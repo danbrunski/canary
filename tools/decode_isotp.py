@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.analysis.iso_tp import UdsMessage, decode_session, iter_frames
+from src.analysis.range_match import match_did_range
 from src.analysis.signal_lookup import (
     SignalCatalog,
     fuzzy_match_tag,
@@ -128,6 +129,7 @@ def report(
     _print_per_window(windows, per_window)
     _print_did_summary(windows, per_window, catalog)
     _print_window_bindings(windows, per_window, catalog)
+    _print_fsm_range_matches(per_window, catalog)
     return 0
 
 
@@ -391,6 +393,91 @@ def _print_window_bindings(
 
     if not any_output:
         print("\n  (no per-window binding signals found)")
+
+
+def _print_fsm_range_matches(
+    per_window: dict[int, list[UdsMessage]],
+    catalog: SignalCatalog | None,
+) -> None:
+    """Match each varying DID's captured range against FSM expected ranges.
+
+    Independent evidence from tag-fuzzy + range-expansion: even DIDs without
+    a meaningful tag context get bound here when their value range fits a
+    known FSM signal under a plausible scaling. This is what turns the soft
+    'I think 0x1226 is throttle-related' guess into 'MASS AIRFLOW at /32 —
+    decoded 2.25-20.88 g·m/s matches FSM expected 2.0-6.0 idle / 7.0-20.0
+    revved' with derived scaling and offset.
+    """
+    if catalog is None:
+        return
+
+    # Aggregate captured raw range per DID; track CAN IDs for module attribution.
+    by_did_can: dict[int, set[int]] = defaultdict(set)
+    by_did_range: dict[int, tuple[int, int]] = {}
+    for msgs in per_window.values():
+        for msg in msgs:
+            if (
+                msg.is_response
+                and msg.service_id == 0x22
+                and msg.did is not None
+                and msg.body
+            ):
+                val = int.from_bytes(msg.body, "big")
+                by_did_can[msg.did].add(msg.can_id)
+                lo, hi = by_did_range.get(msg.did, (val, val))
+                by_did_range[msg.did] = (min(lo, val), max(hi, val))
+
+    print()
+    print("=" * 78)
+    print("FSM RANGE-MATCH BINDINGS (DID raw range vs FSM expected range)")
+    print("=" * 78)
+
+    any_output = False
+    for did in sorted(by_did_range):
+        raw_lo, raw_hi = by_did_range[did]
+        if raw_hi == raw_lo:
+            continue  # constants can't be range-matched
+        modules = {module_for_can_id(cid) for cid in by_did_can[did]} - {None}
+        if not modules:
+            continue
+        candidates = []
+        for module in modules:
+            candidates.extend(catalog.for_module(module))
+        if not candidates:
+            continue
+        # Bigger top_k here than the matcher default — many ECM signals have
+        # generic FSM ranges (0-65, 0-80%, etc.) that fit any captured data
+        # by coincidence. Show more candidates so the actual binding (often
+        # a more specific range) isn't truncated by coincidental matches.
+        matches = match_did_range(raw_lo, raw_hi, candidates, top_k=8)
+        if not matches:
+            continue
+        any_output = True
+        module_str = ", ".join(sorted(modules))
+        print(f"\n  0x{did:04X}  [{module_str}]  raw range {raw_lo}..{raw_hi}")
+        for m in matches:
+            scale_str = f"×{m.scale:g}"
+            if m.offset != 0:
+                scale_str = f"{scale_str}{m.offset:+g}"
+            decoded_str = f"[{m.decoded_min:.2f}, {m.decoded_max:.2f}]"
+            unit = m.expected.unit or "(no unit)"
+            exp_lo = "−∞" if m.expected.min == float("-inf") else f"{m.expected.min:g}"
+            exp_hi = "∞" if m.expected.max == float("inf") else f"{m.expected.max:g}"
+            print(
+                f"    score={m.score:.2f}  {m.param.name:25s}  scale={scale_str:>14s}  "
+                f"decoded {decoded_str} vs FSM [{exp_lo}, {exp_hi}] {unit}  (p.{m.param.page})"
+            )
+
+    if not any_output:
+        print("\n  (no DID raw ranges fit any FSM expected range under tested scalings)")
+        return
+    print()
+    print("  Caveat: FSM range extraction has known row-attribution imperfections")
+    print("  (some ranges are mis-attributed to neighboring params). Treat matches")
+    print("  as candidate bindings to disambiguate via ELM327 cross-reference, not")
+    print("  as confirmations on their own. Multi-window and physically-correlated")
+    print("  signals (e.g. throttle-blip → MAF/IGN TIMING/INJ PULSE all spike) may")
+    print("  produce multiple high-scoring candidates that are all defensible.")
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

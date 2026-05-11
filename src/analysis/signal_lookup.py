@@ -104,12 +104,29 @@ _TAG_NOISE_TOKENS: frozenset[str] = frozenset(
 
 
 @dataclass(frozen=True)
+class ExpectedRange:
+    """One numeric expected-value range for a CONSULT-III parameter.
+
+    Pulled from the FSM's spec column. Either bound may be ±inf for
+    one-sided constraints (`More than 70°C` / `Less than 4.75V`).
+    `unit` is the raw unit string from the FSM (e.g. "V", "°C", "g·m/s")
+    and is preserved verbatim — downstream code does dimensional reasoning
+    by string match, not unit math.
+    """
+
+    min: float
+    max: float
+    unit: str
+
+
+@dataclass(frozen=True)
 class ParamRef:
     """One FSM-named parameter under a particular module."""
 
     name: str
     module: str
     page: int
+    expected_ranges: tuple[ExpectedRange, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -143,7 +160,19 @@ def load_catalog(path: Path) -> SignalCatalog:
     by_module: dict[str, list[ParamRef]] = {}
     for module in payload["modules"]:
         by_module[module["module"]] = [
-            ParamRef(name=p["name"], module=module["module"], page=int(p["page"]))
+            ParamRef(
+                name=p["name"],
+                module=module["module"],
+                page=int(p["page"]),
+                expected_ranges=tuple(
+                    ExpectedRange(
+                        min=float(r["min"]),
+                        max=float(r["max"]),
+                        unit=str(r.get("unit", "")),
+                    )
+                    for r in p.get("expected_ranges", [])
+                ),
+            )
             for p in module["params"]
         ]
     return SignalCatalog(by_module=by_module)
