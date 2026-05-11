@@ -126,7 +126,7 @@ Goal: a reproducible feature pipeline + a working baseline detector.
   grid at `resample_hz` (default 1). Forward-fill slow sensors (coolant,
   baro). Gap-flag fast sensors (RPM, MAF) when gap exceeds 2× expected
   period. (FR-04)
-- [ ] **2.3 — Operating mode segmenter.** `src/preprocessing/segmenter.py`
+- [x] **2.3 — Operating mode segmenter.** `src/preprocessing/segmenter.py`
   — rule-based classifier driven by the YAML thresholds (idle, city,
   highway, WOT, off-road). Returns a per-row mode label. User-extensible:
   unknown modes from config flow through without code changes. (FR-04)
