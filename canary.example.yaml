@@ -45,6 +45,8 @@ models:
     enabled: true
     n_estimators: 200
     contamination: 0.01
+    # Optional task-2.8 tuning output, e.g. {idle: 0.005, city: 0.01}
+    per_mode_contamination: {}
     random_state: 42
   lstm_autoencoder:
     enabled: true

@@ -237,9 +237,16 @@ Goal: a reproducible feature pipeline + a working baseline detector.
   range, sessions, hyperparams, scaler params, schema, and per-mode
   sample summaries. Covered by `tests/test_isolation_forest.py`.
   (FR-05, FR-09)
-- [ ] **2.8 — Synthetic anomaly evaluation.** Score injected sessions;
+- [x] **2.8 — Synthetic anomaly evaluation.** Score injected sessions;
   report per-mode precision/recall and the anomaly-score distribution.
-  Tune `contamination` per mode based on results. (FR-05)
+  Tune `contamination` per mode based on results. Implemented as
+  `src/models/isolation_forest_evaluation.py`: returns scored rows plus
+  a JSON-safe report with overall/per-mode confusion metrics, finite-score
+  quantiles, non-finite score counts, injection-window records, and
+  best-F1 per-mode contamination recommendations. `IsolationForestConfig`
+  now accepts optional `per_mode_contamination` overrides consumed by the
+  trainer and recorded in the model manifest. Covered by
+  `tests/test_isolation_forest_evaluation.py`. (FR-05)
 - [ ] **2.9 — Unit tests.** Resampler edge cases (gaps, leading NaN),
   segmenter boundary conditions, feature-window correctness on
   hand-crafted inputs. (NFR-05)

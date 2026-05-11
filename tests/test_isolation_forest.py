@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +31,7 @@ class _IFConfig:
     enabled: bool = True
     n_estimators: int = 50
     contamination: float = 0.05
+    per_mode_contamination: dict[str, float] = field(default_factory=dict)
     random_state: int = 42
 
 
@@ -93,10 +94,12 @@ def test_fit_trains_one_model_per_operating_mode_and_emits_manifest() -> None:
     assert manifest["training_sessions"] == ["session-a", "session-b"]
     assert manifest["hyperparams"]["n_estimators"] == 25
     assert manifest["hyperparams"]["contamination"] == 0.1
+    assert manifest["hyperparams"]["per_mode_contamination"] == {}
     assert manifest["hyperparams"]["random_state"] == 42
     assert manifest["scaler"]["columns"] == ["obd:RPM", "obd:SPEED", "obd:LOAD"]
     assert manifest["schema"]["feature_columns"] == ["obd:RPM", "obd:SPEED", "obd:LOAD"]
     assert {mode["mode"] for mode in manifest["modes"]} == {"city", "idle"}
+    assert {mode["contamination"] for mode in manifest["modes"]} == {0.1}
 
 
 def test_score_orients_anomaly_score_so_outlier_is_larger() -> None:
@@ -160,6 +163,22 @@ def test_training_drops_rows_with_missing_features_and_records_count() -> None:
     assert trained.manifest.input_rows == len(frame)
     assert trained.manifest.complete_rows == len(frame) - 2
     assert trained.manifest.dropped_missing_feature_rows == 2
+
+
+def test_per_mode_contamination_override_is_recorded_in_manifest() -> None:
+    frame = _two_mode_frame()
+    trained = fit_isolation_forest(
+        frame,
+        _IFConfig(contamination=0.05, per_mode_contamination={"idle": 0.02}),
+        feature_columns=["obd:RPM", "obd:SPEED"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+
+    manifest = trained.manifest.to_dict()
+    assert manifest["hyperparams"]["per_mode_contamination"] == {"idle": 0.02}
+    by_mode = {mode["mode"]: mode for mode in manifest["modes"]}
+    assert by_mode["idle"]["contamination"] == 0.02
+    assert by_mode["city"]["contamination"] == 0.05
 
 
 def test_save_and_load_round_trip_joblib_artifact_and_json_manifest(tmp_path: Path) -> None:

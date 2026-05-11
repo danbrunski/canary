@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Self
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class _Strict(BaseModel):
@@ -75,6 +75,7 @@ class IsolationForestConfig(_Strict):
     enabled: bool
     n_estimators: int
     contamination: float
+    per_mode_contamination: dict[str, float] = Field(default_factory=dict)
     random_state: int = 42
 
 

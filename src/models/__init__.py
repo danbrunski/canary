@@ -15,6 +15,18 @@ from src.models.isolation_forest import (
     load_isolation_forest_model,
     save_isolation_forest_model,
 )
+from src.models.isolation_forest_evaluation import (
+    ClassificationMetrics,
+    ContaminationRecommendation,
+    IsolationForestEvaluation,
+    IsolationForestEvaluationReport,
+    ModeEvaluation,
+    ScoreDistribution,
+    classification_metrics,
+    evaluate_isolation_forest,
+    recommend_contamination,
+    score_distribution,
+)
 
 __all__ = [
     "LABEL_COLUMN",
@@ -30,4 +42,14 @@ __all__ = [
     "fit_isolation_forest",
     "load_isolation_forest_model",
     "save_isolation_forest_model",
+    "ClassificationMetrics",
+    "ContaminationRecommendation",
+    "IsolationForestEvaluation",
+    "IsolationForestEvaluationReport",
+    "ModeEvaluation",
+    "ScoreDistribution",
+    "classification_metrics",
+    "evaluate_isolation_forest",
+    "recommend_contamination",
+    "score_distribution",
 ]

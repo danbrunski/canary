@@ -55,6 +55,7 @@ class ModeTrainingSummary:
 
     mode: str
     n_samples: int
+    contamination: float
     sessions: tuple[str, ...]
     start_timestamp: str | None
     end_timestamp: str | None
@@ -63,6 +64,7 @@ class ModeTrainingSummary:
         return {
             "mode": self.mode,
             "n_samples": self.n_samples,
+            "contamination": self.contamination,
             "sessions": list(self.sessions),
             "start_timestamp": self.start_timestamp,
             "end_timestamp": self.end_timestamp,
@@ -73,6 +75,7 @@ class ModeTrainingSummary:
         return cls(
             mode=str(data["mode"]),
             n_samples=int(data["n_samples"]),
+            contamination=float(data["contamination"]),
             sessions=tuple(str(session) for session in data["sessions"]),
             start_timestamp=_optional_str(data.get("start_timestamp")),
             end_timestamp=_optional_str(data.get("end_timestamp")),
@@ -250,9 +253,10 @@ def fit_isolation_forest(
         x = group[list(selected_features)].to_numpy(dtype=float)
         if len(x) == 0:
             continue
+        contamination = _contamination_for_mode(config, mode)
         model = isolation_forest_cls(
             n_estimators=config.n_estimators,
-            contamination=config.contamination,
+            contamination=contamination,
             random_state=seed,
         )
         model.fit(x)
@@ -260,6 +264,7 @@ def fit_isolation_forest(
         modes.append(
             _mode_summary(
                 mode=mode,
+                contamination=contamination,
                 frame=complete.loc[group.index],
                 session_column=session_column,
                 timestamp_column=timestamp_column,
@@ -292,6 +297,7 @@ def fit_isolation_forest(
         hyperparams={
             "n_estimators": config.n_estimators,
             "contamination": config.contamination,
+            "per_mode_contamination": _per_mode_contamination(config),
             "random_state": seed,
         },
         scaler=scaler.to_dict(),
@@ -363,8 +369,23 @@ def _validate_config(config: IsolationForestConfigLike) -> None:
         raise ValueError("isolation forest training requested but config is disabled")
     if config.n_estimators <= 0:
         raise ValueError("n_estimators must be positive")
-    if not 0.0 < config.contamination <= 0.5:
-        raise ValueError("contamination must be in (0, 0.5]")
+    _validate_contamination(config.contamination, label="contamination")
+    for mode, contamination in _per_mode_contamination(config).items():
+        _validate_contamination(contamination, label=f"per_mode_contamination[{mode!r}]")
+
+
+def _validate_contamination(value: float, *, label: str) -> None:
+    if not 0.0 < value <= 0.5:
+        raise ValueError(f"{label} must be in (0, 0.5]")
+
+
+def _per_mode_contamination(config: IsolationForestConfigLike) -> dict[str, float]:
+    overrides = getattr(config, "per_mode_contamination", {})
+    return {str(mode): float(value) for mode, value in dict(overrides).items()}
+
+
+def _contamination_for_mode(config: IsolationForestConfigLike, mode: str) -> float:
+    return _per_mode_contamination(config).get(mode, config.contamination)
 
 
 def _resolve_feature_columns(
@@ -401,6 +422,7 @@ def _resolve_feature_columns(
 def _mode_summary(
     *,
     mode: str,
+    contamination: float,
     frame: pd.DataFrame,
     session_column: str,
     timestamp_column: str,
@@ -408,6 +430,7 @@ def _mode_summary(
     return ModeTrainingSummary(
         mode=mode,
         n_samples=len(frame),
+        contamination=contamination,
         sessions=_unique_strings(frame[session_column]),
         start_timestamp=_min_timestamp(frame[timestamp_column]),
         end_timestamp=_max_timestamp(frame[timestamp_column]),
