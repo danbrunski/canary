@@ -27,7 +27,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.analysis.iso_tp import iter_frames
-from src.decode.bindings import Signal, apply_scaling, decode_raw, load_bindings
+from src.decode.bindings import (
+    Signal,
+    apply_scaling,
+    decode_raw,
+    is_plausible,
+    load_bindings,
+)
 from src.session import session_paths
 
 _CONFIDENCE_ORDER = ("confirmed", "high", "medium", "low", "hypothesized")
@@ -43,6 +49,9 @@ class SignalStats:
     raw_max: int | None = None
     decoded_min: float | None = None
     decoded_max: float | None = None
+    implausible_samples: int = 0  # decoded values outside plausible_min/max
+    implausible_min: float | None = None  # most-extreme low offender
+    implausible_max: float | None = None  # most-extreme high offender
 
     def update(self, raw: int, decoded: float | None) -> None:
         self.n_samples += 1
@@ -55,6 +64,15 @@ class SignalStats:
                 self.decoded_min = decoded
             if self.decoded_max is None or decoded > self.decoded_max:
                 self.decoded_max = decoded
+            # Plausibility tally: counts and tracks the worst offenders so the
+            # report can flag "N decoded samples outside [min, max]".
+            ok = is_plausible(self.signal, decoded)
+            if ok is False:
+                self.implausible_samples += 1
+                if self.implausible_min is None or decoded < self.implausible_min:
+                    self.implausible_min = decoded
+                if self.implausible_max is None or decoded > self.implausible_max:
+                    self.implausible_max = decoded
 
 
 def collect_stats(frames_path: Path, signals: list[Signal]) -> dict[str, SignalStats]:
@@ -148,7 +166,43 @@ def report(
             print(f"      raw     : {r.raw_min:>6} .. {r.raw_max:<6}   n={r.n_samples}")
             if r.decoded_min is not None and r.decoded_max is not None:
                 unit = f" {sig.unit}" if sig.unit and sig.unit != "unknown" else ""
-                print(f"      decoded : {r.decoded_min:>6.2f} .. {r.decoded_max:<6.2f}{unit}")
+                # Plausibility status:
+                #   no bounds        → nothing extra
+                #   bounds, all OK   → "✓ plausible"
+                #   bounds, some bad → "✗ N samples outside [a, b]; worst x..y"
+                plaus_str = ""
+                if sig.plausible_min is not None or sig.plausible_max is not None:
+                    bounds_lo = (
+                        f"{sig.plausible_min:g}"
+                        if sig.plausible_min is not None else "-∞"
+                    )
+                    bounds_hi = (
+                        f"{sig.plausible_max:g}"
+                        if sig.plausible_max is not None else "+∞"
+                    )
+                    if r.implausible_samples == 0:
+                        plaus_str = f"  ✓ in [{bounds_lo}, {bounds_hi}]"
+                    else:
+                        pct = 100.0 * r.implausible_samples / r.n_samples
+                        plaus_str = (
+                            f"  ✗ {r.implausible_samples} samples ({pct:.1f}%)"
+                            f" outside [{bounds_lo}, {bounds_hi}]"
+                        )
+                line = (
+                    f"      decoded : {r.decoded_min:>6.2f} .. "
+                    f"{r.decoded_max:<6.2f}{unit}{plaus_str}"
+                )
+                print(line)
+                if r.implausible_samples > 0:
+                    worst_lo = (
+                        f"{r.implausible_min:.2f}"
+                        if r.implausible_min is not None else "—"
+                    )
+                    worst_hi = (
+                        f"{r.implausible_max:.2f}"
+                        if r.implausible_max is not None else "—"
+                    )
+                    print(f"                worst offenders: {worst_lo} .. {worst_hi}{unit}")
             else:
                 print("      decoded : —  (scale not yet pinned)")
         if absent:

@@ -52,6 +52,8 @@ signals:
     offset: -40.0
     unit: "degC"
     confidence: high
+    plausible_min: -10.0   # below this and we're seeing the engine-off sentinel
+    plausible_max: 130.0   # Xterra thermostat caps around 90-95degC; +35 headroom
     evidence:
       - session: 2026-05-11T152858
         method: byte_vs_tag_differential

@@ -58,6 +58,13 @@ class Signal(_Strict):
     offset: float | None = None
     unit: str = "unknown"
     confidence: Literal["confirmed", "high", "medium", "low", "hypothesized"]
+    # Optional sanity bounds for the *decoded* value. When set, the decoder
+    # flags samples that fall outside this range — typical use is to catch
+    # binding bugs (e.g. coolant decoding to -40degC because the scale/offset
+    # was misapplied to a "no reading" sentinel). Leave unset for signals
+    # without scaling or signals whose plausible range isn't yet known.
+    plausible_min: float | None = None
+    plausible_max: float | None = None
     evidence: list[Evidence] = Field(default_factory=list)
     notes: str | None = None
 
@@ -103,3 +110,24 @@ def apply_scaling(signal: Signal, raw: int) -> float | None:
         return None
     offset = signal.offset if signal.offset is not None else 0.0
     return raw * signal.scale + offset
+
+
+def is_plausible(signal: Signal, decoded: float) -> bool | None:
+    """Check whether `decoded` falls inside the signal's plausible range.
+
+    Returns:
+      * `True`  — decoded is within `[plausible_min, plausible_max]` inclusive
+      * `False` — decoded is outside the bounds
+      * `None`  — at least one bound is unset; no check performed
+
+    Either bound can be omitted: a min-only bound means "must be at least X",
+    a max-only bound means "must be at most X". Only fully-unset signals
+    skip the check.
+    """
+    if signal.plausible_min is None and signal.plausible_max is None:
+        return None
+    if signal.plausible_min is not None and decoded < signal.plausible_min:
+        return False
+    if signal.plausible_max is not None and decoded > signal.plausible_max:
+        return False
+    return True

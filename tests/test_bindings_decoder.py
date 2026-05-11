@@ -13,6 +13,7 @@ from src.decode.bindings import (
     Signal,
     apply_scaling,
     decode_raw,
+    is_plausible,
     load_bindings,
 )
 from tools.decode_bindings import collect_stats
@@ -140,6 +141,65 @@ def test_apply_scaling_battery_voltage_one_sixteenth():
     """The exact transform we'd expect for `BATTERY VOLT raw / 16 = volts`."""
     s = _sig(scale=1 / 16, offset=0.0)
     assert apply_scaling(s, 224) == 14.0
+
+
+# ---------------------------------------------------------------------------
+# is_plausible
+# ---------------------------------------------------------------------------
+
+
+def test_is_plausible_returns_none_when_no_bounds():
+    s = _sig(plausible_min=None, plausible_max=None)
+    assert is_plausible(s, 42.0) is None
+
+
+def test_is_plausible_both_bounds_inside():
+    s = _sig(plausible_min=0.0, plausible_max=100.0)
+    assert is_plausible(s, 50.0) is True
+
+
+def test_is_plausible_both_bounds_below():
+    s = _sig(plausible_min=0.0, plausible_max=100.0)
+    assert is_plausible(s, -5.0) is False
+
+
+def test_is_plausible_both_bounds_above():
+    s = _sig(plausible_min=0.0, plausible_max=100.0)
+    assert is_plausible(s, 150.0) is False
+
+
+def test_is_plausible_inclusive_bounds():
+    """Min and max are inclusive — exactly-at-boundary counts as plausible."""
+    s = _sig(plausible_min=0.0, plausible_max=100.0)
+    assert is_plausible(s, 0.0) is True
+    assert is_plausible(s, 100.0) is True
+
+
+def test_is_plausible_min_only():
+    s = _sig(plausible_min=10.0, plausible_max=None)
+    assert is_plausible(s, 5.0) is False
+    assert is_plausible(s, 50.0) is True
+
+
+def test_is_plausible_max_only():
+    s = _sig(plausible_min=None, plausible_max=10.0)
+    assert is_plausible(s, 50.0) is False
+    assert is_plausible(s, 5.0) is True
+
+
+def test_is_plausible_coolant_minus_40_caught():
+    """The actual COOLANT bug surfaced by decode_bindings.py against the
+    rev session: raw=0 → decoded=-40 should be flagged as implausible."""
+    s = _sig(
+        scale=1.0, offset=-40.0,
+        plausible_min=-10.0, plausible_max=130.0,
+    )
+    # raw=0 → -40 → implausible (engine-off sentinel)
+    assert is_plausible(s, apply_scaling(s, 0)) is False
+    # raw=53 → 13degC → plausible (cold engine)
+    assert is_plausible(s, apply_scaling(s, 53)) is True
+    # raw=130 → 90degC → plausible (thermostat-regulated)
+    assert is_plausible(s, apply_scaling(s, 130)) is True
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +380,77 @@ def test_collect_stats_zero_samples_for_signal_not_seen(tmp_path: Path):
     assert stats["GHOST"].n_samples == 0
     assert stats["GHOST"].raw_min is None
     assert stats["GHOST"].raw_max is None
+
+
+def test_collect_stats_counts_implausible_samples(tmp_path: Path):
+    """COOLANT with plausibility bounds: engine-off sentinel (raw=0 → -40degC)
+    must be counted as implausible while real readings stay plausible."""
+    frames = tmp_path / "frames.log"
+    _write_candump(
+        frames,
+        [
+            (1.0, 0x551, bytes([0, 0])),    # raw=0 → -40degC, implausible
+            (1.1, 0x551, bytes([0, 0])),    # raw=0 → -40degC, implausible
+            (2.0, 0x551, bytes([53, 0])),   # raw=53 → 13degC, plausible
+            (3.0, 0x551, bytes([90, 0])),   # raw=90 → 50degC, plausible
+        ],
+    )
+    signals = [
+        Signal(
+            name="COOLANT", module="ECM", can_id=0x551,
+            byte_start=0, byte_length=1,
+            scale=1.0, offset=-40.0,
+            unit="degC", confidence="high",
+            plausible_min=-10.0, plausible_max=130.0,
+        ),
+    ]
+    stats = collect_stats(frames, signals)
+    c = stats["COOLANT"]
+    assert c.n_samples == 4
+    assert c.implausible_samples == 2
+    assert c.implausible_min == -40.0
+    assert c.implausible_max == -40.0  # both bad samples were the same value
+
+
+def test_collect_stats_no_plausibility_when_bounds_unset(tmp_path: Path):
+    """A signal without plausibility bounds should have implausible_samples=0
+    regardless of decoded value range."""
+    frames = tmp_path / "frames.log"
+    _write_candump(
+        frames,
+        [(1.0, 0x551, bytes([255, 0]))],  # raw=255 → 215degC if scaled
+    )
+    signals = [
+        Signal(
+            name="COOLANT", module="ECM", can_id=0x551,
+            byte_start=0, byte_length=1,
+            scale=1.0, offset=-40.0,
+            confidence="high",
+            # plausible_min/max NOT set
+        ),
+    ]
+    stats = collect_stats(frames, signals)
+    assert stats["COOLANT"].implausible_samples == 0
+
+
+def test_collect_stats_implausible_skipped_when_no_scaling(tmp_path: Path):
+    """Plausibility lives in decoded space; signals without scaling can't
+    have decoded values, so implausible count stays 0 even if bounds are set."""
+    frames = tmp_path / "frames.log"
+    _write_candump(frames, [(1.0, 0x100, bytes([200]))])
+    signals = [
+        Signal(
+            name="UNSCALED", module="X", can_id=0x100,
+            byte_start=0, byte_length=1,
+            scale=None,
+            confidence="hypothesized",
+            plausible_min=0.0, plausible_max=10.0,  # set but no decoded value
+        ),
+    ]
+    stats = collect_stats(frames, signals)
+    s = stats["UNSCALED"]
+    assert s.n_samples == 1
+    assert s.implausible_samples == 0  # can't check without decoded value
 
 
 def test_evidence_round_trips():
