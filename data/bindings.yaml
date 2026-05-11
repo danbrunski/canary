@@ -1,0 +1,260 @@
+# Canary signal bindings — broadcast CAN bytes mapped to known signals.
+#
+# This is the project's canonical record of "byte position X in CAN ID Y means
+# Z" findings. It grows over time as captures and analyses accumulate. Each
+# entry tracks not just the mapping but the evidence backing it, so future
+# data (e.g. ELM327 Mode 01 cross-reference) can promote, demote, or correct.
+#
+# Confidence levels:
+#   confirmed     — exact scale/offset validated against ground truth
+#   high          — directional behavior matches across multiple observations
+#   medium        — direction matches but exact scaling unknown
+#   low           — pattern is suggestive but ambiguous
+#   hypothesized  — best-guess interpretation; could be wrong
+#
+# This file is hand-edited as findings sharpen. Tools may CONSUME it
+# (DBC export, daemon decoder) but should not auto-rewrite it.
+
+schema_version: 1
+
+vehicle:
+  make: Nissan
+  model: Xterra
+  year: 2008
+  engine: VQ40DE
+  transmission: manual_6speed
+
+# Diagnostic-bus structure observed on the OBD-II port:
+#   ~10 ms hot-path:  ECM/chassis signal frames
+#   ~20 ms drivetrain
+#   ~40 ms intermediate
+#   ~100 ms body/BCM
+#   ~900 ms+ one-shot / heartbeat
+bus:
+  bitrate: 500000
+  channels:
+    - name: vehicle_can
+      ids_observed: 29  # in session 2026-05-11T152858
+
+signals:
+
+  # --------------------------------------------------------------------------
+  # ECM — engine control
+  # --------------------------------------------------------------------------
+
+  - name: ECM_COOLANT_TEMP
+    module: ECM
+    can_id: 0x551
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 1.0
+    offset: -40.0
+    unit: "degC"
+    confidence: high
+    evidence:
+      - session: 2026-05-11T152858
+        method: byte_vs_tag_differential
+        finding: >
+          Monotonic rise from raw 53 (cold start) to raw 90 (end of 6-min run),
+          across every window without reversal. With offset -40, decodes to
+          13degC -> 50degC — plausible cold-to-warm Xterra arc.
+    notes: |
+      Strong candidate. ELM327 Mode 01 PID 0x05 (engine coolant temp) will
+      cross-reference exactly. Other coolant duplicates may exist: 0x233:0
+      and 0x23D:7 both showed monotonic warm-up in the earlier seated session.
+
+  - name: ECM_ENGINE_REV_LEVEL
+    module: ECM
+    can_id: 0x23D
+    byte_start: 1
+    byte_length: 2
+    byte_order: big   # assumed MSB-first, byte 1 then byte 2
+    scale: null       # TBD via cross-reference
+    offset: null
+    unit: unknown     # rpm OR engine load OR fuel pulse — directionally one of these
+    confidence: medium
+    evidence:
+      - session: 2026-05-11T152858
+        method: byte_vs_tag_differential
+        finding: >
+          byte 1 and byte 2 spike together in lockstep across every rev event,
+          and the values order correctly with RPM target:
+            idle: 0, 0   |  blip_2k: 27.8, 24.0  |  sustain_2500: 29.7, 24.3
+            blip_3k: 31.3, 26.2  |  blip_4k: 42.5, 37.4
+          Engine-off windows return to 0,0. This is a real engine-state signal
+          monotonically correlated with RPM/load.
+    notes: |
+      THE prize byte from the rev session. Once ELM327 is connected, run
+      cross_reference.py to fit a linear model against Mode 01 RPM (0x0C)
+      AND calculated load (0x04) — whichever fits cleanly tells us what
+      this 16-bit value actually means.
+
+  - name: ECM_INTAKE_VACUUM_OR_IAC
+    module: ECM
+    can_id: 0x233
+    byte_start: 1
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown     # kPa (manifold abs pressure) or % (idle air control)
+    confidence: medium
+    evidence:
+      - session: 2026-05-11T152858
+        method: byte_vs_tag_differential
+        finding: >
+          Inverse-throttle behavior: highest at warm idle (mean 227), drops
+          during blips (125-141), zero when engine off. Recovers to idle
+          baseline between revs. Classic IAC % or manifold pressure pattern.
+    notes: |
+      Cross-reference with Mode 01 PID 0x0B (intake manifold absolute
+      pressure) or 0x33 (atmospheric pressure) when ELM327 arrives.
+
+  - name: ECM_CALC_LOAD_A
+    module: ECM
+    can_id: 0x233
+    byte_start: 4
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: medium
+    evidence:
+      - session: 2026-05-11T152858
+        method: byte_vs_tag_differential
+        finding: >
+          engine_start window spiked to 202.6 (cranking transient), idles ~130,
+          drops to 92 during sustained 2500 rpm. Engine-off = 0.
+      - session: 2026-05-11T152858
+        method: cross_broadcast_pairing
+        finding: >
+          Mean values are IDENTICAL to 0x23D:3 in every window, indicating
+          the ECM publishes this value on two CAN IDs simultaneously.
+    notes: |
+      The cross-broadcast pair (with ECM_CALC_LOAD_B) reduces the candidate
+      list — only signals published by the ECM appear in both. Direction
+      (high cranking, mid idle, low at sustained throttle) is consistent
+      with engine load or fuel pulse width.
+
+  - name: ECM_CALC_LOAD_B
+    module: ECM
+    can_id: 0x23D
+    byte_start: 3
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: medium
+    evidence:
+      - session: 2026-05-11T152858
+        method: cross_broadcast_pairing
+        finding: Identical means to ECM_CALC_LOAD_A (0x233:4) in every window.
+    notes: Cross-broadcast duplicate of ECM_CALC_LOAD_A.
+
+  - name: ECM_THROTTLE_TRANSIENT
+    module: ECM
+    can_id: 0x23D
+    byte_start: 6
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: hypothesized
+    evidence:
+      - session: 2026-05-11T152858
+        method: byte_vs_tag_differential
+        finding: >
+          Bursts during blip-start/end windows specifically:
+            idle_*: ~0  |  blip_2k_start: 151.9  |  blip_3k_end: 95.5
+            sustain_2500_end: 85  |  blip_4k_end: 145.6
+          Fires only during throttle transitions, returns to 0 at steady state.
+      - session: 2026-05-11T034516
+        method: byte_vs_tag_differential
+        finding: >
+          In the earlier seated session (with NT510 screen-selection tags),
+          this byte LATCHED 0->255 once ECM reached certain live-data screens
+          and never reverted. Behavior contradicts the rev session reading;
+          the earlier interpretation was likely misattributed because tags
+          weren't physical-action-driven.
+    notes: |
+      Either a transient indicator (acceleration enrichment, throttle-rate
+      sensor, deceleration fuel cutoff flag) OR a context byte that the ECM
+      sets depending on what's polling it. Behavior across two sessions is
+      inconsistent — needs explicit experiment to pin down.
+
+  # --------------------------------------------------------------------------
+  # Engine state flag (cross-broadcast triplet)
+  # --------------------------------------------------------------------------
+
+  - name: ECM_ENGINE_STATE_A
+    module: ECM
+    can_id: 0x231
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 1.0
+    offset: 0.0
+    unit: enum
+    confidence: high
+    evidence:
+      - session: 2026-05-11T152858
+        method: byte_vs_tag_differential
+        finding: >
+          Clean two-state behavior: raw 254 = engine off, raw 205 = engine
+          running steady. Small perturbations during blips. Engine-off bracket
+          at start (254) and end (engine_off_key_on = 241.6) brackets the
+          running window perfectly.
+      - session: 2026-05-11T152858
+        method: cross_broadcast_pairing
+        finding: >
+          Mean values match 0x231:3 AND 0x29E:0 in every window — ECM
+          publishes this state byte three times across two CAN IDs.
+    notes: |
+      State enum, useful as an anomaly-detection input: an unexpected
+      transition to 254 mid-drive = engine stalled / fuel cut / major fault.
+      The three-way redundancy means a single bit-flip in one location is
+      detectable.
+
+  - name: ECM_ENGINE_STATE_B
+    module: ECM
+    can_id: 0x231
+    byte_start: 3
+    byte_length: 1
+    byte_order: big
+    scale: 1.0
+    offset: 0.0
+    unit: enum
+    confidence: high
+    evidence:
+      - session: 2026-05-11T152858
+        method: cross_broadcast_pairing
+        finding: Identical means to ECM_ENGINE_STATE_A.
+    notes: Cross-broadcast duplicate.
+
+  - name: ECM_ENGINE_STATE_C
+    module: ECM
+    can_id: 0x29E
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 1.0
+    offset: 0.0
+    unit: enum
+    confidence: high
+    evidence:
+      - session: 2026-05-11T152858
+        method: cross_broadcast_pairing
+        finding: Identical means to ECM_ENGINE_STATE_A.
+    notes: Cross-broadcast duplicate.
+
+# Future sections (placeholders for organization once data arrives):
+#
+# - ABS_*  (wheel speeds, brake pressure, ABS-active flags — need drive session)
+# - BCM_*  (lights, doors, key state)
+# - IPDM_* (power module relays)
+# - STEERING_ANGLE  (0x1F9:3 candidate from session 2026-05-11T034516, needs
+#                    physical-action capture to confirm)
