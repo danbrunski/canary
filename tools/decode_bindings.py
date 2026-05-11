@@ -138,8 +138,10 @@ def report(
 
     print("=" * 78)
     print(f"BINDING DECODE  {session_dir}")
-    print(f"  bindings: {bindings_path}  ({len(bindings.signals)} signals total,"
-          f" {len(signals)} after filter)")
+    print(
+        f"  bindings: {bindings_path}  ({len(bindings.signals)} signals total,"
+        f" {len(signals)} after filter)"
+    )
     print("=" * 78)
 
     # Group by confidence so the most-trusted bindings come first.
@@ -155,8 +157,10 @@ def report(
         any_shown = True
         present = [r for r in rows if r.n_samples > 0]
         absent = [r for r in rows if r.n_samples == 0]
-        print(f"\n  {conf.upper()} CONFIDENCE  ({len(rows)} bindings, "
-              f"{len(present)} seen / {len(absent)} missing)")
+        print(
+            f"\n  {conf.upper()} CONFIDENCE  ({len(rows)} bindings, "
+            f"{len(present)} seen / {len(absent)} missing)"
+        )
         for r in sorted(present, key=lambda x: x.signal.name):
             sig = r.signal
             span = _format_byte_span(sig)
@@ -172,14 +176,8 @@ def report(
                 #   bounds, some bad → "✗ N samples outside [a, b]; worst x..y"
                 plaus_str = ""
                 if sig.plausible_min is not None or sig.plausible_max is not None:
-                    bounds_lo = (
-                        f"{sig.plausible_min:g}"
-                        if sig.plausible_min is not None else "-∞"
-                    )
-                    bounds_hi = (
-                        f"{sig.plausible_max:g}"
-                        if sig.plausible_max is not None else "+∞"
-                    )
+                    bounds_lo = f"{sig.plausible_min:g}" if sig.plausible_min is not None else "-∞"
+                    bounds_hi = f"{sig.plausible_max:g}" if sig.plausible_max is not None else "+∞"
                     if r.implausible_samples == 0:
                         plaus_str = f"  ✓ in [{bounds_lo}, {bounds_hi}]"
                     else:
@@ -194,20 +192,16 @@ def report(
                 )
                 print(line)
                 if r.implausible_samples > 0:
-                    worst_lo = (
-                        f"{r.implausible_min:.2f}"
-                        if r.implausible_min is not None else "—"
-                    )
-                    worst_hi = (
-                        f"{r.implausible_max:.2f}"
-                        if r.implausible_max is not None else "—"
-                    )
+                    worst_lo = f"{r.implausible_min:.2f}" if r.implausible_min is not None else "—"
+                    worst_hi = f"{r.implausible_max:.2f}" if r.implausible_max is not None else "—"
                     print(f"                worst offenders: {worst_lo} .. {worst_hi}{unit}")
             else:
                 print("      decoded : —  (scale not yet pinned)")
         if absent:
-            print("\n    Not seen in this session: "
-                  + ", ".join(sorted(r.signal.name for r in absent)))
+            print(
+                "\n    Not seen in this session: "
+                + ", ".join(sorted(r.signal.name for r in absent))
+            )
 
     if not any_shown:
         print("\n  No bindings matched the filter.")
@@ -234,8 +228,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--confidence",
         default=None,
-        help="Comma-separated confidence levels to include "
-             "(e.g. 'high,medium'). Default: all.",
+        help="Comma-separated confidence levels to include (e.g. 'high,medium'). Default: all.",
     )
     return parser.parse_args(argv)
 

@@ -23,8 +23,7 @@ from tools.log_to_parquet import convert
 
 def test_write_records_emits_chunked_files(tmp_path: Path):
     records = [
-        TelemetryRecord.can(1.0 + i * 0.001, 0x100 + i, bytes([i, i + 1]))
-        for i in range(25)
+        TelemetryRecord.can(1.0 + i * 0.001, 0x100 + i, bytes([i, i + 1])) for i in range(25)
     ]
     files = write_records_to_parquet(records, tmp_path, max_rows=10)
     # 25 records / 10 per chunk = 3 files (10, 10, 5)
@@ -86,17 +85,23 @@ def _make_synthetic_session(root: Path) -> Path:
     session = root / "synth"
     session.mkdir()
     (session / "frames.log").write_text(
-        "\n".join([
-            "(1.0) vcan0 100#01020304",
-            "(1.5) vcan0 200#AABB",
-            "(2.0) vcan0 100#05060708",
-        ]) + "\n"
+        "\n".join(
+            [
+                "(1.0) vcan0 100#01020304",
+                "(1.5) vcan0 200#AABB",
+                "(2.0) vcan0 100#05060708",
+            ]
+        )
+        + "\n"
     )
     (session / "pids.jsonl").write_text(
-        "\n".join([
-            json.dumps({"t": 1.2, "pid": "RPM", "value": 752.0, "unit": "rpm"}),
-            json.dumps({"t": 1.8, "pid": "ENGINE_COOLANT_TEMP", "value": 87.0, "unit": "C"}),
-        ]) + "\n"
+        "\n".join(
+            [
+                json.dumps({"t": 1.2, "pid": "RPM", "value": 752.0, "unit": "rpm"}),
+                json.dumps({"t": 1.8, "pid": "ENGINE_COOLANT_TEMP", "value": 87.0, "unit": "C"}),
+            ]
+        )
+        + "\n"
     )
     return session
 
@@ -128,9 +133,7 @@ def test_convert_skips_pids_when_no_pids_flag_set(tmp_path: Path):
 def test_convert_handles_session_without_pids_file(tmp_path: Path):
     session = tmp_path / "no-pids"
     session.mkdir()
-    (session / "frames.log").write_text(
-        "(1.0) vcan0 100#0102\n(2.0) vcan0 200#FF\n"
-    )
+    (session / "frames.log").write_text("(1.0) vcan0 100#0102\n(2.0) vcan0 200#FF\n")
     files = convert(session, max_rows=100)
     rows = pq.read_table(files[0]).to_pylist()
     assert len(rows) == 2

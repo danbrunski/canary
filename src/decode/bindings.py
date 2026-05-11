@@ -94,7 +94,7 @@ def decode_raw(signal: Signal, data: bytes) -> int | None:
     end = signal.byte_start + signal.byte_length
     if len(data) < end:
         return None
-    chunk = data[signal.byte_start:end]
+    chunk = data[signal.byte_start : end]
     return int.from_bytes(chunk, byteorder=signal.byte_order)
 
 

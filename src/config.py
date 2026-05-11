@@ -50,6 +50,10 @@ class CollectionConfig(_Strict):
     storage_path: Path
     session_retention_days: int
     storage_warning_mb: int
+    reconnect_initial_delay_seconds: float = 10.0
+    reconnect_max_delay_seconds: float = 60.0
+    queue_max_size: int = 10_000
+    queue_warning_fraction: float = 0.8
 
 
 class OperatingModeSpec(_Strict):

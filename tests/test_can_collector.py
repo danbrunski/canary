@@ -19,10 +19,12 @@ import pytest
 from src.collection.can_collector import (
     bus_factory,
     collect_can,
+    collect_can_from_config,
     frame_to_record,
     make_session_dir,
     record,
 )
+from src.collection.reconnect import ReconnectPolicy
 from src.config import CanBusConfig, VehicleConfig
 
 VIRTUAL_CHANNEL = "canary-test"
@@ -84,6 +86,61 @@ async def test_collect_can_enqueues_frames():
     await asyncio.wait_for(task, timeout=1.0)
     assert record.channel == "0x456"
     assert record.payload == b"\xaa\xbb"
+
+
+@pytest.mark.asyncio
+async def test_collect_can_from_config_retries_after_factory_failure():
+    class FakeBus:
+        def __init__(self) -> None:
+            self.shutdown_called = False
+            self.messages = [
+                can.Message(
+                    timestamp=1_778_000_000.0,
+                    arbitration_id=0x789,
+                    data=b"\x01\x02",
+                    is_extended_id=False,
+                )
+            ]
+
+        def recv(self, timeout: float) -> can.Message | None:
+            return self.messages.pop(0) if self.messages else None
+
+        def shutdown(self) -> None:
+            self.shutdown_called = True
+
+    attempts = 0
+    bus = FakeBus()
+
+    def factory(_spec: CanBusConfig) -> FakeBus:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("can adapter missing")
+        return bus
+
+    queue = asyncio.Queue()
+    stop = asyncio.Event()
+    task = asyncio.create_task(
+        collect_can_from_config(
+            _virtual_spec("canary-test-reconnect"),
+            queue,
+            stop,
+            poll_interval=0.01,
+            factory=factory,  # type: ignore[arg-type]
+            reconnect_policy=ReconnectPolicy(
+                initial_delay_seconds=0.01,
+                max_delay_seconds=0.01,
+            ),
+        )
+    )
+
+    record = await asyncio.wait_for(queue.get(), timeout=1.0)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    assert attempts == 2
+    assert record.channel == "0x789"
+    assert bus.shutdown_called is True
 
 
 def test_make_session_dir_creates_layout(tmp_path: Path):

@@ -42,7 +42,11 @@ def test_signal_minimal_fields():
 def test_signal_rejects_invalid_confidence():
     with pytest.raises(ValidationError):
         Signal(
-            name="X", module="Y", can_id=1, byte_start=0, byte_length=1,
+            name="X",
+            module="Y",
+            can_id=1,
+            byte_start=0,
+            byte_length=1,
             confidence="totally_certain",  # type: ignore[arg-type]
         )
 
@@ -50,15 +54,24 @@ def test_signal_rejects_invalid_confidence():
 def test_signal_rejects_invalid_byte_order():
     with pytest.raises(ValidationError):
         Signal(
-            name="X", module="Y", can_id=1, byte_start=0, byte_length=1,
-            confidence="high", byte_order="middle",  # type: ignore[arg-type]
+            name="X",
+            module="Y",
+            can_id=1,
+            byte_start=0,
+            byte_length=1,
+            confidence="high",
+            byte_order="middle",  # type: ignore[arg-type]
         )
 
 
 def test_signal_rejects_byte_start_out_of_range():
     with pytest.raises(ValidationError):
         Signal(
-            name="X", module="Y", can_id=1, byte_start=-1, byte_length=1,
+            name="X",
+            module="Y",
+            can_id=1,
+            byte_start=-1,
+            byte_length=1,
             confidence="high",
         )
 
@@ -67,8 +80,13 @@ def test_signal_rejects_unknown_fields():
     """Strict mode — typos in YAML must error, not silently drop."""
     with pytest.raises(ValidationError):
         Signal(  # type: ignore[call-arg]
-            name="X", module="Y", can_id=1, byte_start=0, byte_length=1,
-            confidence="high", color="red",
+            name="X",
+            module="Y",
+            can_id=1,
+            byte_start=0,
+            byte_length=1,
+            confidence="high",
+            color="red",
         )
 
 
@@ -79,7 +97,11 @@ def test_signal_rejects_unknown_fields():
 
 def _sig(**kw) -> Signal:
     defaults = dict(
-        name="X", module="ECM", can_id=0x100, byte_start=0, byte_length=1,
+        name="X",
+        module="ECM",
+        can_id=0x100,
+        byte_start=0,
+        byte_length=1,
         confidence="high",
     )
     defaults.update(kw)
@@ -191,8 +213,10 @@ def test_is_plausible_coolant_minus_40_caught():
     """The actual COOLANT bug surfaced by decode_bindings.py against the
     rev session: raw=0 → decoded=-40 should be flagged as implausible."""
     s = _sig(
-        scale=1.0, offset=-40.0,
-        plausible_min=-10.0, plausible_max=130.0,
+        scale=1.0,
+        offset=-40.0,
+        plausible_min=-10.0,
+        plausible_max=130.0,
     )
     # raw=0 → -40 → implausible (engine-off sentinel)
     assert is_plausible(s, apply_scaling(s, 0)) is False
@@ -286,23 +310,35 @@ def test_collect_stats_aggregates_per_signal(tmp_path: Path):
     _write_candump(
         frames,
         [
-            (1.0, 0x551, bytes([53, 0, 0, 0, 0, 0, 0])),   # cold start
-            (2.0, 0x551, bytes([70, 0, 0, 0, 0, 0, 0])),   # warming
-            (3.0, 0x551, bytes([90, 0, 0, 0, 0, 0, 0])),   # warm
+            (1.0, 0x551, bytes([53, 0, 0, 0, 0, 0, 0])),  # cold start
+            (2.0, 0x551, bytes([70, 0, 0, 0, 0, 0, 0])),  # warming
+            (3.0, 0x551, bytes([90, 0, 0, 0, 0, 0, 0])),  # warm
             (1.5, 0x231, bytes([254, 0, 0, 0, 0, 0, 0, 0])),  # engine off
             (2.5, 0x231, bytes([205, 0, 0, 0, 0, 0, 0, 0])),  # engine on
         ],
     )
     signals = [
         Signal(
-            name="COOLANT", module="ECM", can_id=0x551,
-            byte_start=0, byte_length=1, scale=1.0, offset=-40.0,
-            unit="degC", confidence="high",
+            name="COOLANT",
+            module="ECM",
+            can_id=0x551,
+            byte_start=0,
+            byte_length=1,
+            scale=1.0,
+            offset=-40.0,
+            unit="degC",
+            confidence="high",
         ),
         Signal(
-            name="ENGINE_STATE", module="ECM", can_id=0x231,
-            byte_start=0, byte_length=1, scale=1.0, offset=0.0,
-            unit="enum", confidence="high",
+            name="ENGINE_STATE",
+            module="ECM",
+            can_id=0x231,
+            byte_start=0,
+            byte_length=1,
+            scale=1.0,
+            offset=0.0,
+            unit="enum",
+            confidence="high",
         ),
     ]
     stats = collect_stats(frames, signals)
@@ -329,9 +365,13 @@ def test_collect_stats_handles_signal_without_scaling(tmp_path: Path):
     )
     signals = [
         Signal(
-            name="REV_LEVEL", module="ECM", can_id=0x23D,
-            byte_start=1, byte_length=2,
-            scale=None, offset=None,
+            name="REV_LEVEL",
+            module="ECM",
+            can_id=0x23D,
+            byte_start=1,
+            byte_length=2,
+            scale=None,
+            offset=None,
             confidence="medium",
         ),
     ]
@@ -351,14 +391,19 @@ def test_collect_stats_ignores_unrelated_frames(tmp_path: Path):
         frames,
         [
             (1.0, 0x551, bytes([60, 0, 0, 0, 0, 0, 0])),
-            (1.1, 0x999, bytes([1, 2, 3])),     # unknown ID
-            (1.2, 0xABC, bytes([4, 5, 6])),     # unknown ID
+            (1.1, 0x999, bytes([1, 2, 3])),  # unknown ID
+            (1.2, 0xABC, bytes([4, 5, 6])),  # unknown ID
         ],
     )
     signals = [
         Signal(
-            name="COOLANT", module="ECM", can_id=0x551,
-            byte_start=0, byte_length=1, scale=1.0, offset=-40.0,
+            name="COOLANT",
+            module="ECM",
+            can_id=0x551,
+            byte_start=0,
+            byte_length=1,
+            scale=1.0,
+            offset=-40.0,
             confidence="high",
         ),
     ]
@@ -372,8 +417,12 @@ def test_collect_stats_zero_samples_for_signal_not_seen(tmp_path: Path):
     _write_candump(frames, [(1.0, 0x551, bytes([60, 0]))])
     signals = [
         Signal(
-            name="GHOST", module="ABS", can_id=0x123,
-            byte_start=0, byte_length=1, confidence="hypothesized",
+            name="GHOST",
+            module="ABS",
+            can_id=0x123,
+            byte_start=0,
+            byte_length=1,
+            confidence="hypothesized",
         ),
     ]
     stats = collect_stats(frames, signals)
@@ -389,19 +438,25 @@ def test_collect_stats_counts_implausible_samples(tmp_path: Path):
     _write_candump(
         frames,
         [
-            (1.0, 0x551, bytes([0, 0])),    # raw=0 → -40degC, implausible
-            (1.1, 0x551, bytes([0, 0])),    # raw=0 → -40degC, implausible
-            (2.0, 0x551, bytes([53, 0])),   # raw=53 → 13degC, plausible
-            (3.0, 0x551, bytes([90, 0])),   # raw=90 → 50degC, plausible
+            (1.0, 0x551, bytes([0, 0])),  # raw=0 → -40degC, implausible
+            (1.1, 0x551, bytes([0, 0])),  # raw=0 → -40degC, implausible
+            (2.0, 0x551, bytes([53, 0])),  # raw=53 → 13degC, plausible
+            (3.0, 0x551, bytes([90, 0])),  # raw=90 → 50degC, plausible
         ],
     )
     signals = [
         Signal(
-            name="COOLANT", module="ECM", can_id=0x551,
-            byte_start=0, byte_length=1,
-            scale=1.0, offset=-40.0,
-            unit="degC", confidence="high",
-            plausible_min=-10.0, plausible_max=130.0,
+            name="COOLANT",
+            module="ECM",
+            can_id=0x551,
+            byte_start=0,
+            byte_length=1,
+            scale=1.0,
+            offset=-40.0,
+            unit="degC",
+            confidence="high",
+            plausible_min=-10.0,
+            plausible_max=130.0,
         ),
     ]
     stats = collect_stats(frames, signals)
@@ -422,9 +477,13 @@ def test_collect_stats_no_plausibility_when_bounds_unset(tmp_path: Path):
     )
     signals = [
         Signal(
-            name="COOLANT", module="ECM", can_id=0x551,
-            byte_start=0, byte_length=1,
-            scale=1.0, offset=-40.0,
+            name="COOLANT",
+            module="ECM",
+            can_id=0x551,
+            byte_start=0,
+            byte_length=1,
+            scale=1.0,
+            offset=-40.0,
             confidence="high",
             # plausible_min/max NOT set
         ),
@@ -440,11 +499,15 @@ def test_collect_stats_implausible_skipped_when_no_scaling(tmp_path: Path):
     _write_candump(frames, [(1.0, 0x100, bytes([200]))])
     signals = [
         Signal(
-            name="UNSCALED", module="X", can_id=0x100,
-            byte_start=0, byte_length=1,
+            name="UNSCALED",
+            module="X",
+            can_id=0x100,
+            byte_start=0,
+            byte_length=1,
             scale=None,
             confidence="hypothesized",
-            plausible_min=0.0, plausible_max=10.0,  # set but no decoded value
+            plausible_min=0.0,
+            plausible_max=10.0,  # set but no decoded value
         ),
     ]
     stats = collect_stats(frames, signals)
@@ -465,8 +528,12 @@ def test_bindings_round_trips_through_pydantic():
         schema_version=1,
         signals=[
             Signal(
-                name="X", module="ECM", can_id=0x100,
-                byte_start=0, byte_length=1, confidence="high",
+                name="X",
+                module="ECM",
+                can_id=0x100,
+                byte_start=0,
+                byte_length=1,
+                confidence="high",
             ),
         ],
     )

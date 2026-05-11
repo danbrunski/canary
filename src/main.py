@@ -13,8 +13,11 @@ from typing import Any
 from src.collection.can_collector import collect_can_from_config
 from src.collection.obd_collector import ObdSpec, collect_obd
 from src.collection.pids import REQUIRED_PIDS
+from src.collection.queueing import QueueDepthMonitor
+from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig
 from src.log import configure_logging
+from src.storage.monitor import warn_if_storage_low
 from src.storage.parquet_writer import ParquetTelemetryWriter, delete_expired_sessions
 from src.telemetry import TelemetryRecord
 
@@ -52,32 +55,54 @@ async def _drain_queue(
     stop_event: asyncio.Event,
     *,
     poll_interval: float = 0.5,
+    storage_path: Path | None = None,
+    storage_warning_mb: int | None = None,
+    queue_warning_fraction: float = 0.8,
 ) -> None:
     """Drain telemetry records into storage until stopped and queue is empty."""
+    queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
+    if storage_path is not None and storage_warning_mb is not None:
+        warn_if_storage_low(storage_path, storage_warning_mb)
+
     while not stop_event.is_set() or not queue.empty():
+        queue_monitor.observe(queue)
         try:
             record = await asyncio.wait_for(queue.get(), timeout=poll_interval)
         except TimeoutError:
             if writer.flush_due():
                 writer.flush()
+                if storage_path is not None and storage_warning_mb is not None:
+                    warn_if_storage_low(storage_path, storage_warning_mb)
             continue
 
         try:
             writer.write(record)
         finally:
             queue.task_done()
+            queue_monitor.observe(queue)
     writer.close()
+    if storage_path is not None and storage_warning_mb is not None:
+        warn_if_storage_low(storage_path, storage_warning_mb)
 
 
 def _default_collectors(config: CanaryConfig) -> list[CollectorStarter]:
     obd_pids = tuple(spec.command.name for spec in REQUIRED_PIDS)
     obd_spec = ObdSpec(port=config.hardware.elm327_port, pids=obd_pids)
+    reconnect_policy = ReconnectPolicy(
+        initial_delay_seconds=config.collection.reconnect_initial_delay_seconds,
+        max_delay_seconds=config.collection.reconnect_max_delay_seconds,
+    )
 
     async def can(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
-        await collect_can_from_config(config.hardware.can, queue, stop)
+        await collect_can_from_config(
+            config.hardware.can,
+            queue,
+            stop,
+            reconnect_policy=reconnect_policy,
+        )
 
     async def obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
-        await collect_obd(obd_spec, queue, stop)
+        await collect_obd(obd_spec, queue, stop, reconnect_policy=reconnect_policy)
 
     return [can, obd]
 
@@ -90,13 +115,22 @@ async def run_collection(
     writer: ParquetTelemetryWriter | None = None,
 ) -> None:
     """Run collectors and persist telemetry until stop_event fires."""
-    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=10_000)
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=config.collection.queue_max_size)
     storage_writer = (
         ParquetTelemetryWriter(config.collection.storage_path) if writer is None else writer
     )
     active_collectors = _default_collectors(config) if collectors is None else list(collectors)
 
-    writer_task = asyncio.create_task(_drain_queue(queue, storage_writer, stop_event))
+    writer_task = asyncio.create_task(
+        _drain_queue(
+            queue,
+            storage_writer,
+            stop_event,
+            storage_path=config.collection.storage_path,
+            storage_warning_mb=config.collection.storage_warning_mb,
+            queue_warning_fraction=config.collection.queue_warning_fraction,
+        )
+    )
     collector_tasks: list[asyncio.Task[None]] = [
         asyncio.create_task(starter(queue, stop_event)) for starter in active_collectors
     ]

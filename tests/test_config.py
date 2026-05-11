@@ -16,6 +16,8 @@ def test_example_yaml_loads():
     assert config.vehicle.make == "Nissan"
     assert config.vehicle.year == 2008
     assert config.collection.obd_poll_rate_hz == 1
+    assert config.collection.reconnect_initial_delay_seconds == 10
+    assert config.collection.queue_max_size == 10000
     assert "idle" in config.preprocessing.operating_modes
     assert config.preprocessing.operating_modes["idle"].rpm_max == 900
     assert config.models.isolation_forest.enabled is True

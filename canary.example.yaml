@@ -21,6 +21,10 @@ collection:
   storage_path: /data/canary
   session_retention_days: 30
   storage_warning_mb: 500
+  reconnect_initial_delay_seconds: 10
+  reconnect_max_delay_seconds: 60
+  queue_max_size: 10000
+  queue_warning_fraction: 0.8
 
 preprocessing:
   resample_hz: 1

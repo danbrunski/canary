@@ -30,6 +30,8 @@ from src.collection.obd_collector import (
     reading_to_record,
     resolve_pids,
 )
+from src.collection.queueing import QueueDropCounter
+from src.collection.reconnect import ReconnectPolicy
 
 # ---------------------------------------------------------------------------
 # Reading + writer
@@ -67,6 +69,20 @@ async def test_queue_reading_callback_enqueues_threadsafe():
     record = await asyncio.wait_for(queue.get(), timeout=1.0)
     assert record.channel == "RPM"
     assert record.value == 700.0
+
+
+@pytest.mark.asyncio
+async def test_queue_reading_callback_counts_full_queue_drop():
+    queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+    counter = QueueDropCounter("obd-test")
+    callback = queue_reading_callback(queue, asyncio.get_running_loop(), on_drop=counter)
+
+    callback(ObdReading(timestamp=1_778_000_000.0, pid="RPM", value=700.0, unit="rpm"))
+    await asyncio.sleep(0)
+    callback(ObdReading(timestamp=1_778_000_001.0, pid="RPM", value=701.0, unit="rpm"))
+    await asyncio.sleep(0)
+
+    assert counter.dropped == 1
 
 
 def test_jsonl_writer_appends_one_line_per_reading(tmp_path: Path):
@@ -252,6 +268,43 @@ async def test_collect_obd_starts_and_stops_connection() -> None:
     stop.set()
     await asyncio.wait_for(task, timeout=1.0)
 
+    assert record.channel == "RPM"
+    assert conn.started is True
+    assert conn.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_collect_obd_retries_after_factory_failure() -> None:
+    conn = _FakeObdConnection()
+    stop = asyncio.Event()
+    queue = asyncio.Queue()
+    attempts = 0
+
+    def factory(_spec: ObdSpec, on_reading: Any) -> _FakeObdConnection:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("adapter missing")
+        on_reading(ObdReading(timestamp=1_778_000_000.0, pid="RPM", value=710.0, unit="rpm"))
+        return conn
+
+    task = asyncio.create_task(
+        collect_obd(
+            ObdSpec(port="/dev/fake"),
+            queue,
+            stop,
+            factory=factory,
+            reconnect_policy=ReconnectPolicy(
+                initial_delay_seconds=0.01,
+                max_delay_seconds=0.01,
+            ),
+        )
+    )
+    record = await asyncio.wait_for(queue.get(), timeout=1.0)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    assert attempts == 2
     assert record.channel == "RPM"
     assert conn.started is True
     assert conn.stopped is True

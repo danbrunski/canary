@@ -30,11 +30,14 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Protocol
 
 import obd
 
+from src.collection.queueing import DropCallback, QueueDropCounter, put_nowait_or_drop
+from src.collection.reconnect import ReconnectPolicy, wait_for_stop_or_timeout
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
@@ -97,6 +100,9 @@ class ObdConnection(Protocol):
     def start(self) -> None: ...
 
     def stop(self) -> None: ...
+
+
+DEFAULT_RECONNECT_POLICY = ReconnectPolicy()
 
 
 def resolve_pids(names: tuple[str, ...]) -> list[Any]:
@@ -162,11 +168,14 @@ def reading_to_record(reading: ObdReading) -> TelemetryRecord:
 def queue_reading_callback(
     queue: asyncio.Queue[TelemetryRecord],
     loop: asyncio.AbstractEventLoop,
+    *,
+    on_drop: DropCallback | None = None,
 ) -> Callable[[ObdReading], None]:
     """Thread-safe callback that pushes OBD readings onto an asyncio queue."""
 
     def on_reading(reading: ObdReading) -> None:
-        loop.call_soon_threadsafe(queue.put_nowait, reading_to_record(reading))
+        record = reading_to_record(reading)
+        loop.call_soon_threadsafe(partial(put_nowait_or_drop, queue, record, on_drop=on_drop))
 
     return on_reading
 
@@ -177,15 +186,46 @@ async def collect_obd(
     stop_event: asyncio.Event,
     *,
     factory: Callable[[ObdSpec, Callable[[ObdReading], None]], ObdConnection] = obd_factory,
+    reconnect_policy: ReconnectPolicy | None = DEFAULT_RECONNECT_POLICY,
+    drop_counter: QueueDropCounter | None = None,
 ) -> None:
     """Run python-obd Async as a daemon queue producer until stopped."""
     loop = asyncio.get_running_loop()
-    conn = factory(spec, queue_reading_callback(queue, loop))
-    conn.start()
-    try:
-        await stop_event.wait()
-    finally:
-        conn.stop()
+    on_drop = QueueDropCounter("obd") if drop_counter is None else drop_counter
+    delay = reconnect_policy.initial_delay_seconds if reconnect_policy is not None else 0.0
+
+    while not stop_event.is_set():
+        conn: ObdConnection | None = None
+        try:
+            conn = factory(spec, queue_reading_callback(queue, loop, on_drop=on_drop))
+            conn.start()
+            log.info("obd collection started", extra={"port": spec.port})
+            await stop_event.wait()
+            return
+        except ValueError:
+            raise
+        except Exception as exc:
+            if stop_event.is_set():
+                return
+            if reconnect_policy is None:
+                raise
+            log.warning(
+                "obd collector failed; reconnecting",
+                extra={
+                    "port": spec.port,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "reconnect_delay_seconds": delay,
+                },
+            )
+            if await wait_for_stop_or_timeout(stop_event, delay):
+                return
+            delay = reconnect_policy.next_delay(delay)
+        finally:
+            if conn is not None:
+                try:
+                    conn.stop()
+                except Exception:
+                    log.exception("failed to stop obd connection")
 
 
 def _make_callback(

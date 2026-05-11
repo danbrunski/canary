@@ -76,3 +76,32 @@ async def test_run_collection_writes_collector_records(tmp_path: Path):
     rows = pq.read_table(files[0]).to_pylist()
     assert rows[0]["channel"] == "RPM"
     assert rows[0]["value_number"] == 700.0
+
+
+@pytest.mark.asyncio
+async def test_run_collection_smoke_writes_obd_and_can_records(tmp_path: Path):
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = config.model_copy(
+        update={
+            "collection": config.collection.model_copy(
+                update={
+                    "storage_path": tmp_path,
+                    "session_retention_days": 30,
+                }
+            )
+        }
+    )
+    stop = asyncio.Event()
+
+    async def collector(queue: asyncio.Queue[TelemetryRecord], stop_event: asyncio.Event) -> None:
+        await queue.put(TelemetryRecord.obd(1_778_000_000.0, "RPM", 700.0, "rpm"))
+        await queue.put(TelemetryRecord.can(1_778_000_000.1, 0x123, b"\x01\x02"))
+        stop_event.set()
+
+    await run_collection(config, stop, collectors=[collector])
+
+    files = sorted(tmp_path.glob("*/telemetry-*.parquet"))
+    assert len(files) == 1
+    rows = pq.read_table(files[0]).to_pylist()
+    assert {row["source"] for row in rows} == {"obd", "can"}
+    assert {row["channel"] for row in rows} == {"RPM", "0x123"}

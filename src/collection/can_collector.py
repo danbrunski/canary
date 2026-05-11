@@ -17,6 +17,7 @@ import logging
 import socket
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,12 +25,16 @@ from typing import Any
 
 import can
 
+from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
+from src.collection.reconnect import ReconnectPolicy, wait_for_stop_or_timeout
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
 from src.session import make_session_dir as _make_session_dir
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
+
+DEFAULT_RECONNECT_POLICY = ReconnectPolicy()
 
 
 @dataclass(frozen=True)
@@ -72,14 +77,30 @@ async def collect_can(
     stop_event: asyncio.Event,
     *,
     poll_interval: float = 0.2,
+    drop_counter: QueueDropCounter | None = None,
 ) -> None:
     """Read CAN frames and enqueue normalized telemetry records until stopped."""
+    on_drop = QueueDropCounter("can") if drop_counter is None else drop_counter
+    parse_errors = 0
     while not stop_event.is_set():
-        msg = bus.recv(timeout=poll_interval)
+        try:
+            msg = bus.recv(timeout=poll_interval)
+        except ValueError as exc:
+            parse_errors += 1
+            if parse_errors == 1 or parse_errors % 100 == 0:
+                log.warning(
+                    "dropped malformed CAN frame",
+                    extra={
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "parse_errors_total": parse_errors,
+                    },
+                )
+            await asyncio.sleep(0)
+            continue
         if msg is None:
             await asyncio.sleep(0)
             continue
-        await queue.put(frame_to_record(msg))
+        put_nowait_or_drop(queue, frame_to_record(msg), on_drop=on_drop)
         await asyncio.sleep(0)
 
 
@@ -89,13 +110,51 @@ async def collect_can_from_config(
     stop_event: asyncio.Event,
     *,
     poll_interval: float = 0.2,
+    factory: Callable[[CanBusConfig], can.BusABC] = bus_factory,
+    reconnect_policy: ReconnectPolicy | None = DEFAULT_RECONNECT_POLICY,
 ) -> None:
     """Own a configured Bus for the daemon queue-producer path."""
-    bus = bus_factory(spec)
-    try:
-        await collect_can(bus, queue, stop_event, poll_interval=poll_interval)
-    finally:
-        bus.shutdown()
+    delay = reconnect_policy.initial_delay_seconds if reconnect_policy is not None else 0.0
+    drop_counter = QueueDropCounter("can")
+
+    while not stop_event.is_set():
+        bus: can.BusABC | None = None
+        try:
+            bus = factory(spec)
+            log.info(
+                "can collection started",
+                extra={"interface": spec.interface, "channel": spec.channel},
+            )
+            await collect_can(
+                bus,
+                queue,
+                stop_event,
+                poll_interval=poll_interval,
+                drop_counter=drop_counter,
+            )
+            return
+        except ValueError:
+            raise
+        except Exception as exc:
+            if stop_event.is_set():
+                return
+            if reconnect_policy is None:
+                raise
+            log.warning(
+                "can collector failed; reconnecting",
+                extra={
+                    "interface": spec.interface,
+                    "channel": spec.channel,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "reconnect_delay_seconds": delay,
+                },
+            )
+            if await wait_for_stop_or_timeout(stop_event, delay):
+                return
+            delay = reconnect_policy.next_delay(delay)
+        finally:
+            if bus is not None:
+                bus.shutdown()
 
 
 def record(
