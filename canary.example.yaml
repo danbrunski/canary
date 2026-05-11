@@ -1,0 +1,48 @@
+# CANary example configuration.
+# Copy to `canary.yaml` and edit for your vehicle / hardware.
+
+vehicle:
+  make: Nissan
+  model: Xterra
+  year: 2008
+  vin: ""
+
+hardware:
+  elm327_port: /dev/ttyUSB0
+  can_interface: can0
+  can_bitrate: 500000
+
+collection:
+  obd_poll_rate_hz: 1
+  storage_path: /data/canary
+  session_retention_days: 30
+  storage_warning_mb: 500
+
+preprocessing:
+  resample_hz: 1
+  rolling_window_seconds: 30
+  operating_modes:
+    idle:
+      rpm_max: 900
+      speed_max: 0
+    city:
+      speed_max: 50
+    highway:
+      speed_min: 80
+    wot:
+      throttle_min: 80
+
+models:
+  isolation_forest:
+    enabled: true
+    n_estimators: 200
+    contamination: 0.01
+  lstm_autoencoder:
+    enabled: true
+    sequence_length: 30
+    latent_dim: 32
+    threshold_k: 3.0
+
+dashboard:
+  host: 0.0.0.0
+  port: 8000

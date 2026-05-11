@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+build/
+dist/
+sdist/
+wheels/
+.eggs/
+develop-eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+.hypothesis/
+
+# Type checking & lint caches
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local config & secrets — copy canary.example.yaml to canary.yaml and edit
+.env
+.env.*
+canary.yaml
+
+# CANary telemetry artifacts (not committed; can be large)
+*.parquet
+*.jsonl
+*.log
+logs/
+data/sessions/
+data/raw/
+
+# Trained model artifacts (not committed; manifests live alongside the binary)
+models/*.pt
+models/*.pth
+models/*.pkl
+models/*.joblib
+models/*.onnx
