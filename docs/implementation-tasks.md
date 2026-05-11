@@ -194,10 +194,17 @@ Goal: a reproducible feature pipeline + a working baseline detector.
   the same config works at any resample frequency. Skips gap-flag
   columns, mode column, and non-numeric columns automatically; safe to
   call twice in a row. (FR-04)
-- [ ] **2.5 — Normalization.** Z-score scaler fit on the labeled clean
+- [x] **2.5 — Normalization.** Z-score scaler fit on the labeled clean
   baseline only; persisted alongside the model in the manifest. Reject
-  inference-time data whose channels don't match the fit schema. (FR-04,
-  FR-09)
+  inference-time data whose channels don't match the fit schema.
+  Implemented as `src/preprocessing/normalization.py` (`ZScoreScaler`,
+  frozen dataclass). `fit` auto-discovers numeric feature columns (same
+  policy as `features.compute_features`), uses population std (ddof=0),
+  errors on all-NaN columns. `transform` raises `SchemaMismatchError` on
+  missing fitted columns and passes non-fitted columns through. Constant
+  channels (σ < `std_floor`) get σ=1 — centering only, no amplification.
+  `to_dict`/`from_dict` give a plain-JSON round-trip for the manifest;
+  older manifests without `std_floor` still load. (FR-04, FR-09)
 - [ ] **2.6 — Synthetic anomaly injector.** `tests/anomaly_injector.py` —
   utilities to splice spikes, drift, dropouts, and stuck-sensor patterns
   into a clean session. Used by 2.8 and Phase 3 evaluation. (NFR-05)

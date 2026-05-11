@@ -14,6 +14,7 @@ from src.preprocessing.loader import (
     read_sessions,
     to_wide,
 )
+from src.preprocessing.normalization import SchemaMismatchError, ZScoreScaler
 from src.preprocessing.resampler import ResampleConfig, gap_column, resample_wide
 from src.preprocessing.segmenter import (
     MODE_COLUMN,
@@ -27,8 +28,10 @@ __all__ = [
     "MODE_COLUMN",
     "FeatureConfig",
     "ResampleConfig",
+    "SchemaMismatchError",
     "SegmenterConfig",
     "UNKNOWN_MODE",
+    "ZScoreScaler",
     "channel_key",
     "compute_features",
     "discover_sessions",
