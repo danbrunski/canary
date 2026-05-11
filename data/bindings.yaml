@@ -251,9 +251,175 @@ signals:
         finding: Identical means to ECM_ENGINE_STATE_A.
     notes: Cross-broadcast duplicate.
 
+  # --------------------------------------------------------------------------
+  # Motion-correlated candidates from the partial drive session.
+  #
+  # All identified by inventory comparison: byte was constant (1-2 unique
+  # values) in the parked rev session, became fully-varying (>100 unique
+  # values) in the partial drive session. Direction of the underlying
+  # signal (vehicle speed vs. wheel speed vs. steering vs. brake) is not
+  # yet distinguishable without (a) a tagged drive with explicit
+  # highway_cruise / stopped_at_light windows, or (b) ELM327 Mode 01 PID
+  # 0x0D (VSS) cross-reference.
+  # --------------------------------------------------------------------------
+
+  - name: MOTION_SIGNAL_2D1_1
+    module: unknown      # 9.7ms cadence ID; ECM or ABS
+    can_id: 0x2D1
+    byte_start: 1
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: hypothesized
+    evidence:
+      - session: 2026-05-11T154648
+        method: inventory_comparison
+        finding: >
+          1 unique value when parked (rev session) → 256 unique values when
+          driving. Cleanest "motion only" signature in the data.
+    notes: |
+      Strong motion-correlated candidate. Likely vehicle speed (8-bit) OR
+      a wheel-speed byte.
+
+  - name: MOTION_SIGNAL_280_5
+    module: unknown
+    can_id: 0x280
+    byte_start: 5
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: hypothesized
+    evidence:
+      - session: 2026-05-11T154648
+        method: inventory_comparison
+        finding: 1 unique parked → 256 unique driving.
+    notes: Strong motion-correlated; type TBD.
+
+  - name: MOTION_SIGNAL_590_2
+    module: unknown      # 92ms body bus
+    can_id: 0x590
+    byte_start: 2
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: hypothesized
+    evidence:
+      - session: 2026-05-11T154648
+        method: inventory_comparison
+        finding: 2 unique parked → 256 unique driving.
+    notes: |
+      On the slow 92ms body bus, so likely a BCM-aware signal (odometer
+      tick, accumulated trip data, fuel level?).
+
+  - name: MOTION_SIGNAL_590_5
+    module: unknown
+    can_id: 0x590
+    byte_start: 5
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: hypothesized
+    evidence:
+      - session: 2026-05-11T154648
+        method: inventory_comparison
+        finding: 11 unique parked → 254 unique driving.
+    notes: Paired with MOTION_SIGNAL_590_2; same ID, same cadence.
+
+  - name: MOTION_SIGNAL_354_1
+    module: unknown      # 37ms intermediate cadence
+    can_id: 0x354
+    byte_start: 1
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: hypothesized
+    evidence:
+      - session: 2026-05-11T154648
+        method: inventory_comparison
+        finding: 2 unique parked → 256 unique driving.
+    notes: |
+      37ms cadence is unusual — typically used for transmission or 4WD
+      transfer-case state. Could be a sustained-state signal that changes
+      slowly with vehicle motion.
+
+  - name: WHEEL_SPEED_PAIR_A
+    module: ABS          # tentative — 18.8ms drivetrain cadence
+    can_id: 0x284
+    byte_start: 1
+    byte_length: 2       # bytes 1 + 3 with byte 0/2 = MSB? or two 16-bit signals?
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown        # presumed rpm or km/h
+    confidence: hypothesized
+    evidence:
+      - session: 2026-05-11T154648
+        method: inventory_comparison
+        finding: >
+          0x284 bytes 1 AND 3 went from 2 unique parked to 128 unique each
+          driving. Same exact uniqueness profile in 0x285 bytes 1 and 3.
+          Cross-broadcast pair (0x284 left wheels / 0x285 right wheels?)
+          on the 18.8ms drivetrain bus — textbook ABS wheel-speed encoding.
+    notes: |
+      Strong wheel-speed candidate. 4 channels likely fit:
+        0x284:0-1 = front-left wheel speed (16-bit)
+        0x284:2-3 = front-right wheel speed (16-bit)
+        0x285:0-1 = rear-left wheel speed (16-bit)
+        0x285:2-3 = rear-right wheel speed (16-bit)
+      Or front/rear axles. Cross-reference with PID 0x0D (vehicle speed)
+      when ELM327 arrives — VSS should be the average of the four.
+
+  - name: WHEEL_SPEED_PAIR_B
+    module: ABS
+    can_id: 0x285
+    byte_start: 1
+    byte_length: 2
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: hypothesized
+    evidence:
+      - session: 2026-05-11T154648
+        method: inventory_comparison
+        finding: >
+          Mirrors 0x284 variability profile exactly (bytes 1 and 3 both go
+          2→128). Probable rear-axle counterpart.
+    notes: See WHEEL_SPEED_PAIR_A notes.
+
+  - name: MOTION_SIGNAL_002_0
+    module: unknown
+    can_id: 0x002
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: hypothesized
+    evidence:
+      - session: 2026-05-11T154648
+        method: inventory_comparison
+        finding: 6 unique parked → 256 unique driving.
+    notes: |
+      0x002 is the lowest-priority arbitration ID we see, broadcast at
+      9.3ms — possibly a freshness/timing counter or a high-resolution
+      sensor. The full-byte variability when moving is consistent with
+      either speed-scaled signal OR a counter that increments faster
+      under load.
+
 # Future sections (placeholders for organization once data arrives):
 #
-# - ABS_*  (wheel speeds, brake pressure, ABS-active flags — need drive session)
 # - BCM_*  (lights, doors, key state)
 # - IPDM_* (power module relays)
 # - STEERING_ANGLE  (0x1F9:3 candidate from session 2026-05-11T034516, needs
