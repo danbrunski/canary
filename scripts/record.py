@@ -82,7 +82,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--obd-pids",
         default="RPM,COOLANT_TEMP,INTAKE_TEMP,MAF,THROTTLE_POS,ENGINE_LOAD,"
-                "CONTROL_MODULE_VOLTAGE,TIMING_ADVANCE",
+        "CONTROL_MODULE_VOLTAGE,TIMING_ADVANCE",
         help=(
             "Comma-separated python-obd command names to watch. Default covers "
             "the PIDs most useful for cross-referencing Nissan Mode 22 DIDs."
@@ -125,21 +125,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     signal.signal(signal.SIGINT, _request_stop)
     signal.signal(signal.SIGTERM, _request_stop)
 
-    bus = bus_factory(spec)
+    bus = None
     obd_conn = None
     obd_writer = None
-    if args.obd_port:
-        pids = tuple(p.strip() for p in args.obd_pids.split(",") if p.strip())
-        obd_writer = JsonlReadingWriter(paths.root / "pids.jsonl")
-        obd_spec = ObdSpec(port=args.obd_port, baudrate=args.obd_baud, pids=pids)
-        log.info(
-            "starting parallel OBD capture",
-            extra={"port": obd_spec.port, "pids": list(pids)},
-        )
-        obd_conn = obd_factory(obd_spec, on_reading=obd_writer.write)
-        obd_conn.start()
-
     try:
+        bus = bus_factory(spec)
+        if args.obd_port:
+            pids = tuple(p.strip() for p in args.obd_pids.split(",") if p.strip())
+            obd_writer = JsonlReadingWriter(paths.pids)
+            obd_spec = ObdSpec(port=args.obd_port, baudrate=args.obd_baud, pids=pids)
+            log.info(
+                "starting parallel OBD capture",
+                extra={"port": obd_spec.port, "pids": list(pids)},
+            )
+            obd_conn = obd_factory(obd_spec, on_reading=obd_writer.write)
+            obd_conn.start()
+
         record(
             bus,
             paths,
@@ -150,11 +151,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             stop_event=stop_event,
         )
     finally:
-        bus.shutdown()
         if obd_conn is not None:
             obd_conn.stop()
         if obd_writer is not None:
             obd_writer.close()
+        if bus is not None:
+            bus.shutdown()
     return 0
 
 

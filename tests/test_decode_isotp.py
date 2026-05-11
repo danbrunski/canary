@@ -37,8 +37,18 @@ def _mode22_request(did: int) -> str:
 def _mode22_response_2b(did: int, value: int) -> str:
     """ISO-TP single frame Mode 22 positive response, 2-byte payload."""
     return (
-        f"05 62 {did >> 8:02X} {did & 0xFF:02X} "
-        f"{value >> 8:02X} {value & 0xFF:02X} 00 00".replace(" ", "")
+        f"05 62 {did >> 8:02X} {did & 0xFF:02X} {value >> 8:02X} {value & 0xFF:02X} 00 00".replace(
+            " ", ""
+        )
+    )
+
+
+def _mode22_response_4b(did: int, value: int) -> str:
+    """ISO-TP single frame Mode 22 positive response, 4-byte payload."""
+    return (
+        f"07 62 {did >> 8:02X} {did & 0xFF:02X} "
+        f"{(value >> 24) & 0xFF:02X} {(value >> 16) & 0xFF:02X} "
+        f"{(value >> 8) & 0xFF:02X} {value & 0xFF:02X}".replace(" ", "")
     )
 
 
@@ -133,3 +143,23 @@ def test_baseline_window_does_not_show_absence(
     assert "absent here" not in section, (
         "baseline window has no UDS traffic; should not report absences"
     )
+
+
+def test_range_expansion_skips_ambiguous_wide_payloads(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    session = tmp_path / "wide"
+    session.mkdir()
+
+    frames: list[tuple[float, int, str]] = []
+    for i in range(20):
+        t = 10.0 + i * 0.5
+        frames.append((t, 0x7E0, _mode22_request(0x1234)))
+        frames.append((t + 0.001, 0x7E8, _mode22_response_4b(0x1234, 100_000 + i * 10_000)))
+    _write_candump(session / "frames.log", frames)
+    _write_tags(session / "tags.jsonl", [(10.0, "wide_payload")])
+
+    rc = decode_main([str(session), "--no-signals"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Range-expanded DIDs" not in out

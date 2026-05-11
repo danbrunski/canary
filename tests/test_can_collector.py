@@ -196,3 +196,28 @@ def test_record_persists_vehicle_state_in_manifest(tmp_path: Path):
 
     manifest = json.loads(paths.manifest.read_text())
     assert manifest["vehicle_state"] == "engine_running_idle"
+
+
+class ExplodingBus:
+    def recv(self, timeout: float) -> can.Message | None:
+        raise RuntimeError("adapter disappeared")
+
+
+def test_record_writes_error_manifest_when_recv_raises(tmp_path: Path):
+    spec = _virtual_spec("canary-test-error")
+    paths = make_session_dir(tmp_path, datetime.now(UTC))
+
+    with pytest.raises(RuntimeError, match="adapter disappeared"):
+        record(
+            ExplodingBus(),  # type: ignore[arg-type]
+            paths,
+            spec=spec,
+            vehicle=_vehicle(),
+            duration=1.0,
+            poll_interval=0.05,
+        )
+
+    manifest = json.loads(paths.manifest.read_text())
+    assert manifest["stopped_by"] == "error"
+    assert manifest["frames_recorded"] == 0
+    assert manifest["error"] == "RuntimeError: adapter disappeared"

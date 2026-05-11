@@ -48,12 +48,7 @@ def test_parse_candump_returns_none_on_garbage():
 
 def test_iter_frames_skips_blanks_and_garbage(tmp_path: Path):
     log = tmp_path / "frames.log"
-    log.write_text(
-        "(1.0) vcan0 100#AABB\n"
-        "\n"
-        "garbage line\n"
-        "(2.0) vcan0 200#CCDD R\n"
-    )
+    log.write_text("(1.0) vcan0 100#AABB\n\ngarbage line\n(2.0) vcan0 200#CCDD R\n")
     frames = list(iter_frames(log))
     assert [f.can_id for f in frames] == [0x100, 0x200]
 
@@ -127,7 +122,7 @@ def test_first_frame_invalidates_prior_partial():
     """A new FF arriving while one is in-flight on the same ID restarts cleanly."""
     frames = [
         _f(1.0, 0x7E8, "100A 6112 3334 35".replace(" ", "")),  # FF #1, abandoned
-        _f(1.1, 0x7E8, "0362110A".ljust(16, "F")),               # SF arrives instead
+        _f(1.1, 0x7E8, "0362110A".ljust(16, "F")),  # SF arrives instead
     ]
     msgs = list(reassemble(frames))
     assert len(msgs) == 1

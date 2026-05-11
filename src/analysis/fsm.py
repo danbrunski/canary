@@ -146,9 +146,7 @@ def looks_like_param_name(text: str) -> bool:
     return True
 
 
-def extract_param_names(
-    pdf: Any, page_number: int, *, max_x: float = 135.0
-) -> list[str]:
+def extract_param_names(pdf: Any, page_number: int, *, max_x: float = 135.0) -> list[str]:
     """Pull leftmost-column param names from one PDF page.
 
     `page_number` is 1-indexed (matching how the FSM and pdfplumber output

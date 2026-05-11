@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from src.analysis.diagnostics import DEFAULT_DIAG_IDS
+
 log = logging.getLogger(__name__)
 
 # candump line: "(<timestamp>) <channel> <ID>#<HEX> [flags]"
@@ -196,14 +198,14 @@ class UdsMessage:
 
     timestamp: float
     can_id: int
-    is_response: bool        # True if SID >= 0x40 (positive response)
-    is_negative: bool        # True if 0x7F negative response
-    service_id: int          # request SID; for responses, response - 0x40
-    service_name: str        # human-readable
-    sub_function: int | None # first byte after SID, e.g. session type or DID hi
-    did: int | None          # 16-bit data identifier when service is 0x22 / 0x62
-    raw_payload: bytes       # full UDS payload (SID + body)
-    body: bytes              # everything after SID (for responses, after SID + DID for 0x62)
+    is_response: bool  # True if SID >= 0x40 (positive response)
+    is_negative: bool  # True if 0x7F negative response
+    service_id: int  # request SID; for responses, response - 0x40
+    service_name: str  # human-readable
+    sub_function: int | None  # first byte after SID, e.g. session type or DID hi
+    did: int | None  # 16-bit data identifier when service is 0x22 / 0x62
+    raw_payload: bytes  # full UDS payload (SID + body)
+    body: bytes  # everything after SID (for responses, after SID + DID for 0x62)
     nrc: int | None = field(default=None)  # negative response code, if applicable
 
     @property
@@ -284,7 +286,7 @@ def decode_session(
     (0x7E0–0x7EF) plus the functional broadcast ID 0x7DF.
     """
     if diag_ids is None:
-        diag_ids = {0x7DF, *range(0x7E0, 0x7F0)}
+        diag_ids = set(DEFAULT_DIAG_IDS)
     diag_frames = (f for f in frames if f.can_id in diag_ids)
     for msg in reassemble(diag_frames):
         decoded = decode_uds(msg)

@@ -212,13 +212,8 @@ def report(
     print(f"  {'ID':<8}{'byte':>5}  {'delta':>8}  per-window means")
     print(f"  {'-' * 8}{'-' * 5}  {'-' * 8}  {'-' * 50}")
     for d in diffs[:top_n]:
-        means = ", ".join(
-            f"{label[:18]}={stats.mean:.1f}"
-            for label, stats in d.per_window.items()
-        )
-        print(
-            f"  0x{d.can_id:03X}  {d.byte_index:>4}  {d.delta:>8.1f}  {means}"
-        )
+        means = ", ".join(f"{label[:18]}={stats.mean:.1f}" for label, stats in d.per_window.items())
+        print(f"  0x{d.can_id:03X}  {d.byte_index:>4}  {d.delta:>8.1f}  {means}")
 
     # Group by CAN ID and show full per-window stats for the few most-active IDs.
     by_id: dict[int, list[ByteDifferential]] = defaultdict(list)

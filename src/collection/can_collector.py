@@ -24,17 +24,10 @@ from typing import Any
 import can
 
 from src.config import CanBusConfig, VehicleConfig
+from src.session import SessionPaths
+from src.session import make_session_dir as _make_session_dir
 
 log = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class SessionPaths:
-    """File layout for a single recording session."""
-
-    root: Path
-    frames: Path
-    manifest: Path
 
 
 @dataclass(frozen=True)
@@ -43,6 +36,11 @@ class RecordingResult:
     ended_at: datetime
     frames_recorded: int
     stopped_by: str  # "deadline" | "signal"
+
+
+def make_session_dir(out_root: Path, started_at: datetime) -> SessionPaths:
+    """Create a timestamped recording session directory."""
+    return _make_session_dir(out_root, started_at)
 
 
 def bus_factory(spec: CanBusConfig) -> can.BusABC:
@@ -54,18 +52,6 @@ def bus_factory(spec: CanBusConfig) -> can.BusABC:
     if spec.interface != "virtual":
         kwargs["bitrate"] = spec.bitrate
     return can.Bus(**kwargs)
-
-
-def make_session_dir(out_root: Path, started_at: datetime) -> SessionPaths:
-    """Create `out_root/<UTC-timestamp>/` and return the file layout.
-
-    Timestamp uses `T` separator and no colons so the path is safe on every
-    filesystem we care about (tmpfs, ext4, exFAT, NTFS via WSL).
-    """
-    ts = started_at.strftime("%Y-%m-%dT%H%M%S")
-    root = out_root / ts
-    root.mkdir(parents=True, exist_ok=False)
-    return SessionPaths(root=root, frames=root / "frames.log", manifest=root / "manifest.json")
 
 
 def record(
@@ -102,38 +88,55 @@ def record(
         },
     )
 
-    with can.io.CanutilsLogWriter(str(paths.frames)) as writer:
-        while True:
-            if stop_event is not None and stop_event.is_set():
-                stop_reason = "signal"
-                break
-            if deadline is not None and time.monotonic() >= deadline:
-                stop_reason = "deadline"
-                break
-            msg = bus.recv(timeout=poll_interval)
-            if msg is None:
-                continue
-            writer.on_message_received(msg)
-            count += 1
-
-    ended_at = datetime.now(UTC)
-    result = RecordingResult(
-        started_at=started_at,
-        ended_at=ended_at,
-        frames_recorded=count,
-        stopped_by=stop_reason,
-    )
-    _write_manifest(
-        paths.manifest, spec=spec, vehicle=vehicle, result=result, vehicle_state=vehicle_state
-    )
-    log.info(
-        "recording stopped",
-        extra={
-            "frames_recorded": count,
-            "stopped_by": stop_reason,
-            "elapsed_seconds": (ended_at - started_at).total_seconds(),
-        },
-    )
+    error: BaseException | None = None
+    result: RecordingResult
+    try:
+        with can.io.CanutilsLogWriter(str(paths.frames)) as writer:
+            while True:
+                if stop_event is not None and stop_event.is_set():
+                    stop_reason = "signal"
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    stop_reason = "deadline"
+                    break
+                msg = bus.recv(timeout=poll_interval)
+                if msg is None:
+                    continue
+                writer.on_message_received(msg)
+                count += 1
+    except BaseException as exc:
+        error = exc
+        stop_reason = "error"
+        raise
+    finally:
+        ended_at = datetime.now(UTC)
+        result = RecordingResult(
+            started_at=started_at,
+            ended_at=ended_at,
+            frames_recorded=count,
+            stopped_by=stop_reason,
+        )
+        try:
+            _write_manifest(
+                paths.manifest,
+                spec=spec,
+                vehicle=vehicle,
+                result=result,
+                vehicle_state=vehicle_state,
+                error=error,
+            )
+        except Exception:
+            if error is None:
+                raise
+            log.exception("failed to write manifest after recording error")
+        log.info(
+            "recording stopped",
+            extra={
+                "frames_recorded": count,
+                "stopped_by": stop_reason,
+                "elapsed_seconds": (ended_at - started_at).total_seconds(),
+            },
+        )
     return result
 
 
@@ -144,6 +147,7 @@ def _write_manifest(
     vehicle: VehicleConfig | None,
     result: RecordingResult,
     vehicle_state: str | None = None,
+    error: BaseException | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "started_at": result.started_at.isoformat(),
@@ -160,4 +164,6 @@ def _write_manifest(
         "frames_recorded": result.frames_recorded,
         "stopped_by": result.stopped_by,
     }
+    if error is not None:
+        payload["error"] = f"{type(error).__name__}: {error}"
     path.write_text(json.dumps(payload, indent=2, sort_keys=True))

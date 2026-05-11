@@ -24,15 +24,27 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, TypedDict
 
 from src.analysis.fsm import extract_pdf_section_with_specs
+
+
+class FsmSource(TypedDict, total=False):
+    module: str
+    file: str
+    pages: list[int]
+    max_x: float
+    platform_note: str
+    tested_on_canary_truck: bool
+    fsm_section: str
+
 
 # Per-source page ranges. Each entry is one CONSULT-III data-monitor table
 # from one FSM PDF. `tested_on_canary_truck` flags whether we've validated
 # this module's signals against actual bus traffic on the user's M/T Xterra.
 # `max_x` overrides the leftmost-column cutoff when a table's name column is
 # wider than the default (e.g. when names carry inline unit annotations).
-SOURCES: list[dict] = [
+SOURCES: list[FsmSource] = [
     {
         "module": "ECM",
         "file": "ec.pdf",
@@ -155,7 +167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error: FSM directory not found: {fsm_dir}", file=sys.stderr)
         return 1
 
-    modules: list[dict] = []
+    modules: list[dict[str, Any]] = []
     total_params = 0
     print(f"extracting from {fsm_dir}/ ...")
     for src in SOURCES:
@@ -185,7 +197,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
         )
 
-    output: dict = {
+    output: dict[str, Any] = {
         "vehicle": "2008 Nissan Xterra",
         "fsm_revision": "February 2010",
         "extracted_at": datetime.now(UTC).isoformat(),

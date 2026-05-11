@@ -164,8 +164,6 @@ def _make_callback(
             units = str(value.units)
             unit = "" if units == "dimensionless" else units
             value = float(value.magnitude)
-        on_reading(
-            ObdReading(timestamp=time.time(), pid=pid_name, value=value, unit=unit)
-        )
+        on_reading(ObdReading(timestamp=time.time(), pid=pid_name, value=value, unit=unit))
 
     return cb

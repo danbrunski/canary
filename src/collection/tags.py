@@ -20,11 +20,14 @@ Tags are written independently of the recorder process. That means:
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
 
-TAGS_FILENAME = "tags.jsonl"
+from src.session import TAGS_FILENAME
+
+_SESSION_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
 
 
 def write_tag(
@@ -72,7 +75,9 @@ def find_latest_session(sessions_root: Path) -> Path:
     """
     if not sessions_root.is_dir():
         raise FileNotFoundError(f"sessions root does not exist: {sessions_root}")
-    candidates = [d for d in sessions_root.iterdir() if d.is_dir()]
+    candidates = [
+        d for d in sessions_root.iterdir() if d.is_dir() and _SESSION_DIR_RE.match(d.name)
+    ]
     if not candidates:
         raise FileNotFoundError(f"no session directories in {sessions_root}")
-    return max(candidates, key=lambda d: d.stat().st_mtime)
+    return max(candidates, key=lambda d: d.name)

@@ -12,6 +12,8 @@ from pathlib import Path
 from tools.cross_reference import (
     cross_reference,
     linear_regression,
+    load_pid_units,
+    load_pids_jsonl,
     pair_by_timestamp,
 )
 
@@ -85,9 +87,28 @@ def test_pair_by_timestamp_picks_nearest_when_multiple_in_window():
     assert pairs == [(200.0, 0.9)]
 
 
+def test_pair_by_timestamp_does_not_reuse_pid_samples():
+    a = [(1.0, 100.0), (1.2, 200.0)]
+    b = [(1.05, 1.0)]
+    pairs = pair_by_timestamp(a, b, tolerance_seconds=0.3)
+    assert pairs == [(100.0, 1.0)]
+
+
 def test_pair_by_timestamp_empty_inputs():
     assert pair_by_timestamp([], [(1.0, 2.0)]) == []
     assert pair_by_timestamp([(1.0, 2.0)], []) == []
+
+
+def test_pid_jsonl_loaders_skip_malformed_lines(tmp_path: Path):
+    path = tmp_path / "pids.jsonl"
+    path.write_text(
+        json.dumps({"t": 1.0, "pid": "RPM", "value": 700.0, "unit": "rpm"}) + "\n"
+        '{"t": 2.0, "pid": "RPM", "value": \n'
+        "{}\n" + json.dumps({"t": 3.0, "pid": "RPM", "value": 720.0, "unit": "rpm"}) + "\n"
+    )
+
+    assert load_pids_jsonl(path)["RPM"] == [(1.0, 700.0), (3.0, 720.0)]
+    assert load_pid_units(path) == {"RPM": "rpm"}
 
 
 # ---------------------------------------------------------------------------
@@ -110,17 +131,14 @@ def _write_candump_for_did_at_times(
         lines.append(f"({ts:.6f}) vcan0 {can_id_req:03X}#{req_data} R")
         # response: 05 62 hi lo vh vl 00 00
         resp_data = (
-            f"05 62 {did >> 8:02X} {did & 0xFF:02X} "
-            f"{val >> 8:02X} {val & 0xFF:02X} 00 00"
+            f"05 62 {did >> 8:02X} {did & 0xFF:02X} {val >> 8:02X} {val & 0xFF:02X} 00 00"
         ).replace(" ", "")
         # Response timestamp slightly after request to simulate ECM latency
         lines.append(f"({ts + 0.001:.6f}) vcan0 {can_id_resp:03X}#{resp_data} R")
     path.write_text("\n".join(lines) + "\n")
 
 
-def _write_pids_jsonl(
-    path: Path, samples: list[tuple[float, str, float, str]]
-) -> None:
+def _write_pids_jsonl(path: Path, samples: list[tuple[float, str, float, str]]) -> None:
     """samples = (timestamp, pid, value, unit)."""
     lines = []
     for t, pid, value, unit in samples:

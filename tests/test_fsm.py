@@ -98,7 +98,7 @@ def test_real_param_names_accepted(name: str):
         "x" * 35,  # too long
         "(cid:122) Specification data",  # PDF artifact
         "IPDM E/R (INTELLIGENT",  # unbalanced parens — header fragment
-        "ROOM)",                  # unbalanced parens — header fragment
+        "ROOM)",  # unbalanced parens — header fragment
     ],
 )
 def test_noise_rejected(noise: str):

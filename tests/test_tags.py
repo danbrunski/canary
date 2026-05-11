@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -64,13 +63,20 @@ def test_write_tag_concurrent_writers_dont_interleave(tmp_path: Path):
     assert all("label" in tag and "thread" in tag for tag in tags)
 
 
-def test_find_latest_session_picks_newest_mtime(tmp_path: Path):
+def test_find_latest_session_picks_newest_timestamped_name(tmp_path: Path):
     older = tmp_path / "2026-05-10T100000"
     newer = tmp_path / "2026-05-10T200000"
     older.mkdir()
-    time.sleep(0.01)  # ensure mtime ordering
     newer.mkdir()
+    write_tag(older, "touch older")
     assert find_latest_session(tmp_path) == newer
+
+
+def test_find_latest_session_ignores_non_timestamp_directories(tmp_path: Path):
+    (tmp_path / "scratch").mkdir()
+    sess = tmp_path / "2026-05-10T100000"
+    sess.mkdir()
+    assert find_latest_session(tmp_path) == sess
 
 
 def test_find_latest_session_errors_when_empty(tmp_path: Path):

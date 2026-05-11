@@ -147,9 +147,7 @@ def match_did_range(
         # captures idle→revved as one combined raw range, which won't cleanly
         # fit either sub-range alone but DOES fit their union. Add a synthetic
         # union range to the candidate set so this case scores correctly.
-        ranges_to_try: list[tuple[int, ExpectedRange]] = list(
-            enumerate(param.expected_ranges)
-        )
+        ranges_to_try: list[tuple[int, ExpectedRange]] = list(enumerate(param.expected_ranges))
         bounded = [
             (i, er)
             for i, er in enumerate(param.expected_ranges)

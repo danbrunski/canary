@@ -35,9 +35,9 @@ from pathlib import Path
 # from NT510 captures. SAE-standard physical addressing range, plus the
 # Nissan manufacturer-specific bits we've seen (0x740 currently unknown).
 CAN_ID_TO_MODULE: dict[int, str] = {
-    0x7E0: "ECM",       # confirmed on canary truck
-    0x7E8: "ECM",       # confirmed on canary truck
-    0x7E1: "TCM_5AT",   # would be TCM on AT builds; M/T returns NoComm
+    0x7E0: "ECM",  # confirmed on canary truck
+    0x7E8: "ECM",  # confirmed on canary truck
+    0x7E1: "TCM_5AT",  # would be TCM on AT builds; M/T returns NoComm
     0x7E9: "TCM_5AT",
     # 0x7E2 / 0x7EA → likely ABS, TBD
     # 0x7E3 / 0x7EB → likely BCM, TBD
