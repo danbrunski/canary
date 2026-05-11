@@ -24,7 +24,12 @@ import threading
 from collections.abc import Sequence
 from pathlib import Path
 
-from src.collection.can_collector import bus_factory, make_session_dir, record
+from src.collection.can_collector import (
+    DEFAULT_RECONNECT_POLICY,
+    bus_factory,
+    make_session_dir,
+    record,
+)
 from src.collection.obd_collector import (
     JsonlReadingWriter,
     ObdSpec,
@@ -32,6 +37,7 @@ from src.collection.obd_collector import (
 )
 from src.config import CanaryConfig
 from src.log import configure_logging
+from src.storage.monitor import free_space_mb
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +101,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="ELM327 baud rate (default 38400, sometimes 9600 for cheap clones).",
     )
     parser.add_argument(
+        "--min-free-mb",
+        type=int,
+        default=200,
+        help=(
+            "Refuse to start if less than this much disk space is free under "
+            "--out-dir. Set to 0 to skip the pre-flight check. Default 200MB."
+        ),
+    )
+    parser.add_argument(
+        "--no-reconnect",
+        action="store_true",
+        help=(
+            "Disable auto-reconnect on adapter failure. By default the "
+            "recorder rebuilds the bus via bus_factory on USB disconnect / "
+            "adapter reset / OSError. Useful when debugging — without this "
+            "flag, those errors are silently retried."
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -108,6 +133,31 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     config = CanaryConfig.from_yaml(args.config)
     spec = config.hardware.can
+
+    # Pre-flight: refuse to start if disk space is tight. A 1-hour drive at
+    # ~1600 fps × ~75 bytes per candump line is ~440 MB raw; even after the
+    # parse-tolerance fixes, running out of disk mid-recording is the kind
+    # of failure that loses the LAST data, which is exactly the most
+    # interesting part. Better to fail fast at startup with a clear message.
+    if args.min_free_mb > 0:
+        args.out_dir.mkdir(parents=True, exist_ok=True)
+        free_mb = free_space_mb(args.out_dir)
+        if free_mb < args.min_free_mb:
+            log.error(
+                "insufficient disk space; aborting",
+                extra={
+                    "out_dir": str(args.out_dir),
+                    "free_mb": free_mb,
+                    "required_mb": args.min_free_mb,
+                },
+            )
+            print(
+                f"error: only {free_mb:.0f} MB free in {args.out_dir} "
+                f"(need ≥{args.min_free_mb} MB). Free some space or pass "
+                f"--min-free-mb to lower the threshold.",
+                file=sys.stderr,
+            )
+            return 1
 
     from datetime import UTC, datetime
 
@@ -141,6 +191,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             obd_conn = obd_factory(obd_spec, on_reading=obd_writer.write)
             obd_conn.start()
 
+        # Pass factory + reconnect_policy so a USB hiccup / adapter reset /
+        # OSError doesn't kill the recording mid-drive. The factory lets
+        # record() rebuild the bus into the same writer, so frames.log stays
+        # one continuous file across reconnects.
         record(
             bus,
             paths,
@@ -149,6 +203,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             vehicle_state=args.vehicle_state,
             duration=args.seconds,
             stop_event=stop_event,
+            factory=None if args.no_reconnect else bus_factory,
+            reconnect_policy=None if args.no_reconnect else DEFAULT_RECONNECT_POLICY,
         )
     finally:
         if obd_conn is not None:

@@ -395,6 +395,171 @@ def test_record_skips_index_error_from_truncated_slcan(tmp_path: Path):
     assert result.stopped_by == "deadline"
 
 
+class ReconnectableBus:
+    """Bus that fails with OSError after N good frames, simulating a USB
+    disconnect. Each instance counts how many times it's been shut down so
+    tests can confirm the factory built fresh ones."""
+
+    instances_built = 0
+    instances_shutdown = 0
+
+    def __init__(self, good_frames_before_failure: int = 3) -> None:
+        type(self).instances_built += 1
+        self.calls = 0
+        self.budget = good_frames_before_failure
+        self.shutdown_called = False
+
+    def recv(self, timeout: float) -> can.Message | None:
+        self.calls += 1
+        if self.calls > self.budget:
+            raise OSError(5, "Input/output error")
+        return can.Message(
+            arbitration_id=0x100 + self.calls,
+            data=bytes([self.calls & 0xFF] * 4),
+            is_extended_id=False,
+            timestamp=float(self.calls),
+        )
+
+    def shutdown(self) -> None:
+        self.shutdown_called = True
+        type(self).instances_shutdown += 1
+
+
+def test_record_auto_reconnects_on_bus_failure(tmp_path: Path):
+    """OSError from a USB disconnect should trigger reconnect via factory,
+    not kill the recording. Mirrors what collect_can_from_config does for
+    the daemon path."""
+    ReconnectableBus.instances_built = 0
+    ReconnectableBus.instances_shutdown = 0
+
+    spec = _virtual_spec("canary-test-reconnect-record")
+    paths = make_session_dir(tmp_path, datetime.now(UTC))
+
+    def factory(_spec: CanBusConfig) -> ReconnectableBus:
+        return ReconnectableBus(good_frames_before_failure=3)
+
+    initial_bus = factory(spec)
+    # We expect: 3 good frames from initial bus → fails → rebuild → 3 more → fails
+    # → rebuild → 3 more → deadline. So 9 frames total across 3 buses.
+
+    result = record(
+        initial_bus,  # type: ignore[arg-type]
+        paths,
+        spec=spec,
+        vehicle=_vehicle(),
+        duration=0.6,
+        poll_interval=0.02,
+        factory=factory,  # type: ignore[arg-type]
+        reconnect_policy=ReconnectPolicy(
+            initial_delay_seconds=0.01,
+            max_delay_seconds=0.01,
+        ),
+    )
+
+    assert result.reconnects >= 1, "factory should have been called for reconnect"
+    assert result.frames_recorded >= 3, "at least the pre-failure frames should land"
+    assert result.stopped_by == "deadline"
+    # Failed buses should have been shut down — no USB handle leaks.
+    assert ReconnectableBus.instances_shutdown >= result.reconnects
+
+    manifest = json.loads(paths.manifest.read_text())
+    assert manifest["reconnects"] == result.reconnects
+    assert manifest["dropped_writes"] == 0
+
+
+def test_record_without_factory_still_propagates_bus_errors(tmp_path: Path):
+    """Backward compatibility: when factory/reconnect_policy are not provided,
+    bus-level OSError should propagate as before (caller decides what to do)."""
+
+    class BrokenBus:
+        def recv(self, timeout: float) -> can.Message | None:
+            raise OSError(5, "Input/output error")
+
+    spec = _virtual_spec("canary-test-no-reconnect")
+    paths = make_session_dir(tmp_path, datetime.now(UTC))
+
+    with pytest.raises(OSError, match="Input/output error"):
+        record(
+            BrokenBus(),  # type: ignore[arg-type]
+            paths,
+            spec=spec,
+            vehicle=_vehicle(),
+            duration=0.3,
+            poll_interval=0.02,
+        )
+    manifest = json.loads(paths.manifest.read_text())
+    assert manifest["stopped_by"] == "error"
+
+
+def test_record_stops_cleanly_on_disk_write_failure(tmp_path: Path):
+    """OSError from writer.on_message_received should end the loop cleanly,
+    set stopped_by='disk_error', and still flush the manifest."""
+
+    class GoodBus:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def recv(self, timeout: float) -> can.Message | None:
+            self.calls += 1
+            return can.Message(
+                arbitration_id=0x100,
+                data=b"\x01\x02",
+                is_extended_id=False,
+                timestamp=float(self.calls),
+            )
+
+    class FlakyWriter:
+        """Wraps CanutilsLogWriter and fails after N writes to simulate disk full."""
+
+        def __init__(self, real: object, fail_after: int = 5) -> None:
+            self.real = real
+            self.fail_after = fail_after
+            self.writes = 0
+
+        def __enter__(self) -> FlakyWriter:
+            self.real.__enter__()  # type: ignore[attr-defined]
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            self.real.__exit__(*args)  # type: ignore[attr-defined]
+
+        def on_message_received(self, msg: can.Message) -> None:
+            self.writes += 1
+            if self.writes > self.fail_after:
+                raise OSError(28, "No space left on device")
+            self.real.on_message_received(msg)  # type: ignore[attr-defined]
+
+    # Patch the CanutilsLogWriter constructor to return a flaky wrapper.
+    import unittest.mock as mock
+
+    spec = _virtual_spec("canary-test-disk-error")
+    paths = make_session_dir(tmp_path, datetime.now(UTC))
+    real_writer_cls = can.io.CanutilsLogWriter
+
+    def flaky_writer_cls(path: str) -> FlakyWriter:
+        return FlakyWriter(real_writer_cls(path), fail_after=5)
+
+    with mock.patch.object(can.io, "CanutilsLogWriter", flaky_writer_cls):
+        result = record(
+            GoodBus(),  # type: ignore[arg-type]
+            paths,
+            spec=spec,
+            vehicle=_vehicle(),
+            duration=1.0,
+            poll_interval=0.005,
+        )
+
+    assert result.stopped_by == "disk_error"
+    assert result.frames_recorded == 5  # exactly the writes that succeeded
+    assert result.dropped_writes == 1  # the one that triggered the stop
+
+    manifest = json.loads(paths.manifest.read_text())
+    assert manifest["stopped_by"] == "disk_error"
+    assert manifest["frames_recorded"] == 5
+    assert manifest["dropped_writes"] == 1
+    assert "No space left on device" in manifest["error"]
+
+
 def test_record_writes_error_manifest_when_recv_raises(tmp_path: Path):
     spec = _virtual_spec("canary-test-error")
     paths = make_session_dir(tmp_path, datetime.now(UTC))
