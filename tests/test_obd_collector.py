@@ -10,6 +10,7 @@ testable without hardware:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,7 +24,10 @@ from src.collection.obd_collector import (
     ObdReading,
     ObdSpec,
     _make_callback,
+    collect_obd,
     obd_factory,
+    queue_reading_callback,
+    reading_to_record,
     resolve_pids,
 )
 
@@ -42,6 +46,27 @@ def test_obd_reading_handles_string_value():
     """VIN and similar PIDs return strings, not floats."""
     r = ObdReading(timestamp=1.0, pid="VIN", value="JN8AR05Y...", unit="")
     assert json.loads(r.to_json_line())["value"] == "JN8AR05Y..."
+
+
+def test_reading_to_record_maps_obd_reading():
+    record = reading_to_record(
+        ObdReading(timestamp=1_778_000_000.0, pid="RPM", value=752.0, unit="rpm")
+    )
+    assert record.source == "obd"
+    assert record.channel == "RPM"
+    assert record.value == 752.0
+    assert record.unit == "rpm"
+
+
+@pytest.mark.asyncio
+async def test_queue_reading_callback_enqueues_threadsafe():
+    queue = asyncio.Queue()
+    callback = queue_reading_callback(queue, asyncio.get_running_loop())
+
+    callback(ObdReading(timestamp=1_778_000_000.0, pid="RPM", value=700.0, unit="rpm"))
+    record = await asyncio.wait_for(queue.get(), timeout=1.0)
+    assert record.channel == "RPM"
+    assert record.value == 700.0
 
 
 def test_jsonl_writer_appends_one_line_per_reading(tmp_path: Path):
@@ -198,3 +223,35 @@ def test_obd_factory_skips_unsupported_pids_and_watches_supported():
     watched_cmd = instance.watch.call_args.args[0]
     assert watched_cmd.name == "RPM"
     assert conn is instance
+
+
+class _FakeObdConnection:
+    def __init__(self) -> None:
+        self.started = False
+        self.stopped = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+@pytest.mark.asyncio
+async def test_collect_obd_starts_and_stops_connection() -> None:
+    conn = _FakeObdConnection()
+    stop = asyncio.Event()
+    queue = asyncio.Queue()
+
+    def factory(_spec: ObdSpec, on_reading: Any) -> _FakeObdConnection:
+        on_reading(ObdReading(timestamp=1_778_000_000.0, pid="RPM", value=710.0, unit="rpm"))
+        return conn
+
+    task = asyncio.create_task(collect_obd(ObdSpec(port="/dev/fake"), queue, stop, factory=factory))
+    record = await asyncio.wait_for(queue.get(), timeout=1.0)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    assert record.channel == "RPM"
+    assert conn.started is True
+    assert conn.stopped is True

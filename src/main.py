@@ -6,13 +6,24 @@ import argparse
 import asyncio
 import logging
 import signal
-from collections.abc import Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from pathlib import Path
+from typing import Any
 
+from src.collection.can_collector import collect_can_from_config
+from src.collection.obd_collector import ObdSpec, collect_obd
+from src.collection.pids import REQUIRED_PIDS
 from src.config import CanaryConfig
 from src.log import configure_logging
+from src.storage.parquet_writer import ParquetTelemetryWriter, delete_expired_sessions
+from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
+
+CollectorStarter = Callable[
+    [asyncio.Queue[TelemetryRecord], asyncio.Event],
+    Coroutine[Any, Any, None],
+]
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -35,7 +46,89 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-async def run(config: CanaryConfig, stop_event: asyncio.Event | None = None) -> None:
+async def _drain_queue(
+    queue: asyncio.Queue[TelemetryRecord],
+    writer: ParquetTelemetryWriter,
+    stop_event: asyncio.Event,
+    *,
+    poll_interval: float = 0.5,
+) -> None:
+    """Drain telemetry records into storage until stopped and queue is empty."""
+    while not stop_event.is_set() or not queue.empty():
+        try:
+            record = await asyncio.wait_for(queue.get(), timeout=poll_interval)
+        except TimeoutError:
+            if writer.flush_due():
+                writer.flush()
+            continue
+
+        try:
+            writer.write(record)
+        finally:
+            queue.task_done()
+    writer.close()
+
+
+def _default_collectors(config: CanaryConfig) -> list[CollectorStarter]:
+    obd_pids = tuple(spec.command.name for spec in REQUIRED_PIDS)
+    obd_spec = ObdSpec(port=config.hardware.elm327_port, pids=obd_pids)
+
+    async def can(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
+        await collect_can_from_config(config.hardware.can, queue, stop)
+
+    async def obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
+        await collect_obd(obd_spec, queue, stop)
+
+    return [can, obd]
+
+
+async def run_collection(
+    config: CanaryConfig,
+    stop_event: asyncio.Event,
+    *,
+    collectors: Sequence[CollectorStarter] | None = None,
+    writer: ParquetTelemetryWriter | None = None,
+) -> None:
+    """Run collectors and persist telemetry until stop_event fires."""
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=10_000)
+    storage_writer = (
+        ParquetTelemetryWriter(config.collection.storage_path) if writer is None else writer
+    )
+    active_collectors = _default_collectors(config) if collectors is None else list(collectors)
+
+    writer_task = asyncio.create_task(_drain_queue(queue, storage_writer, stop_event))
+    collector_tasks: list[asyncio.Task[None]] = [
+        asyncio.create_task(starter(queue, stop_event)) for starter in active_collectors
+    ]
+    stop_task = asyncio.create_task(stop_event.wait())
+
+    try:
+        done, _pending = await asyncio.wait(
+            [stop_task, *collector_tasks],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in done:
+            if task is not stop_task:
+                task.result()
+    finally:
+        stop_event.set()
+        await asyncio.gather(*collector_tasks, return_exceptions=True)
+        await queue.join()
+        await writer_task
+        deleted = delete_expired_sessions(
+            config.collection.storage_path,
+            config.collection.session_retention_days,
+        )
+        if deleted:
+            log.info("expired sessions deleted", extra={"count": len(deleted)})
+
+
+async def run(
+    config: CanaryConfig,
+    stop_event: asyncio.Event | None = None,
+    *,
+    start_collectors: bool = True,
+) -> None:
     """Start the daemon and block until the stop event fires.
 
     If `stop_event` is None, one is created and wired to SIGTERM/SIGINT. Tests
@@ -56,9 +149,10 @@ async def run(config: CanaryConfig, stop_event: asyncio.Event | None = None) -> 
         },
     )
 
-    # TODO(Phase 1+): start collectors → writer → inference → dashboard here.
-
-    await stop_event.wait()
+    if start_collectors:
+        await run_collection(config, stop_event)
+    else:
+        await stop_event.wait()
     log.info("canary stopping")
 
 

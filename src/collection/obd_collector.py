@@ -24,15 +24,18 @@ poll loop, just a different sink (Parquet ring buffer instead of JSONL).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import obd
+
+from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +93,12 @@ class JsonlReadingWriter:
         self._fp.close()
 
 
+class ObdConnection(Protocol):
+    def start(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+
 def resolve_pids(names: tuple[str, ...]) -> list[Any]:
     """Map python-obd command names to OBDCommand instances; raise on unknown.
 
@@ -140,6 +149,43 @@ def obd_factory(
         conn.watch(cmd, callback=_make_callback(pid_name, on_reading))
 
     return conn
+
+
+def reading_to_record(reading: ObdReading) -> TelemetryRecord:
+    """Convert an OBD reading into the shared telemetry schema."""
+    value = reading.value
+    if not isinstance(value, (bool, int, float, str, type(None))):
+        value = str(value)
+    return TelemetryRecord.obd(reading.timestamp, reading.pid, value, reading.unit)
+
+
+def queue_reading_callback(
+    queue: asyncio.Queue[TelemetryRecord],
+    loop: asyncio.AbstractEventLoop,
+) -> Callable[[ObdReading], None]:
+    """Thread-safe callback that pushes OBD readings onto an asyncio queue."""
+
+    def on_reading(reading: ObdReading) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, reading_to_record(reading))
+
+    return on_reading
+
+
+async def collect_obd(
+    spec: ObdSpec,
+    queue: asyncio.Queue[TelemetryRecord],
+    stop_event: asyncio.Event,
+    *,
+    factory: Callable[[ObdSpec, Callable[[ObdReading], None]], ObdConnection] = obd_factory,
+) -> None:
+    """Run python-obd Async as a daemon queue producer until stopped."""
+    loop = asyncio.get_running_loop()
+    conn = factory(spec, queue_reading_callback(queue, loop))
+    conn.start()
+    try:
+        await stop_event.wait()
+    finally:
+        conn.stop()
 
 
 def _make_callback(

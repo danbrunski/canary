@@ -6,6 +6,7 @@ recorder over an in-memory channel. CI runs these without any USB device.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import time
@@ -17,6 +18,8 @@ import pytest
 
 from src.collection.can_collector import (
     bus_factory,
+    collect_can,
+    frame_to_record,
     make_session_dir,
     record,
 )
@@ -39,6 +42,48 @@ def test_bus_factory_virtual_constructs_bus():
         assert isinstance(bus, can.BusABC)
     finally:
         bus.shutdown()
+
+
+def test_frame_to_record_maps_can_message():
+    msg = can.Message(
+        timestamp=1_778_000_000.25,
+        arbitration_id=0x123,
+        data=b"\x01\x02\x03",
+        is_extended_id=False,
+    )
+    record = frame_to_record(msg)
+    assert record.source == "can"
+    assert record.channel == "0x123"
+    assert record.payload == b"\x01\x02\x03"
+    assert record.metadata == {"can_id": 0x123, "dlc": 3}
+
+
+@pytest.mark.asyncio
+async def test_collect_can_enqueues_frames():
+    class FakeBus:
+        def __init__(self) -> None:
+            self.messages = [
+                can.Message(
+                    timestamp=1_778_000_000.0,
+                    arbitration_id=0x456,
+                    data=b"\xaa\xbb",
+                    is_extended_id=False,
+                )
+            ]
+
+        def recv(self, timeout: float) -> can.Message | None:
+            return self.messages.pop(0) if self.messages else None
+
+    bus = FakeBus()
+    queue = asyncio.Queue()
+    stop = asyncio.Event()
+    task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.01))  # type: ignore[arg-type]
+
+    record = await asyncio.wait_for(queue.get(), timeout=1.0)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+    assert record.channel == "0x456"
+    assert record.payload == b"\xaa\xbb"
 
 
 def test_make_session_dir_creates_layout(tmp_path: Path):

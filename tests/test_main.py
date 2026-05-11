@@ -1,12 +1,15 @@
 """Tests for the daemon entry point."""
 
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 
+import pyarrow.parquet as pq
 import pytest
 
 from src.config import CanaryConfig
-from src.main import parse_args, run
+from src.main import parse_args, run, run_collection
+from src.telemetry import TelemetryRecord
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -34,6 +37,42 @@ async def test_run_exits_on_stop_event():
         stop.set()
 
     await asyncio.wait_for(
-        asyncio.gather(run(config, stop_event=stop), trigger_stop()),
+        asyncio.gather(run(config, stop_event=stop, start_collectors=False), trigger_stop()),
         timeout=1.0,
     )
+
+
+@pytest.mark.asyncio
+async def test_run_collection_writes_collector_records(tmp_path: Path):
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = config.model_copy(
+        update={
+            "collection": config.collection.model_copy(
+                update={
+                    "storage_path": tmp_path,
+                    "session_retention_days": 30,
+                }
+            )
+        }
+    )
+    stop = asyncio.Event()
+
+    async def collector(queue: asyncio.Queue[TelemetryRecord], stop_event: asyncio.Event) -> None:
+        await queue.put(
+            TelemetryRecord(
+                timestamp=datetime(2026, 5, 11, tzinfo=UTC),
+                source="obd",
+                channel="RPM",
+                value=700.0,
+                unit="rpm",
+            )
+        )
+        stop_event.set()
+
+    await run_collection(config, stop, collectors=[collector])
+
+    files = sorted(tmp_path.glob("*/telemetry-*.parquet"))
+    assert len(files) == 1
+    rows = pq.read_table(files[0]).to_pylist()
+    assert rows[0]["channel"] == "RPM"
+    assert rows[0]["value_number"] == 700.0

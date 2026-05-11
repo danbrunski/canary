@@ -11,6 +11,7 @@ The collector NEVER calls `bus.send()`. CANary is listen-only by FR-02 / NFR-06.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import socket
@@ -26,6 +27,7 @@ import can
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
 from src.session import make_session_dir as _make_session_dir
+from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +54,47 @@ def bus_factory(spec: CanBusConfig) -> can.BusABC:
     if spec.interface != "virtual":
         kwargs["bitrate"] = spec.bitrate
     return can.Bus(**kwargs)
+
+
+def frame_to_record(msg: can.Message) -> TelemetryRecord:
+    """Convert a python-can message into the shared telemetry schema."""
+    return TelemetryRecord.can(
+        float(msg.timestamp),
+        int(msg.arbitration_id),
+        bytes(msg.data),
+    )
+
+
+async def collect_can(
+    bus: can.BusABC,
+    queue: asyncio.Queue[TelemetryRecord],
+    stop_event: asyncio.Event,
+    *,
+    poll_interval: float = 0.2,
+) -> None:
+    """Read CAN frames and enqueue normalized telemetry records until stopped."""
+    while not stop_event.is_set():
+        msg = bus.recv(timeout=poll_interval)
+        if msg is None:
+            await asyncio.sleep(0)
+            continue
+        await queue.put(frame_to_record(msg))
+        await asyncio.sleep(0)
+
+
+async def collect_can_from_config(
+    spec: CanBusConfig,
+    queue: asyncio.Queue[TelemetryRecord],
+    stop_event: asyncio.Event,
+    *,
+    poll_interval: float = 0.2,
+) -> None:
+    """Own a configured Bus for the daemon queue-producer path."""
+    bus = bus_factory(spec)
+    try:
+        await collect_can(bus, queue, stop_event, poll_interval=poll_interval)
+    finally:
+        bus.shutdown()
 
 
 def record(
