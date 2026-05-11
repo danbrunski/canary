@@ -96,6 +96,19 @@ SOURCES: list[dict] = [
         "fsm_section": "MWI-57, Reference Value",
     },
     {
+        "module": "IPDM_ER",
+        "file": "pcs.pdf",
+        "pages": [20, 21, 22],
+        "platform_note": (
+            "Intelligent Power Distribution Module — Engine Room. The smart "
+            "fuse/relay box; sits between BCM logical requests and physical "
+            "relays. Useful for body anomaly detection (load-vs-request "
+            "comparison)."
+        ),
+        "tested_on_canary_truck": False,
+        "fsm_section": "PCS-20, Reference Value (IPDM E/R)",
+    },
+    {
         "module": "TCM_5AT",
         "file": "tm.pdf",
         "pages": [106, 107, 108, 109],

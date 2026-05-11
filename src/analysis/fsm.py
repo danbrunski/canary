@@ -139,6 +139,10 @@ def looks_like_param_name(text: str) -> bool:
     # Reject "all-letters one-word section labels" like "PREPARATION".
     if " " not in s and s.isalpha() and len(s) > 5 and s.isupper():
         return False
+    # Reject unbalanced brackets/parens — those are page-heading fragments
+    # the cleaner couldn't strip because their close/open is on another line.
+    if s.count("(") != s.count(")") or s.count("[") != s.count("]"):
+        return False
     return True
 
 

@@ -1,9 +1,9 @@
 {
   "vehicle": "2008 Nissan Xterra",
   "fsm_revision": "February 2010",
-  "extracted_at": "2026-05-11T04:42:29.696453+00:00",
-  "module_count": 7,
-  "param_count": 316,
+  "extracted_at": "2026-05-11T04:50:03.747572+00:00",
+  "module_count": 8,
+  "param_count": 333,
   "modules": [
     {
       "module": "ECM",
@@ -979,6 +979,89 @@
         {
           "name": "VEHICLE SPEED",
           "page": 58
+        }
+      ]
+    },
+    {
+      "module": "IPDM_ER",
+      "source_file": "pcs.pdf",
+      "fsm_section": "PCS-20, Reference Value (IPDM E/R)",
+      "pages": [
+        20,
+        21,
+        22
+      ],
+      "platform_note": "Intelligent Power Distribution Module \u2014 Engine Room. The smart fuse/relay box; sits between BCM logical requests and physical relays. Useful for body anomaly detection (load-vs-request comparison).",
+      "tested_on_canary_truck": false,
+      "param_count": 17,
+      "params": [
+        {
+          "name": "MOTOR FAN REQ",
+          "page": 20
+        },
+        {
+          "name": "A/C COMP REQ",
+          "page": 20
+        },
+        {
+          "name": "HL LO REQ",
+          "page": 20
+        },
+        {
+          "name": "HL HI REQ",
+          "page": 20
+        },
+        {
+          "name": "FR FOG REQ",
+          "page": 20
+        },
+        {
+          "name": "H L WASHER REQ",
+          "page": 20
+        },
+        {
+          "name": "FR WIP REQ",
+          "page": 20
+        },
+        {
+          "name": "WIP AUTO STOP",
+          "page": 20
+        },
+        {
+          "name": "WIP PROT",
+          "page": 20
+        },
+        {
+          "name": "ST RLY REQ",
+          "page": 20
+        },
+        {
+          "name": "IGN RLY",
+          "page": 20
+        },
+        {
+          "name": "RR DEF REQ",
+          "page": 20
+        },
+        {
+          "name": "OIL P SW",
+          "page": 20
+        },
+        {
+          "name": "DTRL REQ",
+          "page": 20
+        },
+        {
+          "name": "HOOD SW",
+          "page": 20
+        },
+        {
+          "name": "THFT HRN REQ",
+          "page": 21
+        },
+        {
+          "name": "HORN CHIRP",
+          "page": 21
         }
       ]
     },
