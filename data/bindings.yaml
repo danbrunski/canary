@@ -180,7 +180,7 @@ signals:
     scale: null
     offset: null
     unit: unknown
-    confidence: medium  # promoted from hypothesized
+    confidence: high  # promoted from medium — cranking transition seals it
     evidence:
       - session: 2026-05-11T152858
         method: byte_vs_tag_differential
@@ -203,11 +203,21 @@ signals:
           Engine-off / stationary windows: ~0-9. gear_reverse: 24.6.
           coming_to_stop (active driving): 186.8. Magnitude scales with
           throttle activity — confirms the rev session reading.
+      - session: 2026-05-11T222447
+        method: byte_vs_tag_differential
+        finding: >
+          key_on_engine_off_warma: 8 (engine-off baseline). cranking: 238.6
+          (jumps the instant the engine cranks). driving: 93.5. stopped: 239.5
+          (idle compensation activity). The 8 → 239 jump at the cranking tag
+          rules out any "set on diagnostic request" interpretation — this is
+          engine-running activity, full stop.
     notes: |
-      Two physical-action sessions agree: 0 at steady state, climbs with
-      throttle activity. The earlier screen-tagged session is now treated
+      Three physical-action sessions agree, including a full engine-off
+      bracket: 0 at engine off, jumps the moment the engine cranks, climbs
+      with throttle activity. The earlier screen-tagged session is treated
       as misattributed and ignored. Likely acceleration enrichment
-      multiplier or throttle-rate-of-change signal.
+      multiplier or throttle-rate-of-change signal. Exact units pending
+      ELM327 cross-reference.
 
   # --------------------------------------------------------------------------
   # Engine state flag (cross-broadcast triplet)
@@ -545,7 +555,7 @@ signals:
     scale: null
     offset: null
     unit: unknown  # bytes likely encode trip distance or odometer ticks
-    confidence: medium
+    confidence: high  # promoted — "holds value when stopped" confirms accumulator
     evidence:
       - session: 2026-05-11T211240
         method: byte_vs_tag_differential
@@ -556,12 +566,21 @@ signals:
           225.8, byte 3 reaches 155.2, byte 5 reaches 150.0, byte 4
           reaches 153.7, byte 2 reaches 147.7. Same pattern, multiple
           bytes — strongly suggests a multi-byte accumulator.
+      - session: 2026-05-11T222447
+        method: byte_vs_tag_differential
+        finding: >
+          During the `stopped` window the values HOLD (byte 6 = 240 in
+          both `driving` and the following `stopped`), they do NOT decay
+          toward zero. That's accumulator/odometer behavior, not a speed
+          signal (which would drop to 0 when stationary). Zero across all
+          engine-off and reverse windows; only ticks during forward motion.
     notes: |
-      Best candidate for trip distance / accumulated odometer ticks. The
-      fact that gear_reverse shows ~0 but forward-driving shows ~150
-      suggests the accumulator only ticks during forward motion (or it
-      decrements in reverse and we're seeing the integration). Worth
-      decoding as a single multi-byte unsigned integer.
+      Trip distance / accumulated odometer ticks. The "holds when stopped"
+      property in the 222447 session distinguishes it definitively from a
+      speed-style signal. Decoding the byte range as a single unsigned
+      integer is the next step — and a sustained-highway capture (long
+      enough to roll a byte over) would let us derive the meters-per-tick
+      scale without ELM327.
 
   - name: MOTION_002_2
     module: unknown
@@ -596,7 +615,7 @@ signals:
     scale: null
     offset: null
     unit: unknown
-    confidence: medium
+    confidence: high  # promoted — A/C-load spike pins it as engine-load-correlated
     evidence:
       - session: 2026-05-11T211240
         method: byte_vs_tag_differential
@@ -604,9 +623,18 @@ signals:
           ~6.5 across all stationary windows. Climbs to 26.1 in
           gear_reverse, 85.2 in coming_to_stop (driving). Magnitude
           tracks vehicle motion intensity.
+      - session: 2026-05-11T222447
+        method: byte_vs_tag_differential
+        finding: >
+          ~10 across all stationary engine-running windows; jumps to 249
+          during the `ac_on` window (A/C clutch adds engine load); 66 in
+          reverse, 48 in driving, 4 when stopped. The A/C-load spike means
+          this tracks ENGINE LOAD, not just vehicle motion.
     notes: |
-      Another motion-correlated candidate. 0x29E is on the 20ms
-      drivetrain bus. Could be transmission speed or wheel-derived.
+      Reinterpreted from "vehicle motion" to "calculated engine load /
+      torque request" based on the A/C-load spike in 222447. 0x29E is on
+      the 20ms drivetrain bus. Cross-reference with Mode 01 PID 0x04
+      (calculated load) when ELM327 arrives.
 
 # Future sections (placeholders for organization once data arrives):
 #
