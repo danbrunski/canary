@@ -163,10 +163,18 @@ daemon is deployed on the vehicle.
   from candump `frames.log` + `pids.jsonl` to chunked Parquet using
   the canonical TELEMETRY_SCHEMA. Lets pre-daemon captures feed the
   same downstream pipelines as live ones.
-- [ ] **1.E.5 — `--timestamp` flag on `scripts/tag.py`.** Backfill
+- [x] **1.E.5 — `--timestamp` flag on `scripts/tag.py`.** Backfill
   tags after the fact from voice-memo notes (or other post-hoc
-  sources). Small; useful for drive sessions where in-vehicle tagging
-  is unsafe.
+  sources). Shipped two mutually-exclusive flags: `--timestamp` takes
+  ISO 8601 (with or without tz; naive = UTC) or a Unix epoch; `--offset`
+  takes a duration relative to the session's `started_at` in plain
+  seconds, suffix-form (`12m`, `1h30m`, `90s`, `1h 2m 3s`), or
+  colon-form (`12:30` mm:ss, `01:12:30` hh:mm:ss). Reads the session
+  manifest to compute offset baseline and warns to stderr if the
+  resolved timestamp falls outside the session window (still writes
+  the tag — outside-bounds tags are valid but worth flagging). 41
+  unit tests cover the parsers, manifest loading, the resolver, the
+  bounds-warning logic, and the full CLI flow.
 
 ---
 
