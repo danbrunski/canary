@@ -1,0 +1,1378 @@
+{
+  "vehicle": "2008 Nissan Xterra",
+  "fsm_revision": "February 2010",
+  "extracted_at": "2026-05-11T04:42:29.696453+00:00",
+  "module_count": 7,
+  "param_count": 316,
+  "modules": [
+    {
+      "module": "ECM",
+      "source_file": "ec.pdf",
+      "fsm_section": "EC-431, CONSULT-III Reference Value in Data Monitor Mode",
+      "pages": [
+        431,
+        432,
+        433
+      ],
+      "platform_note": "VQ40DE engine",
+      "tested_on_canary_truck": true,
+      "param_count": 65,
+      "params": [
+        {
+          "name": "ENG SPEED",
+          "page": 431
+        },
+        {
+          "name": "MAS A/F SE-B1",
+          "page": 431
+        },
+        {
+          "name": "B/FUEL SCHDL",
+          "page": 431
+        },
+        {
+          "name": "A/F ALPHA-B1",
+          "page": 431
+        },
+        {
+          "name": "A/F ALPHA-B2",
+          "page": 431
+        },
+        {
+          "name": "COOLAN TEMP/S",
+          "page": 431
+        },
+        {
+          "name": "A/F SEN1 (B1)",
+          "page": 431
+        },
+        {
+          "name": "A/F SEN1 (B2)",
+          "page": 431
+        },
+        {
+          "name": "HO2S2 (B1)",
+          "page": 431
+        },
+        {
+          "name": "HO2S2 (B2)",
+          "page": 431
+        },
+        {
+          "name": "HO2S2 MNTR (B1)",
+          "page": 431
+        },
+        {
+          "name": "HO2S2 MNTR (B2)",
+          "page": 431
+        },
+        {
+          "name": "VHCL SPEED SE",
+          "page": 431
+        },
+        {
+          "name": "BATTERY VOLT",
+          "page": 431
+        },
+        {
+          "name": "ACCEL SEN 1",
+          "page": 431
+        },
+        {
+          "name": "2*1",
+          "page": 431
+        },
+        {
+          "name": "ACCEL SEN",
+          "page": 431
+        },
+        {
+          "name": "TP SEN 1-B1",
+          "page": 431
+        },
+        {
+          "name": "2-B1*1",
+          "page": 431
+        },
+        {
+          "name": "TP SEN",
+          "page": 431
+        },
+        {
+          "name": "EVAP SYS PRES",
+          "page": 431
+        },
+        {
+          "name": "START SIGNAL",
+          "page": 431
+        },
+        {
+          "name": "CLSD THL POS",
+          "page": 431
+        },
+        {
+          "name": "AIR COND SIG",
+          "page": 431
+        },
+        {
+          "name": "P/N POSI SW",
+          "page": 431
+        },
+        {
+          "name": "PW/ST SIGNAL",
+          "page": 431
+        },
+        {
+          "name": "LOAD SIGNAL",
+          "page": 432
+        },
+        {
+          "name": "IGNITION SW",
+          "page": 432
+        },
+        {
+          "name": "HEATER FAN SW",
+          "page": 432
+        },
+        {
+          "name": "BRAKE SW",
+          "page": 432
+        },
+        {
+          "name": "INJ PULSE-B1",
+          "page": 432
+        },
+        {
+          "name": "INJ PULSE-B2",
+          "page": 432
+        },
+        {
+          "name": "IGN TIMING",
+          "page": 432
+        },
+        {
+          "name": "CAL/LD VALUE",
+          "page": 432
+        },
+        {
+          "name": "MASS AIRFLOW",
+          "page": 432
+        },
+        {
+          "name": "PURG VOL C/V",
+          "page": 432
+        },
+        {
+          "name": "INT/V TIM (B1)",
+          "page": 432
+        },
+        {
+          "name": "INT/V TIM (B2)",
+          "page": 432
+        },
+        {
+          "name": "INT/V SOL (B1)",
+          "page": 432
+        },
+        {
+          "name": "INT/V SOL (B2)",
+          "page": 432
+        },
+        {
+          "name": "VIAS S/V-1",
+          "page": 432
+        },
+        {
+          "name": "AIR COND RLY",
+          "page": 432
+        },
+        {
+          "name": "FUEL PUMP RLY",
+          "page": 432
+        },
+        {
+          "name": "VENT CONT/V",
+          "page": 432
+        },
+        {
+          "name": "THRTL RELAY",
+          "page": 432
+        },
+        {
+          "name": "COOLING FAN",
+          "page": 433
+        },
+        {
+          "name": "HO2S2 HTR (B1)",
+          "page": 433
+        },
+        {
+          "name": "HO2S2 HTR (B2)",
+          "page": 433
+        },
+        {
+          "name": "I/P PULLY SPD",
+          "page": 433
+        },
+        {
+          "name": "VEHICLE SPEED",
+          "page": 433
+        },
+        {
+          "name": "TRVL AFTER MIL",
+          "page": 433
+        },
+        {
+          "name": "A/F S1 HTR (B1)",
+          "page": 433
+        },
+        {
+          "name": "A/F S1 HTR (B2)",
+          "page": 433
+        },
+        {
+          "name": "AC PRESS SEN",
+          "page": 433
+        },
+        {
+          "name": "SET VHCL SPD",
+          "page": 433
+        },
+        {
+          "name": "MAIN SW",
+          "page": 433
+        },
+        {
+          "name": "CANCEL SW",
+          "page": 433
+        },
+        {
+          "name": "RESUME/ACC SW",
+          "page": 433
+        },
+        {
+          "name": "SET SW",
+          "page": 433
+        },
+        {
+          "name": "BRAKE SW1",
+          "page": 433
+        },
+        {
+          "name": "BRAKE SW2",
+          "page": 433
+        },
+        {
+          "name": "CRUISE LAMP",
+          "page": 433
+        },
+        {
+          "name": "SET LAMP",
+          "page": 433
+        },
+        {
+          "name": "ALT DUTY",
+          "page": 433
+        },
+        {
+          "name": "BAT CUR SEN",
+          "page": 433
+        }
+      ]
+    },
+    {
+      "module": "ABS",
+      "source_file": "brc.pdf",
+      "fsm_section": "BRC-83, Reference Value",
+      "pages": [
+        83,
+        84,
+        85,
+        86,
+        87
+      ],
+      "platform_note": "ABS Actuator and Electric Unit (Control Unit). The BRC FSM duplicates this Data Monitor table at BRC-202 for the without-VDC variant; both lists are byte-identical, so only the BRC-83 copy is extracted here.",
+      "tested_on_canary_truck": false,
+      "param_count": 50,
+      "params": [
+        {
+          "name": "ABS ACTUATOR",
+          "page": 83
+        },
+        {
+          "name": "CONSULT-III MONITOR",
+          "page": 83
+        },
+        {
+          "name": "FR LH SENSOR",
+          "page": 83
+        },
+        {
+          "name": "FR RH SENSOR",
+          "page": 83
+        },
+        {
+          "name": "RR LH SENSOR",
+          "page": 83
+        },
+        {
+          "name": "RR RH SENSOR",
+          "page": 83
+        },
+        {
+          "name": "STOP LAMP SW",
+          "page": 83
+        },
+        {
+          "name": "BATTERY VOLT",
+          "page": 83
+        },
+        {
+          "name": "GEAR",
+          "page": 83
+        },
+        {
+          "name": "SLCT LVR POSI",
+          "page": 83
+        },
+        {
+          "name": "OFF SW",
+          "page": 83
+        },
+        {
+          "name": "YAW RATE SEN",
+          "page": 83
+        },
+        {
+          "name": "ACCEL POS SIG",
+          "page": 83
+        },
+        {
+          "name": "SIDE G-SENSOR",
+          "page": 83
+        },
+        {
+          "name": "STR ANGLE SIG",
+          "page": 84
+        },
+        {
+          "name": "ENGINE SPEED",
+          "page": 84
+        },
+        {
+          "name": "FLUID LEV SW",
+          "page": 84
+        },
+        {
+          "name": "FR RH IN SOL",
+          "page": 84
+        },
+        {
+          "name": "FR RH OUT SOL",
+          "page": 84
+        },
+        {
+          "name": "FR LH IN SOL",
+          "page": 84
+        },
+        {
+          "name": "FR LH OUT SOL",
+          "page": 84
+        },
+        {
+          "name": "RR RH IN SOL",
+          "page": 84
+        },
+        {
+          "name": "RR RH OUT SOL",
+          "page": 84
+        },
+        {
+          "name": "RR LH IN SOL",
+          "page": 84
+        },
+        {
+          "name": "RR LH OUT SOL",
+          "page": 85
+        },
+        {
+          "name": "MOTOR RELAY",
+          "page": 85
+        },
+        {
+          "name": "ACTUATOR RLY",
+          "page": 85
+        },
+        {
+          "name": "ABS WARN LAMP",
+          "page": 85
+        },
+        {
+          "name": "OFF LAMP",
+          "page": 85
+        },
+        {
+          "name": "SLIP LAMP",
+          "page": 85
+        },
+        {
+          "name": "4WD FAIL REQ",
+          "page": 85
+        },
+        {
+          "name": "EBD SIGNAL",
+          "page": 85
+        },
+        {
+          "name": "ABS SIGNAL",
+          "page": 85
+        },
+        {
+          "name": "TCS SIGNAL",
+          "page": 85
+        },
+        {
+          "name": "VDC SIGNAL",
+          "page": 85
+        },
+        {
+          "name": "EBD FAIL SIG",
+          "page": 85
+        },
+        {
+          "name": "ABS FAIL SIG",
+          "page": 85
+        },
+        {
+          "name": "TCS FAIL SIG",
+          "page": 85
+        },
+        {
+          "name": "VDC FAIL SIG",
+          "page": 85
+        },
+        {
+          "name": "CRANKING SIG",
+          "page": 85
+        },
+        {
+          "name": "CV1",
+          "page": 85
+        },
+        {
+          "name": "CV2",
+          "page": 86
+        },
+        {
+          "name": "SV1",
+          "page": 86
+        },
+        {
+          "name": "SV2",
+          "page": 86
+        },
+        {
+          "name": "DECEL G-SEN",
+          "page": 86
+        },
+        {
+          "name": "EBD WARN LAMP",
+          "page": 86
+        },
+        {
+          "name": "N POSI SIG",
+          "page": 86
+        },
+        {
+          "name": "P POSI SIG",
+          "page": 86
+        },
+        {
+          "name": "R POSI SIG",
+          "page": 86
+        },
+        {
+          "name": "2WD/4WD",
+          "page": 86
+        }
+      ]
+    },
+    {
+      "module": "TRANSFER_4WD",
+      "source_file": "dln.pdf",
+      "fsm_section": "DLN-17, DATA MONITOR MODE Display Item List",
+      "pages": [
+        17,
+        18
+      ],
+      "platform_note": "ALL MODE AWD/4WD Transfer Control Unit",
+      "tested_on_canary_truck": false,
+      "param_count": 22,
+      "params": [
+        {
+          "name": "ENGINE SPEED",
+          "page": 17
+        },
+        {
+          "name": "BATTERY VOLT",
+          "page": 18
+        },
+        {
+          "name": "2WD SWITCH",
+          "page": 18
+        },
+        {
+          "name": "4H SWITCH",
+          "page": 18
+        },
+        {
+          "name": "4L SWITCH",
+          "page": 18
+        },
+        {
+          "name": "4L POSI SW",
+          "page": 18
+        },
+        {
+          "name": "ATP SWITCH",
+          "page": 18
+        },
+        {
+          "name": "WAIT DETCT SW",
+          "page": 18
+        },
+        {
+          "name": "4WD MODE",
+          "page": 18
+        },
+        {
+          "name": "SHIFT ACT 1",
+          "page": 18
+        },
+        {
+          "name": "SHIFT AC MON 1",
+          "page": 18
+        },
+        {
+          "name": "SHIFT ACT 2",
+          "page": 18
+        },
+        {
+          "name": "SHIFT AC MON 2",
+          "page": 18
+        },
+        {
+          "name": "SFT ACT/R MON",
+          "page": 18
+        },
+        {
+          "name": "SHIFT POS SW 1",
+          "page": 18
+        },
+        {
+          "name": "SHIFT POS SW 2",
+          "page": 18
+        },
+        {
+          "name": "SHIFT POS SW 3",
+          "page": 18
+        },
+        {
+          "name": "SHIFT POS SW 4",
+          "page": 18
+        },
+        {
+          "name": "4WD FAIL LAMP",
+          "page": 18
+        },
+        {
+          "name": "2WD IND",
+          "page": 18
+        },
+        {
+          "name": "4H IND",
+          "page": 18
+        },
+        {
+          "name": "4L IND",
+          "page": 18
+        }
+      ]
+    },
+    {
+      "module": "DIFF_LOCK",
+      "source_file": "dln.pdf",
+      "fsm_section": "DLN-248, DATA MONITOR Display Item List",
+      "pages": [
+        248
+      ],
+      "platform_note": "Rear Differential Lock Control Unit (Off-Road / Pro-4X trim only). Skip if your Xterra doesn't have the locking rear diff option.",
+      "tested_on_canary_truck": false,
+      "param_count": 9,
+      "params": [
+        {
+          "name": "BATTERY VOLT",
+          "page": 248
+        },
+        {
+          "name": "4WD MODE",
+          "page": 248
+        },
+        {
+          "name": "D-LOCK SW SIG",
+          "page": 248
+        },
+        {
+          "name": "D-LOCK SIG",
+          "page": 248
+        },
+        {
+          "name": "RELAY ON",
+          "page": 248
+        },
+        {
+          "name": "RELAY MTR",
+          "page": 248
+        },
+        {
+          "name": "SOL MTR",
+          "page": 248
+        },
+        {
+          "name": "IND MTR",
+          "page": 248
+        },
+        {
+          "name": "D-LOCK POS SW",
+          "page": 248
+        }
+      ]
+    },
+    {
+      "module": "BCM",
+      "source_file": "bcs.pdf",
+      "fsm_section": "BCS-37, Reference Value",
+      "pages": [
+        37,
+        38,
+        39
+      ],
+      "platform_note": "Body Control Module",
+      "tested_on_canary_truck": false,
+      "param_count": 38,
+      "params": [
+        {
+          "name": "AIR COND SW",
+          "page": 37
+        },
+        {
+          "name": "BACK DOOR SW",
+          "page": 37
+        },
+        {
+          "name": "CDL LOCK SW",
+          "page": 37
+        },
+        {
+          "name": "CDL UNLOCK SW",
+          "page": 37
+        },
+        {
+          "name": "DOOR SW-AS",
+          "page": 37
+        },
+        {
+          "name": "DOOR SW-DR",
+          "page": 37
+        },
+        {
+          "name": "DOOR SW-RL",
+          "page": 37
+        },
+        {
+          "name": "DOOR SW-RR",
+          "page": 37
+        },
+        {
+          "name": "ENGINE RUN",
+          "page": 37
+        },
+        {
+          "name": "FR FOG SW",
+          "page": 37
+        },
+        {
+          "name": "FR WASHER SW",
+          "page": 37
+        },
+        {
+          "name": "FR WIPER LOW",
+          "page": 37
+        },
+        {
+          "name": "FR WIPER HI",
+          "page": 37
+        },
+        {
+          "name": "FR WIPER INT",
+          "page": 37
+        },
+        {
+          "name": "FR WIPER STOP",
+          "page": 37
+        },
+        {
+          "name": "HAZARD SW",
+          "page": 37
+        },
+        {
+          "name": "LIGHT SW 1ST",
+          "page": 37
+        },
+        {
+          "name": "HEADLAMP SW1",
+          "page": 37
+        },
+        {
+          "name": "HEADLAMP SW2",
+          "page": 37
+        },
+        {
+          "name": "HI BEAM SW",
+          "page": 38
+        },
+        {
+          "name": "IGN ON SW",
+          "page": 38
+        },
+        {
+          "name": "IGN SW CAN",
+          "page": 38
+        },
+        {
+          "name": "INT VOLUME",
+          "page": 38
+        },
+        {
+          "name": "KEY ON SW",
+          "page": 38
+        },
+        {
+          "name": "KEYLESS LOCK",
+          "page": 38
+        },
+        {
+          "name": "KEYLESS UNLOCK",
+          "page": 38
+        },
+        {
+          "name": "OIL PRESS SW",
+          "page": 38
+        },
+        {
+          "name": "PASSING SW",
+          "page": 38
+        },
+        {
+          "name": "REAR DEF SW",
+          "page": 38
+        },
+        {
+          "name": "RR WASHER SW",
+          "page": 38
+        },
+        {
+          "name": "RR WIPER INT",
+          "page": 38
+        },
+        {
+          "name": "RR WIPER ON",
+          "page": 38
+        },
+        {
+          "name": "RR WIPER STOP",
+          "page": 38
+        },
+        {
+          "name": "TAIL LAMP SW",
+          "page": 38
+        },
+        {
+          "name": "TRNK OPNR SW",
+          "page": 38
+        },
+        {
+          "name": "TURN SIGNAL L",
+          "page": 38
+        },
+        {
+          "name": "TURN SIGNAL R",
+          "page": 38
+        },
+        {
+          "name": "VEHICLE SPEED",
+          "page": 38
+        }
+      ]
+    },
+    {
+      "module": "CLUSTER",
+      "source_file": "mwi.pdf",
+      "fsm_section": "MWI-57, Reference Value",
+      "pages": [
+        57,
+        58,
+        59
+      ],
+      "platform_note": "Combination Meter. Note: the cluster's CONSULT-III Data Monitor screen exposes the BCM signals it consumes over CAN, so this list intentionally overlaps with BCM. Useful as a cross-reference.",
+      "tested_on_canary_truck": false,
+      "param_count": 38,
+      "params": [
+        {
+          "name": "AIR COND SW",
+          "page": 57
+        },
+        {
+          "name": "BACK DOOR SW",
+          "page": 57
+        },
+        {
+          "name": "CDL LOCK SW",
+          "page": 57
+        },
+        {
+          "name": "CDL UNLOCK SW",
+          "page": 57
+        },
+        {
+          "name": "DOOR SW-AS",
+          "page": 57
+        },
+        {
+          "name": "DOOR SW-DR",
+          "page": 57
+        },
+        {
+          "name": "DOOR SW-RL",
+          "page": 57
+        },
+        {
+          "name": "DOOR SW-RR",
+          "page": 57
+        },
+        {
+          "name": "ENGINE RUN",
+          "page": 57
+        },
+        {
+          "name": "FR FOG SW",
+          "page": 57
+        },
+        {
+          "name": "FR WASHER SW",
+          "page": 57
+        },
+        {
+          "name": "FR WIPER LOW",
+          "page": 57
+        },
+        {
+          "name": "FR WIPER HI",
+          "page": 57
+        },
+        {
+          "name": "FR WIPER INT",
+          "page": 57
+        },
+        {
+          "name": "FR WIPER STOP",
+          "page": 57
+        },
+        {
+          "name": "HAZARD SW",
+          "page": 57
+        },
+        {
+          "name": "LIGHT SW 1ST",
+          "page": 57
+        },
+        {
+          "name": "HEADLAMP SW1",
+          "page": 57
+        },
+        {
+          "name": "HEADLAMP SW2",
+          "page": 57
+        },
+        {
+          "name": "HI BEAM SW",
+          "page": 58
+        },
+        {
+          "name": "IGN ON SW",
+          "page": 58
+        },
+        {
+          "name": "IGN SW CAN",
+          "page": 58
+        },
+        {
+          "name": "INT VOLUME",
+          "page": 58
+        },
+        {
+          "name": "KEY ON SW",
+          "page": 58
+        },
+        {
+          "name": "KEYLESS LOCK",
+          "page": 58
+        },
+        {
+          "name": "KEYLESS UNLOCK",
+          "page": 58
+        },
+        {
+          "name": "OIL PRESS SW",
+          "page": 58
+        },
+        {
+          "name": "PASSING SW",
+          "page": 58
+        },
+        {
+          "name": "REAR DEF SW",
+          "page": 58
+        },
+        {
+          "name": "RR WASHER SW",
+          "page": 58
+        },
+        {
+          "name": "RR WIPER INT",
+          "page": 58
+        },
+        {
+          "name": "RR WIPER ON",
+          "page": 58
+        },
+        {
+          "name": "RR WIPER STOP",
+          "page": 58
+        },
+        {
+          "name": "TAIL LAMP SW",
+          "page": 58
+        },
+        {
+          "name": "TRNK OPNR SW",
+          "page": 58
+        },
+        {
+          "name": "TURN SIGNAL L",
+          "page": 58
+        },
+        {
+          "name": "TURN SIGNAL R",
+          "page": 58
+        },
+        {
+          "name": "VEHICLE SPEED",
+          "page": 58
+        }
+      ]
+    },
+    {
+      "module": "TCM_5AT",
+      "source_file": "tm.pdf",
+      "fsm_section": "TM-106, Monitor Item Selection (CONSULT-III)",
+      "pages": [
+        106,
+        107,
+        108,
+        109
+      ],
+      "platform_note": "5AT: RE5R05A automatic transmission. NOT present on M/T builds. Included for users with the AT variant; not validated on this build.",
+      "tested_on_canary_truck": false,
+      "param_count": 94,
+      "params": [
+        {
+          "name": "OUTPUT REV",
+          "page": 106
+        },
+        {
+          "name": "GEAR RATIO",
+          "page": 106
+        },
+        {
+          "name": "TC SLIP SPEED",
+          "page": 106
+        },
+        {
+          "name": "F SUN GR REV",
+          "page": 106
+        },
+        {
+          "name": "F CARR GR REV",
+          "page": 106
+        },
+        {
+          "name": "ATF TEMP SE 1",
+          "page": 106
+        },
+        {
+          "name": "ATF TEMP SE 2",
+          "page": 106
+        },
+        {
+          "name": "BATTERY VOLT",
+          "page": 106
+        },
+        {
+          "name": "ATF PRES SW 1",
+          "page": 106
+        },
+        {
+          "name": "ATF PRES SW 2",
+          "page": 106
+        },
+        {
+          "name": "ATF PRES SW 3",
+          "page": 106
+        },
+        {
+          "name": "ATF PRES SW 5",
+          "page": 106
+        },
+        {
+          "name": "ATF PRES SW 6",
+          "page": 106
+        },
+        {
+          "name": "RANGE SW 1",
+          "page": 106
+        },
+        {
+          "name": "RANGE SW 2",
+          "page": 106
+        },
+        {
+          "name": "RANGE SW 3",
+          "page": 106
+        },
+        {
+          "name": "RANGE SW 4",
+          "page": 106
+        },
+        {
+          "name": "1 POSITION SW",
+          "page": 106
+        },
+        {
+          "name": "SLCT LVR POSI",
+          "page": 106
+        },
+        {
+          "name": "OD CONT SW",
+          "page": 106
+        },
+        {
+          "name": "POWERSHIFT SW",
+          "page": 106
+        },
+        {
+          "name": "HOLD SW",
+          "page": 106
+        },
+        {
+          "name": "MANU MODE SW",
+          "page": 106
+        },
+        {
+          "name": "NON M-MODE SW",
+          "page": 106
+        },
+        {
+          "name": "UP SW LEVER",
+          "page": 106
+        },
+        {
+          "name": "DOWN SW LEVER",
+          "page": 106
+        },
+        {
+          "name": "SFT UP ST SW",
+          "page": 106
+        },
+        {
+          "name": "SFT DWN ST SW",
+          "page": 106
+        },
+        {
+          "name": "ASCD-OD CUT",
+          "page": 106
+        },
+        {
+          "name": "ASCD-CRUISE",
+          "page": 106
+        },
+        {
+          "name": "ABS SIGNAL",
+          "page": 106
+        },
+        {
+          "name": "ACC OD CUT",
+          "page": 107
+        },
+        {
+          "name": "ACC SIGNAL",
+          "page": 107
+        },
+        {
+          "name": "TCS GR/P KEEP",
+          "page": 107
+        },
+        {
+          "name": "TCS SIGNAL 2",
+          "page": 107
+        },
+        {
+          "name": "TCS SIGNAL 1",
+          "page": 107
+        },
+        {
+          "name": "TCC SOLENOID",
+          "page": 107
+        },
+        {
+          "name": "LINE PRES SOL",
+          "page": 107
+        },
+        {
+          "name": "I/C SOLENOID",
+          "page": 107
+        },
+        {
+          "name": "FR/B SOLENOID",
+          "page": 107
+        },
+        {
+          "name": "D/C SOLENOID",
+          "page": 107
+        },
+        {
+          "name": "HLR/C SOL",
+          "page": 107
+        },
+        {
+          "name": "ON OFF SOL",
+          "page": 107
+        },
+        {
+          "name": "TCC SOL MON",
+          "page": 107
+        },
+        {
+          "name": "L/P SOL MON",
+          "page": 107
+        },
+        {
+          "name": "I/C SOL MON",
+          "page": 107
+        },
+        {
+          "name": "FR/B SOL MON",
+          "page": 107
+        },
+        {
+          "name": "D/C SOL MON",
+          "page": 107
+        },
+        {
+          "name": "HLR/C SOL MON",
+          "page": 107
+        },
+        {
+          "name": "ONOFF SOL MON",
+          "page": 107
+        },
+        {
+          "name": "P POSI IND",
+          "page": 107
+        },
+        {
+          "name": "R POSI IND",
+          "page": 107
+        },
+        {
+          "name": "N POSI IND",
+          "page": 107
+        },
+        {
+          "name": "D POSI IND",
+          "page": 107
+        },
+        {
+          "name": "4TH POSI IND",
+          "page": 107
+        },
+        {
+          "name": "3RD POSI IND",
+          "page": 107
+        },
+        {
+          "name": "2ND POSI IND",
+          "page": 107
+        },
+        {
+          "name": "1ST POSI IND",
+          "page": 107
+        },
+        {
+          "name": "MANU MODE IND",
+          "page": 107
+        },
+        {
+          "name": "POWER M LAMP",
+          "page": 107
+        },
+        {
+          "name": "F-SAFE IND/L",
+          "page": 107
+        },
+        {
+          "name": "ATF WARN LAMP",
+          "page": 107
+        },
+        {
+          "name": "BACK-UP LAMP",
+          "page": 107
+        },
+        {
+          "name": "STARTER RELAY",
+          "page": 107
+        },
+        {
+          "name": "RANGE SW3 MON",
+          "page": 107
+        },
+        {
+          "name": "C/V CLB ID1",
+          "page": 107
+        },
+        {
+          "name": "C/V CLB ID2",
+          "page": 108
+        },
+        {
+          "name": "C/V CLB ID3",
+          "page": 108
+        },
+        {
+          "name": "UNIT CLB ID1",
+          "page": 108
+        },
+        {
+          "name": "UNIT CLB ID2",
+          "page": 108
+        },
+        {
+          "name": "UNIT CLB ID3",
+          "page": 108
+        },
+        {
+          "name": "TRGT GR RATIO",
+          "page": 108
+        },
+        {
+          "name": "TRGT PRES TCC",
+          "page": 108
+        },
+        {
+          "name": "TRGT PRES L/P",
+          "page": 108
+        },
+        {
+          "name": "TRGT PRES I/C",
+          "page": 108
+        },
+        {
+          "name": "TRGT PRE FR/B",
+          "page": 108
+        },
+        {
+          "name": "TRGT PRES D/C",
+          "page": 108
+        },
+        {
+          "name": "TRG PRE HLR/C",
+          "page": 108
+        },
+        {
+          "name": "SHIFT PATTERN",
+          "page": 108
+        },
+        {
+          "name": "DRV CST JUDGE",
+          "page": 108
+        },
+        {
+          "name": "START RLY MON",
+          "page": 108
+        },
+        {
+          "name": "NEXT GR POSI",
+          "page": 108
+        },
+        {
+          "name": "SHIFT MODE",
+          "page": 108
+        },
+        {
+          "name": "MANU GR POSI",
+          "page": 108
+        },
+        {
+          "name": "VEHICLE SPEED",
+          "page": 108
+        },
+        {
+          "name": "DUTY-HI",
+          "page": 108
+        },
+        {
+          "name": "DUTY-LOW",
+          "page": 108
+        },
+        {
+          "name": "PLS WIDTH-HI",
+          "page": 108
+        },
+        {
+          "name": "PLS WIDTH-LOW",
+          "page": 108
+        },
+        {
+          "name": "1ST GR FUNCTN P0731",
+          "page": 109
+        },
+        {
+          "name": "2ND GR FUNCTN P0732",
+          "page": 109
+        },
+        {
+          "name": "3RD GR FUNCTN P0733",
+          "page": 109
+        },
+        {
+          "name": "4TH GR FUNCTN P0734",
+          "page": 109
+        },
+        {
+          "name": "5TH GR FUNCTN P0735",
+          "page": 109
+        }
+      ]
+    }
+  ]
+}

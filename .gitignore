@@ -53,6 +53,10 @@ logs/
 data/sessions/
 data/raw/
 
+# Vendor FSM PDFs — copyrighted, not committable; extracted name lists land
+# in data/fsm/ which IS committed (factual identifiers).
+xterra_fsm/
+
 # Trained model artifacts (not committed; manifests live alongside the binary)
 models/*.pt
 models/*.pth

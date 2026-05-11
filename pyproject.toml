@@ -24,6 +24,9 @@ dev = [
     "pytest-asyncio>=0.23",
     "types-pyyaml",
     "pandas-stubs",
+    # tools/extract_fsm_signals.py — pulls CONSULT-III parameter names from
+    # vendor FSM PDFs into data/fsm/signals.json. Dev-only.
+    "pdfplumber>=0.11",
 ]
 # Phase 1.5 will add:
 # emulator = ["ELM327-emulator"]
@@ -60,7 +63,7 @@ module = "tests.*"
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-module = ["obd", "obd.*"]
+module = ["obd", "obd.*", "pdfplumber", "pdfplumber.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
