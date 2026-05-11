@@ -360,38 +360,55 @@ emission stays viable as a one-way derived artifact (4.D.2 below).
 
 ### 5C. Dashboard frontend (FR-08)
 
-- [ ] **5.6 — Stack decision.** Pick React + Vite (or Svelte if simpler);
-  document choice in `src/dashboard/static/README.md`. Single-page app,
-  built artifacts checked in or built at deploy.
-- [ ] **5.7 — Live PID panel.** Subscribe to `/ws/telemetry`, render a
+- [ ] **5.6 — Display strategy.** Adopt the approach in
+  `docs/dashboard-display-strategy.md`: full React/TypeScript PWA served
+  by the Pi for phone/head-unit mirroring; optional native Android Auto
+  companion later for constrained status/alert views only.
+- [ ] **5.7 — Stack decision.** Use React + TypeScript + Vite unless a
+  proof-of-concept shows a simpler stack wins. Document build/deploy
+  details in `src/dashboard/static/README.md`. Single-page app, built
+  artifacts checked in or built at deploy.
+- [ ] **5.8 — PWA + head-unit mirroring mode.** Fullscreen landscape UI
+  sized for a phone mirrored to the Kenwood receiver. Show connection
+  state, stale-data warnings, and a parked/maintenance-mode gate for any
+  future diagnostic controls.
+- [ ] **5.9 — Live PID panel.** Subscribe to `/ws/telemetry`, render a
   grid of current values + sparklines for last 60 s.
-- [ ] **5.8 — Anomaly timeline.** Anomaly score chart; recent-events list
+- [ ] **5.10 — Anomaly timeline.** Anomaly score chart; recent-events list
   with filter by source and mode.
-- [ ] **5.9 — Operating-mode indicator.** Current mode badge + recent
+- [ ] **5.11 — Operating-mode indicator.** Current mode badge + recent
   transitions.
+- [ ] **5.12 — Model performance panel.** Show active model version,
+  inference latency, thresholds, anomaly score distribution, and LSTM
+  reconstruction error once the model layer exists.
+- [ ] **5.13 — TPMS panel.** Once TPMS signals are decoded, show per-tire
+  pressure/temperature/status and stale sensor warnings.
+- [ ] **5.14 — Parked diagnostics panel.** Maintenance-only UI for
+  reverse-engineered proprietary protocol reads and any future control
+  actions. Requires explicit confirmations and backend enforcement.
 
 ### 5D. Model management (FR-09)
 
-- [ ] **5.10 — Model manifest format.** YAML alongside each artifact:
+- [ ] **5.15 — Model manifest format.** YAML alongside each artifact:
   version, training data hash + date range, hyperparams, scaler params,
   threshold, schema. (FR-09)
-- [ ] **5.11 — Hot swap.** `ModelManager` watches the models directory;
+- [ ] **5.16 — Hot swap.** `ModelManager` watches the models directory;
   on a new manifest, validate schema match and atomically swap the
   in-memory model without restarting the process. (FR-09)
-- [ ] **5.12 — Retraining CLI.** `scripts/retrain.py` — pulls clean
+- [ ] **5.17 — Retraining CLI.** `scripts/retrain.py` — pulls clean
   sessions from the last N days, retrains both models, writes new
   artifacts + manifests. Manual trigger in v1; cron later. (FR-09)
 
 ### 5E. Deployment (NFR-02, NFR-04)
 
-- [ ] **5.13 — systemd unit.** `systemd/canary.service` — Type=notify,
+- [ ] **5.18 — systemd unit.** `systemd/canary.service` — Type=notify,
   Restart=on-failure, runs as a non-root `canary` user, reads config
   from `/etc/canary/canary.yaml`, writes to `/data/canary`.
-- [ ] **5.14 — Install script.** `scripts/install.sh` — creates user,
+- [ ] **5.19 — Install script.** `scripts/install.sh` — creates user,
   installs venv, copies unit file, enables service. Idempotent.
-- [ ] **5.15 — Pi 5 image bring-up doc.** `docs/pi-setup.md` — Bookworm
+- [ ] **5.20 — Pi 5 image bring-up doc.** `docs/pi-setup.md` — Bookworm
   install, SocketCAN modules, USB device permissions, fstab for the SSD.
-- [ ] **5.16 — Vehicle install.** Mount Pi, run buck converter from ACC,
+- [ ] **5.21 — Vehicle install.** Mount Pi, run buck converter from ACC,
   verify clean shutdown on ignition off. (Hardware task; software side
   is graceful-shutdown handling.)
 

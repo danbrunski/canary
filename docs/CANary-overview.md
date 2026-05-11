@@ -254,7 +254,10 @@ ELM327 USB   Canable USB
 
 ### Phase 5 — Dashboard & Deployment (Weeks 9–12)
 - [ ] Implement FastAPI backend with WebSocket telemetry stream
-- [ ] Build web dashboard for live visualization
+- [ ] Build React/TypeScript PWA dashboard for live visualization
+- [ ] Support phone/head-unit mirroring as the primary in-vehicle display
+- [ ] Keep official Android Auto, if pursued, as a limited status/alert
+  companion rather than the full diagnostic dashboard
 - [ ] Package as systemd service with auto-start
 - [ ] Mount hardware permanently in vehicle
 
