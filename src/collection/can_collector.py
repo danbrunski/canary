@@ -37,7 +37,8 @@ class RecordingResult:
     started_at: datetime
     ended_at: datetime
     frames_recorded: int
-    stopped_by: str  # "deadline" | "signal"
+    stopped_by: str  # "deadline" | "signal" | "error"
+    parse_errors: int = 0  # malformed frames dropped without aborting the run
 
 
 def make_session_dir(out_root: Path, started_at: datetime) -> SessionPaths:
@@ -119,6 +120,7 @@ def record(
     deadline = time.monotonic() + duration if duration is not None else None
     stop_reason = "signal"
     count = 0
+    parse_errors = 0  # python-can slcan parser blows up on corrupt frames; count them
 
     log.info(
         "recording started",
@@ -142,7 +144,23 @@ def record(
                 if deadline is not None and time.monotonic() >= deadline:
                     stop_reason = "deadline"
                     break
-                msg = bus.recv(timeout=poll_interval)
+                try:
+                    msg = bus.recv(timeout=poll_interval)
+                except (ValueError, can.CanError) as exc:
+                    # python-can's slcan parser raises ValueError on a corrupt
+                    # DLC byte (one bad char during a bus error / EMI hit / USB
+                    # jitter would otherwise kill a multi-hour recording). Drop
+                    # the bad frame, count it, and keep going.
+                    parse_errors += 1
+                    if parse_errors == 1 or parse_errors % 100 == 0:
+                        log.warning(
+                            "dropped malformed CAN frame",
+                            extra={
+                                "error": f"{type(exc).__name__}: {exc}",
+                                "parse_errors_total": parse_errors,
+                            },
+                        )
+                    continue
                 if msg is None:
                     continue
                 writer.on_message_received(msg)
@@ -158,6 +176,7 @@ def record(
             ended_at=ended_at,
             frames_recorded=count,
             stopped_by=stop_reason,
+            parse_errors=parse_errors,
         )
         try:
             _write_manifest(
@@ -178,6 +197,7 @@ def record(
                 "frames_recorded": count,
                 "stopped_by": stop_reason,
                 "elapsed_seconds": (ended_at - started_at).total_seconds(),
+                "parse_errors": parse_errors,
             },
         )
     return result
@@ -206,6 +226,7 @@ def _write_manifest(
         },
         "frames_recorded": result.frames_recorded,
         "stopped_by": result.stopped_by,
+        "parse_errors": result.parse_errors,
     }
     if error is not None:
         payload["error"] = f"{type(error).__name__}: {error}"

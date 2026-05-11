@@ -248,6 +248,57 @@ class ExplodingBus:
         raise RuntimeError("adapter disappeared")
 
 
+class FlakyBus:
+    """A bus that raises ValueError on every Nth recv to simulate the slcan
+    parser's int('C') crash. Good frames otherwise."""
+
+    def __init__(self, bad_every: int = 3, total_calls: int = 12) -> None:
+        self.calls = 0
+        self.bad_every = bad_every
+        self.total_calls = total_calls
+
+    def recv(self, timeout: float) -> can.Message | None:
+        self.calls += 1
+        if self.calls > self.total_calls:
+            # Block to let the recorder's deadline fire cleanly.
+            time.sleep(timeout)
+            return None
+        if self.calls % self.bad_every == 0:
+            raise ValueError("invalid literal for int() with base 10: 'C'")
+        return can.Message(
+            arbitration_id=0x100 + self.calls,
+            data=bytes([self.calls & 0xFF] * 4),
+            is_extended_id=False,
+            timestamp=float(self.calls),
+        )
+
+
+def test_record_skips_malformed_frames_without_aborting(tmp_path: Path):
+    """A single ValueError from python-can's slcan parser must not kill the run.
+    The bad frames are counted and the recording continues."""
+    spec = _virtual_spec("canary-test-flaky")
+    paths = make_session_dir(tmp_path, datetime.now(UTC))
+
+    result = record(
+        FlakyBus(bad_every=3, total_calls=12),  # type: ignore[arg-type]
+        paths,
+        spec=spec,
+        vehicle=_vehicle(),
+        duration=0.3,
+        poll_interval=0.02,
+    )
+
+    # 12 calls total, every 3rd is bad → 4 bad, 8 good
+    assert result.frames_recorded == 8
+    assert result.parse_errors == 4
+    assert result.stopped_by == "deadline"
+
+    manifest = json.loads(paths.manifest.read_text())
+    assert manifest["frames_recorded"] == 8
+    assert manifest["parse_errors"] == 4
+    assert manifest["stopped_by"] == "deadline"
+
+
 def test_record_writes_error_manifest_when_recv_raises(tmp_path: Path):
     spec = _virtual_spec("canary-test-error")
     paths = make_session_dir(tmp_path, datetime.now(UTC))
