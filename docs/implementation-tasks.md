@@ -24,7 +24,11 @@ Goal: a runnable empty skeleton, reproducible dev env, CI green on first push.
   pyyaml, pydantic) live in `[project.dependencies]`; `[project.optional-dependencies.dev]`
   carries tooling (ruff, mypy, pytest, pytest-asyncio, types-pyyaml,
   pandas-stubs). `[project.optional-dependencies.ml]` carries Torch for
-  Phase 3 sequence/model work.
+  Phase 3 sequence/model work. `scripts/install_deps.py` is the preferred
+  setup path: it creates/updates `.venv`, installs project/dev deps, detects
+  the local NVIDIA driver CUDA capability, and installs Torch from the matching
+  PyTorch wheel index (`cpu`, `cu118`, `cu126`, `cu128`, or `cu130`) with manual
+  override support. Documented in `docs/install.md`.
   ELM327-emulator deferred to a future `[emulator]` extra (Phase 1.5) —
   its sdist needs `--no-build-isolation`, not worth solving until we
   actually wire the emulator test.
@@ -256,6 +260,21 @@ Goal: a reproducible feature pipeline + a working baseline detector.
   max-gap behavior, inclusive min/max segmenter thresholds, session-boundary
   isolation, rolling mean/std/ROC hand calculations, higher-Hz windows,
   feature toggles, column selection, and empty-input schemas. (NFR-05)
+- [x] **2.10 — Training CLI.** `scripts/train_anomaly_model.py` — the
+  Phase 2 capstone. Runs the full pipeline (read_session → decode CAN via
+  bindings.yaml → to_wide(coerce_numeric) → resample → operating-mode
+  segment, or a single `all` mode when no OBD PIDs are present → rolling
+  features), fits the per-mode Isolation Forest + z-score scaler, writes
+  the joblib artifact + JSON manifest. `--evaluate <session>` additionally
+  splices a synthetic spike+dropout into a held-out session and prints
+  per-mode precision / recall / score-distribution + a recommended
+  `contamination` (the tuning feedback Task 2.8 calls for). Verified
+  end-to-end against the 18-minute drive session 2026-05-11T222447:
+  trained on 92 feature columns (23 decoded signals + their rolling
+  derivatives), single `all` mode (no OBD), artifact written; the
+  injected-spike evaluation produced a sensible-but-untuned baseline
+  (precision ≈ 0.18, recall ≈ 0.5 at the default contamination=0.01 —
+  exactly the signal that contamination needs raising). (FR-05)
 
 ---
 

@@ -30,6 +30,8 @@ dev = [
     "pdfplumber>=0.11",
 ]
 ml = [
+    # Optional-extra metadata cannot choose a CUDA wheel index. For actual
+    # setup, prefer scripts/install_deps.py so Torch matches the local driver.
     "torch>=2.0",
 ]
 # Phase 1.5 will add:

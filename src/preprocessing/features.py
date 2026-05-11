@@ -144,7 +144,17 @@ def _features_one_session(
             roc = (ordered[col] - shifted) / cfg.window_seconds
             new_cols[roc_column(col)] = roc.to_numpy()
 
-    return ordered.assign(**new_cols)
+    if not new_cols:
+        return ordered
+    # Build all feature columns in one shot — `ordered.assign(**new_cols)`
+    # adds them one at a time, which fragments the frame and triggers a
+    # PerformanceWarning when there are dozens of channels. Drop any columns
+    # we're about to recreate first so a second call on already-featurized
+    # input replaces rather than duplicates them (matching the old assign()).
+    to_replace = [c for c in new_cols if c in ordered.columns]
+    base = ordered.drop(columns=to_replace) if to_replace else ordered
+    feature_block = pd.DataFrame(new_cols, index=base.index)
+    return pd.concat([base, feature_block], axis=1)
 
 
 def _rows_in_window(timestamps: pd.Series, window_seconds: int) -> int:

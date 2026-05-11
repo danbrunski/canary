@@ -44,9 +44,21 @@ requirements, and development phases.
 ### Install (development)
 
 ```bash
-python3.12 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
+python3.12 scripts/install_deps.py
 ```
+
+The installer creates `.venv`, installs the development dependencies, detects
+the local NVIDIA driver's CUDA capability with `nvidia-smi`, and installs Torch
+from the matching PyTorch wheel index. Use `--dry-run` to inspect the selected
+commands, or override detection explicitly, for example:
+
+```bash
+python3.12 scripts/install_deps.py --torch cu126
+python3.12 scripts/install_deps.py --torch cpu
+```
+
+See [`docs/install.md`](docs/install.md) for the CUDA selection table,
+overrides, and verification commands.
 
 ### Configure
 
