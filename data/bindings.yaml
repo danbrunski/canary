@@ -64,6 +64,12 @@ signals:
       cross-reference exactly. Other coolant duplicates may exist: 0x233:0
       and 0x23D:7 both showed monotonic warm-up in the earlier seated session.
 
+      CAVEAT: raw=0 (decoded -40degC) appears in engine-off frames — looks
+      like a "no reading" sentinel rather than a real -40degC reading. Any
+      decoder using this signal should gate on engine-running state OR drop
+      raw=0 readings. Surfaced by decode_bindings.py against
+      session 2026-05-11T152858.
+
   - name: ECM_ENGINE_REV_LEVEL
     module: ECM
     can_id: 0x23D
@@ -218,6 +224,14 @@ signals:
       transition to 254 mid-drive = engine stalled / fuel cut / major fault.
       The three-way redundancy means a single bit-flip in one location is
       detectable.
+
+      REFINEMENT: decode_bindings.py against session 2026-05-11T152858 shows
+      raw values across the full 0..255 range — the byte is NOT binary. The
+      original 254/205 finding was based on per-tag-window MEANS. Within a
+      window the byte still varies (small perturbations during transitions,
+      possible counter bits in the low nibble, etc.). Future work: examine
+      the byte's bit-level structure to separate the steady "state code"
+      portion from any counter/transient bits.
 
   - name: ECM_ENGINE_STATE_B
     module: ECM
