@@ -226,10 +226,17 @@ Goal: a reproducible feature pipeline + a working baseline detector.
   spike → max \|z\|≈2200, drift → ≈350, dropout → NaN propagation,
   stuck → raw \|z\|≈1.4 (correctly invisible to raw z-score, which is
   why rolling features exist). (NFR-05)
-- [ ] **2.7 — Isolation Forest training.** `src/models/isolation_forest.py`
-  — fit per-mode IF using `n_estimators` and `contamination` from config;
-  serialize with `joblib`; emit a manifest (training data hash, date
-  range, hyperparams, scaler params, schema). (FR-05, FR-09)
+- [x] **2.7 — Isolation Forest training.** `src/models/isolation_forest.py`
+  — fit one sklearn `IsolationForest` per operating mode using
+  `n_estimators`, `contamination`, and `random_state` from config;
+  fit/persist the
+  `ZScoreScaler` on the same complete training rows; score rows with
+  larger-is-worse anomaly scores plus sklearn's `1`/`-1` labels; label
+  missing-feature rows anomalous for dropout visibility. Serializes a
+  `joblib` artifact plus JSON manifest with training data hash, date
+  range, sessions, hyperparams, scaler params, schema, and per-mode
+  sample summaries. Covered by `tests/test_isolation_forest.py`.
+  (FR-05, FR-09)
 - [ ] **2.8 — Synthetic anomaly evaluation.** Score injected sessions;
   report per-mode precision/recall and the anomaly-score distribution.
   Tune `contamination` per mode based on results. (FR-05)

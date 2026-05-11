@@ -45,6 +45,7 @@ models:
     enabled: true
     n_estimators: 200
     contamination: 0.01
+    random_state: 42
   lstm_autoencoder:
     enabled: true
     sequence_length: 30

@@ -21,6 +21,7 @@ def test_example_yaml_loads():
     assert "idle" in config.preprocessing.operating_modes
     assert config.preprocessing.operating_modes["idle"].rpm_max == 900
     assert config.models.isolation_forest.enabled is True
+    assert config.models.isolation_forest.random_state == 42
     assert config.dashboard.port == 8000
 
 

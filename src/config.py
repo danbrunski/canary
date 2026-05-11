@@ -75,6 +75,7 @@ class IsolationForestConfig(_Strict):
     enabled: bool
     n_estimators: int
     contamination: float
+    random_state: int = 42
 
 
 class LSTMAutoencoderConfig(_Strict):
