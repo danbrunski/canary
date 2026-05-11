@@ -1,5 +1,11 @@
 """Preprocessing utilities for model-ready telemetry frames."""
 
+from src.preprocessing.anomaly_injection import (
+    AnomalyInjector,
+    AnomalyKind,
+    InjectionWindow,
+    windows_to_records,
+)
 from src.preprocessing.features import (
     FeatureConfig,
     compute_features,
@@ -26,7 +32,10 @@ from src.preprocessing.segmenter import (
 
 __all__ = [
     "MODE_COLUMN",
+    "AnomalyInjector",
+    "AnomalyKind",
     "FeatureConfig",
+    "InjectionWindow",
     "ResampleConfig",
     "SchemaMismatchError",
     "SegmenterConfig",
@@ -45,4 +54,5 @@ __all__ = [
     "segment_operating_modes",
     "std_column",
     "to_wide",
+    "windows_to_records",
 ]

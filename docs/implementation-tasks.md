@@ -205,9 +205,19 @@ Goal: a reproducible feature pipeline + a working baseline detector.
   channels (σ < `std_floor`) get σ=1 — centering only, no amplification.
   `to_dict`/`from_dict` give a plain-JSON round-trip for the manifest;
   older manifests without `std_floor` still load. (FR-04, FR-09)
-- [ ] **2.6 — Synthetic anomaly injector.** `tests/anomaly_injector.py` —
-  utilities to splice spikes, drift, dropouts, and stuck-sensor patterns
-  into a clean session. Used by 2.8 and Phase 3 evaluation. (NFR-05)
+- [x] **2.6 — Synthetic anomaly injector.** Splice spikes, drift, dropouts,
+  and stuck-sensor patterns into a clean session. Used by 2.8 and Phase 3
+  evaluation. Implemented as `src/preprocessing/anomaly_injection.py`
+  (`AnomalyInjector` builder + `InjectionWindow` records) rather than
+  `tests/anomaly_injector.py` — placing it under `src/` lets the
+  evaluation scripts and future replay harness import it cleanly without
+  test-path hacks. `windows_to_records` serializes injection metadata for
+  reports. Four kinds: `.spike(value=…)`, `.drift(total_delta=…)`,
+  `.dropout()`, `.stuck()` (freezes at the value from the row immediately
+  before the window). Validated end-to-end against the z-score scaler:
+  spike → max \|z\|≈2200, drift → ≈350, dropout → NaN propagation,
+  stuck → raw \|z\|≈1.4 (correctly invisible to raw z-score, which is
+  why rolling features exist). (NFR-05)
 - [ ] **2.7 — Isolation Forest training.** `src/models/isolation_forest.py`
   — fit per-mode IF using `n_estimators` and `contamination` from config;
   serialize with `joblib`; emit a manifest (training data hash, date
