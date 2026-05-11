@@ -75,6 +75,7 @@ def record(
     spec: CanBusConfig,
     vehicle: VehicleConfig | None,
     duration: float | None,
+    vehicle_state: str | None = None,
     stop_event: threading.Event | None = None,
     poll_interval: float = 0.2,
 ) -> RecordingResult:
@@ -122,7 +123,9 @@ def record(
         frames_recorded=count,
         stopped_by=stop_reason,
     )
-    _write_manifest(paths.manifest, spec=spec, vehicle=vehicle, result=result)
+    _write_manifest(
+        paths.manifest, spec=spec, vehicle=vehicle, result=result, vehicle_state=vehicle_state
+    )
     log.info(
         "recording stopped",
         extra={
@@ -140,6 +143,7 @@ def _write_manifest(
     spec: CanBusConfig,
     vehicle: VehicleConfig | None,
     result: RecordingResult,
+    vehicle_state: str | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "started_at": result.started_at.isoformat(),
@@ -147,6 +151,7 @@ def _write_manifest(
         "duration_seconds": (result.ended_at - result.started_at).total_seconds(),
         "host": socket.gethostname(),
         "vehicle": vehicle.model_dump() if vehicle is not None else None,
+        "vehicle_state": vehicle_state,
         "bus": {
             "interface": spec.interface,
             "channel": spec.channel,

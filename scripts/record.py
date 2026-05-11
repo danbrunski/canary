@@ -55,6 +55,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Stop after this many seconds. Default: run until SIGINT/SIGTERM.",
     )
     parser.add_argument(
+        "--vehicle-state",
+        default=None,
+        help=(
+            "Vehicle operating state during this recording. Free-form, but "
+            "prefer one of: engine_off_key_on, engine_running_idle, "
+            "engine_running_warmup, driving, cold_start. Stored verbatim in "
+            "manifest.json so the analyzer can reason about value ranges."
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -92,6 +102,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             paths,
             spec=spec,
             vehicle=config.vehicle,
+            vehicle_state=args.vehicle_state,
             duration=args.seconds,
             stop_event=stop_event,
         )

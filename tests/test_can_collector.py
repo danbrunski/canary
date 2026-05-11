@@ -174,3 +174,25 @@ def test_record_writes_manifest_even_with_zero_frames(tmp_path: Path):
     manifest = json.loads(paths.manifest.read_text())
     assert manifest["frames_recorded"] == 0
     assert manifest["vehicle"] is None
+    assert manifest["vehicle_state"] is None  # default when not passed
+
+
+def test_record_persists_vehicle_state_in_manifest(tmp_path: Path):
+    spec = _virtual_spec("canary-test-state")
+    bus = bus_factory(spec)
+    paths = make_session_dir(tmp_path, datetime.now(UTC))
+    try:
+        record(
+            bus,
+            paths,
+            spec=spec,
+            vehicle=_vehicle(),
+            vehicle_state="engine_running_idle",
+            duration=0.1,
+            poll_interval=0.05,
+        )
+    finally:
+        bus.shutdown()
+
+    manifest = json.loads(paths.manifest.read_text())
+    assert manifest["vehicle_state"] == "engine_running_idle"

@@ -127,7 +127,7 @@ def report(
 
     _print_per_window(windows, per_window)
     _print_did_summary(windows, per_window, catalog)
-    _print_window_dominant_dids(windows, per_window, catalog)
+    _print_window_bindings(windows, per_window, catalog)
     return 0
 
 
@@ -223,75 +223,135 @@ def _print_did_summary(
               "(fuzzy-matched against the tag label).")
 
 
-def _print_window_dominant_dids(
+def _print_window_bindings(
     windows: list[TagWindow],
     per_window: dict[int, list[UdsMessage]],
     catalog: SignalCatalog | None,
 ) -> None:
-    """For each tag window, surface DIDs polled MUCH more here than elsewhere.
+    """Per-window binding signals: range expansion + presence/absence.
 
-    The "★ single-window" heuristic in the summary table catches DIDs read
-    in only one window (mostly ECU-ID block during module-select). The
-    *interesting* signal bindings are usually DIDs polled across many
-    windows but at much higher rate during the window whose tag names them
-    — e.g. NT510 narrows polling to MAF when the MAF screen is open.
+    Two findings drove this design over the prior rate-dominance metric:
 
-    Threshold: a DID is "dominant" in window W if its reads-per-second in
-    W is at least 2x its average rate across all other windows AND it had
-    at least 5 reads in W. Avoids false positives from one-shot probes.
+      1. NT510 *substitutes* DIDs across screens (not adds-on-top). A DID
+         being polled in some windows but absent in others is itself a
+         binding signal — likely the NT510-deems-relevant-for-this-screen
+         set. Surfaced as "polled-here-but-absent-elsewhere" / its inverse.
+
+      2. The strongest binding signal is value-range expansion correlated
+         with a known physical action in the window. e.g. blipping the
+         throttle made one DID go from spread ≤8 (at idle) to spread 596
+         (during the blip) — a 70x expansion. That DID is unambiguously a
+         throttle/MAF/ignition family signal regardless of NT510's polling.
+
+    Each window gets:
+      * Tag-fuzzy FSM candidates for the named signal
+      * Range-expanded DIDs (spread here ≥5x baseline elsewhere; ≥30 raw)
+      * DIDs uniquely polled in this window (already in summary as ★)
+      * DIDs polled in many other windows but absent here (suggests the
+        named signal is unrelated to those DIDs)
     """
-    dominance_ratio = 2.0
-    min_reads_in_window = 5
+    expansion_ratio_threshold = 5.0
+    min_spread_for_expansion = 30
+    # Absence is interesting only when a DID is polled in *almost every other*
+    # window but missing here — that suggests this window's named signal
+    # isn't related to it. A DID polled in only 3 of 10 other windows being
+    # absent from an 11th window is meaningless noise.
+    max_absence_shown = 5
 
-    # Build per-DID per-window read counts (responses only; matches summary).
-    by_did_window: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    # Per-DID per-window: list of decoded integer values (big-endian, all body bytes).
+    by_did_win_vals: dict[int, dict[int, list[int]]] = defaultdict(lambda: defaultdict(list))
     can_ids_per_did: dict[int, set[int]] = defaultdict(set)
     for win_idx, msgs in per_window.items():
         for msg in msgs:
-            if msg.is_response and msg.service_id == 0x22 and msg.did is not None:
-                by_did_window[msg.did][win_idx] += 1
+            if (
+                msg.is_response
+                and msg.service_id == 0x22
+                and msg.did is not None
+                and msg.body
+            ):
+                by_did_win_vals[msg.did][win_idx].append(int.from_bytes(msg.body, "big"))
                 can_ids_per_did[msg.did].add(msg.can_id)
+
+    # Per-DID set of windows it appeared in (for presence/absence).
+    windows_for_did: dict[int, set[int]] = {
+        did: set(per_win.keys()) for did, per_win in by_did_win_vals.items()
+    }
 
     print()
     print("=" * 78)
-    print("DOMINANT DIDS PER TAG WINDOW (rate-spike candidates for binding)")
+    print("PER-WINDOW BINDING ANALYSIS (presence/absence + range expansion)")
     print("=" * 78)
 
+    n_windows = len(windows)
     any_output = False
+    # Tighten as window count grows: only "missing from a near-universal DID"
+    # is informative. For 11 windows, requires a DID polled in ≥8 others.
+    min_other_windows_for_absence = max(3, n_windows - 3)
+    # Windows with no UDS traffic at all (idle baselines) trivially show
+    # everything as absent — filter those out so the report stays signal.
+    windows_with_traffic: set[int] = {
+        wi for wi, msgs in per_window.items()
+        if any(m.is_response and m.service_id == 0x22 for m in msgs)
+    }
+
     for win_idx, w in enumerate(windows):
         duration = max(w.end - w.start, 0.001)
-        # Compute (DID, rate-here, ratio-vs-elsewhere) for DIDs read in this window.
-        rows: list[tuple[int, float, float, int]] = []
-        for did, win_counts in by_did_window.items():
-            n_here = win_counts.get(win_idx, 0)
-            if n_here < min_reads_in_window:
-                continue
-            rate_here = n_here / duration
-            # Average rate across all OTHER windows the DID appeared in.
-            other_total_reads = sum(c for wi, c in win_counts.items() if wi != win_idx)
-            other_total_time = sum(
-                max(windows[wi].end - windows[wi].start, 0.001)
-                for wi, c in win_counts.items()
-                if wi != win_idx and c > 0
-            )
-            rate_elsewhere = other_total_reads / other_total_time if other_total_time > 0 else 0.0
-            # Ratio: ∞ if elsewhere=0 (only-here is just like a ★), else ratio.
-            ratio = rate_here / rate_elsewhere if rate_elsewhere > 0 else float("inf")
-            if ratio >= dominance_ratio:
-                rows.append((did, rate_here, ratio, n_here))
 
-        if not rows:
+        # Range expansion: DID's spread in this window vs max spread elsewhere.
+        expanded: list[tuple[int, int, int, float]] = []  # (did, spread_here, baseline, ratio)
+        for did, by_win in by_did_win_vals.items():
+            vals_here = by_win.get(win_idx, [])
+            if len(vals_here) < 2:
+                continue
+            spread_here = max(vals_here) - min(vals_here)
+            if spread_here < min_spread_for_expansion:
+                continue
+            other_spreads = [
+                max(v) - min(v) for wi, v in by_win.items() if wi != win_idx and len(v) >= 2
+            ]
+            baseline = max(other_spreads) if other_spreads else 0
+            if baseline == 0:
+                # No comparable elsewhere; treat as infinite ratio.
+                ratio = float("inf")
+            else:
+                ratio = spread_here / baseline
+            if ratio >= expansion_ratio_threshold:
+                expanded.append((did, spread_here, baseline, ratio))
+
+        # Window-unique (only-polled-here): same as ★ in summary, listed for context.
+        unique = [
+            did
+            for did, win_set in windows_for_did.items()
+            if win_set == {win_idx}
+        ]
+
+        # Absence: polled in many other windows but missing here. Suggests the
+        # named signal is unrelated to these DIDs. Skip absence entirely for
+        # windows with no UDS traffic (everything's trivially absent).
+        absent: list[int] = (
+            [
+                did
+                for did, win_set in windows_for_did.items()
+                if win_idx not in win_set
+                and len(win_set) >= min_other_windows_for_absence
+            ]
+            if win_idx in windows_with_traffic
+            else []
+        )
+
+        if not expanded and not unique and not absent:
             continue
         any_output = True
-        rows.sort(key=lambda r: -r[1])  # by reads-per-second here
 
-        # Try to bind the tag label to FSM names for the dominant module.
+        # Tag-fuzzy FSM candidates (best guess for what this window is testing).
         suggestions: list[str] = []
         if catalog is not None:
             modules_seen = {
                 m
-                for did, _, _, _ in rows
-                for m in (module_for_can_id(cid) for cid in can_ids_per_did[did])
+                for did in (
+                    [d for d, _, _, _ in expanded] + unique + absent
+                )
+                for m in (module_for_can_id(cid) for cid in can_ids_per_did.get(did, set()))
                 if m is not None
             }
             if len(modules_seen) == 1:
@@ -301,14 +361,36 @@ def _print_window_dominant_dids(
 
         print(f"\n--- {w.label!r}  ({duration:.1f}s) ---")
         if suggestions:
-            print(f"  FSM name candidates from tag label: {', '.join(suggestions)}")
-        for did, rate, ratio, n in rows[:5]:
-            ratio_str = "only here" if ratio == float("inf") else f"{ratio:.1f}x elsewhere"
-            print(f"  0x{did:04X}  {rate:5.1f}/s  ({n} reads, {ratio_str})")
+            print(f"  Tag-fuzzy FSM candidates: {', '.join(suggestions)}")
+
+        if expanded:
+            print("  Range-expanded DIDs (responded physically in this window):")
+            expanded.sort(key=lambda r: -r[3])
+            for did, spread_h, baseline, ratio in expanded[:5]:
+                ratio_str = "no baseline" if ratio == float("inf") else f"{ratio:.0f}x baseline"
+                print(
+                    f"    0x{did:04X}  spread {spread_h} here  vs ≤{baseline} elsewhere "
+                    f"({ratio_str})"
+                )
+
+        if unique:
+            print(f"  DIDs polled only in this window ({len(unique)} total, ★ in summary):")
+            for did in sorted(unique)[:5]:
+                print(f"    0x{did:04X}")
+            if len(unique) > 5:
+                print(f"    ... +{len(unique) - 5} more")
+
+        if absent and n_windows > 2:
+            print(
+                f"  DIDs polled in ≥{min_other_windows_for_absence} other windows but absent here:"
+            )
+            for did in sorted(absent)[:max_absence_shown]:
+                print(f"    0x{did:04X}  (in {len(windows_for_did[did])} other windows)")
+            if len(absent) > max_absence_shown:
+                print(f"    ... +{len(absent) - max_absence_shown} more")
 
     if not any_output:
-        print("\n  (no DIDs met the dominance threshold; either polling was uniform")
-        print("   across windows or windows are too short to compute meaningful rates)")
+        print("\n  (no per-window binding signals found)")
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
