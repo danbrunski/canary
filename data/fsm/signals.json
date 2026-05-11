@@ -1,7 +1,7 @@
 {
   "vehicle": "2008 Nissan Xterra",
   "fsm_revision": "February 2010",
-  "extracted_at": "2026-05-11T04:50:03.747572+00:00",
+  "extracted_at": "2026-05-11T05:44:39.681089+00:00",
   "module_count": 8,
   "param_count": 333,
   "modules": [
@@ -20,263 +20,597 @@
       "params": [
         {
           "name": "ENG SPEED",
-          "page": 431
+          "page": 431,
+          "spec_text": "tion. tachometer indication. | E",
+          "expected_ranges": []
         },
         {
           "name": "MAS A/F SE-B1",
-          "page": 431
+          "page": 431,
+          "spec_text": "See EC-79.",
+          "expected_ranges": []
         },
         {
           "name": "B/FUEL SCHDL",
-          "page": 431
+          "page": 431,
+          "spec_text": "See EC-79. | F",
+          "expected_ranges": []
         },
         {
           "name": "A/F ALPHA-B1",
-          "page": 431
+          "page": 431,
+          "spec_text": "See EC-79.",
+          "expected_ranges": []
         },
         {
           "name": "A/F ALPHA-B2",
-          "page": 431
+          "page": 431,
+          "spec_text": "",
+          "expected_ranges": []
         },
         {
           "name": "COOLAN TEMP/S",
-          "page": 431
+          "page": 431,
+          "spec_text": "\u2022 Engine: After warming up More than 70\u00b0C (158\u00b0F) | G",
+          "expected_ranges": [
+            {
+              "min": 70.0,
+              "max": Infinity,
+              "unit": "\u00b0C"
+            }
+          ]
         },
         {
           "name": "A/F SEN1 (B1)",
-          "page": 431
+          "page": 431,
+          "spec_text": "\u2022 Engine: After warming up Maintaining engine speed at 2,000 rpm Fluctuates around 2.2 V",
+          "expected_ranges": []
         },
         {
           "name": "A/F SEN1 (B2)",
-          "page": 431
+          "page": 431,
+          "spec_text": "\u2022 Revving engine from idle to 3,000 rpm quickly after the following conditions | H | are met",
+          "expected_ranges": []
         },
         {
           "name": "HO2S2 (B1)",
-          "page": 431
+          "page": 431,
+          "spec_text": "- Engine: After warming up 0 - 0.3V \u2190\u2192 Approx. 0.6 - 1.0V",
+          "expected_ranges": [
+            {
+              "min": 0.0,
+              "max": 0.3,
+              "unit": "V"
+            },
+            {
+              "min": 0.6,
+              "max": 1.0,
+              "unit": "V"
+            },
+            {
+              "min": 0.54,
+              "max": 0.6599999999999999,
+              "unit": ""
+            }
+          ]
         },
         {
           "name": "HO2S2 (B2)",
-          "page": 431
+          "page": 431,
+          "spec_text": "- Keeping engine speed between 3,500 and 4,000 rpm for 1 minute and at | idle for 1 minute under no load. | I | \u2022 Revving engine from idle to 3,000 rpm quickly after the following conditions | are met",
+          "expected_ranges": []
         },
         {
           "name": "HO2S2 MNTR (B1)",
-          "page": 431
+          "page": 431,
+          "spec_text": "- Engine: After warming up LEAN \u2190\u2192 RICH",
+          "expected_ranges": []
         },
         {
           "name": "HO2S2 MNTR (B2)",
-          "page": 431
+          "page": 431,
+          "spec_text": "- Keeping engine speed between 3,500 and 4,000 rpm for 1 minute and at J | idle for 1 minute under no load. | \u2022 Turn drive wheels and compare CONSULT-III value with the speedometer Almost the same speed as the",
+          "expected_ranges": []
         },
         {
           "name": "VHCL SPEED SE",
-          "page": 431
+          "page": 431,
+          "spec_text": "indication. speedometer indication | K | SULT-III value. CONSULT-III value | The preset vehicle speed is dis-",
+          "expected_ranges": []
         },
         {
           "name": "BATTERY VOLT",
-          "page": 431
+          "page": 431,
+          "spec_text": "\u2022 Ignition switch: ON (Engine stopped) 11 - 14V | Accelerator pedal: Fully released 0.65 - 0.87V | \u2022 Ignition switch: ON",
+          "expected_ranges": [
+            {
+              "min": 11.0,
+              "max": 14.0,
+              "unit": "V"
+            },
+            {
+              "min": 0.65,
+              "max": 0.87,
+              "unit": "V"
+            }
+          ]
         },
         {
           "name": "ACCEL SEN 1",
-          "page": 431
+          "page": 431,
+          "spec_text": "L | (Engine stopped) | Accelerator pedal: Fully depressed More than 4.3V | Accelerator pedal: Fully released 0.56 - 0.96V | \u2022 Ignition switch: ON",
+          "expected_ranges": [
+            {
+              "min": 0.56,
+              "max": 0.96,
+              "unit": "V"
+            },
+            {
+              "min": 4.3,
+              "max": Infinity,
+              "unit": "V"
+            }
+          ]
         },
         {
           "name": "2*1",
-          "page": 431
+          "page": 431,
+          "spec_text": "",
+          "expected_ranges": []
         },
         {
           "name": "ACCEL SEN",
-          "page": 431
+          "page": 431,
+          "spec_text": "(Engine stopped) | Accelerator pedal: Fully depressed More than 4.0V | M | \u2022 Ignition switch: ON Accelerator pedal: Fully released More than 0.36V",
+          "expected_ranges": [
+            {
+              "min": 4.0,
+              "max": Infinity,
+              "unit": "V"
+            },
+            {
+              "min": 0.36,
+              "max": Infinity,
+              "unit": "V"
+            }
+          ]
         },
         {
           "name": "TP SEN 1-B1",
-          "page": 431
+          "page": 431,
+          "spec_text": "(Engine stopped)",
+          "expected_ranges": []
         },
         {
           "name": "2-B1*1",
-          "page": 431
+          "page": 431,
+          "spec_text": "",
+          "expected_ranges": []
         },
         {
           "name": "TP SEN",
-          "page": 431
+          "page": 431,
+          "spec_text": "Accelerator pedal: Fully depressed Less than 4.75V | \u2022 Shift lever: D (A/T), 1st (M/T) | N",
+          "expected_ranges": [
+            {
+              "min": -Infinity,
+              "max": 4.75,
+              "unit": "V"
+            }
+          ]
         },
         {
           "name": "EVAP SYS PRES",
-          "page": 431
+          "page": 431,
+          "spec_text": "\u2022 Ignition switch: ON Approx. 1.8 - 4.8V",
+          "expected_ranges": [
+            {
+              "min": 1.8,
+              "max": 4.8,
+              "unit": "V"
+            },
+            {
+              "min": 1.62,
+              "max": 1.98,
+              "unit": ""
+            }
+          ]
         },
         {
           "name": "START SIGNAL",
-          "page": 431
+          "page": 431,
+          "spec_text": "\u2022 Ignition switch: ON \u2192 START \u2192 ON OFF \u2192 ON \u2192 OFF | Accelerator pedal: Fully released ON | O | \u2022 Ignition switch: ON",
+          "expected_ranges": []
         },
         {
           "name": "CLSD THL POS",
-          "page": 431
+          "page": 431,
+          "spec_text": "(Engine stopped) | Accelerator pedal: Slightly depressed OFF | Air conditioner switch: OFF OFF | \u2022 Engine: After warming up, idle the | P",
+          "expected_ranges": []
         },
         {
           "name": "AIR COND SIG",
-          "page": 431
+          "page": 431,
+          "spec_text": "Air conditioner switch: ON | engine | ON | (Compressor operates.) | Shift lever: P or N (A/T), Neutral (M/T) ON",
+          "expected_ranges": []
         },
         {
           "name": "P/N POSI SW",
-          "page": 431
+          "page": 431,
+          "spec_text": "\u2022 Ignition switch: ON | Shift lever: Except above OFF | Steering wheel: Not being turned OFF | \u2022 Engine: After warming up, idle the",
+          "expected_ranges": []
         },
         {
           "name": "PW/ST SIGNAL",
-          "page": 431
+          "page": 431,
+          "spec_text": "engine | Steering wheel: Being turned. ON | EC-431 | 2008 Xterra",
+          "expected_ranges": []
         },
         {
           "name": "LOAD SIGNAL",
-          "page": 432
+          "page": 432,
+          "spec_text": "\u2022 Ignition switch: ON | Rear window defogger switch is OFF | OFF | and lighting switch is OFF",
+          "expected_ranges": []
         },
         {
           "name": "IGNITION SW",
-          "page": 432
+          "page": 432,
+          "spec_text": "\u2022 Ignition switch: ON \u2192 OFF \u2192 ON ON \u2192 OFF \u2192 ON | Heater fan: Operating. ON | \u2022 Engine: After warming up, idle the",
+          "expected_ranges": []
         },
         {
           "name": "HEATER FAN SW",
-          "page": 432
+          "page": 432,
+          "spec_text": "engine | Heater fan: Not operating OFF | Brake pedal: Fully released OFF",
+          "expected_ranges": []
         },
         {
           "name": "BRAKE SW",
-          "page": 432
+          "page": 432,
+          "spec_text": "\u2022 Ignition switch: ON | Brake pedal: Slightly depressed ON | \u2022 Engine: After warming up Idle 2.0 - 3.0 msec | \u2022 Shift lever: P or N (A/T), Neutral",
+          "expected_ranges": [
+            {
+              "min": 2.0,
+              "max": 3.0,
+              "unit": "msec"
+            }
+          ]
         },
         {
           "name": "INJ PULSE-B1",
-          "page": 432
+          "page": 432,
+          "spec_text": "(M/T)",
+          "expected_ranges": []
         },
         {
           "name": "INJ PULSE-B2",
-          "page": 432
+          "page": 432,
+          "spec_text": "2,000 rpm 1.9 - 2.9 msec | \u2022 Air conditioner switch: OFF | \u2022 No load | \u2022 Engine: After warming up Idle 13\u00b0 - 18\u00b0 BTDC | \u2022 Shift lever: P or N (A/T), Neutral",
+          "expected_ranges": [
+            {
+              "min": 1.9,
+              "max": 2.9,
+              "unit": "msec"
+            },
+            {
+              "min": 13.0,
+              "max": 18.0,
+              "unit": ""
+            }
+          ]
         },
         {
           "name": "IGN TIMING",
-          "page": 432
+          "page": 432,
+          "spec_text": "(M/T) | 2,000 rpm 25\u00b0 - 45\u00b0 BTDC | \u2022 Air conditioner switch: OFF | \u2022 No load | \u2022 Engine: After warming up Idle 5% - 35% | \u2022 Shift lever: P or N (A/T), Neutral",
+          "expected_ranges": [
+            {
+              "min": 25.0,
+              "max": 45.0,
+              "unit": ""
+            },
+            {
+              "min": 5.0,
+              "max": 35.0,
+              "unit": "%"
+            }
+          ]
         },
         {
           "name": "CAL/LD VALUE",
-          "page": 432
+          "page": 432,
+          "spec_text": "(M/T) | 2,500 rpm 5% - 35% | \u2022 Air conditioner switch: OFF | \u2022 No load | \u2022 Engine: After warming up Idle 2.0 - 6.0 g\u00b7m/s | \u2022 Shift lever: P or N (A/T), Neutral",
+          "expected_ranges": [
+            {
+              "min": 5.0,
+              "max": 35.0,
+              "unit": "%"
+            },
+            {
+              "min": 2.0,
+              "max": 6.0,
+              "unit": "g\u00b7m/s"
+            }
+          ]
         },
         {
           "name": "MASS AIRFLOW",
-          "page": 432
+          "page": 432,
+          "spec_text": "(M/T) | 2,500 rpm 7.0 - 20.0 g\u00b7m/s | \u2022 Air conditioner switch: OFF | \u2022 No load | \u2022 Engine: After warming up Idle | \u2022 Shift lever: P or N (A/T), Neutral (Accelerator pedal is not depressed 0%",
+          "expected_ranges": [
+            {
+              "min": 7.0,
+              "max": 20.0,
+              "unit": "g\u00b7m/s"
+            }
+          ]
         },
         {
           "name": "PURG VOL C/V",
-          "page": 432
+          "page": 432,
+          "spec_text": "(M/T) even slightly, after engine starting) | \u2022 Air conditioner switch: OFF | 2,000 rpm \u2014 | \u2022 No load | \u2022 Engine: After warming up Idle \u22125\u00b0 - 5\u00b0CA | \u2022 Shift lever: P or N (A/T), Neutral",
+          "expected_ranges": [
+            {
+              "min": -5.0,
+              "max": 5.0,
+              "unit": "\u00b0CA"
+            }
+          ]
         },
         {
           "name": "INT/V TIM (B1)",
-          "page": 432
+          "page": 432,
+          "spec_text": "(M/T)",
+          "expected_ranges": []
         },
         {
           "name": "INT/V TIM (B2)",
-          "page": 432
+          "page": 432,
+          "spec_text": "2,000 rpm Approx. 0\u00b0 - 30\u00b0CA | \u2022 Air conditioner switch: OFF | \u2022 No load | \u2022 Engine: After warming up Idle 0% - 2% | \u2022 Shift lever: P or N (A/T), Neutral",
+          "expected_ranges": [
+            {
+              "min": 0.0,
+              "max": 30.0,
+              "unit": "\u00b0CA"
+            },
+            {
+              "min": 0.0,
+              "max": 2.0,
+              "unit": "%"
+            },
+            {
+              "min": -0.1,
+              "max": 0.1,
+              "unit": ""
+            }
+          ]
         },
         {
           "name": "INT/V SOL (B1)",
-          "page": 432
+          "page": 432,
+          "spec_text": "(M/T)",
+          "expected_ranges": []
         },
         {
           "name": "INT/V SOL (B2)",
-          "page": 432
+          "page": 432,
+          "spec_text": "2,000 rpm Approx. 0% - 50% | \u2022 Air conditioner switch: OFF | \u2022 No load | 2,200 - 3,300 rpm ON",
+          "expected_ranges": [
+            {
+              "min": 0.0,
+              "max": 50.0,
+              "unit": "%"
+            },
+            {
+              "min": -0.1,
+              "max": 0.1,
+              "unit": "%"
+            }
+          ]
         },
         {
           "name": "VIAS S/V-1",
-          "page": 432
+          "page": 432,
+          "spec_text": "\u2022 Engine: After warming up | Except above conditions OFF | Air conditioner switch: OFF OFF | \u2022 Engine: After warming up, idle the",
+          "expected_ranges": []
         },
         {
           "name": "AIR COND RLY",
-          "page": 432
+          "page": 432,
+          "spec_text": "Air conditioner switch: ON | engine | ON | (Compressor operates) | \u2022 For 1 second after turning ignition switch ON | ON | \u2022 Engine running or cranking",
+          "expected_ranges": []
         },
         {
           "name": "FUEL PUMP RLY",
-          "page": 432
+          "page": 432,
+          "spec_text": "\u2022 Except above conditions OFF",
+          "expected_ranges": []
         },
         {
           "name": "VENT CONT/V",
-          "page": 432
+          "page": 432,
+          "spec_text": "\u2022 Ignition switch: ON OFF",
+          "expected_ranges": []
         },
         {
           "name": "THRTL RELAY",
-          "page": 432
+          "page": 432,
+          "spec_text": "\u2022 Ignition switch: ON ON | EC-432 | 2008 Xterra",
+          "expected_ranges": []
         },
         {
           "name": "COOLING FAN",
-          "page": 433
+          "page": 433,
+          "spec_text": "engine LOW | EC | 98\u00b0C (208\u00b0F) and 104\u00b0C (219\u00b0F) | \u2022 Air conditioner switch: OFF | Engine coolant temperature: 105\u00b0C | HI | (221\u00b0F) or more | C | \u2022 Engine speed: Below 3,600 rpm after the following conditions are met. | - Engine: After warming up | ON",
+          "expected_ranges": [
+            {
+              "min": -Infinity,
+              "max": 3.0,
+              "unit": ""
+            }
+          ]
         },
         {
           "name": "HO2S2 HTR (B1)",
-          "page": 433
+          "page": 433,
+          "spec_text": "- Keeping the engine speed between 3,500 and 4,000 rpm for 1 minute and",
+          "expected_ranges": []
         },
         {
           "name": "HO2S2 HTR (B2)",
-          "page": 433
+          "page": 433,
+          "spec_text": "at idle for 1 minute under no load | D | \u2022 Engine speed: Above 3,600 rpm OFF | Almost the same speed as the",
+          "expected_ranges": [
+            {
+              "min": 3.0,
+              "max": Infinity,
+              "unit": ""
+            }
+          ]
         },
         {
           "name": "I/P PULLY SPD",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Vehicle speed: More than 20 km/h (12 MPH) | speedometer indication E | \u2022 Turn drive wheels and compare the CONSULT-III value with speedometer Almost the same speed as the",
+          "expected_ranges": [
+            {
+              "min": 20.0,
+              "max": Infinity,
+              "unit": "km/h"
+            }
+          ]
         },
         {
           "name": "VEHICLE SPEED",
-          "page": 433
+          "page": 433,
+          "spec_text": "indication. speedometer indication | Vehicle has traveled after MIL has 0 - 65,535 km F",
+          "expected_ranges": [
+            {
+              "min": 0.0,
+              "max": 65.0,
+              "unit": ""
+            }
+          ]
         },
         {
           "name": "TRVL AFTER MIL",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Ignition switch: ON | turned ON. (0 - 40,723 mile)",
+          "expected_ranges": [
+            {
+              "min": 0.0,
+              "max": 40.0,
+              "unit": ""
+            }
+          ]
         },
         {
           "name": "A/F S1 HTR (B1)",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Engine: After warming up, idle the engine 0 - 100%",
+          "expected_ranges": [
+            {
+              "min": 0.0,
+              "max": 100.0,
+              "unit": "%"
+            }
+          ]
         },
         {
           "name": "A/F S1 HTR (B2)",
-          "page": 433
+          "page": 433,
+          "spec_text": "G | \u2022 Engine: Idle | 1.0 - 4.0V",
+          "expected_ranges": [
+            {
+              "min": 1.0,
+              "max": 4.0,
+              "unit": "V"
+            }
+          ]
         },
         {
           "name": "AC PRESS SEN",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Both A/C switch blower fan switch: ON (Compressor operates) | \u2022 Turn drive wheels and compare speedometer indication with the CON- Almost the same speed as the H",
+          "expected_ranges": []
         },
         {
           "name": "SET VHCL SPD",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Engine: Running ASCD: Operating. | played. | I | MAIN switch: Pressed ON",
+          "expected_ranges": []
         },
         {
           "name": "MAIN SW",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Ignition switch: ON | MAIN switch: Released OFF | J | CANCEL switch: Pressed ON",
+          "expected_ranges": []
         },
         {
           "name": "CANCEL SW",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Ignition switch: ON | CANCEL switch: Released OFF | RESUME/ACCELERATE switch: | ON | K | Pressed",
+          "expected_ranges": []
         },
         {
           "name": "RESUME/ACC SW",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Ignition switch: ON | RESUME/ACCELERATE switch: Re- | OFF | leased | L | SET/COAST switch: Pressed ON",
+          "expected_ranges": []
         },
         {
           "name": "SET SW",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Ignition switch: ON | SET/COAST switch: Released OFF | Brake pedal: Fully released ON | M",
+          "expected_ranges": []
         },
         {
           "name": "BRAKE SW1",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Ignition switch: ON | Brake pedal: Slightly depressed OFF | Brake pedal: Fully released OFF",
+          "expected_ranges": []
         },
         {
           "name": "BRAKE SW2",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Ignition switch: ON | N | Brake pedal: Slightly depressed ON | MAIN switch: pressed at the 1st time \u2192",
+          "expected_ranges": []
         },
         {
           "name": "CRUISE LAMP",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Ignition switch: ON ON \u2192 OFF | at the 2nd time | O | \u2022 MAIN switch: ON ASCD: Operating ON | \u2022 When vehicle speed is between",
+          "expected_ranges": []
         },
         {
           "name": "SET LAMP",
-          "page": 433
+          "page": 433,
+          "spec_text": "40km/h (25MPH) and 144km/h | ASCD: Not operating OFF | (89MPH) | P",
+          "expected_ranges": []
         },
         {
           "name": "ALT DUTY",
-          "page": 433
+          "page": 433,
+          "spec_text": "\u2022 Engine: Idle 0 - 80% | \u2022 Engine speed: Idle | charged*2 | \u2022 Battery: Fully",
+          "expected_ranges": [
+            {
+              "min": 0.0,
+              "max": 80.0,
+              "unit": "%"
+            }
+          ]
         },
         {
           "name": "BAT CUR SEN",
-          "page": 433
+          "page": 433,
+          "spec_text": "Approx. 2,600 - 3,500mV | \u2022 Shift lever: P or N (A/T), Neutral (M/T) | \u2022 Air conditioner switch: OFF | \u2022 No load | EC-433 | 2008 Xterra",
+          "expected_ranges": [
+            {
+              "min": 1.8,
+              "max": 2.2,
+              "unit": ""
+            }
+          ]
         }
       ]
     },
@@ -297,203 +631,332 @@
       "params": [
         {
           "name": "ABS ACTUATOR",
-          "page": 83
+          "page": 83,
+          "spec_text": "AND ELECTRIC UNIT (CONTROL UNIT) | A | INFOID:0000000003081292 | DIAGNOSIS TOOL | B | the control unit calculation data, so a normal value might be displayed even in the | circuit (harness) is open or short-circuited. | C",
+          "expected_ranges": []
         },
         {
           "name": "CONSULT-III MONITOR",
-          "page": 83
+          "page": 83,
+          "spec_text": "ITEM | Data monitor | Display content | Reference value in D | Condition | normal operation | 0 [km/h (MPH)] Vehicle stopped | E",
+          "expected_ranges": []
         },
         {
           "name": "FR LH SENSOR",
-          "page": 83
+          "page": 83,
+          "spec_text": "Wheel speed | Nearly matches the speed meter display Vehicle running | (\u00b1 10% or less) (Note 1) | 0 [km/h (MPH)] Vehicle stopped | BRC",
+          "expected_ranges": []
         },
         {
           "name": "FR RH SENSOR",
-          "page": 83
+          "page": 83,
+          "spec_text": "Wheel speed | Nearly matches the speed meter display Vehicle running | (\u00b1 10% or less) (Note 1) | 0 [km/h (MPH)] Vehicle stopped | G",
+          "expected_ranges": []
         },
         {
           "name": "RR LH SENSOR",
-          "page": 83
+          "page": 83,
+          "spec_text": "Wheel speed | Nearly matches the speed meter display Vehicle running | (\u00b1 10% or less) (Note 1) | 0 [km/h (MPH)] Vehicle stopped | H",
+          "expected_ranges": []
         },
         {
           "name": "RR RH SENSOR",
-          "page": 83
+          "page": 83,
+          "spec_text": "Wheel speed | Nearly matches the speed meter display Vehicle running | (\u00b1 10% or less) (Note 1) | When brake pedal is depressed ON | I",
+          "expected_ranges": []
         },
         {
           "name": "STOP LAMP SW",
-          "page": 83
+          "page": 83,
+          "spec_text": "Stop lamp switch signal status | When brake pedal is released OFF | Battery voltage supplied to the ABS actuator",
+          "expected_ranges": []
         },
         {
           "name": "BATTERY VOLT",
-          "page": 83
+          "page": 83,
+          "spec_text": "Ignition switch ON 10 \u2013 16 V | and electric unit (control unit) | J | 1st gear 1 | 2nd gear 2",
+          "expected_ranges": [
+            {
+              "min": 10.0,
+              "max": 16.0,
+              "unit": "V"
+            }
+          ]
         },
         {
           "name": "GEAR",
-          "page": 83
+          "page": 83,
+          "spec_text": "Gear position determined by TCM 3rd gear 3 | K | 4th gear 4 | 5th gear 5 | P position P | L | R position R",
+          "expected_ranges": []
         },
         {
           "name": "SLCT LVR POSI",
-          "page": 83
+          "page": 83,
+          "spec_text": "A/T selector lever position | N position N | D position D | VDC OFF switch ON | M | ON | (When VDC OFF indicator lamp is ON)",
+          "expected_ranges": []
         },
         {
           "name": "OFF SW",
-          "page": 83
+          "page": 83,
+          "spec_text": "VDC OFF switch ON/OFF | VDC OFF switch OFF | OFF | (When VDC OFF indicator lamp is OFF) | N | When vehicle is stopped Approx. 0 d/s | Yaw rate detected by yaw rate/side/decel G",
+          "expected_ranges": [
+            {
+              "min": -0.1,
+              "max": 0.1,
+              "unit": "d/s"
+            }
+          ]
         },
         {
           "name": "YAW RATE SEN",
-          "page": 83
+          "page": 83,
+          "spec_text": "sensor | When vehicle turning \u221275 to 75 d/s | Accelerator pedal not depressed (ignition O | 0 % | switch is ON) | Throttle actuator opening/closing is dis-",
+          "expected_ranges": []
         },
         {
           "name": "ACCEL POS SIG",
-          "page": 83
+          "page": 83,
+          "spec_text": "played (linked with accelerator pedal) | Accelerator pedal depressed (ignition | 0 - 100 % | switch is ON) | P | m/s2 | Vehicle stopped Approx. 0 | Negative value | Vehicle turning right | (m/s2)",
+          "expected_ranges": [
+            {
+              "min": 0.0,
+              "max": 100.0,
+              "unit": "%"
+            },
+            {
+              "min": -0.1,
+              "max": 0.1,
+              "unit": ""
+            }
+          ]
         },
         {
           "name": "SIDE G-SENSOR",
-          "page": 83
+          "page": 83,
+          "spec_text": "Transverse G detected by side G sensor | Positive value | Vehicle turning left | (m/s2) | BRC-83 | 2008 Xterra",
+          "expected_ranges": []
         },
         {
           "name": "STR ANGLE SIG",
-          "page": 84
+          "page": 84,
+          "spec_text": "sensor | Steering wheel turned \u2013720 to +720\u00b0 | With engine stopped 0 rpm | Almost in accor-",
+          "expected_ranges": []
         },
         {
           "name": "ENGINE SPEED",
-          "page": 84
+          "page": 84,
+          "spec_text": "With engine running | Engine running dance with tachome- | ter display | When brake fluid level switch ON ON",
+          "expected_ranges": []
         },
         {
           "name": "FLUID LEV SW",
-          "page": 84
+          "page": 84,
+          "spec_text": "Brake fluid level switch signal status | When brake fluid level switch OFF OFF | Actuator (solenoid valve) is active (\u201cAC- | TIVE TEST\u201d with CONSULT-III) or actua- ON | tor relay is inactive (in fail-safe mode)",
+          "expected_ranges": []
         },
         {
           "name": "FR RH IN SOL",
-          "page": 84
+          "page": 84,
+          "spec_text": "Operation status of each solenoid valve | When the actuator (solenoid valve) is not | active and actuator relay is active (igni- OFF | tion switch ON) | Actuator (solenoid valve) is active (\u201cAC- | TIVE TEST\u201d with CONSULT-III) or actua- ON | tor relay is inactive (in fail-safe mode)",
+          "expected_ranges": []
         },
         {
           "name": "FR RH OUT SOL",
-          "page": 84
+          "page": 84,
+          "spec_text": "Operation status of each solenoid valve | When the actuator (solenoid valve) is not | active and actuator relay is active (igni- OFF | tion switch ON) | Actuator (solenoid valve) is active (\u201cAC- | TIVE TEST\u201d with CONSULT-III) or actua- ON | tor relay is inactive (in fail-safe mode)",
+          "expected_ranges": []
         },
         {
           "name": "FR LH IN SOL",
-          "page": 84
+          "page": 84,
+          "spec_text": "Operation status of each solenoid valve | When the actuator (solenoid valve) is not | active and actuator relay is active (igni- OFF | tion switch ON) | Actuator (solenoid valve) is active (\u201cAC- | TIVE TEST\u201d with CONSULT-III) or actua- ON | tor relay is inactive (in fail-safe mode)",
+          "expected_ranges": []
         },
         {
           "name": "FR LH OUT SOL",
-          "page": 84
+          "page": 84,
+          "spec_text": "Operation status of each solenoid valve | When the actuator (solenoid valve) is not | active and actuator relay is active (igni- OFF | tion switch ON) | Actuator (solenoid valve) is active (\u201cAC- | TIVE TEST\u201d with CONSULT-III) or actua- ON | tor relay is inactive (in fail-safe mode)",
+          "expected_ranges": []
         },
         {
           "name": "RR RH IN SOL",
-          "page": 84
+          "page": 84,
+          "spec_text": "Operation status of each solenoid valve | When the actuator (solenoid valve) is not | active and actuator relay is active (igni- OFF | tion switch ON) | Actuator (solenoid valve) is active (\u201cAC- | TIVE TEST\u201d with CONSULT-III) or actua- ON | tor relay is inactive (in fail-safe mode)",
+          "expected_ranges": []
         },
         {
           "name": "RR RH OUT SOL",
-          "page": 84
+          "page": 84,
+          "spec_text": "Operation status of each solenoid valve | When the actuator (solenoid valve) is not | active and actuator relay is active (igni- OFF | tion switch ON) | Actuator (solenoid valve) is active (\u201cAC- | TIVE TEST\u201d with CONSULT-III) or actua- ON | tor relay is inactive (in fail-safe mode)",
+          "expected_ranges": []
         },
         {
           "name": "RR LH IN SOL",
-          "page": 84
+          "page": 84,
+          "spec_text": "Operation status of each solenoid valve | When the actuator (solenoid valve) is not | active and actuator relay is active (igni- OFF | tion switch ON) | BRC-84 | 2008 Xterra",
+          "expected_ranges": []
         },
         {
           "name": "RR LH OUT SOL",
-          "page": 85
+          "page": 85,
+          "spec_text": "Operation status of each solenoid valve | When the actuator (solenoid valve) is not | active and actuator relay is active (igni- OFF C | tion switch ON) | When the motor relay and motor are op- | ON | erating | D",
+          "expected_ranges": []
         },
         {
           "name": "MOTOR RELAY",
-          "page": 85
+          "page": 85,
+          "spec_text": "Motor and motor relay operation | When the motor relay and motor are not | OFF | operating | When the actuator relay is operating ON E",
+          "expected_ranges": []
         },
         {
           "name": "ACTUATOR RLY",
-          "page": 85
+          "page": 85,
+          "spec_text": "Actuator relay operation | When the actuator relay is not operating OFF | When ABS warning lamp is ON ON | ABS warning lamp",
+          "expected_ranges": []
         },
         {
           "name": "ABS WARN LAMP",
-          "page": 85
+          "page": 85,
+          "spec_text": "BRC | (Note 3) | When ABS warning lamp is OFF OFF | When VDC OFF indicator lamp is ON ON | VDC OFF indicator lamp",
+          "expected_ranges": []
         },
         {
           "name": "OFF LAMP",
-          "page": 85
+          "page": 85,
+          "spec_text": "(Note 3) | When VDC OFF indicator lamp is OFF OFF | G | When SLIP indicator lamp is ON ON | SLIP indicator lamp",
+          "expected_ranges": []
         },
         {
           "name": "SLIP LAMP",
-          "page": 85
+          "page": 85,
+          "spec_text": "(Note 3) | When SLIP indicator lamp is OFF OFF | H | When transfer control unit is in fail-safe | ON",
+          "expected_ranges": []
         },
         {
           "name": "4WD FAIL REQ",
-          "page": 85
+          "page": 85,
+          "spec_text": "mode | Transfer control unit fail-safe signal | When transfer control unit is normal OFF | I | EBD is active ON",
+          "expected_ranges": []
         },
         {
           "name": "EBD SIGNAL",
-          "page": 85
+          "page": 85,
+          "spec_text": "EBD operation | EBD is inactive OFF | ABS is active ON | J",
+          "expected_ranges": []
         },
         {
           "name": "ABS SIGNAL",
-          "page": 85
+          "page": 85,
+          "spec_text": "ABS operation | ABS is inactive OFF | TCS is active ON",
+          "expected_ranges": []
         },
         {
           "name": "TCS SIGNAL",
-          "page": 85
+          "page": 85,
+          "spec_text": "TCS operation | K | TCS is inactive OFF | VDC is active ON",
+          "expected_ranges": []
         },
         {
           "name": "VDC SIGNAL",
-          "page": 85
+          "page": 85,
+          "spec_text": "VDC operation | VDC is inactive OFF | L | In EBD fail-safe ON",
+          "expected_ranges": []
         },
         {
           "name": "EBD FAIL SIG",
-          "page": 85
+          "page": 85,
+          "spec_text": "EBD fail-safe signal | EBD is normal OFF | M | In ABS fail-safe ON",
+          "expected_ranges": []
         },
         {
           "name": "ABS FAIL SIG",
-          "page": 85
+          "page": 85,
+          "spec_text": "ABS fail-safe signal | ABS is normal OFF | In TCS fail-safe ON",
+          "expected_ranges": []
         },
         {
           "name": "TCS FAIL SIG",
-          "page": 85
+          "page": 85,
+          "spec_text": "TCS fail-safe signal N | TCS is normal OFF | In VDC fail-safe ON",
+          "expected_ranges": []
         },
         {
           "name": "VDC FAIL SIG",
-          "page": 85
+          "page": 85,
+          "spec_text": "VDC fail-safe signal | VDC is normal OFF O | Crank is active ON",
+          "expected_ranges": []
         },
         {
           "name": "CRANKING SIG",
-          "page": 85
+          "page": 85,
+          "spec_text": "Crank operation | Crank is inactive OFF | P | When actuator (switch-over valve) is ac- | tive (\u201cACTIVE TEST\u201d with CONSULT-III) | ON | or actuator relay is inactive (when in fail- | safe mode)",
+          "expected_ranges": []
         },
         {
           "name": "CV1",
-          "page": 85
+          "page": 85,
+          "spec_text": "VDC switch-over valve | When actuator (switch-over valve) is not | active and actuator relay is active (igni- OFF | tion switch ON) | BRC-85 | 2008 Xterra",
+          "expected_ranges": []
         },
         {
           "name": "CV2",
-          "page": 86
+          "page": 86,
+          "spec_text": "VDC switch-over valve | When actuator (switch-over valve) is not | active and actuator relay is active (igni- OFF | tion switch ON) | When actuator (switch-over valve) is ac- | tive (\u201cACTIVE TEST\u201d with CONSULT-III) | ON | or actuator relay is inactive (when in fail- | safe mode)",
+          "expected_ranges": []
         },
         {
           "name": "SV1",
-          "page": 86
+          "page": 86,
+          "spec_text": "VDC switch-over valve | When actuator (switch-over valve) is not | active and actuator relay is active (igni- OFF | tion switch ON) | When actuator (switch-over valve) is ac- | tive (\u201cACTIVE TEST\u201d with CONSULT-III) | ON | or actuator relay is inactive (when in fail- | safe mode)",
+          "expected_ranges": []
         },
         {
           "name": "SV2",
-          "page": 86
+          "page": 86,
+          "spec_text": "VDC switch-over valve | When actuator (switch-over valve) is not | active and actuator relay is active (igni- OFF | tion switch ON) | Vehicle stopped Approx. 0 G | Longitudinal acceleration detected by Decel",
+          "expected_ranges": [
+            {
+              "min": -0.1,
+              "max": 0.1,
+              "unit": "G"
+            }
+          ]
         },
         {
           "name": "DECEL G-SEN",
-          "page": 86
+          "page": 86,
+          "spec_text": "G-Sensor | Vehicle running -1.7 to 1.7 G | When EBD warning lamp is ON ON | EBD warning lamp",
+          "expected_ranges": []
         },
         {
           "name": "EBD WARN LAMP",
-          "page": 86
+          "page": 86,
+          "spec_text": "(Note 3) | When EBD warning lamp is OFF OFF | A/T shift position = N position ON | Transmission range switch signal ON/OFF",
+          "expected_ranges": []
         },
         {
           "name": "N POSI SIG",
-          "page": 86
+          "page": 86,
+          "spec_text": "condition | A/T shift position = other than N position OFF | A/T shift position = P position ON | Transmission range switch signal ON/OFF",
+          "expected_ranges": []
         },
         {
           "name": "P POSI SIG",
-          "page": 86
+          "page": 86,
+          "spec_text": "condition | A/T shift position = other than P position OFF | A/T shift position = R position ON | Transmission range switch signal ON/OFF",
+          "expected_ranges": []
         },
         {
           "name": "R POSI SIG",
-          "page": 86
+          "page": 86,
+          "spec_text": "condition | A/T shift position = other than R position OFF | 2WD model 2WD",
+          "expected_ranges": []
         },
         {
           "name": "2WD/4WD",
-          "page": 86
+          "page": 86,
+          "spec_text": "Drive axle | 4WD model 4WD | is normal. | for warning lamp and indicator lamp. | to BRC-78, \"Description\". | Refer to BRC-79, \"Description\". | Refer to BRC-80, \"Description\". | Refer to BRC-81, \"Description\". | BRC-86 | 2008 Xterra",
+          "expected_ranges": []
         }
       ]
     },
@@ -511,91 +974,135 @@
       "params": [
         {
           "name": "ENGINE SPEED",
-          "page": 17
+          "page": 17,
+          "spec_text": "\u00d7 \u2013 \u00d7 | Signal input with CAN communication line. | DLN-17 | 2008 Xterra",
+          "expected_ranges": []
         },
         {
           "name": "BATTERY VOLT",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u00d7 \u2013 \u00d7 | unit.",
+          "expected_ranges": []
         },
         {
           "name": "2WD SWITCH",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u00d7 \u2013 \u00d7 | 4WD shift switch signal status is displayed.",
+          "expected_ranges": []
         },
         {
           "name": "4H SWITCH",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u00d7 \u2013 \u00d7 | (4L means 4LO of 4WD shift switch.)",
+          "expected_ranges": []
         },
         {
           "name": "4L SWITCH",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u00d7 \u2013 \u00d7",
+          "expected_ranges": []
         },
         {
           "name": "4L POSI SW",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u00d7 \u2013 \u00d7 4LO switch signal status is displayed.",
+          "expected_ranges": []
         },
         {
           "name": "ATP SWITCH",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u2013 ATP switch signal status is displayed. | \u00d7 \u00d7 | Wait detection switch signal status is dis-",
+          "expected_ranges": []
         },
         {
           "name": "WAIT DETCT SW",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u00d7 \u2013 \u00d7 | played. | Control status of 4WD recognized by trans-",
+          "expected_ranges": []
         },
         {
           "name": "4WD MODE",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u2013 \u00d7 \u00d7 | fer control unit. (2WD, 4H or 4LO) | Vehicle speed recognized by transfer con- | \u2013 \u00d7 \u00d7 | trol unit. | Output condition to actuator motor (clock-",
+          "expected_ranges": []
         },
         {
           "name": "SHIFT ACT 1",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u2013 \u00d7 \u00d7 | wise) | Check signal for transfer control unit signal",
+          "expected_ranges": []
         },
         {
           "name": "SHIFT AC MON 1",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u2013 \u2013 \u00d7 | output | Output condition to actuator motor (coun-",
+          "expected_ranges": []
         },
         {
           "name": "SHIFT ACT 2",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u2013 \u00d7 \u00d7 | terclockwise) | Check signal for transfer control unit signal",
+          "expected_ranges": []
         },
         {
           "name": "SHIFT AC MON 2",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u2013 \u2013 \u00d7 | output | Operating condition of actuator motor relay",
+          "expected_ranges": []
         },
         {
           "name": "SFT ACT/R MON",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u2013 \u2013 \u00d7 | (integrated in transfer control unit)",
+          "expected_ranges": []
         },
         {
           "name": "SHIFT POS SW 1",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u00d7 \u2013 \u00d7 Condition of actuator position switch 1",
+          "expected_ranges": []
         },
         {
           "name": "SHIFT POS SW 2",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u00d7 \u2013 \u00d7 Condition of actuator position switch 2",
+          "expected_ranges": []
         },
         {
           "name": "SHIFT POS SW 3",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u00d7 \u2013 \u00d7 Condition of actuator position switch 3",
+          "expected_ranges": []
         },
         {
           "name": "SHIFT POS SW 4",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u00d7 \u2013 \u00d7 Condition of actuator position switch 4 | Control status of 4WD warning lamp is dis-",
+          "expected_ranges": []
         },
         {
           "name": "4WD FAIL LAMP",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u2013 \u00d7 \u00d7 | played. | Control status of 4WD shift indicator lamp",
+          "expected_ranges": []
         },
         {
           "name": "2WD IND",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u2013 \u2013 \u00d7 | (rear) is displayed. | Control status of 4WD shift indicator lamp",
+          "expected_ranges": []
         },
         {
           "name": "4H IND",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u2013 \u2013 \u00d7 | (front and center) is displayed. | Control status of 4LO indicator lamp is dis-",
+          "expected_ranges": []
         },
         {
           "name": "4L IND",
-          "page": 18
+          "page": 18,
+          "spec_text": "\u2013 \u2013 \u00d7 | played. | DLN-18 | 2008 Xterra",
+          "expected_ranges": []
         }
       ]
     },
@@ -612,39 +1119,57 @@
       "params": [
         {
           "name": "BATTERY VOLT",
-          "page": 248
+          "page": 248,
+          "spec_text": "Displays power supply voltage for the differential lock control unit.",
+          "expected_ranges": []
         },
         {
           "name": "4WD MODE",
-          "page": 248
+          "page": 248,
+          "spec_text": "Displays 4WD shift switch position. | Displays average of rear wheel speed sensors (left and right). Value is approximately | equal to the indication of vehicle speed on the speedometer (inside \u00b110%).",
+          "expected_ranges": []
         },
         {
           "name": "D-LOCK SW SIG",
-          "page": 248
+          "page": 248,
+          "spec_text": "Displays differential lock mode switch position.",
+          "expected_ranges": []
         },
         {
           "name": "D-LOCK SIG",
-          "page": 248
+          "page": 248,
+          "spec_text": "Displays control status of differential lock. | Displays operating condition of differential lock solenoid relay (integrated in differential",
+          "expected_ranges": []
         },
         {
           "name": "RELAY ON",
-          "page": 248
+          "page": 248,
+          "spec_text": "lock control unit). | Displays control status of differential lock solenoid relay (integrated in differential dif-",
+          "expected_ranges": []
         },
         {
           "name": "RELAY MTR",
-          "page": 248
+          "page": 248,
+          "spec_text": "ferential lock control unit).",
+          "expected_ranges": []
         },
         {
           "name": "SOL MTR",
-          "page": 248
+          "page": 248,
+          "spec_text": "Displays control status of differential lock solenoid.",
+          "expected_ranges": []
         },
         {
           "name": "IND MTR",
-          "page": 248
+          "page": 248,
+          "spec_text": "Displays control status of DIFF LOCK indicator lamp.",
+          "expected_ranges": []
         },
         {
           "name": "D-LOCK POS SW",
-          "page": 248
+          "page": 248,
+          "spec_text": "Displays condition of differential lock position switch | DLN-248 | 2008 Xterra",
+          "expected_ranges": []
         }
       ]
     },
@@ -663,155 +1188,242 @@
       "params": [
         {
           "name": "AIR COND SW",
-          "page": 37
+          "page": 37,
+          "spec_text": "A/C switch ON ON D | Back door closed OFF",
+          "expected_ranges": []
         },
         {
           "name": "BACK DOOR SW",
-          "page": 37
+          "page": 37,
+          "spec_text": "Back door opened ON | E | Door lock/unlock switch does not operate OFF",
+          "expected_ranges": []
         },
         {
           "name": "CDL LOCK SW",
-          "page": 37
+          "page": 37,
+          "spec_text": "Press door lock/unlock switch to the LOCK side ON | Door lock/unlock switch does not operate OFF | F",
+          "expected_ranges": []
         },
         {
           "name": "CDL UNLOCK SW",
-          "page": 37
+          "page": 37,
+          "spec_text": "Press door lock/unlock switch to the UNLOCK side ON | Front door RH closed OFF",
+          "expected_ranges": []
         },
         {
           "name": "DOOR SW-AS",
-          "page": 37
+          "page": 37,
+          "spec_text": "G | Front door RH opened ON | Front door LH closed OFF",
+          "expected_ranges": []
         },
         {
           "name": "DOOR SW-DR",
-          "page": 37
+          "page": 37,
+          "spec_text": "Front door LH opened ON | H | Rear door LH closed OFF",
+          "expected_ranges": []
         },
         {
           "name": "DOOR SW-RL",
-          "page": 37
+          "page": 37,
+          "spec_text": "Rear door LH opened ON | I | Rear door RH closed OFF",
+          "expected_ranges": []
         },
         {
           "name": "DOOR SW-RR",
-          "page": 37
+          "page": 37,
+          "spec_text": "Rear door RH opened ON | Engine stopped OFF | J",
+          "expected_ranges": []
         },
         {
           "name": "ENGINE RUN",
-          "page": 37
+          "page": 37,
+          "spec_text": "Engine running ON | Front fog lamp switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "FR FOG SW",
-          "page": 37
+          "page": 37,
+          "spec_text": "K | Front fog lamp switch ON ON | Front washer switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "FR WASHER SW",
-          "page": 37
+          "page": 37,
+          "spec_text": "Front washer switch ON ON | L | Front wiper switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "FR WIPER LOW",
-          "page": 37
+          "page": 37,
+          "spec_text": "Front wiper switch LO ON | Front wiper switch OFF OFF BCS",
+          "expected_ranges": []
         },
         {
           "name": "FR WIPER HI",
-          "page": 37
+          "page": 37,
+          "spec_text": "Front wiper switch HI ON | Front wiper switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "FR WIPER INT",
-          "page": 37
+          "page": 37,
+          "spec_text": "N | Front wiper switch INT ON | Any position other than front wiper stop position OFF",
+          "expected_ranges": []
         },
         {
           "name": "FR WIPER STOP",
-          "page": 37
+          "page": 37,
+          "spec_text": "Front wiper stop position ON | O | When hazard switch is not pressed OFF",
+          "expected_ranges": []
         },
         {
           "name": "HAZARD SW",
-          "page": 37
+          "page": 37,
+          "spec_text": "When hazard switch is pressed ON | P | Lighting switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "LIGHT SW 1ST",
-          "page": 37
+          "page": 37,
+          "spec_text": "Lighting switch 1st ON | Headlamp switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "HEADLAMP SW1",
-          "page": 37
+          "page": 37,
+          "spec_text": "Headlamp switch 1st ON | Headlamp switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "HEADLAMP SW2",
-          "page": 37
+          "page": 37,
+          "spec_text": "Headlamp switch 1st ON | BCS-37 | 2008 Xterra",
+          "expected_ranges": []
         },
         {
           "name": "HI BEAM SW",
-          "page": 38
+          "page": 38,
+          "spec_text": "High beam switch HI ON | Ignition switch OFF or ACC OFF",
+          "expected_ranges": []
         },
         {
           "name": "IGN ON SW",
-          "page": 38
+          "page": 38,
+          "spec_text": "Ignition switch ON ON | Ignition switch OFF or ACC OFF",
+          "expected_ranges": []
         },
         {
           "name": "IGN SW CAN",
-          "page": 38
+          "page": 38,
+          "spec_text": "Ignition switch ON ON",
+          "expected_ranges": []
         },
         {
           "name": "INT VOLUME",
-          "page": 38
+          "page": 38,
+          "spec_text": "Wiper intermittent dial is in a dial position 1 - 7 1 - 7 | Mechanical key is removed from key cylinder OFF",
+          "expected_ranges": [
+            {
+              "min": 1.0,
+              "max": 7.0,
+              "unit": ""
+            },
+            {
+              "min": 1.0,
+              "max": 7.0,
+              "unit": ""
+            }
+          ]
         },
         {
           "name": "KEY ON SW",
-          "page": 38
+          "page": 38,
+          "spec_text": "Mechanical key is inserted to key cylinder ON | LOCK button of key fob is not pressed OFF",
+          "expected_ranges": []
         },
         {
           "name": "KEYLESS LOCK",
-          "page": 38
+          "page": 38,
+          "spec_text": "LOCK button of key fob is pressed ON | UNLOCK button of key fob is not pressed OFF",
+          "expected_ranges": []
         },
         {
           "name": "KEYLESS UNLOCK",
-          "page": 38
+          "page": 38,
+          "spec_text": "UNLOCK button of key fob is pressed ON | \u2022 Ignition switch OFF or ACC | OFF | \u2022 Engine running",
+          "expected_ranges": []
         },
         {
           "name": "OIL PRESS SW",
-          "page": 38
+          "page": 38,
+          "spec_text": "Ignition switch ON ON | Other than lighting switch PASS OFF",
+          "expected_ranges": []
         },
         {
           "name": "PASSING SW",
-          "page": 38
+          "page": 38,
+          "spec_text": "Lighting switch PASS ON | Rear window defogger switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "REAR DEF SW",
-          "page": 38
+          "page": 38,
+          "spec_text": "Rear window defogger switch ON ON | Rear washer switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "RR WASHER SW",
-          "page": 38
+          "page": 38,
+          "spec_text": "Rear washer switch ON ON | Rear wiper switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "RR WIPER INT",
-          "page": 38
+          "page": 38,
+          "spec_text": "Rear wiper switch INT ON | Rear wiper switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "RR WIPER ON",
-          "page": 38
+          "page": 38,
+          "spec_text": "Rear wiper switch ON ON | Rear wiper stop position OFF",
+          "expected_ranges": []
         },
         {
           "name": "RR WIPER STOP",
-          "page": 38
+          "page": 38,
+          "spec_text": "Other than rear wiper stop position ON | Lighting switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "TAIL LAMP SW",
-          "page": 38
+          "page": 38,
+          "spec_text": "Lighting switch 1ST ON | When back door opener switch is not pressed OFF",
+          "expected_ranges": []
         },
         {
           "name": "TRNK OPNR SW",
-          "page": 38
+          "page": 38,
+          "spec_text": "When back door opener switch is pressed ON | Turn signal switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "TURN SIGNAL L",
-          "page": 38
+          "page": 38,
+          "spec_text": "Turn signal switch LH ON | Turn signal switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "TURN SIGNAL R",
-          "page": 38
+          "page": 38,
+          "spec_text": "Turn signal switch RH ON",
+          "expected_ranges": []
         },
         {
           "name": "VEHICLE SPEED",
-          "page": 38
+          "page": 38,
+          "spec_text": "While driving Equivalent to speedometer reading | BCS-38 | 2008 Xterra",
+          "expected_ranges": []
         }
       ]
     },
@@ -830,155 +1442,242 @@
       "params": [
         {
           "name": "AIR COND SW",
-          "page": 57
+          "page": 57,
+          "spec_text": "A/C switch ON ON | Back door closed OFF",
+          "expected_ranges": []
         },
         {
           "name": "BACK DOOR SW",
-          "page": 57
+          "page": 57,
+          "spec_text": "D | Back door opened ON | Door lock/unlock switch does not operate OFF",
+          "expected_ranges": []
         },
         {
           "name": "CDL LOCK SW",
-          "page": 57
+          "page": 57,
+          "spec_text": "E | Press door lock/unlock switch to the LOCK side ON | Door lock/unlock switch does not operate OFF",
+          "expected_ranges": []
         },
         {
           "name": "CDL UNLOCK SW",
-          "page": 57
+          "page": 57,
+          "spec_text": "Press door lock/unlock switch to the UNLOCK side ON | F | Front door RH closed OFF",
+          "expected_ranges": []
         },
         {
           "name": "DOOR SW-AS",
-          "page": 57
+          "page": 57,
+          "spec_text": "Front door RH opened ON | Front door LH closed OFF G",
+          "expected_ranges": []
         },
         {
           "name": "DOOR SW-DR",
-          "page": 57
+          "page": 57,
+          "spec_text": "Front door LH opened ON | Rear door LH closed OFF",
+          "expected_ranges": []
         },
         {
           "name": "DOOR SW-RL",
-          "page": 57
+          "page": 57,
+          "spec_text": "H | Rear door LH opened ON | Rear door RH closed OFF",
+          "expected_ranges": []
         },
         {
           "name": "DOOR SW-RR",
-          "page": 57
+          "page": 57,
+          "spec_text": "Rear door RH opened ON | I | Engine stopped OFF",
+          "expected_ranges": []
         },
         {
           "name": "ENGINE RUN",
-          "page": 57
+          "page": 57,
+          "spec_text": "Engine running ON | J | Front fog lamp switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "FR FOG SW",
-          "page": 57
+          "page": 57,
+          "spec_text": "Front fog lamp switch ON ON | Front washer switch OFF OFF | K",
+          "expected_ranges": []
         },
         {
           "name": "FR WASHER SW",
-          "page": 57
+          "page": 57,
+          "spec_text": "Front washer switch ON ON | Front wiper switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "FR WIPER LOW",
-          "page": 57
+          "page": 57,
+          "spec_text": "L | Front wiper switch LO ON | Front wiper switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "FR WIPER HI",
-          "page": 57
+          "page": 57,
+          "spec_text": "Front wiper switch HI ON | M | Front wiper switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "FR WIPER INT",
-          "page": 57
+          "page": 57,
+          "spec_text": "Front wiper switch INT ON | Any position other than front wiper stop position OFF MWI",
+          "expected_ranges": []
         },
         {
           "name": "FR WIPER STOP",
-          "page": 57
+          "page": 57,
+          "spec_text": "Front wiper stop position ON | When hazard switch is not pressed OFF",
+          "expected_ranges": []
         },
         {
           "name": "HAZARD SW",
-          "page": 57
+          "page": 57,
+          "spec_text": "O | When hazard switch is pressed ON | Lighting switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "LIGHT SW 1ST",
-          "page": 57
+          "page": 57,
+          "spec_text": "Lighting switch 1st ON | P | Headlamp switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "HEADLAMP SW1",
-          "page": 57
+          "page": 57,
+          "spec_text": "Headlamp switch 1st ON | Headlamp switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "HEADLAMP SW2",
-          "page": 57
+          "page": 57,
+          "spec_text": "Headlamp switch 1st ON | MWI-57 | 2008 Xterra",
+          "expected_ranges": []
         },
         {
           "name": "HI BEAM SW",
-          "page": 58
+          "page": 58,
+          "spec_text": "High beam switch HI ON | Ignition switch OFF or ACC OFF",
+          "expected_ranges": []
         },
         {
           "name": "IGN ON SW",
-          "page": 58
+          "page": 58,
+          "spec_text": "Ignition switch ON ON | Ignition switch OFF or ACC OFF",
+          "expected_ranges": []
         },
         {
           "name": "IGN SW CAN",
-          "page": 58
+          "page": 58,
+          "spec_text": "Ignition switch ON ON",
+          "expected_ranges": []
         },
         {
           "name": "INT VOLUME",
-          "page": 58
+          "page": 58,
+          "spec_text": "Wiper intermittent dial is in a dial position 1 - 7 1 - 7 | Mechanical key is removed from key cylinder OFF",
+          "expected_ranges": [
+            {
+              "min": 1.0,
+              "max": 7.0,
+              "unit": ""
+            },
+            {
+              "min": 1.0,
+              "max": 7.0,
+              "unit": ""
+            }
+          ]
         },
         {
           "name": "KEY ON SW",
-          "page": 58
+          "page": 58,
+          "spec_text": "Mechanical key is inserted to key cylinder ON | LOCK button of key fob is not pressed OFF",
+          "expected_ranges": []
         },
         {
           "name": "KEYLESS LOCK",
-          "page": 58
+          "page": 58,
+          "spec_text": "LOCK button of key fob is pressed ON | UNLOCK button of key fob is not pressed OFF",
+          "expected_ranges": []
         },
         {
           "name": "KEYLESS UNLOCK",
-          "page": 58
+          "page": 58,
+          "spec_text": "UNLOCK button of key fob is pressed ON | \u2022 Ignition switch OFF or ACC | OFF | \u2022 Engine running",
+          "expected_ranges": []
         },
         {
           "name": "OIL PRESS SW",
-          "page": 58
+          "page": 58,
+          "spec_text": "Ignition switch ON ON | Other than lighting switch PASS OFF",
+          "expected_ranges": []
         },
         {
           "name": "PASSING SW",
-          "page": 58
+          "page": 58,
+          "spec_text": "Lighting switch PASS ON | Rear window defogger switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "REAR DEF SW",
-          "page": 58
+          "page": 58,
+          "spec_text": "Rear window defogger switch ON ON | Rear washer switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "RR WASHER SW",
-          "page": 58
+          "page": 58,
+          "spec_text": "Rear washer switch ON ON | Rear wiper switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "RR WIPER INT",
-          "page": 58
+          "page": 58,
+          "spec_text": "Rear wiper switch INT ON | Rear wiper switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "RR WIPER ON",
-          "page": 58
+          "page": 58,
+          "spec_text": "Rear wiper switch ON ON | Rear wiper stop position OFF",
+          "expected_ranges": []
         },
         {
           "name": "RR WIPER STOP",
-          "page": 58
+          "page": 58,
+          "spec_text": "Other than rear wiper stop position ON | Lighting switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "TAIL LAMP SW",
-          "page": 58
+          "page": 58,
+          "spec_text": "Lighting switch 1ST ON | When back door opener switch is not pressed OFF",
+          "expected_ranges": []
         },
         {
           "name": "TRNK OPNR SW",
-          "page": 58
+          "page": 58,
+          "spec_text": "When back door opener switch is pressed ON | Turn signal switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "TURN SIGNAL L",
-          "page": 58
+          "page": 58,
+          "spec_text": "Turn signal switch LH ON | Turn signal switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "TURN SIGNAL R",
-          "page": 58
+          "page": 58,
+          "spec_text": "Turn signal switch RH ON",
+          "expected_ranges": []
         },
         {
           "name": "VEHICLE SPEED",
-          "page": 58
+          "page": 58,
+          "spec_text": "While driving Equivalent to speedometer reading | MWI-58 | 2008 Xterra",
+          "expected_ranges": []
         }
       ]
     },
@@ -997,71 +1696,111 @@
       "params": [
         {
           "name": "MOTOR FAN REQ",
-          "page": 20
+          "page": 20,
+          "spec_text": "Engine idle speed 0 - 100 % | operation status, vehicle speed, | etc. | A/C switch OFF OFF",
+          "expected_ranges": [
+            {
+              "min": 0.0,
+              "max": 100.0,
+              "unit": "%"
+            }
+          ]
         },
         {
           "name": "A/C COMP REQ",
-          "page": 20
+          "page": 20,
+          "spec_text": "A/C switch ON ON | Lighting switch OFF OFF | Lighting switch 1ST, 2ND, HI or AUTO (Light is illuminated) ON | Lighting switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "HL LO REQ",
-          "page": 20
+          "page": 20,
+          "spec_text": "Lighting switch 2ND HI or AUTO (Light is illuminated) ON | Lighting switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "HL HI REQ",
-          "page": 20
+          "page": 20,
+          "spec_text": "Lighting switch HI ON | Front fog lamp switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "FR FOG REQ",
-          "page": 20
+          "page": 20,
+          "spec_text": "Lighting switch 2ND | Front fog lamp switch ON ON | NOTE:",
+          "expected_ranges": []
         },
         {
           "name": "H L WASHER REQ",
-          "page": 20
+          "page": 20,
+          "spec_text": "OFF | This item is displayed, but cannot be monitored. | Front wiper switch OFF STOP | Front wiper switch INT 1LOW",
+          "expected_ranges": []
         },
         {
           "name": "FR WIP REQ",
-          "page": 20
+          "page": 20,
+          "spec_text": "Ignition switch ON | Front wiper switch LO LOW | Front wiper switch HI HI | Front wiper stop position STOP P",
+          "expected_ranges": []
         },
         {
           "name": "WIP AUTO STOP",
-          "page": 20
+          "page": 20,
+          "spec_text": "Ignition switch ON | Any position other than front wiper | ACT P | stop position | Front wiper operates normally OFF",
+          "expected_ranges": []
         },
         {
           "name": "WIP PROT",
-          "page": 20
+          "page": 20,
+          "spec_text": "Ignition switch ON | Front wiper stops at fail-safe opera- | BLOCK | tion | Ignition switch OFF or ACC OFF",
+          "expected_ranges": []
         },
         {
           "name": "ST RLY REQ",
-          "page": 20
+          "page": 20,
+          "spec_text": "Ignition switch START ON | Ignition switch OFF or ACC OFF",
+          "expected_ranges": []
         },
         {
           "name": "IGN RLY",
-          "page": 20
+          "page": 20,
+          "spec_text": "Ignition switch ON ON | Rear defogger switch OFF OFF",
+          "expected_ranges": []
         },
         {
           "name": "RR DEF REQ",
-          "page": 20
+          "page": 20,
+          "spec_text": "Rear defogger switch ON ON | Ignition switch OFF, ACC or engine running OPEN",
+          "expected_ranges": []
         },
         {
           "name": "OIL P SW",
-          "page": 20
+          "page": 20,
+          "spec_text": "Ignition switch ON CLOSE | NOTE:",
+          "expected_ranges": []
         },
         {
           "name": "DTRL REQ",
-          "page": 20
+          "page": 20,
+          "spec_text": "OFF | This item is displayed, but cannot be monitored. | NOTE:",
+          "expected_ranges": []
         },
         {
           "name": "HOOD SW",
-          "page": 20
+          "page": 20,
+          "spec_text": "OFF | This item is displayed, but cannot be monitored. | PCS-20 | 2008 Xterra",
+          "expected_ranges": []
         },
         {
           "name": "THFT HRN REQ",
-          "page": 21
+          "page": 21,
+          "spec_text": "\u2022 Horn is activated with VEHICLE SECURITY (THEFT WARNING) SYS- ON | B | TEM | Not operated OFF",
+          "expected_ranges": []
         },
         {
           "name": "HORN CHIRP",
-          "page": 21
+          "page": 21,
+          "spec_text": "Door locking with keyfob (horn chirp mode) ON | C | D | E | F | G | H | I | J | K | L | PCS | N | O | P | PCS-21 | 2008 Xterra",
+          "expected_ranges": []
         }
       ]
     },
@@ -1081,379 +1820,567 @@
       "params": [
         {
           "name": "OUTPUT REV",
-          "page": 106
+          "page": 106,
+          "spec_text": "X X",
+          "expected_ranges": []
         },
         {
           "name": "GEAR RATIO",
-          "page": 106
+          "page": 106,
+          "spec_text": "\u2014 X | Difference between engine speed and torque",
+          "expected_ranges": []
         },
         {
           "name": "TC SLIP SPEED",
-          "page": 106
+          "page": 106,
+          "spec_text": "\u2014 X | converter input shaft speed",
+          "expected_ranges": []
         },
         {
           "name": "F SUN GR REV",
-          "page": 106
+          "page": 106,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "F CARR GR REV",
-          "page": 106
+          "page": 106,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "ATF TEMP SE 1",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014",
+          "expected_ranges": []
         },
         {
           "name": "ATF TEMP SE 2",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014 | \u2014 X | \u2014 X",
+          "expected_ranges": []
         },
         {
           "name": "BATTERY VOLT",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014",
+          "expected_ranges": []
         },
         {
           "name": "ATF PRES SW 1",
-          "page": 106
+          "page": 106,
+          "spec_text": "X X",
+          "expected_ranges": []
         },
         {
           "name": "ATF PRES SW 2",
-          "page": 106
+          "page": 106,
+          "spec_text": "X X (for LC/B solenoid)",
+          "expected_ranges": []
         },
         {
           "name": "ATF PRES SW 3",
-          "page": 106
+          "page": 106,
+          "spec_text": "X X",
+          "expected_ranges": []
         },
         {
           "name": "ATF PRES SW 5",
-          "page": 106
+          "page": 106,
+          "spec_text": "X X",
+          "expected_ranges": []
         },
         {
           "name": "ATF PRES SW 6",
-          "page": 106
+          "page": 106,
+          "spec_text": "X X",
+          "expected_ranges": []
         },
         {
           "name": "RANGE SW 1",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014",
+          "expected_ranges": []
         },
         {
           "name": "RANGE SW 2",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014",
+          "expected_ranges": []
         },
         {
           "name": "RANGE SW 3",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014",
+          "expected_ranges": []
         },
         {
           "name": "RANGE SW 4",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014",
+          "expected_ranges": []
         },
         {
           "name": "1 POSITION SW",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014 1st position switch | Selector lever position is recognized by the TCM.",
+          "expected_ranges": []
         },
         {
           "name": "SLCT LVR POSI",
-          "page": 106
+          "page": 106,
+          "spec_text": "\u2014 X For fail-safe operation, the specific value used | for control is displayed.",
+          "expected_ranges": []
         },
         {
           "name": "OD CONT SW",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014",
+          "expected_ranges": []
         },
         {
           "name": "POWERSHIFT SW",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014",
+          "expected_ranges": []
         },
         {
           "name": "HOLD SW",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014",
+          "expected_ranges": []
         },
         {
           "name": "MANU MODE SW",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014",
+          "expected_ranges": []
         },
         {
           "name": "NON M-MODE SW",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014 | Not mounted but displayed.",
+          "expected_ranges": []
         },
         {
           "name": "UP SW LEVER",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014",
+          "expected_ranges": []
         },
         {
           "name": "DOWN SW LEVER",
-          "page": 106
+          "page": 106,
+          "spec_text": "X \u2014",
+          "expected_ranges": []
         },
         {
           "name": "SFT UP ST SW",
-          "page": 106
+          "page": 106,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "SFT DWN ST SW",
-          "page": 106
+          "page": 106,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "ASCD-OD CUT",
-          "page": 106
+          "page": 106,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "ASCD-CRUISE",
-          "page": 106
+          "page": 106,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "ABS SIGNAL",
-          "page": 106
+          "page": 106,
+          "spec_text": "\u2014 \u2014 | TM-106 | 2008 Xterra",
+          "expected_ranges": []
         },
         {
           "name": "ACC OD CUT",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 | Not mounted but displayed.",
+          "expected_ranges": []
         },
         {
           "name": "ACC SIGNAL",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 | C",
+          "expected_ranges": []
         },
         {
           "name": "TCS GR/P KEEP",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "TCS SIGNAL 2",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 | TM",
+          "expected_ranges": []
         },
         {
           "name": "TCS SIGNAL 1",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "TCC SOLENOID",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 X | E",
+          "expected_ranges": []
         },
         {
           "name": "LINE PRES SOL",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 X",
+          "expected_ranges": []
         },
         {
           "name": "I/C SOLENOID",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 X | F",
+          "expected_ranges": []
         },
         {
           "name": "FR/B SOLENOID",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 X",
+          "expected_ranges": []
         },
         {
           "name": "D/C SOLENOID",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 X",
+          "expected_ranges": []
         },
         {
           "name": "HLR/C SOL",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 X G",
+          "expected_ranges": []
         },
         {
           "name": "ON OFF SOL",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 LC/B solenoid",
+          "expected_ranges": []
         },
         {
           "name": "TCC SOL MON",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 | H",
+          "expected_ranges": []
         },
         {
           "name": "L/P SOL MON",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "I/C SOL MON",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 | I",
+          "expected_ranges": []
         },
         {
           "name": "FR/B SOL MON",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "D/C SOL MON",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 | J",
+          "expected_ranges": []
         },
         {
           "name": "HLR/C SOL MON",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "ONOFF SOL MON",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 LC/B solenoid | K",
+          "expected_ranges": []
         },
         {
           "name": "P POSI IND",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "R POSI IND",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 | L",
+          "expected_ranges": []
         },
         {
           "name": "N POSI IND",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "D POSI IND",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "4TH POSI IND",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 M",
+          "expected_ranges": []
         },
         {
           "name": "3RD POSI IND",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "2ND POSI IND",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 | N",
+          "expected_ranges": []
         },
         {
           "name": "1ST POSI IND",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "MANU MODE IND",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 | O | Not mounted but displayed.",
+          "expected_ranges": []
         },
         {
           "name": "POWER M LAMP",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "F-SAFE IND/L",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 | P",
+          "expected_ranges": []
         },
         {
           "name": "ATF WARN LAMP",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "BACK-UP LAMP",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "STARTER RELAY",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "RANGE SW3 MON",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "C/V CLB ID1",
-          "page": 107
+          "page": 107,
+          "spec_text": "\u2014 \u2014 | TM-107 | 2008 Xterra",
+          "expected_ranges": []
         },
         {
           "name": "C/V CLB ID2",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "C/V CLB ID3",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "UNIT CLB ID1",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "UNIT CLB ID2",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "UNIT CLB ID3",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "TRGT GR RATIO",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "TRGT PRES TCC",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "TRGT PRES L/P",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "TRGT PRES I/C",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "TRGT PRE FR/B",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "TRGT PRES D/C",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "TRG PRE HLR/C",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "SHIFT PATTERN",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "DRV CST JUDGE",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "START RLY MON",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "NEXT GR POSI",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "SHIFT MODE",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "MANU GR POSI",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "VEHICLE SPEED",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 X Vehicle speed recognized by the TCM. | Displays the value measured by the voltage | \u2014 \u2014 | probe. | \u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "DUTY-HI",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014 | The value measured by the pulse probe is dis-",
+          "expected_ranges": []
         },
         {
           "name": "DUTY-LOW",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014 | played.",
+          "expected_ranges": []
         },
         {
           "name": "PLS WIDTH-HI",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014",
+          "expected_ranges": []
         },
         {
           "name": "PLS WIDTH-LOW",
-          "page": 108
+          "page": 108,
+          "spec_text": "\u2014 \u2014 | TM-108 | 2008 Xterra",
+          "expected_ranges": []
         },
         {
           "name": "1ST GR FUNCTN P0731",
-          "page": 109
+          "page": 109,
+          "spec_text": "not) | B | results (OK or NG) | items for \"2GR function ratio\" can be confirmed. | status (whether the diagnosis is being performed",
+          "expected_ranges": []
         },
         {
           "name": "2ND GR FUNCTN P0732",
-          "page": 109
+          "page": 109,
+          "spec_text": "C | not) | results (OK or NG) \u2022 Input clutch solenoid valve | \u2022 Front brake solenoid valve | items for \"3GR function ratio\" can be confirmed. | \u2022 Direct clutch solenoid valve | status (whether the diagnosis is being performed TM",
+          "expected_ranges": []
         },
         {
           "name": "3RD GR FUNCTN P0733",
-          "page": 109
+          "page": 109,
+          "spec_text": "\u2022 High and low reverse clutch | not) | solenoid valve | results (OK or NG) | \u2022 Each clutch | items for \"4GR function ratio\" can be confirmed. \u2022 Hydraulic control circuit | E | status (whether the diagnosis is being performed",
+          "expected_ranges": []
         },
         {
           "name": "4TH GR FUNCTN P0734",
-          "page": 109
+          "page": 109,
+          "spec_text": "not) | results (OK or NG) | F | items for \"5GR function ratio\" can be confirmed. | status (whether the diagnosis is being performed",
+          "expected_ranges": []
         },
         {
           "name": "5TH GR FUNCTN P0735",
-          "page": 109
+          "page": 109,
+          "spec_text": "not) | results (OK or NG) | G | CONSULT-III | INFOID:0000000003080431 | H | PROCEDURE (WITH GST) | (GST) Function\". | I | PROCEDURE (NO TOOLS) | Lamp (MIL)\". | PROCEDURE (NO TOOLS) | J | \u201cON\u201d, the O/D OFF indicator lamp lights up for 2 seconds. As a method | the self-diagnostics start signal is input, the memory for the malfunction | K | indicator lamp flashes to display the corresponding DTC. | L | LAMP | lever in \u201cP\u201d position. Warm engine to normal operating temperature. | OFF at least twice, then leave it in the OFF position. | M | not start engine.) | on for about 2 seconds? | N | OFF Indicator Lamp Does Not Come On\". | STEP 1 | O | button. | to \u201cD\u201d position. | P | (Set the closed throttle position signal \u201cON\u201d.) | lamp switch signal \u201cON\u201d.) | not start engine.) | \u201cD\u201d to \u201c3\u201d position. | lamp switch signal \u201cOFF\u201d.) | \u201c3\u201d to \u201c2\u201d position. | lamp switch signal \u201cON\u201d.) | TM-109 | 2008 Xterra",
+          "expected_ranges": []
         }
       ]
     }

@@ -25,7 +25,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-from src.analysis.fsm import extract_pdf_section
+from src.analysis.fsm import extract_pdf_section_with_specs
 
 # Per-source page ranges. Each entry is one CONSULT-III data-monitor table
 # from one FSM PDF. `tested_on_canary_truck` flags whether we've validated
@@ -164,10 +164,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"  SKIP {src['module']:14s} — missing {path}")
             continue
         max_x = src.get("max_x", 135.0)
-        params = extract_pdf_section(path, src["pages"], max_x=max_x)
+        params = extract_pdf_section_with_specs(path, src["pages"], max_x=max_x)
         total_params += len(params)
+        with_ranges = sum(1 for p in params if p["expected_ranges"])
         page_range = f"pp.{src['pages'][0]}-{src['pages'][-1]}"
-        print(f"  {src['module']:14s}  {len(params):4d} params  ({src['file']} {page_range})")
+        print(
+            f"  {src['module']:14s}  {len(params):4d} params  "
+            f"({with_ranges:3d} w/ numeric ranges)  ({src['file']} {page_range})"
+        )
         modules.append(
             {
                 "module": src["module"],
