@@ -119,10 +119,10 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
 
 Goal: a reproducible feature pipeline + a working baseline detector.
 
-- [ ] **2.1 — Parquet session loader.** `src/preprocessing/loader.py` —
+- [x] **2.1 — Parquet session loader.** `src/preprocessing/loader.py` —
   read a session (or list of sessions) into a long-format DataFrame; pivot
   to wide (one column per channel) on demand.
-- [ ] **2.2 — Resampler.** `src/preprocessing/resampler.py` — uniform time
+- [x] **2.2 — Resampler.** `src/preprocessing/resampler.py` — uniform time
   grid at `resample_hz` (default 1). Forward-fill slow sensors (coolant,
   baro). Gap-flag fast sensors (RPM, MAF) when gap exceeds 2× expected
   period. (FR-04)
