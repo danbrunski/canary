@@ -42,7 +42,7 @@ class RecordingResult:
     started_at: datetime
     ended_at: datetime
     frames_recorded: int
-    stopped_by: str  # "deadline" | "signal" | "error" | "disk_error"
+    stopped_by: str  # "deadline" | "signal" | "error" | "disk_error" | "reconnect_exhausted"
     parse_errors: int = 0  # malformed frames dropped without aborting the run
     reconnects: int = 0  # successful bus rebuilds during the recording
     dropped_writes: int = 0  # frames the disk writer failed to persist
@@ -171,6 +171,7 @@ def record(
     poll_interval: float = 0.2,
     factory: Callable[[CanBusConfig], can.BusABC] | None = None,
     reconnect_policy: ReconnectPolicy | None = None,
+    max_reconnects: int | None = 10,
 ) -> RecordingResult:
     """Record frames from `bus` into `paths.frames` until duration or stop_event.
 
@@ -186,6 +187,15 @@ def record(
     The SAME `CanutilsLogWriter` stays open across reconnects so frames.log
     remains a single continuous file. Without both params, bus-level
     exceptions propagate as before (backward-compatible).
+
+    `max_reconnects` caps the number of CONSECUTIVE failed rebuild attempts
+    (default 10). A successful rebuild resets the counter. Once exhausted,
+    the recording stops with `stop_reason = "reconnect_exhausted"`. This
+    prevents the recorder from retrying forever against a persistently
+    broken adapter — important because in WSL2 a wedged USB device can
+    leave the rebuild call in an uninterruptible kernel I/O state where
+    even `kill -9` won't terminate the process. Set to None to allow
+    unlimited retries (not recommended outside controlled environments).
 
     Frame-level parse errors (ValueError / IndexError from python-can's
     slcan parser, or `can.CanError` subclasses) are ALWAYS caught and
@@ -221,6 +231,10 @@ def record(
     reconnect_delay = (
         reconnect_policy.initial_delay_seconds if reconnect_policy is not None else 0.0
     )
+    # Consecutive failed rebuilds — resets on a successful reconnect, caps via
+    # max_reconnects so a wedged adapter doesn't trap us in an infinite retry
+    # loop (which in WSL2 can produce uninterruptible kernel I/O state).
+    failed_rebuilds = 0
 
     error: BaseException | None = None
     result: RecordingResult
@@ -248,19 +262,34 @@ def record(
                     try:
                         current_bus = factory(spec)
                         reconnects += 1
+                        failed_rebuilds = 0  # reset on success
                         reconnect_delay = reconnect_policy.initial_delay_seconds
                         log.info(
                             "bus reconnected",
                             extra={"total_reconnects": reconnects},
                         )
                     except Exception as build_exc:
+                        failed_rebuilds += 1
                         log.warning(
                             "bus rebuild failed; will retry",
                             extra={
                                 "error": f"{type(build_exc).__name__}: {build_exc}",
                                 "next_delay_seconds": reconnect_delay,
+                                "failed_rebuilds": failed_rebuilds,
+                                "max_reconnects": max_reconnects,
                             },
                         )
+                        if max_reconnects is not None and failed_rebuilds >= max_reconnects:
+                            log.error(
+                                "reconnect attempts exhausted; stopping recording",
+                                extra={
+                                    "failed_rebuilds": failed_rebuilds,
+                                    "frames_recorded": count,
+                                },
+                            )
+                            stop_reason = "reconnect_exhausted"
+                            error = build_exc
+                            break
                         reconnect_delay = reconnect_policy.next_delay(reconnect_delay)
                         continue
 

@@ -120,6 +120,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--max-reconnects",
+        type=int,
+        default=10,
+        help=(
+            "Cap consecutive failed bus-rebuild attempts. Once exceeded, "
+            "the recording stops with stopped_by='reconnect_exhausted' so "
+            "we don't spin forever against a persistently broken adapter "
+            "(which on WSL2 can lead to uninterruptible kernel I/O state). "
+            "Default 10."
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -166,11 +178,32 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # SIGINT/SIGTERM → stop_event so the recorder exits cleanly with a flushed
     # writer and a finalized manifest, instead of dying mid-write.
+    # Two-press behavior: first Ctrl-C requests a clean stop, second restores
+    # the default handler so a third press raises KeyboardInterrupt and a
+    # fourth would terminate immediately. This escape hatch matters because
+    # in WSL2 with a wedged USB adapter the recorder's reconnect logic can
+    # land in uninterruptible kernel I/O (D state) where SIGKILL won't even
+    # land. The user shouldn't have to `wsl --shutdown` to recover.
     stop_event = threading.Event()
+    interrupt_count = 0
 
     def _request_stop(signum: int, _frame: object) -> None:
-        log.info("stop requested", extra={"signal": signum})
+        nonlocal interrupt_count
+        interrupt_count += 1
+        log.info(
+            "stop requested",
+            extra={"signal": signum, "press_count": interrupt_count},
+        )
         stop_event.set()
+        if interrupt_count >= 2:
+            # Restore default handler — next Ctrl-C raises KeyboardInterrupt
+            # and propagates out of any Python-level loop.
+            print(
+                "\nSecond stop requested — restoring default signal handler. "
+                "Press Ctrl-C again to force exit.",
+                file=sys.stderr,
+            )
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     signal.signal(signal.SIGINT, _request_stop)
     signal.signal(signal.SIGTERM, _request_stop)
@@ -205,6 +238,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             stop_event=stop_event,
             factory=None if args.no_reconnect else bus_factory,
             reconnect_policy=None if args.no_reconnect else DEFAULT_RECONNECT_POLICY,
+            max_reconnects=args.max_reconnects,
         )
     finally:
         if obd_conn is not None:

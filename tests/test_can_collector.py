@@ -467,6 +467,91 @@ def test_record_auto_reconnects_on_bus_failure(tmp_path: Path):
     assert manifest["dropped_writes"] == 0
 
 
+def test_record_bails_after_max_consecutive_reconnect_failures(tmp_path: Path):
+    """If the factory fails to rebuild N times in a row, record() stops with
+    stopped_by='reconnect_exhausted' rather than spinning forever. Protects
+    against wedged-USB-adapter scenarios where every rebuild attempt blocks
+    in kernel I/O — a real failure mode observed in WSL2."""
+    ReconnectableBus.instances_built = 0
+    ReconnectableBus.instances_shutdown = 0
+
+    spec = _virtual_spec("canary-test-bail")
+    paths = make_session_dir(tmp_path, datetime.now(UTC))
+
+    factory_calls = 0
+
+    def failing_factory(_spec: CanBusConfig) -> ReconnectableBus:
+        nonlocal factory_calls
+        factory_calls += 1
+        raise RuntimeError(f"adapter wedged (attempt {factory_calls})")
+
+    initial_bus = ReconnectableBus(good_frames_before_failure=2)
+
+    result = record(
+        initial_bus,  # type: ignore[arg-type]
+        paths,
+        spec=spec,
+        vehicle=_vehicle(),
+        duration=10.0,  # generous; we expect to bail well before this
+        poll_interval=0.02,
+        factory=failing_factory,  # type: ignore[arg-type]
+        reconnect_policy=ReconnectPolicy(
+            initial_delay_seconds=0.005,
+            max_delay_seconds=0.005,
+        ),
+        max_reconnects=3,
+    )
+
+    # First bus dies after 2 frames, then 3 failed rebuild attempts → bail.
+    assert result.stopped_by == "reconnect_exhausted"
+    assert result.frames_recorded == 2
+    assert factory_calls == 3  # exactly max_reconnects attempts
+
+    manifest = json.loads(paths.manifest.read_text())
+    assert manifest["stopped_by"] == "reconnect_exhausted"
+    assert "adapter wedged" in manifest["error"]
+
+
+def test_record_resets_failure_count_on_successful_reconnect(tmp_path: Path):
+    """A successful reconnect must reset the failed-rebuild counter so
+    intermittent USB flaps don't accumulate toward the cap."""
+    spec = _virtual_spec("canary-test-reset")
+    paths = make_session_dir(tmp_path, datetime.now(UTC))
+
+    # Pattern: bus dies → fail, fail, succeed → bus dies → fail, fail, succeed
+    # Without reset: 4 cumulative failures → bail at 3. With reset: never bails.
+    sequence: list[str] = []
+
+    def varied_factory(_spec: CanBusConfig) -> ReconnectableBus:
+        # Two failures then a success, repeating.
+        sequence.append("call")
+        n = len(sequence)
+        if n in (1, 2, 4, 5):
+            raise RuntimeError(f"transient failure {n}")
+        return ReconnectableBus(good_frames_before_failure=1)
+
+    initial_bus = ReconnectableBus(good_frames_before_failure=1)
+
+    result = record(
+        initial_bus,  # type: ignore[arg-type]
+        paths,
+        spec=spec,
+        vehicle=_vehicle(),
+        duration=0.5,
+        poll_interval=0.01,
+        factory=varied_factory,  # type: ignore[arg-type]
+        reconnect_policy=ReconnectPolicy(
+            initial_delay_seconds=0.005,
+            max_delay_seconds=0.005,
+        ),
+        max_reconnects=3,
+    )
+
+    # Should reach deadline cleanly, not bail. At least 2 successful reconnects.
+    assert result.stopped_by == "deadline"
+    assert result.reconnects >= 2
+
+
 def test_record_without_factory_still_propagates_bus_errors(tmp_path: Path):
     """Backward compatibility: when factory/reconnect_policy are not provided,
     bus-level OSError should propagate as before (caller decides what to do)."""
