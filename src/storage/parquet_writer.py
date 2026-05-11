@@ -96,6 +96,50 @@ class ParquetTelemetryWriter:
         return self.flush()
 
 
+def write_records_to_parquet(
+    records: Iterable[TelemetryRecord],
+    out_dir: Path,
+    *,
+    max_rows: int = 10_000,
+    compression: str = "snappy",
+    chunk_name: str = "telemetry",
+) -> list[Path]:
+    """Write telemetry records to chunked Parquet files in `out_dir`.
+
+    Batch counterpart to `ParquetTelemetryWriter` — same schema and chunk
+    naming, but driven by a finite iterable instead of a real-time stream.
+    Used by `tools/log_to_parquet.py` to convert recorded `frames.log` /
+    `pids.jsonl` into the canonical Parquet shape.
+
+    The output is byte-equivalent (modulo compression headers) to what the
+    daemon would have produced if the same records had streamed through it,
+    so downstream tooling can ignore where the data came from.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    files: list[Path] = []
+    buffer: list[TelemetryRecord] = []
+    chunk_index = 0
+
+    def flush() -> None:
+        nonlocal chunk_index
+        if not buffer:
+            return
+        rows = [r.parquet_row() for r in buffer]
+        table = _PA.Table.from_pylist(rows, schema=TELEMETRY_SCHEMA)
+        path = out_dir / f"{chunk_name}-{chunk_index:05d}.parquet"
+        _PQ.write_table(table, path, compression=compression)
+        files.append(path)
+        buffer.clear()
+        chunk_index += 1
+
+    for record in records:
+        buffer.append(record)
+        if len(buffer) >= max_rows:
+            flush()
+    flush()  # final partial chunk
+    return files
+
+
 def delete_expired_sessions(
     sessions_root: Path,
     retention_days: int,
