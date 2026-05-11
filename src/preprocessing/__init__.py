@@ -6,6 +6,12 @@ from src.preprocessing.anomaly_injection import (
     InjectionWindow,
     windows_to_records,
 )
+from src.preprocessing.decode import (
+    DECODED_SOURCE,
+    decode_can_rows,
+    decoded_channel,
+    read_session_decoded,
+)
 from src.preprocessing.features import (
     FeatureConfig,
     compute_features,
@@ -31,6 +37,7 @@ from src.preprocessing.segmenter import (
 )
 
 __all__ = [
+    "DECODED_SOURCE",
     "MODE_COLUMN",
     "AnomalyInjector",
     "AnomalyKind",
@@ -43,11 +50,14 @@ __all__ = [
     "ZScoreScaler",
     "channel_key",
     "compute_features",
+    "decode_can_rows",
+    "decoded_channel",
     "discover_sessions",
     "gap_column",
     "mean_column",
     "mode_for_row",
     "read_session",
+    "read_session_decoded",
     "read_sessions",
     "resample_wide",
     "roc_column",

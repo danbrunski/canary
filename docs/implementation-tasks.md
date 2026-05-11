@@ -23,7 +23,8 @@ Goal: a runnable empty skeleton, reproducible dev env, CI green on first push.
   python-can, cantools, pandas, pyarrow, scikit-learn, fastapi, uvicorn,
   pyyaml, pydantic) live in `[project.dependencies]`; `[project.optional-dependencies.dev]`
   carries tooling (ruff, mypy, pytest, pytest-asyncio, types-pyyaml,
-  pandas-stubs). Torch deferred to a future `[ml]` extra (Phase 3).
+  pandas-stubs). `[project.optional-dependencies.ml]` carries Torch for
+  Phase 3 sequence/model work.
   ELM327-emulator deferred to a future `[emulator]` extra (Phase 1.5) —
   its sdist needs `--no-build-isolation`, not worth solving until we
   actually wire the emulator test.
@@ -247,9 +248,14 @@ Goal: a reproducible feature pipeline + a working baseline detector.
   now accepts optional `per_mode_contamination` overrides consumed by the
   trainer and recorded in the model manifest. Covered by
   `tests/test_isolation_forest_evaluation.py`. (FR-05)
-- [ ] **2.9 — Unit tests.** Resampler edge cases (gaps, leading NaN),
+- [x] **2.9 — Unit tests.** Resampler edge cases (gaps, leading NaN),
   segmenter boundary conditions, feature-window correctness on
-  hand-crafted inputs. (NFR-05)
+  hand-crafted inputs. Coverage lives in `tests/test_preprocessing_resampler.py`,
+  `tests/test_preprocessing_segmenter.py`, and
+  `tests/test_preprocessing_features.py`: leading fast/slow NaNs, strict
+  max-gap behavior, inclusive min/max segmenter thresholds, session-boundary
+  isolation, rolling mean/std/ROC hand calculations, higher-Hz windows,
+  feature toggles, column selection, and empty-input schemas. (NFR-05)
 
 ---
 
@@ -257,10 +263,17 @@ Goal: a reproducible feature pipeline + a working baseline detector.
 
 Goal: deep model that catches temporal anomalies the IF misses.
 
-- [ ] **3.1 — Sliding-window dataset.** `src/models/sequence_dataset.py`
-  — PyTorch `Dataset` yielding `(B, T, F)` windows from Parquet sessions
-  with stride 1. Filters out sequences that span session boundaries or
-  contain gap flags. (FR-06)
+- [x] **3.1 — Sliding-window dataset.** `src/models/sequence_dataset.py`
+  — PyTorch map-style `Dataset` yielding `(T, F)` windows that a
+  `DataLoader` batches to `(B, T, F)`. Includes a pure-pandas window
+  builder for CI coverage without the optional `ml` extra; `__getitem__`
+  imports torch lazily and raises `MissingSequenceDependencyError` when
+  torch is absent. Supports `from_sessions(...)` to load Parquet sessions
+  through the existing preprocessing path, stride control, explicit feature
+  columns, metadata lookup, and filters out windows spanning sessions,
+  containing gap flags, or containing missing feature values. Added
+  `[project.optional-dependencies].ml = ["torch>=2.0"]`. Covered by
+  `tests/test_sequence_dataset.py`. (FR-06)
 - [ ] **3.2 — Model.** `src/models/lstm_autoencoder.py` — encoder LSTM →
   latent (`latent_dim`) → decoder LSTM. Configurable depth/hidden size.
 - [ ] **3.3 — Training loop.** Train on clean sessions only; MAE loss;
@@ -276,9 +289,17 @@ Goal: deep model that catches temporal anomalies the IF misses.
   <50% Pi 5 CPU at 1 Hz. (FR-06, NFR-01)
 - [ ] **3.6 — False-positive benchmark.** Held-out clean sessions: report
   FPR at the calibrated threshold; iterate on `k` if needed. (FR-06)
-- [ ] **3.7 — Replay harness.** `scripts/replay.py` — feed a recorded
+- [x] **3.7 — Replay harness.** `scripts/replay.py` — feed a recorded
   Parquet session through preprocessing + inference end-to-end, no
-  hardware needed. Used in CI. (NFR-05)
+  hardware needed. Used in CI. Implemented as an importable CLI that loads
+  one or more Parquet session directories, pivots numeric telemetry,
+  resamples, segments, computes rolling features, optionally loads an
+  IsolationForest artifact for scoring, and emits a JSON report with
+  row counts, source/channel counts, mode counts, numeric/rolling/model
+  feature columns, complete model-input rows, and score distribution.
+  CAN-only payload captures replay cleanly but surface zero complete
+  numeric model rows until decoded CAN/binding features land. Covered by
+  `tests/test_replay_script.py`. (NFR-05)
 
 ---
 
@@ -354,12 +375,30 @@ emission stays viable as a one-way derived artifact (4.D.2 below).
 
 ### 4.D — Future integration (not done)
 
-- [ ] **4.D.1 — Wire bindings decoder into preprocessing.** When a signal
-  has a known scale/offset (`confidence` ≥ `medium`), it should appear
-  as a column in the wide-format DataFrame from `loader.read_session` —
-  no per-signal code changes. Replaces the original "Phase 4.4 wire
-  decoded channels into preprocessing" with the bindings.yaml path
-  instead of DBC. (FR-04)
+- [x] **4.D.1 — Wire bindings decoder into preprocessing.** Decoded CAN
+  signals now flow into the ML pipeline as numeric columns the model can
+  learn from — closing the gap between the RE half (bindings) and the ML
+  half (loader → resample → segment → features → scaler → IsolationForest).
+  Implemented as `src/preprocessing/decode.py`:
+    * `decode_can_rows(long_frame, bindings, confidence_levels=…)` appends
+      `source="decoded"`, `channel=<signal name>` rows whose value is the
+      RAW integer from the binding's byte range (scaling is for human
+      reports, not the model — the scaler normalizes anyway, and most
+      bindings have no pinned scale yet).
+    * `read_session_decoded(session_dir, bindings_path=…)` = `read_session`
+      + `decode_can_rows`; falls back to plain `read_session` if the
+      bindings file is absent.
+    * `to_wide` gained `coerce_numeric=True` (default): after the pivot,
+      any value column whose non-null entries are all numbers is cast to
+      numeric dtype. This fixed a pre-existing `to_wide` bug — it always
+      produced `object`-dtype columns (it pivots on the coalesced `value`
+      column), so even OBD numeric channels were being skipped by
+      `compute_features` / `ZScoreScaler`. Nothing exercised the
+      `to_wide → resample → features` path on real data until now.
+  End-to-end smoke against session 2026-05-11T222447: 2.2M long rows →
+  1.15M wide rows × 55 cols → resampled 694 × 107 → features 694 × 266;
+  all 23 decoded signals numeric and reaching the scaler; coolant decodes
+  to 75-94degC; throttle-transient varies 0-255. (FR-04)
 - [ ] **4.D.2 — DBC emitter from bindings.yaml.** Optional companion
   artifact: `tools/emit_dbc.py` produces a draft `data/dbc/xterra_2008.dbc`
   from `bindings.yaml` for SavvyCAN/Cabana interop and external sharing.

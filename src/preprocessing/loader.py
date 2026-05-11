@@ -55,8 +55,18 @@ def to_wide(
     *,
     value: TelemetryValueKind = "value",
     index_columns: Sequence[str] = INDEX_COLUMNS,
+    coerce_numeric: bool = True,
 ) -> pd.DataFrame:
-    """Pivot long telemetry rows to one column per `source:channel`."""
+    """Pivot long telemetry rows to one column per `source:channel`.
+
+    The `value` column is `object`-dtype (it coalesces numeric / text / bool
+    values per row), so the pivot output is `object` too — which means the
+    downstream resampler and feature stages would treat even genuinely
+    numeric channels (OBD PIDs, decoded CAN signals) as non-numeric and skip
+    them. With `coerce_numeric=True` (the default), each value column whose
+    non-null entries are all numbers is cast to a numeric dtype after the
+    pivot. Channels carrying strings (VIN) or bools are left untouched.
+    """
     if telemetry.empty:
         return pd.DataFrame(columns=[*index_columns])
 
@@ -73,7 +83,24 @@ def to_wide(
         dropna=False,
     )
     pivoted.columns = [str(column) for column in pivoted.columns]
-    return pivoted.reset_index().sort_values(list(index_columns), kind="stable")
+    wide = pivoted.reset_index().sort_values(list(index_columns), kind="stable")
+
+    if coerce_numeric:
+        index_set = set(index_columns)
+        for column in wide.columns:
+            if column in index_set:
+                continue
+            if pd.api.types.is_numeric_dtype(wide[column]):
+                continue
+            converted = pd.to_numeric(wide[column], errors="coerce")
+            # Only keep the conversion if it didn't drop any real values —
+            # i.e. every non-null original entry was numeric. A string-bearing
+            # channel (VIN) or a bool channel stays as-is.
+            original_notna = wide[column].notna()
+            if bool((original_notna == converted.notna()).all()):
+                wide[column] = converted
+
+    return wide
 
 
 def channel_key(source: str, channel: str) -> str:
