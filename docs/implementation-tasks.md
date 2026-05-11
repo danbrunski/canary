@@ -185,9 +185,15 @@ Goal: a reproducible feature pipeline + a working baseline detector.
   — rule-based classifier driven by the YAML thresholds (idle, city,
   highway, WOT, off-road). Returns a per-row mode label. User-extensible:
   unknown modes from config flow through without code changes. (FR-04)
-- [ ] **2.4 — Rolling features.** `src/preprocessing/features.py` —
+- [x] **2.4 — Rolling features.** `src/preprocessing/features.py` —
   windowed mean, std, and rate-of-change over `rolling_window_seconds`.
-  Vectorized with pandas `.rolling()`. (FR-04)
+  Vectorized with pandas `.rolling()`. Time-based window respects
+  session boundaries (no leakage from session A into session B's
+  warmup). Rate-of-change is `(value − value.shift(n_rows)) /
+  window_seconds`, deriving `n_rows` from the median inter-row delta so
+  the same config works at any resample frequency. Skips gap-flag
+  columns, mode column, and non-numeric columns automatically; safe to
+  call twice in a row. (FR-04)
 - [ ] **2.5 — Normalization.** Z-score scaler fit on the labeled clean
   baseline only; persisted alongside the model in the manifest. Reject
   inference-time data whose channels don't match the fit schema. (FR-04,
