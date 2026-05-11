@@ -190,9 +190,7 @@ class IsolationForestEvaluationReport:
             "rows": self.rows,
             "overall": self.overall.to_dict(),
             "score_distribution": self.score_distribution.to_dict(),
-            "modes": {
-                mode: evaluation.to_dict() for mode, evaluation in self.modes.items()
-            },
+            "modes": {mode: evaluation.to_dict() for mode, evaluation in self.modes.items()},
             "recommended_per_mode_contamination": self.recommended_per_mode_contamination,
             "windows": [dict(window) for window in self.windows],
         }
@@ -359,10 +357,9 @@ def recommend_contamination(
     if np.all(finite_labels):
         return _empty_recommendation(mode, "no_finite_clean_rows")
 
-    best: (
-        tuple[tuple[float, float, float, float, float], float, ClassificationMetrics]
-        | None
-    ) = None
+    best: tuple[tuple[float, float, float, float, float], float, ClassificationMetrics] | None = (
+        None
+    )
     for threshold in sorted(np.unique(finite_scores)):
         predicted = finite_scores >= threshold
         metrics = classification_metrics(finite_labels, predicted)

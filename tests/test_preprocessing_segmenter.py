@@ -48,6 +48,38 @@ def test_segment_operating_modes_uses_configured_mode_order_for_precedence() -> 
     assert segmented.loc[0, MODE_COLUMN] == "city"
 
 
+def test_segment_operating_modes_treats_min_and_max_bounds_as_inclusive() -> None:
+    modes = {
+        "band": OperatingModeSpec(
+            rpm_min=1000,
+            rpm_max=2000,
+            speed_min=10,
+            speed_max=20,
+            throttle_min=30,
+            throttle_max=40,
+        )
+    }
+    frame = pd.DataFrame(
+        [
+            {"obd:RPM": 1000.0, "obd:SPEED": 10.0, "obd:THROTTLE_POS": 30.0},
+            {"obd:RPM": 2000.0, "obd:SPEED": 20.0, "obd:THROTTLE_POS": 40.0},
+            {"obd:RPM": 999.9, "obd:SPEED": 10.0, "obd:THROTTLE_POS": 30.0},
+            {"obd:RPM": 1000.0, "obd:SPEED": 20.1, "obd:THROTTLE_POS": 30.0},
+            {"obd:RPM": 1000.0, "obd:SPEED": 10.0, "obd:THROTTLE_POS": 40.1},
+        ]
+    )
+
+    segmented = segment_operating_modes(frame, modes)
+
+    assert list(segmented[MODE_COLUMN]) == [
+        "band",
+        "band",
+        UNKNOWN_MODE,
+        UNKNOWN_MODE,
+        UNKNOWN_MODE,
+    ]
+
+
 def test_segment_operating_modes_supports_custom_mode_names() -> None:
     frame = pd.DataFrame([{"obd:RPM": 1800.0, "obd:SPEED": 20.0, "obd:THROTTLE_POS": 25.0}])
     modes = {

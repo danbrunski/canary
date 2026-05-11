@@ -27,6 +27,17 @@ from src.models.isolation_forest_evaluation import (
     recommend_contamination,
     score_distribution,
 )
+from src.models.sequence_dataset import (
+    DEFAULT_SEQUENCE_STRIDE,
+    MissingSequenceDependencyError,
+    SequenceWindow,
+    SequenceWindowBuildResult,
+    SequenceWindowDataset,
+    build_sequence_windows,
+    resolve_gap_columns,
+    resolve_sequence_feature_columns,
+    sequence_frame_from_sessions,
+)
 
 __all__ = [
     "LABEL_COLUMN",
@@ -52,4 +63,13 @@ __all__ = [
     "evaluate_isolation_forest",
     "recommend_contamination",
     "score_distribution",
+    "DEFAULT_SEQUENCE_STRIDE",
+    "MissingSequenceDependencyError",
+    "SequenceWindow",
+    "SequenceWindowBuildResult",
+    "SequenceWindowDataset",
+    "build_sequence_windows",
+    "resolve_gap_columns",
+    "resolve_sequence_feature_columns",
+    "sequence_frame_from_sessions",
 ]

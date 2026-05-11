@@ -29,15 +29,14 @@ dev = [
     # vendor FSM PDFs into data/fsm/signals.json. Dev-only.
     "pdfplumber>=0.11",
 ]
+ml = [
+    "torch>=2.0",
+]
 # Phase 1.5 will add:
 # emulator = ["ELM327-emulator"]
 # Kept out of `dev` because its sdist is missing setuptools in build deps;
 # needs `pip install --no-build-isolation ELM327-emulator` after setuptools
 # is in the venv. Revisit once we're actually wiring the emulator test.
-#
-# Phase 3 will add:
-# ml = ["torch>=2.0"]
-# Torch is deferred to keep the runtime install light until the LSTM lands.
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -74,6 +73,8 @@ module = [
     "pyarrow.*",
     "sklearn",
     "sklearn.*",
+    "torch",
+    "torch.*",
 ]
 ignore_missing_imports = true
 

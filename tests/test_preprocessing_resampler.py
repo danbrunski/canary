@@ -66,6 +66,36 @@ def test_resample_wide_marks_leading_fast_nulls_as_gaps() -> None:
     assert bool(result.loc[2, gap_column("obd:RPM")]) is False
 
 
+def test_resample_wide_keeps_leading_slow_nulls_until_first_observation() -> None:
+    wide = pd.DataFrame(
+        [
+            {"session": "s1", "timestamp": _ts(0), "obd:COOLANT_TEMP": None},
+            {"session": "s1", "timestamp": _ts(2), "obd:COOLANT_TEMP": 82.0},
+            {"session": "s1", "timestamp": _ts(4), "obd:COOLANT_TEMP": None},
+        ]
+    )
+
+    result = resample_wide(wide)
+
+    assert result["obd:COOLANT_TEMP"].isna().iloc[:2].all()
+    assert result["obd:COOLANT_TEMP"].iloc[2:].tolist() == [82.0, 82.0, 82.0]
+    assert gap_column("obd:COOLANT_TEMP") not in result.columns
+
+
+def test_resample_wide_gap_threshold_is_strictly_greater_than_max_gap() -> None:
+    wide = pd.DataFrame(
+        [
+            {"session": "s1", "timestamp": _ts(0), "obd:RPM": 700.0},
+            {"session": "s1", "timestamp": _ts(3), "obd:RPM": None},
+        ]
+    )
+
+    result = resample_wide(wide, config=ResampleConfig(hz=1.0, max_gap_factor=2.0))
+
+    # Age == max_gap at t=2 is still acceptable; t=3 is the first gap.
+    assert result[gap_column("obd:RPM")].tolist() == [False, False, False, True]
+
+
 def test_resample_wide_supports_explicit_fast_channels() -> None:
     wide = pd.DataFrame([{"session": "s1", "timestamp": _ts(0), "obd:COOLANT_TEMP": 80.0}])
 

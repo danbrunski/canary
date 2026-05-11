@@ -123,9 +123,7 @@ def test_evaluate_isolation_forest_reports_overall_and_per_mode_results() -> Non
         labels=(1, -1, 1, -1, 1, 1),
     )
 
-    evaluation = evaluate_isolation_forest(
-        trained, injector.df, labels, windows=injector.windows
-    )
+    evaluation = evaluate_isolation_forest(trained, injector.df, labels, windows=injector.windows)
     report = evaluation.report
 
     assert report.model_version == "iforest-eval-test"
@@ -140,9 +138,7 @@ def test_evaluate_isolation_forest_reports_overall_and_per_mode_results() -> Non
     assert report.modes["idle"].metrics.recall == pytest.approx(0.5)
     assert report.modes["city"].metrics.false_positives == 1
     assert report.modes["city"].contamination.reason == "no_labeled_finite_anomalies"
-    assert report.modes["idle"].contamination.recommended_contamination == pytest.approx(
-        0.001
-    )
+    assert report.modes["idle"].contamination.recommended_contamination == pytest.approx(0.001)
     assert report.recommended_per_mode_contamination == {"idle": pytest.approx(0.001)}
     assert len(report.windows) == 1
 

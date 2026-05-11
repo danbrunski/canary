@@ -91,6 +91,18 @@ def test_mean_is_a_true_rolling_average_inside_window():
     assert means[5] == pytest.approx(5.0)  # (4+5+6)/3
 
 
+def test_std_matches_hand_calculated_trailing_window():
+    df = _uniform_session("s1", 5, values={"obd:RPM": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    out = compute_features(df, config=FeatureConfig(window_seconds=3))
+    stds = out[std_column("obd:RPM")]
+
+    assert math.isnan(stds.iloc[0])
+    assert stds.iloc[1] == pytest.approx(math.sqrt(0.5))  # sample std of [1, 2]
+    assert stds.iloc[2] == pytest.approx(1.0)  # sample std of [1, 2, 3]
+    assert stds.iloc[3] == pytest.approx(1.0)  # sample std of [2, 3, 4]
+    assert stds.iloc[4] == pytest.approx(1.0)  # sample std of [3, 4, 5]
+
+
 # ---------------------------------------------------------------------------
 # Rate-of-change
 # ---------------------------------------------------------------------------
