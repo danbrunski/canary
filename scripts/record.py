@@ -25,6 +25,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from src.collection.can_collector import bus_factory, make_session_dir, record
+from src.collection.obd_collector import (
+    JsonlReadingWriter,
+    ObdSpec,
+    obd_factory,
+)
 from src.config import CanaryConfig
 from src.log import configure_logging
 
@@ -65,6 +70,31 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--obd-port",
+        default=None,
+        help=(
+            "Serial device for an ELM327-class adapter (e.g. /dev/ttyUSB0). "
+            "When given, runs python-obd in parallel with the CAN recorder "
+            "and writes Mode 01 readings to <session>/pids.jsonl. Enables "
+            "Mode 22 ↔ Mode 01 cross-reference for binding derivation."
+        ),
+    )
+    parser.add_argument(
+        "--obd-pids",
+        default="RPM,COOLANT_TEMP,INTAKE_TEMP,MAF,THROTTLE_POS,ENGINE_LOAD,"
+                "CONTROL_MODULE_VOLTAGE,TIMING_ADVANCE",
+        help=(
+            "Comma-separated python-obd command names to watch. Default covers "
+            "the PIDs most useful for cross-referencing Nissan Mode 22 DIDs."
+        ),
+    )
+    parser.add_argument(
+        "--obd-baud",
+        type=int,
+        default=38400,
+        help="ELM327 baud rate (default 38400, sometimes 9600 for cheap clones).",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -96,6 +126,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _request_stop)
 
     bus = bus_factory(spec)
+    obd_conn = None
+    obd_writer = None
+    if args.obd_port:
+        pids = tuple(p.strip() for p in args.obd_pids.split(",") if p.strip())
+        obd_writer = JsonlReadingWriter(paths.root / "pids.jsonl")
+        obd_spec = ObdSpec(port=args.obd_port, baudrate=args.obd_baud, pids=pids)
+        log.info(
+            "starting parallel OBD capture",
+            extra={"port": obd_spec.port, "pids": list(pids)},
+        )
+        obd_conn = obd_factory(obd_spec, on_reading=obd_writer.write)
+        obd_conn.start()
+
     try:
         record(
             bus,
@@ -108,6 +151,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     finally:
         bus.shutdown()
+        if obd_conn is not None:
+            obd_conn.stop()
+        if obd_writer is not None:
+            obd_writer.close()
     return 0
 
 
