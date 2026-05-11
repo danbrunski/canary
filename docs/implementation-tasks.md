@@ -352,6 +352,51 @@ emission stays viable as a one-way derived artifact (4.D.2 below).
   representative captured frame, assert decoded value matches the
   recorded plausible range. (NFR-05)
 
+### 4.E — Behavior-model inference (not done)
+
+Captures the engine's installed-state expected behavior — fuel surface,
+ignition surface, VE proxy, coolant warmup curve, idle stability, etc. —
+from runtime observation rather than from ECU flash. These models then
+feed anomaly detection (deviation features) and the dashboard's
+performance panel (task 5.12). Approach, scope guardrails, and rationale
+documented in `docs/behavior-model-inference.md`. Strictly read-only —
+no Mode 23 / Mode 27 / flash dumps / writes.
+
+- [ ] **4.E.1 — Behavior-model schema.** Decide YAML structure (sibling
+  to `bindings.yaml` vs. embedded). Design the Pydantic model in
+  `src/decode/behavior_models.py`. Versioning, fit metadata, axis
+  definitions, plausible-deviation bounds.
+- [ ] **4.E.2 — 1D surface inferer.** `src/analysis/surface_1d.py` —
+  coolant warmup curves and idle-stability curves. Polynomial / LOWESS
+  + goodness-of-fit metric. Generalizes `cross_reference.py`'s linear
+  regression. (FR-05)
+- [ ] **4.E.3 — 2D surface inferer.** `src/analysis/surface_2d.py` —
+  grid-binned mean per (axis A bin × axis B bin) for fuel, AFR, VE,
+  and ignition surfaces. Per-operating-mode fits. Records R² and
+  sample count per cell so sparse coverage is visible. (FR-05)
+- [ ] **4.E.4 — Injector pulse-width DID identification.** Cross-reference
+  captured Mode 22 DIDs against Mode 01 fuel-trim variations. The DID
+  whose value correlates with `RPM × (1 + STFT/100)` is the injector PW.
+  Adds to `data/bindings.yaml`.
+- [ ] **4.E.5 — Calibration-DID scanner.** `tools/scan_constant_dids.py`
+  sweeps Mode 22 DID space, splits runtime-varying from constants,
+  prints the constants list. Verify Canable application is read-only
+  before running.
+- [ ] **4.E.6 — Behavior-model decoder integration.** Extend `src/decode/`
+  to load behavior models at startup and expose
+  `expected_value(operating_point)` + `deviation(actual, operating_point)`
+  for the runtime decode path. (FR-05)
+- [ ] **4.E.7 — Deviation features in preprocessing.** Wire the decoder's
+  expected/deviation outputs into `loader.read_session`'s output so
+  existing `compute_features` and `ZScoreScaler` see them as ordinary
+  numeric columns. No changes needed to those modules. (FR-04)
+- [ ] **4.E.8 — Refit CLI.** `scripts/refit_behavior_models.py` — pulls
+  clean sessions from the last N days, refits all surfaces, writes
+  versioned model artifacts. Manual trigger in v1; cron later. (FR-09)
+- [ ] **4.E.9 — Performance panel data feed.** Backend endpoints
+  surfacing current model versions, deviation heatmaps, warmup curves
+  vs. baseline. Consumed by dashboard task 5.12. (FR-08)
+
 ---
 
 ## Phase 5 — Dashboard, Alerts & Deployment (Overview Phase 5)
