@@ -107,7 +107,7 @@ signals:
     scale: null
     offset: null
     unit: unknown     # kPa (manifold abs pressure) or % (idle air control)
-    confidence: medium
+    confidence: high  # promoted from medium based on A/C-load response
     evidence:
       - session: 2026-05-11T152858
         method: byte_vs_tag_differential
@@ -115,9 +115,18 @@ signals:
           Inverse-throttle behavior: highest at warm idle (mean 227), drops
           during blips (125-141), zero when engine off. Recovers to idle
           baseline between revs. Classic IAC % or manifold pressure pattern.
+      - session: 2026-05-11T211240
+        method: byte_vs_tag_differential
+        finding: >
+          On engine_started window mean is 74; A/C-on drops it to 49; clutch_in
+          (engine briefly higher rpm) spikes to 243; cruising stabilizes around
+          133. A/C-load → MAP drop is the textbook engine-load signature; this
+          is almost certainly manifold absolute pressure (Mode 01 PID 0x0B).
     notes: |
-      Cross-reference with Mode 01 PID 0x0B (intake manifold absolute
-      pressure) or 0x33 (atmospheric pressure) when ELM327 arrives.
+      A/C-load drop in the second session promotes this from "vacuum or IAC"
+      to "MAP" (manifold absolute pressure) with high confidence in the
+      direction. Exact scale (raw → kPa) still pending ELM327 cross-reference
+      with Mode 01 PID 0x0B.
 
   - name: ECM_CALC_LOAD_A
     module: ECM
@@ -171,7 +180,7 @@ signals:
     scale: null
     offset: null
     unit: unknown
-    confidence: hypothesized
+    confidence: medium  # promoted from hypothesized
     evidence:
       - session: 2026-05-11T152858
         method: byte_vs_tag_differential
@@ -188,11 +197,17 @@ signals:
           and never reverted. Behavior contradicts the rev session reading;
           the earlier interpretation was likely misattributed because tags
           weren't physical-action-driven.
+      - session: 2026-05-11T211240
+        method: byte_vs_tag_differential
+        finding: >
+          Engine-off / stationary windows: ~0-9. gear_reverse: 24.6.
+          coming_to_stop (active driving): 186.8. Magnitude scales with
+          throttle activity — confirms the rev session reading.
     notes: |
-      Either a transient indicator (acceleration enrichment, throttle-rate
-      sensor, deceleration fuel cutoff flag) OR a context byte that the ECM
-      sets depending on what's polling it. Behavior across two sessions is
-      inconsistent — needs explicit experiment to pin down.
+      Two physical-action sessions agree: 0 at steady state, climbs with
+      throttle activity. The earlier screen-tagged session is now treated
+      as misattributed and ignored. Likely acceleration enrichment
+      multiplier or throttle-rate-of-change signal.
 
   # --------------------------------------------------------------------------
   # Engine state flag (cross-broadcast triplet)
@@ -422,17 +437,176 @@ signals:
     scale: null
     offset: null
     unit: unknown
-    confidence: hypothesized
+    confidence: medium  # promoted — clean gear/motion-state signature across multiple sessions
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
         finding: 6 unique parked → 256 unique driving.
+      - session: 2026-05-11T211240
+        method: byte_vs_tag_differential
+        finding: >
+          ~245 steady through engine-off / running-stationary / A/C-on /
+          parking-brake / clutch_in tags. Drops to 131 in gear_reverse, 130
+          in coming_to_stop (driving). Clean two-state-or-three-state encoding
+          tied to "is the vehicle moving."
     notes: |
-      0x002 is the lowest-priority arbitration ID we see, broadcast at
-      9.3ms — possibly a freshness/timing counter or a high-resolution
-      sensor. The full-byte variability when moving is consistent with
-      either speed-scaled signal OR a counter that increments faster
-      under load.
+      Likely vehicle motion state with a forward/reverse distinction OR
+      transmission-output-shaft-speed encoded value. Paired with 0x002:1
+      (see GEAR_OR_MOTION_002_1) — together they likely encode the
+      "vehicle moving + direction" state. Cross-reference with Mode 01
+      PID 0x0D (vehicle speed) will resolve once ELM327 arrives.
+
+  # --------------------------------------------------------------------------
+  # New findings from session 2026-05-11T211240 (physical-action-tagged drive)
+  # --------------------------------------------------------------------------
+
+  - name: GEAR_OR_MOTION_002_1
+    module: unknown      # 9.9ms hot-path; possibly ECM or TCM-equivalent
+    can_id: 0x002
+    byte_start: 1
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown  # likely enum
+    confidence: high
+    evidence:
+      - session: 2026-05-11T211240
+        method: byte_vs_tag_differential
+        finding: >
+          Cleanest enum-style transitions in the data: stays at 254 across
+          engine-off / engine_started / A/C-on / parking-brake / clutch_in
+          (every stationary state). Drops to 63 (= 0x3F) in gear_reverse,
+          then to 102 in coming_to_stop (forward driving). Three values
+          encode: stationary (254), reverse (63), forward-driving (102).
+    notes: |
+      One of the most diagnostic signals in the data so far. The values
+      themselves look bit-packed (254 = 0xFE, 63 = 0x3F, 102 = 0x66) so
+      individual bits may encode separate flags (brake-applied,
+      gear-engaged, vehicle-moving). Worth decoding bit-by-bit once
+      ground truth from a Mode 01 transmission state PID is available.
+
+  - name: AC_COMPRESSOR_STATE
+    module: HVAC        # 100ms body bus
+    can_id: 0x625
+    byte_start: 1
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown  # likely enum or % duty
+    confidence: high
+    evidence:
+      - session: 2026-05-11T211240
+        method: byte_vs_tag_differential
+        finding: >
+          0 across all engine-off and engine_started-pre-AC windows.
+          Jumps to 122.8 the instant air_condition_on tag fires; stays
+          at 128 during parking_brake_off and clutch_in (A/C still on).
+          Drops back to ~50 once driving begins (compressor cycles).
+          Exact one-event response to the A/C tag transition.
+    notes: |
+      Probably A/C compressor commanded state, duty cycle, or pressure.
+      The drop during driving suggests it's load-modulated (compressor
+      pulses on/off to manage cabin temperature). Useful for anomaly
+      detection: if this byte stays at 0 when the user expects A/C, it
+      indicates compressor or pressure-switch failure.
+
+  - name: POWER_STATE_625_3
+    module: HVAC        # paired with AC_COMPRESSOR_STATE on same CAN ID
+    can_id: 0x625
+    byte_start: 3
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown  # likely enum
+    confidence: medium
+    evidence:
+      - session: 2026-05-11T211240
+        method: byte_vs_tag_differential
+        finding: >
+          157 across engine-off windows (key on, engine off). Drops to
+          52.1 during engine_started transition, then steady at 29 across
+          all driving states. Three-state encoding aligned with engine
+          run state.
+    notes: |
+      Plausible ignition/power state byte. 157 = key-on-engine-off,
+      52 = transitional, 29 = engine-running-and-driving. Useful for
+      anomaly detection on stalled-while-driving scenarios — if this
+      byte reverts to 157 mid-drive, the engine has died.
+
+  - name: ODOMETER_ACCUMULATOR_385
+    module: unknown        # 100ms body bus, 0x385
+    can_id: 0x385
+    byte_start: 2
+    byte_length: 5  # bytes 2-6 all spike together during driving
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown  # bytes likely encode trip distance or odometer ticks
+    confidence: medium
+    evidence:
+      - session: 2026-05-11T211240
+        method: byte_vs_tag_differential
+        finding: >
+          Bytes 2-6 of 0x385 are uniformly 0 across all engine-off,
+          stationary-engine-on, and gear-reverse windows, then climb in
+          unison during coming_to_stop (active driving). Byte 6 reaches
+          225.8, byte 3 reaches 155.2, byte 5 reaches 150.0, byte 4
+          reaches 153.7, byte 2 reaches 147.7. Same pattern, multiple
+          bytes — strongly suggests a multi-byte accumulator.
+    notes: |
+      Best candidate for trip distance / accumulated odometer ticks. The
+      fact that gear_reverse shows ~0 but forward-driving shows ~150
+      suggests the accumulator only ticks during forward motion (or it
+      decrements in reverse and we're seeing the integration). Worth
+      decoding as a single multi-byte unsigned integer.
+
+  - name: MOTION_002_2
+    module: unknown
+    can_id: 0x002
+    byte_start: 2
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: medium
+    evidence:
+      - session: 2026-05-11T154648
+        method: inventory_comparison
+        finding: 2 unique parked → 114 unique driving.
+      - session: 2026-05-11T211240
+        method: byte_vs_tag_differential
+        finding: >
+          Stays low through stationary states; varies widely during
+          gear_reverse (140 unique values) and coming_to_stop driving.
+    notes: |
+      Companion to GEAR_OR_MOTION_002_1; bytes 0/1/2 of 0x002 together
+      look like a packed vehicle-state structure. Likely contains
+      transmission output shaft speed or wheel-speed-derived signal.
+
+  - name: MOTION_29E_5
+    module: unknown
+    can_id: 0x29E
+    byte_start: 5
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: medium
+    evidence:
+      - session: 2026-05-11T211240
+        method: byte_vs_tag_differential
+        finding: >
+          ~6.5 across all stationary windows. Climbs to 26.1 in
+          gear_reverse, 85.2 in coming_to_stop (driving). Magnitude
+          tracks vehicle motion intensity.
+    notes: |
+      Another motion-correlated candidate. 0x29E is on the 20ms
+      drivetrain bus. Could be transmission speed or wheel-derived.
 
 # Future sections (placeholders for organization once data arrives):
 #
