@@ -306,13 +306,25 @@ class ExplodingBus:
 
 
 class FlakyBus:
-    """A bus that raises ValueError on every Nth recv to simulate the slcan
-    parser's int('C') crash. Good frames otherwise."""
+    """A bus that raises a parameterizable exception on every Nth recv to
+    simulate slcan parser crashes. Good frames otherwise."""
 
-    def __init__(self, bad_every: int = 3, total_calls: int = 12) -> None:
+    def __init__(
+        self,
+        bad_every: int = 3,
+        total_calls: int = 12,
+        exception: BaseException | None = None,
+    ) -> None:
         self.calls = 0
         self.bad_every = bad_every
         self.total_calls = total_calls
+        # Default: the original observed mode (decimal-parse of hex DLC).
+        # Tests pin specific failure modes by passing exception=...
+        self.exception: BaseException = (
+            exception
+            if exception is not None
+            else ValueError("invalid literal for int() with base 10: 'C'")
+        )
 
     def recv(self, timeout: float) -> can.Message | None:
         self.calls += 1
@@ -321,7 +333,7 @@ class FlakyBus:
             time.sleep(timeout)
             return None
         if self.calls % self.bad_every == 0:
-            raise ValueError("invalid literal for int() with base 10: 'C'")
+            raise self.exception
         return can.Message(
             arbitration_id=0x100 + self.calls,
             data=bytes([self.calls & 0xFF] * 4),
@@ -354,6 +366,33 @@ def test_record_skips_malformed_frames_without_aborting(tmp_path: Path):
     assert manifest["frames_recorded"] == 8
     assert manifest["parse_errors"] == 4
     assert manifest["stopped_by"] == "deadline"
+
+
+def test_record_skips_index_error_from_truncated_slcan(tmp_path: Path):
+    """python-can's slcan parser raises IndexError when an extended-frame line
+    is truncated before the DLC byte (slcan.py:304). This was the second
+    observed crash mode in real driving (commit cf4bca0 only caught the
+    ValueError mode). Must be tolerated."""
+    spec = _virtual_spec("canary-test-truncated")
+    paths = make_session_dir(tmp_path, datetime.now(UTC))
+
+    result = record(
+        FlakyBus(
+            bad_every=4,
+            total_calls=12,
+            exception=IndexError("string index out of range"),
+        ),  # type: ignore[arg-type]
+        paths,
+        spec=spec,
+        vehicle=_vehicle(),
+        duration=0.3,
+        poll_interval=0.02,
+    )
+
+    # Every 4th of 12 calls is bad → 3 bad, 9 good
+    assert result.frames_recorded == 9
+    assert result.parse_errors == 3
+    assert result.stopped_by == "deadline"
 
 
 def test_record_writes_error_manifest_when_recv_raises(tmp_path: Path):

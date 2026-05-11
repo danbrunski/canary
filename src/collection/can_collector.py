@@ -205,11 +205,18 @@ def record(
                     break
                 try:
                     msg = bus.recv(timeout=poll_interval)
-                except (ValueError, can.CanError) as exc:
-                    # python-can's slcan parser raises ValueError on a corrupt
-                    # DLC byte (one bad char during a bus error / EMI hit / USB
-                    # jitter would otherwise kill a multi-hour recording). Drop
-                    # the bad frame, count it, and keep going.
+                except (ValueError, IndexError, can.CanError) as exc:
+                    # python-can's slcan parser is brittle against truncated /
+                    # corrupted frames. We've now seen two distinct failure
+                    # modes against real bus traffic:
+                    #   ValueError    — int('C') from the DLC byte parsed as
+                    #                   decimal instead of hex (slcan.py:282)
+                    #   IndexError    — extended-frame line truncated before
+                    #                   the DLC byte (slcan.py:304)
+                    # Either is a single bad line out of millions of good
+                    # ones; dropping it and continuing is strictly correct
+                    # for our listen-only use case. Genuine adapter failures
+                    # still propagate via RuntimeError / OSError.
                     parse_errors += 1
                     if parse_errors == 1 or parse_errors % 100 == 0:
                         log.warning(
