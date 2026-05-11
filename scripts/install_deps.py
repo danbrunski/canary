@@ -185,7 +185,11 @@ def install(
     project_spec = editable_project_spec(project_extras)
     run_command([str(python), "-m", "pip", "install", "-e", project_spec], dry_run=dry_run)
 
-    detected_cuda, detection_note = detect_cuda_with_nvidia_smi()
+    if torch == "auto":
+        detected_cuda, detection_note = detect_cuda_with_nvidia_smi()
+    else:
+        detected_cuda = None
+        detection_note = f"CUDA detection skipped because --torch {torch} was specified."
     selection = select_torch_wheel(torch, detected_cuda)
     print(detection_note)
     print(selection.reason)
