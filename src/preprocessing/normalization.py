@@ -89,9 +89,7 @@ class ZScoreScaler:
             # NaN can leak in when an entire column is NaN. Surface that
             # as a clean error rather than poisoning the manifest.
             if pd.isna(mean_val) or pd.isna(std_val):
-                raise ValueError(
-                    f"column {col!r} has no non-NaN values; cannot fit scaler"
-                )
+                raise ValueError(f"column {col!r} has no non-NaN values; cannot fit scaler")
             means[col] = mean_val
             stds[col] = std_val
         return cls(
@@ -110,9 +108,7 @@ class ZScoreScaler:
         """
         missing = [col for col in self.columns if col not in df.columns]
         if missing:
-            raise SchemaMismatchError(
-                f"input DataFrame missing fitted columns: {missing}"
-            )
+            raise SchemaMismatchError(f"input DataFrame missing fitted columns: {missing}")
 
         out = df.copy()
         for col in self.columns:
@@ -169,9 +165,7 @@ def _resolve_columns(
         _require_columns(df, cols)
         for col in cols:
             if not pd.api.types.is_numeric_dtype(df[col]):
-                raise TypeError(
-                    f"column {col!r} is not numeric; cannot fit z-score scaler"
-                )
+                raise TypeError(f"column {col!r} is not numeric; cannot fit z-score scaler")
         return cols
 
     skip_exact = {SESSION_COLUMN, TIMESTAMP_COLUMN, MODE_COLUMN}

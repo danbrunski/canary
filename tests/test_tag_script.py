@@ -134,9 +134,7 @@ def _write_manifest(session_dir: Path, started_at: str, ended_at: str | None = N
 def test_load_session_start_reads_manifest(tmp_path: Path):
     _write_manifest(tmp_path, "2026-05-11T15:29:00+00:00")
     start = _load_session_start(tmp_path)
-    assert start == pytest.approx(
-        datetime(2026, 5, 11, 15, 29, 0, tzinfo=UTC).timestamp()
-    )
+    assert start == pytest.approx(datetime(2026, 5, 11, 15, 29, 0, tzinfo=UTC).timestamp())
 
 
 def test_load_session_start_returns_none_when_manifest_missing(tmp_path: Path):
@@ -160,9 +158,7 @@ def test_load_session_end_reads_manifest(tmp_path: Path):
         ended_at="2026-05-11T15:35:00+00:00",
     )
     end = _load_session_end(tmp_path)
-    assert end == pytest.approx(
-        datetime(2026, 5, 11, 15, 35, 0, tzinfo=UTC).timestamp()
-    )
+    assert end == pytest.approx(datetime(2026, 5, 11, 15, 35, 0, tzinfo=UTC).timestamp())
 
 
 # ---------------------------------------------------------------------------
@@ -270,9 +266,7 @@ def test_main_writes_tag_with_explicit_timestamp(tmp_path: Path, capsys):
     tags = _read_tags(tmp_path)
     assert len(tags) == 1
     assert tags[0]["label"] == "highway_entry"
-    assert tags[0]["t"] == pytest.approx(
-        datetime(2026, 5, 11, 15, 32, 0, tzinfo=UTC).timestamp()
-    )
+    assert tags[0]["t"] == pytest.approx(datetime(2026, 5, 11, 15, 32, 0, tzinfo=UTC).timestamp())
 
 
 def test_main_writes_tag_with_offset(tmp_path: Path):
@@ -312,6 +306,7 @@ def test_main_default_still_uses_now(tmp_path: Path):
     assert "t" in tags[0]
     # 't' should be roughly recent (anything within the last hour of test exec).
     import time
+
     assert abs(tags[0]["t"] - time.time()) < 3600
 
 
@@ -350,6 +345,7 @@ def test_help_documents_backfill_flags():
         parse_args(["--help"])
     # capsys doesn't capture argparse's help; smoke the docstring instead.
     from scripts import tag as tag_module
+
     assert "--timestamp" in tag_module.__doc__
     assert "--offset" in tag_module.__doc__
 
@@ -357,6 +353,7 @@ def test_help_documents_backfill_flags():
 def test_iso_round_trip_in_help_examples():
     """Sanity: the example ISO timestamp in the docstring parses cleanly."""
     from scripts import tag as tag_module
+
     example_match = re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", tag_module.__doc__ or "")
     assert example_match is not None
     assert parse_timestamp(example_match.group(0)) > 0

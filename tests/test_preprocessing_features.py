@@ -202,7 +202,8 @@ def test_skips_non_numeric_columns():
 
 def test_explicit_value_columns_restricts_featurization():
     df = _uniform_session(
-        "s1", 5,
+        "s1",
+        5,
         values={"obd:RPM": [800.0] * 5, "obd:COOLANT": [85.0] * 5},
     )
     out = compute_features(df, value_columns=["obd:RPM"])
@@ -258,11 +259,13 @@ def test_disable_all_features_returns_input_shape():
 
 def test_empty_input_returns_empty_frame_with_feature_schema():
     """Empty frame with typed numeric columns: feature columns get appended."""
-    df = pd.DataFrame({
-        SESSION_COLUMN: pd.Series([], dtype="object"),
-        TIMESTAMP_COLUMN: pd.Series([], dtype="datetime64[us, UTC]"),
-        "obd:RPM": pd.Series([], dtype="float64"),
-    })
+    df = pd.DataFrame(
+        {
+            SESSION_COLUMN: pd.Series([], dtype="object"),
+            TIMESTAMP_COLUMN: pd.Series([], dtype="datetime64[us, UTC]"),
+            "obd:RPM": pd.Series([], dtype="float64"),
+        }
+    )
     out = compute_features(df)
     assert out.empty
     assert mean_column("obd:RPM") in out.columns
@@ -294,7 +297,8 @@ def test_output_preserves_session_and_timestamp_columns():
 
 def test_multiple_channels_each_get_independent_features():
     df = _uniform_session(
-        "s1", 10,
+        "s1",
+        10,
         values={
             "obd:RPM": [800 + 100 * i for i in range(10)],
             "obd:COOLANT": [85.0] * 10,
@@ -315,9 +319,7 @@ def test_higher_hz_resampling_keeps_window_in_seconds_consistent():
         start="2026-05-11T15:00:00Z", periods=n, freq=pd.Timedelta(seconds=0.1), tz="UTC"
     )
     values = [800 + 5.0 * i for i in range(n)]  # +5 per row at 10 Hz = +50/sec
-    df = pd.DataFrame(
-        {SESSION_COLUMN: ["s1"] * n, TIMESTAMP_COLUMN: timestamps, "obd:RPM": values}
-    )
+    df = pd.DataFrame({SESSION_COLUMN: ["s1"] * n, TIMESTAMP_COLUMN: timestamps, "obd:RPM": values})
     out = compute_features(df, config=FeatureConfig(window_seconds=2))
     roc = out[roc_column("obd:RPM")].iloc[20:]  # past warmup (2s × 10 Hz = 20 rows)
     assert roc.tolist() == pytest.approx([50.0] * len(roc))

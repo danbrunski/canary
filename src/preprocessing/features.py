@@ -176,8 +176,7 @@ def _value_columns(
         for col in cols:
             if not pd.api.types.is_numeric_dtype(df[col]):
                 raise TypeError(
-                    f"column {col!r} is not numeric; "
-                    "rolling features require numeric input"
+                    f"column {col!r} is not numeric; rolling features require numeric input"
                 )
         return cols
 

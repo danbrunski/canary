@@ -128,9 +128,7 @@ def parse_timestamp(s: str) -> float:
     try:
         dt = datetime.fromisoformat(stripped)
     except ValueError as e:
-        raise ValueError(
-            f"--timestamp {s!r}: not a Unix epoch or ISO 8601 datetime"
-        ) from e
+        raise ValueError(f"--timestamp {s!r}: not a Unix epoch or ISO 8601 datetime") from e
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return dt.timestamp()
@@ -164,16 +162,12 @@ def parse_duration(s: str) -> float:
         if len(parts) == 3:
             hours, mins, secs = parts
             return float(hours) * 3600 + float(mins) * 60 + float(secs)
-        raise ValueError(
-            f"--offset {s!r}: colon-form must be mm:ss or hh:mm:ss"
-        )
+        raise ValueError(f"--offset {s!r}: colon-form must be mm:ss or hh:mm:ss")
 
     # Suffix-form (h/m/s, any subset).
     match = _DURATION_SUFFIX_RE.match(stripped)
     if match is None or not any(match.groups()):
-        raise ValueError(
-            f"--offset {s!r}: not a plain number, hh:mm:ss, or h/m/s suffix form"
-        )
+        raise ValueError(f"--offset {s!r}: not a plain number, hh:mm:ss, or h/m/s suffix form")
     hours, mins, secs = match.groups()
     return (
         (float(hours) if hours else 0.0) * 3600
@@ -259,9 +253,7 @@ def _resolve_timestamp(args: argparse.Namespace, session_dir: Path) -> float | N
         offset_seconds = parse_duration(args.offset)
         started = _load_session_start(session_dir)
         if started is None:
-            raise ValueError(
-                f"--offset requires a manifest with started_at in {session_dir}"
-            )
+            raise ValueError(f"--offset requires a manifest with started_at in {session_dir}")
         return started + offset_seconds
     return None
 

@@ -125,9 +125,7 @@ class AnomalyInjector:
         mask = self._mask_for(s, e)
         self._df.loc[mask, channel] = value
         self._windows.append(
-            InjectionWindow(
-                channel=channel, kind="spike", start=s, end=e, parameter=value
-            )
+            InjectionWindow(channel=channel, kind="spike", start=s, end=e, parameter=value)
         )
         return self
 
@@ -200,9 +198,7 @@ class AnomalyInjector:
         self._require_channel(channel)
         mask = self._mask_for(s, e)
         self._df.loc[mask, channel] = np.nan
-        self._windows.append(
-            InjectionWindow(channel=channel, kind="dropout", start=s, end=e)
-        )
+        self._windows.append(InjectionWindow(channel=channel, kind="dropout", start=s, end=e))
         return self
 
     def stuck(
@@ -231,17 +227,13 @@ class AnomalyInjector:
         else:
             available = self._df[channel].dropna()
             if available.empty:
-                raise ValueError(
-                    f"cannot stick channel {channel!r}: no non-NaN values to freeze"
-                )
+                raise ValueError(f"cannot stick channel {channel!r}: no non-NaN values to freeze")
             stuck_value = float(available.iloc[0])
 
         mask = self._mask_for(s, e)
         self._df.loc[mask, channel] = stuck_value
         self._windows.append(
-            InjectionWindow(
-                channel=channel, kind="stuck", start=s, end=e, parameter=stuck_value
-            )
+            InjectionWindow(channel=channel, kind="stuck", start=s, end=e, parameter=stuck_value)
         )
         return self
 

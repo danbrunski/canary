@@ -155,8 +155,8 @@ def test_drift_ramps_linearly():
     coolant = inj.df["obd:COOLANT"]
     # 11 rows at 1s spacing. row 0 at t=0 fraction=0; row 5 at t=5
     # fraction=0.5; row 10 at t=10 is outside the window (end is exclusive).
-    assert coolant.iloc[0] == pytest.approx(85.0)   # +0
-    assert coolant.iloc[5] == pytest.approx(95.0)   # +10
+    assert coolant.iloc[0] == pytest.approx(85.0)  # +0
+    assert coolant.iloc[5] == pytest.approx(95.0)  # +10
     assert coolant.iloc[9] == pytest.approx(85.0 + 18.0)  # +18 (fraction 0.9)
     # Row 10 is at t=10s, end is t=10s, end is exclusive → no drift applied
     assert coolant.iloc[10] == pytest.approx(85.0)
@@ -370,8 +370,7 @@ def test_labels_empty_when_no_injections():
 def test_chaining_returns_self_and_accumulates_windows():
     inj = AnomalyInjector(_clean_frame(20))
     result = (
-        inj
-        .spike(
+        inj.spike(
             channel="obd:RPM",
             start="2026-05-11T15:00:02Z",
             end="2026-05-11T15:00:04Z",
@@ -464,4 +463,4 @@ def test_injected_spike_amplifies_under_z_score_scaling():
     anomalous_z = scaled.loc[labels, "obd:RPM"].abs()
     clean_z = scaled.loc[~labels, "obd:RPM"].abs()
     assert anomalous_z.min() > 100.0  # spike is way out of distribution
-    assert clean_z.max() < 5.0       # clean data stays bounded
+    assert clean_z.max() < 5.0  # clean data stays bounded
