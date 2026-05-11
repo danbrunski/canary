@@ -9,8 +9,12 @@ vehicle:
 
 hardware:
   elm327_port: /dev/ttyUSB0
-  can_interface: can0
-  can_bitrate: 500000
+  can:
+    # Dev (WSL + Canable in slcan firmware): interface=slcan, channel=/dev/ttyACM0
+    # Prod (Raspberry Pi + SocketCAN):       interface=socketcan, channel=can0
+    interface: slcan
+    channel: /dev/ttyACM0
+    bitrate: 500000
 
 collection:
   obd_poll_rate_hz: 1

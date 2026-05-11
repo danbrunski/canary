@@ -24,10 +24,25 @@ class VehicleConfig(_Strict):
     vin: str = ""
 
 
+class CanBusConfig(_Strict):
+    """How to construct the python-can `Bus`.
+
+    `interface` is the python-can backend identifier:
+      * `slcan`     — serial-attached adapter (Canable in slcan firmware, WSL dev)
+      * `socketcan` — kernel SocketCAN netdev (Pi production)
+      * `virtual`   — in-memory bus for tests and replay
+    `channel` is the device path (`/dev/ttyACM0`) or netdev name (`can0`).
+    `bitrate` is ignored by `virtual`.
+    """
+
+    interface: str
+    channel: str
+    bitrate: int
+
+
 class HardwareConfig(_Strict):
     elm327_port: str
-    can_interface: str
-    can_bitrate: int
+    can: CanBusConfig
 
 
 class CollectionConfig(_Strict):
