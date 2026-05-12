@@ -82,7 +82,17 @@ class IsolationForestConfig(_Strict):
 class LSTMAutoencoderConfig(_Strict):
     enabled: bool
     sequence_length: int
+    hidden_size: int = 64
+    num_layers: int = 1
     latent_dim: int
+    dropout: float = 0.0
+    batch_size: int = 64
+    learning_rate: float = 0.001
+    max_epochs: int = 100
+    validation_fraction: float = 0.2
+    early_stopping_patience: int = 10
+    min_delta: float = 0.0
+    random_state: int = 42
     threshold_k: float
 
 

@@ -293,19 +293,58 @@ Goal: deep model that catches temporal anomalies the IF misses.
   containing gap flags, or containing missing feature values. Added
   `[project.optional-dependencies].ml = ["torch>=2.0"]`. Covered by
   `tests/test_sequence_dataset.py`. (FR-06)
-- [ ] **3.2 — Model.** `src/models/lstm_autoencoder.py` — encoder LSTM →
+- [x] **3.2 — Model.** `src/models/lstm_autoencoder.py` — encoder LSTM →
   latent (`latent_dim`) → decoder LSTM. Configurable depth/hidden size.
-- [ ] **3.3 — Training loop.** Train on clean sessions only; MAE loss;
-  early stop on validation loss; checkpoint best weights; save manifest
-  (FR-06, FR-09).
-- [ ] **3.4 — Threshold calibration.** Compute per-channel and global
+  Implemented as a lazy-Torch module so non-ML imports still work without
+  the optional dependency. `LSTMAutoencoder` consumes `(B, T, F)` batches,
+  exposes `encode`, `decode`, `forward`, serializable architecture metadata,
+  and MAE reconstruction-error reductions for future threshold calibration
+  (`none`, `sample`, `timestep`, `channel`, `global`). `build_lstm_autoencoder`
+  constructs from config and supports device/dtype placement. Added
+  `hidden_size`, `num_layers`, and `dropout` to `LSTMAutoencoderConfig` and
+  `canary.example.yaml`. Covered by `tests/test_lstm_autoencoder.py`. (FR-06)
+- [x] **3.3 — Training loop.** Train on clean sessions only; MAE loss;
+  early stop on validation loss; checkpoint best weights; save manifest.
+  Implemented as `src/models/lstm_training.py`: `train_lstm_autoencoder`
+  consumes a `SequenceWindowDataset` built from clean baseline sessions,
+  performs a deterministic train/validation split, trains with Adam + MAE,
+  monitors validation loss when a validation split exists (otherwise train
+  loss), restores the best checkpoint, and returns `TrainedLSTMAutoencoder`.
+  `save_lstm_autoencoder_model` writes a portable Torch checkpoint plus
+  `<artifact>.manifest.json`; `load_lstm_autoencoder_model` restores the
+  architecture and weights. The manifest records training hash, sessions,
+  time range, feature schema, architecture, hyperparams, split sizes,
+  best/stopped epochs, early-stop status, and per-epoch losses. Added
+  `batch_size`, `learning_rate`, `max_epochs`, `validation_fraction`,
+  `early_stopping_patience`, `min_delta`, and `random_state` to
+  `LSTMAutoencoderConfig` / `canary.example.yaml`. Covered by
+  `tests/test_lstm_training.py`. (FR-06, FR-09)
+- [x] **3.4 — Threshold calibration.** Compute per-channel and global
   reconstruction-error distributions on the training set; set threshold
   to `μ + k·σ` with configurable `k` (default 3). Persist in manifest.
+  Implemented in `src/models/lstm_training.py` as
+  `calibrate_lstm_thresholds`, and run by default at the end of
+  `train_lstm_autoencoder` using `config.threshold_k`. Global thresholds
+  use per-window MAE across all timesteps/channels; per-channel thresholds
+  use per-window MAE across timesteps for each feature column. The manifest
+  `thresholds` block records `threshold_k`, calibration timestamp, training
+  data hash, window count, and count/mean/std/min/max/p50/p90/p95/p99 plus
+  `threshold` for both global and per-channel error distributions. Save/load
+  preserves the calibrated thresholds. Covered by `tests/test_lstm_training.py`.
   (FR-06)
-- [ ] **3.5 — Real-time inference loop.** `src/models/inference.py` —
+- [~] **3.5 — Real-time inference loop.** `src/models/inference.py` —
   consume a sliding window from the live preprocessing buffer, run a
-  forward pass, emit anomaly score. Run on CPU; benchmark and confirm
-  <50% Pi 5 CPU at 1 Hz. (FR-06, NFR-01)
+  forward pass, emit anomaly score. Software path implemented:
+  `LSTMSequenceBuffer` accepts model-ready feature rows, resets on session
+  changes / missing features / non-finite values, and emits a full `(T, F)`
+  window only after `sequence_length` clean rows. `LSTMInferenceEngine`
+  requires calibrated LSTM thresholds, runs CPU inference by default,
+  computes global and per-channel reconstruction errors, compares them to
+  manifest thresholds, emits anomalous channels, anomaly flag, model version,
+  window timestamps, and latency in milliseconds. Covered by
+  `tests/test_lstm_inference.py`. Remaining work before marking done:
+  run on the Pi 5 target and confirm the 1 Hz CPU budget is <50%.
+  (FR-06, NFR-01)
 - [ ] **3.6 — False-positive benchmark.** Held-out clean sessions: report
   FPR at the calibrated threshold; iterate on `k` if needed. (FR-06)
 - [x] **3.7 — Replay harness.** `scripts/replay.py` — feed a recorded

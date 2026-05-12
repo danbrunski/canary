@@ -1,5 +1,13 @@
 """Model-layer exports."""
 
+from src.models.inference import (
+    LSTM_ANOMALY_COLUMN,
+    LSTM_SCORE_COLUMN,
+    LSTM_THRESHOLD_COLUMN,
+    LSTMInferenceEngine,
+    LSTMInferenceResult,
+    LSTMSequenceBuffer,
+)
 from src.models.isolation_forest import (
     LABEL_COLUMN,
     MISSING_FEATURES_COLUMN,
@@ -26,6 +34,27 @@ from src.models.isolation_forest_evaluation import (
     evaluate_isolation_forest,
     recommend_contamination,
     score_distribution,
+)
+from src.models.lstm_autoencoder import (
+    LSTMAutoencoder,
+    LSTMAutoencoderArchitecture,
+    LSTMAutoencoderConfigLike,
+    MissingLSTMAutoencoderDependencyError,
+    ReconstructionReduction,
+    build_lstm_autoencoder,
+)
+from src.models.lstm_training import (
+    EpochLoss,
+    LSTMAutoencoderManifest,
+    LSTMAutoencoderTrainingConfigLike,
+    LSTMThresholdCalibration,
+    ReconstructionErrorDistribution,
+    TrainedLSTMAutoencoder,
+    calibrate_lstm_thresholds,
+    default_lstm_manifest_path,
+    load_lstm_autoencoder_model,
+    save_lstm_autoencoder_model,
+    train_lstm_autoencoder,
 )
 from src.models.sequence_dataset import (
     DEFAULT_SEQUENCE_STRIDE,
@@ -63,6 +92,29 @@ __all__ = [
     "evaluate_isolation_forest",
     "recommend_contamination",
     "score_distribution",
+    "LSTM_ANOMALY_COLUMN",
+    "LSTM_SCORE_COLUMN",
+    "LSTM_THRESHOLD_COLUMN",
+    "LSTMInferenceEngine",
+    "LSTMInferenceResult",
+    "LSTMSequenceBuffer",
+    "LSTMAutoencoder",
+    "LSTMAutoencoderArchitecture",
+    "LSTMAutoencoderConfigLike",
+    "MissingLSTMAutoencoderDependencyError",
+    "ReconstructionReduction",
+    "build_lstm_autoencoder",
+    "EpochLoss",
+    "LSTMAutoencoderManifest",
+    "LSTMAutoencoderTrainingConfigLike",
+    "LSTMThresholdCalibration",
+    "ReconstructionErrorDistribution",
+    "TrainedLSTMAutoencoder",
+    "calibrate_lstm_thresholds",
+    "default_lstm_manifest_path",
+    "load_lstm_autoencoder_model",
+    "save_lstm_autoencoder_model",
+    "train_lstm_autoencoder",
     "DEFAULT_SEQUENCE_STRIDE",
     "MissingSequenceDependencyError",
     "SequenceWindow",

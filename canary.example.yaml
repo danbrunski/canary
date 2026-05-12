@@ -51,7 +51,17 @@ models:
   lstm_autoencoder:
     enabled: true
     sequence_length: 30
+    hidden_size: 64
+    num_layers: 1
     latent_dim: 32
+    dropout: 0.0
+    batch_size: 64
+    learning_rate: 0.001
+    max_epochs: 100
+    validation_fraction: 0.2
+    early_stopping_patience: 10
+    min_delta: 0.0
+    random_state: 42
     threshold_k: 3.0
 
 dashboard:
