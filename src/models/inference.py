@@ -81,9 +81,7 @@ class LSTMSequenceBuffer:
         self.timestamp_column = timestamp_column
         self.session_column = session_column
         self.dtype = dtype
-        self._values: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(
-            maxlen=sequence_length
-        )
+        self._values: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(maxlen=sequence_length)
         self._metadata: deque[tuple[str, str]] = deque(maxlen=sequence_length)
         self._session: str | None = None
 

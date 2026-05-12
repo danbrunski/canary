@@ -153,8 +153,7 @@ class LSTMAutoencoder(_module_base()):  # type: ignore[misc]
             raise ValueError("latent tensor must have shape (batch, latent_dim)")
         if int(latent.shape[-1]) != self.latent_dim:
             raise ValueError(
-                f"latent tensor has {int(latent.shape[-1])} features; "
-                f"expected {self.latent_dim}"
+                f"latent tensor has {int(latent.shape[-1])} features; expected {self.latent_dim}"
             )
 
         decoded_seed = self.from_latent(latent)

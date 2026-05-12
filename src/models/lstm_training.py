@@ -497,9 +497,7 @@ def load_lstm_autoencoder_model(
     torch = _torch_module()
     payload = torch.load(artifact_path, map_location=device, weights_only=False)
     if int(payload["artifact_format_version"]) != ARTIFACT_FORMAT_VERSION:
-        raise ValueError(
-            f"unsupported LSTM artifact format {payload['artifact_format_version']!r}"
-        )
+        raise ValueError(f"unsupported LSTM artifact format {payload['artifact_format_version']!r}")
     if str(payload["model_type"]) != MODEL_TYPE:
         raise ValueError(f"unexpected model type {payload['model_type']!r}")
 
