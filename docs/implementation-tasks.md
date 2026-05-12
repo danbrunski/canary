@@ -345,8 +345,27 @@ Goal: deep model that catches temporal anomalies the IF misses.
   `tests/test_lstm_inference.py`. Remaining work before marking done:
   run on the Pi 5 target and confirm the 1 Hz CPU budget is <50%.
   (FR-06, NFR-01)
-- [ ] **3.6 — False-positive benchmark.** Held-out clean sessions: report
-  FPR at the calibrated threshold; iterate on `k` if needed. (FR-06)
+- [x] **3.6 — False-positive benchmark.** `src/models/false_positive_benchmark.py`
+  + `scripts/fp_benchmark.py` — feed held-out *clean* Parquet sessions through
+  the same `from_sessions` preprocessing the LSTM was trained on, score every
+  sliding window, and report: the false-positive rate at the manifest's
+  calibrated threshold (FPR = flagged / total — every flag on clean data is by
+  definition a false positive), the implied `alerts_per_hour` vs. the v1
+  done-definition budget (≤ 1 alert / hour, derived from the wall-clock span of
+  the held-out windows), a sweep of `k` multipliers (default `1 2 3 4 5 6 8 10`
+  plus the calibrated `k`, each recomputing `threshold = mean + k·σ` from the
+  *training* error distribution stored in the manifest so a tighter/looser
+  threshold can be picked without retraining — the "iterate on `k`" feedback),
+  plus per-channel exceedance counts and per-session FPR/alert rates. The
+  combined flag mirrors live inference (`global error > global threshold` OR any
+  channel over its threshold). `benchmark_false_positives` validates the
+  held-out dataset against the trained model (calibrated thresholds present,
+  matching feature columns, matching sequence length) and returns a JSON-safe
+  `FalsePositiveBenchmarkReport`. Covered by
+  `tests/test_false_positive_benchmark.py` (loose/tight thresholds,
+  k-sweep monotonicity, JSON round-trip, the four validation errors, and an
+  end-to-end Parquet → train → save → benchmark CLI run). Running it on real
+  drives is pending more held-out clean captures (see 1.16). (FR-06)
 - [x] **3.7 — Replay harness.** `scripts/replay.py` — feed a recorded
   Parquet session through preprocessing + inference end-to-end, no
   hardware needed. Used in CI. Implemented as an importable CLI that loads
