@@ -42,105 +42,28 @@ from src.models.isolation_forest import (
     fit_isolation_forest,
 )
 from src.preprocessing import (
-    MODE_COLUMN,
     AnomalyInjector,
     FeatureConfig,
     ResampleConfig,
-    SegmenterConfig,
     compute_features,
     decode_can_rows,
     discover_sessions,
     read_session,
     resample_wide,
-    segment_operating_modes,
     to_wide,
+)
+from src.preprocessing.feature_pipeline import (
+    DEFAULT_BINDINGS_PATH,
+    build_feature_frame,
+)
+from src.preprocessing.feature_pipeline import (
+    segment_or_constant as _segment_or_constant,
+)
+from src.preprocessing.feature_pipeline import (
+    trainable_feature_columns as _trainable_feature_columns,
 )
 
 log = logging.getLogger(__name__)
-
-DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
-# When no OBD PIDs are present we can't run the threshold segmenter; everything
-# becomes one mode. The Isolation Forest then fits a single global model, which
-# is the right behavior — per-mode models materialize once OBD data exists.
-ALL_MODE = "all"
-
-
-def build_feature_frame(
-    session_dirs: Sequence[Path],
-    config: CanaryConfig,
-    *,
-    bindings_path: Path = DEFAULT_BINDINGS_PATH,
-) -> pd.DataFrame:
-    """Run the full preprocessing pipeline over `session_dirs` into a feature frame.
-
-    read_session → decode_can_rows (if bindings present) → to_wide(coerce_numeric)
-    → resample_wide → operating-mode segment (or constant mode) → compute_features.
-    """
-    bindings = load_bindings(bindings_path) if bindings_path.exists() else None
-
-    long_parts: list[pd.DataFrame] = []
-    for session_dir in session_dirs:
-        long = read_session(session_dir)
-        if bindings is not None:
-            long = decode_can_rows(long, bindings)
-        long_parts.append(long)
-    long_frame = pd.concat(long_parts, ignore_index=True)
-
-    wide = to_wide(long_frame, coerce_numeric=True)
-    resampled = resample_wide(wide, config=ResampleConfig(hz=config.preprocessing.resample_hz))
-
-    resampled = _segment_or_constant(resampled, config)
-
-    return compute_features(
-        resampled,
-        config=FeatureConfig(window_seconds=config.preprocessing.rolling_window_seconds),
-    )
-
-
-def _segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> pd.DataFrame:
-    """Apply the operating-mode segmenter when its inputs exist, else add a
-    constant `operating_mode = "all"` column so the IF fits a single model."""
-    seg_cfg = SegmenterConfig(
-        signal_columns={
-            "rpm": "obd:RPM",
-            "speed": "obd:SPEED",
-            "throttle": "obd:THROTTLE_POS",
-        }
-    )
-    have_inputs = all(col in resampled.columns for col in seg_cfg.signal_columns.values())
-    if have_inputs:
-        return segment_operating_modes(
-            resampled, config.preprocessing.operating_modes, config=seg_cfg
-        )
-    out = resampled.copy()
-    out[MODE_COLUMN] = ALL_MODE
-    log.info(
-        "no OBD PID columns present; using a single operating mode",
-        extra={"mode": ALL_MODE},
-    )
-    return out
-
-
-def _trainable_feature_columns(features: pd.DataFrame) -> list[str]:
-    """Numeric feature columns with at least one non-NaN value.
-
-    Excludes structural columns and gap flags; keeps decoded:* and OBD
-    channels plus their __mean/__std/__roc derivatives. Drops all-NaN
-    columns (signals whose CAN ID never appeared this session) so the
-    z-score scaler doesn't choke.
-    """
-    skip_exact = {"session", "timestamp", MODE_COLUMN}
-    cols: list[str] = []
-    for raw in features.columns:
-        col = str(raw)
-        if col in skip_exact or col.endswith("__gap"):
-            continue
-        if not pd.api.types.is_numeric_dtype(features[col]):
-            continue
-        if not bool(features[col].notna().any()):
-            continue
-        cols.append(col)
-    return cols
 
 
 def train(

@@ -11,7 +11,6 @@ import pyarrow.parquet as pq
 import pytest
 
 from scripts.train_anomaly_model import (
-    ALL_MODE,
     _segment_or_constant,
     _trainable_feature_columns,
     build_feature_frame,
@@ -20,6 +19,7 @@ from scripts.train_anomaly_model import (
 )
 from src.config import CanaryConfig
 from src.preprocessing import MODE_COLUMN
+from src.preprocessing.feature_pipeline import ALL_MODE
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
 
 # ---------------------------------------------------------------------------

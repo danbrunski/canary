@@ -318,7 +318,17 @@ Goal: deep model that catches temporal anomalies the IF misses.
   `batch_size`, `learning_rate`, `max_epochs`, `validation_fraction`,
   `early_stopping_patience`, `min_delta`, and `random_state` to
   `LSTMAutoencoderConfig` / `canary.example.yaml`. Covered by
-  `tests/test_lstm_training.py`. (FR-06, FR-09)
+  `tests/test_lstm_training.py`. The one-command path from recorded
+  sessions to a calibrated checkpoint is `scripts/train_lstm.py` (the LSTM
+  counterpart to `scripts/train_anomaly_model.py`): it runs the shared
+  feature pipeline (`src/preprocessing/feature_pipeline.py` — read session →
+  decode CAN via `bindings.yaml` → wide → resample → operating-mode segment →
+  rolling features, factored out of the IF trainer so both behave
+  identically), builds sliding windows, trains + calibrates, writes
+  `model.pt` + `model.manifest.json`, and `--evaluate <session>…` runs the
+  Task 3.6 false-positive benchmark on held-out clean sessions (auto-excluded
+  from the training set when sessions are discovered). Covered by
+  `tests/test_train_lstm.py`. (FR-06, FR-09)
 - [x] **3.4 — Threshold calibration.** Compute per-channel and global
   reconstruction-error distributions on the training set; set threshold
   to `μ + k·σ` with configurable `k` (default 3). Persist in manifest.
@@ -364,8 +374,9 @@ Goal: deep model that catches temporal anomalies the IF misses.
   `FalsePositiveBenchmarkReport`. Covered by
   `tests/test_false_positive_benchmark.py` (loose/tight thresholds,
   k-sweep monotonicity, JSON round-trip, the four validation errors, and an
-  end-to-end Parquet → train → save → benchmark CLI run). Running it on real
-  drives is pending more held-out clean captures (see 1.16). (FR-06)
+  end-to-end Parquet → train → save → benchmark CLI run). Wired into
+  `scripts/train_lstm.py --evaluate`; running it on real drives is pending more
+  held-out clean captures (see 1.16). (FR-06)
 - [x] **3.7 — Replay harness.** `scripts/replay.py` — feed a recorded
   Parquet session through preprocessing + inference end-to-end, no
   hardware needed. Used in CI. Implemented as an importable CLI that loads
