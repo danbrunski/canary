@@ -1,0 +1,14 @@
+{
+  "name": "CANary",
+  "short_name": "CANary",
+  "description": "Vehicle anomaly detection — live PIDs, anomalies, model health.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#101418",
+  "theme_color": "#101418",
+  "icons": [
+    { "src": "/canary.svg", "type": "image/svg+xml", "sizes": "any" }
+  ]
+}

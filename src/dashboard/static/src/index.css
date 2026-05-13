@@ -1,0 +1,429 @@
+/* CANary dashboard styles.
+ *
+ * Landscape-first, high-contrast palette tuned for daylight visibility on a
+ * phone mirrored to a head unit. Two-tier color: yellow accent for "live /
+ * primary", green for "ok", amber for "warning", red for "anomaly / critical".
+ * Background is a near-black so OLED screens minimize glare and burn-in.
+ *
+ * Layout is a CSS grid; on portrait it falls back to a single column so a
+ * phone-on-its-side still renders cleanly.
+ */
+
+:root {
+  --bg: #101418;
+  --bg-elev: #181d22;
+  --bg-elev-2: #1f262d;
+  --fg: #e8eef3;
+  --fg-dim: #94a3ad;
+  --accent: #ffb84a;
+  --ok: #7cffcb;
+  --warn: #ffd166;
+  --bad: #ff6b6b;
+  --border: #232c34;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  min-height: 100vh;
+  font-size: 15px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+a { color: var(--accent); }
+
+/* ---------------------------------------------------------------------------
+ * Shell + header
+ * --------------------------------------------------------------------------- */
+
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  font-size: 1.05rem;
+}
+
+.connections {
+  display: flex;
+  gap: 0.75rem;
+  margin-left: auto;
+  font-size: 0.82rem;
+  color: var(--fg-dim);
+}
+
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.conn .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+}
+
+.conn-open .dot { background: var(--ok); }
+.conn-connecting .dot { background: var(--warn); }
+.conn-error .dot,
+.conn-closed .dot { background: var(--bad); }
+
+.mode-toggle {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.82rem;
+}
+
+.mode-toggle.parked {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------------------------
+ * Operating-mode badge
+ * --------------------------------------------------------------------------- */
+
+.mode-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.15rem 0.85rem;
+  border-radius: 8px;
+  background: var(--bg-elev-2);
+  min-width: 6rem;
+}
+
+.mode-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--fg-dim);
+}
+
+.mode-value {
+  font-size: 1rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.mode-idle .mode-value { color: var(--ok); }
+.mode-city .mode-value,
+.mode-highway .mode-value { color: var(--accent); }
+.mode-wot .mode-value { color: var(--warn); }
+.mode-unknown .mode-value { color: var(--fg-dim); }
+
+/* ---------------------------------------------------------------------------
+ * Panel grid
+ * --------------------------------------------------------------------------- */
+
+main { padding: 1rem; flex: 1; }
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  grid-template-rows: auto auto auto;
+  gap: 1rem;
+}
+
+@media (max-width: 900px) {
+  .panel-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+}
+
+.panel header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.6rem;
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg);
+}
+
+.panel .count { font-size: 0.78rem; color: var(--fg-dim); }
+
+.placeholder {
+  color: var(--fg-dim);
+  font-style: italic;
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Telemetry panel
+ * --------------------------------------------------------------------------- */
+
+.telemetry-panel { grid-column: 1 / 3; grid-row: 1; }
+
+.primary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.6rem;
+}
+
+.channel-card {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+.channel-card.large {
+  padding: 0.7rem 0.9rem;
+}
+
+.channel-key {
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  margin-bottom: 0.15rem;
+}
+
+.channel-value {
+  font-size: 1.45rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.channel-card.large .channel-value {
+  font-size: 1.85rem;
+}
+
+.channel-unit {
+  font-size: 0.7rem;
+  color: var(--fg-dim);
+  margin-left: 0.35rem;
+  font-weight: 400;
+}
+
+.more-channels {
+  margin-top: 0.85rem;
+}
+
+.more-channels summary {
+  font-size: 0.85rem;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.secondary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.secondary-grid .channel-card { font-size: 0.85rem; padding: 0.35rem 0.55rem; }
+.secondary-grid .channel-value { font-size: 1rem; }
+
+/* ---------------------------------------------------------------------------
+ * Anomaly panel
+ * --------------------------------------------------------------------------- */
+
+.anomaly-panel { grid-column: 1 / 3; grid-row: 2; }
+
+.filters {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.78rem;
+  color: var(--fg-dim);
+}
+
+.filters select {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+  font: inherit;
+}
+
+.score-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.score-label {
+  font-size: 0.7rem;
+  color: var(--fg-dim);
+}
+
+.event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.event-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.event-list li:last-child { border-bottom: 0; }
+
+.event-list time {
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.source {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  background: var(--bg-elev-2);
+}
+
+.source.isolation_forest { color: var(--accent); }
+.source.lstm_autoencoder { color: var(--ok); }
+
+.event-list .mode {
+  font-size: 0.75rem;
+  color: var(--fg-dim);
+}
+
+.event-list .score { color: var(--bad); font-variant-numeric: tabular-nums; }
+.event-list .threshold { color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+.event-list .channels { color: var(--fg-dim); font-size: 0.78rem; }
+
+.badge.dropout {
+  background: var(--warn);
+  color: var(--bg);
+  padding: 0.05rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+ * Model panel
+ * --------------------------------------------------------------------------- */
+
+.model-panel dl, .system-panel dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.model-row, .system-panel dl > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.88rem;
+}
+
+.model-row dt, .system-panel dt {
+  color: var(--fg-dim);
+}
+
+.model-row dd, .system-panel dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.counters {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  font-size: 0.78rem;
+  color: var(--fg-dim);
+}
+
+.counters b { color: var(--fg); font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------------------
+ * System panel
+ * --------------------------------------------------------------------------- */
+
+.system-panel .stale { color: var(--bad); }
+.system-panel .dim { color: var(--fg-dim); font-size: 0.78rem; }
+.system-panel .error {
+  color: var(--bad);
+  background: rgba(255, 107, 107, 0.12);
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  margin-bottom: 0.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+ * TPMS + diagnostics (mostly placeholders for now)
+ * --------------------------------------------------------------------------- */
+
+.tpms-panel, .diagnostics-panel {
+  grid-column: span 1;
+}
+
+.diagnostics-panel { background: rgba(255, 184, 74, 0.06); }
+.diagnostics-panel header .warning {
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.diagnostics-panel .placeholder code {
+  background: var(--bg-elev-2);
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+}

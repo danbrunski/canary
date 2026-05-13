@@ -883,32 +883,74 @@ no Mode 23 / Mode 27 / flash dumps / writes.
 
 ### 5C. Dashboard frontend (FR-08)
 
-- [ ] **5.6 — Display strategy.** Adopt the approach in
-  `docs/dashboard-display-strategy.md`: full React/TypeScript PWA served
-  by the Pi for phone/head-unit mirroring; optional native Android Auto
-  companion later for constrained status/alert views only.
-- [ ] **5.7 — Stack decision.** Use React + TypeScript + Vite unless a
-  proof-of-concept shows a simpler stack wins. Document build/deploy
-  details in `src/dashboard/static/README.md`. Single-page app, built
-  artifacts checked in or built at deploy.
-- [ ] **5.8 — PWA + head-unit mirroring mode.** Fullscreen landscape UI
-  sized for a phone mirrored to the Kenwood receiver. Show connection
-  state, stale-data warnings, and a parked/maintenance-mode gate for any
-  future diagnostic controls.
-- [ ] **5.9 — Live PID panel.** Subscribe to `/ws/telemetry`, render a
-  grid of current values + sparklines for last 60 s.
-- [ ] **5.10 — Anomaly timeline.** Anomaly score chart; recent-events list
-  with filter by source and mode.
-- [ ] **5.11 — Operating-mode indicator.** Current mode badge + recent
-  transitions.
-- [ ] **5.12 — Model performance panel.** Show active model version,
-  inference latency, thresholds, anomaly score distribution, and LSTM
-  reconstruction error once the model layer exists.
-- [ ] **5.13 — TPMS panel.** Once TPMS signals are decoded, show per-tire
-  pressure/temperature/status and stale sensor warnings.
-- [ ] **5.14 — Parked diagnostics panel.** Maintenance-only UI for
-  reverse-engineered proprietary protocol reads and any future control
-  actions. Requires explicit confirmations and backend enforcement.
+- [x] **5.6 — Display strategy.** `docs/dashboard-display-strategy.md`
+  — full React/TypeScript PWA served by the Pi for phone/head-unit
+  mirroring; native Android Auto deferred as a constrained companion.
+- [x] **5.7 — Stack: React + TypeScript + Vite.** Hand-scaffolded under
+  `src/dashboard/static/` (no `npm create vite` — every dep we pull is
+  declared in `package.json`). `tsconfig.app.json` is strict
+  (noUnusedLocals, noUnusedParameters, noFallthroughCasesInSwitch). Build
+  via `npm run build` → `dist/` (155 KB JS, 5.8 KB CSS, 50 KB gzipped);
+  the FastAPI backend auto-mounts `dist/` on `/` when present.
+  `src/dashboard/static/README.md` documents build/dev/typecheck flow.
+- [x] **5.8 — PWA + head-unit mirroring mode.** `public/manifest.webmanifest`
+  declares fullscreen + landscape + theme color; iOS web-app meta tags in
+  `index.html`. Landscape-first CSS grid layout with a portrait fallback;
+  dark high-contrast palette tuned for daylight visibility. `DashboardShell`
+  shows connection state per stream (two colored dots: telemetry +
+  anomalies), a current-mode badge, and a `→ parked` / `→ driving` toggle
+  that gates the `DiagnosticsPanel`. The `SystemPanel` surfaces a stale-data
+  warning (newest channel timestamp > 10 s ago).
+- [x] **5.9 — Live PID panel.** `panels/TelemetryPanel.tsx` +
+  `hooks/useTelemetryStream.ts`. The hook seeds from `GET /telemetry/latest`
+  so values render immediately, then subscribes to `/ws/telemetry` and
+  maintains per-channel ring buffers (120 samples ≈ 2 min at 1 Hz). Panel
+  renders a primary grid (RPM, SPEED, COOLANT_TEMP, MAF, THROTTLE_POS,
+  voltage) with canvas-based sparklines (`Sparkline.tsx`, no chart-lib
+  dep), and a collapsible secondary grid for everything else the
+  collectors produce.
+- [x] **5.10 — Anomaly timeline.** `panels/AnomalyPanel.tsx` +
+  `hooks/useAnomalyStream.ts`. Seeds from `GET /anomalies` (last day's
+  JSONL), subscribes to `/ws/anomalies`, dedupes by
+  `(timestamp, source, model_version)`. Renders a score sparkline (last 60
+  events) + a filterable event list with per-event timestamp, source
+  badge (colored per detector), operating mode, score/threshold,
+  affected-channel preview, and a "missing features" badge for dropout
+  events.
+- [x] **5.11 — Operating-mode indicator.** `panels/OperatingModeIndicator.tsx`
+  reads the most recent anomaly event's `operating_mode` field as the
+  freshest cue the daemon publishes (avoids needing a second producer
+  for live mode). Colored by mode (idle = green, city/highway = accent,
+  WOT = warn).
+- [x] **5.12 — Model performance panel.** `panels/ModelPanel.tsx` reads
+  `/status` for `model_versions` (live values from ModelManager) + the new
+  `emitter_counters` (emitted / suppressed_not_anomaly / suppressed_dedupe);
+  derives mean LSTM inference latency from the rolling event stream's
+  `latency_ms` field. Behavior-model deviation heatmaps (4.E.9) will land
+  here next.
+- [x] **5.13 — TPMS panel (placeholder).** `panels/TpmsPanel.tsx` reads
+  `decoded:TPMS_FL_PRESSURE` etc. from the channel map; when those
+  bindings haven't been pinned (current state), surfaces "TPMS bindings
+  not yet pinned — see `data/bindings.yaml`" instead of showing fake
+  zeros. Once the bindings land, the panel takes over with no
+  shell-level change.
+- [x] **5.14 — Parked diagnostics panel (gate).** `panels/DiagnosticsPanel.tsx`
+  is the parked-mode-only surface for proprietary protocol reads + any
+  future control actions. Driving mode hides the panel entirely (not
+  "shows it disabled") so a mis-tap can't land here. The frontend gate
+  is for the operator's ergonomics; the backend must enforce parked
+  mode separately when controls are added (per
+  `docs/dashboard-display-strategy.md`'s safety boundary). The panel is
+  currently a stub that documents the rule — the actual tools land as
+  they're built.
+
+Backend wire-up for the SPA: `create_app(..., static_dir=, enable_dev_cors=)`
+mounts the built React bundle on `/` (404s cleanly until `npm run build`
+runs — API routes still work without the SPA) and optionally enables CORS
+for `http://localhost:5173` so `npm run dev` can talk to the backend
+directly. `scripts/serve_dashboard.py` gets matching `--static-dir` and
+`--dev-cors` flags. `tests/test_dashboard_api.py` covers static-mount
+present / absent and the CORS dev-origin allow.
 
 ### 5D. Model management (FR-09)
 

@@ -42,6 +42,8 @@ from typing import Any
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import read_events_dir
@@ -51,6 +53,11 @@ from src.preprocessing.loader import (
     PARQUET_PATTERN,
     discover_sessions,
 )
+
+#: Where the React SPA's built artifacts land — relative to repo root in dev,
+#: but the daemon resolves it via ``Path(__file__).parent / "static" / "dist"``
+#: which works regardless of cwd.
+DEFAULT_STATIC_DIR = Path(__file__).resolve().parent / "static" / "dist"
 
 log = logging.getLogger(__name__)
 
@@ -256,6 +263,8 @@ def create_app(
     telemetry_broadcaster: Broadcaster | None = None,
     anomalies_broadcaster: Broadcaster | None = None,
     emitter: AnomalyEventEmitter | None = None,
+    static_dir: Path | None = None,
+    enable_dev_cors: bool = False,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -266,6 +275,18 @@ def create_app(
     daemon isn't producing yet).
     """
     app = FastAPI(title="CANary", version=_canary_version())
+    if enable_dev_cors:
+        # `npm run dev` serves the SPA on :5173 and proxies the backend.
+        # Add CORS so a developer can also hit the backend directly from
+        # the browser without going through the Vite proxy. Production
+        # serves the SPA from the same origin and doesn't need CORS.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     telemetry_bus = telemetry_broadcaster or Broadcaster()
     anomalies_bus = anomalies_broadcaster or Broadcaster()
     # Stash them on app.state so producer threads / app extensions can reach
@@ -303,6 +324,20 @@ def create_app(
     @app.websocket("/ws/anomalies")
     async def ws_anomalies(websocket: WebSocket) -> None:
         await _run_websocket(websocket, anomalies_bus)
+
+    # Serve the built SPA from /, with SPA fall-through on 404 (the React
+    # router could later own client-side paths like /diagnostics).
+    # The mount is added last so the API routes above always win when their
+    # paths overlap. ``html=True`` makes ``index.html`` the fallback for
+    # any unmatched path, exactly what an SPA wants.
+    chosen_static = static_dir if static_dir is not None else DEFAULT_STATIC_DIR
+    if chosen_static.exists():
+        app.mount("/", StaticFiles(directory=str(chosen_static), html=True), name="spa")
+    else:
+        log.info(
+            "static dir not built; SPA not mounted",
+            extra={"static_dir": str(chosen_static)},
+        )
 
     return app
 

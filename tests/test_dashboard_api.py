@@ -148,6 +148,42 @@ def test_build_status_surfaces_emitter_counters(config: CanaryConfig, tmp_path: 
     }
 
 
+def test_create_app_mounts_static_when_dist_exists(
+    config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
+) -> None:
+    """When the SPA has been built, GET / returns the index.html."""
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text("<!doctype html><title>canary-test</title>")
+    app = create_app(config, anomalies_dir=anomalies_dir, static_dir=static_dir)
+    client = TestClient(app)
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "canary-test" in response.text
+
+
+def test_create_app_skips_static_when_dist_missing(
+    config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
+) -> None:
+    """Until `npm run build`, /  returns 404 — the API routes still work."""
+    app = create_app(config, anomalies_dir=anomalies_dir, static_dir=tmp_path / "absent")
+    client = TestClient(app)
+    response = client.get("/")
+    assert response.status_code == 404
+    # /status still works
+    assert client.get("/status").status_code == 200
+
+
+def test_create_app_dev_cors_allows_vite_origin(config: CanaryConfig, anomalies_dir: Path) -> None:
+    """``enable_dev_cors=True`` permits the Vite dev origin so the frontend
+    can call the backend directly from localhost:5173."""
+    app = create_app(config, anomalies_dir=anomalies_dir, enable_dev_cors=True)
+    client = TestClient(app)
+    response = client.get("/status", headers={"Origin": "http://localhost:5173"})
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
 def test_status_endpoint_includes_emitter_counters(config: CanaryConfig, tmp_path: Path) -> None:
     """End-to-end through TestClient: the /status response carries the counters dict."""
     from src.alerts.emitter import AnomalyEventEmitter

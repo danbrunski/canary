@@ -77,6 +77,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Bind port. Default: canary.yaml's dashboard.port.",
     )
     parser.add_argument(
+        "--static-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Path to the React SPA's built `dist/`. Default: "
+            "src/dashboard/static/dist beside the backend. Pass an empty "
+            "string to disable static serving entirely (API-only mode)."
+        ),
+    )
+    parser.add_argument(
+        "--dev-cors",
+        action="store_true",
+        help=(
+            "Allow CORS from http://localhost:5173 (the Vite dev origin) so "
+            "the frontend's `npm run dev` can call the backend directly. "
+            "Don't enable in production."
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -127,6 +146,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         config,
         anomalies_dir=args.anomalies_dir,
         models_dir=args.models_dir,
+        static_dir=args.static_dir,
+        enable_dev_cors=args.dev_cors,
     )
 
     log.info(
