@@ -751,6 +751,25 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   free-form `detail`. Adapter constructors `from_lstm_result(...)` and
   `from_isolation_forest_row(...)` keep the per-detector mapping in one
   place. Covered by `tests/test_alerts.py`.
+- [x] **5.2a — Inference → AnomalyEventLogger bridge.** `src/alerts/emitter.py` —
+  `AnomalyEventEmitter` turns per-detector results into `AnomalyEvent`
+  records via the existing `from_lstm_result` / `from_isolation_forest_row`
+  adapters and persists them through `AnomalyEventLogger`. Owns
+  emission policy (LSTM: `result.is_anomaly`; IF: label==-1 OR
+  `isolation_forest_missing_features`), dedupe (per-(`source`,`model_version`)
+  minimum-gap, default 1s, configurable to 0 for replay), and
+  observable `EmitterCounters` (emitted / suppressed_not_anomaly /
+  suppressed_dedupe — surfaceable from /status). Dropout events are
+  tagged with `detail["missing_features"] = True` so the dashboard can
+  render them differently from "real" outliers. Plus
+  `IsolationForestInferenceEngine.observe(row)` — streaming wrapper
+  around `TrainedIsolationForest.score` so the daemon row-processing
+  loop is symmetric with `LSTMInferenceEngine.observe`. Pure wiring; no
+  torch/sklearn imports at module top so the emitter is cheap to
+  construct. Covered by `tests/test_alerts_emitter.py` (16 tests:
+  LSTM emit/suppress/dedupe + window math; IF outlier / inlier /
+  missing-features / dropout-with-NA-label; counter reset; bad
+  timestamp; Z-suffix timestamps; engine end-to-end). (FR-07)
 - [x] **5.2 — Event logger.** `src/alerts/event_logger.py` —
   `AnomalyEventLogger`: append-only, flushed per write (crash-safe), daily
   rotation via dated filenames (`anomalies-YYYY-MM-DD.jsonl` under the
@@ -787,11 +806,39 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   at the uvicorn entry point. Added `httpx>=0.27` to dev deps for the
   FastAPI TestClient. Covered by `tests/test_dashboard_api.py` (19
   tests: unit helpers + full route surface with `TestClient`).
-- [ ] **5.4 — WebSocket stream.** `/ws/telemetry` pushes live PID values;
-  `/ws/anomalies` pushes anomaly events as they fire.
-- [ ] **5.5 — Bind to LAN only by default.** Honor `host`/`port` from
-  config; default `0.0.0.0:8000` but document that the Pi should be
-  firewalled / hotspot-only. No auth in v1; document that. (NFR-06)
+- [x] **5.4 — WebSocket stream.** `src/dashboard/broadcast.py` (in-memory
+  pub/sub) + `/ws/telemetry` and `/ws/anomalies` routes in
+  `src/dashboard/api.py`. `Broadcaster(queue_size=100)` — fan-out to N
+  bounded per-subscriber queues; if a subscriber falls behind the queue
+  fills and we drop the *oldest* (freshest data wins, producer never
+  blocks). `Subscription.dropped` is observable per subscriber. Async-only
+  `publish()` plus a `publish_threadsafe(loop, ...)` escape hatch for the
+  OBD/CAN supervisor threads (1.E.1) to publish from off-loop without
+  racing the queue. The FastAPI handler accepts the WebSocket, subscribes,
+  pumps each message as JSON until `WebSocketDisconnect`, then
+  unsubscribes in `finally` — slow clients can't leak subscriber slots.
+  `create_app(..., telemetry_broadcaster=, anomalies_broadcaster=)` lets
+  the daemon inject the same instances its producers publish into;
+  defaults to fresh per-app instances stashed on `app.state` so tests
+  / the bare-app case still work. Covered by `tests/test_dashboard_broadcast.py`
+  (10 tests: delivery, no-sub no-op, unsubscribe, drop-oldest backpressure,
+  dropped counter, threadsafe, async-for iterator, count tracking,
+  idempotent unsubscribe, slow-subscriber isolation) plus 4
+  `tests/test_dashboard_api.py` WebSocket integration tests using
+  `TestClient.websocket_connect`.
+- [x] **5.5 — Bind-host entry point.** `scripts/serve_dashboard.py` is
+  the uvicorn entry the systemd unit will run. `--host` / `--port` flags
+  default to `canary.yaml`'s `dashboard.{host,port}`; `--anomalies-dir`
+  and `--models-dir` configure where `create_app` reads the alerts log
+  and model manifests from. `warn_if_public_bind(host)` logs a loud
+  warning when binding to anything other than loopback / link-local /
+  RFC1918 private (and conservatively warns on hostnames the script
+  can't classify without a DNS roundtrip) — v1 has no auth on the
+  dashboard, so the warning is the cheap guard. Covered by
+  `tests/test_serve_dashboard_script.py` (9 tests: silent for loopback /
+  RFC1918 / link-local; loud for 0.0.0.0 / public IPs / hostnames;
+  CLI defaults from canary.yaml; CLI override; --anomalies-dir /
+  --models-dir pass-through to create_app). (NFR-06)
 
 ### 5C. Dashboard frontend (FR-08)
 
@@ -849,12 +896,41 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   is asserted equal to `AnomalyEvent.AnomalySource` so dashboard payloads
   round-trip cleanly. 18 tests; full suite 711 passed, 1 skipped;
   ruff/format/mypy clean (55 source files). (FR-09)
-- [ ] **5.16 — Hot swap.** `ModelManager` watches the models directory;
-  on a new manifest, validate schema match and atomically swap the
-  in-memory model without restarting the process. (FR-09)
-- [ ] **5.17 — Retraining CLI.** `scripts/retrain.py` — pulls clean
-  sessions from the last N days, retrains both models, writes new
-  artifacts + manifests. Manual trigger in v1; cron later. (FR-09)
+- [x] **5.16 — Hot swap (`ModelManager`).** `src/models/manager.py` —
+  generic `ModelManager[T]` polls an artifact path, validates a newer
+  sidecar manifest against the running one via `schemas_compatible`
+  (5.15), and atomically swaps the in-memory reference. Two safety
+  policies: (1) **manifest validation first** — a new manifest is
+  rejected if it doesn't satisfy `ModelManifestCommon`, has a mismatched
+  `feature_columns`, has an unexpected `model_type` (when
+  `allowed_model_types` is set), or if the loader raises; the running
+  model stays in place. (2) **lock-guarded load+validate+assign** —
+  two pollers can't race a half-loaded checkpoint into place. mtime
+  short-circuit avoids re-validating unchanged manifests on every tick.
+  `current` returns a frozen `LoadedModel[T]` snapshot; the prior
+  snapshot is unaffected by a swap. `SwapAttempt(kind, detail,
+  new_version)` is the observable per-poll outcome — the daemon's
+  /status path will surface counts of each kind. Polling rather than
+  fsnotify (no extra dep; refit cadence is minutes-to-hours so polling
+  cost is irrelevant). `manager_for_artifact(...)` convenience constructor
+  loads the initial artifact in one call. Covered by `tests/test_model_manager.py`
+  (12 tests: load_initial / missing files / no-change / swap / feature_columns
+  mismatch / model_type mismatch / malformed manifest / loader exception /
+  parallel-poller lock / snapshot immutability / typed convenience).
+  (FR-09)
+- [x] **5.17 — Retraining CLI.** `scripts/retrain.py` orchestrates
+  `train_anomaly_model.train` and `train_lstm.train` over the same
+  age-filtered session set in one process. Each trainer writes its own
+  artifact + manifest under `--if-out` / `--lstm-out`; the daemon's
+  `ModelManager` (5.16) picks them up on next poll. `--skip-if` /
+  `--skip-lstm` for partial refreshes; `--days N` / `--all` mirror
+  `refit_behavior_models.py`. Continues if one trainer fails (logged +
+  reported in the stdout summary with `✗`); exit code non-zero in that
+  case. Sessions filter reuses `_filter_sessions_by_age` from the
+  refit CLI so both trainers see the same window-of-recent semantics.
+  Covered by `tests/test_retrain_script.py` (6 tests: both trainers
+  fire, --skip-if, --skip-lstm, both-skip rejected, no-sessions error,
+  one-failure-doesn't-stop-the-other). (FR-09)
 
 ### 5E. Deployment (NFR-02, NFR-04)
 

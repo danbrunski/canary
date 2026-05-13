@@ -41,10 +41,11 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 
 from src.alerts.event_logger import read_events_dir
 from src.config import CanaryConfig
+from src.dashboard.broadcast import Broadcaster
 from src.preprocessing.loader import (
     PARQUET_PATTERN,
     discover_sessions,
@@ -241,14 +242,24 @@ def create_app(
     *,
     anomalies_dir: Path,
     models_dir: Path | None = None,
+    telemetry_broadcaster: Broadcaster | None = None,
+    anomalies_broadcaster: Broadcaster | None = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
-    Routes are intentionally thin — they delegate to the pure helpers
-    above so the same logic can be unit-tested without spinning up the
-    web stack.
+    Routes delegate to pure helpers so the same logic is unit-testable
+    without spinning up the web stack. The broadcasters power the
+    WebSocket streams (5.4); pass ``None`` and those endpoints will
+    accept connections but never emit (useful in tests or when the
+    daemon isn't producing yet).
     """
     app = FastAPI(title="CANary", version=_canary_version())
+    telemetry_bus = telemetry_broadcaster or Broadcaster()
+    anomalies_bus = anomalies_broadcaster or Broadcaster()
+    # Stash them on app.state so producer threads / app extensions can reach
+    # the same instances after construction.
+    app.state.telemetry_broadcaster = telemetry_bus
+    app.state.anomalies_broadcaster = anomalies_bus
 
     @app.get("/status")
     def get_status() -> dict[str, Any]:
@@ -273,7 +284,35 @@ def create_app(
         rows = read_latest_telemetry_rows(config.collection.storage_path, n=n)
         return {"rows": rows, "count": len(rows)}
 
+    @app.websocket("/ws/telemetry")
+    async def ws_telemetry(websocket: WebSocket) -> None:
+        await _run_websocket(websocket, telemetry_bus)
+
+    @app.websocket("/ws/anomalies")
+    async def ws_anomalies(websocket: WebSocket) -> None:
+        await _run_websocket(websocket, anomalies_bus)
+
     return app
+
+
+async def _run_websocket(websocket: WebSocket, bus: Broadcaster) -> None:
+    """Hold one WebSocket open, pumping messages from ``bus`` until disconnect.
+
+    The handler accepts, subscribes, then loops on ``subscription.get()``
+    sending each message as JSON. ``WebSocketDisconnect`` (client closed)
+    breaks the loop cleanly. Any other exception unsubscribes + re-raises
+    — keeping the subscriber list correct under failures.
+    """
+    await websocket.accept()
+    subscription = bus.subscribe()
+    try:
+        while True:
+            message = await subscription.get()
+            await websocket.send_json(message)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        bus.unsubscribe(subscription)
 
 
 def _canary_version() -> str:

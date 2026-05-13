@@ -1,0 +1,226 @@
+"""Hot-swap model loader (Task 5.16).
+
+The IF and LSTM detectors are normally loaded once at daemon start. When a
+retrain (5.17) writes a new artifact + manifest under the models directory,
+``ModelManager`` notices, validates the new manifest against the running
+model's schema via :mod:`src.models.manifest`, and atomically swaps the
+in-memory reference. The next inference call uses the new model with no
+process restart.
+
+Two safety policies:
+
+* **Manifest validation first.** A new manifest is rejected if it doesn't
+  satisfy ``ModelManifestCommon`` *or* if its feature columns don't match
+  the running model. Failed swaps leave the running model in place — the
+  daemon keeps detecting; a noisy refit can't silently break inference.
+* **Atomic swap.** ``current`` returns a snapshot of the in-flight model;
+  ``poll`` rebuilds and replaces it under a lock. Inference threads
+  reading ``current`` see either the old or new model, never a partially-
+  constructed one. (Python attribute assignment is atomic enough; we use
+  a lock around the *whole swap* — load + validate + assign — so two
+  pollers can't race a half-loaded checkpoint into place.)
+
+Polling rather than ``watchdog``-style fsnotify: simpler, no extra dep,
+and the swap rate doesn't matter (refits are minute-to-hour scale).
+``poll()`` is idempotent — feeds a watchdog/timer/explicit call equally
+well; tests inject a fake clock and step through.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Generic, TypeVar
+
+from src.models.manifest import (
+    ManifestValidationError,
+    ModelManifestCommon,
+    load_manifest_common,
+    schemas_compatible,
+)
+
+log = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class LoadedModel(Generic[T]):
+    """A model bundle the manager is serving.
+
+    ``artifact_path`` / ``manifest_path`` are tracked so ``poll`` can detect
+    a newer manifest by ``mtime`` without re-validating an unchanged file
+    on every tick.
+    """
+
+    artifact: T
+    manifest: ModelManifestCommon
+    artifact_path: Path
+    manifest_path: Path
+    manifest_mtime: float
+
+
+@dataclass(frozen=True)
+class SwapAttempt:
+    """One ``poll()`` outcome — observable so the daemon's /status can surface it."""
+
+    kind: str  # "swapped" | "no_change" | "rejected" | "missing"
+    detail: str = ""
+    new_version: str | None = None
+
+
+ManifestSidecar = Callable[[Path], Path]
+"""Function that, given an artifact path, returns the manifest path that pairs with it.
+
+Both trainers use ``<artifact>.manifest.json``; this is configurable in case a
+future trainer uses a different convention.
+"""
+
+
+def default_manifest_sidecar(artifact_path: Path) -> Path:
+    return artifact_path.with_suffix(".manifest.json")
+
+
+class ModelManager(Generic[T]):
+    """Watches an artifact path, hot-swaps when a newer compatible manifest lands."""
+
+    def __init__(
+        self,
+        artifact_path: Path,
+        loader: Callable[[Path], T],
+        *,
+        initial: LoadedModel[T] | None = None,
+        manifest_sidecar: ManifestSidecar = default_manifest_sidecar,
+        allowed_model_types: tuple[str, ...] | None = None,
+    ) -> None:
+        """``loader`` builds the in-memory model from the artifact path.
+
+        Pass it as ``load_isolation_forest_model`` / ``load_lstm_autoencoder_model``;
+        decoupling lets the manager work for either detector kind, and lets
+        tests pass a trivial ``lambda p: object()``.
+
+        ``allowed_model_types`` restricts which ``model_type`` values are
+        accepted on hot-swap — pass ``("isolation_forest",)`` to an IF
+        manager so it can't accidentally accept an LSTM artifact named with
+        the wrong path.
+        """
+        self._artifact_path = artifact_path
+        self._loader = loader
+        self._manifest_sidecar = manifest_sidecar
+        self._allowed_model_types = allowed_model_types
+        self._lock = threading.Lock()
+        self._current = initial
+
+    @property
+    def current(self) -> LoadedModel[T] | None:
+        """A snapshot of the model currently being served. ``None`` when nothing
+        is loaded yet — caller is on the hook for that case."""
+        return self._current
+
+    def load_initial(self) -> SwapAttempt:
+        """Load the artifact-path model at startup. Logs + skips if absent."""
+        return self._maybe_load(_force=True)
+
+    def poll(self) -> SwapAttempt:
+        """Check the manifest; swap if a newer compatible one is on disk."""
+        return self._maybe_load(_force=False)
+
+    # ------------------------------------------------------------------ private
+
+    def _maybe_load(self, *, _force: bool) -> SwapAttempt:
+        manifest_path = self._manifest_sidecar(self._artifact_path)
+        if not manifest_path.exists() or not self._artifact_path.exists():
+            return SwapAttempt(
+                kind="missing",
+                detail=f"manifest or artifact missing at {self._artifact_path}",
+            )
+        try:
+            mtime = manifest_path.stat().st_mtime
+        except OSError as exc:
+            return SwapAttempt(kind="missing", detail=f"stat failed: {exc}")
+
+        with self._lock:
+            if not _force and self._current is not None and mtime <= self._current.manifest_mtime:
+                return SwapAttempt(kind="no_change")
+
+            try:
+                manifest = load_manifest_common(
+                    manifest_path, allowed_model_types=self._allowed_model_types
+                )
+            except ManifestValidationError as exc:
+                log.warning(
+                    "rejecting new manifest", extra={"path": str(manifest_path), "error": str(exc)}
+                )
+                return SwapAttempt(kind="rejected", detail=str(exc))
+
+            if self._current is not None and not schemas_compatible(
+                self._current.manifest, manifest
+            ):
+                log.warning(
+                    "rejecting new manifest: feature columns don't match running model",
+                    extra={
+                        "path": str(manifest_path),
+                        "running_version": self._current.manifest.model_version,
+                        "new_version": manifest.model_version,
+                    },
+                )
+                return SwapAttempt(
+                    kind="rejected",
+                    detail="feature_columns mismatch — refit on the same schema first",
+                    new_version=manifest.model_version,
+                )
+
+            try:
+                artifact = self._loader(self._artifact_path)
+            except Exception as exc:  # noqa: BLE001 — loader errors are caller's bag of varied types
+                log.exception(
+                    "loader failed",
+                    extra={"path": str(self._artifact_path), "error": str(exc)},
+                )
+                return SwapAttempt(kind="rejected", detail=f"loader failed: {exc}")
+
+            loaded = LoadedModel(
+                artifact=artifact,
+                manifest=manifest,
+                artifact_path=self._artifact_path,
+                manifest_path=manifest_path,
+                manifest_mtime=mtime,
+            )
+            prior_version = (
+                self._current.manifest.model_version if self._current is not None else None
+            )
+            self._current = loaded
+            log.info(
+                "model swapped",
+                extra={
+                    "path": str(self._artifact_path),
+                    "prior_version": prior_version,
+                    "new_version": manifest.model_version,
+                },
+            )
+            return SwapAttempt(kind="swapped", new_version=manifest.model_version)
+
+
+def manager_for_artifact(
+    artifact_path: Path,
+    loader: Callable[[Path], Any],
+    *,
+    model_type: str | None = None,
+) -> ModelManager[Any]:
+    """Convenience: build a ``ModelManager`` and load the initial artifact."""
+    allowed = (model_type,) if model_type is not None else None
+    manager = ModelManager(artifact_path, loader=loader, allowed_model_types=allowed)
+    manager.load_initial()
+    return manager
+
+
+__all__ = [
+    "LoadedModel",
+    "ModelManager",
+    "SwapAttempt",
+    "default_manifest_sidecar",
+    "manager_for_artifact",
+]

@@ -311,6 +311,93 @@ def test_telemetry_latest_rejects_silly_n(config: CanaryConfig, anomalies_dir: P
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# WebSocket streams (Task 5.4)
+# ---------------------------------------------------------------------------
+
+
+def test_ws_telemetry_pushes_published_messages(config: CanaryConfig, anomalies_dir: Path) -> None:
+    from src.dashboard.broadcast import Broadcaster
+
+    bus = Broadcaster()
+    app = create_app(config, anomalies_dir=anomalies_dir, telemetry_broadcaster=bus)
+    client = TestClient(app)
+    with client.websocket_connect("/ws/telemetry") as ws:
+        # Wait until our subscriber registered, then publish
+        # (the TestClient is synchronous; the subscribe happens during accept()).
+        import time
+
+        for _ in range(50):
+            if bus.subscriber_count == 1:
+                break
+            time.sleep(0.01)
+        bus.publish({"timestamp": "now", "channel": "RPM", "value": 700})
+        message = ws.receive_json()
+        assert message == {"timestamp": "now", "channel": "RPM", "value": 700}
+
+
+def test_ws_anomalies_pushes_published_events(config: CanaryConfig, anomalies_dir: Path) -> None:
+    from src.dashboard.broadcast import Broadcaster
+
+    bus = Broadcaster()
+    app = create_app(config, anomalies_dir=anomalies_dir, anomalies_broadcaster=bus)
+    client = TestClient(app)
+    with client.websocket_connect("/ws/anomalies") as ws:
+        import time
+
+        for _ in range(50):
+            if bus.subscriber_count == 1:
+                break
+            time.sleep(0.01)
+        bus.publish({"timestamp": "now", "source": "lstm_autoencoder", "score": 5.0})
+        message = ws.receive_json()
+        assert message["source"] == "lstm_autoencoder"
+
+
+def test_ws_disconnect_removes_subscriber(config: CanaryConfig, anomalies_dir: Path) -> None:
+    from src.dashboard.broadcast import Broadcaster
+
+    bus = Broadcaster()
+    app = create_app(config, anomalies_dir=anomalies_dir, telemetry_broadcaster=bus)
+    client = TestClient(app)
+    with client.websocket_connect("/ws/telemetry") as ws:
+        import time
+
+        for _ in range(50):
+            if bus.subscriber_count == 1:
+                break
+            time.sleep(0.01)
+        assert bus.subscriber_count == 1
+        ws.close()
+    # subscriber count drops after the handler finishes its `finally` block
+    import time
+
+    for _ in range(50):
+        if bus.subscriber_count == 0:
+            break
+        time.sleep(0.01)
+    assert bus.subscriber_count == 0
+
+
+def test_ws_endpoint_works_without_explicit_broadcaster(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    """No broadcaster passed → app creates a default one; ws still accepts."""
+    app = create_app(config, anomalies_dir=anomalies_dir)
+    client = TestClient(app)
+    with client.websocket_connect("/ws/telemetry") as ws:
+        # Publish via app.state's auto-created broadcaster
+        bus = app.state.telemetry_broadcaster
+        import time
+
+        for _ in range(50):
+            if bus.subscriber_count == 1:
+                break
+            time.sleep(0.01)
+        bus.publish({"ping": 1})
+        assert ws.receive_json() == {"ping": 1}
+
+
 def _event(timestamp: str, *, score: float) -> AnomalyEvent:
     return AnomalyEvent(
         timestamp=timestamp,

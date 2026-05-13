@@ -1,0 +1,211 @@
+"""Bridge inference results to the AnomalyEventLogger (Tasks 5.1+5.2 wire-up).
+
+The Isolation Forest and LSTM autoencoder produce different shapes; this
+module turns each into the unified ``AnomalyEvent`` and persists it through
+``AnomalyEventLogger``. It owns:
+
+* **emission policy** — *when* a result counts as an event. The LSTM has
+  ``result.is_anomaly`` already; the IF labels rows ``-1`` (outlier) or
+  ``1`` (inlier) plus the ``isolation_forest_missing_features`` flag for
+  the dropout case. Both surface here as one method call.
+* **dedupe** — back-to-back identical events from a noisy detector would
+  spam the logger and the dashboard. A 1-second minimum gap per
+  ``(source, model_version)`` is applied by default; turn it off with
+  ``min_seconds_between_events=0`` for tests / replay.
+* **counter accounting** — ``emitted`` / ``suppressed`` are observable so
+  the daemon's `/status` endpoint (5.3) can surface them.
+
+Pure wiring; no torch / sklearn imports — kept narrow on purpose so the
+daemon can construct one without touching the model layers.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
+
+import pandas as pd
+
+from src.alerts.event_logger import AnomalyEventLogger
+from src.alerts.events import AnomalyEvent
+from src.models.isolation_forest import (
+    LABEL_COLUMN,
+    MISSING_FEATURES_COLUMN,
+    SCORE_COLUMN,
+)
+
+if TYPE_CHECKING:  # avoid importing torch-touching modules at import time
+    from src.models.inference import LSTMInferenceResult
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class EmitterCounters:
+    """Observable counts; rolling totals since the emitter was constructed."""
+
+    emitted: int = 0
+    suppressed_not_anomaly: int = 0
+    suppressed_dedupe: int = 0
+
+    def reset(self) -> None:
+        self.emitted = 0
+        self.suppressed_not_anomaly = 0
+        self.suppressed_dedupe = 0
+
+
+class AnomalyEventEmitter:
+    """Convert per-detector results into ``AnomalyEvent`` and log them.
+
+    Construct one per running detector (or share across both — the dedupe
+    key is ``(source, model_version)`` so a single emitter feeds both
+    safely). Not thread-safe; wrap with a lock if the LSTM and IF run on
+    different threads, which they currently don't.
+    """
+
+    def __init__(
+        self,
+        logger: AnomalyEventLogger,
+        *,
+        min_seconds_between_events: float = 1.0,
+    ) -> None:
+        self._logger = logger
+        self._min_seconds_between_events = min_seconds_between_events
+        self._last_emit: dict[tuple[str, str], float] = {}
+        self.counters = EmitterCounters()
+
+    def emit_lstm(
+        self,
+        result: LSTMInferenceResult,
+        *,
+        operating_mode: str | None = None,
+    ) -> AnomalyEvent | None:
+        """Emit an event from a streaming LSTM result, if anomalous + not deduped."""
+        if not result.is_anomaly:
+            self.counters.suppressed_not_anomaly += 1
+            return None
+        event = AnomalyEvent.from_lstm_result(result, operating_mode=operating_mode)
+        return self._emit(event)
+
+    def emit_isolation_forest_row(
+        self,
+        row: pd.Series,
+        *,
+        model_version: str,
+        timestamp: str,
+        affected_channels: tuple[str, ...] = (),
+        session: str | None = None,
+        score_column: str = SCORE_COLUMN,
+        label_column: str = LABEL_COLUMN,
+        missing_features_column: str = MISSING_FEATURES_COLUMN,
+        mode_column: str = "operating_mode",
+    ) -> AnomalyEvent | None:
+        """Emit an event from one row of a scored Isolation Forest frame.
+
+        Anomaly rule mirrors ``TrainedIsolationForest.score``: label ``-1``
+        OR the missing-features dropout flag. Rows that hit neither
+        ``suppressed_not_anomaly`` and return ``None`` without persisting.
+        """
+        label = row.get(label_column)
+        missing = bool(row.get(missing_features_column, False))
+        is_anomaly = missing or (label is not None and int(label) == -1)
+        if not is_anomaly:
+            self.counters.suppressed_not_anomaly += 1
+            return None
+        event = AnomalyEvent.from_isolation_forest_row(
+            row,
+            model_version=model_version,
+            timestamp=timestamp,
+            score_column=score_column,
+            mode_column=mode_column,
+            affected_channels=affected_channels,
+            session=session,
+        )
+        if missing:
+            # tag dropout vs ordinary outlier so the dashboard can render
+            # the two cases differently — same source/model, different reason.
+            detail = dict(event.detail)
+            detail["missing_features"] = True
+            event = event.model_copy(update={"detail": detail})
+        return self._emit(event)
+
+    def _emit(self, event: AnomalyEvent) -> AnomalyEvent | None:
+        if self._is_deduped(event):
+            self.counters.suppressed_dedupe += 1
+            return None
+        self._logger.log(event)
+        self.counters.emitted += 1
+        self._last_emit[(event.source, event.model_version)] = _seconds(event.timestamp)
+        return event
+
+    def _is_deduped(self, event: AnomalyEvent) -> bool:
+        if self._min_seconds_between_events <= 0:
+            return False
+        key = (event.source, event.model_version)
+        prior = self._last_emit.get(key)
+        if prior is None:
+            return False
+        now = _seconds(event.timestamp)
+        return (now - prior) < self._min_seconds_between_events
+
+
+def _seconds(timestamp: str) -> float:
+    """Coerce an event timestamp into an epoch-seconds float.
+
+    Accepts the ISO-8601 strings the adapters produce (``..."+00:00"`` or
+    ``..."Z"``); raises ``ValueError`` on garbage so the emitter doesn't
+    silently accept timestamps that won't compare meaningfully.
+    """
+    cleaned = timestamp.replace("Z", "+00:00") if timestamp.endswith("Z") else timestamp
+    dt = datetime.fromisoformat(cleaned)
+    return dt.timestamp()
+
+
+# ---------------------------------------------------------------------------
+# Streaming IF inference — analogous to LSTMInferenceEngine
+# ---------------------------------------------------------------------------
+
+
+class IsolationForestInferenceEngine:
+    """Streaming Isolation Forest inference over single rows.
+
+    Thin wrapper around ``TrainedIsolationForest.score`` that takes one
+    row at a time and returns the single scored row. Symmetric with
+    ``LSTMInferenceEngine.observe`` so the daemon can wire both detectors
+    through the same row-processing loop.
+    """
+
+    def __init__(self, trained: Any) -> None:
+        # `trained` is a TrainedIsolationForest; typed as Any to keep this
+        # module from importing sklearn at import time (the daemon may
+        # construct an emitter long before any model is loaded).
+        self.trained = trained
+        self.feature_columns: tuple[str, ...] = tuple(trained.feature_columns)
+        self.mode_column: str = trained.mode_column
+        self.model_version: str = trained.manifest.model_version
+
+    def observe(self, row: Mapping[str, Any] | pd.Series) -> pd.Series:
+        """Score one row; return the scored Series.
+
+        The caller passes the row to ``emit_isolation_forest_row`` to
+        decide whether it merits an event. Splitting score / emit lets
+        consumers log the score even when it didn't fire, useful for
+        backfilling distributions.
+        """
+        if isinstance(row, pd.Series):
+            frame = row.to_frame().T
+        else:
+            frame = pd.DataFrame([dict(row)])
+        scored = self.trained.score(frame)
+        out: pd.Series = scored.iloc[0]
+        return out
+
+
+__all__ = [
+    "AnomalyEventEmitter",
+    "EmitterCounters",
+    "IsolationForestInferenceEngine",
+]
