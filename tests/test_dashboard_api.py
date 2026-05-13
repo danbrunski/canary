@@ -148,6 +148,102 @@ def test_build_status_surfaces_emitter_counters(config: CanaryConfig, tmp_path: 
     }
 
 
+def test_read_bindings_for_display_returns_empty_when_file_missing(tmp_path: Path) -> None:
+    from src.dashboard.api import read_bindings_for_display
+
+    assert read_bindings_for_display(tmp_path / "missing.yaml") == {}
+
+
+def test_read_bindings_for_display_filters_confidence_and_keys_by_channel(
+    tmp_path: Path,
+) -> None:
+    """Display projection: keyed by `decoded:<NAME>`, low-confidence excluded."""
+    from src.dashboard.api import read_bindings_for_display
+
+    yaml = """
+schema_version: 1
+vehicle: {make: Nissan, model: Xterra, year: 2008}
+signals:
+  - name: COOLANT_TEMP
+    module: ECM
+    can_id: 0x551
+    byte_start: 0
+    byte_length: 1
+    scale: 1.0
+    offset: -40.0
+    unit: degC
+    confidence: confirmed
+    plausible_min: -10
+    plausible_max: 130
+  - name: ENGINE_RPM
+    module: ECM
+    can_id: 0x1F9
+    byte_start: 2
+    byte_length: 2
+    scale: 0.125
+    offset: 0
+    unit: rpm
+    confidence: high
+  - name: MAYBE_THIS
+    module: UNKNOWN
+    can_id: 0x300
+    byte_start: 0
+    byte_length: 1
+    confidence: hypothesized
+"""
+    path = tmp_path / "bindings.yaml"
+    path.write_text(yaml)
+    out = read_bindings_for_display(path)
+
+    # decoded:* keys; hypothesized excluded by default
+    assert set(out.keys()) == {"decoded:COOLANT_TEMP", "decoded:ENGINE_RPM"}
+    assert out["decoded:COOLANT_TEMP"] == {
+        "name": "COOLANT_TEMP",
+        "scale": 1.0,
+        "offset": -40.0,
+        "unit": "degC",
+        "confidence": "confirmed",
+        "plausible_min": -10.0,
+        "plausible_max": 130.0,
+    }
+    assert out["decoded:ENGINE_RPM"]["scale"] == 0.125
+
+
+def test_bindings_endpoint_returns_display_payload(
+    config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
+) -> None:
+    yaml = """
+schema_version: 1
+signals:
+  - name: RPM
+    module: ECM
+    can_id: 0x1F9
+    byte_start: 2
+    byte_length: 2
+    scale: 0.125
+    offset: 0
+    unit: rpm
+    confidence: confirmed
+"""
+    path = tmp_path / "bindings.yaml"
+    path.write_text(yaml)
+    app = create_app(config, anomalies_dir=anomalies_dir, bindings_path=path)
+    client = TestClient(app)
+    r = client.get("/bindings")
+    assert r.status_code == 200
+    assert r.json()["decoded:RPM"]["scale"] == 0.125
+
+
+def test_bindings_endpoint_returns_empty_when_file_missing(
+    config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
+) -> None:
+    app = create_app(config, anomalies_dir=anomalies_dir, bindings_path=tmp_path / "absent.yaml")
+    client = TestClient(app)
+    r = client.get("/bindings")
+    assert r.status_code == 200
+    assert r.json() == {}
+
+
 def test_read_behavior_models_returns_empty_when_file_missing(tmp_path: Path) -> None:
     """A daemon brought up before any `refit_behavior_models.py` run should
     surface "no surfaces" cleanly, not 500. The dashboard renders this as

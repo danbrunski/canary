@@ -53,6 +53,7 @@ from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
     load_behavior_models,
 )
+from src.decode.bindings import load_bindings
 from src.preprocessing.loader import (
     PARQUET_PATTERN,
     discover_sessions,
@@ -62,6 +63,12 @@ from src.preprocessing.loader import (
 #: but the daemon resolves it via ``Path(__file__).parent / "static" / "dist"``
 #: which works regardless of cwd.
 DEFAULT_STATIC_DIR = Path(__file__).resolve().parent / "static" / "dist"
+
+#: Where the project hand-edits CAN signal bindings live. The dashboard reads
+#: a *display-oriented* projection so the frontend can render decoded channels
+#: in engineering units. The full evidence trail / notes / confidence ladder
+#: stays in the YAML and is irrelevant to the live view.
+DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
 
 log = logging.getLogger(__name__)
 
@@ -259,6 +266,43 @@ def echo_config(config: CanaryConfig) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def read_bindings_for_display(
+    path: Path = DEFAULT_BINDINGS_PATH,
+    *,
+    confidence_levels: tuple[str, ...] = ("confirmed", "high", "medium"),
+) -> dict[str, Any]:
+    """Surface the display-relevant subset of ``bindings.yaml`` for the frontend.
+
+    The dashboard renders a ``decoded:<NAME>`` column's raw integer value as
+    ``raw * scale + offset`` with the binding's unit; values outside
+    ``plausible_min/max`` get color-flagged. Returns one entry per signal
+    keyed by ``decoded:<NAME>`` so the frontend lookup is a flat
+    ``bindings[channel_key]``.
+
+    Low-confidence signals (``low`` / ``hypothesized``) are excluded by
+    default — surfacing them in the UI risks treating a guess as a reading.
+    Adjust ``confidence_levels`` if a parked-mode debug view ever wants
+    them all.
+    """
+    if not path.exists():
+        return {}
+    bindings = load_bindings(path)
+    out: dict[str, dict[str, Any]] = {}
+    for signal in bindings.signals:
+        if signal.confidence not in confidence_levels:
+            continue
+        out[f"decoded:{signal.name}"] = {
+            "name": signal.name,
+            "scale": signal.scale,
+            "offset": signal.offset,
+            "unit": signal.unit,
+            "confidence": signal.confidence,
+            "plausible_min": signal.plausible_min,
+            "plausible_max": signal.plausible_max,
+        }
+    return out
+
+
 def read_behavior_models(path: Path = DEFAULT_BEHAVIOR_MODELS_PATH) -> dict[str, Any]:
     """Return ``behavior_models.yaml`` as a JSON-safe payload for the dashboard.
 
@@ -288,6 +332,7 @@ def create_app(
     anomalies_broadcaster: Broadcaster | None = None,
     emitter: AnomalyEventEmitter | None = None,
     behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
+    bindings_path: Path = DEFAULT_BINDINGS_PATH,
     static_dir: Path | None = None,
     enable_dev_cors: bool = False,
 ) -> FastAPI:
@@ -348,6 +393,12 @@ def create_app(
         # run lands in the dashboard without a daemon restart. Cheap — the
         # file is < 100 KB even with a full surface catalog.
         return read_behavior_models(behavior_models_path)
+
+    @app.get("/bindings")
+    def get_bindings() -> dict[str, Any]:
+        # Re-read per request so a hand-edit to bindings.yaml (during RE)
+        # surfaces in the dashboard immediately. The file is small.
+        return read_bindings_for_display(bindings_path)
 
     @app.websocket("/ws/telemetry")
     async def ws_telemetry(websocket: WebSocket) -> None:

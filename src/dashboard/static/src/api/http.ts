@@ -7,6 +7,7 @@
 import type {
   AnomaliesResponse,
   BehaviorModelsResponse,
+  BindingsByChannel,
   StatusResponse,
   TelemetryLatestResponse,
 } from "../types";
@@ -60,6 +61,10 @@ export function getBehaviorModels(
   signal?: AbortSignal,
 ): Promise<BehaviorModelsResponse> {
   return fetchJson<BehaviorModelsResponse>("/models/behavior", { signal });
+}
+
+export function getBindings(signal?: AbortSignal): Promise<BindingsByChannel> {
+  return fetchJson<BindingsByChannel>("/bindings", { signal });
 }
 
 export { HttpError };

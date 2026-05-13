@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { useAnomalyStream } from "./hooks/useAnomalyStream";
 import { useBehaviorModels } from "./hooks/useBehaviorModels";
+import { useBindings } from "./hooks/useBindings";
 import { useStatus } from "./hooks/useStatus";
 import { useTelemetryStream } from "./hooks/useTelemetryStream";
 import { AnomalyPanel } from "./panels/AnomalyPanel";
@@ -21,6 +22,7 @@ export default function App() {
   const anomalies = useAnomalyStream();
   const { status, error: statusError } = useStatus();
   const behaviorModels = useBehaviorModels();
+  const bindings = useBindings();
 
   return (
     <DashboardShell
@@ -31,7 +33,7 @@ export default function App() {
       events={anomalies.events}
     >
       <div className="panel-grid">
-        <TelemetryPanel channels={telemetry.channels} />
+        <TelemetryPanel channels={telemetry.channels} bindings={bindings} />
         <AnomalyPanel events={anomalies.events} />
         <ModelPanel status={status} events={anomalies.events} />
         <SystemPanel

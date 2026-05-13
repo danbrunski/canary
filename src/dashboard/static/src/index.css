@@ -219,6 +219,19 @@ main { padding: 1rem; flex: 1; }
   padding: 0.7rem 0.9rem;
 }
 
+.channel-card.band-warn {
+  border-color: var(--warn);
+  background: rgba(255, 209, 102, 0.08);
+}
+
+.channel-card.band-bad {
+  border-color: var(--bad);
+  background: rgba(255, 107, 107, 0.10);
+}
+
+.channel-card.band-bad .channel-value { color: var(--bad); }
+.channel-card.band-warn .channel-value { color: var(--warn); }
+
 .channel-key {
   font-size: 0.65rem;
   letter-spacing: 0.1em;
