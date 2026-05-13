@@ -421,12 +421,15 @@ emission stays viable as a one-way derived artifact (4.D.2 below).
 
 ### 4.A — Capture protocols & methodology
 
-- [~] **4.1 — RE workflow doc.** `docs/can-re-workflow.md` — Z1 + Canable
-  capture → physical-action-tagged sessions → byte-vs-tag differential →
-  binding hypothesis → ELM327 cross-reference to pin scaling. Reference,
-  not code. Status: the methodology is captured implicitly across
-  `data/analyses/*.md` and bindings evidence; no consolidated workflow
-  doc yet. Worth writing once the ELM327 closes one full hypothesis loop.
+- [x] **4.1 — RE workflow doc.** `docs/can-re-workflow.md` — the rig
+  (Canable sniffer / ELM327 / NT510), the capture workflow (`record.py` +
+  `guided_session.py` protocols, physical-action tags, engine-state
+  discipline), the analysis pipeline (inventory → byte-vs-tag differential
+  → `cross_reference_broadcast.py` / `cross_reference.py` / `scan_constant_dids.py`
+  → FSM cross-reference → `decode_bindings.py` validation), the
+  confidence ladder + evidence-trail conventions for `bindings.yaml`, and
+  a worked example (`ECM_RPM`). Written now that the ELM327 closed a full
+  hypothesis loop. Reference, not code.
 - [x] **4.A.1 — Physical-action capture protocol.** Codified as the
   `rev` protocol in `scripts/guided_session.py`. Key engineering choice:
   tags mark physical events on the vehicle (idle, blip, sustained,
