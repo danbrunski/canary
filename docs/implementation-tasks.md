@@ -139,11 +139,18 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
 - [~] **1.16 — Vehicle data collection.** Log 10+ diverse drives (cold
   start, idle, city, highway, off-road). Document each in
   `data/sessions.md` (date, conditions, notes). Inputs to Phase 2 training.
-  Status: 4 sessions captured (two parked dev sessions, the rev protocol
-  session 2026-05-11T152858, and the partial drive 2026-05-11T154648).
-  Each documented under `data/analyses/<session>.md`; no consolidated
-  `data/sessions.md` index yet. Blocked on more drive time; the
-  slcan-tolerance fix (commit cf4bca0) unblocks long captures.
+  Status: ~12 sessions captured (early parked/dev ones, the rev protocol
+  2026-05-11T152858, the partial/tagged drives 2026-05-11T154648/211240,
+  the 18-min drive 2026-05-11T222447, and the three 2026-05-13 ELM327
+  rig-bring-up sessions: KOEO baseline, rev-with-OBD, NT510-active). Each
+  documented under `data/analyses/<session>.md`; `data/sessions.md` is the
+  consolidated index now. `docs/data-collection-plan.md` lays out the
+  remaining captures (cold-start / idle baseline / city / highway /
+  load-sweep / off-road / A/C / Mode-22 DIDs) and how much is enough to
+  start the ML + behavior-model work. Parallel OBD (`record.py --obd-port`)
+  is proven and the default `--obd-pids` set is the fuller ML/mapping one.
+  Still gated on drive time; the slcan-tolerance fix (cf4bca0) and the
+  supervised OBD reconnect unblock long multi-device captures.
 
 ---
 
@@ -156,13 +163,23 @@ daemon is deployed on the vehicle.
 - [x] **1.E.1 — `scripts/record.py`.** CLI wrapper around the CAN
   collector: writes `frames.log` (candump format) + `manifest.json`
   per session, supports `--vehicle-state`, `--seconds`, and parallel
-  OBD-II `--obd-port` capture via `pids.jsonl` sidecar.
+  OBD-II `--obd-port` capture via `pids.jsonl` sidecar. The OBD side runs
+  in a supervised daemon thread (`obd_collector.supervise_obd_capture`)
+  that survives the ELM327 dropping off USB and reattaching (watches the
+  device file + python-obd's connection state + a reading-staleness
+  heartbeat); an OBD failure never aborts the CAN capture. Default
+  `--obd-pids` is the fuller ML/behavior-model set (~19 PIDs incl. MAP,
+  both banks' fuel trims, pre-cat O2, baro, run-time, fuel-status).
 - [x] **1.E.2 — `scripts/tag.py`.** Append-only tag CLI; writes one
   JSON record per Enter-press into `<session>/tags.jsonl`. Auto-finds
   the most recent session under `data/sessions/`.
 - [x] **1.E.3 — `scripts/guided_session.py`.** Interactive protocol
-  runner — walks the user through a labeled sequence (currently the
-  rev protocol), one Enter press per tag. Designed for hands-busy
+  runner — walks the user through a labeled sequence, one Enter press per
+  tag (or `s`+Enter to skip a step that doesn't apply). Protocols: `rev`
+  (idle/blip/sustain), `nt510` (module scan, ABS live data + steering/brake
+  actions, ECU/ABS actuator tests), and `drive` (cold-start → idle →
+  city → highway → coast/DFCO → WOT → 4-Lo → A/C → engine-off — the
+  operating-envelope capture for ML training). Designed for hands-busy
   in-vehicle use where typing labels is impractical.
 - [x] **1.E.4 — `tools/log_to_parquet.py`.** Offline batch converter
   from candump `frames.log` + `pids.jsonl` to chunked Parquet using
@@ -433,7 +450,13 @@ emission stays viable as a one-way derived artifact (4.D.2 below).
 - [x] **4.B.4 — Mode 22 ↔ Mode 01 cross-reference.** `tools/cross_reference.py`
   + `src/analysis/cross_reference.py` — pair Mode 22 DID reads against
   python-obd Mode 01 PIDs by timestamp, linear-regress to derive
-  scale/offset. **Blocked on ELM327 arrival.**
+  scale/offset. ELM327 is now connected and working (protocol 6 ISO
+  15765-4 CAN 11/500). Companion: `tools/cross_reference_broadcast.py` +
+  `src/analysis/broadcast_correlate.py` — the broadcast-byte ↔ Mode 01
+  PID counterpart (regress a CAN byte's raw value against each PID;
+  probes default to `bindings.yaml`'s unpinned signals). Used to pin
+  `ECM_RPM` (0x1F9:2-3, raw÷8, r²=1.000) and confirm `ECM_COOLANT_TEMP`
+  (0x551:0, raw−40, r²=0.999) against session 2026-05-13T005522's PIDs.
 - [x] **4.B.5 — FSM signal extraction.** `tools/extract_fsm_signals.py`
   + `src/analysis/fsm.py` — parse Xterra Factory Service Manual PDFs
   (Hitachi/Nissan CONSULT-III tables) into `data/fsm/signals.json` (333
@@ -526,11 +549,19 @@ no Mode 23 / Mode 27 / flash dumps / writes.
 - [ ] **4.E.4 — Injector pulse-width DID identification.** Cross-reference
   captured Mode 22 DIDs against Mode 01 fuel-trim variations. The DID
   whose value correlates with `RPM × (1 + STFT/100)` is the injector PW.
-  Adds to `data/bindings.yaml`.
-- [ ] **4.E.5 — Calibration-DID scanner.** `tools/scan_constant_dids.py`
-  sweeps Mode 22 DID space, splits runtime-varying from constants,
-  prints the constants list. Verify Canable application is read-only
-  before running.
+  Adds to `data/bindings.yaml`. Tooling is in place — `tools/scan_constant_dids.py`
+  (the DID sweep, 4.E.5) + `tools/cross_reference.py` (the Mode 22 ↔
+  Mode 01 pairing, 4.B.4); needs a drive captured with the fuel-trim
+  PIDs watched (now in the default `--obd-pids` set) and a Mode 22 DID
+  log alongside (record.py doesn't poll DIDs yet — TODO).
+- [x] **4.E.5 — Calibration-DID scanner.** `tools/scan_constant_dids.py`
+  + `src/analysis/did_scan.py` — sweeps Mode 22 DID space over the
+  ELM327 (read-only, service 0x22 only; `Elm327Mode22Transport`), takes
+  ≥2 passes at different engine states, and classifies each DID as
+  varying / constant / intermittent (`classify_dids`). `parse_mode22_response`
+  + the reply parser are unit-tested; the serial parsing layer still needs
+  validation against the actual adapter at the vehicle. Verify the Canable
+  is in its sniffing role only before running.
 - [ ] **4.E.6 — Behavior-model decoder integration.** Extend `src/decode/`
   to load behavior models at startup and expose
   `expected_value(operating_point)` + `deviation(actual, operating_point)`
@@ -552,11 +583,19 @@ no Mode 23 / Mode 27 / flash dumps / writes.
 
 ### 5A. Alert system (FR-07)
 
-- [ ] **5.1 — Anomaly event schema.** `src/alerts/events.py` — Pydantic
-  model with timestamp, source (`isolation_forest`|`lstm`),
-  affected_channels, anomaly_score, operating_mode, model_version.
-- [ ] **5.2 — Event logger.** `src/alerts/event_logger.py` — append-only
-  JSONL file at `storage_path/anomalies.jsonl`. Rotated daily.
+- [x] **5.1 — Anomaly event schema.** `src/alerts/events.py` — `AnomalyEvent`
+  (Pydantic, `extra=forbid`): timestamp, source (`isolation_forest`|
+  `lstm_autoencoder`), model_version, score, optional threshold,
+  affected_channels, operating_mode, session, window timestamps, latency,
+  free-form `detail`. Adapter constructors `from_lstm_result(...)` and
+  `from_isolation_forest_row(...)` keep the per-detector mapping in one
+  place. Covered by `tests/test_alerts.py`.
+- [x] **5.2 — Event logger.** `src/alerts/event_logger.py` —
+  `AnomalyEventLogger`: append-only, flushed per write (crash-safe), daily
+  rotation via dated filenames (`anomalies-YYYY-MM-DD.jsonl` under the
+  configured directory — a new file on the UTC date roll, no rename). Plus
+  `read_events` / `read_events_dir` for the dashboard's `since=` query.
+  Covered by `tests/test_alerts.py`.
 
 ### 5B. FastAPI backend (FR-08)
 
