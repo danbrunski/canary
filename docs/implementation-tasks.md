@@ -887,12 +887,14 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   — full React/TypeScript PWA served by the Pi for phone/head-unit
   mirroring; native Android Auto deferred as a constrained companion.
 - [x] **5.7 — Stack: React + TypeScript + Vite.** Hand-scaffolded under
-  `src/dashboard/static/` (no `npm create vite` — every dep we pull is
-  declared in `package.json`). `tsconfig.app.json` is strict
-  (noUnusedLocals, noUnusedParameters, noFallthroughCasesInSwitch). Build
-  via `npm run build` → `dist/` (155 KB JS, 5.8 KB CSS, 50 KB gzipped);
-  the FastAPI backend auto-mounts `dist/` on `/` when present.
-  `src/dashboard/static/README.md` documents build/dev/typecheck flow.
+  `src/dashboard/static/` (no `pnpm create vite` — every dep we pull is
+  declared in `package.json`). pnpm is the package manager (declared via
+  `packageManager` field for corepack); lockfile is `pnpm-lock.yaml`.
+  `tsconfig.app.json` is strict (noUnusedLocals, noUnusedParameters,
+  noFallthroughCasesInSwitch). Build via `pnpm build` → `dist/`
+  (155 KB JS, 5.8 KB CSS, 50 KB gzipped); the FastAPI backend auto-mounts
+  `dist/` on `/` when present. `src/dashboard/static/README.md` documents
+  build/dev/typecheck flow.
 - [x] **5.8 — PWA + head-unit mirroring mode.** `public/manifest.webmanifest`
   declares fullscreen + landscape + theme color; iOS web-app meta tags in
   `index.html`. Landscape-first CSS grid layout with a portrait fallback;
@@ -945,9 +947,9 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   they're built.
 
 Backend wire-up for the SPA: `create_app(..., static_dir=, enable_dev_cors=)`
-mounts the built React bundle on `/` (404s cleanly until `npm run build`
+mounts the built React bundle on `/` (404s cleanly until `pnpm build`
 runs — API routes still work without the SPA) and optionally enables CORS
-for `http://localhost:5173` so `npm run dev` can talk to the backend
+for `http://localhost:5173` so `pnpm dev` can talk to the backend
 directly. `scripts/serve_dashboard.py` gets matching `--static-dir` and
 `--dev-cors` flags. `tests/test_dashboard_api.py` covers static-mount
 present / absent and the CORS dev-origin allow.

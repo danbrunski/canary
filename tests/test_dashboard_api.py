@@ -165,7 +165,7 @@ def test_create_app_mounts_static_when_dist_exists(
 def test_create_app_skips_static_when_dist_missing(
     config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
 ) -> None:
-    """Until `npm run build`, /  returns 404 — the API routes still work."""
+    """Until `pnpm build`, /  returns 404 — the API routes still work."""
     app = create_app(config, anomalies_dir=anomalies_dir, static_dir=tmp_path / "absent")
     client = TestClient(app)
     response = client.get("/")

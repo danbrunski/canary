@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "packageManager": "pnpm@10.29.3",
   "description": "CANary in-vehicle dashboard (React + TypeScript + Vite PWA). Served by the FastAPI backend; pulls /status + /anomalies + /telemetry, subscribes to /ws/telemetry + /ws/anomalies.",
   "scripts": {
     "dev": "vite",

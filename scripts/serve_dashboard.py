@@ -91,7 +91,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Allow CORS from http://localhost:5173 (the Vite dev origin) so "
-            "the frontend's `npm run dev` can call the backend directly. "
+            "the frontend's `pnpm dev` can call the backend directly. "
             "Don't enable in production."
         ),
     )

@@ -276,7 +276,7 @@ def create_app(
     """
     app = FastAPI(title="CANary", version=_canary_version())
     if enable_dev_cors:
-        # `npm run dev` serves the SPA on :5173 and proxies the backend.
+        # `pnpm dev` serves the SPA on :5173 and proxies the backend.
         # Add CORS so a developer can also hit the backend directly from
         # the browser without going through the Vite proxy. Production
         # serves the SPA from the same origin and doesn't need CORS.

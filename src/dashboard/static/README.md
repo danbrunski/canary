@@ -44,12 +44,14 @@ src/dashboard/static/
 
 ## Develop
 
-Pre-req: Node 18+. Anything 20/22 works.
+Pre-req: Node 18+ (20/22 work) and [pnpm](https://pnpm.io) 10+. If pnpm
+isn't installed, `corepack enable && corepack prepare pnpm@10.29.3 --activate`
+picks up the version pinned in `package.json`'s `packageManager` field.
 
 ```sh
 cd src/dashboard/static
-npm install
-npm run dev                   # http://localhost:5173
+pnpm install
+pnpm dev                   # http://localhost:5173
 ```
 
 In a second shell, run the backend with CORS for the dev origin:
@@ -66,7 +68,7 @@ the SPA looks like it's same-origin with the backend.
 
 ```sh
 cd src/dashboard/static
-npm run build                 # → dist/
+pnpm build                 # → dist/
 ```
 
 `scripts/serve_dashboard.py` auto-discovers `dist/` next to the backend
@@ -77,10 +79,10 @@ deployments.
 ## Typecheck
 
 ```sh
-npm run typecheck             # strict TS, no emit
+pnpm typecheck             # strict TS, no emit
 ```
 
-Runs as part of `npm run build`. CI should call `npm run build` end-to-end
+Runs as part of `pnpm build`. CI should call `pnpm build` end-to-end
 when the frontend is in scope.
 
 ## Connection model
