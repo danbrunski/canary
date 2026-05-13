@@ -771,9 +771,20 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   on repeat). Smoke-tested against a converted-from-candump session to
   confirm the CLI prints actionable skip reasons against real data.
   (FR-09)
-- [ ] **4.E.9 — Performance panel data feed.** Backend endpoints
-  surfacing current model versions, deviation heatmaps, warmup curves
-  vs. baseline. Consumed by dashboard task 5.12. (FR-08)
+- [x] **4.E.9 — Performance panel data feed.** `GET /models/behavior`
+  on the dashboard backend returns the full `data/behavior_models.yaml`
+  contents (Pydantic `model_dump(mode="json")` of `BehaviorModels`),
+  re-read per request so a `scripts/refit_behavior_models.py` run lands
+  without a daemon restart. Frontend wire-up: `useBehaviorModels` hook
+  polls the endpoint at 60 s cadence; `BehaviorModelsPanel` renders each
+  surface — 1D fits via the `Curve` component (canvas, samples the fit
+  closed-form for polys, linearly interpolates for lookup tables) and 2D
+  fits via the `Heatmap` component (canvas grid; empty cells render dark
+  so coverage gaps are immediately visible). Each card shows name, version,
+  output channel + unit, operating-mode filter, sample count, R²,
+  and the surface's notes from the recipe. Covered by 4 new backend tests
+  (`/models/behavior` endpoint + the underlying `read_behavior_models`
+  helper, both with file-present and file-missing). (FR-08)
 
 ---
 

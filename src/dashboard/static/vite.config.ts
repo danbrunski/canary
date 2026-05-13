@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -24,5 +25,13 @@ export default defineConfig({
     // bandwidth is rarely the bottleneck. Revisit if the bundle grows
     // past a few hundred KB.
     rollupOptions: { output: { manualChunks: undefined } },
+  },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test-setup.ts"],
+    // Don't load assets / css through the test harness — they're not
+    // exercised in unit tests and pulling them in slows the suite.
+    css: false,
   },
 });

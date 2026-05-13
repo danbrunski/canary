@@ -6,6 +6,7 @@
 
 import type {
   AnomaliesResponse,
+  BehaviorModelsResponse,
   StatusResponse,
   TelemetryLatestResponse,
 } from "../types";
@@ -53,6 +54,12 @@ export function getLatestTelemetry(
   signal?: AbortSignal,
 ): Promise<TelemetryLatestResponse> {
   return fetchJson<TelemetryLatestResponse>(`/telemetry/latest?n=${n}`, { signal });
+}
+
+export function getBehaviorModels(
+  signal?: AbortSignal,
+): Promise<BehaviorModelsResponse> {
+  return fetchJson<BehaviorModelsResponse>("/models/behavior", { signal });
 }
 
 export { HttpError };

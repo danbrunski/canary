@@ -85,6 +85,29 @@ pnpm typecheck             # strict TS, no emit
 Runs as part of `pnpm build`. CI should call `pnpm build` end-to-end
 when the frontend is in scope.
 
+## Test
+
+```sh
+pnpm test                  # one-shot
+pnpm test:watch            # rerun on file change
+```
+
+Vitest + React Testing Library + jsdom. Tests live next to the code
+they cover (`*.test.ts` / `*.test.tsx`). Current coverage prioritizes
+the async/state-machine pieces that are easiest to break:
+
+* `api/websocket.test.ts` — reconnect-with-backoff, JSON parse failure
+  handling, `close()` shutdown, constructor-throws path
+* `hooks/useAnomalyStream.test.ts` — `/anomalies` seed ordering, WS
+  dedupe key, per-source dedupe isolation, connection state
+  propagation, unmount cleanup
+* `hooks/useTelemetryStream.test.ts` — seed → live merge, 120-sample
+  ring-buffer cap, non-numeric values skipped from history, malformed
+  rows ignored
+
+Pinned versions: `vitest@^2.1.9` + `jsdom@^25` for Vite 5 compatibility
+(Vitest 4 / jsdom 29 require Vite 6+).
+
 ## Connection model
 
 Each panel reads from one of three hooks (`useStatus`, `useTelemetryStream`,

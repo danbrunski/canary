@@ -148,6 +148,123 @@ def test_build_status_surfaces_emitter_counters(config: CanaryConfig, tmp_path: 
     }
 
 
+def test_read_behavior_models_returns_empty_when_file_missing(tmp_path: Path) -> None:
+    """A daemon brought up before any `refit_behavior_models.py` run should
+    surface "no surfaces" cleanly, not 500. The dashboard renders this as
+    "no behavior models refit yet."""
+    from src.dashboard.api import read_behavior_models
+
+    payload = read_behavior_models(tmp_path / "missing.yaml")
+    assert payload == {"schema_version": None, "models": []}
+
+
+def test_read_behavior_models_round_trips_yaml(tmp_path: Path) -> None:
+    """Persisted behavior_models.yaml deserializes back through the loader
+    cleanly and the JSON-mode dump is dashboard-ready."""
+    from src.dashboard.api import read_behavior_models
+    from src.decode.behavior_models import (
+        Axis1D,
+        BehaviorModel1D,
+        BehaviorModels,
+        PolynomialFit,
+        dump_behavior_models,
+    )
+
+    models = BehaviorModels(
+        schema_version=1,
+        models=[
+            BehaviorModel1D(
+                name="coolant_warmup",
+                kind="surface_1d",
+                output="obd:COOLANT_TEMP",
+                output_unit="degC",
+                axis=Axis1D(
+                    name="t",
+                    channel="obd:RUN_TIME",
+                    unit="s",
+                    domain=(0.0, 600.0),
+                ),
+                fit=PolynomialFit(
+                    kind="poly",
+                    coefficients=[25.0, 0.15],
+                    sample_count=12_450,
+                    r_squared=0.97,
+                    sessions=["2026-05-13T005522"],
+                    fitted_at="2026-05-13T15:00:00+00:00",
+                    training_data_hash="sha256:abc",
+                ),
+                version=2,
+            )
+        ],
+    )
+    path = tmp_path / "behavior_models.yaml"
+    dump_behavior_models(models, path)
+    payload = read_behavior_models(path)
+    assert payload["schema_version"] == 1
+    assert len(payload["models"]) == 1
+    [model] = payload["models"]
+    assert model["name"] == "coolant_warmup"
+    assert model["version"] == 2
+    assert model["fit"]["r_squared"] == 0.97
+
+
+def test_behavior_models_endpoint_returns_empty_when_missing(
+    config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
+) -> None:
+    app = create_app(
+        config,
+        anomalies_dir=anomalies_dir,
+        behavior_models_path=tmp_path / "absent.yaml",
+    )
+    client = TestClient(app)
+    response = client.get("/models/behavior")
+    assert response.status_code == 200
+    assert response.json() == {"schema_version": None, "models": []}
+
+
+def test_behavior_models_endpoint_returns_yaml_content(
+    config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
+) -> None:
+    """End-to-end: refit dumps yaml → endpoint surfaces it for the dashboard."""
+    from src.decode.behavior_models import (
+        Axis1D,
+        BehaviorModel1D,
+        BehaviorModels,
+        PolynomialFit,
+        dump_behavior_models,
+    )
+
+    behavior_path = tmp_path / "behavior_models.yaml"
+    dump_behavior_models(
+        BehaviorModels(
+            schema_version=1,
+            models=[
+                BehaviorModel1D(
+                    name="coolant_warmup",
+                    kind="surface_1d",
+                    output="obd:COOLANT_TEMP",
+                    axis=Axis1D(name="t", channel="obd:RUN_TIME", domain=(0.0, 600.0)),
+                    fit=PolynomialFit(
+                        kind="poly",
+                        coefficients=[25.0, 0.15],
+                        sample_count=100,
+                        r_squared=0.95,
+                        fitted_at="now",
+                    ),
+                )
+            ],
+        ),
+        behavior_path,
+    )
+    app = create_app(config, anomalies_dir=anomalies_dir, behavior_models_path=behavior_path)
+    client = TestClient(app)
+    response = client.get("/models/behavior")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["models"]) == 1
+    assert body["models"][0]["name"] == "coolant_warmup"
+
+
 def test_create_app_mounts_static_when_dist_exists(
     config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
 ) -> None:

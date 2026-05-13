@@ -46,8 +46,11 @@ export function useAnomalyStream() {
     getAnomalies(undefined, controller.signal)
       .then((seed) => {
         if (cancelled) return;
-        // Reverse so the newest end up first after iteration.
-        for (const event of [...seed.events].reverse()) prepend(event);
+        // Seed is timestamp-ascending (oldest first) per the backend. Each
+        // `prepend` adds to the FRONT, so iterating forward produces
+        // newest-first as a side-effect — which is the order the WS
+        // stream will keep extending.
+        for (const event of seed.events) prepend(event);
       })
       .catch(() => {
         /* WS will populate; silent fallback */

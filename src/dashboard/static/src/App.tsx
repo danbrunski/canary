@@ -1,9 +1,11 @@
 import { useState } from "react";
 
 import { useAnomalyStream } from "./hooks/useAnomalyStream";
+import { useBehaviorModels } from "./hooks/useBehaviorModels";
 import { useStatus } from "./hooks/useStatus";
 import { useTelemetryStream } from "./hooks/useTelemetryStream";
 import { AnomalyPanel } from "./panels/AnomalyPanel";
+import { BehaviorModelsPanel } from "./panels/BehaviorModelsPanel";
 import { DashboardShell } from "./panels/DashboardShell";
 import { DiagnosticsPanel } from "./panels/DiagnosticsPanel";
 import { ModelPanel } from "./panels/ModelPanel";
@@ -18,6 +20,7 @@ export default function App() {
   const telemetry = useTelemetryStream();
   const anomalies = useAnomalyStream();
   const { status, error: statusError } = useStatus();
+  const behaviorModels = useBehaviorModels();
 
   return (
     <DashboardShell
@@ -36,6 +39,7 @@ export default function App() {
           channels={telemetry.channels}
           statusError={statusError}
         />
+        <BehaviorModelsPanel data={behaviorModels.data} error={behaviorModels.error} />
         <TpmsPanel channels={telemetry.channels} />
         <DiagnosticsPanel mode={mode} />
       </div>

@@ -49,6 +49,10 @@ from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import read_events_dir
 from src.config import CanaryConfig
 from src.dashboard.broadcast import Broadcaster
+from src.decode.behavior_models import (
+    DEFAULT_BEHAVIOR_MODELS_PATH,
+    load_behavior_models,
+)
 from src.preprocessing.loader import (
     PARQUET_PATTERN,
     discover_sessions,
@@ -251,6 +255,26 @@ def echo_config(config: CanaryConfig) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Behavior models — Task 4.E.9 dashboard feed
+# ---------------------------------------------------------------------------
+
+
+def read_behavior_models(path: Path = DEFAULT_BEHAVIOR_MODELS_PATH) -> dict[str, Any]:
+    """Return ``behavior_models.yaml`` as a JSON-safe payload for the dashboard.
+
+    The dashboard's performance panel renders 1D fits (coolant warmup, idle
+    RPM curve) directly and 2D fits (timing surface, fuel-trim surface) as
+    heatmaps with per-cell counts surfacing operating-envelope coverage.
+
+    Missing file → ``{"models": [], "schema_version": null}``; the dashboard
+    handles that as "no surfaces refit yet" rather than an error.
+    """
+    if not path.exists():
+        return {"schema_version": None, "models": []}
+    return load_behavior_models(path).model_dump(mode="json")
+
+
+# ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
 
@@ -263,6 +287,7 @@ def create_app(
     telemetry_broadcaster: Broadcaster | None = None,
     anomalies_broadcaster: Broadcaster | None = None,
     emitter: AnomalyEventEmitter | None = None,
+    behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
     static_dir: Path | None = None,
     enable_dev_cors: bool = False,
 ) -> FastAPI:
@@ -316,6 +341,13 @@ def create_app(
     ) -> dict[str, Any]:
         rows = read_latest_telemetry_rows(config.collection.storage_path, n=n)
         return {"rows": rows, "count": len(rows)}
+
+    @app.get("/models/behavior")
+    def get_behavior_models() -> dict[str, Any]:
+        # Re-read on every request so a `scripts/refit_behavior_models.py`
+        # run lands in the dashboard without a daemon restart. Cheap — the
+        # file is < 100 KB even with a full surface catalog.
+        return read_behavior_models(behavior_models_path)
 
     @app.websocket("/ws/telemetry")
     async def ws_telemetry(websocket: WebSocket) -> None:
