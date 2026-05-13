@@ -216,15 +216,26 @@ from candidate to confirmed in one rev-protocol session).
    "binding candidates" + "16-bit signal candidates" sections are the
    hot list.
 
-2. **A CAN-native OBD-II requester would obsolete the ELM327 entirely.**
-   The Canable can transmit, not just sniff. A small ISO 15765-4
-   request/response client would let the daemon poll Mode 01 + Mode 03
-   + Mode 09 directly through the same USB device the broadcast
-   collector uses — no extra hardware. Worth building once the
-   broadcast story is solid, since at that point the only remaining
-   role for an OBD-II path is DTCs + readiness, both of which Mode 03
-   / Mode 01 STATUS cover. Tracked as a follow-up; not on the critical
-   path.
+2. **The CAN-native OBD-II client now exists** —
+   `src/collection/can_obd_client.py`. ISO 15765-4 single-frame +
+   multi-frame ISO-TP reassembly (first-frame / consecutive-frame /
+   flow-control). Decodes ~37 standard Mode-01 PIDs (powertrain, fuel
+   control, narrowband O2, environment, EGR, EVAP, catalyst temps, …)
+   with SAE J1979 scaling; Mode 03 DTC list parsing including system
+   letter (P/C/B/U); Mode 09 InfoType multi-frame (VIN, calibration ID);
+   `query_supported_mode_01_pids` walks the PIDS_A/B/C/D bitmasks.
+   `tools/can_obd_probe.py` is the one-shot CLI — same information as
+   `tools/obd_coverage.py` but over the Canable, no ELM327 USB device
+   needed. Read-only by construction (the request builder has no path
+   for Mode 04 / 0x2E / 0x2F). 28 tests including a multi-frame VIN
+   round-trip with flow-control.
+
+   The path is wired but not yet swapped into the production daemon —
+   the existing `obd_collector.py` (ELM327) still runs the watch loop.
+   Switching to the Canable-native path is a separate piece: one
+   `can_obd_collector.py` that wraps `CanObdClient` in the same
+   supervisor pattern `supervise_obd_capture` uses, plus a config flag
+   to choose between the two paths.
 
 3. **The NT510 stays an RE-only tool.** It doesn't expose an automatable
    interface, and even if it did, every parameter it surfaces is
