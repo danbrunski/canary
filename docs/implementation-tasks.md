@@ -71,9 +71,18 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
   `wait_for_stop_or_timeout`); used by both OBD and CAN paths. Tested via
   `test_collect_obd_retries_after_factory_failure` and the corresponding
   CAN test. (NFR-02)
-- [ ] **1.4 — Read-only enforcement.** Wrap the OBD interface so that only
-  query commands are issuable; assert no `Mode 04`/write paths reachable.
-  Unit-test that an attempted write raises. (NFR-06)
+- [x] **1.4 — Read-only enforcement.** `src/collection/obd_collector.py` —
+  `WRITE_COMMAND_MODES = {0x04, 0x2E, 0x2F}` + `assert_read_only_command()`
+  guard + `WriteCommandRejected` (subclasses `ValueError` so collector
+  retry paths still surface it immediately). `resolve_pids()` rejects any
+  named PID whose service mode is a write before the connection is opened;
+  `enforce_read_only(conn)` wraps `Async.watch/query/unwatch` so any later
+  hand-crafted `OBDCommand` (or a future Mode 22 DID extension calling
+  `query()` with a raw mode byte) is blocked too. ELM327 ``AT*`` commands
+  (mode=None) stay allowed. Idempotent. Covered by `tests/test_obd_collector.py`
+  (rejects `CLEAR_DTC`, accepts read modes 0x03/0x09, blocks synthesized
+  0x2E, passes through AT, wraps `watch`/`query`/`unwatch`, idempotency).
+  (NFR-06)
 - [ ] **1.5 — Unit tests with emulator.** `tests/test_obd_collector.py` —
   spin up `ELM327-emulator`, run collector for N seconds, assert expected
   PIDs appeared and unsupported PIDs produced warnings, not crashes.
@@ -112,10 +121,19 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
   compression. Implemented as `ParquetTelemetryWriter` (streaming, live)
   + `write_records_to_parquet` (batch, offline) sharing TELEMETRY_SCHEMA;
   daemon-produced and offline-converted Parquet are byte-equivalent.
-- [ ] **1.11 — Session keying.** Detect new ignition by Engine Run Time
-  reset (PID 0x1F decreases or starts near 0). New session ⇒ rotate file.
-  Current behavior: sessions are time-bucketed by daemon startup, not by
-  ignition. (FR-03)
+- [x] **1.11 — Session keying.** `src/storage/parquet_writer.py` —
+  `ParquetTelemetryWriter._rotate_if_engine_run_time_reset` watches Engine
+  Run Time PID readings (`RUN_TIME` and its lowercase aliases via
+  `ENGINE_RUN_TIME_CHANNELS`) and rotates the session directory either
+  when the value decreases (engine restart with the previous reading still
+  recent) or when it dips back below the
+  `engine_run_time_reset_threshold_seconds` floor after having been above
+  it (default 5 s — guards against the noisy first reading sometimes seen
+  right after `usbipd attach`). New session ⇒ fresh timestamped directory
+  from `make_session_dir`; chunk index resets so file numbering doesn't
+  collide. Tracked sessions accumulate in `writer.session_paths`. Covered
+  by `tests/test_parquet_writer.py::test_writer_rotates_session_when_engine_run_time_resets`.
+  (FR-03)
 - [x] **1.12 — Ring buffer.** Background sweeper deletes session files
   older than `session_retention_days`. Configurable, default 30.
   Implemented as `delete_expired_sessions` and invoked from

@@ -44,6 +44,44 @@ from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
 
+# OBD-II service modes that mutate ECU state. We never want to send any of
+# these — CANary is strictly read-only against the ECU (NFR-06). The only one
+# python-obd exposes today is Mode 04 (`CLEAR_DTC`); Mode 0x2E
+# `WriteDataByIdentifier` and 0x2F `InputOutputControlByIdentifier` aren't in
+# python-obd's stock command table, but anyone hand-crafting an `OBDCommand`
+# (or `Async.query()` on a raw mode-byte command) could still send one — guard
+# both paths. ELM327 ``AT*`` configuration commands keep mode=None and stay
+# allowed.
+WRITE_COMMAND_MODES: frozenset[int] = frozenset({0x04, 0x2E, 0x2F})
+
+
+class WriteCommandRejectedError(ValueError):
+    """Raised when a caller tries to schedule a non-read OBD command.
+
+    Subclasses ``ValueError`` so existing collector retry paths (which already
+    re-raise ``ValueError`` instead of reconnecting) still surface bad config
+    immediately rather than spinning on a hopeless reconnect loop.
+    """
+
+
+def assert_read_only_command(command: Any, *, requester: str = "") -> None:
+    """Reject any OBDCommand whose service mode mutates ECU state.
+
+    Mode is fetched defensively — a duck-typed fake without ``.mode`` is
+    treated as unknown and allowed (the tests' fakes don't set it). Real
+    ``OBDCommand`` objects always have it.
+    """
+    mode = getattr(command, "mode", None)
+    if mode is None:
+        return
+    if mode in WRITE_COMMAND_MODES:
+        name = getattr(command, "name", repr(command))
+        prefix = f"{requester}: " if requester else ""
+        raise WriteCommandRejectedError(
+            f"{prefix}OBD command {name!r} is service mode 0x{mode:02X} "
+            f"(write/control); CANary is read-only. Refusing to send."
+        )
+
 
 @dataclass(frozen=True)
 class ObdSpec:
@@ -121,6 +159,7 @@ def resolve_pids(names: tuple[str, ...]) -> list[Any]:
                 f"unknown OBD command {name!r}; "
                 f"see https://python-obd.readthedocs.io/en/latest/Command%20Tables/"
             )
+        assert_read_only_command(cmd, requester="resolve_pids")
         out.append(cmd)
     return out
 
@@ -147,6 +186,7 @@ def obd_factory(
             "Check `usbipd attach`, that /dev/ttyUSB* exists in WSL, "
             "and that the ELM327 is plugged into the vehicle's OBD-II port."
         )
+    enforce_read_only(conn)
 
     log.info("obd connected", extra={"port": spec.port, "watching": list(spec.pids)})
 
@@ -156,6 +196,31 @@ def obd_factory(
             continue
         conn.watch(cmd, callback=_make_callback(pid_name, on_reading))
 
+    return conn
+
+
+def enforce_read_only(conn: Any) -> Any:
+    """Monkey-patch ``conn`` so ``watch``/``query`` reject write-mode commands.
+
+    Defence-in-depth on top of ``resolve_pids``: any later caller — including
+    a future Mode 22 DID extension or hand-written `Async.query()` — is
+    guarded. The original method bindings are kept; we wrap them in a check
+    that calls ``assert_read_only_command`` first.
+    """
+    for method_name in ("watch", "query", "unwatch"):
+        original = getattr(conn, method_name, None)
+        if original is None or getattr(original, "_canary_read_only_wrapped", False):
+            continue
+
+        def _wrap(orig: Any, label: str) -> Any:
+            def _guarded(command: Any, *args: Any, **kwargs: Any) -> Any:
+                assert_read_only_command(command, requester=f"obd.{label}")
+                return orig(command, *args, **kwargs)
+
+            _guarded._canary_read_only_wrapped = True  # type: ignore[attr-defined]
+            return _guarded
+
+        setattr(conn, method_name, _wrap(original, method_name))
     return conn
 
 

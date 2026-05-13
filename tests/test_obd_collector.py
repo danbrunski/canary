@@ -22,11 +22,15 @@ from unittest.mock import patch
 import pytest
 
 from src.collection.obd_collector import (
+    WRITE_COMMAND_MODES,
     JsonlReadingWriter,
     ObdReading,
     ObdSpec,
+    WriteCommandRejectedError,
     _make_callback,
+    assert_read_only_command,
     collect_obd,
+    enforce_read_only,
     obd_factory,
     queue_reading_callback,
     reading_to_record,
@@ -140,6 +144,94 @@ def test_resolve_pids_known_commands():
 def test_resolve_pids_unknown_command_raises_with_helpful_message():
     with pytest.raises(ValueError, match="unknown OBD command 'RMP'"):
         resolve_pids(("RPM", "RMP"))  # typo in second item
+
+
+# ---------------------------------------------------------------------------
+# Read-only enforcement (Task 1.4 / NFR-06)
+# ---------------------------------------------------------------------------
+
+
+def test_write_command_modes_contains_known_write_services() -> None:
+    # Mode 04 (CLEAR_DTC), 0x2E (WriteDataByIdentifier), 0x2F (IOControl)
+    assert 0x04 in WRITE_COMMAND_MODES
+    assert 0x2E in WRITE_COMMAND_MODES
+    assert 0x2F in WRITE_COMMAND_MODES
+
+
+def test_resolve_pids_rejects_clear_dtc() -> None:
+    with pytest.raises(WriteCommandRejectedError, match="CLEAR_DTC"):
+        resolve_pids(("RPM", "CLEAR_DTC"))
+
+
+def test_resolve_pids_allows_read_modes() -> None:
+    # Mode 03 (GET_DTC) and Mode 09 (VIN) are read-only diagnostics — fine.
+    cmds = resolve_pids(("GET_DTC", "VIN"))
+    assert len(cmds) == 2
+
+
+def test_assert_read_only_command_blocks_synthesized_write_modes() -> None:
+    class _Fake:
+        name = "PROPRIETARY_WRITE"
+        mode = 0x2E  # WriteDataByIdentifier
+
+    with pytest.raises(WriteCommandRejectedError, match=r"0x2E.*read-only"):
+        assert_read_only_command(_Fake(), requester="test")
+
+
+def test_assert_read_only_command_passes_through_at_commands() -> None:
+    # ELM327 AT* commands have mode=None — must remain allowed.
+    class _AtCmd:
+        name = "ELM_VOLTAGE"
+        mode = None
+
+    assert_read_only_command(_AtCmd())  # no exception
+
+
+def test_enforce_read_only_wraps_watch_and_query() -> None:
+    calls: list[str] = []
+
+    class _FakeConn:
+        def watch(self, cmd: Any) -> None:
+            calls.append(("watch", cmd.name))
+
+        def query(self, cmd: Any) -> None:
+            calls.append(("query", cmd.name))
+
+        def unwatch(self, cmd: Any) -> None:
+            calls.append(("unwatch", cmd.name))
+
+    class _ReadCmd:
+        name = "RPM"
+        mode = 0x01
+
+    class _WriteCmd:
+        name = "CLEAR_DTC"
+        mode = 0x04
+
+    conn = enforce_read_only(_FakeConn())
+    # reads still go through
+    conn.watch(_ReadCmd())
+    conn.query(_ReadCmd())
+    assert calls == [("watch", "RPM"), ("query", "RPM")]
+    # writes raise and never reach the original method
+    with pytest.raises(WriteCommandRejectedError):
+        conn.watch(_WriteCmd())
+    with pytest.raises(WriteCommandRejectedError):
+        conn.query(_WriteCmd())
+    assert calls == [("watch", "RPM"), ("query", "RPM")]
+
+
+def test_enforce_read_only_is_idempotent() -> None:
+    class _FakeConn:
+        def watch(self, cmd: Any) -> None: ...
+        def query(self, cmd: Any) -> None: ...
+        def unwatch(self, cmd: Any) -> None: ...
+
+    conn = _FakeConn()
+    enforce_read_only(conn)
+    first_watch = conn.watch
+    enforce_read_only(conn)  # second call should be a no-op
+    assert conn.watch is first_watch
 
 
 # ---------------------------------------------------------------------------
