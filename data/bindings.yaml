@@ -51,7 +51,7 @@ signals:
     scale: 1.0
     offset: -40.0
     unit: "degC"
-    confidence: high
+    confidence: confirmed
     plausible_min: -10.0   # below this and we're seeing the engine-off sentinel
     plausible_max: 130.0   # Xterra thermostat caps around 90-95degC; +35 headroom
     evidence:
@@ -61,6 +61,12 @@ signals:
           Monotonic rise from raw 53 (cold start) to raw 90 (end of 6-min run),
           across every window without reversal. With offset -40, decodes to
           13degC -> 50degC — plausible cold-to-warm Xterra arc.
+      - session: 2026-05-13T005522
+        method: broadcast_vs_pid_regression
+        finding: >
+          Regressed against Mode 01 PID 0x05 (engine coolant temp): r2 = 0.999,
+          coolant_degC = raw × 0.9986 − 39.86 (n = 354) — i.e. exactly the
+          scale 1.0 / offset −40 already recorded. Confirmed.
     notes: |
       Strong candidate. ELM327 Mode 01 PID 0x05 (engine coolant temp) will
       cross-reference exactly. Other coolant duplicates may exist: 0x233:0
@@ -72,31 +78,69 @@ signals:
       raw=0 readings. Surfaced by decode_bindings.py against
       session 2026-05-11T152858.
 
-  - name: ECM_ENGINE_REV_LEVEL
+  - name: ECM_RPM
+    module: ECM
+    can_id: 0x1F9
+    byte_start: 2
+    byte_length: 2
+    byte_order: big   # MSB byte 2, LSB byte 3
+    scale: 0.125      # raw / 8 → rpm
+    offset: 0.0
+    unit: "rpm"
+    confidence: confirmed
+    plausible_min: 0.0
+    plausible_max: 7000.0   # VQ40DE redline ~6000; headroom for overrev
+    evidence:
+      - session: 2026-05-13T005522
+        method: byte_vs_tag_differential
+        finding: >
+          0x1F9 byte 2 rises monotonically through the rev protocol: idle ~23,
+          blip_2k ~44, blip_3k ~66, sustain_2500 ~69, blip_4k ~73; ~0/3 with
+          the engine off. Flagged as the clean RPM candidate.
+      - session: 2026-05-13T005522
+        method: broadcast_vs_pid_regression
+        finding: >
+          Bytes 2-3 (16-bit, big-endian) regressed against Mode 01 PID 0x0C
+          (engine RPM) over the engine-running window: r2 = 1.000,
+          RPM = raw x 0.1251 − 4.8 (n = 354). The clean form raw ÷ 8 is almost
+          certainly the true scaling (byte 2 alone ≈ RPM / 32, also r2 ≈ 1.0).
+    notes: |
+      Confirmed engine RPM, 16-bit at 8 counts/rpm on the ~100 Hz 0x1F9 frame.
+      This is the real RPM signal — NOT 0x23D:1-2 (see ECM_AIRFLOW_PROXY_23D,
+      which the earlier rev-session analysis had mislabeled as the "rev level"
+      prize but which actually cross-references to airflow).
+
+  - name: ECM_AIRFLOW_PROXY_23D
     module: ECM
     can_id: 0x23D
     byte_start: 1
     byte_length: 2
     byte_order: big   # assumed MSB-first, byte 1 then byte 2
-    scale: null       # TBD via cross-reference
+    scale: null       # correlation is real but not clean enough to pin
     offset: null
-    unit: unknown     # rpm OR engine load OR fuel pulse — directionally one of these
+    unit: unknown     # airflow / fuel-related — possibly MAF (g/s), injector PW, or VE
     confidence: medium
     evidence:
       - session: 2026-05-11T152858
         method: byte_vs_tag_differential
         finding: >
           byte 1 and byte 2 spike together in lockstep across every rev event,
-          and the values order correctly with RPM target:
-            idle: 0, 0   |  blip_2k: 27.8, 24.0  |  sustain_2500: 29.7, 24.3
-            blip_3k: 31.3, 26.2  |  blip_4k: 42.5, 37.4
-          Engine-off windows return to 0,0. This is a real engine-state signal
-          monotonically correlated with RPM/load.
+          ordered with RPM target (idle 0,0 → blip_4k 42.5,37.4), zero engine-off.
+      - session: 2026-05-13T005522
+        method: broadcast_vs_pid_regression
+        finding: >
+          Bytes 1-2 regress against Mode 01 PID 0x10 (MAF) at r2 ≈ 0.79
+          (byte 2 alone r2 ≈ 0.82); NO clean correlation with RPM (PID 0x0C).
+          So this is an airflow/fuel-related quantity, not RPM. Scaling left
+          unpinned: the fit (raw×0.0016+4 g/s) doesn't match the idle MAF floor,
+          so it's likely a filtered/derived value (injector PW or VE), not the
+          raw MAF reading.
     notes: |
-      THE prize byte from the rev session. Once ELM327 is connected, run
-      cross_reference.py to fit a linear model against Mode 01 RPM (0x0C)
-      AND calculated load (0x04) — whichever fits cleanly tells us what
-      this 16-bit value actually means.
+      Renamed from ECM_ENGINE_REV_LEVEL — the cross-reference rules out RPM
+      (that's ECM_RPM @ 0x1F9:2-3). Cross-broadcast siblings 0x233:0 / 0x23D:7
+      may carry the same value. Promotion needs a session with the MAP PID
+      (0x0B) and/or MAF watched alongside a tagged drive (not just no-load revs)
+      to separate MAF from injector-PW from VE.
 
   - name: ECM_INTAKE_VACUUM_OR_IAC
     module: ECM
@@ -438,16 +482,16 @@ signals:
           2→128). Probable rear-axle counterpart.
     notes: See WHEEL_SPEED_PAIR_A notes.
 
-  - name: MOTION_SIGNAL_002_0
-    module: unknown
+  - name: STEERING_002_LOW
+    module: unknown      # 9.9ms hot-path; chassis/ABS-published
     can_id: 0x002
     byte_start: 0
     byte_length: 1
     byte_order: big
     scale: null
     offset: null
-    unit: unknown
-    confidence: medium  # promoted — clean gear/motion-state signature across multiple sessions
+    unit: unknown        # LSB of a 16-bit steering value (see STEERING_ANGLE_002)
+    confidence: low
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
@@ -457,44 +501,61 @@ signals:
         finding: >
           ~245 steady through engine-off / running-stationary / A/C-on /
           parking-brake / clutch_in tags. Drops to 131 in gear_reverse, 130
-          in coming_to_stop (driving). Clean two-state-or-three-state encoding
-          tied to "is the vehicle moving."
+          in coming_to_stop (driving).
+      - session: 2026-05-13T011123
+        method: byte_vs_tag_differential
+        finding: >
+          With the vehicle stationary and engine running, sweeps its full
+          0–255 range during the steering lock-to-lock (steer_full_left → 115,
+          steer_full_right → 153, steer_center → 91 means, ranges 0–255), then
+          pins to ~43 when the wheel is held centred. That's LSB-of-a-16-bit
+          behaviour, and the stimulus was steering, not motion.
     notes: |
-      Likely vehicle motion state with a forward/reverse distinction OR
-      transmission-output-shaft-speed encoded value. Paired with 0x002:1
-      (see GEAR_OR_MOTION_002_1) — together they likely encode the
-      "vehicle moving + direction" state. Cross-reference with Mode 01
-      PID 0x0D (vehicle speed) will resolve once ELM327 arrives.
+      Reinterpreted from "vehicle motion state" to the low byte of a 16-bit
+      steering value on 0x002 (high byte = STEERING_ANGLE_002 @ 0x002:1, rate
+      = STEERING_RATE_002 @ 0x002:2). The earlier "131 in reverse / 130 driving"
+      reading is consistent — you steer while reversing and driving. Confirm
+      against the NT510 ABS steering-angle live-data readout in a follow-up.
 
   # --------------------------------------------------------------------------
   # New findings from session 2026-05-11T211240 (physical-action-tagged drive)
   # --------------------------------------------------------------------------
 
-  - name: GEAR_OR_MOTION_002_1
-    module: unknown      # 9.9ms hot-path; possibly ECM or TCM-equivalent
+  - name: STEERING_ANGLE_002
+    module: unknown      # 9.9ms hot-path; chassis/ABS-published (steering-angle sensor)
     can_id: 0x002
     byte_start: 1
     byte_length: 1
     byte_order: big
     scale: null
     offset: null
-    unit: unknown  # likely enum
-    confidence: high
+    unit: unknown        # high byte of a ~16-bit steering angle (with 0x002:0 = low byte)
+    confidence: low      # demoted from high — the "clean motion enum" reading is superseded
     evidence:
       - session: 2026-05-11T211240
         method: byte_vs_tag_differential
         finding: >
-          Cleanest enum-style transitions in the data: stays at 254 across
-          engine-off / engine_started / A/C-on / parking-brake / clutch_in
-          (every stationary state). Drops to 63 (= 0x3F) in gear_reverse,
-          then to 102 in coming_to_stop (forward driving). Three values
-          encode: stationary (254), reverse (63), forward-driving (102).
+          254 across engine-off / engine_started / A/C-on / parking-brake /
+          clutch_in (every stationary, wheels-straight state); 63 in
+          gear_reverse, 102 in coming_to_stop (forward driving).
+      - session: 2026-05-13T011123
+        method: byte_vs_tag_differential
+        finding: >
+          With the vehicle stationary and engine running, swings across its
+          full range during the steering lock-to-lock — steer_full_left mean
+          237 (range 231–255), steer_full_right mean 82 (range 0–255),
+          steer_center mean 62 (range 0–255) — and is otherwise pinned. So
+          0x002 bytes 0–1 are a 16-bit steering angle, not a motion/gear enum.
+          (Big-endian: centred ≈ 0x002B, full-left ≈ 0xED73, full-right
+          ≈ 0x5299 — i.e. center near zero, lock-to-lock roughly ±, though the
+          two extremes aren't symmetric so there's an offset/scale still TBD.)
     notes: |
-      One of the most diagnostic signals in the data so far. The values
-      themselves look bit-packed (254 = 0xFE, 63 = 0x3F, 102 = 0x66) so
-      individual bits may encode separate flags (brake-applied,
-      gear-engaged, vehicle-moving). Worth decoding bit-by-bit once
-      ground truth from a Mode 01 transmission state PID is available.
+      Renamed from GEAR_OR_MOTION_002_1. The old reading ("stationary 254 /
+      reverse 63 / forward 102") is consistent with steering angle — you have
+      the wheel cranked when reversing out of a spot, varied while driving,
+      ~straight when parked. Decode 0x002:0-1 as one big-endian 16-bit value;
+      calibrate scale/offset against the NT510 ABS "steering angle" live data
+      in a follow-up run with the engine running.
 
   - name: AC_COMPRESSOR_STATE
     module: HVAC        # 100ms body bus
@@ -582,16 +643,16 @@ signals:
       enough to roll a byte over) would let us derive the meters-per-tick
       scale without ELM327.
 
-  - name: MOTION_002_2
-    module: unknown
+  - name: STEERING_RATE_002
+    module: unknown      # same 0x002 frame as STEERING_ANGLE_002
     can_id: 0x002
     byte_start: 2
     byte_length: 1
     byte_order: big
     scale: null
     offset: null
-    unit: unknown
-    confidence: medium
+    unit: unknown        # steering rate / velocity (nonzero only while turning)
+    confidence: low
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
@@ -601,10 +662,17 @@ signals:
         finding: >
           Stays low through stationary states; varies widely during
           gear_reverse (140 unique values) and coming_to_stop driving.
+      - session: 2026-05-13T011123
+        method: byte_vs_tag_differential
+        finding: >
+          ~0–1 everywhere except the three steering windows, where it climbs
+          to ~16–28 mean — i.e. nonzero only while the wheel is actually
+          turning, zero when held still. Classic steering-rate / angular-
+          velocity signature.
     notes: |
-      Companion to GEAR_OR_MOTION_002_1; bytes 0/1/2 of 0x002 together
-      look like a packed vehicle-state structure. Likely contains
-      transmission output shaft speed or wheel-speed-derived signal.
+      Renamed from MOTION_002_2. Pairs with STEERING_ANGLE_002 (0x002:0-1):
+      the 0x002 frame carries steering angle (bytes 0-1) plus a rate byte
+      (byte 2). Sign of the rate (left vs right) and its scale are TBD.
 
   - name: MOTION_29E_5
     module: unknown
@@ -635,10 +703,72 @@ signals:
       torque request" based on the A/C-load spike in 222447. 0x29E is on
       the 20ms drivetrain bus. Cross-reference with Mode 01 PID 0x04
       (calculated load) when ELM327 arrives.
+      NOTE: in the 2026-05-13T005522 no-load rev session this byte did NOT
+      regress cleanly against the Mode 01 load/RPM PIDs (r2 < 0.5) — needs a
+      loaded drive to confirm the load interpretation.
+
+  # --------------------------------------------------------------------------
+  # Brake — from the NT510-active session 2026-05-13T011123 (engine running,
+  # stationary, tagged brake-pedal presses while watching ABS live data).
+  # --------------------------------------------------------------------------
+
+  - name: BRAKE_PRESSURE_29E_3
+    module: ABS          # 0x29E, ~20ms drivetrain/ABS cadence
+    can_id: 0x29E
+    byte_start: 3
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown        # brake-line pressure or pedal position
+    confidence: low
+    evidence:
+      - session: 2026-05-13T011123
+        method: byte_vs_tag_differential
+        finding: >
+          0 across every window except `brake_press`, where it averages ~32
+          over the press window (i.e. ~64–128 while the pedal is firmly down,
+          0 between presses) and returns to 0 at `brake_release`. Magnitude
+          tracks pedal force — looks like brake-line pressure or pedal travel.
+    notes: |
+      Needs a dedicated capture: hold several distinct, sustained pedal
+      pressures (light / medium / hard) for ~10 s each so the value can be
+      pinned, and ideally cross-reference against the NT510's ABS "brake
+      pressure" live-data parameter if it exposes one.
+
+  - name: BRAKE_ACTIVITY_29E_7
+    module: ABS
+    can_id: 0x29E
+    byte_start: 7
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown        # brake/driver-demand activity — flag or counter, not a clean value
+    confidence: low
+    evidence:
+      - session: 2026-05-13T011123
+        method: byte_vs_tag_differential
+        finding: >
+          ~117 across everything except `brake_press`, where it jumps to ~149.
+          Reverts at `brake_release`. A brake-active flag or activity counter.
+      - session: 2026-05-13T005522
+        method: broadcast_vs_pid_regression
+        finding: >
+          In the rev session (no braking) it correlates weakly with throttle
+          (r2 ≈ 0.65), MAF (~0.59), and calculated load (~0.56). So it isn't a
+          dedicated brake signal — more likely a "driver-demand / pedal
+          activity" composite that responds to both throttle and brake input.
+    notes: |
+      Ambiguous. Disambiguate with a capture that has independent throttle and
+      brake events (idle → brake-only presses → throttle-only blips, all
+      tagged) so the two contributions can be separated.
 
 # Future sections (placeholders for organization once data arrives):
 #
 # - BCM_*  (lights, doors, key state)
-# - IPDM_* (power module relays)
-# - STEERING_ANGLE  (0x1F9:3 candidate from session 2026-05-11T034516, needs
-#                    physical-action capture to confirm)
+# - IPDM_* (power module relays — incl. a clean cooling-fan duty redo: the
+#           2026-05-13T011123 fan test was mistagged, see that analysis)
+# - 0x284/0x285 byte 6: a duty-modulated field whose toggle ratio tracks engine
+#   load (rose with throttle blips and during the fan test) — decode the
+#   bit/duty structure rather than treating it as a plain byte.
