@@ -30,6 +30,7 @@ from src.collection.obd_collector import (
     _make_callback,
     assert_read_only_command,
     collect_obd,
+    did_command,
     enforce_read_only,
     obd_factory,
     queue_reading_callback,
@@ -232,6 +233,64 @@ def test_enforce_read_only_is_idempotent() -> None:
     first_watch = conn.watch
     enforce_read_only(conn)  # second call should be a no-op
     assert conn.watch is first_watch
+
+
+# ---------------------------------------------------------------------------
+# did_command: custom Mode 22 OBDCommand builder
+# ---------------------------------------------------------------------------
+
+
+def test_did_command_builds_a_mode22_obdcommand() -> None:
+    cmd = did_command("1101")
+    # python-obd OBDCommand surface: name, command, decoder, header
+    assert cmd.name == "DID_1101"
+    assert cmd.command == b"221101"
+    assert cmd.header == b"7E0"
+
+
+def test_did_command_normalizes_case() -> None:
+    cmd = did_command("f190")
+    assert cmd.name == "DID_F190"
+    assert cmd.command == b"22F190"
+
+
+def test_did_command_rejects_bad_input() -> None:
+    with pytest.raises(ValueError, match="4-character hex"):
+        did_command("110")  # too short
+    with pytest.raises(ValueError, match="4-character hex"):
+        did_command("11Z0")  # non-hex char
+    with pytest.raises(ValueError, match="4-character hex"):
+        did_command("11011")  # too long
+
+
+def test_did_command_decoder_concatenates_message_bytes() -> None:
+    cmd = did_command("1101")
+    decoder = cmd.decode
+
+    class _Msg:
+        def __init__(self, data: bytes) -> None:
+            self.data = data
+
+    # the decoder lives on the OBDCommand; in python-obd the public surface
+    # is the function passed in. We're testing that surface directly:
+    result = decoder([_Msg(b"\x62\x11\x01\xab"), _Msg(b"\xcd")])
+    assert result == "621101abcd"
+
+
+def test_did_command_decoder_returns_none_on_empty() -> None:
+    cmd = did_command("1101")
+    assert cmd.decode([]) is None
+
+
+def test_obd_spec_carries_dids_and_header() -> None:
+    spec = ObdSpec(
+        port="/dev/ttyUSB0",
+        pids=("RPM",),
+        dids=("1101", "F190"),
+        did_header="7E1",
+    )
+    assert spec.dids == ("1101", "F190")
+    assert spec.did_header == "7E1"
 
 
 # ---------------------------------------------------------------------------

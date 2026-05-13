@@ -85,7 +85,17 @@ def assert_read_only_command(command: Any, *, requester: str = "") -> None:
 
 @dataclass(frozen=True)
 class ObdSpec:
-    """How to construct the python-obd Async client."""
+    """How to construct the python-obd Async client.
+
+    ``dids`` is the Mode 22 ReadDataByIdentifier set (16-bit hex DIDs as
+    ``"1101"``-style strings; the ``22`` mode byte is prepended for you).
+    These are polled alongside ``pids`` through one ELM327 — the python-obd
+    Async loop round-robins all watch commands, so a long ``pids+dids`` list
+    will lower the per-command refresh rate. For exploratory DID sweeps
+    use ``tools/scan_constant_dids.py`` instead; this side is for *known*
+    DIDs you want logged through a drive (e.g. the injector-PW DID, after
+    it's been identified via 4.E.4).
+    """
 
     port: str
     baudrate: int = 38400
@@ -93,6 +103,8 @@ class ObdSpec:
     # (ISO 15765-4 CAN 11/500) to skip the probing handshake on a known bus.
     protocol: str | None = None
     pids: tuple[str, ...] = ()
+    dids: tuple[str, ...] = ()
+    did_header: str = "7E0"  # request header for Mode 22 — engine ECU by default
 
 
 @dataclass(frozen=True)
@@ -164,6 +176,47 @@ def resolve_pids(names: tuple[str, ...]) -> list[Any]:
     return out
 
 
+def did_command(did_hex: str, *, header: str = "7E0") -> Any:
+    """Build a python-obd OBDCommand that polls one Mode 22 DID.
+
+    ``did_hex`` is a 4-character hex DID (``"1101"``, ``"F190"``, …). The
+    ``22`` service byte is prepended. The decoder is a passthrough — the
+    raw response bytes are stringified to hex and surfaced as the
+    ``ObdReading.value``. Multi-frame ISO-TP responses arrive concatenated;
+    consumers parse them downstream. ``header`` defaults to engine ECU
+    (``7E0``); pass another to point at a different module.
+
+    Service 0x22 is a *read* in the UDS sense, but python-obd's mode field
+    is OBD-II service (1–9). We set mode=None so the read-only enforcement
+    doesn't reject it.
+    """
+    if len(did_hex) != 4 or any(c not in "0123456789abcdefABCDEF" for c in did_hex):
+        raise ValueError(f"DID must be a 4-character hex string, got {did_hex!r}")
+    name = f"DID_{did_hex.upper()}"
+    request = f"22{did_hex.upper()}".encode("ascii")
+
+    def _decoder(messages: Any) -> str | None:
+        """Concatenate response bytes across (potentially multi-frame) messages."""
+        out = bytearray()
+        for msg in messages or ():
+            data = getattr(msg, "data", None)
+            if not isinstance(data, (bytes, bytearray)):
+                continue
+            out.extend(data)
+        return out.hex() if out else None
+
+    return obd.OBDCommand(
+        name,
+        f"Mode 22 ReadDataByIdentifier DID 0x{did_hex.upper()}",
+        request,
+        0,
+        _decoder,
+        ecu=obd.protocols.ECU.ENGINE,
+        fast=False,
+        header=header.encode("ascii"),
+    )
+
+
 def obd_factory(
     spec: ObdSpec,
     on_reading: Callable[[ObdReading], None],
@@ -172,9 +225,12 @@ def obd_factory(
 
     Each PID is checked against the ECU's supported set; unsupported PIDs
     are warned and skipped (per FR-01: "log a warning and continue").
-    Returns the live connection — caller must call `.start()` and `.stop()`.
+    Mode 22 DIDs from ``spec.dids`` are appended to the watch list with
+    custom OBDCommands (``did_command``). Returns the live connection —
+    caller must call `.start()` and `.stop()`.
     """
     commands = resolve_pids(spec.pids)
+    did_commands = [did_command(d, header=spec.did_header) for d in spec.dids]
 
     kwargs: dict[str, Any] = {"portstr": spec.port, "baudrate": spec.baudrate}
     if spec.protocol is not None:
@@ -188,13 +244,26 @@ def obd_factory(
         )
     enforce_read_only(conn)
 
-    log.info("obd connected", extra={"port": spec.port, "watching": list(spec.pids)})
+    log.info(
+        "obd connected",
+        extra={
+            "port": spec.port,
+            "watching_pids": list(spec.pids),
+            "watching_dids": list(spec.dids),
+        },
+    )
 
     for pid_name, cmd in zip(spec.pids, commands, strict=True):
         if not conn.supports(cmd):
             log.warning("PID not supported by this ECU; skipping", extra={"pid": pid_name})
             continue
         conn.watch(cmd, callback=_make_callback(pid_name, on_reading))
+
+    # DIDs aren't in the ECU's `supports()` set (python-obd only tracks
+    # standard Mode 01 PIDs), so we watch them unconditionally and let
+    # negative responses be logged as warnings by the decoder.
+    for did, cmd in zip(spec.dids, did_commands, strict=True):
+        conn.watch(cmd, callback=_make_callback(f"DID_{did.upper()}", on_reading))
 
     return conn
 

@@ -100,13 +100,24 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
   `bus.recv()` with `try/except (ValueError, can.CanError)` so a single
   corrupt slcan frame doesn't kill multi-hour recordings (counted into
   `RecordingResult.parse_errors` + manifest). (FR-02)
-- [ ] **1.8 — DBC decode hook.** Optional `cantools` decoder; if a DBC path
-  is configured, decode known frames into named-channel records and pass
-  through unknown frames as raw. DBC is empty in Phase 1 — wire the hook,
-  defer signal definitions to Phase 4. (FR-02)
-  Note: the project's primary signal-decode path is now `bindings.yaml` +
-  `src/decode/bindings.py` (see Phase 4.B). A DBC hook is still worth
-  having for SavvyCAN/Cabana interop; defer with a follow-up task.
+- [x] **1.8 — DBC decode hook (reader).** `src/decode/dbc.py` —
+  `load_dbc_database(path)` and `load_dbc_dir(directory) → cantools
+  Database | None` (silent `None` when missing/empty, mirroring the
+  "no bindings.yaml on disk" fallback). `decode_can_rows_dbc(long_frame,
+  database)` walks the CAN rows, looks up each known frame_id, calls
+  `message.decode(payload, decode_choices=False)`, and emits new
+  `source="dbc"` rows (one per signal) appended to the long frame —
+  unknown frames pass through untouched, malformed payloads are caught +
+  skipped so a single bad frame can't kill an offline pipeline. Named
+  choices / enums are skipped (numeric path only). Wired into
+  `build_feature_frame` after the bindings.yaml decode and before
+  `to_wide`, so DBC signals show up as `dbc:<SIGNAL>` columns alongside
+  bindings' `decoded:<NAME>`. One-way: bindings.yaml stays source of
+  truth; the DBC emitter side (4.D.2) is still skipped per the SavvyCAN
+  decision. Covered by `tests/test_decode_dbc.py` (12 tests: loader
+  variants, encode/decode round-trip, unknown-ID pass-through, empty
+  frame, too-short payload, no-can-rows path, multi-frame coexistence).
+  (FR-02)
 - [x] **1.9 — Synthetic CAN replay test.** Use `python-can`'s
   `VirtualBus` to inject canned frames; assert collector emits expected
   records. `test_record_captures_frames_and_writes_manifest` runs an
@@ -625,14 +636,26 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   layout, per-cell tracking of underlying relationship, empty-cell
   marking, NaN/out-of-range drops, edge-monotonicity, right-edge
   inclusiveness). (FR-05)
-- [ ] **4.E.4 — Injector pulse-width DID identification.** Cross-reference
+- [~] **4.E.4 — Injector pulse-width DID identification.** Cross-reference
   captured Mode 22 DIDs against Mode 01 fuel-trim variations. The DID
   whose value correlates with `RPM × (1 + STFT/100)` is the injector PW.
-  Adds to `data/bindings.yaml`. Tooling is in place — `tools/scan_constant_dids.py`
-  (the DID sweep, 4.E.5) + `tools/cross_reference.py` (the Mode 22 ↔
-  Mode 01 pairing, 4.B.4); needs a drive captured with the fuel-trim
-  PIDs watched (now in the default `--obd-pids` set) and a Mode 22 DID
-  log alongside (record.py doesn't poll DIDs yet — TODO).
+  Adds to `data/bindings.yaml`. Tooling is fully in place:
+    * DID sweep — `tools/scan_constant_dids.py` (4.E.5);
+    * Mode 22 ↔ Mode 01 pairing — `tools/cross_reference.py` (4.B.4);
+    * **Live DID polling** — `scripts/record.py --obd-dids 1101,F190 [--obd-did-header 7E0]`
+      now appends each DID to the python-obd `Async` watch loop alongside
+      Mode 01 PIDs. Each DID is built into a custom `OBDCommand` via
+      `did_command(did_hex, header=...)` (passthrough hex decoder; ECU =
+      ENGINE), then the supervised OBD thread writes its response bytes
+      into `pids.jsonl` exactly like Mode 01 readings. Long
+      `pids+dids` lists lower per-command refresh rate, since python-obd
+      round-robins the watch loop. Multi-frame ISO-TP DIDs arrive
+      concatenated (caller parses downstream).
+  Software work complete — only thing left is the captured drive itself
+  with fuel-trim PIDs + a candidate DID set being polled together.
+  Covered by `tests/test_obd_collector.py` (6 new `did_command` /
+  `ObdSpec.dids` tests) and `tests/test_record_script.py` (DID flow-through
+  + malformed-DID rejection).
 - [x] **4.E.5 — Calibration-DID scanner.** `tools/scan_constant_dids.py`
   + `src/analysis/did_scan.py` — sweeps Mode 22 DID space over the
   ELM327 (read-only, service 0x22 only; `Elm327Mode22Transport`), takes

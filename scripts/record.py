@@ -109,6 +109,27 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--obd-dids",
+        default="",
+        help=(
+            "Comma-separated 4-hex Mode 22 DIDs to poll alongside --obd-pids "
+            "(e.g. '1101,F190'). Each DID is appended to the python-obd "
+            "Async watch loop with a passthrough decoder; the response bytes "
+            "land in pids.jsonl as a hex string. Use this for known DIDs you "
+            "want logged through a drive (injector PW, ignition timing) — for "
+            "exploratory sweeps use tools/scan_constant_dids.py instead. Empty "
+            "by default; ISO-TP multi-frame DIDs may need parsing downstream."
+        ),
+    )
+    parser.add_argument(
+        "--obd-did-header",
+        default="7E0",
+        help=(
+            "Request header for Mode 22 DID polling (default 7E0 = engine ECU). "
+            "Other modules: 7E1 = trans, 7E2 = ABS, etc."
+        ),
+    )
+    parser.add_argument(
         "--obd-baud",
         type=int,
         default=38400,
@@ -229,14 +250,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         bus = bus_factory(spec)
         if args.obd_port:
             pids = tuple(p.strip() for p in args.obd_pids.split(",") if p.strip())
+            dids = tuple(d.strip() for d in args.obd_dids.split(",") if d.strip())
             resolve_pids(pids)  # fail fast on a typo, before the CAN capture starts
+            for did in dids:
+                if len(did) != 4 or any(c not in "0123456789abcdefABCDEF" for c in did):
+                    raise ValueError(f"--obd-dids: {did!r} is not a 4-character hex DID")
             obd_writer = JsonlReadingWriter(paths.pids)
-            obd_spec = ObdSpec(port=args.obd_port, baudrate=args.obd_baud, pids=pids)
+            obd_spec = ObdSpec(
+                port=args.obd_port,
+                baudrate=args.obd_baud,
+                pids=pids,
+                dids=dids,
+                did_header=args.obd_did_header,
+            )
             log.info(
                 "starting parallel OBD capture (supervised)",
                 extra={
                     "port": obd_spec.port,
                     "pids": list(pids),
+                    "dids": list(dids),
                     "reconnect": not args.no_reconnect,
                 },
             )

@@ -110,3 +110,69 @@ def test_record_cli_cleans_up_without_obd(tmp_path: Path, monkeypatch: pytest.Mo
 
     assert rc == 0
     assert bus.closed is True
+
+
+def test_record_cli_passes_dids_to_obd_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--obd-dids should propagate into the ObdSpec the factory sees."""
+    bus = FakeBus()
+    writer = FakeWriter()
+    captured_spec: dict[str, Any] = {}
+
+    class FakeObdConn:
+        def start(self) -> None: ...
+        def stop(self) -> None: ...
+        def is_connected(self) -> bool:
+            return True
+
+    def fake_factory(spec: Any, _on_reading: Any) -> FakeObdConn:
+        captured_spec["spec"] = spec
+        return FakeObdConn()
+
+    monkeypatch.setattr(record_script, "bus_factory", lambda _spec: bus)
+    monkeypatch.setattr(record_script, "JsonlReadingWriter", lambda _path: writer)
+    monkeypatch.setattr(record_script, "obd_factory", fake_factory)
+    monkeypatch.setattr(record_script, "record", lambda *_a, **_k: None)
+
+    rc = record_script.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--out-dir",
+            str(tmp_path),
+            "--obd-port",
+            "/dev/null",
+            "--obd-dids",
+            "1101,F190",
+            "--obd-did-header",
+            "7E1",
+        ]
+    )
+    assert rc == 0
+    spec = captured_spec["spec"]
+    assert spec.dids == ("1101", "F190")
+    assert spec.did_header == "7E1"
+
+
+def test_record_cli_rejects_malformed_did(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bus = FakeBus()
+    writer = FakeWriter()
+    monkeypatch.setattr(record_script, "bus_factory", lambda _spec: bus)
+    monkeypatch.setattr(record_script, "JsonlReadingWriter", lambda _path: writer)
+    monkeypatch.setattr(record_script, "obd_factory", lambda _spec, _on: object())
+    monkeypatch.setattr(record_script, "record", lambda *_a, **_k: None)
+
+    with pytest.raises(ValueError, match="4-character hex DID"):
+        record_script.main(
+            [
+                "--config",
+                "canary.example.yaml",
+                "--out-dir",
+                str(tmp_path),
+                "--obd-port",
+                "/dev/null",
+                "--obd-dids",
+                "ZZZZ",
+            ]
+        )

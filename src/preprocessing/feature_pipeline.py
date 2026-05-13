@@ -23,6 +23,7 @@ from src.decode.behavior_models import (
     load_behavior_models,
 )
 from src.decode.bindings import load_bindings
+from src.decode.dbc import DEFAULT_DBC_DIR, decode_can_rows_dbc, load_dbc_dir
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.features import FeatureConfig, compute_features
 from src.preprocessing.loader import read_session, to_wide
@@ -57,13 +58,16 @@ def build_feature_frame(
     *,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
     behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
+    dbc_dir: Path = DEFAULT_DBC_DIR,
 ) -> pd.DataFrame:
     """Run the full preprocessing pipeline over ``session_dirs`` into a feature frame.
 
-    ``read_session`` → ``decode_can_rows`` (if a bindings file is present) →
-    ``to_wide(coerce_numeric=True)`` → ``resample_wide`` → operating-mode segment
-    (or a constant ``"all"`` mode) → ``append_deviation_columns`` (if a
-    behavior-models file is present — Task 4.E.7) → ``compute_features``.
+    ``read_session`` → ``decode_can_rows`` (bindings.yaml, if present) →
+    ``decode_can_rows_dbc`` (any ``.dbc`` files under ``dbc_dir``, if present —
+    Task 1.8 interop hook) → ``to_wide(coerce_numeric=True)`` → ``resample_wide``
+    → operating-mode segment (or constant ``"all"`` mode) →
+    ``append_deviation_columns`` (behavior models, if present — Task 4.E.7) →
+    ``compute_features``.
 
     The deviation columns land *before* ``compute_features`` so they pick up
     rolling mean/std/roc derivatives just like raw / decoded channels. The
@@ -74,12 +78,15 @@ def build_feature_frame(
     behavior_models = (
         load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
     )
+    dbc_database = load_dbc_dir(dbc_dir)
 
     long_parts: list[pd.DataFrame] = []
     for session_dir in session_dirs:
         long = read_session(session_dir)
         if bindings is not None:
             long = decode_can_rows(long, bindings)
+        if dbc_database is not None:
+            long = decode_can_rows_dbc(long, dbc_database)
         long_parts.append(long)
     long_frame = pd.concat(long_parts, ignore_index=True)
 
