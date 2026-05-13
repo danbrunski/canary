@@ -127,6 +127,7 @@ def test_inference_flags_anomaly_against_low_thresholds() -> None:
 
 
 def test_inference_engine_requires_calibrated_thresholds() -> None:
+    _torch()  # skip cleanly when torch is unavailable (CI without the `ml` extra)
     trained = train_lstm_autoencoder(
         _dataset(),
         _config(),
