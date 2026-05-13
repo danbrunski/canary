@@ -695,9 +695,33 @@ no Mode 23 / Mode 27 / flash dumps / writes.
 
 ### 5B. FastAPI backend (FR-08)
 
-- [ ] **5.3 — REST endpoints.** `GET /telemetry/latest`,
-  `GET /anomalies?since=...`, `GET /status` (health, storage, model
-  version), `GET /config` (read-only echo).
+- [x] **5.3 — REST endpoints.** `src/dashboard/api.py` — read-only
+  FastAPI app over the files the daemon already writes; no live producer
+  wiring (WebSockets land in 5.4). Routes delegate to pure helpers so
+  the same logic is unit-testable without spinning up the web stack.
+    * `GET /status` → `build_status(config, models_dir=…)`: storage
+      path + free MB + most recent session under `collection.storage_path`
+      via `discover_sessions` + loaded model versions (best-effort,
+      reads `<models_dir>/*.manifest.json`'s `version` field) + a
+      "year make model" vehicle line.
+    * `GET /config` → `echo_config(config)`: Pydantic
+      `model_dump(mode="json")` of the loaded `canary.yaml`.
+    * `GET /anomalies?since=…` → `read_anomalies_since(anomalies_dir,
+      since=…)`: walks the `AnomalyEventLogger`'s
+      `anomalies-YYYY-MM-DD.jsonl` files (5.2) sorted by timestamp;
+      ISO-8601 `since` is filterable by lexicographic compare (events
+      persist as ISO too); garbage `since` → HTTP 400.
+    * `GET /telemetry/latest?n=…` → `read_latest_telemetry_rows(storage_path,
+      n)`: last `n` rows from the newest Parquet chunk in the newest
+      session; `(value_number, value_text, value_bool)` collapsed into
+      a single `value` field; `n` bounded [1, 10_000] (FastAPI 422 on
+      out-of-range).
+  Factory `create_app(config, *, anomalies_dir, models_dir)` stays
+  stateless — every request re-reads from disk (cheap for v1; `since=`
+  bounds the work as the corpus grows). Bind-host policy (5.5) belongs
+  at the uvicorn entry point. Added `httpx>=0.27` to dev deps for the
+  FastAPI TestClient. Covered by `tests/test_dashboard_api.py` (19
+  tests: unit helpers + full route surface with `TestClient`).
 - [ ] **5.4 — WebSocket stream.** `/ws/telemetry` pushes live PID values;
   `/ws/anomalies` pushes anomaly events as they fire.
 - [ ] **5.5 — Bind to LAN only by default.** Honor `host`/`port` from
@@ -735,9 +759,31 @@ no Mode 23 / Mode 27 / flash dumps / writes.
 
 ### 5D. Model management (FR-09)
 
-- [ ] **5.15 — Model manifest format.** YAML alongside each artifact:
-  version, training data hash + date range, hyperparams, scaler params,
-  threshold, schema. (FR-09)
+- [x] **5.15 — Shared model manifest schema.** `src/models/manifest.py`
+  — Pydantic `ModelManifestCommon` (strict, `extra="forbid"` with
+  `protected_namespaces=()`) listing every field both
+  `IsolationForestManifest` and `LSTMAutoencoderManifest` are
+  contractually obliged to carry: `artifact_format_version`,
+  `model_type` ∈ `KNOWN_MODEL_TYPES`, `model_version`, `created_at`,
+  `training_data_hash`, training timestamps + sessions, `input_rows`,
+  `hyperparams`, `schema` (aliased to `schema_` since Pydantic reserves
+  the name). Detector-specific keys (`modes` for the IF,
+  `thresholds`/`architecture` for the LSTM) flow through `extras` so
+  the schema is forward-compatible: per-trainer manifests can grow new
+  fields without bumping `CURRENT_MANIFEST_FORMAT_VERSION` (only
+  consumers that *use* those new fields opt in). `validate_manifest_common`
+  / `load_manifest_common` are the single entry the dashboard
+  (`build_status` reads `version` from the same manifests), eventual
+  hot-swap (5.16), and retraining CLI (5.17) all consume through.
+  `schemas_compatible(a, b)` checks `feature_columns` match for the
+  hot-swap "is the new model substitutable for the running one?"
+  decision. `ManifestValidationError` is the single exception type
+  callers catch. A conformance test in `tests/test_model_manifest.py`
+  pins the trainer dataclasses to the shared field names so a future
+  refactor that drops a shared field fails loudly. `KNOWN_MODEL_TYPES`
+  is asserted equal to `AnomalyEvent.AnomalySource` so dashboard payloads
+  round-trip cleanly. 18 tests; full suite 711 passed, 1 skipped;
+  ruff/format/mypy clean (55 source files). (FR-09)
 - [ ] **5.16 — Hot swap.** `ModelManager` watches the models directory;
   on a new manifest, validate schema match and atomically swap the
   in-memory model without restarting the process. (FR-09)

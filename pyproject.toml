@@ -28,6 +28,8 @@ dev = [
     # tools/extract_fsm_signals.py — pulls CONSULT-III parameter names from
     # vendor FSM PDFs into data/fsm/signals.json. Dev-only.
     "pdfplumber>=0.11",
+    # fastapi.testclient pulls in httpx; FastAPI doesn't ship it as a hard dep.
+    "httpx>=0.27",
 ]
 ml = [
     # Optional-extra metadata cannot choose a CUDA wheel index. For actual
