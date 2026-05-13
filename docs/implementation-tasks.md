@@ -142,9 +142,22 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
   emit warning event when below `storage_warning_mb`. `src/storage/monitor.py`
   with `free_space_mb` + `warn_if_storage_low`. Dashboard surfacing
   deferred until Phase 5. (NFR-03)
-- [ ] **1.14 — Crash-safety test.** Kill the writer mid-flush; on restart,
-  verify no corrupt files (Parquet footer present) and that data prior to
-  the last flush is intact. (NFR-02)
+- [x] **1.14 — Crash-safety test.** `tests/test_parquet_writer.py` —
+  three tests covering the atomic-write contract: (1)
+  `test_failed_atomic_write_does_not_publish_final_file` — a mid-flush
+  crash leaves no published `.parquet`; the buffer is preserved and the
+  next successful flush emits the same data. (2)
+  `test_crash_mid_flush_preserves_prior_chunks` — a corrupting
+  `pq.write_table` (writes a truncated `PAR1` header and raises) after a
+  successful flush #1; the intact chunk reads fine, the lingering `.tmp`
+  isn't picked up by `discover_sessions` / `read_session` (the
+  `telemetry-*.parquet` glob doesn't match `*.tmp`). (3)
+  `test_crash_recovery_with_fresh_writer_appends_new_chunks` — a new
+  writer over the same root after a "crash" (no `close()`) lands in a
+  fresh dated session directory; the prior session's surviving chunk is
+  untouched. The on-disk contract: dated session directories isolate
+  writers; the same-directory `.tmp → rename` keeps surviving chunks'
+  footers correct under any process kill. (NFR-02)
 
 ### 1D. Phase-1 milestone
 
@@ -540,10 +553,21 @@ emission stays viable as a one-way derived artifact (4.D.2 below).
   confirm anomaly fires before a DTC would. Requires wheel-speed
   bindings to graduate to `confirmed` confidence first (currently
   hypothesized: `WHEEL_SPEED_PAIR_A/B`). (Overview Phase 4 goal)
-- [ ] **4.D.4 — Bindings → DBC cross-reference test.** `tests/test_dbc.py`
-  equivalent — for each `confirmed` signal in bindings.yaml, decode a
-  representative captured frame, assert decoded value matches the
-  recorded plausible range. (NFR-05)
+- [x] **4.D.4 — Bindings → captured-frame validation.** `tests/test_bindings_validation.py`
+  — for every `confidence: confirmed` signal in `data/bindings.yaml`,
+  walks `data/sessions/*/frames.log`, finds the first frame whose
+  arbitration ID matches the binding, decodes it via the same
+  `decode_raw` + `apply_scaling` path the daemon uses, and asserts the
+  result is inside the declared `plausible_min`/`plausible_max` band.
+  Skipped cleanly when no captured frames are available (CI without
+  vehicle data). Plus a guard test (`test_at_least_one_confirmed_signal_observed`)
+  that fails — rather than silently skips — if every confirmed signal's
+  CAN ID has fallen out of the captured corpus, so stale bindings can't
+  ride along undetected. Catches the bug class `decode_bindings.py`
+  already found once (`ECM_COOLANT_TEMP` engine-off −40 °C sentinel),
+  plus off-by-one `byte_start` errors and sign/endianness mistakes. No
+  test fixture is committed — the test reads whatever sessions are on
+  disk, per the "no committed fixtures" decision. (NFR-05)
 
 ### 4.E — Behavior-model inference (not done)
 
