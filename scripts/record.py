@@ -94,18 +94,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--obd-pids",
-        default=(
-            "RPM,SPEED,COOLANT_TEMP,INTAKE_TEMP,INTAKE_PRESSURE,MAF,THROTTLE_POS,"
-            "ENGINE_LOAD,TIMING_ADVANCE,SHORT_FUEL_TRIM_1,LONG_FUEL_TRIM_1,"
-            "SHORT_FUEL_TRIM_2,LONG_FUEL_TRIM_2,O2_B1S1,O2_B2S1,BAROMETRIC_PRESSURE,"
-            "CONTROL_MODULE_VOLTAGE,RUN_TIME,FUEL_STATUS"
-        ),
+        default="auto",
         help=(
-            "Comma-separated python-obd command names to watch. Default is the "
-            "fuller set for ML + behavior-model work (RPM/speed/MAP/MAF/trims/O2/"
-            "timing/baro/...); ~19 PIDs polls at roughly 1 Hz each through one "
-            "ELM327. Unsupported PIDs are warned-and-skipped. Pass a leaner list "
-            "for transient-heavy segments. See docs/data-collection-plan.md."
+            "What Mode-01 PIDs to watch via the ELM327. Default `auto` "
+            "queries the ECU's supported-PID bitmask at connect time and "
+            "watches everything it claims — portable across vehicles, no "
+            "per-vehicle tuning. Pass a comma-separated list "
+            "(`RPM,SPEED,COOLANT_TEMP,...`) for an explicit subset (faster "
+            "per-PID refresh at the cost of coverage); pass `auto,EXTRA_PID` "
+            "to add an explicit PID on top of auto. Unsupported PIDs are "
+            "warned-and-skipped. `tools/obd_coverage.py` reports what the "
+            "ECU actually claims to support. Note: the ELM327 path is "
+            "primarily for RE cross-reference + DTCs; production telemetry "
+            "comes from the CAN bus via bindings.yaml, no ELM327 required."
         ),
     )
     parser.add_argument(

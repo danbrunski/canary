@@ -83,18 +83,39 @@ def assert_read_only_command(command: Any, *, requester: str = "") -> None:
         )
 
 
+#: Sentinel for "auto-discover what the ECU supports". When ``ObdSpec.pids``
+#: is exactly ``(AUTO_PIDS,)``, ``obd_factory`` opens the connection, reads
+#: ``conn.supported_commands`` (populated by python-obd's PIDS_A/B/C/D
+#: bitmask probe), and watches every Mode-01 PID the ECU claims minus the
+#: PIDS_* metadata commands themselves. Portable across vehicles — the same
+#: code path picks up wideband-O2 PIDs on cars that have them, EGR PIDs on
+#: cars that do, etc.
+AUTO_PIDS = "auto"
+
+#: Commands we exclude from auto-discovery: PIDS_A/B/C/D are bitmasks of
+#: which other PIDs are supported (we used them to discover the set in the
+#: first place — no value in polling them continuously).
+_AUTO_EXCLUDED_PIDS: frozenset[str] = frozenset({"PIDS_A", "PIDS_B", "PIDS_C", "PIDS_D", "PIDS_9A"})
+
+
 @dataclass(frozen=True)
 class ObdSpec:
     """How to construct the python-obd Async client.
 
+    ``pids`` accepts either an explicit tuple of python-obd command names
+    (`("RPM", "SPEED", ...)`) or the sentinel ``(AUTO_PIDS,)`` meaning
+    "watch every Mode-01 PID this ECU claims to support". Auto mode is the
+    portable default — works on a 2008 Xterra, a 2018 F-150, or anything
+    OBD-II-compliant without per-vehicle tuning. Trade-off: more PIDs in
+    the watch loop = lower per-PID refresh rate, since the ELM327
+    round-robins them.
+
     ``dids`` is the Mode 22 ReadDataByIdentifier set (16-bit hex DIDs as
     ``"1101"``-style strings; the ``22`` mode byte is prepended for you).
-    These are polled alongside ``pids`` through one ELM327 — the python-obd
-    Async loop round-robins all watch commands, so a long ``pids+dids`` list
-    will lower the per-command refresh rate. For exploratory DID sweeps
-    use ``tools/scan_constant_dids.py`` instead; this side is for *known*
-    DIDs you want logged through a drive (e.g. the injector-PW DID, after
-    it's been identified via 4.E.4).
+    These are polled alongside ``pids`` through one ELM327. For exploratory
+    DID sweeps use ``tools/scan_constant_dids.py`` instead; this side is
+    for *known* DIDs you want logged through a drive (e.g. the injector-PW
+    DID, after it's been identified via 4.E.4).
     """
 
     port: str
@@ -162,9 +183,15 @@ def resolve_pids(names: tuple[str, ...]) -> list[Any]:
 
     Validation runs before connecting to the adapter so an `--obd-pids RMP`
     typo fails loudly at startup rather than silently dropping a signal.
+
+    The ``AUTO_PIDS`` sentinel is permitted but contributes no commands —
+    auto-discovery happens later, after the connection is open and the
+    ECU has reported its supported-PID bitmask.
     """
     out: list[Any] = []
     for name in names:
+        if name == AUTO_PIDS:
+            continue
         cmd = getattr(obd.commands, name, None)
         if cmd is None:
             raise ValueError(
@@ -174,6 +201,31 @@ def resolve_pids(names: tuple[str, ...]) -> list[Any]:
         assert_read_only_command(cmd, requester="resolve_pids")
         out.append(cmd)
     return out
+
+
+def discover_supported_pids(conn: Any) -> list[Any]:
+    """Read the ECU's supported Mode-01 PIDs and return the OBDCommand objects.
+
+    Uses python-obd's ``conn.supported_commands``, populated at connection
+    time from the PIDS_A/B/C/D bitmask responses. We filter to Mode 01
+    (the only mode that's universally bitmask-queryable) and drop the
+    PIDS_* metadata commands themselves. Every returned command also gets
+    a ``assert_read_only_command`` check — defense-in-depth against a
+    future python-obd that adds a write command to supported_commands.
+
+    Returns a list, deterministically sorted by command name so a session's
+    manifest is stable across runs.
+    """
+    discovered: list[Any] = []
+    for cmd in conn.supported_commands:
+        mode = getattr(cmd, "mode", None)
+        name = getattr(cmd, "name", "")
+        if mode != 1 or name in _AUTO_EXCLUDED_PIDS:
+            continue
+        assert_read_only_command(cmd, requester="discover_supported_pids")
+        discovered.append(cmd)
+    discovered.sort(key=lambda c: c.name)
+    return discovered
 
 
 def did_command(did_hex: str, *, header: str = "7E0") -> Any:
@@ -223,14 +275,24 @@ def obd_factory(
 ) -> obd.Async:
     """Build an `obd.Async` client and prime it with watch commands.
 
-    Each PID is checked against the ECU's supported set; unsupported PIDs
-    are warned and skipped (per FR-01: "log a warning and continue").
+    Two PID-resolution paths:
+
+    * **Explicit list** (``spec.pids = ("RPM", "SPEED", ...)``) — each PID
+      is checked against the ECU's supported set; unsupported PIDs warn +
+      skip per FR-01.
+    * **Auto-discovery** (``spec.pids = (AUTO_PIDS,)``) — after the
+      connection opens, query the ECU's reported supported-PID bitmask
+      and watch every Mode-01 PID it claims (minus the PIDS_* metadata
+      commands themselves). Portable across vehicles; this is the
+      ``record.py`` default.
+
     Mode 22 DIDs from ``spec.dids`` are appended to the watch list with
-    custom OBDCommands (``did_command``). Returns the live connection —
-    caller must call `.start()` and `.stop()`.
+    custom OBDCommands (``did_command``) regardless of the PID path.
+    Returns the live connection — caller must call `.start()` and `.stop()`.
     """
-    commands = resolve_pids(spec.pids)
+    explicit_commands = resolve_pids(spec.pids)
     did_commands = [did_command(d, header=spec.did_header) for d in spec.dids]
+    auto_mode = AUTO_PIDS in spec.pids
 
     kwargs: dict[str, Any] = {"portstr": spec.port, "baudrate": spec.baudrate}
     if spec.protocol is not None:
@@ -244,16 +306,42 @@ def obd_factory(
         )
     enforce_read_only(conn)
 
+    # Build the actual watch list. In auto mode the supported set lands here;
+    # in explicit mode it's just what `resolve_pids` returned.
+    if auto_mode:
+        auto_commands = discover_supported_pids(conn)
+        explicit_names = tuple(n for n in spec.pids if n != AUTO_PIDS)
+        auto_names = tuple(c.name for c in auto_commands)
+        # Union explicit + auto; explicit wins on dedupe so the operator can
+        # ADD a PID the ECU's bitmask didn't claim (rare but useful for ECUs
+        # that under-report).
+        seen: set[str] = set()
+        watch_commands: list[Any] = []
+        explicit_paired = [c for c in explicit_commands if c.name in explicit_names]
+        for name, cmd in [
+            *zip(explicit_names, explicit_paired, strict=False),
+            *zip(auto_names, auto_commands, strict=True),
+        ]:
+            if name in seen:
+                continue
+            seen.add(name)
+            watch_commands.append(cmd)
+        watch_names = tuple(c.name for c in watch_commands)
+    else:
+        watch_commands = explicit_commands
+        watch_names = spec.pids
+
     log.info(
         "obd connected",
         extra={
             "port": spec.port,
-            "watching_pids": list(spec.pids),
+            "auto_pid_discovery": auto_mode,
+            "watching_pids": list(watch_names),
             "watching_dids": list(spec.dids),
         },
     )
 
-    for pid_name, cmd in zip(spec.pids, commands, strict=True):
+    for pid_name, cmd in zip(watch_names, watch_commands, strict=True):
         if not conn.supports(cmd):
             log.warning("PID not supported by this ECU; skipping", extra={"pid": pid_name})
             continue
