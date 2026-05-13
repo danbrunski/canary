@@ -411,9 +411,15 @@ Goal: deep model that catches temporal anomalies the IF misses.
   computes global and per-channel reconstruction errors, compares them to
   manifest thresholds, emits anomalous channels, anomaly flag, model version,
   window timestamps, and latency in milliseconds. Covered by
-  `tests/test_lstm_inference.py`. Remaining work before marking done:
-  run on the Pi 5 target and confirm the 1 Hz CPU budget is <50%.
-  (FR-06, NFR-01)
+  `tests/test_lstm_inference.py`. Live feature source landed in Milestone B
+  (`src/preprocessing/live.py`); the daemon-side IF inference task
+  (`src/daemon.run_live_inference`) drives `IsolationForestInferenceEngine`
+  off it. LSTM live still needs the schema-alignment piece (the LSTM's
+  trained feature_columns must match the live wide-row schema exactly —
+  the live source builds those up channel-by-channel as records arrive).
+  Remaining work before marking done: run on the Pi 5 target and confirm
+  the 1 Hz CPU budget is <50%; finish LSTM live wiring once a model has
+  trained on a real session. (FR-06, NFR-01)
 - [x] **3.6 — False-positive benchmark.** `src/models/false_positive_benchmark.py`
   + `scripts/fp_benchmark.py` — feed held-out *clean* Parquet sessions through
   the same `from_sessions` preprocessing the LSTM was trained on, score every

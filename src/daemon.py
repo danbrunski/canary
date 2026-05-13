@@ -33,19 +33,29 @@ import logging
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import uvicorn
 
-from src.alerts.emitter import AnomalyEventEmitter
+from src.alerts.emitter import (
+    AnomalyEventEmitter,
+    IsolationForestInferenceEngine,
+)
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
 from src.collection.queueing import QueueDepthMonitor
 from src.config import CanaryConfig
 from src.dashboard.api import create_app
 from src.dashboard.broadcast import Broadcaster
+from src.decode.behavior_models import (
+    DEFAULT_BEHAVIOR_MODELS_PATH,
+    load_behavior_models,
+)
+from src.decode.bindings import load_bindings
 from src.models.manager import ModelManager, manager_for_artifact
+from src.preprocessing.live import LiveFeatureSource
 from src.storage.monitor import warn_if_storage_low
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
@@ -215,6 +225,105 @@ def _record_to_dict(record: TelemetryRecord) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Background tasks the daemon runs alongside the collectors
 # ---------------------------------------------------------------------------
+
+
+async def run_live_inference(
+    source: LiveFeatureSource,
+    components: DaemonComponents,
+    stop_event: asyncio.Event,
+    *,
+    tick_seconds: float | None = None,
+) -> None:
+    """Drive live Isolation Forest inference from a ``LiveFeatureSource``.
+
+    Caller wires record-stream → ``source.observe(record)`` somewhere else
+    (a queue tee, a Broadcaster subscription, etc.). This task ticks at
+    ``tick_seconds`` (default ``1 / preprocessing.resample_hz``), pulls a
+    one-row feature frame from ``source``, runs it through
+    ``IsolationForestInferenceEngine.observe`` →
+    ``AnomalyEventEmitter.emit_isolation_forest_row``. The emitter's
+    logger publishes events onto the anomalies broadcaster so
+    ``/ws/anomalies`` subscribers see them immediately, and writes the
+    JSONL for ``/anomalies`` HTTP queries.
+
+    LSTM live inference is not yet wired here — the LSTM expects
+    fixed-schema windows (``feature_columns`` matching the trained set
+    exactly), which the live source builds up channel-by-channel as
+    records arrive. A separate task can subscribe once the
+    schema-alignment piece exists. For now: IF only.
+
+    Best-effort: every error inside the loop is caught + logged. One bad
+    row can't kill the inference stream.
+    """
+    if "isolation_forest" not in components.model_managers:
+        log.info("isolation_forest model manager absent; live inference skipped")
+        await stop_event.wait()
+        return
+
+    interval = tick_seconds or 1.0 / max(components.config.preprocessing.resample_hz, 1.0)
+    if_manager = components.model_managers["isolation_forest"]
+
+    while not stop_event.is_set():
+        loaded = if_manager.current
+        if loaded is not None:
+            try:
+                row = source.tick(datetime.now(UTC))
+                if row is not None:
+                    _score_and_emit(loaded, row, components.emitter)
+            except Exception:  # noqa: BLE001 — live inference is best-effort
+                log.exception("live inference tick failed")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+            return  # stop_event fired
+        except TimeoutError:
+            continue
+
+
+def _score_and_emit(
+    loaded: Any,
+    row: Any,  # pd.DataFrame, one row
+    emitter: AnomalyEventEmitter,
+) -> None:
+    """Run one feature row through IF.score → emitter. Best-effort.
+
+    The model's expected ``feature_columns`` are a subset of what the
+    live source produces; missing columns surface as NaN, which
+    ``TrainedIsolationForest.score`` flags as ``missing_features`` rather
+    than crashing. That behavior is exactly what we want during the
+    schema-warmup window immediately after startup.
+    """
+    engine = IsolationForestInferenceEngine(loaded.artifact)
+    scored = engine.observe(row.iloc[0])
+    timestamp = row["timestamp"].iloc[0]
+    emitter.emit_isolation_forest_row(
+        scored,
+        model_version=engine.model_version,
+        timestamp=str(timestamp),
+    )
+
+
+def build_live_feature_source(
+    components: DaemonComponents,
+    *,
+    bindings_path: Path | None = None,
+    behavior_models_path: Path | None = None,
+) -> LiveFeatureSource:
+    """Construct a ``LiveFeatureSource`` from the daemon's config + sidecars.
+
+    Convenience for the daemon entry: loads ``bindings.yaml`` and
+    ``behavior_models.yaml`` if present at the given paths (defaults are
+    the canonical locations), and wires them into the source so CAN
+    payloads decode and deviation columns appear automatically.
+    """
+    bindings_path = bindings_path or Path("data/bindings.yaml")
+    behavior_models_path = behavior_models_path or DEFAULT_BEHAVIOR_MODELS_PATH
+    bindings = load_bindings(bindings_path) if bindings_path.exists() else None
+    behavior_models = (
+        load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
+    )
+    return LiveFeatureSource(
+        config=components.config, bindings=bindings, behavior_models=behavior_models
+    )
 
 
 async def poll_model_managers(

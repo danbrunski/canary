@@ -346,6 +346,109 @@ def test_daemon_components_is_a_dataclass(config: CanaryConfig) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Live inference task
+# ---------------------------------------------------------------------------
+
+
+async def test_run_live_inference_skips_when_no_manager(config: CanaryConfig) -> None:
+    """Without an IF manager (models disabled), the task waits for stop and returns."""
+    from src.daemon import build_live_feature_source, run_live_inference
+
+    components = build_components(config)
+    assert "isolation_forest" not in components.model_managers
+    source = build_live_feature_source(components)
+    stop = asyncio.Event()
+    task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
+    await asyncio.sleep(0.1)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+
+async def test_run_live_inference_emits_event_when_outlier(config: CanaryConfig) -> None:
+    """End-to-end: feed an outlier into the live source, expect an anomalies
+    broadcaster message and a JSONL line on disk."""
+    from src.alerts.emitter import IsolationForestInferenceEngine
+    from src.daemon import build_live_feature_source, run_live_inference
+    from src.models.manager import LoadedModel
+    from src.models.manifest import ModelManifestCommon
+
+    components = build_components(config)
+
+    # Inject a stub IF manager + loaded fake model that always labels rows -1.
+    class _FakeTrained:
+        feature_columns = ("obd:RPM", "obd:SPEED")
+        mode_column = "operating_mode"
+        manifest = type("M", (), {"model_version": "fake_if_v1"})()
+
+        def score(self, frame):
+            out = frame.copy()
+            out["isolation_forest_score"] = 0.9
+            out["isolation_forest_label"] = -1
+            out["isolation_forest_model_mode"] = "idle"
+            out["isolation_forest_missing_features"] = False
+            return out
+
+    class _StubManager:
+        @property
+        def current(self):
+            return LoadedModel(
+                artifact=_FakeTrained(),
+                manifest=ModelManifestCommon(
+                    artifact_format_version=1,
+                    model_type="isolation_forest",
+                    model_version="fake_if_v1",
+                    created_at="now",
+                    training_data_hash="h",
+                    input_rows=1,
+                ),
+                artifact_path=Path("/tmp/x"),
+                manifest_path=Path("/tmp/x.manifest.json"),
+                manifest_mtime=0.0,
+            )
+
+        def poll(self):
+            return None
+
+    components.model_managers["isolation_forest"] = _StubManager()  # type: ignore[assignment]
+
+    # Pump a record into the live source so tick() has something to emit.
+    source = build_live_feature_source(components)
+    source.observe(TelemetryRecord.obd(1.0, "RPM", 5500.0, "rpm"))
+
+    sub = components.anomalies_broadcaster.subscribe()
+    stop = asyncio.Event()
+    task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
+
+    try:
+        msg = await asyncio.wait_for(sub.get(), timeout=2.0)
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert msg["source"] == "isolation_forest"
+    assert msg["model_version"] == "fake_if_v1"
+    # JSONL written too
+    assert any(config.daemon.anomalies_dir.glob("anomalies-*.jsonl"))
+    # Sanity: the engine wrapper class actually exists in the path
+    assert IsolationForestInferenceEngine.__name__ == "IsolationForestInferenceEngine"
+
+
+async def test_build_live_feature_source_loads_bindings_when_present(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    """When data/bindings.yaml exists, the source is constructed with it."""
+    from src.daemon import build_live_feature_source
+
+    components = build_components(config)
+    source = build_live_feature_source(components)
+    # data/bindings.yaml exists in the checkout; the source picks it up.
+    assert source.bindings is not None
+    # And a CAN frame on a known ID decodes.
+    source.observe(TelemetryRecord.can(1.0, 0x551, bytes([0x69, 0, 0, 0, 0, 0, 0, 0])))
+    assert "decoded:ECM_COOLANT_TEMP" in source.known_channels
+
+
 async def test_run_daemon_end_to_end_telemetry_published_to_ws(
     config: CanaryConfig,
 ) -> None:
