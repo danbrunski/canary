@@ -82,6 +82,13 @@ PROTOCOL_REV: list[Step] = [
 PROTOCOL_NT510: list[Step] = [
     Step("nt510_module_scan_start", "NT510: start the all-systems / module scan.", None),
     Step("nt510_module_scan_end", "Module scan done — note which modules answered.", None),
+    Step(
+        "engine_start",
+        "Start the engine (skip with 's' if it's already running). Enter once it idles. "
+        "Needed for the steering test — the Xterra's power steering is engine-driven.",
+        None,
+    ),
+    Step("idle_settle", "Let it idle and settle.", 30),
     Step("nt510_abs_livedata_start", "NT510: open ABS (chassis) live data / data stream.", None),
     Step("steer_full_left", "Steering wheel FULL LEFT, hold a moment.", 5),
     Step("steer_full_right", "Now FULL RIGHT, hold.", 5),
@@ -89,12 +96,6 @@ PROTOCOL_NT510: list[Step] = [
     Step("brake_press", "Brake pedal: a couple of firm presses, then a light one.", 10),
     Step("brake_release", "Foot fully off the brake.", 3),
     Step("nt510_abs_livedata_end", "NT510: close the ABS live-data screen.", None),
-    Step(
-        "engine_start",
-        "Start the engine (skip with 's' if it's already running). Enter once it idles.",
-        None,
-    ),
-    Step("idle_settle", "Let it idle and settle.", 30),
     Step("nt510_fan_test_on", "NT510: cooling-fan actuator test — fan ON.", None),
     Step("nt510_fan_test_off", "Cooling-fan test OFF / finished.", None),
     Step(
