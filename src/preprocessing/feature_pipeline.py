@@ -17,6 +17,11 @@ from pathlib import Path
 import pandas as pd
 
 from src.config import CanaryConfig
+from src.decode.behavior_decoder import append_deviation_columns
+from src.decode.behavior_models import (
+    DEFAULT_BEHAVIOR_MODELS_PATH,
+    load_behavior_models,
+)
 from src.decode.bindings import load_bindings
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.features import FeatureConfig, compute_features
@@ -51,14 +56,24 @@ def build_feature_frame(
     config: CanaryConfig,
     *,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
+    behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
 ) -> pd.DataFrame:
     """Run the full preprocessing pipeline over ``session_dirs`` into a feature frame.
 
     ``read_session`` → ``decode_can_rows`` (if a bindings file is present) →
     ``to_wide(coerce_numeric=True)`` → ``resample_wide`` → operating-mode segment
-    (or a constant ``"all"`` mode) → ``compute_features``.
+    (or a constant ``"all"`` mode) → ``append_deviation_columns`` (if a
+    behavior-models file is present — Task 4.E.7) → ``compute_features``.
+
+    The deviation columns land *before* ``compute_features`` so they pick up
+    rolling mean/std/roc derivatives just like raw / decoded channels. The
+    ``ZScoreScaler`` then normalizes them through ``trainable_feature_columns``
+    without changes to either module.
     """
     bindings = load_bindings(bindings_path) if bindings_path.exists() else None
+    behavior_models = (
+        load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
+    )
 
     long_parts: list[pd.DataFrame] = []
     for session_dir in session_dirs:
@@ -71,6 +86,8 @@ def build_feature_frame(
     wide = to_wide(long_frame, coerce_numeric=True)
     resampled = resample_wide(wide, config=ResampleConfig(hz=config.preprocessing.resample_hz))
     resampled = segment_or_constant(resampled, config)
+    if behavior_models is not None and behavior_models.models:
+        resampled = append_deviation_columns(resampled, behavior_models)
     return compute_features(
         resampled,
         config=FeatureConfig(window_seconds=config.preprocessing.rolling_window_seconds),

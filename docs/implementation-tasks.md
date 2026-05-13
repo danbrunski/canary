@@ -555,18 +555,52 @@ performance panel (task 5.12). Approach, scope guardrails, and rationale
 documented in `docs/behavior-model-inference.md`. Strictly read-only —
 no Mode 23 / Mode 27 / flash dumps / writes.
 
-- [ ] **4.E.1 — Behavior-model schema.** Decide YAML structure (sibling
-  to `bindings.yaml` vs. embedded). Design the Pydantic model in
-  `src/decode/behavior_models.py`. Versioning, fit metadata, axis
-  definitions, plausible-deviation bounds.
-- [ ] **4.E.2 — 1D surface inferer.** `src/analysis/surface_1d.py` —
-  coolant warmup curves and idle-stability curves. Polynomial / LOWESS
-  + goodness-of-fit metric. Generalizes `cross_reference.py`'s linear
-  regression. (FR-05)
-- [ ] **4.E.3 — 2D surface inferer.** `src/analysis/surface_2d.py` —
-  grid-binned mean per (axis A bin × axis B bin) for fuel, AFR, VE,
-  and ignition surfaces. Per-operating-mode fits. Records R² and
-  sample count per cell so sparse coverage is visible. (FR-05)
+- [x] **4.E.1 — Behavior-model schema.** `src/decode/behavior_models.py`
+  — strict Pydantic schema (sibling file `data/behavior_models.yaml`,
+  loader/dumper, `extra="forbid"` with `protected_namespaces=()`).
+  Discriminated union: `surface_1d` carries an `Axis1D` (channel + unit +
+  inclusive `domain`) and a `Fit1D` discriminated on `kind` —
+  `PolynomialFit` (coefficients lowest-order first, numpy convention) or
+  `LookupTableFit` (strictly-increasing `x_knots` + matching `y_knots`).
+  `surface_2d` carries two `Axis2D`s (strictly-increasing `bin_edges`)
+  and a `GridBinnedMeanFit` (row-major flat list of `GridCell{mean,std,count}`,
+  enforced length = `axes[0].bin_count * axes[1].bin_count`). Optional
+  `operating_mode` filter, `version`, `notes`. Shared `_BaseFit` bookkeeping
+  (sample_count, r_squared, sessions, fitted_at ISO-8601, training_data_hash).
+  `DeviationConfig` (absolute / relative bands; relative on 1D needs an
+  explicit `reference_std`; warning < critical enforced). Helper:
+  `flatten_grid(rows)` row-major flatten with rectangular-shape validation.
+  Covered by `tests/test_behavior_models.py` (17 tests: axis validation,
+  fit validation, deviation rules, 2D cell-count enforcement, YAML
+  round-trip, unknown-field rejection, discriminator selection).
+- [x] **4.E.2 — 1D surface inferer.** `src/analysis/surface_1d.py` —
+  `fit_polynomial` (closed-form via `numpy.polynomial.polynomial.polyfit`
+  — coefficients lowest-order first matching the schema; needs ≥ `degree+2`
+  clean rows) and `fit_binned_lookup` (quantile bins → bin-mean lookup
+  table — a piecewise-linear LOWESS substitute that doesn't pull scipy in;
+  needs ≥ `n_knots*2` rows and ≥ 2 distinct x values). Both compute R² in
+  the same residual-vs-mean form so persisted fit quality matches what the
+  runtime evaluator sees, drop NaN rows pre-fit, and stamp a stable
+  `training_data_hash` (sha256 of the (x,y) row tuples) so refit
+  invalidation is detectable. `evaluate_1d(model, x)` returns the
+  expected value or `None` outside the fit domain (no polynomial
+  extrapolation — easy way to manufacture nonsense). Pure
+  numpy/pandas; no scipy/sklearn dependency added. Covered by
+  `tests/test_surface_1d.py` (13 tests). (FR-05)
+- [x] **4.E.3 — 2D surface inferer.** `src/analysis/surface_2d.py` —
+  `fit_grid_binned_mean` bins `(x, y)` into the configured grid and writes
+  per-cell `{mean, std (ddof=0 to match `ZScoreScaler`), count}`. Empty
+  cells are persisted with `count=0` so the evaluator can return `None`
+  ("operating point never observed") instead of fabricating a value. NaN
+  rows and out-of-range rows are dropped before binning; the top edge is
+  closed so `x.max()` lands in the last bin. `r_squared` is left `None`
+  (the empirical mean has no closed-form comparison). `evaluate_2d(model,
+  x, y)` returns the full `GridCell` (not just `mean`) so the decoder
+  layer can compute `|delta| / cell.std` for relative deviations. Pure
+  numpy/pandas. Covered by `tests/test_surface_2d.py` (10 tests: grid
+  layout, per-cell tracking of underlying relationship, empty-cell
+  marking, NaN/out-of-range drops, edge-monotonicity, right-edge
+  inclusiveness). (FR-05)
 - [ ] **4.E.4 — Injector pulse-width DID identification.** Cross-reference
   captured Mode 22 DIDs against Mode 01 fuel-trim variations. The DID
   whose value correlates with `RPM × (1 + STFT/100)` is the injector PW.
@@ -583,14 +617,31 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   + the reply parser are unit-tested; the serial parsing layer still needs
   validation against the actual adapter at the vehicle. Verify the Canable
   is in its sniffing role only before running.
-- [ ] **4.E.6 — Behavior-model decoder integration.** Extend `src/decode/`
-  to load behavior models at startup and expose
-  `expected_value(operating_point)` + `deviation(actual, operating_point)`
-  for the runtime decode path. (FR-05)
-- [ ] **4.E.7 — Deviation features in preprocessing.** Wire the decoder's
-  expected/deviation outputs into `loader.read_session`'s output so
-  existing `compute_features` and `ZScoreScaler` see them as ordinary
-  numeric columns. No changes needed to those modules. (FR-04)
+- [x] **4.E.6 — Behavior-model decoder integration.** `src/decode/behavior_decoder.py`
+  exposes the runtime API. Scalar: `expected_value(model, operating_point)`
+  → expected output or `None` (mode mismatch / missing input / outside
+  domain / empty 2D cell); `deviation(model, actual, operating_point)`
+  → `DeviationResult{expected, actual, deviation, severity}` graded against
+  the model's `DeviationConfig` (`absolute` uses `|delta|`; `relative` uses
+  `|delta|/std` where std is the 2D cell std or the 1D `reference_std`).
+  Severity bands are inclusive lower-bounds (`score >= band`) so threshold
+  semantics stay intuitive. Vectorized: `expected_value_column(frame,
+  model)` returns a float series with NaN where the model has no
+  expectation. Covered by `tests/test_behavior_decoder.py` (19 tests).
+  (FR-05)
+- [x] **4.E.7 — Deviation features in preprocessing.** `append_deviation_columns(frame, models)`
+  writes a `deviation:<model_name>` column per behavior model;
+  `build_feature_frame` (the shared offline pipeline used by both the IF
+  trainer and the LSTM trainer) loads `data/behavior_models.yaml` when
+  present and inserts this step between `segment_or_constant` and
+  `compute_features`, so the deviation columns pick up rolling
+  mean/std/roc derivatives just like raw/decoded channels and flow into
+  `ZScoreScaler` via `trainable_feature_columns` unchanged. NaN is the
+  correct value when the model has no expectation or the actual column
+  isn't present — the existing scaler/feature stages already handle that.
+  `output_columns` override lets a caller point at a non-`decoded:<output>`
+  actual column (e.g. an OBD PID). Covered by `tests/test_behavior_decoder.py`.
+  (FR-04)
 - [ ] **4.E.8 — Refit CLI.** `scripts/refit_behavior_models.py` — pulls
   clean sessions from the last N days, refits all surfaces, writes
   versioned model artifacts. Manual trigger in v1; cron later. (FR-09)
