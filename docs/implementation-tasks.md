@@ -689,9 +689,51 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   `output_columns` override lets a caller point at a non-`decoded:<output>`
   actual column (e.g. an OBD PID). Covered by `tests/test_behavior_decoder.py`.
   (FR-04)
-- [ ] **4.E.8 — Refit CLI.** `scripts/refit_behavior_models.py` — pulls
-  clean sessions from the last N days, refits all surfaces, writes
-  versioned model artifacts. Manual trigger in v1; cron later. (FR-09)
+- [x] **4.E.8 — Refit CLI.** `scripts/refit_behavior_models.py` +
+  `src/analysis/refit.py` — declarative-recipe batch driver over the 1D
+  / 2D inferers. The CLI pulls sessions discovered under `--sessions-root`
+  filtered by `--days` (default 30; `--all` overrides), runs the shared
+  `build_feature_frame` pipeline (so deviation columns from any
+  *previously*-published behavior models flow through the feature stage
+  too), and runs every recipe in `default_recipes()` — or the subset
+  named via repeatable `--recipe`. Atomic write (temp file + rename) to
+  `data/behavior_models.yaml`.
+
+  Recipes are typed dataclasses (`Surface1DRecipe`, `Surface2DRecipe`)
+  carrying everything the fitter needs plus a `min_samples` floor and an
+  optional `operating_mode` pre-filter. `fit_recipe` never raises: missing
+  columns, too-few samples, empty-after-mode-filter, and any internal
+  fitter exception all return a `RecipeResult(skipped=True, reason=...)`,
+  logged + reported in the CLI summary — partial coverage beats crash.
+
+  `refit_all(recipes, frame, existing=...)` does the versioning bookkeeping:
+  successfully refitted models get their `version` bumped one above any
+  prior entry of the same name; skipped recipes *inherit* the prior model
+  unchanged (a refit that lost data doesn't lose previously-known
+  surfaces); models in `existing` not in the current recipe set are
+  dropped (catalog edit is how surfaces retire). Recipe order is preserved
+  in the output for stable diffs.
+
+  Default catalog: `coolant_warmup` (1D binned-lookup over RUN_TIME →
+  COOLANT — warmup is sigmoid-ish, polys overshoot), `idle_rpm_vs_coolant`
+  (1D binned-lookup, mode=idle), `timing_advance_vs_rpm` (1D poly2),
+  `timing_advance_vs_rpm_load` (2D grid over RPM × ENGINE_LOAD), and
+  `fuel_trim_vs_rpm_load` (2D grid → STFT B1). All use standard Mode 01
+  PIDs — no Mode 22 DIDs required, so all of these are fittable today as
+  soon as a drive with the expanded `--obd-pids` set is captured. Fuel /
+  AFR / VE surfaces from `docs/behavior-model-inference.md` wait on
+  injector-PW DID identification (4.E.4) before joining the catalog.
+  2D recipes use quantile-based auto-edges (`auto_bin_count` knots) by
+  default; pass `x_edges` / `y_edges` for an explicit grid (matching a
+  published OEM map, e.g.).
+
+  Covered by `tests/test_refit.py` (18 tests: recipe success paths, every
+  skip path, versioning, carry-over, retirement, recipe ordering) and
+  `tests/test_refit_behavior_models_script.py` (10 tests: session-age
+  filter, recipe selection / validation, dry-run, write-out, version-bump
+  on repeat). Smoke-tested against a converted-from-candump session to
+  confirm the CLI prints actionable skip reasons against real data.
+  (FR-09)
 - [ ] **4.E.9 — Performance panel data feed.** Backend endpoints
   surfacing current model versions, deviation heatmaps, warmup curves
   vs. baseline. Consumed by dashboard task 5.12. (FR-08)

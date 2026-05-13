@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""Refit the behavior-model surfaces from recorded sessions (Task 4.E.8).
+
+Manual trigger in v1; cron later (the daemon doesn't refit live yet).
+Discovers recent Parquet sessions, runs the same preprocessing pipeline the
+IF / LSTM trainers use (decode bindings.yaml → wide → resample → segment →
+deviation columns from any previously-published behavior models), and runs
+every recipe in ``default_recipes()`` (or a user-supplied subset). Skipped
+recipes (missing columns, too few samples) are logged but don't fail the
+run; surfaces that *did* refit get their ``version`` bumped one above the
+previous ``behavior_models.yaml`` entry of the same name.
+
+Usage:
+
+    .venv/bin/python scripts/refit_behavior_models.py
+    .venv/bin/python scripts/refit_behavior_models.py --days 14
+    .venv/bin/python scripts/refit_behavior_models.py --dry-run
+    .venv/bin/python scripts/refit_behavior_models.py \\
+        --recipe coolant_warmup --recipe idle_rpm_vs_coolant
+
+Output: ``data/behavior_models.yaml`` (or wherever ``--out`` points).
+Atomic write — temp file + rename so a crash mid-write doesn't truncate
+the previous version.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+from src.analysis.refit import Recipe, default_recipes, refit_all
+from src.config import CanaryConfig
+from src.decode.behavior_models import (
+    DEFAULT_BEHAVIOR_MODELS_PATH,
+    dump_behavior_models,
+    load_behavior_models,
+)
+from src.log import configure_logging
+from src.preprocessing import discover_sessions
+from src.preprocessing.feature_pipeline import build_feature_frame
+
+log = logging.getLogger(__name__)
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="refit_behavior_models",
+        description=(
+            "Refit every behavior-model recipe from recently-captured sessions. "
+            "Existing models in --out have their `version` bumped on successful refit; "
+            "skipped recipes inherit the prior model unchanged."
+        ),
+    )
+    parser.add_argument(
+        "sessions",
+        nargs="*",
+        type=Path,
+        help="Session directories. Default: all under --sessions-root within --days.",
+    )
+    parser.add_argument(
+        "--sessions-root",
+        type=Path,
+        default=Path("data/sessions"),
+        help="Where to discover sessions when none are given explicitly.",
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help=(
+            "Only refit using sessions captured in the last N days. Default 30. "
+            "Use --all to override (or 0)."
+        ),
+    )
+    parser.add_argument(
+        "--all",
+        dest="use_all_sessions",
+        action="store_true",
+        help="Override --days and use every session under --sessions-root.",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("canary.yaml"),
+        help="Path to canary.yaml (preprocessing config).",
+    )
+    parser.add_argument(
+        "--bindings",
+        type=Path,
+        default=Path("data/bindings.yaml"),
+        help="Path to bindings.yaml for CAN-signal decode (default data/bindings.yaml).",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=DEFAULT_BEHAVIOR_MODELS_PATH,
+        help=f"Output YAML. Default {DEFAULT_BEHAVIOR_MODELS_PATH}.",
+    )
+    parser.add_argument(
+        "--recipe",
+        action="append",
+        default=None,
+        help=(
+            "Recipe name(s) to refit; repeatable. Default: all recipes from "
+            "default_recipes(). Useful for iterating on one surface."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would refit (recipe → fitted / skipped) but don't write --out.",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+    )
+    return parser.parse_args(argv)
+
+
+def _filter_sessions_by_age(sessions: list[Path], days: int, now: datetime) -> list[Path]:
+    """Keep session dirs whose timestamped name falls within ``days`` of ``now``.
+
+    The convention is ``YYYY-MM-DDTHHMMSS`` (UTC, matches ``make_session_dir``).
+    Non-conforming names are kept — better to over-include than to silently
+    drop something the user explicitly placed under sessions/.
+    """
+    if days <= 0:
+        return sessions
+    cutoff = now - timedelta(days=days)
+    kept: list[Path] = []
+    for session in sessions:
+        try:
+            started = datetime.strptime(session.name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
+        except ValueError:
+            kept.append(session)  # unknown format → keep
+            continue
+        if started >= cutoff:
+            kept.append(session)
+    return kept
+
+
+def _select_recipes(catalog: list[Recipe], names: list[str] | None) -> list[Recipe]:
+    if names is None:
+        return catalog
+    by_name = {r.name: r for r in catalog}
+    unknown = [n for n in names if n not in by_name]
+    if unknown:
+        raise SystemExit(f"unknown recipe(s): {unknown}; available: {sorted(by_name)}")
+    return [by_name[n] for n in names]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    configure_logging(args.log_level)
+    config = CanaryConfig.from_yaml(args.config)
+
+    sessions: list[Path] = list(args.sessions)
+    if not sessions:
+        sessions = discover_sessions(args.sessions_root)
+        if not args.use_all_sessions:
+            sessions = _filter_sessions_by_age(sessions, args.days, datetime.now(UTC))
+    if not sessions:
+        print(
+            f"error: no sessions found under {args.sessions_root} within --days {args.days}. "
+            "Pass session paths directly or use --all.",
+            file=sys.stderr,
+        )
+        return 1
+
+    recipes = _select_recipes(default_recipes(), args.recipe)
+    log.info(
+        "starting refit",
+        extra={
+            "sessions": len(sessions),
+            "recipes": [r.name for r in recipes],
+            "out": str(args.out),
+            "dry_run": args.dry_run,
+        },
+    )
+
+    existing = load_behavior_models(args.out) if args.out.exists() else None
+    if existing is not None:
+        log.info("loaded prior models", extra={"count": len(existing.models)})
+
+    # The feature pipeline gives the wide, resampled, segmented frame the
+    # fitters expect — same path the IF / LSTM trainers consume.
+    frame = build_feature_frame(
+        sessions, config, bindings_path=args.bindings, behavior_models_path=args.out
+    )
+    log.info("built feature frame", extra={"rows": len(frame), "columns": len(frame.columns)})
+
+    models, results = refit_all(
+        recipes, frame, sessions=[s.name for s in sessions], existing=existing
+    )
+
+    _print_report(results, frame_rows=len(frame))
+
+    if args.dry_run:
+        log.info("dry-run; not writing")
+        return 0
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = args.out.with_suffix(args.out.suffix + ".tmp")
+    dump_behavior_models(models, tmp)
+    tmp.replace(args.out)
+    log.info("wrote behavior models", extra={"path": str(args.out), "count": len(models.models)})
+    return 0
+
+
+def _print_report(results: Sequence, frame_rows: int) -> None:
+    """Stdout summary so an interactive run shows which recipes won / lost."""
+    fitted = [r for r in results if r.fitted]
+    skipped = [r for r in results if r.skipped]
+    print("=" * 72)
+    print(f"BEHAVIOR MODEL REFIT  ({frame_rows} feature rows)")
+    print("=" * 72)
+    if fitted:
+        print(f"\n  fitted ({len(fitted)}):")
+        for res in fitted:
+            assert res.model is not None
+            fit = res.model.fit
+            r2 = f"r²={fit.r_squared:.3f}" if fit.r_squared is not None else "r²=N/A"
+            print(f"    ✓ {res.name:35s}  n={fit.sample_count:>6d}  {r2}  v{res.model.version}")
+    if skipped:
+        print(f"\n  skipped ({len(skipped)}):")
+        for res in skipped:
+            print(f"    ✗ {res.name:35s}  {res.reason}")
+    print()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
