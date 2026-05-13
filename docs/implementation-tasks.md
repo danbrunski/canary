@@ -403,23 +403,32 @@ Goal: deep model that catches temporal anomalies the IF misses.
   (FR-06)
 - [~] **3.5 — Real-time inference loop.** `src/models/inference.py` —
   consume a sliding window from the live preprocessing buffer, run a
-  forward pass, emit anomaly score. Software path implemented:
-  `LSTMSequenceBuffer` accepts model-ready feature rows, resets on session
-  changes / missing features / non-finite values, and emits a full `(T, F)`
-  window only after `sequence_length` clean rows. `LSTMInferenceEngine`
-  requires calibrated LSTM thresholds, runs CPU inference by default,
-  computes global and per-channel reconstruction errors, compares them to
-  manifest thresholds, emits anomalous channels, anomaly flag, model version,
-  window timestamps, and latency in milliseconds. Covered by
-  `tests/test_lstm_inference.py`. Live feature source landed in Milestone B
-  (`src/preprocessing/live.py`); the daemon-side IF inference task
-  (`src/daemon.run_live_inference`) drives `IsolationForestInferenceEngine`
-  off it. LSTM live still needs the schema-alignment piece (the LSTM's
-  trained feature_columns must match the live wide-row schema exactly —
-  the live source builds those up channel-by-channel as records arrive).
+  forward pass, emit anomaly score. Software path complete:
+    * `LSTMSequenceBuffer` accepts model-ready feature rows, resets on
+      session changes / missing features / non-finite values, emits a
+      full `(T, F)` window only after `sequence_length` clean rows.
+    * `LSTMInferenceEngine` requires calibrated thresholds, runs CPU
+      inference by default, computes global and per-channel reconstruction
+      errors, compares them to manifest thresholds, emits anomalous
+      channels, anomaly flag, model version, window timestamps, latency.
+    * Live feature source: `src/preprocessing/live.py:LiveFeatureSource`
+      (Milestone B) is the row-by-row analog of `build_feature_frame`.
+    * Daemon-side IF inference: `src/daemon.run_live_inference` drives
+      `IsolationForestInferenceEngine` off the live source at the
+      configured resample cadence.
+    * Daemon-side LSTM inference: `src/daemon.run_live_inference_lstm`
+      with `_lstm_observe` schema-alignment helper — NaN-fills any
+      trained feature column the live source hasn't seen yet (the buffer
+      resets on non-finite values during warmup, exactly the "wait for
+      schema" behavior we want).
+    * Both inference tasks are spawned by `run_daemon` alongside the
+      collectors + writer + dashboard, all in one event loop. Records
+      flow producer → `asyncio.Queue` → `drain_queue_with_broadcast`
+      → Parquet + telemetry broadcaster + `live_source.observe`; per
+      `resample_hz` tick the inference tasks pull a feature row and
+      score → emit → log + anomalies broadcaster.
   Remaining work before marking done: run on the Pi 5 target and confirm
-  the 1 Hz CPU budget is <50%; finish LSTM live wiring once a model has
-  trained on a real session. (FR-06, NFR-01)
+  the 1 Hz CPU budget is <50%. (FR-06, NFR-01)
 - [x] **3.6 — False-positive benchmark.** `src/models/false_positive_benchmark.py`
   + `scripts/fp_benchmark.py` — feed held-out *clean* Parquet sessions through
   the same `from_sessions` preprocessing the LSTM was trained on, score every
@@ -806,12 +815,16 @@ no Mode 23 / Mode 27 / flash dumps / writes.
       session; `(value_number, value_text, value_bool)` collapsed into
       a single `value` field; `n` bounded [1, 10_000] (FastAPI 422 on
       out-of-range).
-  Factory `create_app(config, *, anomalies_dir, models_dir)` stays
-  stateless — every request re-reads from disk (cheap for v1; `since=`
-  bounds the work as the corpus grows). Bind-host policy (5.5) belongs
-  at the uvicorn entry point. Added `httpx>=0.27` to dev deps for the
-  FastAPI TestClient. Covered by `tests/test_dashboard_api.py` (19
-  tests: unit helpers + full route surface with `TestClient`).
+  Factory `create_app(config, *, anomalies_dir, models_dir, ..., emitter)`
+  stays stateless — every request re-reads from disk (cheap for v1;
+  `since=` bounds the work as the corpus grows). When the daemon passes
+  its `AnomalyEventEmitter`, `/status` surfaces `emitter_counters`
+  (`{emitted, suppressed_not_anomaly, suppressed_dedupe}`) — the
+  "is the anomaly path firing?" check the dashboard can render without
+  polling the JSONL. Bind-host policy (5.5) belongs at the uvicorn entry
+  point. Added `httpx>=0.27` to dev deps for the FastAPI TestClient.
+  Covered by `tests/test_dashboard_api.py` (22 tests: unit helpers + full
+  route surface with `TestClient` + counters round-trip).
 - [x] **5.4 — WebSocket stream.** `src/dashboard/broadcast.py` (in-memory
   pub/sub) + `/ws/telemetry` and `/ws/anomalies` routes in
   `src/dashboard/api.py`. `Broadcaster(queue_size=100)` — fan-out to N

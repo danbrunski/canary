@@ -43,6 +43,7 @@ from typing import Any
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 
+from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import read_events_dir
 from src.config import CanaryConfig
 from src.dashboard.broadcast import Broadcaster
@@ -69,6 +70,13 @@ class StatusSnapshot:
     latest_session_path: str | None
     model_versions: dict[str, str | None]
     vehicle: str
+    #: Emitter counters at ``/status`` request time — ``{"emitted": N,
+    #: "suppressed_not_anomaly": N, "suppressed_dedupe": N}`` or ``None`` when
+    #: the daemon hasn't wired an emitter in. The dashboard surfaces this as
+    #: "is the anomaly path firing?" — emitted > 0 within a recent window is
+    #: a strong "yes" signal; persistent zero with a recent session is the
+    #: cue that something is wrong upstream.
+    emitter_counters: dict[str, int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +86,7 @@ class StatusSnapshot:
             "latest_session_path": self.latest_session_path,
             "model_versions": self.model_versions,
             "vehicle": self.vehicle,
+            "emitter_counters": self.emitter_counters,
         }
 
 
@@ -118,6 +127,7 @@ def build_status(
     config: CanaryConfig,
     *,
     models_dir: Path | None = None,
+    emitter: AnomalyEventEmitter | None = None,
 ) -> StatusSnapshot:
     """Assemble the status snapshot used by ``GET /status``."""
     storage = config.collection.storage_path
@@ -134,6 +144,7 @@ def build_status(
         latest_session_path=str(latest) if latest else None,
         model_versions=model_versions,
         vehicle=f"{config.vehicle.year} {config.vehicle.make} {config.vehicle.model}".strip(),
+        emitter_counters=emitter.counters.to_dict() if emitter is not None else None,
     )
 
 
@@ -244,6 +255,7 @@ def create_app(
     models_dir: Path | None = None,
     telemetry_broadcaster: Broadcaster | None = None,
     anomalies_broadcaster: Broadcaster | None = None,
+    emitter: AnomalyEventEmitter | None = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -263,7 +275,7 @@ def create_app(
 
     @app.get("/status")
     def get_status() -> dict[str, Any]:
-        return build_status(config, models_dir=models_dir).to_dict()
+        return build_status(config, models_dir=models_dir, emitter=emitter).to_dict()
 
     @app.get("/config")
     def get_config() -> dict[str, Any]:

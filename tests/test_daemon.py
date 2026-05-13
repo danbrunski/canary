@@ -351,6 +351,156 @@ def test_daemon_components_is_a_dataclass(config: CanaryConfig) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def test_run_live_inference_lstm_skips_when_no_manager(config: CanaryConfig) -> None:
+    """Without an LSTM manager, the task waits for stop and returns."""
+    from src.daemon import build_live_feature_source, run_live_inference_lstm
+
+    components = build_components(config)
+    assert "lstm_autoencoder" not in components.model_managers
+    source = build_live_feature_source(components)
+    stop = asyncio.Event()
+    task = asyncio.create_task(run_live_inference_lstm(source, components, stop, tick_seconds=0.05))
+    await asyncio.sleep(0.1)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+
+async def test_run_live_inference_lstm_emits_on_full_window(config: CanaryConfig) -> None:
+    """Stub LSTM that always reports is_anomaly=True after a full window.
+
+    Verifies the schema-alignment path: the live source has all needed
+    columns → buffer fills → engine.observe returns a result → emitter
+    fires → anomalies broadcaster sees the event.
+    """
+    from collections import namedtuple
+
+    from src.daemon import build_live_feature_source, run_live_inference_lstm
+    from src.models.manager import LoadedModel, SwapAttempt
+    from src.models.manifest import ModelManifestCommon
+
+    components = build_components(config)
+    LSTMResult = namedtuple(
+        "LSTMResult",
+        [
+            "is_anomaly",
+            "timestamp",
+            "model_version",
+            "global_score",
+            "global_threshold",
+            "anomalous_channels",
+            "channel_scores",
+            "channel_thresholds",
+            "session",
+            "window_start_timestamp",
+            "window_end_timestamp",
+            "latency_ms",
+        ],
+    )
+
+    class _FakeLSTMEngine:
+        """Stand-in for LSTMInferenceEngine: returns a result on every observe."""
+
+        feature_columns = ("obd:RPM",)
+
+        def __init__(self, _artifact: object) -> None:
+            self._ticks = 0
+
+        def observe(self, _row: Any) -> Any:
+            self._ticks += 1
+            return LSTMResult(
+                is_anomaly=True,
+                timestamp="2026-05-13T12:00:00+00:00",
+                model_version="fake_lstm_v1",
+                global_score=4.0,
+                global_threshold=2.0,
+                anomalous_channels=("obd:RPM",),
+                channel_scores={"obd:RPM": 4.0},
+                channel_thresholds={"obd:RPM": 2.0},
+                session="live",
+                window_start_timestamp="2026-05-13T11:59:30+00:00",
+                window_end_timestamp="2026-05-13T12:00:00+00:00",
+                latency_ms=3.0,
+            )
+
+    class _StubLSTMManager:
+        @property
+        def current(self) -> Any:
+            return LoadedModel(
+                artifact=object(),  # the engine factory ignores it
+                manifest=ModelManifestCommon(
+                    artifact_format_version=1,
+                    model_type="lstm_autoencoder",
+                    model_version="fake_lstm_v1",
+                    created_at="now",
+                    training_data_hash="h",
+                    input_rows=1,
+                ),
+                artifact_path=Path("/tmp/x"),
+                manifest_path=Path("/tmp/x.manifest.json"),
+                manifest_mtime=0.0,
+            )
+
+        def poll(self) -> SwapAttempt:
+            return SwapAttempt(kind="no_change")
+
+    components.model_managers["lstm_autoencoder"] = _StubLSTMManager()  # type: ignore[assignment]
+    # Patch the lazy-imported LSTMInferenceEngine inside daemon.
+    import src.daemon as daemon_mod
+    import src.models.inference as inf_mod
+
+    original = getattr(inf_mod, "LSTMInferenceEngine", None)
+    inf_mod.LSTMInferenceEngine = _FakeLSTMEngine  # type: ignore[assignment,misc]
+    try:
+        source = build_live_feature_source(components)
+        source.observe(TelemetryRecord.obd(1.0, "RPM", 700.0, "rpm"))
+
+        sub = components.anomalies_broadcaster.subscribe()
+        stop = asyncio.Event()
+        task = asyncio.create_task(
+            run_live_inference_lstm(source, components, stop, tick_seconds=0.05)
+        )
+        try:
+            msg = await asyncio.wait_for(sub.get(), timeout=2.0)
+        finally:
+            stop.set()
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        if original is not None:
+            inf_mod.LSTMInferenceEngine = original  # type: ignore[assignment]
+        elif hasattr(inf_mod, "LSTMInferenceEngine"):
+            delattr(inf_mod, "LSTMInferenceEngine")
+        del daemon_mod  # keep linter quiet about unused import
+
+    assert msg["source"] == "lstm_autoencoder"
+    assert msg["model_version"] == "fake_lstm_v1"
+
+
+async def test_lstm_observe_helper_fills_missing_columns_with_nan() -> None:
+    """A column the live source hasn't seen yet should arrive as NaN — the
+    LSTM buffer will reject it and clear, which is the correct "wait for
+    schema" behavior."""
+    import pandas as pd
+
+    from src.daemon import _lstm_observe
+
+    captured: dict[str, Any] = {}
+
+    class _Captor:
+        feature_columns = ("obd:RPM", "obd:SPEED")
+
+        def observe(self, series: pd.Series) -> str | None:
+            captured["series"] = series
+            return None
+
+    row = pd.DataFrame([{"timestamp": "now", "session": "live", "obd:RPM": 700.0}])
+    _lstm_observe(_Captor(), row)
+    assert captured["series"]["obd:RPM"] == 700.0
+    # obd:SPEED wasn't in the row → NaN
+    import math
+
+    assert math.isnan(captured["series"]["obd:SPEED"])
+
+
 async def test_run_live_inference_skips_when_no_manager(config: CanaryConfig) -> None:
     """Without an IF manager (models disabled), the task waits for stop and returns."""
     from src.daemon import build_live_feature_source, run_live_inference
@@ -447,6 +597,164 @@ async def test_build_live_feature_source_loads_bindings_when_present(
     # And a CAN frame on a known ID decodes.
     source.observe(TelemetryRecord.can(1.0, 0x551, bytes([0x69, 0, 0, 0, 0, 0, 0, 0])))
     assert "decoded:ECM_COOLANT_TEMP" in source.known_channels
+
+
+async def test_drain_feeds_live_source_when_passed(tmp_path: Path) -> None:
+    """The full producer → drain → live_source path with no separate observer."""
+    from src.config import CanaryConfig
+    from src.preprocessing.live import LiveFeatureSource
+
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    source = LiveFeatureSource(config=config)
+
+    writer = ParquetTelemetryWriter(tmp_path / "storage")
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+
+    async def _producer() -> None:
+        for value in (700.0, 720.0):
+            await queue.put(TelemetryRecord.obd(1_778_000_000.0 + value, "RPM", value, "rpm"))
+        await asyncio.sleep(0.05)
+        stop.set()
+
+    drain_task = asyncio.create_task(
+        drain_queue_with_broadcast(queue, writer, stop, live_source=source)
+    )
+    await _producer()
+    await drain_task
+    assert "obd:RPM" in source.known_channels
+
+
+async def test_drain_swallows_live_source_exceptions(tmp_path: Path) -> None:
+    """A misbehaving live_source.observe must not block the Parquet writer."""
+    writer = ParquetTelemetryWriter(tmp_path / "storage")
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+
+    class _Boom:
+        def observe(self, _record: TelemetryRecord) -> None:
+            raise RuntimeError("kaboom")
+
+    async def _producer() -> None:
+        await queue.put(TelemetryRecord.obd(1_778_000_000.0, "RPM", 700.0, "rpm"))
+        await asyncio.sleep(0.05)
+        stop.set()
+
+    drain_task = asyncio.create_task(
+        drain_queue_with_broadcast(queue, writer, stop, live_source=_Boom())  # type: ignore[arg-type]
+    )
+    await _producer()
+    await drain_task
+    assert list((tmp_path / "storage").rglob("*.parquet"))
+
+
+async def test_run_daemon_end_to_end_inference_emits_anomaly(config: CanaryConfig) -> None:
+    """Full vertical: collector → drain → live_source → IF tick → emitter →
+    anomalies broadcaster + JSONL. Uses a stub IF model that labels every row.
+    """
+    from src.daemon import run_daemon
+    from src.models.manager import LoadedModel, SwapAttempt
+    from src.models.manifest import ModelManifestCommon
+
+    components = build_components(config)
+
+    class _FakeTrained:
+        feature_columns = ("obd:RPM",)
+        mode_column = "operating_mode"
+        manifest = type("M", (), {"model_version": "fake_if_v1"})()
+
+        def score(self, frame: Any) -> Any:
+            out = frame.copy()
+            out["isolation_forest_score"] = 0.9
+            out["isolation_forest_label"] = -1
+            out["isolation_forest_model_mode"] = "all"
+            out["isolation_forest_missing_features"] = False
+            return out
+
+    class _StubManager:
+        @property
+        def current(self) -> Any:
+            return LoadedModel(
+                artifact=_FakeTrained(),
+                manifest=ModelManifestCommon(
+                    artifact_format_version=1,
+                    model_type="isolation_forest",
+                    model_version="fake_if_v1",
+                    created_at="now",
+                    training_data_hash="h",
+                    input_rows=1,
+                ),
+                artifact_path=Path("/tmp/x"),
+                manifest_path=Path("/tmp/x.manifest.json"),
+                manifest_mtime=0.0,
+            )
+
+        def poll(self) -> SwapAttempt:
+            return SwapAttempt(kind="no_change")
+
+    components.model_managers["isolation_forest"] = _StubManager()  # type: ignore[assignment]
+
+    async def _producer_collector(
+        queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event
+    ) -> None:
+        for i in range(5):
+            await queue.put(TelemetryRecord.obd(1_778_000_000.0 + i, "RPM", float(700 + i), "rpm"))
+            await asyncio.sleep(0.02)
+        await stop.wait()
+
+    sub = components.anomalies_broadcaster.subscribe()
+    stop = asyncio.Event()
+
+    async def _run() -> None:
+        await run_daemon(config, stop, collectors=[_producer_collector], components=components)
+
+    daemon_task = asyncio.create_task(_run())
+    try:
+        msg = await asyncio.wait_for(sub.get(), timeout=5.0)
+    finally:
+        stop.set()
+        await asyncio.wait_for(daemon_task, timeout=5.0)
+
+    assert msg["source"] == "isolation_forest"
+    assert msg["model_version"] == "fake_if_v1"
+    # JSONL too
+    assert any(config.daemon.anomalies_dir.glob("anomalies-*.jsonl"))
+
+
+async def test_run_daemon_disable_live_inference_skips_inference_task(
+    config: CanaryConfig,
+) -> None:
+    """``enable_live_inference=False`` should leave the inference task off."""
+    from src.daemon import run_daemon
+
+    components = build_components(config)
+    records_pushed: list[TelemetryRecord] = []
+
+    async def _producer(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
+        record = TelemetryRecord.obd(1_778_000_000.0, "RPM", 700.0, "rpm")
+        records_pushed.append(record)
+        await queue.put(record)
+        await stop.wait()
+
+    stop = asyncio.Event()
+
+    async def _run() -> None:
+        await run_daemon(
+            config,
+            stop,
+            collectors=[_producer],
+            components=components,
+            enable_live_inference=False,
+        )
+
+    daemon_task = asyncio.create_task(_run())
+    await asyncio.sleep(0.2)
+    stop.set()
+    await asyncio.wait_for(daemon_task, timeout=5.0)
+    # Producer ran, Parquet got the record, but no inference task means no
+    # AnomalyEvent emission could possibly have happened.
+    assert len(records_pushed) == 1
+    assert not list(config.daemon.anomalies_dir.glob("anomalies-*.jsonl"))
 
 
 async def test_run_daemon_end_to_end_telemetry_published_to_ws(

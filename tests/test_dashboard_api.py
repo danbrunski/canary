@@ -123,6 +123,45 @@ def test_build_status_no_sessions_no_models(config: CanaryConfig) -> None:
     assert snap.model_versions == {}
     assert "Nissan Xterra" in snap.vehicle
     assert snap.free_mb > 0
+    # No emitter passed → counters absent (None)
+    assert snap.emitter_counters is None
+
+
+def test_build_status_surfaces_emitter_counters(config: CanaryConfig, tmp_path: Path) -> None:
+    """When the daemon passes the emitter, /status carries its counters."""
+    from src.alerts.emitter import AnomalyEventEmitter
+    from src.alerts.event_logger import AnomalyEventLogger
+
+    logger = AnomalyEventLogger(tmp_path / "anomalies")
+    emitter = AnomalyEventEmitter(logger, min_seconds_between_events=0)
+    # Hand-modify the counters to a non-zero state — emit_lstm would otherwise
+    # require a result fixture, and the build_status path is what we're testing.
+    emitter.counters.emitted = 4
+    emitter.counters.suppressed_not_anomaly = 12
+    emitter.counters.suppressed_dedupe = 1
+
+    snap = build_status(config, emitter=emitter)
+    assert snap.emitter_counters == {
+        "emitted": 4,
+        "suppressed_not_anomaly": 12,
+        "suppressed_dedupe": 1,
+    }
+
+
+def test_status_endpoint_includes_emitter_counters(config: CanaryConfig, tmp_path: Path) -> None:
+    """End-to-end through TestClient: the /status response carries the counters dict."""
+    from src.alerts.emitter import AnomalyEventEmitter
+    from src.alerts.event_logger import AnomalyEventLogger
+
+    logger = AnomalyEventLogger(tmp_path / "anomalies-status")
+    emitter = AnomalyEventEmitter(logger, min_seconds_between_events=0)
+    emitter.counters.emitted = 2
+    app = create_app(config, anomalies_dir=tmp_path / "anomalies-status", emitter=emitter)
+    client = TestClient(app)
+    response = client.get("/status")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["emitter_counters"]["emitted"] == 2
 
 
 def test_build_status_with_session_and_model_manifest(config: CanaryConfig, tmp_path: Path) -> None:

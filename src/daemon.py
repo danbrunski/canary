@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -167,19 +167,26 @@ async def drain_queue_with_broadcast(
     stop_event: asyncio.Event,
     *,
     telemetry_broadcaster: Broadcaster | None = None,
+    live_source: LiveFeatureSource | None = None,
     poll_interval: float = 0.5,
     storage_path: Path | None = None,
     storage_warning_mb: int | None = None,
     queue_warning_fraction: float = 0.8,
 ) -> None:
-    """Drain telemetry into storage + the live telemetry broadcaster.
+    """Drain telemetry into storage + the live broadcaster + the live source.
 
     Extension of ``src.main._drain_queue``: same Parquet write path, same
     queue-depth / disk-space monitoring, but each record is *also*
-    published onto ``telemetry_broadcaster`` so ``/ws/telemetry``
-    subscribers see it without polling Parquet. Publishing is best-effort
-    — a full subscriber queue drops the oldest message, never blocks the
-    writer.
+
+    * published onto ``telemetry_broadcaster`` so ``/ws/telemetry``
+      subscribers see it without polling Parquet;
+    * fed into ``live_source.observe(record)`` so the streaming feature
+      pipeline (Milestone B) stays in sync with what's hitting disk.
+
+    Both are optional — pass ``None`` to skip either. Publishing is
+    best-effort: a full subscriber queue drops the oldest message and a
+    ``live_source.observe`` exception is caught + logged. Neither can
+    block the writer.
     """
     queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
     if storage_path is not None and storage_warning_mb is not None:
@@ -200,6 +207,11 @@ async def drain_queue_with_broadcast(
             writer.write(record)
             if telemetry_broadcaster is not None:
                 telemetry_broadcaster.publish(_record_to_dict(record))
+            if live_source is not None:
+                try:
+                    live_source.observe(record)
+                except Exception:  # noqa: BLE001 — live inference is best-effort
+                    log.exception("live_source.observe failed; skipping record")
         finally:
             queue.task_done()
             queue_monitor.observe(queue)
@@ -277,6 +289,103 @@ async def run_live_inference(
             return  # stop_event fired
         except TimeoutError:
             continue
+
+
+async def run_live_inference_lstm(
+    source: LiveFeatureSource,
+    components: DaemonComponents,
+    stop_event: asyncio.Event,
+    *,
+    tick_seconds: float | None = None,
+) -> None:
+    """Drive live LSTM autoencoder inference from a ``LiveFeatureSource``.
+
+    Symmetric to ``run_live_inference`` but for the LSTM. Picks up the
+    LSTM-manager's current loaded model each tick (so hot-swap takes
+    effect immediately), pulls a one-row feature frame from ``source``,
+    and feeds the model-specific ``feature_columns`` through
+    ``LSTMInferenceEngine.observe``. Schema-alignment policy:
+
+    * **Missing columns are NaN.** The LSTM buffer's
+      ``append`` clears itself on a non-finite value, so during the
+      schema-warmup window (channels still arriving) we don't emit; once
+      every trained ``feature_column`` is present, the buffer fills and
+      starts emitting. This matches the model's "wait for a clean window"
+      contract from training time.
+    * **Extra columns are dropped.** The source naturally carries
+      whatever's been observed; the engine only reads its trained set.
+
+    Best-effort: every error caught + logged, stream survives bad rows.
+    """
+    if "lstm_autoencoder" not in components.model_managers:
+        log.info("lstm_autoencoder model manager absent; LSTM live inference skipped")
+        await stop_event.wait()
+        return
+
+    interval = tick_seconds or 1.0 / max(components.config.preprocessing.resample_hz, 1.0)
+    lstm_manager = components.model_managers["lstm_autoencoder"]
+    engine: Any = None
+    engine_version: str | None = None
+
+    while not stop_event.is_set():
+        loaded = lstm_manager.current
+        if loaded is not None:
+            # Rebuild the engine only when the manager has swapped — same
+            # idiom as the IF path; an LSTMInferenceEngine is cheap to
+            # construct, expensive to load (torch tensors). Hot-swap takes
+            # effect on the very next tick after ModelManager.poll() reports
+            # ``swapped``.
+            new_version = loaded.manifest.model_version
+            if engine_version != new_version:
+                try:
+                    from src.models.inference import LSTMInferenceEngine
+
+                    engine = LSTMInferenceEngine(loaded.artifact)
+                    engine_version = new_version
+                except Exception:  # noqa: BLE001 — bad checkpoint shouldn't kill the task
+                    log.exception("failed to build LSTMInferenceEngine; will retry next tick")
+                    engine = None
+                    engine_version = None
+
+        if engine is not None:
+            try:
+                row = source.tick(datetime.now(UTC))
+                if row is not None:
+                    result = _lstm_observe(engine, row)
+                    if result is not None:
+                        components.emitter.emit_lstm(result)
+            except Exception:  # noqa: BLE001 — live inference is best-effort
+                log.exception("live LSTM inference tick failed")
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+            return  # stop_event fired
+        except TimeoutError:
+            continue
+
+
+def _lstm_observe(engine: Any, row: Any) -> Any:
+    """Align ``row`` to the LSTM engine's expected feature columns and observe.
+
+    ``LSTMSequenceBuffer.append`` already handles missing-column / non-finite
+    cases by clearing the buffer (return False, no result), so we don't need
+    to pre-validate — we just present the columns the engine asks for. The
+    return value is ``LSTMInferenceResult`` once a full window is ready,
+    ``None`` otherwise.
+    """
+    import pandas as pd
+
+    series = row.iloc[0]
+    # Build a Series carrying only the trained feature columns + session +
+    # timestamp metadata the buffer reads. Missing → NaN.
+    aligned: dict[str, Any] = {
+        "timestamp": series.get("timestamp"),
+        "session": series.get("session", "live"),
+    }
+    for col in engine.feature_columns:
+        value = series[col] if col in series.index else float("nan")
+        aligned[col] = value
+    return engine.observe(pd.Series(aligned))
 
 
 def _score_and_emit(
@@ -385,6 +494,7 @@ async def serve_in_background(
         models_dir=components.config.daemon.models_dir,
         telemetry_broadcaster=components.telemetry_broadcaster,
         anomalies_broadcaster=components.anomalies_broadcaster,
+        emitter=components.emitter,
     )
     if server_factory is None:
         server_factory = uvicorn.Server
@@ -421,12 +531,18 @@ async def run_daemon(
     collectors: Sequence[Callable[..., Any]] | None = None,
     writer: ParquetTelemetryWriter | None = None,
     components: DaemonComponents | None = None,
+    enable_live_inference: bool = True,
 ) -> DaemonComponents:
     """Run the full daemon until ``stop_event`` fires.
 
     Builds components (or accepts pre-built ones for tests), spins up:
       * the collectors (CAN, OBD) → ``asyncio.Queue``
-      * ``drain_queue_with_broadcast`` → Parquet + telemetry broadcaster
+      * ``drain_queue_with_broadcast`` → Parquet + telemetry broadcaster +
+        optional live source (every drained record fans out to all three)
+      * ``run_live_inference`` → IF scoring on each tick → emitter →
+        anomalies broadcaster + JSONL  (when ``enable_live_inference`` AND
+        the IF model manager has a loaded artifact; otherwise the task
+        becomes a passive wait on ``stop_event``)
       * ``poll_model_managers`` → hot-swap loop
       * the dashboard via ``serve_in_background``
 
@@ -438,6 +554,10 @@ async def run_daemon(
     storage_writer = (
         ParquetTelemetryWriter(config.collection.storage_path) if writer is None else writer
     )
+
+    # Build the live source (no-op if bindings/behavior_models are absent on
+    # disk — observe still works, just without decoded:* / deviation:* columns).
+    live_source = build_live_feature_source(components) if enable_live_inference else None
 
     # Lazy import — keeps daemon module importable without the collector deps
     # at module-load time.
@@ -451,6 +571,7 @@ async def run_daemon(
             storage_writer,
             stop_event,
             telemetry_broadcaster=components.telemetry_broadcaster,
+            live_source=live_source,
             storage_path=config.collection.storage_path,
             storage_warning_mb=config.collection.storage_warning_mb,
             queue_warning_fraction=config.collection.queue_warning_fraction,
@@ -463,6 +584,15 @@ async def run_daemon(
             interval_seconds=config.daemon.model_poll_seconds,
         )
     )
+    inference_tasks: list[asyncio.Task[Any]] = []
+    if live_source is not None:
+        inference_tasks.append(
+            asyncio.create_task(run_live_inference(live_source, components, stop_event))
+        )
+        if "lstm_autoencoder" in components.model_managers:
+            inference_tasks.append(
+                asyncio.create_task(run_live_inference_lstm(live_source, components, stop_event))
+            )
     collector_tasks = [
         asyncio.create_task(starter(queue, stop_event)) for starter in active_collectors
     ]
@@ -486,6 +616,15 @@ async def run_daemon(
                 await poll_task
             except asyncio.CancelledError:
                 pass
+            for task in inference_tasks:
+                # Each inference task observes stop_event and returns on its
+                # own; this is the join + cancel safety net.
+                try:
+                    await asyncio.wait_for(task, timeout=2.0)
+                except (TimeoutError, asyncio.CancelledError):
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
             components.event_logger.close()
     return components
 

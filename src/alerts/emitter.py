@@ -56,6 +56,14 @@ class EmitterCounters:
         self.suppressed_not_anomaly = 0
         self.suppressed_dedupe = 0
 
+    def to_dict(self) -> dict[str, int]:
+        """JSON-safe snapshot — what ``GET /status`` exposes per detector."""
+        return {
+            "emitted": self.emitted,
+            "suppressed_not_anomaly": self.suppressed_not_anomaly,
+            "suppressed_dedupe": self.suppressed_dedupe,
+        }
+
 
 class AnomalyEventEmitter:
     """Convert per-detector results into ``AnomalyEvent`` and log them.
