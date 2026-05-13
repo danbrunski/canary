@@ -57,6 +57,17 @@ def bus_factory(spec: CanBusConfig) -> can.BusABC:
     """Construct a python-can Bus from config.
 
     `bitrate` is omitted for `virtual` (the backend rejects it as unknown).
+
+    The collector is read-only by FR-02 / NFR-06: it never calls `bus.send()`,
+    so no data frame is ever injected regardless of how the adapter is opened.
+    Hardware bus-monitoring (no ACK either) is desirable but adapter-dependent:
+    python-can's slcan `listen_only=True` sends the `L` open command, but the
+    knockoff "CANable2" CAN-FD adapter used in dev returns zero frames in that
+    mode (its firmware doesn't honor `L`), so we open normally (`O`) and rely
+    on the never-transmit invariant — ACK-only on a busy multi-node vehicle bus
+    is benign and is exactly what every scan tool on the port already does.
+    SocketCAN's listen-only is configured out-of-band via
+    `ip link set ... listen-only on` (see docs/can-setup.md).
     """
     kwargs: dict[str, Any] = {"interface": spec.interface, "channel": spec.channel}
     if spec.interface != "virtual":
