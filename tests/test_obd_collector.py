@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,6 +31,7 @@ from src.collection.obd_collector import (
     queue_reading_callback,
     reading_to_record,
     resolve_pids,
+    supervise_obd_capture,
 )
 from src.collection.queueing import QueueDropCounter
 from src.collection.reconnect import ReconnectPolicy
@@ -308,3 +311,148 @@ async def test_collect_obd_retries_after_factory_failure() -> None:
     assert record.channel == "RPM"
     assert conn.started is True
     assert conn.stopped is True
+
+
+# ---------------------------------------------------------------------------
+# supervise_obd_capture: survives adapter dropout / reattach
+# ---------------------------------------------------------------------------
+
+_ZERO_BACKOFF = ReconnectPolicy(initial_delay_seconds=0.0, max_delay_seconds=0.0)
+
+
+class _SupervisedFakeConn:
+    def __init__(self, *, connected: bool = True, on_start: Callable[[], None] | None = None):
+        self.connected = connected
+        self.started = False
+        self.stopped = False
+        self._on_start = on_start
+
+    def start(self) -> None:
+        self.started = True
+        if self._on_start is not None:
+            self._on_start()
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def is_connected(self) -> bool:
+        return self.connected
+
+
+def test_supervise_obd_capture_single_attempt_when_reconnect_disabled() -> None:
+    stop = threading.Event()
+    calls: list[str] = []
+
+    def factory(spec: ObdSpec, _on_reading: Callable[[ObdReading], None]) -> object:
+        calls.append(spec.port)
+        raise RuntimeError("adapter not responding")
+
+    supervise_obd_capture(
+        ObdSpec(port="/dev/fake"),
+        lambda _r: None,
+        stop,
+        factory=factory,  # type: ignore[arg-type]
+        reconnect_policy=None,
+        port_exists=lambda _p: True,
+    )
+
+    assert calls == ["/dev/fake"]
+    assert not stop.is_set()
+
+
+def test_supervise_obd_capture_retries_factory_failures_until_stop() -> None:
+    stop = threading.Event()
+    calls: list[str] = []
+
+    def factory(spec: ObdSpec, _on_reading: Callable[[ObdReading], None]) -> object:
+        calls.append(spec.port)
+        if len(calls) >= 3:
+            stop.set()
+        raise RuntimeError("transient ELM hiccup")
+
+    supervise_obd_capture(
+        ObdSpec(port="/dev/fake"),
+        lambda _r: None,
+        stop,
+        factory=factory,  # type: ignore[arg-type]
+        reconnect_policy=_ZERO_BACKOFF,
+        port_exists=lambda _p: True,
+        health_poll_seconds=0.0,
+    )
+
+    assert len(calls) == 3
+
+
+def test_supervise_obd_capture_reconnects_when_device_disappears() -> None:
+    stop = threading.Event()
+    conns: list[_SupervisedFakeConn] = []
+
+    def factory(_spec: ObdSpec, _on_reading: Callable[[ObdReading], None]) -> _SupervisedFakeConn:
+        if not conns:
+            conn = _SupervisedFakeConn(connected=False)  # first link drops immediately
+        else:
+            conn = _SupervisedFakeConn(connected=True, on_start=stop.set)  # second ends the test
+        conns.append(conn)
+        return conn
+
+    supervise_obd_capture(
+        ObdSpec(port="/dev/fake"),
+        lambda _r: None,
+        stop,
+        factory=factory,
+        reconnect_policy=_ZERO_BACKOFF,
+        port_exists=lambda _p: True,
+        health_poll_seconds=0.0,
+    )
+
+    assert len(conns) == 2
+    assert all(conn.started and conn.stopped for conn in conns)
+
+
+def test_supervise_obd_capture_waits_for_device_to_appear() -> None:
+    stop = threading.Event()
+    presence = iter([False, False, True])
+
+    def port_exists(_p: str) -> bool:
+        try:
+            return next(presence)
+        except StopIteration:
+            return True
+
+    started = threading.Event()
+
+    def on_start() -> None:
+        started.set()
+        stop.set()
+
+    def factory(_spec: ObdSpec, _on_reading: Callable[[ObdReading], None]) -> _SupervisedFakeConn:
+        return _SupervisedFakeConn(connected=True, on_start=on_start)
+
+    supervise_obd_capture(
+        ObdSpec(port="/dev/fake"),
+        lambda _r: None,
+        stop,
+        factory=factory,
+        reconnect_policy=_ZERO_BACKOFF,
+        port_exists=port_exists,
+        health_poll_seconds=0.0,
+    )
+
+    assert started.is_set()
+
+
+def test_supervise_obd_capture_reraises_unknown_pid_error() -> None:
+    stop = threading.Event()
+
+    def factory(_spec: ObdSpec, _on_reading: Callable[[ObdReading], None]) -> object:
+        raise ValueError("unknown OBD command 'RMP'")
+
+    with pytest.raises(ValueError, match="unknown OBD command"):
+        supervise_obd_capture(
+            ObdSpec(port="/dev/fake", pids=("RMP",)),
+            lambda _r: None,
+            stop,
+            factory=factory,  # type: ignore[arg-type]
+            reconnect_policy=None,
+            port_exists=lambda _p: True,
+        )

@@ -12,6 +12,11 @@ Output (per session):
     manifest.json  — vehicle, bus settings, counts, timestamps
 
 Listen-only: never transmits on the bus.
+
+With --obd-port, OBD-II PID polling runs in a supervised daemon thread that
+reconnects when the adapter drops and reappears (e.g. a flaky CH340 over
+WSL-USB). An OBD failure never aborts the CAN capture — the CAN side is the
+priority; pids.jsonl is best-effort.
 """
 
 from __future__ import annotations
@@ -34,6 +39,8 @@ from src.collection.obd_collector import (
     JsonlReadingWriter,
     ObdSpec,
     obd_factory,
+    resolve_pids,
+    supervise_obd_capture,
 )
 from src.config import CanaryConfig
 from src.log import configure_logging
@@ -209,20 +216,42 @@ def main(argv: Sequence[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _request_stop)
 
     bus = None
-    obd_conn = None
+    obd_thread = None
     obd_writer = None
     try:
         bus = bus_factory(spec)
         if args.obd_port:
             pids = tuple(p.strip() for p in args.obd_pids.split(",") if p.strip())
+            resolve_pids(pids)  # fail fast on a typo, before the CAN capture starts
             obd_writer = JsonlReadingWriter(paths.pids)
             obd_spec = ObdSpec(port=args.obd_port, baudrate=args.obd_baud, pids=pids)
             log.info(
-                "starting parallel OBD capture",
-                extra={"port": obd_spec.port, "pids": list(pids)},
+                "starting parallel OBD capture (supervised)",
+                extra={
+                    "port": obd_spec.port,
+                    "pids": list(pids),
+                    "reconnect": not args.no_reconnect,
+                },
             )
-            obd_conn = obd_factory(obd_spec, on_reading=obd_writer.write)
-            obd_conn.start()
+            # Run OBD in a daemon thread that survives the adapter dropping out
+            # and reattaching (e.g. usbipd losing a flaky CH340 over WSL-USB):
+            # it watches the device file + python-obd's connection state, and
+            # on a drop tears down + rebuilds into the same pids.jsonl writer.
+            # OBD failure never aborts the CAN capture — the CAN side is the
+            # priority; the PID sidecar is best-effort.
+            obd_thread = threading.Thread(
+                target=supervise_obd_capture,
+                kwargs={
+                    "spec": obd_spec,
+                    "on_reading": obd_writer.write,
+                    "stop_event": stop_event,
+                    "factory": obd_factory,
+                    "reconnect_policy": None if args.no_reconnect else DEFAULT_RECONNECT_POLICY,
+                },
+                name="obd-supervisor",
+                daemon=True,
+            )
+            obd_thread.start()
 
         # Pass factory + reconnect_policy so a USB hiccup / adapter reset /
         # OSError doesn't kill the recording mid-drive. The factory lets
@@ -241,8 +270,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_reconnects=args.max_reconnects,
         )
     finally:
-        if obd_conn is not None:
-            obd_conn.stop()
+        stop_event.set()  # signal the OBD supervisor to wind down
+        if obd_thread is not None:
+            obd_thread.join(timeout=15.0)
+            if obd_thread.is_alive():
+                log.warning("obd supervisor thread did not exit within 15s; abandoning it")
         if obd_writer is not None:
             obd_writer.close()
         if bus is not None:

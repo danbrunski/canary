@@ -27,6 +27,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -226,6 +228,146 @@ async def collect_obd(
                     conn.stop()
                 except Exception:
                     log.exception("failed to stop obd connection")
+
+
+def supervise_obd_capture(
+    spec: ObdSpec,
+    on_reading: Callable[[ObdReading], None],
+    stop_event: threading.Event,
+    *,
+    factory: Callable[[ObdSpec, Callable[[ObdReading], None]], ObdConnection] = obd_factory,
+    reconnect_policy: ReconnectPolicy | None = DEFAULT_RECONNECT_POLICY,
+    port_exists: Callable[[str], bool] = os.path.exists,
+    health_poll_seconds: float = 1.0,
+    stale_after_seconds: float = 10.0,
+) -> None:
+    """Run OBD capture, surviving USB dropout / reattachment of the adapter.
+
+    Built to run in a daemon thread next to the CAN recorder. It watches the
+    adapter's device file and python-obd's connection status; when the adapter
+    disappears (e.g. ``usbipd`` dropping a flaky CH340 over WSL-USB) or the
+    serial link goes dead — including the case where python-obd's worker thread
+    died silently and just stopped producing readings — it tears the connection
+    down, waits for the device to reappear, and rebuilds, writing into the same
+    ``on_reading`` sink so ``pids.jsonl`` stays continuous.
+
+    With ``reconnect_policy=None`` it's a single best-effort attempt that still
+    won't crash the caller. ``ValueError`` (a bad PID name) is re-raised since
+    retrying can't fix it.
+    """
+    last_reading_at = [time.monotonic()]
+
+    def _track(reading: ObdReading) -> None:
+        last_reading_at[0] = time.monotonic()
+        on_reading(reading)
+
+    delay = reconnect_policy.initial_delay_seconds if reconnect_policy is not None else 0.0
+
+    while not stop_event.is_set():
+        if not _wait_for_obd_device(spec.port, stop_event, port_exists, health_poll_seconds):
+            return  # stop requested while the adapter was missing
+
+        conn: ObdConnection | None = None
+        try:
+            conn = factory(spec, _track)
+            conn.start()
+            connected_at = last_reading_at[0] = time.monotonic()
+            log.info("obd capture connected", extra={"port": spec.port})
+            if reconnect_policy is not None:
+                delay = reconnect_policy.initial_delay_seconds  # reset backoff on success
+            reason = _run_obd_health_loop(
+                conn,
+                spec.port,
+                stop_event,
+                port_exists=port_exists,
+                health_poll_seconds=health_poll_seconds,
+                stale_after_seconds=stale_after_seconds,
+                last_reading_at=last_reading_at,
+                connected_at=connected_at,
+            )
+            if stop_event.is_set():
+                return
+            log.warning(
+                "obd capture interrupted; will reconnect",
+                extra={"port": spec.port, "reason": reason},
+            )
+        except ValueError:
+            raise
+        except Exception as exc:
+            if stop_event.is_set():
+                return
+            log.warning(
+                "obd capture attempt failed",
+                extra={"port": spec.port, "error": f"{type(exc).__name__}: {exc}"},
+            )
+        finally:
+            if conn is not None:
+                try:
+                    conn.stop()
+                except Exception:
+                    log.exception("failed to stop obd connection", extra={"port": spec.port})
+
+        if stop_event.is_set():
+            return
+        if reconnect_policy is None:
+            log.info("obd reconnect disabled; giving up on OBD capture", extra={"port": spec.port})
+            return
+        if stop_event.wait(delay):
+            return
+        delay = reconnect_policy.next_delay(delay)
+
+
+def _wait_for_obd_device(
+    port: str,
+    stop_event: threading.Event,
+    port_exists: Callable[[str], bool],
+    poll_seconds: float,
+) -> bool:
+    """Block until ``port`` exists or stop is requested. Return False if stopped."""
+    announced = False
+    while not stop_event.is_set():
+        if port_exists(port):
+            return True
+        if not announced:
+            log.warning(
+                "obd adapter device not present; waiting for reattach", extra={"port": port}
+            )
+            announced = True
+        if stop_event.wait(poll_seconds):
+            return False
+    return False
+
+
+def _run_obd_health_loop(
+    conn: ObdConnection,
+    port: str,
+    stop_event: threading.Event,
+    *,
+    port_exists: Callable[[str], bool],
+    health_poll_seconds: float,
+    stale_after_seconds: float,
+    last_reading_at: list[float],
+    connected_at: float,
+) -> str:
+    """Watch a live OBD connection; return why it stopped being healthy.
+
+    Returns "" when stop was requested (the caller checks ``stop_event``).
+    """
+    is_connected = getattr(conn, "is_connected", None)
+    while not stop_event.is_set():
+        if stop_event.wait(health_poll_seconds):
+            return ""
+        if not port_exists(port):
+            return "device disappeared"
+        if callable(is_connected) and not is_connected():
+            return "serial link reported disconnected"
+        now = time.monotonic()
+        if (
+            now - connected_at > stale_after_seconds
+            and now - last_reading_at[0] > stale_after_seconds
+        ):
+            return f"no readings for {stale_after_seconds:g}s"
+    return ""
 
 
 def _make_callback(
