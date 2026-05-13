@@ -128,9 +128,36 @@ PROTOCOL_NT510: list[Step] = [
     Step("nt510_session_end", "Back the NT510 out to the main menu. Done — stop record.py.", None),
 ]
 
+# Drive protocol: a full operating-envelope capture for ML training + behavior-
+# model fitting (see docs/data-collection-plan.md). It's meant to be walked
+# loosely — the route decides which steps fire; type `s` + Enter to skip any
+# that don't apply, and just re-hit a step's label by narrating if a phase
+# recurs (e.g. several stops at lights). Hit Enter at the *transition* into each
+# phase; the window for a phase is [its tag, the next tag].
+PROTOCOL_DRIVE: list[Step] = [
+    Step("cold_start", "Engine just started — COLD. Enter at startup. (skip 's' if warm)", None),
+    Step("idle_warm", "Idling, warming up. Sit until coolant is at operating temp.", 300),
+    Step("pulling_away", "About to drive off — Enter as you start moving.", None),
+    Step("city_stop_go", "City / surface streets — stop-and-go, low-to-moderate load.", 600),
+    Step("stopped_engine_on", "Stopped (light/sign), engine running, foot on brake.", 20),
+    Step("hard_accel", "A firm acceleration from a stop.", None),
+    Step("steady_cruise_light", "Steady cruise, light load (~30–45 mph, flat).", 60),
+    Step("highway_onramp", "Merging onto the highway — sustained acceleration.", None),
+    Step("highway_cruise", "Highway cruise, ~65–75 mph, steady throttle.", 900),
+    Step("coasting_dfco", "Coasting down, foot FULLY off the throttle (fuel-cutoff).", 15),
+    Step("wot_pull", "Wide-open-throttle pull through a gear — where safe & legal.", None),
+    Step("uphill_load", "Sustained uphill / loaded cruise. (skip 's' if no hill)", 30),
+    Step("four_lo", "4WD low engaged, crawling off-road. (skip 's' if not off-roading)", 60),
+    Step("ac_on", "A/C turned ON. (skip 's' if not testing A/C)", 30),
+    Step("ac_off", "A/C turned OFF.", None),
+    Step("returning_idle", "Back to idle — parked, in neutral, engine running.", 20),
+    Step("engine_off_key_on", "Engine OFF, key left ON. Done — stop record.py.", 15),
+]
+
 PROTOCOLS: dict[str, list[Step]] = {
     "rev": PROTOCOL_REV,
     "nt510": PROTOCOL_NT510,
+    "drive": PROTOCOL_DRIVE,
 }
 
 

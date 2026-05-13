@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from scripts.guided_session import (
+    PROTOCOL_DRIVE,
     PROTOCOL_NT510,
     PROTOCOL_REV,
     PROTOCOLS,
@@ -338,3 +339,25 @@ def test_run_protocol_skips_steps(tmp_path: Path):
     )
     assert [r["label"] for r in records] == ["a", "c"]
     assert [c["label"] for c in wt.calls] == ["a", "c"]
+
+
+def test_protocols_registry_has_drive():
+    assert "drive" in PROTOCOLS
+    assert PROTOCOLS["drive"] is PROTOCOL_DRIVE
+
+
+def test_drive_protocol_labels_are_unique():
+    labels = [s.label for s in PROTOCOL_DRIVE]
+    assert len(labels) == len(set(labels))
+
+
+def test_drive_protocol_covers_key_phases():
+    labels = set(s.label for s in PROTOCOL_DRIVE)
+    for expected in (
+        "cold_start",
+        "idle_warm",
+        "highway_cruise",
+        "coasting_dfco",
+        "engine_off_key_on",
+    ):
+        assert expected in labels, f"missing {expected}"
