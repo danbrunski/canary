@@ -36,11 +36,14 @@ ml = [
     # setup, prefer scripts/install_deps.py so Torch matches the local driver.
     "torch>=2.0",
 ]
-# Phase 1.5 will add:
-# emulator = ["ELM327-emulator"]
-# Kept out of `dev` because its sdist is missing setuptools in build deps;
-# needs `pip install --no-build-isolation ELM327-emulator` after setuptools
-# is in the venv. Revisit once we're actually wiring the emulator test.
+emulator = [
+    # ELM327-emulator backs the no-hardware OBD integration tests (Task 1.5).
+    # Its sdist used to need --no-build-isolation but the current 3.0.5 wheel
+    # installs cleanly. Install with:
+    #   .venv/bin/pip install --no-build-isolation 'canary[emulator]'
+    # Tests skip cleanly when the package isn't present.
+    "ELM327-emulator>=3.0.5",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

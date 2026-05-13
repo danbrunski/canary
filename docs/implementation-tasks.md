@@ -83,10 +83,28 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
   (rejects `CLEAR_DTC`, accepts read modes 0x03/0x09, blocks synthesized
   0x2E, passes through AT, wraps `watch`/`query`/`unwatch`, idempotency).
   (NFR-06)
-- [ ] **1.5 — Unit tests with emulator.** `tests/test_obd_collector.py` —
-  spin up `ELM327-emulator`, run collector for N seconds, assert expected
-  PIDs appeared and unsupported PIDs produced warnings, not crashes.
-  (NFR-05)
+- [x] **1.5 — Integration tests with ELM327-emulator.** `tests/test_obd_emulator.py`
+  — 8 tests against a live `elm.Elm` instance on a pty, with python-obd
+  driving the real `Async` loop. Verifies the integration path that the
+  unit-test fakes in `test_obd_collector.py` can't:
+    * `obd_factory` connects + reports real `supports()` booleans
+    * `obd_factory.watch → callback` actually produces `ObdReading`s
+      (RPM ≈ 620, SPEED 0 in the emulator's idle profile)
+    * unsupported PIDs are warn-and-skipped without crashing (hooks the
+      `src.collection.obd_collector` logger directly — pytest's caplog
+      can be interfered with by python-obd's import-time logging setup)
+    * `supervise_obd_capture` produces readings end-to-end including
+      reconnect-policy support
+    * round-trip through `JsonlReadingWriter` (the `record.py` path)
+    * read-only enforcement (Mode 04 `CLEAR_DTC`) blocks before the
+      adapter is opened, against a real adapter not just unit fakes
+    * two back-to-back factory builds in one process don't interfere
+  Added `[project.optional-dependencies].emulator` to `pyproject.toml`
+  pinning `ELM327-emulator>=3.0.5`. The 3.0.5 wheel installs cleanly
+  without `--no-build-isolation` (old sdist quirk gone), so the standard
+  `pip install '.[emulator]'` works. `pytest.importorskip("elm", ...)` at
+  module top means the file skips cleanly when the package isn't present,
+  so CI without the extra still passes. (NFR-05)
 
 ### 1B. CAN collector (FR-02)
 
