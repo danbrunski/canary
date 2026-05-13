@@ -1,0 +1,209 @@
+"""Mode 22 DID scanner — which DIDs answer, and which carry runtime-varying
+data vs. fixed calibration constants (Task 4.E.5).
+
+The transport is just "send ReadDataByIdentifier for a 16-bit DID, get the data
+bytes back"; the response parsing and the constant-vs-varying classification —
+the bits worth getting right — are transport-agnostic and unit-tested. A serial
+ELM327 implementation is provided (`Elm327Mode22Transport`).
+
+READ-ONLY: only UDS service 0x22 (ReadDataByIdentifier) is ever sent. No 0x2E
+(WriteDataByIdentifier), no 0x2F (InputOutputControlByIdentifier), no security
+access — and the Canable, if attached, must be in its sniffing role only.
+"""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Protocol
+
+
+class Mode22Transport(Protocol):
+    """Reads one DID at a time over some link to the ECU."""
+
+    def read_did(self, did: int) -> bytes | None:
+        """Return the data bytes after the ``62 HH LL`` echo, or ``None`` if the
+        DID didn't answer positively (negative response, timeout, garbage)."""
+        ...
+
+
+def parse_mode22_response(did: int, raw: bytes) -> bytes | None:
+    """Pull the data payload out of a raw Mode 22 response for ``did``.
+
+    * positive ``62 <DID_hi> <DID_lo> <data...>`` → returns ``<data...>``
+    * negative ``7F 22 <NRC>`` → ``None``
+    * anything shorter / mismatched / not ``0x62`` → ``None``
+    """
+    if len(raw) < 3 or raw[0] != 0x62:
+        return None
+    if raw[1] != (did >> 8) & 0xFF or raw[2] != did & 0xFF:
+        return None
+    return bytes(raw[3:])
+
+
+@dataclass(frozen=True)
+class DidSnapshot:
+    """One sweep: DID → raw data bytes, for the DIDs that answered positively."""
+
+    values: Mapping[int, bytes]
+    captured_at: float  # time.time()
+    label: str = ""
+
+    @property
+    def dids(self) -> frozenset[int]:
+        return frozenset(self.values)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "captured_at": self.captured_at,
+            "values": {f"0x{did:04X}": data.hex() for did, data in sorted(self.values.items())},
+        }
+
+
+def sweep_dids(
+    transport: Mode22Transport,
+    dids: Iterable[int],
+    *,
+    delay_seconds: float = 0.0,
+    label: str = "",
+    on_progress: Callable[[int, bytes | None], None] | None = None,
+) -> DidSnapshot:
+    """Read every DID in ``dids``; keep the ones that answered positively."""
+    values: dict[int, bytes] = {}
+    for did in dids:
+        data = transport.read_did(did)
+        if on_progress is not None:
+            on_progress(did, data)
+        if data is not None:
+            values[did] = data
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+    return DidSnapshot(values=dict(values), captured_at=time.time(), label=label)
+
+
+@dataclass(frozen=True)
+class DidClassification:
+    """Comparing ≥2 snapshots: which DIDs vary, which are constant, which flicker."""
+
+    varying: frozenset[int]  # answered in every snapshot AND the data changed
+    constant: frozenset[int]  # answered in every snapshot AND never changed
+    intermittent: frozenset[int]  # answered in some snapshots but not all
+
+    @property
+    def all_seen(self) -> frozenset[int]:
+        return self.varying | self.constant | self.intermittent
+
+
+def classify_dids(snapshots: Sequence[DidSnapshot]) -> DidClassification:
+    """Split DIDs into varying / constant / intermittent across the snapshots.
+
+    Run at least two snapshots at *different* engine states (e.g. one at idle,
+    one while revving / moving) so "varying" actually means "tracks something."
+    """
+    if len(snapshots) < 2:
+        raise ValueError("need at least 2 snapshots to classify constant vs varying")
+    all_dids: set[int] = set()
+    for snapshot in snapshots:
+        all_dids |= set(snapshot.dids)
+    varying: set[int] = set()
+    constant: set[int] = set()
+    intermittent: set[int] = set()
+    for did in all_dids:
+        seen = [snapshot.values[did] for snapshot in snapshots if did in snapshot.values]
+        if len(seen) < len(snapshots):
+            intermittent.add(did)
+        elif len(set(seen)) > 1:
+            varying.add(did)
+        else:
+            constant.add(did)
+    return DidClassification(frozenset(varying), frozenset(constant), frozenset(intermittent))
+
+
+# ---------------------------------------------------------------------------
+# ELM327 serial transport
+# ---------------------------------------------------------------------------
+
+_FRAME_MARKER_PREFIXES = tuple(f"{i}:" for i in range(16))  # "0:", "1:", ... ISO-TP multi-frame
+_ERROR_TOKENS = ("NO DATA", "STOPPED", "BUFFER FULL", "CAN ERROR", "BUS", "UNABLE", "?", "ERR")
+
+
+def _extract_hex_bytes(text: str) -> bytes:
+    """Pull the response bytes out of an ELM327 reply.
+
+    Handles single-line (``62 F1 90 ...``), the multi-frame ``0: .. / 1: ..``
+    layout (drops the leading length-byte line and the ``N:`` markers), the
+    echoed prompt, and stray whitespace. Returns ``b""`` on error tokens.
+    """
+    cleaned = text.replace("\r", "\n").replace(">", "")
+    if any(tok in cleaned.upper() for tok in _ERROR_TOKENS):
+        return b""
+    out = bytearray()
+    for line in cleaned.split("\n"):
+        token = line.strip()
+        if not token:
+            continue
+        if token[:2] in _FRAME_MARKER_PREFIXES:
+            token = token[2:].strip()  # strip the "N:" frame marker
+        # a bare length byte line (3 hex digits, e.g. "014") precedes multi-frame
+        # data — but it could also legitimately be 1.5 bytes; treat <2-char and
+        # 3-char no-space tokens as length headers and skip them.
+        compact = token.replace(" ", "")
+        if len(compact) in (1, 3) and all(c in "0123456789ABCDEFabcdef" for c in compact):
+            continue
+        for pair in token.split():
+            if len(pair) == 2 and all(c in "0123456789ABCDEFabcdef" for c in pair):
+                out.append(int(pair, 16))
+            elif len(pair) % 2 == 0 and all(c in "0123456789ABCDEFabcdef" for c in pair):
+                out.extend(bytes.fromhex(pair))
+    return bytes(out)
+
+
+class Elm327Mode22Transport:
+    """``Mode22Transport`` over an open pyserial-style port talking to an ELM327.
+
+    On construction: disables echo/linefeeds, sets the protocol to ISO 15765-4
+    CAN 11/500 (protocol 6), and points the request header at the engine ECU
+    (7E0). It never sends anything but ``AT*`` setup commands and ``22 ....``
+    reads. ``serial_port`` only needs ``write(bytes)`` and ``read(n) -> bytes``.
+    """
+
+    def __init__(
+        self,
+        serial_port: Any,
+        *,
+        header: str = "7E0",
+        read_timeout_seconds: float = 1.0,
+        sleep_after_open: float = 0.3,
+    ) -> None:
+        self._ser = serial_port
+        self._read_timeout = read_timeout_seconds
+        time.sleep(sleep_after_open)
+        self._drain()
+        for setup in ("ATZ", "ATE0", "ATL0", "ATS0", "ATSP6", "ATCAF1", f"ATSH{header}"):
+            self._command(setup, timeout=2.0)
+
+    def read_did(self, did: int) -> bytes | None:
+        raw = _extract_hex_bytes(self._command(f"22{did:04X}"))
+        return parse_mode22_response(did, raw)
+
+    def _drain(self) -> None:
+        try:
+            self._ser.read(4096)
+        except Exception:  # noqa: BLE001 — best-effort flush
+            pass
+
+    def _command(self, cmd: str, *, timeout: float | None = None) -> str:
+        self._ser.write((cmd + "\r").encode("ascii"))
+        deadline = time.time() + (self._read_timeout if timeout is None else timeout)
+        buf = bytearray()
+        while time.time() < deadline:
+            chunk = self._ser.read(256)
+            if chunk:
+                buf.extend(chunk)
+                if b">" in buf:
+                    break
+            else:
+                time.sleep(0.01)
+        return bytes(buf).decode("ascii", errors="replace")
