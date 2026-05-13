@@ -106,6 +106,23 @@ class DashboardConfig(_Strict):
     port: int
 
 
+class DaemonConfig(_Strict):
+    """Where the long-running daemon reads / writes its sidecar artifacts.
+
+    All fields are optional so existing ``canary.yaml`` files keep loading
+    without edits; the defaults are sensible relative-to-cwd paths for the
+    common WSL-dev case. Production deployments override them (the systemd
+    unit will pin absolute paths under ``/var/lib/canary``).
+    """
+
+    anomalies_dir: Path = Path("data/anomalies")
+    models_dir: Path = Path("models")
+    isolation_forest_artifact: str = "isolation_forest/model.joblib"
+    lstm_artifact: str = "lstm_autoencoder/model.pt"
+    model_poll_seconds: float = 30.0
+    broadcaster_queue_size: int = 100
+
+
 class CanaryConfig(_Strict):
     vehicle: VehicleConfig
     hardware: HardwareConfig
@@ -113,6 +130,7 @@ class CanaryConfig(_Strict):
     preprocessing: PreprocessingConfig
     models: ModelsConfig
     dashboard: DashboardConfig
+    daemon: DaemonConfig = DaemonConfig()
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:

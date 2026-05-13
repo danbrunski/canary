@@ -41,6 +41,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Path to canary.yaml configuration file (default: ./canary.yaml).",
     )
     parser.add_argument(
+        "--collection-only",
+        action="store_true",
+        help=(
+            "Run only the collection loop (no dashboard, no model managers, "
+            "no broadcasters). Useful when running `record.py`-style headless "
+            "captures or when the dashboard port is occupied."
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -162,11 +171,18 @@ async def run(
     stop_event: asyncio.Event | None = None,
     *,
     start_collectors: bool = True,
+    full_daemon: bool = True,
 ) -> None:
     """Start the daemon and block until the stop event fires.
 
-    If `stop_event` is None, one is created and wired to SIGTERM/SIGINT. Tests
+    If ``stop_event`` is None, one is created and wired to SIGTERM/SIGINT. Tests
     pass an explicit event so they can trigger shutdown without signals.
+
+    ``full_daemon=True`` (the default) runs the assembled daemon —
+    collectors + writer + telemetry broadcaster + model manager polling +
+    dashboard server. ``full_daemon=False`` falls back to the bare
+    collection loop (``run_collection``), kept for the test paths that
+    don't want the dashboard port bound.
     """
     if stop_event is None:
         stop_event = asyncio.Event()
@@ -180,13 +196,21 @@ async def run(
             "vehicle": f"{config.vehicle.year} {config.vehicle.make} {config.vehicle.model}",
             "obd_poll_rate_hz": config.collection.obd_poll_rate_hz,
             "storage_path": str(config.collection.storage_path),
+            "full_daemon": full_daemon,
         },
     )
 
-    if start_collectors:
-        await run_collection(config, stop_event)
-    else:
+    if not start_collectors:
         await stop_event.wait()
+    elif full_daemon:
+        # Lazy import keeps `src.main` importable in environments missing
+        # the optional dashboard deps (uvicorn). The collection-only path
+        # still works.
+        from src.daemon import run_daemon
+
+        await run_daemon(config, stop_event)
+    else:
+        await run_collection(config, stop_event)
     log.info("canary stopping")
 
 
@@ -194,7 +218,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
     configure_logging(args.log_level)
     config = CanaryConfig.from_yaml(args.config)
-    asyncio.run(run(config))
+    asyncio.run(run(config, full_daemon=not args.collection_only))
 
 
 if __name__ == "__main__":

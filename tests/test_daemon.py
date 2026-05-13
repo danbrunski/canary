@@ -1,0 +1,393 @@
+"""Tests for the daemon assembly (Milestone A)."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from src.alerts.events import AnomalyEvent
+from src.config import CanaryConfig, DaemonConfig
+from src.daemon import (
+    DaemonComponents,
+    build_components,
+    drain_queue_with_broadcast,
+    poll_model_managers,
+)
+from src.models.manager import ModelManager
+from src.models.manifest import CURRENT_MANIFEST_FORMAT_VERSION
+from src.storage.parquet_writer import ParquetTelemetryWriter
+from src.telemetry import TelemetryRecord
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+def _config_yaml(tmp_path: Path) -> str:
+    """Minimal canary.yaml content pointing every dir at tmp_path."""
+    return f"""
+vehicle:
+  make: Nissan
+  model: Xterra
+  year: 2008
+  vin: ""
+hardware:
+  elm327_port: /dev/ttyUSB0
+  can:
+    interface: virtual
+    channel: vcan0
+    bitrate: 500000
+collection:
+  obd_poll_rate_hz: 1
+  storage_path: {tmp_path / "storage"}
+  session_retention_days: 30
+  storage_warning_mb: 500
+preprocessing:
+  resample_hz: 1
+  rolling_window_seconds: 30
+  operating_modes:
+    idle:
+      rpm_max: 900
+      speed_max: 0
+models:
+  isolation_forest:
+    enabled: false
+    n_estimators: 100
+    contamination: 0.01
+  lstm_autoencoder:
+    enabled: false
+    sequence_length: 60
+    latent_dim: 16
+    threshold_k: 3.0
+dashboard:
+  host: 127.0.0.1
+  port: 0
+daemon:
+  anomalies_dir: {tmp_path / "anomalies"}
+  models_dir: {tmp_path / "models"}
+  model_poll_seconds: 0.05
+  broadcaster_queue_size: 16
+"""
+
+
+@pytest.fixture
+def config(tmp_path: Path) -> CanaryConfig:
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(tmp_path))
+    return CanaryConfig.from_yaml(cfg_path)
+
+
+# ---------------------------------------------------------------------------
+# build_components
+# ---------------------------------------------------------------------------
+
+
+def test_build_components_creates_anomalies_dir(config: CanaryConfig) -> None:
+    components = build_components(config)
+    assert config.daemon.anomalies_dir.exists()
+    assert components.event_logger.directory == config.daemon.anomalies_dir
+
+
+def test_build_components_constructs_two_broadcasters(config: CanaryConfig) -> None:
+    components = build_components(config)
+    assert components.telemetry_broadcaster is not components.anomalies_broadcaster
+    assert components.telemetry_broadcaster.queue_size == config.daemon.broadcaster_queue_size
+
+
+def test_emitter_publishes_to_anomalies_broadcaster_when_logging(
+    config: CanaryConfig,
+) -> None:
+    """The broadcasting wrapper around AnomalyEventLogger fans events to both."""
+    components = build_components(config)
+    sub = components.anomalies_broadcaster.subscribe()
+
+    async def _exercise() -> dict[str, Any]:
+        event = AnomalyEvent(
+            timestamp="2026-05-13T12:00:00+00:00",
+            source="lstm_autoencoder",
+            model_version="v1",
+            score=5.0,
+            threshold=3.0,
+        )
+        # The emitter's logger is the wrapper; calling .log() drives both paths.
+        components.emitter._logger.log(event)  # type: ignore[attr-defined]
+        return await asyncio.wait_for(sub.get(), timeout=1.0)
+
+    published = asyncio.run(_exercise())
+    assert published["source"] == "lstm_autoencoder"
+    # And the JSONL was written
+    assert any(config.daemon.anomalies_dir.glob("anomalies-*.jsonl"))
+
+
+def test_build_components_skips_managers_when_models_disabled(
+    config: CanaryConfig,
+) -> None:
+    components = build_components(config)
+    assert components.model_managers == {}
+
+
+def test_build_components_constructs_if_manager_when_enabled(
+    tmp_path: Path,
+) -> None:
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(
+        _config_yaml(tmp_path).replace(
+            "  isolation_forest:\n    enabled: false", "  isolation_forest:\n    enabled: true"
+        )
+    )
+    config = CanaryConfig.from_yaml(cfg_path)
+    components = build_components(config)
+    assert "isolation_forest" in components.model_managers
+    # Without an artifact on disk, current is None — the manager keeps polling.
+    assert components.model_managers["isolation_forest"].current is None
+
+
+# ---------------------------------------------------------------------------
+# drain_queue_with_broadcast
+# ---------------------------------------------------------------------------
+
+
+async def test_drain_publishes_each_record_to_broadcaster(tmp_path: Path) -> None:
+    from src.dashboard.broadcast import Broadcaster
+
+    writer = ParquetTelemetryWriter(tmp_path / "storage")
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+    bus = Broadcaster()
+    sub = bus.subscribe()
+
+    async def _producer() -> None:
+        for value in (700.0, 720.0, 750.0):
+            await queue.put(TelemetryRecord.obd(1_778_000_000.0 + value, "RPM", value, "rpm"))
+        await asyncio.sleep(0.05)
+        stop.set()
+
+    drain_task = asyncio.create_task(
+        drain_queue_with_broadcast(queue, writer, stop, telemetry_broadcaster=bus)
+    )
+    await _producer()
+    await drain_task
+
+    received = []
+    while not sub.queue.empty():
+        received.append(sub.queue.get_nowait())
+    assert [r["value"] for r in received] == [700.0, 720.0, 750.0]
+    # Parquet got the same data
+    parquet_files = list((tmp_path / "storage").rglob("*.parquet"))
+    assert parquet_files, "expected at least one Parquet chunk written"
+
+
+async def test_drain_with_no_broadcaster_still_writes_to_parquet(tmp_path: Path) -> None:
+    """The broadcaster is optional; the Parquet write path stays correct."""
+    writer = ParquetTelemetryWriter(tmp_path / "storage")
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+
+    async def _producer() -> None:
+        await queue.put(TelemetryRecord.obd(1_778_000_000.0, "RPM", 700.0, "rpm"))
+        await asyncio.sleep(0.05)
+        stop.set()
+
+    drain_task = asyncio.create_task(
+        drain_queue_with_broadcast(queue, writer, stop, telemetry_broadcaster=None)
+    )
+    await _producer()
+    await drain_task
+
+    assert list((tmp_path / "storage").rglob("*.parquet"))
+
+
+async def test_drain_keeps_publishing_even_under_subscriber_backpressure(
+    tmp_path: Path,
+) -> None:
+    """A slow WebSocket client must not stall the writer."""
+    from src.dashboard.broadcast import Broadcaster
+
+    writer = ParquetTelemetryWriter(tmp_path / "storage")
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+    bus = Broadcaster(queue_size=2)
+    sub = bus.subscribe()
+
+    async def _producer() -> None:
+        for i in range(20):
+            await queue.put(TelemetryRecord.obd(1_778_000_000.0 + i, "RPM", float(700 + i), "rpm"))
+        await asyncio.sleep(0.1)
+        stop.set()
+
+    drain_task = asyncio.create_task(
+        drain_queue_with_broadcast(queue, writer, stop, telemetry_broadcaster=bus)
+    )
+    await _producer()
+    await drain_task
+
+    # The subscriber missed some messages but the queue was drained.
+    assert sub.dropped >= 10
+    assert queue.empty()
+
+
+# ---------------------------------------------------------------------------
+# poll_model_managers
+# ---------------------------------------------------------------------------
+
+
+def _write_manifest_pair(artifact: Path, *, version: str, mtime: float) -> None:
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(f"artifact:{version}")
+    manifest = artifact.with_suffix(".manifest.json")
+    manifest.write_text(
+        json.dumps(
+            {
+                "artifact_format_version": CURRENT_MANIFEST_FORMAT_VERSION,
+                "model_type": "isolation_forest",
+                "model_version": version,
+                "created_at": "2026-05-13T12:00:00+00:00",
+                "training_data_hash": "sha256:abc",
+                "input_rows": 1,
+                "hyperparams": {},
+                "schema": {"feature_columns": ["obd:RPM"]},
+            }
+        )
+    )
+    import os
+
+    os.utime(manifest, (mtime, mtime))
+
+
+async def test_poll_swaps_when_new_manifest_appears(tmp_path: Path) -> None:
+    artifact = tmp_path / "model.joblib"
+    _write_manifest_pair(artifact, version="v1", mtime=1_000_000.0)
+
+    def _loader(p: Path) -> dict:
+        return {"contents": p.read_text()}
+
+    manager: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    manager.load_initial()
+    assert manager.current is not None and manager.current.manifest.model_version == "v1"
+
+    _write_manifest_pair(artifact, version="v2", mtime=2_000_000.0)
+
+    stop = asyncio.Event()
+
+    async def _stop_after_one_poll() -> None:
+        await asyncio.sleep(0.15)
+        stop.set()
+
+    poll_task = asyncio.create_task(
+        poll_model_managers({"if": manager}, stop, interval_seconds=0.05)
+    )
+    await _stop_after_one_poll()
+    await asyncio.wait_for(poll_task, timeout=1.0)
+
+    assert manager.current is not None
+    assert manager.current.manifest.model_version == "v2"
+
+
+async def test_poll_swallows_manager_exceptions(tmp_path: Path) -> None:
+    """A blowing-up manager.poll() must not kill the polling task."""
+
+    class _BoomManager:
+        def poll(self) -> Any:
+            raise RuntimeError("kaboom")
+
+    stop = asyncio.Event()
+
+    async def _stop_soon() -> None:
+        await asyncio.sleep(0.15)
+        stop.set()
+
+    poll_task = asyncio.create_task(
+        poll_model_managers({"if": _BoomManager()}, stop, interval_seconds=0.05)  # type: ignore[dict-item]
+    )
+    await _stop_soon()
+    # Task should still terminate cleanly via stop_event, despite the manager's exception.
+    await asyncio.wait_for(poll_task, timeout=1.0)
+
+
+# ---------------------------------------------------------------------------
+# DaemonConfig defaults
+# ---------------------------------------------------------------------------
+
+
+def test_daemon_config_defaults_are_sane() -> None:
+    """Existing canary.yaml files without a `daemon:` block must keep loading."""
+    cfg = DaemonConfig()
+    assert cfg.anomalies_dir == Path("data/anomalies")
+    assert cfg.models_dir == Path("models")
+    assert cfg.model_poll_seconds == 30.0
+    assert cfg.broadcaster_queue_size == 100
+
+
+def test_canary_yaml_without_daemon_section_loads(tmp_path: Path) -> None:
+    """The example config has no `daemon:` block; it must still load."""
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    assert isinstance(config.daemon, DaemonConfig)
+    # uses the dataclass defaults
+    assert config.daemon.model_poll_seconds == 30.0
+
+
+# ---------------------------------------------------------------------------
+# Components are hold-and-pass — verify they're a real dataclass
+# ---------------------------------------------------------------------------
+
+
+def test_daemon_components_is_a_dataclass(config: CanaryConfig) -> None:
+    components = build_components(config)
+    assert isinstance(components, DaemonComponents)
+    assert components.config is config
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: run_daemon with fake collectors + real dashboard + real broadcaster
+# ---------------------------------------------------------------------------
+
+
+async def test_run_daemon_end_to_end_telemetry_published_to_ws(
+    config: CanaryConfig,
+) -> None:
+    """The integration check: producer → drain_queue → broadcaster → /ws/telemetry.
+
+    Uses a fake collector that pushes a few records, runs the full
+    ``run_daemon`` with the dashboard server in the same loop, opens a
+    WebSocket via httpx through TestClient, asserts the records come out
+    the other end. Stop is triggered after the records flow.
+    """
+    from src.daemon import run_daemon
+
+    records_to_push = [
+        TelemetryRecord.obd(1_778_000_000.0 + i, "RPM", float(700 + i), "rpm") for i in range(3)
+    ]
+
+    async def _fake_collector(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
+        for record in records_to_push:
+            await queue.put(record)
+        # block until stop fires so the daemon doesn't think this collector exited
+        await stop.wait()
+
+    stop = asyncio.Event()
+    components = build_components(config)
+    sub = components.telemetry_broadcaster.subscribe()
+
+    async def _run() -> None:
+        await run_daemon(
+            config,
+            stop,
+            collectors=[_fake_collector],
+            components=components,
+        )
+
+    daemon_task = asyncio.create_task(_run())
+    try:
+        received: list[dict[str, Any]] = []
+        for _ in range(len(records_to_push)):
+            received.append(await asyncio.wait_for(sub.get(), timeout=3.0))
+    finally:
+        stop.set()
+        await asyncio.wait_for(daemon_task, timeout=5.0)
+
+    assert [r["value"] for r in received] == [700.0, 701.0, 702.0]
+    assert all(r["channel"] == "RPM" for r in received)

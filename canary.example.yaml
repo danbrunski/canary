@@ -67,3 +67,12 @@ models:
 dashboard:
   host: 0.0.0.0
   port: 8000
+
+# Optional. Defaults match the values shown; uncomment / edit for production.
+# daemon:
+#   anomalies_dir: data/anomalies
+#   models_dir: models
+#   isolation_forest_artifact: isolation_forest/model.joblib  # relative to models_dir
+#   lstm_artifact: lstm_autoencoder/model.pt                  # relative to models_dir
+#   model_poll_seconds: 30.0
+#   broadcaster_queue_size: 100
