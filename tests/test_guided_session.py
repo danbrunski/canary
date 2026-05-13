@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from scripts.guided_session import (
+    PROTOCOL_NT510,
     PROTOCOL_REV,
     PROTOCOLS,
     Step,
@@ -235,3 +236,105 @@ def test_run_protocol_propagates_write_tag_failure(tmp_path: Path):
             output_fn=_FakeOutput(),
             write_tag_fn=angry_write,
         )
+
+
+# ---------------------------------------------------------------------------
+# nt510 protocol + skip support
+# ---------------------------------------------------------------------------
+
+
+def test_protocols_registry_has_nt510():
+    assert "nt510" in PROTOCOLS
+    assert PROTOCOLS["nt510"] is PROTOCOL_NT510
+
+
+def test_nt510_protocol_labels_are_unique():
+    labels = [s.label for s in PROTOCOL_NT510]
+    assert len(labels) == len(set(labels))
+
+
+def test_nt510_protocol_has_start_end_pairs():
+    labels = set(s.label for s in PROTOCOL_NT510)
+    for start, end in [
+        ("nt510_module_scan_start", "nt510_module_scan_end"),
+        ("nt510_abs_livedata_start", "nt510_abs_livedata_end"),
+        ("nt510_fan_test_on", "nt510_fan_test_off"),
+        ("nt510_idle_air_up", "nt510_idle_air_restore"),
+        ("nt510_evap_purge_on", "nt510_evap_purge_off"),
+        ("nt510_power_balance_start", "nt510_power_balance_end"),
+        ("nt510_fuel_pump_cut", "nt510_fuel_pump_restore"),
+        ("nt510_abs_actuator_start", "nt510_abs_actuator_end"),
+    ]:
+        assert start in labels, f"missing {start}"
+        assert end in labels, f"missing {end}"
+
+
+class _ScriptedInput:
+    """Returns queued responses in order; falls back to '' once exhausted."""
+
+    def __init__(self, responses: list[str]) -> None:
+        self._responses = list(responses)
+        self.prompts: list[str] = []
+
+    def __call__(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return self._responses.pop(0) if self._responses else ""
+
+
+def test_run_step_skips_on_s_input(tmp_path: Path):
+    wt = _FakeWriteTag()
+    record = run_step(
+        Step("nt510_fan_test_on", "Fan on."),
+        1,
+        1,
+        tmp_path,
+        input_fn=_ScriptedInput(["s"]),
+        output_fn=_FakeOutput(),
+        write_tag_fn=wt,
+    )
+    assert record is None
+    assert wt.calls == []
+
+
+def test_run_step_skips_on_skip_word_case_insensitive(tmp_path: Path):
+    wt = _FakeWriteTag()
+    record = run_step(
+        Step("nt510_evap_purge_on", "Purge on."),
+        1,
+        1,
+        tmp_path,
+        input_fn=_ScriptedInput(["  SKIP  "]),
+        output_fn=_FakeOutput(),
+        write_tag_fn=wt,
+    )
+    assert record is None
+    assert wt.calls == []
+
+
+def test_run_step_tags_normally_on_empty_input(tmp_path: Path):
+    wt = _FakeWriteTag()
+    record = run_step(
+        Step("idle_settle", "Idle."),
+        1,
+        1,
+        tmp_path,
+        input_fn=_ScriptedInput([""]),
+        output_fn=_FakeOutput(),
+        write_tag_fn=wt,
+    )
+    assert record is not None
+    assert len(wt.calls) == 1
+
+
+def test_run_protocol_skips_steps(tmp_path: Path):
+    steps = [Step("a", "first"), Step("b", "second"), Step("c", "third")]
+    wt = _FakeWriteTag()
+    records = run_protocol(
+        steps,
+        tmp_path,
+        input_fn=_ScriptedInput(["", "s", ""]),
+        output_fn=_FakeOutput(),
+        write_tag_fn=wt,
+    )
+    assert [r["label"] for r in records] == ["a", "c"]
+    assert [c["label"] for c in wt.calls] == ["a", "c"]

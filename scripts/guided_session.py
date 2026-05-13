@@ -10,9 +10,13 @@ Enter.
 Usage:
   scripts/guided_session.py                  # uses the 'rev' protocol
   scripts/guided_session.py --protocol rev
+  scripts/guided_session.py --protocol nt510 # NT510 active-test session
   scripts/guided_session.py --session data/sessions/<timestamp>
 
-Quit with Ctrl-C at any time; tags written so far stay in tags.jsonl.
+At each step, press Enter to tag and advance, or type `s` (then Enter) to skip
+the step without writing a tag — useful when a protocol lists an action your
+tool/vehicle doesn't have. Quit with Ctrl-C at any time; tags written so far
+stay in tags.jsonl.
 """
 
 from __future__ import annotations
@@ -69,8 +73,63 @@ PROTOCOL_REV: list[Step] = [
     Step("engine_off_key_on", "Kill engine, leave key ON.", 30),
 ]
 
+# NT510-active protocol: drive the Foxwell NT510 (or similar) through its
+# read-only inventory + ABS live data + ECU/ABS actuator tests, tagging each
+# action so the byte-vs-tag differential can find the signal(s) each test
+# moves. Many steps are tool/vehicle-specific — type `s` + Enter to skip any
+# your NT510 doesn't offer. Run record.py CAN-only (no --obd-port) so there's
+# no ISO-TP contention between the NT510 and the ELM327.
+PROTOCOL_NT510: list[Step] = [
+    Step("nt510_module_scan_start", "NT510: start the all-systems / module scan.", None),
+    Step("nt510_module_scan_end", "Module scan done — note which modules answered.", None),
+    Step("nt510_abs_livedata_start", "NT510: open ABS (chassis) live data / data stream.", None),
+    Step("steer_full_left", "Steering wheel FULL LEFT, hold a moment.", 5),
+    Step("steer_full_right", "Now FULL RIGHT, hold.", 5),
+    Step("steer_center", "Back to CENTER (wheels straight).", 3),
+    Step("brake_press", "Brake pedal: a couple of firm presses, then a light one.", 10),
+    Step("brake_release", "Foot fully off the brake.", 3),
+    Step("nt510_abs_livedata_end", "NT510: close the ABS live-data screen.", None),
+    Step(
+        "engine_start",
+        "Start the engine (skip with 's' if it's already running). Enter once it idles.",
+        None,
+    ),
+    Step("idle_settle", "Let it idle and settle.", 30),
+    Step("nt510_fan_test_on", "NT510: cooling-fan actuator test — fan ON.", None),
+    Step("nt510_fan_test_off", "Cooling-fan test OFF / finished.", None),
+    Step(
+        "nt510_idle_air_up",
+        "NT510: idle-air / target-idle test — command idle RPM UP, hold.",
+        10,
+    ),
+    Step("nt510_idle_air_restore", "Restore normal idle.", 5),
+    Step("nt510_evap_purge_on", "NT510: EVAP purge-solenoid (canister purge) test — ON.", 8),
+    Step("nt510_evap_purge_off", "EVAP purge test OFF.", None),
+    Step(
+        "nt510_power_balance_start",
+        "NT510: power-balance / injector-cutoff test — START (it cycles the cylinders).",
+        None,
+    ),
+    Step("nt510_power_balance_end", "Power-balance test finished.", None),
+    Step(
+        "nt510_fuel_pump_cut",
+        "NT510: fuel-pump relay test — CUT the pump (engine stalls in a few s). "
+        "Skip with 's' if you'd rather not stall it.",
+        None,
+    ),
+    Step("nt510_fuel_pump_restore", "Pump restored — restart the engine if it stalled.", None),
+    Step(
+        "nt510_abs_actuator_start",
+        "NT510: ABS actuator / pump-motor activation test — START.",
+        None,
+    ),
+    Step("nt510_abs_actuator_end", "ABS actuator test finished.", None),
+    Step("nt510_session_end", "Back the NT510 out to the main menu. Done — stop record.py.", None),
+]
+
 PROTOCOLS: dict[str, list[Step]] = {
     "rev": PROTOCOL_REV,
+    "nt510": PROTOCOL_NT510,
 }
 
 
@@ -85,11 +144,14 @@ def _format_header(step_num: int, total: int, label: str) -> str:
     return f"\n{bar}\n{title}\n{bar}\n\n  Next:  {label}"
 
 
+_SKIP_TOKENS = {"s", "skip"}
+
+
 def _format_prompt(step: Step) -> str:
     lines = [f"\n  {step.description}"]
     if step.advisory_duration_s is not None:
         lines.append(f"  (Suggested ~{step.advisory_duration_s}s before advancing.)")
-    lines.append("\n  >>> Press Enter to tag and advance: ")
+    lines.append("\n  >>> Enter to tag and advance, or 's' + Enter to skip: ")
     return "\n".join(lines)
 
 
@@ -102,10 +164,17 @@ def run_step(
     input_fn: Callable[[str], str] = input,
     output_fn: Callable[[str], None] = print,
     write_tag_fn: Callable[..., dict[str, Any]] = write_tag,
-) -> dict[str, Any]:
-    """Display one step, await Enter, write the tag, return the record."""
+) -> dict[str, Any] | None:
+    """Display one step, await Enter (or a skip), write the tag.
+
+    Returns the tag record, or ``None`` if the user typed ``s``/``skip`` to
+    skip the step without writing a tag.
+    """
     output_fn(_format_header(step_num, total, step.label))
-    input_fn(_format_prompt(step))
+    response = input_fn(_format_prompt(step))
+    if response.strip().lower() in _SKIP_TOKENS:
+        output_fn(f"  ↷ skipped '{step.label}' (no tag written)")
+        return None
     record = write_tag_fn(session, step.label, kind="event")
     ts = record["t"]
     output_fn(
@@ -123,7 +192,10 @@ def run_protocol(
     output_fn: Callable[[str], None] = print,
     write_tag_fn: Callable[..., dict[str, Any]] = write_tag,
 ) -> list[dict[str, Any]]:
-    """Walk every step in order, returning the list of tag records written."""
+    """Walk every step in order, returning the list of tag records written.
+
+    Skipped steps (the user typed ``s``) contribute no record.
+    """
     written: list[dict[str, Any]] = []
     total = len(steps)
     for i, step in enumerate(steps, start=1):
@@ -136,7 +208,8 @@ def run_protocol(
             output_fn=output_fn,
             write_tag_fn=write_tag_fn,
         )
-        written.append(record)
+        if record is not None:
+            written.append(record)
     return written
 
 
