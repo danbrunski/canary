@@ -45,6 +45,14 @@ elm = pytest.importorskip(
     "`.venv/bin/pip install --no-build-isolation 'canary[emulator]'`",
 )
 
+# Opt-in: these tests spin up a real emulator on a pty and exercise the full
+# python-obd Async loop, which adds ~45 s to the suite. The default pytest
+# invocation (per pyproject.toml `addopts = "-m 'not integration'"`) skips
+# them; run them explicitly with:
+#   .venv/bin/python -m pytest tests/test_obd_emulator.py
+#   .venv/bin/python -m pytest -m integration
+pytestmark = pytest.mark.integration
+
 
 # ---------------------------------------------------------------------------
 # Fixture: a live emulator on a pty, torn down deterministically

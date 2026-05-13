@@ -104,7 +104,11 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
   without `--no-build-isolation` (old sdist quirk gone), so the standard
   `pip install '.[emulator]'` works. `pytest.importorskip("elm", ...)` at
   module top means the file skips cleanly when the package isn't present,
-  so CI without the extra still passes. (NFR-05)
+  so CI without the extra still passes. **Marked `pytest.mark.integration`
+  and excluded by default** (`pyproject.toml`'s
+  `addopts = "-m 'not integration'"`) so the ~45 s pty bring-up doesn't
+  burn the inner-loop suite cadence; run explicitly with
+  `pytest -m integration` or by path. (NFR-05)
 
 ### 1B. CAN collector (FR-02)
 
