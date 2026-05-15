@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from src.collection.tags import TAGS_FILENAME, find_latest_session, write_tag
+from src.collection.tags import TAGS_FILENAME, find_latest_session, write_correction, write_tag
 
 
 def _read_tags(session_dir: Path) -> list[dict]:
@@ -94,3 +94,40 @@ def test_find_latest_session_ignores_files(tmp_path: Path):
     sess = tmp_path / "2026-05-10T100000"
     sess.mkdir()
     assert find_latest_session(tmp_path) == sess
+
+
+# ---------------------------------------------------------------------------
+# write_correction
+# ---------------------------------------------------------------------------
+
+
+def test_write_correction_appends_invalidate_record(tmp_path: Path):
+    write_correction(tmp_path, "hvac_ac_on", reason="never engaged")
+    tags = _read_tags(tmp_path)
+    assert len(tags) == 1
+    record = tags[0]
+    assert record["kind"] == "invalidate"
+    assert record["target_label"] == "hvac_ac_on"
+    assert record["reason"] == "never engaged"
+    assert "target_t" not in record  # absent → invalidate-all-by-label
+    assert record["label"].startswith("invalidate:")
+
+
+def test_write_correction_narrows_by_target_t(tmp_path: Path):
+    write_correction(tmp_path, "right_turn_sharp", target_t=1778811025.0123)
+    record = _read_tags(tmp_path)[0]
+    assert record["target_t"] == 1778811025.0123
+
+
+def test_write_correction_uses_explicit_timestamp(tmp_path: Path):
+    record = write_correction(tmp_path, "x", timestamp=42.0)
+    assert record["t"] == 42.0
+
+
+def test_write_correction_coexists_with_event_tags(tmp_path: Path):
+    """Real-world: event tags written during the session, corrections appended after."""
+    write_tag(tmp_path, "hvac_ac_on")
+    write_tag(tmp_path, "steady_25_flat")
+    write_correction(tmp_path, "hvac_ac_on", reason="missed it")
+    tags = _read_tags(tmp_path)
+    assert [t["kind"] for t in tags] == ["event", "event", "invalidate"]

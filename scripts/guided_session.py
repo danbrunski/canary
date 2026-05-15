@@ -154,10 +154,72 @@ PROTOCOL_DRIVE: list[Step] = [
     Step("engine_off_key_on", "Engine OFF, key left ON. Done — stop record.py.", 15),
 ]
 
+# Binding-targeted drive: focused on the high-variance UNBOUND bytes flagged in
+# the corpus report (0x285:7, 0x551:1, 0x2A0:2, 0x2DE:4-5, 0x2A5 pairs, 0x794
+# pair). Each step isolates ONE physical variable so the byte-vs-tag
+# differential can attribute each unbound byte to a single cause. Order matters:
+# brake-then-release, then HVAC sweep, THEN motion — so the brake/HVAC bytes
+# get a clean stationary window before vehicle-speed-correlated noise enters.
+# Pair with `record.py --vehicle-state driving` in another terminal; do NOT
+# pass --obd-port for this protocol — keep the ISO-TP bus quiet so we can see
+# the broadcast bytes change in response to physical actions, not OBD polls.
+PROTOCOL_BINDING: list[Step] = [
+    Step("key_on_engine_off", "Key ON, engine OFF. Sit. (Baseline before crank.)", 5),
+    Step("engine_start", "Crank the engine. Enter the moment it cranks.", None),
+    Step(
+        "idle_park_neutral_brake",
+        "Parked, in neutral, foot FIRMLY on the brake. Sit and breathe.",
+        10,
+    ),
+    Step(
+        "brake_release",
+        "Foot fully OFF the brake (still parked, neutral). Hold.",
+        10,
+    ),
+    Step(
+        "brake_press_pump",
+        "A few firm brake PRESSES, then one light one. Foot back off to finish.",
+        10,
+    ),
+    Step("hvac_off_baseline", "All HVAC OFF: fan OFF, A/C OFF, vents shut. Sit.", 10),
+    Step("hvac_fan_low", "Fan ON, LOWEST speed. A/C still off.", 10),
+    Step("hvac_fan_high", "Fan to MAXIMUM. A/C still off.", 10),
+    Step("hvac_ac_on", "A/C compressor ON, fan still high.", 15),
+    Step("hvac_ac_off_fan_off", "A/C OFF, fan OFF — back to silence.", 10),
+    Step("pulling_away", "About to drive off. Enter as the wheels start moving.", None),
+    Step("accel_to_25", "Smooth accel from 0 → ~25 mph. Enter as you start.", None),
+    Step("steady_25_flat", "Holding steady ~25 mph, flat road, light throttle.", 60),
+    Step(
+        "coast_dfco",
+        "Foot FULLY off the throttle, decelerating (still rolling — no brake yet).",
+        10,
+    ),
+    Step("brake_to_stop", "Now on the brake, coming to a full stop.", None),
+    Step("accel_to_40", "From the stop, FIRMER accel up to ~40 mph.", None),
+    Step("steady_40", "Holding ~40 mph.", 30),
+    Step("right_turn_sharp", "A sharp RIGHT turn — Enter as you start turning the wheel.", None),
+    Step("straight_recover_a", "Going straight again — wheel centered.", 10),
+    Step("left_turn_sharp", "A sharp LEFT turn.", None),
+    Step("straight_recover_b", "Going straight again.", 10),
+    Step(
+        "bumpy_section",
+        "Driving over rough/bumpy pavement (skip 's' if no such road nearby).",
+        15,
+    ),
+    Step(
+        "uphill_section",
+        "Sustained uphill climb, steady throttle (skip 's' if no hill).",
+        30,
+    ),
+    Step("final_idle", "Back to parked, in neutral, idling.", 15),
+    Step("engine_off_key_on", "Kill engine, leave key ON. Done — stop record.py.", 5),
+]
+
 PROTOCOLS: dict[str, list[Step]] = {
     "rev": PROTOCOL_REV,
     "nt510": PROTOCOL_NT510,
     "drive": PROTOCOL_DRIVE,
+    "binding": PROTOCOL_BINDING,
 }
 
 

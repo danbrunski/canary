@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from scripts.guided_session import (
+    PROTOCOL_BINDING,
     PROTOCOL_DRIVE,
     PROTOCOL_NT510,
     PROTOCOL_REV,
@@ -359,5 +360,70 @@ def test_drive_protocol_covers_key_phases():
         "highway_cruise",
         "coasting_dfco",
         "engine_off_key_on",
+    ):
+        assert expected in labels, f"missing {expected}"
+
+
+# ---------------------------------------------------------------------------
+# binding protocol
+# ---------------------------------------------------------------------------
+
+
+def test_protocols_registry_has_binding():
+    assert "binding" in PROTOCOLS
+    assert PROTOCOLS["binding"] is PROTOCOL_BINDING
+
+
+def test_binding_protocol_labels_are_unique():
+    labels = [s.label for s in PROTOCOL_BINDING]
+    assert len(labels) == len(set(labels))
+
+
+def test_binding_protocol_brackets_engine_state():
+    """Starts key-on/engine-off, ends with engine-off so build_windows has clean anchors."""
+    labels = [s.label for s in PROTOCOL_BINDING]
+    assert labels[0] == "key_on_engine_off"
+    assert "engine_start" in labels
+    assert labels[-1] == "engine_off_key_on"
+
+
+def test_binding_protocol_isolates_brake_before_motion():
+    """Brake steps must come before any motion step so the brake byte sees a
+    stationary baseline with no vehicle-speed-correlated noise."""
+    labels = [s.label for s in PROTOCOL_BINDING]
+    brake_release_idx = labels.index("brake_release")
+    pulling_away_idx = labels.index("pulling_away")
+    assert brake_release_idx < pulling_away_idx
+
+
+def test_binding_protocol_isolates_hvac_before_motion():
+    """HVAC sweep must come before motion so 0x551:1 (HVAC candidate) gets a
+    stationary differential window — otherwise speed-correlated bytes confound it."""
+    labels = [s.label for s in PROTOCOL_BINDING]
+    hvac_baseline_idx = labels.index("hvac_off_baseline")
+    pulling_away_idx = labels.index("pulling_away")
+    assert hvac_baseline_idx < pulling_away_idx
+
+
+def test_binding_protocol_covers_targeted_actions():
+    """Each unbound-byte candidate from the corpus report needs a tagged action."""
+    labels = set(s.label for s in PROTOCOL_BINDING)
+    for expected in (
+        # brake (0x285:7 candidate)
+        "idle_park_neutral_brake",
+        "brake_release",
+        "brake_press_pump",
+        # HVAC (0x551:1 candidate)
+        "hvac_off_baseline",
+        "hvac_fan_low",
+        "hvac_fan_high",
+        "hvac_ac_on",
+        # motion / speed (0x2DE, 0x2A5, 0x794 candidates)
+        "steady_25_flat",
+        "steady_40",
+        "coast_dfco",
+        # steering / lateral (any byte that tracks yaw)
+        "right_turn_sharp",
+        "left_turn_sharp",
     ):
         assert expected in labels, f"missing {expected}"

@@ -395,6 +395,70 @@ def test_record_skips_index_error_from_truncated_slcan(tmp_path: Path):
     assert result.stopped_by == "deadline"
 
 
+def test_record_treats_can_operation_error_as_bus_failure_not_parse_error(tmp_path: Path):
+    """Regression: session 2026-05-15T020322 had `CanOperationError: Could not
+    read from serial device` from a Canable USB drop on a 28-min drive. The
+    `except (ValueError, IndexError, can.CanError)` trap caught it as a parse
+    error, so reconnect never fired and we burned 27 min spinning at 200K
+    errors/sec (63,400,211 total). After narrowing the trap to
+    `(ValueError, IndexError)`, CanOperationError must fall through to the
+    bus-level handler — counted as a reconnect, not a parse error."""
+    ReconnectableBus.instances_built = 0
+    ReconnectableBus.instances_shutdown = 0
+
+    spec = _virtual_spec("canary-test-can-op-error")
+    paths = make_session_dir(tmp_path, datetime.now(UTC))
+
+    # Bus that raises CanOperationError on recv (matches the slcan dead-pipe path).
+    class _DeadSerialBus:
+        def __init__(self, good_frames: int = 2) -> None:
+            self.calls = 0
+            self.budget = good_frames
+            self.shutdown_called = False
+
+        def recv(self, timeout: float) -> can.Message | None:
+            self.calls += 1
+            if self.calls > self.budget:
+                raise can.CanOperationError("Could not read from serial device")
+            return can.Message(
+                arbitration_id=0x100 + self.calls,
+                data=bytes([self.calls & 0xFF] * 4),
+                is_extended_id=False,
+                timestamp=float(self.calls),
+            )
+
+        def shutdown(self) -> None:
+            self.shutdown_called = True
+
+    rebuild_count = 0
+
+    def factory(_spec: CanBusConfig) -> _DeadSerialBus:
+        nonlocal rebuild_count
+        rebuild_count += 1
+        return _DeadSerialBus(good_frames=2)
+
+    result = record(
+        _DeadSerialBus(good_frames=2),  # type: ignore[arg-type]
+        paths,
+        spec=spec,
+        vehicle=_vehicle(),
+        duration=0.3,
+        poll_interval=0.02,
+        factory=factory,  # type: ignore[arg-type]
+        reconnect_policy=ReconnectPolicy(
+            initial_delay_seconds=0.01,
+            max_delay_seconds=0.01,
+        ),
+    )
+
+    # The whole point: CanOperationError is NOT a parse error.
+    assert result.parse_errors == 0, (
+        f"CanOperationError leaked into parse-error path: {result.parse_errors}"
+    )
+    # And IS a bus-level failure that triggers reconnect.
+    assert result.reconnects >= 1, "reconnect path should have fired"
+
+
 class ReconnectableBus:
     """Bus that fails with OSError after N good frames, simulating a USB
     disconnect. Each instance counts how many times it's been shut down so

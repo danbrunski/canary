@@ -306,10 +306,17 @@ def record(
 
                 try:
                     msg = current_bus.recv(timeout=poll_interval)
-                except (ValueError, IndexError, can.CanError) as exc:
-                    # Frame-level parser error. See slcan.py:282 (ValueError)
-                    # and slcan.py:304 (IndexError) for the two observed modes.
-                    # Drop the bad line, keep recording.
+                except (ValueError, IndexError) as exc:
+                    # Frame-level parser error from python-can's slcan parser:
+                    # slcan.py:282 (ValueError) and slcan.py:304 (IndexError).
+                    # Drop the bad line, keep recording. We DO NOT trap
+                    # can.CanError here — its subclasses (CanOperationError
+                    # from a dead serial pipe, CanInitializationError, etc.)
+                    # are bus-level failures that need the reconnect branch
+                    # below. Catching them as "parse errors" caused a 27-min
+                    # tight loop in session 2026-05-15T020322 — 63M errors,
+                    # zero reconnects, frames stopped 5 min in. A small sleep
+                    # keeps even legit storms of parse errors from burning CPU.
                     parse_errors += 1
                     if parse_errors == 1 or parse_errors % 100 == 0:
                         log.warning(
@@ -319,6 +326,7 @@ def record(
                                 "parse_errors_total": parse_errors,
                             },
                         )
+                    time.sleep(0.001)
                     continue
                 except Exception as exc:
                     # Bus-level failure (OSError from a USB disconnect,

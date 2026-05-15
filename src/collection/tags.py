@@ -67,6 +67,43 @@ def write_tag(
     return record
 
 
+def write_correction(
+    session_dir: Path,
+    target_label: str,
+    *,
+    target_t: float | None = None,
+    reason: str | None = None,
+    timestamp: float | None = None,
+) -> dict[str, Any]:
+    """Append a `kind="invalidate"` correction to a session's tags.jsonl.
+
+    `target_label` names the original event tag's label. Pass `target_t` to
+    invalidate just one occurrence (the most precise option); omit it to
+    invalidate every tag with that label in the session (the easy option,
+    appropriate when the protocol step never produced the intended action).
+    `reason` is free-form annotation — surfaced by the analyzer when it
+    explains which windows it dropped.
+
+    The correction record itself never becomes a window — `load_tags` filters
+    it out — but it stays in tags.jsonl so the audit trail is intact.
+    """
+    fields: dict[str, Any] = {"target_label": target_label}
+    if target_t is not None:
+        fields["target_t"] = float(target_t)
+    if reason is not None:
+        fields["reason"] = reason
+    # label= is just for human readability when grepping tags.jsonl; the
+    # analyzer keys off (kind, target_label, target_t).
+    label = f"invalidate:{target_label}"
+    return write_tag(
+        session_dir,
+        label,
+        kind="invalidate",
+        timestamp=timestamp,
+        **fields,
+    )
+
+
 def find_latest_session(sessions_root: Path) -> Path:
     """Return the most recently created session directory under `sessions_root`.
 

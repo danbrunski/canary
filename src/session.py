@@ -60,10 +60,23 @@ def make_session_dir(out_root: Path, started_at: datetime) -> SessionPaths:
 
 
 def load_tags(path: Path) -> list[dict[str, Any]]:
-    """Load JSONL tags from `path`, returning an empty list when absent."""
+    """Load JSONL tags from `path`, returning an empty list when absent.
+
+    Applies corrections recorded via `kind="invalidate"` tags: each invalidate
+    record names a target tag (by `target_label`, optionally narrowed by
+    `target_t`); matching event tags are dropped, and the invalidate records
+    themselves are filtered out of the result. This lets a user post-hoc say
+    "the AC didn't actually turn on when I tagged hvac_ac_on" without losing
+    history — tags.jsonl stays append-only.
+
+    The intended driver: a tag fires but the physical action didn't happen at
+    that moment (e.g. AC failed to engage, sharp turn aborted because of
+    traffic). `scripts/correct_tag.py` appends an invalidate; subsequent
+    analyzer runs see the corrected window list.
+    """
     if not path.exists():
         return []
-    tags: list[dict[str, Any]] = []
+    raw: list[dict[str, Any]] = []
     with path.open("r") as f:
         for line in f:
             if not line.strip():
@@ -78,8 +91,51 @@ def load_tags(path: Path) -> list[dict[str, Any]]:
                     str(record["label"])
                 except (KeyError, TypeError, ValueError):
                     continue
-                tags.append(record)
-    return tags
+                raw.append(record)
+    return _apply_invalidations(raw)
+
+
+def _apply_invalidations(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filter event tags suppressed by invalidate records; drop the records too.
+
+    An invalidate record looks like::
+
+        {"t": ..., "kind": "invalidate", "target_label": "hvac_ac_on",
+         "target_t": <orig_t or omitted>, "reason": "..."}
+
+    If `target_t` is present, only the event tag with that exact (label, t)
+    is dropped. If absent, every event tag matching `target_label` is dropped.
+    Invalidate records lacking `target_label` are ignored (defensive — we
+    won't silently drop everything because of a malformed correction).
+    """
+    invalidate_all_by_label: set[str] = set()
+    invalidate_by_label_and_t: set[tuple[str, float]] = set()
+    for record in raw:
+        if record.get("kind") != "invalidate":
+            continue
+        target_label = record.get("target_label")
+        if not isinstance(target_label, str):
+            continue
+        target_t = record.get("target_t")
+        if target_t is None:
+            invalidate_all_by_label.add(target_label)
+        else:
+            try:
+                invalidate_by_label_and_t.add((target_label, float(target_t)))
+            except (TypeError, ValueError):
+                continue
+
+    kept: list[dict[str, Any]] = []
+    for record in raw:
+        if record.get("kind") == "invalidate":
+            continue  # corrections are metadata, not windows
+        label = str(record["label"])
+        if label in invalidate_all_by_label:
+            continue
+        if (label, float(record["t"])) in invalidate_by_label_and_t:
+            continue
+        kept.append(record)
+    return kept
 
 
 def build_windows(
