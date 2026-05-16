@@ -565,7 +565,7 @@ signals:
     byte_order: big
     scale: null
     offset: null
-    unit: unknown  # likely enum or % duty
+    unit: unknown  # enum/duty: 0 = compressor off, ~128 = engaged
     confidence: high
     evidence:
       - session: 2026-05-11T211240
@@ -576,12 +576,28 @@ signals:
           at 128 during parking_brake_off and clutch_in (A/C still on).
           Drops back to ~50 once driving begins (compressor cycles).
           Exact one-event response to the A/C tag transition.
+      - session: 2026-05-16T202800
+        method: byte_vs_tag_differential
+        finding: >
+          Second independent tagged confirmation (engine-running accessory
+          sweep): 0 across every non-A/C window (pre-tags, KOEO, all
+          idle/blip windows, blower_off=0); exactly 128 in ac_on,
+          blower_max, blower_low; ~106 in ac_on_blower_low (duty/cycling).
+          Same 0↔128 transition tied one-for-one to the A/C tag as in
+          211240, on a different day and engine state.
     notes: |
-      Probably A/C compressor commanded state, duty cycle, or pressure.
-      The drop during driving suggests it's load-modulated (compressor
-      pulses on/off to manage cabin temperature). Useful for anomaly
-      detection: if this byte stays at 0 when the user expects A/C, it
-      indicates compressor or pressure-switch failure.
+      A/C compressor commanded state: 0 = off, ~128 = engaged, with
+      intermediate values when the compressor cycles under load (the drop
+      to ~50 while driving in 211240, ~106 at low blower in 202800). The
+      discrete on/off mapping is now corroborated by two independent tagged
+      sessions — strong evidence — but this stays `high`, not `confirmed`:
+      the project reserves `confirmed` for a scale/offset validated against
+      ground truth (schema header; enforced by test_bindings_validation.py,
+      which fails any confirmed signal with scale: null). This is a
+      scale-less enum, so `high` is its ceiling until a Mode 22 A/C-state
+      DID (or a pinned duty curve) gives it a validated mapping. Anomaly
+      use: stays 0 when A/C is commanded → compressor / pressure-switch
+      failure.
 
   - name: POWER_STATE_625_3
     module: HVAC        # paired with AC_COMPRESSOR_STATE on same CAN ID
@@ -721,7 +737,7 @@ signals:
     scale: null
     offset: null
     unit: unknown        # brake-line pressure or pedal position
-    confidence: low
+    confidence: high
     evidence:
       - session: 2026-05-13T011123
         method: byte_vs_tag_differential
@@ -730,11 +746,24 @@ signals:
           over the press window (i.e. ~64–128 while the pedal is firmly down,
           0 between presses) and returns to 0 at `brake_release`. Magnitude
           tracks pedal force — looks like brake-line pressure or pedal travel.
+      - session: 2026-05-16T202800
+        method: byte_vs_tag_differential
+        finding: >
+          The independent-brake capture the old notes asked for. Exactly 0
+          across every window (pre-tags, KOEO, all idle/blip/throttle
+          windows, A/C, blower, headlights, clutch, windows) except the
+          foot-brake-down windows: 63.8 at brake_pedal_pushed, 64.0 held
+          through parking_brake_off/on (foot brake stayed down), 2.2 at
+          brake_pedal_released. Zero throttle sensitivity — responds ONLY
+          to the foot brake. Two independent sessions agree.
     notes: |
-      Needs a dedicated capture: hold several distinct, sustained pedal
-      pressures (light / medium / hard) for ~10 s each so the value can be
-      pinned, and ideally cross-reference against the NT510's ABS "brake
-      pressure" live-data parameter if it exposes one.
+      Foot-brake-applied signal on the ~20 ms ABS frame: ~0 released,
+      ~64 firmly applied. Promoted low→high — two tagged sessions, clean
+      isolation from throttle. Still `high` not `confirmed` because the
+      mapping from raw to actual line pressure / pedal travel isn't pinned;
+      a capture holding several distinct, sustained pressures (light /
+      medium / hard, ~10 s each) — or an ABS Mode 22 brake-pressure DID
+      cross-reference — would scale it.
 
   - name: BRAKE_ACTIVITY_29E_7
     module: ABS
@@ -744,8 +773,8 @@ signals:
     byte_order: big
     scale: null
     offset: null
-    unit: unknown        # brake/driver-demand activity — flag or counter, not a clean value
-    confidence: low
+    unit: unknown        # brake-dominant driver-demand activity (composite)
+    confidence: high
     evidence:
       - session: 2026-05-13T011123
         method: byte_vs_tag_differential
@@ -759,10 +788,59 @@ signals:
           (r2 ≈ 0.65), MAF (~0.59), and calculated load (~0.56). So it isn't a
           dedicated brake signal — more likely a "driver-demand / pedal
           activity" composite that responds to both throttle and brake input.
+      - session: 2026-05-16T202800
+        method: byte_vs_tag_differential
+        finding: >
+          The independent throttle-vs-brake capture the old notes asked for,
+          in one session: baseline ~110–118 at idle; only a mild rise on
+          throttle blips (blip_3k ~136, blip_4k ~137); a strong, clean jump
+          to ~180 on brake_pedal_pushed and held through parking_brake_off/on,
+          reverting to 118.5 at brake_pedal_released. Brake moves it ~3× more
+          than throttle does → brake-dominant driver-demand composite, not a
+          pure brake flag (consistent with the 005522 weak-throttle r2).
     notes: |
-      Ambiguous. Disambiguate with a capture that has independent throttle and
-      brake events (idle → brake-only presses → throttle-only blips, all
-      tagged) so the two contributions can be separated.
+      Brake-dominant driver-demand / pedal-activity composite on the ~20 ms
+      ABS frame: ~115 idle, ~180 on firm brake, small throttle component.
+      Promoted low→high — the 202800 session separated the two inputs and
+      confirmed brake dominance. Pair with BRAKE_PRESSURE_29E_3 (0x29E:3,
+      the clean brake-only byte): 29E:3 isolates the brake, 29E:7 carries
+      the blended driver-demand. Exact bit/scale structure still open.
+
+  # --------------------------------------------------------------------------
+  # Body — HVAC blower + exterior lighting status (new in 2026-05-16T202800,
+  # the first session to tag blower steps and headlights independently).
+  # --------------------------------------------------------------------------
+
+  - name: HVAC_BLOWER_LIGHTING_358_1
+    module: BCM          # 0x358, ~97 ms body frame
+    can_id: 0x358
+    byte_start: 1
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown        # bit-packed status, not a scalar
+    confidence: medium
+    evidence:
+      - session: 2026-05-16T202800
+        method: byte_vs_tag_differential
+        finding: >
+          ~0 across pre-tags, KOEO, every idle/blip window, brake, clutch,
+          windows, and engine_off. Goes to exactly 64 in every blower-running
+          window (ac_on, blower_max, blower_low, ac_off_blower_low,
+          ac_on_blower_low), ~1 at blower_off, and 125 at headlights_on /
+          7 at headlights_off (blower was off across the headlight windows).
+          Two independent inputs move it: blower → +64, headlights → a
+          larger/different pattern (~125).
+    notes: |
+      Bit-packed HVAC-blower + exterior-lighting status byte (not a scalar):
+      a blower-active bit (~value 64) and a headlights bit are encoded
+      together. Confidence medium — direction is unambiguous across many
+      tagged windows, but the individual bit positions aren't decomposed.
+      Next: a capture toggling blower-only, then headlights-only, then both,
+      each isolated, so the bitmask can be read off directly. Likely a
+      sibling of other 0x358 status bits (0x358:1 was 0/64 here; the byte
+      may carry door/lamp flags too).
 
 # Future sections (placeholders for organization once data arrives):
 #
