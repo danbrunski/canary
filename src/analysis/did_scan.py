@@ -16,7 +16,10 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from src.collection.can_obd_client import CanObdClient
 
 
 class Mode22Transport(Protocol):
@@ -207,3 +210,37 @@ class Elm327Mode22Transport:
             else:
                 time.sleep(0.01)
         return bytes(buf).decode("ascii", errors="replace")
+
+
+# ---------------------------------------------------------------------------
+# python-can transport (CanObdClient-backed)
+# ---------------------------------------------------------------------------
+
+
+class CanableMode22Transport:
+    """``Mode22Transport`` backed by ``CanObdClient`` over a python-can bus.
+
+    The bus-native sibling of ``Elm327Mode22Transport``: it issues UDS
+    service 0x22 reads through ``CanObdClient.query_mode_22`` on the same
+    CAN interface used for broadcast sniffing, so no separate serial
+    adapter is needed. Mode 22 is physically addressed, so ``request_id``
+    (default 0x7E0 = engine ECU) is passed through on every read, letting
+    one client be retargeted at different modules (0x7E1 trans, 0x7E2 ABS,
+    …). ``query_mode_22`` already returns the bytes *after* the
+    ``62 HH LL`` echo as ``.payload`` (and ``None`` for a negative ``7F``
+    response or a timeout), which is exactly the ``Mode22Transport``
+    contract — so the bridge is a one-liner.
+
+    Read-only by construction: only ``query_mode_22`` (service 0x22) is
+    ever invoked. ``client`` is duck-typed (just needs ``query_mode_22``)
+    so this analysis module stays import-decoupled from the collection
+    layer at runtime.
+    """
+
+    def __init__(self, client: CanObdClient, *, request_id: int = 0x7E0) -> None:
+        self._client = client
+        self._request_id = request_id
+
+    def read_did(self, did: int) -> bytes | None:
+        response = self._client.query_mode_22(did, request_id=self._request_id)
+        return None if response is None else response.payload

@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
-"""Sweep Mode 22 DID space over an ELM327; split runtime-varying DIDs from
-fixed calibration constants (Task 4.E.5).
+"""Sweep Mode 22 DID space; split runtime-varying DIDs from fixed
+calibration constants (Task 4.E.5).
+
+Two interchangeable transports for UDS service 0x22 — pick whichever
+adapter is on the OBD-II port:
+
+* ``--canable`` — over the CAN bus from ``--config``, via
+  ``CanObdClient.query_mode_22``. Uses the same CAN interface as the
+  broadcast sniffer; no separate adapter needed.
+* ``--port /dev/ttyUSBx`` — over an ELM327-class serial adapter.
 
 Run at the vehicle with the engine in a known state. By default it does two
 passes and pauses between them so you can change the engine state (e.g. pass 1
@@ -8,13 +16,15 @@ at idle, pass 2 while revving / moving): DIDs whose value differs between passes
 are "varying" (candidate live signals — injector PW, timing, etc.), DIDs that
 answer in every pass but never change are "constant" (calibration / config).
 
-READ-ONLY — only UDS service 0x22 (ReadDataByIdentifier) is sent. Make sure the
-Canable, if attached, is in its sniffing role only.
+READ-ONLY — only UDS service 0x22 (ReadDataByIdentifier) is sent. Whatever
+adapter is used here is request-only; don't run this alongside a broadcast
+recording on the same single-consumer device (e.g. one slcan node).
 
 Usage:
+  tools/scan_constant_dids.py --canable
+  tools/scan_constant_dids.py --canable --header 7E0 --full --out data/sessions/<ts>/dids.json
+  tools/scan_constant_dids.py --canable --start 0x1100 --end 0x12FF --passes 3
   tools/scan_constant_dids.py --port /dev/ttyUSB0
-  tools/scan_constant_dids.py --port /dev/ttyUSB0 --full --out data/sessions/<ts>/dids.json
-  tools/scan_constant_dids.py --port /dev/ttyUSB0 --start 0x1100 --end 0x12FF --passes 3
 """
 
 from __future__ import annotations
@@ -23,29 +33,51 @@ import argparse
 import json
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from src.analysis.did_scan import (
+    CanableMode22Transport,
     DidSnapshot,
     Elm327Mode22Transport,
+    Mode22Transport,
     classify_dids,
     sweep_dids,
 )
+from src.collection.can_collector import bus_factory
+from src.collection.can_obd_client import CanObdClient
+from src.config import CanaryConfig
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="scan_constant_dids",
         description=(
-            "Sweep Mode 22 DIDs over an ELM327 and classify varying vs. constant "
-            "across passes taken at different engine states. Read-only (service 0x22)."
+            "Sweep Mode 22 DIDs and classify varying vs. constant across passes "
+            "taken at different engine states. Read-only (service 0x22)."
         ),
     )
-    parser.add_argument("--port", required=True, help="ELM327 serial device, e.g. /dev/ttyUSB0.")
+    transport = parser.add_mutually_exclusive_group(required=True)
+    transport.add_argument(
+        "--canable",
+        action="store_true",
+        help="UDS 0x22 over the CAN bus from --config (no separate adapter).",
+    )
+    transport.add_argument(
+        "--port",
+        help="UDS 0x22 over an ELM327-class serial adapter, e.g. /dev/ttyUSB0.",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("canary.yaml"),
+        help="canary.yaml path (--canable bus config). Default: ./canary.yaml.",
+    )
     parser.add_argument("--baud", type=int, default=38400, help="ELM327 baud rate (default 38400).")
     parser.add_argument(
-        "--header", default="7E0", help="ECU request CAN ID (default 7E0 = engine)."
+        "--header",
+        default="7E0",
+        help="ECU request CAN ID, hex (default 7E0 = engine; trans 7E1, ABS 7E2, …).",
     )
     parser.add_argument(
         "--start",
@@ -84,6 +116,44 @@ def _open_serial(port: str, baud: int):  # type: ignore[no-untyped-def]
     return serial.Serial(port, baud, timeout=0.2)
 
 
+def _build_transport(
+    args: argparse.Namespace,
+) -> tuple[Mode22Transport, Callable[[], None], str]:
+    """Return ``(transport, close_fn, banner)`` for the selected link.
+
+    Raises on a bad ``--header`` or a link-open failure; the caller turns
+    that into a clean exit-1.
+    """
+    try:
+        request_id = int(args.header, 16)
+    except ValueError as exc:
+        raise RuntimeError(f"--header must be hex (e.g. 7E0), got {args.header!r}") from exc
+    if not 0 <= request_id <= 0x7FF:
+        raise RuntimeError(f"--header out of 11-bit CAN range: 0x{request_id:X}")
+
+    if args.canable:
+        config = CanaryConfig.from_yaml(args.config)
+        bus = bus_factory(config.hardware.can)
+        response_id = request_id + 8  # 0x7E0→0x7E8, 0x7E1→0x7E9, …
+        client = CanObdClient(
+            bus,
+            request_id=request_id,
+            response_id_min=response_id,
+            response_id_max=response_id,
+            timeout_seconds=args.read_timeout,
+        )
+        transport = CanableMode22Transport(client, request_id=request_id)
+        banner = (
+            f"Canable {config.hardware.can.channel} "
+            f"(req 0x{request_id:X} → resp 0x{response_id:X})"
+        )
+        return transport, bus.shutdown, banner
+
+    ser = _open_serial(args.port, args.baud)
+    elm = Elm327Mode22Transport(ser, header=args.header, read_timeout_seconds=args.read_timeout)
+    return elm, ser.close, f"ELM327 on {args.port} (header {args.header})"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.passes < 1:
@@ -96,15 +166,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     dids = range(start, end + 1)
 
     try:
-        ser = _open_serial(args.port, args.baud)
-    except Exception as exc:  # noqa: BLE001 - surface any serial open failure cleanly
-        print(f"error: could not open {args.port}: {exc}", file=sys.stderr)
+        transport, close_fn, banner = _build_transport(args)
+    except Exception as exc:  # noqa: BLE001 - surface any link-open failure cleanly
+        print(f"error: could not open transport: {exc}", file=sys.stderr)
         return 1
     try:
-        print(f"Initializing ELM327 on {args.port} (header {args.header})…", file=sys.stderr)
-        transport = Elm327Mode22Transport(
-            ser, header=args.header, read_timeout_seconds=args.read_timeout
-        )
+        print(f"Mode 22 DID scan via {banner}…", file=sys.stderr)
         snapshots: list[DidSnapshot] = []
         for i in range(args.passes):
             if i > 0 and args.pause_prompt:
@@ -133,7 +200,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
     finally:
         try:
-            ser.close()
+            close_fn()
         except Exception:  # noqa: BLE001
             pass
 

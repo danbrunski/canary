@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from src.analysis.did_scan import (
+    CanableMode22Transport,
     DidSnapshot,
     Mode22Transport,
     _extract_hex_bytes,
@@ -128,3 +129,57 @@ def test_extract_handles_negative_response_text() -> None:
     raw = _extract_hex_bytes("7F 22 31\r>")
     assert raw == bytes.fromhex("7F2231")
     assert parse_mode22_response(0x1100, raw) is None
+
+
+# ---------------------------------------------------------------------------
+# CanableMode22Transport — bridges CanObdClient.query_mode_22 to the protocol
+# ---------------------------------------------------------------------------
+
+
+class _FakeObdResponse:
+    """Stand-in for can_obd_client.ObdResponse — only .payload is used here."""
+
+    def __init__(self, payload: bytes) -> None:
+        self.payload = payload
+
+
+class _FakeCanObdClient:
+    """query_mode_22 stub. None models a negative (7F) / timed-out read,
+    matching CanObdClient's real contract (payload already stripped of the
+    `62 HH LL` echo on a positive response)."""
+
+    def __init__(self, responses: dict[int, bytes | None]) -> None:
+        self._responses = responses
+        self.calls: list[tuple[int, int | None]] = []
+
+    def query_mode_22(
+        self, did: int, *, request_id: int | None = None
+    ) -> _FakeObdResponse | None:
+        self.calls.append((did, request_id))
+        data = self._responses.get(did)
+        return None if data is None else _FakeObdResponse(data)
+
+
+def test_canable_transport_returns_payload_and_passes_request_id() -> None:
+    client = _FakeCanObdClient({0x1101: b"\x12\x34"})
+    transport = CanableMode22Transport(client, request_id=0x7E0)
+    assert transport.read_did(0x1101) == b"\x12\x34"
+    assert client.calls == [(0x1101, 0x7E0)]
+
+
+def test_canable_transport_none_on_negative_or_timeout() -> None:
+    client = _FakeCanObdClient({0x1101: None})
+    transport = CanableMode22Transport(client)  # default request_id 0x7E0
+    assert transport.read_did(0x1101) is None
+    assert client.calls == [(0x1101, 0x7E0)]
+
+
+def test_canable_transport_drives_sweep_and_classify() -> None:
+    idle = _FakeCanObdClient({0x1100: b"\x00", 0x1101: b"\x10", 0x1102: b"\xaa"})
+    snap_idle = sweep_dids(CanableMode22Transport(idle), range(0x1100, 0x1103), label="idle")
+    revving = _FakeCanObdClient({0x1100: b"\x00", 0x1101: b"\x20"})  # 0x1102 dropped out
+    snap_rev = sweep_dids(CanableMode22Transport(revving), range(0x1100, 0x1103), label="rev")
+    cls = classify_dids([snap_idle, snap_rev])
+    assert cls.constant == frozenset({0x1100})  # same both passes
+    assert cls.varying == frozenset({0x1101})  # 0x10 → 0x20
+    assert cls.intermittent == frozenset({0x1102})  # only answered at idle
