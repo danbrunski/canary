@@ -112,6 +112,51 @@ def test_record_cli_cleans_up_without_obd(tmp_path: Path, monkeypatch: pytest.Mo
     assert bus.closed is True
 
 
+def test_record_cli_runs_canable_obd_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--obd-source canable should use the one-bus CAN+OBD recorder."""
+    bus = FakeBus()
+    writer = FakeWriter()
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(record_script, "bus_factory", lambda _spec: bus)
+    monkeypatch.setattr(record_script, "JsonlReadingWriter", lambda _path: writer)
+
+    def fake_record_can_obd(_bus: Any, _paths: Any, **kwargs: Any) -> None:
+        captured["bus"] = _bus
+        captured["spec"] = kwargs["spec"]
+        captured["writer"] = kwargs["obd_writer"]
+
+    monkeypatch.setattr(record_script, "record_can_obd", fake_record_can_obd)
+
+    rc = record_script.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--out-dir",
+            str(tmp_path),
+            "--obd-source",
+            "canable",
+            "--obd-pids",
+            "RPM",
+            "--obd-dids",
+            "1101",
+            "--obd-did-header",
+            "7E0",
+        ]
+    )
+
+    assert rc == 0
+    assert captured["bus"] is bus
+    assert captured["spec"].pids == ("RPM",)
+    assert captured["spec"].dids == ("1101",)
+    assert captured["spec"].did_request_id == 0x7E0
+    assert captured["writer"] is writer
+    assert bus.closed is True
+    assert writer.closed is True
+
+
 def test_record_cli_passes_dids_to_obd_spec(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

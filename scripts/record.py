@@ -11,12 +11,12 @@ Output (per session):
     frames.log     — candump format, append-only
     manifest.json  — vehicle, bus settings, counts, timestamps
 
-Listen-only: never transmits on the bus.
+Default CAN-only recording never transmits on the bus.
 
-With --obd-port, OBD-II PID polling runs in a supervised daemon thread that
-reconnects when the adapter drops and reappears (e.g. a flaky CH340 over
-WSL-USB). An OBD failure never aborts the CAN capture — the CAN side is the
-priority; pids.jsonl is best-effort.
+With --obd-source canable, the same Canable records broadcast frames and issues
+read-only OBD ISO-TP requests, writing decoded readings to pids.jsonl. With
+--obd-port / --obd-source elm327, the legacy ELM327 path runs in a supervised
+daemon thread.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from src.collection.can_collector import (
     make_session_dir,
     record,
 )
+from src.collection.can_obd_collector import CanObdSpec, parse_can_id, record_can_obd
 from src.collection.obd_collector import (
     JsonlReadingWriter,
     ObdSpec,
@@ -85,6 +86,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--obd-source",
+        choices=["off", "canable", "elm327"],
+        default=None,
+        help=(
+            "OBD sidecar source. `canable` uses the same CAN adapter for "
+            "read-only ISO-TP Mode 01/22 requests. `elm327` uses the legacy "
+            "python-obd path. Default: elm327 when --obd-port is set, otherwise off."
+        ),
+    )
+    parser.add_argument(
         "--obd-port",
         default=None,
         help=(
@@ -98,17 +109,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--obd-pids",
         default="auto",
         help=(
-            "What Mode-01 PIDs to watch via the ELM327. Default `auto` "
+            "What Mode-01 PIDs to watch. Default `auto` "
             "queries the ECU's supported-PID bitmask at connect time and "
             "watches everything it claims — portable across vehicles, no "
             "per-vehicle tuning. Pass a comma-separated list "
             "(`RPM,SPEED,COOLANT_TEMP,...`) for an explicit subset (faster "
             "per-PID refresh at the cost of coverage); pass `auto,EXTRA_PID` "
             "to add an explicit PID on top of auto. Unsupported PIDs are "
-            "warned-and-skipped. `tools/obd_coverage.py` reports what the "
-            "ECU actually claims to support. Note: the ELM327 path is "
-            "primarily for RE cross-reference + DTCs; production telemetry "
-            "comes from the CAN bus via bindings.yaml, no ELM327 required."
+            "warned-and-skipped."
         ),
     )
     parser.add_argument(
@@ -116,20 +124,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default="",
         help=(
             "Comma-separated 4-hex Mode 22 DIDs to poll alongside --obd-pids "
-            "(e.g. '1101,F190'). Each DID is appended to the python-obd "
-            "Async watch loop with a passthrough decoder; the response bytes "
-            "land in pids.jsonl as a hex string. Use this for known DIDs you "
-            "want logged through a drive (injector PW, ignition timing) — for "
-            "exploratory sweeps use tools/scan_constant_dids.py instead. Empty "
-            "by default; ISO-TP multi-frame DIDs may need parsing downstream."
+            "(e.g. '1101,F190'). Responses land in pids.jsonl as hex strings "
+            "under DID_<hex> channels."
         ),
     )
     parser.add_argument(
         "--obd-did-header",
         default="7E0",
         help=(
-            "Request header for Mode 22 DID polling (default 7E0 = engine ECU). "
-            "Other modules: 7E1 = trans, 7E2 = ABS, etc."
+            "Request header / CAN ID for Mode 22 DID polling "
+            "(default 7E0 = engine ECU). Other modules: 7E1 = trans, 7E2 = ABS, etc."
         ),
     )
     parser.add_argument(
@@ -267,66 +271,99 @@ def main(argv: Sequence[str] | None = None) -> int:
     obd_writer = None
     try:
         bus = bus_factory(spec)
-        if args.obd_port:
-            pids = tuple(p.strip() for p in args.obd_pids.split(",") if p.strip())
-            dids = tuple(d.strip() for d in args.obd_dids.split(",") if d.strip())
-            resolve_pids(pids)  # fail fast on a typo, before the CAN capture starts
-            for did in dids:
-                if len(did) != 4 or any(c not in "0123456789abcdefABCDEF" for c in did):
-                    raise ValueError(f"--obd-dids: {did!r} is not a 4-character hex DID")
+        pids = tuple(p.strip() for p in args.obd_pids.split(",") if p.strip())
+        dids = tuple(d.strip() for d in args.obd_dids.split(",") if d.strip())
+        obd_source = args.obd_source
+        if obd_source is None:
+            obd_source = "elm327" if args.obd_port else "off"
+        if args.obd_port and obd_source == "off":
+            obd_source = "elm327"
+
+        if obd_source == "canable":
             obd_writer = JsonlReadingWriter(paths.pids)
-            obd_spec = ObdSpec(
-                port=args.obd_port,
-                baudrate=args.obd_baud,
+            can_obd_spec = CanObdSpec(
+                can=spec,
+                poll_rate_hz=config.collection.obd_poll_rate_hz,
                 pids=pids,
                 dids=dids,
-                did_header=args.obd_did_header,
+                did_request_id=parse_can_id(args.obd_did_header),
+                request_timeout_seconds=config.collection.obd_request_timeout_seconds,
             )
             log.info(
-                "starting parallel OBD capture (supervised)",
+                "starting Canable-native OBD capture",
                 extra={
-                    "port": obd_spec.port,
                     "pids": list(pids),
                     "dids": list(dids),
-                    "reconnect": not args.no_reconnect,
+                    "did_request_id": f"0x{can_obd_spec.did_request_id:X}",
                 },
             )
-            # Run OBD in a daemon thread that survives the adapter dropping out
-            # and reattaching (e.g. usbipd losing a flaky CH340 over WSL-USB):
-            # it watches the device file + python-obd's connection state, and
-            # on a drop tears down + rebuilds into the same pids.jsonl writer.
-            # OBD failure never aborts the CAN capture — the CAN side is the
-            # priority; the PID sidecar is best-effort.
-            obd_thread = threading.Thread(
-                target=supervise_obd_capture,
-                kwargs={
-                    "spec": obd_spec,
-                    "on_reading": obd_writer.write,
-                    "stop_event": stop_event,
-                    "factory": obd_factory,
-                    "reconnect_policy": None if args.no_reconnect else DEFAULT_RECONNECT_POLICY,
-                },
-                name="obd-supervisor",
-                daemon=True,
+            record_can_obd(
+                bus,
+                paths,
+                spec=can_obd_spec,
+                vehicle=config.vehicle,
+                vehicle_state=args.vehicle_state,
+                duration=args.seconds,
+                stop_event=stop_event,
+                obd_writer=obd_writer,
             )
-            obd_thread.start()
+        else:
+            if obd_source == "elm327":
+                if args.obd_port is None:
+                    args.obd_port = config.hardware.elm327_port
+                pids = pids or config.collection.obd_pids
+                dids = dids or config.collection.obd_dids
+                resolve_pids(pids)  # fail fast on a typo, before the CAN capture starts
+                for did in dids:
+                    if len(did) != 4 or any(c not in "0123456789abcdefABCDEF" for c in did):
+                        raise ValueError(f"--obd-dids: {did!r} is not a 4-character hex DID")
+                obd_writer = JsonlReadingWriter(paths.pids)
+                obd_spec = ObdSpec(
+                    port=args.obd_port,
+                    baudrate=args.obd_baud,
+                    pids=pids,
+                    dids=dids,
+                    did_header=args.obd_did_header,
+                )
+                log.info(
+                    "starting parallel ELM327 OBD capture (supervised)",
+                    extra={
+                        "port": obd_spec.port,
+                        "pids": list(pids),
+                        "dids": list(dids),
+                        "reconnect": not args.no_reconnect,
+                    },
+                )
+                obd_thread = threading.Thread(
+                    target=supervise_obd_capture,
+                    kwargs={
+                        "spec": obd_spec,
+                        "on_reading": obd_writer.write,
+                        "stop_event": stop_event,
+                        "factory": obd_factory,
+                        "reconnect_policy": None if args.no_reconnect else DEFAULT_RECONNECT_POLICY,
+                    },
+                    name="obd-supervisor",
+                    daemon=True,
+                )
+                obd_thread.start()
 
-        # Pass factory + reconnect_policy so a USB hiccup / adapter reset /
-        # OSError doesn't kill the recording mid-drive. The factory lets
-        # record() rebuild the bus into the same writer, so frames.log stays
-        # one continuous file across reconnects.
-        record(
-            bus,
-            paths,
-            spec=spec,
-            vehicle=config.vehicle,
-            vehicle_state=args.vehicle_state,
-            duration=args.seconds,
-            stop_event=stop_event,
-            factory=None if args.no_reconnect else bus_factory,
-            reconnect_policy=None if args.no_reconnect else DEFAULT_RECONNECT_POLICY,
-            max_reconnects=args.max_reconnects,
-        )
+            # Pass factory + reconnect_policy so a USB hiccup / adapter reset /
+            # OSError doesn't kill the recording mid-drive. The factory lets
+            # record() rebuild the bus into the same writer, so frames.log stays
+            # one continuous file across reconnects.
+            record(
+                bus,
+                paths,
+                spec=spec,
+                vehicle=config.vehicle,
+                vehicle_state=args.vehicle_state,
+                duration=args.seconds,
+                stop_event=stop_event,
+                factory=None if args.no_reconnect else bus_factory,
+                reconnect_policy=None if args.no_reconnect else DEFAULT_RECONNECT_POLICY,
+                max_reconnects=args.max_reconnects,
+            )
     finally:
         # Remove the pidfile first: once we're in `finally` the recorder is
         # definitively stopping, and a later shutdown step (bus.shutdown on a

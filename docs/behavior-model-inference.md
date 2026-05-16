@@ -10,6 +10,12 @@ The target vehicle is a 2008 Nissan Xterra (VQ40DE engine) that has been out of
 production since 2015. Approach, scope, and risk profile are sized for that
 specific vehicle and its owner-operator diagnostic context.
 
+Status as of 2026-05-16: the schema, 1D/2D fitters, deviation decoder,
+preprocessing integration, refit CLI, and dashboard feed are implemented. The
+remaining blockers are data, not modeling code: OBD-backed drive captures now
+run through the Canable-native streaming collector, and injector pulse width
+still needs Mode 22 DID identification.
+
 ## Goals
 
 1. **Inputs to anomaly detection.** For every signal we care about (fuel pulse
@@ -61,7 +67,7 @@ What we will do:
 - Listen-only CAN capture (Canable in slcan mode, application-level read-only)
 - Standard Mode 22 ReadDataByIdentifier requests (the *intended* diagnostic
   interface; what every workshop scanner uses)
-- Mode 01 PID polling via ELM327
+- Mode 01 PID polling via the Canable-native client or the legacy ELM327 path
 - Fit statistical models to the captured data
 - Persist the fitted models, version them, evaluate drift between versions
 
@@ -128,10 +134,10 @@ For the fuel and AFR surfaces specifically:
 | STFT B1 / LTFT B1 | OBD Mode 01 PID 0x06 / 0x07 | Fuel trim characteristics |
 | Vehicle speed | OBD Mode 01 PID 0x0D | Operating-mode segmentation |
 
-Most of this is standard Mode 01 — available immediately once the ELM327
-arrives. Injector pulse width is the gap: it's typically exposed via a
-manufacturer Mode 22 DID rather than standard Mode 01. Identifying that DID
-is part of task 4.E.4 below.
+Most of this is standard Mode 01 — available through the Canable-native
+streaming collector. Injector pulse width is the gap: it's typically exposed
+via a manufacturer Mode 22 DID rather than standard Mode 01. Identifying that
+DID is part of task 4.E.4 below.
 
 For the runtime-inference path to converge on a good surface, we need:
 
@@ -238,50 +244,31 @@ Output: a list of named calibration constants we can cross-reference against
 the runtime surface. If FSM doc names DID `0x1280` as "idle target RPM" and
 the runtime surface's RPM mode is 750 rpm, those should agree.
 
-## Implementation tasks
+## Implementation status
 
-These slot into the implementation plan as Phase 4.E. Each is roughly one
-working session.
+These correspond to Phase 4.E in `docs/implementation-tasks.md`.
 
-- **4.E.1 — Behavior-model schema.** Decide YAML structure (sibling file vs.
-  inline in `bindings.yaml`); design the Pydantic model in
-  `src/decode/behavior_models.py`. Versioning, fit metadata, axis definitions.
-
-- **4.E.2 — 1D surface inferer.** `src/analysis/surface_1d.py` — fits
-  coolant warmup curves and idle-stability curves. Polynomial / LOWESS,
-  goodness-of-fit metric, persists to YAML. Generalizes `cross_reference.py`'s
-  linear-regression path.
-
-- **4.E.3 — 2D surface inferer.** `src/analysis/surface_2d.py` — grid-binned
-  mean per (axis A bin × axis B bin) for fuel, AFR, VE, ignition surfaces.
-  Per-operating-mode fits. Records R² and sample count per cell so we know
-  which cells are sparsely covered.
-
-- **4.E.4 — Injector pulse-width DID identification.** Cross-reference
-  captured Mode 22 DIDs against Mode 01 fuel-trim variations during a varied
-  drive. The DID whose value correlates with `RPM × (1 + STFT/100)` is the
-  injector PW. Adds to `data/bindings.yaml` once identified.
-
-- **4.E.5 — Calibration-DID scanner.** `tools/scan_constant_dids.py` — sweeps
-  Mode 22 DID space, splits runtime-varying from constants, prints the
-  constants list. Verify listen-only setup first.
-
-- **4.E.6 — Behavior-model decoder integration.** Extend `src/decode/` to
-  load behavior models at startup, expose `expected_value(operating_point)`
-  and `deviation(actual, operating_point)` for the runtime decode path.
-
-- **4.E.7 — Deviation features in preprocessing.** Wire the decoder's
-  expected/deviation outputs into `loader.read_session`'s output so
-  `compute_features` and `ZScoreScaler` see them as ordinary numeric
-  columns. No changes needed to those modules — they're column-agnostic.
-
-- **4.E.8 — Refit CLI.** `scripts/refit_behavior_models.py` — pulls clean
-  sessions from the last N days, refits all surfaces, writes new model
-  artifacts + version. Manual trigger in v1; cron later.
-
-- **4.E.9 — Performance panel data feed.** Backend endpoints surfacing
-  current model versions, deviation heatmaps, warmup curves vs. baseline.
-  Used by dashboard task 5.12.
+- [x] **4.E.1 — Behavior-model schema.** Implemented in
+  `src/decode/behavior_models.py` with `data/behavior_models.yaml` as the
+  sibling artifact.
+- [x] **4.E.2 — 1D surface inferer.** Implemented in
+  `src/analysis/surface_1d.py`.
+- [x] **4.E.3 — 2D surface inferer.** Implemented in
+  `src/analysis/surface_2d.py`.
+- [~] **4.E.4 — Injector pulse-width DID identification.** Selected Mode 22 DID
+  polling now works through `scripts/record.py --obd-source canable --obd-dids`.
+  Still pending: the actual candidate-DID drive and a broad Canable-native DID
+  sweep CLI for exploratory scans.
+- [x] **4.E.5 — Calibration-DID scanner.** Implemented in
+  `tools/scan_constant_dids.py` / `src/analysis/did_scan.py` for the legacy ELM
+  path.
+- [x] **4.E.6 — Behavior-model decoder integration.** Implemented in
+  `src/decode/behavior_decoder.py`.
+- [x] **4.E.7 — Deviation features in preprocessing.** Implemented via
+  `append_deviation_columns` and `build_feature_frame`.
+- [x] **4.E.8 — Refit CLI.** Implemented in `scripts/refit_behavior_models.py`.
+- [x] **4.E.9 — Performance panel data feed.** Implemented via
+  `GET /models/behavior` and the React behavior-model panel.
 
 The order assumes Phase 2 (IsolationForest baseline) lands first — behavior
 models are most valuable as *additional* features feeding an existing

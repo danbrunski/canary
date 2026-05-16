@@ -8,19 +8,27 @@ approach itself.
 
 ## Where we are
 
-The ELM327 (CH340 clone, protocol 6 ISO 15765-4 CAN 11/500, ~125 PIDs/MIDs)
-works and `scripts/record.py --obd-port` captures Mode 01 PIDs alongside the
-Canable's broadcast capture, robust to the adapter dropping out. Confirmed
-bindings so far: `ECM_RPM` (0x1F9:2-3, raw/8), `ECM_COOLANT_TEMP` (0x551:0,
-raw−40), plus ~24 more at lower confidence. Captured sessions: a handful of
-short/parked ones plus the 18-min drive 2026-05-11T222447 and the three
-2026-05-13 rig-bring-up sessions. **Not enough yet** — the model layer wants
-many more hours across many more conditions.
+The original ELM327 path proved the RE loop and produced the first confirmed
+bindings (`ECM_RPM` at 0x1F9:2-3, raw/8; `ECM_COOLANT_TEMP` at 0x551:0,
+raw−40), but that adapter is now dead. The active hardware path is the Canable:
+it has already completed a 13.6 minute stationary stability run with zero parse
+errors, and `tools/can_obd_probe.py` successfully walked 41 supported Mode 01
+PIDs and read Mode 03 DTCs over the Canable-native OBD client.
 
-## 1. Expanded PID set (in the recorder)
+The streaming layer is now in place: `src/collection/can_obd_collector.py`
+owns one Canable Bus, records broadcast CAN frames, interleaves read-only Mode
+01 / Mode 22 requests, and emits the same `TelemetryRecord` / `pids.jsonl`
+shape as the legacy ELM path. Captured sessions remain insufficient for model
+validation: a handful of short/parked sessions, one 18-minute drive, three
+2026-05-13 rig sessions, and the 2026-05-16 stationary binding sweep.
 
-`scripts/record.py` defaults `--obd-pids` to a fuller set so every capture
-feeds both the binding cross-reference and the ML/mapping features:
+## 1. Expanded PID set
+
+This is the target set for every OBD-backed capture. The Canable-native path
+uses `obd_pids: [auto]` by default, which walks the ECU's supported-PID bitmask
+and polls every PID CANary has a decoder for. Pass an explicit list to
+`scripts/record.py --obd-source canable --obd-pids ...` for a narrower/faster
+drive.
 
 ```
 RPM, SPEED, COOLANT_TEMP, INTAKE_TEMP, INTAKE_PRESSURE (MAP), MAF, THROTTLE_POS,
@@ -29,9 +37,10 @@ SHORT_FUEL_TRIM_2, LONG_FUEL_TRIM_2, O2_B1S1, O2_B2S1, BAROMETRIC_PRESSURE,
 CONTROL_MODULE_VOLTAGE, RUN_TIME, FUEL_STATUS
 ```
 
-~19 PIDs through one ELM327 → roughly 1 Hz per PID, which is fine at the 1 Hz
-resample the pipeline uses. PIDs the ECU doesn't support are warned-and-skipped.
-Override with `--obd-pids` for a leaner/faster set on transient-heavy segments.
+~19 PIDs at the 1 Hz resample cadence is enough for the ML and behavior-model
+pipeline. The Canable-native collector should auto-discover supported PIDs,
+skip unsupported ones, and log the same `pids.jsonl` / telemetry rows the legacy
+ELM path produced so downstream tooling stays unchanged.
 
 **Narrowband-O2 caveat.** The Xterra's O2 sensors are narrowband — rich/lean of
 stoich only, not absolute AFR. A true AFR map needs a wideband sensor (separate
@@ -43,8 +52,9 @@ generic Mode 01, but reachable as a Nissan Mode 22 DID (see capture 8 below).
 
 ## 2. Captures still needed (prioritized)
 
-All with `scripts/record.py --obd-port /dev/ttyUSB0`, and ideally tagged via
-`scripts/guided_session.py --protocol drive` (or at minimum `--vehicle-state`).
+Run these with `scripts/record.py --obd-source canable` and the expanded OBD PID
+set. Ideally tag with `scripts/guided_session.py --protocol drive` or at
+minimum set `--vehicle-state`.
 
 1. **Cold-start session** — first start of the day, engine genuinely cold. Idle
    until coolant reaches operating temp (~5–10 min), then a short drive.
@@ -71,9 +81,10 @@ All with `scripts/record.py --obd-port /dev/ttyUSB0`, and ideally tagged via
 8. **Mode 22 DID exploration** — sweep Nissan Consult DIDs while running, logged
    alongside Mode 01, then `tools/cross_reference.py` (Mode 22 ↔ Mode 01
    regression) identifies them. Prize: **injector pulse width** = the DID that
-   tracks `RPM × (1 + STFT/100)` (Phase 4.E.4). Needs the ELM327 doing Mode 22
-   reads — extend the recorder's OBD side to also poll a DID list, or build
-   `tools/scan_constant_dids.py` (Phase 4.E.5, not built yet).
+   tracks `RPM × (1 + STFT/100)` (Phase 4.E.4). Use
+   `scripts/record.py --obd-source canable --obd-dids ...` for selected
+   candidates during a drive. Broad exploratory DID sweeping still needs a
+   Canable-native replacement for `tools/scan_constant_dids.py`.
 
 Opportunistic extras: towing / heavy load (pushes into the high-load corner an
 empty truck on flat ground can't reach); a tagged drive specifically for
@@ -103,6 +114,16 @@ cross-reference → more decoded signals become ML features), so it compounds.
   Mode 01 PIDs (the byte↔PID counterpart to the Mode 22↔Mode 01 tool); reads
   `bindings.yaml` and reports which PID each unpinned signal tracks + scale.
 - [x] `data/sessions.md` — running index of captured sessions.
-- [ ] `tools/scan_constant_dids.py` — Mode 22 DID sweep (Phase 4.E.5).
-- [ ] Extend the recorder (or a separate poller) to log Mode 22 DIDs alongside
-  Mode 01 during a drive, so capture 8 above is one command.
+- [x] `tools/scan_constant_dids.py` — Mode 22 DID sweep over the legacy ELM327
+  path (Phase 4.E.5).
+- [x] `scripts/record.py --obd-dids` — logs selected Mode 22 DIDs alongside
+  Mode 01 during a legacy ELM-backed drive.
+- [x] `src/collection/can_obd_client.py` + `tools/can_obd_probe.py` — read-only
+  Canable-native Mode 01 / 03 / 09 one-shot client.
+- [x] `src/collection/can_obd_collector.py` — one-bus Canable streaming
+  producer for broadcast CAN + OBD Mode 01 + Mode 22 DIDs.
+- [x] Config/daemon/recorder wiring: `collection.obd_source: canable` is the
+  default, and `scripts/record.py --obd-source canable` writes
+  `frames.log` + `pids.jsonl` without an ELM327.
+- [ ] Add a Canable-native broad DID sweep CLI to replace the legacy
+  `tools/scan_constant_dids.py --port ...` ELM transport for exploratory scans.

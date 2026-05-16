@@ -6,7 +6,12 @@
 
 ## Overview
 
-CANary is an on-vehicle software system that continuously reads telemetry from a 2008 Nissan Xterra (and broadly any OBD-II compliant vehicle) via two data channels — the standardized OBD-II PID interface (ELM327) and the raw CAN bus (Canable/SocketCAN) — and uses unsupervised machine learning to learn normal vehicle behavior and flag anomalous conditions in real time.
+CANary is an on-vehicle software system that continuously reads telemetry from
+a 2008 Nissan Xterra (and broadly any OBD-II compliant vehicle) via raw CAN bus
+capture and standardized OBD-II diagnostic reads. The current hardware direction
+is a single Canable / SocketCAN interface for both broadcast CAN capture and
+read-only ISO-TP OBD requests; the original ELM327 path remains in the repo as a
+legacy fallback but is no longer the target hardware path.
 
 The system runs headlessly on a Raspberry Pi 5 mounted in-vehicle, logs all telemetry to local storage, and surfaces anomaly alerts via a local network dashboard or notification mechanism.
 
@@ -29,11 +34,11 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 ┌─────────────────────────────────────────────────────────────┐
 │                     Data Ingestion Layer                    │
 │                                                             │
-│  ELM327 (USB)          Canable (USB / SocketCAN)           │
-│  python-obd Async      python-can listen-only              │
-│  OBD-II PIDs @ 1-10Hz  Raw CAN frames @ 100-500Hz         │
-│        │                        │                           │
-│        └──────────┬─────────────┘                           │
+│  Canable (USB / SocketCAN)                                  │
+│  python-can broadcast capture + ISO-TP OBD requests         │
+│  Raw CAN frames @ 100-500Hz; OBD Mode 01/03/09 on demand   │
+│                              │                              │
+│                              ▼                              │
 │                   ▼                                         │
 │         Timestamped Parquet ring buffer                     │
 └───────────────────┬─────────────────────────────────────────┘
@@ -72,16 +77,22 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 ### Functional Requirements
 
 #### FR-01 — OBD-II Data Collection
-- The system SHALL connect to the vehicle via a USB ELM327 adapter using `python-obd`
+- The system SHALL collect standardized OBD-II data over the Canable-native
+  ISO-TP client when running on current hardware
+- The legacy ELM327 / `python-obd` path MAY be used as a fallback for
+  development and emulator testing
 - The system SHALL poll the following PIDs at a minimum: RPM, Vehicle Speed, Engine Load, Coolant Temp, Intake Air Temp, MAF Air Flow Rate, Throttle Position, Short-Term Fuel Trim Bank 1, Long-Term Fuel Trim Bank 1, O2 Sensor Voltages, Barometric Pressure, Engine Run Time
-- The system SHALL use asynchronous polling (`obd.Async`) to avoid blocking the main processing loop
+- The system SHALL use non-blocking/supervised polling so OBD request-response
+  traffic does not block CAN capture or inference
 - The system SHALL log a warning and continue operation if a PID is unsupported by the vehicle ECU
 
 #### FR-02 — Raw CAN Bus Collection
 - The system SHALL connect to a Canable USB adapter via SocketCAN (`can0`)
-- The system SHALL operate the CAN interface in **listen-only mode** to prevent bus collisions with the ELM327
+- The system SHALL capture broadcast CAN frames continuously and avoid write or
+  actuation traffic; diagnostic requests are limited to read-only OBD services
 - The system SHALL capture all CAN frame IDs present on the bus at full bus rate
-- The system SHALL apply a DBC filter file (once reverse engineered) to decode proprietary Nissan Consult III signals into named channels
+- The system SHALL apply `data/bindings.yaml` to decode proprietary Nissan
+  signals into named channels; generated DBC export is optional interop
 
 #### FR-03 — Data Storage
 - The system SHALL write all collected telemetry to timestamped Parquet files on local storage (microSD or USB SSD)
@@ -131,7 +142,8 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 #### NFR-02 — Reliability
 - The system SHALL start automatically on boot (systemd service)
 - The system SHALL resume data collection after a crash or unexpected shutdown without data loss beyond the current write buffer
-- The system SHALL handle ELM327 connection drops with automatic reconnect (configurable retry interval, default 10 seconds)
+- The system SHALL handle adapter connection drops with automatic reconnect
+  (configurable retry interval, default 10 seconds)
 
 #### NFR-03 — Storage
 - All raw telemetry SHALL be stored in Apache Parquet format for efficient columnar access
@@ -143,12 +155,15 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 - The system SHALL be containerizable (Docker/Podman) for development and testing on non-Pi hardware
 
 #### NFR-05 — Testability
-- The system SHALL support a simulation mode using the `ELM327-emulator` package in place of a physical adapter
+- The system SHALL support simulation/replay using virtual CAN buses,
+  recorded Parquet sessions, and the legacy `ELM327-emulator` integration tests
 - The system SHALL support replay of recorded Parquet sessions through the preprocessing and inference pipeline for offline testing
 - All core modules SHALL have unit test coverage for preprocessing transforms, feature engineering, and threshold logic
 
 #### NFR-06 — Security
-- The ELM327 adapter SHALL be operated in read-only mode; the system SHALL never issue write or actuation commands to the vehicle bus
+- OBD/CAN tooling SHALL be read-only at the application layer; the system SHALL
+  never issue write, clear-DTC, actuation, security-access, or memory-read/write
+  commands to the vehicle bus
 - The dashboard SHALL be accessible on localhost / LAN only; no external internet exposure by default
 
 ---
@@ -158,7 +173,7 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 | Layer | Technology |
 |---|---|
 | Language | Python 3.11+ |
-| OBD-II interface | `python-obd` |
+| OBD-II interface | `python-can` ISO-TP client over Canable; legacy `python-obd` fallback |
 | CAN bus interface | `python-can` + SocketCAN (`can0`) |
 | Data storage | Apache Parquet via `pandas` / `pyarrow` |
 | ML baseline | `scikit-learn` (IsolationForest, OneClassSVM) |
@@ -166,9 +181,9 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 | API / dashboard backend | `FastAPI` + `uvicorn` |
 | Feature engineering | `pandas`, `tsfresh` (optional) |
 | Configuration | YAML via `pyyaml` |
-| Testing | `pytest`, `ELM327-emulator` |
+| Testing | `pytest`, virtual CAN buses, `ELM327-emulator` for legacy path |
 | Deployment | `systemd` service, optional Docker |
-| Hardware | Raspberry Pi 5 (8 GB), USB ELM327, Canable USB, OBD-II Y-splitter |
+| Hardware | Raspberry Pi 5 (8 GB), Canable USB / SocketCAN adapter; ELM327 optional legacy fallback |
 
 ---
 
@@ -177,14 +192,9 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 ```
 Vehicle OBD-II Port (J1962)
          │
-    Y-Splitter
-    ┌─────┴─────┐
-    │           │
-ELM327 USB   Canable USB
-(python-obd)  (python-can, listen-only)
-    │           │
-    └─────┬─────┘
-          │
+Canable USB / SocketCAN
+(broadcast CAN + OBD ISO-TP)
+         │
     Raspberry Pi 5 (8 GB)
     - Raspberry Pi OS Bookworm (arm64)
     - USB SSD or high-endurance microSD
@@ -195,7 +205,7 @@ ELM327 USB   Canable USB
 
 ## Data Channels
 
-### OBD-II PIDs (via ELM327)
+### OBD-II PIDs (via Canable-native ISO-TP; legacy ELM327 fallback)
 
 | PID | Name | Unit |
 |-----|------|------|
@@ -212,7 +222,7 @@ ELM327 USB   Canable USB
 | 0x33 | Barometric Pressure | kPa |
 | 0x1F | Engine Run Time | s |
 
-### CAN Bus Channels (via Canable — pending DBC)
+### CAN Bus Channels (via Canable + `bindings.yaml`)
 
 - ABS individual wheel speeds (FL, FR, RL, RR)
 - Transfer case engagement state (2H / 4H / 4Lo)
@@ -226,9 +236,10 @@ ELM327 USB   Canable USB
 ## Development Phases
 
 ### Phase 1 — Data Collection (Weeks 1–2)
-- [ ] Install and verify `python-obd` + ELM327 connection on Pi 5
+- [x] Implement legacy `python-obd` + ELM327 path and emulator tests
+- [x] Move OBD collection onto the Canable-native client for current hardware
 - [ ] Install and verify `python-can` + Canable on Pi 5
-- [ ] Implement dual-channel async data collection with Parquet logging
+- [x] Implement dual-channel async data collection with Parquet logging
 - [ ] Log 10+ diverse drive sessions (city, highway, cold start, idle, off-road)
 - [ ] Validate offline using `ELM327-emulator`
 
@@ -273,9 +284,13 @@ vehicle:
   vin: ""  # optional
 
 hardware:
+  # `elm327_port` is the legacy fallback path. Current hardware uses the
+  # Canable-native client configured under `can`.
   elm327_port: /dev/ttyUSB0
-  can_interface: can0
-  can_bitrate: 500000
+  can:
+    interface: socketcan
+    channel: can0
+    bitrate: 500000
 
 collection:
   obd_poll_rate_hz: 1
@@ -323,8 +338,10 @@ canary/
 │   ├── __init__.py
 │   ├── main.py                  # Entry point
 │   ├── collection/
-│   │   ├── obd_collector.py     # python-obd async collection
-│   │   └── can_collector.py     # python-can SocketCAN collection
+│   │   ├── obd_collector.py     # legacy python-obd async collection
+│   │   ├── can_obd_client.py    # Canable-native OBD Mode 01/03/09/22 client
+│   │   ├── can_obd_collector.py # one-bus CAN + OBD streaming collector
+│   │   └── can_collector.py     # python-can SocketCAN/slcan collection
 │   ├── storage/
 │   │   └── parquet_writer.py    # Timestamped Parquet ring buffer
 │   ├── preprocessing/

@@ -7,6 +7,14 @@ dependencies are called out explicitly.
 
 Status legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
+Current status (2026-05-16): the software stack is substantially ahead of the
+original phase labels. Phases 2/3, the bindings/behavior-model path, dashboard,
+alerts, and model management are implemented. The latest hardware reality is
+that the ELM327 adapter is dead, so OBD has moved to the Canable-native path:
+Mode 01 / 03 / 09 one-shot probing, streaming Mode 01 capture, and streaming
+Mode 22 DID reads are now implemented. Next: resume the OBD-backed capture
+backlog in `docs/data-collection-plan.md`, then proceed with Pi deployment.
+
 ---
 
 ## Phase 0 — Project Bootstrap
@@ -29,9 +37,9 @@ Goal: a runnable empty skeleton, reproducible dev env, CI green on first push.
   the local NVIDIA driver CUDA capability, and installs Torch from the matching
   PyTorch wheel index (`cpu`, `cu118`, `cu126`, `cu128`, or `cu130`) with manual
   override support. Documented in `docs/install.md`.
-  ELM327-emulator deferred to a future `[emulator]` extra (Phase 1.5) —
-  its sdist needs `--no-build-isolation`, not worth solving until we
-  actually wire the emulator test.
+  `[project.optional-dependencies.emulator]` now carries ELM327-emulator for
+  the Phase 1.5 integration tests; the current wheel installs cleanly without
+  the old sdist workaround.
 - [x] **0.4 — Config loader.** `src/config.py` — Pydantic models mirroring the
   `canary.yaml` schema in the overview; load+validate at startup; fail fast on
   unknown keys. Ship a checked-in `canary.example.yaml`. (NFR-04)
@@ -213,8 +221,9 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
   load-sweep / off-road / A/C / Mode-22 DIDs) and how much is enough to
   start the ML + behavior-model work. Parallel OBD (`record.py --obd-port`)
   is proven and the default `--obd-pids` set is the fuller ML/mapping one.
-  Still gated on drive time; the slcan-tolerance fix (cf4bca0) and the
-  supervised OBD reconnect unblock long multi-device captures.
+  Still gated on drive time and hardware validation: the legacy ELM327 adapter
+  is dead, and the Canable-native streaming path is now the OBD-backed capture
+  route that needs the next real drive validation.
 
 ---
 
@@ -261,6 +270,22 @@ daemon is deployed on the vehicle.
   the tag — outside-bounds tags are valid but worth flagging). 41
   unit tests cover the parsers, manifest loading, the resolver, the
   bounds-warning logic, and the full CLI flow.
+- [x] **1.E.6 — Canable-native OBD streaming collector + wiring.** Wrap
+  `src/collection/can_obd_client.py` in the same supervised producer pattern
+  as the ELM327 OBD collector, emit the same `TelemetryRecord` / `pids.jsonl`
+  shape, and add config/daemon/recorder wiring so `canable` becomes the default
+  OBD source and `elm327` is only a legacy fallback. The one-shot pieces are
+  already proven:
+  `tools/can_obd_probe.py` walks supported Mode 01 PIDs, reads Mode 03 DTCs,
+  and uses the same Canable hardware as the broadcast sniffer. This is the
+  highest-priority software task because it unblocks OBD-backed cold-start,
+  warm-idle, city/highway, and load-sweep captures after the ELM327 failure.
+- [x] **1.E.7 — Canable-native Mode 22 DID reads.** Extend
+  `CanObdClient` and the new streaming collector to issue read-only UDS Mode 22
+  `ReadDataByIdentifier` requests over the Canable, using a configurable
+  physical request ID (default engine ECU `0x7E0`). Emit `DID_<hex>` readings
+  into `pids.jsonl` / telemetry in the same shape as the legacy
+  `record.py --obd-dids` path so existing cross-reference tools keep working.
 
 ---
 
@@ -536,9 +561,10 @@ emission stays viable as a one-way derived artifact (4.D.2 below).
   15765-4 CAN 11/500). Companion: `tools/cross_reference_broadcast.py` +
   `src/analysis/broadcast_correlate.py` — the broadcast-byte ↔ Mode 01
   PID counterpart (regress a CAN byte's raw value against each PID;
-  probes default to `bindings.yaml`'s unpinned signals). Used to pin
-  `ECM_RPM` (0x1F9:2-3, raw÷8, r²=1.000) and confirm `ECM_COOLANT_TEMP`
-  (0x551:0, raw−40, r²=0.999) against session 2026-05-13T005522's PIDs.
+  probes default to `bindings.yaml`'s unpinned signals). The original ELM327
+  session pinned `ECM_RPM` (0x1F9:2-3, raw÷8, r²=1.000) and confirmed
+  `ECM_COOLANT_TEMP` (0x551:0, raw−40, r²=0.999); future PID ground-truth
+  captures use the Canable-native OBD path.
 - [x] **4.B.5 — FSM signal extraction.** `tools/extract_fsm_signals.py`
   + `src/analysis/fsm.py` — parse Xterra Factory Service Manual PDFs
   (Hitachi/Nissan CONSULT-III tables) into `data/fsm/signals.json` (333
@@ -679,20 +705,13 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   Adds to `data/bindings.yaml`. Tooling is fully in place:
     * DID sweep — `tools/scan_constant_dids.py` (4.E.5);
     * Mode 22 ↔ Mode 01 pairing — `tools/cross_reference.py` (4.B.4);
-    * **Live DID polling** — `scripts/record.py --obd-dids 1101,F190 [--obd-did-header 7E0]`
-      now appends each DID to the python-obd `Async` watch loop alongside
-      Mode 01 PIDs. Each DID is built into a custom `OBDCommand` via
-      `did_command(did_hex, header=...)` (passthrough hex decoder; ECU =
-      ENGINE), then the supervised OBD thread writes its response bytes
-      into `pids.jsonl` exactly like Mode 01 readings. Long
-      `pids+dids` lists lower per-command refresh rate, since python-obd
-      round-robins the watch loop. Multi-frame ISO-TP DIDs arrive
-      concatenated (caller parses downstream).
-  Software work complete — only thing left is the captured drive itself
-  with fuel-trim PIDs + a candidate DID set being polled together.
-  Covered by `tests/test_obd_collector.py` (6 new `did_command` /
-  `ObdSpec.dids` tests) and `tests/test_record_script.py` (DID flow-through
-  + malformed-DID rejection).
+    * **Live DID polling** — `scripts/record.py --obd-source canable --obd-dids 1101,F190 [--obd-did-header 7E0]`
+      now issues Mode 22 requests over the Canable and writes `DID_<hex>`
+      readings into `pids.jsonl` exactly like Mode 01 readings. The legacy
+      ELM327 path still supports `--obd-port --obd-dids` for emulator/fallback
+      coverage, but it is no longer required.
+  Covered by `tests/test_can_obd_client.py`, `tests/test_can_obd_collector.py`,
+  `tests/test_obd_collector.py`, and `tests/test_record_script.py`.
 - [x] **4.E.5 — Calibration-DID scanner.** `tools/scan_constant_dids.py`
   + `src/analysis/did_scan.py` — sweeps Mode 22 DID space over the
   ELM327 (read-only, service 0x22 only; `Elm327Mode22Transport`), takes
@@ -1069,7 +1088,7 @@ These get touched in multiple phases — keep them in mind, don't defer to the e
 
 | # | Risk / Question | Mitigation / When to resolve |
 |---|---|---|
-| R1 | ELM327 + Canable on the same OBD-II port may conflict if Canable isn't truly listen-only. | Validate listen-only with `candump` showing no TX before connecting ELM327. Phase 1. |
+| R1 | Active Canable-native OBD polling and passive broadcast sniffing share one adapter/bus. | `can_obd_collector.py` owns one Bus and multiplexes both paths; keep request rates bounded and validate with long captures before deployment. |
 | R2 | Nissan Consult III RE is open-ended; could slip Phase 4 indefinitely. | Phase 4 is parallel and additive — Phases 1–3 don't depend on it. Ship without it if needed. |
 | R3 | LSTM may be too heavy for the Pi 5 at the target window length. | Benchmark in 3.5; fall back to smaller `latent_dim` or shorter window. CNN-LSTM is explicitly Phase 3+ in overview. |
 | R4 | Per-mode IF models could overfit sparse modes (off-road, WOT). | Pool with global model when per-mode sample count is below a threshold. Decide in 2.8. |

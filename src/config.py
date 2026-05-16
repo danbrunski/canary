@@ -7,7 +7,7 @@ silently dropped, so typos in config don't become silent drift at runtime.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -46,6 +46,11 @@ class HardwareConfig(_Strict):
 
 
 class CollectionConfig(_Strict):
+    obd_source: Literal["canable", "elm327", "disabled"] = "canable"
+    obd_pids: tuple[str, ...] = ("auto",)
+    obd_dids: tuple[str, ...] = ()
+    obd_did_request_id: int = 0x7E0
+    obd_request_timeout_seconds: float = 1.0
     obd_poll_rate_hz: float
     storage_path: Path
     session_retention_days: int

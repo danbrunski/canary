@@ -8,6 +8,8 @@ vehicle:
   vin: ""
 
 hardware:
+  # Legacy fallback only. Current hardware direction is Canable-native OBD via
+  # collection.obd_source=canable.
   elm327_port: /dev/ttyUSB0
   can:
     # Dev (WSL + Canable in slcan firmware): interface=slcan, channel=/dev/ttyACM0
@@ -17,6 +19,18 @@ hardware:
     bitrate: 500000
 
 collection:
+  # canable = one Canable does broadcast CAN + read-only OBD ISO-TP.
+  # elm327 = legacy python-obd path through hardware.elm327_port.
+  # disabled = CAN frames only.
+  obd_source: canable
+  # `auto` walks the ECU's supported Mode-01 PID bitmask and polls every PID
+  # CANary has a decoder for. Add explicit names/hex PIDs to force extras.
+  obd_pids: [auto]
+  # Known Mode-22 DIDs to poll as DID_<hex> readings; exploratory sweeps still
+  # use tools/scan_constant_dids.py until that tool is moved to Canable-native.
+  obd_dids: []
+  obd_did_request_id: 0x7E0
+  obd_request_timeout_seconds: 1.0
   obd_poll_rate_hz: 1
   storage_path: /data/canary
   session_retention_days: 30

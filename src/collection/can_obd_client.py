@@ -5,13 +5,14 @@ request side: send a service-N request frame on the OBD-II functional ID
 (0x7DF), reassemble the ECU's ISO-TP response (single-frame for most
 Mode 01 PIDs, multi-frame for VIN and DTC lists), and return the decoded
 payload. Pairs with ``can_collector.collect_can`` which sniffs broadcast
-frames in parallel — same Canable, two consumers.
+frames. For continuous capture, ``can_obd_collector`` owns one Bus and
+multiplexes broadcast frames plus diagnostic responses so slcan does not need
+two competing serial handles.
 
-Why this exists alongside ``obd_collector.py``: the ELM327 path is fine
-for RE cross-reference, but it requires an extra USB adapter and
-serializes all PIDs through one slow round-robin. A Canable-native client
-runs on the same hardware that's already on the bus, polls at native CAN
-rate, and removes a layer of WSL-USB flakiness.
+Why this exists alongside ``obd_collector.py``: the ELM327 path remains for
+emulator coverage and legacy captures, but the active hardware direction is
+Canable-only. A Canable-native client runs on the hardware already on the bus,
+polls at native CAN rate, and removes a layer of WSL-USB flakiness.
 
 Scope of v1:
 
@@ -28,13 +29,9 @@ Scope of v1:
 
 Not in v1:
 
-* UDS Mode 22 DIDs over the Canable (would need separate ISO-TP request
-  framing). Use ``scripts/scan_constant_dids.py`` over the ELM327 for
-  now; this client can grow Mode 22 support when the injector-PW DID
-  workflow demands it.
 * Flow-control with non-zero block-size or separation-time. We always
   request CTS=0 (all frames) which works for the response sizes
-  Mode 01 / 03 / 09 produce.
+  Mode 01 / 03 / 09 / 22 produce.
 * DTCs from Mode 07 (pending) or Mode 0A (permanent) — same wire shape
   as Mode 03 so a one-line addition once needed.
 
@@ -102,10 +99,10 @@ class CanObdClient:
     """Send OBD-II service-N requests on a python-can ``Bus``; collect responses.
 
     Constructed once per Canable session. Re-entrant *for sequential* calls
-    only — the underlying ``Bus.recv`` is shared global state, so don't
-    call ``query_*`` from two threads concurrently. The daemon's intended
-    pattern is to run this client in its own task / thread, separate from
-    the broadcast sniffer (which has its own Bus instance).
+    only — the underlying ``Bus.recv`` is shared global state, so don't call
+    ``query_*`` from two threads concurrently. Continuous capture uses
+    ``can_obd_collector`` to multiplex raw-frame capture and diagnostic polling
+    through one Bus.
     """
 
     def __init__(
@@ -140,6 +137,24 @@ class CanObdClient:
     def query_mode_09(self, info_type: int) -> ObdResponse | None:
         """Mode 09 VehicleInfo (VIN=0x02, calibration ID=0x04, ECU name=0x0A)."""
         return self._request(service=0x09, pid=info_type, expect_pid_echo=True)
+
+    def query_mode_22(self, did: int, *, request_id: int | None = None) -> ObdResponse | None:
+        """UDS Mode 22 ReadDataByIdentifier.
+
+        ``did`` is the 16-bit data identifier (for example ``0x1101``).
+        Most ECUs expect Mode 22 on a physical tester address such as
+        ``0x7E0`` rather than the functional broadcast ``0x7DF`` used for
+        generic Mode 01. Pass ``request_id=0x7E0`` for that common engine-ECU
+        case; if omitted, the client's default request ID is used.
+        """
+        if not 0 <= did <= 0xFFFF:
+            raise ValueError(f"DID must be a 16-bit integer, got 0x{did:X}")
+        return self._request(
+            service=0x22,
+            pid=did,
+            expect_pid_echo=True,
+            request_id=request_id,
+        )
 
     def query_supported_mode_01_pids(self) -> tuple[int, ...]:
         """Enumerate the Mode 01 PIDs the responding ECU claims to support.
@@ -177,11 +192,12 @@ class CanObdClient:
         service: int,
         pid: int | None,
         expect_pid_echo: bool,
+        request_id: int | None = None,
     ) -> ObdResponse | None:
         """Send a single-frame request and reassemble the response."""
         request_payload = self._build_request(service=service, pid=pid)
         message = can.Message(
-            arbitration_id=self._request_id,
+            arbitration_id=self._request_id if request_id is None else request_id,
             data=request_payload,
             is_extended_id=False,
         )
@@ -200,8 +216,12 @@ class CanObdClient:
         """Single-frame request body. Padded to 8 bytes with 0x00."""
         if pid is None:
             body = bytes([0x01, service])  # PCI=0x01 (1 data byte), service
-        else:
+        elif 0 <= pid <= 0xFF:
             body = bytes([0x02, service, pid])  # PCI=0x02 (2 data bytes)
+        elif 0 <= pid <= 0xFFFF:
+            body = bytes([0x03, service, (pid >> 8) & 0xFF, pid & 0xFF])
+        else:
+            raise ValueError(f"PID/DID identifier out of range: 0x{pid:X}")
         return body + bytes(8 - len(body))
 
     def _collect_response(
@@ -319,9 +339,16 @@ class CanObdClient:
             return None
         offset = 1
         if pid_echo is not None:
-            if len(body) < 2 or body[1] != pid_echo:
+            if 0 <= pid_echo <= 0xFF:
+                if len(body) < 2 or body[1] != pid_echo:
+                    return None
+                offset = 2
+            elif 0 <= pid_echo <= 0xFFFF:
+                if len(body) < 3 or body[1] != (pid_echo >> 8) & 0xFF or body[2] != pid_echo & 0xFF:
+                    return None
+                offset = 3
+            else:
                 return None
-            offset = 2
         return body[offset:]
 
 
@@ -450,6 +477,19 @@ def decode_commanded_lambda(data: bytes) -> tuple[float, str] | None:
     return ((data[0] * 256 + data[1]) / 32768.0, "ratio")
 
 
+def decode_fuel_status(data: bytes) -> tuple[float, str] | None:
+    """PID 0x03 fuel-system status.
+
+    SAE J1979 returns two bitmask bytes. The first byte carries the primary
+    fuel-system state for vehicles with one bank; preserving it as a numeric
+    bitmask keeps the channel model-friendly while avoiding a vehicle-specific
+    enum interpretation in the collector.
+    """
+    if not _need(data, 1):
+        return None
+    return (float(data[0]), "bitmask")
+
+
 def decode_evap_vapor_pressure_signed(data: bytes) -> tuple[float, str] | None:
     """PID 0x32: signed 16-bit / 4 Pa. Negative = vacuum."""
     if not _need(data, 2):
@@ -484,6 +524,7 @@ def decode_catalyst_temp(data: bytes) -> tuple[float, str] | None:
 #: ``read_supported`` flow and any caller that wants to translate a numeric
 #: PID into a named telemetry channel.
 PID_DECODERS: dict[int, tuple[str, Callable[[bytes], tuple[float, str] | None]]] = {
+    0x03: ("FUEL_STATUS", decode_fuel_status),
     0x04: ("ENGINE_LOAD", decode_percent_a_over_255),
     0x05: ("COOLANT_TEMP", decode_temp_minus_40),
     0x06: ("SHORT_FUEL_TRIM_1", decode_percent_b_minus_128),
@@ -619,6 +660,7 @@ __all__ = [
     "decode_egr_percent",
     "decode_evap_purge",
     "decode_evap_vapor_pressure_signed",
+    "decode_fuel_status",
     "decode_intake_pressure",
     "decode_maf",
     "decode_o2_voltage",

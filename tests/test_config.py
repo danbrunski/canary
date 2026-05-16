@@ -16,6 +16,9 @@ def test_example_yaml_loads():
     assert config.vehicle.make == "Nissan"
     assert config.vehicle.year == 2008
     assert config.collection.obd_poll_rate_hz == 1
+    assert config.collection.obd_source == "canable"
+    assert config.collection.obd_pids == ("auto",)
+    assert config.collection.obd_did_request_id == 0x7E0
     assert config.collection.reconnect_initial_delay_seconds == 10
     assert config.collection.queue_max_size == 10000
     assert "idle" in config.preprocessing.operating_modes

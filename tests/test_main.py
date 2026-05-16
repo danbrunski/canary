@@ -8,7 +8,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from src.config import CanaryConfig
-from src.main import parse_args, run, run_collection
+from src.main import _default_collectors, parse_args, run, run_collection
 from src.telemetry import TelemetryRecord
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -105,3 +105,34 @@ async def test_run_collection_smoke_writes_obd_and_can_records(tmp_path: Path):
     rows = pq.read_table(files[0]).to_pylist()
     assert {row["source"] for row in rows} == {"obd", "can"}
     assert {row["channel"] for row in rows} == {"RPM", "0x123"}
+
+
+@pytest.mark.asyncio
+async def test_default_collectors_use_canable_obd_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    captured = {}
+
+    async def fake_collect_can_obd(spec, queue, stop_event, *, reconnect_policy):
+        captured["spec"] = spec
+        captured["queue"] = queue
+        captured["reconnect_policy"] = reconnect_policy
+        stop_event.set()
+
+    monkeypatch.setattr("src.main.collect_can_obd_from_config", fake_collect_can_obd)
+
+    collectors = _default_collectors(config)
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+
+    assert len(collectors) == 1
+    await collectors[0](queue, stop)
+
+    spec = captured["spec"]
+    assert spec.can == config.hardware.can
+    assert spec.pids == ("auto",)
+    assert spec.dids == ()
+    assert spec.did_request_id == 0x7E0
+    assert captured["queue"] is queue
+    assert captured["reconnect_policy"].initial_delay_seconds == 10

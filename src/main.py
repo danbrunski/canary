@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from src.collection.can_collector import collect_can_from_config
+from src.collection.can_obd_collector import CanObdSpec, collect_can_obd_from_config
 from src.collection.obd_collector import ObdSpec, collect_obd
 from src.collection.pids import REQUIRED_PIDS
 from src.collection.queueing import QueueDepthMonitor
@@ -95,12 +96,32 @@ async def _drain_queue(
 
 
 def _default_collectors(config: CanaryConfig) -> list[CollectorStarter]:
-    obd_pids = tuple(spec.command.name for spec in REQUIRED_PIDS)
-    obd_spec = ObdSpec(port=config.hardware.elm327_port, pids=obd_pids)
     reconnect_policy = ReconnectPolicy(
         initial_delay_seconds=config.collection.reconnect_initial_delay_seconds,
         max_delay_seconds=config.collection.reconnect_max_delay_seconds,
     )
+
+    if config.collection.obd_source == "canable":
+        can_obd_spec = CanObdSpec(
+            can=config.hardware.can,
+            poll_rate_hz=config.collection.obd_poll_rate_hz,
+            pids=config.collection.obd_pids,
+            dids=config.collection.obd_dids,
+            did_request_id=config.collection.obd_did_request_id,
+            request_timeout_seconds=config.collection.obd_request_timeout_seconds,
+        )
+
+        async def canable_obd(
+            queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event
+        ) -> None:
+            await collect_can_obd_from_config(
+                can_obd_spec,
+                queue,
+                stop,
+                reconnect_policy=reconnect_policy,
+            )
+
+        return [canable_obd]
 
     async def can(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
         await collect_can_from_config(
@@ -109,6 +130,21 @@ def _default_collectors(config: CanaryConfig) -> list[CollectorStarter]:
             stop,
             reconnect_policy=reconnect_policy,
         )
+
+    if config.collection.obd_source == "disabled":
+        return [can]
+
+    obd_pids = (
+        config.collection.obd_pids
+        if config.collection.obd_pids
+        else tuple(spec.command.name for spec in REQUIRED_PIDS)
+    )
+    obd_spec = ObdSpec(
+        port=config.hardware.elm327_port,
+        pids=obd_pids,
+        dids=config.collection.obd_dids,
+        did_header=f"{config.collection.obd_did_request_id:X}",
+    )
 
     async def obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
         await collect_obd(obd_spec, queue, stop, reconnect_policy=reconnect_policy)

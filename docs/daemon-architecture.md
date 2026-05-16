@@ -34,10 +34,10 @@ producer, a new sink, or a new inference task, start here.
                                                            ▼
 ┌──────────────────┐                            ┌────────────────────────┐
 │ vehicle bus +    │                            │ ModelManager (5.16)    │
-│ OBD adapter      │                            │   - mtime short-circ.  │
+│ CAN/OBD adapter  │                            │   - mtime short-circ.  │
 └────────┬─────────┘                            │   - validate manifest  │
          │                                      │   - schemas_compatible │
-         │ python-can, python-obd               │   - load + atomic swap │
+         │ python-can (python-obd legacy)       │   - load + atomic swap │
          ▼                                      └──────────┬─────────────┘
 ┌──────────────────┐                                       │ current
 │ collectors (1A,  │                                       │
@@ -94,7 +94,7 @@ producer, a new sink, or a new inference task, start here.
 
 | Layer | Module | Role |
 |---|---|---|
-| **Producers** | `src/collection/{can,obd}_collector.py` | Push `TelemetryRecord` onto an `asyncio.Queue`. OBD is supervised — survives ELM327 dropout. CAN is reconnect-on-failure via `ReconnectPolicy`. Both are read-only (NFR-06): the OBD path enforces it via `enforce_read_only(conn)`. |
+| **Producers** | `src/collection/can_obd_collector.py`, `src/collection/can_collector.py`, `src/collection/obd_collector.py` | Push `TelemetryRecord` onto an `asyncio.Queue`. Default current hardware path is `can_obd_collector.py`: one Canable Bus handles broadcast CAN plus read-only OBD Mode 01 / selected Mode 22 polling. `can_collector.py` is CAN-only; `obd_collector.py` is legacy ELM327/emulator fallback. |
 | **Storage** | `src/storage/parquet_writer.py` | Buffers records and flushes to dated session dirs. 1.11 session keying rotates on Engine Run Time reset; 1.12 retention sweeps old sessions on shutdown; 1.14 atomic-write contract: `.tmp → rename` so a crash mid-flush never leaves a corrupt `.parquet` visible to the discovery glob. |
 | **Live preprocessing** | `src/preprocessing/live.py` | `LiveFeatureSource` is the row-by-row analog of `build_feature_frame`. `observe(record)` updates a `current_values` dict; `tick(now)` emits one wide row through segment + deviation + rolling features. Ring buffer holds `2 × window_seconds × resample_hz` rows. ~21 ms p95 per tick on a laptop with 42 channels (see `scripts/benchmark_live_pipeline.py`). |
 | **Inference** | `src/models/inference.py` + `src/alerts/emitter.py` | `LSTMInferenceEngine` (windowed) + `IsolationForestInferenceEngine` (row-by-row wrapper around `TrainedIsolationForest.score`). `AnomalyEventEmitter` decides when a result is an event (`is_anomaly` / label==-1), dedupes per (source, model_version), counts `emitted` / `suppressed_*` for `/status`. |
@@ -106,8 +106,9 @@ producer, a new sink, or a new inference task, start here.
 
 ## The flow, in one paragraph
 
-CAN + OBD records arrive on a single `asyncio.Queue` from the collector
-tasks. `drain_queue_with_broadcast` pulls each record and tees it
+CAN records, plus OBD records when a streaming OBD producer is configured,
+arrive on a single `asyncio.Queue` from the collector tasks.
+`drain_queue_with_broadcast` pulls each record and tees it
 three ways: into the Parquet writer (session-keyed by Engine Run Time
 reset), onto the telemetry `Broadcaster` (which `/ws/telemetry`
 subscribers see immediately), and into the `LiveFeatureSource.observe`
@@ -145,7 +146,7 @@ This doc covers the daemon's *runtime* assembly. Out of scope:
 * **The RE workflow** — how you go from "a CAN ID and 8 mystery bytes" to a typed entry in `data/bindings.yaml`. See `docs/can-re-workflow.md`.
 * **The behavior-model rationale** — why we infer surfaces from runtime data rather than reading factory calibration tables. See `docs/behavior-model-inference.md`.
 * **The data-collection plan** — what drives we still need before the ML side has enough coverage. See `docs/data-collection-plan.md`.
-* **Deployment** — systemd unit, install script, Pi setup. Phase 5E in `docs/implementation-tasks.md`, currently deferred per the WSL-only-dev convention.
+* **Deployment** — systemd unit, install script, Pi setup. Phase 5E in `docs/implementation-tasks.md`, currently deferred until the first Pi bring-up pass is ready.
 
 ## Performance touchpoints (NFR-01 budget)
 

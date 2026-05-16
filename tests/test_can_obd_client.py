@@ -175,8 +175,10 @@ def _single_frame_reply(
     """Construct a single-frame ISO-TP reply with the given service payload."""
     if pid is None:
         payload = bytes([service]) + body
-    else:
+    elif 0 <= pid <= 0xFF:
         payload = bytes([service, pid]) + body
+    else:
+        payload = bytes([service, (pid >> 8) & 0xFF, pid & 0xFF]) + body
     if len(payload) > 7:
         raise ValueError("payload too big for single-frame; use multi-frame helper")
     pci = len(payload)  # single-frame PCI byte = length, high nibble = 0
@@ -381,6 +383,48 @@ def test_query_mode_03_single_frame() -> None:
         ecu.shutdown()
     assert resp is not None
     assert parse_dtc_payload(resp.payload) == ["P0420", "C0510"]
+
+
+def test_query_mode_22_single_frame_with_physical_request_id() -> None:
+    """Mode 22 uses a 16-bit DID echo and usually a physical tester ID."""
+    tester, ecu = _make_pair()
+    stop = threading.Event()
+
+    def _did_responder() -> None:
+        while not stop.is_set():
+            frame = ecu.recv(timeout=0.1)
+            if frame is None:
+                continue
+            if frame.arbitration_id != 0x7E0:
+                continue
+            data = bytes(frame.data)
+            if data[:4] != bytes([0x03, 0x22, 0x11, 0x01]):
+                continue
+            ecu.send(
+                _single_frame_reply(
+                    responder_id=DEFAULT_RESPONSE_ID_MIN,
+                    service=0x62,
+                    pid=0x1101,
+                    body=bytes([0x12, 0x34]),
+                )
+            )
+            return
+
+    t = threading.Thread(target=_did_responder, daemon=True)
+    t.start()
+    try:
+        client = CanObdClient(tester, timeout_seconds=1.0)
+        resp = client.query_mode_22(0x1101, request_id=0x7E0)
+    finally:
+        stop.set()
+        t.join(timeout=1.0)
+        tester.shutdown()
+        ecu.shutdown()
+
+    assert resp is not None
+    assert resp.service == 0x62
+    assert resp.pid == 0x1101
+    assert resp.payload == bytes([0x12, 0x34])
 
 
 def test_query_handles_isotp_multi_frame_reassembly() -> None:

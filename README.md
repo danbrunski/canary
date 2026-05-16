@@ -3,10 +3,10 @@
 > Early anomaly detection for vehicle telemetry via OBD-II and CAN bus monitoring.
 
 CANary is an on-vehicle software system that continuously reads telemetry from a 2008
-Nissan Xterra (and broadly any OBD-II compliant vehicle) via two data channels — the
-standardized OBD-II PID interface (ELM327) and the raw CAN bus (Canable / SocketCAN) —
-and uses unsupervised machine learning to learn normal vehicle behavior and flag
-anomalous conditions in real time.
+Nissan Xterra (and broadly any OBD-II compliant vehicle) via raw CAN bus capture
+(Canable / SocketCAN) and standardized OBD-II PID reads. It uses unsupervised
+machine learning to learn normal vehicle behavior and flag anomalous conditions in
+real time.
 
 It runs headlessly on a Raspberry Pi 5 mounted in-vehicle, logs all telemetry to local
 storage, and surfaces anomaly alerts via a local network dashboard.
@@ -18,8 +18,9 @@ detecting subtle signs of trouble before they become failures.
 
 ## Features
 
-- **Dual-channel ingestion** — OBD-II PIDs via `python-obd` (async) and raw CAN frames
-  via `python-can` + SocketCAN (listen-only, never writes to the bus).
+- **Dual-channel ingestion** — raw CAN frames plus OBD-II Mode 01 / selected
+  Mode 22 reads through one Canable-native `python-can` path; the legacy ELM327
+  path remains for emulator/fallback coverage.
 - **Parquet ring buffer** — timestamped, columnar, rotated per ignition session, with
   configurable retention.
 - **Operating-mode segmentation** — Idle / City / Highway / WOT / Off-road, so models
@@ -39,7 +40,8 @@ requirements, and development phases.
 ### Prerequisites
 
 - Python 3.11+
-- For on-vehicle use: Raspberry Pi 5 (8 GB), USB ELM327, Canable USB, OBD-II Y-splitter
+- For on-vehicle use: Raspberry Pi 5 (8 GB), Canable USB / SocketCAN adapter.
+  OBD reads run through the Canable-native client; no ELM327 is required.
 
 ### Install (development)
 
@@ -111,9 +113,16 @@ canary/
 
 ## Status
 
-Phase 1 — Data Collection. See
-[`docs/implementation-tasks.md`](docs/implementation-tasks.md) for the current task
-breakdown.
+The software stack is past the original Phase 1 collection milestone:
+preprocessing, IF/LSTM training and inference, bindings decode, behavior-model
+surfaces, dashboard, alert logging, and model hot-swap are implemented. The
+Canable-native OBD collector is now the default hardware path. The remaining v1
+work is mostly operational: real drive captures for training/validation, Pi
+deployment, and long-run vehicle validation.
+
+See [`docs/implementation-tasks.md`](docs/implementation-tasks.md) for the current
+task breakdown and [`docs/data-collection-plan.md`](docs/data-collection-plan.md)
+for the capture backlog.
 
 ---
 
@@ -122,15 +131,14 @@ breakdown.
 ```
 Vehicle OBD-II Port (J1962)
          │
-    Y-Splitter
-    ┌─────┴─────┐
-    │           │
-ELM327 USB   Canable USB
-(python-obd)  (python-can, listen-only)
-    │           │
-    └─────┬─────┘
+   Canable USB / SocketCAN
+  (CAN sniff + OBD ISO-TP)
           │
     Raspberry Pi 5 (8 GB)
+
+Optional RE rig: add an NT510 via an OBD-II splitter when a capture needs a
+human-driven diagnostic stimulus. The ELM327 path is retained only for legacy
+captures and emulator coverage.
 ```
 
 ---

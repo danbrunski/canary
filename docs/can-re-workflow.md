@@ -7,21 +7,27 @@ version now that a full hypothesis loop has closed (`ECM_RPM`).
 
 ## The rig
 
-Three devices on the OBD-II port (via a splitter):
+The current baseline rig is the Canable on the OBD-II port. It handles
+broadcast CAN capture plus read-only OBD Mode 01 and selected Mode 22 DID
+polling. Add the NT510 when the session needs human-driven diagnostic stimulus.
+The ELM327 path remains only as legacy fallback/emulator coverage.
 
-- **Canable** (knockoff USB-CAN-FD, CANable2 slcan firmware) — the passive
-  sniffer. `record.py` opens it via python-can's `slcan` backend at 500 kbps
-  classic CAN and only ever `recv()`s — it never injects a data frame. (It
-  *does* emit per-frame ACK bits in normal-open mode; the firmware ignores the
-  slcan `L` listen-only command, so true bus-monitoring isn't available — but
-  ACK-only on a multi-node vehicle bus is benign and is exactly what every scan
-  tool on the port already does. See `can_collector.bus_factory`.)
-- **ELM327** (CH340 clone) — the *automatable* tester. python-obd polls Mode 01
-  PIDs (and, later, Mode 22 DIDs) and `record.py --obd-port` logs them with
-  `time.time()` timestamps to `pids.jsonl` — the ground truth the byte-vs-PID
-  regression fits against. (CH340 over WSL-USB is flaky; run `usbipd attach`
-  with `--auto-attach`. The OBD side of `record.py` is supervised and survives
-  drops — see 1.E.1.)
+- **Canable** (knockoff USB-CAN-FD, CANable2 slcan firmware) — the primary
+  interface. `record.py` opens it via python-can's `slcan` backend at 500 kbps
+  classic CAN for broadcast capture. `tools/can_obd_probe.py` also uses it as a
+  read-only ISO-TP OBD requester for Mode 01 / 03 / 09. The streaming
+  Canable-native OBD collector (`record.py --obd-source canable`) interleaves
+  Mode 01 and selected Mode 22 DID polling while writing the same `pids.jsonl`
+  sidecar the legacy ELM path used.
+  The adapter *does* emit per-frame ACK bits in normal-open mode; the firmware
+  ignores the slcan `L` listen-only command, so true bus-monitoring isn't
+  available — but ACK-only on a multi-node vehicle bus is benign and is exactly
+  what every scan tool on the port already does. See `can_collector.bus_factory`.
+- **ELM327** (CH340 clone) — legacy automatable tester. It previously polled
+  Mode 01 PIDs and Mode 22 DIDs via `record.py --obd-port`, logging ground truth
+  to `pids.jsonl` for byte-vs-PID regression. The current adapter is dead; keep
+  this path documented only for emulator/fallback context and do not plan new
+  required captures around it.
 - **NT510** (handheld Nissan scan tool) — the *human-driven* stimulus + extra
   reference. Live data for the many Nissan-Consult parameters generic OBD
   doesn't expose, and bidirectional actuator tests (cooling fan, IACV, EVAP,
@@ -30,13 +36,16 @@ Three devices on the OBD-II port (via a splitter):
   at once** (ISO-TP collisions on 7E0/7E8) — stagger them, or keep the ELM327
   off the ECU while the NT510 is on it.
 
-Capture CAN-only (`record.py` with no `--obd-port`) when the NT510 is the active
-player, so there's zero contention.
+Capture CAN-only (`record.py --obd-source off`) when the NT510 is the active
+player, so there's zero diagnostic-request contention. For non-NT510 sessions,
+use `record.py --obd-source canable` so the session has both broadcast frames
+and OBD ground-truth readings.
 
 ## Capture
 
 `record.py` writes a session directory: `frames.log` (candump format,
-append-safe), `manifest.json` (vehicle, bus, counts), and — with `--obd-port` —
+append-safe), `manifest.json` (vehicle, bus, counts), and — with the legacy
+`--obd-port` path or the Canable-native streaming collector —
 `pids.jsonl`. Tag events into `tags.jsonl` with `tag.py` or, hands-busy in the
 vehicle, walk a protocol with `guided_session.py` (one Enter per event, `s` to
 skip): `rev` (idle / throttle blips / sustain), `nt510` (module scan, ABS live
@@ -79,7 +88,9 @@ load* — on-road drives, not just no-load revs in neutral. See
      `RPM × (1 + STFT/100)`).
    - `tools/scan_constant_dids.py --port …`: sweep Mode 22 DID space over ≥2
      engine states; splits varying (candidate live signals) from constant
-     (calibration). Read-only — service 0x22 only.
+     (calibration). Read-only — service 0x22 only. This currently uses the
+     legacy ELM327 path; selected live DID polling is already available through
+     `record.py --obd-source canable --obd-dids`.
 4. **FSM cross-reference** — `tools/decode_isotp.py` uses `data/fsm/signals.json`
    (parsed from the Factory Service Manual CONSULT-III tables) to score
    captured DID raw ranges against named FSM parameters' expected ranges.
