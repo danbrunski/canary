@@ -842,6 +842,38 @@ signals:
       sibling of other 0x358 status bits (0x358:1 was 0/64 here; the byte
       may carry door/lamp flags too).
 
+  - name: COOLING_FAN_1F9_0
+    module: ECM        # 0x1F9 byte 0 — sibling of ECM_RPM (bytes 2-3) on the ~100 Hz ECM frame
+    can_id: 0x1F9
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: null        # bit-packed status flags, not a scalar
+    offset: null
+    unit: unknown
+    confidence: high
+    evidence:
+      - session: 2026-05-16T225450
+        method: nt510_active_test_differential
+        finding: >
+          NT510 cooling-fan active test (Nissan svc 0x30: ch 0x33 = fan
+          stage 1, ch 0x34 = fan stage 2, decoded on the wire). 0x1F9
+          byte 0 stepped exactly 0x20 (OFF) → 0x60 (LOW, +0x40) → 0xE0
+          (HIGH, +0x80) and back to 0x20, dead stable (1 unique value
+          while held), across two operator-timed OFF→LOW→HIGH→OFF cycles.
+          The broadcast bit pattern maps one-for-one onto the commanded
+          stages, so the commanded actuator and the broadcast reflection
+          corroborate each other independently.
+    notes: |
+      Cooling-fan status on the ECM 0x1F9 frame, byte 0: base bit 0x20
+      always set; bit 0x40 = fan stage 1 (low), bit 0x80 = fan stage 2
+      (high). OFF=0x20, LOW=0x60, HIGH=0xE0. Decode as flags, not a
+      scalar. Supersedes the mistagged 2026-05-13T011123 cooling-fan
+      attempt (the "clean redo" the IPDM note below asked for). Anomaly
+      value: coolant high while bit 0x80 never asserts → stage-2 fan
+      fault, detectable passively with no active polling. Bits
+      0x01–0x10 of this byte not yet characterized.
+
 # Future sections (placeholders for organization once data arrives):
 #
 # - BCM_*  (lights, doors, key state)
