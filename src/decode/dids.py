@@ -110,3 +110,19 @@ def apply_scaling(entry: DidEntry, raw: int) -> float | None:
         return None
     offset = entry.offset if entry.offset is not None else 0.0
     return raw * entry.scale + offset
+
+
+def is_plausible(entry: DidEntry, decoded: float) -> bool | None:
+    """Whether `decoded` is within `entry`'s plausible range.
+
+    `True`/`False` when at least one bound is set; `None` when neither is
+    (no check). Mirrors `bindings.is_plausible` so the DID validator can
+    flag misapplied scalings the same way the broadcast one does.
+    """
+    if entry.plausible_min is None and entry.plausible_max is None:
+        return None
+    if entry.plausible_min is not None and decoded < entry.plausible_min:
+        return False
+    if entry.plausible_max is not None and decoded > entry.plausible_max:
+        return False
+    return True

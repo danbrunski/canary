@@ -80,7 +80,7 @@ dids:
   - did: 0x123F
     name: ECM_INTAKE_AIR_TEMP
     byte_start: 0
-    byte_length: 1
+    byte_length: 2          # payload is 2 bytes BE (0x0050 = 80); 1-byte read hit the sentinel
     byte_order: big
     scale: 1.0
     offset: -40.0
@@ -92,8 +92,9 @@ dids:
       - session: 2026-05-16T214006
         method: four_state_classification
         finding: >
-          A-40, flat ~40 degC across all four states (intake air barely
-          moves parked); NT510 "INT/A temp" = 42.
+          2-byte payload 0x0050 = 80; A-40 → flat ~40 degC across all four
+          states (intake air barely moves parked); NT510 "INT/A temp" = 42.
+          (byte_length corrected 1→2 — caught by tools/decode_dids.py.)
 
   - did: 0x1208
     name: ECM_INJECTOR_PW_B1

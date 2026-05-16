@@ -11,6 +11,7 @@ from src.decode.dids import (
     DidEntry,
     apply_scaling,
     decode_did_raw,
+    is_plausible,
     load_did_map,
 )
 
@@ -53,6 +54,17 @@ def test_apply_scaling_with_offset() -> None:
 
 def test_apply_scaling_none_when_unpinned() -> None:
     assert apply_scaling(_entry(scale=None), 1234) is None
+
+
+def test_is_plausible_bounds() -> None:
+    e = _entry(plausible_min=-40.0, plausible_max=130.0)
+    assert is_plausible(e, 61.0) is True
+    assert is_plausible(e, -50.0) is False
+    assert is_plausible(e, 200.0) is False
+
+
+def test_is_plausible_none_when_no_bounds() -> None:
+    assert is_plausible(_entry(), 999.0) is None
 
 
 def test_strict_schema_rejects_unknown_field() -> None:
