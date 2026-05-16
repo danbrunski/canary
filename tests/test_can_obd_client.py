@@ -265,6 +265,86 @@ def test_query_returns_none_on_timeout() -> None:
         _ecu.shutdown()
 
 
+def test_negative_response_returns_none_without_waiting_full_timeout() -> None:
+    """A 7F <service> NRC must short-circuit, not burn the whole timeout.
+
+    Critical for DID sweeps: an absent DID otherwise costs one full
+    timeout each (hours over a wide range).
+    """
+    tester, ecu = _make_pair()
+    stop = threading.Event()
+
+    def ecu_loop() -> None:
+        while not stop.is_set():
+            f = ecu.recv(timeout=0.1)
+            if f is None:
+                continue
+            d = bytes(f.data)
+            if len(d) >= 4 and d[1] == 0x22:  # Mode 22 request → negative
+                ecu.send(
+                    can.Message(
+                        arbitration_id=0x7E8,
+                        data=bytes([0x03, 0x7F, 0x22, 0x31, 0, 0, 0, 0]),
+                        is_extended_id=False,
+                    )
+                )
+
+    t = threading.Thread(target=ecu_loop, daemon=True)
+    t.start()
+    try:
+        client = CanObdClient(
+            tester, request_id=0x7E0, response_id_min=0x7E8,
+            response_id_max=0x7E8, timeout_seconds=5.0,
+        )
+        t0 = time.monotonic()
+        assert client.query_mode_22(0x1101) is None
+        assert time.monotonic() - t0 < 1.0  # returned on the NRC, not at 5 s
+    finally:
+        stop.set()
+        t.join(timeout=1.0)
+        tester.shutdown()
+        ecu.shutdown()
+
+
+def test_enter_diagnostic_session_positive_and_negative() -> None:
+    tester, ecu = _make_pair()
+    stop = threading.Event()
+
+    def ecu_loop() -> None:
+        while not stop.is_set():
+            f = ecu.recv(timeout=0.1)
+            if f is None:
+                continue
+            d = bytes(f.data)
+            if len(d) >= 3 and d[1] == 0x10:  # DiagnosticSessionControl
+                if d[2] == 0xC0:
+                    body = [0x02, 0x50, 0xC0]
+                else:
+                    body = [0x03, 0x7F, 0x10, 0x12]  # subFunctionNotSupported
+                ecu.send(
+                    can.Message(
+                        arbitration_id=0x7E8,
+                        data=bytes(body + [0] * (8 - len(body))),
+                        is_extended_id=False,
+                    )
+                )
+
+    t = threading.Thread(target=ecu_loop, daemon=True)
+    t.start()
+    try:
+        c = CanObdClient(
+            tester, request_id=0x7E0, response_id_min=0x7E8,
+            response_id_max=0x7E8, timeout_seconds=2.0,
+        )
+        assert c.enter_diagnostic_session(0xC0) is True
+        assert c.enter_diagnostic_session(0x03) is False
+    finally:
+        stop.set()
+        t.join(timeout=1.0)
+        tester.shutdown()
+        ecu.shutdown()
+
+
 def test_query_rejects_wrong_pid_echo() -> None:
     """A response with the wrong PID echo must be ignored (different request)."""
     tester, ecu = _make_pair()

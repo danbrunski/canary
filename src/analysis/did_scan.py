@@ -231,16 +231,49 @@ class CanableMode22Transport:
     response or a timeout), which is exactly the ``Mode22Transport``
     contract — so the bridge is a one-liner.
 
-    Read-only by construction: only ``query_mode_22`` (service 0x22) is
-    ever invoked. ``client`` is duck-typed (just needs ``query_mode_22``)
-    so this analysis module stays import-decoupled from the collection
-    layer at runtime.
+    Manufacturer DID gating: some ECMs refuse ``22`` outside a non-default
+    diagnostic session (the 2008 Nissan ECM gates it behind sub-function
+    ``0xC0``). Pass ``session=0xC0`` and this transport enters it before
+    reads and re-enters it every ``keepalive_seconds`` (the session lapses
+    after a few seconds and TesterPresent is itself rejected on that ECM,
+    so periodic ``10 <sf>`` is the keep-alive). With ``session=None`` it
+    behaves as a plain pass-through (ECUs that don't gate 0x22).
+
+    Read-only by construction: only ``query_mode_22`` (0x22) and, when a
+    session is requested, ``enter_diagnostic_session`` (0x10 session
+    control — no memory write, no actuation) are invoked. ``client`` is
+    duck-typed so this analysis module stays import-decoupled from the
+    collection layer at runtime.
     """
 
-    def __init__(self, client: CanObdClient, *, request_id: int = 0x7E0) -> None:
+    def __init__(
+        self,
+        client: CanObdClient,
+        *,
+        request_id: int = 0x7E0,
+        session: int | None = None,
+        keepalive_seconds: float = 2.0,
+        time_fn: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._client = client
         self._request_id = request_id
+        self._session = session
+        self._keepalive = keepalive_seconds
+        self._time_fn = time_fn
+        self._last_primed: float | None = None
+
+    def _ensure_session(self) -> None:
+        if self._session is None:
+            return
+        now = self._time_fn()
+        if self._last_primed is not None and now - self._last_primed < self._keepalive:
+            return
+        # Best-effort: a failed re-prime just means the next read returns
+        # None (negative response) and we retry the prime on the read after.
+        if self._client.enter_diagnostic_session(self._session, request_id=self._request_id):
+            self._last_primed = now
 
     def read_did(self, did: int) -> bytes | None:
+        self._ensure_session()
         response = self._client.query_mode_22(did, request_id=self._request_id)
         return None if response is None else response.payload

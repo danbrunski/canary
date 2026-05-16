@@ -12,7 +12,13 @@ original phase labels. Phases 2/3, the bindings/behavior-model path, dashboard,
 alerts, and model management are implemented. The latest hardware reality is
 that the ELM327 adapter is dead, so OBD has moved to the Canable-native path:
 Mode 01 / 03 / 09 one-shot probing, streaming Mode 01 capture, and streaming
-Mode 22 DID reads are now implemented. Next: resume the OBD-backed capture
+Mode 22 DID reads are now implemented, and the engine-ECM DID space has been
+explored: the 2008 Nissan ECM gates 0x22 behind UDS session `10 C0` (kept
+alive by re-priming; mutually exclusive with Mode 01), now handled by
+`scan_constant_dids.py --session C0` and `CanableMode22Transport`. Injector
+pulse width identified as DID `0x1208` (Phase 4.E.4 enabler; scale calibration
++ a structured `data/dids.yaml` map outstanding — see
+`data/analyses/2026-05-16T223328.md`). Next: resume the OBD-backed capture
 backlog in `docs/data-collection-plan.md`, then proceed with Pi deployment.
 
 ---

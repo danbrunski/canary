@@ -80,6 +80,23 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="ECU request CAN ID, hex (default 7E0 = engine; trans 7E1, ABS 7E2, …).",
     )
     parser.add_argument(
+        "--session",
+        default=None,
+        help=(
+            "UDS diagnostic-session sub-function (hex) to enter + keep alive "
+            "before 0x22 reads. The 2008 Nissan ECM gates Mode 22 behind "
+            "'C0' — pass --session C0. Omit for ECUs that answer 0x22 in the "
+            "default session. (--canable only.) NOTE: while a non-default "
+            "session is held this ECM stops answering standard OBD Mode 01."
+        ),
+    )
+    parser.add_argument(
+        "--keepalive",
+        type=float,
+        default=2.0,
+        help="Re-enter --session every N s (session lapses; default 2.0).",
+    )
+    parser.add_argument(
         "--start",
         type=lambda s: int(s, 0),
         default=0x0000,
@@ -142,10 +159,17 @@ def _build_transport(
             response_id_max=response_id,
             timeout_seconds=args.read_timeout,
         )
-        transport = CanableMode22Transport(client, request_id=request_id)
+        session = int(args.session, 16) if args.session is not None else None
+        transport = CanableMode22Transport(
+            client,
+            request_id=request_id,
+            session=session,
+            keepalive_seconds=args.keepalive,
+        )
         banner = (
             f"Canable {config.hardware.can.channel} "
-            f"(req 0x{request_id:X} → resp 0x{response_id:X})"
+            f"(req 0x{request_id:X} → resp 0x{response_id:X}"
+            + (f", session 0x{session:X} keepalive {args.keepalive}s)" if session is not None else ")")
         )
         return transport, bus.shutdown, banner
 

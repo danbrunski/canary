@@ -22,6 +22,8 @@ OBD column: `Y` = recorded with `--obd-port` (has `pids.jsonl`); `—` = CAN-onl
 | 2026-05-13T005522 | rev protocol, engine running | Y | rev protocol with parallel ELM327 — pinned ECM_RPM (0x1F9:2-3) and ECM_COOLANT_TEMP against PIDs | [analysis](analyses/2026-05-13T005522.md) |
 | 2026-05-13T011123 | NT510 active session | — | NT510 module scan + ABS live data (steering/brakes) + cooling-fan test; steering = 0x002, brake = 0x29E candidates | [analysis](analyses/2026-05-13T011123.md) |
 | 2026-05-16T202800 | KOEO→crank→idle→blips→engine-off→restart→accessory sweep (rev + binding tags) | — | **reconnect-fix (7ff2a79) stability validation: 13.6 min, 1.13M frames, 0 parse / 0 reconnect, clean signal stop.** Canable-only (ELM327 dead). A/C on↔off + blower + headlights + brake + clutch + window binding tags. ⚠ no engine-restart marker before the accessory block — see analysis. | [analysis](analyses/2026-05-16T202800.md) |
+| 2026-05-16T214006 | KOEO → cold idle → warm idle → ~2500 rpm (4-state) | DID | **Mode 22 breakthrough**: Nissan gates 0x22 behind UDS session `10 C0`; 138 DIDs swept across 4 states. Identified RPM/coolant/IAT etc.; split 87 calibration constants from live signals. Session ⊥ Mode 01. | [analysis](analyses/2026-05-16T214006.md) |
+| 2026-05-16T223328 | warm idle, NT510 active (passive Canable sniff) | DID | NT510 Engine-Live-Data sniffed off the bus → DID **name map**; **injector PW = `0x1208`** locked via blip signature. NT510 "graph" doesn't change poll rate (assumption corrected). | [analysis](analyses/2026-05-16T223328.md) |
 
 ## Still needed (see docs/data-collection-plan.md)
 

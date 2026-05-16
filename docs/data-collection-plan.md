@@ -78,13 +78,21 @@ minimum set `--vehicle-state`.
 7. **A/C on↔off pairs** on the same segment — the compressor load shifts
    MAP/trim/idle. → high-load points + confirms `AC_COMPRESSOR_STATE`,
    `MOTION_29E_5`.
-8. **Mode 22 DID exploration** — sweep Nissan Consult DIDs while running, logged
-   alongside Mode 01, then `tools/cross_reference.py` (Mode 22 ↔ Mode 01
-   regression) identifies them. Prize: **injector pulse width** = the DID that
-   tracks `RPM × (1 + STFT/100)` (Phase 4.E.4). Use
-   `scripts/record.py --obd-source canable --obd-dids ...` for selected
-   candidates during a drive. Broad exploratory DID sweeping still needs a
-   Canable-native replacement for `tools/scan_constant_dids.py`.
+8. **Mode 22 DID exploration** — DONE for the engine ECM (sessions
+   2026-05-16T214006 / T223328). Key facts now established and tooled:
+   - The 2008 Nissan ECM **gates Mode 22 behind UDS session `10 C0`**
+     (`7F 22 80` otherwise); `3E 00` TesterPresent is rejected, so the
+     session is kept alive by re-sending `10 C0` every ~2 s. Session
+     `0xC0` is **mutually exclusive with standard OBD Mode 01**.
+   - `tools/scan_constant_dids.py --canable --session C0` does the
+     Canable-native sweep + constant-vs-varying classification (no ELM327;
+     early-returns on negative responses so a full sweep is minutes).
+   - **Prize captured: injector pulse width = DID `0x1208`** (2-byte,
+     scale ≈ raw×4e-4 ms, exact constant TBD). Plus RPM `0x1219`, coolant
+     `0x1101`, IAT `0x123F`, TPS `0x120F/10`, A/F sensor `0x1225/26`, VVT
+     `0x1110`, A/F-heater `0x1107..0A`. See `data/analyses/2026-05-16T223328.md`
+     for the full DID map. Remaining: calibrate the `0x1208` scale and
+     structure the map as `data/dids.yaml` (parallel to `bindings.yaml`).
 
 Opportunistic extras: towing / heavy load (pushes into the high-load corner an
 empty truck on flat ground can't reach); a tagged drive specifically for
@@ -114,8 +122,10 @@ cross-reference → more decoded signals become ML features), so it compounds.
   Mode 01 PIDs (the byte↔PID counterpart to the Mode 22↔Mode 01 tool); reads
   `bindings.yaml` and reports which PID each unpinned signal tracks + scale.
 - [x] `data/sessions.md` — running index of captured sessions.
-- [x] `tools/scan_constant_dids.py` — Mode 22 DID sweep over the legacy ELM327
-  path (Phase 4.E.5).
+- [x] `tools/scan_constant_dids.py` — Mode 22 DID sweep + constant-vs-varying
+  classification (Phase 4.E.5). Canable-native (`--canable`) or legacy ELM327
+  (`--port`); `--session C0` enters + keeps alive the Nissan diagnostic
+  session that gates 0x22; early-returns on negative responses.
 - [x] `scripts/record.py --obd-dids` — logs selected Mode 22 DIDs alongside
   Mode 01 during a legacy ELM-backed drive.
 - [x] `src/collection/can_obd_client.py` + `tools/can_obd_probe.py` — read-only

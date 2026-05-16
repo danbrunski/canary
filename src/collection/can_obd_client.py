@@ -156,6 +156,34 @@ class CanObdClient:
             request_id=request_id,
         )
 
+    def enter_diagnostic_session(
+        self, subfunction: int, *, request_id: int | None = None
+    ) -> bool:
+        """UDS Service 0x10 DiagnosticSessionControl — enter a session.
+
+        Returns True on a positive ``50 <subfunction>`` response. This is
+        session *control* (no memory write, no actuation), but it is a
+        precondition for manufacturer DID reads: e.g. the 2008 Nissan ECM
+        gates Mode 22 behind a proprietary session (sub-function ``0xC0``)
+        and refuses ``22`` with ``7F 22 80`` in the default session. The
+        session also lapses after a few seconds, so callers must re-enter
+        it periodically (TesterPresent ``0x3E`` is itself rejected on this
+        ECM — re-sending ``10 <sf>`` is the keep-alive). Note: while a
+        non-default session is active this ECM stops answering standard
+        OBD Mode 01 — the two are mutually exclusive.
+        """
+        if not 0 <= subfunction <= 0xFF:
+            raise ValueError(f"session sub-function must be a byte, got 0x{subfunction:X}")
+        return (
+            self._request(
+                service=0x10,
+                pid=subfunction,
+                expect_pid_echo=True,
+                request_id=request_id,
+            )
+            is not None
+        )
+
     def query_supported_mode_01_pids(self) -> tuple[int, ...]:
         """Enumerate the Mode 01 PIDs the responding ECU claims to support.
 
@@ -251,6 +279,19 @@ class CanObdClient:
             responder = frame.arbitration_id
 
             if pci_high == _PCI_SINGLE_FRAME:
+                length = data[0] & 0x0F
+                body = (
+                    data[1 : 1 + length]
+                    if 1 <= length <= 7 and len(data) >= 1 + length
+                    else b""
+                )
+                # Definitive negative response to *our* service (7F SS NRC):
+                # stop now instead of waiting out the timeout. Critical for
+                # DID sweeps — an absent DID otherwise costs a full timeout
+                # each (hours over a 0x0000–0xFFFF range). Same return value
+                # (None) as before, just immediate.
+                if len(body) >= 3 and body[0] == 0x7F and body[1] == service:
+                    return None
                 payload = self._handle_single_frame(data, expected_service, pid_echo)
                 if payload is None:
                     continue

@@ -108,6 +108,24 @@ def test_build_transport_canable_respects_alternate_module_header(
     assert constructed[0]["response_id_max"] == 0x7E9
 
 
+def test_build_transport_canable_passes_session_and_keepalive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_canable(monkeypatch)
+    args = scd.parse_args(["--canable", "--session", "C0", "--keepalive", "1.5"])
+    transport, _close, _banner = scd._build_transport(args)
+    assert transport._session == 0xC0
+    assert transport._keepalive == 1.5
+
+
+def test_build_transport_canable_defaults_to_no_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_canable(monkeypatch)
+    transport, _close, _banner = scd._build_transport(scd.parse_args(["--canable"]))
+    assert transport._session is None
+
+
 def test_build_transport_rejects_non_hex_header() -> None:
     args = scd.parse_args(["--canable", "--header", "ZZZ"])
     with pytest.raises(RuntimeError, match="must be hex"):

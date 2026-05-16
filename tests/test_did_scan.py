@@ -174,6 +174,43 @@ def test_canable_transport_none_on_negative_or_timeout() -> None:
     assert client.calls == [(0x1101, 0x7E0)]
 
 
+class _SessionClient:
+    """query_mode_22 + enter_diagnostic_session recorder for session tests."""
+
+    def __init__(self) -> None:
+        self.sessions: list[tuple[int, int | None]] = []
+        self.reads: list[int] = []
+
+    def enter_diagnostic_session(self, sf: int, *, request_id: int | None = None) -> bool:
+        self.sessions.append((sf, request_id))
+        return True
+
+    def query_mode_22(self, did: int, *, request_id: int | None = None) -> _FakeObdResponse:
+        self.reads.append(did)
+        return _FakeObdResponse(b"\x01")
+
+
+def test_canable_transport_primes_and_reprimes_session() -> None:
+    clk = [100.0]
+    c = _SessionClient()
+    tr = CanableMode22Transport(
+        c, request_id=0x7E0, session=0xC0, keepalive_seconds=2.0, time_fn=lambda: clk[0]
+    )
+    tr.read_did(0x1101)  # first read primes the session
+    tr.read_did(0x1102)  # within keepalive window → no re-prime
+    assert c.sessions == [(0xC0, 0x7E0)]
+    clk[0] += 2.5  # past the keepalive window
+    tr.read_did(0x1103)  # stale → re-prime
+    assert c.sessions == [(0xC0, 0x7E0), (0xC0, 0x7E0)]
+    assert c.reads == [0x1101, 0x1102, 0x1103]
+
+
+def test_canable_transport_no_session_is_passthrough() -> None:
+    c = _SessionClient()
+    CanableMode22Transport(c, session=None).read_did(0x1101)
+    assert c.sessions == []  # never enters a session when none requested
+
+
 def test_canable_transport_drives_sweep_and_classify() -> None:
     idle = _FakeCanObdClient({0x1100: b"\x00", 0x1101: b"\x10", 0x1102: b"\xaa"})
     snap_idle = sweep_dids(CanableMode22Transport(idle), range(0x1100, 0x1103), label="idle")
