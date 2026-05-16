@@ -94,6 +94,14 @@ load* — on-road drives, not just no-load revs in neutral. See
 4. **FSM cross-reference** — `tools/decode_isotp.py` uses `data/fsm/signals.json`
    (parsed from the Factory Service Manual CONSULT-III tables) to score
    captured DID raw ranges against named FSM parameters' expected ranges.
+   **Caveat (2026-05-16): treat range-match output as weak hints only, not
+   bindings.** Only ~9 % of FSM params (24 ECM) have parsed ranges, the
+   scale/offset grid is permissive, and small-range bytes coincidentally
+   fit narrow bands — a cross-ref of the 0x1100/0x1200 DID sweep mis-named
+   *every* already-known DID at score ≥0.96 (RPM 0x1219 → "TRVL AFTER MIL",
+   TPS 0x1210 → "INJ PULSE-B2"). Name DIDs from ground truth (NT510 /
+   Mode 01 cross-reference), never from FSM range-fit alone. Improving FSM
+   range extraction would make this leg useful again.
 5. **Validate** — `tools/decode_bindings.py <session>`: decode every binding
    against every matching frame; report raw + decoded ranges + plausibility. It
    catches binding bugs (the COOLANT engine-off −40 °C sentinel was found this
