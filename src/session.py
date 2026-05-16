@@ -15,6 +15,15 @@ MANIFEST_FILENAME = "manifest.json"
 PIDS_FILENAME = "pids.jsonl"
 TAGS_FILENAME = "tags.jsonl"
 
+# Written by record.py at startup, removed on clean exit. Gives an
+# out-of-band controller (scripts/stop_recording.py, a supervisor) a stable
+# handle on the live recorder so it never has to guess the PID via `pgrep`
+# — which is fragile when the process runs under a shell/eval wrapper or
+# when more than one session is on disk. Not part of SessionPaths on
+# purpose: it's a transient runtime artifact, not session data, and adding
+# a field to the frozen dataclass would ripple through every consumer.
+PID_FILENAME = "recorder.pid"
+
 
 @dataclass(frozen=True)
 class SessionPaths:

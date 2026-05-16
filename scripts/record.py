@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import threading
@@ -44,6 +45,7 @@ from src.collection.obd_collector import (
 )
 from src.config import CanaryConfig
 from src.log import configure_logging
+from src.session import PID_FILENAME
 from src.storage.monitor import free_space_mb
 
 log = logging.getLogger(__name__)
@@ -212,6 +214,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     paths = make_session_dir(args.out_dir, datetime.now(UTC))
     log.info("session created", extra={"session_dir": str(paths.root)})
 
+    # Stable handle for out-of-band stop. Written now, removed in `finally`
+    # on any clean exit (signal, deadline, error). A controller reads this
+    # instead of `pgrep`-ing for the process, which is unreliable when the
+    # recorder runs under a shell/eval wrapper or when several sessions
+    # exist on disk. A stale file (process SIGKILLed before `finally`) is
+    # detected by stop_recording.py via a liveness check.
+    pid_file = paths.root / PID_FILENAME
+    pid_file.write_text(f"{os.getpid()}\n")
+    log.info("recorder pidfile written", extra={"pid_file": str(pid_file), "pid": os.getpid()})
+    print(
+        f"recording {paths.root} (pid {os.getpid()}). Stop cleanly with Ctrl-C, "
+        f"or from another shell:\n"
+        f"  .venv/bin/python scripts/stop_recording.py --session {paths.root}",
+        file=sys.stderr,
+    )
+
     # SIGINT/SIGTERM → stop_event so the recorder exits cleanly with a flushed
     # writer and a finalized manifest, instead of dying mid-write.
     # Two-press behavior: first Ctrl-C requests a clean stop, second restores
@@ -310,6 +328,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_reconnects=args.max_reconnects,
         )
     finally:
+        # Remove the pidfile first: once we're in `finally` the recorder is
+        # definitively stopping, and a later shutdown step (bus.shutdown on a
+        # wedged adapter) could hang — we don't want stop_recording.py to
+        # keep signalling a process that's already on its way out.
+        pid_file.unlink(missing_ok=True)
         stop_event.set()  # signal the OBD supervisor to wind down
         if obd_thread is not None:
             obd_thread.join(timeout=15.0)
