@@ -1,0 +1,257 @@
+# Canary Mode 22 DID map — identified Nissan UDS ReadDataByIdentifier params.
+#
+# The Mode-22 counterpart of bindings.yaml (which covers broadcast bytes).
+# DIDs here are actively polled over the ECU diagnostic session; only
+# *identified* DIDs are recorded — the full per-session sweeps live in the
+# (gitignored) data/sessions/<ts>/dids_*.json snapshots and the analyses.
+#
+# byte_start/byte_length index into the Mode-22 response *payload* (bytes
+# after the `62 HH LL` echo) — exactly CanObdClient.query_mode_22().payload.
+# Loader/validator: src/decode/dids.py (strict pydantic).
+#
+# Confidence ladder matches bindings.yaml: confirmed = scale/offset
+# validated vs ground truth; high = directional + cross-checked; medium =
+# byte known, scaling unpinned; etc.
+
+schema_version: 1
+
+vehicle:
+  make: Nissan
+  model: Xterra
+  year: 2008
+  engine: VQ40DE
+
+access:
+  ecu_request_id: 0x7E0       # engine ECM physical request
+  ecu_response_id: 0x7E8
+  session: 0xC0               # UDS 0x10 sub-function that unlocks Mode 22
+  keepalive_seconds: 2.0      # re-send 10 C0; 0x81/0x85 open but don't unlock 0x22
+  notes: |
+    The 2008 Nissan ECM refuses service 0x22 in the default session
+    (7F 22 80). Sub-functions 0x81/0x85/0xC0 all return positive 50 xx
+    but only 0xC0 unlocks 0x22. TesterPresent 0x3E is itself rejected, so
+    the session is kept alive by re-sending 10 C0 every ~2 s (S3 ≈ a few
+    s). Session 0xC0 is MUTUALLY EXCLUSIVE with standard OBD Mode 01 — the
+    ECM stops answering Mode 01 while a non-default session is held.
+    Read-only: only 0x10 (session control) + 0x22 (read) are issued.
+    See data/analyses/2026-05-16T214006.md and T223328.md.
+
+dids:
+  - did: 0x1101
+    name: ECM_COOLANT_TEMP
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 1.0
+    offset: -40.0
+    unit: degC
+    confidence: confirmed
+    plausible_min: -40.0
+    plausible_max: 130.0
+    evidence:
+      - session: 2026-05-16T214006
+        method: four_state_classification
+        finding: >
+          A-40: cold idle raw 0x65 = 61 degC matched the parallel Mode 01
+          coolant reading (61) exactly; warm 0x82 = 90; NT510 read 91.
+          Exact scale/offset validated against ground truth.
+    notes: Same signal as broadcast ECM_COOLANT_TEMP (0x551:0); DID form is the cross-check.
+
+  - did: 0x1219
+    name: ECM_RPM
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: 1.0
+    offset: 0.0
+    unit: rpm
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 7000.0
+    evidence:
+      - session: 2026-05-16T214006
+        method: four_state_classification
+        finding: >
+          0 at KOEO; cold fast-idle 1190; warm idle 756 (parallel Mode 01
+          = 762); ~2500-rpm hold = 2418. NT510 "ENG speed" = 775. raw ≈
+          rpm directly.
+    notes: scale ≈ 1.0; exact constant not finely pinned (idle 756 vs 762).
+
+  - did: 0x123F
+    name: ECM_INTAKE_AIR_TEMP
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 1.0
+    offset: -40.0
+    unit: degC
+    confidence: high
+    plausible_min: -40.0
+    plausible_max: 90.0
+    evidence:
+      - session: 2026-05-16T214006
+        method: four_state_classification
+        finding: >
+          A-40, flat ~40 degC across all four states (intake air barely
+          moves parked); NT510 "INT/A temp" = 42.
+
+  - did: 0x1208
+    name: ECM_INJECTOR_PW_B1
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: null          # ≈ 4e-4 ms/count; needs steady-state multi-point calibration
+    offset: null
+    unit: ms
+    confidence: high
+    evidence:
+      - session: 2026-05-16T223328
+        method: nt510_blip_signature
+        finding: >
+          NT510 graphed "Inj pulse-b1": idle 2.14 ms -> blips 4 / 9 / 9.4.
+          0x1208 (2-byte) raw 4962 / 10384 / 23487 / 24416 over the same,
+          broadcast-RPM-timed windows; LSQ scale ≈ 4e-4 ms, err 0.28.
+          Cold-enrich consistent (cold 2.68 > warm 2.17 ≈ NT510 2.14).
+    notes: >
+      Phase 4.E.4 fuel-surface enabler. DID identification firm; exact
+      scale constant outstanding (the blip peaks were eyeballed). 0x1209
+      is a correlated fuel/air sibling, not injector PW.
+
+  - did: 0x1107
+    name: ECM_AF_SENSOR_HEATER_DUTY
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 0.5
+    offset: 0.0
+    unit: percent
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 100.0
+    evidence:
+      - session: 2026-05-16T223328
+        method: four_state_plus_nt510_name
+        finding: >
+          raw x0.5: 0 % engine-off, ~46.5 % warm idle, 35 % at rev;
+          NT510 "A/F S1 HTR b1" = 48 %.
+    notes: >
+      DIDs 0x1108, 0x1109, 0x110A and 0x113C mirror this exact value
+      (per-sensor / redundant heater-duty registers).
+
+  - did: 0x1225
+    name: ECM_AF_SENSOR_V_B1
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: 0.005
+    offset: 0.0
+    unit: V
+    confidence: high
+    evidence:
+      - session: 2026-05-16T223328
+        method: four_state_plus_nt510_name
+        finding: x0.005 ≈ 2.15 V, stable; NT510 "A/F sen1 b1" = 2.15. Bank pair with 0x1226.
+
+  - did: 0x1226
+    name: ECM_AF_SENSOR_V_B2
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: 0.005
+    offset: 0.0
+    unit: V
+    confidence: high
+    evidence:
+      - session: 2026-05-16T223328
+        method: four_state_plus_nt510_name
+        finding: x0.005 ≈ 2.15 V; NT510 "A/F sen1 b2" = 2.15. Pairs with 0x1225 (≈ equal banks).
+
+  - did: 0x120F
+    name: ECM_THROTTLE_POS_SENSOR_1
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: 0.005
+    offset: 0.0
+    unit: V
+    confidence: high
+    evidence:
+      - session: 2026-05-16T223328
+        method: four_state_plus_nt510_name
+        finding: >
+          x0.005: ~0.67 V warm idle -> 0.90 V at 2500 rpm (throttle
+          opened); NT510 "TP sen 1-b1" = 0.65. Pairs with 0x1210.
+
+  - did: 0x1210
+    name: ECM_THROTTLE_POS_SENSOR_2
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: 0.005
+    offset: 0.0
+    unit: V
+    confidence: high
+    evidence:
+      - session: 2026-05-16T223328
+        method: four_state_plus_nt510_name
+        finding: x0.005, tracks sensor 1 (~0.67 idle -> 0.90 rev); NT510 "TP sen 2-b1" = 0.65.
+
+  - did: 0x1110
+    name: ECM_INTAKE_VVT_SOLENOID_DUTY
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: null          # only 0 (idle) and 11 (rev) observed — scaling unpinned
+    offset: null
+    unit: percent
+    confidence: medium
+    evidence:
+      - session: 2026-05-16T214006
+        method: four_state_classification
+        finding: 0 at KOEO/cold/warm idle, 11 at 2500 rpm; NT510 "Int/V sol" = 0.00 % at idle.
+
+  - did: 0x1206
+    name: ECM_INTAKE_PRESSURE_1206
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: medium
+    evidence:
+      - session: 2026-05-16T214006
+        method: four_state_classification
+        finding: >
+          ~atmospheric-ish at KOEO, drops running, lower at rev (manifold
+          vacuum). Pairs with 0x1207. MAP/intake-pressure candidate; scale TBD.
+
+  - did: 0x1207
+    name: ECM_INTAKE_PRESSURE_1207
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: medium
+    evidence:
+      - session: 2026-05-16T214006
+        method: four_state_classification
+        finding: Mirrors 0x1206 (pressure pair); scale TBD.
+
+  - did: 0x1201
+    name: ECM_RPM_LOAD_CORRELATED_1201
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: medium
+    evidence:
+      - session: 2026-05-16T214006
+        method: four_state_classification
+        finding: >
+          0 at KOEO; warm 60 -> 193 at rev (ratio ≈ 3.2, tracks RPM).
+          Small magnitude; load/torque or ignition-dwell candidate, unnamed.
