@@ -7,19 +7,24 @@ dependencies are called out explicitly.
 
 Status legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
-Current status (2026-05-16): the software stack is substantially ahead of the
+Current status (2026-05-17): the software stack is substantially ahead of the
 original phase labels. Phases 2/3, the bindings/behavior-model path, dashboard,
-alerts, and model management are implemented. The latest hardware reality is
-that the ELM327 adapter is dead, so OBD has moved to the Canable-native path:
-Mode 01 / 03 / 09 one-shot probing, streaming Mode 01 capture, and streaming
-Mode 22 DID reads are now implemented, and the engine-ECM DID space has been
-explored: the 2008 Nissan ECM gates 0x22 behind UDS session `10 C0` (kept
-alive by re-priming; mutually exclusive with Mode 01), now handled by
-`scan_constant_dids.py --session C0` and `CanableMode22Transport`. Injector
-pulse width identified as DID `0x1208` (Phase 4.E.4 enabler; scale calibration
-+ a structured `data/dids.yaml` map outstanding — see
-`data/analyses/2026-05-16T223328.md`). Next: resume the OBD-backed capture
-backlog in `docs/data-collection-plan.md`, then proceed with Pi deployment.
+alerts, model management, Pi service install, and authenticated headless control
+plane are implemented. The latest hardware reality is that the ELM327 adapter is
+dead, so OBD has moved to the Canable-native path: Mode 01 / 03 / 09 one-shot
+probing, streaming Mode 01 capture, and streaming Mode 22 DID reads are
+implemented. `obd_pids: [auto]` now merges all responder supported-PID bitmasks
+and polls every decoder-backed Mode 01 PID in `PID_DECODERS` (38 today), with
+short-timeout/backoff behavior for non-responders. The 2008 Nissan ECM gates
+0x22 behind UDS session `10 C0` (kept alive by re-priming; mutually exclusive
+with Mode 01), now handled by `scan_constant_dids.py --session C0`,
+`CanableMode22Transport`, and the structured `data/dids.yaml` catalog. Injector
+pulse width is identified as DID `0x1208`; scale calibration and daemon/live
+dashboard integration for the `0xC0` DID profile are still pending. The next
+software backlog is no longer basic daemon plumbing; it is Torque Pro parity,
+full public OBD coverage, proprietary Nissan telemetry/diagnostics,
+false-positive feedback, training/model-health dashboards, and acceptance tests
+that prove the Pi-in-truck workflow end to end (Phase 6).
 
 ---
 
@@ -283,15 +288,18 @@ daemon is deployed on the vehicle.
   OBD source and `elm327` is only a legacy fallback. The one-shot pieces are
   already proven:
   `tools/can_obd_probe.py` walks supported Mode 01 PIDs, reads Mode 03 DTCs,
-  and uses the same Canable hardware as the broadcast sniffer. This is the
-  highest-priority software task because it unblocks OBD-backed cold-start,
-  warm-idle, city/highway, and load-sweep captures after the ELM327 failure.
+  and uses the same Canable hardware as the broadcast sniffer. Auto mode now
+  merges all responding ECUs' supported-PID bitmasks and polls every
+  decoder-backed Mode 01 PID in `PID_DECODERS`; the remaining gap is a complete
+  SAE J1979 registry and Torque-parity features (Phase 6.1–6.7).
 - [x] **1.E.7 — Canable-native Mode 22 DID reads.** Extend
   `CanObdClient` and the new streaming collector to issue read-only UDS Mode 22
   `ReadDataByIdentifier` requests over the Canable, using a configurable
   physical request ID (default engine ECU `0x7E0`). Emit `DID_<hex>` readings
   into `pids.jsonl` / telemetry in the same shape as the legacy
   `record.py --obd-dids` path so existing cross-reference tools keep working.
+  This does not yet make Nissan's `10 C0` session a first-class live telemetry
+  profile in the daemon/dashboard; that scheduling and UI work is Phase 6.15.
 
 ---
 
@@ -964,8 +972,9 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   `/status` for `model_versions` (live values from ModelManager) + the new
   `emitter_counters` (emitted / suppressed_not_anomaly / suppressed_dedupe);
   derives mean LSTM inference latency from the rolling event stream's
-  `latency_ms` field. Behavior-model deviation heatmaps (4.E.9) will land
-  here next.
+  `latency_ms` field. Behavior-model surfaces render through
+  `BehaviorModelsPanel` (4.E.9). Richer training-run, model-health, drift, and
+  false-positive tuning views are still pending in Phase 6.21–6.27.
 - [x] **5.13 — TPMS panel (placeholder).** `panels/TpmsPanel.tsx` reads
   `decoded:TPMS_FL_PRESSURE` etc. from the channel map; when those
   bindings haven't been pinned (current state), surfaces "TPMS bindings
@@ -1090,6 +1099,199 @@ present / absent and the CORS dev-origin allow.
 
 ---
 
+## Phase 6 — Torque-Parity Control Plane, Nissan Diagnostics & ML Ops
+
+Goal: turn the working Pi daemon and dashboard into a complete in-truck
+operator surface. CANary must match the everyday OBD/dashboard/logging features
+of Torque Pro while adding CANary-specific ML training, anomaly feedback, and
+Nissan proprietary diagnostic capability. This phase directly closes the
+sanity-check gaps: live public OBD telemetry, all openly available PIDs,
+proprietary Nissan DIDs, dashboard trending, save-on-request training data,
+real-time inference visibility, false-alarm control, parked diagnostic tests,
+training/model-health visualization, and Torque Pro parity.
+
+### 6A. Standard OBD and Torque-parity telemetry
+
+- [~] **6.1 — Complete SAE J1979 registry.** Expand the current
+  `PID_DECODERS` table from the 38 decoder-backed Mode 01 PIDs into a typed
+  registry for every public, read-only PID/service CANary can safely request.
+  Cover Mode 01 supported-PID groups through the full J1979 range, Mode 02
+  freeze-frame variants where the formula is identical, Mode 03 / 07 / 0A DTC
+  reads, Mode 06 onboard-monitor results, and Mode 09 vehicle information.
+  Each entry needs mode, PID, canonical channel name, display name, category,
+  unit, byte length, decoder/formula, support-bit group, default poll tier,
+  dashboard hint, and tests with canned raw responses. Unknown or unsupported
+  PIDs must degrade to "supported but not decoded" rather than disappearing.
+- [ ] **6.2 — Adaptive real-time OBD polling scheduler.** Replace the flat
+  auto-PID loop with poll tiers and bus-budget controls: fast powertrain
+  channels (RPM, speed, load, throttle, MAP/MAF) at the highest safe rate,
+  temperature/fuel/trim channels at medium rate, slow monitor/status channels
+  at low rate, and one-shot/service reads on demand. Publish scheduler metrics
+  (configured rate, observed response rate, timeout/backoff state, bus errors)
+  so the dashboard can explain why a supported PID is stale or missing.
+- [ ] **6.3 — OBD capability and coverage endpoint.** Add API + dashboard views
+  that show the ECU-reported supported PID bitmaps, which PIDs CANary decodes,
+  which are actively polled, which responded recently, which are backed off,
+  and which public PIDs still need decoders. This is the operator-facing proof
+  that "28 channels" means 28 usable channels, not hidden raw CAN IDs.
+- [ ] **6.4 — DTC, freeze-frame, monitor, and VIN workflow.** Add dashboard and
+  `canaryctl` flows for stored DTCs (Mode 03), pending DTCs (Mode 07),
+  permanent DTCs (Mode 0A), freeze-frame data (Mode 02), Mode 06 monitor test
+  results, VIN, calibration IDs, and CVNs. Include code lookup text where a
+  public database is available, timestamped snapshots, and export with the
+  current telemetry/session context.
+- [ ] **6.5 — Parked-only clear-DTC action.** Implement optional Mode 04 behind
+  the authenticated control plane, a parked interlock, explicit browser/CLI
+  confirmation, audit logging, and an automatic post-clear rescan. This is a
+  deliberate exception to CANary's read-only default because Torque parity
+  requires it; it must never be available while driving.
+- [ ] **6.6 — Trip, fuel, and performance calculations.** Add derived channels
+  for trip time/distance, fuel used, instant/average MPG or L/100 km, CO2
+  estimate, idle time, 0-60 mph, 1/4-mile estimate, boost/vacuum where MAP is
+  available, and estimated horsepower/torque where enough inputs exist. Vehicle
+  parameters (weight, fuel type, displacement, volumetric-efficiency defaults,
+  tire size) must be configurable and persisted with the session.
+- [ ] **6.7 — GPS and route logging.** Support at least one GPS source for the
+  Pi/truck workflow: browser Geolocation from the dashboard, USB GNSS through
+  `gpsd`, or both. Store `source="gps"` telemetry rows, display route/speed on
+  the dashboard, cross-check GPS speed against OBD speed, and export GPX/KML
+  plus CSV/Parquet alongside the OBD/CAN data.
+- [ ] **6.8 — Custom PID/formula support.** Add user-defined Mode 01 / 09 / 22
+  requests with formula expressions, units, min/max, categories, display hints,
+  and poll tiers. Import/export Torque custom PID CSV where practical, validate
+  formulas in a sandboxed expression evaluator, and persist accepted
+  definitions in a versioned YAML file.
+
+### 6B. Full-featured dashboard and remote control UI
+
+- [ ] **6.9 — Custom dashboard builder.** Add user-configurable gauge pages:
+  digital readouts, dial gauges, bars, LEDs, sparklines, trend charts, maps,
+  and diagnostic tiles. Layouts must work on phone portrait, phone landscape,
+  tablet/laptop, and head-unit mirroring; persist layouts per browser/device
+  and allow export/import of dashboard profiles.
+- [ ] **6.10 — Advanced live charting.** Add multi-channel trend charts with
+  selectable numeric channels, multiple axes, pause/resume, zoom, time-window
+  selection, min/max/average overlays, cursor readouts, and export of the
+  selected chart window. Chart raw OBD, decoded CAN, proprietary DID,
+  derived/trip, GPS, and anomaly/model signals uniformly.
+- [ ] **6.11 — User alarms and dashboard alerts.** Let the operator configure
+  thresholds for any numeric telemetry channel with debounce, hysteresis,
+  severity, cool-down, optional browser audio/speech, and alert history.
+  Threshold alarms should coexist with ML anomaly alerts and be visibly
+  distinguishable.
+- [ ] **6.12 — HUD, themes, PWA offline, and reconnect behavior.** Add a
+  mirrored HUD view, day/night themes, large touch targets, wake-lock guidance,
+  service-worker caching for the built dashboard, explicit reconnect/resync
+  behavior, and stale-data banners for every stream.
+- [ ] **6.13 — Control-plane frontend integration.** Build dashboard panels for
+  the existing `/control/*` API: preflight, version, capture start/stop/tag,
+  current capture state, session browser, session metadata/pin/delete/export,
+  job queue/logs/cancel, model artifact upload, and control audit stream. The
+  browser should be able to do what `scripts/canaryctl.py` can do.
+- [ ] **6.14 — Browser control authentication UX.** Add a token entry/storage
+  flow for authenticated control actions, clear "read-only vs control" state in
+  the UI, and graceful 401/403/503 handling. Keep read-only telemetry usable
+  without a token if configured that way, but never expose mutating controls
+  without the token.
+
+### 6C. Nissan proprietary telemetry and diagnostics
+
+- [ ] **6.15 — Live Nissan DID telemetry profile.** Make `data/dids.yaml` a
+  first-class daemon input. The daemon must be able to enter UDS session
+  `10 C0`, keep it alive, poll confirmed DIDs like `0x1208`, decode names and
+  units through `src/decode/dids.py`, emit stable telemetry channels, and
+  expose the active DID profile on the dashboard. Because `10 C0` is mutually
+  exclusive with normal Mode 01 polling on the current ECM, add explicit
+  profile switching or scheduled windows rather than silently mixing modes.
+- [ ] **6.16 — DID map dashboard/workbench.** Show known DIDs, confidence,
+  units, ranges, live values, raw hex, evidence links, and last-seen status.
+  Add a parked-only DID sweep launcher that records requests/responses,
+  summarizes varying/constant/intermittent DIDs, and creates reviewable
+  candidate entries for `data/dids.yaml`.
+- [ ] **6.17 — CONSULT/NT510 reverse-engineering workbench.** Add parked-only
+  tools to record active NT510/CONSULT sessions, segment request/response
+  exchanges, tag screen/actions, compare against `data/fsm/signals.json`, and
+  generate candidate DID/control maps with evidence. This should produce data
+  review artifacts, not immediately publish unreviewed commands.
+- [ ] **6.18 — Safe diagnostic test executor.** Implement allowlisted,
+  parked-only proprietary diagnostic tests and actuator commands with module,
+  service, payload, expected response, preconditions, countdown, audit log,
+  timeout, post-test restore, and post-test rescan. Do not expose an arbitrary
+  raw CAN/UDS send endpoint in the dashboard or API.
+- [ ] **6.19 — Proprietary protocol regression corpus.** Store known-good
+  Nissan diagnostic exchanges and expected parses for ECM/ABS/BCM. Add replay
+  tests so DID decoding, session handling, IO-control identification, and
+  parked diagnostic command metadata cannot regress as the maps evolve.
+
+### 6D. Data export, training operations, and anomaly tuning
+
+- [ ] **6.20 — Dataset capture and export pipeline.** Add dashboard and CLI
+  controls to mark a capture as "training candidate", select channels, apply
+  resampling, include/exclude annotations, and export CSV, JSONL, Parquet, ZIP,
+  and model-ready feature matrices. Every export should include manifest
+  metadata: vehicle, config hash, channel schema, sessions, tags, time range,
+  model/training purpose, and data-quality warnings.
+- [ ] **6.21 — Training run ledger and metrics artifacts.** Persist structured
+  run records for Isolation Forest, LSTM, behavior-model refits, and future
+  models: input sessions, feature schema, hyperparameters, loss curves,
+  threshold calibration, validation metrics, false-positive benchmark output,
+  produced artifacts, job logs, and publish status. Treat this as the source of
+  truth for the dashboard's training history.
+- [ ] **6.22 — Training dashboard.** Visualize training jobs and model quality:
+  run history, active job logs, IF score distributions, LSTM loss curves,
+  threshold bands, held-out false-positive rate, alerts/hour, per-channel
+  reconstruction error, feature coverage, missing-feature rate, and currently
+  published model versions.
+- [ ] **6.23 — Dataset health dashboard.** Show session coverage by operating
+  mode, speed/load range, coolant temperature, ambient temperature where
+  available, route/terrain, and tags. Add channel-availability heatmaps,
+  gap/dropout statistics, stale/dirty/pinned flags, and "ready to train?"
+  checks before a retraining job starts.
+- [ ] **6.24 — False-positive feedback loop.** Let the operator mark anomaly
+  events as true positive, false positive, ignored, or needs review; attach a
+  reason and driving context; and persist those labels next to the anomaly log
+  and training ledger. Feedback labels must be exportable and visible in the
+  anomaly timeline.
+- [ ] **6.25 — Threshold tuning and alert suppression.** Add per-model,
+  per-operating-mode threshold overrides, debounce/hysteresis/cool-down rules,
+  suppressions for known benign conditions, and before/after false-positive
+  estimates. Every tuning change must be audited, versioned, reversible, and
+  reflected in the live inference status.
+- [ ] **6.26 — Label-aware retraining and online-update policy.** Retraining
+  jobs should consume reviewed feedback labels, exclude known false-positive
+  windows or fold them into clean baselines after review, and publish a new
+  explicit model artifact/version. Do not continuously mutate live model
+  weights without a reviewable artifact, manifest, and rollback path.
+- [ ] **6.27 — Model drift and inference health monitoring.** Track feature
+  distribution drift, reconstruction-error drift, data freshness, inference
+  latency, Pi CPU/memory, model schema mismatch, missing-feature rate, and
+  model-manager swap outcomes. Surface warnings on the dashboard and in
+  `/status`.
+
+### 6E. Acceptance tests and parity proof
+
+- [ ] **6.28 — Torque Pro parity acceptance suite.** Maintain a checklist and
+  hardware/simulation tests comparing CANary against Torque Pro feature
+  categories: live gauges, all supported public OBD PIDs, custom PIDs,
+  graphing, logging, DTC/freeze-frame/clear, Mode 06/09 information, alarms,
+  trip/performance calculations, GPS/map export, dashboard persistence, and
+  mobile usability. Capture screenshots or short recordings for each accepted
+  category.
+- [ ] **6.29 — Pi-in-truck hardware-in-loop test matrix.** Add a repeatable
+  validation run for the actual Pi 5 + Canable + Xterra: boot on ignition,
+  service readiness, dashboard from phone, capture start/tag/stop from laptop,
+  live OBD channel count, Nissan DID profile switch, real-time inference,
+  export, retrain job, model publish, service restart, adapter unplug/replug,
+  and clean shutdown.
+- [ ] **6.30 — Operator runbooks for advanced workflows.** Update docs for
+  "collect data during this drive", "debug missing PID", "scan DTCs",
+  "clear DTC while parked", "capture Nissan DIDs", "run parked diagnostic
+  test", "label false alarm", "retrain and publish", and "export training
+  dataset". Each runbook should include the dashboard path and equivalent
+  `canaryctl` command.
+
+---
+
 ## Cross-Cutting Concerns
 
 These get touched in multiple phases — keep them in mind, don't defer to the end.
@@ -1109,6 +1311,16 @@ These get touched in multiple phases — keep them in mind, don't defer to the e
 - **CPU budget.** Profile after each phase; NFR-01 says <50% Pi 5 CPU
   steady-state. LSTM inference is the likely pinch point — measure
   before optimizing.
+- **OBD session scheduling.** Standard Mode 01 polling, Nissan `10 C0`
+  DID polling, and parked diagnostic tests may not be simultaneously
+  compatible. Treat the active diagnostic profile as explicit state and show
+  it in the dashboard.
+- **Safety boundary.** Public OBD reads stay safe by default. Clear-DTC and
+  proprietary diagnostic/control actions must be allowlisted, parked-only,
+  authenticated, audited, and recoverable.
+- **Feedback lineage.** False-positive labels, suppressions, threshold changes,
+  and retraining inputs are model data, not UI preferences. Preserve their
+  provenance so a later model version can be explained or rolled back.
 
 ---
 
@@ -1122,6 +1334,12 @@ These get touched in multiple phases — keep them in mind, don't defer to the e
 | R4 | Per-mode IF models could overfit sparse modes (off-road, WOT). | Pool with global model when per-mode sample count is below a threshold. Decide in 2.8. |
 | R5 | Dashboard auth deferred to v2 — anyone on the LAN can see live data. | Document in 5.5; revisit once a hotspot/AP design is chosen. |
 | R6 | No remote access path for alerts when phone is off the vehicle's LAN. | Out of scope for v1; "optional push notification" in FR-07 is a v2 feature. |
+| R7 | Public OBD coverage can look complete while unsupported/undecoded PIDs are silently hidden. | Phase 6.3 requires explicit capability/coverage reporting, including "supported but not decoded" and backed-off states. |
+| R8 | Standard Mode 01 polling and Nissan `10 C0` DID polling are mutually exclusive on the current ECM. | Phase 6.15 makes diagnostic profile state explicit and prevents silent mode mixing. |
+| R9 | Parked diagnostic tests and clear-DTC actions introduce write/control risk. | Phase 6.5 and 6.18 require allowlists, parked interlocks, authentication, confirmation, audit logs, and no arbitrary raw-send endpoint. |
+| R10 | Torque Pro parity can grow without a finish line. | Phase 6.28 defines the parity checklist and evidence requirements. |
+| R11 | False-positive tuning can accidentally hide real anomalies. | Phase 6.24–6.26 require feedback labels, versioned threshold/suppression changes, before/after estimates, and rollback. |
+| R12 | Training data exports can become untraceable once copied off the Pi. | Phase 6.20 requires manifests with config hash, channel schema, sessions, tags, and quality warnings for every export. |
 
 ---
 
@@ -1132,11 +1350,39 @@ v1 ships when, on the Pi 5 in the Xterra:
 1. systemd-managed service starts on boot, reconnects on adapter drop.
 2. OBD + CAN data continuously logged to Parquet for ≥1 week without
    manual intervention.
-3. Both Isolation Forest and LSTM Autoencoder are running inference live.
-4. Synthetic anomaly injected via replay produces a dashboard alert
+3. Canable auto OBD shows the supported public Mode 01 channel set on the
+   dashboard, with no raw-CAN-only rows counted as telemetry channels.
+4. Both Isolation Forest and LSTM Autoencoder are running inference live.
+5. Synthetic anomaly injected via replay produces a dashboard alert
    within 5 s. (NFR-01)
-5. Dashboard reachable from a phone on the vehicle's hotspot.
-6. False-positive rate on a held-out clean drive ≤ 1 alert / hour.
+6. Dashboard reachable from a phone on the vehicle's hotspot.
+7. False-positive rate on a held-out clean drive ≤ 1 alert / hour.
+8. Authenticated control API can start/stop/tag/export a capture from a
+   laptop without SSH.
 
 CAN-decoded signals (Phase 4) are a stretch goal for v1 and a hard
 requirement for v1.1.
+
+## Done Definition (v1.1 / Torque-Parity)
+
+v1.1 ships when:
+
+1. CANary exposes every supported public OBD PID/service it can safely read,
+   and the dashboard reports unsupported, unsupported-by-vehicle, and
+   supported-but-not-decoded cases explicitly.
+2. The dashboard provides Torque-class live gauges, custom layouts, trend
+   charts, alarms, DTC/freeze-frame/Mode 06/Mode 09 workflows, trip/fuel/
+   performance calculations, GPS route logging, custom PIDs, and exports.
+3. The browser dashboard can operate the full authenticated control plane:
+   preflight, captures, tags, sessions, exports, jobs, model upload, and audit.
+4. Training-data exports include reproducible manifests and can be used by the
+   Isolation Forest/LSTM training jobs without manual cleanup.
+5. Live inference health, training run history, dataset health, model metrics,
+   false-positive labels, and threshold/suppression state are visible in the
+   dashboard.
+6. Nissan `10 C0` DID telemetry is available as an explicit live profile with
+   decoded names/units from `data/dids.yaml`, and profile switching is visible.
+7. Parked-only proprietary diagnostic tests and clear-DTC actions are
+   allowlisted, authenticated, audited, and covered by regression tests.
+8. The Phase 6.28 Torque Pro parity checklist passes on the Pi 5 + Canable +
+   Xterra hardware path, not only in simulation.
