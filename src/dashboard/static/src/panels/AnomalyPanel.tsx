@@ -1,21 +1,73 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
+import { getFeedback, postFeedback } from "../api/http";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
+import { useControlResource } from "../hooks/useControlResource";
 import { badgeClass, cn, placeholderClass, selectClass } from "../styles";
 import type { AnomalyEvent } from "../types";
 
 interface AnomalyPanelProps {
   events: AnomalyEvent[];
+  /** When a control token is present the timeline becomes labellable
+   *  (Task 6.24): each event gets true/false-positive / ignore / review
+   *  verdicts that persist next to the anomaly log. */
+  token?: string;
+}
+
+const FEEDBACK_LABELS: { id: string; short: string; tone: string }[] = [
+  { id: "true_positive", short: "TP", tone: "text-bad" },
+  { id: "false_positive", short: "FP", tone: "text-ok" },
+  { id: "ignored", short: "ignore", tone: "text-fg-dim" },
+  { id: "needs_review", short: "review", tone: "text-warn" },
+];
+
+function eventKey(e: AnomalyEvent): string {
+  return `${e.timestamp}|${e.source}|${e.model_version}`;
 }
 
 /** Anomaly timeline (Task 5.10): the most recent score chart up top, then a
  *  filterable list of events. The chart is fixed-width historical — newest
  *  events on the right — so an operator at a glance can see "are we
  *  trending hotter?" without parsing timestamps. */
-export function AnomalyPanel({ events }: AnomalyPanelProps) {
+export function AnomalyPanel({ events, token }: AnomalyPanelProps) {
   const [sourceFilter, setSourceFilter] = useState<AnomalyEvent["source"] | "all">("all");
   const [modeFilter, setModeFilter] = useState<string | "all">("all");
+  // Locally-applied verdicts (optimistic) keyed by anomaly key, merged over
+  // whatever the server already has.
+  const [localLabels, setLocalLabels] = useState<Record<string, string>>({});
+
+  const feedbackFetcher = useCallback(
+    (signal: AbortSignal) => getFeedback(token ?? "", signal),
+    [token],
+  );
+  const feedback = useControlResource(feedbackFetcher, {
+    enabled: Boolean(token),
+    intervalMs: 30000,
+  });
+
+  const serverLabels = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const fb of feedback.data?.feedback ?? []) m[fb.anomaly_key] = fb.label;
+    return m;
+  }, [feedback.data]);
+
+  const labelEvent = async (e: AnomalyEvent, label: string) => {
+    if (!token) return;
+    const key = eventKey(e);
+    setLocalLabels((prev) => ({ ...prev, [key]: label }));
+    try {
+      await postFeedback(token, e as unknown as Record<string, unknown>, label, null);
+      feedback.refresh();
+    } catch {
+      // Roll back the optimistic mark on failure.
+      setLocalLabels((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  };
 
   const visible = useMemo(() => {
     return events.filter((e) => {
@@ -41,7 +93,13 @@ export function AnomalyPanel({ events }: AnomalyPanelProps) {
       title="Anomalies"
       centerHeader
       actions={
-        <div className="flex gap-3 font-num text-[0.78rem] tabular-nums text-fg-dim">
+        <div className="flex flex-wrap items-center gap-3 font-num text-[0.78rem] tabular-nums text-fg-dim">
+          {token && feedback.data && (
+            <span title="operator verdicts on file">
+              fb: {feedback.data.summary.false_positive ?? 0} FP /{" "}
+              {feedback.data.summary.true_positive ?? 0} TP
+            </span>
+          )}
           <label className="flex items-center gap-1.5">
             source{" "}
             <select
@@ -127,6 +185,36 @@ export function AnomalyPanel({ events }: AnomalyPanelProps) {
                     missing features
                   </span>
                 )}
+                {token &&
+                  (() => {
+                    const current =
+                      localLabels[eventKey(e)] ?? serverLabels[eventKey(e)];
+                    return (
+                      <span className="ml-auto flex items-center gap-1">
+                        {current ? (
+                          <span className="text-[0.7rem] uppercase tracking-[0.06em] text-accent-2">
+                            {current.replace("_", " ")}
+                          </span>
+                        ) : (
+                          FEEDBACK_LABELS.map((fb) => (
+                            <button
+                              key={fb.id}
+                              type="button"
+                              className={cn(
+                                "rounded border border-border-soft px-1.5 py-0.5 text-[0.66rem] uppercase tracking-[0.04em] hover:border-border",
+                                fb.tone,
+                              )}
+                              title={`mark ${fb.id.replace("_", " ")}`}
+                              aria-label={`mark ${fb.id.replace("_", " ")}`}
+                              onClick={() => labelEvent(e, fb.id)}
+                            >
+                              {fb.short}
+                            </button>
+                          ))
+                        )}
+                      </span>
+                    );
+                  })()}
               </li>
             ))}
           </ol>

@@ -23,6 +23,7 @@ import { ModelPanel } from "./ModelPanel";
 import { ObdCoveragePanel } from "./ObdCoveragePanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
 import { TrainingPanel } from "./TrainingPanel";
+import { TuningPanel } from "./TuningPanel";
 import { SystemPanel } from "./SystemPanel";
 import { TelemetryPanel } from "./TelemetryPanel";
 import { TpmsPanel } from "./TpmsPanel";
@@ -85,7 +86,7 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
     case "live-gauges":
       return <TelemetryPanel channels={d.channels} bindings={d.bindings} />;
     case "diag-anomalies":
-      return <AnomalyPanel events={d.events} />;
+      return <AnomalyPanel events={d.events} token={d.token} />;
     case "diag-system":
       return (
         <SystemPanel
@@ -146,14 +147,7 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
     case "models-training":
       return <TrainingPanel token={d.token} />;
     case "models-tuning":
-      return (
-        <PlaceholderPanel
-          title="Threshold tuning & suppression"
-          task="6.25"
-          endpoint="GET/POST /control/tuning (+ /estimate, /revert)"
-          summary="Per-model / per-mode threshold overrides, suppression rules, debounce/cool-down — versioned, audited, reversible, with a before/after FP estimate."
-        />
-      );
+      return <TuningPanel token={d.token} />;
     case "models-health":
       return (
         <PlaceholderPanel
