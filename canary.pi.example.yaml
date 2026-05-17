@@ -1,0 +1,85 @@
+# CANary Raspberry Pi 5 example configuration.
+# Copy to /etc/canary/canary.yaml on the Pi and edit for your adapter/network.
+
+vehicle:
+  make: Nissan
+  model: Xterra
+  year: 2008
+  vin: ""
+
+hardware:
+  # Legacy fallback only. The Pi deployment uses Canable-native OBD over
+  # SocketCAN by default.
+  elm327_port: /dev/ttyUSB0
+  can:
+    interface: socketcan
+    channel: can0
+    bitrate: 500000
+
+collection:
+  obd_source: canable
+  obd_pids: [auto]
+  obd_dids: []
+  obd_did_request_id: 0x7E0
+  obd_request_timeout_seconds: 1.0
+  obd_poll_rate_hz: 1
+  storage_path: /data/canary/sessions
+  session_retention_days: 30
+  storage_warning_mb: 500
+  reconnect_initial_delay_seconds: 10
+  reconnect_max_delay_seconds: 60
+  queue_max_size: 10000
+  queue_warning_fraction: 0.8
+
+preprocessing:
+  resample_hz: 1
+  rolling_window_seconds: 30
+  operating_modes:
+    idle:
+      rpm_max: 900
+      speed_max: 0
+    city:
+      speed_max: 50
+    highway:
+      speed_min: 80
+    wot:
+      throttle_min: 80
+
+models:
+  isolation_forest:
+    enabled: true
+    n_estimators: 200
+    contamination: 0.01
+    per_mode_contamination: {}
+    random_state: 42
+  lstm_autoencoder:
+    # Keep first Pi bring-up light. Enable after Torch is installed and a
+    # model artifact exists under daemon.models_dir.
+    enabled: false
+    sequence_length: 30
+    hidden_size: 64
+    num_layers: 1
+    latent_dim: 32
+    dropout: 0.0
+    batch_size: 64
+    learning_rate: 0.001
+    max_epochs: 100
+    validation_fraction: 0.2
+    early_stopping_patience: 10
+    min_delta: 0.0
+    random_state: 42
+    threshold_k: 3.0
+
+dashboard:
+  # LAN-only. There is no auth in v1; keep this behind the vehicle hotspot or
+  # a trusted local network.
+  host: 0.0.0.0
+  port: 8000
+
+daemon:
+  anomalies_dir: /data/canary/anomalies
+  models_dir: models
+  isolation_forest_artifact: isolation_forest/model.joblib
+  lstm_artifact: lstm_autoencoder/model.pt
+  model_poll_seconds: 30.0
+  broadcaster_queue_size: 100

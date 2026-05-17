@@ -5,7 +5,7 @@ Use `scripts/install_deps.py` for local development setup. It creates or updates
 wheel index selected for the machine's NVIDIA driver.
 
 ```bash
-python3.12 scripts/install_deps.py
+python3 scripts/install_deps.py
 ```
 
 ## What It Installs
@@ -44,32 +44,48 @@ For example, a driver reporting `CUDA Version: 12.7` selects `cu126`.
 Inspect the plan without installing:
 
 ```bash
-python3.12 scripts/install_deps.py --dry-run
+python3 scripts/install_deps.py --dry-run
 ```
 
 Force a specific Torch wheel source:
 
 ```bash
-python3.12 scripts/install_deps.py --torch cu126
-python3.12 scripts/install_deps.py --torch cpu
+python3 scripts/install_deps.py --torch cu126
+python3 scripts/install_deps.py --torch cpu
 ```
 
 Skip Torch entirely:
 
 ```bash
-python3.12 scripts/install_deps.py --torch none
+python3 scripts/install_deps.py --torch none
 ```
 
 Install only base project dependencies, without `dev`:
 
 ```bash
-python3.12 scripts/install_deps.py --extras none
+python3 scripts/install_deps.py --extras none
 ```
 
 Pin a Torch version while still using the selected wheel index:
 
 ```bash
-python3.12 scripts/install_deps.py --torch-package 'torch==2.11.0'
+python3 scripts/install_deps.py --torch-package 'torch==2.11.0'
+```
+
+## Raspberry Pi Runtime Install
+
+For the Pi service install, prefer the wrapper:
+
+```bash
+sudo scripts/install_pi.sh
+```
+
+That calls `scripts/install_deps.py` with runtime-only defaults:
+`--extras none --torch none`. Use CPU Torch only when you are ready to run
+LSTM inference on the Pi:
+
+```bash
+sudo CANARY_TORCH=cpu scripts/install_pi.sh
 ```
 
 ## Verifying CUDA

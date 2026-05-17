@@ -1,0 +1,35 @@
+[Unit]
+Description=CANary headless vehicle telemetry daemon
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/canary/canary.yaml
+ConditionPathExists=/etc/canary/canary.env
+
+[Service]
+Type=simple
+User=canary
+Group=canary
+SupplementaryGroups=dialout
+EnvironmentFile=/etc/canary/canary.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/bin/bash -c 'cd "$CANARY_HOME" && exec "$CANARY_HOME/.venv/bin/python" -m src.main --config "$CANARY_CONFIG"'
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Opening SocketCAN raw sockets as a non-root service needs CAP_NET_RAW on
+# many Linux builds. CAN interface configuration still happens outside this
+# service through docs/can-setup.md or a separate boot-time network unit.
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+NoNewPrivileges=true
+
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

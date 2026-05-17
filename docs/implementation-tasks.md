@@ -1055,13 +1055,25 @@ present / absent and the CORS dev-origin allow.
 
 ### 5E. Deployment (NFR-02, NFR-04)
 
-- [ ] **5.18 — systemd unit.** `systemd/canary.service` — Type=notify,
-  Restart=on-failure, runs as a non-root `canary` user, reads config
-  from `/etc/canary/canary.yaml`, writes to `/data/canary`.
-- [ ] **5.19 — Install script.** `scripts/install.sh` — creates user,
-  installs venv, copies unit file, enables service. Idempotent.
-- [ ] **5.20 — Pi 5 image bring-up doc.** `docs/pi-setup.md` — Bookworm
-  install, SocketCAN modules, USB device permissions, fstab for the SSD.
+- [x] **5.18 — systemd unit.** `systemd/canary.service` runs the full
+  daemon as the non-root `canary` user, reads `/etc/canary/canary.env`
+  and `/etc/canary/canary.yaml`, grants `CAP_NET_RAW` for SocketCAN raw
+  sockets, restarts on failure, and leaves CAN interface configuration to
+  the OS / `docs/can-setup.md`. It is `Type=simple` for v1 because the
+  Python daemon does not emit `sd_notify` readiness yet; upgrade to
+  `Type=notify` only when the daemon has an explicit readiness signal.
+- [x] **5.19 — Install script.** `scripts/install_pi.sh` is the
+  idempotent Pi install helper for an already-cloned repo. It creates
+  the `canary` user/group, `/etc/canary`, `/data/canary`, copies
+  `canary.pi.example.yaml` only when config is absent, installs the
+  runtime venv via `scripts/install_deps.py --extras none --torch none`
+  by default, installs the unit, reloads systemd, and enables the
+  service. `CANARY_TORCH=cpu` opts into CPU Torch for LSTM inference.
+- [x] **5.20 — Pi 5 image bring-up doc.** `docs/pi-setup.md` covers
+  Bookworm packages, clone/install, SocketCAN active/passive bring-up,
+  optional dashboard build, systemd operation, and laptop/headless API
+  access. `docs/headless-api.md` lists REST/WebSocket endpoints and the
+  SSH tunnel workflow for laptop frontend development.
 - [ ] **5.21 — Vehicle install.** Mount Pi, run buck converter from ACC,
   verify clean shutdown on ignition off. (Hardware task; software side
   is graceful-shutdown handling.)

@@ -9,6 +9,7 @@ from src.config import CanaryConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
+PI_EXAMPLE_YAML = REPO_ROOT / "canary.pi.example.yaml"
 
 
 def test_example_yaml_loads():
@@ -27,6 +28,17 @@ def test_example_yaml_loads():
     assert config.models.isolation_forest.random_state == 42
     assert config.models.isolation_forest.per_mode_contamination == {}
     assert config.dashboard.port == 8000
+
+
+def test_pi_example_yaml_loads():
+    config = CanaryConfig.from_yaml(PI_EXAMPLE_YAML)
+    assert config.hardware.can.interface == "socketcan"
+    assert config.hardware.can.channel == "can0"
+    assert config.collection.storage_path == Path("/data/canary/sessions")
+    assert config.daemon.anomalies_dir == Path("/data/canary/anomalies")
+    assert config.daemon.models_dir == Path("models")
+    assert config.models.lstm_autoencoder.enabled is False
+    assert config.dashboard.host == "0.0.0.0"
 
 
 def test_unknown_top_level_key_rejected(tmp_path: Path):

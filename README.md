@@ -27,8 +27,8 @@ detecting subtle signs of trouble before they become failures.
   see context-appropriate signal ranges.
 - **Layered models** — Isolation Forest baseline → LSTM Autoencoder → CNN-LSTM hybrid.
 - **Local dashboard** — FastAPI + WebSocket, accessible only over the vehicle's LAN.
-- **Read-only by design** — the system never issues write or actuation commands to the
-  vehicle bus.
+- **Read-only by design** — active OBD polling may transmit diagnostic read
+  requests, but the system never issues write or actuation commands.
 
 See [`docs/CANary-overview.md`](docs/CANary-overview.md) for the full architecture,
 requirements, and development phases.
@@ -46,7 +46,7 @@ requirements, and development phases.
 ### Install (development)
 
 ```bash
-python3.12 scripts/install_deps.py
+python3 scripts/install_deps.py
 ```
 
 The installer creates `.venv`, installs the development dependencies, detects
@@ -55,8 +55,8 @@ from the matching PyTorch wheel index. Use `--dry-run` to inspect the selected
 commands, or override detection explicitly, for example:
 
 ```bash
-python3.12 scripts/install_deps.py --torch cu126
-python3.12 scripts/install_deps.py --torch cpu
+python3 scripts/install_deps.py --torch cu126
+python3 scripts/install_deps.py --torch cpu
 ```
 
 See [`docs/install.md`](docs/install.md) for the CUDA selection table,
@@ -77,6 +77,23 @@ cp canary.example.yaml canary.yaml
 .venv/bin/python -m src.main
 ```
 
+### Raspberry Pi / headless
+
+For the Pi, use the Pi-specific config and systemd install path:
+
+```bash
+sudo git clone <repo-url> /opt/canary
+cd /opt/canary
+sudo scripts/install_pi.sh
+sudo nano /etc/canary/canary.yaml
+sudo systemctl start canary
+```
+
+The daemon serves the read-only API and browser dashboard on the configured
+LAN address, defaulting to `http://<pi-hostname-or-ip>:8000/`. See
+[`docs/pi-setup.md`](docs/pi-setup.md) and
+[`docs/headless-api.md`](docs/headless-api.md).
+
 ### Test / lint / typecheck
 
 ```bash
@@ -92,10 +109,15 @@ cp canary.example.yaml canary.yaml
 ```
 canary/
 ├── canary.example.yaml       # Template config (copy → canary.yaml)
+├── canary.pi.example.yaml    # Pi/systemd deployment template
 ├── pyproject.toml
 ├── docs/
 │   ├── CANary-overview.md    # Architecture, requirements, phases
+│   ├── pi-setup.md           # Raspberry Pi 5 bring-up
+│   ├── headless-api.md       # REST/WebSocket/browser access
 │   └── implementation-tasks.md
+├── systemd/
+│   └── canary.service        # Headless daemon unit
 ├── src/
 │   ├── main.py               # Entry point
 │   ├── config.py             # YAML → Pydantic
