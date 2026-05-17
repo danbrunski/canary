@@ -1,3 +1,13 @@
+import {
+  definitionListClass,
+  definitionRowClass,
+  definitionTermClass,
+  definitionValueClass,
+  panelClass,
+  panelHeaderClass,
+  panelTitleClass,
+  placeholderClass,
+} from "../styles";
 import type { AnomalyEvent, StatusResponse } from "../types";
 
 interface ModelPanelProps {
@@ -30,38 +40,38 @@ export function ModelPanel({ status, events }: ModelPanelProps) {
           .reduce((a, b) => a + b, 0) / lstmEvents.length;
 
   return (
-    <section className="panel model-panel">
-      <header>
-        <h2>Models</h2>
+    <section className={panelClass}>
+      <header className={panelHeaderClass}>
+        <h2 className={panelTitleClass}>Models</h2>
       </header>
-      <dl>
+      <dl className={definitionListClass}>
         {Object.entries(versions).length === 0 ? (
-          <div className="placeholder">no model artifacts loaded.</div>
+          <div className={placeholderClass}>no model artifacts loaded.</div>
         ) : (
           Object.entries(versions).map(([name, version]) => (
-            <div key={name} className="model-row">
-              <dt>{name}</dt>
-              <dd>{version ?? "no version"}</dd>
+            <div key={name} className={definitionRowClass}>
+              <dt className={definitionTermClass}>{name}</dt>
+              <dd className={definitionValueClass}>{version ?? "no version"}</dd>
             </div>
           ))
         )}
         {meanLstmLatency !== null && (
-          <div className="model-row">
-            <dt>lstm mean latency</dt>
-            <dd>{meanLstmLatency.toFixed(1)} ms</dd>
+          <div className={definitionRowClass}>
+            <dt className={definitionTermClass}>lstm mean latency</dt>
+            <dd className={definitionValueClass}>{meanLstmLatency.toFixed(1)} ms</dd>
           </div>
         )}
       </dl>
       {counters && (
-        <div className="counters">
+        <div className="mt-3 flex gap-4 text-[0.78rem] text-fg-dim">
           <span title="anomaly events emitted to the logger + ws">
-            emitted: <b>{counters.emitted}</b>
+            emitted: <b className="text-fg">{counters.emitted}</b>
           </span>
           <span title="inference results that didn't cross the threshold">
-            ok: <b>{counters.suppressed_not_anomaly}</b>
+            ok: <b className="text-fg">{counters.suppressed_not_anomaly}</b>
           </span>
           <span title="anomalies dropped within the dedupe window">
-            deduped: <b>{counters.suppressed_dedupe}</b>
+            deduped: <b className="text-fg">{counters.suppressed_dedupe}</b>
           </span>
         </div>
       )}

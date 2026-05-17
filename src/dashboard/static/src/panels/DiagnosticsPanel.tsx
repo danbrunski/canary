@@ -1,4 +1,5 @@
 import type { AppMode } from "../types";
+import { cn, panelClass, panelHeaderClass, panelTitleClass, placeholderClass } from "../styles";
 
 interface DiagnosticsPanelProps {
   mode: AppMode;
@@ -22,12 +23,14 @@ interface DiagnosticsPanelProps {
 export function DiagnosticsPanel({ mode }: DiagnosticsPanelProps) {
   if (mode !== "parked") return null;
   return (
-    <section className="panel diagnostics-panel">
-      <header>
-        <h2>Diagnostics</h2>
-        <span className="warning">parked / maintenance mode</span>
+    <section className={cn(panelClass, "bg-accent/10")}>
+      <header className={panelHeaderClass}>
+        <h2 className={panelTitleClass}>Diagnostics</h2>
+        <span className="text-[0.7rem] uppercase tracking-[0.1em] text-accent">
+          parked / maintenance mode
+        </span>
       </header>
-      <p className="placeholder">
+      <p className={placeholderClass}>
         Diagnostic tools land here as they're built. Each control will
         require explicit confirmation and backend parked-mode enforcement.
       </p>

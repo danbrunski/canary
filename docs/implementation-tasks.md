@@ -26,6 +26,21 @@ full public OBD coverage, proprietary Nissan telemetry/diagnostics,
 false-positive feedback, training/model-health dashboards, and acceptance tests
 that prove the Pi-in-truck workflow end to end (Phase 6).
 
+Overnight batch (2026-05-17): the no-truck / data-analysis half of Phase 6
+landed — 6.1 (typed J1979 registry), 6.6 (trip/fuel/perf derived channels),
+6.8 (sandboxed custom PIDs), 6.20 (dataset export), 6.21 (training-run
+ledger), 6.23 backend (dataset health + ready-to-train gate), 6.24
+(false-positive feedback), 6.25 (threshold tuning/suppression, audited +
+reversible), 6.27 (drift/inference-health on /status), 6.32 (local companion
+library), 6.3/6.4 backend (OBD coverage endpoint + DTC catalog), plus 4.D.2
+(verified), 4.D.3 (synthetic bearing-wear validation), 6.30 (operator
+runbooks), and 0.8 (sim dev container). The dashboard frontend now builds on
+Tailwind CSS v4 with a refreshed visual system. What remains is genuinely
+hardware-gated or pure-frontend: the React panels for these new backends
+(6.9–6.14, 6.16, 6.22 UI), live-ECU flows (6.4 reads, 6.15 DID profile),
+write/parked actions (6.5, 6.18), the companion API/sync/publish (6.33–6.39),
+and the in-truck acceptance matrix (6.28–6.29).
+
 ---
 
 ## Phase 0 — Project Bootstrap

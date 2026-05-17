@@ -1,4 +1,5 @@
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
+import { panelClass, panelHeaderClass, panelTitleClass, placeholderClass } from "../styles";
 
 interface TpmsPanelProps {
   channels: Map<string, ChannelSnapshot>;
@@ -25,18 +26,18 @@ const TPMS_CHANNELS = [
 export function TpmsPanel({ channels }: TpmsPanelProps) {
   const found = TPMS_CHANNELS.map((key) => channels.get(key)).filter(Boolean);
   return (
-    <section className="panel tpms-panel">
-      <header>
-        <h2>TPMS</h2>
+    <section className={panelClass}>
+      <header className={panelHeaderClass}>
+        <h2 className={panelTitleClass}>TPMS</h2>
       </header>
       {found.length === 0 ? (
-        <p className="placeholder">
+        <p className={placeholderClass}>
           TPMS bindings not yet pinned — see <code>data/bindings.yaml</code>.
           Once the four per-tire pressure signals are decoded with
           confidence ≥ medium, they'll appear here automatically.
         </p>
       ) : (
-        <div className="tpms-grid">{/* future: per-corner cards */}</div>
+        <div className="grid grid-cols-2 gap-2">{/* future: per-corner cards */}</div>
       )}
     </section>
   );
