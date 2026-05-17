@@ -25,6 +25,7 @@ def _make_config(tmp_path: Path) -> CanaryConfig:
     cfg.write_text(_config_yaml(storage))
     return CanaryConfig.from_yaml(cfg)
 
+
 GOOD = """
 id: city
 label: "City drive"
@@ -116,9 +117,7 @@ def test_test_profiles_endpoint(tmp_path: Path) -> None:
     assert body["profiles"][0]["id"] == "city"
     assert body["errors"] == []
 
-    missing = create_app(
-        config, anomalies_dir=anomalies_dir, test_profiles_dir=tmp_path / "absent"
-    )
+    missing = create_app(config, anomalies_dir=anomalies_dir, test_profiles_dir=tmp_path / "absent")
     r = TestClient(missing).get("/test-profiles")
     assert r.status_code == 200
     assert r.json() == {"profiles": [], "errors": []}

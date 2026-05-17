@@ -410,8 +410,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     protocols = available_protocols(args.profiles_dir)
     if args.protocol not in protocols:
         print(
-            f"error: unknown protocol {args.protocol!r}. "
-            f"Available: {', '.join(sorted(protocols))}",
+            f"error: unknown protocol {args.protocol!r}. Available: {', '.join(sorted(protocols))}",
             file=sys.stderr,
         )
         return 2
