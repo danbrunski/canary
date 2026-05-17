@@ -18,17 +18,17 @@ describe("Panel primitive", () => {
     expect(screen.getByText("3 events")).toBeInTheDocument();
   });
 
-  it("actions override count", () => {
+  it("count and actions coexist", () => {
     render(
       createElement(Panel, {
         title: "T",
-        count: "ignored",
+        count: "3 events",
         actions: createElement("span", null, "filters"),
         children: null,
       }),
     );
     expect(screen.getByText("filters")).toBeInTheDocument();
-    expect(screen.queryByText("ignored")).not.toBeInTheDocument();
+    expect(screen.getByText("3 events")).toBeInTheDocument();
   });
 
   it("PanelGrid renders its children", () => {

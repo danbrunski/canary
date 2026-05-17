@@ -15,17 +15,19 @@ import type {
   StatusResponse,
   WorkbenchItem,
 } from "../types";
+import { AlarmsPanel } from "./AlarmsPanel";
 import { AnomalyPanel } from "./AnomalyPanel";
 import { BehaviorModelsPanel } from "./BehaviorModelsPanel";
+import { ChartsPanel } from "./ChartsPanel";
 import { ControlPanel } from "./ControlPanel";
 import { DatasetHealthPanel } from "./DatasetHealthPanel";
 import { ModelPanel } from "./ModelPanel";
 import { ObdCoveragePanel } from "./ObdCoveragePanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
-import { TrainingPanel } from "./TrainingPanel";
-import { TuningPanel } from "./TuningPanel";
 import { SystemPanel } from "./SystemPanel";
 import { TelemetryPanel } from "./TelemetryPanel";
+import { TrainingPanel } from "./TrainingPanel";
+import { TuningPanel } from "./TuningPanel";
 import { TpmsPanel } from "./TpmsPanel";
 
 export interface DashboardData {
@@ -111,21 +113,9 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
         <ControlPanel token={d.token} onTokenChange={d.onTokenChange} />
       );
     case "live-charts":
-      return (
-        <PlaceholderPanel
-          title="Advanced charting"
-          task="6.10"
-          summary="Multi-channel trend charts with selectable axes, zoom, time-window selection, min/max/avg overlays and window export. Until then, Gauges carries the live sparkline + chart."
-        />
-      );
+      return <ChartsPanel channels={d.channels} />;
     case "live-alarms":
-      return (
-        <PlaceholderPanel
-          title="User alarms"
-          task="6.11"
-          summary="Per-channel threshold alarms with debounce / hysteresis / cool-down, audible alerts and history, visually distinct from ML anomalies."
-        />
-      );
+      return <AlarmsPanel channels={d.channels} />;
     case "diag-coverage":
       return <ObdCoveragePanel />;
     case "diag-dtc":

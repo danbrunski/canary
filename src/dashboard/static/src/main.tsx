@@ -13,3 +13,14 @@ createRoot(root).render(
     <App />
   </StrictMode>,
 );
+
+// Offline shell caching (Task 6.12). Production only — in `pnpm dev` a SW
+// would cache Vite's HMR chunks and fight the dev server. The SW itself
+// never caches dynamic API/WS paths (see public/sw.js).
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      /* SW unsupported / blocked — the app still works fully online */
+    });
+  });
+}

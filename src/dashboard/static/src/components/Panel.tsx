@@ -42,7 +42,16 @@ export function Panel({
     <section className={cn(panelClass, className)}>
       <header className={centerHeader ? panelHeaderCenterClass : panelHeaderClass}>
         <h2 className={panelTitleClass}>{title}</h2>
-        {actions ?? (count != null && <span className={panelCountClass}>{count}</span>)}
+        {/* count + actions coexist (count = info, actions = controls);
+            either may be omitted. */}
+        {(count != null || actions) && (
+          <span className="flex items-center gap-3">
+            {count != null && (
+              <span className={panelCountClass}>{count}</span>
+            )}
+            {actions}
+          </span>
+        )}
       </header>
       {children}
     </section>
