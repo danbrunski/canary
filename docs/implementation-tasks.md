@@ -1264,12 +1264,27 @@ training/model-health visualization, and Torque Pro parity.
 
 ### 6D. Data export, training operations, and anomaly tuning
 
-- [ ] **6.20 — Dataset capture and export pipeline.** Add dashboard and CLI
-  controls to mark a capture as "training candidate", select channels, apply
-  resampling, include/exclude annotations, and export CSV, JSONL, Parquet, ZIP,
-  and model-ready feature matrices. Every export should include manifest
-  metadata: vehicle, config hash, channel schema, sessions, tags, time range,
-  model/training purpose, and data-quality warnings.
+- [x] **6.20 — Dataset capture and export pipeline.** `src/datasets/export.py`
+  — `DatasetExportSpec` (sessions, channel filter, resample_hz, include/exclude
+  tag windows, formats, purpose, zip) → `build_dataset` (read_session → to_wide
+  → optional resample → per-session tag-window mask via `session.build_windows`,
+  POSIX-seconds aligned independent of the `timestamp[us]` unit → channel
+  select) returning the frame + a `DatasetManifest` (created_at, purpose,
+  vehicle, sha256 `config_hash`, sessions, channel schema+dtypes, tag labels,
+  time range, row count, spec, and **quality warnings**: high-NaN channels,
+  parse-error-heavy sessions, missing/empty sessions, requested-but-absent
+  channels, no-tag-match — Risk R12, honest about what it ships).
+  `export_dataset` writes CSV/JSONL/Parquet/`feature_matrix` (model-ready via
+  the shared `build_feature_frame` + `trainable_feature_columns`) +
+  `dataset_manifest.json` + an optional ZIP. `mark_training_candidate` flags a
+  session via the existing metadata path (consumed by the 6.23 health view).
+  CLI `scripts/export_dataset.py` (`--mark-candidate`, multi `--session`/
+  `--channel`/`--format`, `--resample-hz`, tag filters, prints quality
+  warnings). Covered by `tests/test_dataset_export.py` (11 tests: manifest,
+  channel-select+missing-warn, resample, tag include/exclude+no-match warn,
+  parse-error/missing-session/empty warnings, spec validation, all-format+ZIP
+  export, feature-matrix, mark-candidate, CLI). Control-plane job submission is
+  6.13/6.36. (FR-08, FR-09)
 - [x] **6.21 — Training run ledger and metrics artifacts.**
   `src/models/training_ledger.py` — `TrainingRunRecord` (strict Pydantic:
   run_id, model_type, version, status, input sessions, feature schema,
