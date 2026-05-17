@@ -93,6 +93,17 @@ export function getLatestTelemetry(
   return fetchJson<TelemetryLatestResponse>(`/telemetry/latest?n=${n}`, { signal });
 }
 
+/** Seed shape for the live panels: the most recent sample for *every*
+ *  channel, not the last N rows globally (which the high-rate CAN bus
+ *  dominates, starving the ~1 Hz OBD gauges). */
+export function getLatestPerChannel(
+  signal?: AbortSignal,
+): Promise<TelemetryLatestResponse> {
+  return fetchJson<TelemetryLatestResponse>(`/telemetry/latest?per_channel=true`, {
+    signal,
+  });
+}
+
 export function getBehaviorModels(
   signal?: AbortSignal,
 ): Promise<BehaviorModelsResponse> {

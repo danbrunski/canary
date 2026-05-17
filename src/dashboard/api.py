@@ -286,6 +286,61 @@ def read_latest_telemetry_rows(
     return rows
 
 
+_PER_CHANNEL_COLUMNS = [
+    "timestamp",
+    "source",
+    "channel",
+    "value_number",
+    "value_text",
+    "value_bool",
+    "unit",
+]
+
+
+def read_latest_per_channel(
+    storage_path: Path,
+    *,
+    window_seconds: float = 90.0,
+    max_chunks: int = 300,
+) -> list[dict[str, Any]]:
+    """Return the most recent row for *every distinct channel* in the newest
+    session.
+
+    ``read_latest_telemetry_rows`` returns the last N rows globally, which the
+    high-rate CAN bus dominates ~60:1 over the ~1 Hz OBD poll — a 120-row seed
+    carries only 2–3 OBD channels, so the dashboard's gauges come up nearly
+    empty until the WebSocket slowly backfills. This instead scans chunks
+    newest-first until the accumulated span covers ``window_seconds`` (one full
+    OBD poll cycle, with margin) and keeps the latest sample per
+    ``(source, channel)`` — so every gauge renders immediately on load.
+
+    Only the value columns are read (the binary ``payload`` is skipped), which
+    keeps a ~90 s / ~150 k-row scan well under half a second. Returns ``[]``
+    when there's no session/chunk on disk.
+    """
+    latest = _resolve_latest_session(storage_path)
+    if latest is None:
+        return []
+    chunks = [c for c in sorted(latest.glob(PARQUET_PATTERN)) if c.stat().st_size > 0]
+    if not chunks:
+        return []
+    collected: list[pd.DataFrame] = []
+    for chunk in reversed(chunks[-max_chunks:]):  # newest-first
+        collected.append(pd.read_parquet(chunk, columns=_PER_CHANNEL_COLUMNS))
+        spanned = pd.concat(collected) if len(collected) > 1 else collected[0]
+        ts = pd.to_datetime(spanned["timestamp"], utc=True)
+        if (ts.max() - ts.min()).total_seconds() >= window_seconds:
+            break
+    table = pd.concat(collected[::-1], ignore_index=True)
+    table["timestamp"] = pd.to_datetime(table["timestamp"], utc=True)
+    table = table.sort_values("timestamp", kind="stable")
+    latest_rows = table.groupby(["source", "channel"], as_index=False).last()
+    rows: list[dict[str, Any]] = []
+    for record in latest_rows.to_dict(orient="records"):
+        rows.append(_normalize_telemetry_row({str(k): v for k, v in record.items()}))
+    return rows
+
+
 def read_obd_coverage(storage_path: Path) -> dict[str, Any]:
     """OBD capability/coverage (Task 6.3) derived from observed telemetry.
 
@@ -604,8 +659,13 @@ def create_app(
     @app.get("/telemetry/latest")
     def get_telemetry_latest(
         n: int = Query(default=100, ge=1, le=10_000),
+        per_channel: bool = Query(default=False),
     ) -> dict[str, Any]:
-        rows = read_latest_telemetry_rows(config.collection.storage_path, n=n)
+        rows = (
+            read_latest_per_channel(config.collection.storage_path)
+            if per_channel
+            else read_latest_telemetry_rows(config.collection.storage_path, n=n)
+        )
         return {"rows": rows, "count": len(rows)}
 
     @app.get("/models/behavior")
@@ -1257,4 +1317,5 @@ __all__ = [
     "echo_config",
     "read_anomalies_since",
     "read_latest_telemetry_rows",
+    "read_latest_per_channel",
 ]

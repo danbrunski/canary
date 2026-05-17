@@ -4,10 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TelemetryRow } from "../types";
 
 const mocks = vi.hoisted(() => ({
-  getLatestTelemetry: vi.fn(),
+  getLatestPerChannel: vi.fn(),
   openReconnectingSocket: vi.fn(),
 }));
-vi.mock("../api/http", () => ({ getLatestTelemetry: mocks.getLatestTelemetry }));
+vi.mock("../api/http", () => ({ getLatestPerChannel: mocks.getLatestPerChannel }));
 vi.mock("../api/websocket", () => ({
   openReconnectingSocket: mocks.openReconnectingSocket,
 }));
@@ -24,14 +24,14 @@ const makeRow = (overrides: Partial<TelemetryRow> = {}): TelemetryRow => ({
 });
 
 beforeEach(() => {
-  mocks.getLatestTelemetry.mockReset();
+  mocks.getLatestPerChannel.mockReset();
   mocks.openReconnectingSocket.mockReset();
 });
 afterEach(() => vi.clearAllMocks());
 
 describe("useTelemetryStream", () => {
   it("seeds channels from /telemetry/latest", async () => {
-    mocks.getLatestTelemetry.mockResolvedValue({
+    mocks.getLatestPerChannel.mockResolvedValue({
       rows: [makeRow({ channel: "RPM", value: 700 })],
       count: 1,
     });
@@ -45,7 +45,7 @@ describe("useTelemetryStream", () => {
   });
 
   it("ingests live messages and accumulates per-channel history", async () => {
-    mocks.getLatestTelemetry.mockResolvedValue({ rows: [], count: 0 });
+    mocks.getLatestPerChannel.mockResolvedValue({ rows: [], count: 0 });
     let onMessage: ((r: TelemetryRow) => void) | null = null;
     mocks.openReconnectingSocket.mockImplementation((opts: { onMessage: (r: TelemetryRow) => void }) => {
       onMessage = opts.onMessage;
@@ -66,7 +66,7 @@ describe("useTelemetryStream", () => {
   });
 
   it("caps history at 120 samples (sliding ring buffer)", async () => {
-    mocks.getLatestTelemetry.mockResolvedValue({ rows: [], count: 0 });
+    mocks.getLatestPerChannel.mockResolvedValue({ rows: [], count: 0 });
     let onMessage: ((r: TelemetryRow) => void) | null = null;
     mocks.openReconnectingSocket.mockImplementation((opts: { onMessage: (r: TelemetryRow) => void }) => {
       onMessage = opts.onMessage;
@@ -86,7 +86,7 @@ describe("useTelemetryStream", () => {
   });
 
   it("skips non-numeric values from the history but keeps the latest record", async () => {
-    mocks.getLatestTelemetry.mockResolvedValue({ rows: [], count: 0 });
+    mocks.getLatestPerChannel.mockResolvedValue({ rows: [], count: 0 });
     let onMessage: ((r: TelemetryRow) => void) | null = null;
     mocks.openReconnectingSocket.mockImplementation((opts: { onMessage: (r: TelemetryRow) => void }) => {
       onMessage = opts.onMessage;
@@ -104,7 +104,7 @@ describe("useTelemetryStream", () => {
   });
 
   it("ignores malformed rows (missing source/channel)", async () => {
-    mocks.getLatestTelemetry.mockResolvedValue({ rows: [], count: 0 });
+    mocks.getLatestPerChannel.mockResolvedValue({ rows: [], count: 0 });
     let onMessage: ((r: TelemetryRow) => void) | null = null;
     mocks.openReconnectingSocket.mockImplementation((opts: { onMessage: (r: TelemetryRow) => void }) => {
       onMessage = opts.onMessage;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { openReconnectingSocket } from "../api/websocket";
-import { getLatestTelemetry } from "../api/http";
+import { getLatestPerChannel } from "../api/http";
 import type { ConnectionState, TelemetryRow } from "../types";
 
 /** Per-channel state the dashboard cares about. */
@@ -48,8 +48,10 @@ export function useTelemetryStream() {
     };
 
     // Seed via the REST snapshot so panels render with real values before
-    // the first WebSocket frame lands.
-    getLatestTelemetry(HISTORY_LENGTH, controller.signal)
+    // the first WebSocket frame lands. Per-channel (latest sample for every
+    // channel) — a flat last-N seed is ~60:1 CAN-dominated and would leave
+    // the ~1 Hz OBD gauges blank until the socket slowly backfilled them.
+    getLatestPerChannel(controller.signal)
       .then((seed) => {
         if (cancelled) return;
         for (const row of seed.rows) ingest(row);
