@@ -93,6 +93,14 @@ def build_feature_frame(
             long = decode_can_rows(long, bindings)
         if dbc_database is not None:
             long = decode_can_rows_dbc(long, dbc_database)
+        # Raw CAN frames are ~98% of the rows and carry no numeric value
+        # (the bytes live in `payload`); they exist only to be decoded into
+        # the decoded:* / dbc:* rows appended above. Once decoded they're
+        # dead weight: their pivot columns are all-NaN and dropped by
+        # trainable_feature_columns anyway (the model has zero can:*
+        # features). Dropping them here is output-equivalent but collapses
+        # the to_wide pivot's row volume ~50x — the actual OOM cause.
+        long = long[long["source"] != "can"]
         wide = to_wide(long, coerce_numeric=True)
         resampled_parts.append(resample_wide(wide, config=resample_config))
     resampled = pd.concat(resampled_parts, ignore_index=True)
