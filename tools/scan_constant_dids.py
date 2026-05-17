@@ -169,8 +169,11 @@ def _build_transport(
         banner = (
             f"Canable {config.hardware.can.channel} "
             f"(req 0x{request_id:X} → resp 0x{response_id:X}"
-            + (f", session 0x{session:X} keepalive {args.keepalive}s)" if session is not None else ")")
         )
+        if session is not None:
+            banner += f", session 0x{session:X} keepalive {args.keepalive}s)"
+        else:
+            banner += ")"
         return transport, bus.shutdown, banner
 
     ser = _open_serial(args.port, args.baud)
