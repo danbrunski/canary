@@ -1,8 +1,10 @@
+import { createElement } from "react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { BindingDisplay } from "../types";
-import { renderChannel } from "./TelemetryPanel";
+import { TelemetryPanel, renderChannel } from "./TelemetryPanel";
 
 const snapshot = (overrides: Partial<ChannelSnapshot["latest"]> = {}): ChannelSnapshot => ({
   latest: {
@@ -138,5 +140,43 @@ describe("renderChannel", () => {
     expect(renderChannel(snapshot({ value: 0.123 }), undefined).text).toBe("0.12");
     expect(renderChannel(snapshot({ value: 12.34 }), undefined).text).toBe("12.3");
     expect(renderChannel(snapshot({ value: 1234.5 }), undefined).text).toBe("1235");
+  });
+});
+
+describe("TelemetryPanel", () => {
+  it("hides empty raw CAN frames from counts and default chart selection", async () => {
+    const channels = new Map<string, ChannelSnapshot>();
+    for (let i = 0; i < 28; i += 1) {
+      const id = `0x${(0x1f9 + i).toString(16).toUpperCase()}`;
+      channels.set(
+        `can:${id}`,
+        snapshot({ source: "can", channel: id, value: null, unit: "" }),
+      );
+    }
+    channels.set(
+      "obd:EVAPORATIVE_PURGE",
+      snapshot({
+        channel: "EVAPORATIVE_PURGE",
+        value: 0,
+        unit: "%",
+      }),
+    );
+    channels.get("obd:EVAPORATIVE_PURGE")!.history = [0, 1, 0];
+    channels.set(
+      "obd:FUEL_LEVEL",
+      snapshot({
+        channel: "FUEL_LEVEL",
+        value: 40,
+        unit: "%",
+      }),
+    );
+    channels.get("obd:FUEL_LEVEL")!.history = [40, 39.8, 40];
+
+    render(createElement(TelemetryPanel, { channels, bindings: {} }));
+
+    expect(screen.getByText("2 live values")).toBeInTheDocument();
+    expect(screen.queryByText("0x1F9")).not.toBeInTheDocument();
+    expect(screen.getByText("2 visible / select up to 6 to chart")).toBeInTheDocument();
+    expect(await screen.findByText("Live chart")).toBeInTheDocument();
   });
 });

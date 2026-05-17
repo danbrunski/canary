@@ -14,6 +14,7 @@ import pytest
 
 from src.collection.can_collector import make_session_dir
 from src.collection.can_obd_collector import (
+    AUTO_BASELINE_PID_NAMES,
     CanObdSpec,
     build_poll_requests,
     parse_can_id,
@@ -65,6 +66,39 @@ class _FakeBus:
         return None
 
 
+class _NegativeThenPositiveBus:
+    def __init__(self) -> None:
+        self.sent: list[can.Message] = []
+        self._responses: list[can.Message] = []
+
+    def send(self, msg: can.Message) -> None:
+        self.sent.append(msg)
+        data = bytes(msg.data)
+        if msg.arbitration_id == 0x7DF and data[:3] == bytes([0x02, 0x01, 0x04]):
+            self._responses.append(
+                can.Message(
+                    arbitration_id=0x7E8,
+                    data=bytes([0x03, 0x7F, 0x01, 0x12, 0x00, 0x00, 0x00, 0x00]),
+                    is_extended_id=False,
+                )
+            )
+        elif msg.arbitration_id == 0x7DF and data[:3] == bytes([0x02, 0x01, 0x0C]):
+            self._responses.append(
+                can.Message(
+                    arbitration_id=0x7E8,
+                    data=bytes([0x04, 0x41, 0x0C, 0x0A, 0xF0, 0x00, 0x00, 0x00]),
+                    is_extended_id=False,
+                )
+            )
+
+    def recv(self, timeout: float = 0.0) -> can.Message | None:
+        if self._responses:
+            return self._responses.pop(0)
+        if timeout:
+            time.sleep(min(timeout, 0.005))
+        return None
+
+
 def test_parse_pid_token_accepts_auto_names_and_hex() -> None:
     assert parse_pid_token("auto") is None
     assert parse_pid_token("RPM") == 0x0C
@@ -89,7 +123,29 @@ def test_build_poll_requests_combines_auto_explicit_and_dids() -> None:
         dids=("1101",),
     )
     requests = build_poll_requests(_StaticDiscovery(), spec)
-    assert [r.channel for r in requests] == ["RPM", "COOLANT_TEMP", "SPEED", "DID_1101"]
+    channels = [r.channel for r in requests]
+    assert channels[:2] == ["RPM", "COOLANT_TEMP"]
+    assert "SPEED" in channels
+    assert channels[-1] == "DID_1101"
+
+
+def test_auto_poll_requests_probe_full_decoded_pid_catalog_when_discovery_is_sparse() -> None:
+    class _SparseDiscovery:
+        def query_supported_mode_01_pids(self) -> tuple[int, ...]:
+            return (0x2E, 0x2F)
+
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=("auto",),
+    )
+
+    channels = [r.channel for r in build_poll_requests(_SparseDiscovery(), spec)]
+
+    assert "EVAPORATIVE_PURGE" in channels
+    assert "FUEL_LEVEL" in channels
+    for name in AUTO_BASELINE_PID_NAMES:
+        assert name in channels
+    assert len(channels) >= 24
 
 
 def test_run_loop_emits_can_frames_pid_readings_and_did_readings() -> None:
@@ -126,6 +182,37 @@ def test_run_loop_emits_can_frames_pid_readings_and_did_readings() -> None:
     assert len(frames) >= 2
     assert stats.requests_sent >= 2
     assert stats.readings_emitted >= 2
+
+
+def test_negative_pid_response_does_not_block_following_pids() -> None:
+    bus = _NegativeThenPositiveBus()
+    stop = threading.Event()
+    readings: list[Any] = []
+
+    def on_reading(reading: Any) -> None:
+        readings.append(reading)
+        if reading.pid == "RPM":
+            stop.set()
+
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        poll_rate_hz=100.0,
+        pids=("ENGINE_LOAD", "RPM"),
+        request_timeout_seconds=1.0,
+    )
+
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        spec,
+        on_frame=lambda _msg: None,
+        on_reading=on_reading,
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 0.4,
+    )
+
+    assert [reading.pid for reading in readings] == ["RPM"]
+    assert len(bus.sent) >= 2
+    assert stats.requests_sent >= 2
 
 
 # --- record_can_obd reconnect resilience -----------------------------------

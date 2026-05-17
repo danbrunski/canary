@@ -183,25 +183,33 @@ class CanObdClient:
         )
 
     def query_supported_mode_01_pids(self) -> tuple[int, ...]:
-        """Enumerate the Mode 01 PIDs the responding ECU claims to support.
+        """Enumerate the Mode 01 PIDs responding ECUs claim to support.
 
         Walks PID 0x00 → 0x20 → 0x40 → 0x60 → 0x80 → 0xA0 → 0xC0, each of
-        which is a 32-bit bitmask of the next 32 PIDs. The walk stops when
-        a response's high-bit (continuation marker) is clear, matching the
-        SAE J1979 spec. Returns the sorted tuple of supported PID numbers.
+        which is a 32-bit bitmask of the next 32 PIDs. Functional OBD
+        requests can be answered by multiple modules, so each probe merges
+        all responder bitmasks instead of trusting whichever ECU answered
+        first. The walk continues while any responder sets the continuation
+        marker, matching the SAE J1979 spec. Returns the sorted tuple of
+        supported PID numbers.
         """
         supported: set[int] = set()
         for base in (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0):
-            resp = self.query_mode_01(base)
-            if resp is None or len(resp.payload) < 4:
+            responses = self._request_many(service=0x01, pid=base, expect_pid_echo=True)
+            bitmasks = [
+                int.from_bytes(resp.payload[:4], byteorder="big")
+                for resp in responses
+                if len(resp.payload) >= 4
+            ]
+            if not bitmasks:
                 break
-            bits = int.from_bytes(resp.payload[:4], byteorder="big")
-            for i in range(32):
-                if bits & (1 << (31 - i)):
-                    supported.add(base + 1 + i)
+            for bits in bitmasks:
+                for i in range(32):
+                    if bits & (1 << (31 - i)):
+                        supported.add(base + 1 + i)
             # The lowest bit of the bitmask indicates "more PIDs available
-            # at base+32" — when clear, stop walking.
-            if not (bits & 0x01):
+            # at base+32" — when no responder sets it, stop walking.
+            if not any(bits & 0x01 for bits in bitmasks):
                 break
         # The probe PIDs themselves (0x00 / 0x20 / …) aren't telemetry; drop them.
         for base in (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0):
@@ -237,6 +245,76 @@ class CanObdClient:
             service=service,
             pid_echo=pid if expect_pid_echo else None,
         )
+
+    def _request_many(
+        self,
+        *,
+        service: int,
+        pid: int | None,
+        expect_pid_echo: bool,
+        request_id: int | None = None,
+        quiet_seconds: float = 0.05,
+    ) -> list[ObdResponse]:
+        """Send a request and collect single-frame replies from all responders.
+
+        Supported-PID probes are functional broadcasts, so more than one ECU
+        may answer. Once the first relevant response arrives, keep listening
+        for a short quiet window so slower responders are merged without
+        waiting the full timeout on every successful probe.
+        """
+        request_payload = self._build_request(service=service, pid=pid)
+        message = can.Message(
+            arbitration_id=self._request_id if request_id is None else request_id,
+            data=request_payload,
+            is_extended_id=False,
+        )
+        try:
+            self._bus.send(message)
+        except can.CanError:
+            log.warning("CAN send failed", extra={"service": service, "pid": pid})
+            return []
+
+        expected_service = 0x40 | service
+        deadline = self._time_fn() + self._timeout
+        quiet_deadline: float | None = None
+        responses: dict[int, ObdResponse] = {}
+
+        while True:
+            now = self._time_fn()
+            if now >= deadline or (quiet_deadline is not None and now >= quiet_deadline):
+                break
+            wait_until = deadline if quiet_deadline is None else min(deadline, quiet_deadline)
+            frame = self._bus.recv(timeout=max(0.001, wait_until - now))
+            if frame is None:
+                continue
+            if not (self._response_id_min <= frame.arbitration_id <= self._response_id_max):
+                continue
+            data = bytes(frame.data)
+            if not data:
+                continue
+            pci_high = (data[0] >> 4) & 0x0F
+            if pci_high != _PCI_SINGLE_FRAME:
+                continue
+            length = data[0] & 0x0F
+            body = data[1 : 1 + length] if 1 <= length <= 7 and len(data) >= 1 + length else b""
+            if len(body) >= 3 and body[0] == 0x7F and body[1] == service:
+                quiet_deadline = self._time_fn() + quiet_seconds
+                continue
+            payload = self._handle_single_frame(
+                data, expected_service, pid if expect_pid_echo else None
+            )
+            if payload is None:
+                continue
+            responder = int(frame.arbitration_id)
+            responses[responder] = ObdResponse(
+                service=expected_service,
+                pid=pid if expect_pid_echo else None,
+                payload=payload,
+                responder_id=responder,
+            )
+            quiet_deadline = self._time_fn() + quiet_seconds
+
+        return list(responses.values())
 
     def _build_request(self, *, service: int, pid: int | None) -> bytes:
         """Single-frame request body. Padded to 8 bytes with 0x00."""

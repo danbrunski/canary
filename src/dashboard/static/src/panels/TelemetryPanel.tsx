@@ -31,6 +31,12 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
   const [query, setQuery] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
 
+  const displayChannels = useMemo(() => {
+    return [...channels]
+      .filter(([_key, snap]) => !isEmptyRawCan(snap))
+      .sort(([a], [b]) => a.localeCompare(b));
+  }, [channels]);
+
   const { primary, secondary } = useMemo(() => {
     const primary: [string, ChannelSnapshot][] = [];
     const secondary: [string, ChannelSnapshot][] = [];
@@ -39,33 +45,33 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
       if (snap) primary.push([key, snap]);
     }
     const primarySet = new Set(PRIMARY_CHANNELS);
-    for (const [key, snap] of [...channels].sort(([a], [b]) => a.localeCompare(b))) {
-      if (isEmptyRawCan(snap)) continue;
+    for (const [key, snap] of displayChannels) {
       if (!primarySet.has(key)) secondary.push([key, snap]);
     }
     return { primary, secondary };
-  }, [channels]);
+  }, [channels, displayChannels]);
 
   const visibleChannels = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return [...channels]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .filter(([key, snap]) => {
-        if (isEmptyRawCan(snap)) return false;
-        if (!needle) return true;
-        return (
-          key.toLowerCase().includes(needle) ||
-          String(snap.latest.value ?? "").toLowerCase().includes(needle) ||
-          (snap.latest.unit ?? "").toLowerCase().includes(needle)
-        );
-      });
-  }, [channels, query]);
+    return displayChannels.filter(([key, snap]) => {
+      if (!needle) return true;
+      return (
+        key.toLowerCase().includes(needle) ||
+        String(snap.latest.value ?? "").toLowerCase().includes(needle) ||
+        (snap.latest.unit ?? "").toLowerCase().includes(needle)
+      );
+    });
+  }, [displayChannels, query]);
 
   useEffect(() => {
-    if (selectedKeys.size > 0 || channels.size === 0) return;
+    if (selectedKeys.size > 0 || displayChannels.length === 0) return;
     const defaults = PRIMARY_CHANNELS.filter((key) => channels.has(key)).slice(0, 4);
-    setSelectedKeys(new Set(defaults.length > 0 ? defaults : [...channels.keys()].slice(0, 4)));
-  }, [channels, selectedKeys.size]);
+    const numericFallback = displayChannels
+      .filter(([_key, snap]) => snap.history.length > 0)
+      .map(([key]) => key)
+      .slice(0, 4);
+    setSelectedKeys(new Set(defaults.length > 0 ? defaults : numericFallback));
+  }, [channels, displayChannels, selectedKeys.size]);
 
   const chartKeys = useMemo(
     () => [...selectedKeys].filter((key) => channels.has(key)).slice(0, 6),
@@ -103,7 +109,7 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
       <header>
         <div>
           <h2>Telemetry</h2>
-          <span className="count">{channels.size} channels</span>
+          <span className="count">{displayChannels.length} live values</span>
         </div>
         <input
           className="channel-search"

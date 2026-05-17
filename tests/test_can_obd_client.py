@@ -426,6 +426,61 @@ def test_discover_supported_pids_continues_past_continuation_bit() -> None:
     assert pids == (0x0C, 0x21)
 
 
+def test_discover_supported_pids_merges_multiple_responders() -> None:
+    """Functional supported-PID probes must not trust only the first ECU."""
+
+    class _MultiResponderSupportedBus:
+        def __init__(self) -> None:
+            self.sent: list[can.Message] = []
+            self._responses: list[can.Message] = []
+
+        def send(self, msg: can.Message) -> None:
+            self.sent.append(msg)
+            data = bytes(msg.data)
+            if data[:3] == bytes([0x02, 0x01, 0x00]):
+                transmission_bits = 0x01  # continuation to 0x20 only
+                engine_bits = (1 << 20) | (1 << 19)  # RPM + SPEED
+                self._responses.extend(
+                    [
+                        _single_frame_reply(
+                            responder_id=0x7E9,
+                            service=0x41,
+                            pid=0x00,
+                            body=transmission_bits.to_bytes(4, "big"),
+                        ),
+                        _single_frame_reply(
+                            responder_id=0x7E8,
+                            service=0x41,
+                            pid=0x00,
+                            body=engine_bits.to_bytes(4, "big"),
+                        ),
+                    ]
+                )
+            elif data[:3] == bytes([0x02, 0x01, 0x20]):
+                transmission_bits = (1 << 18) | (1 << 17)  # EVAPORATIVE_PURGE + FUEL_LEVEL
+                self._responses.append(
+                    _single_frame_reply(
+                        responder_id=0x7E9,
+                        service=0x41,
+                        pid=0x20,
+                        body=transmission_bits.to_bytes(4, "big"),
+                    )
+                )
+
+        def recv(self, timeout: float = 0.0) -> can.Message | None:
+            if self._responses:
+                return self._responses.pop(0)
+            if timeout:
+                time.sleep(min(timeout, 0.005))
+            return None
+
+    bus = _MultiResponderSupportedBus()
+    client = CanObdClient(bus, timeout_seconds=0.2)  # type: ignore[arg-type]
+
+    assert client.query_supported_mode_01_pids() == (0x0C, 0x0D, 0x2E, 0x2F)
+    assert [bytes(msg.data)[2] for msg in bus.sent] == [0x00, 0x20]
+
+
 def test_read_pids_sequential() -> None:
     """``read_pids`` queries each PID in order and returns decoded results."""
     tester, ecu = _make_pair()

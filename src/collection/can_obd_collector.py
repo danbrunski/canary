@@ -57,6 +57,9 @@ log = logging.getLogger(__name__)
 
 AUTO_PIDS = "auto"
 DEFAULT_DID_REQUEST_ID = 0x7E0
+AUTO_PROBE_TIMEOUT_SECONDS = 0.25
+AUTO_MISS_BACKOFF_SECONDS = 30.0
+AUTO_BASELINE_PID_NAMES = tuple(name for _pid, (name, _decoder) in sorted(PID_DECODERS.items()))
 
 _PCI_SINGLE_FRAME = 0x0
 _PCI_FIRST_FRAME = 0x1
@@ -97,6 +100,14 @@ class _PollRequest:
     identifier: int
     request_id: int
     channel: str
+    auto_probe: bool = False
+    fast_probe: bool = False
+
+
+@dataclass
+class _PollRequestState:
+    missed_responses: int = 0
+    suppressed_until: float = 0.0
 
 
 @dataclass
@@ -161,13 +172,32 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
             explicit_pids.append(parsed)
 
     pids: list[int] = []
-    if auto:
-        supported = client.query_supported_mode_01_pids()
-        pids.extend(pid for pid in supported if pid in PID_DECODERS)
+    auto_probe_by_pid: dict[int, bool] = {}
+    fast_probe_by_pid: dict[int, bool] = {}
 
-    for pid in explicit_pids:
+    def add_pid(pid: int, *, auto_probe: bool, fast_probe: bool = False) -> None:
         if pid not in pids:
             pids.append(pid)
+            fast_probe_by_pid[pid] = fast_probe
+        # Explicit config wins over auto management for the same PID.
+        auto_probe_by_pid[pid] = auto_probe_by_pid.get(pid, True) and auto_probe
+        fast_probe_by_pid[pid] = fast_probe_by_pid.get(pid, False) and auto_probe
+
+    if auto:
+        supported = client.query_supported_mode_01_pids()
+        for pid in supported:
+            if pid in PID_DECODERS:
+                add_pid(pid, auto_probe=True, fast_probe=False)
+        # Some ECUs/adapters report sparse or incomplete supported-PID bitmasks
+        # even though standard Mode-01 PIDs answer when queried directly. Keep
+        # discovery first for fast dashboard values, then probe every decoded
+        # standard PID CANary knows about so auto mode can surface the full
+        # basic-OBD set. Unsupported auto probes are backed off by the run loop.
+        for pid in sorted(PID_DECODERS):
+            add_pid(pid, auto_probe=True, fast_probe=True)
+
+    for pid in explicit_pids:
+        add_pid(pid, auto_probe=False, fast_probe=False)
 
     requests = [
         _PollRequest(
@@ -176,6 +206,8 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
             identifier=pid,
             request_id=DEFAULT_REQUEST_ID,
             channel=PID_DECODERS[pid][0],
+            auto_probe=auto_probe_by_pid[pid],
+            fast_probe=fast_probe_by_pid[pid],
         )
         for pid in pids
     ]
@@ -219,20 +251,21 @@ def run_can_obd_loop(
     )
     requests = build_poll_requests(client, spec)
     if requests:
-        request_spacing = 1.0 / (max(spec.poll_rate_hz, 0.001) * len(requests))
+        initial_request_spacing = 1.0 / (max(spec.poll_rate_hz, 0.001) * len(requests))
         log.info(
             "canable obd streaming started",
             extra={
                 "pids": [r.channel for r in requests if r.kind == "pid"],
                 "dids": [r.channel for r in requests if r.kind == "did"],
-                "request_spacing_seconds": request_spacing,
+                "initial_request_spacing_seconds": initial_request_spacing,
+                "auto_miss_backoff_seconds": AUTO_MISS_BACKOFF_SECONDS,
             },
         )
     else:
-        request_spacing = 0.0
         log.warning("canable obd streaming has no PID/DID requests; recording CAN only")
 
     index = 0
+    request_states = [_PollRequestState() for _request in requests]
     next_request_at = time.monotonic()
     while not _should_stop(stop_event, deadline_monotonic):
         if not requests:
@@ -240,6 +273,19 @@ def run_can_obd_loop(
             continue
 
         now = time.monotonic()
+        active_request_count = _count_active_requests(requests, request_states, now)
+        if active_request_count == 0:
+            _drain_frames_until(
+                bus,
+                on_frame,
+                stats,
+                stop_event,
+                now + 0.2,
+                deadline_monotonic,
+            )
+            continue
+
+        request_spacing = 1.0 / (max(spec.poll_rate_hz, 0.001) * active_request_count)
         if now < next_request_at:
             _drain_frames_until(
                 bus,
@@ -251,23 +297,38 @@ def run_can_obd_loop(
             )
             continue
 
-        request = requests[index]
+        selection = _select_next_request(requests, request_states, index, now)
+        if selection is None:
+            continue
+        selected_index, request, request_state = selection
+
+        timeout_seconds = spec.request_timeout_seconds
+        if request.auto_probe and (request.fast_probe or request_state.missed_responses > 0):
+            timeout_seconds = min(timeout_seconds, AUTO_PROBE_TIMEOUT_SECONDS)
         response = _query_with_tap(
             bus,
             request,
-            timeout_seconds=spec.request_timeout_seconds,
+            timeout_seconds=timeout_seconds,
             on_frame=on_frame,
             stop_event=stop_event,
             stats=stats,
             deadline_monotonic=deadline_monotonic,
         )
+        emitted = False
         if response is not None:
             reading = _response_to_reading(request, response)
             if reading is not None:
+                emitted = True
                 stats.readings_emitted += 1
                 on_reading(reading)
+        if request.auto_probe:
+            _update_auto_probe_state(
+                request_state,
+                emitted=emitted,
+                now=time.monotonic(),
+            )
 
-        index = (index + 1) % len(requests)
+        index = (selected_index + 1) % len(requests)
         next_request_at = max(next_request_at + request_spacing, time.monotonic())
 
     return stats
@@ -578,6 +639,55 @@ def _response_to_reading(
     return ObdReading(timestamp, name, value, unit)
 
 
+def _update_auto_probe_state(
+    state: _PollRequestState,
+    *,
+    emitted: bool,
+    now: float,
+) -> None:
+    if emitted:
+        state.missed_responses = 0
+        state.suppressed_until = 0.0
+        return
+    state.missed_responses += 1
+    state.suppressed_until = now + AUTO_MISS_BACKOFF_SECONDS
+
+
+def _count_active_requests(
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    now: float,
+) -> int:
+    return sum(
+        1
+        for request, state in zip(requests, states, strict=True)
+        if not _is_request_suppressed(request, state, now)
+    )
+
+
+def _select_next_request(
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    start_index: int,
+    now: float,
+) -> tuple[int, _PollRequest, _PollRequestState] | None:
+    for offset in range(len(requests)):
+        index = (start_index + offset) % len(requests)
+        request = requests[index]
+        state = states[index]
+        if not _is_request_suppressed(request, state, now):
+            return index, request, state
+    return None
+
+
+def _is_request_suppressed(
+    request: _PollRequest,
+    state: _PollRequestState,
+    now: float,
+) -> bool:
+    return request.auto_probe and state.suppressed_until > now
+
+
 def _query_with_tap(
     bus: can.BusABC,
     request: _PollRequest,
@@ -616,6 +726,8 @@ def _query_with_tap(
         responder = int(msg.arbitration_id)
 
         if pci_high == _PCI_SINGLE_FRAME:
+            if _is_negative_response(data, request.service):
+                return None
             payload = _handle_single_frame(data, expected_service, request.identifier)
             if payload is None:
                 continue
@@ -718,6 +830,14 @@ def _handle_single_frame(data: bytes, expected_service: int, identifier: int) ->
     return _extract_service_payload(body, expected_service, identifier)
 
 
+def _is_negative_response(data: bytes, service: int) -> bool:
+    length = data[0] & 0x0F
+    if length < 3 or len(data) < 1 + length:
+        return False
+    body = data[1 : 1 + length]
+    return len(body) >= 3 and body[0] == 0x7F and body[1] == service
+
+
 def _extract_service_payload(
     body: bytes,
     expected_service: int,
@@ -753,6 +873,7 @@ def _should_stop(stop_event: threading.Event, deadline_monotonic: float | None) 
 
 __all__ = [
     "AUTO_PIDS",
+    "AUTO_BASELINE_PID_NAMES",
     "DEFAULT_DID_REQUEST_ID",
     "CanObdLoopStats",
     "CanObdSpec",
