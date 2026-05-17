@@ -47,6 +47,7 @@ from src.alerts.emitter import (
 )
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
+from src.alerts.feedback import FeedbackStore
 from src.collection.queueing import QueueDepthMonitor
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
@@ -532,6 +533,7 @@ async def serve_in_background(
         capture_controller=components.capture_controller,
         job_controller=components.job_controller,
         audit_logger=components.audit_logger,
+        feedback_store=FeedbackStore(components.config.daemon.feedback_log),
     )
     if components.job_controller is not None:
         loop = asyncio.get_running_loop()

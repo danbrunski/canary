@@ -63,6 +63,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import read_events_dir
+from src.alerts.feedback import (
+    FEEDBACK_LABELS,
+    FeedbackStore,
+    annotate_events_with_feedback,
+)
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
@@ -414,6 +419,16 @@ class ModelUploadRequest(_ControlRequest):
     manifest: dict[str, Any]
 
 
+class FeedbackRequest(_ControlRequest):
+    """Operator verdict on one anomaly event (Task 6.24)."""
+
+    event: dict[str, Any]
+    label: str
+    reason: str | None = None
+    driving_context: dict[str, Any] = Field(default_factory=dict)
+    labeled_by: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -436,6 +451,7 @@ def create_app(
     control_broadcaster: Broadcaster | None = None,
     audit_logger: ControlAuditLogger | None = None,
     control_token: str | None = None,
+    feedback_store: FeedbackStore | None = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -497,6 +513,10 @@ def create_app(
             events = read_anomalies_since(anomalies_dir, since=since)
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=400, detail=f"bad `since`: {exc}") from exc
+        # Join the operator's verdict onto each event so the timeline can
+        # show "you marked this" without a second round-trip (Task 6.24).
+        if feedback_store is not None:
+            events = annotate_events_with_feedback(events, feedback_store)
         return {"events": events, "count": len(events)}
 
     @app.get("/telemetry/latest")
@@ -801,6 +821,40 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         publish_control_event("model.upload", "ok", published)
         return {"model": published}
+
+    def _feedback() -> FeedbackStore:
+        if feedback_store is None:
+            raise HTTPException(status_code=503, detail="feedback API is not available")
+        return feedback_store
+
+    @app.get("/control/feedback")
+    def get_feedback(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        store = _feedback()
+        records = [fb.to_dict() for fb in store.labels().values()]
+        return {"feedback": records, "count": len(records), "summary": store.summary()}
+
+    @app.post("/control/feedback", status_code=201)
+    def post_feedback(
+        request: FeedbackRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        store = _feedback()
+        if request.label not in FEEDBACK_LABELS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"label must be one of {sorted(FEEDBACK_LABELS)}",
+            )
+        fb = store.record(
+            event=request.event,
+            label=request.label,  # type: ignore[arg-type]  # checked above
+            reason=request.reason,
+            driving_context=request.driving_context,
+            labeled_by=request.labeled_by,
+        )
+        publish_control_event("anomaly.feedback", "ok", fb.to_dict())
+        return {"feedback": fb.to_dict()}
 
     @app.websocket("/ws/telemetry")
     async def ws_telemetry(websocket: WebSocket) -> None:

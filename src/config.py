@@ -152,6 +152,8 @@ class DaemonConfig(_Strict):
     models_dir: Path = Path("models")
     jobs_dir: Path = Path("data/control/jobs")
     audit_log: Path = Path("data/control/audit.jsonl")
+    feedback_log: Path = Path("data/control/anomaly_feedback.jsonl")
+    training_ledger: Path = Path("data/control/training_runs.jsonl")
     isolation_forest_artifact: str = "isolation_forest/model.joblib"
     lstm_artifact: str = "lstm_autoencoder/model.pt"
     model_poll_seconds: float = 30.0

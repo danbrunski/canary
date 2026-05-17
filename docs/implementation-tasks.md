@@ -1303,11 +1303,24 @@ training/model-health visualization, and Torque Pro parity.
   available, route/terrain, and tags. Add channel-availability heatmaps,
   gap/dropout statistics, stale/dirty/pinned flags, and "ready to train?"
   checks before a retraining job starts.
-- [ ] **6.24 — False-positive feedback loop.** Let the operator mark anomaly
-  events as true positive, false positive, ignored, or needs review; attach a
-  reason and driving context; and persist those labels next to the anomaly log
-  and training ledger. Feedback labels must be exportable and visible in the
-  anomaly timeline.
+- [x] **6.24 — False-positive feedback loop.** `src/alerts/feedback.py` —
+  `AnomalyFeedback` (strict Pydantic: anomaly_key, label ∈
+  `{true_positive, false_positive, ignored, needs_review}`, reason,
+  free-form `driving_context`, an echo of the labelled `event` so an export
+  survives anomaly-log rotation, labeled_by/at) persisted by `FeedbackStore`
+  as append-only JSONL under `data/control/` (gitignored). `anomaly_key`
+  reproduces the dashboard's `(timestamp, source, model_version)` dedupe tuple
+  so a verdict rejoins exactly the clicked event; relabel = another append,
+  `labels()` collapses to the latest verdict, `raw_records()` keeps the chain
+  (feedback-lineage / Risk R11). `annotate_events_with_feedback` is a pure join
+  used by `GET /anomalies` so the timeline shows the verdict inline;
+  authenticated `GET/POST /control/feedback` (audited via the existing control
+  event stream, 422 on bad label, 503 when no store) record and list verdicts;
+  `feedback_to_csv` exports them for off-Pi training-set curation (6.26). New
+  `DaemonConfig.feedback_log`; daemon wires a `FeedbackStore` into `create_app`.
+  Covered by `tests/test_feedback.py` (9 tests: key/store/relabel/summary,
+  pure annotation, CSV, auth required, post+get, invalid label, annotated
+  `/anomalies`, 503-unconfigured). (FR-07, FR-09)
 - [ ] **6.25 — Threshold tuning and alert suppression.** Add per-model,
   per-operating-mode threshold overrides, debounce/hysteresis/cool-down rules,
   suppressions for known benign conditions, and before/after false-positive
