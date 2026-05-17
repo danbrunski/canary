@@ -5,6 +5,13 @@ the vehicle first: a phone connected to the Pi over the vehicle LAN, optionally
 mirrored to the Kenwood head unit. A native Android Auto app is a later,
 constrained companion surface rather than the main dashboard.
 
+The Pi-hosted dashboard is not the whole offline workflow. For reviewing synced
+drives, training models on a laptop while the truck is off, choosing whether a
+training job runs on the laptop or the Pi, and publishing models back to the Pi
+later, use the standalone companion app plan in `docs/companion-app-plan.md`.
+That companion should be the same CANary app shell and visual language, not a
+separate UI.
+
 ## Recommended Targets
 
 ### Primary: React/TypeScript PWA
@@ -53,6 +60,16 @@ CANary dashboard. It is useful for driver-safe status only:
 Do not plan to expose rich arbitrary charts or diagnostic controls through
 Android Auto. Keep those in the PWA, and use Android Auto only if its supported
 templates can represent the needed driver-safe status view.
+
+### Offline: Standalone Companion App
+
+The standalone companion app is the same React/TypeScript CANary app running
+against a local-library backend instead of the live Pi daemon. It syncs sessions
+from the Pi while the truck is on, keeps a local CANary library when the truck
+is off, lets the user run training either locally or on the Pi, and publishes
+approved model artifacts back to the Pi later. Panels, charts, gauges,
+navigation, terminology, and styling should be shared with the Pi-hosted
+dashboard.
 
 ## UI Modes
 

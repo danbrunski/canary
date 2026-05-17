@@ -1290,6 +1290,56 @@ training/model-health visualization, and Torque Pro parity.
   dataset". Each runbook should include the dashboard path and equivalent
   `canaryctl` command.
 
+### 6F. Standalone companion app and offline training workflow
+
+- [x] **6.31 — Companion app architecture plan.** `docs/companion-app-plan.md`
+  defines the offline/local workflow as the same CANary app running against a
+  local-library backend: sync sessions from the Pi while the truck is on, keep a
+  local session library, review/chart/export data while the truck is off, choose
+  whether training runs on the laptop or the Pi, and publish approved artifacts
+  back to the Pi later. `docs/dashboard-display-strategy.md` and
+  `docs/headless-api.md` link to it so the Pi-hosted dashboard and offline
+  companion runtime roles stay distinct without creating a separate UI.
+- [ ] **6.32 — Local CANary library format.** Define and implement a laptop
+  library root (`~/.canary/library` by default) with a SQLite index plus normal
+  session/model files on disk. Track sessions, captures, tags, channel
+  inventory, quality checks, datasets, training runs, model artifacts, publish
+  history, and queued Pi actions.
+- [ ] **6.33 — Companion local API.** Add a local FastAPI service that exposes
+  session browsing, telemetry history, anomalies, datasets, training jobs,
+  model artifacts, and sync state from the local library. It should mirror the
+  Pi dashboard API shape where possible so the same React app and panels run in
+  `Live Pi` and `Local Library` modes.
+- [ ] **6.34 — Pi session sync.** Build resumable sync from the Pi control API:
+  session inventory, selected session/capture downloads, checksum validation,
+  duplicate detection, pin-on-Pi, retry after interruption, and import into the
+  local library.
+- [ ] **6.35 — Offline dashboard/library mode.** Add a dashboard mode that runs
+  without the Pi: session library search, historical telemetry charts, anomaly
+  review, false-positive labeling, dataset builder, exports, training metrics,
+  and model comparison. It must share the Pi dashboard's visual system,
+  navigation, charts, gauges, channel naming, and terminology. The UI must
+  clearly show `Live Pi`, `Local Library`, or `Queued Offline` state.
+- [ ] **6.36 — Training target selector.** From the same training UI, let the
+  user run IF, LSTM, combined retrain, and behavior-model refit jobs either on
+  the laptop against synced sessions or on the Pi via `/control/jobs` when the
+  Pi is reachable. Persist logs, metrics, manifests, plots, artifacts,
+  false-positive benchmark output, compute target, and approval state in a
+  shared training-run ledger.
+- [ ] **6.37 — Model publish queue.** Package approved model artifacts with
+  manifest, training-run record, checksums, and compatibility report; upload
+  them to the Pi when reachable; confirm accepted/active status; and preserve
+  local + Pi audit history. Failed uploads must be retryable.
+- [ ] **6.38 — Companion packaging.** Start with a repo-runner
+  `scripts/canary_companion.py` that starts the local API and serves/opens the
+  built frontend. Later package as Tauri/Electron for Linux/macOS/Windows; keep
+  phone/tablet as review/sync/publish surfaces unless mobile training proves
+  practical.
+- [ ] **6.39 — Offline workflow acceptance test.** Prove the full loop: collect
+  on Pi, sync to laptop, power Pi off, browse/chart/train locally, produce an
+  approved model bundle, power Pi on, publish the model, and confirm the daemon
+  activates it.
+
 ---
 
 ## Cross-Cutting Concerns

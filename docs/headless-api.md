@@ -7,6 +7,12 @@ the authenticated control API used from a laptop.
 The read-only dashboard endpoints are unauthenticated in v1. The `/control/*`
 endpoints require a bearer token from `CANARY_CONTROL_TOKEN`.
 
+This API is only reachable while the Pi is powered. The offline workflow for
+syncing sessions to a laptop/tablet, reviewing data while the truck is off,
+choosing whether training runs locally or on the Pi, and publishing models back
+to the Pi is covered in `docs/companion-app-plan.md`. That workflow should use
+the same CANary app shell as the Pi dashboard with a local-library backend.
+
 ## Browser
 
 If the dashboard frontend has been built, open:
