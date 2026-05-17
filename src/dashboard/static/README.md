@@ -42,6 +42,20 @@ src/dashboard/static/
       DiagnosticsPanel.tsx    # parked-mode only (Task 5.14)
 ```
 
+## Styling — Tailwind CSS v4
+
+Tailwind v4 is the styling system, wired through the official Vite plugin
+(`@tailwindcss/vite` in `vite.config.ts`) — no `tailwind.config.js`, no
+PostCSS step. The design system is CSS-first: `src/index.css` does
+`@import "tailwindcss"` then declares the palette / radii / numeric font in
+a single `@theme` block. Tailwind compiles those tokens into **both** utility
+classes (`bg-elev`, `text-accent`, `rounded-card`, …) **and** CSS custom
+properties (`--color-accent`, …). New / refactored markup uses utilities
+directly; the curated panel classes (`.panel`, `.channel-card`, …) are
+authored as plain CSS against the same tokens, so the two stay in lockstep
+and there's a single source of truth for the look. Change a colour in
+`@theme` and utilities + components move together.
+
 ## Develop
 
 Pre-req: Node 18+ (20/22 work) and [pnpm](https://pnpm.io) 10+. If pnpm

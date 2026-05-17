@@ -1,13 +1,14 @@
 /// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // In dev (`npm run dev`), Vite serves the UI on :5173 and proxies the
 // backend paths to the FastAPI server on :8000. In production
 // (`npm run build`), the SPA is built into ./dist and served by the
 // backend itself (see scripts/serve_dashboard.py mounting).
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
     proxy: {

@@ -1,25 +1,69 @@
-/* CANary dashboard styles.
+/* CANary dashboard styles — Tailwind CSS v4 (CSS-first config).
  *
- * Landscape-first, high-contrast palette tuned for daylight visibility on a
- * phone mirrored to a head unit. Two-tier color: yellow accent for "live /
- * primary", green for "ok", amber for "warning", red for "anomaly / critical".
- * Background is a near-black so OLED screens minimize glare and burn-in.
+ * Tailwind is the styling system: the design tokens live in `@theme` below,
+ * which Tailwind compiles into both utility classes (`bg-elev`, `text-accent`,
+ * `rounded-card`, …) *and* CSS custom properties (`--color-accent`, …). The
+ * curated component classes further down are authored in plain CSS against
+ * those same tokens (Tailwind v4 supports authoring CSS alongside utilities),
+ * so panels keep their semantic class names while new/refactored markup uses
+ * utilities directly.
  *
- * Layout is a CSS grid; on portrait it falls back to a single column so a
- * phone-on-its-side still renders cleanly.
+ * Landscape-first, high-contrast, layered graphite-blue palette tuned for
+ * daylight visibility on a phone mirrored to a head unit. Amber = live/
+ * primary, cyan = data, green/amber/red = ok/warn/critical. Near-black base
+ * minimizes OLED glare + burn-in.
  */
 
+@import "tailwindcss";
+
+@theme {
+  /* Layered surfaces: each step lighter so panels read as physically stacked
+   * without heavy borders. Exposed as `bg-bg`, `bg-elev`, `text-fg`, etc. */
+  --color-bg: #0b0f14;
+  --color-elev: #141a21;
+  --color-elev-2: #1b232c;
+  --color-elev-3: #232d38;
+  --color-fg: #eef3f8;
+  --color-fg-dim: #8a98a5;
+  --color-fg-faint: #5b6772;
+  --color-accent: #ffb547;
+  --color-accent-2: #4fd6e0;
+  --color-ok: #5fe3b3;
+  --color-warn: #ffd166;
+  --color-bad: #ff6f6f;
+  --color-border: #29333d;
+  --color-border-soft: #20272f;
+
+  --radius-card: 14px;
+  --radius-tile: 9px;
+
+  --font-num: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono", Menlo,
+    monospace;
+}
+
 :root {
-  --bg: #101418;
-  --bg-elev: #181d22;
-  --bg-elev-2: #1f262d;
-  --fg: #e8eef3;
-  --fg-dim: #94a3ad;
-  --accent: #ffb84a;
-  --ok: #7cffcb;
-  --warn: #ffd166;
-  --bad: #ff6b6b;
-  --border: #232c34;
+  /* Short aliases so the curated component CSS reads cleanly; all resolve to
+   * the Tailwind `@theme` vars above (single source of truth). */
+  --bg: var(--color-bg);
+  --bg-elev: var(--color-elev);
+  --bg-elev-2: var(--color-elev-2);
+  --bg-elev-3: var(--color-elev-3);
+  --fg: var(--color-fg);
+  --fg-dim: var(--color-fg-dim);
+  --fg-faint: var(--color-fg-faint);
+  --accent: var(--color-accent);
+  --accent-2: var(--color-accent-2);
+  --accent-soft: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  --ok: var(--color-ok);
+  --warn: var(--color-warn);
+  --bad: var(--color-bad);
+  --border: var(--color-border);
+  --border-soft: var(--color-border-soft);
+  --radius: var(--radius-card);
+  --radius-sm: var(--radius-tile);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.7);
+  --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.4), 0 14px 34px -14px rgba(0, 0, 0, 0.8);
+  --num: var(--font-num);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: dark;
 }
@@ -29,19 +73,45 @@
 html, body, #root {
   margin: 0;
   padding: 0;
-  background: var(--bg);
   color: var(--fg);
   min-height: 100vh;
   font-size: 15px;
+  /* A faint top-corner glow lifts the near-black off "dead OLED". */
+  background:
+    radial-gradient(900px 600px at 88% -10%, rgba(79, 214, 224, 0.06), transparent 60%),
+    radial-gradient(1100px 700px at 6% -8%, rgba(255, 181, 71, 0.05), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button {
   font: inherit;
   color: inherit;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease, transform 0.08s ease;
+}
+
+button:focus-visible,
+input:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
 }
 
 a { color: var(--accent); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--bg-elev-3);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border); background-clip: content-box; }
 
 /* ---------------------------------------------------------------------------
  * Shell + header
@@ -57,9 +127,11 @@ a { color: var(--accent); }
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elev);
+  padding: 0.6rem 1.15rem;
+  border-bottom: 1px solid var(--border-soft);
+  background: linear-gradient(180deg, rgba(20, 26, 33, 0.92), rgba(15, 19, 24, 0.86));
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
   position: sticky;
   top: 0;
   z-index: 5;
@@ -67,84 +139,119 @@ a { color: var(--accent); }
 
 .brand-block {
   min-width: 6.5rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .brand {
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.14em;
   font-size: 1.05rem;
+  background: linear-gradient(95deg, var(--accent), #ffd9a0 70%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .brand-subtitle {
-  color: var(--fg-dim);
-  font-size: 0.65rem;
-  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .view-tabs {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.2rem;
+  gap: 0.2rem;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 0.22rem;
 }
 
 .view-tabs button {
   min-height: 2rem;
   border: 0;
-  border-radius: 6px;
+  border-radius: 999px;
   background: transparent;
   color: var(--fg-dim);
-  padding: 0.25rem 0.65rem;
+  padding: 0.3rem 0.85rem;
   font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
+.view-tabs button:hover { color: var(--fg); }
+
 .view-tabs button.active {
-  background: var(--bg-elev-2);
+  background: linear-gradient(180deg, var(--bg-elev-3), var(--bg-elev-2));
   color: var(--fg);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 2px 8px -4px rgba(0, 0, 0, 0.7);
 }
 
 .connections {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.45rem;
   margin-left: auto;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: var(--fg-dim);
 }
 
 .conn {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.4rem;
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-soft);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.66rem;
+  font-weight: 600;
 }
 
 .conn .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--fg-dim);
+  background: var(--fg-faint);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
-.conn-open .dot { background: var(--ok); }
-.conn-connecting .dot { background: var(--warn); }
+.conn-open .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(95, 227, 179, 0.18); }
+.conn-connecting .dot {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.18);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
 .conn-error .dot,
-.conn-closed .dot { background: var(--bad); }
+.conn-closed .dot { background: var(--bad); box-shadow: 0 0 0 3px rgba(255, 111, 111, 0.2); }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
 
 .mode-toggle {
   background: var(--bg-elev-2);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.35rem 0.7rem;
-  font-size: 0.82rem;
+  border-radius: 999px;
+  padding: 0.4rem 0.95rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
+
+.mode-toggle:hover { border-color: var(--fg-faint); }
 
 .mode-toggle.parked {
   border-color: var(--accent);
   color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* ---------------------------------------------------------------------------
@@ -155,17 +262,18 @@ a { color: var(--accent); }
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  padding: 0.15rem 0.85rem;
-  border-radius: 8px;
+  padding: 0.25rem 1rem;
+  border-radius: 999px;
   background: var(--bg-elev-2);
-  min-width: 6rem;
+  border: 1px solid var(--border-soft);
+  min-width: 6.5rem;
 }
 
 .mode-label {
-  font-size: 0.6rem;
+  font-size: 0.56rem;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--fg-dim);
+  letter-spacing: 0.18em;
+  color: var(--fg-faint);
 }
 
 .mode-value {
@@ -185,13 +293,13 @@ a { color: var(--accent); }
  * Panel grid
  * --------------------------------------------------------------------------- */
 
-main { padding: 1rem; flex: 1; }
+main { padding: 1.15rem; flex: 1; }
 
 .panel-grid {
   display: grid;
   grid-template-columns: 2fr 1fr 1fr;
   grid-template-rows: auto auto auto;
-  gap: 1rem;
+  gap: 1.15rem;
 }
 
 .single-grid {
@@ -236,17 +344,31 @@ main { padding: 1rem; flex: 1; }
 }
 
 .panel {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.9rem 1rem;
+  background: linear-gradient(180deg, var(--bg-elev), var(--bg));
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Hairline accent along the top edge — instrument-panel cue, ~invisible
+ * until it matters (warn/anomaly variants recolor it). */
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent) 30%, var(--accent-2) 75%, transparent);
+  opacity: 0.5;
 }
 
 .panel header {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.75rem;
   border: none;
   padding: 0;
   background: transparent;
@@ -254,17 +376,22 @@ main { padding: 1rem; flex: 1; }
 
 .panel h2 {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 0.82rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--fg);
+  color: var(--fg-dim);
 }
 
-.panel .count { font-size: 0.78rem; color: var(--fg-dim); }
+.panel .count {
+  font-size: 0.74rem;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
 
 .placeholder {
-  color: var(--fg-dim);
+  color: var(--fg-faint);
   font-style: italic;
   margin: 0;
 }
@@ -304,53 +431,68 @@ main { padding: 1rem; flex: 1; }
 }
 
 .channel-card {
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.5rem 0.7rem;
+  background: linear-gradient(180deg, var(--bg-elev-2), var(--bg-elev));
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.75rem;
+  position: relative;
+  transition: border-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.channel-card:hover {
+  border-color: var(--border);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
 }
 
 .channel-card.large {
-  padding: 0.7rem 0.9rem;
+  padding: 0.8rem 1rem;
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(255, 181, 71, 0.06), transparent 60%),
+    linear-gradient(180deg, var(--bg-elev-2), var(--bg-elev));
 }
 
 .channel-card.band-warn {
-  border-color: var(--warn);
-  background: rgba(255, 209, 102, 0.08);
+  border-color: rgba(255, 209, 102, 0.55);
+  background: linear-gradient(180deg, rgba(255, 209, 102, 0.12), rgba(255, 209, 102, 0.03));
 }
 
 .channel-card.band-bad {
-  border-color: var(--bad);
-  background: rgba(255, 107, 107, 0.10);
+  border-color: rgba(255, 111, 111, 0.6);
+  background: linear-gradient(180deg, rgba(255, 111, 111, 0.14), rgba(255, 111, 111, 0.04));
 }
 
 .channel-card.band-bad .channel-value { color: var(--bad); }
 .channel-card.band-warn .channel-value { color: var(--warn); }
 
 .channel-key {
-  font-size: 0.65rem;
-  letter-spacing: 0.1em;
-  color: var(--fg-dim);
+  font-size: 0.62rem;
+  letter-spacing: 0.13em;
+  color: var(--fg-faint);
   text-transform: uppercase;
-  margin-bottom: 0.15rem;
+  margin-bottom: 0.2rem;
 }
 
 .channel-value {
-  font-size: 1.45rem;
+  font-size: 1.5rem;
   font-weight: 600;
+  font-family: var(--num);
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
   color: var(--fg);
 }
 
 .channel-card.large .channel-value {
-  font-size: 1.85rem;
+  font-size: 2rem;
+  color: var(--accent);
 }
 
 .channel-unit {
   font-size: 0.7rem;
-  color: var(--fg-dim);
+  color: var(--fg-faint);
   margin-left: 0.35rem;
-  font-weight: 400;
+  font-weight: 500;
+  font-family: var(--num);
 }
 
 .more-channels {
@@ -1116,5 +1258,119 @@ main { padding: 1rem; flex: 1; }
   .job-row,
   .session-list button {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Cohesive polish pass (Tailwind-themed). Tightens the remaining high-traffic
+ * controls so the whole surface shares one material language: pill controls,
+ * subtle hover lift, focus rings, smooth transitions. Tokens are the Tailwind
+ * `@theme` vars, so utilities and these components stay in lockstep.
+ * --------------------------------------------------------------------------- */
+
+button:not(.view-tabs button):not(:disabled):hover {
+  border-color: var(--fg-faint);
+}
+
+button:active { transform: translateY(1px); }
+
+select,
+input[type="text"],
+input[type="search"],
+input[type="number"],
+input[type="password"],
+textarea {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+select:hover,
+input:hover,
+textarea:hover { border-color: var(--border); }
+
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-2) 22%, transparent);
+  outline: none;
+}
+
+/* Sparklines / chart strokes pick up the accent so "live" reads consistently. */
+.telemetry-chart path { stroke: var(--accent); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 35%, transparent)); }
+.telemetry-chart line { stroke: var(--border-soft); }
+
+.score-chart canvas,
+.sparkline,
+canvas.sparkline { display: block; }
+
+/* Channel browser rows: match the tile material + give a hover affordance. */
+.channel-row {
+  background: linear-gradient(180deg, var(--bg-elev-2), var(--bg-elev));
+  border-color: var(--border-soft);
+  border-radius: var(--radius-tile);
+  transition: border-color 0.15s ease, transform 0.08s ease;
+}
+.channel-row:hover { border-color: var(--border); transform: translateY(-1px); }
+.channel-row.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent) inset;
+}
+.row-value { font-family: var(--num); }
+
+/* Anomaly + control list rows, generic cards: shared elevated material. */
+.anomaly-event,
+.job-row,
+.session-list button,
+.event-row,
+.active-capture {
+  background: linear-gradient(180deg, var(--bg-elev-2), var(--bg-elev));
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-tile);
+  transition: border-color 0.15s ease, transform 0.08s ease;
+}
+
+.anomaly-event:hover,
+.job-row:hover,
+.session-list button:hover { border-color: var(--border); }
+
+.filters select,
+.filters { font-variant-numeric: tabular-nums; }
+
+/* Source/severity badges → consistent pills. */
+.badge,
+.source-badge,
+.tag-pill,
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid var(--border-soft);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* Definition lists in the model/system panels: aligned, monospace values. */
+.model-panel dt,
+.system-panel dt { color: var(--fg-faint); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.model-panel dd,
+.system-panel dd { font-family: var(--num); font-variant-numeric: tabular-nums; }
+
+/* Respect reduced-motion: kill the connection-dot pulse + transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }

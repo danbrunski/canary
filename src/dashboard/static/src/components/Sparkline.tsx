@@ -17,7 +17,7 @@ export function Sparkline({
   values,
   width = 120,
   height = 28,
-  stroke = "#7CFFCB",
+  stroke = "#ffb547",
   min,
   max,
 }: SparklineProps) {
