@@ -98,6 +98,7 @@ from src.decode.behavior_models import (
 )
 from src.decode.bindings import load_bindings
 from src.models.health import HealthMonitor
+from src.models.training_ledger import TrainingLedger
 from src.preprocessing.loader import (
     PARQUET_PATTERN,
     discover_sessions,
@@ -899,6 +900,19 @@ def create_app(
         store = _feedback()
         records = [fb.to_dict() for fb in store.labels().values()]
         return {"feedback": records, "count": len(records), "summary": store.summary()}
+
+    @app.get("/control/training-runs")
+    def get_training_runs(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """Training-run history for the 6.22 dashboard (Task 6.21 ledger).
+
+        Latest record per run (the append-only chain is collapsed); read
+        per request so a fresh ``retrain.py`` run shows up without a daemon
+        restart. Empty list when nothing's been recorded yet."""
+        ledger = TrainingLedger(config.daemon.training_ledger)
+        runs = [r.to_dict() for r in ledger.records()]
+        return {"runs": runs, "count": len(runs)}
 
     @app.post("/control/feedback", status_code=201)
     def post_feedback(

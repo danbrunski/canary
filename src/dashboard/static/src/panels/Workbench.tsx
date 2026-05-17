@@ -18,8 +18,11 @@ import type {
 import { AnomalyPanel } from "./AnomalyPanel";
 import { BehaviorModelsPanel } from "./BehaviorModelsPanel";
 import { ControlPanel } from "./ControlPanel";
+import { DatasetHealthPanel } from "./DatasetHealthPanel";
 import { ModelPanel } from "./ModelPanel";
+import { ObdCoveragePanel } from "./ObdCoveragePanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
+import { TrainingPanel } from "./TrainingPanel";
 import { SystemPanel } from "./SystemPanel";
 import { TelemetryPanel } from "./TelemetryPanel";
 import { TpmsPanel } from "./TpmsPanel";
@@ -123,14 +126,7 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
         />
       );
     case "diag-coverage":
-      return (
-        <PlaceholderPanel
-          title="OBD coverage"
-          task="6.3"
-          endpoint="GET /obd/coverage"
-          summary="Which public PIDs the ECU supports, which CANary decodes, which are supported-but-undecoded, polled, responding, or backed off — the honest proof behind the channel count."
-        />
-      );
+      return <ObdCoveragePanel />;
     case "diag-dtc":
       return (
         <PlaceholderPanel
@@ -148,14 +144,7 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
         />
       );
     case "models-training":
-      return (
-        <PlaceholderPanel
-          title="Training dashboard"
-          task="6.22"
-          summary="Run history, loss curves, threshold bands, held-out FP rate, per-channel reconstruction error and published versions, from the training-run ledger."
-          endpoint="needs GET /control/training-runs"
-        />
-      );
+      return <TrainingPanel token={d.token} />;
     case "models-tuning":
       return (
         <PlaceholderPanel
@@ -184,14 +173,7 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
         />
       );
     case "data-health":
-      return (
-        <PlaceholderPanel
-          title="Dataset health"
-          task="6.23"
-          endpoint="GET /control/datasets/health"
-          summary="Per-session coverage by mode / value range / tags, channel availability, gap stats and a go/no-go 'ready to train?' verdict."
-        />
-      );
+      return <DatasetHealthPanel token={d.token} />;
     case "data-export":
       return (
         <PlaceholderPanel

@@ -52,10 +52,10 @@ describe("Workbench navigation", () => {
   });
 
   it("placeholder items explain the backend that's ready", () => {
-    renderAt("diag-coverage");
-    expect(screen.getByText("OBD coverage")).toBeInTheDocument();
-    expect(screen.getByText(/GET \/obd\/coverage/)).toBeInTheDocument();
-    expect(screen.getByText("6.3")).toBeInTheDocument();
+    // data-export is still a labeled placeholder (6.20 UI pending).
+    renderAt("data-export");
+    expect(screen.getByText("Dataset export")).toBeInTheDocument();
+    expect(screen.getByText("6.20")).toBeInTheDocument();
   });
 
   it("marks not-yet-built items with a 'soon' hint", () => {

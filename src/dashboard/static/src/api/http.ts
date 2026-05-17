@@ -10,13 +10,20 @@ import type {
   BindingsByChannel,
   CaptureResponse,
   CaptureTagResponse,
+  DatasetHealthResponse,
+  FeedbackResponse,
   JobLogsResponse,
   JobResponse,
   JobsResponse,
+  ObdCoverageResponse,
   PreflightResponse,
   SessionsResponse,
   StatusResponse,
   TelemetryLatestResponse,
+  TrainingRunsResponse,
+  TuningConfig,
+  TuningEstimate,
+  TuningResponse,
   VersionResponse,
 } from "../types";
 
@@ -250,6 +257,86 @@ export function uploadModelArtifact(
   return controlJson(`/control/models/${encodeURIComponent(modelType)}/artifact`, token, {
     method: "POST",
     body: jsonBody({ artifact_b64: artifactB64, manifest }),
+  });
+}
+
+// --- Phase-6 panels --------------------------------------------------------
+
+/** `/obd/coverage` is read-only + unauthenticated (Task 6.3). */
+export function getObdCoverage(
+  signal?: AbortSignal,
+): Promise<ObdCoverageResponse> {
+  return fetchJson("/obd/coverage", { signal });
+}
+
+export function getDatasetHealth(
+  token: string,
+  signal?: AbortSignal,
+): Promise<DatasetHealthResponse> {
+  return controlJson("/control/datasets/health", token, { signal });
+}
+
+export function getTrainingRuns(
+  token: string,
+  signal?: AbortSignal,
+): Promise<TrainingRunsResponse> {
+  return controlJson("/control/training-runs", token, { signal });
+}
+
+export function getTuning(
+  token: string,
+  signal?: AbortSignal,
+): Promise<TuningResponse> {
+  return controlJson("/control/tuning", token, { signal });
+}
+
+export function updateTuning(
+  token: string,
+  config: TuningConfig,
+  change: string,
+): Promise<TuningResponse> {
+  return controlJson("/control/tuning", token, {
+    method: "POST",
+    body: jsonBody({ config, change }),
+  });
+}
+
+export function estimateTuning(
+  token: string,
+  config: TuningConfig,
+): Promise<TuningEstimate> {
+  return controlJson("/control/tuning/estimate", token, {
+    method: "POST",
+    body: jsonBody({ config }),
+  });
+}
+
+export function revertTuning(
+  token: string,
+  version: number,
+): Promise<TuningResponse> {
+  return controlJson("/control/tuning/revert", token, {
+    method: "POST",
+    body: jsonBody({ version }),
+  });
+}
+
+export function getFeedback(
+  token: string,
+  signal?: AbortSignal,
+): Promise<FeedbackResponse> {
+  return controlJson("/control/feedback", token, { signal });
+}
+
+export function postFeedback(
+  token: string,
+  event: Record<string, unknown>,
+  label: string,
+  reason: string | null,
+): Promise<{ feedback: Record<string, unknown> }> {
+  return controlJson("/control/feedback", token, {
+    method: "POST",
+    body: jsonBody({ event, label, reason }),
   });
 }
 

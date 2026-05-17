@@ -252,3 +252,56 @@ def test_retrain_ledger_hook_is_best_effort(
     )
     assert rc == 0
     assert not ledger_path.exists()  # nothing recorded, no stray file
+
+
+# ---------------------------------------------------------------------------
+# GET /control/training-runs (Task 6.22 feed)
+# ---------------------------------------------------------------------------
+
+_API_CONFIG_YAML = """
+vehicle: {{make: Nissan, model: Xterra, year: 2008}}
+hardware:
+  elm327_port: /dev/ttyUSB0
+  can: {{interface: virtual, channel: vcan0, bitrate: 500000}}
+collection:
+  obd_poll_rate_hz: 1.0
+  storage_path: {storage}
+  session_retention_days: 30
+  storage_warning_mb: 500
+preprocessing:
+  resample_hz: 1.0
+  rolling_window_seconds: 5
+  operating_modes: {{}}
+models:
+  isolation_forest: {{enabled: true, n_estimators: 100, contamination: 0.01}}
+  lstm_autoencoder: {{enabled: false, sequence_length: 30, latent_dim: 8, threshold_k: 3.0}}
+dashboard: {{host: 127.0.0.1, port: 8000}}
+daemon:
+  training_ledger: {ledger}
+"""
+
+
+def test_training_runs_endpoint(tmp_path: Path) -> None:
+    from fastapi.testclient import TestClient
+
+    from src.config import CanaryConfig
+    from src.dashboard.api import create_app
+
+    storage = tmp_path / "storage"
+    (storage / "2026-05-17T120000").mkdir(parents=True)
+    ledger_path = tmp_path / "runs.jsonl"
+    TrainingLedger(ledger_path).append(
+        build_run_record_from_manifest(_lstm_manifest(tmp_path / "lstm", "lstm_api"))
+    )
+    cfg = tmp_path / "canary.yaml"
+    cfg.write_text(_API_CONFIG_YAML.format(storage=storage, ledger=ledger_path))
+    config = CanaryConfig.from_yaml(cfg)
+    client = TestClient(
+        create_app(config, anomalies_dir=tmp_path / "anom", control_token="secret")
+    )
+    assert client.get("/control/training-runs").status_code == 401
+    body = client.get(
+        "/control/training-runs", headers={"Authorization": "Bearer secret"}
+    ).json()
+    assert body["count"] == 1
+    assert body["runs"][0]["run_id"] == "lstm_api"
