@@ -337,6 +337,14 @@ function ChannelCard({
             {rendered.unit}
           </span>
         )}
+        {rendered.raw && (
+          <span
+            className="ml-1.5 align-middle rounded bg-black/30 px-1 text-[0.55rem] font-bold uppercase tracking-[0.08em] text-fg-faint"
+            title="Raw CAN bytes — this signal's scaling/units haven't been reverse-engineered yet (data/bindings.yaml). The number is the raw integer, not an engineering value."
+          >
+            raw
+          </span>
+        )}
       </div>
       {/* Slot is always present at a fixed height → constant card size
           whether the graph is on, off, or unavailable. */}
@@ -370,6 +378,11 @@ interface RenderedValue {
   text: string;
   unit: string;
   bandClass: "" | "band-warn" | "band-bad";
+  /** True when this is the *raw* decoded integer, not an engineering value:
+   *  a decoded CAN channel whose binding has no pinned scale (or no binding
+   *  at all). The UI flags it so a 12-digit accumulator reads as
+   *  "raw, scaling not reverse-engineered yet", not a broken gauge. */
+  raw: boolean;
 }
 
 /** Apply binding scale/offset/unit, decide whether to color the card. */
@@ -379,14 +392,14 @@ export function renderChannel(
 ): RenderedValue {
   const raw = snapshot.latest.value;
   if (raw === null || raw === undefined) {
-    return { text: "—", unit: "", bandClass: "" };
+    return { text: "—", unit: "", bandClass: "", raw: false };
   }
   // Non-numeric (VIN string, bool) — pass through, no binding math applies
   if (typeof raw === "string" || typeof raw === "boolean") {
-    return { text: String(raw), unit: snapshot.latest.unit ?? "", bandClass: "" };
+    return { text: String(raw), unit: cleanUnit(snapshot.latest.unit), bandClass: "", raw: false };
   }
   if (!Number.isFinite(raw)) {
-    return { text: "—", unit: "", bandClass: "" };
+    return { text: "—", unit: "", bandClass: "", raw: false };
   }
   // Apply binding scale + offset when present. Decoded CAN channels carry
   // the raw integer from the bytes; OBD channels are pre-scaled by
@@ -397,7 +410,10 @@ export function renderChannel(
   if (binding && binding.scale !== null && isDecoded) {
     value = raw * binding.scale + (binding.offset ?? 0);
   }
-  const unit = binding?.unit ?? snapshot.latest.unit ?? "";
+  // A decoded channel with no pinned scale (or no binding at all) is the
+  // raw integer from the CAN bytes, not an engineering value.
+  const rawDisplay = isDecoded && (!binding || binding.scale === null);
+  const unit = cleanUnit(binding?.unit) || cleanUnit(snapshot.latest.unit);
   const text = formatNumber(value);
 
   // Plausibility-band coloring. Warning when value is on the boundary
@@ -415,7 +431,14 @@ export function renderChannel(
     }
   }
 
-  return { text, unit, bandClass };
+  return { text, unit, bandClass, raw: rawDisplay };
+}
+
+/** ``unknown`` is a placeholder in bindings.yaml for a not-yet-RE'd unit —
+ *  render nothing rather than the literal word "unknown". */
+function cleanUnit(unit: string | null | undefined): string {
+  if (!unit || unit === "unknown") return "";
+  return unit;
 }
 
 /** Sparkline series in engineering units when scale is pinned — otherwise
