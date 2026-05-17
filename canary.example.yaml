@@ -6,6 +6,18 @@ vehicle:
   model: Xterra
   year: 2008
   vin: ""
+  # Physical parameters for derived trip/fuel/performance channels (Task 6.6).
+  # All optional; shown with the 2008 Xterra 4.0 V6 defaults. These are
+  # carried into every session manifest so a trip's numbers stay
+  # reproducible from the captured data alone.
+  parameters:
+    mass_kg: 1980.0
+    fuel_type: gasoline          # gasoline | diesel | e85
+    displacement_l: 4.0
+    volumetric_efficiency: 0.85
+    drivetrain_loss_fraction: 0.15
+    thermal_efficiency: 0.30
+    # tire_diameter_m: 0.77      # optional; speed cross-checks only
 
 hardware:
   # Legacy fallback only. Current hardware direction is Canable-native OBD via

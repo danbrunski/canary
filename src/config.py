@@ -17,11 +17,39 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class VehicleParameters(_Strict):
+    """Physical parameters needed for derived trip/fuel/performance channels
+    (Task 6.6). All optional with defaults so existing ``canary.yaml`` files
+    keep loading; ``VehicleConfig.model_dump()`` carries them into every
+    session manifest, so a trip's calculations stay reproducible from the
+    captured data alone.
+    """
+
+    #: Curb/test mass in kg — used for acceleration-derived power sanity.
+    mass_kg: float = 1900.0
+    #: ``gasoline`` | ``diesel`` | ``e85`` — selects stoichiometric AFR, fuel
+    #: density, and the CO2 emission factor.
+    fuel_type: Literal["gasoline", "diesel", "e85"] = "gasoline"
+    #: Engine displacement in litres (volumetric-efficiency fuel estimate).
+    displacement_l: float = 4.0
+    #: Volumetric efficiency (0–1.2) for the speed-density fallback when no
+    #: MAF / fuel-rate PID is available.
+    volumetric_efficiency: float = 0.85
+    #: Driveline loss fraction (0–1) between crank and wheels for the
+    #: estimated-power channel.
+    drivetrain_loss_fraction: float = 0.15
+    #: Brake thermal efficiency (0–1) for the fuel-energy power estimate.
+    thermal_efficiency: float = 0.30
+    #: Rolling tire diameter in metres (optional; speed cross-checks only).
+    tire_diameter_m: float | None = None
+
+
 class VehicleConfig(_Strict):
     make: str
     model: str
     year: int
     vin: str = ""
+    parameters: VehicleParameters = VehicleParameters()
 
 
 class CanBusConfig(_Strict):

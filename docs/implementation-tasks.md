@@ -1152,12 +1152,30 @@ training/model-health visualization, and Torque Pro parity.
   confirmation, audit logging, and an automatic post-clear rescan. This is a
   deliberate exception to CANary's read-only default because Torque parity
   requires it; it must never be available while driving.
-- [ ] **6.6 — Trip, fuel, and performance calculations.** Add derived channels
-  for trip time/distance, fuel used, instant/average MPG or L/100 km, CO2
-  estimate, idle time, 0-60 mph, 1/4-mile estimate, boost/vacuum where MAP is
-  available, and estimated horsepower/torque where enough inputs exist. Vehicle
-  parameters (weight, fuel type, displacement, volumetric-efficiency defaults,
-  tire size) must be configurable and persisted with the session.
+- [x] **6.6 — Trip, fuel, and performance calculations.** `src/analysis/derived.py`
+  — pure functions over a wide telemetry frame. `compute_derived_channels`
+  appends `derived:*` columns: `FUEL_RATE_LPH`, `INSTANT_ECONOMY_L_PER_100KM` /
+  `_MPG`, `BOOST_VACUUM_KPA`, `ESTIMATED_POWER_HP`, `ESTIMATED_TORQUE_NM`, and
+  the time-integrated `TRIP_DISTANCE_KM` / `FUEL_USED_L` / `CO2_KG` /
+  `IDLE_TIME_S` / `AVG_ECONOMY_L_PER_100KM`. Fuel/air degrades through three
+  methods (`ENGINE_FUEL_RATE` PID → MAF÷AFR×λ → ideal-gas speed-density) so a
+  MAF-only vehicle still gets fuel numbers; power prefers the J1979 torque PIDs
+  and falls back to a fuel-energy estimate. `summarize_trip` reduces to a
+  `TripSummary` (duration, distance, fuel, avg economy L/100km + MPG, CO2, idle
+  time/fraction, max speed, best 0-60 mph, 1/4-mile ET + trap speed from a
+  clean-launch scan of the speed trace). No channel is fabricated — absent
+  inputs ⇒ no column / `None`, never a fake zero; capture-gap dt is clamped so
+  totals track wall-clock driving. Vehicle physical parameters live in the new
+  `VehicleConfig.parameters` (`VehicleParameters`: `mass_kg`, `fuel_type`,
+  `displacement_l`, `volumetric_efficiency`, `drivetrain_loss_fraction`,
+  `thermal_efficiency`, `tire_diameter_m`) — all optional with 2008-Xterra
+  defaults, documented in `canary.example.yaml`, and carried into every session
+  manifest automatically via `vehicle.model_dump()` so a trip's numbers stay
+  reproducible from captured data alone. Cumulative columns are deliberately
+  *not* model features (monotonic). Covered by `tests/test_derived.py`
+  (16 tests: every fuel method, economy, boost/vacuum, power from torque PIDs,
+  cumulative/idle, accel metrics on a synthetic launch, empty/missing-input
+  safety, fuel-property table). (FR-08)
 - [ ] **6.7 — GPS and route logging.** Support at least one GPS source for the
   Pi/truck workflow: browser Geolocation from the dashboard, USB GNSS through
   `gpsd`, or both. Store `source="gps"` telemetry rows, display route/speed on
