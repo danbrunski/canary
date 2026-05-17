@@ -207,11 +207,16 @@ def read_latest_telemetry_rows(
     *,
     n: int = 100,
 ) -> list[dict[str, Any]]:
-    """Return the last ``n`` rows from the newest chunk of the newest session.
+    """Return the last ``n`` rows of the newest session, spanning Parquet
+    chunks as needed.
 
-    Returns an empty list when there's no session on disk. Reads only the
-    newest chunk to keep latency bounded — cross-chunk pagination is a
-    future feature; the dashboard's live feed will use the WebSocket path.
+    Reads chunks newest-first and stops as soon as ``n`` rows are in hand,
+    so latency stays bounded (``n`` is route-capped at 10_000) while the
+    window can still be wide enough to surface a low-rate signal. The old
+    single-newest-chunk read could not: at full bus rate a chunk spans a
+    fraction of a second, so a 1 Hz OBD/decoded row would never appear in
+    "latest N" no matter how large N was. Returns ``[]`` when there's no
+    session/chunk on disk.
     """
     latest = _resolve_latest_session(storage_path)
     if latest is None:
@@ -219,7 +224,19 @@ def read_latest_telemetry_rows(
     chunks = sorted(latest.glob(PARQUET_PATTERN))
     if not chunks:
         return []
-    table = pd.read_parquet(chunks[-1])
+    collected: list[pd.DataFrame] = []
+    total = 0
+    for chunk in reversed(chunks):  # newest-first; stop once we have >= n
+        df = pd.read_parquet(chunk)
+        collected.append(df)
+        total += len(df)
+        if total >= n:
+            break
+    table = (
+        collected[0]
+        if len(collected) == 1
+        else pd.concat(collected[::-1], ignore_index=True)  # back to chronological
+    )
     if len(table) > n:
         table = table.tail(n)
     rows: list[dict[str, Any]] = []

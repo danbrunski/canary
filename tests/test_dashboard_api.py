@@ -513,6 +513,56 @@ def test_telemetry_latest_truncates_to_n(config: CanaryConfig) -> None:
     assert rows[0]["value"] == 707.0
 
 
+def _make_session_with_chunks(
+    storage_root: Path, name: str, n_chunks: int, rows_per_chunk: int = 3
+) -> Path:
+    """Write `n_chunks` Parquet chunks; row `value_number` == its global
+    index so cross-chunk ordering is verifiable."""
+    session = storage_root / name
+    session.mkdir(parents=True, exist_ok=True)
+    counter = 0
+    for c in range(n_chunks):
+        recs = []
+        for _ in range(rows_per_chunk):
+            recs.append(
+                {
+                    "timestamp": pa.scalar(
+                        1_778_000_000_000_000 + counter * 1_000_000,
+                        type=pa.timestamp("us", tz="UTC"),
+                    ).as_py(),
+                    "source": "obd",
+                    "channel": "RPM",
+                    "value_number": float(counter),
+                    "value_text": None,
+                    "value_bool": None,
+                    "unit": "rpm",
+                    "payload": None,
+                    "metadata_json": None,
+                }
+            )
+            counter += 1
+        pq.write_table(
+            pa.Table.from_pylist(recs, schema=TELEMETRY_SCHEMA),
+            session / f"telemetry-{c:05d}.parquet",
+        )
+    return session
+
+
+def test_telemetry_latest_spans_chunk_boundaries(config: CanaryConfig) -> None:
+    # 4 chunks × 3 rows = 12; the last 7 must cross ≥2 chunk files, in order.
+    _make_session_with_chunks(config.collection.storage_path, "2026-05-13T120000", 4, 3)
+    rows = read_latest_telemetry_rows(config.collection.storage_path, n=7)
+    assert [r["value"] for r in rows] == [5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0]
+
+
+def test_telemetry_latest_n_over_total_returns_all_across_chunks(
+    config: CanaryConfig,
+) -> None:
+    _make_session_with_chunks(config.collection.storage_path, "2026-05-13T120000", 4, 3)
+    rows = read_latest_telemetry_rows(config.collection.storage_path, n=100)
+    assert [r["value"] for r in rows] == [float(i) for i in range(12)]
+
+
 # ---------------------------------------------------------------------------
 # echo_config
 # ---------------------------------------------------------------------------
