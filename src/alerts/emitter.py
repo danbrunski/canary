@@ -31,6 +31,7 @@ import pandas as pd
 
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
+from src.alerts.tuning import AlertTuner
 from src.models.isolation_forest import (
     LABEL_COLUMN,
     MISSING_FEATURES_COLUMN,
@@ -50,11 +51,15 @@ class EmitterCounters:
     emitted: int = 0
     suppressed_not_anomaly: int = 0
     suppressed_dedupe: int = 0
+    #: Suppressed by an operator tuning rule (Task 6.25) — distinct from
+    #: dedupe so the dashboard can show "tuning is muting N/hr" explicitly.
+    suppressed_tuning: int = 0
 
     def reset(self) -> None:
         self.emitted = 0
         self.suppressed_not_anomaly = 0
         self.suppressed_dedupe = 0
+        self.suppressed_tuning = 0
 
     def to_dict(self) -> dict[str, int]:
         """JSON-safe snapshot — what ``GET /status`` exposes per detector."""
@@ -62,6 +67,7 @@ class EmitterCounters:
             "emitted": self.emitted,
             "suppressed_not_anomaly": self.suppressed_not_anomaly,
             "suppressed_dedupe": self.suppressed_dedupe,
+            "suppressed_tuning": self.suppressed_tuning,
         }
 
 
@@ -79,9 +85,11 @@ class AnomalyEventEmitter:
         logger: AnomalyEventLogger,
         *,
         min_seconds_between_events: float = 1.0,
+        tuner: AlertTuner | None = None,
     ) -> None:
         self._logger = logger
         self._min_seconds_between_events = min_seconds_between_events
+        self._tuner = tuner
         self._last_emit: dict[tuple[str, str], float] = {}
         self.counters = EmitterCounters()
 
@@ -141,12 +149,23 @@ class AnomalyEventEmitter:
         return self._emit(event)
 
     def _emit(self, event: AnomalyEvent) -> AnomalyEvent | None:
+        # Operator tuning gate (6.25) runs before dedupe: a tuned-out event
+        # should never reach the logger/dashboard at all. Suppression-only by
+        # contract — the tuner can mute, never manufacture.
+        if self._tuner is not None:
+            decision = self._tuner.decide(event, now=_seconds(event.timestamp))
+            if not decision.emit:
+                self.counters.suppressed_tuning += 1
+                log.debug("tuning suppressed event", extra={"reason": decision.reason})
+                return None
         if self._is_deduped(event):
             self.counters.suppressed_dedupe += 1
             return None
         self._logger.log(event)
         self.counters.emitted += 1
         self._last_emit[(event.source, event.model_version)] = _seconds(event.timestamp)
+        if self._tuner is not None:
+            self._tuner.notify_emitted(event, now=_seconds(event.timestamp))
         return event
 
     def _is_deduped(self, event: AnomalyEvent) -> bool:

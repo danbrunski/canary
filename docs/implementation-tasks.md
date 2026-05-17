@@ -1321,11 +1321,29 @@ training/model-health visualization, and Torque Pro parity.
   Covered by `tests/test_feedback.py` (9 tests: key/store/relabel/summary,
   pure annotation, CSV, auth required, post+get, invalid label, annotated
   `/anomalies`, 503-unconfigured). (FR-07, FR-09)
-- [ ] **6.25 — Threshold tuning and alert suppression.** Add per-model,
-  per-operating-mode threshold overrides, debounce/hysteresis/cool-down rules,
-  suppressions for known benign conditions, and before/after false-positive
-  estimates. Every tuning change must be audited, versioned, reversible, and
-  reflected in the live inference status.
+- [x] **6.25 — Threshold tuning and alert suppression.** `src/alerts/tuning.py`
+  — strict `TuningConfig` (versioned) of `ThresholdOverride` (per-source,
+  per-operating-mode multiplier/absolute, never lowers the detector's own bar),
+  `SuppressionRule` (source/mode/channel-substring/max-score AND match — a
+  severe excursion above `max_score` still gets through), and `DebouncePolicy`
+  (min-consecutive debounce, cool-down, `rearm_below` hysteresis). `AlertTuner`
+  is suppression-only by contract (mutes a flagged event, never manufactures
+  one) and is consulted by the emitter in `_emit` *before* dedupe; the new
+  `EmitterCounters.suppressed_tuning` surfaces via `/status`. Versioned +
+  reversible: `save_tuning_config` writes the YAML atomically and appends a
+  *full-snapshot* audit line so `load_tuning_version` reconstructs any prior
+  version verbatim; `estimate_before_after` runs a stateless threshold+
+  suppression pass over recent anomalies so the operator sees the blast radius
+  *before* committing (Risk R11). Authenticated `GET/POST /control/tuning`
+  (auto-bumps version, mutates the live tuner in place — effective next
+  inference tick, no restart, baseline auto-snapshotted so the first edit is
+  reversible), `POST /control/tuning/estimate`, `POST /control/tuning/revert`
+  (revert is itself a new audited version). New `DaemonConfig.tuning_config`/
+  `tuning_audit`; daemon builds one `AlertTuner` shared by the emitter and the
+  API. Covered by `tests/test_tuning.py` (14 tests: override raise/never-lower/
+  scope, suppression channel+max-score, debounce, cool-down+hysteresis,
+  estimate, save/load/revert, emitter integration, full API incl. live mutation
+  + 503). (FR-07, FR-09)
 - [ ] **6.26 — Label-aware retraining and online-update policy.** Retraining
   jobs should consume reviewed feedback labels, exclude known false-positive
   windows or fold them into clean baselines after review, and publish a new

@@ -145,6 +145,7 @@ def test_build_status_surfaces_emitter_counters(config: CanaryConfig, tmp_path: 
         "emitted": 4,
         "suppressed_not_anomaly": 12,
         "suppressed_dedupe": 1,
+        "suppressed_tuning": 0,
     }
 
 

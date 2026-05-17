@@ -68,6 +68,13 @@ from src.alerts.feedback import (
     FeedbackStore,
     annotate_events_with_feedback,
 )
+from src.alerts.tuning import (
+    AlertTuner,
+    TuningConfig,
+    estimate_before_after,
+    load_tuning_version,
+    save_tuning_config,
+)
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
@@ -429,6 +436,19 @@ class FeedbackRequest(_ControlRequest):
     labeled_by: str | None = None
 
 
+class TuningUpdateRequest(_ControlRequest):
+    """Replace the tuning config (Task 6.25). ``version`` is auto-bumped."""
+
+    config: dict[str, Any]
+    change: str = "tuning update"
+    by: str | None = None
+
+
+class TuningRevertRequest(_ControlRequest):
+    version: int
+    by: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -452,6 +472,7 @@ def create_app(
     audit_logger: ControlAuditLogger | None = None,
     control_token: str | None = None,
     feedback_store: FeedbackStore | None = None,
+    alert_tuner: AlertTuner | None = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -855,6 +876,109 @@ def create_app(
         )
         publish_control_event("anomaly.feedback", "ok", fb.to_dict())
         return {"feedback": fb.to_dict()}
+
+    def _tuner() -> AlertTuner:
+        if alert_tuner is None:
+            raise HTTPException(status_code=503, detail="tuning API is not available")
+        return alert_tuner
+
+    def _ensure_baseline_audited(tuner: AlertTuner) -> None:
+        """Snapshot the pre-change config so the first change is revertible.
+
+        The in-memory default (version 1) is never written until the operator
+        makes a change; without this, you couldn't undo your *first* tuning
+        edit. Idempotent — only writes if that version isn't already in the
+        audit log.
+        """
+        current = tuner.config
+        if load_tuning_version(current.version, config.daemon.tuning_audit) is None:
+            save_tuning_config(
+                current,
+                config.daemon.tuning_config,
+                audit_path=config.daemon.tuning_audit,
+                change="baseline snapshot",
+                by="system",
+            )
+
+    @app.get("/control/tuning")
+    def get_tuning(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        return {"tuning": _tuner().config.to_dict()}
+
+    @app.post("/control/tuning")
+    def post_tuning(
+        request: TuningUpdateRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        tuner = _tuner()
+        try:
+            proposed = TuningConfig.model_validate(request.config)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"invalid tuning config: {exc}") from exc
+        _ensure_baseline_audited(tuner)
+        # Monotonic version bump regardless of what the client sent — the
+        # version is the audit handle, not client-controlled.
+        proposed = proposed.model_copy(update={"version": tuner.config.version + 1})
+        save_tuning_config(
+            proposed,
+            config.daemon.tuning_config,
+            audit_path=config.daemon.tuning_audit,
+            change=request.change,
+            by=request.by,
+        )
+        # Mutate the live tuner in place so the change takes effect on the
+        # very next inference tick — no daemon restart.
+        tuner.config = proposed
+        publish_control_event(
+            "tuning.update", "ok", {"version": proposed.version, "change": request.change}
+        )
+        return {"tuning": proposed.to_dict()}
+
+    @app.post("/control/tuning/estimate")
+    def post_tuning_estimate(
+        request: TuningUpdateRequest,
+        since: str | None = Query(default=None),
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """Before/after FP estimate of a proposed config over recent
+        anomalies — run *before* committing (Risk R11)."""
+        tuner = _tuner()
+        try:
+            proposed = TuningConfig.model_validate(request.config)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"invalid tuning config: {exc}") from exc
+        try:
+            events = read_anomalies_since(anomalies_dir, since=since)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=f"bad `since`: {exc}") from exc
+        return estimate_before_after(events, tuner.config, proposed)
+
+    @app.post("/control/tuning/revert")
+    def post_tuning_revert(
+        request: TuningRevertRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        tuner = _tuner()
+        snapshot = load_tuning_version(request.version, config.daemon.tuning_audit)
+        if snapshot is None:
+            raise HTTPException(
+                status_code=404, detail=f"no tuning version {request.version} in audit log"
+            )
+        # Reverting is itself a new, audited version (never rewinds the log).
+        reverted = snapshot.model_copy(update={"version": tuner.config.version + 1})
+        save_tuning_config(
+            reverted,
+            config.daemon.tuning_config,
+            audit_path=config.daemon.tuning_audit,
+            change=f"revert to v{request.version}",
+            by=request.by,
+        )
+        tuner.config = reverted
+        publish_control_event(
+            "tuning.revert", "ok", {"to_version": request.version, "new_version": reverted.version}
+        )
+        return {"tuning": reverted.to_dict()}
 
     @app.websocket("/ws/telemetry")
     async def ws_telemetry(websocket: WebSocket) -> None:

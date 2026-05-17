@@ -48,6 +48,7 @@ from src.alerts.emitter import (
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
 from src.alerts.feedback import FeedbackStore
+from src.alerts.tuning import AlertTuner, load_tuning_config
 from src.collection.queueing import QueueDepthMonitor
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
@@ -91,6 +92,7 @@ class DaemonComponents:
     audit_logger: ControlAuditLogger
     emitter: AnomalyEventEmitter
     model_managers: dict[str, ModelManager[Any]]
+    alert_tuner: AlertTuner
     capture_controller: CaptureController | None = None
     job_controller: JobController | None = None
 
@@ -103,7 +105,8 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
 
     event_logger = AnomalyEventLogger(config.daemon.anomalies_dir)
     audit_logger = ControlAuditLogger(config.daemon.audit_log)
-    emitter = _make_broadcasting_emitter(event_logger, anomalies_bus)
+    tuner = AlertTuner(load_tuning_config(config.daemon.tuning_config))
+    emitter = _make_broadcasting_emitter(event_logger, anomalies_bus, tuner=tuner)
     model_managers = _load_model_managers(config)
 
     return DaemonComponents(
@@ -115,6 +118,7 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         audit_logger=audit_logger,
         emitter=emitter,
         model_managers=model_managers,
+        alert_tuner=tuner,
         capture_controller=None,
         job_controller=_make_job_controller(config),
     )
@@ -136,7 +140,10 @@ def _make_job_controller(config: CanaryConfig) -> JobController:
 
 
 def _make_broadcasting_emitter(
-    logger: AnomalyEventLogger, anomalies_bus: Broadcaster
+    logger: AnomalyEventLogger,
+    anomalies_bus: Broadcaster,
+    *,
+    tuner: AlertTuner | None = None,
 ) -> AnomalyEventEmitter:
     """Wrap ``AnomalyEventLogger`` so every persisted event is also published
     on the broadcaster — keeps the logger-as-source-of-truth + the live-push
@@ -158,7 +165,10 @@ def _make_broadcasting_emitter(
             self._inner.close()
 
     # AnomalyEventEmitter just needs `.log(event)`; duck-type satisfies it.
-    return AnomalyEventEmitter(_BroadcastingLogger(logger, anomalies_bus))  # type: ignore[arg-type]
+    return AnomalyEventEmitter(
+        _BroadcastingLogger(logger, anomalies_bus),  # type: ignore[arg-type]
+        tuner=tuner,
+    )
 
 
 def _load_model_managers(config: CanaryConfig) -> dict[str, ModelManager[Any]]:
@@ -534,6 +544,7 @@ async def serve_in_background(
         job_controller=components.job_controller,
         audit_logger=components.audit_logger,
         feedback_store=FeedbackStore(components.config.daemon.feedback_log),
+        alert_tuner=components.alert_tuner,
     )
     if components.job_controller is not None:
         loop = asyncio.get_running_loop()
