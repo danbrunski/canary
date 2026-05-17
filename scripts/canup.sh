@@ -9,10 +9,12 @@ set -euo pipefail
 #   sudo CAN_IFACE=can1 CAN_BITRATE=250000 scripts/canup.sh
 #   sudo CAN_LISTEN_ONLY=1 scripts/canup.sh   # passive CAN-only capture
 #
-# `restart-ms 100` lets the controller auto-recover from a CAN bus-off
-# event (electrical noise, a transient short on the vehicle bus) instead of
-# staying dark until the next manual bring-up — the link-layer companion to
-# the recorder's adapter-level auto-reconnect.
+# No `restart-ms`: the Canable runs gs_usb/candleLight firmware, whose driver
+# has no bus-off restart, so the kernel rejects IFLA_CAN_RESTART_MS and the
+# `ip link set type can` call would error. Bus-off / USB re-enumeration
+# recovery is handled at the application layer by the recorder's
+# ReconnectPolicy (src/collection/can_collector.py). See
+# docs/canable-firmware.md.
 
 IFACE="${CAN_IFACE:-can0}"
 BITRATE="${CAN_BITRATE:-500000}"
@@ -29,7 +31,7 @@ if ! ip link show "${IFACE}" >/dev/null 2>&1; then
   exit 1
 fi
 
-type_args=(type can bitrate "${BITRATE}" restart-ms 100)
+type_args=(type can bitrate "${BITRATE}")
 if [[ "${LISTEN_ONLY}" == "1" ]]; then
   type_args+=(listen-only on)
 fi

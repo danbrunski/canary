@@ -90,8 +90,13 @@ sudo nano /etc/canary/canary.yaml
 
 ## 4. Bring Up SocketCAN
 
-If the Canable appears as `can0`, bring it up for the default active read-only
-OBD + CAN mode:
+The Canable must run **candleLight/gs_usb** firmware so it appears as a native
+`can0` (slcan firmware exposes only `/dev/ttyACM0` and breaks the headless
+automation). If `can0` does not appear on plug-in, reflash per
+**`docs/canable-firmware.md`** before continuing.
+
+With candleLight firmware `can0` appears automatically; bring it up for the
+default active read-only OBD + CAN mode:
 
 ```bash
 sudo ip link set can0 down || true

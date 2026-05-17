@@ -12,17 +12,22 @@ broadcast CAN capture plus read-only OBD Mode 01 and selected Mode 22 DID
 polling. Add the NT510 when the session needs human-driven diagnostic stimulus.
 The ELM327 path remains only as legacy fallback/emulator coverage.
 
-- **Canable** (knockoff USB-CAN-FD, CANable2 slcan firmware) — the primary
-  interface. `record.py` opens it via python-can's `slcan` backend at 500 kbps
-  classic CAN for broadcast capture. `tools/can_obd_probe.py` also uses it as a
-  read-only ISO-TP OBD requester for Mode 01 / 03 / 09. The streaming
-  Canable-native OBD collector (`record.py --obd-source canable`) interleaves
-  Mode 01 and selected Mode 22 DID polling while writing the same `pids.jsonl`
-  sidecar the legacy ELM path used.
-  The adapter *does* emit per-frame ACK bits in normal-open mode; the firmware
-  ignores the slcan `L` listen-only command, so true bus-monitoring isn't
-  available — but ACK-only on a multi-node vehicle bus is benign and is exactly
-  what every scan tool on the port already does. See `can_collector.bus_factory`.
+- **Canable** (knockoff USB-CAN-FD, CANable2 **candleLight/gs_usb** firmware) —
+  the primary interface. The Pi opens it via python-can's `socketcan` backend
+  on the native `can0` interface at 500 kbps classic CAN for broadcast capture.
+  `tools/can_obd_probe.py` also uses it as a read-only ISO-TP OBD requester for
+  Mode 01 / 03 / 09. The streaming Canable-native OBD collector
+  (`record.py --obd-source canable`) interleaves Mode 01 and selected Mode 22
+  DID polling while writing the same `pids.jsonl` sidecar the legacy ELM path
+  used. (The adapter was originally flashed with slcan firmware; that is
+  superseded — slcan exposes only `/dev/ttyACM0` and breaks the headless
+  `can0.service` automation. See `docs/canable-firmware.md`.)
+  In the default active read-only OBD mode the recorder transmits diagnostic
+  read requests and the adapter emits per-frame ACK bits, so this is not silent
+  bus-monitoring — but ACK + read-only OBD on a multi-node vehicle bus is benign
+  and is exactly what every scan tool on the port already does. For true passive
+  capture, gs_usb supports kernel `listen-only` (see `docs/can-setup.md`). See
+  `can_collector.bus_factory`.
 - **ELM327** (CH340 clone) — legacy automatable tester. It previously polled
   Mode 01 PIDs and Mode 22 DIDs via `record.py --obd-port`, logging ground truth
   to `pids.jsonl` for byte-vs-PID regression. The current adapter is dead; keep
