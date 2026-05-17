@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from src.config import CanaryConfig
-from src.decode.bindings import load_bindings
+from src.decode.bindings import Bindings, load_bindings
 from src.preprocessing.live import LiveFeatureSource
 from src.telemetry import TelemetryRecord
 
@@ -93,10 +93,31 @@ def test_can_record_with_no_matching_binding_is_silently_skipped(
 
 
 def test_can_record_with_short_payload_is_silently_skipped(config: CanaryConfig) -> None:
-    bindings = load_bindings(Path("data/bindings.yaml"))
+    # Synthetic single binding at bytes 2-3, deliberately NOT real
+    # data/bindings.yaml. The original fixture used 0x1F9 + a 1-byte
+    # payload on the premise "0x1F9 only binds RPM at bytes 2-3" — which a
+    # later byte-0 binding (COOLING_FAN_1F9_0, 0x1F9:0) silently
+    # invalidated (a 1-byte payload then DID decode something). Decoupling
+    # from the live bindings file keeps this testing the decode-too-short
+    # path deterministically, immune to future bindings.yaml changes.
+    bindings = Bindings.model_validate(
+        {
+            "schema_version": 1,
+            "signals": [
+                {
+                    "name": "TEST_NEEDS_BYTES_2_3",
+                    "module": "TEST",
+                    "can_id": 0x123,
+                    "byte_start": 2,
+                    "byte_length": 2,
+                    "confidence": "high",
+                }
+            ],
+        }
+    )
     src = LiveFeatureSource(config=config, bindings=bindings)
-    # 0x1F9 binds RPM at bytes 2-3 but the payload only has 1 byte
-    src.observe(TelemetryRecord.can(1.0, 0x1F9, b"\x00"))
+    # 1-byte payload can't satisfy a bytes-2-3 binding → nothing decodes.
+    src.observe(TelemetryRecord.can(1.0, 0x123, b"\x00"))
     assert src.tick(datetime(2026, 5, 13, 12, 0, tzinfo=UTC)) is None
 
 
