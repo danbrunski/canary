@@ -39,6 +39,7 @@ def _steady_state_anomaly_rate(scored: pd.DataFrame) -> float:
         return 0.0
     return float((complete[LABEL_COLUMN] == -1).mean())
 
+
 #: An ABS module compares wheel-speed pairs coarsely; a single-wheel fault
 #: code needs a divergence on this order before it sets. We want the ML to
 #: fire well under this.

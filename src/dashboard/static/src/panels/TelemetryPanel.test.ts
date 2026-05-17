@@ -1,6 +1,6 @@
 import { createElement } from "react";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { BindingDisplay } from "../types";
@@ -178,5 +178,53 @@ describe("TelemetryPanel", () => {
     expect(screen.queryByText("0x1F9")).not.toBeInTheDocument();
     expect(screen.getByText("2 visible / select up to 6 to chart")).toBeInTheDocument();
     expect(await screen.findByText("Live chart")).toBeInTheDocument();
+  });
+});
+
+describe("TelemetryPanel — Drive (compact) pinning", () => {
+  afterEach(() => window.localStorage.clear());
+
+  function driveChannels(): Map<string, ChannelSnapshot> {
+    const channels = new Map<string, ChannelSnapshot>();
+    for (const name of ["ECM_RPM", "ECM_COOLANT_TEMP", "STEERING_ANGLE_002"]) {
+      channels.set(
+        `decoded:${name}`,
+        snapshot({ source: "decoded", channel: name, value: 1234, unit: "" }),
+      );
+      channels.get(`decoded:${name}`)!.history = [1, 2, 3];
+    }
+    return channels;
+  }
+
+  it("shows every channel as an equal tile — nothing hidden behind an expander", () => {
+    render(createElement(TelemetryPanel, { channels: driveChannels(), bindings: {}, compact: true }));
+    // No "N more channels" expander, no pinned-only toggle until something is pinned.
+    expect(screen.queryByText(/more channels/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/pinned only/)).not.toBeInTheDocument();
+    // Every channel is an equal tile (the per-tile pin control proves it —
+    // the name itself also appears in the chart legend, so assert the
+    // tile-unique pin button instead).
+    expect(screen.getByRole("button", { name: "pin ECM_RPM" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "pin ECM_COOLANT_TEMP" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "pin STEERING_ANGLE_002" }),
+    ).toBeInTheDocument();
+  });
+
+  it("pins a channel, persists it, and exposes the pinned-only toggle", () => {
+    render(createElement(TelemetryPanel, { channels: driveChannels(), bindings: {}, compact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "pin ECM_RPM" }));
+    expect(screen.getByText("3 live values · 1 pinned")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /pinned only/ }),
+    ).toBeInTheDocument();
+    expect(
+      JSON.parse(window.localStorage.getItem("canary.drive.pinned") ?? "[]"),
+    ).toEqual(["decoded:ECM_RPM"]);
+    // Unpin returns to the no-pins state.
+    fireEvent.click(screen.getByRole("button", { name: "unpin ECM_RPM" }));
+    expect(screen.getByText("3 live values")).toBeInTheDocument();
   });
 });

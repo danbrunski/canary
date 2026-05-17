@@ -854,8 +854,6 @@ def test_record_to_dict_is_json_serializable() -> None:
     json.dumps(obd)  # must not raise
     assert obd["value"] == 812.0 and obd["channel"] == "RPM"
 
-    can = _record_to_dict(
-        TelemetryRecord.can(1_778_000_000.0, 0x1F9, bytes([1, 2, 3, 4]))
-    )
+    can = _record_to_dict(TelemetryRecord.can(1_778_000_000.0, 0x1F9, bytes([1, 2, 3, 4])))
     assert isinstance(can["timestamp"], str)
     json.dumps(can)  # raw CAN frame row is JSON-safe too

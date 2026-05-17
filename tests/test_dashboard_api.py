@@ -267,9 +267,7 @@ dids:
     assert body["schema_version"] == 1
     assert body["dids"][0]["name"] == "INJECTOR_PULSE_WIDTH"
 
-    missing = create_app(
-        config, anomalies_dir=anomalies_dir, dids_path=tmp_path / "absent.yaml"
-    )
+    missing = create_app(config, anomalies_dir=anomalies_dir, dids_path=tmp_path / "absent.yaml")
     r = TestClient(missing).get("/dids")
     assert r.status_code == 200
     assert r.json()["dids"] == []

@@ -296,12 +296,8 @@ def test_training_runs_endpoint(tmp_path: Path) -> None:
     cfg = tmp_path / "canary.yaml"
     cfg.write_text(_API_CONFIG_YAML.format(storage=storage, ledger=ledger_path))
     config = CanaryConfig.from_yaml(cfg)
-    client = TestClient(
-        create_app(config, anomalies_dir=tmp_path / "anom", control_token="secret")
-    )
+    client = TestClient(create_app(config, anomalies_dir=tmp_path / "anom", control_token="secret"))
     assert client.get("/control/training-runs").status_code == 401
-    body = client.get(
-        "/control/training-runs", headers={"Authorization": "Bearer secret"}
-    ).json()
+    body = client.get("/control/training-runs", headers={"Authorization": "Bearer secret"}).json()
     assert body["count"] == 1
     assert body["runs"][0]["run_id"] == "lstm_api"

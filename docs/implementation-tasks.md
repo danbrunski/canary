@@ -88,7 +88,7 @@ Goal: a runnable empty skeleton, reproducible dev env, CI green on first push.
   → inference → dashboard — wire-up TODO until Phase 1), and handles
   SIGTERM/SIGINT for clean shutdown.
 - [x] **0.7 — CI.** GitHub Actions: lint, type-check, unit tests on
-  `ubuntu-latest` with Python 3.11 and 3.12. No hardware-dependent jobs yet.
+  `ubuntu-latest` with Python 3.11. No hardware-dependent jobs yet.
 - [x] **0.8 — Dev container.** `Dockerfile` (python:3.12-slim, deps baked
   into a cached layer, no `ml`/Torch extra) + `docker-compose.yml`
   (bind-mounts `src/scripts/tests/tools/data/models`, exposes 8000,

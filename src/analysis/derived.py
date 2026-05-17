@@ -344,12 +344,7 @@ def summarize_trip(wide: pd.DataFrame, vehicle: VehicleParameters) -> TripSummar
     idle_time_s = _last("derived:IDLE_TIME_S")
     avg_l100: float | None = None
     avg_mpg: float | None = None
-    if (
-        fuel_used_l is not None
-        and fuel_used_l > 0
-        and distance_km is not None
-        and distance_km > 0
-    ):
+    if fuel_used_l is not None and fuel_used_l > 0 and distance_km is not None and distance_km > 0:
         avg_l100 = fuel_used_l / distance_km * 100.0
         avg_mpg = (distance_km * _MI_PER_KM) / (fuel_used_l * _GAL_PER_L)
     speed = _series(enriched, "obd:SPEED", "decoded:VEHICLE_SPEED")

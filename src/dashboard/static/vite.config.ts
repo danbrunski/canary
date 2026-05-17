@@ -17,6 +17,15 @@ export default defineConfig({
       "/control": "http://127.0.0.1:8000",
       "/anomalies": "http://127.0.0.1:8000",
       "/telemetry": "http://127.0.0.1:8000",
+      // Without these, dev (`pnpm dev`) serves index.html for the API path,
+      // useBindings/useBehaviorModels parse HTML as JSON and silently get
+      // {} — so decoded gauges show *raw* bytes (e.g. ECM_RPM 16375 instead
+      // of raw×0.125 ≈ 2047). Prod serves the SPA same-origin so it's moot
+      // there; this only bites the dev server.
+      "/bindings": "http://127.0.0.1:8000",
+      "/models": "http://127.0.0.1:8000",
+      "/obd": "http://127.0.0.1:8000",
+      "/dids": "http://127.0.0.1:8000",
       "/ws": { target: "ws://127.0.0.1:8000", ws: true },
     },
   },

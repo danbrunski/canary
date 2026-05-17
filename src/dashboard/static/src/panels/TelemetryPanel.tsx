@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Sparkline } from "../components/Sparkline";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import {
+  buttonClass,
   cn,
   inputClass,
   panelClass,
@@ -16,13 +17,16 @@ import type { BindingDisplay, BindingsByChannel } from "../types";
 interface TelemetryPanelProps {
   channels: Map<string, ChannelSnapshot>;
   bindings: BindingsByChannel;
+  /** Drive view: equal-prominence tile grid + a user-pinned subset, no
+   *  hero tile, nothing hidden behind an expander. */
   compact?: boolean;
 }
 
-/** Channels the driving view should foreground (Task 5.9). The dashboard
- *  shows these big and at the top; everything else lands in a "more" grid.
- *  Order matters — left-to-right in the layout. */
-const PRIMARY_CHANNELS = [
+/** Sensible default pins for a standard OBD capture (Drive view). Only used
+ *  to seed the pin set the first time, and only the ones that actually
+ *  exist — a decoded-CAN replay has none of these, so it defaults to
+ *  "show everything, equally". */
+const DEFAULT_PIN_CANDIDATES = [
   "obd:RPM",
   "obd:SPEED",
   "obd:COOLANT_TEMP",
@@ -31,14 +35,34 @@ const PRIMARY_CHANNELS = [
   "obd:CONTROL_MODULE_VOLTAGE",
 ];
 
+const PIN_STORAGE_KEY = "canary.drive.pinned";
+
+function loadPins(): string[] {
+  try {
+    const raw = window.localStorage.getItem(PIN_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Render current values + 2-minute sparklines. Decoded CAN channels are
  *  rendered in engineering units when their binding has a pinned scale —
- *  ``decoded:ECM_COOLANT_TEMP`` raw=105 becomes "65 °C". When the binding
- *  has plausibility bounds, values outside them are color-flagged so an
- *  operator sees the abnormal reading immediately. */
+ *  ``decoded:ECM_RPM`` raw=16376 becomes "2047 rpm". When the binding has
+ *  plausibility bounds, values outside them are color-flagged. */
 export function TelemetryPanel({ channels, bindings, compact = false }: TelemetryPanelProps) {
   const [query, setQuery] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [pinned, setPinned] = useState<string[]>(loadPins);
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify(pinned));
+    } catch {
+      /* storage disabled — pins still live for the session */
+    }
+  }, [pinned]);
 
   const displayChannels = useMemo(() => {
     return [...channels]
@@ -46,19 +70,20 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
       .sort(([a], [b]) => a.localeCompare(b));
   }, [channels]);
 
-  const { primary, secondary } = useMemo(() => {
-    const primary: [string, ChannelSnapshot][] = [];
-    const secondary: [string, ChannelSnapshot][] = [];
-    for (const key of PRIMARY_CHANNELS) {
-      const snap = channels.get(key);
-      if (snap) primary.push([key, snap]);
-    }
-    const primarySet = new Set(PRIMARY_CHANNELS);
-    for (const [key, snap] of displayChannels) {
-      if (!primarySet.has(key)) secondary.push([key, snap]);
-    }
-    return { primary, secondary };
-  }, [channels, displayChannels]);
+  // Seed default pins once (only with channels that exist). A decoded
+  // replay has none of the OBD defaults → stays empty → equal grid of all.
+  useEffect(() => {
+    if (pinned.length > 0 || displayChannels.length === 0) return;
+    const seed = DEFAULT_PIN_CANDIDATES.filter((k) => channels.has(k));
+    if (seed.length > 0) setPinned(seed);
+  }, [channels, displayChannels.length, pinned.length]);
+
+  const pinnedSet = useMemo(() => new Set(pinned), [pinned]);
+
+  const togglePin = (key: string) =>
+    setPinned((cur) =>
+      cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key],
+    );
 
   const visibleChannels = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -72,20 +97,42 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
     });
   }, [displayChannels, query]);
 
+  // Drive grid order: pinned first (in pin order), then the rest, all the
+  // same size. "Pinned only" collapses to just the curated set.
+  const gridChannels = useMemo(() => {
+    const byKey = new Map(visibleChannels);
+    const pins = pinned
+      .filter((k) => byKey.has(k))
+      .map((k) => [k, byKey.get(k)!] as [string, ChannelSnapshot]);
+    if (pinnedOnly && pins.length > 0) return pins;
+    const rest = visibleChannels.filter(([k]) => !pinnedSet.has(k));
+    return [...pins, ...rest];
+  }, [visibleChannels, pinned, pinnedSet, pinnedOnly]);
+
   useEffect(() => {
     if (selectedKeys.size > 0 || displayChannels.length === 0) return;
-    const defaults = PRIMARY_CHANNELS.filter((key) => channels.has(key)).slice(0, 4);
     const numericFallback = displayChannels
       .filter(([_key, snap]) => snap.history.length > 0)
       .map(([key]) => key)
       .slice(0, 4);
-    setSelectedKeys(new Set(defaults.length > 0 ? defaults : numericFallback));
-  }, [channels, displayChannels, selectedKeys.size]);
+    setSelectedKeys(new Set(numericFallback));
+  }, [displayChannels, selectedKeys.size]);
 
-  const chartKeys = useMemo(
-    () => [...selectedKeys].filter((key) => channels.has(key)).slice(0, 6),
-    [channels, selectedKeys],
-  );
+  // The chart follows the pins in Drive (curating tiles curates the chart);
+  // in the explorer it follows the row selection.
+  const chartKeys = useMemo(() => {
+    if (compact) {
+      const fromPins = pinned.filter(
+        (k) => (channels.get(k)?.history.length ?? 0) > 1,
+      );
+      if (fromPins.length > 0) return fromPins.slice(0, 6);
+      return displayChannels
+        .filter(([, s]) => s.history.length > 1)
+        .map(([k]) => k)
+        .slice(0, 6);
+    }
+    return [...selectedKeys].filter((key) => channels.has(key)).slice(0, 6);
+  }, [compact, pinned, channels, displayChannels, selectedKeys]);
 
   const toggleSelected = (key: string) => {
     setSelectedKeys((current) => {
@@ -93,9 +140,7 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
       if (next.has(key)) {
         next.delete(key);
       } else {
-        if (next.size >= 6) {
-          next.delete([...next][0]);
-        }
+        if (next.size >= 6) next.delete([...next][0]);
         next.add(key);
       }
       return next;
@@ -118,67 +163,83 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
       <header className={panelHeaderCenterClass}>
         <div>
           <h2 className={panelTitleClass}>Telemetry</h2>
-          <span className={panelCountClass}>{displayChannels.length} live values</span>
+          <span className={panelCountClass}>
+            {displayChannels.length} live values
+            {compact && pinned.length > 0 && ` · ${pinned.length} pinned`}
+          </span>
         </div>
-        <input
-          className={cn(inputClass, "w-[min(24rem,45vw)] max-[700px]:w-full")}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="search PID or signal"
-        />
-      </header>
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2.5">
-        {primary.map(([key, snap]) => (
-          <ChannelCard
-            key={key}
-            channelKey={key}
-            snapshot={snap}
-            binding={bindings[key]}
-            large
+        <div className="flex items-center gap-2">
+          {compact && pinned.length > 0 && (
+            <button
+              type="button"
+              className={cn(
+                buttonClass,
+                "px-2.5 py-1 text-[0.74rem]",
+                pinnedOnly && "border-accent text-accent",
+              )}
+              onClick={() => setPinnedOnly((v) => !v)}
+              title="Show only the channels you've pinned"
+            >
+              {pinnedOnly ? "★ pinned only" : "☆ pinned only"}
+            </button>
+          )}
+          <input
+            className={cn(inputClass, "w-[min(20rem,40vw)] max-[700px]:w-full")}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="search PID or signal"
           />
-        ))}
-      </div>
-      <TelemetryChart
-        channels={channels}
-        bindings={bindings}
-        selectedKeys={chartKeys}
-      />
-      {!compact && (
-        <div className="mt-3.5">
-          <div className="mb-1.5 flex justify-between gap-2 text-[0.78rem] text-fg-dim">
-            <b className="text-fg">Channel explorer</b>
-            <span>{visibleChannels.length} visible / select up to 6 to chart</span>
-          </div>
-          <div className="grid max-h-[44rem] grid-cols-[repeat(auto-fit,minmax(270px,1fr))] gap-1.5 overflow-y-auto">
-            {visibleChannels.map(([key, snap]) => (
-              <ChannelRow
-                key={key}
-                channelKey={key}
-                snapshot={snap}
-                binding={bindings[key]}
-                selected={selectedKeys.has(key)}
-                onToggle={() => toggleSelected(key)}
-              />
-            ))}
-          </div>
         </div>
-      )}
-      {compact && secondary.length > 0 && (
-        <details className="mt-3.5">
-          <summary className="cursor-pointer text-[0.85rem] text-fg-dim">
-            {secondary.length} more channels
-          </summary>
-          <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-1.5">
-            {secondary.map(([key, snap]) => (
-              <ChannelCard
-                key={key}
-                channelKey={key}
-                snapshot={snap}
-                binding={bindings[key]}
-              />
-            ))}
+      </header>
+
+      {compact ? (
+        <>
+          {gridChannels.length === 0 ? (
+            <p className={placeholderClass}>no channels match “{query}”.</p>
+          ) : (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(165px,1fr))] gap-2.5">
+              {gridChannels.map(([key, snap]) => (
+                <ChannelCard
+                  key={key}
+                  channelKey={key}
+                  snapshot={snap}
+                  binding={bindings[key]}
+                  pinned={pinnedSet.has(key)}
+                  onTogglePin={() => togglePin(key)}
+                />
+              ))}
+            </div>
+          )}
+          <TelemetryChart channels={channels} bindings={bindings} selectedKeys={chartKeys} />
+          {pinned.length === 0 && displayChannels.length > 6 && (
+            <p className="mt-2 text-[0.74rem] text-fg-faint">
+              Tip: ☆ a channel to pin it to the top — then “pinned only” for a
+              focused drive view.
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <TelemetryChart channels={channels} bindings={bindings} selectedKeys={chartKeys} />
+          <div className="mt-3.5">
+            <div className="mb-1.5 flex justify-between gap-2 text-[0.78rem] text-fg-dim">
+              <b className="text-fg">Channel explorer</b>
+              <span>{visibleChannels.length} visible / select up to 6 to chart</span>
+            </div>
+            <div className="grid max-h-[44rem] grid-cols-[repeat(auto-fit,minmax(270px,1fr))] gap-1.5 overflow-y-auto">
+              {visibleChannels.map(([key, snap]) => (
+                <ChannelRow
+                  key={key}
+                  channelKey={key}
+                  snapshot={snap}
+                  binding={bindings[key]}
+                  selected={selectedKeys.has(key)}
+                  onToggle={() => toggleSelected(key)}
+                />
+              ))}
+            </div>
           </div>
-        </details>
+        </>
       )}
     </section>
   );
@@ -326,12 +387,14 @@ function ChannelCard({
   channelKey,
   snapshot,
   binding,
-  large = false,
+  pinned,
+  onTogglePin,
 }: {
   channelKey: string;
   snapshot: ChannelSnapshot;
   binding?: BindingDisplay;
-  large?: boolean;
+  pinned?: boolean;
+  onTogglePin?: () => void;
 }) {
   const rendered = renderChannel(snapshot, binding);
   const sparkValues = sparkSeries(snapshot, binding);
@@ -339,18 +402,32 @@ function ChannelCard({
     <div
       className={cn(
         "relative rounded-tile border border-border-soft bg-[linear-gradient(180deg,var(--color-elev-2),var(--color-elev))] px-3 py-2 transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border hover:shadow-panel",
-        large &&
-          "bg-[radial-gradient(120%_120%_at_0%_0%,rgba(255,181,71,0.06),transparent_60%),linear-gradient(180deg,var(--color-elev-2),var(--color-elev))] px-4 py-3",
+        pinned && "border-accent/55",
         bandUtility(rendered.bandClass),
       )}
     >
-      <div className="mb-1 text-[0.62rem] uppercase tracking-[0.13em] text-fg-faint">
+      {onTogglePin && (
+        <button
+          type="button"
+          className={cn(
+            "absolute right-1.5 top-1.5 text-[0.8rem] leading-none transition-colors",
+            pinned ? "text-accent" : "text-fg-faint hover:text-fg-dim",
+          )}
+          onClick={onTogglePin}
+          aria-label={
+            pinned ? `unpin ${prettyChannel(channelKey)}` : `pin ${prettyChannel(channelKey)}`
+          }
+          title={pinned ? "Unpin from top" : "Pin to top"}
+        >
+          {pinned ? "★" : "☆"}
+        </button>
+      )}
+      <div className="mb-1 pr-4 text-[0.62rem] uppercase tracking-[0.13em] text-fg-faint">
         {prettyChannel(channelKey)}
       </div>
       <div
         className={cn(
           "font-num text-2xl font-semibold tabular-nums text-fg",
-          large && "text-[2rem] text-accent",
           rendered.bandClass === "band-bad" && "text-bad",
           rendered.bandClass === "band-warn" && "text-warn",
         )}
@@ -362,13 +439,7 @@ function ChannelCard({
           </span>
         )}
       </div>
-      {sparkValues.length > 1 && (
-        <Sparkline
-          values={sparkValues}
-          width={large ? 200 : 120}
-          height={large ? 44 : 28}
-        />
-      )}
+      {sparkValues.length > 1 && <Sparkline values={sparkValues} width={150} height={30} />}
     </div>
   );
 }
@@ -442,11 +513,7 @@ function sparkSeries(
   snapshot: ChannelSnapshot,
   binding: BindingDisplay | undefined,
 ): number[] {
-  if (
-    !binding ||
-    binding.scale === null ||
-    snapshot.latest.source !== "decoded"
-  ) {
+  if (!binding || binding.scale === null || snapshot.latest.source !== "decoded") {
     return snapshot.history;
   }
   const offset = binding.offset ?? 0;
