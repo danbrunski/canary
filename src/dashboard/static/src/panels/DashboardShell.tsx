@@ -1,51 +1,49 @@
 import type { ReactNode } from "react";
 
-import { ConnectionIndicator } from "./ConnectionIndicator";
-import { OperatingModeIndicator } from "./OperatingModeIndicator";
+import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { buttonClass, cn, headerClass, mainClass, shellClass } from "../styles";
 import type {
   AnomalyEvent,
   AppMode,
   ConnectionState,
-  DashboardView,
+  StatusResponse,
 } from "../types";
+import { ConnectionIndicator } from "./ConnectionIndicator";
+import { OperatingModeIndicator } from "./OperatingModeIndicator";
+import { StatusStrip } from "./StatusStrip";
 
 interface DashboardShellProps {
   appMode: AppMode;
-  activeView: DashboardView;
   onToggleMode: () => void;
-  onViewChange: (view: DashboardView) => void;
   telemetryState: ConnectionState;
   anomalyState: ConnectionState;
   controlState: ConnectionState;
   controlReady: boolean;
   events: AnomalyEvent[];
+  status: StatusResponse | null;
+  channels: Map<string, ChannelSnapshot>;
   children: ReactNode;
 }
 
-/** The page chrome — header (vehicle/mode/connection state), main panel
- *  grid, parked/driving toggle. Layout is landscape-first; on portrait
- *  the grid stacks via CSS media queries. */
+/** Page chrome: header (brand, operating mode, connection state, the
+ *  Drive↔Workbench toggle) + the always-visible StatusStrip + the active
+ *  body. The mode toggle now switches the *whole* context — a locked
+ *  glanceable Drive screen vs. the grouped Workbench — instead of hiding a
+ *  single panel. Grouped navigation lives in the Workbench sidebar, not a
+ *  flat top tab bar, so it scales to every Phase-6 panel. */
 export function DashboardShell({
   appMode,
-  activeView,
   onToggleMode,
-  onViewChange,
   telemetryState,
   anomalyState,
   controlState,
   controlReady,
   events,
+  status,
+  channels,
   children,
 }: DashboardShellProps) {
-  const views: { id: DashboardView; label: string }[] = [
-    { id: "drive", label: "Drive" },
-    { id: "charts", label: "Charts" },
-    { id: "control", label: "Control" },
-    { id: "models", label: "Models" },
-    { id: "system", label: "System" },
-  ];
-
+  const driving = appMode === "driving";
   return (
     <div className={shellClass}>
       <header className={headerClass}>
@@ -54,30 +52,11 @@ export function DashboardShell({
             CANary
           </div>
           <div className="text-[0.62rem] uppercase tracking-[0.16em] text-fg-faint">
-            truck telemetry
+            {driving ? "drive" : "workbench"}
           </div>
         </div>
         <OperatingModeIndicator events={events} />
-        <nav
-          className="flex items-center gap-1 rounded-full border border-border-soft bg-black/30 p-1 max-[900px]:order-4 max-[900px]:w-full max-[900px]:overflow-x-auto"
-          aria-label="Dashboard views"
-        >
-          {views.map((view) => (
-            <button
-              key={view.id}
-              type="button"
-              className={cn(
-                "min-h-8 flex-1 rounded-full border-0 bg-transparent px-3.5 py-1.5 text-[0.82rem] font-semibold tracking-[0.02em] text-fg-dim transition-colors hover:text-fg max-[900px]:flex-[1_0_auto]",
-                activeView === view.id &&
-                  "bg-[linear-gradient(180deg,var(--color-elev-3),var(--color-elev-2))] text-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_2px_8px_-4px_rgba(0,0,0,0.7)]",
-              )}
-              onClick={() => onViewChange(view.id)}
-            >
-              {view.label}
-            </button>
-          ))}
-        </nav>
-        <div className="ml-auto flex gap-2 text-[0.78rem] text-fg-dim max-[900px]:ml-0">
+        <div className="ml-auto flex gap-2 text-[0.78rem] text-fg-dim">
           <ConnectionIndicator label="tel" state={telemetryState} />
           <ConnectionIndicator label="anom" state={anomalyState} />
           <ConnectionIndicator
@@ -90,18 +69,19 @@ export function DashboardShell({
           className={cn(
             buttonClass,
             "rounded-full px-4 text-[0.78rem] font-semibold uppercase tracking-[0.04em]",
-            appMode === "parked" && "border-accent bg-accent/15 text-accent",
+            !driving && "border-accent bg-accent/15 text-accent",
           )}
           onClick={onToggleMode}
           aria-label={
-            appMode === "driving"
-              ? "switch to parked / maintenance mode"
-              : "switch to driving mode"
+            driving
+              ? "switch to the parked workbench"
+              : "switch to the driving screen"
           }
         >
-          {appMode === "driving" ? "→ parked" : "→ driving"}
+          {driving ? "→ workbench" : "→ drive"}
         </button>
       </header>
+      <StatusStrip status={status} channels={channels} events={events} />
       <main className={mainClass}>{children}</main>
     </div>
   );

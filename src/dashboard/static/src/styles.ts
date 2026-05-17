@@ -138,3 +138,62 @@ export function noticeClass(kind: "ok" | "error" | "busy"): string {
     kind === "busy" && "border-accent/55 text-accent",
   );
 }
+
+// ---------------------------------------------------------------------------
+// Navigation refactor (Phase A): mode-driven shell, grouped Workbench nav,
+// persistent status strip.
+// ---------------------------------------------------------------------------
+
+/** Status spine under the header — the always-visible "is everything OK". */
+export const statusStripClass = [
+  "flex",
+  "flex-wrap",
+  "items-center",
+  "gap-x-5",
+  "gap-y-1.5",
+  "border-b",
+  "border-border-soft",
+  "bg-black/20",
+  "px-[1.15rem]",
+  "py-2",
+  "text-[0.74rem]",
+  "text-fg-dim",
+].join(" ");
+
+export const statusItemClass = "inline-flex items-center gap-1.5";
+export const statusLabelClass =
+  "text-[0.6rem] uppercase tracking-[0.16em] text-fg-faint";
+export const statusValueClass = "font-num tabular-nums text-fg";
+
+/** Workbench: sidebar on wide screens, horizontal scroller on phones. */
+export const workbenchClass =
+  "grid gap-[1.15rem] grid-cols-[13rem_1fr] max-[900px]:grid-cols-1";
+
+export const sidebarClass =
+  "flex flex-col gap-4 max-[900px]:flex-row max-[900px]:gap-2 max-[900px]:overflow-x-auto";
+
+export const navGroupLabelClass =
+  "px-2 text-[0.6rem] font-bold uppercase tracking-[0.16em] text-fg-faint max-[900px]:hidden";
+
+export function navItemClass(active: boolean): string {
+  return cn(
+    "min-h-9 rounded-[8px] border border-transparent px-3 py-1.5 text-left text-[0.85rem]",
+    "font-medium text-fg-dim transition-colors hover:text-fg",
+    "max-[900px]:whitespace-nowrap",
+    active &&
+      "border-border-soft bg-[linear-gradient(180deg,var(--color-elev-3),var(--color-elev-2))] text-fg",
+  );
+}
+
+export function groupTabClass(active: boolean): string {
+  return cn(
+    "min-h-8 rounded-full border-0 bg-transparent px-3.5 py-1.5 text-[0.82rem]",
+    "font-semibold tracking-[0.02em] text-fg-dim transition-colors hover:text-fg",
+    "max-[900px]:flex-[1_0_auto]",
+    active &&
+      "bg-[linear-gradient(180deg,var(--color-elev-3),var(--color-elev-2))] text-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_2px_8px_-4px_rgba(0,0,0,0.7)]",
+  );
+}
+
+export const groupTabsClass =
+  "flex items-center gap-1 rounded-full border border-border-soft bg-black/30 p-1 max-[900px]:w-full max-[900px]:overflow-x-auto";

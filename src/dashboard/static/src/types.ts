@@ -49,7 +49,28 @@ export interface StatusResponse {
     emitted: number;
     suppressed_not_anomaly: number;
     suppressed_dedupe: number;
+    suppressed_tuning: number;
   } | null;
+  health: StatusHealth | null;
+}
+
+/** `/status.health` — mirrors `HealthMonitor.snapshot()` (Task 6.27).
+ *  Drift sub-blocks are loosely typed; the Models▸Health panel reads them
+ *  best-effort and they're absent until the daemon wires drift inputs. */
+export interface StatusHealth {
+  observed: number;
+  inference_latency_ms: {
+    mean: number | null;
+    p95: number | null;
+    max: number | null;
+  };
+  missing_feature_rate: number | null;
+  data_freshness_seconds: number | null;
+  model_swaps: Record<string, number>;
+  active_model_version: string | null;
+  system: Record<string, number | null>;
+  feature_drift?: Record<string, unknown>;
+  reconstruction_error_drift?: Record<string, unknown>;
 }
 
 /** Response from `GET /telemetry/latest?n=...`. */
@@ -62,11 +83,50 @@ export interface TelemetryLatestResponse {
  *  as the small dot in the corner. */
 export type ConnectionState = "connecting" | "open" | "closed" | "error";
 
-/** UI mode. `parked` unlocks the maintenance / diagnostics panels. */
+/** Top-level context. `driving` = the locked, glanceable single screen;
+ *  `parked` = the full Workbench with grouped navigation. The mode drives
+ *  the *entire* layout, not just which panels are gated. */
 export type AppMode = "driving" | "parked";
 
-/** Top-level dashboard workspace. */
-export type DashboardView = "drive" | "charts" | "control" | "models" | "system";
+/** Workbench navigation model (replaces the old flat `DashboardView`).
+ *  One canonical home per panel; new Phase-6 panels register in `nav.tsx`
+ *  without ever growing the five top-level groups. */
+export type NavGroupId = "live" | "diagnostics" | "models" | "data" | "control";
+
+export type WorkbenchItem =
+  | "live-gauges"
+  | "live-charts"
+  | "live-alarms"
+  | "diag-anomalies"
+  | "diag-coverage"
+  | "diag-dtc"
+  | "diag-did"
+  | "diag-system"
+  | "diag-tpms"
+  | "models-overview"
+  | "models-behavior"
+  | "models-training"
+  | "models-tuning"
+  | "models-health"
+  | "data-sessions"
+  | "data-health"
+  | "data-export"
+  | "control-main";
+
+export interface NavItemDef {
+  id: WorkbenchItem;
+  label: string;
+  group: NavGroupId;
+  /** Backend exists; the rich UI is a later Phase-6 task (rendered as a
+   *  labeled placeholder for now so the shell can already hold it). */
+  placeholder?: boolean;
+}
+
+export interface NavGroupDef {
+  id: NavGroupId;
+  label: string;
+  items: NavItemDef[];
+}
 
 // ---------------------------------------------------------------------------
 // Behavior models — Task 4.E.9 dashboard performance feed.
