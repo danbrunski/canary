@@ -109,18 +109,27 @@ from src.preprocessing.loader import (
 #: which works regardless of cwd.
 DEFAULT_STATIC_DIR = Path(__file__).resolve().parent / "static" / "dist"
 
+#: Repo root, anchored to this file (``src/dashboard/api.py`` → up 3) rather
+#: than the process cwd. These catalog files are version-controlled and ship
+#: in the clone, so the daemon must find them regardless of where it was
+#: launched from — under systemd the unit happens to ``cd`` to the clone, but
+#: a Docker ``WORKDIR`` or a direct ``serve_dashboard`` run would otherwise
+#: silently empty *all three* catalogs. ``DEFAULT_STATIC_DIR`` already anchors
+#: to ``__file__`` for the same reason; these now match.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 #: Where the project hand-edits CAN signal bindings live. The dashboard reads
 #: a *display-oriented* projection so the frontend can render decoded channels
 #: in engineering units. The full evidence trail / notes / confidence ladder
 #: stays in the YAML and is irrelevant to the live view.
-DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
+DEFAULT_BINDINGS_PATH = _REPO_ROOT / "data" / "bindings.yaml"
 
 #: Canonical Nissan Mode-22 DID catalog (Task 6.16 workbench reads this).
-DEFAULT_DIDS_PATH = Path("data/dids.yaml")
+DEFAULT_DIDS_PATH = _REPO_ROOT / "data" / "dids.yaml"
 
 #: Scanned directory of YAML test-session profiles for the Test panel. A
 #: user-editable catalog (drop a file, it appears) — not hardcoded in code.
-DEFAULT_TEST_PROFILES_DIR = Path("data/test_profiles")
+DEFAULT_TEST_PROFILES_DIR = _REPO_ROOT / "data" / "test_profiles"
 
 log = logging.getLogger(__name__)
 

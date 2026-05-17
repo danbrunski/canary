@@ -34,7 +34,11 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 #: Default location of the hand-edited / refit-written behavior-model file.
-DEFAULT_BEHAVIOR_MODELS_PATH = Path("data/behavior_models.yaml")
+#: Anchored to this file's repo (``src/decode/`` → up 3), not the process
+#: cwd: the daemon must find this version-controlled file no matter where it
+#: was launched (systemd ``cd``s to the clone, but Docker/other entrypoints
+#: must not silently get an empty model set).
+DEFAULT_BEHAVIOR_MODELS_PATH = Path(__file__).resolve().parents[2] / "data" / "behavior_models.yaml"
 
 
 class _Strict(BaseModel):

@@ -55,7 +55,7 @@ from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.jobs import JobController
-from src.dashboard.api import create_app
+from src.dashboard.api import DEFAULT_BINDINGS_PATH, create_app
 from src.dashboard.broadcast import Broadcaster
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
@@ -504,7 +504,9 @@ def build_live_feature_source(
     the canonical locations), and wires them into the source so CAN
     payloads decode and deviation columns appear automatically.
     """
-    bindings_path = bindings_path or Path("data/bindings.yaml")
+    # Repo-root-anchored (see api.DEFAULT_BINDINGS_PATH) so live CAN decode
+    # finds bindings.yaml regardless of the daemon's launch cwd.
+    bindings_path = bindings_path or DEFAULT_BINDINGS_PATH
     behavior_models_path = behavior_models_path or DEFAULT_BEHAVIOR_MODELS_PATH
     bindings = load_bindings(bindings_path) if bindings_path.exists() else None
     behavior_models = (
