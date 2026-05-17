@@ -44,6 +44,9 @@ Thumbs.db
 .env
 .env.*
 canary.yaml
+# Live Pi config pulled by scripts/sync-train.sh for exact-match preprocessing
+# (may contain the vehicle VIN — never commit).
+canary.laptop.yaml
 
 # CANary telemetry artifacts (not committed; can be large)
 *.parquet
@@ -52,6 +55,8 @@ canary.yaml
 logs/
 data/sessions/
 data/raw/
+# Laptop training mirror: sessions rsync'd off the Pi by scripts/sync-train.sh.
+/sessions/
 # control-plane tokens, audit log, job ledger — never commit
 data/control/
 

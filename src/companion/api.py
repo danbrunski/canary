@@ -402,8 +402,10 @@ def create_app(
             raise HTTPException(status_code=400, detail=f"unsupported model type: {model_type}")
         host = default_pi_host(request.pi_host)
         token = default_pi_token(request.token)
-        artifact_path = Path(request.artifact_path) if request.artifact_path else _artifact_path(
-            local_config, model_type
+        artifact_path = (
+            Path(request.artifact_path)
+            if request.artifact_path
+            else _artifact_path(local_config, model_type)
         )
         manifest_path = (
             Path(request.manifest_path)

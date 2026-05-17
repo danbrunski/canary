@@ -197,9 +197,7 @@ class TrainedIsolationForest:
             if complete_indexes.empty:
                 continue
 
-            x = scaled.loc[complete_indexes, list(self.feature_columns)].to_numpy(
-                dtype=np.float32
-            )
+            x = scaled.loc[complete_indexes, list(self.feature_columns)].to_numpy(dtype=np.float32)
             model = self.models[mode_key]
             # sklearn's decision_function is positive for inliers and
             # negative for outliers. Negating gives a more natural

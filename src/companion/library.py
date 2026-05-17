@@ -414,9 +414,7 @@ class CanaryLibrary:
         with self._lock:
             return [
                 json.loads(r["record"])
-                for r in self._conn.execute(
-                    "SELECT record FROM training_runs ORDER BY created_at"
-                )
+                for r in self._conn.execute("SELECT record FROM training_runs ORDER BY created_at")
             ]
 
     # -- model artifacts + publish history ------------------------------

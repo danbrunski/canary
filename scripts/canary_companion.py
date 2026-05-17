@@ -57,10 +57,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--token",
         default=os.environ.get("CANARY_COMPANION_TOKEN"),
-        help=(
-            "Optional local bearer token. If omitted, loopback companion routes "
-            "are unlocked."
-        ),
+        help=("Optional local bearer token. If omitted, loopback companion routes are unlocked."),
     )
     parser.add_argument(
         "--no-static",
