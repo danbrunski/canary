@@ -10,6 +10,31 @@ Recommended operating model:
 - Laptop: SSH for service/log work; browser or `curl` for API/dashboard work.
 - Network: vehicle hotspot, phone hotspot, or a trusted LAN. v1 has no auth.
 
+There are two install paths:
+
+- **Developer bring-up** (run + develop from a clone): one idempotent script,
+  covered just below. Use this on a desktop/bench Pi.
+- **In-vehicle systemd service** (system user, `/etc/canary`, `/data/canary`):
+  sections 1–6 below, driven by `scripts/install_pi.sh`.
+
+## Developer Bring-up (one command)
+
+On a fresh clone, to get a working run-and-develop environment (OS packages,
+dev virtualenv with CPU PyTorch, `canary.yaml`, and the built dashboard):
+
+```bash
+git clone <repo-url> ~/canary && cd ~/canary
+./scripts/setup_pi_dev.sh
+```
+
+It is idempotent and self-documenting (`./scripts/setup_pi_dev.sh --help`).
+Tune it via environment variables, e.g. `CANARY_TORCH=none` (skip PyTorch),
+`CANARY_DASHBOARD=0` (skip the frontend build), or `CANARY_VERIFY=1` (run
+ruff/mypy/pytest at the end). Once PyTorch is installed, re-run with
+`CANARY_TORCH=none` so it is not re-downloaded.
+
+The rest of this document is the in-vehicle systemd service path.
+
 ## 1. Install OS Packages
 
 On Raspberry Pi OS Bookworm or later:

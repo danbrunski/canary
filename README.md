@@ -79,7 +79,15 @@ cp canary.example.yaml canary.yaml
 
 ### Raspberry Pi / headless
 
-For the Pi, use the Pi-specific config and systemd install path:
+To bring up a fresh Pi for running **and developing** CANary in one idempotent
+step (OS packages, dev venv with CPU Torch, `canary.yaml`, built dashboard):
+
+```bash
+./scripts/setup_pi_dev.sh        # --help for options
+```
+
+For the in-vehicle headless **service**, use the Pi-specific config and systemd
+install path instead:
 
 ```bash
 sudo git clone <repo-url> /opt/canary
