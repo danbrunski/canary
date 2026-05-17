@@ -143,6 +143,43 @@ direct link), or the pinned `192.168.137.2`. The control token is **still
 required** — over Ethernet the laptop isn't loopback, identical to the AP
 case (`docs/headless-api.md`).
 
+### WSL2 can't reach the ICS subnet (Windows dev)
+
+WSL2 in default NAT mode is on its own virtual switch and Windows does
+**not** route between it and the ICS Ethernet subnet — so `ssh`/`rsync`
+to `192.168.137.2` fail *from inside WSL* even though Windows itself
+(PowerShell, the browser) reaches the Pi fine. Fixes:
+
+- **Windows 11 22H2+** — mirrored networking (cleanest; keeps the WSL
+  rsync-deploy loop). In `%USERPROFILE%\.wslconfig`:
+
+  ```ini
+  [wsl2]
+  networkingMode=mirrored
+  ```
+
+  then `wsl --shutdown` and reopen WSL. `192.168.137.2` is now reachable
+  from WSL directly.
+
+- **Any Windows** — `netsh interface portproxy` on the Windows host maps a
+  local port to the Pi; from WSL, target the Windows host (the WSL
+  default-route gateway):
+
+  ```powershell
+  netsh interface portproxy add v4tov4 listenport=2222 listenaddress=0.0.0.0 connectport=22   connectaddress=192.168.137.2
+  netsh interface portproxy add v4tov4 listenport=8000 listenaddress=0.0.0.0 connectport=8000 connectaddress=192.168.137.2
+  ```
+
+  ```bash
+  WINHOST=$(ip route show default | awk '{print $3}')
+  ssh -p 2222 canary@"$WINHOST"          # dashboard: http://$WINHOST:8000
+  ```
+
+  Undo with `netsh interface portproxy reset`.
+
+Or just run field management from Windows-side tools / the Windows browser
+— only the WSL shell is walled off.
+
 ### Subnet caveat
 
 The Pi AP is fixed at `10.42.0.0/24`. Windows ICS (`192.168.137.0/24`)
