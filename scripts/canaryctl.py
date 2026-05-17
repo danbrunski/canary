@@ -16,11 +16,79 @@ import argparse
 import base64
 import json
 import os
+import stat
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+
+def _env_file_path() -> Path:
+    """Where to look for persisted CANARY_* defaults.
+
+    ``CANARY_ENV_FILE`` overrides the location (handy for tests); otherwise
+    ``~/.canary/env`` so the operator doesn't re-export host/token each shell.
+    """
+    override = os.environ.get("CANARY_ENV_FILE")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".canary" / "env"
+
+
+def _load_env_file(path: Path) -> dict[str, str]:
+    """Parse a dotenv-style ``KEY=VALUE`` file. Missing/unreadable → {}.
+
+    Tolerates blank lines, ``#`` comments, a leading ``export``, and single-
+    or double-quoted values, so the same file can also be ``source``-d.
+    """
+    try:
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError):
+        return {}
+    # The file holds a bearer token; nudge if it's group/other-readable.
+    try:
+        mode = path.stat().st_mode
+        if mode & (stat.S_IRWXG | stat.S_IRWXO):
+            print(
+                f"warning: {path} is accessible by other users; "
+                f"chmod 600 it (it holds CANARY_TOKEN).",
+                file=sys.stderr,
+            )
+    except OSError:
+        pass
+    values: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        key, _, val = line.partition("=")
+        key, val = key.strip(), val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+            val = val[1:-1]
+        if key:
+            values[key] = val
+    return values
+
+
+def _resolve_default(file_env: dict[str, str], *names: str) -> str | None:
+    """First non-empty value across the process env, then the env file.
+
+    A real environment variable always wins over the file, so an inline
+    ``CANARY_TOKEN=... canaryctl ...`` or an explicit export still overrides.
+    """
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    for name in names:
+        value = file_env.get(name)
+        if value:
+            return value
+    return None
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -28,15 +96,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         prog="canaryctl",
         description="Remote control client for a headless CANary daemon.",
     )
+    file_env = _load_env_file(_env_file_path())
     parser.add_argument(
         "--host",
-        default=os.environ.get("CANARY_HOST") or os.environ.get("CANARY_URL"),
-        help="CANary base URL, e.g. http://192.168.0.230:8000. Defaults to CANARY_HOST.",
+        default=_resolve_default(file_env, "CANARY_HOST", "CANARY_URL"),
+        help=(
+            "CANary base URL, e.g. http://192.168.0.230:8000. Defaults to "
+            "$CANARY_HOST, then CANARY_HOST in ~/.canary/env."
+        ),
     )
     parser.add_argument(
         "--token",
-        default=os.environ.get("CANARY_TOKEN") or os.environ.get("CANARY_CONTROL_TOKEN"),
-        help="Bearer token for /control endpoints. Defaults to CANARY_TOKEN.",
+        default=_resolve_default(file_env, "CANARY_TOKEN", "CANARY_CONTROL_TOKEN"),
+        help=(
+            "Bearer token for /control endpoints. Defaults to $CANARY_TOKEN, "
+            "then CANARY_TOKEN in ~/.canary/env."
+        ),
     )
 
     sub = parser.add_subparsers(dest="command", required=True)

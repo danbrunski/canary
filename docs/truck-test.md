@@ -21,13 +21,23 @@ There are two recorders; the truck test uses the **control plane**:
 
 ## One-time, on the laptop/phone
 
+Persist host + token once into `~/.canary/env` so every shell (and a
+flaky-signal reconnect mid-drive) just works — `canaryctl` reads it when
+the vars aren't already exported:
+
 ```bash
 # Pi IP: check your router, or `ping canary.local`, or on the Pi: hostname -I
-export CANARY_HOST=http://<pi-ip>:8000
-# Token is root:canary 0640 on the Pi — fetch it once:
-export CANARY_TOKEN="$(ssh canary@<pi-ip> sudo cat /etc/canary/control.token)"
+mkdir -p ~/.canary && chmod 700 ~/.canary
+cat > ~/.canary/env <<EOF
+CANARY_HOST=http://<pi-ip>:8000
+CANARY_TOKEN=$(ssh canary@<pi-ip> sudo cat /etc/canary/control.token)
+EOF
+chmod 600 ~/.canary/env
 scripts/canaryctl.py version          # sanity: reaches the daemon
 ```
+
+(`export CANARY_HOST=... CANARY_TOKEN=...` still works and overrides the
+file; an explicit `--host/--token` flag overrides both.)
 
 (`canaryctl.py` is in the repo; clone it on the laptop or `scp` it.)
 

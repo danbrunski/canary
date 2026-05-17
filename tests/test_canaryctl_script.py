@@ -205,3 +205,55 @@ def test_model_upload_dispatch_encodes_artifact_and_manifest(
         "artifact_b64": base64.b64encode(b"model bytes").decode("ascii"),
         "manifest": {"version": "test"},
     }
+
+
+def test_load_env_file_parses_dotenv(tmp_path: Path) -> None:
+    f = tmp_path / "env"
+    f.write_text(
+        "# comment\n"
+        "\n"
+        "CANARY_HOST=http://10.0.0.5:8000\n"
+        "export CANARY_TOKEN='tok en'\n"
+        'CANARY_URL="http://quoted:8000"\n'
+        "BARE\n"
+        "  SPACED = value \n"
+    )
+    parsed = canaryctl._load_env_file(f)
+    assert parsed["CANARY_HOST"] == "http://10.0.0.5:8000"
+    assert parsed["CANARY_TOKEN"] == "tok en"
+    assert parsed["CANARY_URL"] == "http://quoted:8000"
+    assert parsed["SPACED"] == "value"
+    assert "BARE" not in parsed
+    assert canaryctl._load_env_file(tmp_path / "missing") == {}
+
+
+def test_resolve_default_env_beats_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CANARY_HOST", "http://from-env:8000")
+    file_env = {"CANARY_HOST": "http://from-file:8000"}
+    assert canaryctl._resolve_default(file_env, "CANARY_HOST") == "http://from-env:8000"
+    monkeypatch.delenv("CANARY_HOST", raising=False)
+    assert canaryctl._resolve_default(file_env, "CANARY_HOST") == "http://from-file:8000"
+    assert canaryctl._resolve_default({}, "CANARY_HOST") is None
+
+
+def test_parse_args_falls_back_to_env_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for var in ("CANARY_HOST", "CANARY_URL", "CANARY_TOKEN", "CANARY_CONTROL_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    env_file = tmp_path / "env"
+    env_file.write_text("CANARY_HOST=http://pi:8000\nCANARY_TOKEN=secrettok\n")
+    monkeypatch.setenv("CANARY_ENV_FILE", str(env_file))
+
+    args = canaryctl.parse_args(["status"])
+    assert args.host == "http://pi:8000"
+    assert args.token == "secrettok"
+
+    # A real env var still wins over the file.
+    monkeypatch.setenv("CANARY_HOST", "http://override:8000")
+    assert canaryctl.parse_args(["status"]).host == "http://override:8000"
+
+    # An explicit flag still wins over both.
+    assert canaryctl.parse_args(["--host", "http://flag:8000", "status"]).host == (
+        "http://flag:8000"
+    )

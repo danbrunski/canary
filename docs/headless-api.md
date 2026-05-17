@@ -49,6 +49,21 @@ export CANARY_HOST=http://192.168.0.230:8000
 export CANARY_TOKEN='<token from /etc/canary/control.token>'
 ```
 
+Or persist them once so every shell picks them up — `canaryctl` reads
+`~/.canary/env` (dotenv style) when the variables aren't already exported:
+
+```bash
+mkdir -p ~/.canary && chmod 700 ~/.canary
+cat > ~/.canary/env <<'EOF'
+CANARY_HOST=http://192.168.0.230:8000
+CANARY_TOKEN=<token from /etc/canary/control.token>
+EOF
+chmod 600 ~/.canary/env
+```
+
+Precedence: `--host/--token` flags > exported env vars > `~/.canary/env`.
+Point elsewhere with `CANARY_ENV_FILE`.
+
 Then use `canaryctl`:
 
 ```bash
