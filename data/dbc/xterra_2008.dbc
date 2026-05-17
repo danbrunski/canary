@@ -1,0 +1,152 @@
+VERSION ""
+
+
+NS_ : 
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: 
+
+
+BO_ 2 M_002: 8 Vector__XXX
+ SG_ STEERING_RATE_002 : 23|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ STEERING_ANGLE_002 : 15|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ STEERING_002_LOW : 7|8@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 505 M_1F9: 8 Vector__XXX
+ SG_ ECM_RPM : 23|16@0+ (0.125,0.0) [0.0|7000.0] "rpm" Vector__XXX
+ SG_ COOLING_FAN_1F9_0 : 7|8@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 561 M_231: 8 Vector__XXX
+ SG_ ECM_ENGINE_STATE_B : 31|8@0+ (1,0) [0|0] "enum" Vector__XXX
+ SG_ ECM_ENGINE_STATE_A : 7|8@0+ (1,0) [0|0] "enum" Vector__XXX
+
+BO_ 563 M_233: 8 Vector__XXX
+ SG_ ECM_CALC_LOAD_A : 39|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ ECM_INTAKE_VACUUM_OR_IAC : 15|8@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 573 M_23D: 8 Vector__XXX
+ SG_ ECM_THROTTLE_TRANSIENT : 55|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ ECM_CALC_LOAD_B : 31|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ ECM_AIRFLOW_PROXY_23D : 15|16@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 640 M_280: 8 Vector__XXX
+ SG_ MOTION_SIGNAL_280_5 : 47|8@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 644 M_284: 8 Vector__XXX
+ SG_ WHEEL_SPEED_PAIR_A : 15|16@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 645 M_285: 8 Vector__XXX
+ SG_ WHEEL_SPEED_PAIR_B : 15|16@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 670 M_29E: 8 Vector__XXX
+ SG_ BRAKE_ACTIVITY_29E_7 : 63|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ MOTION_29E_5 : 47|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ BRAKE_PRESSURE_29E_3 : 31|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ ECM_ENGINE_STATE_C : 7|8@0+ (1,0) [0|0] "enum" Vector__XXX
+
+BO_ 721 M_2D1: 8 Vector__XXX
+ SG_ MOTION_SIGNAL_2D1_1 : 15|8@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 852 M_354: 8 Vector__XXX
+ SG_ MOTION_SIGNAL_354_1 : 15|8@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 856 M_358: 8 Vector__XXX
+ SG_ HVAC_BLOWER_LIGHTING_358_1 : 15|8@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 901 M_385: 8 Vector__XXX
+ SG_ ODOMETER_ACCUMULATOR_385 : 23|40@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 1361 M_551: 8 Vector__XXX
+ SG_ ECM_COOLANT_TEMP : 7|8@0+ (1,-40) [-10.0|130.0] "degC" Vector__XXX
+
+BO_ 1424 M_590: 8 Vector__XXX
+ SG_ MOTION_SIGNAL_590_5 : 47|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ MOTION_SIGNAL_590_2 : 23|8@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 1573 M_625: 8 Vector__XXX
+ SG_ POWER_STATE_625_3 : 31|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ AC_COMPRESSOR_STATE : 15|8@0+ (1,0) [0|0] "" Vector__XXX
+
+
+
+
+CM_ BO_ 2 "Xterra 0x2 (draft from bindings.yaml)";
+CM_ SG_ 2 STEERING_RATE_002 "confidence=low; Renamed from MOTION_002_2. Pairs with STEERING_ANGLE_002 (0x002:0-1):";
+CM_ SG_ 2 STEERING_ANGLE_002 "confidence=low; Renamed from GEAR_OR_MOTION_002_1. The old reading (\"stationary 254 /";
+CM_ SG_ 2 STEERING_002_LOW "confidence=low; Reinterpreted from \"vehicle motion state\" to the low byte of a 16-bit";
+CM_ BO_ 505 "Xterra 0x1F9 (draft from bindings.yaml)";
+CM_ SG_ 505 ECM_RPM "confidence=confirmed; Confirmed engine RPM, 16-bit at 8 counts/rpm on the ~100 Hz 0x1F9 frame.";
+CM_ SG_ 505 COOLING_FAN_1F9_0 "confidence=high; Cooling-fan status on the ECM 0x1F9 frame, byte 0: base bit 0x20";
+CM_ BO_ 561 "Xterra 0x231 (draft from bindings.yaml)";
+CM_ SG_ 561 ECM_ENGINE_STATE_B "confidence=high; Cross-broadcast duplicate.";
+CM_ SG_ 561 ECM_ENGINE_STATE_A "confidence=high; State enum, useful as an anomaly-detection input: an unexpected";
+CM_ BO_ 563 "Xterra 0x233 (draft from bindings.yaml)";
+CM_ SG_ 563 ECM_CALC_LOAD_A "confidence=medium; The cross-broadcast pair (with ECM_CALC_LOAD_B) reduces the candidate";
+CM_ SG_ 563 ECM_INTAKE_VACUUM_OR_IAC "confidence=high; A/C-load drop in the second session promotes this from \"vacuum or IAC\"";
+CM_ BO_ 573 "Xterra 0x23D (draft from bindings.yaml)";
+CM_ SG_ 573 ECM_THROTTLE_TRANSIENT "confidence=high; Three physical-action sessions agree, including a full engine-off";
+CM_ SG_ 573 ECM_CALC_LOAD_B "confidence=medium; Cross-broadcast duplicate of ECM_CALC_LOAD_A.";
+CM_ SG_ 573 ECM_AIRFLOW_PROXY_23D "confidence=medium; Renamed from ECM_ENGINE_REV_LEVEL — the cross-reference rules out RPM";
+CM_ BO_ 640 "Xterra 0x280 (draft from bindings.yaml)";
+CM_ SG_ 640 MOTION_SIGNAL_280_5 "confidence=hypothesized; Strong motion-correlated; type TBD.";
+CM_ BO_ 644 "Xterra 0x284 (draft from bindings.yaml)";
+CM_ SG_ 644 WHEEL_SPEED_PAIR_A "confidence=hypothesized; Strong wheel-speed candidate. 4 channels likely fit:";
+CM_ BO_ 645 "Xterra 0x285 (draft from bindings.yaml)";
+CM_ SG_ 645 WHEEL_SPEED_PAIR_B "confidence=hypothesized; See WHEEL_SPEED_PAIR_A notes.";
+CM_ BO_ 670 "Xterra 0x29E (draft from bindings.yaml)";
+CM_ SG_ 670 BRAKE_ACTIVITY_29E_7 "confidence=high; Brake-dominant driver-demand / pedal-activity composite on the ~20 ms";
+CM_ SG_ 670 MOTION_29E_5 "confidence=high; Reinterpreted from \"vehicle motion\" to \"calculated engine load /";
+CM_ SG_ 670 BRAKE_PRESSURE_29E_3 "confidence=high; Foot-brake-applied signal on the ~20 ms ABS frame: ~0 released,";
+CM_ SG_ 670 ECM_ENGINE_STATE_C "confidence=high; Cross-broadcast duplicate.";
+CM_ BO_ 721 "Xterra 0x2D1 (draft from bindings.yaml)";
+CM_ SG_ 721 MOTION_SIGNAL_2D1_1 "confidence=hypothesized; Strong motion-correlated candidate. Likely vehicle speed (8-bit) OR";
+CM_ BO_ 852 "Xterra 0x354 (draft from bindings.yaml)";
+CM_ SG_ 852 MOTION_SIGNAL_354_1 "confidence=hypothesized; 37ms cadence is unusual — typically used for transmission or 4WD";
+CM_ BO_ 856 "Xterra 0x358 (draft from bindings.yaml)";
+CM_ SG_ 856 HVAC_BLOWER_LIGHTING_358_1 "confidence=medium; Bit-packed HVAC-blower + exterior-lighting status byte (not a scalar):";
+CM_ BO_ 901 "Xterra 0x385 (draft from bindings.yaml)";
+CM_ SG_ 901 ODOMETER_ACCUMULATOR_385 "confidence=high; Trip distance / accumulated odometer ticks. The \"holds when stopped\"";
+CM_ BO_ 1361 "Xterra 0x551 (draft from bindings.yaml)";
+CM_ SG_ 1361 ECM_COOLANT_TEMP "confidence=confirmed; Strong candidate. ELM327 Mode 01 PID 0x05 (engine coolant temp) will";
+CM_ BO_ 1424 "Xterra 0x590 (draft from bindings.yaml)";
+CM_ SG_ 1424 MOTION_SIGNAL_590_5 "confidence=hypothesized; Paired with MOTION_SIGNAL_590_2; same ID, same cadence.";
+CM_ SG_ 1424 MOTION_SIGNAL_590_2 "confidence=hypothesized; On the slow 92ms body bus, so likely a BCM-aware signal (odometer";
+CM_ BO_ 1573 "Xterra 0x625 (draft from bindings.yaml)";
+CM_ SG_ 1573 POWER_STATE_625_3 "confidence=medium; Plausible ignition/power state byte. 157 = key-on-engine-off,";
+CM_ SG_ 1573 AC_COMPRESSOR_STATE "confidence=high; A/C compressor commanded state: 0 = off, ~128 = engaged, with";
+
+
+
+
+
+
+
