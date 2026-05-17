@@ -1313,11 +1313,22 @@ training/model-health visualization, and Torque Pro parity.
   threshold bands, held-out false-positive rate, alerts/hour, per-channel
   reconstruction error, feature coverage, missing-feature rate, and currently
   published model versions.
-- [ ] **6.23 — Dataset health dashboard.** Show session coverage by operating
-  mode, speed/load range, coolant temperature, ambient temperature where
-  available, route/terrain, and tags. Add channel-availability heatmaps,
-  gap/dropout statistics, stale/dirty/pinned flags, and "ready to train?"
-  checks before a retraining job starts.
+- [~] **6.23 — Dataset health dashboard.** Backend done:
+  `src/datasets/health.py` — `analyze_session` (rows, duration, channels +
+  per-channel NaN fraction, operating-mode coverage via the *same*
+  `segment_or_constant` the trainers use, speed/load/coolant/RPM value ranges,
+  tags, resampler gap fraction, pinned/training-candidate flags, parse-error
+  ratio, quality warnings; never raises — a bad session degrades to a
+  zero-row health row) and `analyze_corpus` (totals, aggregate mode coverage,
+  per-channel availability fraction, and a conservative `ReadinessCheck`
+  go/no-go with reasons — too few sessions/rows, missing key channel, no
+  warning-free baseline — gating a retrain before it wastes Pi cycles).
+  Authenticated `GET /control/datasets/health`; `scripts/dataset_health.py`
+  (text + `--json`, exit 2 = not ready) for the pre-retrain gate and offline
+  workflow. Covered by `tests/test_dataset_health.py` (9 tests: basic
+  coverage, short/missing-key flags, empty-safe, parse-error+pinned,
+  thin/ready/missing-key corpus readiness, API, CLI). React heatmap UI is the
+  remaining frontend piece (Phase 6B). (FR-08, FR-09)
 - [x] **6.24 — False-positive feedback loop.** `src/alerts/feedback.py` —
   `AnomalyFeedback` (strict Pydantic: anomaly_key, label ∈
   `{true_positive, false_positive, ignored, needs_review}`, reason,

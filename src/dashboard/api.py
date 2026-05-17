@@ -914,6 +914,17 @@ def create_app(
                 by="system",
             )
 
+    @app.get("/control/datasets/health")
+    def get_dataset_health(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """Corpus readiness + per-session coverage (Task 6.23)."""
+        from src.datasets.health import analyze_corpus
+
+        storage = config.collection.storage_path
+        sessions = discover_sessions(storage) if storage.exists() else []
+        return analyze_corpus(sessions, config).to_dict()
+
     @app.get("/control/tuning")
     def get_tuning(
         _auth: None = Depends(require_control_auth),
