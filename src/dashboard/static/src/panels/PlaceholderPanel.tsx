@@ -1,9 +1,5 @@
-import {
-  panelClass,
-  panelHeaderClass,
-  panelTitleClass,
-  placeholderClass,
-} from "../styles";
+import { Panel } from "../components/Panel";
+import { placeholderClass } from "../styles";
 
 interface PlaceholderPanelProps {
   title: string;
@@ -25,19 +21,20 @@ export function PlaceholderPanel({
   task,
 }: PlaceholderPanelProps) {
   return (
-    <section className={panelClass}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>{title}</h2>
+    <Panel
+      title={title}
+      actions={
         <span className="rounded-full border border-border-soft bg-black/25 px-2 py-0.5 text-[0.62rem] font-bold uppercase tracking-[0.1em] text-fg-faint">
           {task}
         </span>
-      </header>
+      }
+    >
       <p className={placeholderClass}>{summary}</p>
       {endpoint && (
         <p className="mt-2 font-num text-[0.78rem] text-fg-dim">
           backend ready: <span className="text-accent-2">{endpoint}</span>
         </p>
       )}
-    </section>
+    </Panel>
   );
 }

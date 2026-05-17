@@ -1,3 +1,4 @@
+import { Panel } from "../components/Panel";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import {
   cn,
@@ -5,12 +6,10 @@ import {
   definitionRowClass,
   definitionTermClass,
   definitionValueClass,
-  panelClass,
-  panelHeaderClass,
-  panelTitleClass,
   placeholderClass,
 } from "../styles";
 import type { StatusResponse } from "../types";
+import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
 
 interface SystemPanelProps {
   status: StatusResponse | null;
@@ -21,17 +20,15 @@ interface SystemPanelProps {
 /** System health: storage, latest session, vehicle line, data freshness.
  *
  *  Stale-data detection uses the newest timestamp seen across all
- *  channels — if it's more than 10 s old, surface "stale data" so the
- *  operator knows the daemon stopped emitting (vs. just "no anomalies"). */
+ *  channels (shared `computeFreshness`) — if it's more than 10 s old,
+ *  surface "stale" so the operator knows the daemon stopped emitting
+ *  (vs. just "no anomalies"). */
 export function SystemPanel({ status, channels, statusError }: SystemPanelProps) {
   const freshness = computeFreshness(channels);
-  const stale = freshness !== null && freshness > 10_000;
+  const stale = freshness !== null && freshness > STALE_THRESHOLD_MS;
 
   return (
-    <section className={panelClass}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>System</h2>
-      </header>
+    <Panel title="System">
       {statusError && (
         <div className="mb-2 rounded-md bg-bad/12 px-2 py-1.5 text-[0.82rem] text-bad">
           /status unreachable: {statusError.message}
@@ -65,20 +62,6 @@ export function SystemPanel({ status, channels, statusError }: SystemPanelProps)
           </div>
         </dl>
       )}
-    </section>
+    </Panel>
   );
-}
-
-function computeFreshness(channels: Map<string, ChannelSnapshot>): number | null {
-  let newest: number | null = null;
-  for (const snap of channels.values()) {
-    const ts = snap.latest.timestamp;
-    if (!ts) continue;
-    const ms = Date.parse(ts);
-    if (Number.isFinite(ms) && (newest === null || ms > newest)) {
-      newest = ms;
-    }
-  }
-  if (newest === null) return null;
-  return Date.now() - newest;
 }

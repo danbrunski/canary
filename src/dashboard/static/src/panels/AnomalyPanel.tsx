@@ -1,15 +1,8 @@
 import { useMemo, useState } from "react";
 
+import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
-import {
-  badgeClass,
-  cn,
-  panelClass,
-  panelHeaderClass,
-  panelTitleClass,
-  placeholderClass,
-  selectClass,
-} from "../styles";
+import { badgeClass, cn, placeholderClass, selectClass } from "../styles";
 import type { AnomalyEvent } from "../types";
 
 interface AnomalyPanelProps {
@@ -44,9 +37,10 @@ export function AnomalyPanel({ events }: AnomalyPanelProps) {
   }, [events]);
 
   return (
-    <section className={cn(panelClass, "col-span-2 max-[1100px]:col-span-1")}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>Anomalies</h2>
+    <Panel
+      title="Anomalies"
+      centerHeader
+      actions={
         <div className="flex gap-3 font-num text-[0.78rem] tabular-nums text-fg-dim">
           <label className="flex items-center gap-1.5">
             source{" "}
@@ -78,7 +72,8 @@ export function AnomalyPanel({ events }: AnomalyPanelProps) {
             </label>
           )}
         </div>
-      </header>
+      }
+    >
       {events.length === 0 ? (
         <p className={placeholderClass}>
           no anomalies yet — the daemon hasn't emitted any (or the inference
@@ -137,7 +132,7 @@ export function AnomalyPanel({ events }: AnomalyPanelProps) {
           </ol>
         </>
       )}
-    </section>
+    </Panel>
   );
 }
 

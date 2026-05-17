@@ -1,5 +1,6 @@
+import { Panel } from "../components/Panel";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
-import { panelClass, panelHeaderClass, panelTitleClass, placeholderClass } from "../styles";
+import { placeholderClass } from "../styles";
 
 interface TpmsPanelProps {
   channels: Map<string, ChannelSnapshot>;
@@ -26,10 +27,7 @@ const TPMS_CHANNELS = [
 export function TpmsPanel({ channels }: TpmsPanelProps) {
   const found = TPMS_CHANNELS.map((key) => channels.get(key)).filter(Boolean);
   return (
-    <section className={panelClass}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>TPMS</h2>
-      </header>
+    <Panel title="TPMS">
       {found.length === 0 ? (
         <p className={placeholderClass}>
           TPMS bindings not yet pinned — see <code>data/bindings.yaml</code>.
@@ -39,6 +37,6 @@ export function TpmsPanel({ channels }: TpmsPanelProps) {
       ) : (
         <div className="grid grid-cols-2 gap-2">{/* future: per-corner cards */}</div>
       )}
-    </section>
+    </Panel>
   );
 }

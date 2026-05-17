@@ -1,11 +1,9 @@
+import { Panel } from "../components/Panel";
 import {
   definitionListClass,
   definitionRowClass,
   definitionTermClass,
   definitionValueClass,
-  panelClass,
-  panelHeaderClass,
-  panelTitleClass,
   placeholderClass,
 } from "../styles";
 import type { AnomalyEvent, StatusResponse } from "../types";
@@ -40,10 +38,7 @@ export function ModelPanel({ status, events }: ModelPanelProps) {
           .reduce((a, b) => a + b, 0) / lstmEvents.length;
 
   return (
-    <section className={panelClass}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>Models</h2>
-      </header>
+    <Panel title="Models">
       <dl className={definitionListClass}>
         {Object.entries(versions).length === 0 ? (
           <div className={placeholderClass}>no model artifacts loaded.</div>
@@ -63,7 +58,7 @@ export function ModelPanel({ status, events }: ModelPanelProps) {
         )}
       </dl>
       {counters && (
-        <div className="mt-3 flex gap-4 text-[0.78rem] text-fg-dim">
+        <div className="mt-3 flex flex-wrap gap-4 text-[0.78rem] text-fg-dim">
           <span title="anomaly events emitted to the logger + ws">
             emitted: <b className="text-fg">{counters.emitted}</b>
           </span>
@@ -73,8 +68,11 @@ export function ModelPanel({ status, events }: ModelPanelProps) {
           <span title="anomalies dropped within the dedupe window">
             deduped: <b className="text-fg">{counters.suppressed_dedupe}</b>
           </span>
+          <span title="anomalies muted by an operator tuning rule (Task 6.25)">
+            tuned-out: <b className="text-fg">{counters.suppressed_tuning}</b>
+          </span>
         </div>
       )}
-    </section>
+    </Panel>
   );
 }
