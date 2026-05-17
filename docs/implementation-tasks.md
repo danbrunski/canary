@@ -7,51 +7,21 @@ dependencies are called out explicitly.
 
 Status legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
-Current status (2026-05-17): the software stack is substantially ahead of the
-original phase labels. Phases 2/3, the bindings/behavior-model path, dashboard,
-alerts, model management, Pi service install, and authenticated headless control
-plane are implemented. The latest hardware reality is that the ELM327 adapter is
-dead, so OBD has moved to the Canable-native path: Mode 01 / 03 / 09 one-shot
-probing, streaming Mode 01 capture, and streaming Mode 22 DID reads are
-implemented. `obd_pids: [auto]` now merges all responder supported-PID bitmasks
-and polls every decoder-backed Mode 01 PID in `PID_DECODERS` (38 today), with
-short-timeout/backoff behavior for non-responders. The 2008 Nissan ECM gates
-0x22 behind UDS session `10 C0` (kept alive by re-priming; mutually exclusive
-with Mode 01), now handled by `scan_constant_dids.py --session C0`,
-`CanableMode22Transport`, and the structured `data/dids.yaml` catalog. Injector
-pulse width is identified as DID `0x1208`; scale calibration and daemon/live
-dashboard integration for the `0xC0` DID profile are still pending. The next
-software backlog is no longer basic daemon plumbing; it is Torque Pro parity,
-full public OBD coverage, proprietary Nissan telemetry/diagnostics,
-false-positive feedback, training/model-health dashboards, and acceptance tests
-that prove the Pi-in-truck workflow end to end (Phase 6).
+Status (as of 2026-05-17): Phases 0–5 are shipped (dual-channel
+collection, feature pipeline, Isolation Forest + LSTM, CAN RE/bindings,
+behavior models, dashboard, alerts, model management, Pi service,
+authenticated control plane). OBD runs the Canable-native path (ELM327
+adapter is dead): auto Mode 01 polling of every decoder-backed PID plus
+the Nissan `10 C0` Mode 22 DID profile. Phase 6 substantially landed —
+Torque-parity telemetry, OBD coverage reporting, dataset/training/tuning
+ML-ops, and the reworked dashboard. Remaining work is hardware-gated or
+in-truck (live-ECU reads, write/parked actions, companion sync/publish,
+acceptance matrix) plus the Phase 7 anomaly-architecture hardening from
+the 2026-05-17 review.
 
-Overnight batch (2026-05-17): the no-truck / data-analysis half of Phase 6
-landed — 6.1 (typed J1979 registry), 6.6 (trip/fuel/perf derived channels),
-6.8 (sandboxed custom PIDs), 6.20 (dataset export), 6.21 (training-run
-ledger), 6.23 backend (dataset health + ready-to-train gate), 6.24
-(false-positive feedback), 6.25 (threshold tuning/suppression, audited +
-reversible), 6.27 (drift/inference-health on /status), 6.32 (local companion
-library), 6.3/6.4 backend (OBD coverage endpoint + DTC catalog), plus 4.D.2
-(verified), 4.D.3 (synthetic bearing-wear validation), 6.30 (operator
-runbooks), and 0.8 (sim dev container).
-
-The dashboard frontend was then reworked: Tailwind CSS v4 + a refreshed
-visual system, then a navigation refactor (mode-driven Drive vs. grouped
-Workbench shell, persistent StatusStrip, `Panel`/`PanelGrid` primitive,
-hash deep-link, night theme, offline service worker), then the Phase-6
-panels themselves — 6.3 (OBD coverage), 6.9 (gauge-page builder), 6.10
-(multi-channel charts), 6.11 (user alarms), 6.12 (PWA/night/HUD-ish),
-6.13/6.14 (control plane + auth UX), 6.16 (DID workbench), 6.22 (training
-dashboard, + `GET /control/training-runs`), 6.23 (dataset health), 6.24
-(anomaly feedback labelling), 6.25 (tuning). Each backend-ready view is
-live; the rest are honest endpoint-aware placeholders.
-
-What remains is genuinely hardware-gated or out of an unattended run's
-reach: live-ECU flows (6.4 reads, 6.15 DID profile), write/parked actions
-(6.5, 6.18), drag-resize / dial-gauge widgets + GPS series (6.9/6.10
-extensions), a true light theme + wake-lock (6.12), the companion API/
-sync/publish (6.33–6.39), and the in-truck acceptance matrix (6.28–6.29).
+Completed tasks below are collapsed to their title line to keep this
+plan navigable; the full original description for any `[x]` item is in
+git history. `[ ]` / `[~]` items are kept in full.
 
 ---
 
@@ -60,47 +30,13 @@ sync/publish (6.33–6.39), and the in-truck acceptance matrix (6.28–6.29).
 Goal: a runnable empty skeleton, reproducible dev env, CI green on first push.
 
 - [x] **0.1 — Repo skeleton.** Create the directory layout from
-  `CANary-overview.md` §"Project Structure" (`src/`, `tests/`, `data/dbc/`,
-  `models/`, `systemd/`). Add `__init__.py` placeholders so packages import.
 - [x] **0.2 — Python tooling.** `pyproject.toml` (PEP 621) targeting Python
-  3.11+, with `ruff` (lint+format), `mypy` (strict on `src/`), `pytest`,
-  `pytest-asyncio`. Lockfile deferred until deps stabilize. (NFR-04)
 - [x] **0.3 — `requirements.txt` / extras.** Runtime deps (python-obd,
-  python-can, cantools, pandas, pyarrow, scikit-learn, fastapi, uvicorn,
-  pyyaml, pydantic) live in `[project.dependencies]`; `[project.optional-dependencies.dev]`
-  carries tooling (ruff, mypy, pytest, pytest-asyncio, types-pyyaml,
-  pandas-stubs). `[project.optional-dependencies.ml]` carries Torch for
-  Phase 3 sequence/model work. `scripts/install_deps.py` is the preferred
-  setup path: it creates/updates `.venv`, installs project/dev deps, detects
-  the local NVIDIA driver CUDA capability, and installs Torch from the matching
-  PyTorch wheel index (`cpu`, `cu118`, `cu126`, `cu128`, or `cu130`) with manual
-  override support. Documented in `docs/install.md`.
-  `[project.optional-dependencies.emulator]` now carries ELM327-emulator for
-  the Phase 1.5 integration tests; the current wheel installs cleanly without
-  the old sdist workaround.
 - [x] **0.4 — Config loader.** `src/config.py` — Pydantic models mirroring the
-  `canary.yaml` schema in the overview; load+validate at startup; fail fast on
-  unknown keys. Ship a checked-in `canary.example.yaml`. (NFR-04)
 - [x] **0.5 — Logging.** Structured logging (stdlib `logging` + JSON formatter)
-  with per-module loggers. Single entry point in `src/log.py`.
 - [x] **0.6 — Entry point.** `src/main.py` parses `--config`, loads YAML,
-  starts an asyncio event loop, wires module lifecycles (collectors → writer
-  → inference → dashboard — wire-up TODO until Phase 1), and handles
-  SIGTERM/SIGINT for clean shutdown.
 - [x] **0.7 — CI.** GitHub Actions: lint, type-check, unit tests on
-  `ubuntu-latest` with Python 3.11. No hardware-dependent jobs yet.
 - [x] **0.8 — Dev container.** `Dockerfile` (python:3.12-slim, deps baked
-  into a cached layer, no `ml`/Torch extra) + `docker-compose.yml`
-  (bind-mounts `src/scripts/tests/tools/data/models`, exposes 8000,
-  `restart: unless-stopped`) + `.dockerignore`. Runs `python -m src.main
-  --config canary.sim.example.yaml` — the new no-hardware sim config
-  (`interface: virtual` python-can VirtualBus, `obd_source: disabled`,
-  models off, repo-local `data/sim/` state) so `docker compose up` brings
-  the dashboard + WebSockets + control plane up on any laptop with no
-  Canable or vehicle; `docker compose run --rm canary pytest -q` runs the
-  suite in-container. Sim config validated to parse via `CanaryConfig`; the
-  image build itself isn't CI-verified (no Docker in the test env).
-  (NFR-04, NFR-05)
 
 ---
 
@@ -111,150 +47,29 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
 ### 1A. OBD-II collector (FR-01)
 
 - [x] **1.1 — PID registry.** `src/collection/pids.py` — declarative list of
-  required PIDs (RPM, Speed, Engine Load, Coolant, IAT, MAF, Throttle, STFT/LTFT
-  B1, O2 voltages 0x14–0x1B, Baro, Run Time) with units and `obd.commands`
-  references. Single source of truth for downstream code.
 - [x] **1.2 — Async collector.** `src/collection/obd_collector.py` using
-  `obd.Async`. Poll loop driven by `obd_poll_rate_hz`; emit
-  `(timestamp, pid_name, value, unit)` records onto an `asyncio.Queue`.
-  Log warning + skip on unsupported PIDs; keep running. `obd_factory`
-  validates PID names BEFORE opening the connection so a typo fails fast
-  with a helpful message. (FR-01)
 - [x] **1.3 — Reconnect logic.** Detect adapter disconnect, retry with
-  configurable interval (default 10 s), exponential backoff up to a cap.
-  Implemented as `src/collection/reconnect.py` (`ReconnectPolicy` +
-  `wait_for_stop_or_timeout`); used by both OBD and CAN paths. Tested via
-  `test_collect_obd_retries_after_factory_failure` and the corresponding
-  CAN test. (NFR-02)
 - [x] **1.4 — Read-only enforcement.** `src/collection/obd_collector.py` —
-  `WRITE_COMMAND_MODES = {0x04, 0x2E, 0x2F}` + `assert_read_only_command()`
-  guard + `WriteCommandRejected` (subclasses `ValueError` so collector
-  retry paths still surface it immediately). `resolve_pids()` rejects any
-  named PID whose service mode is a write before the connection is opened;
-  `enforce_read_only(conn)` wraps `Async.watch/query/unwatch` so any later
-  hand-crafted `OBDCommand` (or a future Mode 22 DID extension calling
-  `query()` with a raw mode byte) is blocked too. ELM327 ``AT*`` commands
-  (mode=None) stay allowed. Idempotent. Covered by `tests/test_obd_collector.py`
-  (rejects `CLEAR_DTC`, accepts read modes 0x03/0x09, blocks synthesized
-  0x2E, passes through AT, wraps `watch`/`query`/`unwatch`, idempotency).
-  (NFR-06)
 - [x] **1.5 — Integration tests with ELM327-emulator.** `tests/test_obd_emulator.py`
-  — 8 tests against a live `elm.Elm` instance on a pty, with python-obd
-  driving the real `Async` loop. Verifies the integration path that the
-  unit-test fakes in `test_obd_collector.py` can't:
-    * `obd_factory` connects + reports real `supports()` booleans
-    * `obd_factory.watch → callback` actually produces `ObdReading`s
-      (RPM ≈ 620, SPEED 0 in the emulator's idle profile)
-    * unsupported PIDs are warn-and-skipped without crashing (hooks the
-      `src.collection.obd_collector` logger directly — pytest's caplog
-      can be interfered with by python-obd's import-time logging setup)
-    * `supervise_obd_capture` produces readings end-to-end including
-      reconnect-policy support
-    * round-trip through `JsonlReadingWriter` (the `record.py` path)
-    * read-only enforcement (Mode 04 `CLEAR_DTC`) blocks before the
-      adapter is opened, against a real adapter not just unit fakes
-    * two back-to-back factory builds in one process don't interfere
-  Added `[project.optional-dependencies].emulator` to `pyproject.toml`
-  pinning `ELM327-emulator>=3.0.5`. The 3.0.5 wheel installs cleanly
-  without `--no-build-isolation` (old sdist quirk gone), so the standard
-  `pip install '.[emulator]'` works. `pytest.importorskip("elm", ...)` at
-  module top means the file skips cleanly when the package isn't present,
-  so CI without the extra still passes. **Marked `pytest.mark.integration`
-  and excluded by default** (`pyproject.toml`'s
-  `addopts = "-m 'not integration'"`) so the ~45 s pty bring-up doesn't
-  burn the inner-loop suite cadence; run explicitly with
-  `pytest -m integration` or by path. (NFR-05)
 
 ### 1B. CAN collector (FR-02)
 
 - [x] **1.6 — SocketCAN bring-up doc.** `docs/can-setup.md` — `ip link set
-  can0 up type can bitrate 500000 listen-only on` + udev rule. Reference,
-  not code.
 - [x] **1.7 — Async CAN reader.** `src/collection/can_collector.py` —
-  `python-can` Bus on the configured channel (slcan for the Canable on
-  laptop dev, socketcan for the Pi target). `collect_can` /
-  `collect_can_from_config` push frames onto the asyncio queue. Wraps
-  `bus.recv()` with `try/except (ValueError, can.CanError)` so a single
-  corrupt slcan frame doesn't kill multi-hour recordings (counted into
-  `RecordingResult.parse_errors` + manifest). (FR-02)
 - [x] **1.8 — DBC decode hook (reader).** `src/decode/dbc.py` —
-  `load_dbc_database(path)` and `load_dbc_dir(directory) → cantools
-  Database | None` (silent `None` when missing/empty, mirroring the
-  "no bindings.yaml on disk" fallback). `decode_can_rows_dbc(long_frame,
-  database)` walks the CAN rows, looks up each known frame_id, calls
-  `message.decode(payload, decode_choices=False)`, and emits new
-  `source="dbc"` rows (one per signal) appended to the long frame —
-  unknown frames pass through untouched, malformed payloads are caught +
-  skipped so a single bad frame can't kill an offline pipeline. Named
-  choices / enums are skipped (numeric path only). Wired into
-  `build_feature_frame` after the bindings.yaml decode and before
-  `to_wide`, so DBC signals show up as `dbc:<SIGNAL>` columns alongside
-  bindings' `decoded:<NAME>`. One-way: bindings.yaml stays source of
-  truth; the DBC emitter side (4.D.2) is still skipped per the SavvyCAN
-  decision. Covered by `tests/test_decode_dbc.py` (12 tests: loader
-  variants, encode/decode round-trip, unknown-ID pass-through, empty
-  frame, too-short payload, no-can-rows path, multi-frame coexistence).
-  (FR-02)
 - [x] **1.9 — Synthetic CAN replay test.** Use `python-can`'s
-  `VirtualBus` to inject canned frames; assert collector emits expected
-  records. `test_record_captures_frames_and_writes_manifest` runs an
-  end-to-end sender/receiver over `VirtualBus`. (NFR-05)
 
 ### 1C. Storage (FR-03, NFR-03)
 
 - [x] **1.10 — Parquet writer.** `src/storage/parquet_writer.py` — buffer
-  records in memory, flush every N seconds or M rows to a Parquet file
-  partitioned per ignition session. Schema: timestamp, channel, value,
-  unit, source (`obd`|`can`). Uses `pyarrow` writer with snappy
-  compression. Implemented as `ParquetTelemetryWriter` (streaming, live)
-  + `write_records_to_parquet` (batch, offline) sharing TELEMETRY_SCHEMA;
-  daemon-produced and offline-converted Parquet are byte-equivalent.
 - [x] **1.11 — Session keying.** `src/storage/parquet_writer.py` —
-  `ParquetTelemetryWriter._rotate_if_engine_run_time_reset` watches Engine
-  Run Time PID readings (`RUN_TIME` and its lowercase aliases via
-  `ENGINE_RUN_TIME_CHANNELS`) and rotates the session directory either
-  when the value decreases (engine restart with the previous reading still
-  recent) or when it dips back below the
-  `engine_run_time_reset_threshold_seconds` floor after having been above
-  it (default 5 s — guards against the noisy first reading sometimes seen
-  right after `usbipd attach`). New session ⇒ fresh timestamped directory
-  from `make_session_dir`; chunk index resets so file numbering doesn't
-  collide. Tracked sessions accumulate in `writer.session_paths`. Covered
-  by `tests/test_parquet_writer.py::test_writer_rotates_session_when_engine_run_time_resets`.
-  (FR-03)
 - [x] **1.12 — Ring buffer.** Background sweeper deletes session files
-  older than `session_retention_days`. Configurable, default 30.
-  Implemented as `delete_expired_sessions` and invoked from
-  `run_collection` on shutdown. (FR-03)
 - [x] **1.13 — Disk-space monitor.** Poll free bytes on `storage_path`;
-  emit warning event when below `storage_warning_mb`. `src/storage/monitor.py`
-  with `free_space_mb` + `warn_if_storage_low`. Dashboard surfacing
-  deferred until Phase 5. (NFR-03)
 - [x] **1.14 — Crash-safety test.** `tests/test_parquet_writer.py` —
-  three tests covering the atomic-write contract: (1)
-  `test_failed_atomic_write_does_not_publish_final_file` — a mid-flush
-  crash leaves no published `.parquet`; the buffer is preserved and the
-  next successful flush emits the same data. (2)
-  `test_crash_mid_flush_preserves_prior_chunks` — a corrupting
-  `pq.write_table` (writes a truncated `PAR1` header and raises) after a
-  successful flush #1; the intact chunk reads fine, the lingering `.tmp`
-  isn't picked up by `discover_sessions` / `read_session` (the
-  `telemetry-*.parquet` glob doesn't match `*.tmp`). (3)
-  `test_crash_recovery_with_fresh_writer_appends_new_chunks` — a new
-  writer over the same root after a "crash" (no `close()`) lands in a
-  fresh dated session directory; the prior session's surviving chunk is
-  untouched. The on-disk contract: dated session directories isolate
-  writers; the same-directory `.tmp → rename` keeps surviving chunks'
-  footers correct under any process kill. (NFR-02)
 
 ### 1D. Phase-1 milestone
 
 - [x] **1.15 — End-to-end smoke run.** Run `main.py` against
-  `ELM327-emulator` + `VirtualBus` for 5 minutes; verify Parquet files
-  open in `pandas` and contain both OBD and CAN rows.
-  Covered by `test_run_collection_smoke_writes_obd_and_can_records` —
-  uses fake collectors in lieu of the emulator extra, but exercises the
-  full queue → writer → Parquet path end-to-end.
 - [~] **1.16 — Vehicle data collection.** Log 10+ diverse drives (cold
   start, idle, city, highway, off-road). Document each in
   `data/sessions.md` (date, conditions, notes). Inputs to Phase 2 training.
@@ -281,61 +96,12 @@ for RE captures and for collecting Phase 2 training data before the
 daemon is deployed on the vehicle.
 
 - [x] **1.E.1 — `scripts/record.py`.** CLI wrapper around the CAN
-  collector: writes `frames.log` (candump format) + `manifest.json`
-  per session, supports `--vehicle-state`, `--seconds`, and parallel
-  OBD-II `--obd-port` capture via `pids.jsonl` sidecar. The OBD side runs
-  in a supervised daemon thread (`obd_collector.supervise_obd_capture`)
-  that survives the ELM327 dropping off USB and reattaching (watches the
-  device file + python-obd's connection state + a reading-staleness
-  heartbeat); an OBD failure never aborts the CAN capture. Default
-  `--obd-pids` is the fuller ML/behavior-model set (~19 PIDs incl. MAP,
-  both banks' fuel trims, pre-cat O2, baro, run-time, fuel-status).
 - [x] **1.E.2 — `scripts/tag.py`.** Append-only tag CLI; writes one
-  JSON record per Enter-press into `<session>/tags.jsonl`. Auto-finds
-  the most recent session under `data/sessions/`.
 - [x] **1.E.3 — `scripts/guided_session.py`.** Interactive protocol
-  runner — walks the user through a labeled sequence, one Enter press per
-  tag (or `s`+Enter to skip a step that doesn't apply). Protocols: `rev`
-  (idle/blip/sustain), `nt510` (module scan, ABS live data + steering/brake
-  actions, ECU/ABS actuator tests), and `drive` (cold-start → idle →
-  city → highway → coast/DFCO → WOT → 4-Lo → A/C → engine-off — the
-  operating-envelope capture for ML training). Designed for hands-busy
-  in-vehicle use where typing labels is impractical.
 - [x] **1.E.4 — `tools/log_to_parquet.py`.** Offline batch converter
-  from candump `frames.log` + `pids.jsonl` to chunked Parquet using
-  the canonical TELEMETRY_SCHEMA. Lets pre-daemon captures feed the
-  same downstream pipelines as live ones.
 - [x] **1.E.5 — `--timestamp` flag on `scripts/tag.py`.** Backfill
-  tags after the fact from voice-memo notes (or other post-hoc
-  sources). Shipped two mutually-exclusive flags: `--timestamp` takes
-  ISO 8601 (with or without tz; naive = UTC) or a Unix epoch; `--offset`
-  takes a duration relative to the session's `started_at` in plain
-  seconds, suffix-form (`12m`, `1h30m`, `90s`, `1h 2m 3s`), or
-  colon-form (`12:30` mm:ss, `01:12:30` hh:mm:ss). Reads the session
-  manifest to compute offset baseline and warns to stderr if the
-  resolved timestamp falls outside the session window (still writes
-  the tag — outside-bounds tags are valid but worth flagging). 41
-  unit tests cover the parsers, manifest loading, the resolver, the
-  bounds-warning logic, and the full CLI flow.
 - [x] **1.E.6 — Canable-native OBD streaming collector + wiring.** Wrap
-  `src/collection/can_obd_client.py` in the same supervised producer pattern
-  as the ELM327 OBD collector, emit the same `TelemetryRecord` / `pids.jsonl`
-  shape, and add config/daemon/recorder wiring so `canable` becomes the default
-  OBD source and `elm327` is only a legacy fallback. The one-shot pieces are
-  already proven:
-  `tools/can_obd_probe.py` walks supported Mode 01 PIDs, reads Mode 03 DTCs,
-  and uses the same Canable hardware as the broadcast sniffer. Auto mode now
-  merges all responding ECUs' supported-PID bitmasks and polls every
-  decoder-backed Mode 01 PID in `PID_DECODERS`; the remaining gap is a complete
-  SAE J1979 registry and Torque-parity features (Phase 6.1–6.7).
 - [x] **1.E.7 — Canable-native Mode 22 DID reads.** Extend
-  `CanObdClient` and the new streaming collector to issue read-only UDS Mode 22
-  `ReadDataByIdentifier` requests over the Canable, using a configurable
-  physical request ID (default engine ECU `0x7E0`). Emit `DID_<hex>` readings
-  into `pids.jsonl` / telemetry in the same shape as the legacy
-  `record.py --obd-dids` path so existing cross-reference tools keep working.
-  This does not yet make Nissan's `10 C0` session a first-class live telemetry
-  profile in the daemon/dashboard; that scheduling and UI work is Phase 6.15.
 
 ---
 
@@ -344,93 +110,15 @@ daemon is deployed on the vehicle.
 Goal: a reproducible feature pipeline + a working baseline detector.
 
 - [x] **2.1 — Parquet session loader.** `src/preprocessing/loader.py` —
-  read a session (or list of sessions) into a long-format DataFrame; pivot
-  to wide (one column per channel) on demand.
 - [x] **2.2 — Resampler.** `src/preprocessing/resampler.py` — uniform time
-  grid at `resample_hz` (default 1). Forward-fill slow sensors (coolant,
-  baro). Gap-flag fast sensors (RPM, MAF) when gap exceeds 2× expected
-  period. (FR-04)
 - [x] **2.3 — Operating mode segmenter.** `src/preprocessing/segmenter.py`
-  — rule-based classifier driven by the YAML thresholds (idle, city,
-  highway, WOT, off-road). Returns a per-row mode label. User-extensible:
-  unknown modes from config flow through without code changes. (FR-04)
 - [x] **2.4 — Rolling features.** `src/preprocessing/features.py` —
-  windowed mean, std, and rate-of-change over `rolling_window_seconds`.
-  Vectorized with pandas `.rolling()`. Time-based window respects
-  session boundaries (no leakage from session A into session B's
-  warmup). Rate-of-change is `(value − value.shift(n_rows)) /
-  window_seconds`, deriving `n_rows` from the median inter-row delta so
-  the same config works at any resample frequency. Skips gap-flag
-  columns, mode column, and non-numeric columns automatically; safe to
-  call twice in a row. (FR-04)
 - [x] **2.5 — Normalization.** Z-score scaler fit on the labeled clean
-  baseline only; persisted alongside the model in the manifest. Reject
-  inference-time data whose channels don't match the fit schema.
-  Implemented as `src/preprocessing/normalization.py` (`ZScoreScaler`,
-  frozen dataclass). `fit` auto-discovers numeric feature columns (same
-  policy as `features.compute_features`), uses population std (ddof=0),
-  errors on all-NaN columns. `transform` raises `SchemaMismatchError` on
-  missing fitted columns and passes non-fitted columns through. Constant
-  channels (σ < `std_floor`) get σ=1 — centering only, no amplification.
-  `to_dict`/`from_dict` give a plain-JSON round-trip for the manifest;
-  older manifests without `std_floor` still load. (FR-04, FR-09)
 - [x] **2.6 — Synthetic anomaly injector.** Splice spikes, drift, dropouts,
-  and stuck-sensor patterns into a clean session. Used by 2.8 and Phase 3
-  evaluation. Implemented as `src/preprocessing/anomaly_injection.py`
-  (`AnomalyInjector` builder + `InjectionWindow` records) rather than
-  `tests/anomaly_injector.py` — placing it under `src/` lets the
-  evaluation scripts and future replay harness import it cleanly without
-  test-path hacks. `windows_to_records` serializes injection metadata for
-  reports. Four kinds: `.spike(value=…)`, `.drift(total_delta=…)`,
-  `.dropout()`, `.stuck()` (freezes at the value from the row immediately
-  before the window). Validated end-to-end against the z-score scaler:
-  spike → max \|z\|≈2200, drift → ≈350, dropout → NaN propagation,
-  stuck → raw \|z\|≈1.4 (correctly invisible to raw z-score, which is
-  why rolling features exist). (NFR-05)
 - [x] **2.7 — Isolation Forest training.** `src/models/isolation_forest.py`
-  — fit one sklearn `IsolationForest` per operating mode using
-  `n_estimators`, `contamination`, and `random_state` from config;
-  fit/persist the
-  `ZScoreScaler` on the same complete training rows; score rows with
-  larger-is-worse anomaly scores plus sklearn's `1`/`-1` labels; label
-  missing-feature rows anomalous for dropout visibility. Serializes a
-  `joblib` artifact plus JSON manifest with training data hash, date
-  range, sessions, hyperparams, scaler params, schema, and per-mode
-  sample summaries. Covered by `tests/test_isolation_forest.py`.
-  (FR-05, FR-09)
 - [x] **2.8 — Synthetic anomaly evaluation.** Score injected sessions;
-  report per-mode precision/recall and the anomaly-score distribution.
-  Tune `contamination` per mode based on results. Implemented as
-  `src/models/isolation_forest_evaluation.py`: returns scored rows plus
-  a JSON-safe report with overall/per-mode confusion metrics, finite-score
-  quantiles, non-finite score counts, injection-window records, and
-  best-F1 per-mode contamination recommendations. `IsolationForestConfig`
-  now accepts optional `per_mode_contamination` overrides consumed by the
-  trainer and recorded in the model manifest. Covered by
-  `tests/test_isolation_forest_evaluation.py`. (FR-05)
 - [x] **2.9 — Unit tests.** Resampler edge cases (gaps, leading NaN),
-  segmenter boundary conditions, feature-window correctness on
-  hand-crafted inputs. Coverage lives in `tests/test_preprocessing_resampler.py`,
-  `tests/test_preprocessing_segmenter.py`, and
-  `tests/test_preprocessing_features.py`: leading fast/slow NaNs, strict
-  max-gap behavior, inclusive min/max segmenter thresholds, session-boundary
-  isolation, rolling mean/std/ROC hand calculations, higher-Hz windows,
-  feature toggles, column selection, and empty-input schemas. (NFR-05)
 - [x] **2.10 — Training CLI.** `scripts/train_anomaly_model.py` — the
-  Phase 2 capstone. Runs the full pipeline (read_session → decode CAN via
-  bindings.yaml → to_wide(coerce_numeric) → resample → operating-mode
-  segment, or a single `all` mode when no OBD PIDs are present → rolling
-  features), fits the per-mode Isolation Forest + z-score scaler, writes
-  the joblib artifact + JSON manifest. `--evaluate <session>` additionally
-  splices a synthetic spike+dropout into a held-out session and prints
-  per-mode precision / recall / score-distribution + a recommended
-  `contamination` (the tuning feedback Task 2.8 calls for). Verified
-  end-to-end against the 18-minute drive session 2026-05-11T222447:
-  trained on 92 feature columns (23 decoded signals + their rolling
-  derivatives), single `all` mode (no OBD), artifact written; the
-  injected-spike evaluation produced a sensible-but-untuned baseline
-  (precision ≈ 0.18, recall ≈ 0.5 at the default contamination=0.01 —
-  exactly the signal that contamination needs raising). (FR-05)
 
 ---
 
@@ -439,65 +127,9 @@ Goal: a reproducible feature pipeline + a working baseline detector.
 Goal: deep model that catches temporal anomalies the IF misses.
 
 - [x] **3.1 — Sliding-window dataset.** `src/models/sequence_dataset.py`
-  — PyTorch map-style `Dataset` yielding `(T, F)` windows that a
-  `DataLoader` batches to `(B, T, F)`. Includes a pure-pandas window
-  builder for CI coverage without the optional `ml` extra; `__getitem__`
-  imports torch lazily and raises `MissingSequenceDependencyError` when
-  torch is absent. Supports `from_sessions(...)` to load Parquet sessions
-  through the existing preprocessing path, stride control, explicit feature
-  columns, metadata lookup, and filters out windows spanning sessions,
-  containing gap flags, or containing missing feature values. Added
-  `[project.optional-dependencies].ml = ["torch>=2.0"]`. Covered by
-  `tests/test_sequence_dataset.py`. (FR-06)
 - [x] **3.2 — Model.** `src/models/lstm_autoencoder.py` — encoder LSTM →
-  latent (`latent_dim`) → decoder LSTM. Configurable depth/hidden size.
-  Implemented as a lazy-Torch module so non-ML imports still work without
-  the optional dependency. `LSTMAutoencoder` consumes `(B, T, F)` batches,
-  exposes `encode`, `decode`, `forward`, serializable architecture metadata,
-  and MAE reconstruction-error reductions for future threshold calibration
-  (`none`, `sample`, `timestep`, `channel`, `global`). `build_lstm_autoencoder`
-  constructs from config and supports device/dtype placement. Added
-  `hidden_size`, `num_layers`, and `dropout` to `LSTMAutoencoderConfig` and
-  `canary.example.yaml`. Covered by `tests/test_lstm_autoencoder.py`. (FR-06)
 - [x] **3.3 — Training loop.** Train on clean sessions only; MAE loss;
-  early stop on validation loss; checkpoint best weights; save manifest.
-  Implemented as `src/models/lstm_training.py`: `train_lstm_autoencoder`
-  consumes a `SequenceWindowDataset` built from clean baseline sessions,
-  performs a deterministic train/validation split, trains with Adam + MAE,
-  monitors validation loss when a validation split exists (otherwise train
-  loss), restores the best checkpoint, and returns `TrainedLSTMAutoencoder`.
-  `save_lstm_autoencoder_model` writes a portable Torch checkpoint plus
-  `<artifact>.manifest.json`; `load_lstm_autoencoder_model` restores the
-  architecture and weights. The manifest records training hash, sessions,
-  time range, feature schema, architecture, hyperparams, split sizes,
-  best/stopped epochs, early-stop status, and per-epoch losses. Added
-  `batch_size`, `learning_rate`, `max_epochs`, `validation_fraction`,
-  `early_stopping_patience`, `min_delta`, and `random_state` to
-  `LSTMAutoencoderConfig` / `canary.example.yaml`. Covered by
-  `tests/test_lstm_training.py`. The one-command path from recorded
-  sessions to a calibrated checkpoint is `scripts/train_lstm.py` (the LSTM
-  counterpart to `scripts/train_anomaly_model.py`): it runs the shared
-  feature pipeline (`src/preprocessing/feature_pipeline.py` — read session →
-  decode CAN via `bindings.yaml` → wide → resample → operating-mode segment →
-  rolling features, factored out of the IF trainer so both behave
-  identically), builds sliding windows, trains + calibrates, writes
-  `model.pt` + `model.manifest.json`, and `--evaluate <session>…` runs the
-  Task 3.6 false-positive benchmark on held-out clean sessions (auto-excluded
-  from the training set when sessions are discovered). Covered by
-  `tests/test_train_lstm.py`. (FR-06, FR-09)
 - [x] **3.4 — Threshold calibration.** Compute per-channel and global
-  reconstruction-error distributions on the training set; set threshold
-  to `μ + k·σ` with configurable `k` (default 3). Persist in manifest.
-  Implemented in `src/models/lstm_training.py` as
-  `calibrate_lstm_thresholds`, and run by default at the end of
-  `train_lstm_autoencoder` using `config.threshold_k`. Global thresholds
-  use per-window MAE across all timesteps/channels; per-channel thresholds
-  use per-window MAE across timesteps for each feature column. The manifest
-  `thresholds` block records `threshold_k`, calibration timestamp, training
-  data hash, window count, and count/mean/std/min/max/p50/p90/p95/p99 plus
-  `threshold` for both global and per-channel error distributions. Save/load
-  preserves the calibrated thresholds. Covered by `tests/test_lstm_training.py`.
-  (FR-06)
 - [~] **3.5 — Real-time inference loop.** `src/models/inference.py` —
   consume a sliding window from the live preprocessing buffer, run a
   forward pass, emit anomaly score. Software path complete:
@@ -527,38 +159,7 @@ Goal: deep model that catches temporal anomalies the IF misses.
   Remaining work before marking done: run on the Pi 5 target and confirm
   the 1 Hz CPU budget is <50%. (FR-06, NFR-01)
 - [x] **3.6 — False-positive benchmark.** `src/models/false_positive_benchmark.py`
-  + `scripts/fp_benchmark.py` — feed held-out *clean* Parquet sessions through
-  the same `from_sessions` preprocessing the LSTM was trained on, score every
-  sliding window, and report: the false-positive rate at the manifest's
-  calibrated threshold (FPR = flagged / total — every flag on clean data is by
-  definition a false positive), the implied `alerts_per_hour` vs. the v1
-  done-definition budget (≤ 1 alert / hour, derived from the wall-clock span of
-  the held-out windows), a sweep of `k` multipliers (default `1 2 3 4 5 6 8 10`
-  plus the calibrated `k`, each recomputing `threshold = mean + k·σ` from the
-  *training* error distribution stored in the manifest so a tighter/looser
-  threshold can be picked without retraining — the "iterate on `k`" feedback),
-  plus per-channel exceedance counts and per-session FPR/alert rates. The
-  combined flag mirrors live inference (`global error > global threshold` OR any
-  channel over its threshold). `benchmark_false_positives` validates the
-  held-out dataset against the trained model (calibrated thresholds present,
-  matching feature columns, matching sequence length) and returns a JSON-safe
-  `FalsePositiveBenchmarkReport`. Covered by
-  `tests/test_false_positive_benchmark.py` (loose/tight thresholds,
-  k-sweep monotonicity, JSON round-trip, the four validation errors, and an
-  end-to-end Parquet → train → save → benchmark CLI run). Wired into
-  `scripts/train_lstm.py --evaluate`; running it on real drives is pending more
-  held-out clean captures (see 1.16). (FR-06)
 - [x] **3.7 — Replay harness.** `scripts/replay.py` — feed a recorded
-  Parquet session through preprocessing + inference end-to-end, no
-  hardware needed. Used in CI. Implemented as an importable CLI that loads
-  one or more Parquet session directories, pivots numeric telemetry,
-  resamples, segments, computes rolling features, optionally loads an
-  IsolationForest artifact for scoring, and emits a JSON report with
-  row counts, source/channel counts, mode counts, numeric/rolling/model
-  feature columns, complete model-input rows, and score distribution.
-  CAN-only payload captures replay cleanly but surface zero complete
-  numeric model rows until decoded CAN/binding features land. Covered by
-  `tests/test_replay_script.py`. (NFR-05)
 
 ---
 
@@ -576,131 +177,29 @@ emission stays viable as a one-way derived artifact (4.D.2 below).
 ### 4.A — Capture protocols & methodology
 
 - [x] **4.1 — RE workflow doc.** `docs/can-re-workflow.md` — the rig
-  (Canable sniffer / ELM327 / NT510), the capture workflow (`record.py` +
-  `guided_session.py` protocols, physical-action tags, engine-state
-  discipline), the analysis pipeline (inventory → byte-vs-tag differential
-  → `cross_reference_broadcast.py` / `cross_reference.py` / `scan_constant_dids.py`
-  → FSM cross-reference → `decode_bindings.py` validation), the
-  confidence ladder + evidence-trail conventions for `bindings.yaml`, and
-  a worked example (`ECM_RPM`). Written now that the ELM327 closed a full
-  hypothesis loop. Reference, not code.
 - [x] **4.A.1 — Physical-action capture protocol.** Codified as the
-  `rev` protocol in `scripts/guided_session.py`. Key engineering choice:
-  tags mark physical events on the vehicle (idle, blip, sustained,
-  recover, engine off), not NT510 screen selections. The first attempt
-  used screen-selection tags and produced noisy bindings; the rev
-  session repaired this.
 
 ### 4.B — RE analysis tools (built)
 
 - [x] **4.B.1 — ISO-TP / UDS decoder.** `src/analysis/iso_tp.py` +
-  `tools/decode_isotp.py` — reassemble multi-frame UDS messages,
-  decode services 0x10/0x14/0x19/0x21/0x22/0x27/0x2F/0x3E, group by
-  tag-defined windows for offline analysis.
 - [x] **4.B.2 — Broadcast inventory.** `tools/inventory_broadcast.py` —
-  per-CAN-ID frame counts, median periods, DLC, per-byte unique-value
-  counts. Surfaces which IDs are signal-bearing vs. counter/padding.
 - [x] **4.B.3 — Byte-vs-tag differential.** `tools/broadcast_signals.py`
-  — for every `(can_id, byte_index)` pair, computes per-tag-window
-  mean/range/uniques, ranks bytes by cross-window mean spread (Δ). High
-  Δ = real signal; low Δ = counter or padding.
 - [x] **4.B.4 — Mode 22 ↔ Mode 01 cross-reference.** `tools/cross_reference.py`
-  + `src/analysis/cross_reference.py` — pair Mode 22 DID reads against
-  python-obd Mode 01 PIDs by timestamp, linear-regress to derive
-  scale/offset. ELM327 is now connected and working (protocol 6 ISO
-  15765-4 CAN 11/500). Companion: `tools/cross_reference_broadcast.py` +
-  `src/analysis/broadcast_correlate.py` — the broadcast-byte ↔ Mode 01
-  PID counterpart (regress a CAN byte's raw value against each PID;
-  probes default to `bindings.yaml`'s unpinned signals). The original ELM327
-  session pinned `ECM_RPM` (0x1F9:2-3, raw÷8, r²=1.000) and confirmed
-  `ECM_COOLANT_TEMP` (0x551:0, raw−40, r²=0.999); future PID ground-truth
-  captures use the Canable-native OBD path.
 - [x] **4.B.5 — FSM signal extraction.** `tools/extract_fsm_signals.py`
-  + `src/analysis/fsm.py` — parse Xterra Factory Service Manual PDFs
-  (Hitachi/Nissan CONSULT-III tables) into `data/fsm/signals.json` (333
-  named parameters across 8 modules) including numeric expected ranges.
 - [x] **4.B.6 — FSM range-match scoring.** `src/analysis/range_match.py`
-  — score candidate FSM parameters against captured DID raw ranges
-  across a grid of common scalings + offsets. Tripod with module
-  attribution and tag-fuzzy matching, used in `tools/decode_isotp.py`.
 
 ### 4.C — Bindings system (built)
 
 - [x] **4.C.1 — Canonical bindings file.** `data/bindings.yaml` — typed,
-  hand-edited record of broadcast-byte signal mappings with confidence
-  level (`confirmed`|`high`|`medium`|`low`|`hypothesized`), evidence
-  trail (per-session + method + finding), notes, and optional
-  plausibility bounds. Schema-versioned for forward-compat.
 - [x] **4.C.2 — Bindings decoder library.** `src/decode/bindings.py` —
-  strict Pydantic schema (typos in YAML fail at load time);
-  `decode_raw(signal, data)` extracts the integer; `apply_scaling`
-  applies scale+offset; `is_plausible` checks against declared bounds.
-  Foundation for the daemon's eventual runtime decode path.
 - [x] **4.C.3 — Bindings validation reporter.** `tools/decode_bindings.py`
-  — walks a session, decodes every binding against every matching
-  frame, reports per-signal raw + decoded ranges + plausibility status
-  grouped by confidence level. Catches binding bugs automatically (the
-  COOLANT engine-off −40°C sentinel was found by this tool).
 
 ### 4.D — Future integration (not done)
 
 - [x] **4.D.1 — Wire bindings decoder into preprocessing.** Decoded CAN
-  signals now flow into the ML pipeline as numeric columns the model can
-  learn from — closing the gap between the RE half (bindings) and the ML
-  half (loader → resample → segment → features → scaler → IsolationForest).
-  Implemented as `src/preprocessing/decode.py`:
-    * `decode_can_rows(long_frame, bindings, confidence_levels=…)` appends
-      `source="decoded"`, `channel=<signal name>` rows whose value is the
-      RAW integer from the binding's byte range (scaling is for human
-      reports, not the model — the scaler normalizes anyway, and most
-      bindings have no pinned scale yet).
-    * `read_session_decoded(session_dir, bindings_path=…)` = `read_session`
-      + `decode_can_rows`; falls back to plain `read_session` if the
-      bindings file is absent.
-    * `to_wide` gained `coerce_numeric=True` (default): after the pivot,
-      any value column whose non-null entries are all numbers is cast to
-      numeric dtype. This fixed a pre-existing `to_wide` bug — it always
-      produced `object`-dtype columns (it pivots on the coalesced `value`
-      column), so even OBD numeric channels were being skipped by
-      `compute_features` / `ZScoreScaler`. Nothing exercised the
-      `to_wide → resample → features` path on real data until now.
-  End-to-end smoke against session 2026-05-11T222447: 2.2M long rows →
-  1.15M wide rows × 55 cols → resampled 694 × 107 → features 694 × 266;
-  all 23 decoded signals numeric and reaching the scaler; coolant decodes
-  to 75-94degC; throttle-transient varies 0-255. (FR-04)
 - [x] **4.D.2 — DBC emitter from bindings.yaml.** `tools/emit_dbc.py`
-  produces a draft `data/dbc/xterra_2008.dbc` from `bindings.yaml` via
-  cantools (`--min-confidence`, unpinned-scale signals emitted raw so the
-  DBC still loads, confidence written into each signal comment). One-way,
-  derived artifact — `bindings.yaml` stays source of truth; the reverse
-  decode hook is 1.8. Covered by `tests/test_emit_dbc.py` (3 tests).
-  (FR-02)
 - [x] **4.D.3 — Bearing-wear validation.** `tests/test_bearing_wear_validation.py`
-  — synthetic (the plan explicitly permits it until real `WHEEL_SPEED_*`
-  bindings graduate to `confirmed`). Trains the per-mode Isolation Forest on
-  a clean four-wheel-speed drive, then scores a session where the front pair
-  progressively diverges (slow ramp + growing noise = a worn bearing),
-  asserting: it fires at all; it fires while the divergence is still well
-  under the ~5 kph an ABS wheel-speed-comparison DTC needs (the whole point —
-  ML catches it *before* a code would); the clean baseline stays quiet at the
-  contamination rate (steady-state, excluding rolling-feature warmup); and
-  the worn flag-rate is ≫ the clean rate. Deterministic (seeded). Real-data
-  validation still waits on confirmed bindings. (Overview Phase 4 goal)
 - [x] **4.D.4 — Bindings → captured-frame validation.** `tests/test_bindings_validation.py`
-  — for every `confidence: confirmed` signal in `data/bindings.yaml`,
-  walks `data/sessions/*/frames.log`, finds the first frame whose
-  arbitration ID matches the binding, decodes it via the same
-  `decode_raw` + `apply_scaling` path the daemon uses, and asserts the
-  result is inside the declared `plausible_min`/`plausible_max` band.
-  Skipped cleanly when no captured frames are available (CI without
-  vehicle data). Plus a guard test (`test_at_least_one_confirmed_signal_observed`)
-  that fails — rather than silently skips — if every confirmed signal's
-  CAN ID has fallen out of the captured corpus, so stale bindings can't
-  ride along undetected. Catches the bug class `decode_bindings.py`
-  already found once (`ECM_COOLANT_TEMP` engine-off −40 °C sentinel),
-  plus off-by-one `byte_start` errors and sign/endianness mistakes. No
-  test fixture is committed — the test reads whatever sessions are on
-  disk, per the "no committed fixtures" decision. (NFR-05)
 
 ### 4.E — Behavior-model inference (not done)
 
@@ -713,51 +212,8 @@ documented in `docs/behavior-model-inference.md`. Strictly read-only —
 no Mode 23 / Mode 27 / flash dumps / writes.
 
 - [x] **4.E.1 — Behavior-model schema.** `src/decode/behavior_models.py`
-  — strict Pydantic schema (sibling file `data/behavior_models.yaml`,
-  loader/dumper, `extra="forbid"` with `protected_namespaces=()`).
-  Discriminated union: `surface_1d` carries an `Axis1D` (channel + unit +
-  inclusive `domain`) and a `Fit1D` discriminated on `kind` —
-  `PolynomialFit` (coefficients lowest-order first, numpy convention) or
-  `LookupTableFit` (strictly-increasing `x_knots` + matching `y_knots`).
-  `surface_2d` carries two `Axis2D`s (strictly-increasing `bin_edges`)
-  and a `GridBinnedMeanFit` (row-major flat list of `GridCell{mean,std,count}`,
-  enforced length = `axes[0].bin_count * axes[1].bin_count`). Optional
-  `operating_mode` filter, `version`, `notes`. Shared `_BaseFit` bookkeeping
-  (sample_count, r_squared, sessions, fitted_at ISO-8601, training_data_hash).
-  `DeviationConfig` (absolute / relative bands; relative on 1D needs an
-  explicit `reference_std`; warning < critical enforced). Helper:
-  `flatten_grid(rows)` row-major flatten with rectangular-shape validation.
-  Covered by `tests/test_behavior_models.py` (17 tests: axis validation,
-  fit validation, deviation rules, 2D cell-count enforcement, YAML
-  round-trip, unknown-field rejection, discriminator selection).
 - [x] **4.E.2 — 1D surface inferer.** `src/analysis/surface_1d.py` —
-  `fit_polynomial` (closed-form via `numpy.polynomial.polynomial.polyfit`
-  — coefficients lowest-order first matching the schema; needs ≥ `degree+2`
-  clean rows) and `fit_binned_lookup` (quantile bins → bin-mean lookup
-  table — a piecewise-linear LOWESS substitute that doesn't pull scipy in;
-  needs ≥ `n_knots*2` rows and ≥ 2 distinct x values). Both compute R² in
-  the same residual-vs-mean form so persisted fit quality matches what the
-  runtime evaluator sees, drop NaN rows pre-fit, and stamp a stable
-  `training_data_hash` (sha256 of the (x,y) row tuples) so refit
-  invalidation is detectable. `evaluate_1d(model, x)` returns the
-  expected value or `None` outside the fit domain (no polynomial
-  extrapolation — easy way to manufacture nonsense). Pure
-  numpy/pandas; no scipy/sklearn dependency added. Covered by
-  `tests/test_surface_1d.py` (13 tests). (FR-05)
 - [x] **4.E.3 — 2D surface inferer.** `src/analysis/surface_2d.py` —
-  `fit_grid_binned_mean` bins `(x, y)` into the configured grid and writes
-  per-cell `{mean, std (ddof=0 to match `ZScoreScaler`), count}`. Empty
-  cells are persisted with `count=0` so the evaluator can return `None`
-  ("operating point never observed") instead of fabricating a value. NaN
-  rows and out-of-range rows are dropped before binning; the top edge is
-  closed so `x.max()` lands in the last bin. `r_squared` is left `None`
-  (the empirical mean has no closed-form comparison). `evaluate_2d(model,
-  x, y)` returns the full `GridCell` (not just `mean`) so the decoder
-  layer can compute `|delta| / cell.std` for relative deviations. Pure
-  numpy/pandas. Covered by `tests/test_surface_2d.py` (10 tests: grid
-  layout, per-cell tracking of underlying relationship, empty-cell
-  marking, NaN/out-of-range drops, edge-monotonicity, right-edge
-  inclusiveness). (FR-05)
 - [~] **4.E.4 — Injector pulse-width DID identification.** Cross-reference
   captured Mode 22 DIDs against Mode 01 fuel-trim variations. The DID
   whose value correlates with `RPM × (1 + STFT/100)` is the injector PW.
@@ -772,47 +228,9 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   Covered by `tests/test_can_obd_client.py`, `tests/test_can_obd_collector.py`,
   `tests/test_obd_collector.py`, and `tests/test_record_script.py`.
 - [x] **4.E.5 — Calibration-DID scanner.** `tools/scan_constant_dids.py`
-  + `src/analysis/did_scan.py` — sweeps Mode 22 DID space over the
-  ELM327 (read-only, service 0x22 only; `Elm327Mode22Transport`), takes
-  ≥2 passes at different engine states, and classifies each DID as
-  varying / constant / intermittent (`classify_dids`). `parse_mode22_response`
-  + the reply parser are unit-tested; the serial parsing layer still needs
-  validation against the actual adapter at the vehicle. Verify the Canable
-  is in its sniffing role only before running.
 - [x] **4.E.6 — Behavior-model decoder integration.** `src/decode/behavior_decoder.py`
-  exposes the runtime API. Scalar: `expected_value(model, operating_point)`
-  → expected output or `None` (mode mismatch / missing input / outside
-  domain / empty 2D cell); `deviation(model, actual, operating_point)`
-  → `DeviationResult{expected, actual, deviation, severity}` graded against
-  the model's `DeviationConfig` (`absolute` uses `|delta|`; `relative` uses
-  `|delta|/std` where std is the 2D cell std or the 1D `reference_std`).
-  Severity bands are inclusive lower-bounds (`score >= band`) so threshold
-  semantics stay intuitive. Vectorized: `expected_value_column(frame,
-  model)` returns a float series with NaN where the model has no
-  expectation. Covered by `tests/test_behavior_decoder.py` (19 tests).
-  (FR-05)
 - [x] **4.E.7 — Deviation features in preprocessing.** `append_deviation_columns(frame, models)`
-  writes a `deviation:<model_name>` column per behavior model;
-  `build_feature_frame` (the shared offline pipeline used by both the IF
-  trainer and the LSTM trainer) loads `data/behavior_models.yaml` when
-  present and inserts this step between `segment_or_constant` and
-  `compute_features`, so the deviation columns pick up rolling
-  mean/std/roc derivatives just like raw/decoded channels and flow into
-  `ZScoreScaler` via `trainable_feature_columns` unchanged. NaN is the
-  correct value when the model has no expectation or the actual column
-  isn't present — the existing scaler/feature stages already handle that.
-  `output_columns` override lets a caller point at a non-`decoded:<output>`
-  actual column (e.g. an OBD PID). Covered by `tests/test_behavior_decoder.py`.
-  (FR-04)
 - [x] **4.E.8 — Refit CLI.** `scripts/refit_behavior_models.py` +
-  `src/analysis/refit.py` — declarative-recipe batch driver over the 1D
-  / 2D inferers. The CLI pulls sessions discovered under `--sessions-root`
-  filtered by `--days` (default 30; `--all` overrides), runs the shared
-  `build_feature_frame` pipeline (so deviation columns from any
-  *previously*-published behavior models flow through the feature stage
-  too), and runs every recipe in `default_recipes()` — or the subset
-  named via repeatable `--recipe`. Atomic write (temp file + rename) to
-  `data/behavior_models.yaml`.
 
   Recipes are typed dataclasses (`Surface1DRecipe`, `Surface2DRecipe`)
   carrying everything the fitter needs plus a `min_samples` floor and an
@@ -850,19 +268,6 @@ no Mode 23 / Mode 27 / flash dumps / writes.
   confirm the CLI prints actionable skip reasons against real data.
   (FR-09)
 - [x] **4.E.9 — Performance panel data feed.** `GET /models/behavior`
-  on the dashboard backend returns the full `data/behavior_models.yaml`
-  contents (Pydantic `model_dump(mode="json")` of `BehaviorModels`),
-  re-read per request so a `scripts/refit_behavior_models.py` run lands
-  without a daemon restart. Frontend wire-up: `useBehaviorModels` hook
-  polls the endpoint at 60 s cadence; `BehaviorModelsPanel` renders each
-  surface — 1D fits via the `Curve` component (canvas, samples the fit
-  closed-form for polys, linearly interpolates for lookup tables) and 2D
-  fits via the `Heatmap` component (canvas grid; empty cells render dark
-  so coverage gaps are immediately visible). Each card shows name, version,
-  output channel + unit, operating-mode filter, sample count, R²,
-  and the surface's notes from the recipe. Covered by 4 new backend tests
-  (`/models/behavior` endpoint + the underlying `read_behavior_models`
-  helper, both with file-present and file-missing). (FR-08)
 
 ---
 
@@ -871,170 +276,26 @@ no Mode 23 / Mode 27 / flash dumps / writes.
 ### 5A. Alert system (FR-07)
 
 - [x] **5.1 — Anomaly event schema.** `src/alerts/events.py` — `AnomalyEvent`
-  (Pydantic, `extra=forbid`): timestamp, source (`isolation_forest`|
-  `lstm_autoencoder`), model_version, score, optional threshold,
-  affected_channels, operating_mode, session, window timestamps, latency,
-  free-form `detail`. Adapter constructors `from_lstm_result(...)` and
-  `from_isolation_forest_row(...)` keep the per-detector mapping in one
-  place. Covered by `tests/test_alerts.py`.
 - [x] **5.2a — Inference → AnomalyEventLogger bridge.** `src/alerts/emitter.py` —
-  `AnomalyEventEmitter` turns per-detector results into `AnomalyEvent`
-  records via the existing `from_lstm_result` / `from_isolation_forest_row`
-  adapters and persists them through `AnomalyEventLogger`. Owns
-  emission policy (LSTM: `result.is_anomaly`; IF: label==-1 OR
-  `isolation_forest_missing_features`), dedupe (per-(`source`,`model_version`)
-  minimum-gap, default 1s, configurable to 0 for replay), and
-  observable `EmitterCounters` (emitted / suppressed_not_anomaly /
-  suppressed_dedupe — surfaceable from /status). Dropout events are
-  tagged with `detail["missing_features"] = True` so the dashboard can
-  render them differently from "real" outliers. Plus
-  `IsolationForestInferenceEngine.observe(row)` — streaming wrapper
-  around `TrainedIsolationForest.score` so the daemon row-processing
-  loop is symmetric with `LSTMInferenceEngine.observe`. Pure wiring; no
-  torch/sklearn imports at module top so the emitter is cheap to
-  construct. Covered by `tests/test_alerts_emitter.py` (16 tests:
-  LSTM emit/suppress/dedupe + window math; IF outlier / inlier /
-  missing-features / dropout-with-NA-label; counter reset; bad
-  timestamp; Z-suffix timestamps; engine end-to-end). (FR-07)
 - [x] **5.2 — Event logger.** `src/alerts/event_logger.py` —
-  `AnomalyEventLogger`: append-only, flushed per write (crash-safe), daily
-  rotation via dated filenames (`anomalies-YYYY-MM-DD.jsonl` under the
-  configured directory — a new file on the UTC date roll, no rename). Plus
-  `read_events` / `read_events_dir` for the dashboard's `since=` query.
-  Covered by `tests/test_alerts.py`.
 
 ### 5B. FastAPI backend (FR-08)
 
 - [x] **5.3 — REST endpoints.** `src/dashboard/api.py` — read-only
-  FastAPI app over the files the daemon already writes; no live producer
-  wiring (WebSockets land in 5.4). Routes delegate to pure helpers so
-  the same logic is unit-testable without spinning up the web stack.
-    * `GET /status` → `build_status(config, models_dir=…)`: storage
-      path + free MB + most recent session under `collection.storage_path`
-      via `discover_sessions` + loaded model versions (best-effort,
-      reads `<models_dir>/*.manifest.json`'s `version` field) + a
-      "year make model" vehicle line.
-    * `GET /config` → `echo_config(config)`: Pydantic
-      `model_dump(mode="json")` of the loaded `canary.yaml`.
-    * `GET /anomalies?since=…` → `read_anomalies_since(anomalies_dir,
-      since=…)`: walks the `AnomalyEventLogger`'s
-      `anomalies-YYYY-MM-DD.jsonl` files (5.2) sorted by timestamp;
-      ISO-8601 `since` is filterable by lexicographic compare (events
-      persist as ISO too); garbage `since` → HTTP 400.
-    * `GET /telemetry/latest?n=…` → `read_latest_telemetry_rows(storage_path,
-      n)`: last `n` rows from the newest Parquet chunk in the newest
-      session; `(value_number, value_text, value_bool)` collapsed into
-      a single `value` field; `n` bounded [1, 10_000] (FastAPI 422 on
-      out-of-range).
-  Factory `create_app(config, *, anomalies_dir, models_dir, ..., emitter)`
-  stays stateless — every request re-reads from disk (cheap for v1;
-  `since=` bounds the work as the corpus grows). When the daemon passes
-  its `AnomalyEventEmitter`, `/status` surfaces `emitter_counters`
-  (`{emitted, suppressed_not_anomaly, suppressed_dedupe}`) — the
-  "is the anomaly path firing?" check the dashboard can render without
-  polling the JSONL. Bind-host policy (5.5) belongs at the uvicorn entry
-  point. Added `httpx>=0.27` to dev deps for the FastAPI TestClient.
-  Covered by `tests/test_dashboard_api.py` (22 tests: unit helpers + full
-  route surface with `TestClient` + counters round-trip).
 - [x] **5.4 — WebSocket stream.** `src/dashboard/broadcast.py` (in-memory
-  pub/sub) + `/ws/telemetry` and `/ws/anomalies` routes in
-  `src/dashboard/api.py`. `Broadcaster(queue_size=100)` — fan-out to N
-  bounded per-subscriber queues; if a subscriber falls behind the queue
-  fills and we drop the *oldest* (freshest data wins, producer never
-  blocks). `Subscription.dropped` is observable per subscriber. Async-only
-  `publish()` plus a `publish_threadsafe(loop, ...)` escape hatch for the
-  OBD/CAN supervisor threads (1.E.1) to publish from off-loop without
-  racing the queue. The FastAPI handler accepts the WebSocket, subscribes,
-  pumps each message as JSON until `WebSocketDisconnect`, then
-  unsubscribes in `finally` — slow clients can't leak subscriber slots.
-  `create_app(..., telemetry_broadcaster=, anomalies_broadcaster=)` lets
-  the daemon inject the same instances its producers publish into;
-  defaults to fresh per-app instances stashed on `app.state` so tests
-  / the bare-app case still work. Covered by `tests/test_dashboard_broadcast.py`
-  (10 tests: delivery, no-sub no-op, unsubscribe, drop-oldest backpressure,
-  dropped counter, threadsafe, async-for iterator, count tracking,
-  idempotent unsubscribe, slow-subscriber isolation) plus 4
-  `tests/test_dashboard_api.py` WebSocket integration tests using
-  `TestClient.websocket_connect`.
 - [x] **5.5 — Bind-host entry point.** `scripts/serve_dashboard.py` is
-  the uvicorn entry the systemd unit will run. `--host` / `--port` flags
-  default to `canary.yaml`'s `dashboard.{host,port}`; `--anomalies-dir`
-  and `--models-dir` configure where `create_app` reads the alerts log
-  and model manifests from. `warn_if_public_bind(host)` logs a loud
-  warning when binding to anything other than loopback / link-local /
-  RFC1918 private (and conservatively warns on hostnames the script
-  can't classify without a DNS roundtrip) — v1 has no auth on the
-  dashboard, so the warning is the cheap guard. Covered by
-  `tests/test_serve_dashboard_script.py` (9 tests: silent for loopback /
-  RFC1918 / link-local; loud for 0.0.0.0 / public IPs / hostnames;
-  CLI defaults from canary.yaml; CLI override; --anomalies-dir /
-  --models-dir pass-through to create_app). (NFR-06)
 
 ### 5C. Dashboard frontend (FR-08)
 
 - [x] **5.6 — Display strategy.** `docs/dashboard-display-strategy.md`
-  — full React/TypeScript PWA served by the Pi for phone/head-unit
-  mirroring; native Android Auto deferred as a constrained companion.
 - [x] **5.7 — Stack: React + TypeScript + Vite.** Hand-scaffolded under
-  `src/dashboard/static/` (no `pnpm create vite` — every dep we pull is
-  declared in `package.json`). pnpm is the package manager (declared via
-  `packageManager` field for corepack); lockfile is `pnpm-lock.yaml`.
-  `tsconfig.app.json` is strict (noUnusedLocals, noUnusedParameters,
-  noFallthroughCasesInSwitch). Build via `pnpm build` → `dist/`
-  (155 KB JS, 5.8 KB CSS, 50 KB gzipped); the FastAPI backend auto-mounts
-  `dist/` on `/` when present. `src/dashboard/static/README.md` documents
-  build/dev/typecheck flow.
 - [x] **5.8 — PWA + head-unit mirroring mode.** `public/manifest.webmanifest`
-  declares fullscreen + landscape + theme color; iOS web-app meta tags in
-  `index.html`. Landscape-first CSS grid layout with a portrait fallback;
-  dark high-contrast palette tuned for daylight visibility. `DashboardShell`
-  shows connection state per stream (two colored dots: telemetry +
-  anomalies), a current-mode badge, and a `→ parked` / `→ driving` toggle
-  that gates the `DiagnosticsPanel`. The `SystemPanel` surfaces a stale-data
-  warning (newest channel timestamp > 10 s ago).
 - [x] **5.9 — Live PID panel.** `panels/TelemetryPanel.tsx` +
-  `hooks/useTelemetryStream.ts`. The hook seeds from `GET /telemetry/latest`
-  so values render immediately, then subscribes to `/ws/telemetry` and
-  maintains per-channel ring buffers (120 samples ≈ 2 min at 1 Hz). Panel
-  renders a primary grid (RPM, SPEED, COOLANT_TEMP, MAF, THROTTLE_POS,
-  voltage) with canvas-based sparklines (`Sparkline.tsx`, no chart-lib
-  dep), and a collapsible secondary grid for everything else the
-  collectors produce.
 - [x] **5.10 — Anomaly timeline.** `panels/AnomalyPanel.tsx` +
-  `hooks/useAnomalyStream.ts`. Seeds from `GET /anomalies` (last day's
-  JSONL), subscribes to `/ws/anomalies`, dedupes by
-  `(timestamp, source, model_version)`. Renders a score sparkline (last 60
-  events) + a filterable event list with per-event timestamp, source
-  badge (colored per detector), operating mode, score/threshold,
-  affected-channel preview, and a "missing features" badge for dropout
-  events.
 - [x] **5.11 — Operating-mode indicator.** `panels/OperatingModeIndicator.tsx`
-  reads the most recent anomaly event's `operating_mode` field as the
-  freshest cue the daemon publishes (avoids needing a second producer
-  for live mode). Colored by mode (idle = green, city/highway = accent,
-  WOT = warn).
 - [x] **5.12 — Model performance panel.** `panels/ModelPanel.tsx` reads
-  `/status` for `model_versions` (live values from ModelManager) + the new
-  `emitter_counters` (emitted / suppressed_not_anomaly / suppressed_dedupe);
-  derives mean LSTM inference latency from the rolling event stream's
-  `latency_ms` field. Behavior-model surfaces render through
-  `BehaviorModelsPanel` (4.E.9). Richer training-run, model-health, drift, and
-  false-positive tuning views are still pending in Phase 6.21–6.27.
 - [x] **5.13 — TPMS panel (placeholder).** `panels/TpmsPanel.tsx` reads
-  `decoded:TPMS_FL_PRESSURE` etc. from the channel map; when those
-  bindings haven't been pinned (current state), surfaces "TPMS bindings
-  not yet pinned — see `data/bindings.yaml`" instead of showing fake
-  zeros. Once the bindings land, the panel takes over with no
-  shell-level change.
 - [x] **5.14 — Parked diagnostics panel (gate).** `panels/DiagnosticsPanel.tsx`
-  is the parked-mode-only surface for proprietary protocol reads + any
-  future control actions. Driving mode hides the panel entirely (not
-  "shows it disabled") so a mis-tap can't land here. The frontend gate
-  is for the operator's ergonomics; the backend must enforce parked
-  mode separately when controls are added (per
-  `docs/dashboard-display-strategy.md`'s safety boundary). The panel is
-  currently a stub that documents the rule — the actual tools land as
-  they're built.
 
 Backend wire-up for the SPA: `create_app(..., static_dir=, enable_dev_cors=)`
 mounts the built React bundle on `/` (404s cleanly until `pnpm build`
@@ -1047,97 +308,15 @@ present / absent and the CORS dev-origin allow.
 ### 5D. Model management (FR-09)
 
 - [x] **5.15 — Shared model manifest schema.** `src/models/manifest.py`
-  — Pydantic `ModelManifestCommon` (strict, `extra="forbid"` with
-  `protected_namespaces=()`) listing every field both
-  `IsolationForestManifest` and `LSTMAutoencoderManifest` are
-  contractually obliged to carry: `artifact_format_version`,
-  `model_type` ∈ `KNOWN_MODEL_TYPES`, `model_version`, `created_at`,
-  `training_data_hash`, training timestamps + sessions, `input_rows`,
-  `hyperparams`, `schema` (aliased to `schema_` since Pydantic reserves
-  the name). Detector-specific keys (`modes` for the IF,
-  `thresholds`/`architecture` for the LSTM) flow through `extras` so
-  the schema is forward-compatible: per-trainer manifests can grow new
-  fields without bumping `CURRENT_MANIFEST_FORMAT_VERSION` (only
-  consumers that *use* those new fields opt in). `validate_manifest_common`
-  / `load_manifest_common` are the single entry the dashboard
-  (`build_status` reads `version` from the same manifests), eventual
-  hot-swap (5.16), and retraining CLI (5.17) all consume through.
-  `schemas_compatible(a, b)` checks `feature_columns` match for the
-  hot-swap "is the new model substitutable for the running one?"
-  decision. `ManifestValidationError` is the single exception type
-  callers catch. A conformance test in `tests/test_model_manifest.py`
-  pins the trainer dataclasses to the shared field names so a future
-  refactor that drops a shared field fails loudly. `KNOWN_MODEL_TYPES`
-  is asserted equal to `AnomalyEvent.AnomalySource` so dashboard payloads
-  round-trip cleanly. 18 tests; full suite 711 passed, 1 skipped;
-  ruff/format/mypy clean (55 source files). (FR-09)
 - [x] **5.16 — Hot swap (`ModelManager`).** `src/models/manager.py` —
-  generic `ModelManager[T]` polls an artifact path, validates a newer
-  sidecar manifest against the running one via `schemas_compatible`
-  (5.15), and atomically swaps the in-memory reference. Two safety
-  policies: (1) **manifest validation first** — a new manifest is
-  rejected if it doesn't satisfy `ModelManifestCommon`, has a mismatched
-  `feature_columns`, has an unexpected `model_type` (when
-  `allowed_model_types` is set), or if the loader raises; the running
-  model stays in place. (2) **lock-guarded load+validate+assign** —
-  two pollers can't race a half-loaded checkpoint into place. mtime
-  short-circuit avoids re-validating unchanged manifests on every tick.
-  `current` returns a frozen `LoadedModel[T]` snapshot; the prior
-  snapshot is unaffected by a swap. `SwapAttempt(kind, detail,
-  new_version)` is the observable per-poll outcome — the daemon's
-  /status path will surface counts of each kind. Polling rather than
-  fsnotify (no extra dep; refit cadence is minutes-to-hours so polling
-  cost is irrelevant). `manager_for_artifact(...)` convenience constructor
-  loads the initial artifact in one call. Covered by `tests/test_model_manager.py`
-  (12 tests: load_initial / missing files / no-change / swap / feature_columns
-  mismatch / model_type mismatch / malformed manifest / loader exception /
-  parallel-poller lock / snapshot immutability / typed convenience).
-  (FR-09)
 - [x] **5.17 — Retraining CLI.** `scripts/retrain.py` orchestrates
-  `train_anomaly_model.train` and `train_lstm.train` over the same
-  age-filtered session set in one process. Each trainer writes its own
-  artifact + manifest under `--if-out` / `--lstm-out`; the daemon's
-  `ModelManager` (5.16) picks them up on next poll. `--skip-if` /
-  `--skip-lstm` for partial refreshes; `--days N` / `--all` mirror
-  `refit_behavior_models.py`. Continues if one trainer fails (logged +
-  reported in the stdout summary with `✗`); exit code non-zero in that
-  case. Sessions filter reuses `_filter_sessions_by_age` from the
-  refit CLI so both trainers see the same window-of-recent semantics.
-  Covered by `tests/test_retrain_script.py` (6 tests: both trainers
-  fire, --skip-if, --skip-lstm, both-skip rejected, no-sessions error,
-  one-failure-doesn't-stop-the-other). (FR-09)
 
 ### 5E. Deployment (NFR-02, NFR-04)
 
 - [x] **5.18 — systemd unit.** `systemd/canary.service` runs the full
-  daemon as the non-root `canary` user, reads `/etc/canary/canary.env`
-  and `/etc/canary/canary.yaml`, grants `CAP_NET_RAW` for SocketCAN raw
-  sockets, restarts on failure, and leaves CAN interface configuration to
-  the OS / `docs/can-setup.md`. It is `Type=simple` for v1 because the
-  Python daemon does not emit `sd_notify` readiness yet; upgrade to
-  `Type=notify` only when the daemon has an explicit readiness signal.
 - [x] **5.19 — Install script.** `scripts/install_pi.sh` is the
-  idempotent Pi install helper for an already-cloned repo. It creates
-  the `canary` user/group, `/etc/canary`, `/data/canary`, copies
-  `canary.pi.example.yaml` only when config is absent, installs the
-  runtime venv via `scripts/install_deps.py --extras none --torch none`
-  by default, installs the unit, reloads systemd, and enables the
-  service. `CANARY_TORCH=cpu` opts into CPU Torch for LSTM inference.
 - [x] **5.20 — Pi 5 image bring-up doc.** `docs/pi-setup.md` covers
-  Bookworm packages, clone/install, SocketCAN active/passive bring-up,
-  optional dashboard build, systemd operation, and laptop/headless API
-  access. `docs/headless-api.md` lists REST/WebSocket endpoints and the
-  SSH tunnel workflow for laptop frontend development.
 - [x] **5.20a — Headless control plane.** The daemon now exposes
-  bearer-token-protected `/control/*` routes for capture start/current/tag/stop,
-  session listing/detail/metadata/pin/delete/zip export, persisted and
-  cancellable allow-listed background jobs, preflight/version diagnostics,
-  control audit/event streaming, and model artifact upload. Supported jobs are
-  `retrain_if`, `retrain_lstm`, `retrain_all`, `refit_behavior_models`, and
-  `corpus_report`. `scripts/canaryctl.py` is the laptop-facing CLI so
-  Codex/Claude can drive a Pi at `http://<ip>:8000` without SSH or arbitrary
-  remote shell execution. `scripts/install_pi.sh` generates
-  `/etc/canary/control.token` and injects it into the systemd environment.
 - [ ] **5.21 — Vehicle install.** Mount Pi, run buck converter from ACC,
   verify clean shutdown on ignition off. (Hardware task; software side
   is graceful-shutdown handling.)
@@ -1158,22 +337,6 @@ training/model-health visualization, and Torque Pro parity.
 ### 6A. Standard OBD and Torque-parity telemetry
 
 - [x] **6.1 — Complete SAE J1979 registry.** `src/collection/obd_registry.py`
-  is the typed metadata layer over `can_obd_client.PID_DECODERS`: a
-  `PidDefinition` (mode, pid, channel, display name, `Category`, unit, byte
-  length, `PollTier`, `DashboardHint`, decoder, support-bit group) for every
-  public read-only Mode 01 PID across the full J1979 range (0x01–0x63 today,
-  ~90 entries), plus `MODE09_REGISTRY` (VIN/calibration/CVN/ECU-name decoders),
-  `SERVICE_REGISTRY` (Mode 02/03/06/07/0A descriptors), `parse_mode06_response`
-  (standardized OBDMID test records), and `parse_dtc_payload` re-export. The
-  numeric Mode 01 decoders stay single-sourced in `can_obd_client` (imported,
-  asserted identical by test); formula-stable PIDs it doesn't carry get
-  decoders here; intentionally-undecoded real PIDs get `decoder=None`.
-  `lookup(mode, pid)` (Mode 02 reuses the Mode 01 formula table) and
-  `classify_pid(...)` collapse to the four honest coverage outcomes
-  `decoded` / `supported_not_decoded` / `unsupported` / `unknown_pid` so a
-  supported-but-not-decoded PID is surfaced, never hidden (Risk R7). Covered by
-  `tests/test_obd_registry.py` (18 tests: registry↔PID_DECODERS integrity,
-  support-group math, canned-raw decoders, Mode 06 parsing, classification).
 - [ ] **6.2 — Adaptive real-time OBD polling scheduler.** Replace the flat
   auto-PID loop with poll tiers and bus-budget controls: fast powertrain
   channels (RPM, speed, load, throttle, MAP/MAF) at the highest safe rate,
@@ -1182,20 +345,6 @@ training/model-health visualization, and Torque Pro parity.
   (configured rate, observed response rate, timeout/backoff state, bus errors)
   so the dashboard can explain why a supported PID is stale or missing.
 - [x] **6.3 — OBD capability and coverage endpoint.**
-  `src/analysis/obd_coverage.py` — `build_coverage_report(supported,
-  responded, backed_off)` classifies *every* registry Mode 01 PID (Task 6.1)
-  into `decoded` / `supported_not_decoded` / `unsupported` with poll tier,
-  responded-recently, backed-off, and an explicit `undecoded_supported` gap
-  list (Risk R7 — never hides an undecoded-but-supported PID).
-  `channels_to_pids` maps observed channel names back to PIDs. Read-only
-  `GET /obd/coverage` infers the supported set honestly from the newest
-  session's `obd:` telemetry channels (no live ECU query — works
-  off-vehicle, doesn't contend for the diagnostic bus). `ObdCoveragePanel`
-  (Diagnostics▸OBD Coverage) renders the summary stats, undecoded-gap
-  list, and a status-coloured PID table (responded / backed-off). A live
-  ECU-bitmap + backed-off feed folds in once the daemon exposes it.
-  Covered by `tests/test_obd_coverage.py` + `tests/.../Phase6Panels.test.ts`.
-  (FR-08)
 - [~] **6.4 — DTC, freeze-frame, monitor, and VIN workflow.** Decode/lookup/
   report core done: `src/decode/dtc_catalog.py` — `describe_dtc` (curated
   generic-powertrain table + a *structural* fallback so an unknown/
@@ -1213,53 +362,12 @@ training/model-health visualization, and Torque Pro parity.
   deliberate exception to CANary's read-only default because Torque parity
   requires it; it must never be available while driving.
 - [x] **6.6 — Trip, fuel, and performance calculations.** `src/analysis/derived.py`
-  — pure functions over a wide telemetry frame. `compute_derived_channels`
-  appends `derived:*` columns: `FUEL_RATE_LPH`, `INSTANT_ECONOMY_L_PER_100KM` /
-  `_MPG`, `BOOST_VACUUM_KPA`, `ESTIMATED_POWER_HP`, `ESTIMATED_TORQUE_NM`, and
-  the time-integrated `TRIP_DISTANCE_KM` / `FUEL_USED_L` / `CO2_KG` /
-  `IDLE_TIME_S` / `AVG_ECONOMY_L_PER_100KM`. Fuel/air degrades through three
-  methods (`ENGINE_FUEL_RATE` PID → MAF÷AFR×λ → ideal-gas speed-density) so a
-  MAF-only vehicle still gets fuel numbers; power prefers the J1979 torque PIDs
-  and falls back to a fuel-energy estimate. `summarize_trip` reduces to a
-  `TripSummary` (duration, distance, fuel, avg economy L/100km + MPG, CO2, idle
-  time/fraction, max speed, best 0-60 mph, 1/4-mile ET + trap speed from a
-  clean-launch scan of the speed trace). No channel is fabricated — absent
-  inputs ⇒ no column / `None`, never a fake zero; capture-gap dt is clamped so
-  totals track wall-clock driving. Vehicle physical parameters live in the new
-  `VehicleConfig.parameters` (`VehicleParameters`: `mass_kg`, `fuel_type`,
-  `displacement_l`, `volumetric_efficiency`, `drivetrain_loss_fraction`,
-  `thermal_efficiency`, `tire_diameter_m`) — all optional with 2008-Xterra
-  defaults, documented in `canary.example.yaml`, and carried into every session
-  manifest automatically via `vehicle.model_dump()` so a trip's numbers stay
-  reproducible from captured data alone. Cumulative columns are deliberately
-  *not* model features (monotonic). Covered by `tests/test_derived.py`
-  (16 tests: every fuel method, economy, boost/vacuum, power from torque PIDs,
-  cumulative/idle, accel metrics on a synthetic launch, empty/missing-input
-  safety, fuel-property table). (FR-08)
 - [ ] **6.7 — GPS and route logging.** Support at least one GPS source for the
   Pi/truck workflow: browser Geolocation from the dashboard, USB GNSS through
   `gpsd`, or both. Store `source="gps"` telemetry rows, display route/speed on
   the dashboard, cross-check GPS speed against OBD speed, and export GPX/KML
   plus CSV/Parquet alongside the OBD/CAN data.
 - [x] **6.8 — Custom PID/formula support.** `src/collection/custom_pids.py`
-  — strict Pydantic `CustomPid` (name, display, mode, pid/did, formula, unit,
-  category, min/max, poll tier, dashboard hint, optional request header) +
-  versioned `CustomPidSet` with atomic YAML load/save mirroring `dids.yaml`.
-  Read-only by construction: a `mode` field-validator rejects anything outside
-  `{0x01, 0x09, 0x22}` so a fat-fingered or hostile CSV can't smuggle a Mode 04
-  / 2E / 2F write past CANary's read-only default. `evaluate_formula` is an
-  AST-walking sandbox with a node + call allow-list (no attribute access,
-  subscripting, comprehensions, lambdas, imports, or arbitrary calls — only a
-  fixed safe math set incl. a two's-complement `signed`); bytes bind as
-  `A`..`H` + `bytes` (Torque convention); a short response → `None`, an unsafe
-  formula → `FormulaError` at definition time, not mid-drive. Torque custom-PID
-  CSV import (`torque_csv_to_custom_pids` — bad/write-mode rows skipped with
-  warnings, never abort the import) and export (`custom_pids_to_torque_csv`,
-  round-trips). Daemon poll-tier scheduling is 6.2/6.13; this is the
-  vehicle-free definition + evaluation core. Covered by
-  `tests/test_custom_pids.py` (22 tests: formula math, the safety allow-list
-  including 8 injection attempts, read-only guard, dup-name, YAML round-trip,
-  Torque CSV accept/skip/round-trip). (FR-08)
 
 ### 6B. Full-featured dashboard and remote control UI
 
@@ -1280,13 +388,6 @@ training/model-health visualization, and Torque Pro parity.
   GPS series are deferred (mouse-interaction / GPS-source dependent).
   Covered by `tests/.../ChartsAlarms.test.ts`.
 - [x] **6.11 — User alarms and dashboard alerts.** `AlarmsPanel`
-  (Live▸Alarms) — per-channel threshold rules (op/value/severity) with
-  debounce (consecutive-breach count) + cool-down, evaluated client-side
-  against the live stream every 1 s; active banner, history, optional
-  WebAudio beep, localStorage-persisted; visually + verbally distinct from
-  ML anomalies ("operator-set, not an ML anomaly"). Hysteresis is folded
-  into the debounce+cooldown pair (same anti-flap effect; mirrors the
-  6.25 `AlertTuner` semantics). Covered by `tests/.../ChartsAlarms.test.ts`.
 - [~] **6.12 — HUD, themes, PWA offline, and reconnect behavior.** Done:
   the Drive context is the low-distraction glanceable view; `useTheme`
   day/night toggle (night = dimmer low-glare palette via a
@@ -1298,19 +399,7 @@ training/model-health visualization, and Torque Pro parity.
   light theme (unverifiable here — honest dimming shipped instead),
   wake-lock, and a dedicated mirrored-HUD layout.
 - [x] **6.13 — Control-plane frontend integration.** `ControlPanel`
-  (Control group) drives the full `/control/*` surface — preflight,
-  version, capture start/tag/stop + current state, session browser
-  (metadata/pin/unpin/delete/zip-export), job submit/list/logs/cancel,
-  model artifact upload, and the live control-event stream — i.e. parity
-  with `scripts/canaryctl.py` from the browser. Now reachable as a
-  first-class Workbench group (the nav refactor gave it a home).
 - [x] **6.14 — Browser control authentication UX.** Token entry is a
-  persisted password field (`useControlToken` → localStorage); a clear
-  banner shows **Read-only** vs **Control unlocked**; all mutating actions
-  are token-gated and disabled without it; errors are status-aware via the
-  shared `describeError` (401/403 → "check the token", 503 → "feature not
-  wired", 422 → server detail) rather than raw strings. Read-only
-  telemetry stays fully usable without a token.
 
 ### 6C. Nissan proprietary telemetry and diagnostics
 
@@ -1346,148 +435,17 @@ training/model-health visualization, and Torque Pro parity.
 ### 6D. Data export, training operations, and anomaly tuning
 
 - [x] **6.20 — Dataset capture and export pipeline.** `src/datasets/export.py`
-  — `DatasetExportSpec` (sessions, channel filter, resample_hz, include/exclude
-  tag windows, formats, purpose, zip) → `build_dataset` (read_session → to_wide
-  → optional resample → per-session tag-window mask via `session.build_windows`,
-  POSIX-seconds aligned independent of the `timestamp[us]` unit → channel
-  select) returning the frame + a `DatasetManifest` (created_at, purpose,
-  vehicle, sha256 `config_hash`, sessions, channel schema+dtypes, tag labels,
-  time range, row count, spec, and **quality warnings**: high-NaN channels,
-  parse-error-heavy sessions, missing/empty sessions, requested-but-absent
-  channels, no-tag-match — Risk R12, honest about what it ships).
-  `export_dataset` writes CSV/JSONL/Parquet/`feature_matrix` (model-ready via
-  the shared `build_feature_frame` + `trainable_feature_columns`) +
-  `dataset_manifest.json` + an optional ZIP. `mark_training_candidate` flags a
-  session via the existing metadata path (consumed by the 6.23 health view).
-  CLI `scripts/export_dataset.py` (`--mark-candidate`, multi `--session`/
-  `--channel`/`--format`, `--resample-hz`, tag filters, prints quality
-  warnings). Covered by `tests/test_dataset_export.py` (11 tests: manifest,
-  channel-select+missing-warn, resample, tag include/exclude+no-match warn,
-  parse-error/missing-session/empty warnings, spec validation, all-format+ZIP
-  export, feature-matrix, mark-candidate, CLI). Control-plane job submission is
-  6.13/6.36. (FR-08, FR-09)
 - [x] **6.21 — Training run ledger and metrics artifacts.**
-  `src/models/training_ledger.py` — `TrainingRunRecord` (strict Pydantic:
-  run_id, model_type, version, status, input sessions, feature schema,
-  hyperparams, `metrics` {loss_curve, thresholds, validation,
-  false_positive_benchmark, modes, manifest_extras}, artifacts, job_id +
-  log, `publish_status`) persisted by `TrainingLedger` as append-only JSONL
-  under `data/control/` (gitignored). Append-only with collapse-to-latest:
-  `records()` shows current state per run while `raw_records()` keeps the full
-  provenance chain (feedback-lineage cross-cutting concern); `set_publish_status`
-  appends a status-change line and auto-demotes the prior `active` model of the
-  same type to `published` (one live model per type, every demotion audited).
-  `build_run_record_from_manifest` adapts either trainer's manifest through the
-  shared `validate_manifest_common` (lenient model-type) and merges an optional
-  `fp_benchmark.py` JSON, so trainers stay ledger-agnostic. `scripts/retrain.py`
-  gained a best-effort `--ledger`/`--no-ledger`/`--job-id` hook (a
-  missing/unreadable manifest is logged and skipped — never fails the retrain,
-  never writes a stray file). Operator CLI `scripts/ledger.py`
-  (list/ingest/publish/show) drives it without a daemon for the offline
-  workflow. Source of truth for the 6.22 training dashboard / 6.26 label-aware
-  retraining / 6.37 publish queue. Covered by `tests/test_training_ledger.py`
-  (15 tests: LSTM/IF manifest extraction, FP-benchmark merge, bad-manifest
-  raise, append/collapse/provenance, active-demotion, JSON round-trip, CLI,
-  retrain hook present + best-effort). (FR-09)
 - [x] **6.22 — Training dashboard.** Backend `GET /control/training-runs`
-  over the 6.21 `TrainingLedger` (latest-per-run, authed, +test);
-  `TrainingPanel` (Models▸Training) renders run history with per-run model
-  type / status / publish badge, input-session + feature counts, held-out
-  FP rate + alerts/hr (from the merged benchmark), the LSTM loss-curve
-  sparkline, and the calibrated threshold. Live IF score-distribution /
-  per-channel reconstruction-error views fold in once the daemon writes
-  those to the ledger metrics. Covered by `tests/.../Phase6Panels.test.ts`.
 - [x] **6.23 — Dataset health dashboard.**
-  `src/datasets/health.py` — `analyze_session` (rows, duration, channels +
-  per-channel NaN fraction, operating-mode coverage via the *same*
-  `segment_or_constant` the trainers use, speed/load/coolant/RPM value ranges,
-  tags, resampler gap fraction, pinned/training-candidate flags, parse-error
-  ratio, quality warnings; never raises — a bad session degrades to a
-  zero-row health row) and `analyze_corpus` (totals, aggregate mode coverage,
-  per-channel availability fraction, and a conservative `ReadinessCheck`
-  go/no-go with reasons — too few sessions/rows, missing key channel, no
-  warning-free baseline — gating a retrain before it wastes Pi cycles).
-  Authenticated `GET /control/datasets/health`; `scripts/dataset_health.py`
-  (text + `--json`, exit 2 = not ready) for the pre-retrain gate and offline
-  workflow. Covered by `tests/test_dataset_health.py` (9 tests: basic
-  coverage, short/missing-key flags, empty-safe, parse-error+pinned,
-  thin/ready/missing-key corpus readiness, API, CLI). `DatasetHealthPanel`
-  (Data▸Dataset Health) renders the readiness verdict + reasons,
-  per-session coverage/warnings, and channel-availability bars. Covered by
-  `tests/.../Phase6Panels.test.ts`. (FR-08, FR-09)
 - [x] **6.24 — False-positive feedback loop.** `src/alerts/feedback.py` —
-  `AnomalyFeedback` (strict Pydantic: anomaly_key, label ∈
-  `{true_positive, false_positive, ignored, needs_review}`, reason,
-  free-form `driving_context`, an echo of the labelled `event` so an export
-  survives anomaly-log rotation, labeled_by/at) persisted by `FeedbackStore`
-  as append-only JSONL under `data/control/` (gitignored). `anomaly_key`
-  reproduces the dashboard's `(timestamp, source, model_version)` dedupe tuple
-  so a verdict rejoins exactly the clicked event; relabel = another append,
-  `labels()` collapses to the latest verdict, `raw_records()` keeps the chain
-  (feedback-lineage / Risk R11). `annotate_events_with_feedback` is a pure join
-  used by `GET /anomalies` so the timeline shows the verdict inline;
-  authenticated `GET/POST /control/feedback` (audited via the existing control
-  event stream, 422 on bad label, 503 when no store) record and list verdicts;
-  `feedback_to_csv` exports them for off-Pi training-set curation (6.26). New
-  `DaemonConfig.feedback_log`; daemon wires a `FeedbackStore` into `create_app`.
-  Covered by `tests/test_feedback.py` (9 tests: key/store/relabel/summary,
-  pure annotation, CSV, auth required, post+get, invalid label, annotated
-  `/anomalies`, 503-unconfigured). Frontend: `AnomalyPanel` (Diagnostics▸
-  Anomalies), given a control token, shows per-event TP/FP/ignore/review
-  verdict buttons (optimistic + rollback), merges server verdicts, and a
-  FP/TP summary in the header. Covered by `tests/.../TuningFeedback.test.ts`.
-  (FR-07, FR-09)
 - [x] **6.25 — Threshold tuning and alert suppression.** `src/alerts/tuning.py`
-  — strict `TuningConfig` (versioned) of `ThresholdOverride` (per-source,
-  per-operating-mode multiplier/absolute, never lowers the detector's own bar),
-  `SuppressionRule` (source/mode/channel-substring/max-score AND match — a
-  severe excursion above `max_score` still gets through), and `DebouncePolicy`
-  (min-consecutive debounce, cool-down, `rearm_below` hysteresis). `AlertTuner`
-  is suppression-only by contract (mutes a flagged event, never manufactures
-  one) and is consulted by the emitter in `_emit` *before* dedupe; the new
-  `EmitterCounters.suppressed_tuning` surfaces via `/status`. Versioned +
-  reversible: `save_tuning_config` writes the YAML atomically and appends a
-  *full-snapshot* audit line so `load_tuning_version` reconstructs any prior
-  version verbatim; `estimate_before_after` runs a stateless threshold+
-  suppression pass over recent anomalies so the operator sees the blast radius
-  *before* committing (Risk R11). Authenticated `GET/POST /control/tuning`
-  (auto-bumps version, mutates the live tuner in place — effective next
-  inference tick, no restart, baseline auto-snapshotted so the first edit is
-  reversible), `POST /control/tuning/estimate`, `POST /control/tuning/revert`
-  (revert is itself a new audited version). New `DaemonConfig.tuning_config`/
-  `tuning_audit`; daemon builds one `AlertTuner` shared by the emitter and the
-  API. Covered by `tests/test_tuning.py` (14 tests: override raise/never-lower/
-  scope, suppression channel+max-score, debounce, cool-down+hysteresis,
-  estimate, save/load/revert, emitter integration, full API incl. live mutation
-  + 503). Frontend: `TuningPanel` (Models▸Tuning) — JSON editor over the
-  config with a mandatory before/after **estimate** before Apply (Risk
-  R11) + revert-to-version. Covered by `tests/.../TuningFeedback.test.ts`.
-  (FR-07, FR-09)
 - [ ] **6.26 — Label-aware retraining and online-update policy.** Retraining
   jobs should consume reviewed feedback labels, exclude known false-positive
   windows or fold them into clean baselines after review, and publish a new
   explicit model artifact/version. Do not continuously mutate live model
   weights without a reviewable artifact, manifest, and rollback path.
 - [x] **6.27 — Model drift and inference health monitoring.**
-  `src/models/health.py` — pure `feature_drift` (live-vs-training mean
-  distance in training-σ units off the model's persisted z-score scaler;
-  constant-feature safe; a trained column absent from the live stream forces
-  `schema_mismatch` so a half-blind model can't show green),
-  `reconstruction_error_drift` (live mean recon error vs the LSTM's calibrated
-  training mean → ratio + σ-above), and dependency-free `system_metrics`
-  (Linux `/proc` + `getloadavg`, None-safe — no psutil on the Pi).
-  `HealthMonitor` is a bounded rolling accumulator fed from the daemon's
-  existing paths: `_score_and_emit` records per-tick latency / missing-feature
-  flag / score / data-freshness, `poll_model_managers` records swap outcomes
-  (incl. `error`). `snapshot()` folds in system + optional drift and is
-  surfaced as `StatusSnapshot.health` on `GET /status` when a monitor is wired
-  (mirrors `emitter_counters`). New `DaemonComponents.health_monitor`; the
-  daemon constructs one and threads it into the IF inference tick, the manager
-  poll loop, and `create_app`. Covered by `tests/test_health.py` (8 tests:
-  system smoke, drift flag/schema-mismatch/constant-feature, recon drift,
-  monitor accumulation+drift fold-in, empty-safe, build_status + /status
-  surfacing). LSTM-side latency/recon feed + dashboard warning chips are a
-  follow-on with the LSTM live tick (3.5, Pi). (NFR-01, FR-09)
 
 ### 6E. Acceptance tests and parity proof
 
@@ -1505,45 +463,11 @@ training/model-health visualization, and Torque Pro parity.
   export, retrain job, model publish, service restart, adapter unplug/replug,
   and clean shutdown.
 - [x] **6.30 — Operator runbooks for advanced workflows.** `docs/runbooks.md`
-  — task-oriented recipes for every listed workflow (collect during a drive,
-  debug a missing PID, scan DTCs, clear-DTC-while-parked, capture Nissan
-  DIDs, run a parked diagnostic test, label a false alarm, tune/suppress,
-  corpus-readiness, export a dataset, retrain+publish), each with the
-  dashboard path *and* the `canaryctl`/CLI equivalent. Honest about state:
-  flows whose dashboard panel or live-ECU path is still pending say so, and
-  the not-yet-implemented clear-DTC (6.5) / parked-diagnostic (6.18) flows
-  document their safety contract (parked-interlocked, authenticated, audited,
-  no raw-send) rather than implying capability that doesn't exist.
 
 ### 6F. Standalone companion app and offline training workflow
 
 - [x] **6.31 — Companion app architecture plan.** `docs/companion-app-plan.md`
-  defines the offline/local workflow as the same CANary app running against a
-  local-library backend: sync sessions from the Pi while the truck is on, keep a
-  local session library, review/chart/export data while the truck is off, choose
-  whether training runs on the laptop or the Pi, and publish approved artifacts
-  back to the Pi later. `docs/dashboard-display-strategy.md` and
-  `docs/headless-api.md` link to it so the Pi-hosted dashboard and offline
-  companion runtime roles stay distinct without creating a separate UI.
 - [x] **6.32 — Local CANary library format.** `src/companion/library.py` —
-  `CanaryLibrary` over a laptop root (`~/.canary/library` default):
-  `library.db` SQLite index + verbatim `sessions/` / `models/` / `datasets/`
-  files on disk (the DB is an index/cache, never the source of truth).
-  Additive schema (`CREATE TABLE IF NOT EXISTS`, `schema_version` in `meta`):
-  sessions, session_tags, session_channels (+ NaN fraction), datasets,
-  training_runs, model_artifacts, publish_history, queued_actions.
-  `import_session` copies a session in idempotently and indexes it — rich
-  channel-inventory + quality path when a `CanaryConfig` is given
-  (`datasets.health.analyze_session`), cheap `summarize_session` path
-  otherwise so an import never *requires* the decode/feature stack;
-  `record_training_run` (upsert), `add_model_artifact` (+manifest copy) /
-  `record_publish` / `publish_history`, `add_dataset`, and
-  `queue_action`/`update_action`/`list_actions` for queued Pi work.
-  Foundation for the companion API (6.33) / sync (6.34) / publish queue
-  (6.37). Covered by `tests/test_companion_library.py` (6 tests: layout/
-  schema, cheap-path idempotent import, config-path channel indexing,
-  training-run upsert, model artifact+publish history, datasets+queued
-  actions). (FR-09)
 - [ ] **6.33 — Companion local API.** Add a local FastAPI service that exposes
   session browsing, telemetry history, anomalies, datasets, training jobs,
   model artifacts, and sync state from the local library. It should mirror the
