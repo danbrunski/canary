@@ -38,13 +38,21 @@ const DEFAULT_PIN_CANDIDATES = [
 const PIN_STORAGE_KEY = "canary.drive.pinned";
 const GRAPH_STORAGE_KEY = "canary.drive.graphs";
 
-function loadKeys(storageKey: string): string[] {
+function loadStoredKeys(storageKey: string): string[] | null {
   try {
     const raw = window.localStorage.getItem(storageKey);
-    return raw ? (JSON.parse(raw) as string[]) : [];
+    if (raw === null) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((key): key is string => typeof key === "string")
+      : [];
   } catch {
-    return [];
+    return null;
   }
+}
+
+function loadKeys(storageKey: string): string[] {
+  return loadStoredKeys(storageKey) ?? [];
 }
 
 /** Per-channel current value + its *own* 2-minute sparkline. There is no
@@ -58,13 +66,14 @@ function loadKeys(storageKey: string): string[] {
  *  plausibility bounds are colour-flagged. */
 export function TelemetryPanel({ channels, bindings, compact = false }: TelemetryPanelProps) {
   const [query, setQuery] = useState("");
-  const [pinned, setPinned] = useState<string[]>(() => loadKeys(PIN_STORAGE_KEY));
+  const [pinned, setPinned] = useState<string[] | null>(() => loadStoredKeys(PIN_STORAGE_KEY));
   const [pinnedOnly, setPinnedOnly] = useState(false);
   // Per-card sparklines are OFF by default (digital readout only); the
   // operator opts a channel's graph in. Persisted per browser.
   const [graphs, setGraphs] = useState<string[]>(() => loadKeys(GRAPH_STORAGE_KEY));
 
   useEffect(() => {
+    if (pinned === null) return;
     try {
       window.localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify(pinned));
     } catch {
@@ -95,17 +104,19 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
   // Seed default pins once (only with channels that exist). A decoded
   // replay has none of the OBD defaults → stays empty → equal grid of all.
   useEffect(() => {
-    if (pinned.length > 0 || displayChannels.length === 0) return;
+    if (pinned !== null || displayChannels.length === 0) return;
     const seed = DEFAULT_PIN_CANDIDATES.filter((k) => channels.has(k));
     if (seed.length > 0) setPinned(seed);
-  }, [channels, displayChannels.length, pinned.length]);
+  }, [channels, displayChannels.length, pinned]);
 
-  const pinnedSet = useMemo(() => new Set(pinned), [pinned]);
+  const activePinned = useMemo(() => pinned ?? [], [pinned]);
+  const pinnedSet = useMemo(() => new Set(activePinned), [activePinned]);
 
   const togglePin = (key: string) =>
-    setPinned((cur) =>
-      cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key],
-    );
+    setPinned((cur) => {
+      const current = cur ?? [];
+      return current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
+    });
 
   const visibleChannels = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -123,13 +134,13 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
   // same size. "Pinned only" collapses to just the curated set.
   const gridChannels = useMemo(() => {
     const byKey = new Map(visibleChannels);
-    const pins = pinned
+    const pins = activePinned
       .filter((k) => byKey.has(k))
       .map((k) => [k, byKey.get(k)!] as [string, ChannelSnapshot]);
     if (pinnedOnly && pins.length > 0) return pins;
     const rest = visibleChannels.filter(([k]) => !pinnedSet.has(k));
     return [...pins, ...rest];
-  }, [visibleChannels, pinned, pinnedSet, pinnedOnly]);
+  }, [visibleChannels, activePinned, pinnedSet, pinnedOnly]);
 
   if (channels.size === 0) {
     return (
@@ -149,11 +160,11 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
           <h2 className={panelTitleClass}>Telemetry</h2>
           <span className={panelCountClass}>
             {displayChannels.length} live values
-            {compact && pinned.length > 0 && ` · ${pinned.length} pinned`}
+            {compact && activePinned.length > 0 && ` · ${activePinned.length} pinned`}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {compact && pinned.length > 0 && (
+          {compact && activePinned.length > 0 && (
             <button
               type="button"
               className={cn(
@@ -196,7 +207,7 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
               ))}
             </div>
           )}
-          {pinned.length === 0 && displayChannels.length > 6 && (
+          {activePinned.length === 0 && displayChannels.length > 6 && (
             <p className="mt-2 text-[0.74rem] text-fg-faint">
               Tip: ☆ a channel to pin it to the top — then “pinned only” for a
               focused drive view. Multi-channel trends live in Live ▸ Charts.
