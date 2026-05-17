@@ -11,9 +11,13 @@ Type=oneshot
 RemainAfterExit=yes
 Environment=CAN_IFACE=can0
 Environment=CAN_BITRATE=500000
-# `restart-ms 100` = controller auto-recovers from CAN bus-off. This is the
-# link-layer companion to the recorder's adapter-level auto-reconnect.
-ExecStart=/sbin/ip link set ${CAN_IFACE} type can bitrate ${CAN_BITRATE} restart-ms 100
+# No `restart-ms`: the Canable runs gs_usb/candleLight firmware, whose driver
+# implements no bus-off restart (do_set_mode), so the kernel rejects
+# IFLA_CAN_RESTART_MS ("Device doesn't support restart from Bus Off") and the
+# whole `type can` call errors. Bus-off and USB re-enumeration recovery is
+# handled at the application layer by the recorder's ReconnectPolicy
+# (src/collection/can_collector.py). See docs/canable-firmware.md.
+ExecStart=/sbin/ip link set ${CAN_IFACE} type can bitrate ${CAN_BITRATE}
 ExecStart=/sbin/ip link set ${CAN_IFACE} up
 ExecStop=/sbin/ip link set ${CAN_IFACE} down
 # Don't fail the unit if the device is gone at stop time.
