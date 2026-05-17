@@ -15,6 +15,11 @@ dependencies = [
     "joblib>=1.3",
     "fastapi>=0.110",
     "uvicorn>=0.27",
+    # uvicorn needs a WebSocket impl to serve /ws/telemetry|anomalies|control;
+    # without it the daemon 404s every upgrade and the dashboard shows no live
+    # data. The test suite missed this (FastAPI's TestClient does WS in-process,
+    # bypassing uvicorn's ws layer), so it's pinned explicitly here.
+    "websockets>=12",
 ]
 
 [project.optional-dependencies]

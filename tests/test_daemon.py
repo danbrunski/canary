@@ -13,6 +13,7 @@ from src.alerts.events import AnomalyEvent
 from src.config import CanaryConfig, DaemonConfig
 from src.daemon import (
     DaemonComponents,
+    _record_to_dict,
     build_components,
     build_live_feature_source,
     drain_queue_with_broadcast,
@@ -841,3 +842,20 @@ async def test_run_daemon_end_to_end_telemetry_published_to_ws(
 
     assert [r["value"] for r in received] == [700.0, 701.0, 702.0]
     assert all(r["channel"] == "RPM" for r in received)
+
+
+def test_record_to_dict_is_json_serializable() -> None:
+    """Regression: the WS handler does `websocket.send_json(_record_to_dict)`;
+    a raw datetime timestamp raises TypeError and closes every telemetry
+    socket (dashboard shows "0 live values"). It must be a JSON-safe ISO
+    string, matching the REST /telemetry/latest shape."""
+    obd = _record_to_dict(TelemetryRecord.obd(1_778_000_000.0, "RPM", 812.0, "rpm"))
+    assert isinstance(obd["timestamp"], str)
+    json.dumps(obd)  # must not raise
+    assert obd["value"] == 812.0 and obd["channel"] == "RPM"
+
+    can = _record_to_dict(
+        TelemetryRecord.can(1_778_000_000.0, 0x1F9, bytes([1, 2, 3, 4]))
+    )
+    assert isinstance(can["timestamp"], str)
+    json.dumps(can)  # raw CAN frame row is JSON-safe too

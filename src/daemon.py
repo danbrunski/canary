@@ -272,9 +272,15 @@ async def drain_queue_with_broadcast(
 def _record_to_dict(record: TelemetryRecord) -> dict[str, Any]:
     """Live-stream shape: same {timestamp, source, channel, value, unit}
     the REST ``/telemetry/latest`` endpoint returns, so the dashboard
-    can render the two paths identically."""
+    can render the two paths identically.
+
+    ``timestamp`` is ISO-8601 *string* (not a ``datetime``): the WS handler
+    serializes this via ``websocket.send_json``, and a raw datetime raises
+    ``TypeError: Object of type datetime is not JSON serializable`` —
+    closing every telemetry socket. The REST path already stringifies; this
+    keeps the two paths genuinely identical (and JSON-safe)."""
     return {
-        "timestamp": record.timestamp,
+        "timestamp": record.timestamp.isoformat(),
         "source": record.source,
         "channel": record.channel,
         "value": record.value,
