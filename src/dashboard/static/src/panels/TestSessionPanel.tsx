@@ -134,6 +134,7 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
   const persisted = useRef<PersistedQueue>(loadQueue());
   const [queue, setQueue] = useState<QueuedTag[]>(persisted.current.queue);
   const [recent, setRecent] = useState<QueuedTag[]>(persisted.current.recent);
+  const [tapped, setTapped] = useState<ReadonlySet<string>>(() => new Set());
   const flushing = useRef(false);
 
   const selectedProfile: TestProfile | null =
@@ -166,6 +167,11 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
       });
     return () => ctrl.abort();
   }, []);
+
+  // Clear tapped set at session boundaries (new capture or ended capture).
+  useEffect(() => {
+    setTapped(new Set());
+  }, [capture?.capture_id]);
 
   // Settle the selection once profiles arrive.
   useEffect(() => {
@@ -292,7 +298,10 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
     [capture, persist, flushOnce],
   );
 
-  const tapEvent = (ev: TestEvent) => enqueue(ev.tag, ev.kind);
+  const tapEvent = (ev: TestEvent) => {
+    enqueue(ev.tag, ev.kind);
+    setTapped((prev) => new Set([...prev, ev.tag]));
+  };
 
   const tapCustom = () => {
     const label = window.prompt("Custom event label (becomes the tag):");
@@ -652,10 +661,15 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
                 type="button"
                 onClick={() => tapEvent(ev)}
                 className={cn(
-                  "flex min-h-[5.5rem] flex-col items-center justify-center gap-1 rounded-[12px] border px-3 py-3 text-center transition-transform active:scale-[0.97]",
+                  "flex min-h-[5.5rem] flex-col items-center justify-center gap-1 rounded-[12px] border px-3 py-3 text-center transition-all active:scale-[0.97]",
                   ev.kind === "state"
-                    ? "border-accent-2/55 bg-[linear-gradient(180deg,var(--color-elev-3),var(--color-elev-2))]"
-                    : "border-border bg-elev-2 hover:border-fg-faint",
+                    ? "bg-[linear-gradient(180deg,var(--color-elev-3),var(--color-elev-2))]"
+                    : tapped.has(ev.tag) ? "bg-ok/10" : "bg-elev-2",
+                  tapped.has(ev.tag)
+                    ? "border-ok/55 hover:border-ok/90"
+                    : ev.kind === "state"
+                      ? "border-accent-2/55 hover:border-accent-2/90"
+                      : "border-border hover:border-fg-dim hover:bg-elev-3",
                 )}
               >
                 <span className="text-[1.05rem] font-bold leading-tight text-fg">
