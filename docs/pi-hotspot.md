@@ -10,9 +10,10 @@ so this is a single `nmcli` profile — no manual `hostapd` / `dnsmasq` /
 pins the Pi at **`10.42.0.1`**.
 
 > The Pi 5 has a **single WiFi radio**: it is either an AP *or* a client,
-> not both at once. AP mode therefore has **no internet** — do `apt`,
-> updates and time-sync at home (Ethernet or home WiFi), then take it to the
-> field. `can0` is independent of WiFi and unaffected either way.
+> not both at once. So in always-on AP mode there is **no internet over
+> WiFi** — give it internet either at home, or in the field over a laptop
+> Ethernet bridge with no profile switching (§5). `can0` is independent of
+> WiFi and unaffected either way.
 
 ## 1. Set the WiFi country
 
@@ -43,8 +44,10 @@ Pi = `10.42.0.1/24`, clients get `10.42.0.x` from NetworkManager's DHCP.
 ## 3. Autostart strategy
 
 **A — Always-on AP (recommended for an in-vehicle box).** Leave step 2 as
-is and keep no home-WiFi client profile; do home-side dev/updates over
-**Ethernet**. Deterministic: the Pi is simply "the CANary box you join".
+is and keep no home-WiFi client profile. Deterministic: the Pi is simply
+"the CANary box you join" and it never switches networks on you mid-drive.
+Give it internet when needed over a laptop Ethernet bridge — §5, no
+profile switching, the Pi is untouched.
 
 **B — Home WiFi when in range, AP otherwise.** Matches "only when away":
 
@@ -82,6 +85,71 @@ nmcli -t -f NAME,DEVICE,STATE connection show --active
 
    Paste it once into the dashboard too (it persists per-origin in the
    browser).
+
+## 5. Internet in the field via your laptop (no profile switching)
+
+The AP gives no internet (single radio), but you rarely need it — only for
+`apt`, dependency installs, and clock sync. Get it in the truck by having
+your **laptop share its own uplink over an Ethernet cable**. The Pi's AP
+profile is **never touched**: NetworkManager's `shared` AP installs no
+default route while `eth0` (DHCP) does, so the Pi's internet path becomes
+the cable automatically when it's plugged and the AP idles. Unplug and
+nothing changed. You stay on the laptop's own internet and manage the Pi
+**over the cable**, so neither side switches WiFi.
+
+### Laptop (Windows)
+
+1. Network Connections → right-click the adapter that has internet (Wi-Fi)
+   → **Properties → Sharing** → "Allow other network users to connect…",
+   sharing to the **Ethernet** adapter.
+2. Set the *Internet Connection Sharing (ICS)* service to **Automatic**
+   (Windows sometimes drops sharing after an update/reboot).
+3. Windows pins the Ethernet side to **`192.168.137.1/24`** and runs
+   DHCP + DNS there. Plug a normal cable laptop ↔ Pi `eth0` (auto-MDIX —
+   no crossover needed).
+
+macOS: System Settings → General → Sharing → **Internet Sharing**, Wi-Fi →
+Ethernet (uses `192.168.2.0/24`). Linux laptop: see the subnet caveat.
+
+### Pi
+
+`eth0`'s default profile is already DHCP, so it just pulls address +
+gateway + DNS from the laptop. For a *deterministic* address (Windows ICS
+DHCP is hard to inspect), pin it instead:
+
+```bash
+sudo nmcli connection modify "Wired connection 1" \
+    ipv4.method manual ipv4.addresses 192.168.137.2/24 \
+    ipv4.gateway 192.168.137.1 ipv4.dns 192.168.137.1
+sudo nmcli connection up "Wired connection 1"
+```
+
+Confirm and use it:
+
+```bash
+ip route                       # default via 192.168.137.1 dev eth0
+ping -c1 deb.debian.org        # internet works
+sudo chronyc makestep || sudo systemctl restart systemd-timesyncd
+sudo apt update                # or: sudo -u canary git -C /opt/canary pull --ff-only
+```
+
+`chronyc makestep` matters — the Pi has no RTC, so jump the clock once it
+has internet or your **session timestamps drift**.
+
+### Reaching it for management over the cable
+
+`ssh canary@canary.local` / `http://canary.local:8000/` (mDNS works over a
+direct link), or the pinned `192.168.137.2`. The control token is **still
+required** — over Ethernet the laptop isn't loopback, identical to the AP
+case (`docs/headless-api.md`).
+
+### Subnet caveat
+
+The Pi AP is fixed at `10.42.0.0/24`. Windows ICS (`192.168.137.0/24`)
+and macOS (`192.168.2.0/24`) don't collide with it. A **Linux** laptop
+sharing via `nmcli … ipv4.method shared` uses **`10.42.0.0/24`** — which
+*does* collide with the Pi's AP subnet and breaks routing. From a Linux
+host, re-subnet the share (or the Pi AP) so the two don't overlap.
 
 ## The `10.42.0.0/24` anchor
 
