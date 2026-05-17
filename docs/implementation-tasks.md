@@ -1581,6 +1581,81 @@ training/model-health visualization, and Torque Pro parity.
 
 ---
 
+## Phase 7 — Anomaly Architecture Hardening
+
+Derived from the 2026-05-17 architecture review. The detector design
+(per-mode Isolation Forest + LSTM autoencoder + behavior-model residuals,
+offline-train / online-score, hot-swapped) is sound, but a chain of
+incidents that day — live path missing `dbc:*` (`dbe3550`), `deviation:*`
+silently all-NaN in both train and serve (`acd4318`), float32/float64
+skew (`d500287`, `cc5b0ae`), full-corpus OOM on the Pi (`ffb5b5b`,
+`cc5b0ae`) — exposed structural gaps: a train–serve feature contract
+enforced only by hard-reject, no anomaly fusion/calibration, and no
+feature/score validation. These tasks address the design, not the
+individual bugs (already fixed). Picks up R3 and R4 from Risks below.
+
+### 7A. Feature contract and validation
+
+- [ ] **7.1 — Unify feature extraction + versioned feature spec (P0).**
+  `src/preprocessing/feature_pipeline.py:build_feature_frame` (offline)
+  and `src/preprocessing/live.py:LiveFeatureSource` (online) are
+  independent reimplementations that must emit byte-identical schemas,
+  enforced only by `isolation_forest.py:_require_columns` hard-rejecting
+  on mismatch — the root cause of nearly every 2026-05-17 fire. Extract
+  one feature builder used by both (batch vs streaming param); persist a
+  versioned feature spec in the model manifest (ordered columns, dtypes,
+  decode sources/DBC ids, resample/window params, behavior-model set);
+  replace hard-reject with schema reconciliation (align to spec, impute
+  absent columns with a documented fill, log a one-time divergence
+  report). Keystone — unblocks 7.2/7.3/7.5. (Effort: L)
+
+- [ ] **7.3 — Feature/score validation at model-load and in CI (P1).**
+  `deviation:*` was all-NaN for the model's whole existence, undetected,
+  because nothing asserts features are populated. Add training-time
+  assertions (no all-NaN/constant column passes silently; emit a
+  feature-health summary into the manifest), a model-load gate that
+  validates loaded-model feature health + schema-compat against the live
+  spec and refuses-with-reason rather than scoring garbage, and a CI
+  check on a fixture session (columns populated, schema stable vs a
+  golden spec). Cheap; would have caught the deviation bug instantly.
+  Depends on 7.1. (Effort: S–M)
+
+### 7B. Detection quality
+
+- [ ] **7.2 — Fusion + calibrated severity layer (P1).** IF and LSTM
+  emit two independent streams deduped per-source, never combined, and
+  IF's fixed `contamination=0.01` structurally flags ~1% of *nominal*
+  driving. Add per-tick fusion of IF + LSTM + behavior residuals into one
+  agreement-aware calibrated severity; replace fixed contamination with
+  per-mode score thresholds calibrated on a held-out nominal set
+  (target flag-rate, not assumed contamination); emitter dedupe/tuning
+  operate on the fused event. Directly serves Done-Definition v1 #7
+  (≤1 FP/hr). Depends on 7.1, 7.3. (Effort: M)
+
+- [ ] **7.4 — Behavior/physics residuals as first-class detectors
+  (P2).** The behavior models (coolant warmup, idle-RPM-vs-coolant,
+  timing-vs-rpm/load, fuel-trim) are the most interpretable signal
+  available but are demoted to NaN-prone ensemble *features*. Add a
+  residual detector: per model, band-graded deviation → severity emitted
+  through the fusion path with a human-readable physical cause, surfaced
+  on the dashboard (expected vs actual + band). Depends on 7.2;
+  `acd4318` (resolution fix) done. (Effort: M)
+
+- [ ] **7.5 — LSTM hardening + synthetic-fault eval harness (P2).**
+  LSTM uses a single global reconstruction threshold (not per-mode like
+  IF; AEs tend to reconstruct anomalies too) and its training completion
+  has been repeatedly unconfirmed. Make it per-mode or replace the
+  reconstruction-AE with a next-step forecasting residual; build a
+  synthetic-fault injection harness (stuck sensor, drift, dropout, scale
+  error over nominal sessions) measuring detection vs nominal-FP rate per
+  detector and fused; wire it into CI as a detector-quality regression
+  guard and assert LSTM training completion. Resolves R3; makes
+  Done-Definition v1 #4/#5 verifiable. Depends on 7.1, 7.2. (Effort: L)
+
+Suggested sequence: 7.1 → (7.3 ∥ 7.2) → 7.4 → 7.5.
+
+---
+
 ## Cross-Cutting Concerns
 
 These get touched in multiple phases — keep them in mind, don't defer to the end.
