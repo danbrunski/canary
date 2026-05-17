@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  HttpError,
   getCurrentCapture,
   getPreflight,
   getTestProfiles,
@@ -175,18 +176,24 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
   }, [profiles]);
 
   // --- capture + preflight polling ---------------------------------------
+  const [authRejected, setAuthRejected] = useState(false);
   const refresh = useCallback(async () => {
-    if (!token) {
-      setCapture(null);
-      setPreflight(null);
-      return;
-    }
+    // Always probe — a token may not be needed (server open on loopback for
+    // dev/sim). An empty token just sends an empty bearer; the server either
+    // allows it (loopback, unconfigured) or 401s (token required).
     const [cap, pre] = await Promise.allSettled([
       getCurrentCapture(token),
       getPreflight(token),
     ]);
     if (cap.status === "fulfilled") setCapture(cap.value.capture);
     if (pre.status === "fulfilled") setPreflight(pre.value);
+    const isAuth = (r: PromiseSettledResult<unknown>) =>
+      r.status === "rejected" &&
+      r.reason instanceof HttpError &&
+      (r.reason.status === 401 || r.reason.status === 403);
+    if ([cap, pre].some(isAuth)) setAuthRejected(true);
+    else if (cap.status === "fulfilled" || pre.status === "fulfilled")
+      setAuthRejected(false);
   }, [token]);
 
   useEffect(() => {
@@ -294,10 +301,8 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
   };
 
   const start = async () => {
-    if (!token) {
-      setNotice({ kind: "error", text: "Enter the control token first." });
-      return;
-    }
+    // No hard token gate — the server decides (open on loopback, or 401 if a
+    // token is required); a rejection surfaces via the notice below.
     if (!selectedProfile) {
       setNotice({ kind: "error", text: "No test profile selected." });
       return;
@@ -398,27 +403,65 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
     (q) => q.status !== "sent" && (!capture || q.captureId !== capture.capture_id),
   ).length;
 
+  // Control reachable without a token (server open on loopback for dev/sim):
+  // we got a preflight back despite sending no token and weren't 401'd.
+  const openNoToken = !token && !authRejected && preflight !== null;
+  const tokenLabel = token
+    ? authRejected
+      ? "rejected"
+      : "unlocked"
+    : authRejected
+      ? "required"
+      : openNoToken
+        ? "not needed"
+        : "checking…";
+  const tokenLabelClass = cn(
+    "text-[0.78rem] font-bold",
+    (token && authRejected) || (!token && authRejected)
+      ? "text-bad"
+      : token || openNoToken
+        ? "text-ok"
+        : "text-fg-dim",
+  );
+  const tokenHelp = token
+    ? authRejected
+      ? "The server rejected this token (401) — wrong or stale value. Re-enter it or Clear and try again."
+      : "Stored on this device; also unlocks the Control Plane panel."
+    : authRejected
+      ? "This server requires a token. Paste the one it was started with (Pi: /etc/canary/control.token)."
+      : openNoToken
+        ? "No token needed here — this server allows control from loopback (dev/sim). You'd only paste one if you point this browser at the Pi."
+        : "Pick a profile; checking whether this server needs a token…";
+
   // --- render -------------------------------------------------------------
   return (
     <section className="flex flex-col gap-3">
-      {!token && (
-        <section className={panelClass}>
-          <header className={panelHeaderClass}>
-            <h2 className={panelTitleClass}>Control token</h2>
-          </header>
-          <p className="mb-2 text-[0.84rem] text-fg-dim">
-            Pick a profile below now; enter the token to run preflight and
-            start recording.
-          </p>
+      <section className={panelClass}>
+        <header className={panelHeaderClass}>
+          <h2 className={panelTitleClass}>Control token</h2>
+          <span className={tokenLabelClass}>{tokenLabel}</span>
+        </header>
+        <p className="mb-2 text-[0.82rem] text-fg-dim">{tokenHelp}</p>
+        <div className="flex gap-2">
           <input
             className={cn(inputClass, "w-full")}
             type="password"
             autoComplete="off"
             placeholder="CANARY_CONTROL_TOKEN"
+            value={token}
             onChange={(e) => onTokenChange(e.target.value)}
           />
-        </section>
-      )}
+          {token && (
+            <button
+              type="button"
+              className={buttonClass}
+              onClick={() => onTokenChange("")}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </section>
 
       {notice && <div className={noticeClass(notice.kind)}>{notice.text}</div>}
 
@@ -484,8 +527,8 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
                 <span
                   className={cn(
                     "text-[0.8rem] font-bold",
-                    !token
-                      ? "text-fg-dim"
+                    authRejected
+                      ? "text-bad"
                       : preflight
                         ? preflight.ok
                           ? "text-ok"
@@ -493,8 +536,8 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
                         : "text-fg-dim",
                   )}
                 >
-                  {!token
-                    ? "token needed"
+                  {authRejected
+                    ? "token required"
                     : preflight
                       ? preflight.ok
                         ? "GO"
@@ -502,7 +545,7 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
                       : "checking…"}
                 </span>
               </header>
-              {token && preflight && !preflight.ok && (
+              {preflight && !preflight.ok && (
                 <ul className="m-0 mb-3 flex list-none flex-col gap-1 p-0">
                   {preflight.checks
                     .filter((c) => !c.ok)
@@ -532,25 +575,20 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
               <button
                 type="button"
                 onClick={start}
-                disabled={busy || !token}
+                disabled={busy}
                 className={cn(
                   buttonClass,
                   "min-h-[3.5rem] w-full text-[1.05rem] font-bold",
-                  token && preflight?.ok
+                  preflight?.ok
                     ? "border-ok bg-ok/15 text-ok"
                     : "border-accent-2 bg-accent-2/15 text-fg",
                 )}
               >
-                {busy
-                  ? "Starting…"
-                  : !token
-                    ? "Enter token to start"
-                    : `Start session — ${selectedProfile.label}`}
+                {busy ? "Starting…" : `Start session — ${selectedProfile.label}`}
               </button>
               <button
                 type="button"
                 onClick={() => refresh()}
-                disabled={!token}
                 className={cn(buttonClass, "mt-2 w-full")}
               >
                 Re-run preflight

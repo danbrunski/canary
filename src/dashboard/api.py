@@ -34,6 +34,7 @@ mounted.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -53,6 +54,7 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Request,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -645,9 +647,14 @@ def create_app(
         return read_obd_coverage(config.collection.storage_path)
 
     def require_control_auth(
+        request: Request,
         authorization: str | None = Header(default=None),
     ) -> None:
-        _require_control_auth(resolved_control_token, authorization)
+        _require_control_auth(
+            resolved_control_token,
+            authorization,
+            client_is_loopback=_client_is_loopback(request),
+        )
 
     def _controller() -> CaptureController:
         if capture_controller is None:
@@ -1122,9 +1129,39 @@ def create_app(
     return app
 
 
-def _require_control_auth(control_token: str | None, authorization: str | None) -> None:
-    """Bearer-token guard for mutating control-plane routes."""
+def _client_is_loopback(request: Request) -> bool:
+    """True iff the request's *socket peer* is a loopback address.
+
+    Uses the real ASGI client address, never ``X-Forwarded-For`` (spoofable),
+    so this can't be forged by a remote LAN client. The Vite dev proxy runs on
+    the dev box and connects from 127.0.0.1, so it counts as loopback too.
+    """
+    client = request.client
+    if client is None:
+        return False
+    try:
+        return ipaddress.ip_address(client.host).is_loopback
+    except ValueError:
+        return False
+
+
+def _require_control_auth(
+    control_token: str | None,
+    authorization: str | None,
+    *,
+    client_is_loopback: bool = False,
+) -> None:
+    """Bearer-token guard for mutating control-plane routes.
+
+    When no token is configured, control is *open to loopback only* (the
+    dev/sim case: your own machine / the Vite proxy) and still refused for
+    anyone else with 503. A configured token is always enforced, regardless
+    of where the request came from — so the Pi (token via install_pi.sh)
+    behaves exactly as before.
+    """
     if control_token is None or control_token == "":
+        if client_is_loopback:
+            return
         raise HTTPException(status_code=503, detail="control API token is not configured")
     presented = ""
     if authorization is not None and authorization.startswith("Bearer "):

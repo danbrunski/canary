@@ -534,3 +534,49 @@ def test_require_control_auth_constant_time_paths() -> None:
 
     # Exact match → no raise.
     _require_control_auth("s3cret", "Bearer s3cret")
+
+
+def test_loopback_open_when_token_unconfigured() -> None:
+    """No token configured: control is open to a loopback client (dev/sim)
+    but still 503s for anyone else. A configured token is always enforced,
+    loopback or not (the Pi is unaffected)."""
+    import pytest
+    from fastapi import HTTPException
+
+    from src.dashboard.api import _require_control_auth
+
+    # Unconfigured + loopback → allowed (no raise).
+    for unset in (None, ""):
+        _require_control_auth(unset, None, client_is_loopback=True)
+
+    # Unconfigured + non-loopback → still fail closed with 503.
+    for unset in (None, ""):
+        with pytest.raises(HTTPException) as exc:
+            _require_control_auth(unset, None, client_is_loopback=False)
+        assert exc.value.status_code == 503
+
+    # Configured token enforced regardless of where the request came from.
+    with pytest.raises(HTTPException) as exc:
+        _require_control_auth("s3cret", "Bearer wrong", client_is_loopback=True)
+    assert exc.value.status_code == 401
+    _require_control_auth("s3cret", "Bearer s3cret", client_is_loopback=True)
+
+
+def test_client_is_loopback_detects_socket_peer() -> None:
+    from starlette.requests import Request
+
+    from src.dashboard.api import _client_is_loopback
+
+    def req(client: tuple[str, int] | None) -> Request:
+        scope: dict[str, object] = {"type": "http", "headers": []}
+        if client is not None:
+            scope["client"] = client
+        return Request(scope)
+
+    assert _client_is_loopback(req(("127.0.0.1", 1))) is True
+    assert _client_is_loopback(req(("127.9.9.9", 1))) is True  # whole 127/8
+    assert _client_is_loopback(req(("::1", 1))) is True
+    assert _client_is_loopback(req(("192.168.1.50", 1))) is False
+    assert _client_is_loopback(req(("10.0.0.2", 1))) is False
+    assert _client_is_loopback(req(("testclient", 1))) is False  # unparseable
+    assert _client_is_loopback(req(None)) is False  # no client (e.g. raw ASGI)
