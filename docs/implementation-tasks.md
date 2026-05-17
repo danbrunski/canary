@@ -1112,16 +1112,23 @@ training/model-health visualization, and Torque Pro parity.
 
 ### 6A. Standard OBD and Torque-parity telemetry
 
-- [~] **6.1 — Complete SAE J1979 registry.** Expand the current
-  `PID_DECODERS` table from the 38 decoder-backed Mode 01 PIDs into a typed
-  registry for every public, read-only PID/service CANary can safely request.
-  Cover Mode 01 supported-PID groups through the full J1979 range, Mode 02
-  freeze-frame variants where the formula is identical, Mode 03 / 07 / 0A DTC
-  reads, Mode 06 onboard-monitor results, and Mode 09 vehicle information.
-  Each entry needs mode, PID, canonical channel name, display name, category,
-  unit, byte length, decoder/formula, support-bit group, default poll tier,
-  dashboard hint, and tests with canned raw responses. Unknown or unsupported
-  PIDs must degrade to "supported but not decoded" rather than disappearing.
+- [x] **6.1 — Complete SAE J1979 registry.** `src/collection/obd_registry.py`
+  is the typed metadata layer over `can_obd_client.PID_DECODERS`: a
+  `PidDefinition` (mode, pid, channel, display name, `Category`, unit, byte
+  length, `PollTier`, `DashboardHint`, decoder, support-bit group) for every
+  public read-only Mode 01 PID across the full J1979 range (0x01–0x63 today,
+  ~90 entries), plus `MODE09_REGISTRY` (VIN/calibration/CVN/ECU-name decoders),
+  `SERVICE_REGISTRY` (Mode 02/03/06/07/0A descriptors), `parse_mode06_response`
+  (standardized OBDMID test records), and `parse_dtc_payload` re-export. The
+  numeric Mode 01 decoders stay single-sourced in `can_obd_client` (imported,
+  asserted identical by test); formula-stable PIDs it doesn't carry get
+  decoders here; intentionally-undecoded real PIDs get `decoder=None`.
+  `lookup(mode, pid)` (Mode 02 reuses the Mode 01 formula table) and
+  `classify_pid(...)` collapse to the four honest coverage outcomes
+  `decoded` / `supported_not_decoded` / `unsupported` / `unknown_pid` so a
+  supported-but-not-decoded PID is surfaced, never hidden (Risk R7). Covered by
+  `tests/test_obd_registry.py` (18 tests: registry↔PID_DECODERS integrity,
+  support-group math, canned-raw decoders, Mode 06 parsing, classification).
 - [ ] **6.2 — Adaptive real-time OBD polling scheduler.** Replace the flat
   auto-PID loop with poll tiers and bus-budget controls: fast powertrain
   channels (RPM, speed, load, throttle, MAP/MAF) at the highest safe rate,
