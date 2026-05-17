@@ -1349,11 +1349,26 @@ training/model-health visualization, and Torque Pro parity.
   windows or fold them into clean baselines after review, and publish a new
   explicit model artifact/version. Do not continuously mutate live model
   weights without a reviewable artifact, manifest, and rollback path.
-- [ ] **6.27 — Model drift and inference health monitoring.** Track feature
-  distribution drift, reconstruction-error drift, data freshness, inference
-  latency, Pi CPU/memory, model schema mismatch, missing-feature rate, and
-  model-manager swap outcomes. Surface warnings on the dashboard and in
-  `/status`.
+- [x] **6.27 — Model drift and inference health monitoring.**
+  `src/models/health.py` — pure `feature_drift` (live-vs-training mean
+  distance in training-σ units off the model's persisted z-score scaler;
+  constant-feature safe; a trained column absent from the live stream forces
+  `schema_mismatch` so a half-blind model can't show green),
+  `reconstruction_error_drift` (live mean recon error vs the LSTM's calibrated
+  training mean → ratio + σ-above), and dependency-free `system_metrics`
+  (Linux `/proc` + `getloadavg`, None-safe — no psutil on the Pi).
+  `HealthMonitor` is a bounded rolling accumulator fed from the daemon's
+  existing paths: `_score_and_emit` records per-tick latency / missing-feature
+  flag / score / data-freshness, `poll_model_managers` records swap outcomes
+  (incl. `error`). `snapshot()` folds in system + optional drift and is
+  surfaced as `StatusSnapshot.health` on `GET /status` when a monitor is wired
+  (mirrors `emitter_counters`). New `DaemonComponents.health_monitor`; the
+  daemon constructs one and threads it into the IF inference tick, the manager
+  poll loop, and `create_app`. Covered by `tests/test_health.py` (8 tests:
+  system smoke, drift flag/schema-mismatch/constant-feature, recon drift,
+  monitor accumulation+drift fold-in, empty-safe, build_status + /status
+  surfacing). LSTM-side latency/recon feed + dashboard warning chips are a
+  follow-on with the LSTM live tick (3.5, Pi). (NFR-01, FR-09)
 
 ### 6E. Acceptance tests and parity proof
 

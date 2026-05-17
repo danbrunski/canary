@@ -32,6 +32,7 @@ import asyncio
 import logging
 import os
 import sys
+import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -61,6 +62,7 @@ from src.decode.behavior_models import (
     load_behavior_models,
 )
 from src.decode.bindings import load_bindings
+from src.models.health import HealthMonitor
 from src.models.manager import ModelManager, manager_for_artifact
 from src.preprocessing.live import LiveFeatureSource
 from src.storage.monitor import warn_if_storage_low
@@ -93,6 +95,7 @@ class DaemonComponents:
     emitter: AnomalyEventEmitter
     model_managers: dict[str, ModelManager[Any]]
     alert_tuner: AlertTuner
+    health_monitor: HealthMonitor
     capture_controller: CaptureController | None = None
     job_controller: JobController | None = None
 
@@ -119,6 +122,7 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         emitter=emitter,
         model_managers=model_managers,
         alert_tuner=tuner,
+        health_monitor=HealthMonitor(),
         capture_controller=None,
         job_controller=_make_job_controller(config),
     )
@@ -325,7 +329,7 @@ async def run_live_inference(
             try:
                 row = source.tick(datetime.now(UTC))
                 if row is not None:
-                    _score_and_emit(loaded, row, components.emitter)
+                    _score_and_emit(loaded, row, components.emitter, components.health_monitor)
             except Exception:  # noqa: BLE001 — live inference is best-effort
                 log.exception("live inference tick failed")
         try:
@@ -436,6 +440,7 @@ def _score_and_emit(
     loaded: Any,
     row: Any,  # pd.DataFrame, one row
     emitter: AnomalyEventEmitter,
+    health: HealthMonitor | None = None,
 ) -> None:
     """Run one feature row through IF.score → emitter. Best-effort.
 
@@ -444,10 +449,35 @@ def _score_and_emit(
     ``TrainedIsolationForest.score`` flags as ``missing_features`` rather
     than crashing. That behavior is exactly what we want during the
     schema-warmup window immediately after startup.
+
+    When a ``HealthMonitor`` is wired, the per-tick latency / missing-feature
+    flag / score / data freshness are recorded for ``/status`` (Task 6.27) —
+    a few dict reads + a perf-counter delta, negligible against scoring.
     """
+    import pandas as pd
+
+    from src.models.isolation_forest import MISSING_FEATURES_COLUMN, SCORE_COLUMN
+
     engine = IsolationForestInferenceEngine(loaded.artifact)
+    started = time.perf_counter()
     scored = engine.observe(row.iloc[0])
+    latency_ms = (time.perf_counter() - started) * 1000.0
     timestamp = row["timestamp"].iloc[0]
+    if health is not None:
+        try:
+            ts_epoch = pd.Timestamp(timestamp).timestamp()
+        except (ValueError, TypeError):
+            ts_epoch = None
+        health.observe_inference(
+            latency_ms=latency_ms,
+            missing_features=bool(scored.get(MISSING_FEATURES_COLUMN, False)),
+            score=(
+                float(scored[SCORE_COLUMN])
+                if SCORE_COLUMN in scored and pd.notna(scored[SCORE_COLUMN])
+                else None
+            ),
+            data_timestamp_epoch=ts_epoch,
+        )
     emitter.emit_isolation_forest_row(
         scored,
         model_version=engine.model_version,
@@ -484,6 +514,7 @@ async def poll_model_managers(
     stop_event: asyncio.Event,
     *,
     interval_seconds: float,
+    health: HealthMonitor | None = None,
 ) -> None:
     """Periodically call ``manager.poll()`` on each ModelManager.
 
@@ -497,7 +528,11 @@ async def poll_model_managers(
                 attempt = manager.poll()
             except Exception:  # noqa: BLE001 — manager.poll already swallows + logs internally
                 log.exception("model manager poll raised", extra={"manager": name})
+                if health is not None:
+                    health.note_swap("error")
                 continue
+            if health is not None:
+                health.note_swap(attempt.kind, version=attempt.new_version)
             if attempt.kind == "swapped":
                 log.info(
                     "model swapped",
@@ -545,6 +580,7 @@ async def serve_in_background(
         audit_logger=components.audit_logger,
         feedback_store=FeedbackStore(components.config.daemon.feedback_log),
         alert_tuner=components.alert_tuner,
+        health_monitor=components.health_monitor,
     )
     if components.job_controller is not None:
         loop = asyncio.get_running_loop()
@@ -638,6 +674,7 @@ async def run_daemon(
             components.model_managers,
             stop_event,
             interval_seconds=config.daemon.model_poll_seconds,
+            health=components.health_monitor,
         )
     )
     inference_tasks: list[asyncio.Task[Any]] = []

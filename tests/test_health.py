@@ -1,0 +1,152 @@
+"""Tests for model drift + inference health monitoring (Task 6.27)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from src.config import CanaryConfig
+from src.dashboard.api import build_status, create_app
+from src.models.health import (
+    HealthMonitor,
+    feature_drift,
+    reconstruction_error_drift,
+    system_metrics,
+)
+
+# ---------------------------------------------------------------------------
+# Pure functions
+# ---------------------------------------------------------------------------
+
+
+def test_system_metrics_is_safe_and_shaped() -> None:
+    m = system_metrics()
+    for key in ("load_1m", "cpu_count", "mem_used_fraction", "mem_total_mb"):
+        assert key in m  # value may be None on a platform that lacks it
+
+
+def test_feature_drift_flags_and_schema_mismatch() -> None:
+    scaler = {
+        "columns": ["obd:RPM", "obd:SPEED", "obd:CONST"],
+        "means": {"obd:RPM": 800.0, "obd:SPEED": 0.0, "obd:CONST": 5.0},
+        "stds": {"obd:RPM": 100.0, "obd:SPEED": 20.0, "obd:CONST": 0.0},
+    }
+    live = {"obd:RPM": 1200.0, "obd:SPEED": 5.0, "obd:CONST": 5.5}
+    report = feature_drift(live, scaler, sigma_threshold=3.0)
+    assert report.per_feature_sigma["obd:RPM"] == 4.0  # |1200-800|/100
+    assert "obd:RPM" in report.drifted_features
+    assert "obd:SPEED" not in report.drifted_features  # 0.25σ
+    # Constant training feature: reported as absolute delta, not /0.
+    assert report.per_feature_sigma["obd:CONST"] == 0.5
+    assert report.schema_mismatch is False
+
+    # A trained column the live stream hasn't produced → schema mismatch.
+    partial = feature_drift({"obd:RPM": 800.0}, scaler)
+    assert partial.schema_mismatch is True
+    assert "obd:SPEED" in partial.missing_features
+
+
+def test_reconstruction_error_drift() -> None:
+    thresholds = {"global": {"mean": 0.10, "std": 0.02, "threshold": 0.16}}
+    out = reconstruction_error_drift(0.20, thresholds)
+    assert out["ratio"] == 2.0  # 0.20 / 0.10
+    assert out["sigma_above_train"] == 5.0  # (0.20-0.10)/0.02
+    assert reconstruction_error_drift(None, thresholds)["ratio"] is None
+
+
+# ---------------------------------------------------------------------------
+# HealthMonitor
+# ---------------------------------------------------------------------------
+
+
+def test_monitor_accumulates_and_snapshots() -> None:
+    mon = HealthMonitor()
+    mon.observe_inference(
+        latency_ms=5.0, missing_features=False, score=0.1, data_timestamp_epoch=100.0
+    )
+    mon.observe_inference(
+        latency_ms=15.0, missing_features=True, score=0.9, data_timestamp_epoch=101.0
+    )
+    mon.note_swap("swapped", version="if_v2")
+    mon.note_swap("unchanged")
+    snap = mon.snapshot(now_epoch=111.0)
+    assert snap["observed"] == 2
+    assert snap["missing_feature_rate"] == 0.5
+    assert snap["inference_latency_ms"]["mean"] == 10.0
+    assert snap["inference_latency_ms"]["max"] == 15.0
+    assert snap["data_freshness_seconds"] == 10.0  # 111 - 101
+    assert snap["model_swaps"]["swapped"] == 1
+    assert snap["active_model_version"] == "if_v2"
+    assert "system" in snap
+    # Drift only folded in when inputs provided.
+    assert "feature_drift" not in snap
+    snap2 = mon.snapshot(
+        now_epoch=111.0,
+        scaler={"columns": ["a"], "means": {"a": 0.0}, "stds": {"a": 1.0}},
+        live_means={"a": 10.0},
+        lstm_thresholds={"global": {"mean": 0.1, "std": 0.05}},
+        live_mean_recon_error=0.3,
+    )
+    assert snap2["feature_drift"]["drifted_features"] == ["a"]
+    assert snap2["reconstruction_error_drift"]["ratio"] == 3.0
+
+
+def test_empty_monitor_snapshot_is_none_safe() -> None:
+    snap = HealthMonitor().snapshot(now_epoch=0.0)
+    assert snap["observed"] == 0
+    assert snap["missing_feature_rate"] is None
+    assert snap["inference_latency_ms"]["mean"] is None
+    assert snap["data_freshness_seconds"] is None
+
+
+# ---------------------------------------------------------------------------
+# /status surfacing
+# ---------------------------------------------------------------------------
+
+_CONFIG_YAML = """
+vehicle: {{make: Nissan, model: Xterra, year: 2008}}
+hardware:
+  elm327_port: /dev/ttyUSB0
+  can: {{interface: virtual, channel: vcan0, bitrate: 500000}}
+collection:
+  obd_poll_rate_hz: 1.0
+  storage_path: {storage}
+  session_retention_days: 30
+  storage_warning_mb: 500
+preprocessing:
+  resample_hz: 1.0
+  rolling_window_seconds: 5
+  operating_modes: {{}}
+models:
+  isolation_forest: {{enabled: true, n_estimators: 100, contamination: 0.01}}
+  lstm_autoencoder: {{enabled: false, sequence_length: 30, latent_dim: 8, threshold_k: 3.0}}
+dashboard: {{host: 127.0.0.1, port: 8000}}
+"""
+
+
+def _config(tmp_path: Path) -> CanaryConfig:
+    storage = tmp_path / "storage"
+    (storage / "2026-05-17T120000").mkdir(parents=True)
+    cfg = tmp_path / "canary.yaml"
+    cfg.write_text(_CONFIG_YAML.format(storage=storage))
+    return CanaryConfig.from_yaml(cfg)
+
+
+def test_build_status_includes_health_when_monitor_present(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    assert build_status(config).to_dict()["health"] is None
+    mon = HealthMonitor()
+    mon.observe_inference(latency_ms=3.0)
+    snap = build_status(config, health_monitor=mon)
+    assert snap.to_dict()["health"]["observed"] == 1
+
+
+def test_status_endpoint_exposes_health(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    mon = HealthMonitor()
+    mon.note_swap("swapped", version="lstm_v9")
+    app = create_app(config, anomalies_dir=tmp_path / "anomalies", health_monitor=mon)
+    body = TestClient(app).get("/status").json()
+    assert body["health"]["model_swaps"]["swapped"] == 1
+    assert body["health"]["active_model_version"] == "lstm_v9"

@@ -97,6 +97,7 @@ from src.decode.behavior_models import (
     load_behavior_models,
 )
 from src.decode.bindings import load_bindings
+from src.models.health import HealthMonitor
 from src.preprocessing.loader import (
     PARQUET_PATTERN,
     discover_sessions,
@@ -131,6 +132,10 @@ class StatusSnapshot:
     latest_session_path: str | None
     model_versions: dict[str, str | None]
     vehicle: str
+    #: Inference-health block (Task 6.27) — latency, freshness, missing-feature
+    #: rate, model-swap outcomes, host load, drift — or ``None`` when the
+    #: daemon hasn't wired a monitor in (tests / bare app).
+    health: dict[str, Any] | None = None
     #: Emitter counters at ``/status`` request time — ``{"emitted": N,
     #: "suppressed_not_anomaly": N, "suppressed_dedupe": N}`` or ``None`` when
     #: the daemon hasn't wired an emitter in. The dashboard surfaces this as
@@ -148,6 +153,7 @@ class StatusSnapshot:
             "model_versions": self.model_versions,
             "vehicle": self.vehicle,
             "emitter_counters": self.emitter_counters,
+            "health": self.health,
         }
 
 
@@ -189,6 +195,7 @@ def build_status(
     *,
     models_dir: Path | None = None,
     emitter: AnomalyEventEmitter | None = None,
+    health_monitor: HealthMonitor | None = None,
 ) -> StatusSnapshot:
     """Assemble the status snapshot used by ``GET /status``."""
     storage = config.collection.storage_path
@@ -206,6 +213,7 @@ def build_status(
         model_versions=model_versions,
         vehicle=f"{config.vehicle.year} {config.vehicle.make} {config.vehicle.model}".strip(),
         emitter_counters=emitter.counters.to_dict() if emitter is not None else None,
+        health=health_monitor.snapshot() if health_monitor is not None else None,
     )
 
 
@@ -473,6 +481,7 @@ def create_app(
     control_token: str | None = None,
     feedback_store: FeedbackStore | None = None,
     alert_tuner: AlertTuner | None = None,
+    health_monitor: HealthMonitor | None = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -522,7 +531,12 @@ def create_app(
 
     @app.get("/status")
     def get_status() -> dict[str, Any]:
-        return build_status(config, models_dir=models_dir, emitter=emitter).to_dict()
+        return build_status(
+            config,
+            models_dir=models_dir,
+            emitter=emitter,
+            health_monitor=health_monitor,
+        ).to_dict()
 
     @app.get("/config")
     def get_config() -> dict[str, Any]:
