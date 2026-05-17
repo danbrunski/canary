@@ -1181,11 +1181,25 @@ training/model-health visualization, and Torque Pro parity.
   `gpsd`, or both. Store `source="gps"` telemetry rows, display route/speed on
   the dashboard, cross-check GPS speed against OBD speed, and export GPX/KML
   plus CSV/Parquet alongside the OBD/CAN data.
-- [ ] **6.8 — Custom PID/formula support.** Add user-defined Mode 01 / 09 / 22
-  requests with formula expressions, units, min/max, categories, display hints,
-  and poll tiers. Import/export Torque custom PID CSV where practical, validate
-  formulas in a sandboxed expression evaluator, and persist accepted
-  definitions in a versioned YAML file.
+- [x] **6.8 — Custom PID/formula support.** `src/collection/custom_pids.py`
+  — strict Pydantic `CustomPid` (name, display, mode, pid/did, formula, unit,
+  category, min/max, poll tier, dashboard hint, optional request header) +
+  versioned `CustomPidSet` with atomic YAML load/save mirroring `dids.yaml`.
+  Read-only by construction: a `mode` field-validator rejects anything outside
+  `{0x01, 0x09, 0x22}` so a fat-fingered or hostile CSV can't smuggle a Mode 04
+  / 2E / 2F write past CANary's read-only default. `evaluate_formula` is an
+  AST-walking sandbox with a node + call allow-list (no attribute access,
+  subscripting, comprehensions, lambdas, imports, or arbitrary calls — only a
+  fixed safe math set incl. a two's-complement `signed`); bytes bind as
+  `A`..`H` + `bytes` (Torque convention); a short response → `None`, an unsafe
+  formula → `FormulaError` at definition time, not mid-drive. Torque custom-PID
+  CSV import (`torque_csv_to_custom_pids` — bad/write-mode rows skipped with
+  warnings, never abort the import) and export (`custom_pids_to_torque_csv`,
+  round-trips). Daemon poll-tier scheduling is 6.2/6.13; this is the
+  vehicle-free definition + evaluation core. Covered by
+  `tests/test_custom_pids.py` (22 tests: formula math, the safety allow-list
+  including 8 injection attempts, read-only guard, dup-name, YAML round-trip,
+  Torque CSV accept/skip/round-trip). (FR-08)
 
 ### 6B. Full-featured dashboard and remote control UI
 
