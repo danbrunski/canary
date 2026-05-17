@@ -208,6 +208,10 @@ faults produce sustained nonzero deviation.
 This is the path that turns "we recovered the fuel table" into actual
 anomaly-detection value.
 
+Equation-backed expectations use the same idea but come from physical
+relationships rather than fitted behavior surfaces. Those features and their
+limits are documented in `docs/physics-informed-anomaly-features.md`.
+
 ## Integration with the dashboard
 
 The performance panel (Phase 5 task 5.12) renders this data directly:
