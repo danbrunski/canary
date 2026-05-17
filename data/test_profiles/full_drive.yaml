@@ -1,0 +1,28 @@
+id: full_drive
+label: "Full drive (cold → city → hwy → sweep)"
+description: >-
+  The comprehensive run from the data-collection run-sheet. Covers backlog
+  items 1–5 in one continuous capture; tap phases as they happen.
+protocol: drive
+vehicle_state: cold_start
+purpose: "cold-start → city → highway → load-sweep"
+order: 1
+events:
+  - { label: "Cold idle start", tag: cold_start, kind: state, hint: "Engine just cranked, cold", advisory_duration_s: 0 }
+  - { label: "Warmup complete", tag: warmup_complete, kind: state, hint: "Coolant at operating temp", advisory_duration_s: 300 }
+  - { label: "Pulling away", tag: pulling_away, kind: state, hint: "Started driving from idle" }
+  - { label: "City driving", tag: city_stop_go, kind: state, hint: "Surface streets, stop-and-go", advisory_duration_s: 600 }
+  - { label: "Stopped (light/sign)", tag: stopped_engine_on, hint: "Idling, not moving", advisory_duration_s: 20 }
+  - { label: "Hard accel", tag: hard_accel, hint: "Firm acceleration from a stop" }
+  - { label: "Highway on-ramp", tag: highway_onramp, hint: "Merging / accelerating onto highway" }
+  - { label: "Highway cruise", tag: highway_cruise, kind: state, hint: "~65–75 mph sustained", advisory_duration_s: 900 }
+  - { label: "Coasting (DFCO)", tag: coasting_dfco, hint: "Foot fully off, in gear, clutch out", advisory_duration_s: 15 }
+  - { label: "WOT pull", tag: wot_pull, hint: "Wide-open-throttle pull through gears" }
+  - { label: "Uphill load", tag: uphill_load, hint: "Sustained climb under load", advisory_duration_s: 30 }
+  - { label: "Grid: ~2k rpm light", tag: grid_2k_light, hint: "2nd gear, ~2000 rpm, light throttle — hold ~15 s" }
+  - { label: "Grid: ~3k rpm mod", tag: grid_3k_mod, hint: "3rd gear, ~3000 rpm, moderate — hold ~15 s" }
+  - { label: "4WD low", tag: four_lo, kind: state, hint: "Transfer case in 4-Lo", advisory_duration_s: 60 }
+  - { label: "A/C ON", tag: ac_on, hint: "Compressor engaged" }
+  - { label: "A/C OFF", tag: ac_off, hint: "Compressor disengaged" }
+  - { label: "Back to idle", tag: returning_idle, kind: state, hint: "Parked, engine still running", advisory_duration_s: 20 }
+  - { label: "Engine OFF, key ON", tag: engine_off_key_on, hint: "Killed engine, key left on", advisory_duration_s: 15 }

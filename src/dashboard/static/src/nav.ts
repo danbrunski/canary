@@ -51,7 +51,10 @@ export const NAV: NavGroupDef[] = [
   {
     id: "control",
     label: "Control",
-    items: [{ id: "control-main", label: "Control Plane", group: "control" }],
+    items: [
+      { id: "control-test", label: "Test", group: "control" },
+      { id: "control-main", label: "Control Plane", group: "control" },
+    ],
   },
 ];
 

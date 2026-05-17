@@ -1,0 +1,16 @@
+id: load_sweep
+label: "Load-sweep grid"
+description: >-
+  The key one for behavior-surface fitting — dwell at a grid of
+  (RPM × load) points, a few WOT pulls, long DFCO coasts.
+protocol: drive
+vehicle_state: driving
+purpose: "load-sweep grid coverage"
+order: 5
+events:
+  - { label: "Grid: ~2k rpm light", tag: grid_2k_light, hint: "2nd gear, ~2000 rpm, light throttle — hold ~15 s" }
+  - { label: "Grid: ~3k rpm mod", tag: grid_3k_mod, hint: "3rd gear, ~3000 rpm, moderate — hold ~15 s" }
+  - { label: "WOT pull", tag: wot_pull, hint: "Wide-open-throttle pull through gears" }
+  - { label: "Long DFCO coast", tag: dfco_coast, hint: "Long closed-throttle coast, clutch out" }
+  - { label: "Uphill load", tag: uphill_load, hint: "Sustained climb under load" }
+  - { label: "Steady cruise (light)", tag: steady_cruise_light, kind: state, hint: "Constant speed, light load" }

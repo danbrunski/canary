@@ -112,7 +112,8 @@ export type WorkbenchItem =
   | "data-sessions"
   | "data-health"
   | "data-export"
-  | "control-main";
+  | "control-main"
+  | "control-test";
 
 export interface NavItemDef {
   id: WorkbenchItem;
@@ -240,6 +241,37 @@ export type BindingsByChannel = Record<string, BindingDisplay>;
 // ---------------------------------------------------------------------------
 // Control plane — mirrors the authenticated /control/* FastAPI routes.
 // ---------------------------------------------------------------------------
+
+/** `GET /test-profiles` — mirrors src/control/test_profiles.py. A profile is
+ *  a capture preset + an unordered palette of tappable event buttons. */
+export interface TestEvent {
+  label: string;
+  tag: string;
+  kind: "event" | "state";
+  hint: string | null;
+  advisory_duration_s: number | null;
+}
+
+export interface TestProfile {
+  id: string;
+  label: string;
+  description: string;
+  protocol: string;
+  vehicle_state: string;
+  purpose: string;
+  order: number | null;
+  events: TestEvent[];
+}
+
+export interface TestProfileError {
+  file: string;
+  error: string;
+}
+
+export interface TestProfilesResponse {
+  profiles: TestProfile[];
+  errors: TestProfileError[];
+}
 
 export interface CaptureState {
   capture_id: string;

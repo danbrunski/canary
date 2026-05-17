@@ -26,6 +26,7 @@ export default defineConfig({
       "/models": "http://127.0.0.1:8000",
       "/obd": "http://127.0.0.1:8000",
       "/dids": "http://127.0.0.1:8000",
+      "/test-profiles": "http://127.0.0.1:8000",
       "/ws": { target: "ws://127.0.0.1:8000", ws: true },
     },
   },

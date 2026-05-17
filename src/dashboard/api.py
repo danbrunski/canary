@@ -118,6 +118,10 @@ DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
 #: Canonical Nissan Mode-22 DID catalog (Task 6.16 workbench reads this).
 DEFAULT_DIDS_PATH = Path("data/dids.yaml")
 
+#: Scanned directory of YAML test-session profiles for the Test panel. A
+#: user-editable catalog (drop a file, it appears) — not hardcoded in code.
+DEFAULT_TEST_PROFILES_DIR = Path("data/test_profiles")
+
 log = logging.getLogger(__name__)
 
 
@@ -501,6 +505,7 @@ def create_app(
     behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
     dids_path: Path = DEFAULT_DIDS_PATH,
+    test_profiles_dir: Path = DEFAULT_TEST_PROFILES_DIR,
     static_dir: Path | None = None,
     enable_dev_cors: bool = False,
     capture_controller: CaptureController | None = None,
@@ -613,6 +618,16 @@ def create_app(
         if not dids_path.exists():
             return {"schema_version": None, "vehicle": {}, "access": None, "dids": []}
         return load_did_map(dids_path).model_dump(mode="json")
+
+    @app.get("/test-profiles")
+    def get_test_profiles() -> dict[str, Any]:
+        # Read-only catalog for the Test panel, scanned per request so a
+        # dropped-in / hand-edited profile YAML appears without a daemon
+        # restart. Unauthenticated like /dids + /bindings (no secrets;
+        # listing profiles must work before the control token is entered).
+        from src.control.test_profiles import load_test_profiles
+
+        return load_test_profiles(test_profiles_dir).model_dump(mode="json")
 
     @app.get("/obd/coverage")
     def get_obd_coverage() -> dict[str, Any]:

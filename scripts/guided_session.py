@@ -7,10 +7,16 @@ alongside `scripts/record.py` in another. The script auto-finds the latest
 session and writes each tag with the correct label as soon as you press
 Enter.
 
+Protocols are the built-in RE walks (rev/nt510/binding/drive) *plus* every
+YAML profile under data/test_profiles/ (the same scanned catalog the
+dashboard Test panel uses) — add a profile by dropping in a file, no code
+change. An unknown --protocol prints the available names.
+
 Usage:
   scripts/guided_session.py                  # uses the 'rev' protocol
   scripts/guided_session.py --protocol rev
   scripts/guided_session.py --protocol nt510 # NT510 active-test session
+  scripts/guided_session.py --protocol city  # a YAML test profile
   scripts/guided_session.py --session data/sessions/<timestamp>
 
 At each step, press Enter to tag and advance, or type `s` (then Enter) to skip
@@ -30,6 +36,12 @@ from pathlib import Path
 from typing import Any
 
 from src.collection.tags import find_latest_session, write_tag
+from src.control.test_profiles import TestProfile, load_test_profiles
+
+#: Drive-style *test* profiles are no longer hardcoded here — they live as
+#: scanned YAML in this directory (same catalog the dashboard Test panel
+#: reads). The built-in RE walks below stay in code.
+DEFAULT_TEST_PROFILES_DIR = Path("data/test_profiles")
 
 
 @dataclass(frozen=True)
@@ -223,6 +235,35 @@ PROTOCOLS: dict[str, list[Step]] = {
 }
 
 
+def _profile_to_steps(profile: TestProfile) -> list[Step]:
+    """A YAML test profile, walked in listed order (its `events` order is the
+    presentation order; for a guided walk that's the sequence to prompt)."""
+    return [
+        Step(
+            label=ev.tag,
+            description=ev.hint or ev.label,
+            advisory_duration_s=ev.advisory_duration_s,
+        )
+        for ev in profile.events
+    ]
+
+
+def available_protocols(
+    profiles_dir: Path = DEFAULT_TEST_PROFILES_DIR,
+) -> dict[str, list[Step]]:
+    """Built-in RE walks + every scanned YAML test profile.
+
+    ``rev``/``nt510``/``binding`` (reverse-engineering walks, not "tests")
+    stay in code; drive-style test profiles come from the YAML catalog so a
+    new one needs only a file. A YAML ``id`` overrides a built-in of the same
+    name, so the catalog is authoritative for anything it defines.
+    """
+    merged: dict[str, list[Step]] = dict(PROTOCOLS)
+    for profile in load_test_profiles(profiles_dir).profiles:
+        merged[profile.id] = _profile_to_steps(profile)
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -320,8 +361,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--protocol",
         default="rev",
-        choices=sorted(PROTOCOLS.keys()),
-        help="Which protocol to run.",
+        help=(
+            "Which protocol/profile to run: a built-in RE walk "
+            "(rev/nt510/binding/drive) or any test-profile id from "
+            "--profiles-dir. Unknown names list what's available."
+        ),
     )
     parser.add_argument(
         "--session",
@@ -334,6 +378,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=Path("data/sessions"),
         help="Where to look for the latest session. Default: ./data/sessions.",
+    )
+    parser.add_argument(
+        "--profiles-dir",
+        type=Path,
+        default=DEFAULT_TEST_PROFILES_DIR,
+        help=(
+            "Directory of YAML test profiles to merge in as protocols. "
+            f"Default: {DEFAULT_TEST_PROFILES_DIR}."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -354,7 +407,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 1
 
-    steps = PROTOCOLS[args.protocol]
+    protocols = available_protocols(args.profiles_dir)
+    if args.protocol not in protocols:
+        print(
+            f"error: unknown protocol {args.protocol!r}. "
+            f"Available: {', '.join(sorted(protocols))}",
+            file=sys.stderr,
+        )
+        return 2
+    steps = protocols[args.protocol]
     print(f"Tagging into session: {session}")
     print(f"Protocol: {args.protocol} ({len(steps)} steps)")
     print(

@@ -1,0 +1,14 @@
+id: ac_pairs
+label: "A/C on↔off pairs"
+description: >-
+  Toggle A/C on the same segment — compressor load shifts MAP/trim/idle;
+  confirms the A/C bindings.
+protocol: drive
+vehicle_state: driving
+purpose: "A/C on↔off load pairs"
+order: 6
+events:
+  - { label: "A/C ON", tag: ac_on, hint: "Compressor engaged" }
+  - { label: "A/C OFF", tag: ac_off, hint: "Compressor disengaged" }
+  - { label: "Steady cruise (light)", tag: steady_cruise_light, kind: state, hint: "Constant speed, light load" }
+  - { label: "Stopped (light/sign)", tag: stopped_engine_on, hint: "Idling, not moving" }

@@ -28,6 +28,7 @@ import { ObdCoveragePanel } from "./ObdCoveragePanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
 import { SystemPanel } from "./SystemPanel";
 import { TelemetryPanel } from "./TelemetryPanel";
+import { TestSessionPanel } from "./TestSessionPanel";
 import { TrainingPanel } from "./TrainingPanel";
 import { TuningPanel } from "./TuningPanel";
 import { TpmsPanel } from "./TpmsPanel";
@@ -113,6 +114,10 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
     case "control-main":
       return (
         <ControlPanel token={d.token} onTokenChange={d.onTokenChange} />
+      );
+    case "control-test":
+      return (
+        <TestSessionPanel token={d.token} onTokenChange={d.onTokenChange} />
       );
     case "live-charts":
       return <ChartsPanel channels={d.channels} />;

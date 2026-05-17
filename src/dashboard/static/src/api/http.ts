@@ -21,6 +21,7 @@ import type {
   SessionsResponse,
   StatusResponse,
   TelemetryLatestResponse,
+  TestProfilesResponse,
   TrainingRunsResponse,
   TuningConfig,
   TuningEstimate,
@@ -143,6 +144,10 @@ export function tagCapture(
   body: {
     label: string;
     kind?: string;
+    // Unix seconds of the moment the event happened. Sent client-side so a
+    // slow/retried POST over flaky in-vehicle signal still lands the tag at
+    // the right time (the server otherwise stamps it on receipt).
+    timestamp?: number;
     fields?: Record<string, unknown>;
   },
 ): Promise<CaptureTagResponse> {
@@ -273,6 +278,14 @@ export function getObdCoverage(
 /** `/dids` is read-only + unauthenticated, like `/bindings` (Task 6.16). */
 export function getDids(signal?: AbortSignal): Promise<DidMapResponse> {
   return fetchJson("/dids", { signal });
+}
+
+/** `/test-profiles` is read-only + unauthenticated (scanned YAML catalog);
+ *  the picker must render before the control token is entered. */
+export function getTestProfiles(
+  signal?: AbortSignal,
+): Promise<TestProfilesResponse> {
+  return fetchJson("/test-profiles", { signal });
 }
 
 export function getDatasetHealth(

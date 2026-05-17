@@ -1,0 +1,15 @@
+id: cold_start
+label: "Cold-start + warm-idle"
+description: >-
+  First start of the day, genuinely cold. Idle to operating temp, then a
+  short drive. Time-perishable — can't be faked once warm.
+protocol: drive
+vehicle_state: cold_start
+purpose: "cold-start warmup + warm-idle baseline"
+order: 2
+events:
+  - { label: "Cold idle start", tag: cold_start, kind: state, hint: "Engine just cranked, cold", advisory_duration_s: 0 }
+  - { label: "Warmup complete", tag: warmup_complete, kind: state, hint: "Coolant at operating temp", advisory_duration_s: 300 }
+  - { label: "Pulling away", tag: pulling_away, kind: state, hint: "Started driving from idle" }
+  - { label: "Back to idle", tag: returning_idle, kind: state, hint: "Parked, engine still running" }
+  - { label: "Engine OFF, key ON", tag: engine_off_key_on, hint: "Killed engine, key left on" }
