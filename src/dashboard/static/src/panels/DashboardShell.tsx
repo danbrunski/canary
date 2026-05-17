@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { buttonClass, cn, headerClass, mainClass, shellClass } from "../styles";
+import type { Theme } from "../hooks/useTheme";
 import type {
   AnomalyEvent,
   AppMode,
@@ -15,6 +16,8 @@ import { StatusStrip } from "./StatusStrip";
 interface DashboardShellProps {
   appMode: AppMode;
   onToggleMode: () => void;
+  theme: Theme;
+  onToggleTheme: () => void;
   telemetryState: ConnectionState;
   anomalyState: ConnectionState;
   controlState: ConnectionState;
@@ -34,6 +37,8 @@ interface DashboardShellProps {
 export function DashboardShell({
   appMode,
   onToggleMode,
+  theme,
+  onToggleTheme,
   telemetryState,
   anomalyState,
   controlState,
@@ -64,6 +69,23 @@ export function DashboardShell({
             state={controlReady ? controlState : "closed"}
           />
         </div>
+        <button
+          type="button"
+          className={cn(
+            buttonClass,
+            "rounded-full px-3 text-[0.78rem]",
+            theme === "night" && "border-accent-2 text-accent-2",
+          )}
+          onClick={onToggleTheme}
+          aria-label={
+            theme === "dark"
+              ? "switch to the night (low-glare) theme"
+              : "switch to the day theme"
+          }
+          title="Toggle day / night theme"
+        >
+          {theme === "dark" ? "◐ day" : "● night"}
+        </button>
         <button
           type="button"
           className={cn(

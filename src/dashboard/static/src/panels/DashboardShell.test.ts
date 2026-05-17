@@ -6,6 +6,8 @@ import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { DashboardShell } from "./DashboardShell";
 
 const BASE = {
+  theme: "dark" as const,
+  onToggleTheme: () => {},
   telemetryState: "open" as const,
   anomalyState: "open" as const,
   controlState: "closed" as const,

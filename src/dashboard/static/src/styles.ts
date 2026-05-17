@@ -170,7 +170,8 @@ export const workbenchClass =
   "grid gap-[1.15rem] grid-cols-[13rem_1fr] max-[900px]:grid-cols-1";
 
 export const sidebarClass =
-  "flex flex-col gap-4 max-[900px]:flex-row max-[900px]:gap-2 max-[900px]:overflow-x-auto";
+  "flex flex-col gap-4 max-[900px]:flex-row max-[900px]:gap-2 max-[900px]:overflow-x-auto " +
+  "max-[900px]:border-b max-[900px]:border-border-soft max-[900px]:pb-2";
 
 export const navGroupLabelClass =
   "px-2 text-[0.6rem] font-bold uppercase tracking-[0.16em] text-fg-faint max-[900px]:hidden";

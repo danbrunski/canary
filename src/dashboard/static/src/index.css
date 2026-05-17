@@ -25,3 +25,29 @@
   --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.4),
     0 8px 24px -12px rgba(0, 0, 0, 0.7);
 }
+
+/* Night-driving theme (Phase C). Tailwind v4 emits the @theme tokens as
+ * `--color-*` custom properties, and every utility resolves them through
+ * `var()`, so overriding them on a `[data-theme]` ancestor recolours the
+ * whole UI with zero markup changes. This is a *dimmer* variant — darker
+ * surfaces, softened accents — to cut cab glare at night, deliberately not
+ * a light theme (a true light palette is unverifiable here and out of
+ * scope; honest scaffold over a half-broken one). Default (no attribute)
+ * stays the standard dark palette, unchanged, so existing look + tests are
+ * untouched. The `useTheme` hook toggles `data-theme="night"` on <html>. */
+[data-theme="night"] {
+  --color-bg: #05070a;
+  --color-elev: #0c1116;
+  --color-elev-2: #11171e;
+  --color-elev-3: #18212a;
+  --color-fg: #ccd5dd;
+  --color-fg-dim: #6f7c88;
+  --color-fg-faint: #47525c;
+  --color-accent: #d99a3c;
+  --color-accent-2: #3aa6ad;
+  --color-ok: #4cbf97;
+  --color-warn: #d9b154;
+  --color-bad: #d95b5b;
+  --color-border: #1d262e;
+  --color-border-soft: #161c22;
+}

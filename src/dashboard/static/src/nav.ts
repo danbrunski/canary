@@ -70,6 +70,11 @@ export function groupOf(id: WorkbenchItem): NavGroupId {
   return findItem(id).group;
 }
 
+/** Runtime guard for an untrusted id (e.g. parsed from the URL hash). */
+export function isWorkbenchItem(value: string): value is WorkbenchItem {
+  return ITEMS.some((i) => i.id === value);
+}
+
 /** The active item when the operator clicks into a group (its first item). */
 export function defaultItemForGroup(group: NavGroupId): WorkbenchItem {
   const g = NAV.find((x) => x.id === group);
