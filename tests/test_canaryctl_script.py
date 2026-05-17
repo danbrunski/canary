@@ -236,9 +236,7 @@ def test_resolve_default_env_beats_file(monkeypatch: pytest.MonkeyPatch) -> None
     assert canaryctl._resolve_default({}, "CANARY_HOST") is None
 
 
-def test_parse_args_falls_back_to_env_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_parse_args_falls_back_to_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for var in ("CANARY_HOST", "CANARY_URL", "CANARY_TOKEN", "CANARY_CONTROL_TOKEN"):
         monkeypatch.delenv(var, raising=False)
     env_file = tmp_path / "env"

@@ -13,6 +13,7 @@ export default defineConfig({
     proxy: {
       "/status": "http://127.0.0.1:8000",
       "/config": "http://127.0.0.1:8000",
+      "/control": "http://127.0.0.1:8000",
       "/anomalies": "http://127.0.0.1:8000",
       "/telemetry": "http://127.0.0.1:8000",
       "/ws": { target: "ws://127.0.0.1:8000", ws: true },
