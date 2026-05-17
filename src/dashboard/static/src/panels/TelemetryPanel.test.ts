@@ -144,7 +144,7 @@ describe("renderChannel", () => {
 });
 
 describe("TelemetryPanel", () => {
-  it("hides empty raw CAN frames from counts and default chart selection", async () => {
+  it("hides empty raw CAN frames from counts and the explorer", () => {
     const channels = new Map<string, ChannelSnapshot>();
     for (let i = 0; i < 28; i += 1) {
       const id = `0x${(0x1f9 + i).toString(16).toUpperCase()}`;
@@ -176,8 +176,9 @@ describe("TelemetryPanel", () => {
 
     expect(screen.getByText("2 live values")).toBeInTheDocument();
     expect(screen.queryByText("0x1F9")).not.toBeInTheDocument();
-    expect(screen.getByText("2 visible / select up to 6 to chart")).toBeInTheDocument();
-    expect(await screen.findByText("Live chart")).toBeInTheDocument();
+    expect(screen.getByText("2 visible")).toBeInTheDocument();
+    // No combined multi-channel chart — each tile carries its own sparkline.
+    expect(screen.queryByText("Live chart")).not.toBeInTheDocument();
   });
 });
 
@@ -201,9 +202,7 @@ describe("TelemetryPanel — Drive (compact) pinning", () => {
     // No "N more channels" expander, no pinned-only toggle until something is pinned.
     expect(screen.queryByText(/more channels/)).not.toBeInTheDocument();
     expect(screen.queryByText(/pinned only/)).not.toBeInTheDocument();
-    // Every channel is an equal tile (the per-tile pin control proves it —
-    // the name itself also appears in the chart legend, so assert the
-    // tile-unique pin button instead).
+    // Every channel is an equal tile — assert the tile-unique pin control.
     expect(screen.getByRole("button", { name: "pin ECM_RPM" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "pin ECM_COOLANT_TEMP" }),
@@ -226,5 +225,28 @@ describe("TelemetryPanel — Drive (compact) pinning", () => {
     // Unpin returns to the no-pins state.
     fireEvent.click(screen.getByRole("button", { name: "unpin ECM_RPM" }));
     expect(screen.getByText("3 live values")).toBeInTheDocument();
+  });
+
+  it("sparklines are off by default and the per-card toggle persists", () => {
+    render(createElement(TelemetryPanel, { channels: driveChannels(), bindings: {}, compact: true }));
+    // Default: graph off → "show graph" affordance on every tile, no canvas.
+    const showBtn = screen.getByRole("button", { name: "show graph for ECM_RPM" });
+    expect(showBtn).toHaveAttribute("aria-pressed", "false");
+    expect(document.querySelector("canvas")).toBeNull();
+
+    fireEvent.click(showBtn);
+    expect(
+      screen.getByRole("button", { name: "hide graph for ECM_RPM" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(document.querySelector("canvas")).not.toBeNull();
+    expect(
+      JSON.parse(window.localStorage.getItem("canary.drive.graphs") ?? "[]"),
+    ).toEqual(["decoded:ECM_RPM"]);
+
+    // Toggling back removes it again.
+    fireEvent.click(screen.getByRole("button", { name: "hide graph for ECM_RPM" }));
+    expect(
+      JSON.parse(window.localStorage.getItem("canary.drive.graphs") ?? "[]"),
+    ).toEqual([]);
   });
 });

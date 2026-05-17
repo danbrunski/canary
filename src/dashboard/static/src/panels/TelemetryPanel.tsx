@@ -36,25 +36,33 @@ const DEFAULT_PIN_CANDIDATES = [
 ];
 
 const PIN_STORAGE_KEY = "canary.drive.pinned";
+const GRAPH_STORAGE_KEY = "canary.drive.graphs";
 
-function loadPins(): string[] {
+function loadKeys(storageKey: string): string[] {
   try {
-    const raw = window.localStorage.getItem(PIN_STORAGE_KEY);
+    const raw = window.localStorage.getItem(storageKey);
     return raw ? (JSON.parse(raw) as string[]) : [];
   } catch {
     return [];
   }
 }
 
-/** Render current values + 2-minute sparklines. Decoded CAN channels are
- *  rendered in engineering units when their binding has a pinned scale —
- *  ``decoded:ECM_RPM`` raw=16376 becomes "2047 rpm". When the binding has
- *  plausibility bounds, values outside them are color-flagged. */
+/** Per-channel current value + its *own* 2-minute sparkline. There is no
+ *  combined multi-channel chart here: these signals span wildly different
+ *  scales (rpm vs. a 0-1 flag vs. a 12-digit accumulator) and a shared axis
+ *  just squashes everything into a flat line. Each tile auto-scales its own
+ *  sparkline; for true multi-channel trends use the dedicated Live ▸ Charts
+ *  panel, which normalizes per series. Decoded CAN channels render in
+ *  engineering units when their binding has a pinned scale
+ *  (``decoded:ECM_RPM`` raw 16376 → "2047 rpm"); values outside a binding's
+ *  plausibility bounds are colour-flagged. */
 export function TelemetryPanel({ channels, bindings, compact = false }: TelemetryPanelProps) {
   const [query, setQuery] = useState("");
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
-  const [pinned, setPinned] = useState<string[]>(loadPins);
+  const [pinned, setPinned] = useState<string[]>(() => loadKeys(PIN_STORAGE_KEY));
   const [pinnedOnly, setPinnedOnly] = useState(false);
+  // Per-card sparklines are OFF by default (digital readout only); the
+  // operator opts a channel's graph in. Persisted per browser.
+  const [graphs, setGraphs] = useState<string[]>(() => loadKeys(GRAPH_STORAGE_KEY));
 
   useEffect(() => {
     try {
@@ -63,6 +71,20 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
       /* storage disabled — pins still live for the session */
     }
   }, [pinned]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(GRAPH_STORAGE_KEY, JSON.stringify(graphs));
+    } catch {
+      /* storage disabled — still works for the session */
+    }
+  }, [graphs]);
+
+  const graphSet = useMemo(() => new Set(graphs), [graphs]);
+  const toggleGraph = (key: string) =>
+    setGraphs((cur) =>
+      cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key],
+    );
 
   const displayChannels = useMemo(() => {
     return [...channels]
@@ -108,44 +130,6 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
     const rest = visibleChannels.filter(([k]) => !pinnedSet.has(k));
     return [...pins, ...rest];
   }, [visibleChannels, pinned, pinnedSet, pinnedOnly]);
-
-  useEffect(() => {
-    if (selectedKeys.size > 0 || displayChannels.length === 0) return;
-    const numericFallback = displayChannels
-      .filter(([_key, snap]) => snap.history.length > 0)
-      .map(([key]) => key)
-      .slice(0, 4);
-    setSelectedKeys(new Set(numericFallback));
-  }, [displayChannels, selectedKeys.size]);
-
-  // The chart follows the pins in Drive (curating tiles curates the chart);
-  // in the explorer it follows the row selection.
-  const chartKeys = useMemo(() => {
-    if (compact) {
-      const fromPins = pinned.filter(
-        (k) => (channels.get(k)?.history.length ?? 0) > 1,
-      );
-      if (fromPins.length > 0) return fromPins.slice(0, 6);
-      return displayChannels
-        .filter(([, s]) => s.history.length > 1)
-        .map(([k]) => k)
-        .slice(0, 6);
-    }
-    return [...selectedKeys].filter((key) => channels.has(key)).slice(0, 6);
-  }, [compact, pinned, channels, displayChannels, selectedKeys]);
-
-  const toggleSelected = (key: string) => {
-    setSelectedKeys((current) => {
-      const next = new Set(current);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        if (next.size >= 6) next.delete([...next][0]);
-        next.add(key);
-      }
-      return next;
-    });
-  };
 
   if (channels.size === 0) {
     return (
@@ -206,40 +190,36 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
                   binding={bindings[key]}
                   pinned={pinnedSet.has(key)}
                   onTogglePin={() => togglePin(key)}
+                  graphOn={graphSet.has(key)}
+                  onToggleGraph={() => toggleGraph(key)}
                 />
               ))}
             </div>
           )}
-          <TelemetryChart channels={channels} bindings={bindings} selectedKeys={chartKeys} />
           {pinned.length === 0 && displayChannels.length > 6 && (
             <p className="mt-2 text-[0.74rem] text-fg-faint">
               Tip: ☆ a channel to pin it to the top — then “pinned only” for a
-              focused drive view.
+              focused drive view. Multi-channel trends live in Live ▸ Charts.
             </p>
           )}
         </>
       ) : (
-        <>
-          <TelemetryChart channels={channels} bindings={bindings} selectedKeys={chartKeys} />
-          <div className="mt-3.5">
-            <div className="mb-1.5 flex justify-between gap-2 text-[0.78rem] text-fg-dim">
-              <b className="text-fg">Channel explorer</b>
-              <span>{visibleChannels.length} visible / select up to 6 to chart</span>
-            </div>
-            <div className="grid max-h-[44rem] grid-cols-[repeat(auto-fit,minmax(270px,1fr))] gap-1.5 overflow-y-auto">
-              {visibleChannels.map(([key, snap]) => (
-                <ChannelRow
-                  key={key}
-                  channelKey={key}
-                  snapshot={snap}
-                  binding={bindings[key]}
-                  selected={selectedKeys.has(key)}
-                  onToggle={() => toggleSelected(key)}
-                />
-              ))}
-            </div>
+        <div className="mt-1">
+          <div className="mb-1.5 flex justify-between gap-2 text-[0.78rem] text-fg-dim">
+            <b className="text-fg">Channel explorer</b>
+            <span>{visibleChannels.length} visible</span>
           </div>
-        </>
+          <div className="grid max-h-[44rem] grid-cols-[repeat(auto-fit,minmax(270px,1fr))] gap-1.5 overflow-y-auto">
+            {visibleChannels.map(([key, snap]) => (
+              <ChannelRow
+                key={key}
+                channelKey={key}
+                snapshot={snap}
+                binding={bindings[key]}
+              />
+            ))}
+          </div>
+        </div>
       )}
     </section>
   );
@@ -249,29 +229,19 @@ function ChannelRow({
   channelKey,
   snapshot,
   binding,
-  selected,
-  onToggle,
 }: {
   channelKey: string;
   snapshot: ChannelSnapshot;
   binding?: BindingDisplay;
-  selected: boolean;
-  onToggle: () => void;
 }) {
   const rendered = renderChannel(snapshot, binding);
   return (
-    <button
-      type="button"
+    <div
       className={cn(
-        "grid w-full grid-cols-[2.3rem_minmax(0,1fr)_auto_3rem] items-center gap-2 rounded-tile border border-border-soft bg-[linear-gradient(180deg,var(--color-elev-2),var(--color-elev))] px-2.5 py-2 text-left text-fg transition-[border-color,transform] duration-150 hover:-translate-y-px hover:border-border",
-        selected && "border-accent ring-1 ring-inset ring-accent/45",
+        "grid w-full grid-cols-[minmax(0,1fr)_auto_3rem] items-center gap-2 rounded-tile border border-border-soft bg-[linear-gradient(180deg,var(--color-elev-2),var(--color-elev))] px-2.5 py-2 text-left text-fg",
         bandUtility(rendered.bandClass),
       )}
-      onClick={onToggle}
     >
-      <span className={cn("text-[0.68rem] uppercase text-fg-dim", selected && "text-accent")}>
-        {selected ? "on" : "off"}
-      </span>
       <span className="flex min-w-0 flex-col">
         <b className="overflow-hidden text-ellipsis whitespace-nowrap">{prettyChannel(channelKey)}</b>
         <small className="text-[0.72rem] text-fg-dim">{snapshot.latest.source}</small>
@@ -283,105 +253,13 @@ function ChannelRow({
         )}
       </span>
       <span className="text-[0.72rem] text-fg-dim">{formatAge(snapshot.latest.timestamp)}</span>
-    </button>
-  );
-}
-
-function TelemetryChart({
-  channels,
-  bindings,
-  selectedKeys,
-}: {
-  channels: Map<string, ChannelSnapshot>;
-  bindings: BindingsByChannel;
-  selectedKeys: string[];
-}) {
-  const series = selectedKeys
-    .map((key) => {
-      const snapshot = channels.get(key);
-      if (!snapshot) return null;
-      return {
-        key,
-        label: prettyChannel(key),
-        values: sparkSeries(snapshot, bindings[key]).filter(Number.isFinite),
-      };
-    })
-    .filter((item): item is { key: string; label: string; values: number[] } => {
-      return item !== null && item.values.length > 1;
-    });
-
-  if (series.length === 0) {
-    return (
-      <div className="mt-3.5 flex min-h-16 items-center rounded-[8px] border border-border bg-bg p-2.5 text-[0.85rem] text-fg-dim">
-        Select numeric channels to chart live history.
-      </div>
-    );
-  }
-
-  const allValues = series.flatMap((item) => item.values);
-  const min = Math.min(...allValues);
-  const max = Math.max(...allValues);
-  const span = max === min ? 1 : max - min;
-  const width = 900;
-  const height = 220;
-  const pad = 22;
-  const colors = ["#7cffcb", "#ffb84a", "#7cc7ff", "#ff6b6b", "#c9a7ff", "#ffd166"];
-
-  const pathFor = (values: number[]) =>
-    values
-      .map((value, index) => {
-        const x = pad + (index / Math.max(values.length - 1, 1)) * (width - pad * 2);
-        const y = height - pad - ((value - min) / span) * (height - pad * 2);
-        return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(" ");
-
-  return (
-    <div className="mt-3.5 rounded-[8px] border border-border bg-bg p-2.5">
-      <div className="flex justify-between gap-3 font-num text-[0.78rem] tabular-nums text-fg-dim">
-        <span>{formatNumber(min)}</span>
-        <b>Live chart</b>
-        <span>{formatNumber(max)}</span>
-      </div>
-      <svg
-        className="block h-[clamp(12rem,34vh,22rem)] w-full"
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label="telemetry chart"
-      >
-        <line
-          className="stroke-border-soft [stroke-width:2]"
-          x1={pad}
-          y1={height - pad}
-          x2={width - pad}
-          y2={height - pad}
-        />
-        <line
-          className="stroke-border-soft [stroke-width:2]"
-          x1={pad}
-          y1={pad}
-          x2={pad}
-          y2={height - pad}
-        />
-        {series.map((item, index) => (
-          <path
-            key={item.key}
-            className="fill-none [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:3]"
-            d={pathFor(item.values)}
-            stroke={colors[index % colors.length]}
-          />
-        ))}
-      </svg>
-      <div className="flex flex-wrap justify-start gap-3 font-num text-[0.78rem] tabular-nums text-fg-dim">
-        {series.map((item, index) => (
-          <span key={item.key} style={{ color: colors[index % colors.length] }}>
-            {item.label}
-          </span>
-        ))}
-      </div>
     </div>
   );
 }
+
+/** Fixed sparkline slot height — *always reserved* so toggling a card's
+ *  graph on/off never changes the card's size (no grid reflow). */
+const GRAPH_SLOT_PX = 30;
 
 function ChannelCard({
   channelKey,
@@ -389,15 +267,21 @@ function ChannelCard({
   binding,
   pinned,
   onTogglePin,
+  graphOn = false,
+  onToggleGraph,
 }: {
   channelKey: string;
   snapshot: ChannelSnapshot;
   binding?: BindingDisplay;
   pinned?: boolean;
   onTogglePin?: () => void;
+  graphOn?: boolean;
+  onToggleGraph?: () => void;
 }) {
   const rendered = renderChannel(snapshot, binding);
   const sparkValues = sparkSeries(snapshot, binding);
+  const pretty = prettyChannel(channelKey);
+  const canGraph = sparkValues.length > 1;
   return (
     <div
       className={cn(
@@ -406,24 +290,39 @@ function ChannelCard({
         bandUtility(rendered.bandClass),
       )}
     >
-      {onTogglePin && (
-        <button
-          type="button"
-          className={cn(
-            "absolute right-1.5 top-1.5 text-[0.8rem] leading-none transition-colors",
-            pinned ? "text-accent" : "text-fg-faint hover:text-fg-dim",
-          )}
-          onClick={onTogglePin}
-          aria-label={
-            pinned ? `unpin ${prettyChannel(channelKey)}` : `pin ${prettyChannel(channelKey)}`
-          }
-          title={pinned ? "Unpin from top" : "Pin to top"}
-        >
-          {pinned ? "★" : "☆"}
-        </button>
-      )}
-      <div className="mb-1 pr-4 text-[0.62rem] uppercase tracking-[0.13em] text-fg-faint">
-        {prettyChannel(channelKey)}
+      <div className="absolute right-1.5 top-1.5 flex items-center gap-1.5">
+        {onToggleGraph && (
+          <button
+            type="button"
+            className={cn(
+              "text-[0.78rem] leading-none transition-colors",
+              graphOn ? "text-accent-2" : "text-fg-faint hover:text-fg-dim",
+            )}
+            onClick={onToggleGraph}
+            aria-label={graphOn ? `hide graph for ${pretty}` : `show graph for ${pretty}`}
+            title={graphOn ? "Hide sparkline" : "Show sparkline"}
+            aria-pressed={graphOn}
+          >
+            {graphOn ? "▥" : "▤"}
+          </button>
+        )}
+        {onTogglePin && (
+          <button
+            type="button"
+            className={cn(
+              "text-[0.8rem] leading-none transition-colors",
+              pinned ? "text-accent" : "text-fg-faint hover:text-fg-dim",
+            )}
+            onClick={onTogglePin}
+            aria-label={pinned ? `unpin ${pretty}` : `pin ${pretty}`}
+            title={pinned ? "Unpin from top" : "Pin to top"}
+          >
+            {pinned ? "★" : "☆"}
+          </button>
+        )}
+      </div>
+      <div className="mb-1 pr-10 text-[0.62rem] uppercase tracking-[0.13em] text-fg-faint">
+        {pretty}
       </div>
       <div
         className={cn(
@@ -439,7 +338,20 @@ function ChannelCard({
           </span>
         )}
       </div>
-      {sparkValues.length > 1 && <Sparkline values={sparkValues} width={150} height={30} />}
+      {/* Slot is always present at a fixed height → constant card size
+          whether the graph is on, off, or unavailable. */}
+      <div
+        className="mt-1 flex items-end"
+        style={{ height: GRAPH_SLOT_PX }}
+        aria-hidden={!graphOn}
+      >
+        {graphOn && canGraph && (
+          <Sparkline values={sparkValues} width={150} height={GRAPH_SLOT_PX} />
+        )}
+        {graphOn && !canGraph && (
+          <span className="text-[0.66rem] text-fg-faint">no history yet</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -506,9 +418,9 @@ export function renderChannel(
   return { text, unit, bandClass };
 }
 
-/** Compute the sparkline series in engineering units when scale is pinned —
- *  otherwise the chart's auto-axis would interpret raw bytes, which looks
- *  weird (a coolant chart bottoming at 53 isn't useful). */
+/** Sparkline series in engineering units when scale is pinned — otherwise
+ *  the auto-axis would interpret raw bytes, which looks weird (a coolant
+ *  trace bottoming at 53 isn't useful). */
 function sparkSeries(
   snapshot: ChannelSnapshot,
   binding: BindingDisplay | undefined,
