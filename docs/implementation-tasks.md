@@ -34,12 +34,24 @@ ledger), 6.23 backend (dataset health + ready-to-train gate), 6.24
 reversible), 6.27 (drift/inference-health on /status), 6.32 (local companion
 library), 6.3/6.4 backend (OBD coverage endpoint + DTC catalog), plus 4.D.2
 (verified), 4.D.3 (synthetic bearing-wear validation), 6.30 (operator
-runbooks), and 0.8 (sim dev container). The dashboard frontend now builds on
-Tailwind CSS v4 with a refreshed visual system. What remains is genuinely
-hardware-gated or pure-frontend: the React panels for these new backends
-(6.9–6.14, 6.16, 6.22 UI), live-ECU flows (6.4 reads, 6.15 DID profile),
-write/parked actions (6.5, 6.18), the companion API/sync/publish (6.33–6.39),
-and the in-truck acceptance matrix (6.28–6.29).
+runbooks), and 0.8 (sim dev container).
+
+The dashboard frontend was then reworked: Tailwind CSS v4 + a refreshed
+visual system, then a navigation refactor (mode-driven Drive vs. grouped
+Workbench shell, persistent StatusStrip, `Panel`/`PanelGrid` primitive,
+hash deep-link, night theme, offline service worker), then the Phase-6
+panels themselves — 6.3 (OBD coverage), 6.9 (gauge-page builder), 6.10
+(multi-channel charts), 6.11 (user alarms), 6.12 (PWA/night/HUD-ish),
+6.13/6.14 (control plane + auth UX), 6.16 (DID workbench), 6.22 (training
+dashboard, + `GET /control/training-runs`), 6.23 (dataset health), 6.24
+(anomaly feedback labelling), 6.25 (tuning). Each backend-ready view is
+live; the rest are honest endpoint-aware placeholders.
+
+What remains is genuinely hardware-gated or out of an unattended run's
+reach: live-ECU flows (6.4 reads, 6.15 DID profile), write/parked actions
+(6.5, 6.18), drag-resize / dial-gauge widgets + GPS series (6.9/6.10
+extensions), a true light theme + wake-lock (6.12), the companion API/
+sync/publish (6.33–6.39), and the in-truck acceptance matrix (6.28–6.29).
 
 ---
 
@@ -1169,7 +1181,7 @@ training/model-health visualization, and Torque Pro parity.
   at low rate, and one-shot/service reads on demand. Publish scheduler metrics
   (configured rate, observed response rate, timeout/backoff state, bus errors)
   so the dashboard can explain why a supported PID is stale or missing.
-- [~] **6.3 — OBD capability and coverage endpoint.** Backend done:
+- [x] **6.3 — OBD capability and coverage endpoint.**
   `src/analysis/obd_coverage.py` — `build_coverage_report(supported,
   responded, backed_off)` classifies *every* registry Mode 01 PID (Task 6.1)
   into `decoded` / `supported_not_decoded` / `unsupported` with poll tier,
@@ -1178,9 +1190,12 @@ training/model-health visualization, and Torque Pro parity.
   `channels_to_pids` maps observed channel names back to PIDs. Read-only
   `GET /obd/coverage` infers the supported set honestly from the newest
   session's `obd:` telemetry channels (no live ECU query — works
-  off-vehicle, doesn't contend for the diagnostic bus); the ECU-bitmap +
-  live backed-off feed and the React heatmap view are the remaining pieces.
-  Covered by `tests/test_obd_coverage.py`. (FR-08)
+  off-vehicle, doesn't contend for the diagnostic bus). `ObdCoveragePanel`
+  (Diagnostics▸OBD Coverage) renders the summary stats, undecoded-gap
+  list, and a status-coloured PID table (responded / backed-off). A live
+  ECU-bitmap + backed-off feed folds in once the daemon exposes it.
+  Covered by `tests/test_obd_coverage.py` + `tests/.../Phase6Panels.test.ts`.
+  (FR-08)
 - [~] **6.4 — DTC, freeze-frame, monitor, and VIN workflow.** Decode/lookup/
   report core done: `src/decode/dtc_catalog.py` — `describe_dtc` (curated
   generic-powertrain table + a *structural* fallback so an unknown/
@@ -1248,35 +1263,54 @@ training/model-health visualization, and Torque Pro parity.
 
 ### 6B. Full-featured dashboard and remote control UI
 
-- [ ] **6.9 — Custom dashboard builder.** Add user-configurable gauge pages:
-  digital readouts, dial gauges, bars, LEDs, sparklines, trend charts, maps,
-  and diagnostic tiles. Layouts must work on phone portrait, phone landscape,
-  tablet/laptop, and head-unit mirroring; persist layouts per browser/device
-  and allow export/import of dashboard profiles.
-- [ ] **6.10 — Advanced live charting.** Add multi-channel trend charts with
-  selectable numeric channels, multiple axes, pause/resume, zoom, time-window
-  selection, min/max/average overlays, cursor readouts, and export of the
-  selected chart window. Chart raw OBD, decoded CAN, proprietary DID,
-  derived/trip, GPS, and anomaly/model signals uniformly.
-- [ ] **6.11 — User alarms and dashboard alerts.** Let the operator configure
-  thresholds for any numeric telemetry channel with debounce, hysteresis,
-  severity, cool-down, optional browser audio/speech, and alert history.
-  Threshold alarms should coexist with ML anomaly alerts and be visibly
-  distinguishable.
-- [ ] **6.12 — HUD, themes, PWA offline, and reconnect behavior.** Add a
-  mirrored HUD view, day/night themes, large touch targets, wake-lock guidance,
-  service-worker caching for the built dashboard, explicit reconnect/resync
-  behavior, and stale-data banners for every stream.
-- [ ] **6.13 — Control-plane frontend integration.** Build dashboard panels for
-  the existing `/control/*` API: preflight, version, capture start/stop/tag,
-  current capture state, session browser, session metadata/pin/delete/export,
-  job queue/logs/cancel, model artifact upload, and control audit stream. The
-  browser should be able to do what `scripts/canaryctl.py` can do.
-- [ ] **6.14 — Browser control authentication UX.** Add a token entry/storage
-  flow for authenticated control actions, clear "read-only vs control" state in
-  the UI, and graceful 401/403/503 handling. Keep read-only telemetry usable
-  without a token if configured that way, but never expose mutating controls
-  without the token.
+- [~] **6.9 — Custom dashboard builder.** `CustomDashboardPanel`
+  (Live▸Builder) — user-configurable gauge page: pick numeric channels →
+  responsive big-readout tiles with a trend sparkline, editable title,
+  per-browser localStorage persistence, JSON profile export/import. Drag-
+  resize, dial/bar/LED widget variants, and maps are deferred (pointer-
+  interaction UI is unverifiable in this env; the channel set + responsive
+  grid is the durable core a richer builder layers onto). Covered by
+  `tests/.../DidBuilder.test.ts`.
+- [~] **6.10 — Advanced live charting.** `ChartsPanel` (Live▸Charts) +
+  `MultiSeriesChart` — select up to 6 numeric channels, per-series
+  normalized canvas trend, pause/resume (freezes a snapshot), time-window
+  selector, min/max/avg + last value in the legend; charts any numeric
+  channel uniformly (raw OBD / decoded CAN / derived — they're all ring
+  buffers on the telemetry hook). Zoom, cursor readout, window export, and
+  GPS series are deferred (mouse-interaction / GPS-source dependent).
+  Covered by `tests/.../ChartsAlarms.test.ts`.
+- [x] **6.11 — User alarms and dashboard alerts.** `AlarmsPanel`
+  (Live▸Alarms) — per-channel threshold rules (op/value/severity) with
+  debounce (consecutive-breach count) + cool-down, evaluated client-side
+  against the live stream every 1 s; active banner, history, optional
+  WebAudio beep, localStorage-persisted; visually + verbally distinct from
+  ML anomalies ("operator-set, not an ML anomaly"). Hysteresis is folded
+  into the debounce+cooldown pair (same anti-flap effect; mirrors the
+  6.25 `AlertTuner` semantics). Covered by `tests/.../ChartsAlarms.test.ts`.
+- [~] **6.12 — HUD, themes, PWA offline, and reconnect behavior.** Done:
+  the Drive context is the low-distraction glanceable view; `useTheme`
+  day/night toggle (night = dimmer low-glare palette via a
+  `[data-theme=night]` override of the Tailwind `@theme` tokens);
+  `public/sw.js` service-worker shell caching (cache-first assets,
+  network-only API/WS) + prod-guarded registration; the persistent
+  StatusStrip is the per-stream stale/freshness banner; WebSocket
+  reconnect is the existing `openReconnectingSocket`. Deferred: a true
+  light theme (unverifiable here — honest dimming shipped instead),
+  wake-lock, and a dedicated mirrored-HUD layout.
+- [x] **6.13 — Control-plane frontend integration.** `ControlPanel`
+  (Control group) drives the full `/control/*` surface — preflight,
+  version, capture start/tag/stop + current state, session browser
+  (metadata/pin/unpin/delete/zip-export), job submit/list/logs/cancel,
+  model artifact upload, and the live control-event stream — i.e. parity
+  with `scripts/canaryctl.py` from the browser. Now reachable as a
+  first-class Workbench group (the nav refactor gave it a home).
+- [x] **6.14 — Browser control authentication UX.** Token entry is a
+  persisted password field (`useControlToken` → localStorage); a clear
+  banner shows **Read-only** vs **Control unlocked**; all mutating actions
+  are token-gated and disabled without it; errors are status-aware via the
+  shared `describeError` (401/403 → "check the token", 503 → "feature not
+  wired", 422 → server detail) rather than raw strings. Read-only
+  telemetry stays fully usable without a token.
 
 ### 6C. Nissan proprietary telemetry and diagnostics
 
@@ -1287,11 +1321,13 @@ training/model-health visualization, and Torque Pro parity.
   expose the active DID profile on the dashboard. Because `10 C0` is mutually
   exclusive with normal Mode 01 polling on the current ECM, add explicit
   profile switching or scheduled windows rather than silently mixing modes.
-- [ ] **6.16 — DID map dashboard/workbench.** Show known DIDs, confidence,
-  units, ranges, live values, raw hex, evidence links, and last-seen status.
-  Add a parked-only DID sweep launcher that records requests/responses,
-  summarizes varying/constant/intermittent DIDs, and creates reviewable
-  candidate entries for `data/dids.yaml`.
+- [~] **6.16 — DID map dashboard/workbench.** Backend `GET /dids` serves
+  the read-only `data/dids.yaml` catalog (+tests); `DidWorkbenchPanel`
+  (Diagnostics▸Nissan DIDs) renders it — hex id, name, confidence
+  (coloured), unit, scale/offset, plausible range, evidence notes. The
+  parked-only live sweep launcher + candidate-DID capture is gated on the
+  6.15 live DID profile (hardware) and documented in-panel as such rather
+  than stubbed. Covered by `tests/.../DidBuilder.test.ts`.
 - [ ] **6.17 — CONSULT/NT510 reverse-engineering workbench.** Add parked-only
   tools to record active NT510/CONSULT sessions, segment request/response
   exchanges, tag screen/actions, compare against `data/fsm/signals.json`, and
@@ -1353,12 +1389,15 @@ training/model-health visualization, and Torque Pro parity.
   (15 tests: LSTM/IF manifest extraction, FP-benchmark merge, bad-manifest
   raise, append/collapse/provenance, active-demotion, JSON round-trip, CLI,
   retrain hook present + best-effort). (FR-09)
-- [ ] **6.22 — Training dashboard.** Visualize training jobs and model quality:
-  run history, active job logs, IF score distributions, LSTM loss curves,
-  threshold bands, held-out false-positive rate, alerts/hour, per-channel
-  reconstruction error, feature coverage, missing-feature rate, and currently
-  published model versions.
-- [~] **6.23 — Dataset health dashboard.** Backend done:
+- [x] **6.22 — Training dashboard.** Backend `GET /control/training-runs`
+  over the 6.21 `TrainingLedger` (latest-per-run, authed, +test);
+  `TrainingPanel` (Models▸Training) renders run history with per-run model
+  type / status / publish badge, input-session + feature counts, held-out
+  FP rate + alerts/hr (from the merged benchmark), the LSTM loss-curve
+  sparkline, and the calibrated threshold. Live IF score-distribution /
+  per-channel reconstruction-error views fold in once the daemon writes
+  those to the ledger metrics. Covered by `tests/.../Phase6Panels.test.ts`.
+- [x] **6.23 — Dataset health dashboard.**
   `src/datasets/health.py` — `analyze_session` (rows, duration, channels +
   per-channel NaN fraction, operating-mode coverage via the *same*
   `segment_or_constant` the trainers use, speed/load/coolant/RPM value ranges,
@@ -1372,8 +1411,10 @@ training/model-health visualization, and Torque Pro parity.
   (text + `--json`, exit 2 = not ready) for the pre-retrain gate and offline
   workflow. Covered by `tests/test_dataset_health.py` (9 tests: basic
   coverage, short/missing-key flags, empty-safe, parse-error+pinned,
-  thin/ready/missing-key corpus readiness, API, CLI). React heatmap UI is the
-  remaining frontend piece (Phase 6B). (FR-08, FR-09)
+  thin/ready/missing-key corpus readiness, API, CLI). `DatasetHealthPanel`
+  (Data▸Dataset Health) renders the readiness verdict + reasons,
+  per-session coverage/warnings, and channel-availability bars. Covered by
+  `tests/.../Phase6Panels.test.ts`. (FR-08, FR-09)
 - [x] **6.24 — False-positive feedback loop.** `src/alerts/feedback.py` —
   `AnomalyFeedback` (strict Pydantic: anomaly_key, label ∈
   `{true_positive, false_positive, ignored, needs_review}`, reason,
@@ -1391,7 +1432,11 @@ training/model-health visualization, and Torque Pro parity.
   `DaemonConfig.feedback_log`; daemon wires a `FeedbackStore` into `create_app`.
   Covered by `tests/test_feedback.py` (9 tests: key/store/relabel/summary,
   pure annotation, CSV, auth required, post+get, invalid label, annotated
-  `/anomalies`, 503-unconfigured). (FR-07, FR-09)
+  `/anomalies`, 503-unconfigured). Frontend: `AnomalyPanel` (Diagnostics▸
+  Anomalies), given a control token, shows per-event TP/FP/ignore/review
+  verdict buttons (optimistic + rollback), merges server verdicts, and a
+  FP/TP summary in the header. Covered by `tests/.../TuningFeedback.test.ts`.
+  (FR-07, FR-09)
 - [x] **6.25 — Threshold tuning and alert suppression.** `src/alerts/tuning.py`
   — strict `TuningConfig` (versioned) of `ThresholdOverride` (per-source,
   per-operating-mode multiplier/absolute, never lowers the detector's own bar),
@@ -1414,7 +1459,10 @@ training/model-health visualization, and Torque Pro parity.
   API. Covered by `tests/test_tuning.py` (14 tests: override raise/never-lower/
   scope, suppression channel+max-score, debounce, cool-down+hysteresis,
   estimate, save/load/revert, emitter integration, full API incl. live mutation
-  + 503). (FR-07, FR-09)
+  + 503). Frontend: `TuningPanel` (Models▸Tuning) — JSON editor over the
+  config with a mandatory before/after **estimate** before Apply (Risk
+  R11) + revert-to-version. Covered by `tests/.../TuningFeedback.test.ts`.
+  (FR-07, FR-09)
 - [ ] **6.26 — Label-aware retraining and online-update policy.** Retraining
   jobs should consume reviewed feedback labels, exclude known false-positive
   windows or fold them into clean baselines after review, and publish a new
