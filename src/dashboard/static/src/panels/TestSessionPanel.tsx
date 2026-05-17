@@ -9,7 +9,7 @@
 // Profiles are NOT hardcoded here — they come from the scanned YAML catalog
 // at GET /test-profiles (src/control/test_profiles.py, data/test_profiles/).
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   HttpError,
@@ -236,9 +236,8 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
           fields: {},
         });
         const work = persisted.current.queue.filter((q) => q.id !== next.id);
-        const rec = [{ ...next, status: "sent" as const }, ...persisted.current.recent].slice(
-          0,
-          MAX_RECENT,
+        const rec = persisted.current.recent.map((r) =>
+          r.id === next.id ? { ...r, status: "sent" as const } : r,
         );
         persist(work, rec);
         setQueue(work);
@@ -293,6 +292,18 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
   );
 
   const tapEvent = (ev: TestEvent) => enqueue(ev.tag, ev.kind);
+
+  // Per-tag tap counts for the current capture, derived from the persisted
+  // recent list so the tapped state survives panel navigation and page reload.
+  const tapCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of recent) {
+      if (r.captureId === capture?.capture_id) {
+        counts.set(r.label, (counts.get(r.label) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [recent, capture?.capture_id]);
 
   const tapCustom = () => {
     const label = window.prompt("Custom event label (becomes the tag):");
@@ -646,28 +657,36 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
           )}
 
           <div className="grid grid-cols-2 gap-2.5 max-[420px]:grid-cols-1">
-            {(activeProfile?.events ?? []).map((ev) => (
-              <button
-                key={ev.tag}
-                type="button"
-                onClick={() => tapEvent(ev)}
-                className={cn(
-                  "flex min-h-[5.5rem] flex-col items-center justify-center gap-1 rounded-[12px] border px-3 py-3 text-center transition-transform active:scale-[0.97]",
-                  ev.kind === "state"
-                    ? "border-accent-2/55 bg-[linear-gradient(180deg,var(--color-elev-3),var(--color-elev-2))]"
-                    : "border-border bg-elev-2 hover:border-fg-faint",
-                )}
-              >
-                <span className="text-[1.05rem] font-bold leading-tight text-fg">
-                  {ev.label}
-                </span>
-                {ev.hint && (
-                  <span className="text-[0.72rem] leading-tight text-fg-dim">
-                    {ev.hint}
+            {(activeProfile?.events ?? []).map((ev) => {
+              const tapCount = tapCounts.get(ev.tag) ?? 0;
+              return (
+                <button
+                  key={ev.tag}
+                  type="button"
+                  onClick={() => tapEvent(ev)}
+                  className={cn(
+                    "relative flex min-h-[5.5rem] flex-col items-center justify-center gap-1 rounded-[12px] border px-3 py-3 text-center transition-all active:scale-[0.97]",
+                    tapCount > 0
+                      ? "border-ok/55 bg-ok/10 hover:border-ok/90"
+                      : "border-border bg-elev-2 hover:border-fg-dim hover:bg-elev-3",
+                  )}
+                >
+                  {tapCount > 0 && (
+                    <span className="absolute right-2 top-2 min-w-[1.25rem] rounded-full bg-ok/25 px-1 text-center text-[0.65rem] font-bold leading-tight text-ok">
+                      {tapCount}
+                    </span>
+                  )}
+                  <span className="text-[1.05rem] font-bold leading-tight text-fg">
+                    {ev.label}
                   </span>
-                )}
-              </button>
-            ))}
+                  {ev.hint && (
+                    <span className="text-[0.72rem] leading-tight text-fg-dim">
+                      {ev.hint}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
             <button
               type="button"
               onClick={tapCustom}
