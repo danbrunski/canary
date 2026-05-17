@@ -37,6 +37,13 @@ collection:
   storage_path: data/sim/sessions
   session_retention_days: 7
   storage_warning_mb: 500
+  # Simulation: replay a real recorded drive (the 18-min 2026-05-11
+  # capture) onto the telemetry queue instead of opening hardware. The
+  # daemon decodes it via bindings.yaml exactly like a live drive, so the
+  # dashboard shows real collected signals. 3× for a livelier demo; loops.
+  replay_session: data/sessions/2026-05-11T222447
+  replay_speed: 3.0
+  replay_loop: true
   reconnect_initial_delay_seconds: 10
   reconnect_max_delay_seconds: 60
   queue_max_size: 10000

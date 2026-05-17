@@ -87,6 +87,13 @@ class CollectionConfig(_Strict):
     reconnect_max_delay_seconds: float = 60.0
     queue_max_size: int = 10_000
     queue_warning_fraction: float = 0.8
+    #: Simulation backend: when set, the daemon replays this recorded
+    #: session (dir path or id under storage) onto the telemetry queue
+    #: *instead of* the real CAN/OBD collectors — no hardware needed, the
+    #: dashboard shows previously-collected signals. Empty = normal capture.
+    replay_session: str | None = None
+    replay_speed: float = 1.0
+    replay_loop: bool = True
 
 
 class OperatingModeSpec(_Strict):

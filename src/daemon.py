@@ -655,7 +655,20 @@ async def run_daemon(
     # at module-load time.
     from src.main import _default_collectors
 
-    active_collectors = _default_collectors(config) if collectors is None else list(collectors)
+    if collectors is not None:
+        active_collectors = list(collectors)
+    elif config.collection.replay_session:
+        # Simulation backend: replay a recorded session instead of opening
+        # real CAN/OBD. Same queue → same decode/broadcast/inference path.
+        from src.collection.replay import make_replay_collector
+
+        active_collectors = [make_replay_collector(config)]
+        log.info(
+            "replay mode: real collectors disabled",
+            extra={"session": config.collection.replay_session},
+        )
+    else:
+        active_collectors = _default_collectors(config)
 
     drain_task = asyncio.create_task(
         drain_queue_with_broadcast(
