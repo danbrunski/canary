@@ -226,6 +226,50 @@ def _normalize_minus(s: str) -> str:
     return s.replace("−", "-")
 
 
+# A cross-page reference: the numeric spec lives in another FSM section/page
+# the data-monitor table just points at ("See EC-79.", "Refer to EC-123").
+_CROSS_REF_RE = re.compile(r"\b(?:See|Refer\s+to)\s+[A-Z]{2,4}-\d+", re.IGNORECASE)
+
+# Discrete-state vocabulary: a param whose "spec" is a set of named states
+# (LEAN/RICH, ON/OFF, an "A ←→ B" toggle) has no numeric range *by nature* —
+# distinct from a numeric param we simply failed to parse.
+_STATE_TOKENS = frozenset(
+    (
+        "ON", "OFF", "OPEN", "CLOSE", "CLOSED", "LEAN", "RICH", "YES", "NO",
+        "HI", "LO", "HIGH", "LOW", "ENGAGED", "RELEASED", "ACTIVE", "INACTIVE",
+        "LOCK", "UNLOCK", "FORWARD", "REVERSE", "GOOD", "NG", "ENABLE",
+        "DISABLE", "PRESS", "RELEASE", "DETECT", "STOP", "START", "RESET",
+    )
+)
+_ARROW_RE = re.compile(r"←→|<->|→|->")
+
+
+def classify_spec(text: str, ranges: list[dict[str, float | str]]) -> str:
+    """Why a param does/doesn't have a numeric range.
+
+    Returns one of: ``numeric_range`` (≥1 range parsed), ``cross_ref``
+    (spec points to another FSM page), ``categorical`` (named states, no
+    number by nature), ``descriptive`` (prose/garbled — a number may exist
+    but we couldn't extract it), ``empty`` (no spec text). This makes "9%
+    coverage" honest: the real metric is numeric / (numeric + descriptive
+    + cross_ref) — categorical/empty are *inherently* unrangeable, not
+    extraction failures, and `range_match` must skip them as such.
+    """
+    s = text.strip()
+    if not s:
+        return "empty"
+    if ranges:
+        return "numeric_range"
+    if _CROSS_REF_RE.search(s):
+        return "cross_ref"
+    if _ARROW_RE.search(s):
+        return "categorical"
+    upper_tokens = set(re.findall(r"[A-Z]{2,}", s.upper()))
+    if len(upper_tokens & _STATE_TOKENS) >= 2:
+        return "categorical"
+    return "descriptive"
+
+
 def parse_ranges(text: str) -> list[dict[str, float | str]]:
     """Pull numeric expected ranges out of a CONSULT-III spec text fragment.
 
@@ -332,12 +376,14 @@ def extract_pdf_section_with_specs(
     out: list[dict[str, Any]] = []
     for entry in by_name.values():
         joined = " | ".join(entry["spec_lines"])
+        ranges = parse_ranges(joined)
         out.append(
             {
                 "name": entry["name"],
                 "page": entry["page"],
                 "spec_text": joined,
-                "expected_ranges": parse_ranges(joined),
+                "expected_ranges": ranges,
+                "spec_kind": classify_spec(joined, ranges),
             }
         )
     return out

@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -178,11 +179,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_x = src.get("max_x", 135.0)
         params = extract_pdf_section_with_specs(path, src["pages"], max_x=max_x)
         total_params += len(params)
-        with_ranges = sum(1 for p in params if p["expected_ranges"])
+        kinds = Counter(p.get("spec_kind", "descriptive") for p in params)
+        with_ranges = kinds["numeric_range"]
+        # "Should-have-a-number" denominator excludes categorical/empty —
+        # those are unrangeable by nature, not extraction misses.
+        extractable = with_ranges + kinds["descriptive"] + kinds["cross_ref"]
+        cov = f"{100 * with_ranges / extractable:.0f}%" if extractable else "n/a"
         page_range = f"pp.{src['pages'][0]}-{src['pages'][-1]}"
         print(
             f"  {src['module']:14s}  {len(params):4d} params  "
-            f"({with_ranges:3d} w/ numeric ranges)  ({src['file']} {page_range})"
+            f"numeric={with_ranges:3d} cross_ref={kinds['cross_ref']:3d} "
+            f"categ={kinds['categorical']:3d} descr={kinds['descriptive']:3d} "
+            f"empty={kinds['empty']:3d}  | numeric-coverage {cov}  "
+            f"({src['file']} {page_range})"
         )
         modules.append(
             {

@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.analysis.fsm import clean_param_name, looks_like_param_name, parse_ranges
+from src.analysis.fsm import (
+    classify_spec,
+    clean_param_name,
+    looks_like_param_name,
+    parse_ranges,
+)
 
 
 @pytest.mark.parametrize(
@@ -173,3 +178,62 @@ def test_parse_no_match_returns_empty():
     assert parse_ranges("ON ↔ OFF") == []
     assert parse_ranges("See EC-79.") == []
     assert parse_ranges("") == []
+
+
+# --- classify_spec: golden cases from real FSM spec_text (Slice 1) ---
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("", "empty"),
+        ("   ", "empty"),
+        ("2.0 - 6.0 g·m/s", "numeric_range"),
+        ("11 - 14V at idle | 7 - 20 g·m/s at 2,500 rpm", "numeric_range"),
+        ("Approx. 2.5V", "numeric_range"),
+        ("More than 70°C", "numeric_range"),
+        ("See EC-79.", "cross_ref"),
+        ("See EC-79. | F", "cross_ref"),
+        ("Refer to EC-123 for the standard value", "cross_ref"),
+        ("LEAN ←→ RICH", "categorical"),
+        ("ON ↔ OFF", "categorical"),
+        ("Engine running: ON  Engine stopped: OFF", "categorical"),
+        ("OPEN / CLOSE", "categorical"),
+        # garbled column-split / prose with no extractable number → descriptive,
+        # NOT a false "numeric" or silently-empty
+        ("tion. tachometer indication. | E", "descriptive"),
+        (
+            "• Engine: After warming up Maintaining engine speed at 2,000 "
+            "rpm Fluctuates around 2.2 V",
+            "descriptive",
+        ),
+        ("| K | SULT-III value. CONSULT-III value | The preset ve", "descriptive"),
+    ],
+)
+def test_classify_spec_golden(text: str, expected: str) -> None:
+    assert classify_spec(text, parse_ranges(text)) == expected
+
+
+def test_classify_numeric_wins_over_cross_ref() -> None:
+    # If a number IS extractable, that beats a stray "See EC-NN" mention.
+    assert classify_spec("0 - 0.3V (See EC-79)", parse_ranges("0 - 0.3V")) == "numeric_range"
+
+
+def test_real_signals_kinds_consistent() -> None:
+    """Every param in data/fsm/signals.json must carry a spec_kind, and a
+    'numeric_range' kind iff it actually has expected_ranges."""
+    import json
+    from pathlib import Path
+
+    sig = Path("data/fsm/signals.json")
+    if not sig.exists():
+        pytest.skip("data/fsm/signals.json not present")
+    doc = json.loads(sig.read_text())
+    for m in doc["modules"]:
+        for p in m["params"]:
+            assert "spec_kind" in p, f"{p['name']}: missing spec_kind"
+            has_ranges = bool(p["expected_ranges"])
+            assert (p["spec_kind"] == "numeric_range") == has_ranges, (
+                f"{p['name']}: spec_kind={p['spec_kind']} but "
+                f"expected_ranges={'present' if has_ranges else 'empty'}"
+            )
