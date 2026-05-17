@@ -117,15 +117,29 @@ def to_wide(
         for column in wide.columns:
             if column in index_set:
                 continue
-            if pd.api.types.is_numeric_dtype(wide[column]):
+            col = wide[column]
+            if pd.api.types.is_numeric_dtype(col):
+                # Already numeric (rare on the object-valued read_session
+                # path; happens when to_wide is called with a numeric
+                # `value` kind). Narrow float64 → float32; leave int / bool
+                # channels untouched so their semantics don't change.
+                if col.dtype == "float64":
+                    wide[column] = col.astype("float32")
                 continue
-            converted = pd.to_numeric(wide[column], errors="coerce")
+            converted = pd.to_numeric(col, errors="coerce")
             # Only keep the conversion if it didn't drop any real values —
             # i.e. every non-null original entry was numeric. A string-bearing
             # channel (VIN) or a bool channel stays as-is.
-            original_notna = wide[column].notna()
+            original_notna = col.notna()
             if bool((original_notna == converted.notna()).all()):
-                wide[column] = converted
+                # Store as float32: telemetry is integer-origin sensor data
+                # (≤16-bit raw range, simple scale/offset) — exactly
+                # representable in a 24-bit mantissa, so this is lossless for
+                # the values that matter. This is the dominant pre-resample
+                # memory cost (the dense pivot); halving it is what actually
+                # keeps full-corpus feature-building off the OOM line.
+                # Scaler μ/σ still reduce in float64 (see normalization.py).
+                wide[column] = converted.astype("float32")
 
     return wide
 
