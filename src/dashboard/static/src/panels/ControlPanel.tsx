@@ -20,6 +20,7 @@ import {
   uploadModelArtifact,
 } from "../api/http";
 import { useControlStream } from "../hooks/useControlStream";
+import { describeError } from "../hooks/useControlResource";
 import type {
   CaptureState,
   ConnectionState,
@@ -266,6 +267,25 @@ export function ControlPanel({ token, onTokenChange }: ControlPanelProps) {
             {version.git_sha ? ` / ${version.git_sha}` : ""}
           </div>
         )}
+      </div>
+
+      <div
+        className={cn(
+          "flex items-center gap-2 rounded-[8px] border px-3 py-1.5 text-[0.8rem]",
+          token
+            ? "border-ok/45 bg-ok/10 text-ok"
+            : "border-border-soft bg-elev text-fg-dim",
+        )}
+      >
+        <span
+          className={cn(
+            "inline-block h-2 w-2 rounded-full",
+            token ? "bg-ok" : "bg-fg-faint",
+          )}
+        />
+        {token
+          ? "Control unlocked — mutating actions enabled."
+          : "Read-only — enter the control token to enable captures, jobs, sessions and uploads."}
       </div>
 
       {notice && <div className={noticeClass(notice.kind)}>{notice.text}</div>}
@@ -520,6 +540,6 @@ function formatTime(value: string): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+// Status-aware messaging (Task 6.14): 401/403 → token problem, 503 →
+// feature not wired, etc. — never a raw stack-ish string.
+const errorText = describeError;

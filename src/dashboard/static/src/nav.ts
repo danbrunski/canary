@@ -11,8 +11,9 @@ export const NAV: NavGroupDef[] = [
     label: "Live",
     items: [
       { id: "live-gauges", label: "Gauges", group: "live" },
-      { id: "live-charts", label: "Charts", group: "live", placeholder: true },
-      { id: "live-alarms", label: "Alarms", group: "live", placeholder: true },
+      { id: "live-charts", label: "Charts", group: "live" },
+      { id: "live-alarms", label: "Alarms", group: "live" },
+      { id: "live-builder", label: "Builder", group: "live" },
     ],
   },
   {
@@ -20,9 +21,9 @@ export const NAV: NavGroupDef[] = [
     label: "Diagnostics",
     items: [
       { id: "diag-anomalies", label: "Anomalies", group: "diagnostics" },
-      { id: "diag-coverage", label: "OBD Coverage", group: "diagnostics", placeholder: true },
+      { id: "diag-coverage", label: "OBD Coverage", group: "diagnostics" },
       { id: "diag-dtc", label: "Trouble Codes", group: "diagnostics", placeholder: true },
-      { id: "diag-did", label: "Nissan DIDs", group: "diagnostics", placeholder: true },
+      { id: "diag-did", label: "Nissan DIDs", group: "diagnostics" },
       { id: "diag-system", label: "System", group: "diagnostics" },
       { id: "diag-tpms", label: "TPMS", group: "diagnostics" },
     ],
@@ -33,8 +34,8 @@ export const NAV: NavGroupDef[] = [
     items: [
       { id: "models-overview", label: "Overview", group: "models" },
       { id: "models-behavior", label: "Behavior", group: "models" },
-      { id: "models-training", label: "Training", group: "models", placeholder: true },
-      { id: "models-tuning", label: "Tuning", group: "models", placeholder: true },
+      { id: "models-training", label: "Training", group: "models" },
+      { id: "models-tuning", label: "Tuning", group: "models" },
       { id: "models-health", label: "Drift / Health", group: "models", placeholder: true },
     ],
   },
@@ -43,7 +44,7 @@ export const NAV: NavGroupDef[] = [
     label: "Data",
     items: [
       { id: "data-sessions", label: "Sessions", group: "data", placeholder: true },
-      { id: "data-health", label: "Dataset Health", group: "data", placeholder: true },
+      { id: "data-health", label: "Dataset Health", group: "data" },
       { id: "data-export", label: "Export", group: "data", placeholder: true },
     ],
   },

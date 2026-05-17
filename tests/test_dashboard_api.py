@@ -245,6 +245,36 @@ def test_bindings_endpoint_returns_empty_when_file_missing(
     assert r.json() == {}
 
 
+def test_dids_endpoint(config: CanaryConfig, anomalies_dir: Path, tmp_path: Path) -> None:
+    yaml = """
+schema_version: 1
+vehicle: {make: Nissan, model: Xterra, year: 2008}
+access:
+  ecu_request_id: 0x7E0
+  ecu_response_id: 0x7E8
+  session: 0xC0
+dids:
+  - did: 0x1208
+    name: INJECTOR_PULSE_WIDTH
+    byte_start: 0
+    byte_length: 2
+    confidence: high
+"""
+    path = tmp_path / "dids.yaml"
+    path.write_text(yaml)
+    client = TestClient(create_app(config, anomalies_dir=anomalies_dir, dids_path=path))
+    body = client.get("/dids").json()
+    assert body["schema_version"] == 1
+    assert body["dids"][0]["name"] == "INJECTOR_PULSE_WIDTH"
+
+    missing = create_app(
+        config, anomalies_dir=anomalies_dir, dids_path=tmp_path / "absent.yaml"
+    )
+    r = TestClient(missing).get("/dids")
+    assert r.status_code == 200
+    assert r.json()["dids"] == []
+
+
 def test_read_behavior_models_returns_empty_when_file_missing(tmp_path: Path) -> None:
     """A daemon brought up before any `refit_behavior_models.py` run should
     surface "no surfaces" cleanly, not 500. The dashboard renders this as

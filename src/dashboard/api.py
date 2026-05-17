@@ -115,6 +115,9 @@ DEFAULT_STATIC_DIR = Path(__file__).resolve().parent / "static" / "dist"
 #: stays in the YAML and is irrelevant to the live view.
 DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
 
+#: Canonical Nissan Mode-22 DID catalog (Task 6.16 workbench reads this).
+DEFAULT_DIDS_PATH = Path("data/dids.yaml")
+
 log = logging.getLogger(__name__)
 
 
@@ -497,6 +500,7 @@ def create_app(
     emitter: AnomalyEventEmitter | None = None,
     behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
+    dids_path: Path = DEFAULT_DIDS_PATH,
     static_dir: Path | None = None,
     enable_dev_cors: bool = False,
     capture_controller: CaptureController | None = None,
@@ -598,6 +602,17 @@ def create_app(
         # Re-read per request so a hand-edit to bindings.yaml (during RE)
         # surfaces in the dashboard immediately. The file is small.
         return read_bindings_for_display(bindings_path)
+
+    @app.get("/dids")
+    def get_dids() -> dict[str, Any]:
+        # Read-only Nissan Mode-22 DID catalog for the 6.16 workbench.
+        # Re-read per request like /bindings so a hand-edit during RE shows
+        # up immediately; empty doc when the file is absent.
+        from src.decode.dids import load_did_map
+
+        if not dids_path.exists():
+            return {"schema_version": None, "vehicle": {}, "access": None, "dids": []}
+        return load_did_map(dids_path).model_dump(mode="json")
 
     @app.get("/obd/coverage")
     def get_obd_coverage() -> dict[str, Any]:

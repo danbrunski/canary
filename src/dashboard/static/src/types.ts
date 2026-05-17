@@ -97,6 +97,7 @@ export type WorkbenchItem =
   | "live-gauges"
   | "live-charts"
   | "live-alarms"
+  | "live-builder"
   | "diag-anomalies"
   | "diag-coverage"
   | "diag-dtc"
@@ -448,4 +449,25 @@ export interface FeedbackResponse {
   feedback: FeedbackRecord[];
   count: number;
   summary: Record<string, number>;
+}
+
+/** `GET /dids` — Nissan Mode-22 DID catalog (Task 6.16). Mirrors
+ *  `DidMap.model_dump()`; only the fields the workbench renders are typed. */
+export interface DidEntry {
+  did: number;
+  name: string;
+  unit: string;
+  confidence: "confirmed" | "high" | "medium" | "low" | "hypothesized";
+  scale: number | null;
+  offset: number | null;
+  plausible_min: number | null;
+  plausible_max: number | null;
+  notes: string | null;
+}
+
+export interface DidMapResponse {
+  schema_version: number | null;
+  vehicle: Record<string, unknown>;
+  access: Record<string, unknown> | null;
+  dids: DidEntry[];
 }

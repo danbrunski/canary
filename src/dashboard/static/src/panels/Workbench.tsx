@@ -20,7 +20,9 @@ import { AnomalyPanel } from "./AnomalyPanel";
 import { BehaviorModelsPanel } from "./BehaviorModelsPanel";
 import { ChartsPanel } from "./ChartsPanel";
 import { ControlPanel } from "./ControlPanel";
+import { CustomDashboardPanel } from "./CustomDashboardPanel";
 import { DatasetHealthPanel } from "./DatasetHealthPanel";
+import { DidWorkbenchPanel } from "./DidWorkbenchPanel";
 import { ModelPanel } from "./ModelPanel";
 import { ObdCoveragePanel } from "./ObdCoveragePanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
@@ -116,6 +118,10 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
       return <ChartsPanel channels={d.channels} />;
     case "live-alarms":
       return <AlarmsPanel channels={d.channels} />;
+    case "live-builder":
+      return <CustomDashboardPanel channels={d.channels} />;
+    case "diag-did":
+      return <DidWorkbenchPanel />;
     case "diag-coverage":
       return <ObdCoveragePanel />;
     case "diag-dtc":
@@ -124,14 +130,6 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
           title="Trouble codes"
           task="6.4"
           summary="Stored / pending / permanent DTCs with described, timestamped, exportable snapshots (curated + structural code lookup). Live Mode 03/07/0A read is hardware-gated."
-        />
-      );
-    case "diag-did":
-      return (
-        <PlaceholderPanel
-          title="Nissan DID workbench"
-          task="6.16"
-          summary="Known DIDs with confidence, units, ranges, live value, raw hex, evidence and last-seen, plus a parked-only sweep launcher. Gated on the 6.15 live DID profile."
         />
       );
     case "models-training":

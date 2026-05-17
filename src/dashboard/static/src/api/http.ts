@@ -11,6 +11,7 @@ import type {
   CaptureResponse,
   CaptureTagResponse,
   DatasetHealthResponse,
+  DidMapResponse,
   FeedbackResponse,
   JobLogsResponse,
   JobResponse,
@@ -267,6 +268,11 @@ export function getObdCoverage(
   signal?: AbortSignal,
 ): Promise<ObdCoverageResponse> {
   return fetchJson("/obd/coverage", { signal });
+}
+
+/** `/dids` is read-only + unauthenticated, like `/bindings` (Task 6.16). */
+export function getDids(signal?: AbortSignal): Promise<DidMapResponse> {
+  return fetchJson("/dids", { signal });
 }
 
 export function getDatasetHealth(
