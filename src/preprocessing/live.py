@@ -66,11 +66,13 @@ class LiveFeatureSource:
     config: CanaryConfig
     bindings: Bindings | None = None
     behavior_models: BehaviorModels | None = None
+    dbc_database: Any | None = None
     session: str = "live"
 
     _current_values: dict[str, float] = field(default_factory=dict)
     _buffer: deque[dict[str, Any]] = field(init=False)
     _bindings_by_id: dict[int, list[Signal]] = field(init=False)
+    _dbc_message_by_id: dict[int, Any] = field(init=False)
     _feature_config: FeatureConfig = field(init=False)
     _max_rows: int = field(init=False)
 
@@ -89,6 +91,12 @@ class LiveFeatureSource:
         if self.bindings is not None:
             for sig in self.bindings.signals:
                 self._bindings_by_id.setdefault(sig.can_id, []).append(sig)
+        # Same idea for the DBC database: frame_id → message so a per-frame
+        # decode is an O(1) lookup, not a scan of every message.
+        self._dbc_message_by_id = {}
+        if self.dbc_database is not None:
+            for msg in self.dbc_database.messages:
+                self._dbc_message_by_id[msg.frame_id] = msg
 
     # ------------------------------------------------------------------
     # observe — update the current-value dict
@@ -156,6 +164,36 @@ class LiveFeatureSource:
             value = _to_float(decoded.value)
             if value is not None:
                 self._current_values[f"decoded:{decoded.channel}"] = value
+        self._apply_dbc_decode(record)
+
+    def _apply_dbc_decode(self, record: TelemetryRecord) -> None:
+        """Mirror ``decode_can_rows_dbc``: emit ``dbc:<SIGNAL>`` current values.
+
+        The offline trainer decodes CAN through the DBC database too, so the
+        model's feature columns include ``dbc:*``. Without this the live row
+        is missing every ``dbc:*`` column and inference fails the schema
+        check. Same policy as the offline path: cantools ``decode`` with
+        ``decode_choices=False``, numeric signals only (named/enum choices
+        skip the float() cast).
+        """
+        if self.dbc_database is None or record.payload is None:
+            return
+        can_id = _parse_can_id(record.channel)
+        if can_id is None:
+            return
+        message = self._dbc_message_by_id.get(can_id)
+        if message is None:
+            return
+        try:
+            decoded = message.decode(bytes(record.payload), decode_choices=False)
+        except Exception:  # noqa: BLE001 — cantools raises a family of errors
+            return
+        for signal_name, value in decoded.items():
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue  # named choice / enum signals — skip in numeric path
+            self._current_values[f"dbc:{signal_name}"] = numeric
 
     # ------------------------------------------------------------------
     # tick — emit one feature row
