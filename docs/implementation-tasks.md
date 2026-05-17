@@ -1270,12 +1270,29 @@ training/model-health visualization, and Torque Pro parity.
   and model-ready feature matrices. Every export should include manifest
   metadata: vehicle, config hash, channel schema, sessions, tags, time range,
   model/training purpose, and data-quality warnings.
-- [ ] **6.21 — Training run ledger and metrics artifacts.** Persist structured
-  run records for Isolation Forest, LSTM, behavior-model refits, and future
-  models: input sessions, feature schema, hyperparameters, loss curves,
-  threshold calibration, validation metrics, false-positive benchmark output,
-  produced artifacts, job logs, and publish status. Treat this as the source of
-  truth for the dashboard's training history.
+- [x] **6.21 — Training run ledger and metrics artifacts.**
+  `src/models/training_ledger.py` — `TrainingRunRecord` (strict Pydantic:
+  run_id, model_type, version, status, input sessions, feature schema,
+  hyperparams, `metrics` {loss_curve, thresholds, validation,
+  false_positive_benchmark, modes, manifest_extras}, artifacts, job_id +
+  log, `publish_status`) persisted by `TrainingLedger` as append-only JSONL
+  under `data/control/` (gitignored). Append-only with collapse-to-latest:
+  `records()` shows current state per run while `raw_records()` keeps the full
+  provenance chain (feedback-lineage cross-cutting concern); `set_publish_status`
+  appends a status-change line and auto-demotes the prior `active` model of the
+  same type to `published` (one live model per type, every demotion audited).
+  `build_run_record_from_manifest` adapts either trainer's manifest through the
+  shared `validate_manifest_common` (lenient model-type) and merges an optional
+  `fp_benchmark.py` JSON, so trainers stay ledger-agnostic. `scripts/retrain.py`
+  gained a best-effort `--ledger`/`--no-ledger`/`--job-id` hook (a
+  missing/unreadable manifest is logged and skipped — never fails the retrain,
+  never writes a stray file). Operator CLI `scripts/ledger.py`
+  (list/ingest/publish/show) drives it without a daemon for the offline
+  workflow. Source of truth for the 6.22 training dashboard / 6.26 label-aware
+  retraining / 6.37 publish queue. Covered by `tests/test_training_ledger.py`
+  (15 tests: LSTM/IF manifest extraction, FP-benchmark merge, bad-manifest
+  raise, append/collapse/provenance, active-demotion, JSON round-trip, CLI,
+  retrain hook present + best-effort). (FR-09)
 - [ ] **6.22 — Training dashboard.** Visualize training jobs and model quality:
   run history, active job logs, IF score distributions, LSTM loss curves,
   threshold bands, held-out false-positive rate, alerts/hour, per-channel

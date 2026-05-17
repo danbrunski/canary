@@ -43,6 +43,12 @@ from refit_behavior_models import _filter_sessions_by_age  # noqa: E402
 
 from src.config import CanaryConfig  # noqa: E402
 from src.log import configure_logging  # noqa: E402
+from src.models.manifest import ManifestValidationError  # noqa: E402
+from src.models.training_ledger import (  # noqa: E402
+    DEFAULT_TRAINING_LEDGER_PATH,
+    TrainingLedger,
+    build_run_record_from_manifest,
+)
 from src.preprocessing import discover_sessions  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -121,6 +127,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="LSTM training device (cpu / cuda). Default cpu — Pi target.",
     )
     parser.add_argument(
+        "--ledger",
+        type=Path,
+        default=DEFAULT_TRAINING_LEDGER_PATH,
+        help=(
+            "Training-run ledger JSONL (Task 6.21). Each successful trainer's "
+            "manifest is ingested as a run record. Default data/control/."
+        ),
+    )
+    parser.add_argument(
+        "--no-ledger",
+        action="store_true",
+        help="Skip writing the training-run ledger.",
+    )
+    parser.add_argument(
+        "--job-id",
+        default=None,
+        help="Correlate ledger records with this control-plane job id.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -161,6 +186,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     results: dict[str, str] = {}
 
+    ledger = None if args.no_ledger else TrainingLedger(args.ledger)
+
     if not args.skip_if:
         try:
             if_trainer.train(
@@ -170,6 +197,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 bindings_path=args.bindings,
             )
             results["isolation_forest"] = "ok"
+            _ingest_ledger(ledger, args.if_out, "succeeded", args.job_id)
         except Exception as exc:  # noqa: BLE001 — surface + continue to the next trainer
             log.exception("isolation forest trainer failed", extra={"error": str(exc)})
             results["isolation_forest"] = f"failed: {exc}"
@@ -184,12 +212,43 @@ def main(argv: Sequence[str] | None = None) -> int:
                 device=args.device,
             )
             results["lstm_autoencoder"] = "ok"
+            _ingest_ledger(ledger, args.lstm_out, "succeeded", args.job_id)
         except Exception as exc:  # noqa: BLE001
             log.exception("lstm trainer failed", extra={"error": str(exc)})
             results["lstm_autoencoder"] = f"failed: {exc}"
 
     _print_report(sessions, results, args)
     return 0 if all(v == "ok" for v in results.values()) else 1
+
+
+def _ingest_ledger(
+    ledger: TrainingLedger | None,
+    out_dir: Path,
+    status: str,
+    job_id: str | None,
+) -> None:
+    """Best-effort: record the trainer's manifest in the training ledger.
+
+    Never fails the retrain — a missing/unreadable manifest (e.g. a stubbed
+    trainer in tests, or a trainer that crashed after reporting ok) is logged
+    and skipped. The ledger is an index, not a gate.
+    """
+    if ledger is None:
+        return
+    manifest_path = out_dir / "model.manifest.json"
+    if not manifest_path.exists():
+        log.debug("no manifest at %s; skipping ledger ingest", manifest_path)
+        return
+    try:
+        record = build_run_record_from_manifest(
+            manifest_path,
+            status="succeeded" if status == "succeeded" else "failed",
+            job_id=job_id,
+        )
+        ledger.append(record)
+        log.info("recorded training run", extra={"run_id": record.run_id})
+    except (ManifestValidationError, OSError) as exc:
+        log.warning("ledger ingest skipped: %s", exc)
 
 
 def _print_report(sessions: list[Path], results: dict[str, str], args: argparse.Namespace) -> None:
