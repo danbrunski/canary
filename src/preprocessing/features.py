@@ -36,6 +36,14 @@ ROC_SUFFIX = "__roc"
 
 _FEATURE_SUFFIXES: tuple[str, ...] = (MEAN_SUFFIX, STD_SUFFIX, ROC_SUFFIX)
 
+# Telemetry features feed a downstream model after z-score normalization;
+# float32 (~7 significant digits) is ample and roughly halves the RAM held
+# by the featurized frame, which is the dominant cost during training (each
+# raw channel becomes raw + __mean + __std + __roc). The rolling reductions
+# below are still computed by pandas in float64 — only the stored result is
+# narrowed. Scaler μ/σ stats stay float64 (see normalization.py).
+FEATURE_DTYPE = np.float32
+
 
 @dataclass(frozen=True)
 class FeatureConfig:
@@ -127,10 +135,10 @@ def _features_one_session(
         )
         if cfg.include_mean:
             for col in columns:
-                new_cols[mean_column(col)] = windowed[col].mean().to_numpy()
+                new_cols[mean_column(col)] = windowed[col].mean().to_numpy(dtype=FEATURE_DTYPE)
         if cfg.include_std:
             for col in columns:
-                new_cols[std_column(col)] = windowed[col].std().to_numpy()
+                new_cols[std_column(col)] = windowed[col].std().to_numpy(dtype=FEATURE_DTYPE)
 
     if cfg.include_roc:
         # Rate-of-change uses a row-count shift derived from the median
@@ -142,10 +150,13 @@ def _features_one_session(
         for col in columns:
             shifted = ordered[col].shift(n_rows)
             roc = (ordered[col] - shifted) / cfg.window_seconds
-            new_cols[roc_column(col)] = roc.to_numpy()
+            new_cols[roc_column(col)] = roc.to_numpy(dtype=FEATURE_DTYPE)
 
+    # Narrow the passthrough value columns too, so the whole featurized
+    # frame is float32 rather than just the appended feature columns.
+    value_downcast = {col: FEATURE_DTYPE for col in columns}
     if not new_cols:
-        return ordered
+        return ordered.astype(value_downcast)
     # Build all feature columns in one shot — `ordered.assign(**new_cols)`
     # adds them one at a time, which fragments the frame and triggers a
     # PerformanceWarning when there are dozens of channels. Drop any columns
@@ -153,6 +164,7 @@ def _features_one_session(
     # input replaces rather than duplicates them (matching the old assign()).
     to_replace = [c for c in new_cols if c in ordered.columns]
     base = ordered.drop(columns=to_replace) if to_replace else ordered
+    base = base.astype({c: t for c, t in value_downcast.items() if c in base.columns})
     feature_block = pd.DataFrame(new_cols, index=base.index)
     return pd.concat([base, feature_block], axis=1)
 

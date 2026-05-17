@@ -197,7 +197,9 @@ class TrainedIsolationForest:
             if complete_indexes.empty:
                 continue
 
-            x = scaled.loc[complete_indexes, list(self.feature_columns)].to_numpy(dtype=float)
+            x = scaled.loc[complete_indexes, list(self.feature_columns)].to_numpy(
+                dtype=np.float32
+            )
             model = self.models[mode_key]
             # sklearn's decision_function is positive for inliers and
             # negative for outliers. Negating gives a more natural
@@ -250,7 +252,7 @@ def fit_isolation_forest(
 
     for raw_mode, group in scaled.groupby(mode_column, sort=True, dropna=False):
         mode = str(raw_mode)
-        x = group[list(selected_features)].to_numpy(dtype=float)
+        x = group[list(selected_features)].to_numpy(dtype=np.float32)
         if len(x) == 0:
             continue
         contamination = _contamination_for_mode(config, mode)

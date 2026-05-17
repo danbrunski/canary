@@ -79,7 +79,12 @@ class ZScoreScaler:
         means: dict[str, float] = {}
         stds: dict[str, float] = {}
         for col in cols:
-            series = df[col]
+            # Reduce in float64 even when the feature column is float32:
+            # μ/σ accumulated over a long training set lose precision in
+            # float32, and these scalars are persisted in the model manifest
+            # and divide every transformed value. The upcast is a transient
+            # per-column copy, freed each iteration.
+            series = df[col].astype("float64")
             mean_val = float(series.mean(skipna=True))
             # ddof=0 (population std). The classic z-score assumes the
             # training set represents the full distribution; ddof=1 would
