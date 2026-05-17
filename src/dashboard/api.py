@@ -265,6 +265,30 @@ def read_latest_telemetry_rows(
     return rows
 
 
+def read_obd_coverage(storage_path: Path) -> dict[str, Any]:
+    """OBD capability/coverage (Task 6.3) derived from observed telemetry.
+
+    The "supported" set is inferred honestly from which ``obd:`` channels
+    actually appeared in the newest session — no live ECU query, so it works
+    off-vehicle and without owning the diagnostic bus. Empty report when no
+    session/chunk exists yet.
+    """
+    from src.analysis.obd_coverage import build_coverage_report, channels_to_pids
+
+    latest = _resolve_latest_session(storage_path)
+    observed: set[str] = set()
+    if latest is not None:
+        for chunk in sorted(latest.glob(PARQUET_PATTERN)):
+            try:
+                df = pd.read_parquet(chunk, columns=["source", "channel"])
+            except (OSError, ValueError, KeyError):
+                continue
+            obd_rows = df[df["source"] == "obd"]
+            observed.update(str(c) for c in obd_rows["channel"].unique())
+    supported = channels_to_pids(observed)
+    return build_coverage_report(supported).to_dict()
+
+
 def _normalize_telemetry_row(record: dict[str, Any]) -> dict[str, Any]:
     """Collapse the (value_number, value_text, value_bool) trio into one ``value``
     so the dashboard gets a stable shape regardless of the underlying type."""
@@ -573,6 +597,12 @@ def create_app(
         # Re-read per request so a hand-edit to bindings.yaml (during RE)
         # surfaces in the dashboard immediately. The file is small.
         return read_bindings_for_display(bindings_path)
+
+    @app.get("/obd/coverage")
+    def get_obd_coverage() -> dict[str, Any]:
+        # Read-only honesty surface (Task 6.3 / Risk R7): which public PIDs
+        # the ECU supports, which CANary decodes, which are undecoded gaps.
+        return read_obd_coverage(config.collection.storage_path)
 
     def require_control_auth(
         authorization: str | None = Header(default=None),

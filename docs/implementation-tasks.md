@@ -1136,17 +1136,29 @@ training/model-health visualization, and Torque Pro parity.
   at low rate, and one-shot/service reads on demand. Publish scheduler metrics
   (configured rate, observed response rate, timeout/backoff state, bus errors)
   so the dashboard can explain why a supported PID is stale or missing.
-- [ ] **6.3 — OBD capability and coverage endpoint.** Add API + dashboard views
-  that show the ECU-reported supported PID bitmaps, which PIDs CANary decodes,
-  which are actively polled, which responded recently, which are backed off,
-  and which public PIDs still need decoders. This is the operator-facing proof
-  that "28 channels" means 28 usable channels, not hidden raw CAN IDs.
-- [ ] **6.4 — DTC, freeze-frame, monitor, and VIN workflow.** Add dashboard and
-  `canaryctl` flows for stored DTCs (Mode 03), pending DTCs (Mode 07),
-  permanent DTCs (Mode 0A), freeze-frame data (Mode 02), Mode 06 monitor test
-  results, VIN, calibration IDs, and CVNs. Include code lookup text where a
-  public database is available, timestamped snapshots, and export with the
-  current telemetry/session context.
+- [~] **6.3 — OBD capability and coverage endpoint.** Backend done:
+  `src/analysis/obd_coverage.py` — `build_coverage_report(supported,
+  responded, backed_off)` classifies *every* registry Mode 01 PID (Task 6.1)
+  into `decoded` / `supported_not_decoded` / `unsupported` with poll tier,
+  responded-recently, backed-off, and an explicit `undecoded_supported` gap
+  list (Risk R7 — never hides an undecoded-but-supported PID).
+  `channels_to_pids` maps observed channel names back to PIDs. Read-only
+  `GET /obd/coverage` infers the supported set honestly from the newest
+  session's `obd:` telemetry channels (no live ECU query — works
+  off-vehicle, doesn't contend for the diagnostic bus); the ECU-bitmap +
+  live backed-off feed and the React heatmap view are the remaining pieces.
+  Covered by `tests/test_obd_coverage.py`. (FR-08)
+- [~] **6.4 — DTC, freeze-frame, monitor, and VIN workflow.** Decode/lookup/
+  report core done: `src/decode/dtc_catalog.py` — `describe_dtc` (curated
+  generic-powertrain table + a *structural* fallback so an unknown/
+  manufacturer code is still explained: system, SAE-vs-OEM bit, subsystem
+  group) and `build_dtc_report` (described, timestamped, JSON-exportable
+  stored/pending/permanent snapshot with MIL + SAE dtc_count). Mode 02
+  freeze-frame reuses the Mode 01 formulas via `obd_registry.lookup(0x02,
+  pid)`; Mode 06 parsing is `parse_mode06_response`; VIN/cal/CVN decoders are
+  in the 6.1 registry. The live Mode 03/07/0A/02/09 reads + `canaryctl`/
+  dashboard flows that drive these (needs the truck) are the remaining piece.
+  Covered by `tests/test_obd_coverage.py`. (FR-08)
 - [ ] **6.5 — Parked-only clear-DTC action.** Implement optional Mode 04 behind
   the authenticated control plane, a parked interlock, explicit browser/CLI
   confirmation, audit logging, and an automatic post-clear rescan. This is a
