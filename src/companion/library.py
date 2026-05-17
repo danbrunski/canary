@@ -13,6 +13,9 @@ filter, and join without walking the tree every request.
     sessions/<id>/      # imported session directories (verbatim)
     models/<name>/      # imported model artifacts + manifests
     datasets/<name>/    # exported datasets + their manifests
+    jobs/               # local companion job logs/ledger
+    training-runs/      # local training-run sidecars
+    sync/               # temporary/retryable Pi sync workspace
 
 The DB is an *index/cache*, never the source of truth — every row points
 at files that remain independently readable. Schema migrations are additive
@@ -27,6 +30,7 @@ import json
 import logging
 import shutil
 import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -174,10 +178,21 @@ class CanaryLibrary:
         self.sessions_dir = self.root / "sessions"
         self.models_dir = self.root / "models"
         self.datasets_dir = self.root / "datasets"
-        for d in (self.sessions_dir, self.models_dir, self.datasets_dir):
+        self.jobs_dir = self.root / "jobs"
+        self.training_runs_dir = self.root / "training-runs"
+        self.sync_dir = self.root / "sync"
+        for d in (
+            self.sessions_dir,
+            self.models_dir,
+            self.datasets_dir,
+            self.jobs_dir,
+            self.training_runs_dir,
+            self.sync_dir,
+        ):
             d.mkdir(parents=True, exist_ok=True)
         self.db_path = self.root / "library.db"
-        self._conn = sqlite3.connect(self.db_path)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._migrate()
 
@@ -205,12 +220,13 @@ class CanaryLibrary:
 
     @contextmanager
     def _tx(self) -> Iterator[sqlite3.Connection]:
-        try:
-            yield self._conn
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+        with self._lock:
+            try:
+                yield self._conn
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     # -- sessions -------------------------------------------------------
 
@@ -322,18 +338,19 @@ class CanaryLibrary:
         return result
 
     def get_session(self, session_id: str) -> LibrarySession | None:
-        row = self._conn.execute(
-            "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
-        ).fetchone()
-        if row is None:
-            return None
-        tags = [
-            r["label"]
-            for r in self._conn.execute(
-                "SELECT label FROM session_tags WHERE session_id = ? ORDER BY label",
-                (session_id,),
-            )
-        ]
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            tags = [
+                r["label"]
+                for r in self._conn.execute(
+                    "SELECT label FROM session_tags WHERE session_id = ? ORDER BY label",
+                    (session_id,),
+                )
+            ]
         return LibrarySession(
             session_id=row["session_id"],
             path=row["path"],
@@ -350,11 +367,22 @@ class CanaryLibrary:
         )
 
     def list_sessions(self) -> list[LibrarySession]:
-        ids = [
-            r["session_id"]
-            for r in self._conn.execute("SELECT session_id FROM sessions ORDER BY session_id")
-        ]
+        with self._lock:
+            ids = [
+                r["session_id"]
+                for r in self._conn.execute("SELECT session_id FROM sessions ORDER BY session_id")
+            ]
         return [s for sid in ids if (s := self.get_session(sid)) is not None]
+
+    def remove_session(self, session_id: str, *, delete_files: bool = True) -> None:
+        """Remove a session from the library index and optionally from disk."""
+        session = self.get_session(session_id)
+        if session is not None and delete_files:
+            shutil.rmtree(Path(session.path), ignore_errors=True)
+        with self._tx() as conn:
+            conn.execute("DELETE FROM session_tags WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM session_channels WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
 
     # -- training runs --------------------------------------------------
 
@@ -383,10 +411,13 @@ class CanaryLibrary:
             )
 
     def list_training_runs(self) -> list[dict[str, Any]]:
-        return [
-            json.loads(r["record"])
-            for r in self._conn.execute("SELECT record FROM training_runs ORDER BY created_at")
-        ]
+        with self._lock:
+            return [
+                json.loads(r["record"])
+                for r in self._conn.execute(
+                    "SELECT record FROM training_runs ORDER BY created_at"
+                )
+            ]
 
     # -- model artifacts + publish history ------------------------------
 
@@ -426,7 +457,8 @@ class CanaryLibrary:
         return stored
 
     def list_model_artifacts(self) -> list[dict[str, Any]]:
-        return [dict(r) for r in self._conn.execute("SELECT * FROM model_artifacts")]
+        with self._lock:
+            return [dict(r) for r in self._conn.execute("SELECT * FROM model_artifacts")]
 
     def record_publish(
         self, model_id: str, *, target: str, status: str, detail: str | None = None
@@ -439,13 +471,14 @@ class CanaryLibrary:
             )
 
     def publish_history(self, model_id: str | None = None) -> list[dict[str, Any]]:
-        if model_id is None:
-            rows = self._conn.execute("SELECT * FROM publish_history ORDER BY id")
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM publish_history WHERE model_id = ? ORDER BY id", (model_id,)
-            )
-        return [dict(r) for r in rows]
+        with self._lock:
+            if model_id is None:
+                rows = self._conn.execute("SELECT * FROM publish_history ORDER BY id")
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM publish_history WHERE model_id = ? ORDER BY id", (model_id,)
+                )
+            return [dict(r) for r in rows]
 
     # -- datasets -------------------------------------------------------
 
@@ -466,7 +499,8 @@ class CanaryLibrary:
             )
 
     def list_datasets(self) -> list[dict[str, Any]]:
-        return [dict(r) for r in self._conn.execute("SELECT * FROM datasets ORDER BY name")]
+        with self._lock:
+            return [dict(r) for r in self._conn.execute("SELECT * FROM datasets ORDER BY name")]
 
     # -- queued Pi actions ---------------------------------------------
 
@@ -488,10 +522,11 @@ class CanaryLibrary:
             )
 
     def list_actions(self, *, status: str | None = None) -> list[dict[str, Any]]:
-        if status is None:
-            rows = self._conn.execute("SELECT * FROM queued_actions ORDER BY id")
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM queued_actions WHERE status = ? ORDER BY id", (status,)
-            )
-        return [dict(r) for r in rows]
+        with self._lock:
+            if status is None:
+                rows = self._conn.execute("SELECT * FROM queued_actions ORDER BY id")
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM queued_actions WHERE status = ? ORDER BY id", (status,)
+                )
+            return [dict(r) for r in rows]

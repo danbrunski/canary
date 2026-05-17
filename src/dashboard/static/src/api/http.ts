@@ -18,6 +18,7 @@ import type {
   JobsResponse,
   ObdCoverageResponse,
   PreflightResponse,
+  SessionSummary,
   SessionsResponse,
   StatusResponse,
   TelemetryLatestResponse,
@@ -29,7 +30,7 @@ import type {
   VersionResponse,
 } from "../types";
 
-class HttpError extends Error {
+export class HttpError extends Error {
   status: number;
   body: string;
   constructor(status: number, body: string) {
@@ -37,6 +38,12 @@ class HttpError extends Error {
     this.status = status;
     this.body = body;
   }
+}
+
+function apiUrl(path: string, baseUrl?: string): string {
+  const base = baseUrl?.trim().replace(/\/+$/, "") ?? "";
+  if (!base) return path;
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
@@ -55,15 +62,18 @@ async function controlJson<T>(
   path: string,
   token: string,
   init: RequestInit = {},
+  baseUrl?: string,
 ): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
-  headers.set("Authorization", `Bearer ${token}`);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
   const body = init.body;
   if (body !== undefined && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  return fetchJson<T>(path, { ...init, headers });
+  return fetchJson<T>(apiUrl(path, baseUrl), { ...init, headers });
 }
 
 function jsonBody(value: unknown): string {
@@ -181,8 +191,9 @@ export function stopCapture(
 export function listSessions(
   token: string,
   signal?: AbortSignal,
+  baseUrl?: string,
 ): Promise<SessionsResponse> {
-  return controlJson<SessionsResponse>("/control/sessions", token, { signal });
+  return controlJson<SessionsResponse>("/control/sessions", token, { signal }, baseUrl);
 }
 
 export function updateSessionMetadata(
@@ -239,19 +250,24 @@ export async function downloadSession(token: string, sessionId: string): Promise
   return response.blob();
 }
 
-export function listJobs(token: string, signal?: AbortSignal): Promise<JobsResponse> {
-  return controlJson<JobsResponse>("/control/jobs", token, { signal });
+export function listJobs(
+  token: string,
+  signal?: AbortSignal,
+  baseUrl?: string,
+): Promise<JobsResponse> {
+  return controlJson<JobsResponse>("/control/jobs", token, { signal }, baseUrl);
 }
 
 export function submitJob(
   token: string,
   kind: string,
   params: Record<string, unknown>,
+  baseUrl?: string,
 ): Promise<JobResponse> {
   return controlJson<JobResponse>("/control/jobs", token, {
     method: "POST",
     body: jsonBody({ kind, params }),
-  });
+  }, baseUrl);
 }
 
 export function cancelJob(token: string, jobId: string): Promise<JobResponse> {
@@ -275,6 +291,29 @@ export function uploadModelArtifact(
     method: "POST",
     body: jsonBody({ artifact_b64: artifactB64, manifest }),
   });
+}
+
+export function syncSessionToCompanion(
+  companionBaseUrl: string,
+  companionToken: string,
+  sessionId: string,
+  body: {
+    pi_host?: string | null;
+    token?: string | null;
+    pin?: boolean;
+    pin_reason?: string | null;
+    index_with_config?: boolean;
+  },
+): Promise<{ session: SessionSummary }> {
+  return controlJson(
+    `/companion/sync/sessions/${encodeURIComponent(sessionId)}`,
+    companionToken,
+    {
+      method: "POST",
+      body: jsonBody(body),
+    },
+    companionBaseUrl,
+  );
 }
 
 // --- Phase-6 panels --------------------------------------------------------
@@ -309,8 +348,9 @@ export function getDatasetHealth(
 export function getTrainingRuns(
   token: string,
   signal?: AbortSignal,
+  baseUrl?: string,
 ): Promise<TrainingRunsResponse> {
-  return controlJson("/control/training-runs", token, { signal });
+  return controlJson("/control/training-runs", token, { signal }, baseUrl);
 }
 
 export function getTuning(
@@ -369,5 +409,3 @@ export function postFeedback(
     body: jsonBody({ event, label, reason }),
   });
 }
-
-export { HttpError };

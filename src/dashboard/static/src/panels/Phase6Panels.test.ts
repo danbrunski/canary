@@ -1,5 +1,5 @@
 import { createElement } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -12,12 +12,14 @@ const mocks = vi.hoisted(() => ({
   getObdCoverage: vi.fn(),
   getDatasetHealth: vi.fn(),
   getTrainingRuns: vi.fn(),
+  submitJob: vi.fn(),
 }));
 
 vi.mock("../api/http", () => ({
   getObdCoverage: mocks.getObdCoverage,
   getDatasetHealth: mocks.getDatasetHealth,
   getTrainingRuns: mocks.getTrainingRuns,
+  submitJob: mocks.submitJob,
   HttpError: class extends Error {
     status = 0;
     body = "";
@@ -28,10 +30,18 @@ const { ObdCoveragePanel } = await import("./ObdCoveragePanel");
 const { DatasetHealthPanel } = await import("./DatasetHealthPanel");
 const { TrainingPanel } = await import("./TrainingPanel");
 
+const COMPANION = {
+  baseUrl: "http://127.0.0.1:8765",
+  token: "",
+  setBaseUrl: vi.fn(),
+  setToken: vi.fn(),
+};
+
 beforeEach(() => {
   mocks.getObdCoverage.mockReset();
   mocks.getDatasetHealth.mockReset();
   mocks.getTrainingRuns.mockReset();
+  mocks.submitJob.mockReset();
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -132,9 +142,40 @@ describe("TrainingPanel", () => {
       ],
     };
     mocks.getTrainingRuns.mockResolvedValue(resp);
-    render(createElement(TrainingPanel, { token: "secret" }));
+    render(createElement(TrainingPanel, { token: "secret", companion: COMPANION }));
     expect(await screen.findByText("lstm_v1")).toBeInTheDocument();
     expect(screen.getByText("active")).toBeInTheDocument();
     expect(screen.getByText("1 runs")).toBeInTheDocument();
+  });
+
+  it("starts a laptop training job through the companion API", async () => {
+    mocks.getTrainingRuns.mockResolvedValue({ count: 0, runs: [] });
+    mocks.submitJob.mockResolvedValue({
+      job: {
+        job_id: "job1",
+        kind: "retrain_if",
+        status: "queued",
+        created_at: "2026-05-17T10:00:00+00:00",
+        started_at: null,
+        finished_at: null,
+        returncode: null,
+        log_path: "job.log",
+        command: [],
+        params: { days: 14 },
+      },
+    });
+    render(createElement(TrainingPanel, { token: "secret", companion: COMPANION }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    await waitFor(() =>
+      expect(mocks.submitJob).toHaveBeenCalledWith(
+        "",
+        "retrain_if",
+        { days: 14 },
+        "http://127.0.0.1:8765",
+      ),
+    );
+    expect(await screen.findByText(/queued on laptop/)).toBeInTheDocument();
   });
 });

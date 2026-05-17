@@ -1,14 +1,23 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 
-import { getTrainingRuns } from "../api/http";
+import { getTrainingRuns, submitJob } from "../api/http";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
+import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import { useControlResource } from "../hooks/useControlResource";
-import { cn, placeholderClass } from "../styles";
+import {
+  buttonClass,
+  cn,
+  inputClass,
+  noticeClass,
+  placeholderClass,
+  selectClass,
+} from "../styles";
 import type { TrainingRun } from "../types";
 
 interface TrainingPanelProps {
   token: string;
+  companion: CompanionSettings;
 }
 
 const PUBLISH_STYLE: Record<string, string> = {
@@ -18,63 +27,179 @@ const PUBLISH_STYLE: Record<string, string> = {
   rolled_back: "text-bad",
 };
 
+const JOB_KINDS = ["retrain_if", "retrain_lstm", "retrain_all", "refit_behavior_models"];
+type TrainingTarget = "pi" | "local";
+
 /** Training dashboard (Task 6.22): run history + model quality from the
  *  training-run ledger (Task 6.21). Loss curve, threshold band, held-out
  *  FP rate and publish status per run. */
-export function TrainingPanel({ token }: TrainingPanelProps) {
-  const fetcher = useCallback(
-    (signal: AbortSignal) => getTrainingRuns(token, signal),
-    [token],
+export function TrainingPanel({ token, companion }: TrainingPanelProps) {
+  const [target, setTarget] = useState<TrainingTarget>("local");
+  const [jobKind, setJobKind] = useState("retrain_if");
+  const [jobDays, setJobDays] = useState("14");
+  const [useAllSessions, setUseAllSessions] = useState(false);
+  const [device, setDevice] = useState("cpu");
+  const [notice, setNotice] = useState<{ kind: "ok" | "error" | "busy"; text: string } | null>(
+    null,
   );
-  const { data, error, loading } = useControlResource(fetcher, {
-    enabled: Boolean(token),
+  const [busy, setBusy] = useState(false);
+  const historyBase = target === "local" ? companion.baseUrl : undefined;
+  const historyToken = target === "local" ? companion.token : token;
+  const historyEnabled = target === "local" ? Boolean(companion.baseUrl) : Boolean(token);
+  const fetcher = useCallback(
+    (signal: AbortSignal) => getTrainingRuns(historyToken, signal, historyBase),
+    [historyBase, historyToken],
+  );
+  const { data, error, loading, refresh } = useControlResource(fetcher, {
+    enabled: historyEnabled,
     intervalMs: 15000,
   });
 
-  if (!token) {
-    return (
-      <Panel title="Training">
-        <p className={placeholderClass}>
-          Enter the control token (Control panel) to read training history.
-        </p>
-      </Panel>
-    );
-  }
-  if (loading) {
-    return (
-      <Panel title="Training">
-        <p className={placeholderClass}>loading runs…</p>
-      </Panel>
-    );
-  }
-  if (error || !data) {
-    return (
-      <Panel title="Training">
-        <p className={cn(placeholderClass, "text-bad")}>{error ?? "no data"}</p>
-      </Panel>
-    );
-  }
-  if (data.runs.length === 0) {
-    return (
-      <Panel title="Training" count="0 runs">
-        <p className={placeholderClass}>
-          No training runs recorded yet. Run <code>scripts/retrain.py</code> or
-          a <code>retrain_*</code> control job — each lands here automatically.
-        </p>
-      </Panel>
-    );
-  }
+  const startTraining = async () => {
+    const base = target === "local" ? companion.baseUrl : undefined;
+    const jobToken = target === "local" ? companion.token : token;
+    if (target === "local" && !companion.baseUrl) {
+      setNotice({ kind: "error", text: "Enter the companion API URL." });
+      return;
+    }
+    if (target === "pi" && !token) {
+      setNotice({ kind: "error", text: "Enter the Pi control token first." });
+      return;
+    }
+    const params: Record<string, unknown> = {};
+    if (useAllSessions) {
+      params.all = true;
+    } else if (jobDays.trim()) {
+      params.days = Number(jobDays);
+    }
+    if (jobKind.includes("lstm")) {
+      params.device = device || "cpu";
+    }
+    setBusy(true);
+    setNotice({ kind: "busy", text: "Submitting training job." });
+    try {
+      const response = await submitJob(jobToken, jobKind, params, base);
+      setNotice({
+        kind: "ok",
+        text: `${response.job.kind} queued on ${target === "local" ? "laptop" : "Pi"}.`,
+      });
+      refresh();
+    } catch (err) {
+      setNotice({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // Newest first.
-  const runs = [...data.runs].reverse();
+  const runs = [...(data?.runs ?? [])].reverse();
 
   return (
-    <Panel title="Training" count={`${data.count} runs`}>
-      <div className="flex max-h-[34rem] flex-col gap-2 overflow-y-auto">
-        {runs.map((run) => (
-          <RunCard key={run.run_id} run={run} />
-        ))}
+    <Panel title="Training" count={data ? `${data.count} runs` : undefined}>
+      <div className="mb-3 grid grid-cols-[auto_1fr_auto_auto_auto] items-end gap-2 max-[1100px]:grid-cols-1">
+        <label className="flex flex-col gap-1 text-[0.75rem] text-fg-dim">
+          Target
+          <select
+            className={selectClass}
+            value={target}
+            onChange={(event) => setTarget(event.target.value as TrainingTarget)}
+          >
+            <option value="local">Run on this laptop</option>
+            <option value="pi">Run on Pi</option>
+          </select>
+        </label>
+        {target === "local" ? (
+          <label className="flex flex-col gap-1 text-[0.75rem] text-fg-dim">
+            Companion API
+            <input
+              className={inputClass}
+              value={companion.baseUrl}
+              onChange={(event) => companion.setBaseUrl(event.target.value)}
+              placeholder="http://127.0.0.1:8765"
+            />
+          </label>
+        ) : (
+          <div className="min-h-9 text-[0.75rem] text-fg-dim">
+            {token ? "Pi control token present" : "Pi control token missing"}
+          </div>
+        )}
+        <select
+          className={selectClass}
+          value={jobKind}
+          onChange={(event) => setJobKind(event.target.value)}
+        >
+          {JOB_KINDS.map((kind) => (
+            <option key={kind} value={kind}>
+              {kind}
+            </option>
+          ))}
+        </select>
+        <input
+          className={inputClass}
+          value={jobDays}
+          onChange={(event) => setJobDays(event.target.value)}
+          disabled={useAllSessions}
+          inputMode="numeric"
+          placeholder="days"
+        />
+        <button className={buttonClass} type="button" onClick={startTraining} disabled={busy}>
+          Start
+        </button>
       </div>
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <label className="flex min-h-9 flex-row items-center gap-2 text-[0.75rem] text-fg-dim">
+          <input
+            type="checkbox"
+            checked={useAllSessions}
+            onChange={(event) => setUseAllSessions(event.target.checked)}
+          />
+          all sessions
+        </label>
+        {jobKind.includes("lstm") && (
+          <label className="flex items-center gap-2 text-[0.75rem] text-fg-dim">
+            device
+            <input
+              className={cn(inputClass, "w-24")}
+              value={device}
+              onChange={(event) => setDevice(event.target.value)}
+              placeholder="cpu"
+            />
+          </label>
+        )}
+      </div>
+      {target === "local" && (
+        <label className="mb-3 flex max-w-md flex-col gap-1 text-[0.75rem] text-fg-dim">
+          Local token
+          <input
+            className={inputClass}
+            type="password"
+            value={companion.token}
+            onChange={(event) => companion.setToken(event.target.value)}
+            placeholder="optional"
+            autoComplete="off"
+          />
+        </label>
+      )}
+      {notice && <div className={cn(noticeClass(notice.kind), "mb-3")}>{notice.text}</div>}
+      {!historyEnabled ? (
+        <p className={placeholderClass}>
+          {target === "local"
+            ? "Enter the companion API URL to read laptop training history."
+            : "Enter the Pi control token to read Pi training history."}
+        </p>
+      ) : loading ? (
+        <p className={placeholderClass}>loading runs…</p>
+      ) : error || !data ? (
+        <p className={cn(placeholderClass, "text-bad")}>{error ?? "no data"}</p>
+      ) : runs.length === 0 ? (
+        <p className={placeholderClass}>No training runs recorded yet.</p>
+      ) : (
+        <div className="flex max-h-[34rem] flex-col gap-2 overflow-y-auto">
+          {runs.map((run) => (
+            <RunCard key={run.run_id} run={run} />
+          ))}
+        </div>
+      )}
     </Panel>
   );
 }

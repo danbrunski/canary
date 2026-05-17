@@ -14,11 +14,13 @@ import {
   startCapture,
   stopCapture,
   submitJob,
+  syncSessionToCompanion,
   tagCapture,
   unpinSession,
   updateSessionMetadata,
   uploadModelArtifact,
 } from "../api/http";
+import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import { useControlStream } from "../hooks/useControlStream";
 import { describeError } from "../hooks/useControlResource";
 import type {
@@ -46,6 +48,7 @@ import {
 interface ControlPanelProps {
   token: string;
   onTokenChange: (token: string) => void;
+  companion: CompanionSettings;
 }
 
 const JOB_KINDS = [
@@ -56,7 +59,7 @@ const JOB_KINDS = [
   "refit_behavior_models",
 ];
 
-export function ControlPanel({ token, onTokenChange }: ControlPanelProps) {
+export function ControlPanel({ token, onTokenChange, companion }: ControlPanelProps) {
   const controlStream = useControlStream(token);
   const [preflight, setPreflight] = useState<PreflightResponse | null>(null);
   const [version, setVersion] = useState<VersionResponse | null>(null);
@@ -80,6 +83,7 @@ export function ControlPanel({ token, onTokenChange }: ControlPanelProps) {
   const [modelType, setModelType] = useState("isolation_forest");
   const [artifactFile, setArtifactFile] = useState<File | null>(null);
   const [manifestFile, setManifestFile] = useState<File | null>(null);
+  const [syncPin, setSyncPin] = useState(true);
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.session_id === selectedSessionId) ?? null,
@@ -217,6 +221,18 @@ export function ControlPanel({ token, onTokenChange }: ControlPanelProps) {
       URL.revokeObjectURL(url);
     });
 
+  const syncSelectedToLaptop = () =>
+    run("session sync", async () => {
+      if (!selectedSessionId) throw new Error("Select a session first.");
+      if (!companion.baseUrl) throw new Error("Enter the companion API URL.");
+      await syncSessionToCompanion(companion.baseUrl, companion.token, selectedSessionId, {
+        pi_host: currentPiHost(),
+        token: token || null,
+        pin: syncPin,
+        index_with_config: true,
+      });
+    });
+
   const startJob = () =>
     run("job submit", async () => {
       const params: Record<string, unknown> = {};
@@ -286,6 +302,29 @@ export function ControlPanel({ token, onTokenChange }: ControlPanelProps) {
         {token
           ? "Control unlocked — mutating actions enabled."
           : "Read-only — enter the control token to enable captures, jobs, sessions and uploads."}
+      </div>
+
+      <div className="grid grid-cols-[minmax(18rem,1fr)_minmax(12rem,0.45fr)] items-end gap-3 rounded-[8px] border border-border bg-elev p-3 max-[1100px]:grid-cols-1">
+        <label className="flex flex-col gap-1 text-[0.75rem] text-fg-dim">
+          Companion API
+          <input
+            className={inputClass}
+            value={companion.baseUrl}
+            onChange={(event) => companion.setBaseUrl(event.target.value)}
+            placeholder="http://127.0.0.1:8765"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[0.75rem] text-fg-dim">
+          Local token
+          <input
+            className={inputClass}
+            type="password"
+            value={companion.token}
+            onChange={(event) => companion.setToken(event.target.value)}
+            placeholder="optional"
+            autoComplete="off"
+          />
+        </label>
       </div>
 
       {notice && <div className={noticeClass(notice.kind)}>{notice.text}</div>}
@@ -386,12 +425,21 @@ export function ControlPanel({ token, onTokenChange }: ControlPanelProps) {
               <div className="flex flex-wrap gap-1.5">
                 <button className={buttonClass} type="button" onClick={saveMetadata}>Metadata</button>
                 <button className={buttonClass} type="button" onClick={exportSelected}>Export</button>
+                <button className={buttonClass} type="button" onClick={syncSelectedToLaptop}>Sync to laptop</button>
                 <button className={buttonClass} type="button" onClick={pinSelected}>Pin</button>
                 <button className={buttonClass} type="button" onClick={unpinSelected}>Unpin</button>
                 <button type="button" className={dangerButtonClass} onClick={deleteSelected}>
                   Delete
                 </button>
               </div>
+              <label className="flex min-h-9 flex-row items-center gap-2 text-[0.75rem] text-fg-dim">
+                <input
+                  type="checkbox"
+                  checked={syncPin}
+                  onChange={(event) => setSyncPin(event.target.checked)}
+                />
+                pin on Pi during sync
+              </label>
               <input className={inputClass} value={pinReason} onChange={(event) => setPinReason(event.target.value)} placeholder="pin reason" />
             </div>
           )}
@@ -532,6 +580,14 @@ async function fileToBase64(file: File): Promise<string> {
     binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
   }
   return btoa(binary);
+}
+
+function currentPiHost(): string | null {
+  const host = window.location.hostname;
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+    return null;
+  }
+  return window.location.origin;
 }
 
 function formatTime(value: string): string {

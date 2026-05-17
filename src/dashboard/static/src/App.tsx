@@ -1,5 +1,6 @@
 import { useAnomalyStream } from "./hooks/useAnomalyStream";
 import { useBehaviorModels } from "./hooks/useBehaviorModels";
+import { useCompanionSettings } from "./hooks/useCompanionSettings";
 import { useBindings } from "./hooks/useBindings";
 import { useControlToken } from "./hooks/useControlToken";
 import { useHashRoute } from "./hooks/useHashRoute";
@@ -23,6 +24,7 @@ export default function App() {
   const behaviorModels = useBehaviorModels();
   const bindings = useBindings();
   const controlToken = useControlToken();
+  const companion = useCompanionSettings();
 
   const data: DashboardData = {
     mode,
@@ -35,6 +37,7 @@ export default function App() {
     behaviorModelsError: behaviorModels.error,
     token: controlToken.token,
     onTokenChange: controlToken.setToken,
+    companion,
   };
 
   return (
@@ -47,6 +50,7 @@ export default function App() {
       anomalyState={anomalies.connection}
       controlState={controlToken.hasToken ? "open" : "closed"}
       controlReady={controlToken.hasToken}
+      sourceLabel={companion.baseUrl ? "live pi + laptop" : "live pi"}
       events={anomalies.events}
       status={status}
       channels={telemetry.channels}

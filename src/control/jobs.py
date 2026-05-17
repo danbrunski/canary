@@ -190,6 +190,7 @@ class JobController:
         common_sessions = self._session_args(params)
         config_arg = ["--config", str(self._config_path)]
         bindings_arg = ["--bindings", "data/bindings.yaml"]
+        ledger_arg = ["--ledger", str(self._config.daemon.training_ledger)]
         if kind == "retrain_if":
             return [
                 str(self._python),
@@ -197,6 +198,7 @@ class JobController:
                 *common_sessions,
                 *config_arg,
                 *bindings_arg,
+                *ledger_arg,
                 "--if-out",
                 str(self._config.daemon.models_dir / "isolation_forest"),
                 "--skip-lstm",
@@ -209,6 +211,7 @@ class JobController:
                 *common_sessions,
                 *config_arg,
                 *bindings_arg,
+                *ledger_arg,
                 "--lstm-out",
                 str(self._config.daemon.models_dir / "lstm_autoencoder"),
                 "--skip-if",
@@ -223,6 +226,7 @@ class JobController:
                 *common_sessions,
                 *config_arg,
                 *bindings_arg,
+                *ledger_arg,
                 "--if-out",
                 str(self._config.daemon.models_dir / "isolation_forest"),
                 "--lstm-out",

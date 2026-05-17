@@ -17,6 +17,12 @@ const DATA: DashboardData = {
   behaviorModelsError: null,
   token: "",
   onTokenChange: () => {},
+  companion: {
+    baseUrl: "http://127.0.0.1:8765",
+    token: "",
+    setBaseUrl: () => {},
+    setToken: () => {},
+  },
 };
 
 function renderAt(active: WorkbenchItem) {

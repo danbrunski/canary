@@ -1,4 +1,5 @@
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
+import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import { DEFAULT_ITEM, NAV, defaultItemForGroup } from "../nav";
 import {
   navGroupLabelClass,
@@ -44,6 +45,7 @@ export interface DashboardData {
   behaviorModelsError: Error | null;
   token: string;
   onTokenChange: (token: string) => void;
+  companion: CompanionSettings;
 }
 
 interface WorkbenchProps {
@@ -113,7 +115,11 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
       );
     case "control-main":
       return (
-        <ControlPanel token={d.token} onTokenChange={d.onTokenChange} />
+        <ControlPanel
+          token={d.token}
+          onTokenChange={d.onTokenChange}
+          companion={d.companion}
+        />
       );
     case "control-test":
       return (
@@ -138,7 +144,7 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
         />
       );
     case "models-training":
-      return <TrainingPanel token={d.token} />;
+      return <TrainingPanel token={d.token} companion={d.companion} />;
     case "models-tuning":
       return <TuningPanel token={d.token} />;
     case "models-health":
