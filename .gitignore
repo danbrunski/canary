@@ -57,7 +57,13 @@ data/raw/
 # in data/fsm/ which IS committed (factual identifiers).
 xterra_fsm/
 
-# Trained model artifacts (not committed; manifests live alongside the binary)
+# Trained model artifacts (not committed; manifests live alongside the binary).
+# Recursive — models live in per-type subdirs (models/isolation_forest/…).
+models/**/*.pt
+models/**/*.pth
+models/**/*.pkl
+models/**/*.joblib
+models/**/*.onnx
 models/*.pt
 models/*.pth
 models/*.pkl

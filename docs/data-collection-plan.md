@@ -114,6 +114,23 @@ You don't need all of it.
 Every new drive also sharpens the CAN bindings (more PIDs → more
 cross-reference → more decoded signals become ML features), so it compounds.
 
+### Status (2026-05-17) — pipeline proven, corpus not yet sufficient
+
+- **Isolation Forest baseline trained** (`models/isolation_forest/`, gitignored
+  binary + tracked manifest) on the single 18-min drive `2026-05-11T222447`:
+  664 samples, **184 decoded features** (incl. the `dbc:` broadcast bindings
+  via the emitted DBC). This proves the full pipeline end-to-end
+  (frames → bindings/DBC decode → features → scaler → IF) but is **not a
+  deployable detector**: one session, single operating mode (`all` — no
+  `obd:` PID columns to segment idle/city/highway/wot), and **unvalidated**
+  (no FPR — `fp_benchmark` is LSTM-only; no LSTM trained). Treat as a
+  smoke-test artifact, not Phase 2 done.
+- **Behavior-model refit blocked**: all 5 recipes skip — the recent corpus is
+  Mode-22/broadcast-only (no `obd:` Mode 01 PID columns), a direct
+  consequence of the DID-focused sessions (Mode 22 ⊥ Mode 01). Needs the
+  drive backlog above *with parallel Mode 01 logging* (`--obd-source canable`,
+  not in a `0xC0` DID session).
+
 ## 4. Software prep status
 
 - [x] Expanded `--obd-pids` default in `scripts/record.py`.
