@@ -237,6 +237,9 @@ async def drain_queue_with_broadcast(
             writer.write(record)
             if telemetry_broadcaster is not None:
                 telemetry_broadcaster.publish(_record_to_dict(record))
+                if live_source is not None:
+                    for decoded in live_source.decode_for_telemetry(record):
+                        telemetry_broadcaster.publish(_record_to_dict(decoded))
             if live_source is not None:
                 try:
                     live_source.observe(record)

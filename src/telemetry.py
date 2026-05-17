@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 
-TelemetrySource = Literal["obd", "can"]
+TelemetrySource = Literal["obd", "can", "decoded"]
 TelemetryValue = bool | int | float | str | None
 MetadataValue = bool | int | float | str | None
 
@@ -85,6 +85,25 @@ class TelemetryRecord:
             channel=f"0x{can_id:X}" if channel is None else channel,
             payload=payload,
             metadata={"can_id": can_id, "dlc": len(payload)},
+        )
+
+    @classmethod
+    def decoded(
+        cls,
+        timestamp: datetime,
+        channel: str,
+        value: TelemetryValue,
+        unit: str = "",
+        *,
+        metadata: dict[str, MetadataValue] | None = None,
+    ) -> TelemetryRecord:
+        return cls(
+            timestamp=timestamp,
+            source="decoded",
+            channel=channel,
+            value=value,
+            unit=unit,
+            metadata={} if metadata is None else metadata,
         )
 
     def parquet_row(self) -> dict[str, object]:

@@ -113,24 +113,49 @@ class LiveFeatureSource:
         if value is not None:
             self._current_values[f"{record.source}:{record.channel}"] = value
 
-    def _apply_can_decode(self, record: TelemetryRecord) -> None:
-        if record.payload is None or not isinstance(record.payload, (bytes, bytearray)):
-            return
+    def decode_for_telemetry(self, record: TelemetryRecord) -> tuple[TelemetryRecord, ...]:
+        """Return decoded signal rows for a raw CAN record.
+
+        This is the dashboard-facing counterpart to ``observe``'s CAN decode:
+        inference wants the values in ``_current_values``; the UI also needs
+        named ``decoded:<SIGNAL>`` rows so it can render gauges instead of raw
+        arbitration IDs.
+        """
+        if record.source != "can" or record.payload is None:
+            return ()
         can_id = _parse_can_id(record.channel)
         if can_id is None:
-            return
+            return ()
         signals = self._bindings_by_id.get(can_id)
         if not signals:
-            return
+            return ()
         payload = bytes(record.payload)
+        decoded: list[TelemetryRecord] = []
         for sig in signals:
-            end = sig.byte_start + sig.byte_length
-            if len(payload) < end:
+            raw = _decode_signal_raw(sig, payload)
+            if raw is None:
                 continue
-            raw = int.from_bytes(payload[sig.byte_start : end], byteorder=sig.byte_order)
+            decoded.append(
+                TelemetryRecord.decoded(
+                    record.timestamp,
+                    sig.name,
+                    raw,
+                    sig.unit if sig.unit != "unknown" else "",
+                    metadata={
+                        "can_id": can_id,
+                        "confidence": sig.confidence,
+                    },
+                )
+            )
+        return tuple(decoded)
+
+    def _apply_can_decode(self, record: TelemetryRecord) -> None:
+        for decoded in self.decode_for_telemetry(record):
             # Raw integer matches decode_can_rows' policy — the scaler
             # normalizes downstream and most bindings have no pinned scale.
-            self._current_values[f"decoded:{sig.name}"] = float(raw)
+            value = _to_float(decoded.value)
+            if value is not None:
+                self._current_values[f"decoded:{decoded.channel}"] = value
 
     # ------------------------------------------------------------------
     # tick — emit one feature row
@@ -204,6 +229,13 @@ def _parse_can_id(channel: str) -> int | None:
         return int(channel, 16)
     except (ValueError, TypeError):
         return None
+
+
+def _decode_signal_raw(signal: Signal, payload: bytes) -> int | None:
+    end = signal.byte_start + signal.byte_length
+    if len(payload) < end:
+        return None
+    return int.from_bytes(payload[signal.byte_start : end], byteorder=signal.byte_order)
 
 
 __all__ = ["LiveFeatureSource"]

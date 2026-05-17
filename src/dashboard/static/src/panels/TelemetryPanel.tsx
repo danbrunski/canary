@@ -40,6 +40,7 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
     }
     const primarySet = new Set(PRIMARY_CHANNELS);
     for (const [key, snap] of [...channels].sort(([a], [b]) => a.localeCompare(b))) {
+      if (isEmptyRawCan(snap)) continue;
       if (!primarySet.has(key)) secondary.push([key, snap]);
     }
     return { primary, secondary };
@@ -50,6 +51,7 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
     return [...channels]
       .sort(([a], [b]) => a.localeCompare(b))
       .filter(([key, snap]) => {
+        if (isEmptyRawCan(snap)) return false;
         if (!needle) return true;
         return (
           key.toLowerCase().includes(needle) ||
@@ -398,4 +400,8 @@ function formatAge(timestamp: string | null): string {
   if (!Number.isFinite(ageMs)) return "-";
   if (ageMs < 1000) return "now";
   return `${Math.round(ageMs / 1000)}s`;
+}
+
+function isEmptyRawCan(snapshot: ChannelSnapshot): boolean {
+  return snapshot.latest.source === "can" && snapshot.latest.value === null;
 }

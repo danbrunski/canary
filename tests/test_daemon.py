@@ -14,9 +14,11 @@ from src.config import CanaryConfig, DaemonConfig
 from src.daemon import (
     DaemonComponents,
     build_components,
+    build_live_feature_source,
     drain_queue_with_broadcast,
     poll_model_managers,
 )
+from src.dashboard.broadcast import Broadcaster
 from src.models.manager import ModelManager
 from src.models.manifest import CURRENT_MANIFEST_FORMAT_VERSION
 from src.storage.parquet_writer import ParquetTelemetryWriter
@@ -623,6 +625,43 @@ async def test_drain_feeds_live_source_when_passed(tmp_path: Path) -> None:
     await _producer()
     await drain_task
     assert "obd:RPM" in source.known_channels
+
+
+async def test_drain_publishes_decoded_can_rows_to_telemetry_bus(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    """Dashboard subscribers should see named decoded signals, not only raw CAN IDs."""
+    source = build_live_feature_source(build_components(config))
+    writer = ParquetTelemetryWriter(tmp_path / "storage")
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+    bus = Broadcaster()
+    sub = bus.subscribe()
+
+    async def _producer() -> None:
+        await queue.put(TelemetryRecord.can(1.0, 0x551, bytes([0x69, 0, 0, 0, 0, 0, 0, 0])))
+        await asyncio.sleep(0.05)
+        stop.set()
+
+    drain_task = asyncio.create_task(
+        drain_queue_with_broadcast(
+            queue,
+            writer,
+            stop,
+            telemetry_broadcaster=bus,
+            live_source=source,
+        )
+    )
+    await _producer()
+    await drain_task
+
+    messages = [await sub.get(), await sub.get()]
+    assert any(
+        message["source"] == "decoded"
+        and message["channel"] == "ECM_COOLANT_TEMP"
+        and message["value"] == 105
+        for message in messages
+    )
 
 
 async def test_drain_swallows_live_source_exceptions(tmp_path: Path) -> None:
