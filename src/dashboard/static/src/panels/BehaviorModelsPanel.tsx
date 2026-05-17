@@ -37,7 +37,7 @@ interface BehaviorModelsPanelProps {
 export function BehaviorModelsPanel({ data, error }: BehaviorModelsPanelProps) {
   if (error) {
     return (
-      <section className={cn(panelClass, "col-span-2 max-[900px]:col-span-1")}>
+      <section className={cn(panelClass, "col-span-2 max-[1100px]:col-span-1")}>
         <header className={panelHeaderClass}>
           <h2 className={panelTitleClass}>Behavior Models</h2>
         </header>
@@ -49,7 +49,7 @@ export function BehaviorModelsPanel({ data, error }: BehaviorModelsPanelProps) {
   }
   if (data === null) {
     return (
-      <section className={cn(panelClass, "col-span-2 max-[900px]:col-span-1")}>
+      <section className={cn(panelClass, "col-span-2 max-[1100px]:col-span-1")}>
         <header className={panelHeaderClass}>
           <h2 className={panelTitleClass}>Behavior Models</h2>
         </header>
@@ -59,7 +59,7 @@ export function BehaviorModelsPanel({ data, error }: BehaviorModelsPanelProps) {
   }
   if (data.models.length === 0) {
     return (
-      <section className={cn(panelClass, "col-span-2 max-[900px]:col-span-1")}>
+      <section className={cn(panelClass, "col-span-2 max-[1100px]:col-span-1")}>
         <header className={panelHeaderClass}>
           <h2 className={panelTitleClass}>Behavior Models</h2>
         </header>
@@ -72,7 +72,7 @@ export function BehaviorModelsPanel({ data, error }: BehaviorModelsPanelProps) {
     );
   }
   return (
-    <section className={cn(panelClass, "col-span-2 max-[900px]:col-span-1")}>
+    <section className={cn(panelClass, "col-span-2 max-[1100px]:col-span-1")}>
       <header className={panelHeaderClass}>
         <h2 className={panelTitleClass}>Behavior Models</h2>
         <span className={panelCountClass}>{data.models.length} surfaces</span>

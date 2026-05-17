@@ -44,7 +44,7 @@ export function AnomalyPanel({ events }: AnomalyPanelProps) {
   }, [events]);
 
   return (
-    <section className={cn(panelClass, "col-span-2 row-start-2 max-[900px]:col-span-1")}>
+    <section className={cn(panelClass, "col-span-2 max-[1100px]:col-span-1")}>
       <header className={panelHeaderClass}>
         <h2 className={panelTitleClass}>Anomalies</h2>
         <div className="flex gap-3 font-num text-[0.78rem] tabular-nums text-fg-dim">
