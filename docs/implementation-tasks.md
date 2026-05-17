@@ -1428,11 +1428,25 @@ training/model-health visualization, and Torque Pro parity.
   back to the Pi later. `docs/dashboard-display-strategy.md` and
   `docs/headless-api.md` link to it so the Pi-hosted dashboard and offline
   companion runtime roles stay distinct without creating a separate UI.
-- [ ] **6.32 — Local CANary library format.** Define and implement a laptop
-  library root (`~/.canary/library` by default) with a SQLite index plus normal
-  session/model files on disk. Track sessions, captures, tags, channel
-  inventory, quality checks, datasets, training runs, model artifacts, publish
-  history, and queued Pi actions.
+- [x] **6.32 — Local CANary library format.** `src/companion/library.py` —
+  `CanaryLibrary` over a laptop root (`~/.canary/library` default):
+  `library.db` SQLite index + verbatim `sessions/` / `models/` / `datasets/`
+  files on disk (the DB is an index/cache, never the source of truth).
+  Additive schema (`CREATE TABLE IF NOT EXISTS`, `schema_version` in `meta`):
+  sessions, session_tags, session_channels (+ NaN fraction), datasets,
+  training_runs, model_artifacts, publish_history, queued_actions.
+  `import_session` copies a session in idempotently and indexes it — rich
+  channel-inventory + quality path when a `CanaryConfig` is given
+  (`datasets.health.analyze_session`), cheap `summarize_session` path
+  otherwise so an import never *requires* the decode/feature stack;
+  `record_training_run` (upsert), `add_model_artifact` (+manifest copy) /
+  `record_publish` / `publish_history`, `add_dataset`, and
+  `queue_action`/`update_action`/`list_actions` for queued Pi work.
+  Foundation for the companion API (6.33) / sync (6.34) / publish queue
+  (6.37). Covered by `tests/test_companion_library.py` (6 tests: layout/
+  schema, cheap-path idempotent import, config-path channel indexing,
+  training-run upsert, model artifact+publish history, datasets+queued
+  actions). (FR-09)
 - [ ] **6.33 — Companion local API.** Add a local FastAPI service that exposes
   session browsing, telemetry history, anomalies, datasets, training jobs,
   model artifacts, and sync state from the local library. It should mirror the
