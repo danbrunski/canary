@@ -185,6 +185,15 @@ describe("TelemetryPanel", () => {
 describe("TelemetryPanel — Drive (compact) pinning", () => {
   afterEach(() => window.localStorage.clear());
 
+  const defaultDriveKeys = [
+    "obd:RPM",
+    "obd:SPEED",
+    "obd:COOLANT_TEMP",
+    "obd:MAF",
+    "obd:THROTTLE_POS",
+    "obd:CONTROL_MODULE_VOLTAGE",
+  ];
+
   function driveChannels(): Map<string, ChannelSnapshot> {
     const channels = new Map<string, ChannelSnapshot>();
     for (const name of ["ECM_RPM", "ECM_COOLANT_TEMP", "STEERING_ANGLE_002"]) {
@@ -193,6 +202,16 @@ describe("TelemetryPanel — Drive (compact) pinning", () => {
         snapshot({ source: "decoded", channel: name, value: 1234, unit: "" }),
       );
       channels.get(`decoded:${name}`)!.history = [1, 2, 3];
+    }
+    return channels;
+  }
+
+  function defaultDriveChannels(): Map<string, ChannelSnapshot> {
+    const channels = new Map<string, ChannelSnapshot>();
+    for (const key of defaultDriveKeys) {
+      const channel = key.slice(key.indexOf(":") + 1);
+      channels.set(key, snapshot({ source: "obd", channel, value: 42, unit: "" }));
+      channels.get(key)!.history = [40, 41, 42];
     }
     return channels;
   }
@@ -225,6 +244,34 @@ describe("TelemetryPanel — Drive (compact) pinning", () => {
     // Unpin returns to the no-pins state.
     fireEvent.click(screen.getByRole("button", { name: "unpin ECM_RPM" }));
     expect(screen.getByText("3 live values")).toBeInTheDocument();
+  });
+
+  it("does not re-seed default pins after every default pin is removed", async () => {
+    render(createElement(TelemetryPanel, { channels: defaultDriveChannels(), bindings: {}, compact: true }));
+
+    expect(await screen.findByText("6 live values · 6 pinned")).toBeInTheDocument();
+    for (const key of defaultDriveKeys) {
+      const name = key.slice(key.indexOf(":") + 1);
+      fireEvent.click(screen.getByRole("button", { name: `unpin ${name}` }));
+    }
+
+    expect(screen.getByText("6 live values")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /pinned only/ })).not.toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem("canary.drive.pinned") ?? "null")).toEqual([]);
+    for (const key of defaultDriveKeys) {
+      const name = key.slice(key.indexOf(":") + 1);
+      expect(screen.getByRole("button", { name: `pin ${name}` })).toBeInTheDocument();
+    }
+  });
+
+  it("honors a stored empty pin list", () => {
+    window.localStorage.setItem("canary.drive.pinned", "[]");
+
+    render(createElement(TelemetryPanel, { channels: defaultDriveChannels(), bindings: {}, compact: true }));
+
+    expect(screen.getByText("6 live values")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /pinned only/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "pin RPM" })).toBeInTheDocument();
   });
 
   it("sparklines are off by default and the per-card toggle persists", () => {
