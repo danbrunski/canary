@@ -509,3 +509,28 @@ def test_control_jobs_reject_unknown_kind(tmp_path: Path) -> None:
 
     assert response.status_code == 400
     assert "unsupported job kind" in response.json()["detail"]
+
+
+def test_require_control_auth_constant_time_paths() -> None:
+    """The bearer guard: 503 when unset, 401 on missing/malformed/wrong,
+    pass on exact match — now via secrets.compare_digest (constant time)."""
+    import pytest
+    from fastapi import HTTPException
+
+    from src.dashboard.api import _require_control_auth
+
+    # Server token not configured → fail closed with 503, never 401.
+    for unset in (None, ""):
+        with pytest.raises(HTTPException) as exc:
+            _require_control_auth(unset, "Bearer whatever")
+        assert exc.value.status_code == 503
+
+    # Missing / malformed / wrong → 401.
+    for bad in (None, "", "token-only", "Basic abc", "Bearer", "Bearer wrong"):
+        with pytest.raises(HTTPException) as exc:
+            _require_control_auth("s3cret", bad)
+        assert exc.value.status_code == 401
+        assert exc.value.headers == {"WWW-Authenticate": "Bearer"}
+
+    # Exact match → no raise.
+    _require_control_auth("s3cret", "Bearer s3cret")

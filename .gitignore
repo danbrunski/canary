@@ -52,6 +52,7 @@ canary.yaml
 logs/
 data/sessions/
 data/raw/
+data/control/   # control-plane tokens, audit log, job ledger — never commit
 
 # Vendor FSM PDFs — copyrighted, not committable; extracted name lists land
 # in data/fsm/ which IS committed (factual identifiers).

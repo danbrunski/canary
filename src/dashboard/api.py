@@ -37,6 +37,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -822,8 +823,13 @@ def _require_control_auth(control_token: str | None, authorization: str | None) 
     """Bearer-token guard for mutating control-plane routes."""
     if control_token is None or control_token == "":
         raise HTTPException(status_code=503, detail="control API token is not configured")
-    expected = f"Bearer {control_token}"
-    if authorization != expected:
+    presented = ""
+    if authorization is not None and authorization.startswith("Bearer "):
+        presented = authorization[len("Bearer ") :]
+    # Constant-time compare: a wrong token must not be recoverable by timing
+    # the 401. Splitting the scheme off first keeps the comparison token-to-
+    # token (compare_digest is only fully constant-time on equal-length input).
+    if not secrets.compare_digest(presented, control_token):
         raise HTTPException(
             status_code=401,
             detail="missing or invalid bearer token",
