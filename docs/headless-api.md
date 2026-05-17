@@ -53,17 +53,25 @@ Then use `canaryctl`:
 
 ```bash
 scripts/canaryctl.py status
+scripts/canaryctl.py preflight
+scripts/canaryctl.py version
 scripts/canaryctl.py capture start --purpose "next drive" --protocol drive
 scripts/canaryctl.py tag cold_start
 scripts/canaryctl.py tag highway_cruise --field speed_target=70
 scripts/canaryctl.py capture current
 scripts/canaryctl.py capture stop --reason arrived
 scripts/canaryctl.py sessions list
+scripts/canaryctl.py sessions metadata 2026-05-17T120000 --field route=mesa
+scripts/canaryctl.py sessions pin 2026-05-17T120000 --reason "training candidate"
 scripts/canaryctl.py sessions export 2026-05-17T120000 --out drive.zip
 scripts/canaryctl.py jobs start corpus_report
 scripts/canaryctl.py jobs start retrain_if --days 14
 scripts/canaryctl.py jobs show <job_id>
 scripts/canaryctl.py jobs logs <job_id>
+scripts/canaryctl.py jobs cancel <job_id>
+scripts/canaryctl.py models upload isolation_forest \
+  --artifact models/isolation_forest/model.joblib \
+  --manifest models/isolation_forest/model.manifest.json
 ```
 
 Equivalent raw HTTP:
@@ -88,23 +96,32 @@ curl -H "Authorization: Bearer $CANARY_TOKEN" \
 Capture commands create a labeled window on the daemon's current telemetry
 session. They do not start a second recorder process or contend for the CAN
 adapter. Start/tag/stop records are appended to the active session's
-`tags.jsonl`.
+`tags.jsonl`, and capture/session metadata is written to `control.json` inside
+the session directory.
 
 Control endpoints:
 
 | Endpoint | Purpose |
 | --- | --- |
+| `GET /control/preflight` | run storage/session/token/CAN/model/telemetry readiness checks |
+| `GET /control/version` | return control API version, package version, git SHA, and token env name |
 | `POST /control/captures` | start a labeled capture window on the active daemon session |
 | `GET /control/captures/current` | inspect the active capture window |
 | `POST /control/captures/current/tags` | append a tag to the active capture's `tags.jsonl` |
 | `POST /control/captures/current/stop` | stop the active capture window |
 | `GET /control/sessions` | list timestamped session directories |
 | `GET /control/sessions/{id}` | inspect one session |
+| `POST /control/sessions/{id}/metadata` | merge or replace operator metadata in `control.json` |
+| `POST /control/sessions/{id}/pin` | pin a session so retention cleanup skips it |
+| `POST /control/sessions/{id}/unpin` | remove a session's retention pin |
+| `DELETE /control/sessions/{id}?force=true` | delete a session; `force=true` is required for pinned sessions |
 | `GET /control/sessions/{id}/export` | download one session as a zip archive |
 | `POST /control/jobs` | start an allow-listed background job |
-| `GET /control/jobs` | list in-memory background jobs since daemon start |
+| `GET /control/jobs` | list background jobs from the persisted job ledger |
 | `GET /control/jobs/{id}` | inspect one job |
 | `GET /control/jobs/{id}/logs` | fetch captured stdout/stderr for one job |
+| `POST /control/jobs/{id}/cancel` | request cancellation for a queued or running job |
+| `POST /control/models/{type}/artifact` | publish an uploaded model artifact and manifest |
 
 Allowed job kinds:
 
@@ -120,6 +137,10 @@ Job parameters are structured JSON, not shell text. Common parameters include
 `days`, `all`, and `session_ids`. LSTM jobs also accept `device`; behavior
 refits accept `recipes` and `dry_run`.
 
+Job state is append-only in `daemon.jobs_dir/jobs.jsonl`, so recent job history
+survives daemon restarts. Control mutations are appended to
+`daemon.audit_log` as JSONL audit events and are also broadcast live.
+
 ## WebSockets
 
 Live telemetry and anomalies stream over WebSockets:
@@ -127,6 +148,7 @@ Live telemetry and anomalies stream over WebSockets:
 ```bash
 websocat ws://canary.local:8000/ws/telemetry
 websocat ws://canary.local:8000/ws/anomalies
+websocat "ws://canary.local:8000/ws/control?token=$CANARY_TOKEN"
 ```
 
 The dashboard uses the same streams. Slow clients drop old messages rather

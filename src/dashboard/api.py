@@ -33,10 +33,12 @@ mounted.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import shutil
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,12 +63,19 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import read_events_dir
 from src.config import CanaryConfig
+from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
 from src.control.jobs import JobController
+from src.control.models import publish_model_artifact
+from src.control.preflight import build_preflight
 from src.control.sessions import (
+    delete_session,
     list_sessions,
+    pin_session,
     resolve_session,
     summarize_session,
+    unpin_session,
+    write_session_metadata,
     write_session_zip,
 )
 from src.dashboard.broadcast import Broadcaster
@@ -372,6 +381,21 @@ class JobSubmitRequest(_ControlRequest):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+class SessionMetadataRequest(_ControlRequest):
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    merge: bool = True
+
+
+class SessionPinRequest(_ControlRequest):
+    reason: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ModelUploadRequest(_ControlRequest):
+    artifact_b64: str
+    manifest: dict[str, Any]
+
+
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -391,6 +415,8 @@ def create_app(
     enable_dev_cors: bool = False,
     capture_controller: CaptureController | None = None,
     job_controller: JobController | None = None,
+    control_broadcaster: Broadcaster | None = None,
+    audit_logger: ControlAuditLogger | None = None,
     control_token: str | None = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
@@ -416,6 +442,7 @@ def create_app(
         )
     telemetry_bus = telemetry_broadcaster or Broadcaster()
     anomalies_bus = anomalies_broadcaster or Broadcaster()
+    control_bus = control_broadcaster or Broadcaster()
     resolved_control_token = (
         os.environ.get(config.daemon.control_token_env) if control_token is None else control_token
     )
@@ -423,6 +450,20 @@ def create_app(
     # the same instances after construction.
     app.state.telemetry_broadcaster = telemetry_bus
     app.state.anomalies_broadcaster = anomalies_bus
+    app.state.control_broadcaster = control_bus
+    app.state.control_loop = None
+
+    def publish_control_event(action: str, result: str, payload: dict[str, Any]) -> None:
+        event = (
+            audit_logger.record(action=action, result=result, payload=payload)
+            if audit_logger is not None
+            else {
+                "action": action,
+                "result": result,
+                "payload": payload,
+            }
+        )
+        _publish_on_app_loop(control_bus, event, getattr(app.state, "control_loop", None))
 
     @app.get("/status")
     def get_status() -> dict[str, Any]:
@@ -490,6 +531,9 @@ def create_app(
             )
         except CaptureConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        publish_control_event("capture.start", "ok", capture.to_dict())
         return {"capture": capture.to_dict()}
 
     @app.get("/control/captures/current")
@@ -516,10 +560,12 @@ def create_app(
         except NoActiveCaptureError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         capture = controller.current_capture()
-        return {
+        payload = {
             "tag": tag,
             "capture": None if capture is None else capture.to_dict(),
         }
+        publish_control_event("capture.tag", "ok", payload)
+        return payload
 
     @app.post("/control/captures/current/stop")
     def post_capture_stop(
@@ -531,6 +577,7 @@ def create_app(
             capture = controller.stop_capture(reason=request.reason, fields=request.fields)
         except NoActiveCaptureError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        publish_control_event("capture.stop", "ok", capture.to_dict())
         return {"capture": capture.to_dict()}
 
     @app.get("/control/sessions")
@@ -550,6 +597,73 @@ def create_app(
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"session": summarize_session(session).to_dict()}
+
+    @app.post("/control/sessions/{session_id}/metadata")
+    def post_control_session_metadata(
+        session_id: str,
+        request: SessionMetadataRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            session = resolve_session(config.collection.storage_path, session_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        metadata = write_session_metadata(session, request.metadata, merge=request.merge)
+        payload = {"session_id": session_id, "metadata": metadata}
+        publish_control_event("session.metadata", "ok", payload)
+        return payload
+
+    @app.post("/control/sessions/{session_id}/pin")
+    def post_control_session_pin(
+        session_id: str,
+        request: SessionPinRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            session = resolve_session(config.collection.storage_path, session_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        metadata = pin_session(session, reason=request.reason)
+        if request.metadata:
+            metadata = write_session_metadata(session, request.metadata)
+        payload = {"session": summarize_session(session).to_dict(), "metadata": metadata}
+        publish_control_event("session.pin", "ok", payload)
+        return payload
+
+    @app.post("/control/sessions/{session_id}/unpin")
+    def post_control_session_unpin(
+        session_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            session = resolve_session(config.collection.storage_path, session_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        metadata = unpin_session(session)
+        payload = {"session": summarize_session(session).to_dict(), "metadata": metadata}
+        publish_control_event("session.unpin", "ok", payload)
+        return payload
+
+    @app.delete("/control/sessions/{session_id}")
+    def delete_control_session(
+        session_id: str,
+        force: bool = Query(default=False),
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            session = resolve_session(config.collection.storage_path, session_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        active = capture_controller.current_capture() if capture_controller is not None else None
+        if active is not None and active.session_id == session_id:
+            raise HTTPException(status_code=409, detail="cannot delete the active capture session")
+        try:
+            delete_session(session, force=force)
+        except PermissionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        payload = {"session_id": session_id, "deleted": True, "force": force}
+        publish_control_event("session.delete", "ok", payload)
+        return payload
 
     @app.get("/control/sessions/{session_id}/export")
     def export_control_session(
@@ -585,6 +699,7 @@ def create_app(
             job = _jobs().submit(request.kind, request.params)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        publish_control_event("job.submit", "ok", job.to_dict())
         return {"job": job.to_dict()}
 
     @app.get("/control/jobs")
@@ -614,6 +729,61 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
         return {"job": job.to_dict()}
 
+    @app.post("/control/jobs/{job_id}/cancel")
+    def post_control_job_cancel(
+        job_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        job = _jobs().cancel(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
+        publish_control_event("job.cancel", "ok", job.to_dict())
+        return {"job": job.to_dict()}
+
+    @app.get("/control/preflight")
+    def get_control_preflight(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        current_session = (
+            capture_controller.active.session_path
+            if capture_controller is not None and capture_controller.active is not None
+            else _resolve_latest_session(config.collection.storage_path)
+        )
+        return build_preflight(
+            config,
+            control_token_configured=bool(resolved_control_token),
+            current_session=current_session,
+        )
+
+    @app.get("/control/version")
+    def get_control_version(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        return {
+            "api_version": 1,
+            "package_version": _canary_version(),
+            "git_sha": _git_sha(),
+            "config_token_env": config.daemon.control_token_env,
+        }
+
+    @app.post("/control/models/{model_type}/artifact")
+    def post_control_model_artifact(
+        model_type: str,
+        request: ModelUploadRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            published = publish_model_artifact(
+                config,
+                model_type=model_type,
+                artifact_b64=request.artifact_b64,
+                manifest=request.manifest,
+            )
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        publish_control_event("model.upload", "ok", published)
+        return {"model": published}
+
     @app.websocket("/ws/telemetry")
     async def ws_telemetry(websocket: WebSocket) -> None:
         await _run_websocket(websocket, telemetry_bus)
@@ -621,6 +791,15 @@ def create_app(
     @app.websocket("/ws/anomalies")
     async def ws_anomalies(websocket: WebSocket) -> None:
         await _run_websocket(websocket, anomalies_bus)
+
+    @app.websocket("/ws/control")
+    async def ws_control(websocket: WebSocket) -> None:
+        token = websocket.query_params.get("token")
+        if not resolved_control_token or token != resolved_control_token:
+            await websocket.close(code=1008)
+            return
+        app.state.control_loop = asyncio.get_running_loop()
+        await _run_websocket(websocket, control_bus)
 
     # Serve the built SPA from /, with SPA fall-through on 404 (the React
     # router could later own client-side paths like /diagnostics).
@@ -676,6 +855,27 @@ async def _run_websocket(websocket: WebSocket, bus: Broadcaster) -> None:
         bus.unsubscribe(subscription)
 
 
+def _publish_on_app_loop(
+    bus: Broadcaster,
+    event: dict[str, Any],
+    loop: asyncio.AbstractEventLoop | None,
+) -> None:
+    if loop is None:
+        bus.publish(event)
+        return
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+    if running_loop is loop:
+        bus.publish(event)
+        return
+    try:
+        bus.publish_threadsafe(loop, event)
+    except RuntimeError:
+        bus.publish(event)
+
+
 def _canary_version() -> str:
     """Best-effort package version for the OpenAPI doc."""
     try:
@@ -684,6 +884,22 @@ def _canary_version() -> str:
         return version("canary")
     except Exception:  # noqa: BLE001 — anything goes wrong, fall back
         return "0.0.0"
+
+
+def _git_sha() -> str | None:
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip() or None
 
 
 __all__ = [

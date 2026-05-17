@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 import time
@@ -13,9 +14,11 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from src.config import CanaryConfig
+from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.jobs import JobController
 from src.dashboard.api import create_app
+from src.dashboard.broadcast import Broadcaster
 
 
 def _config_yaml(storage_path: Path) -> str:
@@ -215,6 +218,121 @@ def test_session_list_detail_and_export(tmp_path: Path) -> None:
     assert f"{session.name}/tags.jsonl" in names
 
 
+def test_session_metadata_pin_unpin_and_delete(tmp_path: Path) -> None:
+    client, session = _client(tmp_path)
+
+    metadata = client.post(
+        f"/control/sessions/{session.name}/metadata",
+        headers=_auth(),
+        json={"metadata": {"route": "mesa"}},
+    )
+    assert metadata.status_code == 200
+    assert metadata.json()["metadata"]["route"] == "mesa"
+
+    pinned = client.post(
+        f"/control/sessions/{session.name}/pin",
+        headers=_auth(),
+        json={"reason": "good drive", "metadata": {"terrain": "city"}},
+    )
+    assert pinned.status_code == 200
+    assert pinned.json()["session"]["pinned"] is True
+    assert pinned.json()["session"]["metadata"]["terrain"] == "city"
+
+    blocked = client.delete(f"/control/sessions/{session.name}", headers=_auth())
+    assert blocked.status_code == 409
+
+    unpinned = client.post(f"/control/sessions/{session.name}/unpin", headers=_auth())
+    assert unpinned.status_code == 200
+    assert unpinned.json()["session"]["pinned"] is False
+
+    deleted = client.delete(f"/control/sessions/{session.name}", headers=_auth())
+    assert deleted.status_code == 200
+    assert not session.exists()
+
+
+def test_audit_log_and_control_websocket_receive_events(tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    session = storage / "2026-05-17T120000"
+    session.mkdir(parents=True)
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(storage))
+    config = CanaryConfig.from_yaml(cfg_path)
+    app = create_app(
+        config,
+        anomalies_dir=tmp_path / "anomalies",
+        capture_controller=CaptureController(lambda: session),
+        control_broadcaster=Broadcaster(),
+        audit_logger=ControlAuditLogger(tmp_path / "audit.jsonl"),
+        control_token="secret",
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/control?token=secret") as ws:
+        response = client.post("/control/captures", headers=_auth(), json={"purpose": "drive"})
+        assert response.status_code == 201
+        event = ws.receive_json()
+
+    assert event["action"] == "capture.start"
+    audit = json.loads((tmp_path / "audit.jsonl").read_text().splitlines()[0])
+    assert audit["action"] == "capture.start"
+    assert audit["payload"]["purpose"] == "drive"
+
+
+def test_control_preflight_and_version(tmp_path: Path) -> None:
+    client, _session = _client(tmp_path)
+    started = client.post("/control/captures", headers=_auth(), json={})
+    assert started.status_code == 201
+
+    preflight = client.get("/control/preflight", headers=_auth())
+    assert preflight.status_code == 200
+    payload = preflight.json()
+    assert payload["ok"] is True
+    checks = {check["name"]: check for check in payload["checks"]}
+    assert checks["control_token"]["ok"] is True
+    assert checks["active_session_writable"]["ok"] is True
+    assert checks["can_interface"]["ok"] is True
+
+    version = client.get("/control/version", headers=_auth())
+    assert version.status_code == 200
+    assert version.json()["api_version"] == 1
+    assert version.json()["config_token_env"] == "CANARY_CONTROL_TOKEN"
+
+
+def test_control_model_artifact_upload_publishes_watched_files(tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    session = storage / "2026-05-17T120000"
+    session.mkdir(parents=True)
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(storage))
+    config = CanaryConfig.from_yaml(cfg_path)
+    config = config.model_copy(
+        update={"daemon": config.daemon.model_copy(update={"models_dir": tmp_path / "models"})}
+    )
+    app = create_app(
+        config,
+        anomalies_dir=tmp_path / "anomalies",
+        capture_controller=CaptureController(lambda: session),
+        control_token="secret",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/control/models/isolation_forest/artifact",
+        headers=_auth(),
+        json={
+            "artifact_b64": base64.b64encode(b"model bytes").decode("ascii"),
+            "manifest": {"version": "test-model"},
+        },
+    )
+
+    assert response.status_code == 200
+    model = response.json()["model"]
+    artifact_path = Path(model["artifact_path"])
+    manifest_path = Path(model["manifest_path"])
+    assert artifact_path.read_bytes() == b"model bytes"
+    assert json.loads(manifest_path.read_text())["version"] == "test-model"
+
+
 def test_control_jobs_run_restricted_background_commands(tmp_path: Path) -> None:
     storage = tmp_path / "storage"
     session = storage / "2026-05-17T120000"
@@ -264,6 +382,100 @@ def test_control_jobs_run_restricted_background_commands(tmp_path: Path) -> None
     logs = client.get(f"/control/jobs/{job_id}/logs", headers=_auth())
     assert logs.status_code == 200
     assert "job ok" in logs.json()["log"]
+
+    ledger_controller = JobController(
+        config=config,
+        repo_root=tmp_path,
+        config_path=cfg_path,
+        jobs_dir=tmp_path / "jobs",
+        python=Path(sys.executable),
+        command_builder=_command_builder,
+    )
+    assert ledger_controller.get(job_id) is not None
+
+
+def test_control_jobs_can_cancel_running_process(tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    session = storage / "2026-05-17T120000"
+    session.mkdir(parents=True)
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(storage))
+    config = CanaryConfig.from_yaml(cfg_path)
+
+    def _command_builder(_kind: str, _params: dict[str, Any]) -> list[str]:
+        return [sys.executable, "-c", "import time; time.sleep(10)"]
+
+    app = create_app(
+        config,
+        anomalies_dir=tmp_path / "anomalies",
+        capture_controller=CaptureController(lambda: session),
+        job_controller=JobController(
+            config=config,
+            repo_root=tmp_path,
+            config_path=cfg_path,
+            jobs_dir=tmp_path / "jobs",
+            python=Path(sys.executable),
+            command_builder=_command_builder,
+        ),
+        control_token="secret",
+    )
+    client = TestClient(app)
+    created = client.post(
+        "/control/jobs",
+        headers=_auth(),
+        json={"kind": "corpus_report", "params": {}},
+    )
+    job_id = created.json()["job"]["job_id"]
+
+    cancelled = client.post(f"/control/jobs/{job_id}/cancel", headers=_auth())
+    assert cancelled.status_code == 200
+
+    final = None
+    for _ in range(80):
+        final = client.get(f"/control/jobs/{job_id}", headers=_auth()).json()["job"]
+        if final["status"] == "cancelled":
+            break
+        time.sleep(0.05)
+    assert final is not None
+    assert final["status"] == "cancelled"
+
+
+def test_control_jobs_mark_interrupted_ledger_jobs_failed(tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    session = storage / "2026-05-17T120000"
+    session.mkdir(parents=True)
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(storage))
+    config = CanaryConfig.from_yaml(cfg_path)
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    (jobs_dir / "jobs.jsonl").write_text(
+        json.dumps(
+            {
+                "job_id": "interrupted",
+                "kind": "corpus_report",
+                "status": "running",
+                "created_at": "2026-05-17T12:00:00+00:00",
+                "log_path": str(jobs_dir / "interrupted.log"),
+                "command": [sys.executable, "-c", "print('old')"],
+                "params": {},
+            }
+        )
+        + "\n"
+    )
+
+    controller = JobController(
+        config=config,
+        repo_root=tmp_path,
+        config_path=cfg_path,
+        jobs_dir=jobs_dir,
+        python=Path(sys.executable),
+    )
+
+    job = controller.get("interrupted")
+    assert job is not None
+    assert job.status == "failed"
+    assert job.finished_at is not None
 
 
 def test_control_jobs_reject_unknown_kind(tmp_path: Path) -> None:

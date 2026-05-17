@@ -219,6 +219,8 @@ def delete_expired_sessions(
             started_at = datetime.strptime(child.name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
         except ValueError:
             continue
+        if (child / ".canary-pin").exists():
+            continue
         if started_at < cutoff:
             shutil.rmtree(child)
             deleted.append(child)

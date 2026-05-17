@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -109,4 +111,97 @@ def test_job_start_dispatch_builds_params(monkeypatch: pytest.MonkeyPatch) -> No
             "recipes": ["coolant_warmup"],
             "dry_run": True,
         },
+    }
+
+
+def test_session_pin_dispatch_posts_reason_and_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_request(
+        host: str,
+        method: str,
+        path: str,
+        *,
+        token: str | None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        captured.update(host=host, method=method, path=path, token=token, body=body)
+        return {"session": {"pinned": True}}
+
+    monkeypatch.setattr(canaryctl, "_request_json", fake_request)
+    args = canaryctl.parse_args(
+        [
+            "--host",
+            "canary.local:8000",
+            "--token",
+            "secret",
+            "sessions",
+            "pin",
+            "2026-05-17T120000",
+            "--reason",
+            "good drive",
+            "--field",
+            "route=mesa",
+        ]
+    )
+
+    out = canaryctl._dispatch(args)
+
+    assert out == {"session": {"pinned": True}}
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/control/sessions/2026-05-17T120000/pin"
+    assert captured["body"] == {
+        "reason": "good drive",
+        "metadata": {"route": "mesa"},
+    }
+
+
+def test_model_upload_dispatch_encodes_artifact_and_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_path = tmp_path / "model.joblib"
+    manifest_path = tmp_path / "model.manifest.json"
+    artifact_path.write_bytes(b"model bytes")
+    manifest_path.write_text(json.dumps({"version": "test"}))
+    captured: dict[str, Any] = {}
+
+    def fake_request(
+        host: str,
+        method: str,
+        path: str,
+        *,
+        token: str | None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        captured.update(host=host, method=method, path=path, token=token, body=body)
+        return {"model": {"artifact_bytes": 11}}
+
+    monkeypatch.setattr(canaryctl, "_request_json", fake_request)
+    args = canaryctl.parse_args(
+        [
+            "--host",
+            "canary.local:8000",
+            "--token",
+            "secret",
+            "models",
+            "upload",
+            "isolation_forest",
+            "--artifact",
+            str(artifact_path),
+            "--manifest",
+            str(manifest_path),
+        ]
+    )
+
+    out = canaryctl._dispatch(args)
+
+    assert out == {"model": {"artifact_bytes": 11}}
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/control/models/isolation_forest/artifact"
+    assert captured["body"] == {
+        "artifact_b64": base64.b64encode(b"model bytes").decode("ascii"),
+        "manifest": {"version": "test"},
     }

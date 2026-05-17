@@ -80,6 +80,7 @@ daemon:
   anomalies_dir: /data/canary/anomalies
   models_dir: models
   jobs_dir: /data/canary/control/jobs
+  audit_log: /data/canary/control/audit.jsonl
   isolation_forest_artifact: isolation_forest/model.joblib
   lstm_artifact: lstm_autoencoder/model.pt
   model_poll_seconds: 30.0

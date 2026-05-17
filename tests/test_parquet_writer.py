@@ -240,6 +240,21 @@ def test_delete_expired_sessions_removes_only_old_timestamped_dirs(tmp_path: Pat
     assert scratch.exists()
 
 
+def test_delete_expired_sessions_keeps_pinned_old_sessions(tmp_path: Path) -> None:
+    old = tmp_path / "2026-05-01T000000"
+    old.mkdir()
+    (old / ".canary-pin").write_text('{"pinned": true}\n')
+
+    deleted = delete_expired_sessions(
+        tmp_path,
+        retention_days=5,
+        now=datetime(2026, 5, 11, tzinfo=UTC),
+    )
+
+    assert deleted == []
+    assert old.exists()
+
+
 def test_delete_expired_sessions_rejects_negative_retention(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="retention_days"):
         delete_expired_sessions(tmp_path, retention_days=-1)

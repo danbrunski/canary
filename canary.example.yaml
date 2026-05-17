@@ -87,6 +87,7 @@ dashboard:
 #   anomalies_dir: data/anomalies
 #   models_dir: models
 #   jobs_dir: data/control/jobs
+#   audit_log: data/control/audit.jsonl
 #   isolation_forest_artifact: isolation_forest/model.joblib  # relative to models_dir
 #   lstm_artifact: lstm_autoencoder/model.pt                  # relative to models_dir
 #   model_poll_seconds: 30.0

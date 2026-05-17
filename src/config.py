@@ -123,6 +123,7 @@ class DaemonConfig(_Strict):
     anomalies_dir: Path = Path("data/anomalies")
     models_dir: Path = Path("models")
     jobs_dir: Path = Path("data/control/jobs")
+    audit_log: Path = Path("data/control/audit.jsonl")
     isolation_forest_artifact: str = "isolation_forest/model.joblib"
     lstm_artifact: str = "lstm_autoencoder/model.pt"
     model_poll_seconds: float = 30.0

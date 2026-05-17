@@ -13,6 +13,7 @@ Set CANARY_HOST and CANARY_TOKEN to avoid repeating flags.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -40,6 +41,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status", help="Fetch /status.")
+    sub.add_parser("preflight", help="Run control-plane preflight checks.")
+    sub.add_parser("version", help="Fetch control API version/build info.")
 
     capture = sub.add_parser("capture", help="Capture-window commands.")
     capture_sub = capture.add_subparsers(dest="capture_command", required=True)
@@ -70,6 +73,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     export = sessions_sub.add_parser("export", help="Download one session as a zip archive.")
     export.add_argument("session_id")
     export.add_argument("--out", default=None, help="Output zip path. Default: <session_id>.zip")
+    metadata = sessions_sub.add_parser("metadata", help="Update one session's metadata.")
+    metadata.add_argument("session_id")
+    metadata.add_argument(
+        "--replace", action="store_true", help="Replace metadata instead of merging."
+    )
+    metadata.add_argument("--field", action="append", default=[], metavar="KEY=VALUE")
+    pin = sessions_sub.add_parser("pin", help="Pin a session so retention does not delete it.")
+    pin.add_argument("session_id")
+    pin.add_argument("--reason", default=None)
+    pin.add_argument("--field", action="append", default=[], metavar="KEY=VALUE")
+    unpin = sessions_sub.add_parser("unpin", help="Unpin a session.")
+    unpin.add_argument("session_id")
+    delete = sessions_sub.add_parser("delete", help="Delete a session.")
+    delete.add_argument("session_id")
+    delete.add_argument("--force", action="store_true", help="Allow deleting a pinned session.")
 
     jobs = sub.add_parser("jobs", help="Background maintenance jobs.")
     jobs_sub = jobs.add_subparsers(dest="jobs_command", required=True)
@@ -96,6 +114,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     show_job.add_argument("job_id")
     logs_job = jobs_sub.add_parser("logs", help="Show one job's captured log.")
     logs_job.add_argument("job_id")
+    cancel_job = jobs_sub.add_parser("cancel", help="Cancel a queued/running job.")
+    cancel_job.add_argument("job_id")
+
+    models = sub.add_parser("models", help="Model artifact operations.")
+    models_sub = models.add_subparsers(dest="models_command", required=True)
+    upload = models_sub.add_parser("upload", help="Upload an artifact + manifest to the Pi.")
+    upload.add_argument("model_type", choices=["isolation_forest", "lstm_autoencoder"])
+    upload.add_argument("--artifact", required=True)
+    upload.add_argument("--manifest", required=True)
 
     return parser.parse_args(argv)
 
@@ -119,6 +146,10 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
     host = _base_url(args.host)
     if args.command == "status":
         return _request_json(host, "GET", "/status", token=None)
+    if args.command == "preflight":
+        return _request_json(host, "GET", "/control/preflight", token=args.token)
+    if args.command == "version":
+        return _request_json(host, "GET", "/control/version", token=args.token)
 
     if args.command == "capture":
         if args.capture_command == "start":
@@ -163,6 +194,37 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
             with open(out, "wb") as handle:
                 handle.write(content)
             return {"saved": out, "bytes": len(content)}
+        if args.sessions_command == "metadata":
+            body = {"metadata": _parse_fields(args.field), "merge": not args.replace}
+            return _request_json(
+                host,
+                "POST",
+                f"/control/sessions/{args.session_id}/metadata",
+                token=args.token,
+                body=body,
+            )
+        if args.sessions_command == "pin":
+            body = {"reason": args.reason, "metadata": _parse_fields(args.field)}
+            return _request_json(
+                host,
+                "POST",
+                f"/control/sessions/{args.session_id}/pin",
+                token=args.token,
+                body=body,
+            )
+        if args.sessions_command == "unpin":
+            return _request_json(
+                host,
+                "POST",
+                f"/control/sessions/{args.session_id}/unpin",
+                token=args.token,
+                body={},
+            )
+        if args.sessions_command == "delete":
+            suffix = "?force=true" if args.force else ""
+            return _request_json(
+                host, "DELETE", f"/control/sessions/{args.session_id}{suffix}", token=args.token
+            )
 
     if args.command == "jobs":
         if args.jobs_command == "start":
@@ -180,6 +242,28 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
             return _request_json(host, "GET", f"/control/jobs/{args.job_id}", token=args.token)
         if args.jobs_command == "logs":
             return _request_json(host, "GET", f"/control/jobs/{args.job_id}/logs", token=args.token)
+        if args.jobs_command == "cancel":
+            return _request_json(
+                host,
+                "POST",
+                f"/control/jobs/{args.job_id}/cancel",
+                token=args.token,
+                body={},
+            )
+
+    if args.command == "models":
+        if args.models_command == "upload":
+            with open(args.artifact, "rb") as handle:
+                artifact = base64.b64encode(handle.read()).decode("ascii")
+            with open(args.manifest) as handle:
+                manifest = json.load(handle)
+            return _request_json(
+                host,
+                "POST",
+                f"/control/models/{args.model_type}/artifact",
+                token=args.token,
+                body={"artifact_b64": artifact, "manifest": manifest},
+            )
 
     raise RuntimeError(f"unsupported command: {args.command}")
 

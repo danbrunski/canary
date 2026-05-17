@@ -18,6 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 from src.collection.tags import write_tag
+from src.control.sessions import write_session_metadata
 
 
 class CaptureConflictError(RuntimeError):
@@ -99,6 +100,17 @@ class CaptureController:
                 tag_fields["vehicle_state"] = vehicle_state
             tag_fields.update(dict(fields or {}))
             write_tag(session, "capture_start", kind="capture", **tag_fields)
+            write_session_metadata(
+                session,
+                {
+                    "active_capture_id": state.capture_id,
+                    "capture_started_at": state.started_at,
+                    "purpose": purpose,
+                    "protocol": protocol,
+                    "vehicle_state": vehicle_state,
+                    **dict(fields or {}),
+                },
+            )
             self._active = state
             return state
 
@@ -151,6 +163,16 @@ class CaptureController:
                 tag_fields["reason"] = reason
             tag_fields.update(dict(fields or {}))
             write_tag(state.session_path, "capture_stop", kind="capture", **tag_fields)
+            write_session_metadata(
+                state.session_path,
+                {
+                    "active_capture_id": None,
+                    "last_capture_id": state.capture_id,
+                    "capture_stopped_at": datetime.now(UTC).isoformat(),
+                    "stop_reason": reason,
+                    **dict(fields or {}),
+                },
+            )
             self._active = None
             return state
 

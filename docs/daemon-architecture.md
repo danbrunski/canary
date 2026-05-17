@@ -123,9 +123,10 @@ appends to the JSONL *and* publishes onto the anomalies broadcaster, so
 `/anomalies?since=` and `/ws/anomalies` are guaranteed-consistent
 views. Meanwhile, `ModelManager.poll()` runs every 30 seconds; if a new
 artifact + manifest lands (from `scripts/retrain.py` or
-`scripts/refit_behavior_models.py`), the manager validates the schema
-match and atomically swaps the in-memory model. The next inference tick
-uses it.
+`scripts/refit_behavior_models.py`, or `/control/models/{type}/artifact`),
+the manager validates the schema match and atomically swaps the in-memory
+model. The next inference tick uses it. Remote operator actions are recorded
+to the control audit JSONL and published on `/ws/control`.
 
 ## Seams a contributor will care about
 

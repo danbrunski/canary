@@ -154,6 +154,7 @@ export CANARY_TOKEN='<contents of /etc/canary/control.token on the Pi>'
 Then:
 
 ```bash
+scripts/canaryctl.py preflight
 scripts/canaryctl.py capture start --purpose "next drive" --protocol drive
 scripts/canaryctl.py tag cold_start
 scripts/canaryctl.py capture stop --reason arrived

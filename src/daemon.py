@@ -49,6 +49,7 @@ from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
 from src.collection.queueing import QueueDepthMonitor
 from src.config import CanaryConfig
+from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.jobs import JobController
 from src.dashboard.api import create_app
@@ -84,7 +85,9 @@ class DaemonComponents:
     config: CanaryConfig
     telemetry_broadcaster: Broadcaster
     anomalies_broadcaster: Broadcaster
+    control_broadcaster: Broadcaster
     event_logger: AnomalyEventLogger
+    audit_logger: ControlAuditLogger
     emitter: AnomalyEventEmitter
     model_managers: dict[str, ModelManager[Any]]
     capture_controller: CaptureController | None = None
@@ -95,8 +98,10 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
     """Construct all long-lived components from config. No I/O beyond mkdir."""
     telemetry_bus = Broadcaster(queue_size=config.daemon.broadcaster_queue_size)
     anomalies_bus = Broadcaster(queue_size=config.daemon.broadcaster_queue_size)
+    control_bus = Broadcaster(queue_size=config.daemon.broadcaster_queue_size)
 
     event_logger = AnomalyEventLogger(config.daemon.anomalies_dir)
+    audit_logger = ControlAuditLogger(config.daemon.audit_log)
     emitter = _make_broadcasting_emitter(event_logger, anomalies_bus)
     model_managers = _load_model_managers(config)
 
@@ -104,7 +109,9 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         config=config,
         telemetry_broadcaster=telemetry_bus,
         anomalies_broadcaster=anomalies_bus,
+        control_broadcaster=control_bus,
         event_logger=event_logger,
+        audit_logger=audit_logger,
         emitter=emitter,
         model_managers=model_managers,
         capture_controller=None,
@@ -517,10 +524,17 @@ async def serve_in_background(
         models_dir=components.config.daemon.models_dir,
         telemetry_broadcaster=components.telemetry_broadcaster,
         anomalies_broadcaster=components.anomalies_broadcaster,
+        control_broadcaster=components.control_broadcaster,
         emitter=components.emitter,
         capture_controller=components.capture_controller,
         job_controller=components.job_controller,
+        audit_logger=components.audit_logger,
     )
+    if components.job_controller is not None:
+        loop = asyncio.get_running_loop()
+        components.job_controller.set_event_callback(
+            lambda event: components.control_broadcaster.publish_threadsafe(loop, event)
+        )
     if server_factory is None:
         server_factory = uvicorn.Server
     server_config = uvicorn.Config(

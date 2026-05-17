@@ -1076,9 +1076,11 @@ present / absent and the CORS dev-origin allow.
   SSH tunnel workflow for laptop frontend development.
 - [x] **5.20a — Headless control plane.** The daemon now exposes
   bearer-token-protected `/control/*` routes for capture start/current/tag/stop,
-  session listing/detail/zip export, and an allow-listed background job API
-  for `retrain_if`, `retrain_lstm`, `retrain_all`, `refit_behavior_models`,
-  and `corpus_report`. `scripts/canaryctl.py` is the laptop-facing CLI so
+  session listing/detail/metadata/pin/delete/zip export, persisted and
+  cancellable allow-listed background jobs, preflight/version diagnostics,
+  control audit/event streaming, and model artifact upload. Supported jobs are
+  `retrain_if`, `retrain_lstm`, `retrain_all`, `refit_behavior_models`, and
+  `corpus_report`. `scripts/canaryctl.py` is the laptop-facing CLI so
   Codex/Claude can drive a Pi at `http://<ip>:8000` without SSH or arbitrary
   remote shell execution. `scripts/install_pi.sh` generates
   `/etc/canary/control.token` and injects it into the systemd environment.
