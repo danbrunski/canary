@@ -20,8 +20,7 @@ def discover_sessions(root: Path) -> list[Path]:
     return sorted(
         child
         for child in root.iterdir()
-        if child.is_dir()
-        and any(f.stat().st_size > 0 for f in child.glob(PARQUET_PATTERN))
+        if child.is_dir() and any(f.stat().st_size > 0 for f in child.glob(PARQUET_PATTERN))
     )
 
 
