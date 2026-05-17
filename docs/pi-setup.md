@@ -8,7 +8,9 @@ Recommended operating model:
 
 - Pi: data collection, storage, inference, API, dashboard hosting.
 - Laptop: SSH for service/log work; browser or `curl` for API/dashboard work.
-- Network: vehicle hotspot, phone hotspot, or a trusted LAN. v1 has no auth.
+- Network: vehicle hotspot, phone hotspot, a trusted LAN, or the Pi's own
+  self-hosted AP for field use away from any known network — see
+  `docs/pi-hotspot.md`. v1 has no auth.
 
 There are two install paths:
 

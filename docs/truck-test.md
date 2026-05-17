@@ -5,7 +5,8 @@ control API. Assumes `sudo bash scripts/deploy_truck.sh` has been run (Pi
 boots with `canary.service` + `can0.service` enabled and a control token).
 
 Full API reference: `docs/headless-api.md`. SocketCAN details:
-`docs/can-setup.md`.
+`docs/can-setup.md`. Running the Pi as its own field WiFi AP (no router):
+`docs/pi-hotspot.md` — then the host below is `http://10.42.0.1:8000`.
 
 ## Capture paths — which one
 
@@ -26,7 +27,8 @@ flaky-signal reconnect mid-drive) just works — `canaryctl` reads it when
 the vars aren't already exported:
 
 ```bash
-# Pi IP: check your router, or `ping canary.local`, or on the Pi: hostname -I
+# Pi IP: 10.42.0.1 if using the Pi's own AP (docs/pi-hotspot.md); else
+# check your router, or `ping canary.local`, or on the Pi: hostname -I
 mkdir -p ~/.canary && chmod 700 ~/.canary
 cat > ~/.canary/env <<EOF
 CANARY_HOST=http://<pi-ip>:8000
