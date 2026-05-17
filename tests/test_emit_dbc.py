@@ -74,9 +74,7 @@ def test_real_bindings_emit_loads(tmp_path) -> None:  # type: ignore[no-untyped-
     from pathlib import Path
 
     db = build_database(Path("data/bindings.yaml"))
-    reloaded = cantools.database.load_string(
-        db.as_dbc_string(), database_format="dbc"
-    )
+    reloaded = cantools.database.load_string(db.as_dbc_string(), database_format="dbc")
     assert len(reloaded.messages) == len(db.messages) > 0
     # ECM_RPM (confirmed) must survive the round trip on 0x1F9.
     rpm = reloaded.get_message_by_frame_id(0x1F9)

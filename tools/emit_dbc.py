@@ -62,8 +62,7 @@ def _to_signal(b: Binding) -> Signal:
         minimum=b.plausible_min,
         maximum=b.plausible_max,
         unit=(b.unit if b.unit and b.unit != "unknown" else None),
-        comment=f"confidence={b.confidence}"
-        + (f"; {b.notes.splitlines()[0]}" if b.notes else ""),
+        comment=f"confidence={b.confidence}" + (f"; {b.notes.splitlines()[0]}" if b.notes else ""),
     )
 
 

@@ -28,6 +28,8 @@ def test_example_yaml_loads():
     assert config.models.isolation_forest.random_state == 42
     assert config.models.isolation_forest.per_mode_contamination == {}
     assert config.dashboard.port == 8000
+    assert config.daemon.jobs_dir == Path("data/control/jobs")
+    assert config.daemon.control_token_env == "CANARY_CONTROL_TOKEN"
 
 
 def test_pi_example_yaml_loads():
@@ -37,8 +39,10 @@ def test_pi_example_yaml_loads():
     assert config.collection.storage_path == Path("/data/canary/sessions")
     assert config.daemon.anomalies_dir == Path("/data/canary/anomalies")
     assert config.daemon.models_dir == Path("models")
+    assert config.daemon.jobs_dir == Path("/data/canary/control/jobs")
     assert config.models.lstm_autoencoder.enabled is False
     assert config.dashboard.host == "0.0.0.0"
+    assert config.daemon.control_token_env == "CANARY_CONTROL_TOKEN"
 
 
 def test_unknown_top_level_key_rejected(tmp_path: Path):

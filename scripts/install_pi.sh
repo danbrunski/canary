@@ -20,6 +20,7 @@ CANARY_HOME="${CANARY_HOME:-${REPO_ROOT}}"
 CANARY_CONFIG_DIR="${CANARY_CONFIG_DIR:-/etc/canary}"
 CANARY_CONFIG="${CANARY_CONFIG:-${CANARY_CONFIG_DIR}/canary.yaml}"
 CANARY_ENV="${CANARY_ENV:-${CANARY_CONFIG_DIR}/canary.env}"
+CANARY_CONTROL_TOKEN_FILE="${CANARY_CONTROL_TOKEN_FILE:-${CANARY_CONFIG_DIR}/control.token}"
 CANARY_DATA_DIR="${CANARY_DATA_DIR:-/data/canary}"
 CANARY_PYTHON="${CANARY_PYTHON:-python3}"
 CANARY_EXTRAS="${CANARY_EXTRAS:-none}"
@@ -59,11 +60,23 @@ else
   echo "Keeping existing ${CANARY_CONFIG}."
 fi
 
+if [[ ! -f "${CANARY_CONTROL_TOKEN_FILE}" ]]; then
+  "${CANARY_PYTHON}" -c 'import secrets; print(secrets.token_urlsafe(32))' \
+    >"${CANARY_CONTROL_TOKEN_FILE}"
+  chown root:"${CANARY_GROUP}" "${CANARY_CONTROL_TOKEN_FILE}"
+  chmod 0640 "${CANARY_CONTROL_TOKEN_FILE}"
+  echo "Created ${CANARY_CONTROL_TOKEN_FILE}; use it as CANARY_TOKEN from your laptop."
+else
+  echo "Keeping existing ${CANARY_CONTROL_TOKEN_FILE}."
+fi
+
 cat >"${CANARY_ENV}" <<EOF
 CANARY_HOME=${CANARY_HOME}
 CANARY_CONFIG=${CANARY_CONFIG}
+CANARY_CONTROL_TOKEN=$(cat "${CANARY_CONTROL_TOKEN_FILE}")
 EOF
-chmod 0644 "${CANARY_ENV}"
+chown root:"${CANARY_GROUP}" "${CANARY_ENV}"
+chmod 0640 "${CANARY_ENV}"
 
 install -m 0644 "${CANARY_HOME}/systemd/canary.service" "${CANARY_SERVICE}"
 
@@ -84,5 +97,6 @@ Next:
   2. Bring up can0 for your chosen OBD/CAN mode; see docs/can-setup.md
   3. Start with: sudo systemctl start canary
   4. Watch logs: sudo journalctl -u canary -f
-  5. Open: http://<pi-hostname-or-ip>:8000/status
+  5. Export the laptop token: export CANARY_TOKEN="$(cat "${CANARY_CONTROL_TOKEN_FILE}")"
+  6. Open: http://<pi-hostname-or-ip>:8000/status
 EOF

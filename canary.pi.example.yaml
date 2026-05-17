@@ -79,7 +79,9 @@ dashboard:
 daemon:
   anomalies_dir: /data/canary/anomalies
   models_dir: models
+  jobs_dir: /data/canary/control/jobs
   isolation_forest_artifact: isolation_forest/model.joblib
   lstm_artifact: lstm_autoencoder/model.pt
   model_poll_seconds: 30.0
   broadcaster_queue_size: 100
+  control_token_env: CANARY_CONTROL_TOKEN

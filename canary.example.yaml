@@ -86,7 +86,9 @@ dashboard:
 # daemon:
 #   anomalies_dir: data/anomalies
 #   models_dir: models
+#   jobs_dir: data/control/jobs
 #   isolation_forest_artifact: isolation_forest/model.joblib  # relative to models_dir
 #   lstm_artifact: lstm_autoencoder/model.pt                  # relative to models_dir
 #   model_poll_seconds: 30.0
 #   broadcaster_queue_size: 100
+#   control_token_env: CANARY_CONTROL_TOKEN

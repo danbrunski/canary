@@ -1074,6 +1074,14 @@ present / absent and the CORS dev-origin allow.
   optional dashboard build, systemd operation, and laptop/headless API
   access. `docs/headless-api.md` lists REST/WebSocket endpoints and the
   SSH tunnel workflow for laptop frontend development.
+- [x] **5.20a — Headless control plane.** The daemon now exposes
+  bearer-token-protected `/control/*` routes for capture start/current/tag/stop,
+  session listing/detail/zip export, and an allow-listed background job API
+  for `retrain_if`, `retrain_lstm`, `retrain_all`, `refit_behavior_models`,
+  and `corpus_report`. `scripts/canaryctl.py` is the laptop-facing CLI so
+  Codex/Claude can drive a Pi at `http://<ip>:8000` without SSH or arbitrary
+  remote shell execution. `scripts/install_pi.sh` generates
+  `/etc/canary/control.token` and injects it into the systemd environment.
 - [ ] **5.21 — Vehicle install.** Mount Pi, run buck converter from ACC,
   verify clean shutdown on ignition off. (Hardware task; software side
   is graceful-shutdown handling.)

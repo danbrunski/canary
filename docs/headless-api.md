@@ -1,11 +1,11 @@
 # Headless API
 
 The Raspberry Pi runs one CANary daemon. That daemon collects telemetry,
-writes Parquet, runs model polling/inference, and serves the read-only HTTP
-and WebSocket API used by the browser dashboard.
+writes Parquet, runs model polling/inference, serves the dashboard, and owns
+the authenticated control API used from a laptop.
 
-There is no authentication in v1. Bind it only to loopback, a trusted LAN, or
-the vehicle hotspot.
+The read-only dashboard endpoints are unauthenticated in v1. The `/control/*`
+endpoints require a bearer token from `CANARY_CONTROL_TOKEN`.
 
 ## Browser
 
@@ -38,6 +38,87 @@ Endpoint summary:
 | `GET /anomalies?since=...` | persisted anomaly events from JSONL |
 | `GET /bindings` | decoded CAN binding metadata for display |
 | `GET /models/behavior` | behavior-model surfaces for dashboard panels |
+
+## Control API
+
+The Pi installer writes a token to `/etc/canary/control.token` and exports it
+to the systemd service as `CANARY_CONTROL_TOKEN`. On the laptop:
+
+```bash
+export CANARY_HOST=http://192.168.0.230:8000
+export CANARY_TOKEN='<token from /etc/canary/control.token>'
+```
+
+Then use `canaryctl`:
+
+```bash
+scripts/canaryctl.py status
+scripts/canaryctl.py capture start --purpose "next drive" --protocol drive
+scripts/canaryctl.py tag cold_start
+scripts/canaryctl.py tag highway_cruise --field speed_target=70
+scripts/canaryctl.py capture current
+scripts/canaryctl.py capture stop --reason arrived
+scripts/canaryctl.py sessions list
+scripts/canaryctl.py sessions export 2026-05-17T120000 --out drive.zip
+scripts/canaryctl.py jobs start corpus_report
+scripts/canaryctl.py jobs start retrain_if --days 14
+scripts/canaryctl.py jobs show <job_id>
+scripts/canaryctl.py jobs logs <job_id>
+```
+
+Equivalent raw HTTP:
+
+```bash
+curl -H "Authorization: Bearer $CANARY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"purpose":"next drive","protocol":"drive"}' \
+  "$CANARY_HOST/control/captures"
+
+curl -H "Authorization: Bearer $CANARY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"label":"highway_cruise","fields":{"speed_target":70}}' \
+  "$CANARY_HOST/control/captures/current/tags"
+
+curl -H "Authorization: Bearer $CANARY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"arrived"}' \
+  "$CANARY_HOST/control/captures/current/stop"
+```
+
+Capture commands create a labeled window on the daemon's current telemetry
+session. They do not start a second recorder process or contend for the CAN
+adapter. Start/tag/stop records are appended to the active session's
+`tags.jsonl`.
+
+Control endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /control/captures` | start a labeled capture window on the active daemon session |
+| `GET /control/captures/current` | inspect the active capture window |
+| `POST /control/captures/current/tags` | append a tag to the active capture's `tags.jsonl` |
+| `POST /control/captures/current/stop` | stop the active capture window |
+| `GET /control/sessions` | list timestamped session directories |
+| `GET /control/sessions/{id}` | inspect one session |
+| `GET /control/sessions/{id}/export` | download one session as a zip archive |
+| `POST /control/jobs` | start an allow-listed background job |
+| `GET /control/jobs` | list in-memory background jobs since daemon start |
+| `GET /control/jobs/{id}` | inspect one job |
+| `GET /control/jobs/{id}/logs` | fetch captured stdout/stderr for one job |
+
+Allowed job kinds:
+
+| Kind | What It Runs |
+| --- | --- |
+| `retrain_if` | `scripts/retrain.py --skip-lstm` |
+| `retrain_lstm` | `scripts/retrain.py --skip-if` |
+| `retrain_all` | `scripts/retrain.py` for both detectors |
+| `refit_behavior_models` | `scripts/refit_behavior_models.py` |
+| `corpus_report` | `tools/corpus_report.py --out data/analyses/...` |
+
+Job parameters are structured JSON, not shell text. Common parameters include
+`days`, `all`, and `session_ids`. LSTM jobs also accept `device`; behavior
+refits accept `recipes` and `dry_run`.
 
 ## WebSockets
 

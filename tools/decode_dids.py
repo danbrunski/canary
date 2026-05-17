@@ -48,9 +48,7 @@ def _load_snapshots(files: list[Path]) -> dict[str, dict[int, bytes]]:
     for f in files:
         doc = json.loads(f.read_text())
         vals = doc.get("values", {})
-        snaps[f.stem] = {
-            int(k, 16): bytes.fromhex(v) for k, v in vals.items() if v is not None
-        }
+        snaps[f.stem] = {int(k, 16): bytes.fromhex(v) for k, v in vals.items() if v is not None}
     return snaps
 
 
@@ -79,9 +77,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     keep = set(args.confidence.split(",")) if args.confidence else set(_CONF_ORDER)
     snaps = _load_snapshots(files)
 
-    print(f"snapshots: {len(files)}  |  map: {len(did_map.dids)} DIDs  |  "
-          f"access: req 0x{did_map.access.ecu_request_id:X} session "
-          f"{f'0x{did_map.access.session:X}' if did_map.access.session is not None else 'default'}")
+    print(
+        f"snapshots: {len(files)}  |  map: {len(did_map.dids)} DIDs  |  "
+        f"access: req 0x{did_map.access.ecu_request_id:X} session "
+        f"{f'0x{did_map.access.session:X}' if did_map.access.session is not None else 'default'}"
+    )
     seen_in_map: set[int] = set()
     bad = 0
     for entry in sorted(did_map.dids, key=lambda e: (_CONF_ORDER.index(e.confidence), e.did)):
@@ -125,8 +125,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{len(unidentified)} swept DIDs unidentified (naming backlog)"
     )
     if bad:
-        print(f"\n⚠ {bad} entr{'y' if bad == 1 else 'ies'} decoded OUTSIDE plausible bounds "
-              f"— scale/offset likely wrong.")
+        print(
+            f"\n⚠ {bad} entr{'y' if bad == 1 else 'ies'} decoded OUTSIDE plausible bounds "
+            f"— scale/offset likely wrong."
+        )
         return 2
     print("\n✓ no plausibility violations")
     return 0

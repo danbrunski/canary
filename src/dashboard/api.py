@@ -35,19 +35,40 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import read_events_dir
 from src.config import CanaryConfig
+from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
+from src.control.jobs import JobController
+from src.control.sessions import (
+    list_sessions,
+    resolve_session,
+    summarize_session,
+    write_session_zip,
+)
 from src.dashboard.broadcast import Broadcaster
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
@@ -319,6 +340,39 @@ def read_behavior_models(path: Path = DEFAULT_BEHAVIOR_MODELS_PATH) -> dict[str,
 
 
 # ---------------------------------------------------------------------------
+# Control-plane request models
+# ---------------------------------------------------------------------------
+
+
+class _ControlRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class CaptureStartRequest(_ControlRequest):
+    purpose: str | None = None
+    protocol: str | None = None
+    vehicle_state: str | None = None
+    fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class CaptureTagRequest(_ControlRequest):
+    label: str
+    kind: str = "event"
+    timestamp: float | None = None
+    fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class CaptureStopRequest(_ControlRequest):
+    reason: str | None = None
+    fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class JobSubmitRequest(_ControlRequest):
+    kind: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
 
@@ -335,6 +389,9 @@ def create_app(
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
     static_dir: Path | None = None,
     enable_dev_cors: bool = False,
+    capture_controller: CaptureController | None = None,
+    job_controller: JobController | None = None,
+    control_token: str | None = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -359,6 +416,9 @@ def create_app(
         )
     telemetry_bus = telemetry_broadcaster or Broadcaster()
     anomalies_bus = anomalies_broadcaster or Broadcaster()
+    resolved_control_token = (
+        os.environ.get(config.daemon.control_token_env) if control_token is None else control_token
+    )
     # Stash them on app.state so producer threads / app extensions can reach
     # the same instances after construction.
     app.state.telemetry_broadcaster = telemetry_bus
@@ -400,6 +460,160 @@ def create_app(
         # surfaces in the dashboard immediately. The file is small.
         return read_bindings_for_display(bindings_path)
 
+    def require_control_auth(
+        authorization: str | None = Header(default=None),
+    ) -> None:
+        _require_control_auth(resolved_control_token, authorization)
+
+    def _controller() -> CaptureController:
+        if capture_controller is None:
+            raise HTTPException(status_code=503, detail="control API is not available")
+        return capture_controller
+
+    def _jobs() -> JobController:
+        if job_controller is None:
+            raise HTTPException(status_code=503, detail="job API is not available")
+        return job_controller
+
+    @app.post("/control/captures", status_code=201)
+    def post_capture(
+        request: CaptureStartRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        controller = _controller()
+        try:
+            capture = controller.start_capture(
+                purpose=request.purpose,
+                protocol=request.protocol,
+                vehicle_state=request.vehicle_state,
+                fields=request.fields,
+            )
+        except CaptureConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"capture": capture.to_dict()}
+
+    @app.get("/control/captures/current")
+    def get_current_capture(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        controller = _controller()
+        capture = controller.current_capture()
+        return {"capture": None if capture is None else capture.to_dict()}
+
+    @app.post("/control/captures/current/tags")
+    def post_capture_tag(
+        request: CaptureTagRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        controller = _controller()
+        try:
+            tag = controller.add_tag(
+                request.label,
+                kind=request.kind,
+                timestamp=request.timestamp,
+                fields=request.fields,
+            )
+        except NoActiveCaptureError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        capture = controller.current_capture()
+        return {
+            "tag": tag,
+            "capture": None if capture is None else capture.to_dict(),
+        }
+
+    @app.post("/control/captures/current/stop")
+    def post_capture_stop(
+        request: CaptureStopRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        controller = _controller()
+        try:
+            capture = controller.stop_capture(reason=request.reason, fields=request.fields)
+        except NoActiveCaptureError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"capture": capture.to_dict()}
+
+    @app.get("/control/sessions")
+    def get_control_sessions(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        sessions = [session.to_dict() for session in list_sessions(config.collection.storage_path)]
+        return {"sessions": sessions, "count": len(sessions)}
+
+    @app.get("/control/sessions/{session_id}")
+    def get_control_session(
+        session_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            session = resolve_session(config.collection.storage_path, session_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"session": summarize_session(session).to_dict()}
+
+    @app.get("/control/sessions/{session_id}/export")
+    def export_control_session(
+        session_id: str,
+        background_tasks: BackgroundTasks,
+        _auth: None = Depends(require_control_auth),
+    ) -> FileResponse:
+        try:
+            session = resolve_session(config.collection.storage_path, session_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        tmp = tempfile.NamedTemporaryFile(
+            prefix=f"canary-{session_id}-",
+            suffix=".zip",
+            delete=False,
+        )
+        tmp_path = Path(tmp.name)
+        tmp.close()
+        write_session_zip(session, tmp_path)
+        background_tasks.add_task(_unlink_path, tmp_path)
+        return FileResponse(
+            tmp_path,
+            media_type="application/zip",
+            filename=f"{session_id}.zip",
+        )
+
+    @app.post("/control/jobs", status_code=201)
+    def post_control_job(
+        request: JobSubmitRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            job = _jobs().submit(request.kind, request.params)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"job": job.to_dict()}
+
+    @app.get("/control/jobs")
+    def get_control_jobs(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        jobs = [job.to_dict() for job in _jobs().list_jobs()]
+        return {"jobs": jobs, "count": len(jobs)}
+
+    @app.get("/control/jobs/{job_id}/logs")
+    def get_control_job_logs(
+        job_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        logs = _jobs().logs(job_id)
+        if logs is None:
+            raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
+        return {"job_id": job_id, "log": logs}
+
+    @app.get("/control/jobs/{job_id}")
+    def get_control_job(
+        job_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        job = _jobs().get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
+        return {"job": job.to_dict()}
+
     @app.websocket("/ws/telemetry")
     async def ws_telemetry(websocket: WebSocket) -> None:
         await _run_websocket(websocket, telemetry_bus)
@@ -423,6 +637,23 @@ def create_app(
         )
 
     return app
+
+
+def _require_control_auth(control_token: str | None, authorization: str | None) -> None:
+    """Bearer-token guard for mutating control-plane routes."""
+    if control_token is None or control_token == "":
+        raise HTTPException(status_code=503, detail="control API token is not configured")
+    expected = f"Bearer {control_token}"
+    if authorization != expected:
+        raise HTTPException(
+            status_code=401,
+            detail="missing or invalid bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+def _unlink_path(path: Path) -> None:
+    path.unlink(missing_ok=True)
 
 
 async def _run_websocket(websocket: WebSocket, bus: Broadcaster) -> None:

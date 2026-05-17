@@ -167,8 +167,7 @@ def _build_transport(
             keepalive_seconds=args.keepalive,
         )
         banner = (
-            f"Canable {config.hardware.can.channel} "
-            f"(req 0x{request_id:X} → resp 0x{response_id:X}"
+            f"Canable {config.hardware.can.channel} (req 0x{request_id:X} → resp 0x{response_id:X}"
         )
         if session is not None:
             banner += f", session 0x{session:X} keepalive {args.keepalive}s)"

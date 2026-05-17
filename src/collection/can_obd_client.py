@@ -156,9 +156,7 @@ class CanObdClient:
             request_id=request_id,
         )
 
-    def enter_diagnostic_session(
-        self, subfunction: int, *, request_id: int | None = None
-    ) -> bool:
+    def enter_diagnostic_session(self, subfunction: int, *, request_id: int | None = None) -> bool:
         """UDS Service 0x10 DiagnosticSessionControl — enter a session.
 
         Returns True on a positive ``50 <subfunction>`` response. This is
@@ -280,11 +278,7 @@ class CanObdClient:
 
             if pci_high == _PCI_SINGLE_FRAME:
                 length = data[0] & 0x0F
-                body = (
-                    data[1 : 1 + length]
-                    if 1 <= length <= 7 and len(data) >= 1 + length
-                    else b""
-                )
+                body = data[1 : 1 + length] if 1 <= length <= 7 and len(data) >= 1 + length else b""
                 # Definitive negative response to *our* service (7F SS NRC):
                 # stop now instead of waiting out the timeout. Critical for
                 # DID sweeps — an absent DID otherwise costs a full timeout

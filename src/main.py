@@ -111,9 +111,7 @@ def _default_collectors(config: CanaryConfig) -> list[CollectorStarter]:
             request_timeout_seconds=config.collection.obd_request_timeout_seconds,
         )
 
-        async def canable_obd(
-            queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event
-        ) -> None:
+        async def canable_obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
             await collect_can_obd_from_config(
                 can_obd_spec,
                 queue,

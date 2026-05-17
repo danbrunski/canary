@@ -730,11 +730,7 @@ def _extract_service_payload(
             return None
         return body[2:]
     if 0 <= identifier <= 0xFFFF:
-        if (
-            len(body) < 3
-            or body[1] != (identifier >> 8) & 0xFF
-            or body[2] != identifier & 0xFF
-        ):
+        if len(body) < 3 or body[1] != (identifier >> 8) & 0xFF or body[2] != identifier & 0xFF:
             return None
         return body[3:]
     return None

@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import sys
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -47,6 +49,8 @@ from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
 from src.collection.queueing import QueueDepthMonitor
 from src.config import CanaryConfig
+from src.control.capture import CaptureController
+from src.control.jobs import JobController
 from src.dashboard.api import create_app
 from src.dashboard.broadcast import Broadcaster
 from src.decode.behavior_models import (
@@ -83,6 +87,8 @@ class DaemonComponents:
     event_logger: AnomalyEventLogger
     emitter: AnomalyEventEmitter
     model_managers: dict[str, ModelManager[Any]]
+    capture_controller: CaptureController | None = None
+    job_controller: JobController | None = None
 
 
 def build_components(config: CanaryConfig) -> DaemonComponents:
@@ -101,6 +107,23 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         event_logger=event_logger,
         emitter=emitter,
         model_managers=model_managers,
+        capture_controller=None,
+        job_controller=_make_job_controller(config),
+    )
+
+
+def _make_job_controller(config: CanaryConfig) -> JobController:
+    repo_root = Path.cwd()
+    config_path = Path(os.environ.get("CANARY_CONFIG", "canary.yaml"))
+    python = repo_root / ".venv" / "bin" / "python"
+    if not python.exists():
+        python = Path(sys.executable)
+    return JobController(
+        config=config,
+        repo_root=repo_root,
+        config_path=config_path,
+        jobs_dir=config.daemon.jobs_dir,
+        python=python,
     )
 
 
@@ -495,6 +518,8 @@ async def serve_in_background(
         telemetry_broadcaster=components.telemetry_broadcaster,
         anomalies_broadcaster=components.anomalies_broadcaster,
         emitter=components.emitter,
+        capture_controller=components.capture_controller,
+        job_controller=components.job_controller,
     )
     if server_factory is None:
         server_factory = uvicorn.Server
@@ -554,6 +579,7 @@ async def run_daemon(
     storage_writer = (
         ParquetTelemetryWriter(config.collection.storage_path) if writer is None else writer
     )
+    components.capture_controller = CaptureController(lambda: storage_writer.paths.root)
 
     # Build the live source (no-op if bindings/behavior_models are absent on
     # disk — observe still works, just without decoded:* / deviation:* columns).

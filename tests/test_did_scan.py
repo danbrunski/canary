@@ -152,9 +152,7 @@ class _FakeCanObdClient:
         self._responses = responses
         self.calls: list[tuple[int, int | None]] = []
 
-    def query_mode_22(
-        self, did: int, *, request_id: int | None = None
-    ) -> _FakeObdResponse | None:
+    def query_mode_22(self, did: int, *, request_id: int | None = None) -> _FakeObdResponse | None:
         self.calls.append((did, request_id))
         data = self._responses.get(did)
         return None if data is None else _FakeObdResponse(data)

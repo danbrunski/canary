@@ -296,8 +296,6 @@ def test_record_can_obd_reraises_config_value_error(tmp_path: Path) -> None:
             duration=0.4,
             obd_writer=writer,
             factory=lambda _s: _ReconnectableObdBus(),  # type: ignore[arg-type,return-value]
-            reconnect_policy=ReconnectPolicy(
-                initial_delay_seconds=0.01, max_delay_seconds=0.01
-            ),
+            reconnect_policy=ReconnectPolicy(initial_delay_seconds=0.01, max_delay_seconds=0.01),
         )
     writer.close()

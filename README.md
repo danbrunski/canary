@@ -102,6 +102,16 @@ LAN address, defaulting to `http://<pi-hostname-or-ip>:8000/`. See
 [`docs/pi-setup.md`](docs/pi-setup.md) and
 [`docs/headless-api.md`](docs/headless-api.md).
 
+From a laptop, `scripts/canaryctl.py` drives the authenticated control API:
+
+```bash
+export CANARY_HOST=http://192.168.0.230:8000
+export CANARY_TOKEN='<token from /etc/canary/control.token>'
+scripts/canaryctl.py capture start --purpose "next drive" --protocol drive
+scripts/canaryctl.py tag highway_cruise
+scripts/canaryctl.py capture stop
+```
+
 ### Test / lint / typecheck
 
 ```bash

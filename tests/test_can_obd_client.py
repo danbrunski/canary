@@ -293,8 +293,11 @@ def test_negative_response_returns_none_without_waiting_full_timeout() -> None:
     t.start()
     try:
         client = CanObdClient(
-            tester, request_id=0x7E0, response_id_min=0x7E8,
-            response_id_max=0x7E8, timeout_seconds=5.0,
+            tester,
+            request_id=0x7E0,
+            response_id_min=0x7E8,
+            response_id_max=0x7E8,
+            timeout_seconds=5.0,
         )
         t0 = time.monotonic()
         assert client.query_mode_22(0x1101) is None
@@ -333,8 +336,11 @@ def test_enter_diagnostic_session_positive_and_negative() -> None:
     t.start()
     try:
         c = CanObdClient(
-            tester, request_id=0x7E0, response_id_min=0x7E8,
-            response_id_max=0x7E8, timeout_seconds=2.0,
+            tester,
+            request_id=0x7E0,
+            response_id_min=0x7E8,
+            response_id_max=0x7E8,
+            timeout_seconds=2.0,
         )
         assert c.enter_diagnostic_session(0xC0) is True
         assert c.enter_diagnostic_session(0x03) is False

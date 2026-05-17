@@ -158,8 +158,7 @@ def check_can_link(spec: CanBusConfig, *, runner: CommandRunner = _run) -> Check
     try:
         proc = runner(["ip", "-details", "-json", "link", "show", "dev", chan])
     except (subprocess.SubprocessError, FileNotFoundError) as exc:
-        return CheckResult("can_link", False, f"ip link query failed: {exc}",
-                           remediation=up_cmds)
+        return CheckResult("can_link", False, f"ip link query failed: {exc}", remediation=up_cmds)
     if proc.returncode != 0:
         return CheckResult(
             "can_link",
@@ -169,8 +168,9 @@ def check_can_link(spec: CanBusConfig, *, runner: CommandRunner = _run) -> Check
         )
     info = parse_ip_link(proc.stdout)
     if info is None:
-        return CheckResult("can_link", False, f"could not parse `ip link` for {chan}",
-                           remediation=up_cmds)
+        return CheckResult(
+            "can_link", False, f"could not parse `ip link` for {chan}", remediation=up_cmds
+        )
     operstate = str(info.get("operstate", "?"))
     flags = info.get("flags", [])
     is_up = operstate == "UP" or (isinstance(flags, list) and "UP" in flags)
@@ -282,13 +282,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     p.add_argument("--frames-seconds", type=float, default=5.0)
     p.add_argument("--min-frames", type=int, default=20)
     p.add_argument("--obd-timeout", type=float, default=1.0)
-    p.add_argument("--skip-obd", action="store_true",
-                   help="Skip the Mode 01 ECU check (CAN-only passive capture).")
-    p.add_argument("--bring-up", action="store_true",
-                   help="If can0 is down/wrong, (re)configure it via `sudo ip link` first.")
+    p.add_argument(
+        "--skip-obd",
+        action="store_true",
+        help="Skip the Mode 01 ECU check (CAN-only passive capture).",
+    )
+    p.add_argument(
+        "--bring-up",
+        action="store_true",
+        help="If can0 is down/wrong, (re)configure it via `sudo ip link` first.",
+    )
     p.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
-    p.add_argument("--log-level", default="WARNING",
-                   choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    p.add_argument("--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p.parse_args(argv)
 
 
@@ -316,9 +321,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             bus = bus_factory(spec)
             results.append(
-                check_frames(
-                    bus, seconds=args.frames_seconds, min_frames=args.min_frames
-                )
+                check_frames(bus, seconds=args.frames_seconds, min_frames=args.min_frames)
             )
             obd_source = config.collection.obd_source
             if args.skip_obd or obd_source != "canable":
@@ -337,8 +340,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 CheckResult(
                     "bus",
                     False,
-                    f"could not open {spec.interface}:{spec.channel}: "
-                    f"{type(exc).__name__}: {exc}",
+                    f"could not open {spec.interface}:{spec.channel}: {type(exc).__name__}: {exc}",
                     remediation="run scripts/canup.sh; confirm the Canable is attached",
                 )
             )
@@ -351,8 +353,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     failed_critical = [r for r in results if r.critical and not r.ok]
     if args.json:
-        print(json.dumps({"results": [vars(r) for r in results],
-                          "go": not failed_critical}, indent=2))
+        print(
+            json.dumps({"results": [vars(r) for r in results], "go": not failed_critical}, indent=2)
+        )
     else:
         for r in results:
             mark = "PASS" if r.ok else ("FAIL" if r.critical else "WARN")

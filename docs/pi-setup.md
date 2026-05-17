@@ -68,7 +68,7 @@ actual clone path into `/etc/canary/canary.env`.
 
 The Pi installer creates a non-root `canary` user/group, creates
 `/etc/canary` and `/data/canary`, installs the Python virtualenv, installs the
-systemd unit, and enables the service.
+systemd unit, generates `/etc/canary/control.token`, and enables the service.
 
 ```bash
 sudo scripts/install_pi.sh
@@ -142,6 +142,22 @@ From a laptop or phone on the same network:
 ```bash
 curl http://canary.local:8000/status
 curl 'http://canary.local:8000/telemetry/latest?n=20'
+```
+
+For control commands from a laptop, copy the token once:
+
+```bash
+export CANARY_HOST=http://canary.local:8000
+export CANARY_TOKEN='<contents of /etc/canary/control.token on the Pi>'
+```
+
+Then:
+
+```bash
+scripts/canaryctl.py capture start --purpose "next drive" --protocol drive
+scripts/canaryctl.py tag cold_start
+scripts/canaryctl.py capture stop --reason arrived
+scripts/canaryctl.py jobs start corpus_report
 ```
 
 Open the dashboard at:

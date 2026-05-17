@@ -200,8 +200,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if action == "no-target":
         print(
-            f"error: no {PID_FILENAME} and no {MANIFEST_FILENAME} in {session} "
-            f"— nothing to stop.",
+            f"error: no {PID_FILENAME} and no {MANIFEST_FILENAME} in {session} — nothing to stop.",
             file=sys.stderr,
         )
         return 1
@@ -253,8 +252,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"  {summary}")
         else:
             print(
-                "  warning: process exited but no readable manifest — "
-                "check the recorder log.",
+                "  warning: process exited but no readable manifest — check the recorder log.",
                 file=sys.stderr,
             )
         return 0
