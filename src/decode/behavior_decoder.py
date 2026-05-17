@@ -188,12 +188,18 @@ def append_deviation_columns(
     no expectation OR the actual value is missing. The frame is copied;
     callers can chain through other preprocessing steps unchanged.
 
-    ``output_columns`` defaults to ``decoded:<output>`` for each model —
-    the convention bindings.yaml decoded signals use after ``to_wide``.
+    Column resolution for each model, in precedence order: an explicit
+    ``output_columns[model.name]`` override; else ``model.output`` verbatim
+    when it is already a qualified ``source:channel`` name (e.g.
+    ``obd:COOLANT_TEMP`` from the refit recipes — it has a ``:``); else the
+    legacy ``decoded:<output>`` for a bare CAN signal name (e.g.
+    ``ECM_INJECTOR_PW`` → ``decoded:ECM_INJECTOR_PW``).
     """
     out = frame.copy()
     for model in models.models:
-        actual_col = (output_columns or {}).get(model.name) or f"decoded:{model.output}"
+        actual_col = (output_columns or {}).get(model.name) or (
+            model.output if ":" in model.output else f"decoded:{model.output}"
+        )
         expected = expected_value_column(out, model)
         if actual_col in out.columns:
             actual = pd.to_numeric(out[actual_col], errors="coerce")
