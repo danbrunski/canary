@@ -1,0 +1,17 @@
+# udev rule: auto-recover can0 after a Canable USB re-enumeration.
+#
+# Install:  sudo install -m0644 systemd/70-canable-can0.rules \
+#                 /etc/udev/rules.d/70-canable-can0.rules
+#           sudo udevadm control --reload
+#
+# When the Canable browns out / re-enumerates mid-drive (the in-vehicle
+# analogue of the WSL usbipd drop), the kernel removes then re-adds the
+# `can0` net device. This rule makes systemd (re)start can0.service on every
+# add, so the link comes back at the configured bitrate WITHOUT a human.
+# The recorder's adapter-level auto-reconnect then rebuilds the python-can
+# bus on top of the recovered link — two complementary layers.
+#
+# If your Canable enumerates as can1/canN, add a matching rule or pin a
+# stable name with a serial-based rule (see docs/can-setup.md).
+
+SUBSYSTEM=="net", ACTION=="add", KERNEL=="can0", TAG+="systemd", ENV{SYSTEMD_WANTS}+="can0.service"

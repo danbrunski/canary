@@ -297,6 +297,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "did_request_id": f"0x{can_obd_spec.did_request_id:X}",
                 },
             )
+            # Pass factory + reconnect_policy so an in-vehicle USB hiccup /
+            # adapter re-enumeration / OSError doesn't end the drive mid-
+            # capture. The factory rebuilds the bus into the same writer, so
+            # frames.log stays one continuous file across reconnects. This is
+            # the same resilience the CAN-only record() path already has.
             record_can_obd(
                 bus,
                 paths,
@@ -306,6 +311,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 duration=args.seconds,
                 stop_event=stop_event,
                 obd_writer=obd_writer,
+                factory=None if args.no_reconnect else bus_factory,
+                reconnect_policy=None if args.no_reconnect else DEFAULT_RECONNECT_POLICY,
+                max_reconnects=args.max_reconnects,
             )
         else:
             if obd_source == "elm327":

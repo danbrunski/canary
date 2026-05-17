@@ -154,3 +154,20 @@ cross-reference → more decoded signals become ML features), so it compounds.
   `frames.log` + `pids.jsonl` without an ELM327.
 - [ ] Add a Canable-native broad DID sweep CLI to replace the legacy
   `tools/scan_constant_dids.py --port ...` ELM transport for exploratory scans.
+
+### Capture-readiness hardening (done 2026-05-16)
+
+The drive backlog is the blocker; these remove the ways a drive silently
+fails to produce usable data. Operational checklist: `docs/capture-runbook.md`.
+
+- [x] **Recorder auto-reconnect parity.** `record_can_obd` (the
+  `--obd-source canable` path) now rebuilds the bus on a mid-drive USB
+  drop into the *same* continuous `frames.log`, with a `max_reconnects`
+  cap (`reconnect_exhausted`) — the resilience the CAN-only `record()` and
+  the daemon path already had. Previously a single `OSError` ended the drive.
+- [x] **`scripts/preflight.py`** — go/no-go before a capture: config,
+  disk, `can0` up at bitrate, frames arriving, and **ECU answers Mode 01**
+  (catches the `0xC0`-DID-session trap that caused the Mode-22-only corpus).
+- [x] **Auto-recovering `can0`** — `systemd/can0.service` +
+  `systemd/70-canable-can0.rules` + idempotent `scripts/canup.sh` bring the
+  link back after reboot / USB re-enumeration without a human.

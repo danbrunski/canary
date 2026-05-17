@@ -37,6 +37,7 @@ from src.collection.can_collector import (
     bus_factory,
     frame_to_record,
 )
+from src.collection.can_collector import _wait_interruptible as wait_interruptible
 from src.collection.can_collector import _write_manifest as write_recording_manifest
 from src.collection.can_obd_client import (
     DEFAULT_REQUEST_ID,
@@ -360,42 +361,183 @@ def record_can_obd(
     obd_writer: JsonlReadingWriter,
     vehicle_state: str | None = None,
     stop_event: threading.Event | None = None,
+    factory: Callable[[CanBusConfig], can.BusABC] | None = None,
+    reconnect_policy: ReconnectPolicy | None = None,
+    max_reconnects: int | None = 10,
 ) -> RecordingResult:
-    """Record ``frames.log`` and ``pids.jsonl`` from one Canable."""
+    """Record ``frames.log`` and ``pids.jsonl`` from one Canable.
+
+    When ``factory`` AND ``reconnect_policy`` are provided, a bus-level
+    failure mid-capture (USB disconnect / re-enumeration, adapter reset,
+    ``OSError`` / ``can.CanError`` out of ``bus.recv``/``bus.send``) triggers
+    an auto-reconnect instead of ending the drive: the dead bus is shut down,
+    we wait per the policy, and ``factory(spec.can)`` rebuilds it. The SAME
+    ``CanutilsLogWriter`` stays open across reconnects so ``frames.log``
+    remains one continuous file. Without both params, bus-level exceptions
+    propagate as before (backward-compatible) — this is the behavior the
+    daemon path ``collect_can_obd_from_config`` has always had, now also on
+    the recorder path used by ``scripts/record.py --obd-source canable`` for
+    the drive backlog.
+
+    ``max_reconnects`` caps CONSECUTIVE failed rebuilds (default 10); a
+    successful rebuild resets the counter. Once exhausted the recording stops
+    with ``stopped_by = "reconnect_exhausted"``, mirroring ``record()``. This
+    matters because a wedged USB adapter can leave the rebuild call in
+    uninterruptible kernel I/O (the WSL2 failure mode that motivated the cap
+    on the CAN-only path); the in-vehicle analogue is a brown-out on the
+    Canable's USB power during a drive.
+
+    Frames captured in a segment that ends in a bus exception are written to
+    ``frames.log`` before the failure but not counted (``run_can_obd_loop``
+    does not return its stats when it raises). Data integrity is preserved;
+    only the manifest's ``frames_recorded`` tally is a small undercount across
+    a reconnect.
+    """
     started_at = datetime.now(UTC)
     deadline = time.monotonic() + duration if duration is not None else None
     local_stop = stop_event or threading.Event()
     error: BaseException | None = None
-    stats = CanObdLoopStats()
     stop_reason = "signal"
+
+    frames_seen = 0
+    parse_errors = 0
+    reconnects = 0  # successful bus rebuilds via factory()
+
+    reconnect_enabled = factory is not None and reconnect_policy is not None
+    current_bus: can.BusABC | None = bus
+    reconnect_delay = (
+        reconnect_policy.initial_delay_seconds if reconnect_policy is not None else 0.0
+    )
+    # Consecutive failed rebuilds — resets on success, capped by
+    # max_reconnects so a wedged adapter can't trap us in an infinite loop.
+    failed_rebuilds = 0
+
+    log.info(
+        "canable obd recording started",
+        extra={
+            "frames_path": str(paths.frames),
+            "interface": spec.can.interface,
+            "channel": spec.can.channel,
+            "duration_seconds": duration,
+            "auto_reconnect": reconnect_enabled,
+        },
+    )
+
     try:
         with can.io.CanutilsLogWriter(str(paths.frames)) as writer:
 
             def on_frame(msg: can.Message) -> None:
                 writer.on_message_received(msg)
 
-            stats = run_can_obd_loop(
-                bus,
-                spec,
-                on_frame=on_frame,
-                on_reading=obd_writer.write,
-                stop_event=local_stop,
-                deadline_monotonic=deadline,
-            )
-            if deadline is not None and time.monotonic() >= deadline and not local_stop.is_set():
-                stop_reason = "deadline"
+            while True:
+                if local_stop.is_set():
+                    stop_reason = "signal"
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    stop_reason = "deadline"
+                    break
+
+                # Lost the bus on a previous iteration: rebuild before recv.
+                if current_bus is None:
+                    assert reconnect_enabled  # else we'd have raised already
+                    assert factory is not None and reconnect_policy is not None
+                    if wait_interruptible(local_stop, reconnect_delay):
+                        stop_reason = "signal"
+                        break
+                    if deadline is not None and time.monotonic() >= deadline:
+                        stop_reason = "deadline"
+                        break
+                    try:
+                        current_bus = factory(spec.can)
+                        reconnects += 1
+                        failed_rebuilds = 0  # reset on success
+                        reconnect_delay = reconnect_policy.initial_delay_seconds
+                        log.info("bus reconnected", extra={"total_reconnects": reconnects})
+                    except Exception as build_exc:
+                        failed_rebuilds += 1
+                        log.warning(
+                            "bus rebuild failed; will retry",
+                            extra={
+                                "error": f"{type(build_exc).__name__}: {build_exc}",
+                                "next_delay_seconds": reconnect_delay,
+                                "failed_rebuilds": failed_rebuilds,
+                                "max_reconnects": max_reconnects,
+                            },
+                        )
+                        if max_reconnects is not None and failed_rebuilds >= max_reconnects:
+                            log.error(
+                                "reconnect attempts exhausted; stopping recording",
+                                extra={
+                                    "failed_rebuilds": failed_rebuilds,
+                                    "frames_recorded": frames_seen,
+                                },
+                            )
+                            stop_reason = "reconnect_exhausted"
+                            error = build_exc
+                            break
+                        reconnect_delay = reconnect_policy.next_delay(reconnect_delay)
+                        continue
+
+                try:
+                    segment = run_can_obd_loop(
+                        current_bus,
+                        spec,
+                        on_frame=on_frame,
+                        on_reading=obd_writer.write,
+                        stop_event=local_stop,
+                        deadline_monotonic=deadline,
+                    )
+                except ValueError:
+                    # Config error (bad PID/DID token) — not a transient bus
+                    # fault. Mirrors collect_can_obd_from_config.
+                    raise
+                except Exception as exc:
+                    if not reconnect_enabled:
+                        raise
+                    log.warning(
+                        "canable obd loop failed; will attempt reconnect",
+                        extra={
+                            "error": f"{type(exc).__name__}: {exc}",
+                            "delay_seconds": reconnect_delay,
+                        },
+                    )
+                    try:
+                        current_bus.shutdown()
+                    except Exception:
+                        # Bus may already be dead; shutdown is best-effort.
+                        pass
+                    current_bus = None
+                    continue
+
+                # Loop returned normally → stop_event or deadline ended it.
+                frames_seen += segment.frames_seen
+                parse_errors += segment.parse_errors
+                if local_stop.is_set():
+                    stop_reason = "signal"
+                elif deadline is not None and time.monotonic() >= deadline:
+                    stop_reason = "deadline"
+                break
     except BaseException as exc:
         error = exc
         stop_reason = "error"
         raise
     finally:
         ended_at = datetime.now(UTC)
+        # The bus may have been rebuilt; close whatever we currently hold so
+        # we don't leak a USB handle. The original bus (if unchanged) is the
+        # caller's to close.
+        if reconnect_enabled and current_bus is not None and current_bus is not bus:
+            try:
+                current_bus.shutdown()
+            except Exception:
+                pass
         result = RecordingResult(
             started_at=started_at,
             ended_at=ended_at,
-            frames_recorded=stats.frames_seen,
+            frames_recorded=frames_seen,
             stopped_by=stop_reason,
-            parse_errors=stats.parse_errors,
+            parse_errors=parse_errors,
+            reconnects=reconnects,
         )
         try:
             write_recording_manifest(

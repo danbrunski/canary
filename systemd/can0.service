@@ -1,0 +1,23 @@
+[Unit]
+Description=Bring up SocketCAN can0 for CANary capture
+# Run before the canary daemon so the link exists when it opens the bus.
+Before=canary.service
+# can0 is a USB CAN device; (re)appears as a net device.
+BindsTo=sys-subsystem-net-devices-can0.device
+After=sys-subsystem-net-devices-can0.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=CAN_IFACE=can0
+Environment=CAN_BITRATE=500000
+# `restart-ms 100` = controller auto-recovers from CAN bus-off. This is the
+# link-layer companion to the recorder's adapter-level auto-reconnect.
+ExecStart=/sbin/ip link set ${CAN_IFACE} type can bitrate ${CAN_BITRATE} restart-ms 100
+ExecStart=/sbin/ip link set ${CAN_IFACE} up
+ExecStop=/sbin/ip link set ${CAN_IFACE} down
+# Don't fail the unit if the device is gone at stop time.
+SuccessExitStatus=0 2
+
+[Install]
+WantedBy=multi-user.target
