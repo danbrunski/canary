@@ -266,6 +266,8 @@ def read_latest_telemetry_rows(
     collected: list[pd.DataFrame] = []
     total = 0
     for chunk in reversed(chunks):  # newest-first; stop once we have >= n
+        if chunk.stat().st_size == 0:
+            continue
         df = pd.read_parquet(chunk)
         collected.append(df)
         total += len(df)

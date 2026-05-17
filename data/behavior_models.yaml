@@ -1,0 +1,407 @@
+schema_version: 1
+models:
+- name: coolant_warmup
+  kind: surface_1d
+  output: obd:COOLANT_TEMP
+  output_unit: degC
+  axis:
+    name: time_since_start
+    channel: obd:RUN_TIME
+    unit: s
+    domain:
+    - 729.0
+    - 1071.0
+  version: 1
+  fit:
+    sample_count: 533
+    r_squared: 0.9700016484200673
+    sessions:
+    - 2026-05-17T191827
+    fitted_at: '2026-05-17T20:00:44.149863+00:00'
+    training_data_hash: sha256:d70d7c5883a79a33
+    kind: lookup_table
+    x_knots:
+    - 750.0681818181819
+    - 792.9333333333333
+    - 836.4318181818181
+    - 880.2222222222222
+    - 923.4545454545455
+    - 966.3863636363636
+    - 1009.8666666666667
+    - 1067.4864864864865
+    y_knots:
+    - 80.5
+    - 82.0
+    - 83.9090909090909
+    - 84.8
+    - 84.02272727272727
+    - 84.0
+    - 86.4888888888889
+    - 89.68468468468468
+  deviation:
+    kind: absolute
+    warning_band: 5.0
+    critical_band: 15.0
+  notes: "Thermostat health \u2014 sticking open / stuck closed shows as a flatter\
+    \ / delayed curve."
+- name: idle_rpm_vs_coolant
+  kind: surface_1d
+  output: obd:RPM
+  output_unit: rpm
+  axis:
+    name: coolant_temp
+    channel: obd:COOLANT_TEMP
+    unit: degC
+    domain:
+    - 79.0
+    - 90.0
+  operating_mode: idle
+  version: 1
+  fit:
+    sample_count: 216
+    r_squared: 0.6647920645601135
+    sessions:
+    - 2026-05-17T191827
+    fitted_at: '2026-05-17T20:00:44.154997+00:00'
+    training_data_hash: sha256:01e7832303562422
+    kind: lookup_table
+    x_knots:
+    - 81.0
+    - 89.91534391534391
+    y_knots:
+    - 791.2037037037037
+    - 54.629629629629626
+  deviation:
+    kind: absolute
+    warning_band: 100.0
+    critical_band: 250.0
+  notes: Cold-idle RPM target curve. Vacuum leaks / IACV faults show as elevated idle.
+- name: timing_advance_vs_rpm
+  kind: surface_1d
+  output: obd:TIMING_ADVANCE
+  output_unit: degBTDC
+  axis:
+    name: rpm
+    channel: obd:RPM
+    unit: rpm
+    domain:
+    - 0.0
+    - 3512.5
+  version: 1
+  fit:
+    sample_count: 533
+    r_squared: 0.7261814971072827
+    sessions:
+    - 2026-05-17T191827
+    fitted_at: '2026-05-17T20:00:44.176110+00:00'
+    training_data_hash: sha256:de8966444a44f611
+    kind: poly
+    coefficients:
+    - 60.3802163189483
+    - -0.047723760865569974
+    - 1.1051666367545988e-05
+  deviation:
+    kind: absolute
+    warning_band: 4.0
+    critical_band: 10.0
+  notes: "Heavy load-dependence \u2014 better as a 2D surface; this is the 1D rollup."
+- name: timing_advance_vs_rpm_load
+  kind: surface_2d
+  output: obd:TIMING_ADVANCE
+  output_unit: degBTDC
+  axes:
+  - name: rpm
+    channel: obd:RPM
+    unit: rpm
+    bin_edges:
+    - 0.0
+    - 787.5
+    - 1225.0
+    - 2087.5
+    - 2650.0
+    - 2918.75
+    - 3512.5
+  - name: engine_load
+    channel: obd:ENGINE_LOAD
+    unit: '%'
+    bin_edges:
+    - 0.0
+    - 8.235294117647058
+    - 8.627450980392156
+    - 10.392156862745097
+    - 19.215686274509803
+    - 25.49019607843137
+    - 100.0
+  version: 1
+  fit:
+    sample_count: 533
+    sessions:
+    - 2026-05-17T191827
+    fitted_at: '2026-05-17T20:00:44.182027+00:00'
+    training_data_hash: sha256:2238ef8acaa54da4
+    kind: grid_binned_mean
+    cells:
+    - mean: 63.5
+      std: 0.0
+      count: 168
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 17.0
+      std: 0.0
+      count: 1
+    - mean: 16.666666666666668
+      std: 0.6666666666666666
+      count: 9
+    - mean: 36.77777777777778
+      std: 24.02904620929418
+      count: 18
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 16.0
+      std: 3.69120576505835
+      count: 16
+    - mean: 14.553191489361701
+      std: 1.6606652171138603
+      count: 47
+    - mean: 19.714285714285715
+      std: 7.591617288906527
+      count: 7
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 4.916666666666667
+      std: 12.120632088394657
+      count: 12
+    - mean: 14.586206896551724
+      std: 14.133641064860013
+      count: 29
+    - mean: 36.0
+      std: 6.48074069840786
+      count: 3
+    - mean: 23.666666666666668
+      std: 10.274023338281628
+      count: 21
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 13.0
+      std: 8.640987597877148
+      count: 3
+    - mean: 6.7894736842105265
+      std: 11.987181519257279
+      count: 38
+    - mean: 41.0
+      std: 0.5773502691896257
+      count: 6
+    - mean: 35.0
+      std: 5.0
+      count: 2
+    - mean: 26.157894736842106
+      std: 10.529473210668367
+      count: 19
+    - mean: 11.4
+      std: 12.8
+      count: 5
+    - mean: 10.463414634146341
+      std: 11.565502869869368
+      count: 41
+    - mean: 20.636363636363637
+      std: 17.131962299497538
+      count: 11
+    - mean: 33.666666666666664
+      std: 7.760297817881877
+      count: 6
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 16.25
+      std: 3.832427429188973
+      count: 4
+    - mean: 5.0
+      std: 0.0
+      count: 4
+    - mean: 5.894736842105263
+      std: 5.442471737635249
+      count: 38
+    - mean: 22.0
+      std: 15.903555480554559
+      count: 13
+    - mean: 39.125
+      std: 0.33071891388307384
+      count: 8
+    - mean: 15.0
+      std: 0.0
+      count: 1
+    - mean: 30.333333333333332
+      std: 6.79869268479038
+      count: 3
+  deviation:
+    kind: relative
+    warning_band: 3.0
+    critical_band: 6.0
+  notes: Ignition surface. Knock-retard activity shows as drops vs. the baseline cell
+    mean.
+- name: fuel_trim_vs_rpm_load
+  kind: surface_2d
+  output: obd:SHORT_FUEL_TRIM_1
+  output_unit: '%'
+  axes:
+  - name: rpm
+    channel: obd:RPM
+    unit: rpm
+    bin_edges:
+    - 0.0
+    - 787.5
+    - 1225.0
+    - 2087.5
+    - 2650.0
+    - 2918.75
+    - 3512.5
+  - name: engine_load
+    channel: obd:ENGINE_LOAD
+    unit: '%'
+    bin_edges:
+    - 0.0
+    - 8.235294117647058
+    - 8.627450980392156
+    - 10.392156862745097
+    - 19.215686274509803
+    - 25.49019607843137
+    - 100.0
+  version: 1
+  fit:
+    sample_count: 533
+    sessions:
+    - 2026-05-17T191827
+    fitted_at: '2026-05-17T20:00:44.188865+00:00'
+    training_data_hash: sha256:1e0660bd983b951f
+    kind: grid_binned_mean
+    cells:
+    - mean: 0.0
+      std: 0.0
+      count: 168
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 0.78125
+      std: 0.0
+      count: 1
+    - mean: -0.6076388888888888
+      std: 3.6602723337340306
+      count: 9
+    - mean: 1.7795138888888888
+      std: 1.7431497940992364
+      count: 18
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 3.759765625
+      std: 7.172085362093936
+      count: 16
+    - mean: -0.09973404255319149
+      std: 5.273186980053625
+      count: 47
+    - mean: -2.6785714285714284
+      std: 3.8240718078151374
+      count: 7
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 0.0
+      std: 0.0
+      count: 12
+    - mean: -1.9935344827586208
+      std: 3.9174742130635445
+      count: 29
+    - mean: -5.208333333333333
+      std: 5.788049679920018
+      count: 3
+    - mean: -1.9345238095238095
+      std: 6.723243270242545
+      count: 21
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: 0.0
+      std: 0.0
+      count: 3
+    - mean: 0.0
+      std: 1.2417490847484787
+      count: 38
+    - mean: -13.541666666666666
+      std: 4.614595090278477
+      count: 6
+    - mean: -12.109375
+      std: 2.734375
+      count: 2
+    - mean: -7.113486842105263
+      std: 4.754825830747949
+      count: 19
+    - mean: 0.0
+      std: 0.0
+      count: 5
+    - mean: 0.0
+      std: 0.0
+      count: 41
+    - mean: 3.409090909090909
+      std: 7.6855648726811285
+      count: 11
+    - mean: -11.71875
+      std: 5.162559271249742
+      count: 6
+    - mean: 0.0
+      std: 0.0
+      count: 0
+    - mean: -5.078125
+      std: 2.8437929255002024
+      count: 4
+    - mean: 0.0
+      std: 0.0
+      count: 4
+    - mean: 0.0
+      std: 0.0
+      count: 38
+    - mean: -0.5408653846153846
+      std: 7.037154407838677
+      count: 13
+    - mean: -12.20703125
+      std: 4.36622830197425
+      count: 8
+    - mean: -9.375
+      std: 0.0
+      count: 1
+    - mean: -6.510416666666667
+      std: 0.736569563735987
+      count: 3
+  deviation:
+    kind: relative
+    warning_band: 3.0
+    critical_band: 6.0
+  notes: STFT B1 surface. Vacuum leaks / injector wear / fuel-quality drift shift
+    cells off zero.

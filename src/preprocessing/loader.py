@@ -18,7 +18,10 @@ def discover_sessions(root: Path) -> list[Path]:
     if not root.exists():
         return []
     return sorted(
-        child for child in root.iterdir() if child.is_dir() and list(child.glob(PARQUET_PATTERN))
+        child
+        for child in root.iterdir()
+        if child.is_dir()
+        and any(f.stat().st_size > 0 for f in child.glob(PARQUET_PATTERN))
     )
 
 
