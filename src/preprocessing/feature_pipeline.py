@@ -80,18 +80,23 @@ def build_feature_frame(
     )
     dbc_database = load_dbc_dir(dbc_dir)
 
-    long_parts: list[pd.DataFrame] = []
+    # Decode → pivot → resample one session at a time. resample_wide and
+    # compute_features already group by session (no cross-session bleed), so
+    # per-session-then-concat is identical to concat-then-resample — but peak
+    # memory is now one session's raw bus-rate pivot instead of all of them
+    # concatenated, which OOM-kills the Pi on a full corpus.
+    resample_config = ResampleConfig(hz=config.preprocessing.resample_hz)
+    resampled_parts: list[pd.DataFrame] = []
     for session_dir in session_dirs:
         long = read_session(session_dir)
         if bindings is not None:
             long = decode_can_rows(long, bindings)
         if dbc_database is not None:
             long = decode_can_rows_dbc(long, dbc_database)
-        long_parts.append(long)
-    long_frame = pd.concat(long_parts, ignore_index=True)
+        wide = to_wide(long, coerce_numeric=True)
+        resampled_parts.append(resample_wide(wide, config=resample_config))
+    resampled = pd.concat(resampled_parts, ignore_index=True)
 
-    wide = to_wide(long_frame, coerce_numeric=True)
-    resampled = resample_wide(wide, config=ResampleConfig(hz=config.preprocessing.resample_hz))
     resampled = segment_or_constant(resampled, config)
     if behavior_models is not None and behavior_models.models:
         resampled = append_deviation_columns(resampled, behavior_models)

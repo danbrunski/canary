@@ -62,6 +62,7 @@ from src.decode.behavior_models import (
     load_behavior_models,
 )
 from src.decode.bindings import load_bindings
+from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.models.health import HealthMonitor
 from src.models.manager import ModelManager, manager_for_artifact
 from src.preprocessing.live import LiveFeatureSource
@@ -512,8 +513,15 @@ def build_live_feature_source(
     behavior_models = (
         load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
     )
+    # The training feature pipeline decodes CAN twice — bindings.yaml
+    # (decoded:*) AND the DBC files (dbc:*). The live source must mirror both
+    # or every inference tick fails on the model's required dbc:* columns.
+    dbc_database = load_dbc_dir(DEFAULT_DBC_DIR)
     return LiveFeatureSource(
-        config=components.config, bindings=bindings, behavior_models=behavior_models
+        config=components.config,
+        bindings=bindings,
+        behavior_models=behavior_models,
+        dbc_database=dbc_database,
     )
 
 
