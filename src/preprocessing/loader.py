@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Literal
 
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 PARQUET_PATTERN = "telemetry-*.parquet"
 INDEX_COLUMNS = ["session", "timestamp"]
@@ -26,11 +29,33 @@ def discover_sessions(root: Path) -> list[Path]:
 
 def read_session(session_dir: Path) -> pd.DataFrame:
     """Read one telemetry session directory into a long-format DataFrame."""
-    files = sorted(session_dir.glob(PARQUET_PATTERN))
-    if not files:
+    candidates = sorted(session_dir.glob(PARQUET_PATTERN))
+    if not candidates:
         raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
 
-    frames = [pd.read_parquet(path) for path in files]
+    # A daemon crash mid-write leaves trailing 0-byte or truncated chunks
+    # (the atomic writer's target appears before its content lands). One bad
+    # tail chunk must not poison the whole training corpus — skip the
+    # unreadable ones and keep going.
+    frames: list[pd.DataFrame] = []
+    skipped: list[str] = []
+    for path in candidates:
+        if path.stat().st_size == 0:
+            skipped.append(path.name)
+            continue
+        try:
+            frames.append(pd.read_parquet(path))
+        except (OSError, ValueError, pd.errors.ParserError):
+            skipped.append(path.name)
+    if skipped:
+        log.warning(
+            "skipped %d unreadable chunk(s) in %s: %s",
+            len(skipped),
+            session_dir.name,
+            ", ".join(skipped),
+        )
+    if not frames:
+        raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
     frame = pd.concat(frames, ignore_index=True)
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
     frame["session"] = session_dir.name
