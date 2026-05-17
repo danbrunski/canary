@@ -15,6 +15,7 @@ import { ModelPanel } from "./panels/ModelPanel";
 import { SystemPanel } from "./panels/SystemPanel";
 import { TelemetryPanel } from "./panels/TelemetryPanel";
 import { TpmsPanel } from "./panels/TpmsPanel";
+import { responsiveGridClass } from "./styles";
 import type { AppMode, DashboardView } from "./types";
 
 /** Top-level app: owns the parked/driving toggle, wires hooks into panels. */
@@ -41,7 +42,7 @@ export default function App() {
       events={anomalies.events}
     >
       {view === "drive" && (
-        <div className="panel-grid drive-grid">
+        <div className={`${responsiveGridClass} grid-cols-[2fr_1fr_1fr]`}>
           <TelemetryPanel channels={telemetry.channels} bindings={bindings} compact />
           <AnomalyPanel events={anomalies.events} />
           <SystemPanel
@@ -53,7 +54,7 @@ export default function App() {
         </div>
       )}
       {view === "charts" && (
-        <div className="panel-grid single-grid">
+        <div className={`${responsiveGridClass} grid-cols-1`}>
           <TelemetryPanel channels={telemetry.channels} bindings={bindings} />
         </div>
       )}
@@ -61,14 +62,14 @@ export default function App() {
         <ControlPanel token={controlToken.token} onTokenChange={controlToken.setToken} />
       )}
       {view === "models" && (
-        <div className="panel-grid models-grid">
+        <div className={`${responsiveGridClass} grid-cols-[1fr_2fr] max-[1100px]:grid-cols-1`}>
           <ModelPanel status={status} events={anomalies.events} />
           <BehaviorModelsPanel data={behaviorModels.data} error={behaviorModels.error} />
           <AnomalyPanel events={anomalies.events} />
         </div>
       )}
       {view === "system" && (
-        <div className="panel-grid system-grid">
+        <div className={`${responsiveGridClass} grid-cols-3 max-[1100px]:grid-cols-1`}>
           <SystemPanel
             status={status}
             channels={telemetry.channels}

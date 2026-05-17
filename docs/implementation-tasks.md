@@ -62,8 +62,17 @@ Goal: a runnable empty skeleton, reproducible dev env, CI green on first push.
   SIGTERM/SIGINT for clean shutdown.
 - [x] **0.7 — CI.** GitHub Actions: lint, type-check, unit tests on
   `ubuntu-latest` with Python 3.11 and 3.12. No hardware-dependent jobs yet.
-- [ ] **0.8 — Dev container.** `Dockerfile` + `docker-compose.yml` for
-  non-Pi development; mounts repo, runs `main.py` in simulation mode.
+- [x] **0.8 — Dev container.** `Dockerfile` (python:3.12-slim, deps baked
+  into a cached layer, no `ml`/Torch extra) + `docker-compose.yml`
+  (bind-mounts `src/scripts/tests/tools/data/models`, exposes 8000,
+  `restart: unless-stopped`) + `.dockerignore`. Runs `python -m src.main
+  --config canary.sim.example.yaml` — the new no-hardware sim config
+  (`interface: virtual` python-can VirtualBus, `obd_source: disabled`,
+  models off, repo-local `data/sim/` state) so `docker compose up` brings
+  the dashboard + WebSockets + control plane up on any laptop with no
+  Canable or vehicle; `docker compose run --rm canary pytest -q` runs the
+  suite in-container. Sim config validated to parse via `CanaryConfig`; the
+  image build itself isn't CI-verified (no Docker in the test env).
   (NFR-04, NFR-05)
 
 ---
@@ -632,15 +641,24 @@ emission stays viable as a one-way derived artifact (4.D.2 below).
   1.15M wide rows × 55 cols → resampled 694 × 107 → features 694 × 266;
   all 23 decoded signals numeric and reaching the scaler; coolant decodes
   to 75-94degC; throttle-transient varies 0-255. (FR-04)
-- [ ] **4.D.2 — DBC emitter from bindings.yaml.** Optional companion
-  artifact: `tools/emit_dbc.py` produces a draft `data/dbc/xterra_2008.dbc`
-  from `bindings.yaml` for SavvyCAN/Cabana interop and external sharing.
-  One-way: bindings.yaml is source of truth, DBC is derived. (FR-02)
-- [ ] **4.D.3 — Bearing-wear validation.** Score a session with known
-  uneven wheel-speed behavior (synthetic if no real example exists);
-  confirm anomaly fires before a DTC would. Requires wheel-speed
-  bindings to graduate to `confirmed` confidence first (currently
-  hypothesized: `WHEEL_SPEED_PAIR_A/B`). (Overview Phase 4 goal)
+- [x] **4.D.2 — DBC emitter from bindings.yaml.** `tools/emit_dbc.py`
+  produces a draft `data/dbc/xterra_2008.dbc` from `bindings.yaml` via
+  cantools (`--min-confidence`, unpinned-scale signals emitted raw so the
+  DBC still loads, confidence written into each signal comment). One-way,
+  derived artifact — `bindings.yaml` stays source of truth; the reverse
+  decode hook is 1.8. Covered by `tests/test_emit_dbc.py` (3 tests).
+  (FR-02)
+- [x] **4.D.3 — Bearing-wear validation.** `tests/test_bearing_wear_validation.py`
+  — synthetic (the plan explicitly permits it until real `WHEEL_SPEED_*`
+  bindings graduate to `confirmed`). Trains the per-mode Isolation Forest on
+  a clean four-wheel-speed drive, then scores a session where the front pair
+  progressively diverges (slow ramp + growing noise = a worn bearing),
+  asserting: it fires at all; it fires while the divergence is still well
+  under the ~5 kph an ABS wheel-speed-comparison DTC needs (the whole point —
+  ML catches it *before* a code would); the clean baseline stays quiet at the
+  contamination rate (steady-state, excluding rolling-feature warmup); and
+  the worn flag-rate is ≫ the clean rate. Deterministic (seeded). Real-data
+  validation still waits on confirmed bindings. (Overview Phase 4 goal)
 - [x] **4.D.4 — Bindings → captured-frame validation.** `tests/test_bindings_validation.py`
   — for every `confidence: confirmed` signal in `data/bindings.yaml`,
   walks `data/sessions/*/frames.log`, finds the first frame whose
@@ -1423,12 +1441,16 @@ training/model-health visualization, and Torque Pro parity.
   live OBD channel count, Nissan DID profile switch, real-time inference,
   export, retrain job, model publish, service restart, adapter unplug/replug,
   and clean shutdown.
-- [ ] **6.30 — Operator runbooks for advanced workflows.** Update docs for
-  "collect data during this drive", "debug missing PID", "scan DTCs",
-  "clear DTC while parked", "capture Nissan DIDs", "run parked diagnostic
-  test", "label false alarm", "retrain and publish", and "export training
-  dataset". Each runbook should include the dashboard path and equivalent
-  `canaryctl` command.
+- [x] **6.30 — Operator runbooks for advanced workflows.** `docs/runbooks.md`
+  — task-oriented recipes for every listed workflow (collect during a drive,
+  debug a missing PID, scan DTCs, clear-DTC-while-parked, capture Nissan
+  DIDs, run a parked diagnostic test, label a false alarm, tune/suppress,
+  corpus-readiness, export a dataset, retrain+publish), each with the
+  dashboard path *and* the `canaryctl`/CLI equivalent. Honest about state:
+  flows whose dashboard panel or live-ECU path is still pending say so, and
+  the not-yet-implemented clear-DTC (6.5) / parked-diagnostic (6.18) flows
+  document their safety contract (parked-interlocked, authenticated, audited,
+  no raw-send) rather than implying capability that doesn't exist.
 
 ### 6F. Standalone companion app and offline training workflow
 

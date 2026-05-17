@@ -86,8 +86,12 @@ export function Heatmap({
   }, [cells, rows, cols, width, height, value]);
 
   return (
-    <div className="heatmap-wrap">
-      {caption && <div className="heatmap-caption">{caption}</div>}
+    <div className="flex flex-col gap-1">
+      {caption && (
+        <div className="text-[0.7rem] tracking-[0.04em] text-fg-dim">
+          {caption}
+        </div>
+      )}
       <canvas ref={ref} width={width} height={height} />
     </div>
   );

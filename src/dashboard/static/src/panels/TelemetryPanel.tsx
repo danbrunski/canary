@@ -2,6 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Sparkline } from "../components/Sparkline";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
+import {
+  cn,
+  inputClass,
+  panelClass,
+  panelCountClass,
+  panelHeaderCenterClass,
+  panelTitleClass,
+  placeholderClass,
+} from "../styles";
 import type { BindingDisplay, BindingsByChannel } from "../types";
 
 interface TelemetryPanelProps {
@@ -95,30 +104,30 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
 
   if (channels.size === 0) {
     return (
-      <section className="panel telemetry-panel">
-        <header>
-          <h2>Telemetry</h2>
+      <section className={cn(panelClass, compact && "col-span-2 row-start-1 max-[900px]:col-span-1")}>
+        <header className={panelHeaderCenterClass}>
+          <h2 className={panelTitleClass}>Telemetry</h2>
         </header>
-        <p className="placeholder">no data yet — waiting for the collectors to produce.</p>
+        <p className={placeholderClass}>no data yet — waiting for the collectors to produce.</p>
       </section>
     );
   }
 
   return (
-    <section className={`panel telemetry-panel ${compact ? "compact" : ""}`}>
-      <header>
+    <section className={cn(panelClass, compact && "col-span-2 row-start-1 max-[900px]:col-span-1")}>
+      <header className={panelHeaderCenterClass}>
         <div>
-          <h2>Telemetry</h2>
-          <span className="count">{displayChannels.length} live values</span>
+          <h2 className={panelTitleClass}>Telemetry</h2>
+          <span className={panelCountClass}>{displayChannels.length} live values</span>
         </div>
         <input
-          className="channel-search"
+          className={cn(inputClass, "w-[min(24rem,45vw)] max-[700px]:w-full")}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="search PID or signal"
         />
       </header>
-      <div className="primary-grid">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2.5">
         {primary.map(([key, snap]) => (
           <ChannelCard
             key={key}
@@ -135,12 +144,12 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
         selectedKeys={chartKeys}
       />
       {!compact && (
-        <div className="channel-browser">
-          <div className="browser-header">
-            <b>Channel explorer</b>
+        <div className="mt-3.5">
+          <div className="mb-1.5 flex justify-between gap-2 text-[0.78rem] text-fg-dim">
+            <b className="text-fg">Channel explorer</b>
             <span>{visibleChannels.length} visible / select up to 6 to chart</span>
           </div>
-          <div className="channel-table">
+          <div className="grid max-h-[44rem] grid-cols-[repeat(auto-fit,minmax(270px,1fr))] gap-1.5 overflow-y-auto">
             {visibleChannels.map(([key, snap]) => (
               <ChannelRow
                 key={key}
@@ -155,9 +164,11 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
         </div>
       )}
       {compact && secondary.length > 0 && (
-        <details className="more-channels">
-          <summary>{secondary.length} more channels</summary>
-          <div className="secondary-grid">
+        <details className="mt-3.5">
+          <summary className="cursor-pointer text-[0.85rem] text-fg-dim">
+            {secondary.length} more channels
+          </summary>
+          <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-1.5">
             {secondary.map(([key, snap]) => (
               <ChannelCard
                 key={key}
@@ -190,19 +201,27 @@ function ChannelRow({
   return (
     <button
       type="button"
-      className={`channel-row ${selected ? "selected" : ""} ${rendered.bandClass}`}
+      className={cn(
+        "grid w-full grid-cols-[2.3rem_minmax(0,1fr)_auto_3rem] items-center gap-2 rounded-tile border border-border-soft bg-[linear-gradient(180deg,var(--color-elev-2),var(--color-elev))] px-2.5 py-2 text-left text-fg transition-[border-color,transform] duration-150 hover:-translate-y-px hover:border-border",
+        selected && "border-accent ring-1 ring-inset ring-accent/45",
+        bandUtility(rendered.bandClass),
+      )}
       onClick={onToggle}
     >
-      <span className="row-select">{selected ? "on" : "off"}</span>
-      <span className="row-channel">
-        <b>{prettyChannel(channelKey)}</b>
-        <small>{snapshot.latest.source}</small>
+      <span className={cn("text-[0.68rem] uppercase text-fg-dim", selected && "text-accent")}>
+        {selected ? "on" : "off"}
       </span>
-      <span className="row-value">
+      <span className="flex min-w-0 flex-col">
+        <b className="overflow-hidden text-ellipsis whitespace-nowrap">{prettyChannel(channelKey)}</b>
+        <small className="text-[0.72rem] text-fg-dim">{snapshot.latest.source}</small>
+      </span>
+      <span className="font-num font-bold tabular-nums">
         {rendered.text}
-        {rendered.unit && <em>{rendered.unit}</em>}
+        {rendered.unit && (
+          <em className="ml-1 text-[0.72rem] not-italic text-fg-dim">{rendered.unit}</em>
+        )}
       </span>
-      <span className="row-age">{formatAge(snapshot.latest.timestamp)}</span>
+      <span className="text-[0.72rem] text-fg-dim">{formatAge(snapshot.latest.timestamp)}</span>
     </button>
   );
 }
@@ -232,7 +251,7 @@ function TelemetryChart({
 
   if (series.length === 0) {
     return (
-      <div className="telemetry-chart empty">
+      <div className="mt-3.5 flex min-h-16 items-center rounded-[8px] border border-border bg-bg p-2.5 text-[0.85rem] text-fg-dim">
         Select numeric channels to chart live history.
       </div>
     );
@@ -257,24 +276,42 @@ function TelemetryChart({
       .join(" ");
 
   return (
-    <div className="telemetry-chart">
-      <div className="chart-meta">
+    <div className="mt-3.5 rounded-[8px] border border-border bg-bg p-2.5">
+      <div className="flex justify-between gap-3 font-num text-[0.78rem] tabular-nums text-fg-dim">
         <span>{formatNumber(min)}</span>
         <b>Live chart</b>
         <span>{formatNumber(max)}</span>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="telemetry chart">
-        <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} />
-        <line x1={pad} y1={pad} x2={pad} y2={height - pad} />
+      <svg
+        className="block h-[clamp(12rem,34vh,22rem)] w-full"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="telemetry chart"
+      >
+        <line
+          className="stroke-border-soft [stroke-width:2]"
+          x1={pad}
+          y1={height - pad}
+          x2={width - pad}
+          y2={height - pad}
+        />
+        <line
+          className="stroke-border-soft [stroke-width:2]"
+          x1={pad}
+          y1={pad}
+          x2={pad}
+          y2={height - pad}
+        />
         {series.map((item, index) => (
           <path
             key={item.key}
+            className="fill-none [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:3]"
             d={pathFor(item.values)}
             stroke={colors[index % colors.length]}
           />
         ))}
       </svg>
-      <div className="chart-legend">
+      <div className="flex flex-wrap justify-start gap-3 font-num text-[0.78rem] tabular-nums text-fg-dim">
         {series.map((item, index) => (
           <span key={item.key} style={{ color: colors[index % colors.length] }}>
             {item.label}
@@ -299,11 +336,31 @@ function ChannelCard({
   const rendered = renderChannel(snapshot, binding);
   const sparkValues = sparkSeries(snapshot, binding);
   return (
-    <div className={`channel-card ${large ? "large" : ""} ${rendered.bandClass}`}>
-      <div className="channel-key">{prettyChannel(channelKey)}</div>
-      <div className="channel-value">
+    <div
+      className={cn(
+        "relative rounded-tile border border-border-soft bg-[linear-gradient(180deg,var(--color-elev-2),var(--color-elev))] px-3 py-2 transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border hover:shadow-panel",
+        large &&
+          "bg-[radial-gradient(120%_120%_at_0%_0%,rgba(255,181,71,0.06),transparent_60%),linear-gradient(180deg,var(--color-elev-2),var(--color-elev))] px-4 py-3",
+        bandUtility(rendered.bandClass),
+      )}
+    >
+      <div className="mb-1 text-[0.62rem] uppercase tracking-[0.13em] text-fg-faint">
+        {prettyChannel(channelKey)}
+      </div>
+      <div
+        className={cn(
+          "font-num text-2xl font-semibold tabular-nums text-fg",
+          large && "text-[2rem] text-accent",
+          rendered.bandClass === "band-bad" && "text-bad",
+          rendered.bandClass === "band-warn" && "text-warn",
+        )}
+      >
         {rendered.text}
-        {rendered.unit && <span className="channel-unit">{rendered.unit}</span>}
+        {rendered.unit && (
+          <span className="ml-1.5 font-num text-[0.7rem] font-medium text-fg-faint">
+            {rendered.unit}
+          </span>
+        )}
       </div>
       {sparkValues.length > 1 && (
         <Sparkline
@@ -314,6 +371,16 @@ function ChannelCard({
       )}
     </div>
   );
+}
+
+function bandUtility(bandClass: RenderedValue["bandClass"]): string {
+  if (bandClass === "band-bad") {
+    return "border-bad/60 bg-[linear-gradient(180deg,rgba(255,111,111,0.14),rgba(255,111,111,0.04))]";
+  }
+  if (bandClass === "band-warn") {
+    return "border-warn/55 bg-[linear-gradient(180deg,rgba(255,209,102,0.12),rgba(255,209,102,0.03))]";
+  }
+  return "";
 }
 
 interface RenderedValue {

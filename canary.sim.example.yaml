@@ -1,0 +1,98 @@
+# CANary simulation config (Task 0.8) — no hardware, no Pi.
+#
+# Drives the full daemon (collection queue → Parquet → dashboard +
+# WebSockets + control plane) against a python-can VirtualBus with OBD
+# disabled, so `docker compose up` on any laptop brings up a working
+# dashboard at http://localhost:8000/ without a Canable or a vehicle.
+# Storage is repo-local; models are disabled so no Torch/artifact is
+# required to boot. Train + drop artifacts under models/ to exercise the
+# inference path.
+
+vehicle:
+  make: Nissan
+  model: Xterra
+  year: 2008
+  vin: ""
+  parameters:
+    mass_kg: 1980.0
+    fuel_type: gasoline
+    displacement_l: 4.0
+
+hardware:
+  elm327_port: /dev/null
+  can:
+    # In-memory bus — no kernel SocketCAN, no adapter. The collector blocks
+    # waiting for frames (none arrive) and the rest of the daemon runs.
+    interface: virtual
+    channel: canary-sim
+    bitrate: 500000
+
+collection:
+  obd_source: disabled
+  obd_pids: []
+  obd_dids: []
+  obd_did_request_id: 0x7E0
+  obd_request_timeout_seconds: 1.0
+  obd_poll_rate_hz: 1
+  storage_path: data/sim/sessions
+  session_retention_days: 7
+  storage_warning_mb: 500
+  reconnect_initial_delay_seconds: 10
+  reconnect_max_delay_seconds: 60
+  queue_max_size: 10000
+  queue_warning_fraction: 0.8
+
+preprocessing:
+  resample_hz: 1
+  rolling_window_seconds: 30
+  operating_modes:
+    idle:
+      rpm_max: 900
+      speed_max: 0
+    city:
+      speed_max: 50
+    highway:
+      speed_min: 80
+    wot:
+      throttle_min: 80
+
+models:
+  isolation_forest:
+    enabled: false
+    n_estimators: 200
+    contamination: 0.01
+    per_mode_contamination: {}
+    random_state: 42
+  lstm_autoencoder:
+    enabled: false
+    sequence_length: 30
+    hidden_size: 64
+    num_layers: 1
+    latent_dim: 32
+    dropout: 0.0
+    batch_size: 64
+    learning_rate: 0.001
+    max_epochs: 100
+    validation_fraction: 0.2
+    early_stopping_patience: 10
+    min_delta: 0.0
+    random_state: 42
+    threshold_k: 3.0
+
+dashboard:
+  host: 0.0.0.0
+  port: 8000
+
+daemon:
+  anomalies_dir: data/sim/anomalies
+  models_dir: models
+  jobs_dir: data/sim/control/jobs
+  audit_log: data/sim/control/audit.jsonl
+  feedback_log: data/sim/control/anomaly_feedback.jsonl
+  training_ledger: data/sim/control/training_runs.jsonl
+  tuning_config: data/sim/control/tuning.yaml
+  tuning_audit: data/sim/control/tuning_audit.jsonl
+  isolation_forest_artifact: isolation_forest/model.joblib
+  lstm_artifact: lstm_autoencoder/model.pt
+  model_poll_seconds: 30.0
+  broadcaster_queue_size: 100

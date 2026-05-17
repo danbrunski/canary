@@ -1,0 +1,32 @@
+# CANary non-Pi dev / simulation stack (Task 0.8).
+#
+#   docker compose up                       # dashboard at :8000, sim daemon
+#   docker compose run --rm canary pytest -q
+#   docker compose run --rm canary python scripts/dataset_health.py --json
+#
+# The repo is bind-mounted so source edits take effect on container restart
+# without a rebuild (deps are baked into the image layer). Sim state lives
+# under ./data/sim/ (gitignored) so it never collides with real captures.
+
+services:
+  canary:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: canary-dev:latest
+    container_name: canary-sim
+    command: ["python", "-m", "src.main", "--config", "canary.sim.example.yaml"]
+    ports:
+      - "8000:8000"
+    volumes:
+      # Live source — edit on the host, restart the container to pick it up.
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+      - ./tests:/app/tests
+      - ./tools:/app/tools
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./canary.sim.example.yaml:/app/canary.sim.example.yaml:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
