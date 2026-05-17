@@ -100,8 +100,15 @@ load* — on-road drives, not just no-load revs in neutral. See
    fit narrow bands — a cross-ref of the 0x1100/0x1200 DID sweep mis-named
    *every* already-known DID at score ≥0.96 (RPM 0x1219 → "TRVL AFTER MIL",
    TPS 0x1210 → "INJ PULSE-B2"). Name DIDs from ground truth (NT510 /
-   Mode 01 cross-reference), never from FSM range-fit alone. Improving FSM
-   range extraction would make this leg useful again.
+   Mode 01 cross-reference), never from FSM range-fit alone. **Why the
+   coverage is low (scoping a future fix, 2026-05-16):** it is *not* a
+   `parse_ranges` regex gap — the 41 unranged ECM params have
+   unparseable source text: cross-page references (`"See EC-79."` — the
+   range is on another page the extractor doesn't follow), garbled
+   pdfplumber column splits (`"| K | SULT-III value"`), or categorical
+   specs (`"LEAN ←→ RICH"`, no numeric range). A useful fix is a
+   dedicated rework — follow `See EC-NN` cross-refs + per-PDF table
+   geometry tuning across the 8 FSM PDFs — not a regex tweak.
 5. **Validate** — `tools/decode_bindings.py <session>`: decode every binding
    against every matching frame; report raw + decoded ranges + plausibility. It
    catches binding bugs (the COOLANT engine-off −40 °C sentinel was found this
