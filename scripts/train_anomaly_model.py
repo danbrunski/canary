@@ -73,9 +73,22 @@ def train(
     out_dir: Path,
     *,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
+    feature_frame: pd.DataFrame | None = None,
+    feature_cache_dir: Path | None = None,
+    rebuild_feature_cache: bool = False,
 ) -> TrainedIsolationForest:
     """Build features, fit the per-mode IF + scaler, write artifact + manifest."""
-    features = build_feature_frame(session_dirs, config, bindings_path=bindings_path)
+    features = (
+        feature_frame
+        if feature_frame is not None
+        else build_feature_frame(
+            session_dirs,
+            config,
+            bindings_path=bindings_path,
+            cache_dir=feature_cache_dir,
+            force_rebuild=rebuild_feature_cache,
+        )
+    )
     feature_columns = _trainable_feature_columns(features)
     if not feature_columns:
         raise ValueError(

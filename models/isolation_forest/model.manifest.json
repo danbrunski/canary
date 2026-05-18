@@ -1,17 +1,17 @@
 {
   "artifact_format_version": 1,
   "complete_rows": 162,
-  "created_at": "2026-05-17T23:18:01.557803Z",
-  "dropped_missing_feature_rows": 65294,
+  "created_at": "2026-05-18T01:06:27.994549Z",
+  "dropped_missing_feature_rows": 13787,
   "hyperparams": {
     "contamination": 0.01,
     "n_estimators": 200,
     "per_mode_contamination": {},
     "random_state": 42
   },
-  "input_rows": 65456,
+  "input_rows": 13949,
   "model_type": "isolation_forest",
-  "model_version": "isolation_forest_2026-05-17T231801.557803Z",
+  "model_version": "isolation_forest_2026-05-18T010627.994549Z",
   "modes": [
     {
       "contamination": 0.01,
@@ -994,6 +994,13 @@
     }
   },
   "schema": {
+    "behavior_model_columns": [
+      "deviation:coolant_warmup",
+      "deviation:fuel_trim_vs_rpm_load",
+      "deviation:idle_rpm_vs_coolant",
+      "deviation:timing_advance_vs_rpm",
+      "deviation:timing_advance_vs_rpm_load"
+    ],
     "feature_columns": [
       "dbc:BRAKE_ACTIVITY_29E_7",
       "dbc:BRAKE_PRESSURE_29E_3",
@@ -1638,10 +1645,2927 @@
       "obd:WARMUPS_SINCE_DTC_CLEAR__roc": "float32",
       "obd:WARMUPS_SINCE_DTC_CLEAR__std": "float32"
     },
+    "feature_health": {
+      "all_nan_columns": [],
+      "candidate_feature_count": 320,
+      "columns": {
+        "dbc:BRAKE_ACTIVITY_29E_7": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 167
+        },
+        "dbc:BRAKE_ACTIVITY_29E_7__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2217
+        },
+        "dbc:BRAKE_ACTIVITY_29E_7__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 285
+        },
+        "dbc:BRAKE_ACTIVITY_29E_7__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 4659
+        },
+        "dbc:BRAKE_PRESSURE_29E_3": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2
+        },
+        "dbc:BRAKE_PRESSURE_29E_3__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 72
+        },
+        "dbc:BRAKE_PRESSURE_29E_3__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 3
+        },
+        "dbc:BRAKE_PRESSURE_29E_3__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 61
+        },
+        "dbc:COOLING_FAN_1F9_0": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 11
+        },
+        "dbc:COOLING_FAN_1F9_0__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 249
+        },
+        "dbc:COOLING_FAN_1F9_0__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 21
+        },
+        "dbc:COOLING_FAN_1F9_0__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 352
+        },
+        "dbc:ECM_AIRFLOW_PROXY_23D": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 584
+        },
+        "dbc:ECM_AIRFLOW_PROXY_23D__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 3168
+        },
+        "dbc:ECM_AIRFLOW_PROXY_23D__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 1439
+        },
+        "dbc:ECM_AIRFLOW_PROXY_23D__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3226
+        },
+        "dbc:ECM_CALC_LOAD_A": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 256
+        },
+        "dbc:ECM_CALC_LOAD_A__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 3801
+        },
+        "dbc:ECM_CALC_LOAD_A__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 509
+        },
+        "dbc:ECM_CALC_LOAD_A__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 6938
+        },
+        "dbc:ECM_CALC_LOAD_B": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 256
+        },
+        "dbc:ECM_CALC_LOAD_B__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 3803
+        },
+        "dbc:ECM_CALC_LOAD_B__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 509
+        },
+        "dbc:ECM_CALC_LOAD_B__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 6934
+        },
+        "dbc:ECM_ENGINE_STATE_A": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 130
+        },
+        "dbc:ECM_ENGINE_STATE_A__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2478
+        },
+        "dbc:ECM_ENGINE_STATE_A__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 350
+        },
+        "dbc:ECM_ENGINE_STATE_A__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 4132
+        },
+        "dbc:ECM_ENGINE_STATE_B": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 130
+        },
+        "dbc:ECM_ENGINE_STATE_B__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2505
+        },
+        "dbc:ECM_ENGINE_STATE_B__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 351
+        },
+        "dbc:ECM_ENGINE_STATE_B__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 4132
+        },
+        "dbc:ECM_ENGINE_STATE_C": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 130
+        },
+        "dbc:ECM_ENGINE_STATE_C__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2360
+        },
+        "dbc:ECM_ENGINE_STATE_C__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 352
+        },
+        "dbc:ECM_ENGINE_STATE_C__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3949
+        },
+        "dbc:ECM_INTAKE_VACUUM_OR_IAC": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 256
+        },
+        "dbc:ECM_INTAKE_VACUUM_OR_IAC__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2590
+        },
+        "dbc:ECM_INTAKE_VACUUM_OR_IAC__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 495
+        },
+        "dbc:ECM_INTAKE_VACUUM_OR_IAC__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 6670
+        },
+        "dbc:ECM_RPM": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 898
+        },
+        "dbc:ECM_RPM__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 4574
+        },
+        "dbc:ECM_RPM__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 1245
+        },
+        "dbc:ECM_RPM__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 6783
+        },
+        "dbc:ECM_THROTTLE_TRANSIENT": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 15
+        },
+        "dbc:ECM_THROTTLE_TRANSIENT__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2047
+        },
+        "dbc:ECM_THROTTLE_TRANSIENT__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 49
+        },
+        "dbc:ECM_THROTTLE_TRANSIENT__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3295
+        },
+        "dbc:HVAC_BLOWER_LIGHTING_358_1": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 4
+        },
+        "dbc:HVAC_BLOWER_LIGHTING_358_1__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 98
+        },
+        "dbc:HVAC_BLOWER_LIGHTING_358_1__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13559,
+          "nan_count": 390,
+          "non_finite_count": 0,
+          "non_null_count": 13559,
+          "unique_finite_count": 6
+        },
+        "dbc:HVAC_BLOWER_LIGHTING_358_1__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13936,
+          "nan_count": 13,
+          "non_finite_count": 0,
+          "non_null_count": 13936,
+          "unique_finite_count": 58
+        },
+        "dbc:MOTION_29E_5": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 71
+        },
+        "dbc:MOTION_29E_5__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2785
+        },
+        "dbc:MOTION_29E_5__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 163
+        },
+        "dbc:MOTION_29E_5__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3957
+        },
+        "dbc:MOTION_SIGNAL_280_5": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 256
+        },
+        "dbc:MOTION_SIGNAL_280_5__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 2122
+        },
+        "dbc:MOTION_SIGNAL_280_5__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13559,
+          "nan_count": 390,
+          "non_finite_count": 0,
+          "non_null_count": 13559,
+          "unique_finite_count": 506
+        },
+        "dbc:MOTION_SIGNAL_280_5__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13936,
+          "nan_count": 13,
+          "non_finite_count": 0,
+          "non_null_count": 13936,
+          "unique_finite_count": 3763
+        },
+        "dbc:MOTION_SIGNAL_354_1": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 256
+        },
+        "dbc:MOTION_SIGNAL_354_1__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2093
+        },
+        "dbc:MOTION_SIGNAL_354_1__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 507
+        },
+        "dbc:MOTION_SIGNAL_354_1__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3817
+        },
+        "dbc:WHEEL_SPEED_PAIR_A": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2532
+        },
+        "dbc:WHEEL_SPEED_PAIR_A__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 3854
+        },
+        "dbc:WHEEL_SPEED_PAIR_A__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 3180
+        },
+        "dbc:WHEEL_SPEED_PAIR_A__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3868
+        },
+        "dbc:WHEEL_SPEED_PAIR_B": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2451
+        },
+        "dbc:WHEEL_SPEED_PAIR_B__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 3846
+        },
+        "dbc:WHEEL_SPEED_PAIR_B__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 3179
+        },
+        "dbc:WHEEL_SPEED_PAIR_B__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3862
+        },
+        "decoded:AC_COMPRESSOR_STATE": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 4
+        },
+        "decoded:AC_COMPRESSOR_STATE__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 115
+        },
+        "decoded:AC_COMPRESSOR_STATE__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13559,
+          "nan_count": 390,
+          "non_finite_count": 0,
+          "non_null_count": 13559,
+          "unique_finite_count": 6
+        },
+        "decoded:AC_COMPRESSOR_STATE__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13936,
+          "nan_count": 13,
+          "non_finite_count": 0,
+          "non_null_count": 13936,
+          "unique_finite_count": 117
+        },
+        "decoded:BRAKE_ACTIVITY_29E_7": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 167
+        },
+        "decoded:BRAKE_ACTIVITY_29E_7__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2217
+        },
+        "decoded:BRAKE_ACTIVITY_29E_7__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 285
+        },
+        "decoded:BRAKE_ACTIVITY_29E_7__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 4659
+        },
+        "decoded:BRAKE_PRESSURE_29E_3": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2
+        },
+        "decoded:BRAKE_PRESSURE_29E_3__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 72
+        },
+        "decoded:BRAKE_PRESSURE_29E_3__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 3
+        },
+        "decoded:BRAKE_PRESSURE_29E_3__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 61
+        },
+        "decoded:COOLING_FAN_1F9_0": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 11
+        },
+        "decoded:COOLING_FAN_1F9_0__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 249
+        },
+        "decoded:COOLING_FAN_1F9_0__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 21
+        },
+        "decoded:COOLING_FAN_1F9_0__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 352
+        },
+        "decoded:ECM_AIRFLOW_PROXY_23D": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 584
+        },
+        "decoded:ECM_AIRFLOW_PROXY_23D__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 3168
+        },
+        "decoded:ECM_AIRFLOW_PROXY_23D__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 1439
+        },
+        "decoded:ECM_AIRFLOW_PROXY_23D__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3226
+        },
+        "decoded:ECM_CALC_LOAD_A": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 256
+        },
+        "decoded:ECM_CALC_LOAD_A__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 3801
+        },
+        "decoded:ECM_CALC_LOAD_A__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 509
+        },
+        "decoded:ECM_CALC_LOAD_A__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 6938
+        },
+        "decoded:ECM_CALC_LOAD_B": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 256
+        },
+        "decoded:ECM_CALC_LOAD_B__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 3803
+        },
+        "decoded:ECM_CALC_LOAD_B__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 509
+        },
+        "decoded:ECM_CALC_LOAD_B__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 6934
+        },
+        "decoded:ECM_COOLANT_TEMP": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 80
+        },
+        "decoded:ECM_COOLANT_TEMP__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 1587
+        },
+        "decoded:ECM_COOLANT_TEMP__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 15
+        },
+        "decoded:ECM_COOLANT_TEMP__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 589
+        },
+        "decoded:ECM_ENGINE_STATE_A": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 130
+        },
+        "decoded:ECM_ENGINE_STATE_A__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2478
+        },
+        "decoded:ECM_ENGINE_STATE_A__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 350
+        },
+        "decoded:ECM_ENGINE_STATE_A__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 4132
+        },
+        "decoded:ECM_ENGINE_STATE_B": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 130
+        },
+        "decoded:ECM_ENGINE_STATE_B__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2505
+        },
+        "decoded:ECM_ENGINE_STATE_B__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 351
+        },
+        "decoded:ECM_ENGINE_STATE_B__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 4132
+        },
+        "decoded:ECM_ENGINE_STATE_C": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 130
+        },
+        "decoded:ECM_ENGINE_STATE_C__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2360
+        },
+        "decoded:ECM_ENGINE_STATE_C__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 352
+        },
+        "decoded:ECM_ENGINE_STATE_C__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3949
+        },
+        "decoded:ECM_INTAKE_VACUUM_OR_IAC": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 256
+        },
+        "decoded:ECM_INTAKE_VACUUM_OR_IAC__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2590
+        },
+        "decoded:ECM_INTAKE_VACUUM_OR_IAC__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 495
+        },
+        "decoded:ECM_INTAKE_VACUUM_OR_IAC__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 6670
+        },
+        "decoded:ECM_RPM": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 898
+        },
+        "decoded:ECM_RPM__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 4574
+        },
+        "decoded:ECM_RPM__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 1245
+        },
+        "decoded:ECM_RPM__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 6783
+        },
+        "decoded:ECM_THROTTLE_TRANSIENT": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 15
+        },
+        "decoded:ECM_THROTTLE_TRANSIENT__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2047
+        },
+        "decoded:ECM_THROTTLE_TRANSIENT__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 49
+        },
+        "decoded:ECM_THROTTLE_TRANSIENT__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3295
+        },
+        "decoded:HVAC_BLOWER_LIGHTING_358_1": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 4
+        },
+        "decoded:HVAC_BLOWER_LIGHTING_358_1__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 98
+        },
+        "decoded:HVAC_BLOWER_LIGHTING_358_1__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13559,
+          "nan_count": 390,
+          "non_finite_count": 0,
+          "non_null_count": 13559,
+          "unique_finite_count": 6
+        },
+        "decoded:HVAC_BLOWER_LIGHTING_358_1__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13936,
+          "nan_count": 13,
+          "non_finite_count": 0,
+          "non_null_count": 13936,
+          "unique_finite_count": 58
+        },
+        "decoded:MOTION_29E_5": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 71
+        },
+        "decoded:MOTION_29E_5__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2785
+        },
+        "decoded:MOTION_29E_5__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 163
+        },
+        "decoded:MOTION_29E_5__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3957
+        },
+        "decoded:MOTION_SIGNAL_280_5": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 256
+        },
+        "decoded:MOTION_SIGNAL_280_5__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 2122
+        },
+        "decoded:MOTION_SIGNAL_280_5__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13559,
+          "nan_count": 390,
+          "non_finite_count": 0,
+          "non_null_count": 13559,
+          "unique_finite_count": 506
+        },
+        "decoded:MOTION_SIGNAL_280_5__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13936,
+          "nan_count": 13,
+          "non_finite_count": 0,
+          "non_null_count": 13936,
+          "unique_finite_count": 3763
+        },
+        "decoded:MOTION_SIGNAL_2D1_1": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 256
+        },
+        "decoded:MOTION_SIGNAL_2D1_1__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 2715
+        },
+        "decoded:MOTION_SIGNAL_2D1_1__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13559,
+          "nan_count": 390,
+          "non_finite_count": 0,
+          "non_null_count": 13559,
+          "unique_finite_count": 505
+        },
+        "decoded:MOTION_SIGNAL_2D1_1__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13936,
+          "nan_count": 13,
+          "non_finite_count": 0,
+          "non_null_count": 13936,
+          "unique_finite_count": 3771
+        },
+        "decoded:MOTION_SIGNAL_354_1": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 256
+        },
+        "decoded:MOTION_SIGNAL_354_1__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2093
+        },
+        "decoded:MOTION_SIGNAL_354_1__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 507
+        },
+        "decoded:MOTION_SIGNAL_354_1__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3817
+        },
+        "decoded:MOTION_SIGNAL_590_2": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13873,
+          "nan_count": 76,
+          "non_finite_count": 0,
+          "non_null_count": 13873,
+          "unique_finite_count": 256
+        },
+        "decoded:MOTION_SIGNAL_590_2__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13873,
+          "nan_count": 76,
+          "non_finite_count": 0,
+          "non_null_count": 13873,
+          "unique_finite_count": 2134
+        },
+        "decoded:MOTION_SIGNAL_590_2__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13483,
+          "nan_count": 466,
+          "non_finite_count": 0,
+          "non_null_count": 13483,
+          "unique_finite_count": 498
+        },
+        "decoded:MOTION_SIGNAL_590_2__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13860,
+          "nan_count": 89,
+          "non_finite_count": 0,
+          "non_null_count": 13860,
+          "unique_finite_count": 3842
+        },
+        "decoded:MOTION_SIGNAL_590_5": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13873,
+          "nan_count": 76,
+          "non_finite_count": 0,
+          "non_null_count": 13873,
+          "unique_finite_count": 256
+        },
+        "decoded:MOTION_SIGNAL_590_5__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13873,
+          "nan_count": 76,
+          "non_finite_count": 0,
+          "non_null_count": 13873,
+          "unique_finite_count": 1704
+        },
+        "decoded:MOTION_SIGNAL_590_5__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13483,
+          "nan_count": 466,
+          "non_finite_count": 0,
+          "non_null_count": 13483,
+          "unique_finite_count": 467
+        },
+        "decoded:MOTION_SIGNAL_590_5__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13860,
+          "nan_count": 89,
+          "non_finite_count": 0,
+          "non_null_count": 13860,
+          "unique_finite_count": 4451
+        },
+        "decoded:ODOMETER_ACCUMULATOR_385": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 78
+        },
+        "decoded:ODOMETER_ACCUMULATOR_385__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 1395
+        },
+        "decoded:ODOMETER_ACCUMULATOR_385__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 57
+        },
+        "decoded:ODOMETER_ACCUMULATOR_385__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 1074
+        },
+        "decoded:POWER_STATE_625_3": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 4
+        },
+        "decoded:POWER_STATE_625_3__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13949,
+          "nan_count": 0,
+          "non_finite_count": 0,
+          "non_null_count": 13949,
+          "unique_finite_count": 223
+        },
+        "decoded:POWER_STATE_625_3__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13559,
+          "nan_count": 390,
+          "non_finite_count": 0,
+          "non_null_count": 13559,
+          "unique_finite_count": 9
+        },
+        "decoded:POWER_STATE_625_3__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13936,
+          "nan_count": 13,
+          "non_finite_count": 0,
+          "non_null_count": 13936,
+          "unique_finite_count": 222
+        },
+        "decoded:STEERING_002_LOW": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 256
+        },
+        "decoded:STEERING_002_LOW__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 3195
+        },
+        "decoded:STEERING_002_LOW__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 506
+        },
+        "decoded:STEERING_002_LOW__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 4443
+        },
+        "decoded:STEERING_ANGLE_002": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 48
+        },
+        "decoded:STEERING_ANGLE_002__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 1064
+        },
+        "decoded:STEERING_ANGLE_002__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 102
+        },
+        "decoded:STEERING_ANGLE_002__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 1298
+        },
+        "decoded:STEERING_RATE_002": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 87
+        },
+        "decoded:STEERING_RATE_002__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 589
+        },
+        "decoded:STEERING_RATE_002__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 165
+        },
+        "decoded:STEERING_RATE_002__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 2096
+        },
+        "decoded:WHEEL_SPEED_PAIR_A": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2532
+        },
+        "decoded:WHEEL_SPEED_PAIR_A__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 3854
+        },
+        "decoded:WHEEL_SPEED_PAIR_A__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 3180
+        },
+        "decoded:WHEEL_SPEED_PAIR_A__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3868
+        },
+        "decoded:WHEEL_SPEED_PAIR_B": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 2451
+        },
+        "decoded:WHEEL_SPEED_PAIR_B__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13874,
+          "nan_count": 75,
+          "non_finite_count": 0,
+          "non_null_count": 13874,
+          "unique_finite_count": 3846
+        },
+        "decoded:WHEEL_SPEED_PAIR_B__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13484,
+          "nan_count": 465,
+          "non_finite_count": 0,
+          "non_null_count": 13484,
+          "unique_finite_count": 3179
+        },
+        "decoded:WHEEL_SPEED_PAIR_B__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13861,
+          "nan_count": 88,
+          "non_finite_count": 0,
+          "non_null_count": 13861,
+          "unique_finite_count": 3862
+        },
+        "deviation:coolant_warmup": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 4642,
+          "nan_count": 9307,
+          "non_finite_count": 0,
+          "non_null_count": 4642,
+          "unique_finite_count": 992
+        },
+        "deviation:coolant_warmup__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 4700,
+          "nan_count": 9249,
+          "non_finite_count": 0,
+          "non_null_count": 4700,
+          "unique_finite_count": 1732
+        },
+        "deviation:coolant_warmup__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 4492,
+          "nan_count": 9457,
+          "non_finite_count": 0,
+          "non_null_count": 4492,
+          "unique_finite_count": 857
+        },
+        "deviation:coolant_warmup__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 4693,
+          "nan_count": 9256,
+          "non_finite_count": 0,
+          "non_null_count": 4693,
+          "unique_finite_count": 1715
+        },
+        "deviation:fuel_trim_vs_rpm_load": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13309,
+          "nan_count": 640,
+          "non_finite_count": 0,
+          "non_null_count": 13309,
+          "unique_finite_count": 497
+        },
+        "deviation:fuel_trim_vs_rpm_load__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13424,
+          "nan_count": 525,
+          "non_finite_count": 0,
+          "non_null_count": 13424,
+          "unique_finite_count": 6166
+        },
+        "deviation:fuel_trim_vs_rpm_load__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 12838,
+          "nan_count": 1111,
+          "non_finite_count": 0,
+          "non_null_count": 12838,
+          "unique_finite_count": 1810
+        },
+        "deviation:fuel_trim_vs_rpm_load__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13412,
+          "nan_count": 537,
+          "non_finite_count": 0,
+          "non_null_count": 13412,
+          "unique_finite_count": 6143
+        },
+        "deviation:idle_rpm_vs_coolant": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 578,
+          "nan_count": 13371,
+          "non_finite_count": 0,
+          "non_null_count": 578,
+          "unique_finite_count": 65
+        },
+        "deviation:idle_rpm_vs_coolant__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 987,
+          "nan_count": 12962,
+          "non_finite_count": 0,
+          "non_null_count": 987,
+          "unique_finite_count": 480
+        },
+        "deviation:idle_rpm_vs_coolant__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 350,
+          "nan_count": 13599,
+          "non_finite_count": 0,
+          "non_null_count": 350,
+          "unique_finite_count": 42
+        },
+        "deviation:idle_rpm_vs_coolant__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 952,
+          "nan_count": 12997,
+          "non_finite_count": 0,
+          "non_null_count": 952,
+          "unique_finite_count": 451
+        },
+        "deviation:timing_advance_vs_rpm": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13380,
+          "nan_count": 569,
+          "non_finite_count": 0,
+          "non_null_count": 13380,
+          "unique_finite_count": 1804
+        },
+        "deviation:timing_advance_vs_rpm__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13421,
+          "nan_count": 528,
+          "non_finite_count": 0,
+          "non_null_count": 13421,
+          "unique_finite_count": 6305
+        },
+        "deviation:timing_advance_vs_rpm__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 12979,
+          "nan_count": 970,
+          "non_finite_count": 0,
+          "non_null_count": 12979,
+          "unique_finite_count": 3893
+        },
+        "deviation:timing_advance_vs_rpm__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13409,
+          "nan_count": 540,
+          "non_finite_count": 0,
+          "non_null_count": 13409,
+          "unique_finite_count": 6353
+        },
+        "deviation:timing_advance_vs_rpm_load": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13306,
+          "nan_count": 643,
+          "non_finite_count": 0,
+          "non_null_count": 13306,
+          "unique_finite_count": 390
+        },
+        "deviation:timing_advance_vs_rpm_load__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13421,
+          "nan_count": 528,
+          "non_finite_count": 0,
+          "non_null_count": 13421,
+          "unique_finite_count": 5351
+        },
+        "deviation:timing_advance_vs_rpm_load__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 12835,
+          "nan_count": 1114,
+          "non_finite_count": 0,
+          "non_null_count": 12835,
+          "unique_finite_count": 1706
+        },
+        "deviation:timing_advance_vs_rpm_load__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13409,
+          "nan_count": 540,
+          "non_finite_count": 0,
+          "non_null_count": 13409,
+          "unique_finite_count": 5490
+        },
+        "obd:ABSOLUTE_LOAD": {
+          "constant": true,
+          "dtype": "float32",
+          "finite_count": 13422,
+          "nan_count": 527,
+          "non_finite_count": 0,
+          "non_null_count": 13422,
+          "unique_finite_count": 1
+        },
+        "obd:ABSOLUTE_LOAD__mean": {
+          "constant": true,
+          "dtype": "float32",
+          "finite_count": 13422,
+          "nan_count": 527,
+          "non_finite_count": 0,
+          "non_null_count": 13422,
+          "unique_finite_count": 1
+        },
+        "obd:ABSOLUTE_LOAD__roc": {
+          "constant": true,
+          "dtype": "float32",
+          "finite_count": 13062,
+          "nan_count": 887,
+          "non_finite_count": 0,
+          "non_null_count": 13062,
+          "unique_finite_count": 1
+        },
+        "obd:ABSOLUTE_LOAD__std": {
+          "constant": true,
+          "dtype": "float32",
+          "finite_count": 13410,
+          "nan_count": 539,
+          "non_finite_count": 0,
+          "non_null_count": 13410,
+          "unique_finite_count": 1
+        },
+        "obd:BAROMETRIC_PRESSURE": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13430,
+          "nan_count": 519,
+          "non_finite_count": 0,
+          "non_null_count": 13430,
+          "unique_finite_count": 5
+        },
+        "obd:BAROMETRIC_PRESSURE__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13430,
+          "nan_count": 519,
+          "non_finite_count": 0,
+          "non_null_count": 13430,
+          "unique_finite_count": 95
+        },
+        "obd:BAROMETRIC_PRESSURE__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13070,
+          "nan_count": 879,
+          "non_finite_count": 0,
+          "non_null_count": 13070,
+          "unique_finite_count": 5
+        },
+        "obd:BAROMETRIC_PRESSURE__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13418,
+          "nan_count": 531,
+          "non_finite_count": 0,
+          "non_null_count": 13418,
+          "unique_finite_count": 131
+        },
+        "obd:CATALYST_TEMP_B1S1": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13428,
+          "nan_count": 521,
+          "non_finite_count": 0,
+          "non_null_count": 13428,
+          "unique_finite_count": 179
+        },
+        "obd:CATALYST_TEMP_B1S1__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13428,
+          "nan_count": 521,
+          "non_finite_count": 0,
+          "non_null_count": 13428,
+          "unique_finite_count": 3167
+        },
+        "obd:CATALYST_TEMP_B1S1__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13068,
+          "nan_count": 881,
+          "non_finite_count": 0,
+          "non_null_count": 13068,
+          "unique_finite_count": 53
+        },
+        "obd:CATALYST_TEMP_B1S1__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13416,
+          "nan_count": 533,
+          "non_finite_count": 0,
+          "non_null_count": 13416,
+          "unique_finite_count": 2272
+        },
+        "obd:CATALYST_TEMP_B2S1": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13427,
+          "nan_count": 522,
+          "non_finite_count": 0,
+          "non_null_count": 13427,
+          "unique_finite_count": 180
+        },
+        "obd:CATALYST_TEMP_B2S1__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13427,
+          "nan_count": 522,
+          "non_finite_count": 0,
+          "non_null_count": 13427,
+          "unique_finite_count": 3174
+        },
+        "obd:CATALYST_TEMP_B2S1__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13067,
+          "nan_count": 882,
+          "non_finite_count": 0,
+          "non_null_count": 13067,
+          "unique_finite_count": 53
+        },
+        "obd:CATALYST_TEMP_B2S1__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13415,
+          "nan_count": 534,
+          "non_finite_count": 0,
+          "non_null_count": 13415,
+          "unique_finite_count": 2284
+        },
+        "obd:COMMANDED_EQUIV_RATIO": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13419,
+          "nan_count": 530,
+          "non_finite_count": 0,
+          "non_null_count": 13419,
+          "unique_finite_count": 319
+        },
+        "obd:COMMANDED_EQUIV_RATIO__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13419,
+          "nan_count": 530,
+          "non_finite_count": 0,
+          "non_null_count": 13419,
+          "unique_finite_count": 4484
+        },
+        "obd:COMMANDED_EQUIV_RATIO__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13059,
+          "nan_count": 890,
+          "non_finite_count": 0,
+          "non_null_count": 13059,
+          "unique_finite_count": 1152
+        },
+        "obd:COMMANDED_EQUIV_RATIO__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13407,
+          "nan_count": 542,
+          "non_finite_count": 0,
+          "non_null_count": 13407,
+          "unique_finite_count": 4715
+        },
+        "obd:CONTROL_MODULE_VOLTAGE": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13423,
+          "nan_count": 526,
+          "non_finite_count": 0,
+          "non_null_count": 13423,
+          "unique_finite_count": 33
+        },
+        "obd:CONTROL_MODULE_VOLTAGE__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13423,
+          "nan_count": 526,
+          "non_finite_count": 0,
+          "non_null_count": 13423,
+          "unique_finite_count": 855
+        },
+        "obd:CONTROL_MODULE_VOLTAGE__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13063,
+          "nan_count": 886,
+          "non_finite_count": 0,
+          "non_null_count": 13063,
+          "unique_finite_count": 68
+        },
+        "obd:CONTROL_MODULE_VOLTAGE__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13411,
+          "nan_count": 538,
+          "non_finite_count": 0,
+          "non_null_count": 13411,
+          "unique_finite_count": 2255
+        },
+        "obd:COOLANT_TEMP": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13432,
+          "nan_count": 517,
+          "non_finite_count": 0,
+          "non_null_count": 13432,
+          "unique_finite_count": 77
+        },
+        "obd:COOLANT_TEMP__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13432,
+          "nan_count": 517,
+          "non_finite_count": 0,
+          "non_null_count": 13432,
+          "unique_finite_count": 1580
+        },
+        "obd:COOLANT_TEMP__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13072,
+          "nan_count": 877,
+          "non_finite_count": 0,
+          "non_null_count": 13072,
+          "unique_finite_count": 13
+        },
+        "obd:COOLANT_TEMP__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13420,
+          "nan_count": 529,
+          "non_finite_count": 0,
+          "non_null_count": 13420,
+          "unique_finite_count": 511
+        },
+        "obd:DISTANCE_SINCE_DTC_CLEAR": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13434,
+          "nan_count": 515,
+          "non_finite_count": 0,
+          "non_null_count": 13434,
+          "unique_finite_count": 47
+        },
+        "obd:DISTANCE_SINCE_DTC_CLEAR__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13434,
+          "nan_count": 515,
+          "non_finite_count": 0,
+          "non_null_count": 13434,
+          "unique_finite_count": 1381
+        },
+        "obd:DISTANCE_SINCE_DTC_CLEAR__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13074,
+          "nan_count": 875,
+          "non_finite_count": 0,
+          "non_null_count": 13074,
+          "unique_finite_count": 2
+        },
+        "obd:DISTANCE_SINCE_DTC_CLEAR__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13422,
+          "nan_count": 527,
+          "non_finite_count": 0,
+          "non_null_count": 13422,
+          "unique_finite_count": 16
+        },
+        "obd:DISTANCE_W_MIL": {
+          "constant": true,
+          "dtype": "float32",
+          "finite_count": 13847,
+          "nan_count": 102,
+          "non_finite_count": 0,
+          "non_null_count": 13847,
+          "unique_finite_count": 1
+        },
+        "obd:DISTANCE_W_MIL__mean": {
+          "constant": true,
+          "dtype": "float32",
+          "finite_count": 13847,
+          "nan_count": 102,
+          "non_finite_count": 0,
+          "non_null_count": 13847,
+          "unique_finite_count": 1
+        },
+        "obd:DISTANCE_W_MIL__roc": {
+          "constant": true,
+          "dtype": "float32",
+          "finite_count": 13457,
+          "nan_count": 492,
+          "non_finite_count": 0,
+          "non_null_count": 13457,
+          "unique_finite_count": 1
+        },
+        "obd:DISTANCE_W_MIL__std": {
+          "constant": true,
+          "dtype": "float32",
+          "finite_count": 13834,
+          "nan_count": 115,
+          "non_finite_count": 0,
+          "non_null_count": 13834,
+          "unique_finite_count": 1
+        },
+        "obd:ENGINE_LOAD": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13433,
+          "nan_count": 516,
+          "non_finite_count": 0,
+          "non_null_count": 13433,
+          "unique_finite_count": 219
+        },
+        "obd:ENGINE_LOAD__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13433,
+          "nan_count": 516,
+          "non_finite_count": 0,
+          "non_null_count": 13433,
+          "unique_finite_count": 2674
+        },
+        "obd:ENGINE_LOAD__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13073,
+          "nan_count": 876,
+          "non_finite_count": 0,
+          "non_null_count": 13073,
+          "unique_finite_count": 965
+        },
+        "obd:ENGINE_LOAD__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13421,
+          "nan_count": 528,
+          "non_finite_count": 0,
+          "non_null_count": 13421,
+          "unique_finite_count": 5992
+        },
+        "obd:EVAPORATIVE_PURGE": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13841,
+          "nan_count": 108,
+          "non_finite_count": 0,
+          "non_null_count": 13841,
+          "unique_finite_count": 186
+        },
+        "obd:EVAPORATIVE_PURGE__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13841,
+          "nan_count": 108,
+          "non_finite_count": 0,
+          "non_null_count": 13841,
+          "unique_finite_count": 2321
+        },
+        "obd:EVAPORATIVE_PURGE__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13451,
+          "nan_count": 498,
+          "non_finite_count": 0,
+          "non_null_count": 13451,
+          "unique_finite_count": 849
+        },
+        "obd:EVAPORATIVE_PURGE__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13828,
+          "nan_count": 121,
+          "non_finite_count": 0,
+          "non_null_count": 13828,
+          "unique_finite_count": 3189
+        },
+        "obd:EVAP_VAPOR_PRESSURE": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13433,
+          "nan_count": 516,
+          "non_finite_count": 0,
+          "non_null_count": 13433,
+          "unique_finite_count": 19
+        },
+        "obd:EVAP_VAPOR_PRESSURE__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13433,
+          "nan_count": 516,
+          "non_finite_count": 0,
+          "non_null_count": 13433,
+          "unique_finite_count": 54
+        },
+        "obd:EVAP_VAPOR_PRESSURE__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13073,
+          "nan_count": 876,
+          "non_finite_count": 0,
+          "non_null_count": 13073,
+          "unique_finite_count": 37
+        },
+        "obd:EVAP_VAPOR_PRESSURE__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13421,
+          "nan_count": 528,
+          "non_finite_count": 0,
+          "non_null_count": 13421,
+          "unique_finite_count": 54
+        },
+        "obd:FUEL_LEVEL": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13839,
+          "nan_count": 110,
+          "non_finite_count": 0,
+          "non_null_count": 13839,
+          "unique_finite_count": 21
+        },
+        "obd:FUEL_LEVEL__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13839,
+          "nan_count": 110,
+          "non_finite_count": 0,
+          "non_null_count": 13839,
+          "unique_finite_count": 647
+        },
+        "obd:FUEL_LEVEL__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13449,
+          "nan_count": 500,
+          "non_finite_count": 0,
+          "non_null_count": 13449,
+          "unique_finite_count": 24
+        },
+        "obd:FUEL_LEVEL__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13826,
+          "nan_count": 123,
+          "non_finite_count": 0,
+          "non_null_count": 13826,
+          "unique_finite_count": 634
+        },
+        "obd:FUEL_STATUS": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13405,
+          "nan_count": 544,
+          "non_finite_count": 0,
+          "non_null_count": 13405,
+          "unique_finite_count": 3
+        },
+        "obd:FUEL_STATUS__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13405,
+          "nan_count": 544,
+          "non_finite_count": 0,
+          "non_null_count": 13405,
+          "unique_finite_count": 66
+        },
+        "obd:FUEL_STATUS__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13045,
+          "nan_count": 904,
+          "non_finite_count": 0,
+          "non_null_count": 13045,
+          "unique_finite_count": 6
+        },
+        "obd:FUEL_STATUS__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13393,
+          "nan_count": 556,
+          "non_finite_count": 0,
+          "non_null_count": 13393,
+          "unique_finite_count": 54
+        },
+        "obd:INTAKE_TEMP": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13420,
+          "nan_count": 529,
+          "non_finite_count": 0,
+          "non_null_count": 13420,
+          "unique_finite_count": 51
+        },
+        "obd:INTAKE_TEMP__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13420,
+          "nan_count": 529,
+          "non_finite_count": 0,
+          "non_null_count": 13420,
+          "unique_finite_count": 1492
+        },
+        "obd:INTAKE_TEMP__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13060,
+          "nan_count": 889,
+          "non_finite_count": 0,
+          "non_null_count": 13060,
+          "unique_finite_count": 21
+        },
+        "obd:INTAKE_TEMP__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13408,
+          "nan_count": 541,
+          "non_finite_count": 0,
+          "non_null_count": 13408,
+          "unique_finite_count": 595
+        },
+        "obd:LONG_FUEL_TRIM_1": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13428,
+          "nan_count": 521,
+          "non_finite_count": 0,
+          "non_null_count": 13428,
+          "unique_finite_count": 14
+        },
+        "obd:LONG_FUEL_TRIM_1__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13428,
+          "nan_count": 521,
+          "non_finite_count": 0,
+          "non_null_count": 13428,
+          "unique_finite_count": 364
+        },
+        "obd:LONG_FUEL_TRIM_1__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13068,
+          "nan_count": 881,
+          "non_finite_count": 0,
+          "non_null_count": 13068,
+          "unique_finite_count": 26
+        },
+        "obd:LONG_FUEL_TRIM_1__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13416,
+          "nan_count": 533,
+          "non_finite_count": 0,
+          "non_null_count": 13416,
+          "unique_finite_count": 1736
+        },
+        "obd:LONG_FUEL_TRIM_2": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13405,
+          "nan_count": 544,
+          "non_finite_count": 0,
+          "non_null_count": 13405,
+          "unique_finite_count": 12
+        },
+        "obd:LONG_FUEL_TRIM_2__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13405,
+          "nan_count": 544,
+          "non_finite_count": 0,
+          "non_null_count": 13405,
+          "unique_finite_count": 279
+        },
+        "obd:LONG_FUEL_TRIM_2__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13045,
+          "nan_count": 904,
+          "non_finite_count": 0,
+          "non_null_count": 13045,
+          "unique_finite_count": 23
+        },
+        "obd:LONG_FUEL_TRIM_2__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13393,
+          "nan_count": 556,
+          "non_finite_count": 0,
+          "non_null_count": 13393,
+          "unique_finite_count": 1484
+        },
+        "obd:MAF": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13824,
+          "nan_count": 125,
+          "non_finite_count": 0,
+          "non_null_count": 13824,
+          "unique_finite_count": 2109
+        },
+        "obd:MAF__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13824,
+          "nan_count": 125,
+          "non_finite_count": 0,
+          "non_null_count": 13824,
+          "unique_finite_count": 6306
+        },
+        "obd:MAF__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13434,
+          "nan_count": 515,
+          "non_finite_count": 0,
+          "non_null_count": 13434,
+          "unique_finite_count": 3594
+        },
+        "obd:MAF__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13811,
+          "nan_count": 138,
+          "non_finite_count": 0,
+          "non_null_count": 13811,
+          "unique_finite_count": 7245
+        },
+        "obd:O2_B1S2": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13848,
+          "nan_count": 101,
+          "non_finite_count": 0,
+          "non_null_count": 13848,
+          "unique_finite_count": 97
+        },
+        "obd:O2_B1S2__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13848,
+          "nan_count": 101,
+          "non_finite_count": 0,
+          "non_null_count": 13848,
+          "unique_finite_count": 1950
+        },
+        "obd:O2_B1S2__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13458,
+          "nan_count": 491,
+          "non_finite_count": 0,
+          "non_null_count": 13458,
+          "unique_finite_count": 483
+        },
+        "obd:O2_B1S2__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13835,
+          "nan_count": 114,
+          "non_finite_count": 0,
+          "non_null_count": 13835,
+          "unique_finite_count": 4502
+        },
+        "obd:O2_B2S2": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13847,
+          "nan_count": 102,
+          "non_finite_count": 0,
+          "non_null_count": 13847,
+          "unique_finite_count": 96
+        },
+        "obd:O2_B2S2__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13847,
+          "nan_count": 102,
+          "non_finite_count": 0,
+          "non_null_count": 13847,
+          "unique_finite_count": 1877
+        },
+        "obd:O2_B2S2__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13457,
+          "nan_count": 492,
+          "non_finite_count": 0,
+          "non_null_count": 13457,
+          "unique_finite_count": 477
+        },
+        "obd:O2_B2S2__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13834,
+          "nan_count": 115,
+          "non_finite_count": 0,
+          "non_null_count": 13834,
+          "unique_finite_count": 4557
+        },
+        "obd:RELATIVE_THROTTLE_POS": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13416,
+          "nan_count": 533,
+          "non_finite_count": 0,
+          "non_null_count": 13416,
+          "unique_finite_count": 153
+        },
+        "obd:RELATIVE_THROTTLE_POS__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13416,
+          "nan_count": 533,
+          "non_finite_count": 0,
+          "non_null_count": 13416,
+          "unique_finite_count": 1538
+        },
+        "obd:RELATIVE_THROTTLE_POS__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13056,
+          "nan_count": 893,
+          "non_finite_count": 0,
+          "non_null_count": 13056,
+          "unique_finite_count": 521
+        },
+        "obd:RELATIVE_THROTTLE_POS__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13404,
+          "nan_count": 545,
+          "non_finite_count": 0,
+          "non_null_count": 13404,
+          "unique_finite_count": 3954
+        },
+        "obd:RPM": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13424,
+          "nan_count": 525,
+          "non_finite_count": 0,
+          "non_null_count": 13424,
+          "unique_finite_count": 269
+        },
+        "obd:RPM__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13424,
+          "nan_count": 525,
+          "non_finite_count": 0,
+          "non_null_count": 13424,
+          "unique_finite_count": 3326
+        },
+        "obd:RPM__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13064,
+          "nan_count": 885,
+          "non_finite_count": 0,
+          "non_null_count": 13064,
+          "unique_finite_count": 409
+        },
+        "obd:RPM__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13412,
+          "nan_count": 537,
+          "non_finite_count": 0,
+          "non_null_count": 13412,
+          "unique_finite_count": 4955
+        },
+        "obd:RUN_TIME": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13850,
+          "nan_count": 99,
+          "non_finite_count": 0,
+          "non_null_count": 13850,
+          "unique_finite_count": 1757
+        },
+        "obd:RUN_TIME__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13850,
+          "nan_count": 99,
+          "non_finite_count": 0,
+          "non_null_count": 13850,
+          "unique_finite_count": 6961
+        },
+        "obd:RUN_TIME__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13460,
+          "nan_count": 489,
+          "non_finite_count": 0,
+          "non_null_count": 13460,
+          "unique_finite_count": 62
+        },
+        "obd:RUN_TIME__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13837,
+          "nan_count": 112,
+          "non_finite_count": 0,
+          "non_null_count": 13837,
+          "unique_finite_count": 2167
+        },
+        "obd:SHORT_FUEL_TRIM_1": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13430,
+          "nan_count": 519,
+          "non_finite_count": 0,
+          "non_null_count": 13430,
+          "unique_finite_count": 58
+        },
+        "obd:SHORT_FUEL_TRIM_1__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13430,
+          "nan_count": 519,
+          "non_finite_count": 0,
+          "non_null_count": 13430,
+          "unique_finite_count": 931
+        },
+        "obd:SHORT_FUEL_TRIM_1__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13070,
+          "nan_count": 879,
+          "non_finite_count": 0,
+          "non_null_count": 13070,
+          "unique_finite_count": 80
+        },
+        "obd:SHORT_FUEL_TRIM_1__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13418,
+          "nan_count": 531,
+          "non_finite_count": 0,
+          "non_null_count": 13418,
+          "unique_finite_count": 4117
+        },
+        "obd:SHORT_FUEL_TRIM_2": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13427,
+          "nan_count": 522,
+          "non_finite_count": 0,
+          "non_null_count": 13427,
+          "unique_finite_count": 58
+        },
+        "obd:SHORT_FUEL_TRIM_2__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13427,
+          "nan_count": 522,
+          "non_finite_count": 0,
+          "non_null_count": 13427,
+          "unique_finite_count": 802
+        },
+        "obd:SHORT_FUEL_TRIM_2__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13067,
+          "nan_count": 882,
+          "non_finite_count": 0,
+          "non_null_count": 13067,
+          "unique_finite_count": 78
+        },
+        "obd:SHORT_FUEL_TRIM_2__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13415,
+          "nan_count": 534,
+          "non_finite_count": 0,
+          "non_null_count": 13415,
+          "unique_finite_count": 3966
+        },
+        "obd:SPEED": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13423,
+          "nan_count": 526,
+          "non_finite_count": 0,
+          "non_null_count": 13423,
+          "unique_finite_count": 54
+        },
+        "obd:SPEED__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13423,
+          "nan_count": 526,
+          "non_finite_count": 0,
+          "non_null_count": 13423,
+          "unique_finite_count": 1323
+        },
+        "obd:SPEED__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13063,
+          "nan_count": 886,
+          "non_finite_count": 0,
+          "non_null_count": 13063,
+          "unique_finite_count": 86
+        },
+        "obd:SPEED__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13411,
+          "nan_count": 538,
+          "non_finite_count": 0,
+          "non_null_count": 13411,
+          "unique_finite_count": 2667
+        },
+        "obd:THROTTLE_POS": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13850,
+          "nan_count": 99,
+          "non_finite_count": 0,
+          "non_null_count": 13850,
+          "unique_finite_count": 143
+        },
+        "obd:THROTTLE_POS__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13850,
+          "nan_count": 99,
+          "non_finite_count": 0,
+          "non_null_count": 13850,
+          "unique_finite_count": 1788
+        },
+        "obd:THROTTLE_POS__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13460,
+          "nan_count": 489,
+          "non_finite_count": 0,
+          "non_null_count": 13460,
+          "unique_finite_count": 556
+        },
+        "obd:THROTTLE_POS__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13837,
+          "nan_count": 112,
+          "non_finite_count": 0,
+          "non_null_count": 13837,
+          "unique_finite_count": 4762
+        },
+        "obd:TIMING_ADVANCE": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13421,
+          "nan_count": 528,
+          "non_finite_count": 0,
+          "non_null_count": 13421,
+          "unique_finite_count": 45
+        },
+        "obd:TIMING_ADVANCE__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13421,
+          "nan_count": 528,
+          "non_finite_count": 0,
+          "non_null_count": 13421,
+          "unique_finite_count": 1093
+        },
+        "obd:TIMING_ADVANCE__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13061,
+          "nan_count": 888,
+          "non_finite_count": 0,
+          "non_null_count": 13061,
+          "unique_finite_count": 107
+        },
+        "obd:TIMING_ADVANCE__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13409,
+          "nan_count": 540,
+          "non_finite_count": 0,
+          "non_null_count": 13409,
+          "unique_finite_count": 3987
+        },
+        "obd:WARMUPS_SINCE_DTC_CLEAR": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13838,
+          "nan_count": 111,
+          "non_finite_count": 0,
+          "non_null_count": 13838,
+          "unique_finite_count": 3
+        },
+        "obd:WARMUPS_SINCE_DTC_CLEAR__mean": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13838,
+          "nan_count": 111,
+          "non_finite_count": 0,
+          "non_null_count": 13838,
+          "unique_finite_count": 31
+        },
+        "obd:WARMUPS_SINCE_DTC_CLEAR__roc": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13448,
+          "nan_count": 501,
+          "non_finite_count": 0,
+          "non_null_count": 13448,
+          "unique_finite_count": 2
+        },
+        "obd:WARMUPS_SINCE_DTC_CLEAR__std": {
+          "constant": false,
+          "dtype": "float32",
+          "finite_count": 13825,
+          "nan_count": 124,
+          "non_finite_count": 0,
+          "non_null_count": 13825,
+          "unique_finite_count": 16
+        }
+      },
+      "constant_columns": [
+        "obd:ABSOLUTE_LOAD",
+        "obd:DISTANCE_W_MIL",
+        "obd:ABSOLUTE_LOAD__mean",
+        "obd:DISTANCE_W_MIL__mean",
+        "obd:ABSOLUTE_LOAD__std",
+        "obd:DISTANCE_W_MIL__std",
+        "obd:ABSOLUTE_LOAD__roc",
+        "obd:DISTANCE_W_MIL__roc"
+      ],
+      "dropped_all_nan_columns": [],
+      "non_finite_columns": [],
+      "row_count": 13949,
+      "selected_feature_count": 320
+    },
+    "feature_spec_version": 1,
     "label_column": "isolation_forest_label",
     "mode_column": "operating_mode",
+    "preprocessing": {
+      "operating_modes": [
+        "city",
+        "highway",
+        "idle",
+        "wot"
+      ],
+      "resample_hz": 1.0,
+      "rolling_window_seconds": 30
+    },
     "score_column": "isolation_forest_score",
     "session_column": "session",
+    "source_prefixes": [
+      "dbc",
+      "decoded",
+      "deviation",
+      "obd"
+    ],
     "timestamp_column": "timestamp"
   },
   "training_data_hash": "sha256:2dd74e7530d075535a7ad1a84c9c3ef4b3123aecda6025d8402314b9a245e989",

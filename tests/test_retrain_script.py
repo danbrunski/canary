@@ -18,9 +18,24 @@ def test_retrain_calls_both_trainers(
     session.mkdir(parents=True)
     monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
 
+    feature_frame = object()
     calls: list[str] = []
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: calls.append("if"))
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: calls.append("lstm"))
+    monkeypatch.setattr(
+        retrain,
+        "build_feature_frame",
+        lambda *a, **k: calls.append("build") or feature_frame,
+    )
+
+    def _if_train(*_a: object, **kwargs: object) -> None:
+        assert kwargs["feature_frame"] is feature_frame
+        calls.append("if")
+
+    def _lstm_train(*_a: object, **kwargs: object) -> None:
+        assert kwargs["feature_frame"] is feature_frame
+        calls.append("lstm")
+
+    monkeypatch.setattr(retrain.if_trainer, "train", _if_train)
+    monkeypatch.setattr(retrain.lstm_trainer, "train", _lstm_train)
 
     rc = retrain.main(
         [
@@ -36,7 +51,7 @@ def test_retrain_calls_both_trainers(
         ]
     )
     assert rc == 0
-    assert calls == ["if", "lstm"]
+    assert calls == ["build", "if", "lstm"]
     out = capsys.readouterr().out
     assert "isolation_forest" in out
     assert "lstm_autoencoder" in out
@@ -125,6 +140,7 @@ def test_retrain_continues_after_first_trainer_fails(
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
     monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
 
     lstm_called: list[bool] = []
 
@@ -161,6 +177,7 @@ def test_retrain_returns_error_when_all_requested_trainers_fail(
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
     monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
 
     def _broken(*_a: object, **_k: object) -> None:
         raise RuntimeError("simulated trainer failure")

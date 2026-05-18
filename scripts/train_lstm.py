@@ -33,6 +33,8 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pandas as pd
+
 from src.config import CanaryConfig
 from src.log import configure_logging
 from src.models.false_positive_benchmark import (
@@ -51,7 +53,7 @@ from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
     build_feature_frame,
     build_feature_spec,
-    trainable_feature_columns,
+    sequence_feature_columns,
 )
 
 log = logging.getLogger(__name__)
@@ -62,6 +64,9 @@ def build_dataset(
     config: CanaryConfig,
     *,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
+    feature_frame: pd.DataFrame | None = None,
+    feature_cache_dir: Path | None = None,
+    rebuild_feature_cache: bool = False,
     sequence_length: int | None = None,
     feature_columns: Sequence[str] | None = None,
     stride: int = DEFAULT_SEQUENCE_STRIDE,
@@ -72,11 +77,21 @@ def build_dataset(
     all be present and numeric; otherwise the trainable numeric columns are
     discovered automatically.
     """
-    features = build_feature_frame(session_dirs, config, bindings_path=bindings_path)
+    features = (
+        feature_frame
+        if feature_frame is not None
+        else build_feature_frame(
+            session_dirs,
+            config,
+            bindings_path=bindings_path,
+            cache_dir=feature_cache_dir,
+            force_rebuild=rebuild_feature_cache,
+        )
+    )
     columns = (
         list(feature_columns)
         if feature_columns is not None
-        else trainable_feature_columns(features)
+        else sequence_feature_columns(features)
     )
     if not columns:
         raise ValueError(
@@ -103,6 +118,9 @@ def train(
     out_dir: Path,
     *,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
+    feature_frame: pd.DataFrame | None = None,
+    feature_cache_dir: Path | None = None,
+    rebuild_feature_cache: bool = False,
     sequence_length: int | None = None,
     stride: int = DEFAULT_SEQUENCE_STRIDE,
     device: str = "cpu",
@@ -113,6 +131,9 @@ def train(
         session_dirs,
         config,
         bindings_path=bindings_path,
+        feature_frame=feature_frame,
+        feature_cache_dir=feature_cache_dir,
+        rebuild_feature_cache=rebuild_feature_cache,
         sequence_length=sequence_length,
         stride=stride,
     )

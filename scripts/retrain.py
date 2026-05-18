@@ -50,6 +50,10 @@ from src.models.training_ledger import (  # noqa: E402
     build_run_record_from_manifest,
 )
 from src.preprocessing import discover_sessions  # noqa: E402
+from src.preprocessing.feature_pipeline import (  # noqa: E402
+    DEFAULT_FEATURE_CACHE_DIR,
+    build_feature_frame,
+)
 
 log = logging.getLogger(__name__)
 
@@ -127,6 +131,27 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="LSTM training device (cpu / cuda). Default cpu — Pi target.",
     )
     parser.add_argument(
+        "--feature-cache",
+        type=Path,
+        default=DEFAULT_FEATURE_CACHE_DIR,
+        help=(
+            "Directory for cached model-ready feature frames. Default "
+            f"{DEFAULT_FEATURE_CACHE_DIR}."
+        ),
+    )
+    parser.add_argument(
+        "--no-feature-cache",
+        dest="feature_cache",
+        action="store_const",
+        const=None,
+        help="Disable feature-frame caching for this retrain.",
+    )
+    parser.add_argument(
+        "--rebuild-feature-cache",
+        action="store_true",
+        help="Ignore any existing feature-frame cache entry and rewrite it.",
+    )
+    parser.add_argument(
         "--ledger",
         type=Path,
         default=DEFAULT_TRAINING_LEDGER_PATH,
@@ -187,6 +212,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     results: dict[str, str] = {}
 
     ledger = None if args.no_ledger else TrainingLedger(args.ledger)
+    shared_feature_frame = None
+    if not args.skip_if and not args.skip_lstm:
+        try:
+            shared_feature_frame = build_feature_frame(
+                sessions,
+                config,
+                bindings_path=args.bindings,
+                cache_dir=args.feature_cache,
+                force_rebuild=args.rebuild_feature_cache,
+            )
+        except Exception as exc:  # noqa: BLE001 - preprocessing is shared by both trainers
+            log.exception("feature frame build failed", extra={"error": str(exc)})
+            results["isolation_forest"] = f"failed: preprocessing: {exc}"
+            results["lstm_autoencoder"] = f"failed: preprocessing: {exc}"
+            _print_report(sessions, results, args)
+            return 1
+
+    feature_kwargs = (
+        {"feature_frame": shared_feature_frame}
+        if shared_feature_frame is not None
+        else {
+            "feature_cache_dir": args.feature_cache,
+            "rebuild_feature_cache": args.rebuild_feature_cache,
+        }
+    )
 
     if not args.skip_if:
         try:
@@ -195,6 +245,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 config,
                 args.if_out,
                 bindings_path=args.bindings,
+                **feature_kwargs,
             )
             results["isolation_forest"] = "ok"
             _ingest_ledger(ledger, args.if_out, "succeeded", args.job_id)
@@ -210,6 +261,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.lstm_out,
                 bindings_path=args.bindings,
                 device=args.device,
+                **feature_kwargs,
             )
             results["lstm_autoencoder"] = "ok"
             _ingest_ledger(ledger, args.lstm_out, "succeeded", args.job_id)

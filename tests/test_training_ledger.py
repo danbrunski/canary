@@ -196,6 +196,7 @@ def test_retrain_ingests_ledger_when_manifest_present(
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
     monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     if_out = tmp_path / "if"
     lstm_out = tmp_path / "lstm"
 
@@ -231,6 +232,7 @@ def test_retrain_ledger_hook_is_best_effort(
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
     monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     # Stub trainers that write nothing — ledger ingest must not crash retrain.
     monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)

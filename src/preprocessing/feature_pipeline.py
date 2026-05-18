@@ -10,7 +10,10 @@ training CLIs stay thin and behave identically.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -28,7 +31,7 @@ from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, decode_can_rows_dbc, load_dbc_dir
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.features import FeatureConfig, compute_features
-from src.preprocessing.loader import read_session, to_wide
+from src.preprocessing.loader import PARQUET_PATTERN, read_session, to_wide
 from src.preprocessing.resampler import ResampleConfig, resample_wide
 from src.preprocessing.segmenter import (
     MODE_COLUMN,
@@ -40,6 +43,9 @@ log = logging.getLogger(__name__)
 
 #: Default location of the hand-edited CAN signal bindings file.
 DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
+
+#: Default retrain-time cache for model-ready feature frames.
+DEFAULT_FEATURE_CACHE_DIR = Path("data/cache/feature_frames")
 
 #: Mode label used when no OBD PIDs are present and the threshold segmenter
 #: can't run — everything becomes one mode and the model fits a single global
@@ -54,6 +60,7 @@ _SEGMENTER_SIGNAL_COLUMNS = {
 }
 
 FEATURE_SPEC_VERSION = 1
+FEATURE_FRAME_CACHE_VERSION = 1
 
 
 def build_feature_frame(
@@ -63,6 +70,8 @@ def build_feature_frame(
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
     behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
     dbc_dir: Path = DEFAULT_DBC_DIR,
+    cache_dir: Path | None = None,
+    force_rebuild: bool = False,
 ) -> pd.DataFrame:
     """Run the full preprocessing pipeline over ``session_dirs`` into a feature frame.
 
@@ -78,6 +87,38 @@ def build_feature_frame(
     ``ZScoreScaler`` then normalizes them through ``trainable_feature_columns``
     without changes to either module.
     """
+    session_dirs = [Path(session_dir) for session_dir in session_dirs]
+    cache_path: Path | None = None
+    cache_metadata: dict[str, Any] | None = None
+    if cache_dir is not None:
+        cache_metadata = _feature_frame_cache_metadata(
+            session_dirs,
+            config,
+            bindings_path=bindings_path,
+            behavior_models_path=behavior_models_path,
+            dbc_dir=dbc_dir,
+        )
+        cache_path = Path(cache_dir) / f"{cache_metadata['cache_key']}.pkl"
+        if not force_rebuild and cache_path.exists():
+            try:
+                cached = pd.read_pickle(cache_path)
+                if not isinstance(cached, pd.DataFrame):
+                    raise TypeError(f"cached object is {type(cached).__name__}, not DataFrame")
+                log.info(
+                    "loaded feature frame cache",
+                    extra={
+                        "cache": str(cache_path),
+                        "rows": len(cached),
+                        "columns": len(cached.columns),
+                    },
+                )
+                return cached
+            except Exception as exc:  # noqa: BLE001 - cache corruption should not fail retrain
+                log.warning(
+                    "feature frame cache unreadable; rebuilding",
+                    extra={"cache": str(cache_path), "error": str(exc)},
+                )
+
     bindings = load_bindings(bindings_path) if bindings_path.exists() else None
     behavior_models = (
         load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
@@ -133,10 +174,161 @@ def build_feature_frame(
     resampled = segment_or_constant(resampled, config)
     if behavior_models is not None and behavior_models.models:
         resampled = append_deviation_columns(resampled, behavior_models)
-    return compute_features(
+    features = compute_features(
         resampled,
         config=FeatureConfig(window_seconds=config.preprocessing.rolling_window_seconds),
     )
+    if cache_path is not None and cache_metadata is not None:
+        _write_feature_frame_cache(cache_path, features, cache_metadata)
+    return features
+
+
+def build_feature_frame_cache_key(
+    session_dirs: Sequence[Path],
+    config: CanaryConfig,
+    *,
+    bindings_path: Path = DEFAULT_BINDINGS_PATH,
+    behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
+    dbc_dir: Path = DEFAULT_DBC_DIR,
+) -> str:
+    """Return the deterministic cache key for a feature-frame build."""
+    return str(
+        _feature_frame_cache_metadata(
+            [Path(session_dir) for session_dir in session_dirs],
+            config,
+            bindings_path=bindings_path,
+            behavior_models_path=behavior_models_path,
+            dbc_dir=dbc_dir,
+        )["cache_key"]
+    )
+
+
+def _feature_frame_cache_metadata(
+    session_dirs: Sequence[Path],
+    config: CanaryConfig,
+    *,
+    bindings_path: Path,
+    behavior_models_path: Path,
+    dbc_dir: Path,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "cache_version": FEATURE_FRAME_CACHE_VERSION,
+        "sessions": [_session_cache_entry(session_dir) for session_dir in session_dirs],
+        "preprocessing": config.preprocessing.model_dump(mode="json"),
+        "bindings": _file_cache_entry(bindings_path),
+        "behavior_models": _file_cache_entry(behavior_models_path),
+        "dbc": _directory_cache_entry(dbc_dir, pattern="*.dbc"),
+    }
+    return {**payload, "cache_key": _stable_hash(payload)}
+
+
+def _session_cache_entry(session_dir: Path) -> dict[str, Any]:
+    files: list[dict[str, Any]] = []
+    for file in sorted(session_dir.glob(PARQUET_PATTERN)):
+        try:
+            stat = file.stat()
+        except OSError:
+            continue
+        files.append(
+            {
+                "name": file.name,
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            }
+        )
+    return {
+        "path": _stable_path(session_dir),
+        "name": session_dir.name,
+        "files": files,
+    }
+
+
+def _directory_cache_entry(directory: Path, *, pattern: str) -> dict[str, Any]:
+    if not directory.exists():
+        return {"path": _stable_path(directory), "exists": False, "files": []}
+    files = [
+        _file_cache_entry(file)
+        for file in sorted(directory.glob(pattern))
+        if file.is_file()
+    ]
+    return {"path": _stable_path(directory), "exists": True, "files": files}
+
+
+def _file_cache_entry(path: Path) -> dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        return {"path": _stable_path(path), "exists": False}
+    stat = path.stat()
+    return {
+        "path": _stable_path(path),
+        "exists": True,
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "sha256": _file_sha256(path),
+    }
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _stable_path(path: Path) -> str:
+    return str(path.expanduser().resolve())
+
+
+def _stable_hash(payload: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _write_feature_frame_cache(
+    cache_path: Path,
+    features: pd.DataFrame,
+    metadata: Mapping[str, Any],
+) -> None:
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.tmp")
+    meta_path = cache_path.with_suffix(".json")
+    meta_tmp_path = meta_path.with_name(f".{meta_path.name}.{os.getpid()}.tmp")
+    try:
+        features.to_pickle(tmp_path)
+        tmp_path.replace(cache_path)
+        sidecar = {
+            **dict(metadata),
+            "rows": int(len(features)),
+            "columns": [str(column) for column in features.columns],
+        }
+        meta_tmp_path.write_text(json.dumps(sidecar, indent=2, sort_keys=True) + "\n")
+        meta_tmp_path.replace(meta_path)
+        log.info(
+            "wrote feature frame cache",
+            extra={
+                "cache": str(cache_path),
+                "rows": len(features),
+                "columns": len(features.columns),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - cache write failures should not fail training
+        for path in (tmp_path, meta_tmp_path):
+            try:
+                path.unlink()
+            except OSError as cleanup_exc:
+                log.debug(
+                    "failed to remove incomplete feature-frame cache file",
+                    extra={"path": str(path), "error": str(cleanup_exc)},
+                )
+        log.warning(
+            "feature frame cache write failed; continuing without cache",
+            extra={"cache": str(cache_path), "error": str(exc)},
+        )
 
 
 def segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> pd.DataFrame:
@@ -182,6 +374,42 @@ def candidate_feature_columns(features: pd.DataFrame) -> list[str]:
         if pd.api.types.is_numeric_dtype(features[col]):
             cols.append(col)
     return cols
+
+
+#: Prefix of behavior-model deviation columns (raw + __mean/__std/__roc).
+DEVIATION_PREFIX = "deviation:"
+
+
+def sequence_feature_columns(features: pd.DataFrame) -> list[str]:
+    """LSTM-autoencoder feature columns: dense sensor sequences only.
+
+    Differs from :func:`trainable_feature_columns` (which the Isolation Forest
+    uses) in two ways the sequence windower requires, because
+    ``_window_has_missing_features`` rejects a whole window on *any* NaN:
+
+    * **Drops the entire ``deviation:`` family** (raw and rolling aggregates).
+      Deviations are behavior-model-derived scores that are NaN by contract
+      whenever the model can't speak (off operating-regime) — scattered NaN,
+      not a gap. They are designed for the IF path, which imputes; an
+      autoencoder reconstructing sensor *sequences* should not consume them,
+      and keeping them collapses every window outside their regime.
+    * **Keeps only columns observed in every session.** A channel present in
+      some drives but not this one is all-NaN for that session; in the
+      cross-session union that silently rejects every window in the sessions
+      missing it. Requiring presence in all sessions yields a schema that is
+      dense by construction (the resampler already forward-fills within a
+      session), so windows actually form.
+    """
+    base = [
+        col
+        for col in trainable_feature_columns(features)
+        if not col.startswith(DEVIATION_PREFIX)
+    ]
+    if "session" not in features.columns or features["session"].nunique() <= 1:
+        return base
+    notna = features[base].notna()
+    observed_per_session = notna.groupby(features["session"].to_numpy()).any()
+    return [col for col in base if bool(observed_per_session[col].all())]
 
 
 def build_feature_spec(

@@ -55,6 +55,7 @@ canary.laptop.yaml
 logs/
 data/sessions/
 data/raw/
+data/cache/
 # Laptop training mirror: sessions rsync'd off the Pi by scripts/sync-train.sh.
 /sessions/
 # control-plane tokens, audit log, job ledger — never commit

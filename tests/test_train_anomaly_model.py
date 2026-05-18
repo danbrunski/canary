@@ -18,7 +18,7 @@ from scripts.train_anomaly_model import (
     train,
 )
 from src.config import CanaryConfig
-from src.preprocessing import MODE_COLUMN
+from src.preprocessing import MODE_COLUMN, feature_pipeline
 from src.preprocessing.feature_pipeline import ALL_MODE, build_feature_spec
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
 
@@ -127,6 +127,56 @@ def test_build_feature_frame_without_bindings_still_works(tmp_path: Path):
     # Still has the structural columns
     assert "session" in features.columns
     assert "timestamp" in features.columns
+
+
+def test_build_feature_frame_uses_disk_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = _write_can_session(tmp_path, "sess1")
+    bindings = tmp_path / "bindings.yaml"
+    _write_bindings(bindings)
+    cache_dir = tmp_path / "feature-cache"
+
+    features = build_feature_frame(
+        [session],
+        _config(),
+        bindings_path=bindings,
+        cache_dir=cache_dir,
+    )
+    assert len(list(cache_dir.glob("*.pkl"))) == 1
+
+    def _fail_read_session(_session_dir: Path) -> pd.DataFrame:
+        raise AssertionError("cache miss should not re-read the session")
+
+    monkeypatch.setattr(feature_pipeline, "read_session", _fail_read_session)
+    cached = build_feature_frame(
+        [session],
+        _config(),
+        bindings_path=bindings,
+        cache_dir=cache_dir,
+    )
+
+    pd.testing.assert_frame_equal(cached, features)
+
+
+def test_feature_frame_cache_key_changes_when_bindings_change(tmp_path: Path) -> None:
+    session = _write_can_session(tmp_path, "sess1")
+    bindings = tmp_path / "bindings.yaml"
+    _write_bindings(bindings)
+
+    before = feature_pipeline.build_feature_frame_cache_key(
+        [session],
+        _config(),
+        bindings_path=bindings,
+    )
+    bindings.write_text(bindings.read_text().replace("ECM_AUX_BYTE", "ECM_AUX_BYTE_ALT"))
+    after = feature_pipeline.build_feature_frame_cache_key(
+        [session],
+        _config(),
+        bindings_path=bindings,
+    )
+
+    assert after != before
 
 
 # ---------------------------------------------------------------------------
