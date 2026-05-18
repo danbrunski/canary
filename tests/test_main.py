@@ -114,7 +114,9 @@ async def test_default_collectors_use_canable_obd_by_default(
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     captured = {}
 
-    async def fake_collect_can_obd(spec, queue, stop_event, *, reconnect_policy):
+    async def fake_collect_can_obd(
+        spec, queue, stop_event, *, reconnect_policy, on_scheduler_metrics=None
+    ):
         captured["spec"] = spec
         captured["queue"] = queue
         captured["reconnect_policy"] = reconnect_policy

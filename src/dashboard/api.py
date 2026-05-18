@@ -201,7 +201,11 @@ def _model_version(manifest_path: Path) -> str | None:
         data = json.loads(manifest_path.read_text())
     except (OSError, json.JSONDecodeError):
         return None
-    version = data.get("version") or data.get("training", {}).get("model_version")
+    version = (
+        data.get("model_version")
+        or data.get("version")
+        or data.get("training", {}).get("model_version")
+    )
     return str(version) if version is not None else None
 
 
@@ -222,9 +226,18 @@ def build_status(
     latest = _resolve_latest_session(storage)
     model_versions: dict[str, str | None] = {}
     if models_dir is not None:
-        # Convention: <models_dir>/<name>.manifest.json. Both IF and LSTM use it.
-        for manifest in sorted(models_dir.glob("*.manifest.json")):
-            model_versions[manifest.stem.removesuffix(".manifest")] = _model_version(manifest)
+        # Artifacts live one dir down: <models_dir>/<name>/model.manifest.json
+        # (matches daemon.isolation_forest_artifact / lstm_artifact). Recurse so
+        # the nested layout is found; fall back to the flat
+        # <models_dir>/<name>.manifest.json convention when the manifest sits
+        # directly in models_dir.
+        for manifest in sorted(models_dir.rglob("*.manifest.json")):
+            name = (
+                manifest.stem.removesuffix(".manifest")
+                if manifest.parent == models_dir
+                else manifest.parent.name
+            )
+            model_versions[name] = _model_version(manifest)
     return StatusSnapshot(
         storage_path=str(storage),
         free_mb=_free_mb(storage),

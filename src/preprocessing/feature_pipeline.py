@@ -331,6 +331,10 @@ def _write_feature_frame_cache(
 def segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> pd.DataFrame:
     """Apply the operating-mode segmenter when its inputs exist, else add a
     constant ``operating_mode = "all"`` column so a single model is fit."""
+    if config.preprocessing.single_operating_mode:
+        out = resampled.copy()
+        out[MODE_COLUMN] = ALL_MODE
+        return out
     seg_cfg = SegmenterConfig(signal_columns=dict(_SEGMENTER_SIGNAL_COLUMNS))
     have_inputs = all(col in resampled.columns for col in seg_cfg.signal_columns.values())
     if have_inputs:

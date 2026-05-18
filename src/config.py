@@ -109,6 +109,13 @@ class PreprocessingConfig(_Strict):
     resample_hz: float
     rolling_window_seconds: int
     operating_modes: dict[str, OperatingModeSpec]
+    #: Skip per-mode segmentation entirely and fit/score a single model over a
+    #: constant ``operating_mode = "all"``. Use when the corpus covers one
+    #: regime, or when the OBD mode signals (RPM/SPEED/THROTTLE) are too sparse
+    #: to segment reliably live — that sparsity otherwise produces train/serve
+    #: skew where serving emits a mode the trainer never produced. See
+    #: ``feature_pipeline.segment_or_constant``.
+    single_operating_mode: bool = False
 
 
 class IsolationForestConfig(_Strict):
