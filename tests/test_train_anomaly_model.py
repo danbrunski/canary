@@ -19,7 +19,11 @@ from scripts.train_anomaly_model import (
 )
 from src.config import CanaryConfig
 from src.preprocessing import MODE_COLUMN, feature_pipeline
-from src.preprocessing.feature_pipeline import ALL_MODE, build_feature_spec
+from src.preprocessing.feature_pipeline import (
+    ALL_MODE,
+    build_feature_spec,
+    reconcile_feature_frame_to_spec,
+)
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
 
 # ---------------------------------------------------------------------------
@@ -342,6 +346,37 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
             "operating_modes": ["city", "highway", "idle", "wot"],
         },
     }
+
+
+def test_reconcile_feature_frame_to_spec_aligns_missing_and_extra_columns():
+    import math
+
+    frame = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-05-11T12:00:00Z", periods=1, freq="1s"),
+            "session": ["live"],
+            MODE_COLUMN: ["idle"],
+            "obd:RPM": ["800.0"],
+            "obd:EXTRA": [1.0],
+        }
+    )
+    schema = {
+        "feature_columns": ["obd:RPM", "obd:SPEED"],
+        "feature_dtypes": {"obd:RPM": "float64", "obd:SPEED": "float64"},
+        "mode_column": MODE_COLUMN,
+        "timestamp_column": "timestamp",
+        "session_column": "session",
+    }
+
+    aligned, report = reconcile_feature_frame_to_spec(frame, schema)
+
+    assert aligned.columns.tolist() == ["timestamp", "session", MODE_COLUMN, "obd:RPM", "obd:SPEED"]
+    assert aligned["obd:RPM"].iloc[0] == 800.0
+    assert math.isnan(aligned["obd:SPEED"].iloc[0])
+    assert report.missing_feature_columns == ("obd:SPEED",)
+    assert report.extra_feature_columns == ("obd:EXTRA",)
+    assert report.filled_feature_columns == ("obd:SPEED",)
+    assert report.has_divergence is True
 
 
 # ---------------------------------------------------------------------------

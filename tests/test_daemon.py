@@ -522,13 +522,93 @@ async def test_lstm_observe_helper_fills_missing_columns_with_nan() -> None:
             captured["series"] = series
             return None
 
-    row = pd.DataFrame([{"timestamp": "now", "session": "live", "obd:RPM": 700.0}])
+    row = pd.DataFrame(
+        [{"timestamp": "now", "session": "live", "obd:RPM": 700.0, "obd:EXTRA": 1.0}]
+    )
     _lstm_observe(_Captor(), row)
     assert captured["series"]["obd:RPM"] == 700.0
+    assert "obd:EXTRA" not in captured["series"]
     # obd:SPEED wasn't in the row → NaN
     import math
 
     assert math.isnan(captured["series"]["obd:SPEED"])
+
+
+async def test_score_and_emit_reconciles_missing_live_columns(
+    tmp_path: Path,
+    config: CanaryConfig,
+) -> None:
+    import pandas as pd
+
+    from src.alerts.emitter import AnomalyEventEmitter
+    from src.alerts.event_logger import AnomalyEventLogger
+    from src.daemon import _score_and_emit
+    from src.models.health import HealthMonitor
+    from src.models.manager import LoadedModel
+    from src.models.manifest import ModelManifestCommon
+
+    class _FakeTrained:
+        feature_columns = ("obd:RPM", "obd:SPEED")
+        mode_column = "operating_mode"
+        manifest = type(
+            "M",
+            (),
+            {
+                "model_version": "fake_if_schema",
+                "schema": {
+                    "feature_columns": ["obd:RPM", "obd:SPEED"],
+                    "feature_dtypes": {"obd:RPM": "float64", "obd:SPEED": "float64"},
+                    "mode_column": "operating_mode",
+                    "timestamp_column": "timestamp",
+                    "session_column": "session",
+                },
+            },
+        )()
+
+        def score(self, frame: Any) -> Any:
+            assert "obd:SPEED" in frame.columns
+            out = frame.copy()
+            missing = out[list(self.feature_columns)].isna().any(axis=1)
+            out["isolation_forest_score"] = float("inf")
+            out["isolation_forest_label"] = -1
+            out["isolation_forest_model_mode"] = out["operating_mode"]
+            out["isolation_forest_missing_features"] = missing
+            return out
+
+    loaded = LoadedModel(
+        artifact=_FakeTrained(),
+        manifest=ModelManifestCommon(
+            artifact_format_version=1,
+            model_type="isolation_forest",
+            model_version="fake_if_schema",
+            created_at="now",
+            training_data_hash="h",
+            input_rows=1,
+            schema=_FakeTrained.manifest.schema,
+        ),
+        artifact_path=Path("/tmp/x"),
+        manifest_path=Path("/tmp/x.manifest.json"),
+        manifest_mtime=0.0,
+    )
+    row = pd.DataFrame(
+        [
+            {
+                "timestamp": "2026-05-13T12:00:00Z",
+                "session": "live",
+                "operating_mode": "all",
+                "obd:RPM": 700.0,
+                "obd:EXTRA": 1.0,
+            }
+        ]
+    )
+    health = HealthMonitor()
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=0)
+
+    _score_and_emit(loaded, row, emitter, health)
+
+    assert health.snapshot()["missing_feature_rate"] == 1.0
+    assert emitter.counters.emitted == 0
+    assert not list(tmp_path.glob("anomalies-*.jsonl"))
 
 
 async def test_run_live_inference_skips_when_no_manager(config: CanaryConfig) -> None:

@@ -15,6 +15,7 @@ import json
 import logging
 import os
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -511,6 +512,118 @@ def validate_feature_health(feature_health: Mapping[str, Any]) -> None:
     all_nan = [str(col) for col in feature_health.get("all_nan_columns", [])]
     if all_nan:
         raise ValueError("selected feature columns are all-NaN: " + ", ".join(all_nan))
+
+
+@dataclass(frozen=True)
+class FeatureSpecReconciliation:
+    """Result of aligning a live/offline frame to a persisted feature spec."""
+
+    row_count: int
+    expected_feature_columns: tuple[str, ...]
+    missing_feature_columns: tuple[str, ...]
+    extra_feature_columns: tuple[str, ...]
+    filled_feature_columns: tuple[str, ...]
+    coerced_feature_columns: tuple[str, ...]
+    output_columns: tuple[str, ...]
+
+    @property
+    def has_divergence(self) -> bool:
+        return bool(
+            self.missing_feature_columns
+            or self.extra_feature_columns
+            or self.coerced_feature_columns
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "row_count": self.row_count,
+            "expected_feature_columns": list(self.expected_feature_columns),
+            "missing_feature_columns": list(self.missing_feature_columns),
+            "extra_feature_columns": list(self.extra_feature_columns),
+            "filled_feature_columns": list(self.filled_feature_columns),
+            "coerced_feature_columns": list(self.coerced_feature_columns),
+            "output_columns": list(self.output_columns),
+            "has_divergence": self.has_divergence,
+        }
+
+
+def reconcile_feature_frame_to_spec(
+    frame: pd.DataFrame,
+    schema: Mapping[str, Any],
+    *,
+    structural_columns: Sequence[str] | None = None,
+    fill_missing: float = float("nan"),
+    coerce_numeric: bool = True,
+) -> tuple[pd.DataFrame, FeatureSpecReconciliation]:
+    """Align ``frame`` to the model feature spec persisted in a manifest.
+
+    The serving policy is deliberately explicit:
+
+    * expected feature columns absent from the live row are added as ``NaN``;
+    * extra live feature columns are dropped before scoring;
+    * expected feature columns are coerced numeric because every trained
+      feature column is numeric by construction.
+
+    Structural columns (timestamp/session/mode) are preserved ahead of feature
+    columns so model adapters still have the metadata they need.
+    """
+    feature_columns = tuple(str(column) for column in schema.get("feature_columns", ()))
+    if not feature_columns:
+        raise ValueError("feature schema has no feature_columns")
+
+    out = frame.copy()
+    present = {str(column) for column in out.columns}
+    missing = tuple(column for column in feature_columns if column not in present)
+    for column in missing:
+        out[column] = fill_missing
+
+    dtype_spec = schema.get("feature_dtypes", {})
+    coerced: list[str] = []
+    if coerce_numeric:
+        for column in feature_columns:
+            before = str(out[column].dtype)
+            out[column] = pd.to_numeric(out[column], errors="coerce")
+            after = str(out[column].dtype)
+            expected_dtype = (
+                str(dtype_spec.get(column, "")) if isinstance(dtype_spec, Mapping) else ""
+            )
+            if before != after or (expected_dtype and after != expected_dtype):
+                coerced.append(column)
+
+    extras = tuple(
+        column for column in candidate_feature_columns(out) if column not in feature_columns
+    )
+    structural = _resolve_structural_columns(out, schema, structural_columns)
+    output_columns = tuple(dict.fromkeys([*structural, *feature_columns]))
+    aligned = out.loc[:, [column for column in output_columns if column in out.columns]].copy()
+    report = FeatureSpecReconciliation(
+        row_count=int(len(aligned)),
+        expected_feature_columns=feature_columns,
+        missing_feature_columns=missing,
+        extra_feature_columns=extras,
+        filled_feature_columns=missing,
+        coerced_feature_columns=tuple(coerced),
+        output_columns=tuple(str(column) for column in aligned.columns),
+    )
+    return aligned, report
+
+
+def _resolve_structural_columns(
+    frame: pd.DataFrame,
+    schema: Mapping[str, Any],
+    override: Sequence[str] | None,
+) -> tuple[str, ...]:
+    if override is not None:
+        return tuple(str(column) for column in override if str(column) in frame.columns)
+
+    candidates = [
+        schema.get("timestamp_column", "timestamp"),
+        schema.get("session_column", "session"),
+        schema.get("mode_column", MODE_COLUMN),
+    ]
+    return tuple(
+        dict.fromkeys(str(column) for column in candidates if str(column) in frame.columns)
+    )
 
 
 def _column_health(series: pd.Series) -> dict[str, Any]:

@@ -11,7 +11,9 @@ import pytest
 
 from src.config import CanaryConfig
 from src.decode.bindings import Bindings, load_bindings
+from src.preprocessing.feature_pipeline import build_feature_frame
 from src.preprocessing.live import LiveFeatureSource
+from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
 
@@ -159,6 +161,58 @@ def test_rolling_window_drops_old_observations(config: CanaryConfig) -> None:
     assert row is not None
     # spike is outside the rolling 30s window now
     assert row["obd:RPM__mean"].iloc[0] == pytest.approx(700.0, abs=0.5)
+
+
+def test_live_and_offline_obd_feature_rows_share_contract(
+    tmp_path: Path,
+    config: CanaryConfig,
+) -> None:
+    session = tmp_path / "2026-05-13T120000"
+    base = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    records: list[TelemetryRecord] = []
+    for index, rpm in enumerate([700.0, 720.0, 740.0, 760.0, 780.0]):
+        ts = base + timedelta(seconds=index)
+        records.append(TelemetryRecord(timestamp=ts, source="obd", channel="RPM", value=rpm))
+        records.append(
+            TelemetryRecord(timestamp=ts, source="obd", channel="SPEED", value=float(index))
+        )
+    write_records_to_parquet(records, session)
+    offline = build_feature_frame(
+        [session],
+        config,
+        bindings_path=tmp_path / "no-bindings.yaml",
+        behavior_models_path=tmp_path / "no-behavior.yaml",
+        dbc_dir=tmp_path / "no-dbc",
+    )
+
+    source = LiveFeatureSource(config=config)
+    live_row = None
+    for record in records:
+        source.observe(record)
+        if record.channel == "SPEED":
+            live_row = source.tick(record.timestamp)
+    assert live_row is not None
+
+    expected_columns = {
+        "timestamp",
+        "session",
+        "operating_mode",
+        "obd:RPM",
+        "obd:SPEED",
+        "obd:RPM__mean",
+        "obd:SPEED__mean",
+        "obd:RPM__std",
+        "obd:SPEED__std",
+        "obd:RPM__roc",
+        "obd:SPEED__roc",
+    }
+    assert expected_columns <= set(offline.columns)
+    assert expected_columns <= set(live_row.columns)
+    last_offline = offline.iloc[-1]
+    last_live = live_row.iloc[0]
+    for column in expected_columns - {"timestamp", "session", "operating_mode"}:
+        assert last_live[column] == pytest.approx(last_offline[column], nan_ok=True)
+    assert last_live["operating_mode"] == last_offline["operating_mode"]
 
 
 # ---------------------------------------------------------------------------

@@ -65,6 +65,10 @@ from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.models.health import HealthMonitor
 from src.models.manager import ModelManager, manager_for_artifact
+from src.preprocessing.feature_pipeline import (
+    FeatureSpecReconciliation,
+    reconcile_feature_frame_to_spec,
+)
 from src.preprocessing.live import LiveFeatureSource
 from src.storage.monitor import warn_if_storage_low
 from src.storage.parquet_writer import ParquetTelemetryWriter
@@ -428,24 +432,72 @@ def _lstm_observe(engine: Any, row: Any) -> Any:
     return value is ``LSTMInferenceResult`` once a full window is ready,
     ``None`` otherwise.
     """
-    import pandas as pd
+    schema = _schema_for_engine(engine)
+    aligned, report = reconcile_feature_frame_to_spec(row, schema)
+    _log_schema_reconciliation_once(
+        "lstm_autoencoder",
+        _engine_version(engine),
+        report,
+    )
+    return engine.observe(aligned.iloc[0])
 
-    series = row.iloc[0]
-    # Build a Series carrying only the trained feature columns + session +
-    # timestamp metadata the buffer reads. Missing → NaN.
-    aligned: dict[str, Any] = {
-        "timestamp": series.get("timestamp"),
-        "session": series.get("session", "live"),
+
+def _schema_for_engine(engine: Any) -> dict[str, Any]:
+    trained = getattr(engine, "trained", None)
+    manifest = getattr(trained, "manifest", None)
+    schema = getattr(manifest, "schema", None)
+    if isinstance(schema, dict):
+        return schema
+    return {"feature_columns": list(getattr(engine, "feature_columns", ()))}
+
+
+def _schema_for_loaded(loaded: Any) -> dict[str, Any]:
+    artifact_manifest = getattr(getattr(loaded, "artifact", None), "manifest", None)
+    schema = getattr(artifact_manifest, "schema", None)
+    if isinstance(schema, dict) and schema.get("feature_columns"):
+        return schema
+    manager_schema = getattr(getattr(loaded, "manifest", None), "schema_", None)
+    if isinstance(manager_schema, dict) and manager_schema.get("feature_columns"):
+        return manager_schema
+    artifact = getattr(loaded, "artifact", None)
+    return {
+        "feature_columns": list(getattr(artifact, "feature_columns", ())),
+        "mode_column": getattr(artifact, "mode_column", "operating_mode"),
     }
-    for col in engine.feature_columns:
-        value = series[col] if col in series.index else float("nan")
-        aligned[col] = value
-    return engine.observe(pd.Series(aligned))
+
+
+def _engine_version(engine: Any) -> str:
+    trained = getattr(engine, "trained", None)
+    manifest = getattr(trained, "manifest", None)
+    version = getattr(manifest, "model_version", None) or getattr(engine, "model_version", None)
+    return str(version or "unknown")
+
+
+def _log_schema_reconciliation_once(
+    model_type: str,
+    model_version: str,
+    report: FeatureSpecReconciliation,
+) -> None:
+    if not report.has_divergence:
+        return
+    key = (model_type, model_version)
+    if key in _SCHEMA_RECONCILIATION_WARNED:
+        return
+    _SCHEMA_RECONCILIATION_WARNED.add(key)
+    log.warning(
+        "live feature schema reconciled to model feature spec",
+        extra={
+            "model_type": model_type,
+            "model_version": model_version,
+            "schema_reconciliation": report.to_dict(),
+        },
+    )
 
 
 # Model versions already warned about scoring with a missing feature schema,
 # so the fail-safe suppression logs once per version instead of every tick.
 _IF_MISSING_WARNED: set[str] = set()
+_SCHEMA_RECONCILIATION_WARNED: set[tuple[str, str]] = set()
 
 
 def _score_and_emit(
@@ -471,8 +523,10 @@ def _score_and_emit(
     from src.models.isolation_forest import MISSING_FEATURES_COLUMN, SCORE_COLUMN
 
     engine = IsolationForestInferenceEngine(loaded.artifact)
+    aligned, report = reconcile_feature_frame_to_spec(row, _schema_for_loaded(loaded))
+    _log_schema_reconciliation_once("isolation_forest", engine.model_version, report)
     started = time.perf_counter()
-    scored = engine.observe(row.iloc[0])
+    scored = engine.observe(aligned.iloc[0])
     latency_ms = (time.perf_counter() - started) * 1000.0
     timestamp = row["timestamp"].iloc[0]
     if health is not None:

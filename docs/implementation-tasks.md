@@ -17,7 +17,9 @@ Torque-parity telemetry, OBD coverage reporting, dataset/training/tuning
 ML-ops, and the reworked dashboard. Remaining work is hardware-gated or
 in-truck (live-ECU reads, write/parked actions, companion sync/publish,
 acceptance matrix) plus the Phase 7 anomaly-architecture hardening from
-the 2026-05-17 review.
+the 2026-05-17 review and the Phase 8 storage-lifecycle/disk-safety fix
+from the 2026-05-17 disk investigation (retention is configured but never
+wired into the production daemon; no byte cap; low-space guard only logs).
 
 Completed tasks below are collapsed to their title line to keep this
 plan navigable; the full original description for any `[x]` item is in
@@ -64,7 +66,11 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
 - [x] **1.10 — Parquet writer.** `src/storage/parquet_writer.py` — buffer
 - [x] **1.11 — Session keying.** `src/storage/parquet_writer.py` —
 - [x] **1.12 — Ring buffer.** Background sweeper deletes session files
+  — ⚠ **regressed/false-done:** age-only (no byte cap) and never wired
+  into the production `run_daemon` path. Superseded by 8.1/8.2.
 - [x] **1.13 — Disk-space monitor.** Poll free bytes on `storage_path`;
+  — ⚠ **regressed/false-done:** `warn_if_storage_low` only logs; it never
+  stops/rotates/deletes. Superseded by 8.3.
 - [x] **1.14 — Crash-safety test.** `tests/test_parquet_writer.py` —
 
 ### 1D. Phase-1 milestone
@@ -536,8 +542,12 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   report). Keystone — unblocks 7.2/7.3/7.5. (Effort: L)
   Started: model manifests now persist `feature_spec_version: 1`, ordered
   feature columns, dtypes, source prefixes, preprocessing knobs, sequence
-  params, behavior residual columns, and a feature-health summary. Live/offline
-  builder unification and live schema reconciliation remain.
+  params, behavior residual columns, and a feature-health summary. Live scoring
+  now reconciles rows to the persisted spec (drop extras, fill missing expected
+  features with NaN, coerce numeric dtypes) before IF/LSTM inference and logs a
+  one-time divergence report per model version. A fixture test now checks
+  live/offline feature parity for OBD rows. Full batch/streaming builder
+  extraction remains.
 
 - [x] **7.3 — Feature/score validation at model-load and in CI (P1).**
   `deviation:*` was all-NaN for the model's whole existence, undetected,
@@ -591,6 +601,87 @@ Suggested sequence: 7.1 → (7.3 ∥ 7.2) → 7.4 → 7.5.
 
 ---
 
+## Phase 8 — Storage Lifecycle & Disk Safety
+
+Derived from the 2026-05-17 disk investigation; full design in
+`docs/storage-lifecycle-fix.md`. The storage code has no total-size bound
+and the retention that exists is never invoked by the production daemon:
+`session_retention_days` is dead config, `delete_expired_sessions`
+(`parquet_writer.py:199`) is called only from `run_collection`
+(`main.py:204`, the non-production `--collection-only` path) and only once
+in its shutdown `finally`; `run_daemon` — the `full_daemon=True` default —
+never prunes. `warn_if_storage_low` (`monitor.py:27`) only logs. Left
+running, the SD card fills → failed writes → the unclean state that already
+corrupted the git repo. Directly threatens Done-Definition v1 #2
+("continuously logged for ≥1 week without manual intervention"). Picks up
+R13/R14 below; supersedes the regressed 1.12/1.13.
+
+Invariant for every task here: a session dir with `.canary-pin`
+(`canaryctl sessions pin`) and the **active** session dir are never
+auto-deleted; because engine-run-time reset rotates the active dir
+(`parquet_writer.py:_rotate_if_engine_run_time_reset`), the live path must
+be read each tick, not snapshotted at startup.
+
+- [ ] **8.1 — Wire periodic retention into the production daemon (P0).**
+  Add `run_retention_sweeper` to `src/daemon.py` modeled on
+  `poll_model_managers` (same `stop_event`-timeout loop, same
+  task-launch/cancel handling in `run_daemon`). Cadence is a new
+  `daemon.retention_sweep_seconds` (default 3600). Each tick calls
+  `delete_expired_sessions(storage_path, session_retention_days,
+  protect={writer.paths.root})` — add the `protect` param to exclude the
+  live dir (pinned dirs already excluded) — then logs what it reclaimed.
+  Keep `run_collection`'s shutdown sweep as a final pass for parity, no
+  longer the only sweep. Core fix. (Effort: S–M)
+
+- [ ] **8.2 — Byte-bounded storage cap / true ring buffer (P0).** Add
+  `collection.storage_max_mb` and `enforce_storage_cap(sessions_root,
+  max_mb, *, protect=...)` in `parquet_writer.py`: when total bytes under
+  the root exceed the cap, delete oldest-first unpinned non-protected
+  timestamp dirs until under cap or only pinned/active remain. Called from
+  the 8.1 sweeper after the age sweep. This is the bounded ring buffer 1.12
+  claimed but never implemented. Depends on 8.1. (Effort: S–M)
+
+- [ ] **8.3 — Acting low-space guard (P1).** When the sweeper sees
+  `free_space_mb(storage_path) < storage_warning_mb`, run an emergency
+  oldest-first eviction (same pin/active rules, aggressive target) with
+  structured before/after logging. `warn_if_storage_low` stays the cheap
+  per-flush log so the hot drain path remains non-blocking and log-only;
+  the acting logic lives only in the sweeper. Depends on 8.1, 8.2.
+  (Effort: S)
+
+- [ ] **8.4 — Storage-lifecycle tests (P0/P1).** Unit: `enforce_storage_cap`
+  eviction order, pin exclusion, active/protect exclusion, stop-when-only-
+  pinned. Task: interval honored, age+cap both run, emergency path triggers
+  below threshold, active dir survives an engine-run-time rotation.
+  Regression: assert the assembled `run_daemon` task set includes the
+  retention sweeper — the missing-wiring gap that let this ship. Depends on
+  8.1–8.3. (Effort: S–M)
+
+- [ ] **8.5 — Config + doc reconciliation (P0).** Add `storage_max_mb`
+  (under `collection:`) and `retention_sweep_seconds` (under `daemon:`) to
+  `src/config.py` and **all** of `canary.example.yaml`,
+  `canary.pi.example.yaml`, `canary.dev.example.yaml`,
+  `canary.sim.example.yaml`, plus `docs/CANary-overview.md` (Configuration
+  drift rule). Fix `docs/daemon-architecture.md:98`: retention is a
+  periodic in-process sweep with a byte cap, not "sweeps on shutdown"
+  (false on the production path). Depends on 8.1, 8.2. (Effort: S)
+
+- [ ] **8.6 — Operator-intent / idle-gating for auto-started sessions
+  (P2).** `run_daemon` opens a session and records whenever it runs;
+  KOEO body/chassis CAN keeps the bus chattering so full-rate low-value
+  data accumulates with no operator intent. Continuous logging is partly
+  by design (Done-Definition v1 #2), so the fix is intent-gating, not
+  disabling capture: an optional record-arming gate that defers a
+  full-rate session until a "vehicle active" predicate (engine RPM > 0,
+  vehicle speed, or configurable) is seen. Carries open questions
+  (arm/disarm semantics, pre-arm buffer handling) — design + document,
+  not necessarily all implemented in v1. Secondary; no truck action
+  needed now. (Effort: M)
+
+Suggested sequence: 8.1 → 8.2 → 8.4 → (8.3 ∥ 8.5) → 8.6.
+
+---
+
 ## Cross-Cutting Concerns
 
 These get touched in multiple phases — keep them in mind, don't defer to the end.
@@ -639,6 +730,8 @@ These get touched in multiple phases — keep them in mind, don't defer to the e
 | R10 | Torque Pro parity can grow without a finish line. | Phase 6.28 defines the parity checklist and evidence requirements. |
 | R11 | False-positive tuning can accidentally hide real anomalies. | Phase 6.24–6.26 require feedback labels, versioned threshold/suppression changes, before/after estimates, and rollback. |
 | R12 | Training data exports can become untraceable once copied off the Pi. | Phase 6.20 requires manifests with config hash, channel schema, sessions, tags, and quality warnings for every export. |
+| R13 | Retention/disk bounding is unwired in the production daemon; the SD card fills unattended → failed writes → corrupt unclean state. | Phase 8.1/8.2 wire a periodic in-daemon sweeper + byte cap; 8.4 adds a regression test that `run_daemon` includes the sweeper. ~37 days KOEO runway buys time but it is not self-correcting. |
+| R14 | Sessions auto-start with no operator intent; KOEO body/chassis CAN accumulates full-rate low-value data. | Phase 8.6 designs an optional record-arming gate without breaking Done-Definition v1 #2 continuous logging. Secondary to R13. |
 
 ---
 
