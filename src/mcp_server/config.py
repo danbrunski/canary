@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 DEFAULT_DAEMON_URL = "http://127.0.0.1:8000"
 DEFAULT_BIND_HOST = "0.0.0.0"
@@ -32,6 +33,7 @@ class MCPConfig:
     signals_path: Path | None
     log_fallback_path: Path | None
     daemon_unit: str
+    anomalies_dir: Path | None
 
     @property
     def auth_required(self) -> bool:
@@ -39,25 +41,40 @@ class MCPConfig:
         return self.control_token is not None and self.control_token != ""
 
 
-def _storage_from_config_yaml(config_path: str | None) -> Path | None:
-    """Pull ``collection.storage_path`` out of ``canary.yaml`` for ergonomics.
-
-    The daemon and MCP server share an env file on the Pi; rather than asking
-    operators to duplicate the storage path there, we read it from the same
-    config the daemon uses. Failures (missing file, parse error, no key) just
-    return ``None`` — ``query_telemetry`` stays disabled in that case.
-    """
+def _load_canary_yaml(config_path: str | None) -> dict[str, Any]:
+    """Best-effort load of canary.yaml. Returns ``{}`` when unreadable."""
     if not config_path:
-        return None
+        return {}
     import yaml
 
     try:
         with open(config_path) as handle:
             data = yaml.safe_load(handle) or {}
     except (OSError, yaml.YAMLError):
-        return None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _storage_from_config_yaml(config_path: str | None) -> Path | None:
+    """Pull ``collection.storage_path`` out of ``canary.yaml`` for ergonomics."""
+    data = _load_canary_yaml(config_path)
     raw = (data.get("collection") or {}).get("storage_path")
     return Path(raw) if isinstance(raw, str) and raw else None
+
+
+def _anomalies_dir_from_config_yaml(config_path: str | None) -> Path | None:
+    """Pull ``alerts.anomalies_dir`` out of canary.yaml.
+
+    The daemon defaults this to ``data/anomalies`` (see :mod:`src.config`)
+    — same fallback applied here when the key isn't present, so the
+    anomalies resource works against a stock dev tree.
+    """
+    data = _load_canary_yaml(config_path)
+    raw = (data.get("alerts") or {}).get("anomalies_dir")
+    if isinstance(raw, str) and raw:
+        return Path(raw)
+    # Daemon default when nothing is set.
+    return Path("data/anomalies") if config_path else None
 
 
 def load_from_env() -> MCPConfig:
@@ -76,12 +93,19 @@ def load_from_env() -> MCPConfig:
         Falls back to ``collection.storage_path`` in ``$CANARY_CONFIG`` so the
         operator doesn't have to duplicate the path across two env files.
     """
+    config_env = os.environ.get("CANARY_CONFIG")
     storage_env = os.environ.get("CANARY_STORAGE_PATH")
     storage_path: Path | None
     if storage_env:
         storage_path = Path(storage_env)
     else:
-        storage_path = _storage_from_config_yaml(os.environ.get("CANARY_CONFIG"))
+        storage_path = _storage_from_config_yaml(config_env)
+    anomalies_env = os.environ.get("CANARY_ANOMALIES_DIR")
+    anomalies_dir: Path | None
+    if anomalies_env:
+        anomalies_dir = Path(anomalies_env)
+    else:
+        anomalies_dir = _anomalies_dir_from_config_yaml(config_env)
     signals_env = os.environ.get("CANARY_SIGNALS_PATH")
     log_fallback_env = os.environ.get("CANARY_MCP_LOG_FALLBACK")
     return MCPConfig(
@@ -95,6 +119,7 @@ def load_from_env() -> MCPConfig:
         signals_path=Path(signals_env) if signals_env else None,
         log_fallback_path=Path(log_fallback_env) if log_fallback_env else None,
         daemon_unit=os.environ.get("CANARY_MCP_DAEMON_UNIT", "canary"),
+        anomalies_dir=anomalies_dir,
     )
 
 

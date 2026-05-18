@@ -12,6 +12,7 @@ def _config(
     tmp_path: Path,
     storage: Path | None = None,
     signals: Path | None = None,
+    anomalies: Path | None = None,
 ) -> MCPConfig:
     return MCPConfig(
         daemon_url="http://127.0.0.1:8000",
@@ -24,6 +25,7 @@ def _config(
         signals_path=signals,
         log_fallback_path=None,
         daemon_unit="canary",
+        anomalies_dir=anomalies,
     )
 
 
@@ -73,6 +75,8 @@ async def test_build_server_registers_phase1_and_phase2_tools(tmp_path: Path) ->
         "set_tuning",
         "estimate_tuning",
         "revert_tuning",
+        # Phase 3 write
+        "upload_model_artifact",
     }
     assert expected <= names
     assert "query_telemetry" not in names
@@ -95,6 +99,29 @@ async def test_signal_lookup_registered_when_signals_path_set(tmp_path: Path) ->
     server = build_server(_config(tmp_path, signals=signals))
     tools = await server.list_tools()
     assert "signal_lookup" in {t.name for t in tools}
+
+
+async def test_resources_registered(tmp_path: Path) -> None:
+    """Phase 3 resources show up; the anomalies template requires its dir."""
+    server = build_server(_config(tmp_path, anomalies=tmp_path / "anom"))
+    resources = await server.list_resources()
+    templates = await server.list_resource_templates()
+    static_uris = {str(r.uri) for r in resources}
+    assert "canary://config" in static_uris
+    assert "canary://status" in static_uris
+    assert "canary://behavior-models" in static_uris
+    assert "canary://audit/mcp" in static_uris
+    template_uris = {t.uriTemplate for t in templates}
+    assert "canary://sessions/{session_id}" in template_uris
+    assert "canary://anomalies/{date}" in template_uris
+
+
+async def test_anomalies_resource_omitted_when_dir_unset(tmp_path: Path) -> None:
+    """Without anomalies_dir, only the four static + one template stay."""
+    server = build_server(_config(tmp_path))
+    templates = {t.uriTemplate for t in await server.list_resource_templates()}
+    assert "canary://anomalies/{date}" not in templates
+    assert "canary://sessions/{session_id}" in templates
 
 
 async def test_every_tool_has_non_empty_description(tmp_path: Path) -> None:

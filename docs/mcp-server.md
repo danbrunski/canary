@@ -45,6 +45,18 @@ Write tools (audit-logged with `actor="mcp"` via
 | `set_session_metadata` / `pin_session` / `unpin_session` | `POST /control/sessions/{id}[...]` |
 | `start_job` / `cancel_job` | `POST /control/jobs[...]` |
 | `set_tuning` / `estimate_tuning` / `revert_tuning` | `POST /control/tuning[...]` |
+| `upload_model_artifact` | base64-encodes a local artifact + `POST /control/models/{type}/artifact` |
+
+Resources (URI-addressable; clients pin these to a conversation for stable context):
+
+| URI | Body |
+|---|---|
+| `canary://config` | daemon canary.yaml as JSON |
+| `canary://status` | daemon status snapshot |
+| `canary://behavior-models` | learned behavior surfaces |
+| `canary://sessions/{session_id}` | one session's metadata + chunk inventory |
+| `canary://anomalies/{date}` | raw JSONL for `YYYY-MM-DD` (gated on `CANARY_ANOMALIES_DIR` / `alerts.anomalies_dir`) |
+| `canary://audit/mcp` | tail of the MCP audit log |
 
 ---
 
@@ -94,6 +106,7 @@ CANARY_MCP_AUDIT_PATH=/var/lib/canary/audit/mcp.jsonl
 CANARY_SIGNALS_PATH=/opt/canary/data/fsm/signals.json   # enables signal_lookup
 CANARY_MCP_LOG_FALLBACK=/var/log/canary/daemon.jsonl    # used if journalctl absent
 CANARY_MCP_DAEMON_UNIT=canary                            # systemd unit for tail
+CANARY_ANOMALIES_DIR=/data/canary/anomalies              # falls back to canary.yaml
 ```
 
 ---

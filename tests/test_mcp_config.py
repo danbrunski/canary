@@ -26,6 +26,7 @@ def test_load_from_env_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "CANARY_SIGNALS_PATH",
         "CANARY_MCP_LOG_FALLBACK",
         "CANARY_MCP_DAEMON_UNIT",
+        "CANARY_ANOMALIES_DIR",
     ):
         monkeypatch.delenv(var, raising=False)
     cfg = load_from_env()
@@ -36,6 +37,7 @@ def test_load_from_env_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.signals_path is None
     assert cfg.log_fallback_path is None
     assert cfg.daemon_unit == "canary"
+    assert cfg.anomalies_dir is None
     assert cfg.auth_required is False
 
 
@@ -91,3 +93,39 @@ def test_phase2_paths_round_trip(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert cfg.signals_path == tmp_path / "signals.json"
     assert cfg.log_fallback_path == tmp_path / "canary.log"
     assert cfg.daemon_unit == "canary-prod"
+
+
+def test_anomalies_dir_explicit_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """``CANARY_ANOMALIES_DIR`` wins over any YAML-derived value."""
+    monkeypatch.setenv("CANARY_ANOMALIES_DIR", str(tmp_path / "anom"))
+    monkeypatch.delenv("CANARY_CONFIG", raising=False)
+    cfg = load_from_env()
+    assert cfg.anomalies_dir == tmp_path / "anom"
+
+
+def test_anomalies_dir_from_config_yaml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without an env override, ``alerts.anomalies_dir`` from canary.yaml is used."""
+    config_file = tmp_path / "canary.yaml"
+    config_file.write_text("alerts:\n  anomalies_dir: /var/canary/anomalies\n")
+    monkeypatch.delenv("CANARY_ANOMALIES_DIR", raising=False)
+    monkeypatch.setenv("CANARY_CONFIG", str(config_file))
+    cfg = load_from_env()
+    assert cfg.anomalies_dir == Path("/var/canary/anomalies")
+
+
+def test_anomalies_dir_falls_back_to_daemon_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No YAML key → the daemon's default (``data/anomalies``) is used.
+
+    Matches the daemon's own behavior in :mod:`src.config` so the resource
+    works against a stock dev tree without extra env wiring.
+    """
+    config_file = tmp_path / "canary.yaml"
+    config_file.write_text("collection:\n  storage_path: /var/canary/sessions\n")
+    monkeypatch.delenv("CANARY_ANOMALIES_DIR", raising=False)
+    monkeypatch.setenv("CANARY_CONFIG", str(config_file))
+    cfg = load_from_env()
+    assert cfg.anomalies_dir == Path("data/anomalies")

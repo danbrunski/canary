@@ -16,6 +16,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from src.mcp_server import resources as resource_handlers
 from src.mcp_server.audit import MCPAuditLogger
 from src.mcp_server.client import DaemonClient
 from src.mcp_server.config import MCPConfig, load_from_env
@@ -60,6 +61,9 @@ from src.mcp_server.write_tools import (
     jobs as jobs_write_tool,
 )
 from src.mcp_server.write_tools import (
+    models as models_write_tool,
+)
+from src.mcp_server.write_tools import (
     sessions as sessions_write_tool,
 )
 from src.mcp_server.write_tools import (
@@ -102,6 +106,7 @@ def build_server(config: MCPConfig | None = None) -> FastMCP:
 
     _register_read_tools(mcp, client, query_runner, cfg)
     _register_write_tools(mcp, client, audit)
+    _register_resources(mcp, client, cfg)
     return mcp
 
 
@@ -397,6 +402,77 @@ def _register_write_tools(
         return await tuning_write_tool.revert_tuning(
             client, audit, version=version, by=by
         )
+
+    @mcp.tool()
+    async def upload_model_artifact(
+        model_type: str,
+        artifact_path: str,
+        manifest: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Upload a trained model artifact (path local to the MCP host).
+
+        ``artifact_path`` is read from the MCP server's filesystem,
+        base64-encoded, and POSTed alongside ``manifest`` to
+        ``/control/models/{model_type}/artifact``. Audited with file size +
+        manifest; the base64 body itself is not logged.
+        """
+        from pathlib import Path
+
+        return await models_write_tool.upload_model_artifact(
+            client,
+            audit,
+            model_type=model_type,
+            artifact_path=Path(artifact_path),
+            manifest=manifest,
+        )
+
+
+def _register_resources(
+    mcp: FastMCP,
+    client: DaemonClient,
+    cfg: MCPConfig,
+) -> None:
+    """Register URI-addressable resource endpoints.
+
+    Resource bodies are returned as strings (JSON-pretty for snapshots,
+    raw text for log files). FastMCP infers the URI template parameters
+    from the function signature.
+    """
+
+    @mcp.resource("canary://config", mime_type="application/json")
+    async def config_resource() -> str:
+        """Daemon canary.yaml as pretty-printed JSON."""
+        return await resource_handlers.read_config(client)
+
+    @mcp.resource("canary://status", mime_type="application/json")
+    async def status_resource() -> str:
+        """Daemon status snapshot (storage, models, emitter counters)."""
+        return await resource_handlers.read_status(client)
+
+    @mcp.resource("canary://behavior-models", mime_type="application/json")
+    async def behavior_resource() -> str:
+        """Static behavior surfaces (the learned 'normal' maps)."""
+        return await resource_handlers.read_behavior_models(client)
+
+    @mcp.resource("canary://sessions/{session_id}", mime_type="application/json")
+    async def session_resource(session_id: str) -> str:
+        """One session's metadata + parquet inventory."""
+        return await resource_handlers.read_session(client, session_id=session_id)
+
+    if cfg.anomalies_dir is not None:
+        anomalies_dir = cfg.anomalies_dir
+
+        @mcp.resource("canary://anomalies/{date}", mime_type="application/x-ndjson")
+        def anomalies_resource(date: str) -> str:
+            """One day's anomaly events (YYYY-MM-DD; raw JSONL contents)."""
+            return resource_handlers.read_anomalies_for_date(anomalies_dir, date=date)
+
+    audit_path = cfg.audit_path
+
+    @mcp.resource("canary://audit/mcp", mime_type="application/x-ndjson")
+    def audit_resource() -> str:
+        """Tail of the MCP-driven audit log."""
+        return resource_handlers.read_audit_log(audit_path)
 
 
 __all__ = ["build_server"]
