@@ -467,11 +467,14 @@ training/model-health visualization, and Torque Pro parity.
 
 - [x] **6.31 — Companion app architecture plan.** `docs/companion-app-plan.md`
 - [x] **6.32 — Local CANary library format.** `src/companion/library.py` —
-- [ ] **6.33 — Companion local API.** Add a local FastAPI service that exposes
+- [x] **6.33 — Companion local API.** Add a local FastAPI service that exposes
   session browsing, telemetry history, anomalies, datasets, training jobs,
   model artifacts, and sync state from the local library. It should mirror the
   Pi dashboard API shape where possible so the same React app and panels run in
   `Live Pi` and `Local Library` modes.
+  Done: `src/companion/api.py` serves the local library with dashboard-shaped
+  sessions, `/telemetry/latest`, `/anomalies`, dataset list/health, training
+  jobs/runs, model artifacts, publish, queued actions, and sync-state endpoints.
 - [ ] **6.34 — Pi session sync.** Build resumable sync from the Pi control API:
   session inventory, selected session/capture downloads, checksum validation,
   duplicate detection, pin-on-Pi, retry after interruption, and import into the

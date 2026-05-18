@@ -7,6 +7,7 @@ import json
 import sys
 import time
 import zipfile
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -14,10 +15,15 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from src.alerts.event_logger import AnomalyEventLogger
+from src.alerts.events import AnomalyEvent
+from src.alerts.feedback import FeedbackStore
 from src.companion import api as companion_api
 from src.companion.library import CanaryLibrary
 from src.config import CanaryConfig
 from src.control.jobs import JobController
+from src.storage.parquet_writer import write_records_to_parquet
+from src.telemetry import TelemetryRecord
 
 
 def _config_yaml(storage_path: Path) -> str:
@@ -73,6 +79,24 @@ def _session_zip(session_id: str = "2026-05-17T120000") -> bytes:
     return buf.getvalue()
 
 
+def _make_telemetry_session(parent: Path, session_id: str = "2026-05-17T120000") -> Path:
+    sdir = parent / session_id
+    sdir.mkdir(parents=True)
+    base = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+    records: list[TelemetryRecord] = []
+    for index in range(3):
+        ts = base + timedelta(seconds=index)
+        records.append(
+            TelemetryRecord(timestamp=ts, source="obd", channel="RPM", value=700 + index)
+        )
+        records.append(
+            TelemetryRecord(timestamp=ts, source="obd", channel="SPEED", value=float(index))
+        )
+    write_records_to_parquet(records, sdir)
+    (sdir / "manifest.json").write_text(json.dumps({"started_at": base.isoformat()}))
+    return sdir
+
+
 def test_import_session_archive_endpoint_indexes_local_session(tmp_path: Path) -> None:
     lib = CanaryLibrary(tmp_path / "library")
     app = companion_api.create_app(_config(tmp_path), library=lib, static_dir=None)
@@ -97,6 +121,52 @@ def test_import_session_archive_endpoint_indexes_local_session(tmp_path: Path) -
     assert listed.status_code == 200
     assert listed.json()["count"] == 1
     assert listed.json()["sessions"][0]["telemetry_chunks"] == 1
+
+
+def test_local_dashboard_read_endpoints_use_library_files(tmp_path: Path) -> None:
+    lib = CanaryLibrary(tmp_path / "library")
+    lib.import_session(_make_telemetry_session(tmp_path / "remote"), source_host="pi.local")
+    dataset_path = tmp_path / "dataset.parquet"
+    dataset_path.write_bytes(b"dataset")
+    lib.add_dataset(
+        "baseline",
+        path=dataset_path,
+        manifest={"purpose": "baseline", "row_count": 6, "created_at": "2026-05-17T12:00:00Z"},
+    )
+    lib.queue_action("sync_session", {"session_id": "2026-05-17T120000"})
+    lib.record_publish("if_v1", target="http://pi.local:8000", status="uploaded")
+    app = companion_api.create_app(_config(tmp_path), library=lib, static_dir=None)
+    event = {
+        "timestamp": "2026-05-17T12:00:02Z",
+        "source": "isolation_forest",
+        "model_version": "if_v1",
+        "score": 1.0,
+        "session": "2026-05-17T120000",
+    }
+    with AnomalyEventLogger(app.state.config.daemon.anomalies_dir) as logger:
+        logger.log(AnomalyEvent.model_validate(event))
+    FeedbackStore(app.state.config.daemon.feedback_log).record(
+        event=event,
+        label="false_positive",
+    )
+    client = TestClient(app)
+
+    telemetry = client.get("/telemetry/latest", params={"n": 2}).json()
+    assert telemetry["count"] == 2
+    assert telemetry["rows"][-1]["channel"] == "SPEED"
+
+    anomalies = client.get("/anomalies").json()
+    assert anomalies["count"] == 1
+    assert anomalies["events"][0]["feedback"]["label"] == "false_positive"
+
+    datasets = client.get("/control/datasets").json()
+    assert datasets["count"] == 1
+    assert datasets["datasets"][0]["manifest"]["purpose"] == "baseline"
+
+    sync_state = client.get("/companion/sync/state").json()
+    assert sync_state["source_hosts"] == ["pi.local"]
+    assert len(sync_state["queued_actions"]) == 1
+    assert sync_state["publish_history"][0]["status"] == "uploaded"
 
 
 def test_sync_session_from_pi_uses_control_export_and_optional_pin(

@@ -33,6 +33,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.alerts.feedback import FeedbackStore, annotate_events_with_feedback
 from src.companion.library import DEFAULT_LIBRARY_ROOT, CanaryLibrary, LibrarySession
 from src.config import CanaryConfig
 from src.control.jobs import JobController
@@ -44,6 +45,11 @@ from src.control.sessions import (
     unpin_session,
     write_session_metadata,
     write_session_zip,
+)
+from src.dashboard.api import (
+    read_anomalies_since,
+    read_latest_per_channel,
+    read_latest_telemetry_rows,
 )
 from src.models.training_ledger import TrainingLedger
 
@@ -307,6 +313,30 @@ def create_app(
         lib.remove_session(session_id, delete_files=False)
         return {"session_id": session_id, "deleted": True, "force": force}
 
+    @app.get("/telemetry/latest")
+    def get_local_telemetry_latest(
+        n: int = Query(default=100, ge=1, le=10_000),
+        per_channel: bool = Query(default=False),
+    ) -> dict[str, Any]:
+        rows = (
+            read_latest_per_channel(local_config.collection.storage_path)
+            if per_channel
+            else read_latest_telemetry_rows(local_config.collection.storage_path, n=n)
+        )
+        return {"rows": rows, "count": len(rows)}
+
+    @app.get("/anomalies")
+    def get_local_anomalies(since: str | None = Query(default=None)) -> dict[str, Any]:
+        try:
+            events = read_anomalies_since(local_config.daemon.anomalies_dir, since=since)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=f"bad `since`: {exc}") from exc
+        events = annotate_events_with_feedback(
+            events,
+            FeedbackStore(local_config.daemon.feedback_log),
+        )
+        return {"events": events, "count": len(events)}
+
     @app.post("/control/jobs", status_code=201)
     def start_local_job(
         request: JobSubmitRequest,
@@ -360,6 +390,20 @@ def create_app(
         for run in runs:
             lib.record_training_run(run, compute_target="laptop")
         return {"runs": runs, "count": len(runs)}
+
+    @app.get("/control/datasets")
+    def local_datasets(_auth: None = Depends(require_local_auth)) -> dict[str, Any]:
+        datasets = [_dataset_row_to_dict(row) for row in lib.list_datasets()]
+        return {"datasets": datasets, "count": len(datasets)}
+
+    @app.get("/control/datasets/health")
+    def local_dataset_health(_auth: None = Depends(require_local_auth)) -> dict[str, Any]:
+        from src.datasets.health import analyze_corpus
+
+        sessions = [
+            Path(session.path) for session in lib.list_sessions() if Path(session.path).is_dir()
+        ]
+        return analyze_corpus(sessions, local_config).to_dict()
 
     @app.get("/companion/models")
     def companion_models(_auth: None = Depends(require_local_auth)) -> dict[str, Any]:
@@ -440,6 +484,18 @@ def create_app(
     def queued_actions(_auth: None = Depends(require_local_auth)) -> dict[str, Any]:
         actions = lib.list_actions()
         return {"actions": actions, "count": len(actions)}
+
+    @app.get("/companion/sync/state")
+    def companion_sync_state(_auth: None = Depends(require_local_auth)) -> dict[str, Any]:
+        sessions = lib.list_sessions()
+        actions = lib.list_actions()
+        queued = [action for action in actions if action.get("status") == "queued"]
+        return {
+            "source_hosts": sorted({s.source_host for s in sessions if s.source_host}),
+            "queued_actions": queued,
+            "actions": actions,
+            "publish_history": lib.publish_history(),
+        }
 
     if static_dir is not None and (static_dir / "index.html").exists():
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
@@ -557,6 +613,19 @@ def _library_session_to_control_dict(session: LibrarySession) -> dict[str, Any]:
         }
     )
     return data
+
+
+def _dataset_row_to_dict(row: Mapping[str, Any]) -> dict[str, Any]:
+    payload = dict(row)
+    raw_manifest = payload.get("manifest")
+    if isinstance(raw_manifest, str):
+        try:
+            payload["manifest"] = json.loads(raw_manifest)
+        except json.JSONDecodeError:
+            payload["manifest"] = {}
+    elif raw_manifest is None:
+        payload["manifest"] = {}
+    return payload
 
 
 def _safe_extract_zip(archive: zipfile.ZipFile, target_root: Path) -> None:
