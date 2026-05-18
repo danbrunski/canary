@@ -130,7 +130,15 @@ export const definitionTermClass =
   "text-[0.72rem] uppercase tracking-[0.08em] text-fg-faint";
 export const definitionValueClass = "m-0 font-num tabular-nums";
 
-export function noticeClass(kind: "ok" | "error" | "busy"): string {
+export type NoticeKind = "ok" | "error" | "busy";
+
+/** The notice state shape shared by every action panel. */
+export interface NoticeState {
+  kind: NoticeKind;
+  text: string;
+}
+
+export function noticeClass(kind: NoticeKind): string {
   return cn(
     "rounded-[8px] border bg-elev px-3 py-2 text-[0.86rem] text-fg",
     kind === "ok" && "border-ok/45",

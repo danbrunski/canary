@@ -1,33 +1,30 @@
-import type { AnomalyEvent } from "../types";
+import {
+  type ChannelEvidence,
+  type EvidenceSource,
+  type HeatmapData,
+  type OverlaySeries,
+  type ResidualEvidence,
+  SOURCE_LABEL,
+  SOURCES,
+  extractChannelEvidence,
+  extractHeatmap,
+  extractOverlays,
+  extractResiduals,
+  heatColor,
+  severityTone,
+} from "../lib/evidence";
+import { MeterBar } from "../components/MetricTile";
 import { badgeClass, cn, placeholderClass } from "../styles";
+import type { AnomalyEvent } from "../types";
+import { formatNumber as formatNum } from "../util/format";
+import { formatTimestamp } from "../util/time";
+
+/** Evidence cards show three decimals on sub-10 scores/residuals. */
+const formatNumber = (value: number): string => formatNum(value, 3);
 
 interface ModelEvidencePanelProps {
   event: AnomalyEvent | null;
   relatedEvents: AnomalyEvent[];
-}
-
-type EvidenceSource = "isolation_forest" | "lstm_autoencoder";
-
-const SOURCES: EvidenceSource[] = ["isolation_forest", "lstm_autoencoder"];
-
-const SOURCE_LABEL: Record<EvidenceSource, string> = {
-  isolation_forest: "Isolation Forest",
-  lstm_autoencoder: "LSTM",
-};
-
-interface ChannelEvidence {
-  channel: string;
-  score: number;
-  threshold: number | null;
-  ratio: number | null;
-}
-
-interface ResidualEvidence {
-  name: string;
-  severity: string | null;
-  actual: number | null;
-  expected: number | null;
-  deviation: number | null;
 }
 
 export function ModelEvidencePanel({
@@ -241,22 +238,19 @@ function ChannelBars({ channels }: { channels: ChannelEvidence[] }) {
     <div className="flex flex-col gap-1.5">
       {channels.map((c) => {
         const value = c.ratio === null ? c.score : c.ratio;
-        const width = `${Math.max(3, Math.min(100, (value / max) * 100))}%`;
         return (
           <div key={c.channel} className="grid grid-cols-[minmax(5rem,1fr)_5rem] gap-2">
             <div className="min-w-0">
               <div className="mb-0.5 truncate text-[0.68rem] text-fg-dim" title={c.channel}>
                 {c.channel}
               </div>
-              <div className="h-2 rounded-full bg-black/30">
-                <div
-                  className={cn(
-                    "h-2 rounded-full",
-                    value >= 1 ? "bg-bad" : value >= 0.75 ? "bg-warn" : "bg-accent-2",
-                  )}
-                  style={{ width }}
-                />
-              </div>
+              <MeterBar
+                value={value}
+                max={max}
+                colorClass={
+                  value >= 1 ? "bg-bad" : value >= 0.75 ? "bg-warn" : "bg-accent-2"
+                }
+              />
             </div>
             <div className="self-end text-right font-num text-[0.68rem] tabular-nums text-fg-dim">
               {c.ratio === null ? formatNumber(c.score) : `${c.ratio.toFixed(2)}x`}
@@ -266,12 +260,6 @@ function ChannelBars({ channels }: { channels: ChannelEvidence[] }) {
       })}
     </div>
   );
-}
-
-interface HeatmapData {
-  channels: string[];
-  values: number[][];
-  max: number;
 }
 
 function ChannelHeatmap({ heatmap }: { heatmap: HeatmapData }) {
@@ -303,12 +291,6 @@ function ChannelHeatmap({ heatmap }: { heatmap: HeatmapData }) {
       </div>
     </div>
   );
-}
-
-interface OverlaySeries {
-  channel: string;
-  actual: number[];
-  reconstructed: number[];
 }
 
 function OverlayChart({ overlay }: { overlay: OverlaySeries }) {
@@ -344,190 +326,4 @@ function OverlayChart({ overlay }: { overlay: OverlaySeries }) {
       </svg>
     </div>
   );
-}
-
-function extractChannelEvidence(event: AnomalyEvent): ChannelEvidence[] {
-  const detail = event.detail;
-  const scores =
-    numberMap(detail.channel_scores) ??
-    numberMap(detail.feature_contributors) ??
-    numberMap(detail.contributors);
-  if (!scores) {
-    return event.affected_channels.map((channel) => ({
-      channel,
-      score: 1,
-      threshold: null,
-      ratio: null,
-    }));
-  }
-  const thresholds = numberMap(detail.channel_thresholds) ?? {};
-  return Object.entries(scores)
-    .map(([channel, score]) => {
-      const threshold = thresholds[channel] ?? null;
-      const ratio = threshold !== null && threshold > 0 ? score / threshold : null;
-      return { channel, score, threshold, ratio };
-    })
-    .sort((a, b) => {
-      const av = a.ratio ?? a.score;
-      const bv = b.ratio ?? b.score;
-      return bv - av;
-    });
-}
-
-function extractHeatmap(
-  detail: Record<string, unknown>,
-  fallback: ChannelEvidence[],
-): HeatmapData {
-  const trace =
-    numberSeriesMap(detail.channel_score_series) ??
-    numberSeriesMap(detail.reconstruction_series) ??
-    numberSeriesMap(detail.reconstruction_trace);
-  if (trace) {
-    const channels = Object.keys(trace).sort((a, b) => maxOf(trace[b]) - maxOf(trace[a]));
-    const values = channels.map((channel) => trace[channel]);
-    return { channels, values, max: Math.max(1, ...values.flat()) };
-  }
-
-  const rows = fallback.map((channel) => {
-    const value = channel.ratio ?? channel.score;
-    return { channel: channel.channel, value };
-  });
-  return {
-    channels: rows.map((row) => row.channel),
-    values: rows.map((row) => [row.value]),
-    max: Math.max(1, ...rows.map((row) => row.value)),
-  };
-}
-
-function extractOverlays(
-  detail: Record<string, unknown>,
-  preferredChannels: string[],
-): OverlaySeries[] {
-  const raw = record(detail.reconstruction_overlays) ?? record(detail.reconstruction_overlay);
-  if (!raw) return [];
-  const out: OverlaySeries[] = [];
-  for (const channel of preferredChannels) {
-    const item = record(raw[channel]);
-    if (!item) continue;
-    const actual = numberArray(item.actual);
-    const reconstructed = numberArray(item.reconstructed ?? item.reconstruction);
-    if (actual.length > 1 && reconstructed.length === actual.length) {
-      out.push({ channel, actual, reconstructed });
-    }
-  }
-  return out;
-}
-
-function extractResiduals(detail: Record<string, unknown>): ResidualEvidence[] {
-  const candidates = [
-    detail.behavior_residuals,
-    detail.physics_residuals,
-    detail.residuals,
-  ];
-  const out: ResidualEvidence[] = [];
-  for (const candidate of candidates) {
-    if (!Array.isArray(candidate)) continue;
-    for (const item of candidate) {
-      const obj = record(item);
-      if (!obj) continue;
-      out.push({
-        name: String(obj.name ?? obj.channel ?? obj.model ?? "residual"),
-        severity: typeof obj.severity === "string" ? obj.severity : null,
-        actual: numberOrNull(obj.actual),
-        expected: numberOrNull(obj.expected),
-        deviation: numberOrNull(obj.deviation ?? obj.residual),
-      });
-    }
-  }
-  return out;
-}
-
-function relatedTime(event: AnomalyEvent): number | null {
-  const t = Date.parse(event.window_end_timestamp ?? event.timestamp);
-  return Number.isNaN(t) ? null : t;
-}
-
-export function relatedEventsFor(
-  event: AnomalyEvent | null,
-  events: AnomalyEvent[],
-): AnomalyEvent[] {
-  if (!event) return [];
-  const anchor = relatedTime(event);
-  return events.filter((candidate) => {
-    if (candidate === event) return true;
-    if (event.session && candidate.session && event.session !== candidate.session) return false;
-    const t = relatedTime(candidate);
-    if (anchor === null || t === null) return false;
-    return Math.abs(t - anchor) <= 5_000;
-  });
-}
-
-function numberMap(value: unknown): Record<string, number> | null {
-  const obj = record(value);
-  if (!obj) return null;
-  const out: Record<string, number> = {};
-  for (const [key, raw] of Object.entries(obj)) {
-    const n = numberOrNull(raw);
-    if (n !== null) out[key] = n;
-  }
-  return Object.keys(out).length > 0 ? out : null;
-}
-
-function numberSeriesMap(value: unknown): Record<string, number[]> | null {
-  const obj = record(value);
-  if (!obj) return null;
-  const out: Record<string, number[]> = {};
-  for (const [key, raw] of Object.entries(obj)) {
-    const series = numberArray(raw);
-    if (series.length > 0) out[key] = series;
-  }
-  return Object.keys(out).length > 0 ? out : null;
-}
-
-function numberArray(value: unknown): number[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-}
-
-function numberOrNull(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function record(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function maxOf(values: number[]): number {
-  return Math.max(0, ...values);
-}
-
-function heatColor(value: number, max: number): string {
-  const t = Math.max(0, Math.min(1, value / (max || 1)));
-  const r = Math.round(31 + (255 - 31) * t);
-  const g = Math.round(38 + (111 - 38) * t);
-  const b = Math.round(45 + (111 - 45) * t);
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-function severityTone(severity: string): string {
-  if (severity === "critical") return "text-bad";
-  if (severity === "warning") return "text-warn";
-  return "text-ok";
-}
-
-function formatNumber(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 100) return value.toFixed(0);
-  if (abs >= 10) return value.toFixed(1);
-  return value.toFixed(3);
-}
-
-function formatTimestamp(ts: string): string {
-  try {
-    return new Date(ts).toLocaleTimeString();
-  } catch {
-    return ts;
-  }
 }

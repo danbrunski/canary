@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 import pandas as pd
+
+from src.dataframe_utils import require_columns as _require_columns
 
 SESSION_COLUMN = "session"
 TIMESTAMP_COLUMN = "timestamp"
@@ -137,12 +139,6 @@ def _value_columns(
         ]
     _require_columns(wide, columns)
     return columns
-
-
-def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
-    missing = set(columns) - set(frame.columns)
-    if missing:
-        raise KeyError(f"missing required columns: {', '.join(sorted(missing))}")
 
 
 def _empty_resampled(value_columns: list[str], config: ResampleConfig) -> pd.DataFrame:

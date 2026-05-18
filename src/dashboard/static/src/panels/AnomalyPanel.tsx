@@ -8,8 +8,10 @@ import { scoreView, windowReference, type AnomalyLevel } from "../anomalyScore";
 import type { ScoresBySource } from "../hooks/useScoreStream";
 import { badgeClass, cn, placeholderClass, selectClass } from "../styles";
 import type { AnomalyEvent } from "../types";
+import { formatTimestamp } from "../util/time";
 import { LiveModelScores } from "./LiveModelScores";
-import { ModelEvidencePanel, relatedEventsFor } from "./ModelEvidencePanel";
+import { relatedEventsFor } from "../lib/evidence";
+import { ModelEvidencePanel } from "./ModelEvidencePanel";
 
 const LEVEL_TONE: Record<AnomalyLevel, string> = {
   low: "text-fg-dim",
@@ -328,10 +330,3 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
   );
 }
 
-function formatTimestamp(ts: string): string {
-  try {
-    return new Date(ts).toLocaleTimeString();
-  } catch {
-    return ts;
-  }
-}

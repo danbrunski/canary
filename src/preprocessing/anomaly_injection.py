@@ -34,6 +34,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
+from src.dataframe_utils import require_columns as _require_columns
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 AnomalyKind = Literal["spike", "drift", "dropout", "stuck"]
@@ -287,9 +288,3 @@ def _normalize_window(
     if e < s:
         raise ValueError(f"window end {e} precedes start {s}")
     return s, e
-
-
-def _require_columns(df: pd.DataFrame, columns: Iterable[str]) -> None:
-    missing = set(columns) - set(df.columns)
-    if missing:
-        raise KeyError(f"missing required columns: {sorted(missing)}")

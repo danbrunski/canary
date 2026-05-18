@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { readString, writeString } from "../util/storage";
+
 export type Theme = "dark" | "night";
 
 const STORAGE_KEY = "canary.theme";
 
 function readStored(): Theme {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY) === "night" ? "night" : "dark";
-  } catch {
-    return "dark";
-  }
+  return readString(STORAGE_KEY) === "night" ? "night" : "dark";
 }
 
 /** Day(dark) / night(dimmer) theme. `dark` is the default and leaves the
@@ -26,11 +24,7 @@ export function useTheme(): { theme: Theme; toggle: () => void } {
     } else {
       delete root.dataset.theme;
     }
-    try {
-      window.localStorage.setItem(STORAGE_KEY, theme);
-    } catch {
-      /* private mode / storage disabled — theme still applies for the session */
-    }
+    writeString(STORAGE_KEY, theme);
   }, [theme]);
 
   const toggle = useCallback(() => {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Panel } from "../components/Panel";
+import { useLocalStorageJson } from "../hooks/useLocalStorage";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import {
   buttonClass,
@@ -38,15 +39,6 @@ interface AlarmEvent {
 
 const STORAGE_KEY = "canary.alarms";
 
-function loadRules(): AlarmRule[] {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as AlarmRule[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 const COMPARE: Record<Op, (a: number, b: number) => boolean> = {
   ">": (a, b) => a > b,
   "<": (a, b) => a < b,
@@ -60,7 +52,7 @@ const COMPARE: Record<Op, (a: number, b: number) => boolean> = {
  *  (these are "you told me to watch this", not "the model is surprised") —
  *  rules + history persist per browser via localStorage. */
 export function AlarmsPanel({ channels }: AlarmsPanelProps) {
-  const [rules, setRules] = useState<AlarmRule[]>(loadRules);
+  const [rules, setRules] = useLocalStorageJson<AlarmRule[]>(STORAGE_KEY, []);
   const [history, setHistory] = useState<AlarmEvent[]>([]);
   const [audible, setAudible] = useState(false);
 
@@ -77,14 +69,6 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
     debounce: "3",
     cooldownS: "30",
   });
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(rules));
-    } catch {
-      /* storage disabled — rules still live for the session */
-    }
-  }, [rules]);
 
   const numericChannels = useMemo(
     () =>

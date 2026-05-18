@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
+import { useLocalStorageJson } from "../hooks/useLocalStorage";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { buttonClass, cn, inputClass, placeholderClass } from "../styles";
 
@@ -15,16 +16,7 @@ interface Profile {
 }
 
 const STORAGE_KEY = "canary.dashboard";
-
-function loadProfile(): Profile {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as Profile;
-  } catch {
-    /* ignore */
-  }
-  return { title: "My dashboard", tiles: [] };
-}
+const DEFAULT_PROFILE: Profile = { title: "My dashboard", tiles: [] };
 
 /** Custom dashboard builder (Task 6.9). A user-configurable gauge page:
  *  pick channels → big digital readouts with a trend sparkline, persisted
@@ -33,19 +25,14 @@ function loadProfile(): Profile {
  *  the channel set + responsive grid is the durable core a richer builder
  *  layers onto.) */
 export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
-  const [profile, setProfile] = useState<Profile>(loadProfile);
+  const [profile, setProfile] = useLocalStorageJson<Profile>(
+    STORAGE_KEY,
+    DEFAULT_PROFILE,
+  );
   const [filter, setFilter] = useState("");
   const [importing, setImporting] = useState(false);
   const [importText, setImportText] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-    } catch {
-      /* storage disabled — profile still lives for the session */
-    }
-  }, [profile]);
 
   const numericKeys = useMemo(
     () =>

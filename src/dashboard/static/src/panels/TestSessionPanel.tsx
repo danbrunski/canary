@@ -9,7 +9,7 @@
 // Profiles are NOT hardcoded here — they come from the scanned YAML catalog
 // at GET /test-profiles (src/control/test_profiles.py, data/test_profiles/).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   HttpError,
@@ -18,9 +18,9 @@ import {
   getTestProfiles,
   startCapture,
   stopCapture,
-  tagCapture,
 } from "../api/http";
 import { describeError } from "../hooks/useControlResource";
+import { type QueuedTag, useTagQueue } from "../hooks/useTagQueue";
 import type {
   CaptureState,
   PreflightResponse,
@@ -28,93 +28,26 @@ import type {
   TestProfile,
   TestProfileError,
 } from "../types";
+import { Notice } from "../components/Notice";
 import {
   buttonClass,
   cn,
   dangerButtonClass,
   inputClass,
   noticeClass,
+  type NoticeState,
   panelClass,
   panelHeaderClass,
   panelTitleClass,
 } from "../styles";
+import { formatClockTime, formatElapsed } from "../util/time";
 
 interface TestSessionPanelProps {
   token: string;
   onTokenChange: (token: string) => void;
 }
 
-type TagStatus = "pending" | "sent" | "failed";
-
-interface QueuedTag {
-  id: string;
-  captureId: string;
-  label: string;
-  kind: string;
-  /** Unix seconds at the moment the operator tapped. */
-  t: number;
-  attempts: number;
-  status: TagStatus;
-  error?: string;
-}
-
-const QUEUE_KEY = "canary.testQueue.v1";
 const PROFILE_KEY = "canary.testProfile.v1";
-const MAX_RECENT = 40;
-
-interface PersistedQueue {
-  queue: QueuedTag[];
-  recent: QueuedTag[];
-}
-
-function loadQueue(): PersistedQueue {
-  try {
-    const raw = window.localStorage.getItem(QUEUE_KEY);
-    if (!raw) return { queue: [], recent: [] };
-    const parsed = JSON.parse(raw) as Partial<PersistedQueue>;
-    return {
-      queue: Array.isArray(parsed.queue) ? parsed.queue : [],
-      recent: Array.isArray(parsed.recent) ? parsed.recent : [],
-    };
-  } catch {
-    return { queue: [], recent: [] };
-  }
-}
-
-function saveQueue(state: PersistedQueue): void {
-  try {
-    window.localStorage.setItem(
-      QUEUE_KEY,
-      JSON.stringify({ queue: state.queue, recent: state.recent.slice(0, MAX_RECENT) }),
-    );
-  } catch {
-    /* localStorage full / unavailable — in-memory still works for this run */
-  }
-}
-
-function newId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function clockTime(t: number): string {
-  return new Date(t * 1000).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function elapsed(startedAt: string, now: number): string {
-  const start = new Date(startedAt).getTime();
-  if (Number.isNaN(start)) return "—";
-  const secs = Math.max(0, Math.floor((now - start) / 1000));
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  const mm = String(m).padStart(2, "0");
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
-}
 
 export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps) {
   const [profiles, setProfiles] = useState<TestProfile[]>([]);
@@ -126,15 +59,10 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
     () => window.localStorage.getItem(PROFILE_KEY) ?? "",
   );
   const [purpose, setPurpose] = useState("");
-  const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
   const [busy, setBusy] = useState(false);
   const [endArmed, setEndArmed] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-
-  const persisted = useRef<PersistedQueue>(loadQueue());
-  const [queue, setQueue] = useState<QueuedTag[]>(persisted.current.queue);
-  const [recent, setRecent] = useState<QueuedTag[]>(persisted.current.recent);
-  const flushing = useRef(false);
 
   const selectedProfile: TestProfile | null =
     profiles.find((p) => p.id === selectedProfileId) ?? profiles[0] ?? null;
@@ -142,12 +70,18 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
   // localStorage so a reload mid-drive still resolves one.
   const activeProfile = selectedProfile;
 
-  const pendingCount = queue.filter((q) => q.status !== "sent").length;
-
-  const persist = useCallback((q: QueuedTag[], r: QueuedTag[]) => {
-    persisted.current = { queue: q, recent: r };
-    saveQueue(persisted.current);
-  }, []);
+  const {
+    recent,
+    pendingCount,
+    tapCounts,
+    orphans,
+    enqueue,
+    flushOnce,
+    stillPending,
+    unsentCount,
+    clearOrphans,
+    clearQueue,
+  } = useTagQueue(token, capture);
 
   // --- profile catalog (unauthenticated; works before a token is set) ----
   useEffect(() => {
@@ -216,94 +150,8 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
     if (!capture && selectedProfile) setPurpose(selectedProfile.purpose);
   }, [selectedProfile, capture]);
 
-  // --- the retry flusher --------------------------------------------------
-  const flushOnce = useCallback(async (): Promise<void> => {
-    if (flushing.current || !token) return;
-    const cap = capture;
-    if (!cap) return;
-    flushing.current = true;
-    try {
-      // Oldest first, one at a time — preserves order, won't hammer a flaky link.
-      const next = persisted.current.queue.find(
-        (q) => q.status !== "sent" && q.captureId === cap.capture_id,
-      );
-      if (!next) return;
-      try {
-        await tagCapture(token, {
-          label: next.label,
-          kind: next.kind,
-          timestamp: next.t,
-          fields: {},
-        });
-        const work = persisted.current.queue.filter((q) => q.id !== next.id);
-        const rec = persisted.current.recent.map((r) =>
-          r.id === next.id ? { ...r, status: "sent" as const } : r,
-        );
-        persist(work, rec);
-        setQueue(work);
-        setRecent(rec);
-      } catch (err) {
-        const work = persisted.current.queue.map((q) =>
-          q.id === next.id
-            ? {
-                ...q,
-                attempts: q.attempts + 1,
-                status: "failed" as const,
-                error: describeError(err),
-              }
-            : q,
-        );
-        persist(work, persisted.current.recent);
-        setQueue(work);
-      }
-    } finally {
-      flushing.current = false;
-    }
-  }, [token, capture, persist]);
-
-  useEffect(() => {
-    if (pendingCount === 0 || !capture) return;
-    flushOnce().catch(() => undefined);
-    const timer = window.setInterval(() => flushOnce().catch(() => undefined), 2500);
-    return () => window.clearInterval(timer);
-  }, [pendingCount, capture, flushOnce]);
-
   // --- actions ------------------------------------------------------------
-  const enqueue = useCallback(
-    (label: string, kind: string) => {
-      if (!capture) return;
-      const row: QueuedTag = {
-        id: newId(),
-        captureId: capture.capture_id,
-        label,
-        kind,
-        t: Date.now() / 1000,
-        attempts: 0,
-        status: "pending",
-      };
-      const q = [...persisted.current.queue, row];
-      const r = [row, ...persisted.current.recent].slice(0, MAX_RECENT);
-      persist(q, r);
-      setQueue(q);
-      setRecent(r);
-      flushOnce().catch(() => undefined);
-    },
-    [capture, persist, flushOnce],
-  );
-
   const tapEvent = (ev: TestEvent) => enqueue(ev.tag, ev.kind);
-
-  // Per-tag tap counts for the current capture, derived from the persisted
-  // recent list so the tapped state survives panel navigation and page reload.
-  const tapCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const r of recent) {
-      if (r.captureId === capture?.capture_id) {
-        counts.set(r.label, (counts.get(r.label) ?? 0) + 1);
-      }
-    }
-    return counts;
-  }, [recent, capture?.capture_id]);
 
   const tapCustom = () => {
     const label = window.prompt("Custom event label (becomes the tag):");
@@ -351,10 +199,6 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
     }
   };
 
-  // Reads the live persisted queue (React state is stale inside the loop).
-  const stillPending = () =>
-    persisted.current.queue.some((q) => q.status !== "sent");
-
   const end = async () => {
     if (!endArmed) {
       setEndArmed(true);
@@ -371,7 +215,7 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
         await flushOnce();
       }
       if (stillPending()) {
-        const left = persisted.current.queue.filter((q) => q.status !== "sent").length;
+        const left = unsentCount();
         if (
           !window.confirm(
             `${left} event(s) still unsent (no signal?). End anyway? They will be LOST.`,
@@ -385,14 +229,13 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
         reason: `test session ended (${activeProfile?.label ?? "test"})`,
         fields: {},
       });
-      const leftover = persisted.current.queue.filter((q) => q.status !== "sent");
-      persist([], persisted.current.recent);
-      setQueue([]);
+      const leftoverCount = unsentCount();
+      clearQueue();
       setCapture(null);
       setNotice({
-        kind: leftover.length ? "error" : "ok",
-        text: leftover.length
-          ? `Session closed — but ${leftover.length} event(s) were not saved.`
+        kind: leftoverCount ? "error" : "ok",
+        text: leftoverCount
+          ? `Session closed — but ${leftoverCount} event(s) were not saved.`
           : "Session closed and recording finalized.",
       });
     } catch (err) {
@@ -401,18 +244,6 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
       setBusy(false);
     }
   };
-
-  const clearOrphans = () => {
-    const kept = persisted.current.queue.filter(
-      (q) => capture && q.captureId === capture.capture_id && q.status !== "sent",
-    );
-    persist(kept, persisted.current.recent);
-    setQueue(kept);
-  };
-
-  const orphans = queue.filter(
-    (q) => q.status !== "sent" && (!capture || q.captureId !== capture.capture_id),
-  ).length;
 
   // Control reachable without a token (server open on loopback for dev/sim):
   // we got a preflight back despite sending no token and weren't 401'd.
@@ -474,7 +305,7 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
         </div>
       </section>
 
-      {notice && <div className={noticeClass(notice.kind)}>{notice.text}</div>}
+      <Notice notice={notice} />
 
       {profileLoadErrors.length > 0 && (
         <div className={noticeClass("error")}>
@@ -629,7 +460,7 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
                   elapsed
                 </div>
                 <div className="font-num text-[1.4rem] tabular-nums text-fg">
-                  {elapsed(capture.started_at, now)}
+                  {formatElapsed(capture.started_at, now)}
                 </div>
               </div>
               <div className="text-right">
@@ -753,7 +584,7 @@ function RecentLog({
               key={r.id}
               className="grid grid-cols-[5rem_1fr_auto] items-baseline gap-2 border-b border-border pb-1 text-[0.84rem] last:border-b-0"
             >
-              <time className="font-num tabular-nums text-fg-dim">{clockTime(r.t)}</time>
+              <time className="font-num tabular-nums text-fg-dim">{formatClockTime(r.t)}</time>
               <b className="text-fg">{r.label}</b>
               <span
                 className={cn(

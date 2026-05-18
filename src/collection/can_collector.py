@@ -26,7 +26,12 @@ from typing import Any
 import can
 
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
-from src.collection.reconnect import ReconnectPolicy, wait_for_stop_or_timeout
+from src.collection.reconnect import (
+    BusReconnector,
+    RebuildOutcome,
+    ReconnectPolicy,
+    wait_for_stop_or_timeout,
+)
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
 from src.session import make_session_dir as _make_session_dir
@@ -222,7 +227,6 @@ def record(
     stop_reason = "signal"
     count = 0
     parse_errors = 0  # python-can slcan parser blows up on corrupt frames; count them
-    reconnects = 0  # successful bus rebuilds via factory()
     dropped_writes = 0  # frames the disk writer couldn't persist
 
     log.info(
@@ -239,13 +243,13 @@ def record(
 
     reconnect_enabled = factory is not None and reconnect_policy is not None
     current_bus: can.BusABC | None = bus
-    reconnect_delay = (
-        reconnect_policy.initial_delay_seconds if reconnect_policy is not None else 0.0
+    # Owns the bounded-backoff rebuild accounting (delay, failed_rebuilds,
+    # reconnects) — the WSL2 wedged-adapter cap lives in BusReconnector.
+    reconnector = (
+        BusReconnector(reconnect_policy, max_reconnects, log)
+        if reconnect_enabled and reconnect_policy is not None
+        else None
     )
-    # Consecutive failed rebuilds — resets on a successful reconnect, caps via
-    # max_reconnects so a wedged adapter doesn't trap us in an infinite retry
-    # loop (which in WSL2 can produce uninterruptible kernel I/O state).
-    failed_rebuilds = 0
 
     error: BaseException | None = None
     result: RecordingResult
@@ -262,47 +266,28 @@ def record(
                 # If we lost the bus on a previous iteration and reconnect is
                 # configured, try to rebuild it before attempting to recv.
                 if current_bus is None:
-                    assert reconnect_enabled  # otherwise we'd have raised already
-                    assert factory is not None and reconnect_policy is not None
-                    if _wait_interruptible(stop_event, reconnect_delay):
+                    assert reconnector is not None and factory is not None
+                    outcome, current_bus = reconnector.rebuild(
+                        factory,
+                        spec,
+                        stop_event=stop_event,
+                        deadline_monotonic=deadline,
+                        frames_recorded=count,
+                    )
+                    if outcome is RebuildOutcome.STOP_SIGNAL:
                         stop_reason = "signal"
                         break
-                    if deadline is not None and time.monotonic() >= deadline:
+                    if outcome is RebuildOutcome.STOP_DEADLINE:
                         stop_reason = "deadline"
                         break
-                    try:
-                        current_bus = factory(spec)
-                        reconnects += 1
-                        failed_rebuilds = 0  # reset on success
-                        reconnect_delay = reconnect_policy.initial_delay_seconds
-                        log.info(
-                            "bus reconnected",
-                            extra={"total_reconnects": reconnects},
-                        )
-                    except Exception as build_exc:
-                        failed_rebuilds += 1
-                        log.warning(
-                            "bus rebuild failed; will retry",
-                            extra={
-                                "error": f"{type(build_exc).__name__}: {build_exc}",
-                                "next_delay_seconds": reconnect_delay,
-                                "failed_rebuilds": failed_rebuilds,
-                                "max_reconnects": max_reconnects,
-                            },
-                        )
-                        if max_reconnects is not None and failed_rebuilds >= max_reconnects:
-                            log.error(
-                                "reconnect attempts exhausted; stopping recording",
-                                extra={
-                                    "failed_rebuilds": failed_rebuilds,
-                                    "frames_recorded": count,
-                                },
-                            )
-                            stop_reason = "reconnect_exhausted"
-                            error = build_exc
-                            break
-                        reconnect_delay = reconnect_policy.next_delay(reconnect_delay)
+                    if outcome is RebuildOutcome.EXHAUSTED:
+                        stop_reason = "reconnect_exhausted"
+                        error = reconnector.last_error
+                        break
+                    if outcome is RebuildOutcome.RETRY:
                         continue
+                    # Only REBUILT falls through — it always returns a bus.
+                    assert current_bus is not None
 
                 try:
                     msg = current_bus.recv(timeout=poll_interval)
@@ -336,11 +321,12 @@ def record(
                     # behavior when factory / reconnect_policy aren't set).
                     if not reconnect_enabled:
                         raise
+                    assert reconnector is not None
                     log.warning(
                         "bus recv failed; will attempt reconnect",
                         extra={
                             "error": f"{type(exc).__name__}: {exc}",
-                            "delay_seconds": reconnect_delay,
+                            "delay_seconds": reconnector.delay,
                         },
                     )
                     try:
@@ -389,13 +375,14 @@ def record(
                 current_bus.shutdown()
             except Exception:
                 pass
+        reconnects_total = reconnector.reconnects if reconnector is not None else 0
         result = RecordingResult(
             started_at=started_at,
             ended_at=ended_at,
             frames_recorded=count,
             stopped_by=stop_reason,
             parse_errors=parse_errors,
-            reconnects=reconnects,
+            reconnects=reconnects_total,
             dropped_writes=dropped_writes,
         )
         try:
@@ -418,25 +405,11 @@ def record(
                 "stopped_by": stop_reason,
                 "elapsed_seconds": (ended_at - started_at).total_seconds(),
                 "parse_errors": parse_errors,
-                "reconnects": reconnects,
+                "reconnects": reconnects_total,
                 "dropped_writes": dropped_writes,
             },
         )
     return result
-
-
-def _wait_interruptible(stop_event: threading.Event | None, seconds: float) -> bool:
-    """Sleep for `seconds`, but wake immediately if `stop_event` fires.
-
-    Returns True if the wait was cut short by the stop event — caller
-    should treat that as a clean stop signal.
-    """
-    if seconds <= 0:
-        return False
-    if stop_event is None:
-        time.sleep(seconds)
-        return False
-    return stop_event.wait(seconds)
 
 
 def _write_manifest(

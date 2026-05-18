@@ -23,6 +23,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from src.dataframe_utils import require_columns as _require_columns
 from src.preprocessing.resampler import (
     GAP_SUFFIX,
     SESSION_COLUMN,
@@ -214,12 +215,6 @@ def _value_columns(
             continue
         columns.append(col)
     return columns
-
-
-def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
-    missing = set(columns) - set(frame.columns)
-    if missing:
-        raise KeyError(f"missing required columns: {', '.join(sorted(missing))}")
 
 
 def _empty_with_features(

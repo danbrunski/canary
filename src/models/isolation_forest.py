@@ -23,11 +23,13 @@ from typing import Any, Protocol
 import numpy as np
 import pandas as pd
 
+from src.dataframe_utils import require_columns as _require_columns
 from src.models.manifest import validate_model_feature_spec
 from src.preprocessing.feature_pipeline import build_feature_spec
 from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
+from src.timefmt import format_timestamp as _format_timestamp
 
 ARTIFACT_FORMAT_VERSION = 1
 MODEL_TYPE = "isolation_forest"
@@ -546,25 +548,10 @@ def _coerce_timestamp(value: datetime | pd.Timestamp | str | None) -> pd.Timesta
     return timestamp.tz_convert("UTC")
 
 
-def _format_timestamp(value: datetime | pd.Timestamp) -> str:
-    timestamp = pd.Timestamp(value)
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.tz_localize("UTC")
-    else:
-        timestamp = timestamp.tz_convert("UTC")
-    return timestamp.isoformat().replace("+00:00", "Z")
-
-
 def _optional_str(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
-
-
-def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
-    missing = set(columns) - set(frame.columns)
-    if missing:
-        raise KeyError(f"missing required columns: {', '.join(sorted(missing))}")
 
 
 def _isolation_forest_cls() -> Any:

@@ -37,7 +37,6 @@ from src.collection.can_collector import (
     bus_factory,
     frame_to_record,
 )
-from src.collection.can_collector import _wait_interruptible as wait_interruptible
 from src.collection.can_collector import _write_manifest as write_recording_manifest
 from src.collection.can_obd_client import (
     DEFAULT_RESPONSE_ID_MAX,
@@ -68,7 +67,12 @@ from src.collection.obd_scheduler import (
     parse_pid_token,
 )
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
-from src.collection.reconnect import ReconnectPolicy, wait_for_stop_or_timeout
+from src.collection.reconnect import (
+    BusReconnector,
+    RebuildOutcome,
+    ReconnectPolicy,
+    wait_for_stop_or_timeout,
+)
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
 from src.telemetry import TelemetryRecord
@@ -374,16 +378,16 @@ def record_can_obd(
 
     frames_seen = 0
     parse_errors = 0
-    reconnects = 0  # successful bus rebuilds via factory()
 
     reconnect_enabled = factory is not None and reconnect_policy is not None
     current_bus: can.BusABC | None = bus
-    reconnect_delay = (
-        reconnect_policy.initial_delay_seconds if reconnect_policy is not None else 0.0
+    # Owns the bounded-backoff rebuild accounting (delay, failed_rebuilds,
+    # reconnects); the wedged-adapter cap lives in BusReconnector.
+    reconnector = (
+        BusReconnector(reconnect_policy, max_reconnects, log)
+        if reconnect_enabled and reconnect_policy is not None
+        else None
     )
-    # Consecutive failed rebuilds — resets on success, capped by
-    # max_reconnects so a wedged adapter can't trap us in an infinite loop.
-    failed_rebuilds = 0
 
     log.info(
         "canable obd recording started",
@@ -412,44 +416,28 @@ def record_can_obd(
 
                 # Lost the bus on a previous iteration: rebuild before recv.
                 if current_bus is None:
-                    assert reconnect_enabled  # else we'd have raised already
-                    assert factory is not None and reconnect_policy is not None
-                    if wait_interruptible(local_stop, reconnect_delay):
+                    assert reconnector is not None and factory is not None
+                    outcome, current_bus = reconnector.rebuild(
+                        factory,
+                        spec.can,
+                        stop_event=local_stop,
+                        deadline_monotonic=deadline,
+                        frames_recorded=frames_seen,
+                    )
+                    if outcome is RebuildOutcome.STOP_SIGNAL:
                         stop_reason = "signal"
                         break
-                    if deadline is not None and time.monotonic() >= deadline:
+                    if outcome is RebuildOutcome.STOP_DEADLINE:
                         stop_reason = "deadline"
                         break
-                    try:
-                        current_bus = factory(spec.can)
-                        reconnects += 1
-                        failed_rebuilds = 0  # reset on success
-                        reconnect_delay = reconnect_policy.initial_delay_seconds
-                        log.info("bus reconnected", extra={"total_reconnects": reconnects})
-                    except Exception as build_exc:
-                        failed_rebuilds += 1
-                        log.warning(
-                            "bus rebuild failed; will retry",
-                            extra={
-                                "error": f"{type(build_exc).__name__}: {build_exc}",
-                                "next_delay_seconds": reconnect_delay,
-                                "failed_rebuilds": failed_rebuilds,
-                                "max_reconnects": max_reconnects,
-                            },
-                        )
-                        if max_reconnects is not None and failed_rebuilds >= max_reconnects:
-                            log.error(
-                                "reconnect attempts exhausted; stopping recording",
-                                extra={
-                                    "failed_rebuilds": failed_rebuilds,
-                                    "frames_recorded": frames_seen,
-                                },
-                            )
-                            stop_reason = "reconnect_exhausted"
-                            error = build_exc
-                            break
-                        reconnect_delay = reconnect_policy.next_delay(reconnect_delay)
+                    if outcome is RebuildOutcome.EXHAUSTED:
+                        stop_reason = "reconnect_exhausted"
+                        error = reconnector.last_error
+                        break
+                    if outcome is RebuildOutcome.RETRY:
                         continue
+                    # Only REBUILT falls through — it always returns a bus.
+                    assert current_bus is not None
 
                 try:
                     segment = run_can_obd_loop(
@@ -467,11 +455,12 @@ def record_can_obd(
                 except Exception as exc:
                     if not reconnect_enabled:
                         raise
+                    assert reconnector is not None
                     log.warning(
                         "canable obd loop failed; will attempt reconnect",
                         extra={
                             "error": f"{type(exc).__name__}: {exc}",
-                            "delay_seconds": reconnect_delay,
+                            "delay_seconds": reconnector.delay,
                         },
                     )
                     try:
@@ -504,13 +493,14 @@ def record_can_obd(
                 current_bus.shutdown()
             except Exception:
                 pass
+        reconnects_total = reconnector.reconnects if reconnector is not None else 0
         result = RecordingResult(
             started_at=started_at,
             ended_at=ended_at,
             frames_recorded=frames_seen,
             stopped_by=stop_reason,
             parse_errors=parse_errors,
-            reconnects=reconnects,
+            reconnects=reconnects_total,
         )
         try:
             write_recording_manifest(

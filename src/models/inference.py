@@ -20,6 +20,7 @@ import pandas as pd
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
 from src.models.lstm_training import LSTMThresholdCalibration, TrainedLSTMAutoencoder
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.timefmt import format_timestamp
 
 LSTM_SCORE_COLUMN = "lstm_reconstruction_error"
 LSTM_THRESHOLD_COLUMN = "lstm_reconstruction_threshold"
@@ -260,12 +261,7 @@ def trained_version(trained: TrainedLSTMAutoencoder) -> str:
 def _format_timestamp(value: Any) -> str:
     if value is None or value == "":
         return ""
-    timestamp = pd.Timestamp(value)
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.tz_localize("UTC")
-    else:
-        timestamp = timestamp.tz_convert("UTC")
-    return timestamp.isoformat().replace("+00:00", "Z")
+    return format_timestamp(value)
 
 
 def _torch_module() -> Any:

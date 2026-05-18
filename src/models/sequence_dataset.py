@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import CanaryConfig
+from src.dataframe_utils import require_columns as _require_columns
 from src.preprocessing.features import FeatureConfig, compute_features
 from src.preprocessing.loader import TelemetryValueKind, read_sessions, to_wide
 from src.preprocessing.resampler import (
@@ -28,6 +29,7 @@ from src.preprocessing.resampler import (
     resample_wide,
 )
 from src.preprocessing.segmenter import MODE_COLUMN, segment_operating_modes
+from src.timefmt import format_timestamp as _format_timestamp
 
 DEFAULT_SEQUENCE_STRIDE = 1
 
@@ -314,21 +316,6 @@ def _validate_window_params(sequence_length: int, stride: int) -> None:
         raise ValueError("sequence_length must be positive")
     if stride <= 0:
         raise ValueError("stride must be positive")
-
-
-def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
-    missing = set(columns) - set(frame.columns)
-    if missing:
-        raise KeyError(f"missing required columns: {', '.join(sorted(missing))}")
-
-
-def _format_timestamp(value: pd.Timestamp) -> str:
-    timestamp = pd.Timestamp(value)
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.tz_localize("UTC")
-    else:
-        timestamp = timestamp.tz_convert("UTC")
-    return timestamp.isoformat().replace("+00:00", "Z")
 
 
 def _torch_module() -> Any:

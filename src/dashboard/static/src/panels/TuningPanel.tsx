@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { estimateTuning, getTuning, revertTuning, updateTuning } from "../api/http";
+import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
-import { describeError, useControlResource } from "../hooks/useControlResource";
-import {
-  buttonClass,
-  cn,
-  inputClass,
-  noticeClass,
-  placeholderClass,
-} from "../styles";
+import { useAsyncAction } from "../hooks/useAsyncAction";
+import { useControlResource } from "../hooks/useControlResource";
+import { buttonClass, cn, inputClass, placeholderClass } from "../styles";
 import type { TuningConfig, TuningEstimate } from "../types";
 
 interface TuningPanelProps {
@@ -34,10 +30,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
 
   const [draft, setDraft] = useState("");
   const [estimate, setEstimate] = useState<TuningEstimate | null>(null);
-  const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(
-    null,
-  );
-  const [busy, setBusy] = useState(false);
+  const { notice, busy, run } = useAsyncAction();
   const [revertVersion, setRevertVersion] = useState("");
 
   // Seed the editor from the live config the first time it loads / changes
@@ -79,22 +72,6 @@ export function TuningPanel({ token }: TuningPanelProps) {
     return parsed as TuningConfig;
   };
 
-  const run = async (
-    label: string,
-    action: () => Promise<void>,
-  ): Promise<void> => {
-    setBusy(true);
-    setNotice(null);
-    try {
-      await action();
-      setNotice({ kind: "ok", text: `${label} ok.` });
-    } catch (err) {
-      setNotice({ kind: "error", text: describeError(err) });
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const onEstimate = () =>
     run("estimate", async () => {
       setEstimate(await estimateTuning(token, parseDraft()));
@@ -123,7 +100,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
       title="Tuning"
       count={`v${cfg.version} · ${cfg.threshold_overrides.length} ovr · ${cfg.suppression_rules.length} rules · ${cfg.debounce_policies.length} pol`}
     >
-      {notice && <div className={cn(noticeClass(notice.kind), "mb-2")}>{notice.text}</div>}
+      <Notice notice={notice} className="mb-2" />
 
       <textarea
         className={cn(inputClass, "h-72 w-full resize-y font-num text-[0.78rem]")}
@@ -138,7 +115,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
           type="button"
           className={buttonClass}
           onClick={onEstimate}
-          disabled={busy}
+          disabled={Boolean(busy)}
         >
           Estimate
         </button>
@@ -146,7 +123,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
           type="button"
           className={cn(buttonClass, "border-accent text-accent")}
           onClick={onApply}
-          disabled={busy}
+          disabled={Boolean(busy)}
           title="Auto-versioned + audited server-side"
         >
           Apply
@@ -164,7 +141,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
             type="button"
             className={buttonClass}
             onClick={onRevert}
-            disabled={busy || !revertVersion}
+            disabled={Boolean(busy) || !revertVersion}
           >
             Revert
           </button>

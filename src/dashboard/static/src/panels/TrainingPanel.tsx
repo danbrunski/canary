@@ -1,19 +1,36 @@
 import { useCallback, useMemo, useState } from "react";
 
 import { getTrainingRuns, submitJob } from "../api/http";
+import { Notice } from "../components/Notice";
+import { MetricTile } from "../components/MetricTile";
 import { Panel } from "../components/Panel";
+import { TRAINING_JOB_KINDS } from "../lib/jobKinds";
 import { Sparkline } from "../components/Sparkline";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import { useControlResource } from "../hooks/useControlResource";
 import {
+  type DistributionView,
+  type KSweepPoint,
+  type RunComparison,
+  type RunQuality,
+  type ValidationSlice,
+  buildComparisons,
+  comparisonText,
+  comparisonTone,
+  runQuality,
+  threshold,
+} from "../lib/trainingQuality";
+import {
   buttonClass,
   cn,
   inputClass,
-  noticeClass,
+  type NoticeState,
   placeholderClass,
   selectClass,
 } from "../styles";
 import type { TrainingRun } from "../types";
+import { formatNumber, formatPercent } from "../util/format";
+import { numberArray } from "../util/json";
 
 interface TrainingPanelProps {
   token: string;
@@ -27,7 +44,6 @@ const PUBLISH_STYLE: Record<string, string> = {
   rolled_back: "text-bad",
 };
 
-const JOB_KINDS = ["retrain_if", "retrain_lstm", "retrain_all", "refit_behavior_models"];
 type TrainingTarget = "pi" | "local";
 
 /** Training dashboard (Task 6.22): run history + model quality from the
@@ -39,9 +55,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
   const [jobDays, setJobDays] = useState("14");
   const [useAllSessions, setUseAllSessions] = useState(false);
   const [device, setDevice] = useState("cpu");
-  const [notice, setNotice] = useState<{ kind: "ok" | "error" | "busy"; text: string } | null>(
-    null,
-  );
+  const [notice, setNotice] = useState<NoticeState | null>(null);
   const [busy, setBusy] = useState(false);
   const historyBase = target === "local" ? companion.baseUrl : undefined;
   const historyToken = target === "local" ? companion.token : token;
@@ -129,7 +143,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
           value={jobKind}
           onChange={(event) => setJobKind(event.target.value)}
         >
-          {JOB_KINDS.map((kind) => (
+          {TRAINING_JOB_KINDS.map((kind) => (
             <option key={kind} value={kind}>
               {kind}
             </option>
@@ -181,7 +195,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
           />
         </label>
       )}
-      {notice && <div className={cn(noticeClass(notice.kind), "mb-3")}>{notice.text}</div>}
+      <Notice notice={notice} className="mb-3" />
       {!historyEnabled ? (
         <p className={placeholderClass}>
           {target === "local"
@@ -285,15 +299,17 @@ function RunQualityView({
   return (
     <div className="mt-3 flex flex-col gap-2">
       <div className="grid grid-cols-5 gap-2 max-[1200px]:grid-cols-2 max-[700px]:grid-cols-1">
-        <QualityMetric label="FP" value={formatPercent(quality.fpRate)} />
-        <QualityMetric
+        <MetricTile size="sm" label="FP" value={formatPercent(quality.fpRate)} />
+        <MetricTile
+          size="sm"
           label="alerts/hr"
           value={quality.alertsPerHour === null ? "-" : quality.alertsPerHour.toFixed(2)}
           tone={(quality.alertsPerHour ?? 0) > 1 ? "warn" : "ok"}
         />
-        <QualityMetric label="precision" value={formatPercent(quality.precision)} />
-        <QualityMetric label="recall" value={formatPercent(quality.recall)} />
-        <QualityMetric
+        <MetricTile size="sm" label="precision" value={formatPercent(quality.precision)} />
+        <MetricTile size="sm" label="recall" value={formatPercent(quality.recall)} />
+        <MetricTile
+          size="sm"
           label="delta"
           value={comparisonText(comparison)}
           tone={comparisonTone(comparison)}
@@ -307,27 +323,6 @@ function RunQualityView({
       )}
       {quality.kSweep.length > 0 && <KSweepStrip points={quality.kSweep} />}
       {quality.slices.length > 0 && <ValidationSlices rows={quality.slices} />}
-    </div>
-  );
-}
-
-function QualityMetric({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "ok" | "warn" | "bad";
-}) {
-  return (
-    <div className="rounded-[8px] border border-border-soft bg-black/20 p-2">
-      <div className="text-[0.6rem] uppercase tracking-[0.12em] text-fg-faint">
-        {label}
-      </div>
-      <div className={cn("mt-1 font-num text-[0.9rem] tabular-nums", toneClass(tone))}>
-        {value}
-      </div>
     </div>
   );
 }
@@ -351,7 +346,7 @@ function ScoreDistributionStrip({
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
         <span>score distribution</span>
         <span className="font-num normal-case tracking-normal text-fg-dim">
-          {formatCompact(distribution.min)} - {formatCompact(distribution.max)}
+          {formatNumber(distribution.min)} - {formatNumber(distribution.max)}
         </span>
       </div>
       <div className="relative h-7 rounded-full bg-elev-3">
@@ -397,7 +392,7 @@ function KSweepStrip({ points }: { points: KSweepPoint[] }) {
           )}
           title={`${point.alertsPerHour.toFixed(2)} alerts/hr`}
         >
-          k{formatCompact(point.k)} {point.alertsPerHour.toFixed(2)}/hr
+          k{formatNumber(point.k)} {point.alertsPerHour.toFixed(2)}/hr
         </span>
       ))}
     </div>
@@ -424,264 +419,3 @@ function ValidationSlices({ rows }: { rows: ValidationSlice[] }) {
   );
 }
 
-function numberArray(value: unknown): number[] {
-  return Array.isArray(value)
-    ? value.filter((v): v is number => typeof v === "number")
-    : [];
-}
-
-/** LSTM calibrated global threshold from the manifest metrics, if present. */
-function threshold(run: TrainingRun): number | null {
-  const t = run.metrics.thresholds;
-  if (t && typeof t === "object") {
-    const g = (t as Record<string, unknown>).global;
-    if (g && typeof g === "object") {
-      const v = (g as Record<string, unknown>).threshold;
-      if (typeof v === "number") return v;
-    }
-  }
-  return null;
-}
-
-interface RunQuality {
-  hasQuality: boolean;
-  fpRate: number | null;
-  alertsPerHour: number | null;
-  meetsBudget: boolean | null;
-  precision: number | null;
-  recall: number | null;
-  f1: number | null;
-  threshold: number | null;
-  scoreDistribution: DistributionView | null;
-  kSweep: KSweepPoint[];
-  slices: ValidationSlice[];
-}
-
-interface DistributionView {
-  min: number;
-  max: number;
-  median: number | null;
-  p95: number | null;
-  threshold: number | null;
-}
-
-interface KSweepPoint {
-  k: number;
-  alertsPerHour: number;
-  meetsBudget: boolean;
-}
-
-interface ValidationSlice {
-  label: string;
-  precision: number | null;
-  recall: number | null;
-  f1: number | null;
-}
-
-interface RunComparison {
-  previousRunId: string;
-  alertsDelta: number | null;
-  fpDelta: number | null;
-}
-
-function runQuality(run: TrainingRun): RunQuality {
-  const metrics = run.metrics;
-  const manifestExtras = record(metrics.manifest_extras);
-  const fp = record(metrics.false_positive_benchmark);
-  const validation = record(metrics.validation) ?? record(manifestExtras?.validation);
-  const overall = record(validation?.overall) ?? record(validation?.metrics);
-  const fpGlobal = record(fp?.global);
-  const distribution =
-    distributionView(record(validation?.score_distribution)) ??
-    distributionView(record(fpGlobal?.held_out_error_distribution)) ??
-    distributionView(record(metrics.score_distribution));
-
-  const alertsPerHour = numberOrNull(fp?.alerts_per_hour);
-  const fpRate =
-    numberOrNull(fp?.false_positive_rate) ??
-    numberOrNull(overall?.false_positive_rate);
-  const meetsBudget =
-    typeof fp?.meets_v1_budget === "boolean"
-      ? fp.meets_v1_budget
-      : alertsPerHour === null
-        ? null
-        : alertsPerHour <= 1;
-  const precision = numberOrNull(overall?.precision);
-  const recall = numberOrNull(overall?.recall);
-  const f1 = numberOrNull(overall?.f1);
-  const calibratedThreshold =
-    threshold(run) ?? numberOrNull(fpGlobal?.threshold) ?? distribution?.threshold ?? null;
-  const kSweep = kSweepPoints(fp?.k_sweep);
-  const slices = validationSlices(validation);
-  const hasQuality =
-    fpRate !== null ||
-    alertsPerHour !== null ||
-    precision !== null ||
-    recall !== null ||
-    distribution !== null ||
-    kSweep.length > 0 ||
-    slices.length > 0;
-
-  return {
-    hasQuality,
-    fpRate,
-    alertsPerHour,
-    meetsBudget,
-    precision,
-    recall,
-    f1,
-    threshold: calibratedThreshold,
-    scoreDistribution: distribution,
-    kSweep,
-    slices,
-  };
-}
-
-function buildComparisons(runs: TrainingRun[]): Map<string, RunComparison> {
-  const out = new Map<string, RunComparison>();
-  const previousByType = new Map<string, TrainingRun>();
-  const ordered = [...runs].sort(
-    (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at),
-  );
-  for (const run of ordered) {
-    const previous = previousByType.get(run.model_type);
-    if (previous) {
-      const currentQuality = runQuality(run);
-      const previousQuality = runQuality(previous);
-      out.set(run.run_id, {
-        previousRunId: previous.run_id,
-        alertsDelta: delta(currentQuality.alertsPerHour, previousQuality.alertsPerHour),
-        fpDelta: delta(currentQuality.fpRate, previousQuality.fpRate),
-      });
-    }
-    previousByType.set(run.model_type, run);
-  }
-  return out;
-}
-
-function comparisonText(comparison: RunComparison | null): string {
-  if (!comparison) return "new";
-  if (comparison.alertsDelta !== null) {
-    return `${formatSigned(comparison.alertsDelta)}/hr`;
-  }
-  if (comparison.fpDelta !== null) {
-    return formatSignedPercent(comparison.fpDelta);
-  }
-  return `vs ${comparison.previousRunId}`;
-}
-
-function comparisonTone(comparison: RunComparison | null): "ok" | "warn" | undefined {
-  if (!comparison) return undefined;
-  const deltaValue = comparison.alertsDelta ?? comparison.fpDelta;
-  if (deltaValue === null) return undefined;
-  if (deltaValue < 0) return "ok";
-  if (deltaValue > 0) return "warn";
-  return undefined;
-}
-
-function distributionView(value: Record<string, unknown> | null): DistributionView | null {
-  if (!value) return null;
-  const min = numberOrNull(value.min) ?? numberOrNull(value.minimum);
-  const max = numberOrNull(value.max) ?? numberOrNull(value.maximum);
-  if (min === null || max === null || min === max) return null;
-  return {
-    min,
-    max,
-    median: numberOrNull(value.median) ?? numberOrNull(value.p50),
-    p95: numberOrNull(value.q95) ?? numberOrNull(value.p95),
-    threshold: numberOrNull(value.threshold),
-  };
-}
-
-function kSweepPoints(value: unknown): KSweepPoint[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((raw) => {
-      const item = record(raw);
-      if (!item) return null;
-      const k = numberOrNull(item.k);
-      const alertsPerHour = numberOrNull(item.alerts_per_hour);
-      if (k === null || alertsPerHour === null) return null;
-      return {
-        k,
-        alertsPerHour,
-        meetsBudget: item.meets_v1_budget === true,
-      };
-    })
-    .filter((point): point is KSweepPoint => point !== null)
-    .sort((a, b) => a.k - b.k);
-}
-
-function validationSlices(validation: Record<string, unknown> | null): ValidationSlice[] {
-  if (!validation) return [];
-  const raw =
-    arrayOrNull(validation.by_fault_type) ??
-    arrayOrNull(validation.fault_types) ??
-    arrayOrNull(validation.synthetic_faults) ??
-    arrayOrNull(validation.modes) ??
-    objectValues(validation.modes);
-  if (!raw) return [];
-  return raw
-    .map((item) => {
-      const row = record(item);
-      if (!row) return null;
-      const metrics = record(row.metrics) ?? row;
-      const label = String(row.fault_type ?? row.kind ?? row.mode ?? row.name ?? "slice");
-      return {
-        label,
-        precision: numberOrNull(metrics.precision),
-        recall: numberOrNull(metrics.recall),
-        f1: numberOrNull(metrics.f1),
-      };
-    })
-    .filter((row): row is ValidationSlice => row !== null);
-}
-
-function objectValues(value: unknown): unknown[] | null {
-  const obj = record(value);
-  return obj ? Object.values(obj) : null;
-}
-
-function arrayOrNull(value: unknown): unknown[] | null {
-  return Array.isArray(value) ? value : null;
-}
-
-function record(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function numberOrNull(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function delta(current: number | null, previous: number | null): number | null {
-  return current === null || previous === null ? null : current - previous;
-}
-
-function formatPercent(value: number | null): string {
-  return value === null ? "-" : `${(value * 100).toFixed(1)}%`;
-}
-
-function formatSigned(value: number): string {
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
-}
-
-function formatSignedPercent(value: number): string {
-  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
-}
-
-function formatCompact(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 100) return value.toFixed(0);
-  if (abs >= 10) return value.toFixed(1);
-  return value.toFixed(2);
-}
-
-function toneClass(tone: "ok" | "warn" | "bad" | undefined): string {
-  if (tone === "ok") return "text-ok";
-  if (tone === "warn") return "text-warn";
-  if (tone === "bad") return "text-bad";
-  return "";
-}

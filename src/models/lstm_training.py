@@ -27,6 +27,7 @@ from src.models.lstm_autoencoder import (
 from src.models.manifest import validate_model_feature_spec
 from src.models.sequence_dataset import SequenceWindowDataset
 from src.preprocessing.feature_pipeline import build_feature_spec
+from src.timefmt import format_timestamp as _format_timestamp
 
 ARTIFACT_FORMAT_VERSION = 1
 MODEL_TYPE = "lstm_autoencoder"
@@ -758,15 +759,6 @@ def _coerce_timestamp(value: datetime | pd.Timestamp | str | None) -> pd.Timesta
     if timestamp.tzinfo is None:
         return timestamp.tz_localize("UTC")
     return timestamp.tz_convert("UTC")
-
-
-def _format_timestamp(value: datetime | pd.Timestamp) -> str:
-    timestamp = pd.Timestamp(value)
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.tz_localize("UTC")
-    else:
-        timestamp = timestamp.tz_convert("UTC")
-    return timestamp.isoformat().replace("+00:00", "Z")
 
 
 def _optional_str(value: Any) -> str | None:

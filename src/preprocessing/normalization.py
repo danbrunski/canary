@@ -20,12 +20,13 @@ Design notes:
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
 
+from src.dataframe_utils import require_columns as _require_columns
 from src.preprocessing.resampler import (
     GAP_SUFFIX,
     SESSION_COLUMN,
@@ -185,9 +186,3 @@ def _resolve_columns(
             continue
         cols.append(col)
     return cols
-
-
-def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
-    missing = set(columns) - set(frame.columns)
-    if missing:
-        raise KeyError(f"missing required columns: {', '.join(sorted(missing))}")

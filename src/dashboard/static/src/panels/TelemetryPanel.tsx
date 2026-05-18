@@ -13,6 +13,9 @@ import {
   placeholderClass,
 } from "../styles";
 import type { BindingDisplay, BindingsByChannel } from "../types";
+import { formatNumber } from "../util/format";
+import { writeJson } from "../util/storage";
+import { formatAge } from "../util/time";
 
 interface TelemetryPanelProps {
   channels: Map<string, ChannelSnapshot>;
@@ -72,21 +75,15 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
   // operator opts a channel's graph in. Persisted per browser.
   const [graphs, setGraphs] = useState<string[]>(() => loadKeys(GRAPH_STORAGE_KEY));
 
+  // `null` ⇒ unseeded; only persist a concrete set (an explicit `[]` is a
+  // meaningful "user cleared all pins", which suppresses default re-seeding).
   useEffect(() => {
     if (pinned === null) return;
-    try {
-      window.localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify(pinned));
-    } catch {
-      /* storage disabled — pins still live for the session */
-    }
+    writeJson(PIN_STORAGE_KEY, pinned);
   }, [pinned]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(GRAPH_STORAGE_KEY, JSON.stringify(graphs));
-    } catch {
-      /* storage disabled — still works for the session */
-    }
+    writeJson(GRAPH_STORAGE_KEY, graphs);
   }, [graphs]);
 
   const graphSet = useMemo(() => new Set(graphs), [graphs]);
@@ -471,21 +468,6 @@ function prettyChannel(key: string): string {
   const idx = key.indexOf(":");
   if (idx === -1) return key;
   return key.slice(idx + 1);
-}
-
-function formatNumber(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 100) return value.toFixed(0);
-  if (abs >= 10) return value.toFixed(1);
-  return value.toFixed(2);
-}
-
-function formatAge(timestamp: string | null): string {
-  if (!timestamp) return "-";
-  const ageMs = Date.now() - Date.parse(timestamp);
-  if (!Number.isFinite(ageMs)) return "-";
-  if (ageMs < 1000) return "now";
-  return `${Math.round(ageMs / 1000)}s`;
 }
 
 function isEmptyRawCan(snapshot: ChannelSnapshot): boolean {

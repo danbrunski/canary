@@ -1,3 +1,4 @@
+import { MeterBar, MetricTile } from "../components/MetricTile";
 import { Panel } from "../components/Panel";
 import {
   cn,
@@ -8,6 +9,12 @@ import {
   placeholderClass,
 } from "../styles";
 import type { StatusHealth, StatusResponse } from "../types";
+import { formatPercent as formatPct, toneClass } from "../util/format";
+import { numberMap, numberOr, numberOrNull, stringArray } from "../util/json";
+
+/** Health tiles render whole-percent (no decimal). */
+const formatPercent = (value: number | null | undefined): string =>
+  formatPct(value, 0);
 
 interface ModelHealthPanelProps {
   status: StatusResponse | null;
@@ -166,27 +173,6 @@ function HealthBody({ health }: { health: StatusHealth }) {
   );
 }
 
-function MetricTile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "ok" | "warn" | "bad";
-}) {
-  return (
-    <div className="rounded-[8px] border border-border-soft bg-elev/70 p-2.5">
-      <div className="text-[0.62rem] uppercase tracking-[0.12em] text-fg-faint">
-        {label}
-      </div>
-      <div className={cn("mt-1 font-num text-[1.25rem] tabular-nums", toneClass(tone))}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-[8px] border border-border-soft bg-black/20 p-3">
@@ -234,15 +220,17 @@ function RankedBars({
             <div className="mb-0.5 truncate text-[0.66rem] text-fg-dim" title={name}>
               {name}
             </div>
-            <div className="h-2 rounded-full bg-black/30">
-              <div
-                className={cn(
-                  "h-2 rounded-full",
-                  value >= dangerAt ? "bg-bad" : value >= dangerAt * 0.7 ? "bg-warn" : "bg-accent-2",
-                )}
-                style={{ width: `${Math.max(3, Math.min(100, (value / max) * 100))}%` }}
-              />
-            </div>
+            <MeterBar
+              value={value}
+              max={max}
+              colorClass={
+                value >= dangerAt
+                  ? "bg-bad"
+                  : value >= dangerAt * 0.7
+                    ? "bg-warn"
+                    : "bg-accent-2"
+              }
+            />
           </div>
           <div className="self-end text-right font-num text-[0.66rem] text-fg-dim">
             {value.toFixed(2)} {valueSuffix}
@@ -262,7 +250,7 @@ interface FeatureDriftView {
 
 function featureDriftView(value: Record<string, unknown> | undefined): FeatureDriftView | null {
   if (!value) return null;
-  const perFeature = numberRecord(value.per_feature_sigma);
+  const perFeature = numberMap(value.per_feature_sigma) ?? {};
   return {
     maxSigma: numberOr(value.max_sigma, 0),
     schemaMismatch: value.schema_mismatch === true,
@@ -288,34 +276,8 @@ function reconstructionDriftView(
   };
 }
 
-function numberRecord(value: unknown): Record<string, number> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
-  const out: Record<string, number> = {};
-  for (const [key, raw] of Object.entries(value)) {
-    const n = numberOrNull(raw);
-    if (n !== null) out[key] = n;
-  }
-  return out;
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.map(String) : [];
-}
-
-function numberOr(value: unknown, fallback: number): number {
-  return numberOrNull(value) ?? fallback;
-}
-
-function numberOrNull(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 function formatMs(value: number | null): string {
   return value === null ? "idle" : `${value.toFixed(1)} ms`;
-}
-
-function formatPercent(value: number | null | undefined): string {
-  return value == null ? "-" : `${(value * 100).toFixed(0)}%`;
 }
 
 function formatNumberOrDash(value: number | null): string {
@@ -329,9 +291,3 @@ function latencyTone(value: number | null): "ok" | "warn" | "bad" {
   return "ok";
 }
 
-function toneClass(tone: "ok" | "warn" | "bad" | undefined): string {
-  if (tone === "ok") return "text-ok";
-  if (tone === "warn") return "text-warn";
-  if (tone === "bad") return "text-bad";
-  return "";
-}

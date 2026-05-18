@@ -20,12 +20,13 @@ import {
   updateSessionMetadata,
   uploadModelArtifact,
 } from "../api/http";
+import { Notice } from "../components/Notice";
+import { useAsyncAction } from "../hooks/useAsyncAction";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import { useControlStream } from "../hooks/useControlStream";
 import { describeError } from "../hooks/useControlResource";
 import type {
   CaptureState,
-  ConnectionState,
   JobRecord,
   PreflightResponse,
   SessionSummary,
@@ -36,14 +37,17 @@ import {
   cn,
   dangerButtonClass,
   inputClass,
-  noticeClass,
   panelClass,
   panelCountClass,
   panelHeaderClass,
   panelTitleClass,
-  placeholderClass,
   selectClass,
 } from "../styles";
+import { formatTimeOfDay } from "../util/time";
+import { JOB_KINDS } from "../lib/jobKinds";
+import { ControlEventsCard, PreflightCard } from "./ControlPanelSections";
+
+const TOKEN_GATE = "Enter the control token first.";
 
 interface ControlPanelProps {
   token: string;
@@ -51,13 +55,6 @@ interface ControlPanelProps {
   companion: CompanionSettings;
 }
 
-const JOB_KINDS = [
-  "corpus_report",
-  "retrain_if",
-  "retrain_lstm",
-  "retrain_all",
-  "refit_behavior_models",
-];
 
 export function ControlPanel({ token, onTokenChange, companion }: ControlPanelProps) {
   const controlStream = useControlStream(token);
@@ -66,8 +63,7 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
   const [capture, setCapture] = useState<CaptureState | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [jobs, setJobs] = useState<JobRecord[]>([]);
-  const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  const { notice, setNotice, busy, run: runAction } = useAsyncAction();
   const [purpose, setPurpose] = useState("");
   const [protocol, setProtocol] = useState("drive");
   const [vehicleState, setVehicleState] = useState("driving");
@@ -135,23 +131,17 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
     };
   }, [refreshControl, token]);
 
-  const run = async (label: string, action: () => Promise<void>) => {
-    if (!token) {
-      setNotice({ kind: "error", text: "Enter the control token first." });
-      return;
-    }
-    setBusy(label);
-    setNotice(null);
-    try {
-      await action();
-      await refreshControl();
-      setNotice({ kind: "ok", text: `${label} completed.` });
-    } catch (err) {
-      setNotice({ kind: "error", text: errorText(err) });
-    } finally {
-      setBusy(null);
-    }
-  };
+  // Every mutating control gates on the token and refreshes afterwards;
+  // wrapping the shared runner here keeps all call sites a bare
+  // `run(label, action)`.
+  const run = useCallback(
+    (label: string, action: () => Promise<void>) =>
+      runAction(label, action, {
+        precheck: () => (token ? null : TOKEN_GATE),
+        then: refreshControl,
+      }),
+    [runAction, token, refreshControl],
+  );
 
   const start = () =>
     run("capture start", async () => {
@@ -327,33 +317,11 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
         </label>
       </div>
 
-      {notice && <div className={noticeClass(notice.kind)}>{notice.text}</div>}
-      {busy && <div className={noticeClass("busy")}>Working: {busy}</div>}
+      <Notice notice={notice} />
+      <Notice notice={busy ? { kind: "busy", text: `Working: ${busy}` } : null} />
 
       <div className="grid grid-cols-3 gap-4 max-[1100px]:grid-cols-1">
-        <section className={panelClass}>
-          <header className={panelHeaderClass}>
-            <h2 className={panelTitleClass}>Preflight</h2>
-            <span className={preflight?.ok ? "text-[0.8rem] text-ok" : "text-[0.8rem] text-bad"}>
-              {preflight ? (preflight.ok ? "ready" : "attention") : "locked"}
-            </span>
-          </header>
-          {!token ? (
-            <p className={placeholderClass}>Enter the token to unlock controls.</p>
-          ) : (
-            <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-              {(preflight?.checks ?? []).map((check) => (
-                <li
-                  key={check.name}
-                  className="grid grid-cols-[9rem_1fr] items-baseline gap-2 border-b border-border pb-1.5 text-[0.82rem] text-fg-dim last:border-b-0"
-                >
-                  <span>{check.name.replaceAll("_", " ")}</span>
-                  <b className={checkClass(check.ok, check.severity)}>{check.detail}</b>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <PreflightCard hasToken={Boolean(token)} preflight={preflight} />
 
         <section className={panelClass}>
           <header className={panelHeaderClass}>
@@ -374,7 +342,7 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
             <div className="mt-3 grid grid-cols-[1fr_auto_auto] gap-3 rounded-[8px] border border-ok/35 bg-ok/10 p-2.5 text-[0.85rem] max-[1100px]:grid-cols-1">
               <b>{capture.purpose || capture.protocol || "capture"}</b>
               <span className="text-fg-dim">{capture.session_id}</span>
-              <time className="font-num text-fg-dim">{formatTime(capture.started_at)}</time>
+              <time className="font-num text-fg-dim">{formatTimeOfDay(capture.started_at)}</time>
             </div>
           )}
           <div className="mt-3 grid grid-cols-[1fr_auto_1fr_auto] gap-2 max-[1100px]:grid-cols-1">
@@ -514,37 +482,13 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
           </div>
         </section>
 
-        <section className={panelClass}>
-          <header className={panelHeaderClass}>
-            <h2 className={panelTitleClass}>Control Events</h2>
-            <span className={connectionTextClass(controlStream.connection)}>
-              {controlStream.connection}
-            </span>
-          </header>
-          <ol className="m-0 flex max-h-[22rem] list-none flex-col gap-1.5 overflow-y-auto p-0">
-            {controlStream.events.slice(0, 12).map((event, index) => (
-              <li
-                key={`${event.timestamp ?? event.type ?? "event"}-${index}`}
-                className="grid grid-cols-[4.8rem_1fr_auto] items-baseline gap-2 border-b border-border pb-1.5 text-[0.8rem]"
-              >
-                <time className="font-num text-fg-dim">
-                  {event.timestamp ? formatTime(event.timestamp) : "live"}
-                </time>
-                <b>{event.action ?? event.type ?? "event"}</b>
-                <span className="text-fg-dim">{event.result ?? event.job?.status ?? ""}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
+        <ControlEventsCard
+          connection={controlStream.connection}
+          events={controlStream.events}
+        />
       </div>
     </section>
   );
-}
-
-function checkClass(ok: boolean, severity: string): string {
-  if (ok) return "text-ok";
-  if (severity === "warning") return "text-warn";
-  return "text-bad";
 }
 
 function jobRowClass(status: string): string {
@@ -553,14 +497,6 @@ function jobRowClass(status: string): string {
     status === "running" && "border-accent",
     status === "succeeded" && "border-ok/35",
     status === "failed" && "border-bad/55",
-  );
-}
-
-function connectionTextClass(connection: ConnectionState): string {
-  return cn(
-    "text-fg-dim",
-    connection === "open" && "text-ok",
-    (connection === "error" || connection === "closed") && "text-bad",
   );
 }
 
@@ -588,12 +524,6 @@ function currentPiHost(): string | null {
     return null;
   }
   return window.location.origin;
-}
-
-function formatTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 // Status-aware messaging (Task 6.14): 401/403 → token problem, 503 →
