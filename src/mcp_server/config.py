@@ -29,6 +29,9 @@ class MCPConfig:
     control_token: str | None
     audit_path: Path
     storage_path: Path | None
+    signals_path: Path | None
+    log_fallback_path: Path | None
+    daemon_unit: str
 
     @property
     def auth_required(self) -> bool:
@@ -79,6 +82,8 @@ def load_from_env() -> MCPConfig:
         storage_path = Path(storage_env)
     else:
         storage_path = _storage_from_config_yaml(os.environ.get("CANARY_CONFIG"))
+    signals_env = os.environ.get("CANARY_SIGNALS_PATH")
+    log_fallback_env = os.environ.get("CANARY_MCP_LOG_FALLBACK")
     return MCPConfig(
         daemon_url=os.environ.get("CANARY_DAEMON_URL", DEFAULT_DAEMON_URL).rstrip("/"),
         daemon_token=os.environ.get("CANARY_CONTROL_TOKEN") or None,
@@ -87,6 +92,9 @@ def load_from_env() -> MCPConfig:
         control_token=os.environ.get("CANARY_CONTROL_TOKEN") or None,
         audit_path=Path(os.environ.get("CANARY_MCP_AUDIT_PATH", str(DEFAULT_AUDIT_PATH))),
         storage_path=storage_path,
+        signals_path=Path(signals_env) if signals_env else None,
+        log_fallback_path=Path(log_fallback_env) if log_fallback_env else None,
+        daemon_unit=os.environ.get("CANARY_MCP_DAEMON_UNIT", "canary"),
     )
 
 

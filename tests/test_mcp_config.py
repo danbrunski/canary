@@ -23,6 +23,9 @@ def test_load_from_env_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "CANARY_MCP_AUDIT_PATH",
         "CANARY_STORAGE_PATH",
         "CANARY_CONFIG",
+        "CANARY_SIGNALS_PATH",
+        "CANARY_MCP_LOG_FALLBACK",
+        "CANARY_MCP_DAEMON_UNIT",
     ):
         monkeypatch.delenv(var, raising=False)
     cfg = load_from_env()
@@ -30,6 +33,9 @@ def test_load_from_env_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.bind_port == DEFAULT_BIND_PORT
     assert cfg.daemon_token is None
     assert cfg.storage_path is None
+    assert cfg.signals_path is None
+    assert cfg.log_fallback_path is None
+    assert cfg.daemon_unit == "canary"
     assert cfg.auth_required is False
 
 
@@ -74,3 +80,14 @@ def test_storage_fallback_tolerates_missing_yaml(
     monkeypatch.setenv("CANARY_CONFIG", str(tmp_path / "does-not-exist.yaml"))
     cfg = load_from_env()
     assert cfg.storage_path is None
+
+
+def test_phase2_paths_round_trip(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Phase 2 env vars (signals, log fallback, daemon unit) flow through."""
+    monkeypatch.setenv("CANARY_SIGNALS_PATH", str(tmp_path / "signals.json"))
+    monkeypatch.setenv("CANARY_MCP_LOG_FALLBACK", str(tmp_path / "canary.log"))
+    monkeypatch.setenv("CANARY_MCP_DAEMON_UNIT", "canary-prod")
+    cfg = load_from_env()
+    assert cfg.signals_path == tmp_path / "signals.json"
+    assert cfg.log_fallback_path == tmp_path / "canary.log"
+    assert cfg.daemon_unit == "canary-prod"

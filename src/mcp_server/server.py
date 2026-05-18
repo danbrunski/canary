@@ -21,10 +21,25 @@ from src.mcp_server.client import DaemonClient
 from src.mcp_server.config import MCPConfig, load_from_env
 from src.mcp_server.parquet_query import TelemetryQuery
 from src.mcp_server.tools import (
+    analysis as analysis_tool,
+)
+from src.mcp_server.tools import (
     anomalies as anomalies_tool,
 )
 from src.mcp_server.tools import (
     behavior as behavior_tool,
+)
+from src.mcp_server.tools import (
+    bindings as bindings_tool,
+)
+from src.mcp_server.tools import (
+    jobs as jobs_tool,
+)
+from src.mcp_server.tools import (
+    logs as logs_tool,
+)
+from src.mcp_server.tools import (
+    sessions as sessions_tool,
 )
 from src.mcp_server.tools import (
     status as status_tool,
@@ -32,11 +47,23 @@ from src.mcp_server.tools import (
 from src.mcp_server.tools import (
     telemetry as telemetry_tool,
 )
+from src.mcp_server.tools import (
+    tuning as tuning_tool,
+)
 from src.mcp_server.write_tools import (
     captures as captures_tool,
 )
 from src.mcp_server.write_tools import (
     feedback as feedback_tool,
+)
+from src.mcp_server.write_tools import (
+    jobs as jobs_write_tool,
+)
+from src.mcp_server.write_tools import (
+    sessions as sessions_write_tool,
+)
+from src.mcp_server.write_tools import (
+    tuning as tuning_write_tool,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,7 +100,7 @@ def build_server(config: MCPConfig | None = None) -> FastMCP:
         TelemetryQuery(storage_path) if storage_path is not None else None
     )
 
-    _register_read_tools(mcp, client, query_runner)
+    _register_read_tools(mcp, client, query_runner, cfg)
     _register_write_tools(mcp, client, audit)
     return mcp
 
@@ -82,6 +109,7 @@ def _register_read_tools(
     mcp: FastMCP,
     client: DaemonClient,
     query_runner: TelemetryQuery | None,
+    cfg: MCPConfig,
 ) -> None:
     """Register all read tools as MCP tools."""
 
@@ -127,6 +155,103 @@ def _register_read_tools(
     async def get_behavior_models() -> dict[str, Any]:
         """Static behavior surfaces (the learned 'normal' maps)."""
         return await behavior_tool.get_behavior_models(client)
+
+    @mcp.tool()
+    async def get_bindings() -> dict[str, Any]:
+        """Decoded CAN signal metadata from data/bindings.yaml."""
+        return await bindings_tool.get_bindings(client)
+
+    @mcp.tool()
+    async def get_dids() -> dict[str, Any]:
+        """Nissan Mode-22 DID catalog (schema_version + per-DID entries)."""
+        return await bindings_tool.get_dids(client)
+
+    @mcp.tool()
+    async def get_obd_coverage() -> dict[str, Any]:
+        """OBD coverage: which PIDs the ECU supports, which CANary decodes."""
+        return await bindings_tool.get_obd_coverage(client)
+
+    @mcp.tool()
+    async def list_sessions() -> dict[str, Any]:
+        """All known capture/telemetry sessions on disk, oldest-first."""
+        return await sessions_tool.list_sessions(client)
+
+    @mcp.tool()
+    async def get_session(session_id: str) -> dict[str, Any]:
+        """Detail for one session: tags, control.json, chunk count, metadata."""
+        return await sessions_tool.get_session(client, session_id=session_id)
+
+    @mcp.tool()
+    async def get_dataset_health() -> dict[str, Any]:
+        """Corpus readiness: per-mode sample counts, gaps, last-seen times."""
+        return await sessions_tool.get_dataset_health(client)
+
+    @mcp.tool()
+    async def get_training_runs() -> dict[str, Any]:
+        """Training-run history (the latest record per run from the ledger)."""
+        return await sessions_tool.get_training_runs(client)
+
+    @mcp.tool()
+    async def list_jobs() -> dict[str, Any]:
+        """All known jobs (queued, running, completed, failed)."""
+        return await jobs_tool.list_jobs(client)
+
+    @mcp.tool()
+    async def get_job(job_id: str) -> dict[str, Any]:
+        """Status + result payload for a single job."""
+        return await jobs_tool.get_job(client, job_id=job_id)
+
+    @mcp.tool()
+    async def get_job_logs(job_id: str) -> dict[str, Any]:
+        """Captured stdout/stderr of a job."""
+        return await jobs_tool.get_job_logs(client, job_id=job_id)
+
+    @mcp.tool()
+    async def get_tuning() -> dict[str, Any]:
+        """Currently active alert-tuning config (thresholds, dedupe, etc.)."""
+        return await tuning_tool.get_tuning(client)
+
+    @mcp.tool()
+    async def get_feedback() -> dict[str, Any]:
+        """All recorded operator/MCP feedback labels + summary counts."""
+        return await tuning_tool.get_feedback(client)
+
+    @mcp.tool()
+    def tail_daemon_log(
+        n: int = 100,
+        since: str | None = None,
+        unit: str | None = None,
+    ) -> dict[str, Any]:
+        """Recent daemon log lines as parsed JSON records.
+
+        Reads from systemd journal when available; falls back to a flat log
+        file at $CANARY_MCP_LOG_FALLBACK otherwise. ``unit`` overrides the
+        default ($CANARY_MCP_DAEMON_UNIT, "canary").
+        """
+        return logs_tool.tail_daemon_log(
+            n=n,
+            since=since,
+            unit=unit or cfg.daemon_unit,
+            fallback_path=cfg.log_fallback_path,
+        )
+
+    if cfg.signals_path is not None:
+        signals_path = cfg.signals_path
+
+        @mcp.tool()
+        def signal_lookup(
+            tag_label: str,
+            can_id: int | None = None,
+            top_k: int = 3,
+        ) -> dict[str, Any]:
+            """Fuzzy-match a tag label against the FSM signal catalog.
+
+            ``can_id`` narrows the search to that module (e.g. 0x7E0 → ECM)
+            for better precision. Returns top-k name matches with scores.
+            """
+            return analysis_tool.signal_lookup(
+                signals_path, tag_label=tag_label, can_id=can_id, top_k=top_k
+            )
 
     if query_runner is not None:
         @mcp.tool()
@@ -202,6 +327,75 @@ def _register_write_tools(
             }
         return await feedback_tool.record_feedback(
             client, audit, anomaly_id=anomaly_id, label=label, note=note  # type: ignore[arg-type]
+        )
+
+    @mcp.tool()
+    async def set_session_metadata(
+        session_id: str,
+        metadata: dict[str, Any],
+        merge: bool = True,
+    ) -> dict[str, Any]:
+        """Attach / merge metadata onto a session."""
+        return await sessions_write_tool.set_session_metadata(
+            client, audit, session_id=session_id, metadata=metadata, merge=merge
+        )
+
+    @mcp.tool()
+    async def pin_session(
+        session_id: str,
+        reason: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Pin a session as a training candidate; pinned sessions survive sweeps."""
+        return await sessions_write_tool.pin_session(
+            client, audit, session_id=session_id, reason=reason, metadata=metadata
+        )
+
+    @mcp.tool()
+    async def unpin_session(session_id: str) -> dict[str, Any]:
+        """Remove the pin from a session — eligible for retention sweeps again."""
+        return await sessions_write_tool.unpin_session(
+            client, audit, session_id=session_id
+        )
+
+    @mcp.tool()
+    async def start_job(kind: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Submit a job (corpus_report, retrain_if, retrain_lstm, ...)."""
+        return await jobs_write_tool.start_job(client, audit, kind=kind, params=params)
+
+    @mcp.tool()
+    async def cancel_job(job_id: str) -> dict[str, Any]:
+        """Best-effort cancel a running job."""
+        return await jobs_write_tool.cancel_job(client, audit, job_id=job_id)
+
+    @mcp.tool()
+    async def set_tuning(
+        config: dict[str, Any],
+        change: str = "tuning update",
+        by: str | None = None,
+    ) -> dict[str, Any]:
+        """Replace the alert-tuning config. The daemon auto-bumps version."""
+        return await tuning_write_tool.set_tuning(
+            client, audit, config=config, change=change, by=by
+        )
+
+    @mcp.tool()
+    async def estimate_tuning(
+        config: dict[str, Any],
+        since: str | None = None,
+        change: str = "tuning estimate",
+        by: str | None = None,
+    ) -> dict[str, Any]:
+        """Before/after FP estimate for a proposed tuning over recent anomalies."""
+        return await tuning_write_tool.estimate_tuning(
+            client, audit, config=config, since=since, change=change, by=by
+        )
+
+    @mcp.tool()
+    async def revert_tuning(version: int, by: str | None = None) -> dict[str, Any]:
+        """Revert to a previous tuning version (from the audit log)."""
+        return await tuning_write_tool.revert_tuning(
+            client, audit, version=version, by=by
         )
 
 

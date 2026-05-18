@@ -23,17 +23,28 @@ Read tools:
 | `get_behavior_live` | `GET /models/behavior/live` |
 | `get_behavior_models` | `GET /models/behavior` |
 | `get_current_capture` | `GET /control/captures/current` |
-| `query_telemetry` | DuckDB over the Parquet ring buffer (when `CANARY_STORAGE_PATH` is set) |
+| `get_bindings` | `GET /bindings` |
+| `get_dids` | `GET /dids` |
+| `get_obd_coverage` | `GET /obd/coverage` |
+| `list_sessions` / `get_session` | `GET /control/sessions[/{id}]` |
+| `get_dataset_health` | `GET /control/datasets/health` |
+| `get_training_runs` | `GET /control/training-runs` |
+| `list_jobs` / `get_job` / `get_job_logs` | `GET /control/jobs[...]` |
+| `get_tuning` / `get_feedback` | `GET /control/{tuning,feedback}` |
+| `tail_daemon_log` | `journalctl --unit canary -o json` (fallback file when no systemd) |
+| `signal_lookup` | in-process FSM-name fuzzy match (requires `CANARY_SIGNALS_PATH`) |
+| `query_telemetry` | DuckDB over the Parquet ring buffer (requires `CANARY_STORAGE_PATH`) |
 
 Write tools (audit-logged with `actor="mcp"` via
 [`src/control/audit.py`](../src/control/audit.py)):
 
 | Tool | Wraps |
 |---|---|
-| `start_capture` | `POST /control/captures` |
-| `tag_current_capture` | `POST /control/captures/current/tags` |
-| `stop_capture` | `POST /control/captures/current/stop` |
+| `start_capture` / `tag_current_capture` / `stop_capture` | `POST /control/captures[...]` |
 | `record_feedback` | `POST /control/feedback` |
+| `set_session_metadata` / `pin_session` / `unpin_session` | `POST /control/sessions/{id}[...]` |
+| `start_job` / `cancel_job` | `POST /control/jobs[...]` |
+| `set_tuning` / `estimate_tuning` / `revert_tuning` | `POST /control/tuning[...]` |
 
 ---
 
@@ -76,10 +87,13 @@ Environment variables (set in `/etc/canary/canary.env` alongside the daemon's):
 ```ini
 CANARY_DAEMON_URL=http://127.0.0.1:8000
 CANARY_CONTROL_TOKEN=<shared with the daemon>
-CANARY_STORAGE_PATH=/var/lib/canary/sessions
+CANARY_STORAGE_PATH=/var/lib/canary/sessions   # falls back to $CANARY_CONFIG
 CANARY_MCP_HOST=0.0.0.0
 CANARY_MCP_PORT=8001
 CANARY_MCP_AUDIT_PATH=/var/lib/canary/audit/mcp.jsonl
+CANARY_SIGNALS_PATH=/opt/canary/data/fsm/signals.json   # enables signal_lookup
+CANARY_MCP_LOG_FALLBACK=/var/log/canary/daemon.jsonl    # used if journalctl absent
+CANARY_MCP_DAEMON_UNIT=canary                            # systemd unit for tail
 ```
 
 ---
