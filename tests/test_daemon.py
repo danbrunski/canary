@@ -704,6 +704,59 @@ async def test_score_and_emit_reconciles_missing_live_columns(
     assert not list(tmp_path.glob("anomalies-*.jsonl"))
 
 
+def test_finite_or_none() -> None:
+    from src.daemon import _finite_or_none
+
+    assert _finite_or_none(0.0) == 0.0
+    assert _finite_or_none(1.5) == 1.5
+    assert _finite_or_none(float("nan")) is None
+    assert _finite_or_none(float("inf")) is None
+    assert _finite_or_none(float("-inf")) is None
+    assert _finite_or_none(None) is None
+    assert _finite_or_none("x") is None
+
+
+def test_publish_score_payload_shape_and_none_is_noop() -> None:
+    from src.daemon import _publish_score
+    from src.dashboard.broadcast import Broadcaster
+
+    # None broadcaster must be a silent no-op (don't crash live inference).
+    _publish_score(
+        None,
+        source="isolation_forest",
+        score=0.0,
+        threshold=None,
+        operating_mode="idle",
+        model_version="v",
+        timestamp="now",
+        missing_features=False,
+    )
+
+    bus = Broadcaster()
+    sub = bus.subscribe()
+    _publish_score(
+        bus,
+        source="lstm_autoencoder",
+        score=float("inf"),  # missing-feature / non-finite → null in JSON
+        threshold=171895.06,
+        operating_mode=None,
+        model_version="lstm_v1",
+        timestamp="2026-05-18T03:00:00Z",
+        missing_features=True,
+    )
+    msg = sub.queue.get_nowait()
+    assert msg == {
+        "type": "score",
+        "source": "lstm_autoencoder",
+        "score": None,
+        "threshold": 171895.06,
+        "operating_mode": None,
+        "model_version": "lstm_v1",
+        "timestamp": "2026-05-18T03:00:00Z",
+        "missing_features": True,
+    }
+
+
 async def test_run_live_inference_skips_when_no_manager(config: CanaryConfig) -> None:
     """Without an IF manager (models disabled), the task waits for stop and returns."""
     from src.daemon import build_live_feature_source, run_live_inference

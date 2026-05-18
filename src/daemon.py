@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import sys
 import time
@@ -94,6 +95,7 @@ class DaemonComponents:
     config: CanaryConfig
     telemetry_broadcaster: Broadcaster
     anomalies_broadcaster: Broadcaster
+    scores_broadcaster: Broadcaster
     control_broadcaster: Broadcaster
     event_logger: AnomalyEventLogger
     audit_logger: ControlAuditLogger
@@ -109,6 +111,7 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
     """Construct all long-lived components from config. No I/O beyond mkdir."""
     telemetry_bus = Broadcaster(queue_size=config.daemon.broadcaster_queue_size)
     anomalies_bus = Broadcaster(queue_size=config.daemon.broadcaster_queue_size)
+    scores_bus = Broadcaster(queue_size=config.daemon.broadcaster_queue_size)
     control_bus = Broadcaster(queue_size=config.daemon.broadcaster_queue_size)
 
     event_logger = AnomalyEventLogger(config.daemon.anomalies_dir)
@@ -121,6 +124,7 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         config=config,
         telemetry_broadcaster=telemetry_bus,
         anomalies_broadcaster=anomalies_bus,
+        scores_broadcaster=scores_bus,
         control_broadcaster=control_bus,
         event_logger=event_logger,
         audit_logger=audit_logger,
@@ -340,7 +344,13 @@ async def run_live_inference(
             try:
                 row = source.tick(datetime.now(UTC))
                 if row is not None:
-                    _score_and_emit(loaded, row, components.emitter, components.health_monitor)
+                    _score_and_emit(
+                        loaded,
+                        row,
+                        components.emitter,
+                        components.health_monitor,
+                        scores=components.scores_broadcaster,
+                    )
             except Exception:  # noqa: BLE001 — live inference is best-effort
                 log.exception("live inference tick failed")
         try:
@@ -412,6 +422,19 @@ async def run_live_inference_lstm(
                 if row is not None:
                     result = _lstm_observe(engine, row)
                     if result is not None:
+                        # Every scored window → /ws/scores (live readout),
+                        # then the emitter still gates the anomaly feed on
+                        # is_anomaly as before.
+                        _publish_score(
+                            components.scores_broadcaster,
+                            source="lstm_autoencoder",
+                            score=result.global_score,
+                            threshold=result.global_threshold,
+                            operating_mode=None,
+                            model_version=result.model_version,
+                            timestamp=result.timestamp,
+                            missing_features=False,
+                        )
                         components.emitter.emit_lstm(result)
             except Exception:  # noqa: BLE001 — live inference is best-effort
                 log.exception("live LSTM inference tick failed")
@@ -500,11 +523,57 @@ _IF_MISSING_WARNED: set[str] = set()
 _SCHEMA_RECONCILIATION_WARNED: set[tuple[str, str]] = set()
 
 
+def _finite_or_none(value: Any) -> float | None:
+    """JSON has no NaN/Infinity — coerce non-finite scores to ``None`` so the
+    /ws/scores payload stays valid JSON the browser can parse."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _publish_score(
+    scores: Broadcaster | None,
+    *,
+    source: str,
+    score: Any,
+    threshold: Any,
+    operating_mode: str | None,
+    model_version: str,
+    timestamp: Any,
+    missing_features: bool,
+) -> None:
+    """Fan one inference tick's score onto /ws/scores.
+
+    Published every tick — not just anomalies — so the dashboard can show
+    each model's live current value (including a normal 0). A non-finite
+    score (a missing-feature tick) serializes as ``null`` alongside the
+    ``missing_features`` flag rather than a misleading number.
+    """
+    if scores is None:
+        return
+    scores.publish(
+        {
+            "type": "score",
+            "source": source,
+            "score": _finite_or_none(score),
+            "threshold": _finite_or_none(threshold),
+            "operating_mode": operating_mode,
+            "model_version": model_version,
+            "timestamp": str(timestamp),
+            "missing_features": bool(missing_features),
+        }
+    )
+
+
 def _score_and_emit(
     loaded: Any,
     row: Any,  # pd.DataFrame, one row
     emitter: AnomalyEventEmitter,
     health: HealthMonitor | None = None,
+    *,
+    scores: Broadcaster | None = None,
 ) -> None:
     """Run one feature row through IF.score → emitter. Best-effort.
 
@@ -544,13 +613,26 @@ def _score_and_emit(
             ),
             data_timestamp_epoch=ts_epoch,
         )
+    missing = bool(scored.get(MISSING_FEATURES_COLUMN, False))
+    mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
+    _publish_score(
+        scores,
+        source="isolation_forest",
+        score=scored.get(SCORE_COLUMN),
+        threshold=None,  # IF has no calibrated threshold; boundary is ~0
+        operating_mode=(None if mode_val is None or pd.isna(mode_val) else str(mode_val)),
+        model_version=engine.model_version,
+        timestamp=timestamp,
+        missing_features=missing,
+    )
     # Layer 3 fail-safe: an IF verdict computed from a feature vector with
     # missing trained columns is untrustworthy. Suppress the emit (symmetric
     # with the LSTM path, which already withholds output until a clean
     # window) rather than alerting off a half-blind model. Health still
     # recorded above, so the degraded state is visible on /status — silent
-    # but observable beats confidently wrong.
-    if bool(scored.get(MISSING_FEATURES_COLUMN, False)):
+    # but observable beats confidently wrong. The raw score still went onto
+    # /ws/scores above so the live readout shows the degraded state.
+    if missing:
         version = engine.model_version
         if version not in _IF_MISSING_WARNED:
             _IF_MISSING_WARNED.add(version)
@@ -729,6 +811,7 @@ async def serve_in_background(
         models_dir=components.config.daemon.models_dir,
         telemetry_broadcaster=components.telemetry_broadcaster,
         anomalies_broadcaster=components.anomalies_broadcaster,
+        scores_broadcaster=components.scores_broadcaster,
         control_broadcaster=components.control_broadcaster,
         emitter=components.emitter,
         capture_controller=components.capture_controller,

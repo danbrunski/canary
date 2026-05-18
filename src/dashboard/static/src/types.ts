@@ -31,6 +31,21 @@ export interface AnomalyEvent {
   detail: Record<string, unknown>;
 }
 
+/** One `/ws/scores` frame. Emitted every inference tick for *both* models
+ *  (not just anomalies) so the UI can show each model's live current value,
+ *  including a normal 0. `score` is null on a missing-feature tick — no
+ *  trustworthy value, distinct from a real 0. */
+export interface ScoreMessage {
+  type: "score";
+  source: "isolation_forest" | "lstm_autoencoder";
+  score: number | null;
+  threshold: number | null;
+  operating_mode: string | null;
+  model_version: string;
+  timestamp: string;
+  missing_features: boolean;
+}
+
 /** Response from `GET /anomalies?since=...`. */
 export interface AnomaliesResponse {
   events: AnomalyEvent[];

@@ -1,5 +1,6 @@
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
+import type { ScoresBySource } from "../hooks/useScoreStream";
 import { DEFAULT_ITEM, NAV, defaultItemForGroup } from "../nav";
 import {
   navGroupLabelClass,
@@ -39,6 +40,7 @@ export interface DashboardData {
   channels: Map<string, ChannelSnapshot>;
   bindings: BindingsByChannel;
   events: AnomalyEvent[];
+  liveScores: ScoresBySource;
   status: StatusResponse | null;
   statusError: Error | null;
   behaviorModels: BehaviorModelsResponse | null;
@@ -93,7 +95,9 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
     case "live-gauges":
       return <TelemetryPanel channels={d.channels} bindings={d.bindings} />;
     case "diag-anomalies":
-      return <AnomalyPanel events={d.events} token={d.token} />;
+      return (
+        <AnomalyPanel events={d.events} token={d.token} liveScores={d.liveScores} />
+      );
     case "diag-system":
       return (
         <SystemPanel

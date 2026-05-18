@@ -11,6 +11,7 @@ const DATA: DashboardData = {
   channels: new Map<string, ChannelSnapshot>(),
   bindings: {},
   events: [],
+  liveScores: {},
   status: null,
   statusError: null,
   behaviorModels: null,

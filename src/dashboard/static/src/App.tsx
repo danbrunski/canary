@@ -4,6 +4,7 @@ import { useCompanionSettings } from "./hooks/useCompanionSettings";
 import { useBindings } from "./hooks/useBindings";
 import { useControlToken } from "./hooks/useControlToken";
 import { useHashRoute } from "./hooks/useHashRoute";
+import { useScoreStream } from "./hooks/useScoreStream";
 import { useStatus } from "./hooks/useStatus";
 import { useTelemetryStream } from "./hooks/useTelemetryStream";
 import { useTheme } from "./hooks/useTheme";
@@ -20,6 +21,7 @@ export default function App() {
   const theme = useTheme();
   const telemetry = useTelemetryStream();
   const anomalies = useAnomalyStream();
+  const liveScores = useScoreStream();
   const { status, error: statusError } = useStatus();
   const behaviorModels = useBehaviorModels();
   const bindings = useBindings();
@@ -31,6 +33,7 @@ export default function App() {
     channels: telemetry.channels,
     bindings,
     events: anomalies.events,
+    liveScores: liveScores.scores,
     status,
     statusError,
     behaviorModels: behaviorModels.data,

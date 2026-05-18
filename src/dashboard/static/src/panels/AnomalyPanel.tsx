@@ -5,8 +5,10 @@ import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
 import { useControlResource } from "../hooks/useControlResource";
 import { scoreView, windowReference, type AnomalyLevel } from "../anomalyScore";
+import type { ScoresBySource } from "../hooks/useScoreStream";
 import { badgeClass, cn, placeholderClass, selectClass } from "../styles";
 import type { AnomalyEvent } from "../types";
+import { LiveModelScores } from "./LiveModelScores";
 
 const LEVEL_TONE: Record<AnomalyLevel, string> = {
   low: "text-fg-dim",
@@ -20,6 +22,9 @@ interface AnomalyPanelProps {
    *  (Task 6.24): each event gets true/false-positive / ignore / review
    *  verdicts that persist next to the anomaly log. */
   token?: string;
+  /** Live per-tick scores for both models (from `/ws/scores`). Drives the
+   *  always-on readout at the top, independent of the emitted-anomaly list. */
+  liveScores?: ScoresBySource;
 }
 
 const FEEDBACK_LABELS: { id: string; short: string; tone: string }[] = [
@@ -37,13 +42,14 @@ function eventKey(e: AnomalyEvent): string {
  *  filterable list of events. The chart is fixed-width historical — newest
  *  events on the right — so an operator at a glance can see "are we
  *  trending hotter?" without parsing timestamps. */
-export function AnomalyPanel({ events, token }: AnomalyPanelProps) {
+export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
   const [sourceFilter, setSourceFilter] = useState<AnomalyEvent["source"] | "all">("all");
   const [modeFilter, setModeFilter] = useState<string | "all">("all");
-  // The IF emitter labels anything a hair past its boundary as an anomaly, so
-  // the raw feed is mostly near-zero noise. Default to hiding the "low" tier
-  // from the list (the chart still carries every point); operators can expand.
-  const [showAll, setShowAll] = useState(false);
+  // The live readout up top now answers "what's it doing right now", so the
+  // historical list shows everything by default (operators didn't want events
+  // hidden). The toggle still lets them collapse the near-zero IF boundary
+  // noise when scanning history.
+  const [showAll, setShowAll] = useState(true);
   // Locally-applied verdicts (optimistic) keyed by anomaly key, merged over
   // whatever the server already has.
   const [localLabels, setLocalLabels] = useState<Record<string, string>>({});
@@ -95,7 +101,6 @@ export function AnomalyPanel({ events, token }: AnomalyPanelProps) {
     return visible.map((e) => ({ e, view: scoreView(e.score, e.threshold, ref) }));
   }, [visible]);
 
-  const currentView = scored[0] ?? null;
 
   // Chart keeps every point (continuity); the list is what gets de-flooded.
   const indexSeries = useMemo(
@@ -159,46 +164,17 @@ export function AnomalyPanel({ events, token }: AnomalyPanelProps) {
         </div>
       }
     >
-      {events.length === 0 ? (
-        <p className={placeholderClass}>
-          no anomalies yet — the daemon hasn't emitted any (or the inference
-          path isn't wired). check /status's emitter_counters.
-        </p>
-      ) : (
-        <>
-          {scored.length === 0 ? (
-            <p className={placeholderClass}>no events match the current filters.</p>
-          ) : (
-            <>
-              {currentView && (
-                <div className="mb-2 flex items-baseline gap-3">
-                  <span
-                    className={cn(
-                      "font-num text-2xl font-semibold tabular-nums",
-                      LEVEL_TONE[currentView.view.level],
-                    )}
-                  >
-                    {currentView.view.index}
-                    <span className="text-sm text-fg-dim">/100</span>
-                  </span>
-                  <span
-                    className={cn(
-                      "text-[0.7rem] uppercase tracking-[0.08em]",
-                      LEVEL_TONE[currentView.view.level],
-                    )}
-                  >
-                    {currentView.view.level}
-                  </span>
-                  <span className="font-num text-[0.75rem] tabular-nums text-fg-dim">
-                    raw {currentView.e.score.toFixed(3)}
-                    {currentView.e.threshold !== null &&
-                      ` / thr ${currentView.e.threshold.toFixed(3)}`}
-                  </span>
-                  <span className="ml-auto text-[0.7rem] text-fg-dim">
-                    current anomaly index
-                  </span>
-                </div>
-              )}
+      <>
+        <LiveModelScores scores={liveScores ?? {}} />
+        {events.length === 0 ? (
+          <p className={placeholderClass}>
+            no anomalies emitted yet — the live scores above show current
+            model state (the list below only logs threshold crossings).
+          </p>
+        ) : scored.length === 0 ? (
+          <p className={placeholderClass}>no events match the current filters.</p>
+        ) : (
+          <>
               <div className="mb-2 flex gap-2">
                 <div className="flex flex-col justify-between py-0.5 text-[0.6rem] tabular-nums text-fg-faint">
                   <span>100</span>
@@ -319,7 +295,6 @@ export function AnomalyPanel({ events, token }: AnomalyPanelProps) {
             </>
           )}
         </>
-      )}
     </Panel>
   );
 }

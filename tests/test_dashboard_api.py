@@ -721,6 +721,36 @@ def test_ws_anomalies_pushes_published_events(config: CanaryConfig, anomalies_di
         assert message["source"] == "lstm_autoencoder"
 
 
+def test_ws_scores_pushes_published_scores(config: CanaryConfig, anomalies_dir: Path) -> None:
+    from src.dashboard.broadcast import Broadcaster
+
+    bus = Broadcaster()
+    app = create_app(config, anomalies_dir=anomalies_dir, scores_broadcaster=bus)
+    client = TestClient(app)
+    with client.websocket_connect("/ws/scores") as ws:
+        import time
+
+        for _ in range(50):
+            if bus.subscriber_count == 1:
+                break
+            time.sleep(0.01)
+        bus.publish(
+            {
+                "type": "score",
+                "source": "isolation_forest",
+                "score": 0.0,
+                "threshold": None,
+                "operating_mode": "idle",
+                "model_version": "if_v1",
+                "timestamp": "now",
+                "missing_features": False,
+            }
+        )
+        message = ws.receive_json()
+        assert message["source"] == "isolation_forest"
+        assert message["score"] == 0.0  # a normal 0 must come through, not be hidden
+
+
 def test_ws_disconnect_removes_subscriber(config: CanaryConfig, anomalies_dir: Path) -> None:
     from src.dashboard.broadcast import Broadcaster
 

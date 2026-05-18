@@ -583,6 +583,7 @@ def create_app(
     models_dir: Path | None = None,
     telemetry_broadcaster: Broadcaster | None = None,
     anomalies_broadcaster: Broadcaster | None = None,
+    scores_broadcaster: Broadcaster | None = None,
     emitter: AnomalyEventEmitter | None = None,
     behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
@@ -622,6 +623,7 @@ def create_app(
         )
     telemetry_bus = telemetry_broadcaster or Broadcaster()
     anomalies_bus = anomalies_broadcaster or Broadcaster()
+    scores_bus = scores_broadcaster or Broadcaster()
     control_bus = control_broadcaster or Broadcaster()
     resolved_control_token = (
         os.environ.get(config.daemon.control_token_env) if control_token is None else control_token
@@ -630,6 +632,7 @@ def create_app(
     # the same instances after construction.
     app.state.telemetry_broadcaster = telemetry_bus
     app.state.anomalies_broadcaster = anomalies_bus
+    app.state.scores_broadcaster = scores_bus
     app.state.control_broadcaster = control_bus
     app.state.control_loop = None
 
@@ -1178,6 +1181,12 @@ def create_app(
     @app.websocket("/ws/anomalies")
     async def ws_anomalies(websocket: WebSocket) -> None:
         await _run_websocket(websocket, anomalies_bus)
+
+    @app.websocket("/ws/scores")
+    async def ws_scores(websocket: WebSocket) -> None:
+        # Every inference tick (both models), not just anomalies — powers
+        # the live per-model score readout.
+        await _run_websocket(websocket, scores_bus)
 
     @app.websocket("/ws/control")
     async def ws_control(websocket: WebSocket) -> None:
