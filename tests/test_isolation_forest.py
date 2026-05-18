@@ -213,6 +213,46 @@ def test_save_and_load_round_trip_joblib_artifact_and_json_manifest(tmp_path: Pa
     assert before[LABEL_COLUMN].tolist() == after[LABEL_COLUMN].tolist()
 
 
+def test_load_rejects_manifest_with_all_nan_feature_health(tmp_path: Path) -> None:
+    joblib = pytest.importorskip("joblib")
+    frame = _two_mode_frame()
+    trained = fit_isolation_forest(
+        frame,
+        _IFConfig(n_estimators=20),
+        feature_columns=["obd:RPM", "obd:SPEED"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+    artifact = tmp_path / "isolation_forest.joblib"
+    trained.save(artifact)
+
+    payload = joblib.load(artifact)
+    payload["manifest"]["schema"]["feature_health"]["all_nan_columns"] = ["obd:RPM"]
+    joblib.dump(payload, artifact)
+
+    with pytest.raises(ValueError, match="all-NaN"):
+        load_isolation_forest_model(artifact)
+
+
+def test_load_rejects_scaler_schema_mismatch(tmp_path: Path) -> None:
+    joblib = pytest.importorskip("joblib")
+    frame = _two_mode_frame()
+    trained = fit_isolation_forest(
+        frame,
+        _IFConfig(n_estimators=20),
+        feature_columns=["obd:RPM", "obd:SPEED"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+    artifact = tmp_path / "isolation_forest.joblib"
+    trained.save(artifact)
+
+    payload = joblib.load(artifact)
+    payload["scaler"]["columns"] = ["obd:SPEED", "obd:RPM"]
+    joblib.dump(payload, artifact)
+
+    with pytest.raises(ValueError, match="scaler columns"):
+        load_isolation_forest_model(artifact)
+
+
 def test_score_rejects_untrained_operating_mode() -> None:
     frame = _two_mode_frame()
     trained = fit_isolation_forest(

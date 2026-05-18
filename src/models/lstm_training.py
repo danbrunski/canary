@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -23,8 +24,9 @@ from src.models.lstm_autoencoder import (
     MissingLSTMAutoencoderDependencyError,
     build_lstm_autoencoder,
 )
+from src.models.manifest import validate_model_feature_spec
 from src.models.sequence_dataset import SequenceWindowDataset
-from src.preprocessing.feature_pipeline import build_feature_spec, validate_feature_health
+from src.preprocessing.feature_pipeline import build_feature_spec
 
 ARTIFACT_FORMAT_VERSION = 1
 MODEL_TYPE = "lstm_autoencoder"
@@ -362,7 +364,7 @@ def train_lstm_autoencoder(
             sequence_stride=dataset.stride,
         )
     )
-    validate_feature_health(schema.get("feature_health", {}))
+    validate_model_feature_spec(schema, context="LSTM training feature spec")
     schema["sequence_length"] = dataset.sequence_length
     manifest = LSTMAutoencoderManifest(
         artifact_format_version=ARTIFACT_FORMAT_VERSION,
@@ -514,6 +516,11 @@ def load_lstm_autoencoder_model(
         raise ValueError(f"unexpected model type {payload['model_type']!r}")
 
     manifest = LSTMAutoencoderManifest.from_dict(payload["manifest"])
+    feature_columns = validate_model_feature_spec(
+        manifest.schema,
+        context=f"LSTM manifest {artifact_path}",
+    )
+    _validate_loaded_lstm_manifest(manifest, feature_columns=feature_columns)
     architecture = manifest.architecture
     model = LSTMAutoencoder(
         input_size=int(architecture["input_size"]),
@@ -532,6 +539,67 @@ def load_lstm_autoencoder_model(
 def default_lstm_manifest_path(artifact_path: Path) -> Path:
     """Return the conventional JSON manifest path for a checkpoint."""
     return artifact_path.with_suffix(".manifest.json")
+
+
+def _validate_loaded_lstm_manifest(
+    manifest: LSTMAutoencoderManifest,
+    *,
+    feature_columns: tuple[str, ...],
+) -> None:
+    architecture = manifest.architecture
+    input_size = _required_int(architecture, "input_size", context="LSTM architecture")
+    if input_size != len(feature_columns):
+        raise ValueError(
+            "LSTM architecture input_size does not match manifest feature_columns: "
+            f"input_size={input_size}, feature_columns={len(feature_columns)}"
+        )
+
+    architecture_sequence_length = _required_int(
+        architecture,
+        "sequence_length",
+        context="LSTM architecture",
+    )
+    schema_sequence_length = _required_int(
+        manifest.schema,
+        "sequence_length",
+        context="LSTM feature schema",
+    )
+    if architecture_sequence_length != schema_sequence_length:
+        raise ValueError(
+            "LSTM architecture sequence_length does not match manifest schema: "
+            f"architecture={architecture_sequence_length}, schema={schema_sequence_length}"
+        )
+
+    if manifest.thresholds is not None:
+        _validate_lstm_thresholds(manifest.thresholds, feature_columns=feature_columns)
+
+
+def _validate_lstm_thresholds(
+    thresholds: Mapping[str, Any],
+    *,
+    feature_columns: tuple[str, ...],
+) -> None:
+    try:
+        calibration = LSTMThresholdCalibration.from_dict(thresholds)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"invalid LSTM thresholds in manifest: {exc}") from exc
+
+    if not math.isfinite(calibration.global_error.threshold):
+        raise ValueError("LSTM thresholds global_error.threshold must be finite")
+    missing = [column for column in feature_columns if column not in calibration.channel_errors]
+    if missing:
+        raise ValueError("LSTM thresholds missing channel_errors for: " + ", ".join(missing))
+    for column in feature_columns:
+        threshold = calibration.channel_errors[column].threshold
+        if not math.isfinite(threshold):
+            raise ValueError(f"LSTM threshold for {column!r} must be finite")
+
+
+def _required_int(data: Mapping[str, Any], key: str, *, context: str) -> int:
+    try:
+        return int(data[key])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"{context} missing integer {key!r}") from exc
 
 
 def _validate_config(config: LSTMAutoencoderTrainingConfigLike) -> None:

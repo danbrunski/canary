@@ -242,6 +242,7 @@ def _write_manifest_pair(artifact: Path, *, version: str, mtime: float) -> None:
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text(f"artifact:{version}")
     manifest = artifact.with_suffix(".manifest.json")
+    feature_columns = ["obd:RPM"]
     manifest.write_text(
         json.dumps(
             {
@@ -252,7 +253,33 @@ def _write_manifest_pair(artifact: Path, *, version: str, mtime: float) -> None:
                 "training_data_hash": "sha256:abc",
                 "input_rows": 1,
                 "hyperparams": {},
-                "schema": {"feature_columns": ["obd:RPM"]},
+                "schema": {
+                    "feature_spec_version": 1,
+                    "feature_columns": feature_columns,
+                    "feature_dtypes": {"obd:RPM": "float64"},
+                    "source_prefixes": ["obd"],
+                    "behavior_model_columns": [],
+                    "feature_health": {
+                        "row_count": 1,
+                        "candidate_feature_count": len(feature_columns),
+                        "selected_feature_count": len(feature_columns),
+                        "dropped_all_nan_columns": [],
+                        "all_nan_columns": [],
+                        "constant_columns": ["obd:RPM"],
+                        "non_finite_columns": [],
+                        "columns": {
+                            "obd:RPM": {
+                                "dtype": "float64",
+                                "non_null_count": 1,
+                                "finite_count": 1,
+                                "nan_count": 0,
+                                "non_finite_count": 0,
+                                "unique_finite_count": 1,
+                                "constant": True,
+                            }
+                        },
+                    },
+                },
             }
         )
     )

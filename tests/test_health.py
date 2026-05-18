@@ -100,6 +100,24 @@ def test_empty_monitor_snapshot_is_none_safe() -> None:
     assert snap["data_freshness_seconds"] is None
 
 
+def test_monitor_snapshots_obd_scheduler_metrics() -> None:
+    mon = HealthMonitor()
+    mon.observe_obd_scheduler(
+        {
+            "configured_poll_rate_hz": 1.0,
+            "bus_budget_requests_per_second": 8.0,
+            "active_requests": 3,
+            "backed_off_requests": 1,
+            "requests": [{"channel": "RPM", "poll_tier": "fast"}],
+        }
+    )
+
+    snap = mon.snapshot(now_epoch=0.0)
+
+    assert snap["obd_scheduler"]["active_requests"] == 3
+    assert snap["obd_scheduler"]["requests"][0]["channel"] == "RPM"
+
+
 # ---------------------------------------------------------------------------
 # /status surfacing
 # ---------------------------------------------------------------------------

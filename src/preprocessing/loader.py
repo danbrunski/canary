@@ -9,6 +9,9 @@ from typing import Literal
 
 import pandas as pd
 
+from src.telemetry import SOURCE_SEP
+from src.telemetry import channel_key as channel_key
+
 log = logging.getLogger(__name__)
 
 PARQUET_PATTERN = "telemetry-*.parquet"
@@ -67,7 +70,9 @@ def read_session(session_dir: Path) -> pd.DataFrame:
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
     frame["session"] = session_dir.name
     frame["session_path"] = str(session_dir)
-    frame["source_channel"] = frame["source"].astype(str) + ":" + frame["channel"].astype(str)
+    frame["source_channel"] = (
+        frame["source"].astype(str) + SOURCE_SEP + frame["channel"].astype(str)
+    )
     frame["value"] = _coalesce_value_columns(frame)
     frame = frame.sort_values(["timestamp", "source", "channel"], kind="stable")
     return frame.reset_index(drop=True)
@@ -149,11 +154,6 @@ def to_wide(
                 wide[column] = converted.astype("float32")
 
     return wide
-
-
-def channel_key(source: str, channel: str) -> str:
-    """Return the canonical wide-column name for a telemetry channel."""
-    return f"{source}:{channel}"
 
 
 def _coalesce_value_columns(frame: pd.DataFrame) -> pd.Series:

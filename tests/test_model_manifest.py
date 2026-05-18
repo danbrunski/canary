@@ -10,11 +10,13 @@ import pytest
 from src.models.manifest import (
     CURRENT_MANIFEST_FORMAT_VERSION,
     KNOWN_MODEL_TYPES,
+    FeatureSpecValidationError,
     ManifestValidationError,
     ModelManifestCommon,
     load_manifest_common,
     schemas_compatible,
     validate_manifest_common,
+    validate_model_feature_spec,
 )
 
 
@@ -32,6 +34,38 @@ def _good_payload(**overrides: object) -> dict[str, object]:
     }
     base.update(overrides)
     return base
+
+
+def _feature_schema(columns: list[str] | None = None) -> dict[str, object]:
+    feature_columns = columns or ["obd:RPM", "obd:SPEED"]
+    return {
+        "feature_spec_version": 1,
+        "feature_columns": feature_columns,
+        "feature_dtypes": {column: "float64" for column in feature_columns},
+        "source_prefixes": ["obd"],
+        "behavior_model_columns": [],
+        "feature_health": {
+            "row_count": 100,
+            "candidate_feature_count": len(feature_columns),
+            "selected_feature_count": len(feature_columns),
+            "dropped_all_nan_columns": [],
+            "all_nan_columns": [],
+            "constant_columns": [],
+            "non_finite_columns": [],
+            "columns": {
+                column: {
+                    "dtype": "float64",
+                    "non_null_count": 100,
+                    "finite_count": 100,
+                    "nan_count": 0,
+                    "non_finite_count": 0,
+                    "unique_finite_count": 10,
+                    "constant": False,
+                }
+                for column in feature_columns
+            },
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +183,38 @@ def test_schemas_incompatible_when_key_missing() -> None:
     a = validate_manifest_common(_good_payload())
     b = validate_manifest_common(_good_payload(schema={}))  # no feature_columns
     assert not schemas_compatible(a, b)
+
+
+# ---------------------------------------------------------------------------
+# Feature-spec validation
+# ---------------------------------------------------------------------------
+
+
+def test_validate_model_feature_spec_accepts_training_schema() -> None:
+    assert validate_model_feature_spec(_feature_schema()) == ("obd:RPM", "obd:SPEED")
+
+
+def test_validate_model_feature_spec_rejects_missing_health() -> None:
+    schema = _feature_schema()
+    del schema["feature_health"]
+    with pytest.raises(FeatureSpecValidationError, match="feature_health"):
+        validate_model_feature_spec(schema)
+
+
+def test_validate_model_feature_spec_rejects_selected_all_nan_column() -> None:
+    schema = _feature_schema()
+    health = dict(schema["feature_health"])  # type: ignore[arg-type]
+    health["all_nan_columns"] = ["obd:RPM"]
+    schema["feature_health"] = health
+    with pytest.raises(FeatureSpecValidationError, match="all-NaN"):
+        validate_model_feature_spec(schema)
+
+
+def test_validate_model_feature_spec_rejects_missing_dtype() -> None:
+    schema = _feature_schema()
+    schema["feature_dtypes"] = {"obd:RPM": "float64"}
+    with pytest.raises(FeatureSpecValidationError, match="feature_dtypes missing"):
+        validate_model_feature_spec(schema)
 
 
 # ---------------------------------------------------------------------------

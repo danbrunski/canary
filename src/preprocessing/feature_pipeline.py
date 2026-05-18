@@ -38,6 +38,7 @@ from src.preprocessing.segmenter import (
     SegmenterConfig,
     segment_operating_modes,
 )
+from src.telemetry import source_of
 
 log = logging.getLogger(__name__)
 
@@ -534,7 +535,4 @@ def _base_feature_name(column: str) -> str:
 
 
 def _source_prefix(column: str) -> str:
-    base = _base_feature_name(column)
-    if ":" not in base:
-        return "derived"
-    return base.split(":", 1)[0]
+    return source_of(_base_feature_name(column)) or "derived"

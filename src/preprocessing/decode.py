@@ -35,14 +35,15 @@ from typing import Literal
 import pandas as pd
 
 from src.decode.bindings import Bindings, Signal, load_bindings
+from src.telemetry import DECODED_SOURCE as DECODED_SOURCE
+from src.telemetry import channel_key
 
-DECODED_SOURCE = "decoded"
 DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
 
 
 def decoded_channel(signal_name: str) -> str:
     """Return the wide-column name a decoded signal will occupy after `to_wide`."""
-    return f"{DECODED_SOURCE}:{signal_name}"
+    return channel_key(DECODED_SOURCE, signal_name)
 
 
 def decode_can_rows(

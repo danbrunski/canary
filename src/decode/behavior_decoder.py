@@ -41,6 +41,7 @@ from src.decode.behavior_models import (
     GridBinnedMeanFit,
 )
 from src.preprocessing.segmenter import MODE_COLUMN
+from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
 
 log = logging.getLogger(__name__)
 
@@ -198,7 +199,9 @@ def append_deviation_columns(
     out = frame.copy()
     for model in models.models:
         actual_col = (output_columns or {}).get(model.name) or (
-            model.output if ":" in model.output else f"decoded:{model.output}"
+            model.output
+            if SOURCE_SEP in model.output
+            else channel_key(DECODED_SOURCE, model.output)
         )
         expected = expected_value_column(out, model)
         if actual_col in out.columns:

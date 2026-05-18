@@ -5,11 +5,58 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Final, Literal, get_args
+
+#: Separator between a telemetry source namespace and its channel in a
+#: wide-column name, e.g. ``obd:RPM``. Single source of truth: everything
+#: that builds or parses a ``<source>:<channel>`` key goes through the
+#: helpers below rather than spelling the ``:`` (or the source token)
+#: inline, so a namespace rename is a one-line change here.
+SOURCE_SEP: Final = ":"
+
+#: Canonical telemetry source namespaces. A row carrying one of these as its
+#: ``source`` pivots (via :func:`src.preprocessing.loader.to_wide`) into the
+#: wide column ``<source>:<channel>``.
+OBD_SOURCE: Final = "obd"
+CAN_SOURCE: Final = "can"
+DECODED_SOURCE: Final = "decoded"
+#: DBC-decoded values share the wide-column namespace contract but never ride
+#: a ``TelemetryRecord`` (``decode_can_rows_dbc`` writes ``source_channel``
+#: directly), so ``DBC_SOURCE`` is deliberately *not* a ``TelemetrySource``.
+DBC_SOURCE: Final = "dbc"
 
 TelemetrySource = Literal["obd", "can", "decoded"]
+# PEP 586 forbids spelling a Literal from variables, so the line above is the
+# one unavoidable duplication. Guard it against silently drifting from the
+# constants it must mirror.
+assert set(get_args(TelemetrySource)) == {OBD_SOURCE, CAN_SOURCE, DECODED_SOURCE}
+
 TelemetryValue = bool | int | float | str | None
 MetadataValue = bool | int | float | str | None
+
+
+def channel_key(source: str, channel: str) -> str:
+    """Return the canonical wide-column name for a telemetry channel."""
+    return f"{source}{SOURCE_SEP}{channel}"
+
+
+def source_of(column: str) -> str | None:
+    """Return a wide column's source namespace, or ``None`` if it is unprefixed.
+
+    ``source_of("obd:RPM") == "obd"``; ``source_of("derived_thing") is None``.
+    """
+    source, sep, _ = column.partition(SOURCE_SEP)
+    return source if sep else None
+
+
+def channel_of(column: str) -> str:
+    """Return a wide column's channel, dropping any source namespace.
+
+    The inverse of :func:`channel_key`: ``channel_of("obd:RPM") == "RPM"``;
+    an unprefixed name passes through (``channel_of("RPM") == "RPM"``).
+    """
+    _, sep, channel = column.partition(SOURCE_SEP)
+    return channel if sep else column
 
 
 @dataclass(frozen=True)

@@ -706,7 +706,10 @@ async def run_daemon(
             extra={"session": config.collection.replay_session},
         )
     else:
-        active_collectors = _default_collectors(config)
+        active_collectors = _default_collectors(
+            config,
+            obd_scheduler_metrics_callback=components.health_monitor.observe_obd_scheduler,
+        )
 
     drain_task = asyncio.create_task(
         drain_queue_with_broadcast(

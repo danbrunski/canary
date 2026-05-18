@@ -30,18 +30,20 @@ from typing import Any
 
 import pandas as pd
 
+from src.telemetry import DBC_SOURCE, channel_key
+
 log = logging.getLogger(__name__)
 
-#: Wide-column ``source`` prefix for DBC-decoded values, so ``to_wide``
-#: produces ``dbc:<SIGNAL>`` and the bindings path's ``decoded:<SIGNAL>``
-#: doesn't collide.
-DBC_SOURCE = "dbc"
+#: ``DBC_SOURCE`` (``"dbc"``) is the wide-column ``source`` prefix for
+#: DBC-decoded values — re-exported from :mod:`src.telemetry` so ``to_wide``
+#: produces ``dbc:<SIGNAL>`` without colliding with the bindings path's
+#: ``decoded:<SIGNAL>``. Kept importable here for back-compat.
 DEFAULT_DBC_DIR = Path("data/dbc")
 
 
 def dbc_channel(signal_name: str) -> str:
     """Return the wide-column name a DBC-decoded signal occupies after ``to_wide``."""
-    return f"{DBC_SOURCE}:{signal_name}"
+    return channel_key(DBC_SOURCE, signal_name)
 
 
 def load_dbc_database(path: Path) -> Any:
@@ -147,7 +149,7 @@ def decode_can_rows_dbc(
                         "metadata_json": None,
                         "session": row.get("session"),
                         "session_path": row.get("session_path"),
-                        "source_channel": f"{source_label}:{signal_name}",
+                        "source_channel": channel_key(source_label, signal_name),
                         "value": numeric,
                     }
                 )

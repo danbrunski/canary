@@ -337,13 +337,7 @@ training/model-health visualization, and Torque Pro parity.
 ### 6A. Standard OBD and Torque-parity telemetry
 
 - [x] **6.1 — Complete SAE J1979 registry.** `src/collection/obd_registry.py`
-- [ ] **6.2 — Adaptive real-time OBD polling scheduler.** Replace the flat
-  auto-PID loop with poll tiers and bus-budget controls: fast powertrain
-  channels (RPM, speed, load, throttle, MAP/MAF) at the highest safe rate,
-  temperature/fuel/trim channels at medium rate, slow monitor/status channels
-  at low rate, and one-shot/service reads on demand. Publish scheduler metrics
-  (configured rate, observed response rate, timeout/backoff state, bus errors)
-  so the dashboard can explain why a supported PID is stale or missing.
+- [x] **6.2 — Adaptive real-time OBD polling scheduler.**
 - [x] **6.3 — OBD capability and coverage endpoint.**
 - [~] **6.4 — DTC, freeze-frame, monitor, and VIN workflow.** Decode/lookup/
   report core done: `src/decode/dtc_catalog.py` — `describe_dtc` (curated
@@ -537,7 +531,7 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   params, behavior residual columns, and a feature-health summary. Live/offline
   builder unification and live schema reconciliation remain.
 
-- [~] **7.3 — Feature/score validation at model-load and in CI (P1).**
+- [x] **7.3 — Feature/score validation at model-load and in CI (P1).**
   `deviation:*` was all-NaN for the model's whole existence, undetected,
   because nothing asserts features are populated. Add training-time
   assertions (no all-NaN/constant column passes silently; emit a
@@ -547,10 +541,11 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   check on a fixture session (columns populated, schema stable vs a
   golden spec). Cheap; would have caught the deviation bug instantly.
   Depends on 7.1. (Effort: S–M)
-  Started: IF/LSTM training now emits feature-health metadata in manifests
-  and rejects selected all-NaN feature columns before fitting. Constant
-  columns and dropped all-NaN candidates are reported explicitly; model-load
-  gates and golden CI fixtures remain.
+  Done: IF/LSTM training emits feature-health metadata and rejects selected
+  all-NaN columns before fitting; model-load and hot-swap now validate
+  feature specs, score-shaping metadata, scaler/schema alignment, and LSTM
+  threshold/channel compatibility before serving; CI covers a stable golden
+  feature-spec fixture plus corrupt artifact cases.
 
 ### 7B. Detection quality
 

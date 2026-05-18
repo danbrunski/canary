@@ -71,6 +71,7 @@ export interface StatusHealth {
   system: Record<string, number | null>;
   feature_drift?: Record<string, unknown>;
   reconstruction_error_drift?: Record<string, unknown>;
+  obd_scheduler?: Record<string, unknown>;
 }
 
 /** Response from `GET /telemetry/latest?n=...`. */

@@ -63,6 +63,7 @@ from src.preprocessing.feature_pipeline import (
 from src.preprocessing.feature_pipeline import (
     trainable_feature_columns as _trainable_feature_columns,
 )
+from src.telemetry import DECODED_SOURCE, source_of
 
 log = logging.getLogger(__name__)
 
@@ -145,7 +146,7 @@ def evaluate(
         candidates = [
             c
             for c in resampled.columns
-            if str(c).startswith("decoded:") and bool(resampled[c].notna().any())
+            if source_of(str(c)) == DECODED_SOURCE and bool(resampled[c].notna().any())
         ]
         if not candidates:
             log.warning("no decoded channel available to inject; skipping evaluation")

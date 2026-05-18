@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from src.collection.can_collector import collect_can_from_config
-from src.collection.can_obd_collector import CanObdSpec, collect_can_obd_from_config
+from src.collection.can_obd_collector import (
+    CanObdSpec,
+    ObdSchedulerMetrics,
+    collect_can_obd_from_config,
+)
 from src.collection.obd_collector import ObdSpec, collect_obd
 from src.collection.pids import REQUIRED_PIDS
 from src.collection.queueing import QueueDepthMonitor
@@ -95,7 +99,11 @@ async def _drain_queue(
         warn_if_storage_low(storage_path, storage_warning_mb)
 
 
-def _default_collectors(config: CanaryConfig) -> list[CollectorStarter]:
+def _default_collectors(
+    config: CanaryConfig,
+    *,
+    obd_scheduler_metrics_callback: Callable[[ObdSchedulerMetrics], None] | None = None,
+) -> list[CollectorStarter]:
     reconnect_policy = ReconnectPolicy(
         initial_delay_seconds=config.collection.reconnect_initial_delay_seconds,
         max_delay_seconds=config.collection.reconnect_max_delay_seconds,
@@ -117,6 +125,7 @@ def _default_collectors(config: CanaryConfig) -> list[CollectorStarter]:
                 queue,
                 stop,
                 reconnect_policy=reconnect_policy,
+                on_scheduler_metrics=obd_scheduler_metrics_callback,
             )
 
         return [canable_obd]

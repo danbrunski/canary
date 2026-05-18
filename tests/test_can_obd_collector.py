@@ -16,6 +16,7 @@ from src.collection.can_collector import make_session_dir
 from src.collection.can_obd_collector import (
     AUTO_BASELINE_PID_NAMES,
     CanObdSpec,
+    ObdSchedulerMetrics,
     build_poll_requests,
     parse_can_id,
     parse_did_token,
@@ -99,6 +100,35 @@ class _NegativeThenPositiveBus:
         return None
 
 
+class _TieredPidBus:
+    def __init__(self) -> None:
+        self.sent: list[can.Message] = []
+        self._responses: list[can.Message] = []
+
+    def send(self, msg: can.Message) -> None:
+        self.sent.append(msg)
+        data = bytes(msg.data)
+        if msg.arbitration_id != 0x7DF or data[:2] != bytes([0x02, 0x01]):
+            return
+        pid = data[2]
+        if pid == 0x0C:  # RPM, fast
+            payload = bytes([0x04, 0x41, pid, 0x0A, 0xF0, 0x00, 0x00, 0x00])
+        elif pid == 0x2F:  # FUEL_LEVEL, slow
+            payload = bytes([0x03, 0x41, pid, 0x80, 0x00, 0x00, 0x00, 0x00])
+        else:
+            return
+        self._responses.append(
+            can.Message(arbitration_id=0x7E8, data=payload, is_extended_id=False)
+        )
+
+    def recv(self, timeout: float = 0.0) -> can.Message | None:
+        if self._responses:
+            return self._responses.pop(0)
+        if timeout:
+            time.sleep(min(timeout, 0.001))
+        return None
+
+
 def test_parse_pid_token_accepts_auto_names_and_hex() -> None:
     assert parse_pid_token("auto") is None
     assert parse_pid_token("RPM") == 0x0C
@@ -127,6 +157,19 @@ def test_build_poll_requests_combines_auto_explicit_and_dids() -> None:
     assert channels[:2] == ["RPM", "COOLANT_TEMP"]
     assert "SPEED" in channels
     assert channels[-1] == "DID_1101"
+
+
+def test_build_poll_requests_assigns_registry_poll_tiers() -> None:
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=("RPM", "COOLANT_TEMP", "FUEL_LEVEL"),
+    )
+
+    tiers = {r.channel: r.poll_tier for r in build_poll_requests(_StaticDiscovery(), spec)}
+
+    assert tiers["RPM"] == "fast"
+    assert tiers["COOLANT_TEMP"] == "medium"
+    assert tiers["FUEL_LEVEL"] == "slow"
 
 
 def test_auto_poll_requests_probe_full_decoded_pid_catalog_when_discovery_is_sparse() -> None:
@@ -213,6 +256,75 @@ def test_negative_pid_response_does_not_block_following_pids() -> None:
     assert [reading.pid for reading in readings] == ["RPM"]
     assert len(bus.sent) >= 2
     assert stats.requests_sent >= 2
+
+
+def test_scheduler_polls_fast_tier_more_often_than_slow_tier() -> None:
+    bus = _TieredPidBus()
+    stop = threading.Event()
+    readings: list[Any] = []
+
+    def on_reading(reading: Any) -> None:
+        readings.append(reading)
+        counts = {pid: sum(1 for r in readings if r.pid == pid) for pid in {"RPM", "FUEL_LEVEL"}}
+        if counts["RPM"] >= 3 and counts["FUEL_LEVEL"] >= 1:
+            stop.set()
+
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        poll_rate_hz=8.0,
+        pids=("RPM", "FUEL_LEVEL"),
+        request_timeout_seconds=0.02,
+    )
+
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        spec,
+        on_frame=lambda _msg: None,
+        on_reading=on_reading,
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 1.0,
+    )
+
+    sent_pids = [bytes(msg.data)[2] for msg in bus.sent if bytes(msg.data)[:2] == b"\x02\x01"]
+    assert sent_pids.count(0x0C) > sent_pids.count(0x2F)
+    assert stats.readings_emitted == len(readings)
+
+
+def test_scheduler_metrics_report_rates_and_backoff_state() -> None:
+    bus = _NegativeThenPositiveBus()
+    stop = threading.Event()
+    snapshots: list[ObdSchedulerMetrics] = []
+
+    def on_reading(reading: Any) -> None:
+        if reading.pid == "RPM":
+            stop.set()
+
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        poll_rate_hz=50.0,
+        pids=("ENGINE_LOAD", "RPM"),
+        request_timeout_seconds=0.05,
+    )
+
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        spec,
+        on_frame=lambda _msg: None,
+        on_reading=on_reading,
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 0.4,
+        on_scheduler_metrics=snapshots.append,
+        scheduler_metrics_interval_seconds=0.01,
+    )
+
+    assert stats.scheduler_snapshots >= 1
+    latest = snapshots[-1].to_dict()
+    assert latest["bus_budget_requests_per_second"] > spec.poll_rate_hz
+    assert latest["response_rate"] is not None
+    by_channel = {row["channel"]: row for row in latest["requests"]}
+    assert by_channel["ENGINE_LOAD"]["backed_off"] is True
+    assert by_channel["ENGINE_LOAD"]["timeouts"] >= 1
+    assert by_channel["RPM"]["responses"] >= 1
 
 
 # --- record_can_obd reconnect resilience -----------------------------------

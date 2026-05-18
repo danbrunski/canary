@@ -36,10 +36,12 @@ from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 from src.models.manifest import (
+    FeatureSpecValidationError,
     ManifestValidationError,
     ModelManifestCommon,
     load_manifest_common,
     schemas_compatible,
+    validate_model_feature_spec,
 )
 
 log = logging.getLogger(__name__)
@@ -150,7 +152,11 @@ class ModelManager(Generic[T]):
                 manifest = load_manifest_common(
                     manifest_path, allowed_model_types=self._allowed_model_types
                 )
-            except ManifestValidationError as exc:
+                validate_model_feature_spec(
+                    manifest.schema_,
+                    context=f"manifest {manifest_path}",
+                )
+            except (ManifestValidationError, FeatureSpecValidationError) as exc:
                 log.warning(
                     "rejecting new manifest", extra={"path": str(manifest_path), "error": str(exc)}
                 )

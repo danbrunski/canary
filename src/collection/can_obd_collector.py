@@ -24,10 +24,10 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 import can
 
@@ -47,6 +47,7 @@ from src.collection.can_obd_client import (
     ObdResponse,
 )
 from src.collection.obd_collector import JsonlReadingWriter, ObdReading, reading_to_record
+from src.collection.obd_registry import PollTier, lookup
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
 from src.collection.reconnect import ReconnectPolicy, wait_for_stop_or_timeout
 from src.config import CanBusConfig, VehicleConfig
@@ -60,6 +61,15 @@ DEFAULT_DID_REQUEST_ID = 0x7E0
 AUTO_PROBE_TIMEOUT_SECONDS = 0.25
 AUTO_MISS_BACKOFF_SECONDS = 30.0
 AUTO_BASELINE_PID_NAMES = tuple(name for _pid, (name, _decoder) in sorted(PID_DECODERS.items()))
+SCHEDULER_METRICS_INTERVAL_SECONDS = 5.0
+BUS_BUDGET_MULTIPLIER = 8.0
+MIN_BUS_BUDGET_REQUESTS_PER_SECOND = 2.0
+TIER_RATE_FACTORS: dict[PollTier, float] = {
+    "fast": 1.0,
+    "medium": 1.0 / 3.0,
+    "slow": 1.0 / 15.0,
+    "on_demand": 0.0,
+}
 
 _PCI_SINGLE_FRAME = 0x0
 _PCI_FIRST_FRAME = 0x1
@@ -91,6 +101,9 @@ class CanObdLoopStats:
     parse_errors: int = 0
     requests_sent: int = 0
     readings_emitted: int = 0
+    request_timeouts: int = 0
+    bus_errors: int = 0
+    scheduler_snapshots: int = 0
 
 
 @dataclass(frozen=True)
@@ -100,6 +113,7 @@ class _PollRequest:
     identifier: int
     request_id: int
     channel: str
+    poll_tier: PollTier = "medium"
     auto_probe: bool = False
     fast_probe: bool = False
 
@@ -108,6 +122,14 @@ class _PollRequest:
 class _PollRequestState:
     missed_responses: int = 0
     suppressed_until: float = 0.0
+    next_due_at: float = 0.0
+    last_requested_at: float | None = None
+    last_response_at: float | None = None
+    requests_sent: int = 0
+    responses: int = 0
+    timeouts: int = 0
+    backoffs: int = 0
+    bus_errors: int = 0
 
 
 @dataclass
@@ -115,6 +137,43 @@ class _ReassemblyBuffer:
     total_length: int
     received: bytearray
     next_sequence: int
+
+
+@dataclass(frozen=True)
+class ObdSchedulerMetrics:
+    """Live state of the adaptive OBD poll scheduler.
+
+    The daemon surfaces this through ``/status`` so stale/missing OBD channels
+    are explainable: requested rate, actual response rate, backoff state, and
+    bus errors are visible per PID instead of being hidden behind a flat loop.
+    """
+
+    configured_poll_rate_hz: float
+    bus_budget_requests_per_second: float
+    active_requests: int
+    backed_off_requests: int
+    requests_sent: int
+    readings_emitted: int
+    request_timeouts: int
+    bus_errors: int
+    response_rate: float | None
+    by_tier: dict[str, dict[str, float | int | None]]
+    requests: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "configured_poll_rate_hz": self.configured_poll_rate_hz,
+            "bus_budget_requests_per_second": self.bus_budget_requests_per_second,
+            "active_requests": self.active_requests,
+            "backed_off_requests": self.backed_off_requests,
+            "requests_sent": self.requests_sent,
+            "readings_emitted": self.readings_emitted,
+            "request_timeouts": self.request_timeouts,
+            "bus_errors": self.bus_errors,
+            "response_rate": self.response_rate,
+            "by_tier": self.by_tier,
+            "requests": self.requests,
+        }
 
 
 def parse_pid_token(token: str) -> int | None:
@@ -206,6 +265,7 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
             identifier=pid,
             request_id=DEFAULT_REQUEST_ID,
             channel=PID_DECODERS[pid][0],
+            poll_tier=_poll_tier_for_pid(pid),
             auto_probe=auto_probe_by_pid[pid],
             fast_probe=fast_probe_by_pid[pid],
         )
@@ -219,9 +279,17 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
                 identifier=did,
                 request_id=spec.did_request_id,
                 channel=f"DID_{did:04X}",
+                poll_tier="medium",
             )
         )
     return requests
+
+
+def _poll_tier_for_pid(pid: int) -> PollTier:
+    definition = lookup(0x01, pid)
+    if definition is None:
+        return "medium"
+    return definition.poll_tier
 
 
 def run_can_obd_loop(
@@ -233,6 +301,8 @@ def run_can_obd_loop(
     stop_event: threading.Event,
     deadline_monotonic: float | None = None,
     client_factory: Callable[[can.BusABC], _PidDiscoveryClient] | None = None,
+    on_scheduler_metrics: Callable[[ObdSchedulerMetrics], None] | None = None,
+    scheduler_metrics_interval_seconds: float = SCHEDULER_METRICS_INTERVAL_SECONDS,
 ) -> CanObdLoopStats:
     """Run a single-bus CAN + OBD loop until stopped.
 
@@ -250,29 +320,35 @@ def run_can_obd_loop(
         else client_factory(bus)
     )
     requests = build_poll_requests(client, spec)
+    budget_rps = _bus_budget_requests_per_second(spec)
     if requests:
-        initial_request_spacing = 1.0 / (max(spec.poll_rate_hz, 0.001) * len(requests))
         log.info(
             "canable obd streaming started",
             extra={
                 "pids": [r.channel for r in requests if r.kind == "pid"],
                 "dids": [r.channel for r in requests if r.kind == "did"],
-                "initial_request_spacing_seconds": initial_request_spacing,
+                "poll_tiers": {r.channel: r.poll_tier for r in requests},
+                "bus_budget_requests_per_second": budget_rps,
                 "auto_miss_backoff_seconds": AUTO_MISS_BACKOFF_SECONDS,
             },
         )
     else:
         log.warning("canable obd streaming has no PID/DID requests; recording CAN only")
 
-    index = 0
-    request_states = [_PollRequestState() for _request in requests]
-    next_request_at = time.monotonic()
+    request_states = _initial_request_states(requests, spec, time.monotonic())
+    next_budget_at = time.monotonic()
+    next_metrics_at = time.monotonic()
     while not _should_stop(stop_event, deadline_monotonic):
+        now = time.monotonic()
+        if on_scheduler_metrics is not None and now >= next_metrics_at:
+            on_scheduler_metrics(_scheduler_metrics(requests, request_states, spec, stats, now))
+            stats.scheduler_snapshots += 1
+            next_metrics_at = now + max(0.1, scheduler_metrics_interval_seconds)
+
         if not requests:
             _recv_and_tap(bus, on_frame, stats, timeout=0.2)
             continue
 
-        now = time.monotonic()
         active_request_count = _count_active_requests(requests, request_states, now)
         if active_request_count == 0:
             _drain_frames_until(
@@ -285,35 +361,53 @@ def run_can_obd_loop(
             )
             continue
 
-        request_spacing = 1.0 / (max(spec.poll_rate_hz, 0.001) * active_request_count)
-        if now < next_request_at:
+        if now < next_budget_at:
             _drain_frames_until(
                 bus,
                 on_frame,
                 stats,
                 stop_event,
-                next_request_at,
+                next_budget_at,
                 deadline_monotonic,
             )
             continue
 
-        selection = _select_next_request(requests, request_states, index, now)
+        selection = _select_next_due_request(requests, request_states, now)
         if selection is None:
+            next_due = _next_due_at(requests, request_states, now)
+            if next_due is not None:
+                wait_until = next_due if next_budget_at <= now else min(next_due, next_budget_at)
+                _drain_frames_until(
+                    bus,
+                    on_frame,
+                    stats,
+                    stop_event,
+                    wait_until,
+                    deadline_monotonic,
+                )
             continue
-        selected_index, request, request_state = selection
+        request, request_state = selection
 
         timeout_seconds = spec.request_timeout_seconds
         if request.auto_probe and (request.fast_probe or request_state.missed_responses > 0):
             timeout_seconds = min(timeout_seconds, AUTO_PROBE_TIMEOUT_SECONDS)
-        response = _query_with_tap(
-            bus,
-            request,
-            timeout_seconds=timeout_seconds,
-            on_frame=on_frame,
-            stop_event=stop_event,
-            stats=stats,
-            deadline_monotonic=deadline_monotonic,
-        )
+        request_started = time.monotonic()
+        request_state.last_requested_at = request_started
+        request_state.requests_sent += 1
+        try:
+            response = _query_with_tap(
+                bus,
+                request,
+                timeout_seconds=timeout_seconds,
+                on_frame=on_frame,
+                stop_event=stop_event,
+                stats=stats,
+                deadline_monotonic=deadline_monotonic,
+            )
+        except Exception:  # noqa: BLE001 - propagate after recording scheduler state
+            request_state.bus_errors += 1
+            stats.bus_errors += 1
+            raise
         emitted = False
         if response is not None:
             reading = _response_to_reading(request, response)
@@ -321,16 +415,22 @@ def run_can_obd_loop(
                 emitted = True
                 stats.readings_emitted += 1
                 on_reading(reading)
-        if request.auto_probe:
-            _update_auto_probe_state(
-                request_state,
-                emitted=emitted,
-                now=time.monotonic(),
-            )
+        if emitted:
+            request_state.responses += 1
+            request_state.last_response_at = time.monotonic()
+        else:
+            request_state.timeouts += 1
+            stats.request_timeouts += 1
+        _update_response_state(request_state, emitted=emitted, now=time.monotonic())
 
-        index = (selected_index + 1) % len(requests)
-        next_request_at = max(next_request_at + request_spacing, time.monotonic())
+        request_state.next_due_at = _next_request_due_at(request, request_state, spec)
+        next_budget_at = max(next_budget_at + 1.0 / budget_rps, time.monotonic())
 
+    if on_scheduler_metrics is not None:
+        on_scheduler_metrics(
+            _scheduler_metrics(requests, request_states, spec, stats, time.monotonic())
+        )
+        stats.scheduler_snapshots += 1
     return stats
 
 
@@ -341,6 +441,7 @@ async def collect_can_obd_from_config(
     *,
     factory: Callable[[CanBusConfig], can.BusABC] = bus_factory,
     reconnect_policy: ReconnectPolicy | None = DEFAULT_RECONNECT_POLICY,
+    on_scheduler_metrics: Callable[[ObdSchedulerMetrics], None] | None = None,
 ) -> None:
     """Daemon producer for the Canable-native path."""
     loop = asyncio.get_running_loop()
@@ -372,6 +473,12 @@ async def collect_can_obd_from_config(
                         partial(put_nowait_or_drop, queue, record, on_drop=drop_counter)
                     )
 
+                metrics_callback = None
+                if on_scheduler_metrics is not None:
+
+                    def metrics_callback(metrics: ObdSchedulerMetrics) -> None:
+                        loop.call_soon_threadsafe(on_scheduler_metrics, metrics)
+
                 await asyncio.to_thread(
                     run_can_obd_loop,
                     bus,
@@ -379,6 +486,7 @@ async def collect_can_obd_from_config(
                     on_frame=on_frame,
                     on_reading=on_reading,
                     stop_event=thread_stop,
+                    on_scheduler_metrics=metrics_callback,
                 )
                 return
             except ValueError:
@@ -639,7 +747,7 @@ def _response_to_reading(
     return ObdReading(timestamp, name, value, unit)
 
 
-def _update_auto_probe_state(
+def _update_response_state(
     state: _PollRequestState,
     *,
     emitted: bool,
@@ -651,6 +759,55 @@ def _update_auto_probe_state(
         return
     state.missed_responses += 1
     state.suppressed_until = now + AUTO_MISS_BACKOFF_SECONDS
+    state.backoffs += 1
+
+
+def _initial_request_states(
+    requests: list[_PollRequest],
+    spec: CanObdSpec,
+    now: float,
+) -> list[_PollRequestState]:
+    if not requests:
+        return []
+    spacing = 1.0 / _bus_budget_requests_per_second(spec)
+    states: list[_PollRequestState] = []
+    for index, request in enumerate(requests):
+        states.append(_PollRequestState(next_due_at=now + index * spacing))
+        if _request_rate_hz(request, spec) <= 0.0:
+            states[-1].suppressed_until = float("inf")
+    return states
+
+
+def _bus_budget_requests_per_second(spec: CanObdSpec) -> float:
+    base = max(float(spec.poll_rate_hz), 0.001)
+    return max(MIN_BUS_BUDGET_REQUESTS_PER_SECOND, base * BUS_BUDGET_MULTIPLIER)
+
+
+def _request_rate_hz(request: _PollRequest, spec: CanObdSpec) -> float:
+    base = max(float(spec.poll_rate_hz), 0.001)
+    return base * TIER_RATE_FACTORS.get(request.poll_tier, TIER_RATE_FACTORS["medium"])
+
+
+def _request_interval_seconds(request: _PollRequest, spec: CanObdSpec) -> float:
+    rate = _request_rate_hz(request, spec)
+    if rate <= 0.0:
+        return float("inf")
+    return 1.0 / rate
+
+
+def _next_request_due_at(
+    request: _PollRequest,
+    state: _PollRequestState,
+    spec: CanObdSpec,
+) -> float:
+    interval = _request_interval_seconds(request, spec)
+    if interval == float("inf"):
+        return float("inf")
+    anchor = state.last_requested_at if state.last_requested_at is not None else time.monotonic()
+    next_due = anchor + interval
+    if state.suppressed_until > next_due:
+        return state.suppressed_until
+    return next_due
 
 
 def _count_active_requests(
@@ -660,32 +817,141 @@ def _count_active_requests(
 ) -> int:
     return sum(
         1
-        for request, state in zip(requests, states, strict=True)
-        if not _is_request_suppressed(request, state, now)
+        for _request, state in zip(requests, states, strict=True)
+        if not _is_request_suppressed(state, now)
     )
 
 
-def _select_next_request(
+def _select_next_due_request(
     requests: list[_PollRequest],
     states: list[_PollRequestState],
-    start_index: int,
     now: float,
-) -> tuple[int, _PollRequest, _PollRequestState] | None:
-    for offset in range(len(requests)):
-        index = (start_index + offset) % len(requests)
-        request = requests[index]
-        state = states[index]
-        if not _is_request_suppressed(request, state, now):
-            return index, request, state
-    return None
+) -> tuple[_PollRequest, _PollRequestState] | None:
+    candidates = [
+        (state.next_due_at, index, request, state)
+        for index, (request, state) in enumerate(zip(requests, states, strict=True))
+        if not _is_request_suppressed(state, now) and state.next_due_at <= now
+    ]
+    if not candidates:
+        return None
+    _due_at, _index, request, state = min(candidates, key=lambda item: (item[0], item[1]))
+    return request, state
 
 
-def _is_request_suppressed(
-    request: _PollRequest,
-    state: _PollRequestState,
+def _next_due_at(
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
     now: float,
-) -> bool:
-    return request.auto_probe and state.suppressed_until > now
+) -> float | None:
+    due_times = [
+        state.next_due_at
+        for _request, state in zip(requests, states, strict=True)
+        if not _is_request_suppressed(state, now)
+    ]
+    return min(due_times) if due_times else None
+
+
+def _is_request_suppressed(state: _PollRequestState, now: float) -> bool:
+    return state.suppressed_until > now
+
+
+def _is_request_backed_off(state: _PollRequestState, now: float) -> bool:
+    return _is_request_suppressed(state, now) and state.suppressed_until != float("inf")
+
+
+def _scheduler_metrics(
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    spec: CanObdSpec,
+    stats: CanObdLoopStats,
+    now: float,
+) -> ObdSchedulerMetrics:
+    active = _count_active_requests(requests, states, now)
+    backed_off = sum(
+        1
+        for _request, state in zip(requests, states, strict=True)
+        if _is_request_backed_off(state, now)
+    )
+    by_tier: dict[str, dict[str, float | int | None]] = {}
+    for tier in ("fast", "medium", "slow", "on_demand"):
+        tier_requests = [
+            (request, state)
+            for request, state in zip(requests, states, strict=True)
+            if request.poll_tier == tier
+        ]
+        sent = sum(state.requests_sent for _request, state in tier_requests)
+        responses = sum(state.responses for _request, state in tier_requests)
+        timeouts = sum(state.timeouts for _request, state in tier_requests)
+        tier_active = sum(
+            1 for _request, state in tier_requests if not _is_request_suppressed(state, now)
+        )
+        tier_backed_off = sum(
+            1 for _request, state in tier_requests if _is_request_backed_off(state, now)
+        )
+        sample_request = tier_requests[0][0] if tier_requests else None
+        by_tier[tier] = {
+            "configured_rate_hz": (
+                round(_request_rate_hz(sample_request, spec), 4)
+                if sample_request is not None
+                else 0.0
+            ),
+            "request_count": len(tier_requests),
+            "active_count": tier_active,
+            "backed_off_count": tier_backed_off,
+            "requests_sent": sent,
+            "responses": responses,
+            "timeouts": timeouts,
+            "response_rate": round(responses / sent, 4) if sent else None,
+        }
+
+    request_rows: list[dict[str, Any]] = []
+    for request, state in zip(requests, states, strict=True):
+        backed = _is_request_backed_off(state, now)
+        request_rows.append(
+            {
+                "kind": request.kind,
+                "service": f"0x{request.service:02X}",
+                "identifier": f"0x{request.identifier:04X}"
+                if request.identifier > 0xFF
+                else f"0x{request.identifier:02X}",
+                "channel": request.channel,
+                "poll_tier": request.poll_tier,
+                "configured_rate_hz": round(_request_rate_hz(request, spec), 4),
+                "requests_sent": state.requests_sent,
+                "responses": state.responses,
+                "timeouts": state.timeouts,
+                "response_rate": (
+                    round(state.responses / state.requests_sent, 4) if state.requests_sent else None
+                ),
+                "missed_responses": state.missed_responses,
+                "backed_off": backed,
+                "backoff_remaining_seconds": (
+                    round(max(0.0, state.suppressed_until - now), 3) if backed else 0.0
+                ),
+                "last_response_age_seconds": (
+                    round(max(0.0, now - state.last_response_at), 3)
+                    if state.last_response_at is not None
+                    else None
+                ),
+                "bus_errors": state.bus_errors,
+            }
+        )
+
+    return ObdSchedulerMetrics(
+        configured_poll_rate_hz=float(spec.poll_rate_hz),
+        bus_budget_requests_per_second=round(_bus_budget_requests_per_second(spec), 4),
+        active_requests=active,
+        backed_off_requests=backed_off,
+        requests_sent=stats.requests_sent,
+        readings_emitted=stats.readings_emitted,
+        request_timeouts=stats.request_timeouts,
+        bus_errors=stats.bus_errors,
+        response_rate=(
+            round(stats.readings_emitted / stats.requests_sent, 4) if stats.requests_sent else None
+        ),
+        by_tier=by_tier,
+        requests=request_rows,
+    )
 
 
 def _query_with_tap(
@@ -877,6 +1143,7 @@ __all__ = [
     "DEFAULT_DID_REQUEST_ID",
     "CanObdLoopStats",
     "CanObdSpec",
+    "ObdSchedulerMetrics",
     "build_poll_requests",
     "collect_can_obd_from_config",
     "parse_can_id",

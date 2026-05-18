@@ -269,6 +269,63 @@ def test_feature_spec_records_health_and_dropped_columns():
     assert health["columns"]["obd:SPEED"]["unique_finite_count"] == 3
 
 
+def test_feature_spec_matches_golden_contract_for_fixture_frame():
+    import numpy as np
+
+    df = pd.DataFrame(
+        {
+            "session": ["s1"] * 3,
+            "timestamp": pd.date_range("2026-05-11T12:00:00Z", periods=3, freq="1s"),
+            MODE_COLUMN: ["idle"] * 3,
+            "obd:RPM": [800.0, 800.0, 800.0],
+            "obd:SPEED": [0.0, 1.0, 2.0],
+            "deviation:coolant_warmup": [np.nan, np.nan, np.nan],
+        }
+    )
+
+    assert build_feature_spec(df, _trainable_feature_columns(df), config=_config()) == {
+        "feature_spec_version": 1,
+        "feature_columns": ["obd:RPM", "obd:SPEED"],
+        "feature_dtypes": {"obd:RPM": "float64", "obd:SPEED": "float64"},
+        "source_prefixes": ["obd"],
+        "behavior_model_columns": [],
+        "feature_health": {
+            "row_count": 3,
+            "candidate_feature_count": 3,
+            "selected_feature_count": 2,
+            "dropped_all_nan_columns": ["deviation:coolant_warmup"],
+            "all_nan_columns": [],
+            "constant_columns": ["obd:RPM"],
+            "non_finite_columns": [],
+            "columns": {
+                "obd:RPM": {
+                    "dtype": "float64",
+                    "non_null_count": 3,
+                    "finite_count": 3,
+                    "nan_count": 0,
+                    "non_finite_count": 0,
+                    "unique_finite_count": 1,
+                    "constant": True,
+                },
+                "obd:SPEED": {
+                    "dtype": "float64",
+                    "non_null_count": 3,
+                    "finite_count": 3,
+                    "nan_count": 0,
+                    "non_finite_count": 0,
+                    "unique_finite_count": 3,
+                    "constant": False,
+                },
+            },
+        },
+        "preprocessing": {
+            "resample_hz": 1,
+            "rolling_window_seconds": 30,
+            "operating_modes": ["city", "highway", "idle", "wot"],
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # train — end to end
 # ---------------------------------------------------------------------------

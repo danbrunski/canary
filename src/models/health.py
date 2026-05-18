@@ -203,6 +203,7 @@ class HealthMonitor:
         self._last_data_ts: float | None = None
         self._swaps: dict[str, int] = {"swapped": 0, "rejected": 0, "unchanged": 0, "error": 0}
         self._last_swap_version: str | None = None
+        self._obd_scheduler: dict[str, Any] | None = None
 
     def observe_inference(
         self,
@@ -226,6 +227,13 @@ class HealthMonitor:
         self._swaps[kind] = self._swaps.get(kind, 0) + 1
         if kind == "swapped" and version is not None:
             self._last_swap_version = version
+
+    def observe_obd_scheduler(self, metrics: Any) -> None:
+        """Record the latest adaptive OBD scheduler snapshot for ``/status``."""
+        if hasattr(metrics, "to_dict"):
+            self._obd_scheduler = dict(metrics.to_dict())
+        else:
+            self._obd_scheduler = dict(metrics)
 
     def snapshot(
         self,
@@ -263,6 +271,8 @@ class HealthMonitor:
             "active_model_version": self._last_swap_version,
             "system": system_metrics(),
         }
+        if self._obd_scheduler is not None:
+            snap["obd_scheduler"] = dict(self._obd_scheduler)
         if scaler is not None and live_means is not None:
             snap["feature_drift"] = feature_drift(live_means, scaler).to_dict()
         if lstm_thresholds is not None:

@@ -73,6 +73,10 @@ class ManifestValidationError(ValueError):
     """Raised when a manifest payload doesn't satisfy the common contract."""
 
 
+class FeatureSpecValidationError(ValueError):
+    """Raised when a model manifest's feature spec is unsafe to score."""
+
+
 def validate_manifest_common(
     payload: Mapping[str, Any],
     *,
@@ -117,6 +121,43 @@ def validate_manifest_common(
     return manifest
 
 
+def validate_model_feature_spec(
+    schema: Mapping[str, Any],
+    *,
+    context: str = "model feature spec",
+) -> tuple[str, ...]:
+    """Validate the feature contract persisted in a model manifest.
+
+    The common manifest schema intentionally stays permissive so old tooling can
+    still read historical artifacts. Model loading and hot-swap paths use this
+    stricter gate before a detector can score live rows.
+    """
+    if not isinstance(schema, Mapping):
+        raise FeatureSpecValidationError(f"{context}: schema must be a mapping")
+
+    feature_columns = _validate_feature_columns(schema, context=context)
+    version = schema.get("feature_spec_version")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise FeatureSpecValidationError(
+            f"{context}: feature_spec_version must be a positive integer"
+        )
+
+    dtypes = schema.get("feature_dtypes")
+    if not isinstance(dtypes, Mapping):
+        raise FeatureSpecValidationError(f"{context}: feature_dtypes must be present")
+    missing_dtypes = [column for column in feature_columns if column not in dtypes]
+    if missing_dtypes:
+        raise FeatureSpecValidationError(
+            f"{context}: feature_dtypes missing columns: {', '.join(missing_dtypes)}"
+        )
+
+    health = schema.get("feature_health")
+    if not isinstance(health, Mapping):
+        raise FeatureSpecValidationError(f"{context}: feature_health must be present")
+    _validate_feature_health_summary(health, feature_columns, context=context)
+    return feature_columns
+
+
 def load_manifest_common(
     path: Path,
     *,
@@ -154,13 +195,86 @@ def schemas_compatible(
     return list(a_cols) == list(b_cols)
 
 
+def _validate_feature_columns(schema: Mapping[str, Any], *, context: str) -> tuple[str, ...]:
+    raw_columns = schema.get("feature_columns")
+    if not isinstance(raw_columns, list | tuple):
+        raise FeatureSpecValidationError(f"{context}: feature_columns must be a list")
+    columns = tuple(str(column) for column in raw_columns)
+    if not columns:
+        raise FeatureSpecValidationError(f"{context}: feature_columns must not be empty")
+    blanks = [column for column in columns if not column]
+    if blanks:
+        raise FeatureSpecValidationError(f"{context}: feature_columns contains blank names")
+    duplicates = sorted({column for column in columns if columns.count(column) > 1})
+    if duplicates:
+        raise FeatureSpecValidationError(
+            f"{context}: duplicate feature_columns: {', '.join(duplicates)}"
+        )
+    return columns
+
+
+def _validate_feature_health_summary(
+    health: Mapping[str, Any],
+    feature_columns: tuple[str, ...],
+    *,
+    context: str,
+) -> None:
+    selected_count = health.get("selected_feature_count")
+    if selected_count != len(feature_columns):
+        raise FeatureSpecValidationError(
+            f"{context}: feature_health selected_feature_count {selected_count!r} "
+            f"does not match {len(feature_columns)} feature columns"
+        )
+
+    all_nan = [str(column) for column in health.get("all_nan_columns", [])]
+    if all_nan:
+        raise FeatureSpecValidationError(
+            f"{context}: selected feature columns are all-NaN: {', '.join(all_nan)}"
+        )
+    non_finite = [str(column) for column in health.get("non_finite_columns", [])]
+    if non_finite:
+        raise FeatureSpecValidationError(
+            f"{context}: selected feature columns contain non-finite values: "
+            + ", ".join(non_finite)
+        )
+
+    columns_health = health.get("columns")
+    if not isinstance(columns_health, Mapping):
+        raise FeatureSpecValidationError(f"{context}: feature_health columns must be present")
+    missing_health = [column for column in feature_columns if column not in columns_health]
+    if missing_health:
+        raise FeatureSpecValidationError(
+            f"{context}: feature_health missing columns: {', '.join(missing_health)}"
+        )
+
+    for column in feature_columns:
+        column_health = columns_health[column]
+        if not isinstance(column_health, Mapping):
+            raise FeatureSpecValidationError(
+                f"{context}: feature_health for {column!r} must be a mapping"
+            )
+        non_null = column_health.get("non_null_count")
+        finite_count = column_health.get("finite_count")
+        non_finite_count = column_health.get("non_finite_count")
+        if non_null == 0:
+            raise FeatureSpecValidationError(f"{context}: feature {column!r} has no values")
+        if finite_count == 0:
+            raise FeatureSpecValidationError(f"{context}: feature {column!r} has no finite values")
+        if non_finite_count not in (0, None):
+            raise FeatureSpecValidationError(
+                f"{context}: feature {column!r} contains non-finite values"
+            )
+
+
 __all__ = [
     "CURRENT_MANIFEST_FORMAT_VERSION",
+    "FeatureSpecValidationError",
     "KNOWN_MODEL_TYPES",
     "ManifestValidationError",
     "ModelManifestCommon",
     "load_manifest_common",
     "schemas_compatible",
+    "validate_model_feature_spec",
     "validate_manifest_common",
 ]
 

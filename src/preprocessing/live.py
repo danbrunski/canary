@@ -47,7 +47,13 @@ from src.decode.behavior_models import BehaviorModels
 from src.decode.bindings import Bindings, Signal
 from src.preprocessing.feature_pipeline import segment_or_constant
 from src.preprocessing.features import FeatureConfig, compute_features
-from src.telemetry import TelemetryRecord
+from src.telemetry import (
+    DBC_SOURCE,
+    DECODED_SOURCE,
+    OBD_SOURCE,
+    TelemetryRecord,
+    channel_key,
+)
 
 log = logging.getLogger(__name__)
 
@@ -110,7 +116,7 @@ class LiveFeatureSource:
         if record.source == "obd":
             value = _to_float(record.value)
             if value is not None:
-                self._current_values[f"obd:{record.channel}"] = value
+                self._current_values[channel_key(OBD_SOURCE, record.channel)] = value
             return
         if record.source == "can":
             self._apply_can_decode(record)
@@ -119,7 +125,7 @@ class LiveFeatureSource:
         # stored as-is; the pipeline will surface it as a new column.
         value = _to_float(record.value)
         if value is not None:
-            self._current_values[f"{record.source}:{record.channel}"] = value
+            self._current_values[channel_key(record.source, record.channel)] = value
 
     def decode_for_telemetry(self, record: TelemetryRecord) -> tuple[TelemetryRecord, ...]:
         """Return decoded signal rows for a raw CAN record.
@@ -163,7 +169,7 @@ class LiveFeatureSource:
             # normalizes downstream and most bindings have no pinned scale.
             value = _to_float(decoded.value)
             if value is not None:
-                self._current_values[f"decoded:{decoded.channel}"] = value
+                self._current_values[channel_key(DECODED_SOURCE, decoded.channel)] = value
         self._apply_dbc_decode(record)
 
     def _apply_dbc_decode(self, record: TelemetryRecord) -> None:
@@ -193,7 +199,7 @@ class LiveFeatureSource:
                 numeric = float(value)
             except (TypeError, ValueError):
                 continue  # named choice / enum signals — skip in numeric path
-            self._current_values[f"dbc:{signal_name}"] = numeric
+            self._current_values[channel_key(DBC_SOURCE, signal_name)] = numeric
 
     # ------------------------------------------------------------------
     # tick — emit one feature row

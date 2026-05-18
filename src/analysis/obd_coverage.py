@@ -24,6 +24,7 @@ from src.collection.obd_registry import (
     PidCoverageStatus,
     classify_pid,
 )
+from src.telemetry import channel_of
 
 __all__ = [
     "CoverageReport",
@@ -45,7 +46,7 @@ def channels_to_pids(channels: set[str]) -> set[int]:
     """
     pids: set[int] = set()
     for raw in channels:
-        name = raw.split(":", 1)[1] if ":" in raw else raw
+        name = channel_of(raw)
         pid = _NAME_TO_PID.get(name)
         if pid is not None:
             pids.add(pid)

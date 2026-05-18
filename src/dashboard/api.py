@@ -101,6 +101,7 @@ from src.decode.behavior_models import (
 from src.decode.bindings import load_bindings
 from src.models.health import HealthMonitor
 from src.models.training_ledger import TrainingLedger
+from src.preprocessing.decode import decoded_channel
 from src.preprocessing.loader import (
     PARQUET_PATTERN,
     discover_sessions,
@@ -459,7 +460,7 @@ def read_bindings_for_display(
     for signal in bindings.signals:
         if signal.confidence not in confidence_levels:
             continue
-        out[f"decoded:{signal.name}"] = {
+        out[decoded_channel(signal.name)] = {
             "name": signal.name,
             "scale": signal.scale,
             "offset": signal.offset,

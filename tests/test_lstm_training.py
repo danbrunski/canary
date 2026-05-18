@@ -163,6 +163,44 @@ def test_save_and_load_lstm_autoencoder_checkpoint(tmp_path: Path) -> None:
     assert tuple(reconstructed.shape) == tuple(sample.shape)
 
 
+def test_load_rejects_lstm_architecture_feature_mismatch(tmp_path: Path) -> None:
+    torch = _torch()
+    dataset = _dataset()
+    trained = train_lstm_autoencoder(
+        dataset,
+        _config(max_epochs=1),
+        trained_at="2026-05-12T12:00:00Z",
+    )
+    artifact = tmp_path / "lstm.pt"
+    trained.save(artifact)
+
+    payload = torch.load(artifact, map_location="cpu", weights_only=False)
+    payload["manifest"]["architecture"]["input_size"] = 3
+    torch.save(payload, artifact)
+
+    with pytest.raises(ValueError, match="input_size"):
+        load_lstm_autoencoder_model(artifact)
+
+
+def test_load_rejects_lstm_threshold_feature_mismatch(tmp_path: Path) -> None:
+    torch = _torch()
+    dataset = _dataset()
+    trained = train_lstm_autoencoder(
+        dataset,
+        _config(max_epochs=1),
+        trained_at="2026-05-12T12:00:00Z",
+    )
+    artifact = tmp_path / "lstm.pt"
+    trained.save(artifact)
+
+    payload = torch.load(artifact, map_location="cpu", weights_only=False)
+    del payload["manifest"]["thresholds"]["channel_errors"]["speed"]
+    torch.save(payload, artifact)
+
+    with pytest.raises(ValueError, match="thresholds missing"):
+        load_lstm_autoencoder_model(artifact)
+
+
 def test_manifest_round_trip() -> None:
     _torch()
     trained = train_lstm_autoencoder(

@@ -17,12 +17,49 @@ from src.models.manager import (
 from src.models.manifest import CURRENT_MANIFEST_FORMAT_VERSION
 
 
+def _feature_schema(
+    feature_columns: list[str],
+    *,
+    all_nan_columns: list[str] | None = None,
+) -> dict[str, object]:
+    all_nan = all_nan_columns or []
+    return {
+        "feature_spec_version": 1,
+        "feature_columns": feature_columns,
+        "feature_dtypes": {column: "float64" for column in feature_columns},
+        "source_prefixes": ["obd"],
+        "behavior_model_columns": [],
+        "feature_health": {
+            "row_count": 1000,
+            "candidate_feature_count": len(feature_columns),
+            "selected_feature_count": len(feature_columns),
+            "dropped_all_nan_columns": [],
+            "all_nan_columns": all_nan,
+            "constant_columns": [],
+            "non_finite_columns": [],
+            "columns": {
+                column: {
+                    "dtype": "float64",
+                    "non_null_count": 0 if column in all_nan else 1000,
+                    "finite_count": 0 if column in all_nan else 1000,
+                    "nan_count": 1000 if column in all_nan else 0,
+                    "non_finite_count": 0,
+                    "unique_finite_count": 0 if column in all_nan else 10,
+                    "constant": False,
+                }
+                for column in feature_columns
+            },
+        },
+    }
+
+
 def _write_pair(
     artifact_path: Path,
     *,
     model_type: str = "isolation_forest",
     version: str = "v1",
     feature_columns: list[str] | None = None,
+    schema: dict[str, object] | None = None,
     mtime: float | None = None,
 ) -> Path:
     """Write a (artifact, manifest) pair on disk; return the manifest path."""
@@ -39,7 +76,7 @@ def _write_pair(
                 "training_data_hash": "sha256:deadbeef",
                 "input_rows": 1000,
                 "hyperparams": {},
-                "schema": {"feature_columns": feature_columns or ["obd:RPM", "obd:SPEED"]},
+                "schema": schema or _feature_schema(feature_columns or ["obd:RPM", "obd:SPEED"]),
             }
         )
     )
@@ -124,6 +161,25 @@ def test_poll_rejects_when_feature_columns_differ(tmp_path: Path) -> None:
     assert "feature_columns" in result.detail
     assert result.new_version == "v2"
     # Running model is unchanged
+    assert mgr.current is not None
+    assert mgr.current.manifest.model_version == "v1"
+
+
+def test_poll_rejects_unhealthy_feature_spec(tmp_path: Path) -> None:
+    artifact = tmp_path / "model.joblib"
+    _write_pair(artifact, version="v1", feature_columns=["obd:RPM"], mtime=1_000_000.0)
+    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr.load_initial()
+
+    _write_pair(
+        artifact,
+        version="v2",
+        schema=_feature_schema(["obd:RPM"], all_nan_columns=["obd:RPM"]),
+        mtime=2_000_000.0,
+    )
+    result = mgr.poll()
+    assert result.kind == "rejected"
+    assert "all-NaN" in result.detail
     assert mgr.current is not None
     assert mgr.current.manifest.model_version == "v1"
 

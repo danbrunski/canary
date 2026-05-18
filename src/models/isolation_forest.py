@@ -23,7 +23,8 @@ from typing import Any, Protocol
 import numpy as np
 import pandas as pd
 
-from src.preprocessing.feature_pipeline import build_feature_spec, validate_feature_health
+from src.models.manifest import validate_model_feature_spec
+from src.preprocessing.feature_pipeline import build_feature_spec
 from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
@@ -242,7 +243,7 @@ def fit_isolation_forest(
         if feature_spec is not None
         else build_feature_spec(frame, selected_features)
     )
-    validate_feature_health(schema.get("feature_health", {}))
+    validate_model_feature_spec(schema, context="IsolationForest training feature spec")
 
     complete = frame.dropna(subset=selected_features).copy()
     if complete.empty:
@@ -359,6 +360,16 @@ def load_isolation_forest_model(artifact_path: Path) -> TrainedIsolationForest:
 
     manifest = IsolationForestManifest.from_dict(payload["manifest"])
     scaler = ZScoreScaler.from_dict(payload["scaler"])
+    feature_columns = validate_model_feature_spec(
+        manifest.schema,
+        context=f"IsolationForest manifest {artifact_path}",
+    )
+    _validate_loaded_artifact(
+        payload=payload,
+        manifest=manifest,
+        scaler=scaler,
+        feature_columns=feature_columns,
+    )
     return TrainedIsolationForest(
         models=dict(payload["models"]),
         scaler=scaler,
@@ -384,6 +395,32 @@ def _validate_config(config: IsolationForestConfigLike) -> None:
 def _validate_contamination(value: float, *, label: str) -> None:
     if not 0.0 < value <= 0.5:
         raise ValueError(f"{label} must be in (0, 0.5]")
+
+
+def _validate_loaded_artifact(
+    *,
+    payload: Mapping[str, Any],
+    manifest: IsolationForestManifest,
+    scaler: ZScoreScaler,
+    feature_columns: tuple[str, ...],
+) -> None:
+    scaler_columns = tuple(str(column) for column in scaler.columns)
+    if scaler_columns != feature_columns:
+        raise ValueError(
+            "IsolationForest scaler columns do not match manifest feature_columns: "
+            f"scaler={list(scaler_columns)!r}, manifest={list(feature_columns)!r}"
+        )
+
+    manifest_modes = tuple(mode.mode for mode in manifest.modes)
+    if not manifest_modes:
+        raise ValueError("IsolationForest manifest contains no trained modes")
+    model_modes = {str(mode) for mode in dict(payload["models"])}
+    missing_modes = [mode for mode in manifest_modes if mode not in model_modes]
+    if missing_modes:
+        raise ValueError(
+            "IsolationForest artifact missing models for manifest modes: "
+            + ", ".join(missing_modes)
+        )
 
 
 def _per_mode_contamination(config: IsolationForestConfigLike) -> dict[str, float]:
