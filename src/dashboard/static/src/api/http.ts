@@ -6,6 +6,7 @@
 
 import type {
   AnomaliesResponse,
+  BehaviorLiveResponse,
   BehaviorModelsResponse,
   BindingsByChannel,
   CaptureResponse,
@@ -118,6 +119,15 @@ export function getBehaviorModels(
   signal?: AbortSignal,
 ): Promise<BehaviorModelsResponse> {
   return fetchJson<BehaviorModelsResponse>("/models/behavior", { signal });
+}
+
+/** Live "you are here" overlay feed. Polled fast (~2 s) and independently
+ *  of the slow static-surface poll — the trail itself lives server-side, so
+ *  a slow client poll still returns a smooth history. */
+export function getBehaviorLive(
+  signal?: AbortSignal,
+): Promise<BehaviorLiveResponse> {
+  return fetchJson<BehaviorLiveResponse>("/models/behavior/live", { signal });
 }
 
 export function getBindings(signal?: AbortSignal): Promise<BindingsByChannel> {

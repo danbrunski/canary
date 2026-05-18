@@ -36,7 +36,7 @@ import sys
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -57,9 +57,12 @@ from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.jobs import JobController
 from src.dashboard.api import DEFAULT_BINDINGS_PATH, create_app
+from src.dashboard.behavior_live import BehaviorLiveState, BehaviorObservation
 from src.dashboard.broadcast import Broadcaster
+from src.decode.behavior_decoder import deviation
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
+    BehaviorModel1D,
     load_behavior_models,
 )
 from src.decode.bindings import load_bindings
@@ -71,9 +74,15 @@ from src.preprocessing.feature_pipeline import (
     reconcile_feature_frame_to_spec,
 )
 from src.preprocessing.live import LiveFeatureSource
+from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.monitor import warn_if_storage_low
 from src.storage.parquet_writer import ParquetTelemetryWriter, delete_expired_sessions
-from src.telemetry import TelemetryRecord
+from src.telemetry import (
+    DECODED_SOURCE,
+    SOURCE_SEP,
+    TelemetryRecord,
+    channel_key,
+)
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +112,7 @@ class DaemonComponents:
     model_managers: dict[str, ModelManager[Any]]
     alert_tuner: AlertTuner
     health_monitor: HealthMonitor
+    behavior_live: BehaviorLiveState = field(default_factory=BehaviorLiveState)
     capture_controller: CaptureController | None = None
     job_controller: JobController | None = None
 
@@ -132,6 +142,7 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         model_managers=model_managers,
         alert_tuner=tuner,
         health_monitor=HealthMonitor(),
+        behavior_live=BehaviorLiveState(),
         capture_controller=None,
         job_controller=_make_job_controller(config),
     )
@@ -351,6 +362,10 @@ async def run_live_inference(
                         components.health_monitor,
                         scores=components.scores_broadcaster,
                     )
+                # Independent of the IF verdict: the operating point exists
+                # whenever there are observations, even before the feature
+                # warmup window fills, so the overlay updates from tick one.
+                _observe_behavior(source, components.behavior_live)
             except Exception:  # noqa: BLE001 — live inference is best-effort
                 log.exception("live inference tick failed")
         try:
@@ -650,6 +665,80 @@ def _score_and_emit(
     )
 
 
+def _num(value: object) -> float | None:
+    """Float-cast an operating-point value; ``None`` for NaN / non-numeric.
+
+    Mirrors ``behavior_decoder._scalar`` without reaching for a private
+    name — the daemon only needs it to pull the live axis values that
+    position the dashboard's "you are here" marker.
+    """
+    try:
+        f = float(value)  # type: ignore[arg-type]  # except handles non-numeric
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _observe_behavior(source: LiveFeatureSource, behavior_live: BehaviorLiveState) -> None:
+    """Feed one tick of per-model deviations into the live overlay state.
+
+    Reads the exact wide row the feature pipeline used (the source's
+    ``latest_operating_point``) and runs every behavior model through the
+    same ``behavior_decoder.deviation`` the preprocessing path uses. The
+    Models▸Behavior overlay therefore shows backend truth — mode-gated,
+    domain-clamped, empty-cell aware — not a client-side re-derivation that
+    could silently drift from what the IF/LSTM actually see.
+
+    Best-effort: the caller wraps this in the live-inference try/except, so
+    one malformed row can't kill the inference stream.
+    """
+    models = source.behavior_models
+    point = source.latest_operating_point
+    if models is None or not models.models or point is None:
+        return
+    raw_mode = point.get(MODE_COLUMN)
+    mode = raw_mode if isinstance(raw_mode, str) else None
+    ts = point.get("timestamp")
+    if ts is None:
+        timestamp = None
+    elif hasattr(ts, "isoformat"):
+        timestamp = ts.isoformat()
+    else:
+        timestamp = str(ts)
+    observations: list[BehaviorObservation] = []
+    for model in models.models:
+        # Same actual-column resolution as append_deviation_columns: a
+        # qualified source:channel output is verbatim; a bare CAN signal
+        # name falls back to the legacy decoded:<NAME>.
+        actual_col = (
+            model.output
+            if SOURCE_SEP in model.output
+            else channel_key(DECODED_SOURCE, model.output)
+        )
+        actual = _num(point.get(actual_col))
+        result = deviation(model, actual, point)
+        if isinstance(model, BehaviorModel1D):
+            x = _num(point.get(model.axis.channel))
+            y = None
+        else:
+            x = _num(point.get(model.axes[0].channel))
+            y = _num(point.get(model.axes[1].channel))
+        observations.append(
+            BehaviorObservation(
+                name=model.name,
+                kind=model.kind,
+                x=x,
+                y=y,
+                actual=actual,
+                expected=result.expected,
+                deviation=result.deviation,
+                severity=result.severity,
+                mode_match=model.operating_mode is None or mode == model.operating_mode,
+            )
+        )
+    behavior_live.observe(timestamp, mode, observations)
+
+
 def build_live_feature_source(
     components: DaemonComponents,
     *,
@@ -820,6 +909,7 @@ async def serve_in_background(
         feedback_store=FeedbackStore(components.config.daemon.feedback_log),
         alert_tuner=components.alert_tuner,
         health_monitor=components.health_monitor,
+        behavior_live=components.behavior_live,
     )
     if components.job_controller is not None:
         loop = asyncio.get_running_loop()

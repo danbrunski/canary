@@ -16,6 +16,7 @@ const DATA: DashboardData = {
   statusError: null,
   behaviorModels: null,
   behaviorModelsError: null,
+  behaviorLive: null,
   token: "",
   onTokenChange: () => {},
   companion: {

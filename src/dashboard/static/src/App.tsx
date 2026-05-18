@@ -1,4 +1,5 @@
 import { useAnomalyStream } from "./hooks/useAnomalyStream";
+import { useBehaviorLive } from "./hooks/useBehaviorLive";
 import { useBehaviorModels } from "./hooks/useBehaviorModels";
 import { useCompanionSettings } from "./hooks/useCompanionSettings";
 import { useBindings } from "./hooks/useBindings";
@@ -24,6 +25,7 @@ export default function App() {
   const liveScores = useScoreStream();
   const { status, error: statusError } = useStatus();
   const behaviorModels = useBehaviorModels();
+  const behaviorLive = useBehaviorLive();
   const bindings = useBindings();
   const controlToken = useControlToken();
   const companion = useCompanionSettings();
@@ -38,6 +40,7 @@ export default function App() {
     statusError,
     behaviorModels: behaviorModels.data,
     behaviorModelsError: behaviorModels.error,
+    behaviorLive,
     token: controlToken.token,
     onTokenChange: controlToken.setToken,
     companion,

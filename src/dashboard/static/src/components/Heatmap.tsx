@@ -1,6 +1,16 @@
 import { useEffect, useRef } from "react";
 
-import type { GridCell } from "../types";
+import { SEVERITY_HEX, binIndex } from "../lib/behaviorOverlay";
+import type { BehaviorSeverity, GridCell } from "../types";
+
+/** Live operating point for a 2D surface. ``x`` is the axes[0] (row /
+ *  vertical) value, ``y`` the axes[1] (col / horizontal) value — the same
+ *  orientation the daemon and `evaluate_2d` use. */
+export interface HeatmapLive {
+  x: number | null;
+  y: number | null;
+  severity: BehaviorSeverity;
+}
 
 interface HeatmapProps {
   /** Row-major flat list of cells. ``rows`` is the outer index. */
@@ -15,15 +25,20 @@ interface HeatmapProps {
   value?: "mean" | "count";
   /** Optional caption rendered above the canvas. */
   caption?: string;
+  /** axes[0].bin_edges (rows / vertical). Needed to place the marker. */
+  xEdges?: number[];
+  /** axes[1].bin_edges (cols / horizontal). */
+  yEdges?: number[];
+  live?: HeatmapLive | null;
 }
 
 /** Canvas grid renderer for 2D behavior-model surfaces.
  *
- *  Empty cells (``count === 0``) render as dark/transparent so an
- *  operator immediately sees which corners of the operating envelope
- *  haven't been driven yet. The color ramp is a hot-cold gradient on
- *  the populated cells' value range; the legend below the chart gives
- *  the actual scale.
+ *  Empty cells (``count === 0``) render dark so an operator immediately
+ *  sees which corners of the operating envelope haven't been driven yet.
+ *  When live data + bin edges are supplied, the cell the engine is *in
+ *  right now* is outlined in its severity color with a marker — so a
+ *  noisy anomaly at a sparsely-sampled corner is explained at a glance.
  */
 export function Heatmap({
   cells,
@@ -33,6 +48,9 @@ export function Heatmap({
   height = 140,
   value = "mean",
   caption,
+  xEdges,
+  yEdges,
+  live,
 }: HeatmapProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -83,7 +101,33 @@ export function Heatmap({
       }
       ctx.fillRect(x, y, cellW + 0.5, cellH + 0.5);
     });
-  }, [cells, rows, cols, width, height, value]);
+
+    // Live "you are here" cell.
+    if (
+      live &&
+      live.x !== null &&
+      live.y !== null &&
+      xEdges &&
+      yEdges
+    ) {
+      const ri = binIndex(live.x, xEdges); // row (axes[0])
+      const ci = binIndex(live.y, yEdges); // col (axes[1])
+      if (ri !== null && ci !== null) {
+        const x = ci * cellW;
+        const y = (rows - 1 - ri) * cellH;
+        ctx.strokeStyle = SEVERITY_HEX[live.severity];
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 1, y + 1, cellW - 2, cellH - 2);
+        ctx.fillStyle = SEVERITY_HEX[live.severity];
+        ctx.beginPath();
+        ctx.arc(x + cellW / 2, y + cellH / 2, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#0b0f14";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+  }, [cells, rows, cols, width, height, value, xEdges, yEdges, live]);
 
   return (
     <div className="flex flex-col gap-1">

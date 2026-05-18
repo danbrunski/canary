@@ -1,21 +1,51 @@
 import { useEffect, useRef } from "react";
 
-import type { LookupTableFit, PolynomialFit } from "../types";
+import { SEVERITY_HEX } from "../lib/behaviorOverlay";
+import type {
+  BehaviorSeverity,
+  DeviationConfig,
+  LookupTableFit,
+  PolynomialFit,
+} from "../types";
+
+/** Live "you are here" overlay for a 1D surface. ``trail`` is the recent
+ *  rolling history (server-side); points outside the domain or with a null
+ *  axis/actual are skipped by the renderer. */
+export interface CurveLive {
+  x: number | null;
+  actual: number | null;
+  expected: number | null;
+  severity: BehaviorSeverity;
+  trail: { x: number | null; actual: number | null }[];
+}
 
 interface CurveProps {
   fit: PolynomialFit | LookupTableFit;
   domain: [number, number];
+  /** Drives the warning/critical envelope shading (absolute bands only —
+   *  relative bands need a per-x local std the client doesn't have). */
+  deviation?: DeviationConfig | null;
+  live?: CurveLive | null;
   width?: number;
   height?: number;
 }
 
-/** Render a 1D behavior model's fitted curve to canvas.
+/** Render a 1D behavior model's fitted curve, its deviation envelope, and
+ *  the live operating point + recent trajectory.
  *
- *  Samples the fit at ``samples`` evenly-spaced x values across the fit's
- *  declared domain and draws the polyline. Stays cheap because the
- *  evaluation is closed-form for polynomials and linear-interp for the
- *  lookup table; no curve solver involved. */
-export function Curve({ fit, domain, width = 240, height = 90 }: CurveProps) {
+ *  The fit is sampled closed-form (polynomial) or linear-interp (lookup
+ *  table), so the whole thing — curve, ± band fills, trail polyline, marker
+ *  — is a handful of cheap canvas paths redrawn on each 2 s live poll. The
+ *  y-range is fitted over the curve *and* the band *and* the live values so
+ *  an excursion past "normal" is visible rather than clipped off-canvas. */
+export function Curve({
+  fit,
+  domain,
+  deviation,
+  live,
+  width = 240,
+  height = 90,
+}: CurveProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -32,38 +62,135 @@ export function Curve({ fit, domain, width = 240, height = 90 }: CurveProps) {
     ctx.clearRect(0, 0, width, height);
 
     const [xLo, xHi] = domain;
+    const xSpan = xHi - xLo || 1;
     const samples = 96;
     const xs: number[] = [];
     const ys: number[] = [];
     for (let i = 0; i < samples; i++) {
-      const x = xLo + ((xHi - xLo) * i) / (samples - 1);
+      const x = xLo + (xSpan * i) / (samples - 1);
       xs.push(x);
       ys.push(evaluate(fit, x));
     }
 
-    const yLo = Math.min(...ys);
-    const yHi = Math.max(...ys);
+    // Absolute-mode bands shade the curve ± the configured deltas. Relative
+    // mode would need the local std per x (only the daemon has it), so we
+    // skip the fill there and still draw the marker/trail.
+    const absolute = deviation?.kind === "absolute";
+    const warnBand = absolute ? (deviation?.warning_band ?? null) : null;
+    const critBand = absolute ? (deviation?.critical_band ?? null) : null;
+
+    // Collect every value that must stay on-canvas.
+    const inDomain = (x: number) => x >= xLo && x <= xHi;
+    const yCandidates = [...ys];
+    const outer = critBand ?? warnBand;
+    if (outer !== null) {
+      for (const y of ys) yCandidates.push(y + outer, y - outer);
+    }
+    const trailPts = (live?.trail ?? []).filter(
+      (p): p is { x: number; actual: number } =>
+        p.x !== null && p.actual !== null && inDomain(p.x),
+    );
+    for (const p of trailPts) yCandidates.push(p.actual);
+    if (live && live.x !== null && live.actual !== null && inDomain(live.x)) {
+      yCandidates.push(live.actual);
+    }
+    if (live?.expected !== null && live?.expected !== undefined) {
+      yCandidates.push(live.expected);
+    }
+    let yLo = Math.min(...yCandidates);
+    let yHi = Math.max(...yCandidates);
+    const margin = (yHi - yLo || 1) * 0.06;
+    yLo -= margin;
+    yHi += margin;
     const ySpan = yHi - yLo || 1;
     const pad = 4;
     const usableH = height - pad * 2;
 
-    ctx.strokeStyle = "#FFB84A";
+    const xToPx = (x: number) => ((x - xLo) / xSpan) * width;
+    const yToPy = (v: number) => pad + (1 - (v - yLo) / ySpan) * usableH;
+
+    const band = (delta: number, fill: string) => {
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      xs.forEach((x, i) => {
+        const px = xToPx(x);
+        const py = yToPy(ys[i] + delta);
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      });
+      for (let i = xs.length - 1; i >= 0; i--) {
+        ctx.lineTo(xToPx(xs[i]), yToPy(ys[i] - delta));
+      }
+      ctx.closePath();
+      ctx.fill();
+    };
+    // Critical first (wider), warning on top — nested envelopes.
+    if (critBand !== null) band(critBand, "rgba(255, 111, 111, 0.10)");
+    if (warnBand !== null) band(warnBand, "rgba(255, 209, 102, 0.12)");
+
+    // Fitted curve.
+    ctx.strokeStyle = "#ffb547";
     ctx.lineWidth = 1.75;
     ctx.beginPath();
     xs.forEach((x, i) => {
-      const px = ((x - xLo) / (xHi - xLo)) * width;
-      const py = pad + (1 - (ys[i] - yLo) / ySpan) * usableH;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
+      const px = xToPx(x);
+      const py = yToPy(ys[i]);
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
     });
     ctx.stroke();
 
-    // Axis labels (just min/max y values, no clutter)
+    // Recent trajectory — faint polyline through the trail.
+    if (trailPts.length >= 2) {
+      ctx.strokeStyle = "rgba(238, 243, 248, 0.28)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      trailPts.forEach((p, i) => {
+        const px = xToPx(p.x);
+        const py = yToPy(p.actual);
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+    }
+
+    // Current operating point.
+    if (live && live.x !== null && live.actual !== null && inDomain(live.x)) {
+      const px = xToPx(live.x);
+      const py = yToPy(live.actual);
+      // Deviation tick: marker → expected.
+      if (live.expected !== null && live.expected !== undefined) {
+        ctx.strokeStyle = SEVERITY_HEX[live.severity];
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(px, yToPy(live.expected));
+        ctx.stroke();
+      }
+      ctx.fillStyle = SEVERITY_HEX[live.severity];
+      ctx.beginPath();
+      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#0b0f14";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    } else if (live && live.x !== null) {
+      // Off-map: clamp a hollow chevron to the near edge so the operator
+      // sees "we're driving past the fitted envelope," not a blank chart.
+      const atHi = live.x > xHi;
+      const px = atHi ? width - 5 : 5;
+      ctx.strokeStyle = "#8a98a5";
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      ctx.moveTo(atHi ? px - 5 : px + 5, height / 2 - 5);
+      ctx.lineTo(px, height / 2);
+      ctx.lineTo(atHi ? px - 5 : px + 5, height / 2 + 5);
+      ctx.stroke();
+    }
+
+    // Axis labels (min/max y only — no clutter).
     ctx.fillStyle = "#94a3ad";
     ctx.font = "10px ui-monospace, monospace";
     ctx.fillText(yHi.toFixed(1), 2, 10);
     ctx.fillText(yLo.toFixed(1), 2, height - 2);
-  }, [fit, domain, width, height]);
+  }, [fit, domain, deviation, live, width, height]);
 
   return <canvas ref={ref} width={width} height={height} />;
 }
