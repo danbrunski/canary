@@ -740,85 +740,115 @@ Suggested sequence: 8.1 → 8.2 → 8.4 → (8.3 ∥ 8.5) → 8.6.
 
 ---
 
-## Phase 9 — TCN Sequence Detector
+## Phase 9 — TCN Sequence Detector (optional, LSTM-interchangeable)
 
-Goal: add a Temporal Convolutional Network detector as a third anomaly model
-alongside the row-wise Isolation Forest and windowed LSTM autoencoder. The TCN
-should reuse the same feature contract, model management, retraining ledger,
-alert/event pipeline, dashboard vocabulary, and hot-swap path rather than
-becoming a parallel stack. This phase depends on 7.1/7.3 for feature-spec
-safety and should feed 7.2 fusion once calibrated.
+Goal: add a Temporal Convolutional Network **autoencoder** as a selectable
+alternative to the LSTM autoencoder in the *same* sequence-detector slot —
+**not a third model**. CANary keeps two detector roles: the always-on
+row-wise Isolation Forest, and one **sequence autoencoder** whose
+implementation is operator/config-selectable (`lstm` or `tcn`). The LSTM
+stays in-tree and fully supported; the TCN reuses the identical feature
+contract, manifest/threshold/score schema, retraining ledger, alert/event
+source vocabulary, dashboard surface, and hot-swap path so the two are
+drop-in interchangeable. Motivation (stateless fixed windows — no
+cross-mode hidden-state reset logic; ~3–5× faster training; clean Conv1D
+export for a possible future NPU offload) and the broader compute/LLM
+deployment rationale are captured in
+`docs/llm-assist-and-compute-roadmap.md`. Depends on 7.1/7.3 for
+feature-spec safety; for 7.2 fusion the TCN occupies the single
+sequence-detector source — it does **not** add a fusion source or a
+parallel alert stream.
 
-- [ ] **9.1 — TCN detector design + model contract (P1).** Decide the first
-  production shape: causal forecasting residual, sequence-to-sequence
-  reconstruction, or hybrid residual head. Prefer forecasting unless
-  evaluation proves reconstruction is stronger, because it is easier to make
-  the "expected next telemetry" error explainable. Define the stable
-  `model_type` (for example `tcn_forecaster`), artifact layout
-  (`models/tcn/...`), manifest fields, threshold metrics, score/evidence
-  payload, and config names before writing training code. Document how this
-  detector differs from IF (per-row boundary) and LSTM (recurrent
-  autoencoder) so dashboard/event labels stay clear. (Effort: S)
+- [ ] **9.1 — Sequence-AE contract + TCN shape (P1).** Lock a shared
+  "sequence autoencoder" contract that both the existing LSTM-AE and the new
+  TCN-AE satisfy: `model_type` slot semantics, artifact layout
+  (`models/tcn/...`), manifest fields, threshold metrics, and score/evidence
+  payload — identical shape to the LSTM-AE so picking a detector is a config
+  switch, not a schema change. The first TCN shape is a windowed
+  **reconstruction autoencoder** (same anomaly principle as the LSTM-AE)
+  precisely for this interchangeability; a causal-forecasting variant is
+  recorded as a deferred alternative form, not v1. Document how the sequence
+  detector (LSTM-or-TCN) differs from IF (per-row boundary) so
+  dashboard/event labels stay accurate regardless of which is active.
+  (Effort: S)
 
-- [ ] **9.2 — PyTorch TCN module + sequence dataset reuse (P1).**
+- [ ] **9.2 — PyTorch TCN-AE module + sequence dataset reuse (P1).**
   Implement `src/models/tcn.py` with residual/dilated causal blocks,
   configurable channels/kernel/dropout/receptive field, deterministic CPU
-  inference, and unit tests for input/output shapes, receptive-field padding,
-  serialization compatibility, missing Torch behavior, and finite loss. Reuse
-  `src/models/sequence_dataset.py` wherever possible; add only the window
-  target/shift logic needed by the chosen TCN objective. (Effort: M)
+  inference, and unit tests for I/O shapes, receptive-field padding,
+  serialization, missing-Torch behavior, and finite loss. Reuse
+  `src/models/sequence_dataset.py` as-is (same windowing as the LSTM-AE);
+  add only what the reconstruction objective needs. Keep the module
+  export-clean (standard Conv1D, no exotic ops) so the deferred NPU-offload
+  contingency in the roadmap doc stays open without being built now.
+  (Effort: M)
 
-- [ ] **9.3 — TCN training, calibration, and manifest output (P1).** Add
+- [ ] **9.3 — TCN training, calibration, manifest (P1).** Add
   `scripts/train_tcn.py` and `src/models/tcn_training.py` mirroring the LSTM
-  trainer's normal-only training path: shared feature-frame builder, scaler
-  compatibility, validation split, early stopping if needed, global and
-  per-channel residual distributions, per-mode calibration if sample counts
-  support it, feature-health metadata, and `model.manifest.json`. The trainer
-  must fail on all-NaN/constant selected features and record enough metrics
-  for model comparison. (Effort: M–L)
+  trainer's normal-only path: shared feature-frame builder, scaler
+  compatibility, validation split, global + per-channel residual
+  distributions, per-mode calibration when sample counts support it,
+  feature-health metadata, and a `model.manifest.json` whose threshold/score
+  fields are **schema-compatible with the LSTM-AE manifest** so the inference
+  and dashboard layers need no per-implementation branching. Fail on
+  all-NaN/constant selected features; record enough metrics for direct
+  LSTM-vs-TCN comparison. (Effort: M–L)
 
-- [ ] **9.4 — Retrain orchestration + ledger integration (P1).** Extend
-  `scripts/retrain.py` from IF+LSTM to IF+LSTM+TCN with `--skip-tcn`,
-  `--tcn-out`, shared cached feature frames, partial-success semantics, label-
-  aware feedback filtering, and training-ledger ingestion. Add control-plane
-  job kinds (`retrain_tcn`, updated `retrain_all`) and companion-library
-  action support so the TCN can be trained locally or on the Pi using the same
-  workflow as the existing models. (Effort: M)
+- [ ] **9.4 — Retrain orchestration + ledger (P1).** Extend
+  `scripts/retrain.py` to train IF + the *configured* sequence model
+  (`--sequence-model {lstm,tcn}`, default from config; `--skip-sequence`),
+  not IF+LSTM+TCN unconditionally. Shared cached feature frames,
+  partial-success semantics, label-aware feedback filtering, ledger
+  ingestion. Add control-plane job kinds (`retrain_tcn`; `retrain_all`
+  trains IF + the selected sequence model) and companion-library actions so
+  either sequence model trains locally or on the Pi via the existing
+  workflow. (Effort: M)
 
-- [ ] **9.5 — Live TCN inference + daemon hot-swap path (P1).** Add a
-  `TCNInferenceEngine` that consumes reconciled live feature rows from the
-  persisted feature spec, reuses the LSTM sequence-buffer reset semantics,
-  emits one score frame per inference tick, reports model version/latency/
-  thresholds/top residual channels, and degrades cleanly when Torch or the
-  artifact is unavailable. Wire a `ModelManager` for the TCN artifact through
-  `build_components`, `run_daemon`, config examples, status snapshots, and
-  `/ws/scores` without disturbing IF/LSTM scoring. (Effort: M–L)
+- [ ] **9.5 — Live inference + selectable hot-swap (P1).** Add a
+  `TCNInferenceEngine` that fills the **same sequence-detector slot** the
+  LSTM engine fills — only one sequence engine active at a time, chosen by
+  config/hot-swap. Reuse the LSTM sequence-buffer/reset semantics, emit one
+  score frame per tick with the shared version/latency/threshold/top-residual
+  payload, and degrade cleanly when Torch or the artifact is absent. Wire
+  `ModelManager` selection through `build_components`, `run_daemon`, config
+  examples, status snapshots, and `/ws/scores` so switching `lstm`↔`tcn`
+  never disturbs IF and produces no second stream. (Effort: M–L)
 
-- [ ] **9.6 — Alert fusion, evidence, and dashboard support (P1/P2).**
-  Add TCN as a first-class source in `AnomalyEvent`, score normalization,
-  suppression/tuning rules, model-evidence payload parsing, live score panels,
-  model health/drift summaries, training-run comparison, and upload controls.
-  Before 7.2 fusion lands, TCN events may emit independently like IF/LSTM; once
-  fusion exists, TCN evidence must be folded into source agreement and fused
-  severity instead of producing a duplicate alert stream. (Effort: M)
+- [ ] **9.6 — Dashboard, evidence, operator selection (P1/P2).** The TCN
+  reuses the existing sequence-AE source vocabulary (same `AnomalyEvent`
+  source, score normalization, suppression/tuning rules, evidence parsing,
+  live-score panels, health/drift summaries, training-run comparison) —
+  distinguished only by `model_version`: **no new source, no duplicate alert
+  stream**. Add a model-management control to pick the active sequence
+  detector (LSTM or TCN); the dashboard shows which is live; the LSTM is
+  never removed. For 7.2 fusion, IF + sequence-detector is unchanged
+  regardless of backing implementation. (Effort: M)
 
-- [ ] **9.7 — TCN evaluation, false-positive budget, and Pi performance
-  proof (P1).** Extend the synthetic-fault and false-positive benchmark
-  harnesses to compare IF, LSTM, TCN, and fused combinations on the same
-  nominal/anomaly splits. Track alert rate, detection latency, per-fault
-  recall, score drift, CPU, memory, and artifact size. The default config
-  should keep the TCN disabled until it proves ≤1 FP/hr contribution and fits
-  the Pi 5 budget alongside IF/LSTM. (Effort: M)
+- [ ] **9.7 — Parity evaluation + Pi/FP proof (P1).** Before the live and
+  retrain integration, run an offline spike: train the TCN-AE on recorded
+  sessions and compare it head-to-head with the LSTM-AE on the same
+  nominal/anomaly splits — per-fault recall, alert rate, detection latency,
+  score correlation, drift, CPU, memory, artifact size. Gate: the TCN-AE
+  must **match or beat the LSTM-AE at ≤1 FP/hr within the Pi budget** to
+  become the recommended default; if it does not, it ships as a selectable
+  alternative (disabled by default) and the LSTM stays default — it is not
+  removed either way. If the NPU-offload contingency is later taken,
+  re-validate this gate **after int8 quantization** (quantization perturbs
+  reconstruction-error distributions and can move the FP rate — see the
+  roadmap doc). (Effort: M)
 
-- [ ] **9.8 — Config/docs/tests reconciliation (P1).** Add the TCN config block
-  and daemon artifact path to `src/config.py`, every `canary*.yaml` example,
-  `docs/headless-api.md`, `docs/runbooks.md`, `docs/daemon-architecture.md`,
-  and README model summaries. Add tests for config parsing, manifest
-  validation, model manager model-type rejection, retrain skip/partial-success
-  behavior, dashboard source typing, and no-artifact/no-Torch daemon startup.
-  (Effort: S–M)
+- [ ] **9.8 — Config/docs/tests (P1).** Add the `sequence_detector:
+  lstm | tcn` selector and both artifact paths to `src/config.py`, every
+  `canary*.yaml` example, `docs/headless-api.md`, `docs/runbooks.md`,
+  `docs/daemon-architecture.md`, README model summaries, and a pointer to
+  `docs/llm-assist-and-compute-roadmap.md`. Tests: config parsing, selector
+  round-trip, manifest validation, model-manager model-type rejection, swap
+  with both/one/neither artifact present, retrain skip/partial-success,
+  dashboard source typing, no-artifact/no-Torch startup. (Effort: S–M)
 
-Suggested sequence: 9.1 → 9.2 → 9.3 → 9.4 → 9.5 → (9.6 ∥ 9.7) → 9.8.
+Suggested sequence: 9.1 → 9.2 → 9.3 → 9.7 offline spike → (9.4 ∥ 9.5) →
+9.6 → 9.8. The 9.7 parity spike runs *before* the live/retrain integration
+so a fail keeps the LSTM as default at low cost.
 
 ---
 
