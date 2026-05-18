@@ -78,6 +78,8 @@ async def test_build_server_registers_phase1_and_phase2_tools(tmp_path: Path) ->
         "revert_tuning",
         # Phase 3 write
         "upload_model_artifact",
+        # Replay window
+        "replay_window",
     }
     assert expected <= names
     assert "query_telemetry" not in names

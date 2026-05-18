@@ -33,6 +33,7 @@ ALLOWED_JOB_KINDS: set[str] = {
     "retrain_all",
     "refit_behavior_models",
     "corpus_report",
+    "replay_window",
 }
 
 
@@ -271,7 +272,60 @@ class JobController:
                 "--out",
                 str(out),
             ]
+        if kind == "replay_window":
+            return self._replay_window_command(params, job_id=job_id, config_arg=config_arg)
         raise ValueError(f"unsupported job kind: {kind}")
+
+    def _replay_window_command(
+        self,
+        params: Mapping[str, Any],
+        *,
+        job_id: str | None,
+        config_arg: list[str],
+    ) -> list[str]:
+        """Build the ``tools/replay_window.py`` invocation.
+
+        ``params`` must include ``session_id``. ``start``/``end`` are
+        optional ISO timestamps; ``if_model``/``lstm_model``/``anomalies_dir``
+        are optional path overrides. The job's output JSON lands at
+        ``<jobs_dir>/<job_id>.replay.json`` so the MCP client can read it
+        once the job reaches a terminal state.
+        """
+        session_id = params.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("replay_window requires params.session_id")
+        out_path = (
+            self._jobs_dir / f"{job_id}.replay.json"
+            if job_id is not None
+            else self._jobs_dir / "replay.json"
+        )
+        command: list[str] = [
+            str(self._python),
+            "tools/replay_window.py",
+            "--session-id",
+            session_id,
+            *config_arg,
+            "--out",
+            str(out_path),
+            "--pretty",
+        ]
+        for key, flag in (
+            ("start", "--start"),
+            ("end", "--end"),
+            ("if_model", "--if-model"),
+            ("lstm_model", "--lstm-model"),
+            ("anomalies_dir", "--anomalies-dir"),
+        ):
+            value = params.get(key)
+            if value is not None:
+                command.extend([flag, str(value)])
+        max_rows = params.get("max_rows")
+        if isinstance(max_rows, int) and max_rows > 0:
+            command.extend(["--max-rows", str(max_rows)])
+        max_windows = params.get("max_windows")
+        if isinstance(max_windows, int) and max_windows > 0:
+            command.extend(["--max-windows", str(max_windows)])
+        return command
 
     def _session_args(self, params: Mapping[str, Any]) -> list[str]:
         session_ids = _string_list(params.get("session_ids", []))

@@ -40,6 +40,9 @@ from src.mcp_server.tools import (
     logs as logs_tool,
 )
 from src.mcp_server.tools import (
+    replay as replay_tool,
+)
+from src.mcp_server.tools import (
     search as search_tool,
 )
 from src.mcp_server.tools import (
@@ -374,12 +377,14 @@ def _register_write_tools(
                 "ok": False,
                 "error": ("label must be one of 'true_positive', 'false_positive', 'unknown'"),
             }
+        # Narrow once for mypy — the runtime check above already proved the value.
+        narrowed_label: feedback_tool.FeedbackLabel = label  # type: ignore[assignment]
         return await feedback_tool.record_feedback(
             client,
             audit,
             anomaly_id=anomaly_id,
-            label=label,
-            note=note,  # type: ignore[arg-type]
+            label=narrowed_label,
+            note=note,
         )
 
     @mcp.tool()
@@ -446,6 +451,46 @@ def _register_write_tools(
     async def revert_tuning(version: int, by: str | None = None) -> dict[str, Any]:
         """Revert to a previous tuning version (from the audit log)."""
         return await tuning_write_tool.revert_tuning(client, audit, version=version, by=by)
+
+    @mcp.tool()
+    async def replay_window(
+        session_id: str,
+        start: str | None = None,
+        end: str | None = None,
+        if_model: str | None = None,
+        lstm_model: str | None = None,
+        anomalies_dir: str | None = None,
+        max_rows: int | None = None,
+        max_windows: int | None = None,
+        wait: bool = True,
+        poll_interval: float = 2.0,
+        timeout: float = 600.0,
+    ) -> dict[str, Any]:
+        """Replay a session window through IF + LSTM inference and diff vs history.
+
+        Submits a daemon ``replay_window`` job (so heavy imports stay in the
+        daemon process), optionally polls until it terminates, and returns
+        the structured report with per-row IF scores, per-window LSTM
+        scores + channel reconstruction errors, the historical anomaly
+        events for the same window, and a match/replayed-only/historical-
+        only diff. Set ``wait=False`` to submit and return the job id for
+        async polling.
+        """
+        return await replay_tool.replay_window(
+            client,
+            audit,
+            session_id=session_id,
+            start=start,
+            end=end,
+            if_model=if_model,
+            lstm_model=lstm_model,
+            anomalies_dir=anomalies_dir,
+            max_rows=max_rows,
+            max_windows=max_windows,
+            wait=wait,
+            poll_interval=poll_interval,
+            timeout=timeout,
+        )
 
     @mcp.tool()
     async def upload_model_artifact(

@@ -47,6 +47,7 @@ Write tools (audit-logged with `actor="mcp"` via
 | `start_job` / `cancel_job` | `POST /control/jobs[...]` |
 | `set_tuning` / `estimate_tuning` / `revert_tuning` | `POST /control/tuning[...]` |
 | `upload_model_artifact` | base64-encodes a local artifact + `POST /control/models/{type}/artifact` |
+| `replay_window` | submits a `replay_window` daemon job, polls until done, returns the inference report |
 
 Resources (URI-addressable; clients pin these to a conversation for stable context):
 
@@ -148,6 +149,56 @@ same bearer token. Same tool surface, two clients.
 See also [`docs/llm-assist-and-compute-roadmap.md`](./llm-assist-and-compute-roadmap.md)
 for the broader on-device LLM plan; the MCP server is what gives every
 listed feature its data hook.
+
+---
+
+## Inference debugging via `replay_window`
+
+The MCP tool submits a `replay_window` daemon job that re-runs the current
+Isolation Forest + LSTM autoencoder over a session window, looks up the
+anomaly events that historically fired during the same window, and returns
+a structured comparison:
+
+```json
+{
+  "session_id": "2026-05-17T120000",
+  "window": {"start": "...", "end": "...", "actual_start": "...", "actual_end": "..."},
+  "summary": {
+    "rows_scored": 1800,
+    "if_anomalies_replayed": 2,
+    "lstm_windows_scored": 1741,
+    "lstm_anomalies_replayed": 1,
+    "historical_events": 3,
+    "matched": 2,
+    "replayed_only": 1,
+    "historical_only": 1
+  },
+  "isolation_forest": {"loaded": true, "scores": [...], "anomalies": [...]},
+  "lstm_autoencoder": {
+    "loaded": true,
+    "windows": [
+      {"timestamp": "...", "global_score": 0.42, "channel_scores": {...}, ...}
+    ],
+    "anomalies": [...]
+  },
+  "historical_events": [...],
+  "diff": {"matched": 2, "replayed_only": 1, "historical_only": 1, "tolerance_seconds": 2.0},
+  "warnings": []
+}
+```
+
+The heavy lifting (torch, scikit-learn, the preprocessing pipeline) runs in
+the daemon's job runner — the MCP server itself stays lightweight. Missing
+artifacts are reported as `loaded=false` rather than failing the job, so the
+report shows "as much as is recoverable" when only one model is deployed.
+
+Use cases:
+- **Why did this fire?** Replay the window, inspect the per-channel LSTM
+  reconstruction errors at the offending timestamp.
+- **Did my model change fix it?** Replace the deployed artifact, replay the
+  same known-anomalous window, diff against the old historical event.
+- **Why didn't it fire?** Replay a window where the operator expected an
+  anomaly; the IF/LSTM score traces show how close it came.
 
 ---
 
