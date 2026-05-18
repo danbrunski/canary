@@ -4,8 +4,15 @@ import { getFeedback, postFeedback } from "../api/http";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
 import { useControlResource } from "../hooks/useControlResource";
+import { scoreView, windowReference, type AnomalyLevel } from "../anomalyScore";
 import { badgeClass, cn, placeholderClass, selectClass } from "../styles";
 import type { AnomalyEvent } from "../types";
+
+const LEVEL_TONE: Record<AnomalyLevel, string> = {
+  low: "text-fg-dim",
+  elevated: "text-warn",
+  high: "text-bad",
+};
 
 interface AnomalyPanelProps {
   events: AnomalyEvent[];
@@ -33,6 +40,10 @@ function eventKey(e: AnomalyEvent): string {
 export function AnomalyPanel({ events, token }: AnomalyPanelProps) {
   const [sourceFilter, setSourceFilter] = useState<AnomalyEvent["source"] | "all">("all");
   const [modeFilter, setModeFilter] = useState<string | "all">("all");
+  // The IF emitter labels anything a hair past its boundary as an anomaly, so
+  // the raw feed is mostly near-zero noise. Default to hiding the "low" tier
+  // from the list (the chart still carries every point); operators can expand.
+  const [showAll, setShowAll] = useState(false);
   // Locally-applied verdicts (optimistic) keyed by anomaly key, merged over
   // whatever the server already has.
   const [localLabels, setLocalLabels] = useState<Record<string, string>>({});
@@ -77,10 +88,26 @@ export function AnomalyPanel({ events, token }: AnomalyPanelProps) {
     });
   }, [events, sourceFilter, modeFilter]);
 
-  // Last 60 events (oldest first), score axis
-  const scoreSeries = useMemo(() => {
-    return [...visible].reverse().slice(-60).map((e) => e.score);
+  // Normalize once per visible set: IF carries no threshold, so the index
+  // self-calibrates against the window's own p95 (see anomalyScore.ts).
+  const scored = useMemo(() => {
+    const ref = windowReference(visible.map((e) => e.score));
+    return visible.map((e) => ({ e, view: scoreView(e.score, e.threshold, ref) }));
   }, [visible]);
+
+  const currentView = scored[0] ?? null;
+
+  // Chart keeps every point (continuity); the list is what gets de-flooded.
+  const indexSeries = useMemo(
+    () => [...scored].reverse().slice(-60).map((s) => s.view.index),
+    [scored],
+  );
+
+  const shown = useMemo(
+    () => (showAll ? scored : scored.filter((s) => s.view.level !== "low")),
+    [scored, showAll],
+  );
+  const hiddenCount = scored.length - shown.length;
 
   const modes = useMemo(() => {
     const set = new Set<string>();
@@ -139,14 +166,75 @@ export function AnomalyPanel({ events, token }: AnomalyPanelProps) {
         </p>
       ) : (
         <>
-          <div className="mb-2 flex flex-col gap-1">
-            <Sparkline values={scoreSeries} width={520} height={64} stroke="#FFB84A" />
-            <span className="text-[0.7rem] text-fg-dim">
-              last {scoreSeries.length} scores
-            </span>
-          </div>
-          <ol className="m-0 max-h-[22rem] list-none overflow-y-auto p-0">
-            {visible.slice(0, 50).map((e) => (
+          {scored.length === 0 ? (
+            <p className={placeholderClass}>no events match the current filters.</p>
+          ) : (
+            <>
+              {currentView && (
+                <div className="mb-2 flex items-baseline gap-3">
+                  <span
+                    className={cn(
+                      "font-num text-2xl font-semibold tabular-nums",
+                      LEVEL_TONE[currentView.view.level],
+                    )}
+                  >
+                    {currentView.view.index}
+                    <span className="text-sm text-fg-dim">/100</span>
+                  </span>
+                  <span
+                    className={cn(
+                      "text-[0.7rem] uppercase tracking-[0.08em]",
+                      LEVEL_TONE[currentView.view.level],
+                    )}
+                  >
+                    {currentView.view.level}
+                  </span>
+                  <span className="font-num text-[0.75rem] tabular-nums text-fg-dim">
+                    raw {currentView.e.score.toFixed(3)}
+                    {currentView.e.threshold !== null &&
+                      ` / thr ${currentView.e.threshold.toFixed(3)}`}
+                  </span>
+                  <span className="ml-auto text-[0.7rem] text-fg-dim">
+                    current anomaly index
+                  </span>
+                </div>
+              )}
+              <div className="mb-2 flex gap-2">
+                <div className="flex flex-col justify-between py-0.5 text-[0.6rem] tabular-nums text-fg-faint">
+                  <span>100</span>
+                  <span>50</span>
+                  <span>0</span>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <Sparkline
+                    values={indexSeries}
+                    width={500}
+                    height={72}
+                    stroke="#FFB84A"
+                    min={0}
+                    max={100}
+                    baseline={50}
+                  />
+                  <div className="flex justify-between text-[0.65rem] text-fg-faint">
+                    <span>← older</span>
+                    <span>50 ≈ model threshold · last {indexSeries.length}</span>
+                    <span>newest →</span>
+                  </div>
+                </div>
+              </div>
+              {hiddenCount > 0 && (
+                <button
+                  type="button"
+                  className="mb-1 text-[0.72rem] text-accent hover:underline"
+                  onClick={() => setShowAll((v) => !v)}
+                >
+                  {showAll
+                    ? "show fewer (hide low-significance)"
+                    : `${hiddenCount} low-significance hidden · show all`}
+                </button>
+              )}
+              <ol className="m-0 max-h-[22rem] list-none overflow-y-auto p-0">
+                {shown.slice(0, 50).map(({ e, view }) => (
               <li
                 key={`${e.timestamp}-${e.source}-${e.model_version}`}
                 className="flex flex-wrap items-baseline gap-2 border-b border-border py-1.5 text-[0.85rem] last:border-b-0"
@@ -166,18 +254,28 @@ export function AnomalyPanel({ events, token }: AnomalyPanelProps) {
                 {e.operating_mode && (
                   <span className="text-[0.75rem] text-fg-dim">{e.operating_mode}</span>
                 )}
-                <span className="font-num tabular-nums text-bad">
-                  score {e.score.toFixed(3)}
+                <span
+                  className={cn("font-num tabular-nums", LEVEL_TONE[view.level])}
+                  title={`raw score ${e.score.toFixed(3)}${
+                    e.threshold !== null
+                      ? ` / threshold ${e.threshold.toFixed(3)}`
+                      : ""
+                  }`}
+                >
+                  idx {view.index}
                 </span>
-                {e.threshold !== null && (
-                  <span className="font-num tabular-nums text-fg-dim">
-                    / {e.threshold.toFixed(3)}
-                  </span>
-                )}
+                <span className="font-num text-[0.72rem] tabular-nums text-fg-faint">
+                  raw {e.score.toFixed(3)}
+                  {e.threshold !== null && ` / ${e.threshold.toFixed(3)}`}
+                </span>
                 {e.affected_channels.length > 0 && (
-                  <span className="text-[0.78rem] text-fg-dim">
-                    {e.affected_channels.slice(0, 3).join(", ")}
-                    {e.affected_channels.length > 3 && "…"}
+                  <span
+                    className="text-[0.78rem] text-fg-dim"
+                    title={`top contributing channels: ${e.affected_channels.join(", ")}`}
+                  >
+                    drivers: {e.affected_channels.slice(0, 3).join(", ")}
+                    {e.affected_channels.length > 3 &&
+                      ` +${e.affected_channels.length - 3} more`}
                   </span>
                 )}
                 {e.detail?.missing_features === true && (
@@ -217,7 +315,9 @@ export function AnomalyPanel({ events, token }: AnomalyPanelProps) {
                   })()}
               </li>
             ))}
-          </ol>
+              </ol>
+            </>
+          )}
         </>
       )}
     </Panel>
