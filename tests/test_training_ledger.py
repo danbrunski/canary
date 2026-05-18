@@ -219,6 +219,10 @@ def test_retrain_ingests_ledger_when_manifest_present(
             str(if_out),
             "--lstm-out",
             str(lstm_out),
+            # This test stubs build_feature_frame to a sentinel and only
+            # exercises the ledger; opt out of the feedback policy (covered
+            # by test_retrain_ledger_records_feedback_policy with a real frame).
+            "--no-feedback-policy",
             "--ledger",
             str(ledger_path),
         ]
@@ -305,6 +309,9 @@ def test_retrain_ledger_hook_is_best_effort(
             str(tmp_path / "if"),
             "--lstm-out",
             str(tmp_path / "lstm"),
+            # Ledger-only test with a sentinel feature frame; the feedback
+            # policy needs a real DataFrame and is covered elsewhere.
+            "--no-feedback-policy",
             "--ledger",
             str(ledger_path),
         ]
