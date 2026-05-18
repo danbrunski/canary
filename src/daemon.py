@@ -341,33 +341,35 @@ async def run_live_inference(
     Best-effort: every error inside the loop is caught + logged. One bad
     row can't kill the inference stream.
     """
-    if "isolation_forest" not in components.model_managers:
-        log.info("isolation_forest model manager absent; live inference skipped")
-        await stop_event.wait()
-        return
-
     interval = tick_seconds or 1.0 / max(components.config.preprocessing.resample_hz, 1.0)
-    if_manager = components.model_managers["isolation_forest"]
+    if_manager = components.model_managers.get("isolation_forest")
+    if if_manager is None:
+        log.info(
+            "isolation_forest model manager absent; IF scoring disabled — the "
+            "behavior overlay still runs off the live feature source"
+        )
 
     while not stop_event.is_set():
-        loaded = if_manager.current
-        if loaded is not None:
-            try:
-                row = source.tick(datetime.now(UTC))
-                if row is not None:
-                    _score_and_emit(
-                        loaded,
-                        row,
-                        components.emitter,
-                        components.health_monitor,
-                        scores=components.scores_broadcaster,
-                    )
-                # Independent of the IF verdict: the operating point exists
-                # whenever there are observations, even before the feature
-                # warmup window fills, so the overlay updates from tick one.
-                _observe_behavior(source, components.behavior_live)
-            except Exception:  # noqa: BLE001 — live inference is best-effort
-                log.exception("live inference tick failed")
+        try:
+            row = source.tick(datetime.now(UTC))
+            loaded = if_manager.current if if_manager is not None else None
+            if loaded is not None and row is not None:
+                _score_and_emit(
+                    loaded,
+                    row,
+                    components.emitter,
+                    components.health_monitor,
+                    scores=components.scores_broadcaster,
+                )
+            # Behavior deviation is independent of the IF model: the
+            # operating point exists whenever telemetry is flowing, so the
+            # Models▸Behavior overlay must update even with no IF artifact
+            # loaded (none trained yet) and before the feature-warmup
+            # window fills. Gating it behind a loaded IF model was the bug
+            # that left the overlay showing only static bands.
+            _observe_behavior(source, components.behavior_live)
+        except Exception:  # noqa: BLE001 — live inference is best-effort
+            log.exception("live inference tick failed")
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval)
             return  # stop_event fired
