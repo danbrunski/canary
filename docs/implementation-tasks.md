@@ -302,6 +302,24 @@ no Mode 23 / Mode 27 / flash dumps / writes.
 - [x] **5.12 — Model performance panel.** `panels/ModelPanel.tsx` reads
 - [x] **5.13 — TPMS panel (placeholder).** `panels/TpmsPanel.tsx` reads
 - [x] **5.14 — Parked diagnostics panel (gate).** `panels/DiagnosticsPanel.tsx`
+- [ ] **5.14a — Model evidence event inspector.** Upgrade anomaly/model
+  inspection from "score fired" to "why this fired": side-by-side cards for
+  IF, LSTM, and behavior/physics residuals; score vs threshold/band; operating
+  mode; model version; latency; top affected channels; and source agreement
+  (`IF`, `LSTM`, `both`, `residual`). Use the existing LSTM
+  `channel_scores` / `channel_thresholds` event detail first; add IF
+  `feature_contributors` once 7.2a lands.
+- [ ] **5.14b — LSTM reconstruction visualizations.** Add a parked-only
+  detailed LSTM view with top-channel reconstruction-error bars and a
+  window-by-channel heatmap sorted by worst channel. When backend payloads
+  include reconstruction traces, add actual-vs-reconstructed overlays for the
+  top 2-3 channels in the alert window so an event can show exactly what the
+  sequence model expected and where telemetry diverged.
+- [ ] **5.14c — Models health/drift panel.** Replace the `models-health`
+  placeholder with a real panel backed by `/status.health`: p95/max inference
+  latency, missing-feature rate, data freshness, model swap/reject counts,
+  feature drift vs training baseline, reconstruction-error drift, and host
+  load. Keep the driving screen glanceable; this is a parked diagnostics view.
 
 Backend wire-up for the SPA: `create_app(..., static_dir=, enable_dev_cors=)`
 mounts the built React bundle on `/` (404s cleanly until `pnpm build`
@@ -451,6 +469,12 @@ training/model-health visualization, and Torque Pro parity.
   feedback policy summary in the training ledger, and correlates control jobs
   to explicit retrain artifacts via `--job-id`.
 - [x] **6.27 — Model drift and inference health monitoring.**
+- [ ] **6.27a — Model comparison / detector-quality dashboard.** Surface
+  training-run quality artifacts in the dashboard and companion library:
+  nominal score distributions, injected-fault score distributions, false
+  positives per hour, recall by synthetic fault type, old-vs-candidate model
+  comparison, and publish-readiness verdict. Use the shared training ledger
+  artifacts produced by IF/LSTM retrain and false-positive benchmark jobs.
 
 ### 6E. Acceptance tests and parity proof
 
@@ -576,6 +600,17 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   (target flag-rate, not assumed contamination); emitter dedupe/tuning
   operate on the fused event. Directly serves Done-Definition v1 #7
   (≤1 FP/hr). Depends on 7.1, 7.3. (Effort: M)
+
+- [ ] **7.2a — Detector attribution payloads (P1).** Standardize the
+  explanation/evidence data that anomaly events carry so the dashboard can
+  display model "evidence" without reverse-engineering detector internals.
+  For LSTM, emit compact top-channel reconstruction ratios and enough
+  window-level reconstruction detail to support heatmaps/overlays without
+  flooding the WebSocket. For IF, add cheap first-pass contributors by ranking
+  feature distance from the model scaler/training baseline, then evaluate
+  score-delta or SHAP-style attribution offline if the cheap ranking is not
+  trustworthy. Fused events should preserve per-source evidence and source
+  agreement. Depends on 7.1, 7.2. (Effort: M)
 
 - [ ] **7.4 — Behavior/physics residuals as first-class detectors
   (P2).** The behavior models (coolant warmup, idle-RPM-vs-coolant,
