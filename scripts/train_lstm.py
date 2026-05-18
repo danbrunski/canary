@@ -89,9 +89,7 @@ def build_dataset(
         )
     )
     columns = (
-        list(feature_columns)
-        if feature_columns is not None
-        else sequence_feature_columns(features)
+        list(feature_columns) if feature_columns is not None else sequence_feature_columns(features)
     )
     if not columns:
         raise ValueError(

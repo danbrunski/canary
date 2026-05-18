@@ -246,11 +246,7 @@ def _session_cache_entry(session_dir: Path) -> dict[str, Any]:
 def _directory_cache_entry(directory: Path, *, pattern: str) -> dict[str, Any]:
     if not directory.exists():
         return {"path": _stable_path(directory), "exists": False, "files": []}
-    files = [
-        _file_cache_entry(file)
-        for file in sorted(directory.glob(pattern))
-        if file.is_file()
-    ]
+    files = [_file_cache_entry(file) for file in sorted(directory.glob(pattern)) if file.is_file()]
     return {"path": _stable_path(directory), "exists": True, "files": files}
 
 
@@ -401,9 +397,7 @@ def sequence_feature_columns(features: pd.DataFrame) -> list[str]:
       session), so windows actually form.
     """
     base = [
-        col
-        for col in trainable_feature_columns(features)
-        if not col.startswith(DEVIATION_PREFIX)
+        col for col in trainable_feature_columns(features) if not col.startswith(DEVIATION_PREFIX)
     ]
     if "session" not in features.columns or features["session"].nunique() <= 1:
         return base

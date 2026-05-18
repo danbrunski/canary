@@ -79,9 +79,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     archive = root / ARCHIVE_DIRNAME
-    sessions = sorted(
-        d for d in root.iterdir() if d.is_dir() and not d.name.startswith("_")
-    )
+    sessions = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("_"))
     counts = {"ok": 0, "can_only": 0, "corrupt": 0}
     moved = 0
     print(f"{'SESSION':24s} {'VERDICT':9s} DETAIL")

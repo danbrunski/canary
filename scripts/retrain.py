@@ -135,8 +135,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=DEFAULT_FEATURE_CACHE_DIR,
         help=(
-            "Directory for cached model-ready feature frames. Default "
-            f"{DEFAULT_FEATURE_CACHE_DIR}."
+            f"Directory for cached model-ready feature frames. Default {DEFAULT_FEATURE_CACHE_DIR}."
         ),
     )
     parser.add_argument(
