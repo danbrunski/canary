@@ -34,6 +34,7 @@ from typing import Literal
 
 import pandas as pd
 
+from src.can_ids import parse_can_channel
 from src.decode.bindings import Bindings, Signal, load_bindings
 from src.telemetry import DECODED_SOURCE as DECODED_SOURCE
 from src.telemetry import channel_key
@@ -88,7 +89,7 @@ def decode_can_rows(
     decoded_frames: list[pd.DataFrame] = []
     # Group by the hex channel string so we parse the CAN ID once per group.
     for channel, group in can_rows.groupby("channel", sort=False):
-        can_id = _parse_can_id(str(channel))
+        can_id = parse_can_channel(str(channel))
         if can_id is None or can_id not in by_can_id:
             continue
         payloads = group["payload"]
@@ -165,11 +166,3 @@ def read_session_decoded(
         return long_frame
     bindings = load_bindings(bindings_path)
     return decode_can_rows(long_frame, bindings, confidence_levels=confidence_levels)
-
-
-def _parse_can_id(channel: str) -> int | None:
-    """Parse a CAN channel string ('0x551' / '551') into an int, or None."""
-    try:
-        return int(channel, 16)
-    except (ValueError, TypeError):
-        return None

@@ -41,6 +41,7 @@ from typing import Any
 
 import pandas as pd
 
+from src.can_ids import parse_can_channel
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import append_deviation_columns
 from src.decode.behavior_models import BehaviorModels
@@ -145,7 +146,7 @@ class LiveFeatureSource:
         """
         if record.source != "can" or record.payload is None:
             return ()
-        can_id = _parse_can_id(record.channel)
+        can_id = parse_can_channel(record.channel)
         if can_id is None:
             return ()
         signals = self._bindings_by_id.get(can_id)
@@ -192,7 +193,7 @@ class LiveFeatureSource:
         """
         if self.dbc_database is None or record.payload is None:
             return
-        can_id = _parse_can_id(record.channel)
+        can_id = parse_can_channel(record.channel)
         if can_id is None:
             return
         message = self._dbc_message_by_id.get(can_id)
@@ -279,14 +280,6 @@ def _to_float(value: Any) -> float | None:
     try:
         return float(value)
     except (TypeError, ValueError):
-        return None
-
-
-def _parse_can_id(channel: str) -> int | None:
-    """Parse a CAN channel hex string (``"0x551"`` / ``"551"``) into an int."""
-    try:
-        return int(channel, 16)
-    except (ValueError, TypeError):
         return None
 
 

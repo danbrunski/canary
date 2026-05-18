@@ -34,19 +34,12 @@ mounted.
 from __future__ import annotations
 
 import asyncio
-import ipaddress
-import json
 import logging
 import os
-import secrets
-import shutil
-import subprocess
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 from fastapi import (
     BackgroundTasks,
     Depends,
@@ -56,15 +49,12 @@ from fastapi import (
     Query,
     Request,
     WebSocket,
-    WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
 
 from src.alerts.emitter import AnomalyEventEmitter
-from src.alerts.event_logger import read_events_dir
 from src.alerts.feedback import (
     FEEDBACK_LABELS,
     FeedbackStore,
@@ -95,481 +85,45 @@ from src.control.sessions import (
 )
 from src.dashboard.behavior_live import BehaviorLiveState
 from src.dashboard.broadcast import Broadcaster
+from src.dashboard.paths import (
+    DEFAULT_BINDINGS_PATH,
+    DEFAULT_DIDS_PATH,
+    DEFAULT_STATIC_DIR,
+    DEFAULT_TEST_PROFILES_DIR,
+)
+from src.dashboard.readers import (
+    echo_config,
+    read_anomalies_since,
+    read_behavior_models,
+    read_bindings_for_display,
+    read_latest_per_channel,
+    read_latest_telemetry_rows,
+    read_obd_coverage,
+)
+from src.dashboard.schemas import (
+    CaptureStartRequest,
+    CaptureStopRequest,
+    CaptureTagRequest,
+    FeedbackRequest,
+    JobSubmitRequest,
+    ModelUploadRequest,
+    SessionMetadataRequest,
+    SessionPinRequest,
+    TuningRevertRequest,
+    TuningUpdateRequest,
+)
+from src.dashboard.security import _client_is_loopback, _require_control_auth
+from src.dashboard.status import StatusSnapshot, _resolve_latest_session, build_status
+from src.dashboard.version import _canary_version, _git_sha
+from src.dashboard.websockets import _publish_on_app_loop, _run_websocket
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
-    load_behavior_models,
 )
-from src.decode.bindings import load_bindings
 from src.models.health import HealthMonitor
 from src.models.training_ledger import TrainingLedger
-from src.preprocessing.decode import decoded_channel
-from src.preprocessing.loader import (
-    PARQUET_PATTERN,
-    discover_sessions,
-)
-
-#: Where the React SPA's built artifacts land — relative to repo root in dev,
-#: but the daemon resolves it via ``Path(__file__).parent / "static" / "dist"``
-#: which works regardless of cwd.
-DEFAULT_STATIC_DIR = Path(__file__).resolve().parent / "static" / "dist"
-
-#: Repo root, anchored to this file (``src/dashboard/api.py`` → up 3) rather
-#: than the process cwd. These catalog files are version-controlled and ship
-#: in the clone, so the daemon must find them regardless of where it was
-#: launched from — under systemd the unit happens to ``cd`` to the clone, but
-#: a Docker ``WORKDIR`` or a direct ``serve_dashboard`` run would otherwise
-#: silently empty *all three* catalogs. ``DEFAULT_STATIC_DIR`` already anchors
-#: to ``__file__`` for the same reason; these now match.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-
-#: Where the project hand-edits CAN signal bindings live. The dashboard reads
-#: a *display-oriented* projection so the frontend can render decoded channels
-#: in engineering units. The full evidence trail / notes / confidence ladder
-#: stays in the YAML and is irrelevant to the live view.
-DEFAULT_BINDINGS_PATH = _REPO_ROOT / "data" / "bindings.yaml"
-
-#: Canonical Nissan Mode-22 DID catalog (Task 6.16 workbench reads this).
-DEFAULT_DIDS_PATH = _REPO_ROOT / "data" / "dids.yaml"
-
-#: Scanned directory of YAML test-session profiles for the Test panel. A
-#: user-editable catalog (drop a file, it appears) — not hardcoded in code.
-DEFAULT_TEST_PROFILES_DIR = _REPO_ROOT / "data" / "test_profiles"
+from src.preprocessing.loader import discover_sessions
 
 log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Status helpers — pulled out so they're individually testable
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class StatusSnapshot:
-    """What ``GET /status`` returns. Stable shape independent of FastAPI."""
-
-    storage_path: str
-    free_mb: float
-    latest_session: str | None
-    latest_session_path: str | None
-    model_versions: dict[str, str | None]
-    vehicle: str
-    #: Inference-health block (Task 6.27) — latency, freshness, missing-feature
-    #: rate, model-swap outcomes, host load, drift — or ``None`` when the
-    #: daemon hasn't wired a monitor in (tests / bare app).
-    health: dict[str, Any] | None = None
-    #: Emitter counters at ``/status`` request time — ``{"emitted": N,
-    #: "suppressed_not_anomaly": N, "suppressed_dedupe": N}`` or ``None`` when
-    #: the daemon hasn't wired an emitter in. The dashboard surfaces this as
-    #: "is the anomaly path firing?" — emitted > 0 within a recent window is
-    #: a strong "yes" signal; persistent zero with a recent session is the
-    #: cue that something is wrong upstream.
-    emitter_counters: dict[str, int] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "storage_path": self.storage_path,
-            "free_mb": round(self.free_mb, 1),
-            "latest_session": self.latest_session,
-            "latest_session_path": self.latest_session_path,
-            "model_versions": self.model_versions,
-            "vehicle": self.vehicle,
-            "emitter_counters": self.emitter_counters,
-            "health": self.health,
-        }
-
-
-def _free_mb(path: Path) -> float:
-    """Free disk MB at ``path`` (or its first existing parent). 0 on failure."""
-    target = path
-    while not target.exists() and target != target.parent:
-        target = target.parent
-    try:
-        usage = shutil.disk_usage(target)
-    except OSError:
-        return 0.0
-    return usage.free / (1024 * 1024)
-
-
-def _model_version(manifest_path: Path) -> str | None:
-    """Read the version field from a model manifest JSON, or ``None``.
-
-    Reads conservatively — the manifest format isn't strictly enforced
-    here so that an in-development manifest doesn't break ``/status``.
-    """
-    if not manifest_path.exists():
-        return None
-    try:
-        data = json.loads(manifest_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
-    version = (
-        data.get("model_version")
-        or data.get("version")
-        or data.get("training", {}).get("model_version")
-    )
-    return str(version) if version is not None else None
-
-
-def _resolve_latest_session(storage_path: Path) -> Path | None:
-    sessions = discover_sessions(storage_path)
-    return sessions[-1] if sessions else None
-
-
-def build_status(
-    config: CanaryConfig,
-    *,
-    models_dir: Path | None = None,
-    emitter: AnomalyEventEmitter | None = None,
-    health_monitor: HealthMonitor | None = None,
-) -> StatusSnapshot:
-    """Assemble the status snapshot used by ``GET /status``."""
-    storage = config.collection.storage_path
-    latest = _resolve_latest_session(storage)
-    model_versions: dict[str, str | None] = {}
-    if models_dir is not None:
-        # Artifacts live one dir down: <models_dir>/<name>/model.manifest.json
-        # (matches daemon.isolation_forest_artifact / lstm_artifact). Recurse so
-        # the nested layout is found; fall back to the flat
-        # <models_dir>/<name>.manifest.json convention when the manifest sits
-        # directly in models_dir.
-        for manifest in sorted(models_dir.rglob("*.manifest.json")):
-            name = (
-                manifest.stem.removesuffix(".manifest")
-                if manifest.parent == models_dir
-                else manifest.parent.name
-            )
-            model_versions[name] = _model_version(manifest)
-    return StatusSnapshot(
-        storage_path=str(storage),
-        free_mb=_free_mb(storage),
-        latest_session=latest.name if latest else None,
-        latest_session_path=str(latest) if latest else None,
-        model_versions=model_versions,
-        vehicle=f"{config.vehicle.year} {config.vehicle.make} {config.vehicle.model}".strip(),
-        emitter_counters=emitter.counters.to_dict() if emitter is not None else None,
-        health=health_monitor.snapshot() if health_monitor is not None else None,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Telemetry latest — newest Parquet chunk, last N rows
-# ---------------------------------------------------------------------------
-
-
-def read_latest_telemetry_rows(
-    storage_path: Path,
-    *,
-    n: int = 100,
-) -> list[dict[str, Any]]:
-    """Return the last ``n`` rows of the newest session, spanning Parquet
-    chunks as needed.
-
-    Reads chunks newest-first and stops as soon as ``n`` rows are in hand,
-    so latency stays bounded (``n`` is route-capped at 10_000) while the
-    window can still be wide enough to surface a low-rate signal. The old
-    single-newest-chunk read could not: at full bus rate a chunk spans a
-    fraction of a second, so a 1 Hz OBD/decoded row would never appear in
-    "latest N" no matter how large N was. Returns ``[]`` when there's no
-    session/chunk on disk.
-    """
-    latest = _resolve_latest_session(storage_path)
-    if latest is None:
-        return []
-    chunks = sorted(latest.glob(PARQUET_PATTERN))
-    if not chunks:
-        return []
-    collected: list[pd.DataFrame] = []
-    total = 0
-    for chunk in reversed(chunks):  # newest-first; stop once we have >= n
-        if chunk.stat().st_size == 0:
-            continue
-        df = pd.read_parquet(chunk)
-        collected.append(df)
-        total += len(df)
-        if total >= n:
-            break
-    table = (
-        collected[0]
-        if len(collected) == 1
-        else pd.concat(collected[::-1], ignore_index=True)  # back to chronological
-    )
-    if len(table) > n:
-        table = table.tail(n)
-    rows: list[dict[str, Any]] = []
-    for record in table.to_dict(orient="records"):
-        rows.append(_normalize_telemetry_row({str(k): v for k, v in record.items()}))
-    return rows
-
-
-_PER_CHANNEL_COLUMNS = [
-    "timestamp",
-    "source",
-    "channel",
-    "value_number",
-    "value_text",
-    "value_bool",
-    "unit",
-]
-
-
-def read_latest_per_channel(
-    storage_path: Path,
-    *,
-    window_seconds: float = 90.0,
-    max_chunks: int = 300,
-) -> list[dict[str, Any]]:
-    """Return the most recent row for *every distinct channel* in the newest
-    session.
-
-    ``read_latest_telemetry_rows`` returns the last N rows globally, which the
-    high-rate CAN bus dominates ~60:1 over the ~1 Hz OBD poll — a 120-row seed
-    carries only 2–3 OBD channels, so the dashboard's gauges come up nearly
-    empty until the WebSocket slowly backfills. This instead scans chunks
-    newest-first until the accumulated span covers ``window_seconds`` (one full
-    OBD poll cycle, with margin) and keeps the latest sample per
-    ``(source, channel)`` — so every gauge renders immediately on load.
-
-    Only the value columns are read (the binary ``payload`` is skipped), which
-    keeps a ~90 s / ~150 k-row scan well under half a second. Returns ``[]``
-    when there's no session/chunk on disk.
-    """
-    latest = _resolve_latest_session(storage_path)
-    if latest is None:
-        return []
-    chunks = [c for c in sorted(latest.glob(PARQUET_PATTERN)) if c.stat().st_size > 0]
-    if not chunks:
-        return []
-    collected: list[pd.DataFrame] = []
-    for chunk in reversed(chunks[-max_chunks:]):  # newest-first
-        collected.append(pd.read_parquet(chunk, columns=_PER_CHANNEL_COLUMNS))
-        spanned = pd.concat(collected) if len(collected) > 1 else collected[0]
-        ts = pd.to_datetime(spanned["timestamp"], utc=True)
-        if (ts.max() - ts.min()).total_seconds() >= window_seconds:
-            break
-    table = pd.concat(collected[::-1], ignore_index=True)
-    table["timestamp"] = pd.to_datetime(table["timestamp"], utc=True)
-    table = table.sort_values("timestamp", kind="stable")
-    latest_rows = table.groupby(["source", "channel"], as_index=False).last()
-    rows: list[dict[str, Any]] = []
-    for record in latest_rows.to_dict(orient="records"):
-        rows.append(_normalize_telemetry_row({str(k): v for k, v in record.items()}))
-    return rows
-
-
-def read_obd_coverage(storage_path: Path) -> dict[str, Any]:
-    """OBD capability/coverage (Task 6.3) derived from observed telemetry.
-
-    The "supported" set is inferred honestly from which ``obd:`` channels
-    actually appeared in the newest session — no live ECU query, so it works
-    off-vehicle and without owning the diagnostic bus. Empty report when no
-    session/chunk exists yet.
-    """
-    from src.analysis.obd_coverage import build_coverage_report, channels_to_pids
-
-    latest = _resolve_latest_session(storage_path)
-    observed: set[str] = set()
-    if latest is not None:
-        for chunk in sorted(latest.glob(PARQUET_PATTERN)):
-            try:
-                df = pd.read_parquet(chunk, columns=["source", "channel"])
-            except (OSError, ValueError, KeyError):
-                continue
-            obd_rows = df[df["source"] == "obd"]
-            observed.update(str(c) for c in obd_rows["channel"].unique())
-    supported = channels_to_pids(observed)
-    return build_coverage_report(supported).to_dict()
-
-
-def _normalize_telemetry_row(record: dict[str, Any]) -> dict[str, Any]:
-    """Collapse the (value_number, value_text, value_bool) trio into one ``value``
-    so the dashboard gets a stable shape regardless of the underlying type."""
-    value = record.get("value_number")
-    if value is None or pd.isna(value):
-        value = record.get("value_text")
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        value = record.get("value_bool")
-    return {
-        "timestamp": _iso(record.get("timestamp")),
-        "source": record.get("source"),
-        "channel": record.get("channel"),
-        "value": None if (isinstance(value, float) and pd.isna(value)) else value,
-        "unit": record.get("unit"),
-    }
-
-
-def _iso(value: object) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, pd.Timestamp):
-        return value.isoformat()
-    if hasattr(value, "isoformat"):
-        return value.isoformat()  # type: ignore[no-any-return]
-    return str(value)
-
-
-# ---------------------------------------------------------------------------
-# Anomalies — filter the daily JSONL files by `since`
-# ---------------------------------------------------------------------------
-
-
-def read_anomalies_since(
-    anomalies_dir: Path,
-    *,
-    since: str | None = None,
-) -> list[dict[str, Any]]:
-    """Read anomalies from ``anomalies_dir`` with optional ``since`` filter.
-
-    ``since`` is parsed as an ISO-8601 string compared lexicographically against
-    each event's ``timestamp`` — which is also persisted as ISO-8601, so the
-    comparison is correct without a datetime parse. Invalid ``since`` strings
-    raise ``ValueError`` so the FastAPI handler can turn them into 400s.
-    """
-    if not anomalies_dir.exists():
-        return []
-    events = read_events_dir(anomalies_dir)
-    if since is not None:
-        # Validate by parse-roundtrip; we don't need the result, just to fail
-        # loudly on garbage.
-        pd.Timestamp(since)
-        events = [e for e in events if e.timestamp >= since]
-    return [e.to_dict() for e in events]
-
-
-# ---------------------------------------------------------------------------
-# Config echo — convert the Pydantic model to JSON-safe dict
-# ---------------------------------------------------------------------------
-
-
-def echo_config(config: CanaryConfig) -> dict[str, Any]:
-    return config.model_dump(mode="json")
-
-
-# ---------------------------------------------------------------------------
-# Behavior models — Task 4.E.9 dashboard feed
-# ---------------------------------------------------------------------------
-
-
-def read_bindings_for_display(
-    path: Path = DEFAULT_BINDINGS_PATH,
-    *,
-    confidence_levels: tuple[str, ...] = ("confirmed", "high", "medium"),
-) -> dict[str, Any]:
-    """Surface the display-relevant subset of ``bindings.yaml`` for the frontend.
-
-    The dashboard renders a ``decoded:<NAME>`` column's raw integer value as
-    ``raw * scale + offset`` with the binding's unit; values outside
-    ``plausible_min/max`` get color-flagged. Returns one entry per signal
-    keyed by ``decoded:<NAME>`` so the frontend lookup is a flat
-    ``bindings[channel_key]``.
-
-    Low-confidence signals (``low`` / ``hypothesized``) are excluded by
-    default — surfacing them in the UI risks treating a guess as a reading.
-    Adjust ``confidence_levels`` if a parked-mode debug view ever wants
-    them all.
-    """
-    if not path.exists():
-        return {}
-    bindings = load_bindings(path)
-    out: dict[str, dict[str, Any]] = {}
-    for signal in bindings.signals:
-        if signal.confidence not in confidence_levels:
-            continue
-        out[decoded_channel(signal.name)] = {
-            "name": signal.name,
-            "scale": signal.scale,
-            "offset": signal.offset,
-            "unit": signal.unit,
-            "confidence": signal.confidence,
-            "plausible_min": signal.plausible_min,
-            "plausible_max": signal.plausible_max,
-        }
-    return out
-
-
-def read_behavior_models(path: Path = DEFAULT_BEHAVIOR_MODELS_PATH) -> dict[str, Any]:
-    """Return ``behavior_models.yaml`` as a JSON-safe payload for the dashboard.
-
-    The dashboard's performance panel renders 1D fits (coolant warmup, idle
-    RPM curve) directly and 2D fits (timing surface, fuel-trim surface) as
-    heatmaps with per-cell counts surfacing operating-envelope coverage.
-
-    Missing file → ``{"models": [], "schema_version": null}``; the dashboard
-    handles that as "no surfaces refit yet" rather than an error.
-    """
-    if not path.exists():
-        return {"schema_version": None, "models": []}
-    return load_behavior_models(path).model_dump(mode="json")
-
-
-# ---------------------------------------------------------------------------
-# Control-plane request models
-# ---------------------------------------------------------------------------
-
-
-class _ControlRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class CaptureStartRequest(_ControlRequest):
-    purpose: str | None = None
-    protocol: str | None = None
-    vehicle_state: str | None = None
-    fields: dict[str, Any] = Field(default_factory=dict)
-
-
-class CaptureTagRequest(_ControlRequest):
-    label: str
-    kind: str = "event"
-    timestamp: float | None = None
-    fields: dict[str, Any] = Field(default_factory=dict)
-
-
-class CaptureStopRequest(_ControlRequest):
-    reason: str | None = None
-    fields: dict[str, Any] = Field(default_factory=dict)
-
-
-class JobSubmitRequest(_ControlRequest):
-    kind: str
-    params: dict[str, Any] = Field(default_factory=dict)
-
-
-class SessionMetadataRequest(_ControlRequest):
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    merge: bool = True
-
-
-class SessionPinRequest(_ControlRequest):
-    reason: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class ModelUploadRequest(_ControlRequest):
-    artifact_b64: str
-    manifest: dict[str, Any]
-
-
-class FeedbackRequest(_ControlRequest):
-    """Operator verdict on one anomaly event (Task 6.24)."""
-
-    event: dict[str, Any]
-    label: str
-    reason: str | None = None
-    driving_context: dict[str, Any] = Field(default_factory=dict)
-    labeled_by: str | None = None
-
-
-class TuningUpdateRequest(_ControlRequest):
-    """Replace the tuning config (Task 6.25). ``version`` is auto-bumped."""
-
-    config: dict[str, Any]
-    change: str = "tuning update"
-    by: str | None = None
-
-
-class TuningRevertRequest(_ControlRequest):
-    version: int
-    by: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1226,131 +780,20 @@ def create_app(
     return app
 
 
-def _client_is_loopback(request: Request) -> bool:
-    """True iff the request's *socket peer* is a loopback address.
-
-    Uses the real ASGI client address, never ``X-Forwarded-For`` (spoofable),
-    so this can't be forged by a remote LAN client. The Vite dev proxy runs on
-    the dev box and connects from 127.0.0.1, so it counts as loopback too.
-    """
-    client = request.client
-    if client is None:
-        return False
-    try:
-        return ipaddress.ip_address(client.host).is_loopback
-    except ValueError:
-        return False
-
-
-def _require_control_auth(
-    control_token: str | None,
-    authorization: str | None,
-    *,
-    client_is_loopback: bool = False,
-) -> None:
-    """Bearer-token guard for mutating control-plane routes.
-
-    When no token is configured, control is *open to loopback only* (the
-    dev/sim case: your own machine / the Vite proxy) and still refused for
-    anyone else with 503. A configured token is always enforced, regardless
-    of where the request came from — so the Pi (token via install_pi.sh)
-    behaves exactly as before.
-    """
-    if control_token is None or control_token == "":
-        if client_is_loopback:
-            return
-        raise HTTPException(status_code=503, detail="control API token is not configured")
-    presented = ""
-    if authorization is not None and authorization.startswith("Bearer "):
-        presented = authorization[len("Bearer ") :]
-    # Constant-time compare: a wrong token must not be recoverable by timing
-    # the 401. Splitting the scheme off first keeps the comparison token-to-
-    # token (compare_digest is only fully constant-time on equal-length input).
-    if not secrets.compare_digest(presented, control_token):
-        raise HTTPException(
-            status_code=401,
-            detail="missing or invalid bearer token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-
 def _unlink_path(path: Path) -> None:
     path.unlink(missing_ok=True)
 
 
-async def _run_websocket(websocket: WebSocket, bus: Broadcaster) -> None:
-    """Hold one WebSocket open, pumping messages from ``bus`` until disconnect.
-
-    The handler accepts, subscribes, then loops on ``subscription.get()``
-    sending each message as JSON. ``WebSocketDisconnect`` (client closed)
-    breaks the loop cleanly. Any other exception unsubscribes + re-raises
-    — keeping the subscriber list correct under failures.
-    """
-    await websocket.accept()
-    subscription = bus.subscribe()
-    try:
-        while True:
-            message = await subscription.get()
-            await websocket.send_json(message)
-    except WebSocketDisconnect:
-        pass
-    finally:
-        bus.unsubscribe(subscription)
-
-
-def _publish_on_app_loop(
-    bus: Broadcaster,
-    event: dict[str, Any],
-    loop: asyncio.AbstractEventLoop | None,
-) -> None:
-    if loop is None:
-        bus.publish(event)
-        return
-    try:
-        running_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        running_loop = None
-    if running_loop is loop:
-        bus.publish(event)
-        return
-    try:
-        bus.publish_threadsafe(loop, event)
-    except RuntimeError:
-        bus.publish(event)
-
-
-def _canary_version() -> str:
-    """Best-effort package version for the OpenAPI doc."""
-    try:
-        from importlib.metadata import version
-
-        return version("canary")
-    except Exception:  # noqa: BLE001 — anything goes wrong, fall back
-        return "0.0.0"
-
-
-def _git_sha() -> str | None:
-    try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if completed.returncode != 0:
-        return None
-    return completed.stdout.strip() or None
-
-
 __all__ = [
+    "DEFAULT_BINDINGS_PATH",
+    "DEFAULT_DIDS_PATH",
+    "DEFAULT_STATIC_DIR",
+    "DEFAULT_TEST_PROFILES_DIR",
     "StatusSnapshot",
     "build_status",
     "create_app",
     "echo_config",
     "read_anomalies_since",
-    "read_latest_telemetry_rows",
     "read_latest_per_channel",
+    "read_latest_telemetry_rows",
 ]

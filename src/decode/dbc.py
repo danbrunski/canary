@@ -30,6 +30,7 @@ from typing import Any
 
 import pandas as pd
 
+from src.can_ids import parse_can_channel
 from src.telemetry import DBC_SOURCE, channel_key
 
 log = logging.getLogger(__name__)
@@ -111,7 +112,7 @@ def decode_can_rows_dbc(
 
     decoded_records: list[dict[str, Any]] = []
     for channel, group in can_rows.groupby("channel", sort=False):
-        can_id = _parse_can_id(str(channel))
+        can_id = parse_can_channel(str(channel))
         if can_id is None or can_id not in known_ids:
             continue
         try:
@@ -162,14 +163,6 @@ def decode_can_rows_dbc(
         .sort_values(["timestamp", "source", "channel"], kind="stable")
         .reset_index(drop=True)
     )
-
-
-def _parse_can_id(channel: str) -> int | None:
-    """Parse a CAN channel hex string ('0x551' / '551') into an int, or None."""
-    try:
-        return int(channel, 16)
-    except (ValueError, TypeError):
-        return None
 
 
 __all__ = [
