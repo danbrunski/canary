@@ -20,6 +20,8 @@ acceptance matrix) plus the Phase 7 anomaly-architecture hardening from
 the 2026-05-17 review and the Phase 8 storage-lifecycle/disk-safety fix
 from the 2026-05-17 disk investigation (retention is configured but never
 wired into the production daemon; no byte cap; low-space guard only logs).
+Phase 9 adds a TCN sequence detector alongside the Isolation Forest and
+LSTM without changing the current IF/LSTM v1 acceptance gate.
 
 Completed tasks below are collapsed to their title line to keep this
 plan navigable; the full original description for any `[x]` item is in
@@ -738,6 +740,88 @@ Suggested sequence: 8.1 → 8.2 → 8.4 → (8.3 ∥ 8.5) → 8.6.
 
 ---
 
+## Phase 9 — TCN Sequence Detector
+
+Goal: add a Temporal Convolutional Network detector as a third anomaly model
+alongside the row-wise Isolation Forest and windowed LSTM autoencoder. The TCN
+should reuse the same feature contract, model management, retraining ledger,
+alert/event pipeline, dashboard vocabulary, and hot-swap path rather than
+becoming a parallel stack. This phase depends on 7.1/7.3 for feature-spec
+safety and should feed 7.2 fusion once calibrated.
+
+- [ ] **9.1 — TCN detector design + model contract (P1).** Decide the first
+  production shape: causal forecasting residual, sequence-to-sequence
+  reconstruction, or hybrid residual head. Prefer forecasting unless
+  evaluation proves reconstruction is stronger, because it is easier to make
+  the "expected next telemetry" error explainable. Define the stable
+  `model_type` (for example `tcn_forecaster`), artifact layout
+  (`models/tcn/...`), manifest fields, threshold metrics, score/evidence
+  payload, and config names before writing training code. Document how this
+  detector differs from IF (per-row boundary) and LSTM (recurrent
+  autoencoder) so dashboard/event labels stay clear. (Effort: S)
+
+- [ ] **9.2 — PyTorch TCN module + sequence dataset reuse (P1).**
+  Implement `src/models/tcn.py` with residual/dilated causal blocks,
+  configurable channels/kernel/dropout/receptive field, deterministic CPU
+  inference, and unit tests for input/output shapes, receptive-field padding,
+  serialization compatibility, missing Torch behavior, and finite loss. Reuse
+  `src/models/sequence_dataset.py` wherever possible; add only the window
+  target/shift logic needed by the chosen TCN objective. (Effort: M)
+
+- [ ] **9.3 — TCN training, calibration, and manifest output (P1).** Add
+  `scripts/train_tcn.py` and `src/models/tcn_training.py` mirroring the LSTM
+  trainer's normal-only training path: shared feature-frame builder, scaler
+  compatibility, validation split, early stopping if needed, global and
+  per-channel residual distributions, per-mode calibration if sample counts
+  support it, feature-health metadata, and `model.manifest.json`. The trainer
+  must fail on all-NaN/constant selected features and record enough metrics
+  for model comparison. (Effort: M–L)
+
+- [ ] **9.4 — Retrain orchestration + ledger integration (P1).** Extend
+  `scripts/retrain.py` from IF+LSTM to IF+LSTM+TCN with `--skip-tcn`,
+  `--tcn-out`, shared cached feature frames, partial-success semantics, label-
+  aware feedback filtering, and training-ledger ingestion. Add control-plane
+  job kinds (`retrain_tcn`, updated `retrain_all`) and companion-library
+  action support so the TCN can be trained locally or on the Pi using the same
+  workflow as the existing models. (Effort: M)
+
+- [ ] **9.5 — Live TCN inference + daemon hot-swap path (P1).** Add a
+  `TCNInferenceEngine` that consumes reconciled live feature rows from the
+  persisted feature spec, reuses the LSTM sequence-buffer reset semantics,
+  emits one score frame per inference tick, reports model version/latency/
+  thresholds/top residual channels, and degrades cleanly when Torch or the
+  artifact is unavailable. Wire a `ModelManager` for the TCN artifact through
+  `build_components`, `run_daemon`, config examples, status snapshots, and
+  `/ws/scores` without disturbing IF/LSTM scoring. (Effort: M–L)
+
+- [ ] **9.6 — Alert fusion, evidence, and dashboard support (P1/P2).**
+  Add TCN as a first-class source in `AnomalyEvent`, score normalization,
+  suppression/tuning rules, model-evidence payload parsing, live score panels,
+  model health/drift summaries, training-run comparison, and upload controls.
+  Before 7.2 fusion lands, TCN events may emit independently like IF/LSTM; once
+  fusion exists, TCN evidence must be folded into source agreement and fused
+  severity instead of producing a duplicate alert stream. (Effort: M)
+
+- [ ] **9.7 — TCN evaluation, false-positive budget, and Pi performance
+  proof (P1).** Extend the synthetic-fault and false-positive benchmark
+  harnesses to compare IF, LSTM, TCN, and fused combinations on the same
+  nominal/anomaly splits. Track alert rate, detection latency, per-fault
+  recall, score drift, CPU, memory, and artifact size. The default config
+  should keep the TCN disabled until it proves ≤1 FP/hr contribution and fits
+  the Pi 5 budget alongside IF/LSTM. (Effort: M)
+
+- [ ] **9.8 — Config/docs/tests reconciliation (P1).** Add the TCN config block
+  and daemon artifact path to `src/config.py`, every `canary*.yaml` example,
+  `docs/headless-api.md`, `docs/runbooks.md`, `docs/daemon-architecture.md`,
+  and README model summaries. Add tests for config parsing, manifest
+  validation, model manager model-type rejection, retrain skip/partial-success
+  behavior, dashboard source typing, and no-artifact/no-Torch daemon startup.
+  (Effort: S–M)
+
+Suggested sequence: 9.1 → 9.2 → 9.3 → 9.4 → 9.5 → (9.6 ∥ 9.7) → 9.8.
+
+---
+
 ## Cross-Cutting Concerns
 
 These get touched in multiple phases — keep them in mind, don't defer to the end.
@@ -755,8 +839,8 @@ These get touched in multiple phases — keep them in mind, don't defer to the e
   session under `tests/fixtures/`; most preprocessing/model tests should
   use it instead of regenerating synthetic data each run.
 - **CPU budget.** Profile after each phase; NFR-01 says <50% Pi 5 CPU
-  steady-state. LSTM inference is the likely pinch point — measure
-  before optimizing.
+  steady-state. Sequence detectors (LSTM now, TCN in Phase 9) are the likely
+  pinch point — measure before optimizing or enabling another live model.
 - **OBD session scheduling.** Standard Mode 01 polling, Nissan `10 C0`
   DID polling, and parked diagnostic tests may not be simultaneously
   compatible. Treat the active diagnostic profile as explicit state and show
@@ -788,6 +872,7 @@ These get touched in multiple phases — keep them in mind, don't defer to the e
 | R12 | Training data exports can become untraceable once copied off the Pi. | Phase 6.20 requires manifests with config hash, channel schema, sessions, tags, and quality warnings for every export. |
 | R13 | Retention/disk bounding is unwired in the production daemon; the SD card fills unattended → failed writes → corrupt unclean state. | Phase 8.1/8.2 wire a periodic in-daemon sweeper + byte cap; 8.4 adds a regression test that `run_daemon` includes the sweeper. ~37 days KOEO runway buys time but it is not self-correcting. |
 | R14 | Sessions auto-start with no operator intent; KOEO body/chassis CAN accumulates full-rate low-value data. | Phase 8.6 designs an optional record-arming gate without breaking Done-Definition v1 #2 continuous logging. Secondary to R13. |
+| R15 | Adding TCN creates a third detector that can duplicate alerts and exceed the Pi CPU budget if treated as "just another neural model." | Phase 9 keeps TCN disabled until calibrated, benchmarked, and wired through the same feature spec, evidence, fusion, hot-swap, and performance gates as IF/LSTM. |
 
 ---
 
