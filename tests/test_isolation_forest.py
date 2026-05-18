@@ -213,7 +213,10 @@ def test_save_and_load_round_trip_joblib_artifact_and_json_manifest(tmp_path: Pa
     assert before[LABEL_COLUMN].tolist() == after[LABEL_COLUMN].tolist()
 
 
-def test_score_rejects_untrained_operating_mode() -> None:
+def test_score_withholds_untrained_mode_with_multiple_models() -> None:
+    """An unmodeled mode no longer crashes the call; with >1 model and no
+    single-model fallback those rows are withheld (flagged), and the other
+    rows still score normally."""
     frame = _two_mode_frame()
     trained = fit_isolation_forest(
         frame,
@@ -221,11 +224,42 @@ def test_score_rejects_untrained_operating_mode() -> None:
         feature_columns=["obd:RPM", "obd:SPEED"],
         fitted_at="2026-05-12T01:02:03Z",
     )
-    inference = frame.iloc[[0]].copy()
-    inference.loc[inference.index[0], MODE_COLUMN] = "wot"
+    inference = frame.iloc[[0, 1]].copy()
+    inference.loc[inference.index[0], MODE_COLUMN] = "wot"  # untrained
+    # row 1 stays "idle" (a trained mode)
 
-    with pytest.raises(ValueError, match="no IsolationForest model"):
-        trained.score(inference)
+    scored = trained.score(inference)  # no raise
+
+    assert bool(scored.loc[scored.index[0], MISSING_FEATURES_COLUMN]) is True
+    assert scored.loc[scored.index[0], LABEL_COLUMN] == -1
+    assert bool(scored.loc[scored.index[1], MISSING_FEATURES_COLUMN]) is False
+    assert pd.notna(scored.loc[scored.index[1], SCORE_COLUMN])
+    assert scored.loc[scored.index[1], MODEL_MODE_COLUMN] == "idle"
+
+
+def test_score_routes_untrained_mode_to_single_model_fallback() -> None:
+    """A single-model bundle routes every mode (even unmodeled ones) through
+    that one model — the 'collapse to a single model' contract."""
+    idle_only = _two_mode_frame()
+    idle_only = idle_only[idle_only[MODE_COLUMN] == "idle"].reset_index(drop=True)
+    trained = fit_isolation_forest(
+        idle_only,
+        _IFConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+    assert len(trained.models) == 1
+
+    inference = idle_only.iloc[[0]].copy()
+    inference.loc[inference.index[0], MODE_COLUMN] = "wot"  # not a trained mode
+
+    scored = trained.score(inference)  # no raise
+
+    assert bool(scored.loc[scored.index[0], MISSING_FEATURES_COLUMN]) is False
+    assert pd.notna(scored.loc[scored.index[0], SCORE_COLUMN])
+    # MODEL_MODE_COLUMN records the model actually used (the fallback), so a
+    # routed score is observable downstream.
+    assert scored.loc[scored.index[0], MODEL_MODE_COLUMN] == "idle"
 
 
 def test_fit_rejects_disabled_config() -> None:

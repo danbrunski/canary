@@ -169,11 +169,15 @@ class TrainedIsolationForest:
         """
         _require_columns(frame, [self.mode_column, *self.feature_columns])
 
-        missing_modes = _missing_modes(frame[self.mode_column], self.models)
-        if missing_modes:
-            raise ValueError(
-                "no IsolationForest model for operating modes: " + ", ".join(missing_modes)
-            )
+        # A row whose operating mode has no per-mode model used to crash the
+        # whole call. That blanked the live detector whenever the segmenter
+        # emitted a mode the trainer never produced (sparse OBD → train/serve
+        # skew). Degrade instead: a single-model bundle routes every mode
+        # through that one model; otherwise the unmodeled rows are withheld
+        # (flagged, not scored) so the daemon's missing-feature fail-safe
+        # suppresses the emit while health still records the degraded state —
+        # symmetric with the LSTM "wait for a clean window" contract.
+        fallback_key = next(iter(self.models)) if len(self.models) == 1 else None
 
         scaled = self.scaler.transform(frame)
         out = frame.copy()
@@ -198,14 +202,26 @@ class TrainedIsolationForest:
             if complete_indexes.empty:
                 continue
 
+            model_key = mode_key if mode_key in self.models else fallback_key
+            if model_key is None:
+                # No model for this mode and no single-model fallback to route
+                # through. Withhold rather than crash the tick: flag the rows
+                # so the daemon suppresses the emit but health still sees them.
+                out.loc[complete_indexes, SCORE_COLUMN] = np.inf
+                out.loc[complete_indexes, LABEL_COLUMN] = -1
+                out.loc[complete_indexes, MODEL_MODE_COLUMN] = mode_key
+                out.loc[complete_indexes, MISSING_FEATURES_COLUMN] = True
+                continue
+
             x = scaled.loc[complete_indexes, list(self.feature_columns)].to_numpy(dtype=np.float32)
-            model = self.models[mode_key]
+            model = self.models[model_key]
             # sklearn's decision_function is positive for inliers and
             # negative for outliers. Negating gives a more natural
-            # "higher means worse" anomaly score.
+            # "higher means worse" anomaly score. ``MODEL_MODE_COLUMN`` records
+            # the model actually used, so a fallback route is observable.
             out.loc[complete_indexes, SCORE_COLUMN] = -model.decision_function(x)
             out.loc[complete_indexes, LABEL_COLUMN] = model.predict(x).astype(int)
-            out.loc[complete_indexes, MODEL_MODE_COLUMN] = mode_key
+            out.loc[complete_indexes, MODEL_MODE_COLUMN] = model_key
 
         return out
 
@@ -464,13 +480,6 @@ def _training_data_hash(
     row_hashes = pd.util.hash_pandas_object(normalized, index=False).to_numpy(dtype=np.uint64)
     digest.update(row_hashes.tobytes())
     return f"sha256:{digest.hexdigest()}"
-
-
-def _missing_modes(mode_values: pd.Series, models: Mapping[str, Any]) -> list[str]:
-    available = set(models)
-    observed = {str(mode) for mode in mode_values.unique()}
-    missing = observed - available
-    return sorted(missing)
 
 
 def _unique_strings(series: pd.Series) -> tuple[str, ...]:

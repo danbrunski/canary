@@ -213,6 +213,24 @@ def test_segment_or_constant_uses_segmenter_when_obd_present(tmp_path: Path):
     assert (out[MODE_COLUMN] != ALL_MODE).any() or (out[MODE_COLUMN] == "idle").any()
 
 
+def test_segment_or_constant_single_mode_flag_overrides_segmenter(tmp_path: Path):
+    """single_operating_mode=True forces a constant 'all' mode even when the
+    OBD segmenter inputs are present."""
+    resampled = pd.DataFrame(
+        {
+            "session": ["s1"] * 3,
+            "timestamp": pd.date_range("2026-05-11T12:00:00Z", periods=3, freq="1s"),
+            "obd:RPM": [800.0, 850.0, 900.0],
+            "obd:SPEED": [0.0, 0.0, 0.0],
+            "obd:THROTTLE_POS": [10.0, 12.0, 11.0],
+        }
+    )
+    config = _config()
+    config.preprocessing.single_operating_mode = True
+    out = _segment_or_constant(resampled, config)
+    assert (out[MODE_COLUMN] == ALL_MODE).all()
+
+
 # ---------------------------------------------------------------------------
 # _trainable_feature_columns
 # ---------------------------------------------------------------------------
