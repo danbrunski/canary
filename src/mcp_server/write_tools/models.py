@@ -44,9 +44,7 @@ async def upload_model_artifact(
             result="error",
             payload={"model_type": model_type, "error": f"artifact too large: {size}"},
         )
-        raise ValueError(
-            f"artifact size {size} > limit {_MAX_ARTIFACT_BYTES}; refusing to upload"
-        )
+        raise ValueError(f"artifact size {size} > limit {_MAX_ARTIFACT_BYTES}; refusing to upload")
     artifact_b64 = base64.b64encode(artifact_path.read_bytes()).decode("ascii")
     body: dict[str, Any] = {"artifact_b64": artifact_b64, "manifest": manifest}
     # Don't include the giant base64 blob in the audit payload — log the

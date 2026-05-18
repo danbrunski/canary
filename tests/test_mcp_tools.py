@@ -135,9 +135,7 @@ def test_query_telemetry_returns_ok_false_on_validation_error(tmp_path: Path) ->
 
 async def test_start_capture_records_audit_on_success(tmp_path: Path) -> None:
     """A successful capture-start writes one ``ok`` audit entry."""
-    client = await _fake_daemon(
-        {"POST /control/captures": {"id": "cap_1", "session": "S"}}
-    )
+    client = await _fake_daemon({"POST /control/captures": {"id": "cap_1", "session": "S"}})
     audit = MCPAuditLogger(tmp_path / "audit.jsonl")
     result = await captures_tool.start_capture(
         client, audit, purpose="test drive", protocol="drive"

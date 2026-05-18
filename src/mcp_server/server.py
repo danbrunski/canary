@@ -306,6 +306,7 @@ def _register_read_tools(
             )
 
     if query_runner is not None:
+
         @mcp.tool()
         def query_telemetry(sql: str, row_limit: int | None = None) -> dict[str, Any]:
             """Run a single SELECT/WITH against the telemetry Parquet view.
@@ -346,9 +347,7 @@ def _register_write_tools(
         fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Drop a tag onto the active capture mid-drive."""
-        return await captures_tool.tag_current_capture(
-            client, audit, label=label, fields=fields
-        )
+        return await captures_tool.tag_current_capture(client, audit, label=label, fields=fields)
 
     @mcp.tool()
     async def stop_capture(reason: str | None = None) -> dict[str, Any]:
@@ -373,12 +372,14 @@ def _register_write_tools(
         if label not in ("true_positive", "false_positive", "unknown"):
             return {
                 "ok": False,
-                "error": (
-                    "label must be one of 'true_positive', 'false_positive', 'unknown'"
-                ),
+                "error": ("label must be one of 'true_positive', 'false_positive', 'unknown'"),
             }
         return await feedback_tool.record_feedback(
-            client, audit, anomaly_id=anomaly_id, label=label, note=note  # type: ignore[arg-type]
+            client,
+            audit,
+            anomaly_id=anomaly_id,
+            label=label,
+            note=note,  # type: ignore[arg-type]
         )
 
     @mcp.tool()
@@ -406,9 +407,7 @@ def _register_write_tools(
     @mcp.tool()
     async def unpin_session(session_id: str) -> dict[str, Any]:
         """Remove the pin from a session — eligible for retention sweeps again."""
-        return await sessions_write_tool.unpin_session(
-            client, audit, session_id=session_id
-        )
+        return await sessions_write_tool.unpin_session(client, audit, session_id=session_id)
 
     @mcp.tool()
     async def start_job(kind: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -446,9 +445,7 @@ def _register_write_tools(
     @mcp.tool()
     async def revert_tuning(version: int, by: str | None = None) -> dict[str, Any]:
         """Revert to a previous tuning version (from the audit log)."""
-        return await tuning_write_tool.revert_tuning(
-            client, audit, version=version, by=by
-        )
+        return await tuning_write_tool.revert_tuning(client, audit, version=version, by=by)
 
     @mcp.tool()
     async def upload_model_artifact(

@@ -58,9 +58,7 @@ async def estimate_tuning(
     try:
         result = await client.post_json(path, body)
     except DaemonError as exc:
-        audit.record(
-            tool="estimate_tuning", result="error", payload={**body, "error": str(exc)}
-        )
+        audit.record(tool="estimate_tuning", result="error", payload={**body, "error": str(exc)})
         raise
     audit.record(tool="estimate_tuning", result="ok", payload={**body, "response": result})
     return result

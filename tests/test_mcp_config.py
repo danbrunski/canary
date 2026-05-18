@@ -103,9 +103,7 @@ def test_anomalies_dir_explicit_env(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     assert cfg.anomalies_dir == tmp_path / "anom"
 
 
-def test_anomalies_dir_from_config_yaml(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_anomalies_dir_from_config_yaml(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Without an env override, ``alerts.anomalies_dir`` from canary.yaml is used."""
     config_file = tmp_path / "canary.yaml"
     config_file.write_text("alerts:\n  anomalies_dir: /var/canary/anomalies\n")

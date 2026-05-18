@@ -178,9 +178,7 @@ async def test_start_job_passes_kind_and_params(tmp_path: Path) -> None:
 
     client = await _fake_daemon({"POST /control/jobs": respond})
     audit = MCPAuditLogger(tmp_path / "audit.jsonl")
-    await jobs_write_tool.start_job(
-        client, audit, kind="retrain_if", params={"days": 14}
-    )
+    await jobs_write_tool.start_job(client, audit, kind="retrain_if", params={"days": 14})
     await client.aclose()
     assert captured["body"] == {"kind": "retrain_if", "params": {"days": 14}}
 
@@ -260,9 +258,7 @@ async def test_estimate_tuning_forwards_since(tmp_path: Path) -> None:
 
 
 async def test_revert_tuning_audits(tmp_path: Path) -> None:
-    client = await _fake_daemon(
-        {"POST /control/tuning/revert": {"tuning": {"version": 9}}}
-    )
+    client = await _fake_daemon({"POST /control/tuning/revert": {"tuning": {"version": 9}}})
     audit = MCPAuditLogger(tmp_path / "audit.jsonl")
     result = await tuning_write_tool.revert_tuning(client, audit, version=3)
     await client.aclose()

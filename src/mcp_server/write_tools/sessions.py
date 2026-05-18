@@ -24,9 +24,7 @@ async def set_session_metadata(
     body: dict[str, Any] = {"metadata": metadata, "merge": merge}
     payload = {"session_id": session_id, **body}
     try:
-        result = await client.post_json(
-            f"/control/sessions/{session_id}/metadata", body
-        )
+        result = await client.post_json(f"/control/sessions/{session_id}/metadata", body)
     except DaemonError as exc:
         audit.record(
             tool="set_session_metadata",
@@ -34,9 +32,7 @@ async def set_session_metadata(
             payload={**payload, "error": str(exc)},
         )
         raise
-    audit.record(
-        tool="set_session_metadata", result="ok", payload={**payload, "response": result}
-    )
+    audit.record(tool="set_session_metadata", result="ok", payload={**payload, "response": result})
     return result
 
 
@@ -62,9 +58,7 @@ async def pin_session(
     try:
         result = await client.post_json(f"/control/sessions/{session_id}/pin", body)
     except DaemonError as exc:
-        audit.record(
-            tool="pin_session", result="error", payload={**payload, "error": str(exc)}
-        )
+        audit.record(tool="pin_session", result="error", payload={**payload, "error": str(exc)})
         raise
     audit.record(tool="pin_session", result="ok", payload={**payload, "response": result})
     return result
@@ -81,13 +75,9 @@ async def unpin_session(
     try:
         result = await client.post_json(f"/control/sessions/{session_id}/unpin", {})
     except DaemonError as exc:
-        audit.record(
-            tool="unpin_session", result="error", payload={**payload, "error": str(exc)}
-        )
+        audit.record(tool="unpin_session", result="error", payload={**payload, "error": str(exc)})
         raise
-    audit.record(
-        tool="unpin_session", result="ok", payload={**payload, "response": result}
-    )
+    audit.record(tool="unpin_session", result="ok", payload={**payload, "response": result})
     return result
 
 

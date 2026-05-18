@@ -19,14 +19,11 @@ class _FakeProc:
         self.returncode = returncode
 
 
-def test_tail_uses_journal_when_available(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_tail_uses_journal_when_available(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """When ``journalctl`` exists, it's invoked and its JSON lines parsed."""
     monkeypatch.setattr(logs_tool.shutil, "which", lambda _: "/usr/bin/journalctl")
     journal_lines = "\n".join(
-        json.dumps({"MESSAGE": f"line {i}", "_SYSTEMD_UNIT": "canary.service"})
-        for i in range(3)
+        json.dumps({"MESSAGE": f"line {i}", "_SYSTEMD_UNIT": "canary.service"}) for i in range(3)
     )
 
     def fake_run(cmd: list[str], **_kwargs: Any) -> _FakeProc:

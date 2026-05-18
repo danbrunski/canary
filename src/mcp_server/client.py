@@ -62,9 +62,7 @@ class DaemonClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def get_json(
-        self, path: str, params: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def get_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """``GET path`` → parsed JSON, or raise :class:`DaemonError`.
 
         The CANary daemon returns JSON objects from every documented endpoint
@@ -74,9 +72,7 @@ class DaemonClient:
         """
         return cast(dict[str, Any], await self._request("GET", path, params=params))
 
-    async def post_json(
-        self, path: str, body: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def post_json(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         """``POST path`` with a JSON body → parsed JSON or :class:`DaemonError`."""
         return cast(dict[str, Any], await self._request("POST", path, json_body=body))
 
@@ -89,9 +85,7 @@ class DaemonClient:
         json_body: dict[str, Any] | None = None,
     ) -> Any:
         try:
-            response = await self._client.request(
-                method, path, params=params, json=json_body
-            )
+            response = await self._client.request(method, path, params=params, json=json_body)
         except httpx.HTTPError as exc:
             raise DaemonError(f"{method} {path}: {exc}") from exc
 
