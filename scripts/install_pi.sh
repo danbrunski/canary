@@ -79,6 +79,8 @@ chown root:"${CANARY_GROUP}" "${CANARY_ENV}"
 chmod 0640 "${CANARY_ENV}"
 
 install -m 0644 "${CANARY_HOME}/systemd/canary.service" "${CANARY_SERVICE}"
+install -m 0644 "${CANARY_HOME}/systemd/canary-mcp.service" \
+  "$(dirname "${CANARY_SERVICE}")/canary-mcp.service"
 
 cd "${CANARY_HOME}"
 runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
@@ -88,6 +90,7 @@ runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
 
 systemctl daemon-reload
 systemctl enable canary.service
+systemctl enable canary-mcp.service
 
 cat <<EOF
 CANary Pi install complete.
@@ -95,8 +98,9 @@ CANary Pi install complete.
 Next:
   1. Edit ${CANARY_CONFIG}
   2. Bring up can0 for your chosen OBD/CAN mode; see docs/can-setup.md
-  3. Start with: sudo systemctl start canary
-  4. Watch logs: sudo journalctl -u canary -f
+  3. Start with: sudo systemctl start canary canary-mcp
+  4. Watch logs: sudo journalctl -u canary -f  (or -u canary-mcp -f)
   5. Export the laptop token: export CANARY_TOKEN="$(cat "${CANARY_CONTROL_TOKEN_FILE}")"
   6. Open: http://<pi-hostname-or-ip>:8000/status
+  7. MCP server: http://<pi-hostname-or-ip>:8001/mcp (see docs/mcp-server.md)
 EOF

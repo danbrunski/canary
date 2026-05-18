@@ -20,6 +20,12 @@ dependencies = [
     # data. The test suite missed this (FastAPI's TestClient does WS in-process,
     # bypassing uvicorn's ws layer), so it's pinned explicitly here.
     "websockets>=12",
+    # MCP server (src/mcp_server) — exposes the daemon to Claude Code and any
+    # MCP-speaking client. httpx is the async client to localhost:8000; duckdb
+    # backs ad-hoc SQL over the Parquet ring buffer.
+    "mcp>=1.2",
+    "httpx>=0.27",
+    "duckdb>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -33,8 +39,6 @@ dev = [
     # tools/extract_fsm_signals.py — pulls CONSULT-III parameter names from
     # vendor FSM PDFs into data/fsm/signals.json. Dev-only.
     "pdfplumber>=0.11",
-    # fastapi.testclient pulls in httpx; FastAPI doesn't ship it as a hard dep.
-    "httpx>=0.27",
 ]
 ml = [
     # Optional-extra metadata cannot choose a CUDA wheel index. For actual
@@ -49,6 +53,12 @@ emulator = [
     # Tests skip cleanly when the package isn't present.
     "ELM327-emulator>=3.0.5",
 ]
+
+[project.scripts]
+# MCP server entry point — installed onto $PATH so the systemd unit and
+# Claude Code's stdio transport can both invoke it without knowing the
+# Python path on the target host.
+canary-mcp = "src.mcp_server.__main__:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -87,6 +97,8 @@ module = [
     "sklearn.*",
     "torch",
     "torch.*",
+    "duckdb",
+    "duckdb.*",
 ]
 ignore_missing_imports = true
 

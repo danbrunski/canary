@@ -199,3 +199,7 @@ already in place). No model runs on the handheld.
 - `docs/companion-app-plan.md` — the companion path referenced in D2.
 - `docs/daemon-architecture.md` — capture/detection runtime the base tier
   must not regress.
+- `docs/mcp-server.md` — the MCP tool surface that lets Claude (and an
+  optional on-Pi Qwen) inspect daemon state, query telemetry, and drive
+  the labeling loop in feature 5. The MCP server is the data hook every
+  feature here implicitly depends on.

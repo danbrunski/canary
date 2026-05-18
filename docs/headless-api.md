@@ -13,6 +13,12 @@ choosing whether training runs locally or on the Pi, and publishing models back
 to the Pi is covered in `docs/companion-app-plan.md`. That workflow should use
 the same CANary app shell as the Pi dashboard with a local-library backend.
 
+A separate process — `canary-mcp` — exposes this same surface to LLM clients
+(Claude Code, Qwen, anything that speaks the Model Context Protocol). It
+runs as its own systemd unit and adds an ad-hoc-SQL tool over the Parquet
+ring buffer on top of the HTTP endpoints. See
+[`docs/mcp-server.md`](./mcp-server.md).
+
 ## Browser
 
 If the dashboard frontend has been built, open:

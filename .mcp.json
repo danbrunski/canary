@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "canary": {
+      "type": "http",
+      "url": "http://canary.local:8001/mcp",
+      "headers": {
+        "Authorization": "Bearer ${CANARY_CONTROL_TOKEN}"
+      }
+    }
+  }
+}

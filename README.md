@@ -98,9 +98,13 @@ sudo systemctl start canary
 ```
 
 The daemon serves the read-only API and browser dashboard on the configured
-LAN address, defaulting to `http://<pi-hostname-or-ip>:8000/`. See
-[`docs/pi-setup.md`](docs/pi-setup.md) and
-[`docs/headless-api.md`](docs/headless-api.md).
+LAN address, defaulting to `http://<pi-hostname-or-ip>:8000/`. A companion
+**MCP server** (Model Context Protocol) runs as a separate systemd unit at
+`http://<pi-hostname-or-ip>:8001/mcp` and exposes the same surface — plus
+ad-hoc Parquet SQL — to Claude Code, Qwen-Agent, and other MCP-speaking
+clients. See [`docs/pi-setup.md`](docs/pi-setup.md),
+[`docs/headless-api.md`](docs/headless-api.md), and
+[`docs/mcp-server.md`](docs/mcp-server.md).
 
 From a laptop, `scripts/canaryctl.py` drives the authenticated control API:
 

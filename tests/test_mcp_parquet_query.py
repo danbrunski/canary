@@ -1,0 +1,194 @@
+"""Tests for the DuckDB-backed telemetry query module."""
+
+from __future__ import annotations
+
+import datetime as dt
+from pathlib import Path
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pytest
+
+from src.mcp_server.parquet_query import (
+    QueryValidationError,
+    TelemetryQuery,
+    validate_query,
+)
+
+_SCHEMA = pa.schema(
+    [
+        ("timestamp", pa.timestamp("us", tz="UTC")),
+        ("source", pa.string()),
+        ("channel", pa.string()),
+        ("value_number", pa.float64()),
+        ("value_text", pa.string()),
+        ("value_bool", pa.bool_()),
+        ("unit", pa.string()),
+        ("metadata_json", pa.string()),
+    ]
+)
+
+
+def _write_fixture(root: Path, session_id: str, rows: list[dict[str, object]]) -> Path:
+    session_dir = root / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    table = pa.Table.from_pylist(rows, schema=_SCHEMA)
+    out = session_dir / "telemetry-001.parquet"
+    pq.write_table(table, out)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# validate_query
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT 1",
+        "select * from telemetry where channel = 'RPM'",
+        "  WITH x AS (SELECT 1) SELECT * FROM x",
+        "SELECT 1;",
+        "/* leading comment */ SELECT 1",
+        "-- comment\nSELECT 1",
+    ],
+)
+def test_validate_query_accepts_selects(sql: str) -> None:
+    """SELECT and WITH heads pass; trailing semicolons and comments are tolerated."""
+    cleaned = validate_query(sql)
+    assert cleaned.upper().startswith(("SELECT", "WITH"))
+
+
+@pytest.mark.parametrize(
+    "sql,reason",
+    [
+        ("", "empty"),
+        ("INSERT INTO telemetry VALUES (1)", "INSERT"),
+        ("UPDATE telemetry SET channel = 'x'", "UPDATE"),
+        ("DELETE FROM telemetry", "DELETE"),
+        ("DROP VIEW telemetry", "DROP"),
+        ("CREATE TABLE foo AS SELECT 1", "CREATE"),
+        ("ATTACH 'foo.db'", "ATTACH"),
+        ("PRAGMA threads=8", "PRAGMA"),
+        ("INSTALL httpfs", "INSTALL"),
+        ("LOAD httpfs", "LOAD"),
+        ("SELECT 1; SELECT 2", "multi"),
+    ],
+)
+def test_validate_query_rejects_dangerous(sql: str, reason: str) -> None:
+    """Anything that mutates state or stacks statements is rejected."""
+    with pytest.raises(QueryValidationError):
+        validate_query(sql)
+
+
+def test_validate_query_allows_column_named_with_forbidden_substring() -> None:
+    """A column named ``import_ts`` shouldn't trip the IMPORT keyword check."""
+    # 'import_ts' is fine because the regex is \bIMPORT\b — the trailing _ts
+    # makes import_ts a single token.
+    validate_query("SELECT import_ts FROM telemetry")
+
+
+# ---------------------------------------------------------------------------
+# TelemetryQuery
+# ---------------------------------------------------------------------------
+
+
+def test_telemetry_query_empty_storage_returns_zero(tmp_path: Path) -> None:
+    """Empty storage tree is a normal startup state — no error, no rows."""
+    q = TelemetryQuery(tmp_path)
+    result = q.run("SELECT * FROM telemetry")
+    assert result == []
+
+
+def test_telemetry_query_reads_real_parquet(tmp_path: Path) -> None:
+    """End-to-end: write a Parquet fixture, query it, verify column projection."""
+    t0 = dt.datetime(2026, 5, 18, 12, 0, tzinfo=dt.UTC)
+    _write_fixture(
+        tmp_path,
+        "2026-05-18T120000",
+        [
+            {
+                "timestamp": t0,
+                "source": "obd",
+                "channel": "RPM",
+                "value_number": 800.0,
+                "value_text": None,
+                "value_bool": None,
+                "unit": "rpm",
+                "metadata_json": None,
+            },
+            {
+                "timestamp": t0,
+                "source": "obd",
+                "channel": "SPEED",
+                "value_number": 0.0,
+                "value_text": None,
+                "value_bool": None,
+                "unit": "kph",
+                "metadata_json": None,
+            },
+        ],
+    )
+    q = TelemetryQuery(tmp_path)
+    rows = q.run("SELECT channel, value_number, session FROM telemetry ORDER BY channel")
+    assert [r["channel"] for r in rows] == ["RPM", "SPEED"]
+    assert rows[0]["value_number"] == 800.0
+    assert rows[0]["session"] == "2026-05-18T120000"
+
+
+def test_telemetry_query_picks_up_new_session(tmp_path: Path) -> None:
+    """View is refreshed on each query — files added after construction appear."""
+    q = TelemetryQuery(tmp_path)
+    assert q.run("SELECT * FROM telemetry") == []
+    _write_fixture(
+        tmp_path,
+        "2026-05-18T120000",
+        [
+            {
+                "timestamp": dt.datetime(2026, 5, 18, 12, 0, tzinfo=dt.UTC),
+                "source": "obd",
+                "channel": "RPM",
+                "value_number": 1200.0,
+                "value_text": None,
+                "value_bool": None,
+                "unit": "rpm",
+                "metadata_json": None,
+            }
+        ],
+    )
+    rows = q.run("SELECT channel FROM telemetry")
+    assert rows == [{"channel": "RPM"}]
+
+
+def test_telemetry_query_enforces_row_limit(tmp_path: Path) -> None:
+    """Outer LIMIT is applied even when the SQL omits one."""
+    t0 = dt.datetime(2026, 5, 18, 12, 0, tzinfo=dt.UTC)
+    rows = []
+    for i in range(20):
+        rows.append(
+            {
+                "timestamp": t0 + dt.timedelta(seconds=i),
+                "source": "obd",
+                "channel": "RPM",
+                "value_number": 800.0 + i,
+                "value_text": None,
+                "value_bool": None,
+                "unit": "rpm",
+                "metadata_json": None,
+            }
+        )
+    _write_fixture(tmp_path, "S", rows)
+    q = TelemetryQuery(tmp_path, default_limit=5)
+    result = q.run("SELECT value_number FROM telemetry ORDER BY value_number")
+    assert len(result) == 5
+    # Caller-supplied limit overrides the default.
+    result_caller = q.run("SELECT value_number FROM telemetry", row_limit=3)
+    assert len(result_caller) == 3
+
+
+def test_telemetry_query_rejects_non_select(tmp_path: Path) -> None:
+    """The validator runs before DuckDB sees the statement."""
+    q = TelemetryQuery(tmp_path)
+    with pytest.raises(QueryValidationError):
+        q.run("DROP VIEW telemetry")

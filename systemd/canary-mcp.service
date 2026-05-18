@@ -1,0 +1,35 @@
+[Unit]
+Description=CANary MCP server (Claude / Qwen tool surface for the daemon)
+After=network-online.target canary.service
+Wants=network-online.target
+# Without canary.service running there's nothing for the MCP server to call
+# into — but we don't make it a hard `Requires=`, so an operator can stop the
+# daemon for maintenance without the MCP unit refusing to start.
+ConditionPathExists=/etc/canary/canary.env
+
+[Service]
+Type=simple
+User=canary
+Group=canary
+EnvironmentFile=/etc/canary/canary.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+# CANARY_DAEMON_URL, CANARY_CONTROL_TOKEN, CANARY_STORAGE_PATH,
+# CANARY_MCP_HOST, CANARY_MCP_PORT all come from canary.env. Defaults in
+# src/mcp_server/config.py are sensible if any are unset.
+ExecStart=/bin/bash -c 'cd "$CANARY_HOME" && exec "$CANARY_HOME/.venv/bin/python" -m src.mcp_server'
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+
+# No CAN access needed — the MCP server only talks to localhost HTTP and
+# reads Parquet files. Drop privileges accordingly.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
