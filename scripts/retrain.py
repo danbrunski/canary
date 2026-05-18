@@ -210,6 +210,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     results: dict[str, str] = {}
 
+    # A model disabled in config is "skipped", not "failed": running its
+    # trainer would raise `_validate_config` ("... config is disabled"), which
+    # is a no-op intent, not an error. Treat it like an implicit --skip-<m> so
+    # a disabled trainer doesn't poison the exit code, the report, or the
+    # all-failed check (and sync-train.sh still runs the behavior refit).
+    if not args.skip_if and not config.models.isolation_forest.enabled:
+        log.info("isolation_forest disabled in config; skipping")
+        results["isolation_forest"] = "skipped (disabled in config)"
+        args.skip_if = True
+    if not args.skip_lstm and not config.models.lstm_autoencoder.enabled:
+        log.info("lstm_autoencoder disabled in config; skipping")
+        results["lstm_autoencoder"] = "skipped (disabled in config)"
+        args.skip_lstm = True
+
     ledger = None if args.no_ledger else TrainingLedger(args.ledger)
     shared_feature_frame = None
     if not args.skip_if and not args.skip_lstm:
@@ -275,14 +289,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     # (sync-train.sh) still runs the independent behavior-model refit instead
     # of `set -e` aborting the whole pipeline on a partial run.
     succeeded = [k for k, v in results.items() if v == "ok"]
-    if not succeeded:
-        log.error("all requested trainers failed", extra={"results": results})
+    failed = [k for k, v in results.items() if v.startswith("failed")]
+    skipped = [k for k, v in results.items() if v.startswith("skipped")]
+    if failed and not succeeded:
+        log.error("all attempted trainers failed", extra={"results": results})
         return 1
-    if len(succeeded) != len(results):
+    if not succeeded and not failed:
+        # Everything was skipped (disabled in config / --skip flags) — a
+        # legitimate no-op, not a failure; sync-train.sh proceeds to refit.
+        log.warning("no trainers ran (all skipped: %s)", ", ".join(skipped) or "none")
+        return 0
+    if failed:
         log.warning(
-            "partial retrain — ok: %s; failed: %s",
+            "partial retrain — ok: %s; failed: %s%s",
             ", ".join(succeeded),
-            ", ".join(k for k, v in results.items() if v != "ok"),
+            ", ".join(failed),
+            f"; skipped: {', '.join(skipped)}" if skipped else "",
         )
     return 0
 
@@ -321,14 +343,18 @@ def _print_report(sessions: list[Path], results: dict[str, str], args: argparse.
     print("=" * 72)
     print(f"RETRAIN  ({len(sessions)} sessions)")
     print("=" * 72)
-    if "isolation_forest" in results:
-        status = results["isolation_forest"]
-        symbol = "✓" if status == "ok" else "✗"
-        print(f"  {symbol} isolation_forest  →  {args.if_out}  {status}")
-    if "lstm_autoencoder" in results:
-        status = results["lstm_autoencoder"]
-        symbol = "✓" if status == "ok" else "✗"
-        print(f"  {symbol} lstm_autoencoder  →  {args.lstm_out}  {status}")
+    out_dirs = {"isolation_forest": args.if_out, "lstm_autoencoder": args.lstm_out}
+    for name, out_dir in out_dirs.items():
+        if name not in results:
+            continue
+        status = results[name]
+        if status == "ok":
+            symbol = "✓"
+        elif status.startswith("skipped"):
+            symbol = "○"
+        else:
+            symbol = "✗"
+        print(f"  {symbol} {name}  →  {out_dir}  {status}")
     print()
 
 
