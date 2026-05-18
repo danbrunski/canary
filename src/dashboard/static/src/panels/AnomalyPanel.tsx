@@ -9,6 +9,7 @@ import type { ScoresBySource } from "../hooks/useScoreStream";
 import { badgeClass, cn, placeholderClass, selectClass } from "../styles";
 import type { AnomalyEvent } from "../types";
 import { LiveModelScores } from "./LiveModelScores";
+import { ModelEvidencePanel, relatedEventsFor } from "./ModelEvidencePanel";
 
 const LEVEL_TONE: Record<AnomalyLevel, string> = {
   low: "text-fg-dim",
@@ -53,6 +54,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
   // Locally-applied verdicts (optimistic) keyed by anomaly key, merged over
   // whatever the server already has.
   const [localLabels, setLocalLabels] = useState<Record<string, string>>({});
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   const feedbackFetcher = useCallback(
     (signal: AbortSignal) => getFeedback(token ?? "", signal),
@@ -113,6 +115,16 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
     [scored, showAll],
   );
   const hiddenCount = scored.length - shown.length;
+
+  const selectedEvent = useMemo(() => {
+    if (shown.length === 0) return null;
+    return shown.find(({ e }) => eventKey(e) === selectedKey)?.e ?? shown[0].e;
+  }, [selectedKey, shown]);
+
+  const relatedEvents = useMemo(
+    () => relatedEventsFor(selectedEvent, visible),
+    [selectedEvent, visible],
+  );
 
   const modes = useMemo(() => {
     const set = new Set<string>();
@@ -209,11 +221,20 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                     : `${hiddenCount} low-significance hidden · show all`}
                 </button>
               )}
+              <ModelEvidencePanel
+                event={selectedEvent}
+                relatedEvents={relatedEvents}
+              />
               <ol className="m-0 max-h-[22rem] list-none overflow-y-auto p-0">
                 {shown.slice(0, 50).map(({ e, view }) => (
               <li
                 key={`${e.timestamp}-${e.source}-${e.model_version}`}
-                className="flex flex-wrap items-baseline gap-2 border-b border-border py-1.5 text-[0.85rem] last:border-b-0"
+                className={cn(
+                  "flex flex-wrap items-baseline gap-2 border-b border-border py-1.5 text-[0.85rem] last:border-b-0",
+                  selectedEvent !== null &&
+                    eventKey(e) === eventKey(selectedEvent) &&
+                    "bg-accent/5",
+                )}
               >
                 <time className="font-num tabular-nums text-fg-dim">
                   {formatTimestamp(e.timestamp)}
@@ -259,12 +280,19 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                     missing features
                   </span>
                 )}
+                <button
+                  type="button"
+                  className="ml-auto rounded border border-border-soft px-1.5 py-0.5 text-[0.66rem] uppercase tracking-[0.04em] text-accent hover:border-border"
+                  onClick={() => setSelectedKey(eventKey(e))}
+                >
+                  inspect
+                </button>
                 {token &&
                   (() => {
                     const current =
                       localLabels[eventKey(e)] ?? serverLabels[eventKey(e)];
                     return (
-                      <span className="ml-auto flex items-center gap-1">
+                      <span className="flex items-center gap-1">
                         {current ? (
                           <span className="text-[0.7rem] uppercase tracking-[0.06em] text-accent-2">
                             {current.replace("_", " ")}

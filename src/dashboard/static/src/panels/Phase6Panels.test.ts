@@ -134,7 +134,27 @@ describe("TrainingPanel", () => {
           input_sessions: ["s1"],
           feature_schema: ["obd:RPM"],
           hyperparams: {},
-          metrics: { loss_curve: [0.9, 0.5, 0.3] },
+          metrics: {
+            loss_curve: [0.9, 0.5, 0.3],
+            false_positive_benchmark: {
+              false_positive_rate: 0.01,
+              alerts_per_hour: 0.2,
+              meets_v1_budget: true,
+              global: {
+                held_out_error_distribution: {
+                  minimum: 0.01,
+                  maximum: 0.4,
+                  p50: 0.08,
+                  p95: 0.16,
+                  threshold: 0.3,
+                },
+              },
+              k_sweep: [
+                { k: 2, alerts_per_hour: 1.4, meets_v1_budget: false },
+                { k: 3, alerts_per_hour: 0.2, meets_v1_budget: true },
+              ],
+            },
+          },
           artifacts: {},
           publish_status: "active",
           notes: null,
@@ -146,6 +166,8 @@ describe("TrainingPanel", () => {
     expect(await screen.findByText("lstm_v1")).toBeInTheDocument();
     expect(screen.getByText("active")).toBeInTheDocument();
     expect(screen.getByText("1 runs")).toBeInTheDocument();
+    expect(screen.getByText("budget ok")).toBeInTheDocument();
+    expect(screen.getByText("score distribution")).toBeInTheDocument();
   });
 
   it("starts a laptop training job through the companion API", async () => {

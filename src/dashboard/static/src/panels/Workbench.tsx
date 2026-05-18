@@ -26,6 +26,7 @@ import { ControlPanel } from "./ControlPanel";
 import { CustomDashboardPanel } from "./CustomDashboardPanel";
 import { DatasetHealthPanel } from "./DatasetHealthPanel";
 import { DidWorkbenchPanel } from "./DidWorkbenchPanel";
+import { ModelHealthPanel } from "./ModelHealthPanel";
 import { ModelPanel } from "./ModelPanel";
 import { ObdCoveragePanel } from "./ObdCoveragePanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
@@ -156,12 +157,7 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
       return <TuningPanel token={d.token} />;
     case "models-health":
       return (
-        <PlaceholderPanel
-          title="Drift & inference health"
-          task="6.27"
-          endpoint="GET /status.health"
-          summary="Feature/recon drift, inference latency, missing-feature rate, model-swap outcomes and host load. A live summary is already in the status strip above."
-        />
+        <ModelHealthPanel status={d.status} statusError={d.statusError} />
       );
     case "data-sessions":
       return (

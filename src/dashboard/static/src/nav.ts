@@ -36,7 +36,7 @@ export const NAV: NavGroupDef[] = [
       { id: "models-behavior", label: "Behavior", group: "models" },
       { id: "models-training", label: "Training", group: "models" },
       { id: "models-tuning", label: "Tuning", group: "models" },
-      { id: "models-health", label: "Drift / Health", group: "models", placeholder: true },
+      { id: "models-health", label: "Drift / Health", group: "models" },
     ],
   },
   {
