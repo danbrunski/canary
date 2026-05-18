@@ -6,8 +6,10 @@ import json
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
+from src.alerts.feedback import FeedbackStore
 from src.models.manifest import ManifestValidationError
 from src.models.training_ledger import (
     TrainingLedger,
@@ -224,6 +226,61 @@ def test_retrain_ingests_ledger_when_manifest_present(
     assert rc == 0
     runs = {r.run_id for r in TrainingLedger(ledger_path).records()}
     assert runs == {"if_run", "lstm_run"}
+
+
+def test_retrain_ledger_records_feedback_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    feedback_path = tmp_path / "feedback.jsonl"
+    FeedbackStore(feedback_path).record(
+        event={
+            "timestamp": "2026-05-17T12:00:00Z",
+            "source": "isolation_forest",
+            "model_version": "if_v1",
+            "score": 0.5,
+            "session": "drive-a",
+        },
+        label="false_positive",
+    )
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(
+        retrain,
+        "build_feature_frame",
+        lambda *a, **k: pd.DataFrame(
+            {
+                "session": ["drive-a"],
+                "timestamp": pd.to_datetime(["2026-05-17T12:00:00Z"], utc=True),
+                "obd:RPM": [700.0],
+            }
+        ),
+    )
+    if_out = tmp_path / "if"
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: _if_manifest(if_out, "if_run"))
+    ledger_path = tmp_path / "runs.jsonl"
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--skip-lstm",
+            "--if-out",
+            str(if_out),
+            "--ledger",
+            str(ledger_path),
+            "--feedback",
+            str(feedback_path),
+        ]
+    )
+
+    assert rc == 0
+    record = TrainingLedger(ledger_path).records()[0]
+    assert record.metrics["feedback_policy"]["clean_baseline_labels"] == 1
+    assert record.metrics["feedback_policy"]["excluded_rows"] == 0
 
 
 def test_retrain_ledger_hook_is_best_effort(

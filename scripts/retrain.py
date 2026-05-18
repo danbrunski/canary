@@ -41,9 +41,14 @@ import train_anomaly_model as if_trainer  # noqa: E402
 import train_lstm as lstm_trainer  # noqa: E402
 from refit_behavior_models import _filter_sessions_by_age  # noqa: E402
 
+from src.alerts.feedback import DEFAULT_FEEDBACK_PATH, FeedbackStore  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.models.manifest import ManifestValidationError  # noqa: E402
+from src.models.retraining_policy import (  # noqa: E402
+    RetrainingFeedbackReport,
+    apply_retraining_feedback_policy,
+)
 from src.models.training_ledger import (  # noqa: E402
     DEFAULT_TRAINING_LEDGER_PATH,
     TrainingLedger,
@@ -165,6 +170,30 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Skip writing the training-run ledger.",
     )
     parser.add_argument(
+        "--feedback",
+        type=Path,
+        default=DEFAULT_FEEDBACK_PATH,
+        help=(
+            "Anomaly feedback JSONL for label-aware retraining. False positives "
+            "are treated as reviewed clean baseline; true positives, ignored, "
+            "and needs-review labels exclude their event windows."
+        ),
+    )
+    parser.add_argument(
+        "--no-feedback-policy",
+        action="store_true",
+        help="Do not apply operator feedback labels to the retraining frame.",
+    )
+    parser.add_argument(
+        "--feedback-window-seconds",
+        type=float,
+        default=30.0,
+        help=(
+            "Fallback margin on each side of a labelled event timestamp when "
+            "the event has no explicit window. Default 30 seconds."
+        ),
+    )
+    parser.add_argument(
         "--job-id",
         default=None,
         help="Correlate ledger records with this control-plane job id.",
@@ -225,8 +254,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.skip_lstm = True
 
     ledger = None if args.no_ledger else TrainingLedger(args.ledger)
+    feedback_labels = {} if args.no_feedback_policy else FeedbackStore(args.feedback).labels()
+    any_trainer_requested = not args.skip_if or not args.skip_lstm
+    needs_shared_feature_frame = any_trainer_requested and (
+        (not args.skip_if and not args.skip_lstm) or bool(feedback_labels)
+    )
     shared_feature_frame = None
-    if not args.skip_if and not args.skip_lstm:
+    feedback_report: RetrainingFeedbackReport | None = None
+    if needs_shared_feature_frame:
         try:
             shared_feature_frame = build_feature_frame(
                 sessions,
@@ -237,10 +272,32 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except Exception as exc:  # noqa: BLE001 - preprocessing is shared by both trainers
             log.exception("feature frame build failed", extra={"error": str(exc)})
-            results["isolation_forest"] = f"failed: preprocessing: {exc}"
-            results["lstm_autoencoder"] = f"failed: preprocessing: {exc}"
+            _mark_requested_failures(results, args, f"failed: preprocessing: {exc}")
             _print_report(sessions, results, args)
             return 1
+
+    if shared_feature_frame is not None and feedback_labels:
+        try:
+            shared_feature_frame, feedback_report = apply_retraining_feedback_policy(
+                shared_feature_frame,
+                feedback_labels,
+                fallback_margin_seconds=args.feedback_window_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001 - label policy is a retrain gate
+            log.exception("feedback label policy failed", extra={"error": str(exc)})
+            _mark_requested_failures(results, args, f"failed: feedback policy: {exc}")
+            _print_report(sessions, results, args, feedback_report=feedback_report)
+            return 1
+        if shared_feature_frame.empty:
+            msg = "feedback policy excluded every training row"
+            log.error(msg)
+            _mark_requested_failures(results, args, f"failed: {msg}")
+            _print_report(sessions, results, args, feedback_report=feedback_report)
+            return 1
+        log.info(
+            "applied feedback retraining policy",
+            extra=feedback_report.to_dict(),
+        )
 
     feature_kwargs = (
         {"feature_frame": shared_feature_frame}
@@ -261,7 +318,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 **feature_kwargs,
             )
             results["isolation_forest"] = "ok"
-            _ingest_ledger(ledger, args.if_out, "succeeded", args.job_id)
+            _ingest_ledger(
+                ledger,
+                args.if_out,
+                "succeeded",
+                args.job_id,
+                feedback_report=feedback_report,
+            )
         except Exception as exc:  # noqa: BLE001 — surface + continue to the next trainer
             log.exception("isolation forest trainer failed", extra={"error": str(exc)})
             results["isolation_forest"] = f"failed: {exc}"
@@ -277,12 +340,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 **feature_kwargs,
             )
             results["lstm_autoencoder"] = "ok"
-            _ingest_ledger(ledger, args.lstm_out, "succeeded", args.job_id)
+            _ingest_ledger(
+                ledger,
+                args.lstm_out,
+                "succeeded",
+                args.job_id,
+                feedback_report=feedback_report,
+            )
         except Exception as exc:  # noqa: BLE001
             log.exception("lstm trainer failed", extra={"error": str(exc)})
             results["lstm_autoencoder"] = f"failed: {exc}"
 
-    _print_report(sessions, results, args)
+    _print_report(sessions, results, args, feedback_report=feedback_report)
     # Partial success is the documented contract (a broken LSTM must not block
     # the IF artifact, and vice versa — see the module docstring). Exit
     # non-zero ONLY when every requested trainer failed, so the caller
@@ -314,6 +383,8 @@ def _ingest_ledger(
     out_dir: Path,
     status: str,
     job_id: str | None,
+    *,
+    feedback_report: RetrainingFeedbackReport | None = None,
 ) -> None:
     """Best-effort: record the trainer's manifest in the training ledger.
 
@@ -333,16 +404,49 @@ def _ingest_ledger(
             status="succeeded" if status == "succeeded" else "failed",
             job_id=job_id,
         )
+        if feedback_report is not None:
+            record = record.model_copy(
+                update={
+                    "metrics": {
+                        **record.metrics,
+                        "feedback_policy": feedback_report.to_dict(),
+                    }
+                }
+            )
         ledger.append(record)
         log.info("recorded training run", extra={"run_id": record.run_id})
     except (ManifestValidationError, OSError) as exc:
         log.warning("ledger ingest skipped: %s", exc)
 
 
-def _print_report(sessions: list[Path], results: dict[str, str], args: argparse.Namespace) -> None:
+def _mark_requested_failures(
+    results: dict[str, str],
+    args: argparse.Namespace,
+    status: str,
+) -> None:
+    if not args.skip_if:
+        results["isolation_forest"] = status
+    if not args.skip_lstm:
+        results["lstm_autoencoder"] = status
+
+
+def _print_report(
+    sessions: list[Path],
+    results: dict[str, str],
+    args: argparse.Namespace,
+    *,
+    feedback_report: RetrainingFeedbackReport | None = None,
+) -> None:
     print("=" * 72)
     print(f"RETRAIN  ({len(sessions)} sessions)")
     print("=" * 72)
+    if feedback_report is not None:
+        print(
+            "  feedback policy  →  "
+            f"{feedback_report.clean_baseline_labels} clean labels, "
+            f"{feedback_report.excluded_labels} excluded labels, "
+            f"{feedback_report.excluded_rows} rows removed"
+        )
     out_dirs = {"isolation_forest": args.if_out, "lstm_autoencoder": args.lstm_out}
     for name, out_dir in out_dirs.items():
         if name not in results:

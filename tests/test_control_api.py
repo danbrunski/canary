@@ -394,6 +394,28 @@ def test_control_jobs_run_restricted_background_commands(tmp_path: Path) -> None
     assert ledger_controller.get(job_id) is not None
 
 
+def test_retrain_job_command_passes_job_id_to_ledger(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(tmp_path / "storage"))
+    config = CanaryConfig.from_yaml(cfg_path)
+    controller = JobController(
+        config=config,
+        repo_root=tmp_path,
+        config_path=cfg_path,
+        jobs_dir=tmp_path / "jobs",
+        python=Path(sys.executable),
+    )
+
+    command = controller._build_command(  # noqa: SLF001 - command shape is the contract here
+        "retrain_if",
+        {"all": True},
+        job_id="job-123",
+    )
+
+    assert "--job-id" in command
+    assert command[command.index("--job-id") + 1] == "job-123"
+
+
 def test_control_jobs_can_cancel_running_process(tmp_path: Path) -> None:
     storage = tmp_path / "storage"
     session = storage / "2026-05-17T120000"

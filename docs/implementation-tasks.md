@@ -434,11 +434,16 @@ training/model-health visualization, and Torque Pro parity.
 - [x] **6.23 — Dataset health dashboard.**
 - [x] **6.24 — False-positive feedback loop.** `src/alerts/feedback.py` —
 - [x] **6.25 — Threshold tuning and alert suppression.** `src/alerts/tuning.py`
-- [ ] **6.26 — Label-aware retraining and online-update policy.** Retraining
+- [x] **6.26 — Label-aware retraining and online-update policy.** Retraining
   jobs should consume reviewed feedback labels, exclude known false-positive
   windows or fold them into clean baselines after review, and publish a new
   explicit model artifact/version. Do not continuously mutate live model
   weights without a reviewable artifact, manifest, and rollback path.
+  Done: `scripts/retrain.py` consumes the feedback JSONL by default, keeps
+  reviewed false positives as clean-baseline data, excludes true-positive /
+  ignored / needs-review event windows from the model-ready frame, records the
+  feedback policy summary in the training ledger, and correlates control jobs
+  to explicit retrain artifacts via `--job-id`.
 - [x] **6.27 — Model drift and inference health monitoring.**
 
 ### 6E. Acceptance tests and parity proof

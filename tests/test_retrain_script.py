@@ -5,7 +5,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
+
+from src.alerts.feedback import FeedbackStore
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import retrain  # noqa: E402
@@ -56,6 +59,73 @@ def test_retrain_calls_both_trainers(
     assert "isolation_forest" in out
     assert "lstm_autoencoder" in out
     assert "✓" in out
+
+
+def test_retrain_applies_feedback_policy_for_single_trainer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    feedback_path = tmp_path / "feedback.jsonl"
+    FeedbackStore(feedback_path).record(
+        event={
+            "timestamp": "2026-05-17T12:00:01Z",
+            "window_start_timestamp": "2026-05-17T12:00:01Z",
+            "window_end_timestamp": "2026-05-17T12:00:01Z",
+            "source": "isolation_forest",
+            "model_version": "if_v1",
+            "score": 1.0,
+            "session": "drive-a",
+        },
+        label="true_positive",
+    )
+    feature_frame = pd.DataFrame(
+        {
+            "session": ["drive-a", "drive-a", "drive-a"],
+            "timestamp": pd.to_datetime(
+                [
+                    "2026-05-17T12:00:00Z",
+                    "2026-05-17T12:00:01Z",
+                    "2026-05-17T12:00:02Z",
+                ],
+                utc=True,
+            ),
+            "obd:RPM": [700.0, 999.0, 710.0],
+        }
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(
+        retrain,
+        "build_feature_frame",
+        lambda *a, **k: calls.append("build") or feature_frame,
+    )
+
+    def _if_train(*_a: object, **kwargs: object) -> None:
+        calls.append("if")
+        filtered = kwargs["feature_frame"]
+        assert isinstance(filtered, pd.DataFrame)
+        assert filtered["obd:RPM"].tolist() == [700.0, 710.0]
+
+    monkeypatch.setattr(retrain.if_trainer, "train", _if_train)
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: calls.append("lstm"))
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--skip-lstm",
+            "--feedback",
+            str(feedback_path),
+        ]
+    )
+
+    assert rc == 0
+    assert calls == ["build", "if"]
+    assert "feedback policy" in capsys.readouterr().out
 
 
 def test_retrain_skip_if(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

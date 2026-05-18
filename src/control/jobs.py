@@ -120,7 +120,7 @@ class JobController:
         clean_params = dict(params or {})
         job_id = uuid4().hex
         log_path = self._jobs_dir / f"{job_id}.log"
-        command = tuple(self._build_command(kind, clean_params))
+        command = tuple(self._build_command(kind, clean_params, job_id=job_id))
         record = JobRecord(
             job_id=job_id,
             kind=kind,
@@ -183,7 +183,13 @@ class JobController:
         self._emit(out)
         return out
 
-    def _build_command(self, kind: str, params: Mapping[str, Any]) -> Sequence[str]:
+    def _build_command(
+        self,
+        kind: str,
+        params: Mapping[str, Any],
+        *,
+        job_id: str | None = None,
+    ) -> Sequence[str]:
         if self._command_builder is not None:
             return self._command_builder(kind, params)
 
@@ -191,6 +197,7 @@ class JobController:
         config_arg = ["--config", str(self._config_path)]
         bindings_arg = ["--bindings", "data/bindings.yaml"]
         ledger_arg = ["--ledger", str(self._config.daemon.training_ledger)]
+        job_arg = ["--job-id", job_id] if job_id is not None else []
         if kind == "retrain_if":
             return [
                 str(self._python),
@@ -199,6 +206,7 @@ class JobController:
                 *config_arg,
                 *bindings_arg,
                 *ledger_arg,
+                *job_arg,
                 "--if-out",
                 str(self._config.daemon.models_dir / "isolation_forest"),
                 "--skip-lstm",
@@ -212,6 +220,7 @@ class JobController:
                 *config_arg,
                 *bindings_arg,
                 *ledger_arg,
+                *job_arg,
                 "--lstm-out",
                 str(self._config.daemon.models_dir / "lstm_autoencoder"),
                 "--skip-if",
@@ -227,6 +236,7 @@ class JobController:
                 *config_arg,
                 *bindings_arg,
                 *ledger_arg,
+                *job_arg,
                 "--if-out",
                 str(self._config.daemon.models_dir / "isolation_forest"),
                 "--lstm-out",
