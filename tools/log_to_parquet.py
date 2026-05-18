@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from collections.abc import Iterator, Sequence
 from heapq import merge
@@ -37,6 +38,8 @@ from src.analysis.iso_tp import iter_frames
 from src.session import session_paths
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+
+log = logging.getLogger(__name__)
 
 
 def _frames_to_records(frames_path: Path) -> Iterator[TelemetryRecord]:
@@ -108,6 +111,14 @@ def convert(
         pids_iter = _pids_to_records(paths.pids)
         merged = merge(frames_iter, pids_iter, key=lambda r: r.timestamp)
     else:
+        if include_pids and not paths.pids.exists():
+            log.warning(
+                "no pids.jsonl in %s — converting CAN frames ONLY. The "
+                "resulting parquet has zero source=obd rows; behavior models "
+                "and the LSTM need OBD, so this session will be schema-"
+                "incomplete for training.",
+                session_dir,
+            )
         merged = frames_iter
 
     return write_records_to_parquet(

@@ -146,9 +146,35 @@ def test_retrain_continues_after_first_trainer_fails(
             "--all",
         ]
     )
-    # one trainer failed, but the other still ran; exit code is non-zero
-    assert rc == 1
+    # One trainer failed, but the other still ran; partial success exits zero so
+    # sync-train can continue with independent behavior-model refits.
+    assert rc == 0
     assert lstm_called == [True]
     out = capsys.readouterr().out
     assert "✗ isolation_forest" in out
     assert "✓ lstm_autoencoder" in out
+
+
+def test_retrain_returns_error_when_all_requested_trainers_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+
+    def _broken(*_a: object, **_k: object) -> None:
+        raise RuntimeError("simulated trainer failure")
+
+    monkeypatch.setattr(retrain.if_trainer, "train", _broken)
+    monkeypatch.setattr(retrain.lstm_trainer, "train", _broken)
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+        ]
+    )
+    assert rc == 1

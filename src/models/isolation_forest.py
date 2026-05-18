@@ -23,6 +23,7 @@ from typing import Any, Protocol
 import numpy as np
 import pandas as pd
 
+from src.preprocessing.feature_pipeline import build_feature_spec, validate_feature_health
 from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
@@ -218,6 +219,7 @@ def fit_isolation_forest(
     config: IsolationForestConfigLike,
     *,
     feature_columns: Iterable[str] | None = None,
+    feature_spec: Mapping[str, Any] | None = None,
     mode_column: str = MODE_COLUMN,
     timestamp_column: str = TIMESTAMP_COLUMN,
     session_column: str = SESSION_COLUMN,
@@ -235,6 +237,12 @@ def fit_isolation_forest(
     _require_columns(frame, [mode_column, timestamp_column, session_column])
     selected_features = _resolve_feature_columns(frame, feature_columns, mode_column)
     _require_columns(frame, selected_features)
+    schema = (
+        dict(feature_spec)
+        if feature_spec is not None
+        else build_feature_spec(frame, selected_features)
+    )
+    validate_feature_health(schema.get("feature_health", {}))
 
     complete = frame.dropna(subset=selected_features).copy()
     if complete.empty:
@@ -302,8 +310,7 @@ def fit_isolation_forest(
         },
         scaler=scaler.to_dict(),
         schema={
-            "feature_columns": list(selected_features),
-            "feature_dtypes": {column: str(frame[column].dtype) for column in selected_features},
+            **schema,
             "mode_column": mode_column,
             "timestamp_column": timestamp_column,
             "session_column": session_column,

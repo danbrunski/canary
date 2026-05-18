@@ -218,7 +218,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             results["lstm_autoencoder"] = f"failed: {exc}"
 
     _print_report(sessions, results, args)
-    return 0 if all(v == "ok" for v in results.values()) else 1
+    # Partial success is the documented contract (a broken LSTM must not block
+    # the IF artifact, and vice versa — see the module docstring). Exit
+    # non-zero ONLY when every requested trainer failed, so the caller
+    # (sync-train.sh) still runs the independent behavior-model refit instead
+    # of `set -e` aborting the whole pipeline on a partial run.
+    succeeded = [k for k, v in results.items() if v == "ok"]
+    if not succeeded:
+        log.error("all requested trainers failed", extra={"results": results})
+        return 1
+    if len(succeeded) != len(results):
+        log.warning(
+            "partial retrain — ok: %s; failed: %s",
+            ", ".join(succeeded),
+            ", ".join(k for k, v in results.items() if v != "ok"),
+        )
+    return 0
 
 
 def _ingest_ledger(

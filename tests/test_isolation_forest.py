@@ -98,6 +98,10 @@ def test_fit_trains_one_model_per_operating_mode_and_emits_manifest() -> None:
     assert manifest["hyperparams"]["random_state"] == 42
     assert manifest["scaler"]["columns"] == ["obd:RPM", "obd:SPEED", "obd:LOAD"]
     assert manifest["schema"]["feature_columns"] == ["obd:RPM", "obd:SPEED", "obd:LOAD"]
+    assert manifest["schema"]["feature_spec_version"] == 1
+    assert manifest["schema"]["source_prefixes"] == ["obd"]
+    assert manifest["schema"]["feature_health"]["selected_feature_count"] == 3
+    assert manifest["schema"]["feature_health"]["constant_columns"] == []
     assert {mode["mode"] for mode in manifest["modes"]} == {"city", "idle"}
     assert {mode["contamination"] for mode in manifest["modes"]} == {0.1}
 
@@ -233,7 +237,7 @@ def test_fit_rejects_all_missing_features() -> None:
     frame = _two_mode_frame()
     frame["obd:RPM"] = np.nan
 
-    with pytest.raises(ValueError, match="no complete rows"):
+    with pytest.raises(ValueError, match="all-NaN"):
         fit_isolation_forest(
             frame,
             _IFConfig(),

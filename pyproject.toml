@@ -98,6 +98,10 @@ pythonpath = ["."]
 # opted out by default so the inner-loop suite stays under ~25 s. Run them
 # with: `.venv/bin/python -m pytest -m integration` or `-m "not integration"`
 # to explicitly exclude.
+#
+# Codex/sandbox note: do not wrap API tests in GNU `timeout`. Starlette's
+# TestClient uses AnyIO's blocking portal, and `timeout ... pytest` can make
+# those in-process requests appear hung even when direct pytest finishes.
 addopts = "-m 'not integration'"
 markers = [
     "integration: real-hardware-equivalent tests (e.g. ELM327-emulator); slow.",

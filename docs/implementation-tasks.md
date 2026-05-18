@@ -520,7 +520,7 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
 
 ### 7A. Feature contract and validation
 
-- [ ] **7.1 — Unify feature extraction + versioned feature spec (P0).**
+- [~] **7.1 — Unify feature extraction + versioned feature spec (P0).**
   `src/preprocessing/feature_pipeline.py:build_feature_frame` (offline)
   and `src/preprocessing/live.py:LiveFeatureSource` (online) are
   independent reimplementations that must emit byte-identical schemas,
@@ -532,8 +532,12 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   replace hard-reject with schema reconciliation (align to spec, impute
   absent columns with a documented fill, log a one-time divergence
   report). Keystone — unblocks 7.2/7.3/7.5. (Effort: L)
+  Started: model manifests now persist `feature_spec_version: 1`, ordered
+  feature columns, dtypes, source prefixes, preprocessing knobs, sequence
+  params, behavior residual columns, and a feature-health summary. Live/offline
+  builder unification and live schema reconciliation remain.
 
-- [ ] **7.3 — Feature/score validation at model-load and in CI (P1).**
+- [~] **7.3 — Feature/score validation at model-load and in CI (P1).**
   `deviation:*` was all-NaN for the model's whole existence, undetected,
   because nothing asserts features are populated. Add training-time
   assertions (no all-NaN/constant column passes silently; emit a
@@ -543,6 +547,10 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   check on a fixture session (columns populated, schema stable vs a
   golden spec). Cheap; would have caught the deviation bug instantly.
   Depends on 7.1. (Effort: S–M)
+  Started: IF/LSTM training now emits feature-health metadata in manifests
+  and rejects selected all-NaN feature columns before fitting. Constant
+  columns and dropped all-NaN candidates are reported explicitly; model-load
+  gates and golden CI fixtures remain.
 
 ### 7B. Detection quality
 

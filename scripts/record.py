@@ -92,7 +92,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "OBD sidecar source. `canable` uses the same CAN adapter for "
             "read-only ISO-TP Mode 01/22 requests. `elm327` uses the legacy "
-            "python-obd path. Default: elm327 when --obd-port is set, otherwise off."
+            "python-obd path. Default: elm327 when --obd-port is set, "
+            "otherwise collection.obd_source from the config."
         ),
     )
     parser.add_argument(
@@ -107,9 +108,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--obd-pids",
-        default="auto",
+        default=None,
         help=(
-            "What Mode-01 PIDs to watch. Default `auto` "
+            "What Mode-01 PIDs to watch. Default: collection.obd_pids from "
+            "the config (itself `auto` out of the box), which "
             "queries the ECU's supported-PID bitmask at connect time and "
             "watches everything it claims — portable across vehicles, no "
             "per-vehicle tuning. Pass a comma-separated list "
@@ -121,11 +123,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--obd-dids",
-        default="",
+        default=None,
         help=(
             "Comma-separated 4-hex Mode 22 DIDs to poll alongside --obd-pids "
             "(e.g. '1101,F190'). Responses land in pids.jsonl as hex strings "
-            "under DID_<hex> channels."
+            "under DID_<hex> channels. Default: collection.obd_dids from the "
+            "config (empty out of the box)."
         ),
     )
     parser.add_argument(
@@ -263,21 +266,53 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             signal.signal(signal.SIGINT, signal.SIG_DFL)
 
+    previous_sigint_handler = signal.getsignal(signal.SIGINT)
+    previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
     signal.signal(signal.SIGINT, _request_stop)
     signal.signal(signal.SIGTERM, _request_stop)
 
     bus = None
     obd_thread = None
     obd_writer = None
+    obd_source = "off"
     try:
         bus = bus_factory(spec)
-        pids = tuple(p.strip() for p in args.obd_pids.split(",") if p.strip())
-        dids = tuple(d.strip() for d in args.obd_dids.split(",") if d.strip())
+        # PID/DID selection: explicit CLI wins, else fall back to the config
+        # so a configured PID subset actually reaches the recorder (the
+        # canable branch previously ignored config.collection.obd_pids).
+        if args.obd_pids is None:
+            pids = tuple(config.collection.obd_pids)
+        else:
+            pids = tuple(p.strip() for p in args.obd_pids.split(",") if p.strip())
+        if args.obd_dids is None:
+            dids = tuple(config.collection.obd_dids)
+        else:
+            dids = tuple(d.strip() for d in args.obd_dids.split(",") if d.strip())
+        # OBD source precedence: explicit --obd-source wins; else --obd-port
+        # implies elm327; else honor collection.obd_source from the config
+        # ("disabled" -> off). This previously hard-defaulted to "off" and
+        # never consulted the config, so scripts/record.py silently produced
+        # CAN-only sessions even with `obd_source: canable` configured — the
+        # heterogeneous-schema bug that starved behavior models and collapsed
+        # the LSTM windows.
         obd_source = args.obd_source
         if obd_source is None:
-            obd_source = "elm327" if args.obd_port else "off"
+            if args.obd_port:
+                obd_source = "elm327"
+            else:
+                obd_source = config.collection.obd_source
+                if obd_source == "disabled":
+                    obd_source = "off"
         if args.obd_port and obd_source == "off":
             obd_source = "elm327"
+        if obd_source == "off":
+            log.warning(
+                "OBD capture is OFF — this session will be CAN-only. The "
+                "behavior models and LSTM windower need source=obd rows; a "
+                "CAN-only session yields a heterogeneous training set and a "
+                "model the Pi may reject. Set collection.obd_source in the "
+                "config or pass --obd-source.",
+            )
 
         if obd_source == "canable":
             obd_writer = JsonlReadingWriter(paths.pids)
@@ -319,8 +354,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             if obd_source == "elm327":
                 if args.obd_port is None:
                     args.obd_port = config.hardware.elm327_port
-                pids = pids or config.collection.obd_pids
-                dids = dids or config.collection.obd_dids
                 resolve_pids(pids)  # fail fast on a typo, before the CAN capture starts
                 for did in dids:
                     if len(did) != 4 or any(c not in "0123456789abcdefABCDEF" for c in did):
@@ -387,6 +420,36 @@ def main(argv: Sequence[str] | None = None) -> int:
             obd_writer.close()
         if bus is not None:
             bus.shutdown()
+        signal.signal(signal.SIGINT, previous_sigint_handler)
+        signal.signal(signal.SIGTERM, previous_sigterm_handler)
+
+    # Schema-enforcement boundary (Layer 1): if OBD was configured on but the
+    # session captured zero readings, it is CAN-only / schema-incomplete.
+    # Fail loudly with a non-zero exit so it cannot silently enter the
+    # training set, where it collapses LSTM windows and starves behavior
+    # models. An engine-running session with a working adapter must produce
+    # OBD rows; zero means the adapter, ignition state, or ECU support is the
+    # problem — surface it now, not at train time.
+    if obd_source != "off":
+        readings = (
+            sum(1 for line in paths.pids.open() if line.strip())
+            if paths.pids.exists()
+            else 0
+        )
+        if readings == 0:
+            log.error(
+                "OBD was enabled (source=%s) but this session captured ZERO "
+                "OBD readings (%s) — it is CAN-only / schema-incomplete and "
+                "must not enter the training set. Check the adapter, "
+                "ignition/engine state, and ECU OBD support.",
+                obd_source,
+                paths.pids,
+            )
+            return 1
+        log.info(
+            "OBD readings captured",
+            extra={"readings": readings, "obd_source": obd_source},
+        )
     return 0
 
 

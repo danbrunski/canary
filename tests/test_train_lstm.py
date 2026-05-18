@@ -123,6 +123,8 @@ def test_train_writes_checkpoint_and_manifest(tmp_path: Path) -> None:
     assert reloaded.manifest.thresholds is not None
     payload = json.loads(manifest.read_text())
     assert payload["model_type"] == "lstm_autoencoder"
+    assert payload["schema"]["feature_spec_version"] == 1
+    assert payload["schema"]["preprocessing"]["resample_hz"] == config.preprocessing.resample_hz
     assert payload["thresholds"]["threshold_k"] == _TINY_LSTM["threshold_k"]
 
 

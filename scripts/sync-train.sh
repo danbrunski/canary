@@ -106,17 +106,28 @@ do_pull() {
 
 do_train() {
   assert_preprocessing
+  local rc_retrain=0 rc_refit=0
   step "retrain Isolation Forest + LSTM autoencoder (device=${DEVICE})"
+  # `|| rc=$?` keeps `set -e` from aborting here: retrain exits non-zero only
+  # when EVERY trainer failed; a partial run (e.g. IF ok, LSTM failed) is exit
+  # 0 by contract. The behavior refit below is independent of the anomaly
+  # trainers and must run regardless, so it is never skipped by a retrain
+  # failure.
   "${PY}" scripts/retrain.py \
     --sessions-root "${SESSIONS_ROOT}" --all \
     --config "${LAPTOP_CONFIG}" --bindings "${BINDINGS}" \
     --if-out "${IF_OUT}" --lstm-out "${LSTM_OUT}" \
-    --device "${DEVICE}"
+    --device "${DEVICE}" || rc_retrain=$?
   step "refit behavior models"
   "${PY}" scripts/refit_behavior_models.py \
     --sessions-root "${SESSIONS_ROOT}" --all \
     --config "${LAPTOP_CONFIG}" --bindings "${BINDINGS}" \
-    --out "${BEHAVIOR_OUT}"
+    --out "${BEHAVIOR_OUT}" || rc_refit=$?
+  if [[ ${rc_retrain} -ne 0 || ${rc_refit} -ne 0 ]]; then
+    echo "train issues — retrain rc=${rc_retrain}, refit rc=${rc_refit}; " \
+         "not pushing broken artifacts" >&2
+    return 1
+  fi
 }
 
 do_push() {

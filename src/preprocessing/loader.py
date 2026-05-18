@@ -17,13 +17,20 @@ TelemetryValueKind = Literal["value", "value_number", "value_text", "value_bool"
 
 
 def discover_sessions(root: Path) -> list[Path]:
-    """Return session directories under root that contain telemetry Parquet chunks."""
+    """Return session directories under root that contain telemetry Parquet chunks.
+
+    Directories whose name starts with ``_`` are skipped, so quarantined /
+    schema-incomplete sessions can be moved under ``<root>/_archive/`` and
+    excluded from every training run without touching the data.
+    """
     if not root.exists():
         return []
     return sorted(
         child
         for child in root.iterdir()
-        if child.is_dir() and any(f.stat().st_size > 0 for f in child.glob(PARQUET_PATTERN))
+        if child.is_dir()
+        and not child.name.startswith("_")
+        and any(f.stat().st_size > 0 for f in child.glob(PARQUET_PATTERN))
     )
 
 

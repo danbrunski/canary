@@ -24,6 +24,7 @@ from src.models.lstm_autoencoder import (
     build_lstm_autoencoder,
 )
 from src.models.sequence_dataset import SequenceWindowDataset
+from src.preprocessing.feature_pipeline import build_feature_spec, validate_feature_health
 
 ARTIFACT_FORMAT_VERSION = 1
 MODEL_TYPE = "lstm_autoencoder"
@@ -169,6 +170,7 @@ class LSTMAutoencoderManifest:
     training_start_timestamp: str | None
     training_end_timestamp: str | None
     training_sessions: tuple[str, ...]
+    input_rows: int
     input_windows: int
     train_windows: int
     validation_windows: int
@@ -193,6 +195,7 @@ class LSTMAutoencoderManifest:
             "training_start_timestamp": self.training_start_timestamp,
             "training_end_timestamp": self.training_end_timestamp,
             "training_sessions": list(self.training_sessions),
+            "input_rows": self.input_rows,
             "input_windows": self.input_windows,
             "train_windows": self.train_windows,
             "validation_windows": self.validation_windows,
@@ -219,6 +222,7 @@ class LSTMAutoencoderManifest:
             training_start_timestamp=_optional_str(data.get("training_start_timestamp")),
             training_end_timestamp=_optional_str(data.get("training_end_timestamp")),
             training_sessions=tuple(str(session) for session in data["training_sessions"]),
+            input_rows=int(data.get("input_rows", data["input_windows"])),
             input_windows=int(data["input_windows"]),
             train_windows=int(data["train_windows"]),
             validation_windows=int(data["validation_windows"]),
@@ -260,6 +264,7 @@ def train_lstm_autoencoder(
     model_version: str | None = None,
     trained_at: datetime | pd.Timestamp | str | None = None,
     calibrate_thresholds: bool = True,
+    feature_spec: Mapping[str, Any] | None = None,
 ) -> TrainedLSTMAutoencoder:
     """Train an autoencoder on clean sequence windows.
 
@@ -347,6 +352,18 @@ def train_lstm_autoencoder(
     version = model_version or f"lstm_autoencoder_{created_at.replace(':', '')}"
     train_count = len(train_subset)
     validation_count = 0 if validation_subset is None else len(validation_subset)
+    schema = (
+        dict(feature_spec)
+        if feature_spec is not None
+        else build_feature_spec(
+            dataset.frame,
+            dataset.feature_columns,
+            sequence_length=dataset.sequence_length,
+            sequence_stride=dataset.stride,
+        )
+    )
+    validate_feature_health(schema.get("feature_health", {}))
+    schema["sequence_length"] = dataset.sequence_length
     manifest = LSTMAutoencoderManifest(
         artifact_format_version=ARTIFACT_FORMAT_VERSION,
         model_type=MODEL_TYPE,
@@ -356,6 +373,7 @@ def train_lstm_autoencoder(
         training_start_timestamp=_min_window_timestamp(dataset),
         training_end_timestamp=_max_window_timestamp(dataset),
         training_sessions=_training_sessions(dataset),
+        input_rows=len(dataset.frame),
         input_windows=len(dataset),
         train_windows=train_count,
         validation_windows=validation_count,
@@ -378,13 +396,7 @@ def train_lstm_autoencoder(
             "device": str(device_obj),
             "dtype": dtype,
         },
-        schema={
-            "feature_columns": list(dataset.feature_columns),
-            "feature_dtypes": {
-                column: str(dataset.frame[column].dtype) for column in dataset.feature_columns
-            },
-            "sequence_length": dataset.sequence_length,
-        },
+        schema=schema,
         history=tuple(history),
     )
     trained = TrainedLSTMAutoencoder(model=model, manifest=manifest)

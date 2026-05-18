@@ -55,6 +55,7 @@ from src.preprocessing import (
 from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
     build_feature_frame,
+    build_feature_spec,
 )
 from src.preprocessing.feature_pipeline import (
     segment_or_constant as _segment_or_constant,
@@ -87,6 +88,7 @@ def train(
         features,
         config.models.isolation_forest,
         feature_columns=feature_columns,
+        feature_spec=build_feature_spec(features, feature_columns, config=config),
         fitted_at=datetime.now(UTC),
     )
 

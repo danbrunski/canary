@@ -122,6 +122,12 @@ scripts/canaryctl.py jobs start corpus_report
 .venv/bin/mypy
 ```
 
+Do not wrap FastAPI/Starlette `TestClient` tests in GNU `timeout` inside the
+Codex sandbox. `timeout 90s .venv/bin/pytest ...` can deadlock AnyIO's blocking
+portal and make simple in-process API tests look hung even though
+`.venv/bin/pytest ...` completes normally. If a run appears stuck, first rerun
+the same pytest command directly before debugging app code.
+
 ---
 
 ## Project layout

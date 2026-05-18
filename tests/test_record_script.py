@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 import threading
 from pathlib import Path
 from typing import Any
@@ -33,7 +34,7 @@ class FakeWriter:
 def test_record_cli_continues_when_obd_setup_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An ELM327 that won't connect must not abort the CAN capture or crash."""
+    """An enabled OBD capture with zero readings is schema-incomplete."""
     bus = FakeBus()
     writer = FakeWriter()
 
@@ -58,7 +59,7 @@ def test_record_cli_continues_when_obd_setup_fails(
         ]
     )
 
-    assert rc == 0
+    assert rc == 1
     assert bus.closed is True
     assert writer.closed is True
 
@@ -85,9 +86,10 @@ def test_record_cli_runs_supervised_obd_capture(
     monkeypatch.setattr(record_script, "JsonlReadingWriter", lambda _path: writer)
     monkeypatch.setattr(record_script, "obd_factory", lambda _spec, _on_reading: FakeObdConn())
 
-    def fake_record(*_a: Any, **_k: Any) -> None:
+    def fake_record(*args: Any, **_k: Any) -> None:
         # Stand in for the blocking CAN recorder: hold until OBD is up, then return.
         assert obd_started.wait(timeout=5.0)
+        args[1].pids.write_text('{"timestamp": 1.0, "channel": "RPM", "value": 700}\n')
 
     monkeypatch.setattr(record_script, "record", fake_record)
 
@@ -106,10 +108,45 @@ def test_record_cli_cleans_up_without_obd(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(record_script, "bus_factory", lambda _spec: bus)
     monkeypatch.setattr(record_script, "record", lambda *_a, **_k: None)
 
-    rc = record_script.main(["--config", "canary.example.yaml", "--out-dir", str(tmp_path)])
+    rc = record_script.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--out-dir",
+            str(tmp_path),
+            "--obd-source",
+            "off",
+        ]
+    )
 
     assert rc == 0
     assert bus.closed is True
+
+
+def test_record_cli_restores_signal_handlers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bus = FakeBus()
+    original_sigint = signal.getsignal(signal.SIGINT)
+    original_sigterm = signal.getsignal(signal.SIGTERM)
+
+    monkeypatch.setattr(record_script, "bus_factory", lambda _spec: bus)
+    monkeypatch.setattr(record_script, "record", lambda *_a, **_k: None)
+
+    rc = record_script.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--out-dir",
+            str(tmp_path),
+            "--obd-source",
+            "off",
+        ]
+    )
+
+    assert rc == 0
+    assert signal.getsignal(signal.SIGINT) == original_sigint
+    assert signal.getsignal(signal.SIGTERM) == original_sigterm
 
 
 def test_record_cli_runs_canable_obd_capture(
@@ -123,10 +160,11 @@ def test_record_cli_runs_canable_obd_capture(
     monkeypatch.setattr(record_script, "bus_factory", lambda _spec: bus)
     monkeypatch.setattr(record_script, "JsonlReadingWriter", lambda _path: writer)
 
-    def fake_record_can_obd(_bus: Any, _paths: Any, **kwargs: Any) -> None:
+    def fake_record_can_obd(_bus: Any, paths: Any, **kwargs: Any) -> None:
         captured["bus"] = _bus
         captured["spec"] = kwargs["spec"]
         captured["writer"] = kwargs["obd_writer"]
+        paths.pids.write_text('{"timestamp": 1.0, "channel": "RPM", "value": 700}\n')
 
     monkeypatch.setattr(record_script, "record_can_obd", fake_record_can_obd)
 
@@ -178,7 +216,10 @@ def test_record_cli_passes_dids_to_obd_spec(
     monkeypatch.setattr(record_script, "bus_factory", lambda _spec: bus)
     monkeypatch.setattr(record_script, "JsonlReadingWriter", lambda _path: writer)
     monkeypatch.setattr(record_script, "obd_factory", fake_factory)
-    monkeypatch.setattr(record_script, "record", lambda *_a, **_k: None)
+    def fake_record(*args: Any, **_kwargs: Any) -> None:
+        args[1].pids.write_text('{"timestamp": 1.0, "channel": "RPM", "value": 700}\n')
+
+    monkeypatch.setattr(record_script, "record", fake_record)
 
     rc = record_script.main(
         [

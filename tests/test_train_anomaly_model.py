@@ -19,7 +19,7 @@ from scripts.train_anomaly_model import (
 )
 from src.config import CanaryConfig
 from src.preprocessing import MODE_COLUMN
-from src.preprocessing.feature_pipeline import ALL_MODE
+from src.preprocessing.feature_pipeline import ALL_MODE, build_feature_spec
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
 
 # ---------------------------------------------------------------------------
@@ -189,6 +189,34 @@ def test_trainable_columns_excludes_structural_gap_and_allnan():
     assert "decoded:STRINGY" not in cols  # non-numeric dropped
     assert "session" not in cols
     assert MODE_COLUMN not in cols
+
+
+def test_feature_spec_records_health_and_dropped_columns():
+    import numpy as np
+
+    df = pd.DataFrame(
+        {
+            "session": ["s1"] * 3,
+            "timestamp": pd.date_range("2026-05-11T12:00:00Z", periods=3, freq="1s"),
+            MODE_COLUMN: ["idle"] * 3,
+            "obd:RPM": [800.0, 800.0, 800.0],
+            "obd:SPEED": [0.0, 1.0, 2.0],
+            "deviation:coolant_warmup": [np.nan, np.nan, np.nan],
+        }
+    )
+    feature_columns = _trainable_feature_columns(df)
+
+    spec = build_feature_spec(df, feature_columns, config=_config())
+
+    assert spec["feature_spec_version"] == 1
+    assert spec["feature_columns"] == ["obd:RPM", "obd:SPEED"]
+    assert spec["feature_dtypes"]["obd:RPM"] == "float64"
+    assert spec["source_prefixes"] == ["obd"]
+    assert spec["preprocessing"]["resample_hz"] == _config().preprocessing.resample_hz
+    health = spec["feature_health"]
+    assert health["constant_columns"] == ["obd:RPM"]
+    assert health["dropped_all_nan_columns"] == ["deviation:coolant_warmup"]
+    assert health["columns"]["obd:SPEED"]["unique_finite_count"] == 3
 
 
 # ---------------------------------------------------------------------------

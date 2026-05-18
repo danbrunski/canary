@@ -176,6 +176,7 @@ def test_lstm_manifest_conforms() -> None:
     assert "model_version" in fields
     assert "training_data_hash" in fields
     assert "model_type" in fields
+    assert "input_rows" in fields
 
 
 def test_model_manifest_common_is_strict_about_extras() -> None:

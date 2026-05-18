@@ -50,6 +50,7 @@ from src.preprocessing import discover_sessions
 from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
     build_feature_frame,
+    build_feature_spec,
     trainable_feature_columns,
 )
 
@@ -127,6 +128,13 @@ def train(
         device=device,
         model_version=model_version,
         trained_at=datetime.now(UTC),
+        feature_spec=build_feature_spec(
+            dataset.frame,
+            dataset.feature_columns,
+            config=config,
+            sequence_length=dataset.sequence_length,
+            sequence_stride=dataset.stride,
+        ),
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)

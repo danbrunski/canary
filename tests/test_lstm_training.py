@@ -17,6 +17,7 @@ from src.models.lstm_training import (
     load_lstm_autoencoder_model,
     train_lstm_autoencoder,
 )
+from src.models.manifest import validate_manifest_common
 from src.models.sequence_dataset import SequenceWindowDataset
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
@@ -102,6 +103,11 @@ def test_train_lstm_autoencoder_produces_manifest() -> None:
     assert manifest.hyperparams["loss"] == "mae"
     assert manifest.hyperparams["optimizer"] == "adam"
     assert manifest.training_data_hash.startswith("sha256:")
+    assert manifest.input_rows == len(dataset.frame)
+    assert manifest.schema["feature_spec_version"] == 1
+    assert manifest.schema["feature_health"]["selected_feature_count"] == 2
+    assert manifest.schema["feature_health"]["constant_columns"] == []
+    validate_manifest_common(manifest.to_dict())
     assert manifest.thresholds is not None
     calibration = LSTMThresholdCalibration.from_dict(manifest.thresholds)
     assert calibration.threshold_k == 2.0
