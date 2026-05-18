@@ -8,6 +8,9 @@ interface SparklineProps {
   /** When set, the y-axis is fixed to [min, max] instead of auto-scaled. */
   min?: number;
   max?: number;
+  /** Draw a dim dashed horizontal reference line at this y-value (same units
+   *  as `values`). Use with fixed min/max for a meaningful "threshold" mark. */
+  baseline?: number;
 }
 
 /** Canvas sparkline. The dashboard would render hundreds of these if it
@@ -20,6 +23,7 @@ export function Sparkline({
   stroke = "#ffb547",
   min,
   max,
+  baseline,
 }: SparklineProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -45,6 +49,19 @@ export function Sparkline({
     const pad = 2;
     const usableH = height - pad * 2;
 
+    if (baseline !== undefined && baseline >= lo && baseline <= hi) {
+      const by = pad + (1 - (baseline - lo) / span) * usableH;
+      ctx.save();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(148,163,184,0.45)";
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(0, by);
+      ctx.lineTo(width, by);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = stroke;
     ctx.beginPath();
@@ -55,7 +72,7 @@ export function Sparkline({
       else ctx.lineTo(x, y);
     });
     ctx.stroke();
-  }, [values, width, height, stroke, min, max]);
+  }, [values, width, height, stroke, min, max, baseline]);
 
   return <canvas ref={ref} width={width} height={height} />;
 }
