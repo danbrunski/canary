@@ -432,9 +432,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # problem — surface it now, not at train time.
     if obd_source != "off":
         readings = (
-            sum(1 for line in paths.pids.open() if line.strip())
-            if paths.pids.exists()
-            else 0
+            sum(1 for line in paths.pids.open() if line.strip()) if paths.pids.exists() else 0
         )
         if readings == 0:
             log.error(

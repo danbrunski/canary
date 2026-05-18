@@ -216,6 +216,7 @@ def test_record_cli_passes_dids_to_obd_spec(
     monkeypatch.setattr(record_script, "bus_factory", lambda _spec: bus)
     monkeypatch.setattr(record_script, "JsonlReadingWriter", lambda _path: writer)
     monkeypatch.setattr(record_script, "obd_factory", fake_factory)
+
     def fake_record(*args: Any, **_kwargs: Any) -> None:
         args[1].pids.write_text('{"timestamp": 1.0, "channel": "RPM", "value": 700}\n')
 
