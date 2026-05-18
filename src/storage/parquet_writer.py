@@ -201,23 +201,32 @@ def delete_expired_sessions(
     retention_days: int,
     *,
     now: datetime | None = None,
+    protect: Iterable[Path] | None = None,
 ) -> list[Path]:
-    """Delete timestamp-named session directories older than retention_days."""
+    """Delete timestamp-named session directories older than retention_days.
+
+    ``protect`` is an explicit safety rail for live sessions. A protected
+    directory is never removed even if its timestamp is older than the
+    retention cutoff. Pin files keep their existing behavior.
+    """
     if retention_days < 0:
         raise ValueError("retention_days must be non-negative")
     if not sessions_root.exists():
         return []
 
+    protected = {path.resolve() for path in protect or ()}
     cutoff = (datetime.now(UTC) if now is None else now.astimezone(UTC)) - timedelta(
         days=retention_days
     )
     deleted: list[Path] = []
-    for child in sessions_root.iterdir():
+    for child in sorted(sessions_root.iterdir()):
         if not child.is_dir():
             continue
         try:
             started_at = datetime.strptime(child.name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
         except ValueError:
+            continue
+        if child.resolve() in protected:
             continue
         if (child / ".canary-pin").exists():
             continue

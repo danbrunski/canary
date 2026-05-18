@@ -255,6 +255,24 @@ def test_delete_expired_sessions_keeps_pinned_old_sessions(tmp_path: Path) -> No
     assert old.exists()
 
 
+def test_delete_expired_sessions_keeps_protected_old_sessions(tmp_path: Path) -> None:
+    old = tmp_path / "2026-05-01T000000"
+    protected = tmp_path / "2026-05-02T000000"
+    old.mkdir()
+    protected.mkdir()
+
+    deleted = delete_expired_sessions(
+        tmp_path,
+        retention_days=5,
+        now=datetime(2026, 5, 11, tzinfo=UTC),
+        protect={protected},
+    )
+
+    assert deleted == [old]
+    assert not old.exists()
+    assert protected.exists()
+
+
 def test_delete_expired_sessions_rejects_negative_retention(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="retention_days"):
         delete_expired_sessions(tmp_path, retention_days=-1)

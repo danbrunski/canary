@@ -103,5 +103,6 @@ dashboard:
 #   isolation_forest_artifact: isolation_forest/model.joblib  # relative to models_dir
 #   lstm_artifact: lstm_autoencoder/model.pt                  # relative to models_dir
 #   model_poll_seconds: 30.0
+#   retention_sweep_seconds: 3600.0
 #   broadcaster_queue_size: 100
 #   control_token_env: CANARY_CONTROL_TOKEN

@@ -102,4 +102,5 @@ daemon:
   isolation_forest_artifact: isolation_forest/model.joblib
   lstm_artifact: lstm_autoencoder/model.pt
   model_poll_seconds: 30.0
+  retention_sweep_seconds: 3600.0
   broadcaster_queue_size: 100

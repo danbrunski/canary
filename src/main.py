@@ -204,6 +204,7 @@ async def run_collection(
         deleted = delete_expired_sessions(
             config.collection.storage_path,
             config.collection.session_retention_days,
+            protect={storage_writer.paths.root},
         )
         if deleted:
             log.info("expired sessions deleted", extra={"count": len(deleted)})

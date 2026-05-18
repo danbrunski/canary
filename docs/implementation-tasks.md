@@ -622,7 +622,7 @@ auto-deleted; because engine-run-time reset rotates the active dir
 (`parquet_writer.py:_rotate_if_engine_run_time_reset`), the live path must
 be read each tick, not snapshotted at startup.
 
-- [ ] **8.1 — Wire periodic retention into the production daemon (P0).**
+- [x] **8.1 — Wire periodic retention into the production daemon (P0).**
   Add `run_retention_sweeper` to `src/daemon.py` modeled on
   `poll_model_managers` (same `stop_event`-timeout loop, same
   task-launch/cancel handling in `run_daemon`). Cadence is a new
@@ -632,6 +632,11 @@ be read each tick, not snapshotted at startup.
   live dir (pinned dirs already excluded) — then logs what it reclaimed.
   Keep `run_collection`'s shutdown sweep as a final pass for parity, no
   longer the only sweep. Core fix. (Effort: S–M)
+  Done: production `run_daemon` now starts a periodic age-retention sweeper
+  with live `writer.paths.root` protection, structured reclaim logging, and
+  config-driven cadence; collection-only shutdown cleanup uses the same
+  active-session protection. Regression coverage proves the daemon wiring
+  deletes an expired session while preserving the active one.
 
 - [ ] **8.2 — Byte-bounded storage cap / true ring buffer (P0).** Add
   `collection.storage_max_mb` and `enforce_storage_cap(sessions_root,
@@ -665,6 +670,8 @@ be read each tick, not snapshotted at startup.
   drift rule). Fix `docs/daemon-architecture.md:98`: retention is a
   periodic in-process sweep with a byte cap, not "sweeps on shutdown"
   (false on the production path). Depends on 8.1, 8.2. (Effort: S)
+  Started: `retention_sweep_seconds` is wired through config/examples/docs
+  with 8.1. `storage_max_mb` and byte-cap doc wording remain after 8.2.
 
 - [ ] **8.6 — Operator-intent / idle-gating for auto-started sessions
   (P2).** `run_daemon` opens a session and records whenever it runs;

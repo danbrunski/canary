@@ -321,6 +321,9 @@ models:
 dashboard:
   host: 0.0.0.0
   port: 8000
+
+daemon:
+  retention_sweep_seconds: 3600.0
 ```
 
 ---

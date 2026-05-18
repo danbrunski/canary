@@ -173,6 +173,7 @@ class DaemonConfig(_Strict):
     isolation_forest_artifact: str = "isolation_forest/model.joblib"
     lstm_artifact: str = "lstm_autoencoder/model.pt"
     model_poll_seconds: float = 30.0
+    retention_sweep_seconds: float = 3600.0
     broadcaster_queue_size: int = 100
     control_token_env: str = "CANARY_CONTROL_TOKEN"
 

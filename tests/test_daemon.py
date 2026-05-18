@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from src.daemon import (
     build_live_feature_source,
     drain_queue_with_broadcast,
     poll_model_managers,
+    run_retention_sweeper,
 )
 from src.dashboard.broadcast import Broadcaster
 from src.models.manager import ModelManager
@@ -73,6 +75,7 @@ daemon:
   anomalies_dir: {tmp_path / "anomalies"}
   models_dir: {tmp_path / "models"}
   model_poll_seconds: 0.05
+  retention_sweep_seconds: 0.05
   broadcaster_queue_size: 16
 """
 
@@ -339,6 +342,48 @@ async def test_poll_swallows_manager_exceptions(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Retention sweeper
+# ---------------------------------------------------------------------------
+
+
+async def test_retention_sweeper_deletes_expired_sessions_and_keeps_active(
+    tmp_path: Path,
+) -> None:
+    old = tmp_path / "2000-01-01T000000"
+    active = tmp_path / "2000-01-02T000000"
+    old.mkdir()
+    active.mkdir()
+    (old / "telemetry-00000.parquet").write_bytes(b"old")
+    (active / "telemetry-00000.parquet").write_bytes(b"active")
+    stop = asyncio.Event()
+
+    async def _wait_until_deleted() -> None:
+        for _ in range(20):
+            if not old.exists():
+                return
+            await asyncio.sleep(0.05)
+        raise AssertionError("retention sweeper did not delete expired session")
+
+    task = asyncio.create_task(
+        run_retention_sweeper(
+            tmp_path,
+            retention_days=1,
+            stop_event=stop,
+            interval_seconds=0.05,
+            active_session_path=lambda: active,
+        )
+    )
+    try:
+        await asyncio.wait_for(_wait_until_deleted(), timeout=2.0)
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert not old.exists()
+    assert active.exists()
+
+
+# ---------------------------------------------------------------------------
 # DaemonConfig defaults
 # ---------------------------------------------------------------------------
 
@@ -349,6 +394,7 @@ def test_daemon_config_defaults_are_sane() -> None:
     assert cfg.anomalies_dir == Path("data/anomalies")
     assert cfg.models_dir == Path("models")
     assert cfg.model_poll_seconds == 30.0
+    assert cfg.retention_sweep_seconds == 3600.0
     assert cfg.broadcaster_queue_size == 100
 
 
@@ -374,6 +420,53 @@ def test_daemon_components_is_a_dataclass(config: CanaryConfig) -> None:
 # ---------------------------------------------------------------------------
 # End-to-end: run_daemon with fake collectors + real dashboard + real broadcaster
 # ---------------------------------------------------------------------------
+
+
+async def test_run_daemon_starts_retention_sweeper_and_protects_active_session(
+    config: CanaryConfig,
+) -> None:
+    from src.daemon import run_daemon
+
+    config.collection.session_retention_days = 1
+    config.daemon.retention_sweep_seconds = 0.05
+    old = config.collection.storage_path / "2000-01-01T000000"
+    old.mkdir(parents=True)
+    (old / "telemetry-00000.parquet").write_bytes(b"old")
+    writer = ParquetTelemetryWriter(
+        config.collection.storage_path,
+        session_started_at=datetime(2000, 1, 2, tzinfo=UTC),
+    )
+    active = writer.paths.root
+    (active / "telemetry-00000.parquet").write_bytes(b"active")
+    components = build_components(config)
+    stop = asyncio.Event()
+
+    async def _run() -> None:
+        await run_daemon(
+            config,
+            stop,
+            collectors=[],
+            writer=writer,
+            components=components,
+            enable_live_inference=False,
+        )
+
+    async def _wait_until_deleted() -> None:
+        for _ in range(40):
+            if not old.exists():
+                return
+            await asyncio.sleep(0.05)
+        raise AssertionError("run_daemon retention sweeper did not delete expired session")
+
+    daemon_task = asyncio.create_task(_run())
+    try:
+        await asyncio.wait_for(_wait_until_deleted(), timeout=3.0)
+    finally:
+        stop.set()
+        await asyncio.wait_for(daemon_task, timeout=5.0)
+
+    assert not old.exists()
+    assert active.exists()
 
 
 # ---------------------------------------------------------------------------

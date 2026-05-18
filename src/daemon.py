@@ -71,7 +71,7 @@ from src.preprocessing.feature_pipeline import (
 )
 from src.preprocessing.live import LiveFeatureSource
 from src.storage.monitor import warn_if_storage_low
-from src.storage.parquet_writer import ParquetTelemetryWriter
+from src.storage.parquet_writer import ParquetTelemetryWriter, delete_expired_sessions
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
@@ -641,6 +641,70 @@ async def poll_model_managers(
             continue
 
 
+async def run_retention_sweeper(
+    storage_path: Path,
+    retention_days: int,
+    stop_event: asyncio.Event,
+    *,
+    interval_seconds: float,
+    active_session_path: Callable[[], Path],
+) -> None:
+    """Periodically delete expired session dirs from the production daemon.
+
+    The active session is read through ``active_session_path`` on every tick,
+    not captured once at startup, because ``ParquetTelemetryWriter`` rotates
+    sessions when engine run time resets.
+    """
+    if interval_seconds <= 0:
+        raise ValueError("interval_seconds must be positive")
+
+    while not stop_event.is_set():
+        active = active_session_path()
+        try:
+            sizes_before = _session_sizes(storage_path)
+            deleted = delete_expired_sessions(
+                storage_path,
+                retention_days,
+                protect={active},
+            )
+            if deleted:
+                log.info(
+                    "expired sessions deleted",
+                    extra={
+                        "count": len(deleted),
+                        "reclaimed_bytes": sum(sizes_before.get(path, 0) for path in deleted),
+                        "sessions": [str(path) for path in deleted],
+                        "active_session": str(active),
+                    },
+                )
+        except Exception:  # noqa: BLE001 — cleanup must not kill capture
+            log.exception("retention sweep failed", extra={"storage_path": str(storage_path)})
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            continue
+
+
+def _session_sizes(sessions_root: Path) -> dict[Path, int]:
+    if not sessions_root.exists():
+        return {}
+    sizes: dict[Path, int] = {}
+    for child in sessions_root.iterdir():
+        if child.is_dir():
+            sizes[child] = _tree_size(child)
+    return sizes
+
+
+def _tree_size(root: Path) -> int:
+    total = 0
+    with suppress(OSError):
+        for child in root.rglob("*"):
+            with suppress(OSError):
+                if child.is_file():
+                    total += child.stat().st_size
+    return total
+
+
 @asynccontextmanager
 async def serve_in_background(
     components: DaemonComponents,
@@ -727,6 +791,7 @@ async def run_daemon(
         the IF model manager has a loaded artifact; otherwise the task
         becomes a passive wait on ``stop_event``)
       * ``poll_model_managers`` → hot-swap loop
+      * ``run_retention_sweeper`` → age-based session retention
       * the dashboard via ``serve_in_background``
 
     Returns the components so a caller can inspect counters / model
@@ -785,6 +850,15 @@ async def run_daemon(
             health=components.health_monitor,
         )
     )
+    retention_task = asyncio.create_task(
+        run_retention_sweeper(
+            config.collection.storage_path,
+            config.collection.session_retention_days,
+            stop_event,
+            interval_seconds=config.daemon.retention_sweep_seconds,
+            active_session_path=lambda: storage_writer.paths.root,
+        )
+    )
     inference_tasks: list[asyncio.Task[Any]] = []
     if live_source is not None:
         inference_tasks.append(
@@ -817,6 +891,11 @@ async def run_daemon(
                 await poll_task
             except asyncio.CancelledError:
                 pass
+            retention_task.cancel()
+            try:
+                await retention_task
+            except asyncio.CancelledError:
+                pass
             for task in inference_tasks:
                 # Each inference task observes stop_event and returns on its
                 # own; this is the join + cancel safety net.
@@ -835,6 +914,7 @@ __all__ = [
     "build_components",
     "drain_queue_with_broadcast",
     "poll_model_managers",
+    "run_retention_sweeper",
     "run_daemon",
     "serve_in_background",
 ]
