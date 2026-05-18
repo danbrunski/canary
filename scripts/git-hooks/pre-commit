@@ -1,8 +1,43 @@
 #!/usr/bin/env bash
 # Tracked pre-commit hook: enforces the FAST CI gates (ruff check, ruff format
 # --check, mypy) so a commit can't land that CI will immediately reject on
-# lint/format/type. pytest is left to scripts/check.sh / CI for commit speed.
+# lint/format/type. Documentation-only commits skip the gate so unrelated dirty
+# source work does not block roadmap or README updates. pytest is left to
+# scripts/check.sh / CI for commit speed.
 #
 # Enable once per clone:   git config core.hooksPath scripts/git-hooks
 # Bypass (rare WIP only):  git commit --no-verify
-exec "$(git rev-parse --show-toplevel)/scripts/check.sh" --fast
+repo_root="$(git rev-parse --show-toplevel)"
+
+docs_only=1
+staged_count=0
+
+is_documentation_path() {
+  case "$1" in
+    *.md|*.mdx|docs/*|README|README.*|CHANGELOG|CHANGELOG.*|LICENSE|LICENSE.*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+while IFS= read -r -d '' path; do
+  staged_count=$((staged_count + 1))
+  if ! is_documentation_path "$path"; then
+    docs_only=0
+    break
+  fi
+done < <(git diff --cached --name-only -z)
+
+if [[ $staged_count -eq 0 ]]; then
+  exit 0
+fi
+
+if [[ $docs_only -eq 1 ]]; then
+  echo "documentation-only commit -- skipping fast gate"
+  exit 0
+fi
+
+exec "$repo_root/scripts/check.sh" --fast
