@@ -32,6 +32,7 @@ Read tools:
 | `list_jobs` / `get_job` / `get_job_logs` | `GET /control/jobs[...]` |
 | `get_tuning` / `get_feedback` | `GET /control/{tuning,feedback}` |
 | `tail_daemon_log` | `journalctl --unit canary -o json` (fallback file when no systemd) |
+| `search_anomaly_log` | structured search over anomaly day-files + MCP audit log (kind=anomalies\|audit) |
 | `signal_lookup` | in-process FSM-name fuzzy match (requires `CANARY_SIGNALS_PATH`) |
 | `query_telemetry` | DuckDB over the Parquet ring buffer (requires `CANARY_STORAGE_PATH`) |
 

@@ -40,6 +40,9 @@ from src.mcp_server.tools import (
     logs as logs_tool,
 )
 from src.mcp_server.tools import (
+    search as search_tool,
+)
+from src.mcp_server.tools import (
     sessions as sessions_tool,
 )
 from src.mcp_server.tools import (
@@ -238,6 +241,50 @@ def _register_read_tools(
             since=since,
             unit=unit or cfg.daemon_unit,
             fallback_path=cfg.log_fallback_path,
+        )
+
+    @mcp.tool()
+    def search_anomaly_log(
+        kind: str = "anomalies",
+        since: str | None = None,
+        until: str | None = None,
+        contains: str | None = None,
+        source: str | None = None,
+        mode: str | None = None,
+        min_score: float | None = None,
+        max_score: float | None = None,
+        affected_channel: str | None = None,
+        session: str | None = None,
+        action: str | None = None,
+        result: str | None = None,
+        actor: str | None = None,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        """Search anomaly history (kind='anomalies') or the MCP audit log (kind='audit').
+
+        Anomaly filters: source (isolation_forest|lstm_autoencoder), mode,
+        min_score / max_score, affected_channel, session. Audit filters:
+        action (e.g. 'mcp.start_capture'), result ('ok'|'error'), actor.
+        ``contains`` does a raw-text substring match for fields outside the
+        structured filters. Results are newest-first, capped at ``limit``.
+        """
+        return search_tool.search_anomaly_log(
+            kind=kind,
+            anomalies_dir=cfg.anomalies_dir,
+            audit_path=cfg.audit_path,
+            since=since,
+            until=until,
+            contains=contains,
+            source=source,
+            mode=mode,
+            min_score=min_score,
+            max_score=max_score,
+            affected_channel=affected_channel,
+            session=session,
+            action=action,
+            result=result,
+            actor=actor,
+            limit=limit,
         )
 
     if cfg.signals_path is not None:

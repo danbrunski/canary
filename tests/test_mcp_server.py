@@ -66,6 +66,7 @@ async def test_build_server_registers_phase1_and_phase2_tools(tmp_path: Path) ->
         "get_tuning",
         "get_feedback",
         "tail_daemon_log",
+        "search_anomaly_log",
         # Phase 2 write
         "set_session_metadata",
         "pin_session",
