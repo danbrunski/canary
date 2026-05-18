@@ -51,6 +51,10 @@ def test_retrain_calls_both_trainers(
             str(tmp_path / "if"),
             "--lstm-out",
             str(tmp_path / "lstm"),
+            # Not a feedback test; isolate from the machine's ambient
+            # data/control/anomaly_feedback.jsonl (the feedback path is
+            # covered by test_retrain_applies_feedback_policy_for_single_trainer).
+            "--no-feedback-policy",
         ]
     )
     assert rc == 0
@@ -145,6 +149,7 @@ def test_retrain_skip_if(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
             str(tmp_path / "sessions"),
             "--all",
             "--skip-if",
+            "--no-feedback-policy",
         ]
     )
     assert rc == 0
@@ -168,6 +173,7 @@ def test_retrain_skip_lstm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
             str(tmp_path / "sessions"),
             "--all",
             "--skip-lstm",
+            "--no-feedback-policy",
         ]
     )
     assert rc == 0
@@ -230,6 +236,7 @@ def test_retrain_continues_after_first_trainer_fails(
             "--sessions-root",
             str(tmp_path / "sessions"),
             "--all",
+            "--no-feedback-policy",
         ]
     )
     # One trainer failed, but the other still ran; partial success exits zero so
