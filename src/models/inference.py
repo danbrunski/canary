@@ -227,7 +227,15 @@ class LSTMInferenceEngine:
             column for column, score in channel_scores.items() if score > channel_thresholds[column]
         )
         global_threshold = self.calibration.global_error.threshold
-        is_anomaly = global_score > global_threshold or bool(anomalous_channels)
+        # Gate the emit on the *global* reconstruction error only. The
+        # per-channel thresholds are calibrated from training data and run far
+        # too tight live: with ~90 channels at idle/warmup at least one is
+        # essentially always over its band, so an `or bool(anomalous_channels)`
+        # clause fired every tick and flooded /ws/anomalies with globally-
+        # normal "anomalies". `anomalous_channels` / `channel_scores` /
+        # `channel_thresholds` are still computed and carried in the event
+        # detail so a genuine (global) anomaly stays fully drillable.
+        is_anomaly = global_score > global_threshold
         return LSTMInferenceResult(
             model_version=trained_version(self.trained),
             timestamp=timestamp,

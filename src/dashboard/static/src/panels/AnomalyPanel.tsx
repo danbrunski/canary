@@ -268,11 +268,12 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                 {e.affected_channels.length > 0 && (
                   <span
                     className="text-[0.78rem] text-fg-dim"
-                    title={`top contributing channels: ${e.affected_channels.join(", ")}`}
+                    title={`Channels whose reconstruction error exceeded its calibrated band (${e.affected_channels.length}). Click the row for the full per-channel breakdown.`}
                   >
-                    drivers: {e.affected_channels.slice(0, 3).join(", ")}
-                    {e.affected_channels.length > 3 &&
-                      ` +${e.affected_channels.length - 3} more`}
+                    {e.affected_channels.length} chan over band ·{" "}
+                    {e.affected_channels.slice(0, 2).join(", ")}
+                    {e.affected_channels.length > 2 &&
+                      ` +${e.affected_channels.length - 2}`}
                   </span>
                 )}
                 {e.detail?.missing_features === true && (
