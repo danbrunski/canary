@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Tracked pre-commit hook: enforces the FAST CI gates (ruff check, ruff format
+# --check, mypy) so a commit can't land that CI will immediately reject on
+# lint/format/type. pytest is left to scripts/check.sh / CI for commit speed.
+#
+# Enable once per clone:   git config core.hooksPath scripts/git-hooks
+# Bypass (rare WIP only):  git commit --no-verify
+exec "$(git rev-parse --show-toplevel)/scripts/check.sh" --fast

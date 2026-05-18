@@ -116,10 +116,32 @@ scripts/canaryctl.py jobs start corpus_report
 
 ### Test / lint / typecheck
 
+**Before every commit run the one-command CI-parity gate** — it runs exactly
+what CI (`.github/workflows/ci.yml`) runs, in the same order, so "green
+locally" means "green in CI":
+
 ```bash
-.venv/bin/pytest
+scripts/check.sh          # ruff check . → ruff format --check . → mypy → pytest -v
+scripts/check.sh --fix    # auto-apply `ruff format` + `ruff check --fix`, then gate
+scripts/check.sh --fast   # skip pytest (lint/format/type only)
+```
+
+Enable the tracked pre-commit hook **once per clone** so this is enforced, not
+remembered (the recurring failure is forgetting `ruff format --check .`, which
+`ruff check .` does **not** catch):
+
+```bash
+git config core.hooksPath scripts/git-hooks   # runs scripts/check.sh --fast pre-commit
+```
+
+Bypass for rare WIP commits: `git commit --no-verify`. The raw underlying
+commands, if you need them individually:
+
+```bash
 .venv/bin/ruff check .
+.venv/bin/ruff format --check .
 .venv/bin/mypy
+.venv/bin/pytest
 ```
 
 Do not wrap FastAPI/Starlette `TestClient` tests in GNU `timeout` inside the
