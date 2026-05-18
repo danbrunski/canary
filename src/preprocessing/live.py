@@ -82,6 +82,14 @@ class LiveFeatureSource:
     _feature_config: FeatureConfig = field(init=False)
     _max_rows: int = field(init=False)
 
+    #: Last wide-row operating point (raw channels + ``operating_mode`` +
+    #: ``deviation:*``) from :meth:`tick`. The daemon reads this to compute
+    #: live behavior deviations off the exact row the feature pipeline used,
+    #: rather than re-deriving segmentation. ``None`` until the first tick
+    #: with observations; reset to ``None`` on an empty tick so a stale point
+    #: can't outlive a data gap.
+    latest_operating_point: dict[str, Any] | None = field(init=False, default=None)
+
     def __post_init__(self) -> None:
         hz = max(self.config.preprocessing.resample_hz, 1.0)
         window_s = self.config.preprocessing.rolling_window_seconds
@@ -214,6 +222,7 @@ class LiveFeatureSource:
         index 0 is the only row.
         """
         if not self._current_values:
+            self.latest_operating_point = None
             return None
         # Snapshot — copy so a later observation can't mutate this tick's row.
         snapshot = {
@@ -233,6 +242,12 @@ class LiveFeatureSource:
 
         if self.behavior_models is not None and self.behavior_models.models:
             wide = append_deviation_columns(wide, self.behavior_models)
+
+        # Stash the row the behavior decoder consumes (raw input channels +
+        # operating_mode + deviation:*). Captured before the feature step so
+        # the live overlay still updates on ticks where compute_features
+        # yields nothing yet (warmup window not full).
+        self.latest_operating_point = {str(k): v for k, v in wide.iloc[-1].to_dict().items()}
 
         featured = compute_features(wide, config=self._feature_config)
         if featured.empty:

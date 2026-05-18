@@ -93,6 +93,7 @@ from src.control.sessions import (
     write_session_metadata,
     write_session_zip,
 )
+from src.dashboard.behavior_live import BehaviorLiveState
 from src.dashboard.broadcast import Broadcaster
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
@@ -598,6 +599,7 @@ def create_app(
     feedback_store: FeedbackStore | None = None,
     alert_tuner: AlertTuner | None = None,
     health_monitor: HealthMonitor | None = None,
+    behavior_live: BehaviorLiveState | None = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -688,6 +690,16 @@ def create_app(
         # run lands in the dashboard without a daemon restart. Cheap — the
         # file is < 100 KB even with a full surface catalog.
         return read_behavior_models(behavior_models_path)
+
+    @app.get("/models/behavior/live")
+    def get_behavior_live() -> dict[str, Any]:
+        # Live "you are here" overlay for Models▸Behavior: per-model
+        # expected/actual/deviation/severity + a short server-side trail,
+        # fed by the daemon's inference loop. Empty (not an error) when no
+        # daemon is wired — the static surfaces still render standalone.
+        if behavior_live is None:
+            return {"observed": 0, "timestamp": None, "operating_mode": None, "models": {}}
+        return behavior_live.snapshot()
 
     @app.get("/bindings")
     def get_bindings() -> dict[str, Any]:

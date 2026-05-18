@@ -11,6 +11,7 @@ import {
 import type {
   AnomalyEvent,
   AppMode,
+  BehaviorLiveResponse,
   BehaviorModelsResponse,
   BindingsByChannel,
   StatusResponse,
@@ -43,6 +44,7 @@ export interface DashboardData {
   statusError: Error | null;
   behaviorModels: BehaviorModelsResponse | null;
   behaviorModelsError: Error | null;
+  behaviorLive: BehaviorLiveResponse | null;
   token: string;
   onTokenChange: (token: string) => void;
   companion: CompanionSettings;
@@ -111,6 +113,7 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
         <BehaviorModelsPanel
           data={d.behaviorModels}
           error={d.behaviorModelsError}
+          live={d.behaviorLive}
         />
       );
     case "control-main":
