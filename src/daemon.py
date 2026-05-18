@@ -443,6 +443,11 @@ def _lstm_observe(engine: Any, row: Any) -> Any:
     return engine.observe(pd.Series(aligned))
 
 
+# Model versions already warned about scoring with a missing feature schema,
+# so the fail-safe suppression logs once per version instead of every tick.
+_IF_MISSING_WARNED: set[str] = set()
+
+
 def _score_and_emit(
     loaded: Any,
     row: Any,  # pd.DataFrame, one row
@@ -485,6 +490,23 @@ def _score_and_emit(
             ),
             data_timestamp_epoch=ts_epoch,
         )
+    # Layer 3 fail-safe: an IF verdict computed from a feature vector with
+    # missing trained columns is untrustworthy. Suppress the emit (symmetric
+    # with the LSTM path, which already withholds output until a clean
+    # window) rather than alerting off a half-blind model. Health still
+    # recorded above, so the degraded state is visible on /status — silent
+    # but observable beats confidently wrong.
+    if bool(scored.get(MISSING_FEATURES_COLUMN, False)):
+        version = engine.model_version
+        if version not in _IF_MISSING_WARNED:
+            _IF_MISSING_WARNED.add(version)
+            log.warning(
+                "isolation_forest scoring with missing feature columns; "
+                "suppressing anomaly emit until the live stream supplies the "
+                "full trained schema. Watch /status missing_feature_rate.",
+                extra={"model_version": version},
+            )
+        return
     emitter.emit_isolation_forest_row(
         scored,
         model_version=engine.model_version,
