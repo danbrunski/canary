@@ -71,6 +71,7 @@ class LSTMSequenceBuffer:
         sequence_length: int,
         timestamp_column: str = TIMESTAMP_COLUMN,
         session_column: str = SESSION_COLUMN,
+        mode_column: str = "operating_mode",
         dtype: str = "float32",
     ) -> None:
         if sequence_length <= 0:
@@ -81,10 +82,17 @@ class LSTMSequenceBuffer:
         self.sequence_length = sequence_length
         self.timestamp_column = timestamp_column
         self.session_column = session_column
+        self.mode_column = mode_column
         self.dtype = dtype
         self._values: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(maxlen=sequence_length)
         self._metadata: deque[tuple[str, str]] = deque(maxlen=sequence_length)
         self._session: str | None = None
+        #: Phase 7.5 — the most recent appended row's operating mode, used by
+        #: ``LSTMInferenceEngine.observe`` to pick the per-mode threshold
+        #: (when the calibration carries one). Tracked separately from the
+        #: timestamp/session metadata deque to avoid touching ``metadata()``'s
+        #: 3-tuple contract.
+        self._last_mode: str | None = None
 
     def append(self, row: Mapping[str, Any] | pd.Series) -> bool:
         """Append a feature row and return whether a full window is ready.
@@ -114,6 +122,8 @@ class LSTMSequenceBuffer:
 
         self._values.append(values)
         self._metadata.append((timestamp, session))
+        raw_mode = row.get(self.mode_column)
+        self._last_mode = raw_mode if isinstance(raw_mode, str) else None
         return self.ready
 
     @property
@@ -124,6 +134,12 @@ class LSTMSequenceBuffer:
         self._values.clear()
         self._metadata.clear()
         self._session = None
+        self._last_mode = None
+
+    @property
+    def last_mode(self) -> str | None:
+        """Operating mode of the most recently appended row (7.5)."""
+        return self._last_mode
 
     def window_array(self) -> np.ndarray[Any, np.dtype[np.float32]]:
         if not self.ready:
@@ -180,6 +196,7 @@ class LSTMInferenceEngine:
             session=session,
             window_start_timestamp=start_timestamp,
             window_end_timestamp=end_timestamp,
+            operating_mode=self.buffer.last_mode,
         )
 
     def score_window(
@@ -190,6 +207,7 @@ class LSTMInferenceEngine:
         session: str,
         window_start_timestamp: str,
         window_end_timestamp: str,
+        operating_mode: str | None = None,
     ) -> LSTMInferenceResult:
         """Score one complete ``(T, F)`` sequence window."""
         if window.shape != (self.sequence_length, len(self.feature_columns)):
@@ -227,7 +245,17 @@ class LSTMInferenceEngine:
         anomalous_channels = tuple(
             column for column, score in channel_scores.items() if score > channel_thresholds[column]
         )
-        global_threshold = self.calibration.global_error.threshold
+        # Phase 7.5 per-mode threshold: prefer the mode's held-out
+        # reconstruction-error band when calibration carries one; fall back
+        # to the single global threshold otherwise (back-compat with
+        # pre-7.5 manifests where ``per_mode_errors`` is absent).
+        per_mode = self.calibration.per_mode_errors or {}
+        mode_distribution = per_mode.get(operating_mode) if operating_mode is not None else None
+        global_threshold = (
+            mode_distribution.threshold
+            if mode_distribution is not None
+            else self.calibration.global_error.threshold
+        )
         # Gate the emit on the *global* reconstruction error only. The
         # per-channel thresholds are calibrated from training data and run far
         # too tight live: with ~90 channels at idle/warmup at least one is

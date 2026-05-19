@@ -27,10 +27,16 @@ from src.models.lstm_autoencoder import (
 from src.models.manifest import validate_model_feature_spec
 from src.models.sequence_dataset import SequenceWindowDataset
 from src.preprocessing.feature_pipeline import build_feature_spec
+from src.preprocessing.segmenter import MODE_COLUMN
 from src.timefmt import format_timestamp as _format_timestamp
 
 ARTIFACT_FORMAT_VERSION = 1
 MODEL_TYPE = "lstm_autoencoder"
+
+#: Phase 7.5 — minimum validation-window count for a per-mode LSTM
+#: reconstruction-error band to be persisted. Below this the mode falls back
+#: to the global threshold at inference (mirrors IF's calibration floor).
+_LSTM_MIN_CALIBRATION_SAMPLES = 10
 
 
 class LSTMAutoencoderTrainingConfigLike(Protocol):
@@ -132,9 +138,15 @@ class LSTMThresholdCalibration:
     window_count: int
     global_error: ReconstructionErrorDistribution
     channel_errors: Mapping[str, ReconstructionErrorDistribution]
+    #: Phase 7.5 — per-operating-mode reconstruction-error distribution and
+    #: threshold, computed on the validation set's window-end mode. ``None``
+    #: (or absent in the manifest) for models trained before 7.5 / when no
+    #: mode had enough validation windows; inference then falls back to
+    #: ``global_error.threshold`` (back-compat with the pre-7.5 contract).
+    per_mode_errors: Mapping[str, ReconstructionErrorDistribution] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "threshold_k": self.threshold_k,
             "calibrated_at": self.calibrated_at,
             "training_data_hash": self.training_data_hash,
@@ -145,9 +157,23 @@ class LSTMThresholdCalibration:
                 for channel, distribution in self.channel_errors.items()
             },
         }
+        if self.per_mode_errors is not None:
+            out["per_mode_errors"] = {
+                mode: distribution.to_dict() for mode, distribution in self.per_mode_errors.items()
+            }
+        return out
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> LSTMThresholdCalibration:
+        raw_per_mode = data.get("per_mode_errors")
+        per_mode = (
+            None
+            if raw_per_mode is None
+            else {
+                str(mode): ReconstructionErrorDistribution.from_dict(distribution)
+                for mode, distribution in dict(raw_per_mode).items()
+            }
+        )
         return cls(
             threshold_k=float(data["threshold_k"]),
             calibrated_at=str(data["calibrated_at"]),
@@ -158,6 +184,7 @@ class LSTMThresholdCalibration:
                 str(channel): ReconstructionErrorDistribution.from_dict(distribution)
                 for channel, distribution in dict(data["channel_errors"]).items()
             },
+            per_mode_errors=per_mode,
         )
 
 
@@ -465,6 +492,29 @@ def calibrate_lstm_thresholds(
         column: _error_distribution(channel_matrix[:, index], threshold_k=threshold_k)
         for index, column in enumerate(dataset.feature_columns)
     }
+
+    # Phase 7.5 — per-operating-mode global thresholds. The mode for a window
+    # is the mode of its last row (the row the score is attributed to);
+    # ``shuffle=False`` above keeps the loader/dataset order aligned with
+    # ``global_values``. Modes with fewer than the floor of validation
+    # windows fall back to ``global_error`` at inference, matching IF's
+    # ``_MIN_CALIBRATION_SAMPLES`` philosophy.
+    per_mode_distributions: dict[str, ReconstructionErrorDistribution] = {}
+    frame = dataset.frame
+    if MODE_COLUMN in frame.columns:
+        by_mode: dict[str, list[int]] = {}
+        for index, window in enumerate(dataset.windows):
+            raw = frame.iloc[window.end_row - 1].get(MODE_COLUMN)
+            if raw is None or pd.isna(raw):
+                continue
+            by_mode.setdefault(str(raw), []).append(index)
+        for mode, indexes in by_mode.items():
+            if len(indexes) < _LSTM_MIN_CALIBRATION_SAMPLES:
+                continue
+            per_mode_distributions[mode] = _error_distribution(
+                global_values[indexes], threshold_k=threshold_k
+            )
+
     calibration = LSTMThresholdCalibration(
         threshold_k=threshold_k,
         calibrated_at=_format_timestamp(_coerce_timestamp(calibrated_at)),
@@ -472,6 +522,7 @@ def calibrate_lstm_thresholds(
         window_count=len(dataset),
         global_error=global_distribution,
         channel_errors=channel_distributions,
+        per_mode_errors=per_mode_distributions if per_mode_distributions else None,
     )
     manifest = replace(trained.manifest, thresholds=calibration.to_dict())
     return TrainedLSTMAutoencoder(model=trained.model, manifest=manifest)

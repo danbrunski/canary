@@ -16,8 +16,13 @@ the Nissan `10 C0` Mode 22 DID profile. Phase 6 substantially landed —
 Torque-parity telemetry, OBD coverage reporting, dataset/training/tuning
 ML-ops, and the reworked dashboard. Remaining work is hardware-gated or
 in-truck (live-ECU reads, write/parked actions, companion sync/publish,
-acceptance matrix) plus the Phase 7 anomaly-architecture hardening from
-the 2026-05-17 review. The Phase 8 storage-lifecycle/disk-safety fix from
+acceptance matrix). The Phase 7 anomaly-architecture hardening from the
+2026-05-17 review is software-complete (7.1 unified feature builder, 7.2
+fusion + IF held-out calibration, 7.3 model-load gate, 7.4 behavior
+residuals as first-class detectors, 7.5 LSTM per-mode thresholds +
+synthetic-fault CI regression guard); 7.2a (richer detector attribution)
+is the optional follow-up the dashboard wants. The Phase 8
+storage-lifecycle/disk-safety fix from
 the 2026-05-17 disk investigation is landed (8.1–8.5): the production
 daemon now runs a periodic in-process retention sweeper doing age +
 byte-cap (`storage_max_mb`) + emergency low-space eviction, always
@@ -702,7 +707,7 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   `from_behavior` shape, emit gate/dedupe/independence); model-type↔source
   invariant updated (`behavior` is derived, no artifact). 7.5 next.
 
-- [ ] **7.5 — LSTM hardening + synthetic-fault eval harness (P2).**
+- [x] **7.5 — LSTM hardening + synthetic-fault eval harness (P2).**
   LSTM uses a single global reconstruction threshold (not per-mode like
   IF; AEs tend to reconstruct anomalies too) and its training completion
   has been repeatedly unconfirmed. Make it per-mode or replace the
@@ -712,6 +717,43 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   detector and fused; wire it into CI as a detector-quality regression
   guard and assert LSTM training completion. Resolves R3; makes
   Done-Definition v1 #4/#5 verifiable. Depends on 7.1, 7.2. (Effort: L)
+  Done: **(1) Per-mode LSTM thresholds** (chose the conservative path of
+  the doc's binary fork; reconstruction-AE preserved, next-step
+  forecasting deferred). `LSTMThresholdCalibration` gains optional
+  `per_mode_errors`; the calibrator groups validation reconstruction
+  errors by the window-end mode (loader is `shuffle=False`, so
+  index alignment is well-defined) and persists a
+  `ReconstructionErrorDistribution` per mode with ≥
+  `_LSTM_MIN_CALIBRATION_SAMPLES`. `LSTMSequenceBuffer` now tracks
+  `last_mode` (separate from the 3-tuple `metadata()` contract to keep
+  existing tests untouched); `LSTMInferenceEngine.score_window` accepts
+  `operating_mode` and picks the per-mode threshold when calibration
+  carries one, falling back to `global_error.threshold` (back-compat with
+  pre-7.5 manifests). The fused stream picks it up via the existing
+  `result.global_threshold`. **(2) `scale` fault** added to
+  `AnomalyInjector` (multiplicative; distinct from `spike`/`drift`),
+  rounding out the doc's four sensor-failure modes. **(3) Synthetic-fault
+  harness** in new `src/models/synthetic_fault_eval.py`:
+  `evaluate_detectors(resampled, config, trained_if, *, fault_channel,
+  fault_kinds, n_injections, seed) -> JSON-safe report` injects each
+  kind, re-runs the shared `featurize_wide_frame` (so rolling stats
+  reflect the fault), and reports detection-rate-in-window + nominal-FP
+  per-hour for IF *and* the fused stream (routed through the production
+  `FusionScorer` so the regression guard exercises the real fusion code,
+  not a reimplementation). LSTM/behavior detection rates are
+  intentionally out of the fast-CI scope (covered by the LSTM-completion
+  test below); the harness library accepts them as a future extension.
+  **(4) CI regression guard** in
+  `tests/test_synthetic_fault_eval.py`: builds a tiny seeded 2-mode clean
+  frame, fits IF with calibration, asserts spike/drift/dropout/stuck are
+  detected every run and `scale` ≥ once, and the nominal-FP-per-hour
+  stays below a sane ceiling (loose-enough for quantile noise on the
+  small holdout, tight enough to catch a regression that blows FP open).
+  **LSTM training-completion** test in the same file: tiny multi-mode
+  dataset trains end-to-end and writes per-mode thresholds — the
+  long-asked-for "the LSTM actually finished training" check. Phase 7
+  complete on the software side; R3 (LSTM Pi-5 compute budget) is a
+  hardware-fidelity concern unchanged by this task.
 
 Suggested sequence: 7.1 → (7.3 ∥ 7.2) → 7.4 → 7.5.
 

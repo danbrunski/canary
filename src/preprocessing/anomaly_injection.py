@@ -37,7 +37,7 @@ import pandas as pd
 from src.dataframe_utils import require_columns as _require_columns
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
-AnomalyKind = Literal["spike", "drift", "dropout", "stuck"]
+AnomalyKind = Literal["spike", "drift", "dropout", "stuck", "scale"]
 
 
 @dataclass(frozen=True)
@@ -235,6 +235,32 @@ class AnomalyInjector:
         self._df.loc[mask, channel] = stuck_value
         self._windows.append(
             InjectionWindow(channel=channel, kind="stuck", start=s, end=e, parameter=stuck_value)
+        )
+        return self
+
+    def scale(
+        self,
+        *,
+        channel: str,
+        start: pd.Timestamp | str,
+        end: pd.Timestamp | str,
+        factor: float,
+    ) -> AnomalyInjector:
+        """Multiply ``channel`` by ``factor`` for ``[start, end)``.
+
+        Models a *scale-error* sensor fault — the reading remains shape-
+        plausible but its magnitude is wrong by a constant multiplier
+        (gain drift, miscalibrated divider). Distinct from ``spike``
+        (fixed value, no shape) and ``drift`` (linear ramp, no factor).
+        """
+        if not np.isfinite(factor):
+            raise ValueError("scale factor must be finite")
+        s, e = _normalize_window(start, end)
+        self._require_channel(channel)
+        mask = self._mask_for(s, e)
+        self._df.loc[mask, channel] = self._df.loc[mask, channel].to_numpy() * factor
+        self._windows.append(
+            InjectionWindow(channel=channel, kind="scale", start=s, end=e, parameter=factor)
         )
         return self
 
