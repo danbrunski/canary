@@ -14,6 +14,7 @@ from src.alerts.emitter import (
     IsolationForestInferenceEngine,
 )
 from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
+from src.alerts.events import AnomalyEvent
 
 # ---------------------------------------------------------------------------
 # Fake result types — kept lightweight to avoid torch / sklearn imports here
@@ -40,6 +41,9 @@ class _FakeLSTMResult:
         window_start_timestamp: str = "2026-05-13T11:59:50+00:00",
         window_end_timestamp: str = "2026-05-13T12:00:00+00:00",
         latency_ms: float = 4.5,
+        top_channels: tuple[str, ...] = (),
+        reconstruction_series: dict[str, tuple[float, ...]] | None = None,
+        reconstruction_overlays: dict[str, dict[str, tuple[float, ...]]] | None = None,
     ) -> None:
         self.is_anomaly = is_anomaly
         self.timestamp = timestamp
@@ -53,6 +57,9 @@ class _FakeLSTMResult:
         self.window_start_timestamp = window_start_timestamp
         self.window_end_timestamp = window_end_timestamp
         self.latency_ms = latency_ms
+        self.top_channels = top_channels
+        self.reconstruction_series = reconstruction_series or {}
+        self.reconstruction_overlays = reconstruction_overlays or {}
 
 
 def _scored_if_row(
@@ -313,3 +320,96 @@ def test_engine_does_not_emit_inlier_rows(tmp_path: Path) -> None:
 
 def _unused_for_silencing_a_helper_import(_: Any) -> None:
     """Keep `Any` referenced so the import isn't flagged on edits."""
+
+
+# ---------------------------------------------------------------------------
+# Detector attribution payloads (Phase 7.2a)
+# ---------------------------------------------------------------------------
+
+
+def test_emit_lstm_event_filters_evidence_to_top_channels_when_present(
+    tmp_path: Path,
+) -> None:
+    """When the result carries 7.2a top-channel evidence, the event payload
+    is the *compact* subset — affected_channels = top, channel_scores and
+    channel_thresholds filtered to top, reconstruction_series + overlays
+    present, full anomalous_channels kept in detail for diagnostics."""
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=0)
+    result = _FakeLSTMResult(
+        channel_scores={"a": 0.1, "b": 5.0, "c": 0.2, "d": 0.3, "e": 0.4},
+        channel_thresholds={"a": 1.0, "b": 1.0, "c": 1.0, "d": 1.0, "e": 1.0},
+        anomalous_channels=("b", "e"),
+        top_channels=("b", "e"),
+        reconstruction_series={
+            "b": (0.1, 5.0, 4.0, 3.0),
+            "e": (0.0, 0.4, 0.2, 0.3),
+        },
+        reconstruction_overlays={
+            "b": {"actual": (1.0, 2.0, 3.0, 4.0), "reconstructed": (0.9, -3.0, -1.0, 1.0)},
+            "e": {"actual": (1.0, 1.0, 1.1, 0.9), "reconstructed": (1.0, 0.6, 1.0, 0.6)},
+        },
+    )
+    event = emitter.emit_lstm(result, operating_mode="idle")
+    assert event is not None
+    assert event.affected_channels == ("b", "e")
+    assert set(event.detail["channel_scores"]) == {"b", "e"}
+    assert set(event.detail["channel_thresholds"]) == {"b", "e"}
+    assert event.detail["anomalous_channels"] == ["b", "e"]
+    assert set(event.detail["reconstruction_series"]) == {"b", "e"}
+    assert len(event.detail["reconstruction_series"]["b"]) == 4
+    overlays = event.detail["reconstruction_overlays"]
+    assert set(overlays["b"]) == {"actual", "reconstructed"}
+    assert len(overlays["b"]["actual"]) == 4
+    # JSON round-trips through the schema.
+    assert AnomalyEvent.from_dict(event.to_dict()).source == "lstm_autoencoder"
+
+
+def test_emit_lstm_event_back_compat_without_top_channels(tmp_path: Path) -> None:
+    """Stubs / pre-7.2a results without top_channels still produce events
+    on the old contract: full channel_scores, anomalous-channel affected
+    set, no reconstruction_series / reconstruction_overlays in detail."""
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=0)
+    result = _FakeLSTMResult(
+        channel_scores={"a": 0.5, "b": 5.0, "c": 0.3},
+        channel_thresholds={"a": 1.0, "b": 1.0, "c": 1.0},
+        anomalous_channels=("b",),
+    )
+    event = emitter.emit_lstm(result)
+    assert event is not None
+    assert event.affected_channels == ("b",)
+    assert set(event.detail["channel_scores"]) == {"a", "b", "c"}  # not filtered
+    assert "reconstruction_series" not in event.detail
+    assert "reconstruction_overlays" not in event.detail
+
+
+def test_emit_isolation_forest_row_includes_feature_contributors(
+    tmp_path: Path,
+) -> None:
+    """7.2a IF attribution: the emitter forwards the contributors dict to
+    detail and the event surfaces affected_channels alongside it."""
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=0)
+    contributors = {"obd:RPM": 4.2, "obd:LOAD": 3.1, "obd:SPEED": 0.4}
+    event = emitter.emit_isolation_forest_row(
+        _scored_if_row(),
+        model_version="if_v1",
+        timestamp="2026-05-13T12:00:00+00:00",
+        affected_channels=("obd:RPM", "obd:LOAD"),
+        feature_contributors=contributors,
+    )
+    assert event is not None
+    assert event.affected_channels == ("obd:RPM", "obd:LOAD")
+    assert event.detail["feature_contributors"] == contributors
+    assert AnomalyEvent.from_dict(event.to_dict()).detail["feature_contributors"] == contributors
+
+
+def test_emit_isolation_forest_row_back_compat_without_contributors(
+    tmp_path: Path,
+) -> None:
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=0)
+    event = emitter.emit_isolation_forest_row(
+        _scored_if_row(),
+        model_version="if_v1",
+        timestamp="2026-05-13T12:00:00+00:00",
+    )
+    assert event is not None
+    assert "feature_contributors" not in event.detail

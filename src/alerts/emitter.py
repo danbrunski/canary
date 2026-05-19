@@ -123,6 +123,7 @@ class AnomalyEventEmitter:
         calibrated_anomaly_column: str = CALIBRATED_ANOMALY_COLUMN,
         calibrated_threshold_column: str = CALIBRATED_THRESHOLD_COLUMN,
         mode_column: str = "operating_mode",
+        feature_contributors: Mapping[str, float] | None = None,
     ) -> AnomalyEvent | None:
         """Emit an event from one row of a scored Isolation Forest frame.
 
@@ -156,6 +157,7 @@ class AnomalyEventEmitter:
             affected_channels=affected_channels,
             session=session,
             threshold=threshold,
+            feature_contributors=feature_contributors,
         )
         if missing:
             # tag dropout vs ordinary outlier so the dashboard can render

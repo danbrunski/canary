@@ -102,6 +102,34 @@ def test_inference_result_to_dict_is_json_safe() -> None:
     assert payload["model_version"] == "inference-test"
     assert isinstance(payload["channel_scores"], dict)
     assert isinstance(payload["anomalous_channels"], list)
+    # Phase 7.2a evidence keys are JSON-safe (top channels + series + overlays).
+    assert isinstance(payload["top_channels"], list)
+    assert isinstance(payload["reconstruction_series"], dict)
+    assert isinstance(payload["reconstruction_overlays"], dict)
+
+
+def test_score_window_populates_top_channel_evidence(tmp_path: Path) -> None:
+    """7.2a: ``score_window`` emits compact per-channel evidence — top-K
+    channels by ratio, the per-timestep reconstruction error series for
+    each, and an actual-vs-reconstructed overlay so the dashboard can
+    render the divergence without round-tripping through the model."""
+    _torch()
+    engine = LSTMInferenceEngine(_trained(), time_fn=_fake_clock())
+    result = None
+    for _, row in _frame().iloc[:4].iterrows():
+        result = engine.observe(row)
+    assert result is not None
+    # Only two feature columns ⇒ the top-K is the full set, ordered by
+    # ratio. Larger K than feature count is fine — the slice is bounded.
+    assert set(result.top_channels) == {"rpm", "speed"}
+    assert set(result.reconstruction_series) == {"rpm", "speed"}
+    for series in result.reconstruction_series.values():
+        assert len(series) == engine.sequence_length
+    assert set(result.reconstruction_overlays) == {"rpm", "speed"}
+    for overlay in result.reconstruction_overlays.values():
+        assert set(overlay) == {"actual", "reconstructed"}
+        assert len(overlay["actual"]) == engine.sequence_length
+        assert len(overlay["reconstructed"]) == engine.sequence_length
 
 
 def test_inference_flags_anomaly_against_low_thresholds() -> None:

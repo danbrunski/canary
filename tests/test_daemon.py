@@ -995,6 +995,109 @@ async def test_score_and_emit_reconciles_missing_live_columns(
     assert not list(tmp_path.glob("anomalies-*.jsonl"))
 
 
+async def test_score_and_emit_attaches_feature_contributors_from_scaler(
+    tmp_path: Path,
+    config: CanaryConfig,
+) -> None:
+    """7.2a: when the IF tick is trustworthy (no missing features), the
+    daemon ranks features by ``|scaled z|`` from the model's own scaler
+    and surfaces the top-K on the emitted event as ``feature_contributors``
+    + ``affected_channels`` — cheap first-pass IF attribution."""
+    import pandas as pd
+
+    from src.alerts.emitter import AnomalyEventEmitter
+    from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
+    from src.daemon import _score_and_emit
+    from src.models.health import HealthMonitor
+    from src.models.manager import LoadedModel
+    from src.models.manifest import ModelManifestCommon
+
+    class _FakeScaler:
+        """Scales the trained columns to (x - mean) / std on a per-row frame."""
+
+        def __init__(self) -> None:
+            self.means = {"obd:RPM": 800.0, "obd:SPEED": 5.0, "obd:LOAD": 30.0}
+            self.stds = {"obd:RPM": 50.0, "obd:SPEED": 5.0, "obd:LOAD": 5.0}
+
+        def transform(self, frame: pd.DataFrame) -> pd.DataFrame:
+            out = frame.copy()
+            for column, mean in self.means.items():
+                out[column] = (frame[column] - mean) / self.stds[column]
+            return out
+
+    class _FakeTrained:
+        feature_columns = ("obd:RPM", "obd:SPEED", "obd:LOAD")
+        mode_column = "operating_mode"
+        scaler = _FakeScaler()
+        manifest = type(
+            "M",
+            (),
+            {
+                "model_version": "fake_if_contrib",
+                "schema": {
+                    "feature_columns": list(feature_columns),
+                    "feature_dtypes": dict.fromkeys(feature_columns, "float64"),
+                    "mode_column": "operating_mode",
+                    "timestamp_column": "timestamp",
+                    "session_column": "session",
+                },
+            },
+        )()
+
+        def score(self, frame: Any) -> Any:
+            out = frame.copy()
+            out["isolation_forest_score"] = 0.9
+            out["isolation_forest_label"] = -1
+            out["isolation_forest_model_mode"] = "all"
+            out["isolation_forest_missing_features"] = False
+            return out
+
+    loaded = LoadedModel(
+        artifact=_FakeTrained(),
+        manifest=ModelManifestCommon(
+            artifact_format_version=1,
+            model_type="isolation_forest",
+            model_version="fake_if_contrib",
+            created_at="now",
+            training_data_hash="h",
+            input_rows=1,
+            schema=_FakeTrained.manifest.schema,
+        ),
+        artifact_path=Path("/tmp/x"),
+        manifest_path=Path("/tmp/x.manifest.json"),
+        manifest_mtime=0.0,
+    )
+    # Build a row where obd:LOAD is the farthest from baseline (4 std out),
+    # then obd:RPM (2 std), then obd:SPEED (1 std). The top-K ranking must
+    # reflect that order regardless of the input dict's column order.
+    row = pd.DataFrame(
+        [
+            {
+                "timestamp": "2026-05-13T12:00:00Z",
+                "session": "live",
+                "operating_mode": "all",
+                "obd:SPEED": 10.0,  # |z|=1.0
+                "obd:RPM": 900.0,  # |z|=2.0
+                "obd:LOAD": 50.0,  # |z|=4.0
+            }
+        ]
+    )
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=0)
+
+    _score_and_emit(loaded, row, emitter, HealthMonitor())
+
+    events = read_events_dir(tmp_path)
+    assert len(events) == 1
+    contributors = events[0].detail["feature_contributors"]
+    # All three trained features make it into top-5 here (K=5, only 3 features).
+    assert set(contributors) == {"obd:RPM", "obd:SPEED", "obd:LOAD"}
+    # Ranking: LOAD > RPM > SPEED by |scaled z|.
+    ordered = sorted(contributors.items(), key=lambda kv: kv[1], reverse=True)
+    assert [name for name, _ in ordered] == ["obd:LOAD", "obd:RPM", "obd:SPEED"]
+    # affected_channels echoes the ranked top order.
+    assert events[0].affected_channels == ("obd:LOAD", "obd:RPM", "obd:SPEED")
+
+
 def test_finite_or_none() -> None:
     from src.daemon import _finite_or_none
 

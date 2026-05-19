@@ -11,6 +11,7 @@ detector's native output in one place.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -76,23 +77,63 @@ class AnomalyEvent(BaseModel):
         *,
         operating_mode: str | None = None,
     ) -> AnomalyEvent:
-        """Build an event from a ``LSTMInferenceResult`` (caller checks ``is_anomaly``)."""
+        """Build an event from a ``LSTMInferenceResult`` (caller checks
+        ``is_anomaly``).
+
+        Phase 7.2a — when the result carries top-channel evidence, the
+        event surfaces it: ``affected_channels`` is the top-by-ratio set
+        (cleaner than the noisy "above per-channel threshold" list, which
+        is kept in ``detail.anomalous_channels`` for diagnostics);
+        ``channel_scores`` and ``channel_thresholds`` are filtered to the
+        same top channels so the per-event payload stays bounded;
+        ``reconstruction_series`` and ``reconstruction_overlays`` give the
+        dashboard heatmap and overlay panels the data they need without a
+        round-trip to the model.
+        """
+        top_channels = tuple(getattr(result, "top_channels", ()) or ())
+        channel_scores = dict(result.channel_scores)
+        channel_thresholds = dict(result.channel_thresholds)
+        if top_channels:
+            channel_scores = {
+                column: channel_scores[column]
+                for column in top_channels
+                if column in channel_scores
+            }
+            channel_thresholds = {
+                column: channel_thresholds[column]
+                for column in top_channels
+                if column in channel_thresholds
+            }
+            affected = top_channels
+        else:
+            affected = tuple(result.anomalous_channels)
+        detail: dict[str, Any] = {
+            "channel_scores": channel_scores,
+            "channel_thresholds": channel_thresholds,
+            "anomalous_channels": list(result.anomalous_channels),
+        }
+        recon_series = getattr(result, "reconstruction_series", None)
+        if recon_series:
+            detail["reconstruction_series"] = {k: list(v) for k, v in recon_series.items()}
+        recon_overlays = getattr(result, "reconstruction_overlays", None)
+        if recon_overlays:
+            detail["reconstruction_overlays"] = {
+                k: {sub: list(seq) for sub, seq in overlay.items()}
+                for k, overlay in recon_overlays.items()
+            }
         return cls(
             timestamp=result.timestamp,
             source="lstm_autoencoder",
             model_version=result.model_version,
             score=result.global_score,
             threshold=result.global_threshold,
-            affected_channels=tuple(result.anomalous_channels),
+            affected_channels=affected,
             operating_mode=operating_mode,
             session=result.session or None,
             window_start_timestamp=result.window_start_timestamp or None,
             window_end_timestamp=result.window_end_timestamp or None,
             latency_ms=result.latency_ms,
-            detail={
-                "channel_scores": dict(result.channel_scores),
-                "channel_thresholds": dict(result.channel_thresholds),
-            },
+            detail=detail,
         )
 
     @classmethod
@@ -192,15 +233,26 @@ class AnomalyEvent(BaseModel):
         affected_channels: tuple[str, ...] = (),
         session: str | None = None,
         threshold: float | None = None,
+        feature_contributors: Mapping[str, float] | None = None,
     ) -> AnomalyEvent:
         """Build an event from one row of a scored Isolation Forest frame.
 
         ``threshold`` is the 7.2 per-mode calibrated decision boundary when
         the row was scored by a calibrated mode (``None`` for a legacy
         contamination-label mode, preserving the old "IF has no fixed
-        threshold" contract).
+        threshold" contract). ``feature_contributors`` (Phase 7.2a) is the
+        ``{feature: |scaled-z|}`` ranking the daemon computes from the
+        scaler's view of this row — placed in ``detail.feature_contributors``
+        so the dashboard's evidence panel can rank by feature distance from
+        the training baseline (the cheap-first-pass attribution; SHAP-style
+        offline analysis is the optional follow-up).
         """
         mode = row.get(mode_column)
+        detail: dict[str, Any] = {}
+        if feature_contributors:
+            detail["feature_contributors"] = {
+                str(name): float(value) for name, value in feature_contributors.items()
+            }
         return cls(
             timestamp=timestamp,
             source="isolation_forest",
@@ -211,6 +263,7 @@ class AnomalyEvent(BaseModel):
             operating_mode=None if mode is None else str(mode),
             session=session,
             latency_ms=None,
+            detail=detail,
         )
 
 

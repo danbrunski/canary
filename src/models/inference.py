@@ -11,7 +11,7 @@ import importlib
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -25,6 +25,11 @@ from src.timefmt import format_timestamp
 LSTM_SCORE_COLUMN = "lstm_reconstruction_error"
 LSTM_THRESHOLD_COLUMN = "lstm_reconstruction_threshold"
 LSTM_ANOMALY_COLUMN = "lstm_anomaly"
+
+#: Phase 7.2a — how many top channels (by ratio) the LSTM result carries
+#: detail for. Keeps the ``AnomalyEvent.detail`` payload bounded; ~90 trained
+#: channels × sequence_length 30 would flood the WebSocket otherwise.
+LSTM_TOP_CHANNELS = 5
 
 
 @dataclass(frozen=True)
@@ -43,6 +48,18 @@ class LSTMInferenceResult:
     anomalous_channels: tuple[str, ...]
     is_anomaly: bool
     latency_ms: float
+    #: Phase 7.2a evidence (compact, bounded by :data:`LSTM_TOP_CHANNELS`).
+    #: ``top_channels`` are the channels with the largest ratio of recon
+    #: error to threshold; ``reconstruction_series`` is the per-timestep
+    #: MAE for each of those channels; ``reconstruction_overlays`` carries
+    #: ``actual`` / ``reconstructed`` arrays so the dashboard can render
+    #: the divergence directly. Empty when the model hasn't produced
+    #: a window yet (back-compat default for stubs in tests).
+    top_channels: tuple[str, ...] = ()
+    reconstruction_series: Mapping[str, tuple[float, ...]] = field(default_factory=dict)
+    reconstruction_overlays: Mapping[str, Mapping[str, tuple[float, ...]]] = field(
+        default_factory=dict
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -58,6 +75,12 @@ class LSTMInferenceResult:
             "anomalous_channels": list(self.anomalous_channels),
             "is_anomaly": self.is_anomaly,
             "latency_ms": self.latency_ms,
+            "top_channels": list(self.top_channels),
+            "reconstruction_series": {k: list(v) for k, v in self.reconstruction_series.items()},
+            "reconstruction_overlays": {
+                k: {sub: list(seq) for sub, seq in overlay.items()}
+                for k, overlay in self.reconstruction_overlays.items()
+            },
         }
 
 
@@ -219,19 +242,17 @@ class LSTMInferenceEngine:
         tensor = self._torch.as_tensor(window, dtype=getattr(self._torch, self.dtype))
         tensor = tensor.unsqueeze(0).to(self._device)
         with self._torch.no_grad():
-            global_score = float(
-                self.trained.model.reconstruction_error(tensor, reduction="sample")
-                .detach()
-                .cpu()
-                .item()
-            )
-            channel_values = (
-                self.trained.model.reconstruction_error(tensor, reduction="channel")
-                .detach()
-                .cpu()
-                .numpy()[0]
-                .astype(float)
-            )
+            # Phase 7.2a: one forward → all reductions + the actual/recon
+            # arrays the dashboard overlay needs. Cheaper than calling
+            # ``reconstruction_error`` twice for separate reductions and
+            # never running ``forward`` again for the overlays.
+            reconstructed = self.trained.model.forward(tensor)
+            error_tensor = (reconstructed - tensor).abs()
+            global_score = float(error_tensor.mean().item())
+            channel_values = error_tensor.mean(dim=1).detach().cpu().numpy()[0].astype(float)
+            timestep_error_np = error_tensor.detach().cpu().numpy()[0].astype(float)  # (T, F)
+            actual_np = tensor.detach().cpu().numpy()[0].astype(float)  # (T, F)
+            reconstructed_np = reconstructed.detach().cpu().numpy()[0].astype(float)  # (T, F)
         latency_ms = (self.time_fn() - started) * 1000.0
 
         channel_scores = {
@@ -245,6 +266,32 @@ class LSTMInferenceEngine:
         anomalous_channels = tuple(
             column for column, score in channel_scores.items() if score > channel_thresholds[column]
         )
+
+        # Phase 7.2a evidence — rank channels by ratio (score / threshold)
+        # when the threshold is positive (compares apples to apples across
+        # channels with very different magnitudes); fall back to the raw
+        # score otherwise. Keep only ``LSTM_TOP_CHANNELS`` so the per-event
+        # detail payload stays bounded.
+        def _ratio(column: str) -> float:
+            threshold = channel_thresholds[column]
+            score = channel_scores[column]
+            return score / threshold if threshold > 0 else score
+
+        top_channels = tuple(
+            sorted(self.feature_columns, key=_ratio, reverse=True)[:LSTM_TOP_CHANNELS]
+        )
+        column_index = {column: index for index, column in enumerate(self.feature_columns)}
+        reconstruction_series = {
+            column: tuple(float(v) for v in timestep_error_np[:, column_index[column]])
+            for column in top_channels
+        }
+        reconstruction_overlays = {
+            column: {
+                "actual": tuple(float(v) for v in actual_np[:, column_index[column]]),
+                "reconstructed": tuple(float(v) for v in reconstructed_np[:, column_index[column]]),
+            }
+            for column in top_channels
+        }
         # Phase 7.5 per-mode threshold: prefer the mode's held-out
         # reconstruction-error band when calibration carries one; fall back
         # to the single global threshold otherwise (back-compat with
@@ -278,6 +325,9 @@ class LSTMInferenceEngine:
             anomalous_channels=anomalous_channels,
             is_anomaly=is_anomaly,
             latency_ms=latency_ms,
+            top_channels=top_channels,
+            reconstruction_series=reconstruction_series,
+            reconstruction_overlays=reconstruction_overlays,
         )
 
 

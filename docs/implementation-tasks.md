@@ -17,11 +17,11 @@ Torque-parity telemetry, OBD coverage reporting, dataset/training/tuning
 ML-ops, and the reworked dashboard. Remaining work is hardware-gated or
 in-truck (live-ECU reads, write/parked actions, companion sync/publish,
 acceptance matrix). The Phase 7 anomaly-architecture hardening from the
-2026-05-17 review is software-complete (7.1 unified feature builder, 7.2
-fusion + IF held-out calibration, 7.3 model-load gate, 7.4 behavior
-residuals as first-class detectors, 7.5 LSTM per-mode thresholds +
-synthetic-fault CI regression guard); 7.2a (richer detector attribution)
-is the optional follow-up the dashboard wants. The Phase 8
+2026-05-17 review is fully complete (7.1 unified feature builder, 7.2
+fusion + IF held-out calibration, 7.2a IF + LSTM attribution payloads,
+7.3 model-load gate, 7.4 behavior residuals as first-class detectors,
+7.5 LSTM per-mode thresholds + synthetic-fault CI regression guard).
+The Phase 8
 storage-lifecycle/disk-safety fix from
 the 2026-05-17 disk investigation is landed (8.1–8.5): the production
 daemon now runs a periodic in-process retention sweeper doing age +
@@ -669,7 +669,7 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   (types, LiveModelScores, AnomalyPanel filter, StatusStrip) with tsc +
   vitest green. 7.4/7.5 now unblocked.
 
-- [ ] **7.2a — Detector attribution payloads (P1).** Standardize the
+- [x] **7.2a — Detector attribution payloads (P1).** Standardize the
   explanation/evidence data that anomaly events carry so the dashboard can
   display model "evidence" without reverse-engineering detector internals.
   For LSTM, emit compact top-channel reconstruction ratios and enough
@@ -679,6 +679,42 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   score-delta or SHAP-style attribution offline if the cheap ranking is not
   trustworthy. Fused events should preserve per-source evidence and source
   agreement. Depends on 7.1, 7.2. (Effort: M)
+  Done: **LSTM** — `LSTMInferenceEngine.score_window` does one forward
+  per tick and computes all reductions + the actual/reconstructed arrays
+  from the same `(reconstructed - tensor).abs()`, ranks channels by
+  `score/threshold` ratio (raw score when the threshold is non-positive),
+  and emits `top_channels` + `reconstruction_series` +
+  `reconstruction_overlays` for the top `LSTM_TOP_CHANNELS = 5` only.
+  `AnomalyEvent.from_lstm_result` filters `channel_scores` /
+  `channel_thresholds` to the same top set, sets `affected_channels` to
+  the ranked top (cleaner than the per-channel-threshold-noisy
+  `anomalous_channels` list, which is kept in `detail.anomalous_channels`
+  for diagnostics), and surfaces `detail.reconstruction_series` /
+  `detail.reconstruction_overlays` — the exact keys the dashboard's
+  `extractHeatmap` / `extractOverlays` already consume (panels 5.14a /
+  5.14b). Back-compat: results without `top_channels` (test stubs,
+  pre-7.2a manifests) still produce the legacy full-channel payload.
+  **IF** — `_score_and_emit` calls `loaded.artifact.scaler.transform(row)`
+  (one-row, cheap), ranks features by `|z|` (distance from training
+  baseline) and passes the top-`_IF_TOP_FEATURES = 5` to
+  `emit_isolation_forest_row(..., feature_contributors=...,
+  affected_channels=...)`, which threads them to
+  `AnomalyEvent.from_isolation_forest_row` →
+  `detail.feature_contributors`. The dashboard's
+  `extractChannelEvidence` already reads this key. Attribution is
+  best-effort: on any scaler/lookup failure the emit still goes out
+  (logged), never blocked. **Fused** — `detail.sources` from 7.2 already
+  preserves per-source evidence (score/threshold/fired/severity) and
+  `contributing_sources` / `agreement`; with 7.4's behavior detector +
+  per-source IF/LSTM events kept alongside the fused stream (the 7.2
+  "fused + keep per-source" decision), the dashboard's
+  ModelEvidencePanel drills into the per-source events via
+  `relatedEvents` — no additional duplication needed in the fused
+  payload. Tests: 4 new emitter tests (LSTM filtering + back-compat, IF
+  contributors + back-compat), 1 LSTM-inference test
+  (`score_window_populates_top_channel_evidence`), 1 daemon test
+  (`_score_and_emit` ranks contributors via scaler |z|). Phase 7 fully
+  complete.
 
 - [x] **7.4 — Behavior/physics residuals as first-class detectors
   (P2).** The behavior models (coolant warmup, idle-RPM-vs-coolant,

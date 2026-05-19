@@ -655,6 +655,10 @@ def _log_schema_reconciliation_once(
 # Model versions already warned about scoring with a missing feature schema,
 # so the fail-safe suppression logs once per version instead of every tick.
 _IF_MISSING_WARNED: set[str] = set()
+#: Phase 7.2a — how many top IF feature contributors (by ``|scaled z|``) the
+#: emitter attaches as ``detail.feature_contributors``. Keeps the per-event
+#: payload bounded for IF models with dozens of features.
+_IF_TOP_FEATURES = 5
 _SCHEMA_RECONCILIATION_WARNED: set[tuple[str, str]] = set()
 
 
@@ -828,10 +832,32 @@ def _score_and_emit(
                 extra={"model_version": version},
             )
         return None
+    # Phase 7.2a — cheap first-pass IF attribution: rank features by their
+    # distance from the scaler's training baseline (|z|), keep the top K.
+    # The scaled row is a one-row transform; the scaler is already loaded.
+    feature_contributors: dict[str, float] = {}
+    affected_channels: tuple[str, ...] = ()
+    try:
+        scaled = loaded.artifact.scaler.transform(aligned).iloc[0]
+        ranked = sorted(
+            (
+                (str(column), abs(float(scaled[column])))
+                for column in engine.feature_columns
+                if column in scaled.index and pd.notna(scaled[column])
+            ),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:_IF_TOP_FEATURES]
+        feature_contributors = {name: value for name, value in ranked}
+        affected_channels = tuple(name for name, _ in ranked)
+    except Exception:  # noqa: BLE001 — attribution is best-effort, never blocks an emit
+        log.exception("isolation_forest feature_contributors ranking failed")
     emitter.emit_isolation_forest_row(
         scored,
         model_version=engine.model_version,
         timestamp=str(timestamp),
+        affected_channels=affected_channels,
+        feature_contributors=feature_contributors or None,
     )
     score_val = scored.get(SCORE_COLUMN)
     if score_val is None or pd.isna(score_val):
