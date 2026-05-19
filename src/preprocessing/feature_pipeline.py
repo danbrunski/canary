@@ -26,6 +26,7 @@ from src.config import CanaryConfig
 from src.decode.behavior_decoder import append_deviation_columns
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
+    BehaviorModels,
     load_behavior_models,
 )
 from src.decode.bindings import load_bindings
@@ -173,16 +174,61 @@ def build_feature_frame(
         )
     resampled = pd.concat(resampled_parts, ignore_index=True)
 
-    resampled = segment_or_constant(resampled, config)
-    if behavior_models is not None and behavior_models.models:
-        resampled = append_deviation_columns(resampled, behavior_models)
-    features = compute_features(
-        resampled,
-        config=FeatureConfig(window_seconds=config.preprocessing.rolling_window_seconds),
-    )
+    features = featurize_wide_frame(resampled, config, behavior_models=behavior_models).features
     if cache_path is not None and cache_metadata is not None:
         _write_feature_frame_cache(cache_path, features, cache_metadata)
     return features
+
+
+@dataclass(frozen=True)
+class FeaturizedFrame:
+    """Output of :func:`featurize_wide_frame`.
+
+    ``features`` is the model-ready frame (rolling features appended).
+    ``operating_frame`` is the *pre-feature* wide row set after segmentation
+    and behavior-deviation columns but before ``compute_features`` — the live
+    overlay reads its last row even during the feature-window warmup, so it is
+    returned rather than recomputed.
+    """
+
+    features: pd.DataFrame
+    operating_frame: pd.DataFrame
+
+
+def featurize_wide_frame(
+    wide: pd.DataFrame,
+    config: CanaryConfig,
+    *,
+    behavior_models: BehaviorModels | None = None,
+    feature_config: FeatureConfig | None = None,
+) -> FeaturizedFrame:
+    """The single wide → model-ready feature transform (7.1 keystone).
+
+    Both the offline batch path (:func:`build_feature_frame`, after
+    read/decode/resample) and the online streaming path
+    (``LiveFeatureSource.tick``, after observe/snapshot) call this so the
+    schema-producing tail is *one* implementation, not two that must be kept
+    byte-identical by hand. The head differs by necessity — batch reads and
+    resamples a recorded session, streaming accumulates a current-value
+    snapshot per tick — and the persisted feature spec plus
+    :func:`reconcile_feature_frame_to_spec` are the contract that bridges any
+    residual head divergence at serve time. This function is the part that
+    must never diverge: ``segment_or_constant`` → ``append_deviation_columns``
+    (when behavior models are loaded) → ``compute_features``.
+
+    ``feature_config`` lets the streaming caller pass its once-built
+    ``FeatureConfig`` instead of reconstructing it each tick; when omitted it
+    is derived from ``config.preprocessing.rolling_window_seconds`` exactly as
+    the batch path always did — the two are value-identical.
+    """
+    framed = segment_or_constant(wide, config)
+    if behavior_models is not None and behavior_models.models:
+        framed = append_deviation_columns(framed, behavior_models)
+    cfg = feature_config or FeatureConfig(
+        window_seconds=config.preprocessing.rolling_window_seconds
+    )
+    features = compute_features(framed, config=cfg)
+    return FeaturizedFrame(features=features, operating_frame=framed)
 
 
 def build_feature_frame_cache_key(

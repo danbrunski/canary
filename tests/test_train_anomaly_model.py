@@ -11,7 +11,6 @@ import pyarrow.parquet as pq
 import pytest
 
 from scripts.train_anomaly_model import (
-    _segment_or_constant,
     _trainable_feature_columns,
     build_feature_frame,
     main,
@@ -23,6 +22,9 @@ from src.preprocessing.feature_pipeline import (
     ALL_MODE,
     build_feature_spec,
     reconcile_feature_frame_to_spec,
+)
+from src.preprocessing.feature_pipeline import (
+    segment_or_constant as _segment_or_constant,
 )
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
 

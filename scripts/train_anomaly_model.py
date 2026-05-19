@@ -43,9 +43,7 @@ from src.models.isolation_forest import (
 )
 from src.preprocessing import (
     AnomalyInjector,
-    FeatureConfig,
     ResampleConfig,
-    compute_features,
     decode_can_rows,
     discover_sessions,
     read_session,
@@ -56,9 +54,7 @@ from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
     build_feature_frame,
     build_feature_spec,
-)
-from src.preprocessing.feature_pipeline import (
-    segment_or_constant as _segment_or_constant,
+    featurize_wide_frame,
 )
 from src.preprocessing.feature_pipeline import (
     trainable_feature_columns as _trainable_feature_columns,
@@ -169,13 +165,11 @@ def evaluate(
     inj.spike(channel=channel, start=t_a, end=t_b, value=spike_value)
     inj.dropout(channel=channel, start=t_c, end=t_d)
 
-    seg = _segment_or_constant(inj.df, config)
-    features = compute_features(
-        seg,
-        config=FeatureConfig(window_seconds=config.preprocessing.rolling_window_seconds),
-    )
+    # Same shared wide→features builder the trainer/serve paths use, so the
+    # injected-fault evaluation scores the model on byte-identical schema (7.1).
+    features = featurize_wide_frame(inj.df, config).features
     labels = inj.labels()
-    # compute_features may reorder by session/timestamp; realign labels.
+    # featurize_wide_frame may reorder by session/timestamp; realign labels.
     labels = labels.reindex(features.index, fill_value=False)
 
     evaluation = evaluate_isolation_forest(trained, features, labels, windows=inj.windows)

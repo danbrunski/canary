@@ -571,7 +571,7 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
 
 ### 7A. Feature contract and validation
 
-- [~] **7.1 — Unify feature extraction + versioned feature spec (P0).**
+- [x] **7.1 — Unify feature extraction + versioned feature spec (P0).**
   `src/preprocessing/feature_pipeline.py:build_feature_frame` (offline)
   and `src/preprocessing/live.py:LiveFeatureSource` (online) are
   independent reimplementations that must emit byte-identical schemas,
@@ -589,8 +589,25 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   now reconciles rows to the persisted spec (drop extras, fill missing expected
   features with NaN, coerce numeric dtypes) before IF/LSTM inference and logs a
   one-time divergence report per model version. A fixture test now checks
-  live/offline feature parity for OBD rows. Full batch/streaming builder
-  extraction remains.
+  live/offline feature parity for OBD rows.
+  Done: the schema-producing tail is now one implementation —
+  `feature_pipeline.featurize_wide_frame(wide, config, *, behavior_models,
+  feature_config) -> FeaturizedFrame` runs `segment_or_constant` →
+  `append_deviation_columns` → `compute_features` and returns both the
+  featured frame and the pre-feature `operating_frame`. `build_feature_frame`
+  (offline batch, post read/decode/resample), `LiveFeatureSource.tick`
+  (online streaming, post observe/snapshot — `latest_operating_point`
+  semantics preserved via `operating_frame`), and the
+  `train_anomaly_model.py` injected-fault eval all route through it, so the
+  three previously-independent reimplementations of the column-deriving step
+  are gone. The head asymmetry (batch read+resample vs streaming snapshot) is
+  the only remaining by-necessity difference, bridged at serve time by the
+  persisted feature spec + `reconcile_feature_frame_to_spec` (the already-done
+  half). New `tests/test_feature_pipeline.py` locks the builder contract
+  (rolling features + mode appended, `operating_frame` is pre-feature,
+  `feature_config` override honored, deviation skipped without models); the
+  existing live↔offline parity test stays green, now exercising the shared
+  path. Keystone complete — 7.2/7.4/7.5 unblocked.
 
 - [x] **7.3 — Feature/score validation at model-load and in CI (P1).**
   `deviation:*` was all-NaN for the model's whole existence, undetected,

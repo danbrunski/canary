@@ -12,10 +12,12 @@ incremental version:
    This is the only side-effect — emitting a wide row is a separate call.
 
 2. **tick(now)** — emit one wide row (current_values as of ``now``),
-   append to the rolling buffer, segment the row's operating mode,
-   append deviation columns (if behavior models loaded), recompute
-   ``compute_features`` over the buffered window, and return the *last*
-   row of the result. ``None`` until enough history has accumulated.
+   append to the rolling buffer, then run the *shared* wide→features
+   builder (``feature_pipeline.featurize_wide_frame``: segment →
+   deviation → ``compute_features``) over the buffered window and return
+   the *last* row. The offline batch path runs the same builder, so the
+   two cannot schema-diverge by hand (7.1). ``None`` until enough history
+   has accumulated.
 
 3. **feature_columns** — the columns a downstream inference engine will
    see. Stable across ticks once observation has begun.
@@ -43,11 +45,10 @@ import pandas as pd
 
 from src.can_ids import parse_can_channel
 from src.config import CanaryConfig
-from src.decode.behavior_decoder import append_deviation_columns
 from src.decode.behavior_models import BehaviorModels
 from src.decode.bindings import Bindings, Signal
-from src.preprocessing.feature_pipeline import segment_or_constant
-from src.preprocessing.features import FeatureConfig, compute_features
+from src.preprocessing.feature_pipeline import featurize_wide_frame
+from src.preprocessing.features import FeatureConfig
 from src.telemetry import (
     DBC_SOURCE,
     DECODED_SOURCE,
@@ -236,21 +237,28 @@ class LiveFeatureSource:
         wide = pd.DataFrame(list(self._buffer))
         wide["timestamp"] = pd.to_datetime(wide["timestamp"], utc=True)
 
-        # The segmenter looks at the operating-mode signal columns; if
-        # they're not present yet it falls back to a constant "all" mode,
-        # matching the offline pipeline's behavior on no-OBD captures.
-        wide = segment_or_constant(wide, self.config)
-
-        if self.behavior_models is not None and self.behavior_models.models:
-            wide = append_deviation_columns(wide, self.behavior_models)
+        # Identical transform to the offline batch path — same
+        # segment_or_constant → append_deviation_columns → compute_features —
+        # via the one shared builder so the two can never schema-diverge by
+        # hand (7.1). The segmenter falls back to a constant "all" mode when
+        # the operating-mode signal columns aren't present yet, matching the
+        # offline pipeline's behavior on no-OBD captures.
+        result = featurize_wide_frame(
+            wide,
+            self.config,
+            behavior_models=self.behavior_models,
+            feature_config=self._feature_config,
+        )
 
         # Stash the row the behavior decoder consumes (raw input channels +
-        # operating_mode + deviation:*). Captured before the feature step so
-        # the live overlay still updates on ticks where compute_features
+        # operating_mode + deviation:*) from the pre-feature operating frame,
+        # so the live overlay still updates on ticks where compute_features
         # yields nothing yet (warmup window not full).
-        self.latest_operating_point = {str(k): v for k, v in wide.iloc[-1].to_dict().items()}
+        self.latest_operating_point = {
+            str(k): v for k, v in result.operating_frame.iloc[-1].to_dict().items()
+        }
 
-        featured = compute_features(wide, config=self._feature_config)
+        featured = result.features
         if featured.empty:
             return None
         return featured.iloc[[-1]].reset_index(drop=True)
