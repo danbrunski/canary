@@ -18,10 +18,12 @@ export interface TelemetryRow {
 /** One event from `/anomalies` or `/ws/anomalies` — `AnomalyEvent.to_dict()`. */
 export interface AnomalyEvent {
   timestamp: string;
-  // `fused` (Phase 7.2): the agreement-aware calibrated severity over the
-  // per-tick IF + LSTM + behavior-residual sources. Emitted alongside the
-  // per-source events; its per-source breakdown is in `detail.sources`.
-  source: "isolation_forest" | "lstm_autoencoder" | "fused";
+  // `fused` (Phase 7.2): agreement-aware calibrated severity over the
+  // per-tick sources. `behavior` (Phase 7.4): a behavior/physics-model
+  // residual as a first-class detector — `detail.cause` is a human-readable
+  // physical explanation and `detail.behavior_residuals` the expected/actual.
+  // Both are emitted alongside the per-source events.
+  source: "isolation_forest" | "lstm_autoencoder" | "fused" | "behavior";
   model_version: string;
   score: number;
   threshold: number | null;
@@ -40,7 +42,7 @@ export interface AnomalyEvent {
  *  trustworthy value, distinct from a real 0. */
 export interface ScoreMessage {
   type: "score";
-  source: "isolation_forest" | "lstm_autoencoder" | "fused";
+  source: "isolation_forest" | "lstm_autoencoder" | "fused" | "behavior";
   score: number | null;
   threshold: number | null;
   operating_mode: string | null;

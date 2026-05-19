@@ -189,6 +189,47 @@ class AnomalyEventEmitter:
         )
         return self._emit(event)
 
+    def emit_behavior(
+        self,
+        *,
+        model: str,
+        kind: str,
+        channel: str,
+        timestamp: str,
+        severity_band: str,
+        score: float,
+        threshold: float,
+        actual: float | None,
+        expected: float | None,
+        deviation: float | None,
+        operating_mode: str | None = None,
+    ) -> AnomalyEvent | None:
+        """Emit a behavior/physics residual event (Phase 7.4).
+
+        First-class detector, kept alongside the per-source + fused events.
+        Only ``warning`` / ``critical`` bands fire (``ok`` ⇒
+        ``suppressed_not_anomaly``); dedupe keys on
+        ``(source="behavior", "behavior/<model>")`` so each physical model
+        debounces independently and never cross-suppresses another.
+        """
+        if severity_band not in ("warning", "critical"):
+            self.counters.suppressed_not_anomaly += 1
+            return None
+        event = AnomalyEvent.from_behavior(
+            model=model,
+            kind=kind,
+            channel=channel,
+            timestamp=timestamp,
+            severity_band=severity_band,
+            score=score,
+            threshold=threshold,
+            actual=actual,
+            expected=expected,
+            deviation=deviation,
+            operating_mode=operating_mode,
+        )
+        return self._emit(event)
+
     def _emit(self, event: AnomalyEvent) -> AnomalyEvent | None:
         # Operator tuning gate (6.25) runs before dedupe: a tuned-out event
         # should never reach the logger/dashboard at all. Suppression-only by

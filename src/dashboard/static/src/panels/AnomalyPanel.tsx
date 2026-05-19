@@ -155,6 +155,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
             >
               <option value="all">all</option>
               <option value="fused">fused</option>
+              <option value="behavior">behavior</option>
               <option value="isolation_forest">isolation_forest</option>
               <option value="lstm_autoencoder">lstm_autoencoder</option>
             </select>
@@ -248,6 +249,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                     e.source === "isolation_forest" && "text-accent",
                     e.source === "lstm_autoencoder" && "text-ok",
                     e.source === "fused" && "text-warn",
+                    e.source === "behavior" && "text-accent",
                   )}
                 >
                   {e.source.replace("_", " ")}

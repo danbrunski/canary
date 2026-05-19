@@ -22,9 +22,11 @@ if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import tim
     from src.models.inference import LSTMInferenceResult
 
 #: ``fused`` (Phase 7.2) is the agreement-aware calibrated severity over the
-#: per-tick IF + LSTM + behavior-residual sources. The per-source events are
-#: still emitted alongside it.
-AnomalySource = Literal["isolation_forest", "lstm_autoencoder", "fused"]
+#: per-tick IF + LSTM + behavior-residual sources. ``behavior`` (Phase 7.4)
+#: is the behavior/physics-model residual promoted to a first-class
+#: detector — one event per model with a human-readable physical cause. Both
+#: are emitted alongside the per-detector events, not instead of them.
+AnomalySource = Literal["isolation_forest", "lstm_autoencoder", "fused", "behavior"]
 
 
 class AnomalyEvent(BaseModel):
@@ -121,6 +123,64 @@ class AnomalyEvent(BaseModel):
         )
 
     @classmethod
+    def from_behavior(
+        cls,
+        *,
+        model: str,
+        kind: str,
+        channel: str,
+        timestamp: str,
+        severity_band: str,
+        score: float,
+        threshold: float,
+        actual: float | None,
+        expected: float | None,
+        deviation: float | None,
+        operating_mode: str | None = None,
+    ) -> AnomalyEvent:
+        """Build a behavior/physics residual event (Phase 7.4).
+
+        The behavior models are the most interpretable signal available, so
+        the event leads with a human-readable physical cause and carries the
+        residual in ``detail.behavior_residuals`` — the exact shape the
+        dashboard's ``extractResiduals`` already renders (expected vs actual
+        + band). ``score``/``threshold`` use the same normalized-severity
+        contract as the fused/per-source events so the tuner and dashboard
+        treat it uniformly.
+        """
+        return cls(
+            timestamp=timestamp,
+            source="behavior",
+            model_version=f"behavior/{model}",
+            score=score,
+            threshold=threshold,
+            affected_channels=(channel,),
+            operating_mode=operating_mode,
+            detail={
+                "cause": behavior_cause(
+                    model=model,
+                    channel=channel,
+                    severity_band=severity_band,
+                    actual=actual,
+                    expected=expected,
+                    deviation=deviation,
+                ),
+                "model": model,
+                "kind": kind,
+                "behavior_residuals": [
+                    {
+                        "name": model,
+                        "channel": channel,
+                        "severity": severity_band,
+                        "actual": actual,
+                        "expected": expected,
+                        "deviation": deviation,
+                    }
+                ],
+            },
+        )
+
+    @classmethod
     def from_isolation_forest_row(
         cls,
         row: pd.Series,
@@ -152,3 +212,28 @@ class AnomalyEvent(BaseModel):
             session=session,
             latency_ms=None,
         )
+
+
+def behavior_cause(
+    *,
+    model: str,
+    channel: str,
+    severity_band: str,
+    actual: float | None,
+    expected: float | None,
+    deviation: float | None,
+) -> str:
+    """One human-readable line explaining a behavior-residual detection.
+
+    Physical and generic — names the model, the channel that diverged, and
+    the observed-vs-expected gap. No hardware editorializing.
+    """
+
+    def _fmt(value: float | None) -> str:
+        return "n/a" if value is None else f"{value:.4g}"
+
+    delta = "" if deviation is None else f", Δ {deviation:+.4g}"
+    return (
+        f"{model} {severity_band}: {channel} actual {_fmt(actual)} "
+        f"vs expected {_fmt(expected)}{delta}"
+    )

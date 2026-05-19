@@ -14,9 +14,15 @@ const SOURCE_LABEL: Record<ScoreSource, string> = {
   isolation_forest: "isolation forest",
   lstm_autoencoder: "lstm autoencoder",
   fused: "fused severity",
+  behavior: "behavior residual",
 };
 
-const SOURCES: ScoreSource[] = ["isolation_forest", "lstm_autoencoder", "fused"];
+const SOURCES: ScoreSource[] = [
+  "isolation_forest",
+  "lstm_autoencoder",
+  "fused",
+  "behavior",
+];
 
 /** One model's live readout: current normalized index + level + raw value,
  *  and a fixed-scale (0–100, threshold ref at 50) sparkline of recent ticks.

@@ -675,7 +675,7 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   trustworthy. Fused events should preserve per-source evidence and source
   agreement. Depends on 7.1, 7.2. (Effort: M)
 
-- [ ] **7.4 — Behavior/physics residuals as first-class detectors
+- [x] **7.4 — Behavior/physics residuals as first-class detectors
   (P2).** The behavior models (coolant warmup, idle-RPM-vs-coolant,
   timing-vs-rpm/load, fuel-trim) are the most interpretable signal
   available but are demoted to NaN-prone ensemble *features*. Add a
@@ -683,6 +683,24 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   through the fusion path with a human-readable physical cause, surfaced
   on the dashboard (expected vs actual + band). Depends on 7.2;
   `acd4318` (resolution fix) done. (Effort: M)
+  Done: new `behavior` `AnomalySource` + `AnomalyEvent.from_behavior`
+  leading with a `behavior_cause(...)` physical explanation
+  (`"<model> <band>: <channel> actual X vs expected Y, Δ Z"`, no hardware
+  editorializing) and a `detail.behavior_residuals` entry in the exact
+  shape the dashboard's existing `extractResiduals` renders.
+  `AnomalyEventEmitter.emit_behavior` gates ok-band, dedupes per
+  `(behavior, behavior/<model>)` so each physical model debounces
+  independently. `_observe_behavior` now returns rich `_BehaviorResidual`s;
+  the unified `run_live_inference` emits one behavior event + `/ws/scores`
+  frame per fired, mode-matched model **and** still feeds the 7.2 fusion
+  path (kept-per-source, consistent with the fused decision); the overlay
+  is unchanged. Score/threshold reuse the fusion behavior-severity contract
+  so the tuner + dashboard treat it uniformly. Dashboard gains the
+  `behavior` source (types, LiveModelScores, StatusStrip, AnomalyPanel
+  filter/colour); ModelEvidencePanel already renders the residual from
+  `detail`. Covered by `tests/test_behavior_detector.py` (`behavior_cause`,
+  `from_behavior` shape, emit gate/dedupe/independence); model-type↔source
+  invariant updated (`behavior` is derived, no artifact). 7.5 next.
 
 - [ ] **7.5 — LSTM hardening + synthetic-fault eval harness (P2).**
   LSTM uses a single global reconstruction threshold (not per-mode like

@@ -419,11 +419,41 @@ async def run_live_inference(
                         components.emitter.emit_lstm(result, operating_mode=operating_mode)
                         sources.append(lstm_source(result.global_score, result.global_threshold))
 
-            # Behavior overlay (unchanged) + residual fusion sources.
-            for name, band in _observe_behavior(source, components.behavior_live):
-                behavior = fusion.behavior_source(f"behavior:{name}", band)
-                if behavior.fired:
-                    sources.append(behavior)
+            # Behavior overlay (unchanged) + first-class residual detector
+            # (Phase 7.4): each fired model emits its own behavior event and
+            # publishes a /ws/scores frame, *and* feeds the fusion path.
+            warn_severity = components.config.models.fusion.behavior_warning_severity
+            for residual in _observe_behavior(source, components.behavior_live):
+                behavior = fusion.behavior_source(f"behavior:{residual.name}", residual.severity)
+                if not behavior.fired or not residual.mode_match:
+                    continue
+                sources.append(behavior)
+                ev_ts = timestamp_str or residual.timestamp
+                if ev_ts is None:
+                    continue
+                _publish_score(
+                    components.scores_broadcaster,
+                    source="behavior",
+                    score=behavior.severity,
+                    threshold=warn_severity,
+                    operating_mode=residual.operating_mode,
+                    model_version=f"behavior/{residual.name}",
+                    timestamp=ev_ts,
+                    missing_features=False,
+                )
+                components.emitter.emit_behavior(
+                    model=residual.name,
+                    kind=residual.kind,
+                    channel=residual.channel,
+                    timestamp=ev_ts,
+                    severity_band=residual.severity,
+                    score=behavior.severity,
+                    threshold=warn_severity,
+                    actual=residual.actual,
+                    expected=residual.expected,
+                    deviation=residual.deviation,
+                    operating_mode=residual.operating_mode,
+                )
 
             if fusion.enabled and sources and timestamp_str is not None:
                 fused_version = f"if={if_version or '-'}|lstm={lstm_version or '-'}"
@@ -683,6 +713,26 @@ class _IFFusionInput:
     scale: float | None
 
 
+@dataclass(frozen=True)
+class _BehaviorResidual:
+    """One behavior/physics model's graded deviation for a tick (Phase 7.4).
+
+    Carries everything the first-class behavior detector needs to emit an
+    event *and* feed the fusion path, computed once off the same operating
+    point the overlay uses."""
+
+    name: str
+    kind: str
+    channel: str
+    actual: float | None
+    expected: float | None
+    deviation: float | None
+    severity: str
+    mode_match: bool
+    operating_mode: str | None
+    timestamp: str | None
+
+
 def _score_and_emit(
     loaded: Any,
     row: Any,  # pd.DataFrame, one row
@@ -809,13 +859,14 @@ def _num(value: object) -> float | None:
 
 def _observe_behavior(
     source: LiveFeatureSource, behavior_live: BehaviorLiveState
-) -> list[tuple[str, str]]:
+) -> list[_BehaviorResidual]:
     """Feed one tick of per-model deviations into the live overlay state.
 
-    Returns ``(model_name, severity_band)`` per model so the caller can fuse
-    the residuals (Phase 7.2) off the exact graded deviation the overlay
-    shows — ``deviation()`` already returns ``"ok"`` for an off-mode or
-    no-signal model, so a returned band is mode-safe to fuse.
+    Returns one :class:`_BehaviorResidual` per model so the caller can both
+    emit the first-class behavior detector event (Phase 7.4) and feed the
+    fusion path (Phase 7.2) off the exact graded deviation the overlay shows
+    — ``deviation()`` already returns ``"ok"`` for an off-mode or no-signal
+    model, so a returned band is mode-safe.
 
     Reads the exact wide row the feature pipeline used (the source's
     ``latest_operating_point``) and runs every behavior model through the
@@ -831,7 +882,7 @@ def _observe_behavior(
     point = source.latest_operating_point
     if models is None or not models.models or point is None:
         return []
-    bands: list[tuple[str, str]] = []
+    residuals: list[_BehaviorResidual] = []
     raw_mode = point.get(MODE_COLUMN)
     mode = raw_mode if isinstance(raw_mode, str) else None
     ts = point.get("timestamp")
@@ -859,6 +910,7 @@ def _observe_behavior(
         else:
             x = _num(point.get(model.axes[0].channel))
             y = _num(point.get(model.axes[1].channel))
+        mode_match = model.operating_mode is None or mode == model.operating_mode
         observations.append(
             BehaviorObservation(
                 name=model.name,
@@ -869,12 +921,25 @@ def _observe_behavior(
                 expected=result.expected,
                 deviation=result.deviation,
                 severity=result.severity,
-                mode_match=model.operating_mode is None or mode == model.operating_mode,
+                mode_match=mode_match,
             )
         )
-        bands.append((model.name, result.severity))
+        residuals.append(
+            _BehaviorResidual(
+                name=model.name,
+                kind=model.kind,
+                channel=actual_col,
+                actual=actual,
+                expected=result.expected,
+                deviation=result.deviation,
+                severity=result.severity,
+                mode_match=mode_match,
+                operating_mode=mode,
+                timestamp=timestamp,
+            )
+        )
     behavior_live.observe(timestamp, mode, observations)
-    return bands
+    return residuals
 
 
 def build_live_feature_source(
