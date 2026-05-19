@@ -11,6 +11,7 @@ import {
   extractOverlays,
   extractResiduals,
   heatColor,
+  isEvidenceSource,
   severityTone,
 } from "../lib/evidence";
 import { MeterBar } from "../components/MetricTile";
@@ -38,7 +39,7 @@ export function ModelEvidencePanel({
     const match = relatedEvents.find((e) => e.source === source);
     if (match) sourceEvents.set(source, match);
   }
-  if (SOURCES.includes(event.source)) {
+  if (isEvidenceSource(event.source)) {
     sourceEvents.set(event.source, event);
   }
 

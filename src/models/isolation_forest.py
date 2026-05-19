@@ -38,6 +38,17 @@ MODEL_MODE_COLUMN = "isolation_forest_model_mode"
 SCORE_COLUMN = "isolation_forest_score"
 LABEL_COLUMN = "isolation_forest_label"
 MISSING_FEATURES_COLUMN = "isolation_forest_missing_features"
+#: Phase 7.2 — per-mode calibrated decision boundary + verdict. ``score``
+#: stays the raw larger-is-worse value; these add the held-out-calibrated
+#: threshold and the boolean it produces. ``threshold`` is ``NaN`` and
+#: ``anomaly`` is ``NA`` for a mode with no calibrated threshold (callers
+#: then fall back to the legacy contamination label).
+CALIBRATED_THRESHOLD_COLUMN = "isolation_forest_calibrated_threshold"
+CALIBRATED_ANOMALY_COLUMN = "isolation_forest_calibrated_anomaly"
+
+#: Below this many held-out rows a per-mode calibration is not trustworthy;
+#: the mode falls back to the legacy contamination-label decision.
+_MIN_CALIBRATION_SAMPLES = 10
 
 
 class IsolationForestConfigLike(Protocol):
@@ -47,6 +58,8 @@ class IsolationForestConfigLike(Protocol):
     n_estimators: int
     contamination: float
     random_state: int
+    calibration_holdout_fraction: float
+    target_flag_rate: float
 
 
 class MissingModelDependencyError(ImportError):
@@ -63,6 +76,22 @@ class ModeTrainingSummary:
     sessions: tuple[str, ...]
     start_timestamp: str | None
     end_timestamp: str | None
+    #: Phase 7.2 held-out calibration. ``score_threshold`` is ``None`` when
+    #: the mode fell back to the legacy contamination-label decision (too
+    #: little holdout, or calibration disabled). All optional so manifests
+    #: written before 7.2 still load (the 7.3 model-load gate stays happy).
+    score_threshold: float | None = None
+    #: Spread (std) of the held-out nominal scores — the scale 7.2 fusion
+    #: sizes a fired IF source's severity against (the negated
+    #: decision-function threshold is a poor scale; see ``alerts.fusion``).
+    score_scale: float | None = None
+    holdout_samples: int = 0
+    target_flag_rate: float | None = None
+    achieved_flag_rate: float | None = None
+
+    @property
+    def calibrated(self) -> bool:
+        return self.score_threshold is not None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -72,10 +101,19 @@ class ModeTrainingSummary:
             "sessions": list(self.sessions),
             "start_timestamp": self.start_timestamp,
             "end_timestamp": self.end_timestamp,
+            "score_threshold": self.score_threshold,
+            "score_scale": self.score_scale,
+            "holdout_samples": self.holdout_samples,
+            "target_flag_rate": self.target_flag_rate,
+            "achieved_flag_rate": self.achieved_flag_rate,
         }
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> ModeTrainingSummary:
+        threshold = data.get("score_threshold")
+        scale = data.get("score_scale")
+        target = data.get("target_flag_rate")
+        achieved = data.get("achieved_flag_rate")
         return cls(
             mode=str(data["mode"]),
             n_samples=int(data["n_samples"]),
@@ -83,6 +121,11 @@ class ModeTrainingSummary:
             sessions=tuple(str(session) for session in data["sessions"]),
             start_timestamp=_optional_str(data.get("start_timestamp")),
             end_timestamp=_optional_str(data.get("end_timestamp")),
+            score_threshold=None if threshold is None else float(threshold),
+            score_scale=None if scale is None else float(scale),
+            holdout_samples=int(data.get("holdout_samples", 0)),
+            target_flag_rate=None if target is None else float(target),
+            achieved_flag_rate=None if achieved is None else float(achieved),
         )
 
 
@@ -162,6 +205,34 @@ class TrainedIsolationForest:
     def mode_column(self) -> str:
         return str(self.manifest.schema["mode_column"])
 
+    @property
+    def score_thresholds(self) -> dict[str, float]:
+        """Per-mode held-out-calibrated decision boundaries (7.2).
+
+        Keyed by the model's mode name (the same key ``MODEL_MODE_COLUMN``
+        records, so a single-model fallback route still resolves). Modes that
+        fell back to the legacy contamination label are absent.
+        """
+        return {
+            mode.mode: mode.score_threshold
+            for mode in self.manifest.modes
+            if mode.score_threshold is not None
+        }
+
+    @property
+    def score_scales(self) -> dict[str, float]:
+        """Per-mode held-out score spreads (7.2 fusion magnitude scale).
+
+        Keyed like :attr:`score_thresholds`; modes with a degenerate (zero)
+        spread are absent, so fusion falls back to the unscaled fired
+        severity for them.
+        """
+        return {
+            mode.mode: mode.score_scale
+            for mode in self.manifest.modes
+            if mode.score_scale is not None
+        }
+
     def score(self, frame: pd.DataFrame) -> pd.DataFrame:
         """Append Isolation Forest scores and labels to ``frame``.
 
@@ -226,6 +297,25 @@ class TrainedIsolationForest:
             out.loc[complete_indexes, LABEL_COLUMN] = model.predict(x).astype(int)
             out.loc[complete_indexes, MODEL_MODE_COLUMN] = model_key
 
+        # Phase 7.2 calibrated decision. Map each row to the threshold of the
+        # model actually used (MODEL_MODE_COLUMN, so the single-model fallback
+        # resolves), then verdict = score >= threshold. inf scores (missing /
+        # unmodeled) stay anomalous. A mode with no calibrated threshold gets
+        # NaN/NA here and the emitter falls back to the legacy label.
+        thresholds = self.score_thresholds
+        if thresholds:
+            thr = out[MODEL_MODE_COLUMN].map(thresholds).astype("float64")
+        else:
+            thr = pd.Series(np.nan, index=out.index, dtype="float64")
+        out[CALIBRATED_THRESHOLD_COLUMN] = thr
+        known = thr.notna()
+        anomaly = pd.Series(pd.NA, index=out.index, dtype="boolean")
+        if bool(known.any()):
+            anomaly.loc[known] = out.loc[known, SCORE_COLUMN].to_numpy(dtype="float64") >= thr.loc[
+                known
+            ].to_numpy(dtype="float64")
+        out[CALIBRATED_ANOMALY_COLUMN] = anomaly
+
         return out
 
     def save(self, artifact_path: Path, manifest_path: Path | None = None) -> None:
@@ -275,12 +365,35 @@ def fit_isolation_forest(
     models: dict[str, Any] = {}
     modes: list[ModeTrainingSummary] = []
 
+    holdout_fraction, target_flag_rate = _calibration_params(config)
     for raw_mode, group in scaled.groupby(mode_column, sort=True, dropna=False):
         mode = str(raw_mode)
-        x = group[list(selected_features)].to_numpy(dtype=np.float32)
-        if len(x) == 0:
+        if len(group) == 0:
             continue
         contamination = _contamination_for_mode(config, mode)
+
+        # Phase 7.2: time-order the mode's rows and reserve the tail as a
+        # held-out calibration set the model never sees, so the per-mode
+        # score threshold is set on genuinely unseen nominal data rather
+        # than on the training distribution. Fall back to fitting on all
+        # rows (legacy contamination label) when there isn't enough holdout.
+        ordered_index = (
+            pd.to_datetime(complete.loc[group.index, timestamp_column], utc=True)
+            .sort_values(kind="stable")
+            .index
+        )
+        n = len(ordered_index)
+        n_holdout = int(np.floor(n * holdout_fraction)) if holdout_fraction > 0 else 0
+        calibrate = (n - n_holdout) >= 1 and n_holdout >= _MIN_CALIBRATION_SAMPLES
+        if calibrate:
+            fit_index = ordered_index[: n - n_holdout]
+            holdout_index = ordered_index[n - n_holdout :]
+        else:
+            fit_index, holdout_index, n_holdout = ordered_index, ordered_index[:0], 0
+
+        x = group.loc[fit_index, list(selected_features)].to_numpy(dtype=np.float32)
+        if len(x) == 0:
+            continue
         model = isolation_forest_cls(
             n_estimators=config.n_estimators,
             contamination=contamination,
@@ -288,6 +401,18 @@ def fit_isolation_forest(
         )
         model.fit(x)
         models[mode] = model
+
+        score_threshold: float | None = None
+        score_scale: float | None = None
+        achieved_flag_rate: float | None = None
+        if calibrate:
+            hx = group.loc[holdout_index, list(selected_features)].to_numpy(dtype=np.float32)
+            holdout_scores = -model.decision_function(hx)
+            score_threshold = float(np.quantile(holdout_scores, 1.0 - target_flag_rate))
+            achieved_flag_rate = float(np.mean(holdout_scores >= score_threshold))
+            spread = float(np.std(holdout_scores))
+            score_scale = spread if spread > 0.0 else None
+
         modes.append(
             _mode_summary(
                 mode=mode,
@@ -295,6 +420,11 @@ def fit_isolation_forest(
                 frame=complete.loc[group.index],
                 session_column=session_column,
                 timestamp_column=timestamp_column,
+                score_threshold=score_threshold,
+                score_scale=score_scale,
+                holdout_samples=n_holdout,
+                target_flag_rate=target_flag_rate if calibrate else None,
+                achieved_flag_rate=achieved_flag_rate,
             )
         )
 
@@ -326,6 +456,8 @@ def fit_isolation_forest(
             "contamination": config.contamination,
             "per_mode_contamination": _per_mode_contamination(config),
             "random_state": seed,
+            "calibration_holdout_fraction": holdout_fraction,
+            "target_flag_rate": target_flag_rate,
         },
         scaler=scaler.to_dict(),
         schema={
@@ -408,11 +540,28 @@ def _validate_config(config: IsolationForestConfigLike) -> None:
     _validate_contamination(config.contamination, label="contamination")
     for mode, contamination in _per_mode_contamination(config).items():
         _validate_contamination(contamination, label=f"per_mode_contamination[{mode!r}]")
+    holdout_fraction, target_flag_rate = _calibration_params(config)
+    if not 0.0 <= holdout_fraction < 1.0:
+        raise ValueError("calibration_holdout_fraction must be in [0, 1)")
+    if not 0.0 < target_flag_rate <= 0.5:
+        raise ValueError("target_flag_rate must be in (0, 0.5]")
 
 
 def _validate_contamination(value: float, *, label: str) -> None:
     if not 0.0 < value <= 0.5:
         raise ValueError(f"{label} must be in (0, 0.5]")
+
+
+def _calibration_params(config: IsolationForestConfigLike) -> tuple[float, float]:
+    """Read the Phase 7.2 calibration knobs defensively.
+
+    Configs predating 7.2 (and the lightweight test doubles) don't carry
+    these attributes; absent ⇒ calibration disabled (``holdout_fraction``
+    ``0.0``), which preserves the exact legacy fit-on-all behavior.
+    """
+    holdout_fraction = float(getattr(config, "calibration_holdout_fraction", 0.0))
+    target_flag_rate = float(getattr(config, "target_flag_rate", 0.02))
+    return holdout_fraction, target_flag_rate
 
 
 def _validate_loaded_artifact(
@@ -488,6 +637,11 @@ def _mode_summary(
     frame: pd.DataFrame,
     session_column: str,
     timestamp_column: str,
+    score_threshold: float | None = None,
+    score_scale: float | None = None,
+    holdout_samples: int = 0,
+    target_flag_rate: float | None = None,
+    achieved_flag_rate: float | None = None,
 ) -> ModeTrainingSummary:
     return ModeTrainingSummary(
         mode=mode,
@@ -496,6 +650,11 @@ def _mode_summary(
         sessions=_unique_strings(frame[session_column]),
         start_timestamp=_min_timestamp(frame[timestamp_column]),
         end_timestamp=_max_timestamp(frame[timestamp_column]),
+        score_threshold=score_threshold,
+        score_scale=score_scale,
+        holdout_samples=holdout_samples,
+        target_flag_rate=target_flag_rate,
+        achieved_flag_rate=achieved_flag_rate,
     )
 
 

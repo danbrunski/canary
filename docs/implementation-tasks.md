@@ -627,7 +627,7 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
 
 ### 7B. Detection quality
 
-- [ ] **7.2 — Fusion + calibrated severity layer (P1).** IF and LSTM
+- [x] **7.2 — Fusion + calibrated severity layer (P1).** IF and LSTM
   emit two independent streams deduped per-source, never combined, and
   IF's fixed `contamination=0.01` structurally flags ~1% of *nominal*
   driving. Add per-tick fusion of IF + LSTM + behavior residuals into one
@@ -636,6 +636,33 @@ individual bugs (already fixed). Picks up R3 and R4 from Risks below.
   (target flag-rate, not assumed contamination); emitter dedupe/tuning
   operate on the fused event. Directly serves Done-Definition v1 #7
   (≤1 FP/hr). Depends on 7.1, 7.3. (Effort: M)
+  Done: **(1) IF calibration** — the trainer reserves a time-ordered tail
+  per mode (`isolation_forest.calibration_holdout_fraction`, default 0.2;
+  fall back to legacy fit-on-all + label below `_MIN_CALIBRATION_SAMPLES`),
+  fits on the rest, and sets the per-mode `score_threshold` to the
+  `1 - target_flag_rate` quantile of the *held-out* nominal scores, also
+  persisting their spread as `score_scale`. All optional in
+  `ModeTrainingSummary` (manifests predating 7.2 still load; the 7.3
+  model-load gate stays happy). `TrainedIsolationForest.score` adds
+  `isolation_forest_calibrated_threshold` / `_calibrated_anomaly`; the
+  emitter prefers the calibrated verdict over the legacy `-1` label and
+  surfaces the boundary on the event. **(2) `src/alerts/fusion.py`** —
+  `FusionScorer` combines per-tick IF + LSTM + behavior-residual sources
+  into one `[0,1]` agreement-aware severity (scale-based for IF — the
+  negated-decision-function threshold is negative so a threshold-relative
+  ratio saturates; threshold-relative for LSTM; graded band for behavior;
+  `+agreement_boost` per extra agreeing source). New `fused` `AnomalyEvent`
+  carries the per-source breakdown in `detail` (seeds 7.2a). **(3) Daemon
+  unify** — one per-tick `run_live_inference` scores IF + LSTM (hot-swap
+  folded in) + behavior, emits the `fused` event through the same
+  dedupe/tuner gate *alongside* the unchanged per-source events (decision:
+  fused + keep per-source); the split LSTM task is no longer spawned
+  (`run_live_inference_lstm` retained for its direct tests). `FusionConfig`
+  added to `ModelsConfig` + all 4 example yamls + overview. Covered by
+  `tests/test_fusion.py` (16) + IF-calibration tests in
+  `tests/test_isolation_forest.py`; dashboard gains the `fused` source
+  (types, LiveModelScores, AnomalyPanel filter, StatusStrip) with tsc +
+  vitest green. 7.4/7.5 now unblocked.
 
 - [ ] **7.2a — Detector attribution payloads (P1).** Standardize the
   explanation/evidence data that anomaly events carry so the dashboard can

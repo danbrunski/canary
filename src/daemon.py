@@ -50,6 +50,12 @@ from src.alerts.emitter import (
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
 from src.alerts.feedback import FeedbackStore
+from src.alerts.fusion import (
+    FusionScorer,
+    FusionSource,
+    isolation_forest_source,
+    lstm_source,
+)
 from src.alerts.tuning import AlertTuner, load_tuning_config
 from src.collection.queueing import QueueDepthMonitor
 from src.config import CanaryConfig
@@ -325,54 +331,118 @@ async def run_live_inference(
     *,
     tick_seconds: float | None = None,
 ) -> None:
-    """Drive live Isolation Forest inference from a ``LiveFeatureSource``.
+    """Unified per-tick inference: IF + LSTM + behavior → fusion (Phase 7.2).
 
-    Caller wires record-stream → ``source.observe(record)`` somewhere else
-    (a queue tee, a Broadcaster subscription, etc.). This task ticks at
-    ``tick_seconds`` (default ``1 / preprocessing.resample_hz``), pulls a
-    one-row feature frame from ``source``, runs it through
-    ``IsolationForestInferenceEngine.observe`` →
-    ``AnomalyEventEmitter.emit_isolation_forest_row``. The emitter's
-    logger publishes events onto the anomalies broadcaster so
-    ``/ws/anomalies`` subscribers see them immediately, and writes the
-    JSONL for ``/anomalies`` HTTP queries.
+    Caller wires record-stream → ``source.observe(record)`` somewhere else.
+    Each tick (``tick_seconds``, default ``1 / preprocessing.resample_hz``)
+    pulls *one* feature row and runs every available detector against it:
 
-    LSTM live inference is not yet wired here — the LSTM expects
-    fixed-schema windows (``feature_columns`` matching the trained set
-    exactly), which the live source builds up channel-by-channel as
-    records arrive. A separate task can subscribe once the
-    schema-alignment piece exists. For now: IF only.
+    * **IF** → ``_score_and_emit`` (per-source ``isolation_forest`` event,
+      unchanged) + an IF fusion source from the 7.2 calibrated threshold;
+    * **LSTM** → engine built/hot-swapped here, per-source
+      ``lstm_autoencoder`` event (unchanged) + an LSTM fusion source;
+    * **behavior residuals** → the live overlay (unchanged) + a fusion
+      source per graded model.
 
-    Best-effort: every error inside the loop is caught + logged. One bad
-    row can't kill the inference stream.
+    The fusion sources are combined into one agreement-aware calibrated
+    ``fused`` event (deduped/tuned through the same emitter), emitted
+    *alongside* the per-source events. A single unified task ticks the
+    source once per interval (the old split IF/LSTM tasks double-ticked the
+    buffer); ``run_live_inference_lstm`` is retained standalone for its
+    direct tests but is no longer spawned by ``run_daemon``.
+
+    Best-effort: every error inside the loop is caught + logged.
     """
+    import pandas as pd
+
     interval = tick_seconds or 1.0 / max(components.config.preprocessing.resample_hz, 1.0)
     if_manager = components.model_managers.get("isolation_forest")
+    lstm_manager = components.model_managers.get("lstm_autoencoder")
+    fusion = FusionScorer(components.config.models.fusion)
+    severity_threshold = components.config.models.fusion.severity_threshold
     if if_manager is None:
         log.info(
             "isolation_forest model manager absent; IF scoring disabled — the "
-            "behavior overlay still runs off the live feature source"
+            "behavior overlay + fusion still run off the live feature source"
         )
+    lstm_engine: Any = None
+    lstm_engine_version: str | None = None
 
     while not stop_event.is_set():
         try:
             row = source.tick(datetime.now(UTC))
+            sources: list[FusionSource] = []
+            timestamp_str: str | None = None
+            operating_mode: str | None = None
+            if row is not None:
+                timestamp_str = str(row["timestamp"].iloc[0])
+                mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
+                operating_mode = None if mode_val is None or pd.isna(mode_val) else str(mode_val)
+
             loaded = if_manager.current if if_manager is not None else None
+            if_version = loaded.manifest.model_version if loaded is not None else None
             if loaded is not None and row is not None:
-                _score_and_emit(
+                if_input = _score_and_emit(
                     loaded,
                     row,
                     components.emitter,
                     components.health_monitor,
                     scores=components.scores_broadcaster,
                 )
-            # Behavior deviation is independent of the IF model: the
-            # operating point exists whenever telemetry is flowing, so the
-            # Models▸Behavior overlay must update even with no IF artifact
-            # loaded (none trained yet) and before the feature-warmup
-            # window fills. Gating it behind a loaded IF model was the bug
-            # that left the overlay showing only static bands.
-            _observe_behavior(source, components.behavior_live)
+                if if_input is not None:
+                    sources.append(
+                        isolation_forest_source(
+                            if_input.score, if_input.threshold, scale=if_input.scale
+                        )
+                    )
+
+            lstm_version: str | None = None
+            lstm_loaded = lstm_manager.current if lstm_manager is not None else None
+            if lstm_loaded is not None and row is not None:
+                lstm_version = lstm_loaded.manifest.model_version
+                if lstm_engine_version != lstm_version:
+                    lstm_engine = _build_lstm_engine(lstm_loaded)
+                    lstm_engine_version = lstm_version if lstm_engine is not None else None
+                if lstm_engine is not None:
+                    result = _lstm_observe(lstm_engine, row)
+                    if result is not None:
+                        _publish_score(
+                            components.scores_broadcaster,
+                            source="lstm_autoencoder",
+                            score=result.global_score,
+                            threshold=result.global_threshold,
+                            operating_mode=operating_mode,
+                            model_version=result.model_version,
+                            timestamp=result.timestamp,
+                            missing_features=False,
+                        )
+                        components.emitter.emit_lstm(result, operating_mode=operating_mode)
+                        sources.append(lstm_source(result.global_score, result.global_threshold))
+
+            # Behavior overlay (unchanged) + residual fusion sources.
+            for name, band in _observe_behavior(source, components.behavior_live):
+                behavior = fusion.behavior_source(f"behavior:{name}", band)
+                if behavior.fired:
+                    sources.append(behavior)
+
+            if fusion.enabled and sources and timestamp_str is not None:
+                fused_version = f"if={if_version or '-'}|lstm={lstm_version or '-'}"
+                fused = fusion.fuse(sources, timestamp=timestamp_str, operating_mode=operating_mode)
+                _publish_score(
+                    components.scores_broadcaster,
+                    source="fused",
+                    score=fused.severity,
+                    threshold=severity_threshold,
+                    operating_mode=operating_mode,
+                    model_version=fused_version,
+                    timestamp=timestamp_str,
+                    missing_features=False,
+                )
+                components.emitter.emit_fused(
+                    fused,
+                    model_version=fused_version,
+                    severity_threshold=severity_threshold,
+                )
         except Exception:  # noqa: BLE001 — live inference is best-effort
             log.exception("live inference tick failed")
         try:
@@ -380,6 +450,19 @@ async def run_live_inference(
             return  # stop_event fired
         except TimeoutError:
             continue
+
+
+def _build_lstm_engine(loaded: Any) -> Any:
+    """Build an ``LSTMInferenceEngine`` for a freshly-swapped model, or
+    ``None`` on a bad checkpoint (retried next tick). Mirrors the standalone
+    ``run_live_inference_lstm`` hot-swap idiom."""
+    try:
+        from src.models.inference import LSTMInferenceEngine
+
+        return LSTMInferenceEngine(loaded.artifact)
+    except Exception:  # noqa: BLE001 — bad checkpoint shouldn't kill the task
+        log.exception("failed to build LSTMInferenceEngine; will retry next tick")
+        return None
 
 
 async def run_live_inference_lstm(
@@ -589,6 +672,17 @@ def _publish_score(
     )
 
 
+@dataclass(frozen=True)
+class _IFFusionInput:
+    """The IF half of one fused tick (Phase 7.2). ``threshold``/``scale`` are
+    ``None`` for an uncalibrated (legacy) mode, so the IF source can't fire in
+    fusion — it still emits its own per-source event via the label rule."""
+
+    score: float
+    threshold: float | None
+    scale: float | None
+
+
 def _score_and_emit(
     loaded: Any,
     row: Any,  # pd.DataFrame, one row
@@ -596,8 +690,12 @@ def _score_and_emit(
     health: HealthMonitor | None = None,
     *,
     scores: Broadcaster | None = None,
-) -> None:
+) -> _IFFusionInput | None:
     """Run one feature row through IF.score → emitter. Best-effort.
+
+    Returns the IF fusion input on a trustworthy tick, or ``None`` when the
+    verdict was suppressed (missing-feature schema warmup) and so must not
+    contribute to fusion either — the per-source emit policy is unchanged.
 
     The model's expected ``feature_columns`` are a subset of what the
     live source produces; missing columns surface as NaN, which
@@ -611,7 +709,12 @@ def _score_and_emit(
     """
     import pandas as pd
 
-    from src.models.isolation_forest import MISSING_FEATURES_COLUMN, SCORE_COLUMN
+    from src.models.isolation_forest import (
+        CALIBRATED_THRESHOLD_COLUMN,
+        MISSING_FEATURES_COLUMN,
+        MODEL_MODE_COLUMN,
+        SCORE_COLUMN,
+    )
 
     engine = IsolationForestInferenceEngine(loaded.artifact)
     aligned, report = reconcile_feature_frame_to_spec(row, _schema_for_loaded(loaded))
@@ -637,11 +740,21 @@ def _score_and_emit(
         )
     missing = bool(scored.get(MISSING_FEATURES_COLUMN, False))
     mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
+    raw_threshold = scored.get(CALIBRATED_THRESHOLD_COLUMN)
+    calibrated_threshold = (
+        float(raw_threshold) if raw_threshold is not None and pd.notna(raw_threshold) else None
+    )
+    model_mode = scored.get(MODEL_MODE_COLUMN)
+    scale = (
+        getattr(loaded.artifact, "score_scales", {}).get(str(model_mode))
+        if model_mode is not None and pd.notna(model_mode)
+        else None
+    )
     _publish_score(
         scores,
         source="isolation_forest",
         score=scored.get(SCORE_COLUMN),
-        threshold=None,  # IF has no calibrated threshold; boundary is ~0
+        threshold=calibrated_threshold,  # 7.2 per-mode calibrated boundary
         operating_mode=(None if mode_val is None or pd.isna(mode_val) else str(mode_val)),
         model_version=engine.model_version,
         timestamp=timestamp,
@@ -664,11 +777,19 @@ def _score_and_emit(
                 "full trained schema. Watch /status missing_feature_rate.",
                 extra={"model_version": version},
             )
-        return
+        return None
     emitter.emit_isolation_forest_row(
         scored,
         model_version=engine.model_version,
         timestamp=str(timestamp),
+    )
+    score_val = scored.get(SCORE_COLUMN)
+    if score_val is None or pd.isna(score_val):
+        return None
+    return _IFFusionInput(
+        score=float(score_val),
+        threshold=calibrated_threshold,
+        scale=scale if scale is None else float(scale),
     )
 
 
@@ -686,8 +807,15 @@ def _num(value: object) -> float | None:
     return f if math.isfinite(f) else None
 
 
-def _observe_behavior(source: LiveFeatureSource, behavior_live: BehaviorLiveState) -> None:
+def _observe_behavior(
+    source: LiveFeatureSource, behavior_live: BehaviorLiveState
+) -> list[tuple[str, str]]:
     """Feed one tick of per-model deviations into the live overlay state.
+
+    Returns ``(model_name, severity_band)`` per model so the caller can fuse
+    the residuals (Phase 7.2) off the exact graded deviation the overlay
+    shows — ``deviation()`` already returns ``"ok"`` for an off-mode or
+    no-signal model, so a returned band is mode-safe to fuse.
 
     Reads the exact wide row the feature pipeline used (the source's
     ``latest_operating_point``) and runs every behavior model through the
@@ -702,7 +830,8 @@ def _observe_behavior(source: LiveFeatureSource, behavior_live: BehaviorLiveStat
     models = source.behavior_models
     point = source.latest_operating_point
     if models is None or not models.models or point is None:
-        return
+        return []
+    bands: list[tuple[str, str]] = []
     raw_mode = point.get(MODE_COLUMN)
     mode = raw_mode if isinstance(raw_mode, str) else None
     ts = point.get("timestamp")
@@ -743,7 +872,9 @@ def _observe_behavior(source: LiveFeatureSource, behavior_live: BehaviorLiveStat
                 mode_match=model.operating_mode is None or mode == model.operating_mode,
             )
         )
+        bands.append((model.name, result.severity))
     behavior_live.observe(timestamp, mode, observations)
+    return bands
 
 
 def build_live_feature_source(
@@ -1015,10 +1146,11 @@ async def run_daemon(
       * the collectors (CAN, OBD) → ``asyncio.Queue``
       * ``drain_queue_with_broadcast`` → Parquet + telemetry broadcaster +
         optional live source (every drained record fans out to all three)
-      * ``run_live_inference`` → IF scoring on each tick → emitter →
-        anomalies broadcaster + JSONL  (when ``enable_live_inference`` AND
-        the IF model manager has a loaded artifact; otherwise the task
-        becomes a passive wait on ``stop_event``)
+      * ``run_live_inference`` → per-tick IF + LSTM + behavior scoring,
+        fused into one calibrated ``fused`` event alongside the per-source
+        events → emitter → anomalies broadcaster + JSONL (when
+        ``enable_live_inference``; degrades to behavior/fusion-only when no
+        model artifact is loaded)
       * ``poll_model_managers`` → hot-swap loop
       * ``run_retention_sweeper`` → age + byte-cap + low-space retention
       * the dashboard via ``serve_in_background``
@@ -1092,13 +1224,13 @@ async def run_daemon(
     )
     inference_tasks: list[asyncio.Task[Any]] = []
     if live_source is not None:
+        # One unified task scores IF + LSTM + behavior per tick and fuses
+        # them (7.2). It owns the LSTM engine/hot-swap internally, so the
+        # separate LSTM task is no longer spawned (the standalone
+        # ``run_live_inference_lstm`` stays for its direct tests).
         inference_tasks.append(
             asyncio.create_task(run_live_inference(live_source, components, stop_event))
         )
-        if "lstm_autoencoder" in components.model_managers:
-            inference_tasks.append(
-                asyncio.create_task(run_live_inference_lstm(live_source, components, stop_event))
-            )
     collector_tasks = [
         asyncio.create_task(starter(queue, stop_event)) for starter in active_collectors
     ]

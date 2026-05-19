@@ -14,10 +14,13 @@ pytest.importorskip("joblib")
 pytest.importorskip("sklearn")
 
 from src.models.isolation_forest import (  # noqa: E402
+    CALIBRATED_ANOMALY_COLUMN,
+    CALIBRATED_THRESHOLD_COLUMN,
     LABEL_COLUMN,
     MISSING_FEATURES_COLUMN,
     MODEL_MODE_COLUMN,
     SCORE_COLUMN,
+    ModeTrainingSummary,
     default_manifest_path,
     fit_isolation_forest,
     load_isolation_forest_model,
@@ -318,3 +321,106 @@ def test_fit_rejects_all_missing_features() -> None:
             feature_columns=["obd:RPM"],
             fitted_at="2026-05-12T01:02:03Z",
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.2 — held-out per-mode calibrated thresholds
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _CalibratedIFConfig(_IFConfig):
+    calibration_holdout_fraction: float = 0.2
+    target_flag_rate: float = 0.1
+
+
+def test_calibration_records_threshold_and_scale_in_manifest() -> None:
+    trained = fit_isolation_forest(
+        _two_mode_frame(),
+        _CalibratedIFConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+    for mode in trained.manifest.modes:
+        assert mode.calibrated
+        assert mode.score_threshold is not None
+        assert mode.score_scale is not None and mode.score_scale > 0.0
+        assert mode.holdout_samples == 12  # floor(60 * 0.2)
+        assert mode.target_flag_rate == 0.1
+        assert mode.achieved_flag_rate is not None
+        assert 0.0 <= mode.achieved_flag_rate <= 0.5
+    hp = trained.manifest.hyperparams
+    assert hp["calibration_holdout_fraction"] == 0.2
+    assert hp["target_flag_rate"] == 0.1
+    assert set(trained.score_thresholds) == {"idle", "city"}
+    assert set(trained.score_scales) == {"idle", "city"}
+
+
+def test_score_emits_calibrated_columns_and_flags_injected_outlier() -> None:
+    frame = _two_mode_frame()
+    trained = fit_isolation_forest(
+        frame,
+        _CalibratedIFConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+    probe = frame.copy()
+    probe.loc[probe.index[0], ["obd:RPM", "obd:SPEED", "obd:LOAD"]] = [9e4, 9e3, 9e3]
+    scored = trained.score(probe)
+
+    assert CALIBRATED_THRESHOLD_COLUMN in scored
+    assert CALIBRATED_ANOMALY_COLUMN in scored
+    assert str(scored[CALIBRATED_ANOMALY_COLUMN].dtype) == "boolean"
+    # Both modes are calibrated → every row has a finite threshold + verdict.
+    assert scored[CALIBRATED_THRESHOLD_COLUMN].notna().all()
+    assert scored[CALIBRATED_ANOMALY_COLUMN].notna().all()
+    outlier = scored.loc[probe.index[0]]
+    assert bool(outlier[CALIBRATED_ANOMALY_COLUMN]) is True
+    assert outlier[SCORE_COLUMN] >= outlier[CALIBRATED_THRESHOLD_COLUMN]
+
+
+def test_calibration_round_trips_through_save_load(tmp_path: Path) -> None:
+    trained = fit_isolation_forest(
+        _two_mode_frame(),
+        _CalibratedIFConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+    artifact = tmp_path / "if.joblib"
+    trained.save(artifact)
+    reloaded = load_isolation_forest_model(artifact)
+    before = {m.mode: (m.score_threshold, m.score_scale) for m in trained.manifest.modes}
+    after = {m.mode: (m.score_threshold, m.score_scale) for m in reloaded.manifest.modes}
+    assert before == after
+    assert reloaded.score_thresholds == trained.score_thresholds
+
+
+def test_mode_summary_from_dict_is_back_compat_without_calibration() -> None:
+    # A manifest written before 7.2 has no calibration keys.
+    legacy = {
+        "mode": "idle",
+        "n_samples": 100,
+        "contamination": 0.01,
+        "sessions": ["s"],
+        "start_timestamp": None,
+        "end_timestamp": None,
+    }
+    summary = ModeTrainingSummary.from_dict(legacy)
+    assert summary.score_threshold is None
+    assert summary.score_scale is None
+    assert summary.holdout_samples == 0
+    assert summary.calibrated is False
+
+
+def test_legacy_config_without_calibration_attrs_disables_it() -> None:
+    trained = fit_isolation_forest(
+        _two_mode_frame(),
+        _IFConfig(),  # no calibration_holdout_fraction / target_flag_rate
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+    for mode in trained.manifest.modes:
+        assert not mode.calibrated
+        assert mode.score_threshold is None
+        assert mode.holdout_samples == 0
+    assert trained.score_thresholds == {}

@@ -130,6 +130,34 @@ class IsolationForestConfig(_Strict):
     contamination: float
     per_mode_contamination: dict[str, float] = Field(default_factory=dict)
     random_state: int = 42
+    #: Phase 7.2 — fraction of each mode's clean training rows, time-ordered
+    #: from the tail, held out (not fit on) and used purely to calibrate the
+    #: per-mode score threshold. ``0`` disables calibration (legacy
+    #: contamination-label decision only).
+    calibration_holdout_fraction: float = Field(default=0.2, ge=0.0, lt=1.0)
+    #: Target fraction of *nominal* held-out ticks the per-mode threshold is
+    #: allowed to flag — the calibrated decision boundary is the
+    #: ``1 - target_flag_rate`` quantile of held-out scores. This replaces the
+    #: assumption that exactly ``contamination`` of nominal driving is anomalous.
+    target_flag_rate: float = Field(default=0.02, gt=0.0, le=0.5)
+
+
+class FusionConfig(_Strict):
+    """Phase 7.2 — per-tick fusion of IF + LSTM + behavior residuals into one
+    agreement-aware calibrated severity. All defaulted so configs predating
+    7.2 keep loading with fusion on.
+    """
+
+    enabled: bool = True
+    #: Fused severity in [0, 1] at/above which a fused ``AnomalyEvent`` fires.
+    severity_threshold: float = Field(default=0.5, gt=0.0, le=1.0)
+    #: Added to the fused severity per *additional* agreeing source beyond the
+    #: first (agreement-aware boost), before clamping to 1.0.
+    agreement_boost: float = Field(default=0.25, ge=0.0, le=1.0)
+    #: Normalized severity a "warning" / "critical" behavior-deviation band
+    #: contributes as a fusion source.
+    behavior_warning_severity: float = Field(default=0.5, ge=0.0, le=1.0)
+    behavior_critical_severity: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
 class LSTMAutoencoderConfig(_Strict):
@@ -152,6 +180,7 @@ class LSTMAutoencoderConfig(_Strict):
 class ModelsConfig(_Strict):
     isolation_forest: IsolationForestConfig
     lstm_autoencoder: LSTMAutoencoderConfig
+    fusion: FusionConfig = Field(default_factory=FusionConfig)
 
 
 class DashboardConfig(_Strict):

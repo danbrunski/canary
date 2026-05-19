@@ -154,6 +154,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
               onChange={(e) => setSourceFilter(e.target.value as typeof sourceFilter)}
             >
               <option value="all">all</option>
+              <option value="fused">fused</option>
               <option value="isolation_forest">isolation_forest</option>
               <option value="lstm_autoencoder">lstm_autoencoder</option>
             </select>
@@ -246,6 +247,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                     "rounded bg-elev-2 px-1.5 py-0.5 text-[0.7rem] uppercase tracking-[0.08em]",
                     e.source === "isolation_forest" && "text-accent",
                     e.source === "lstm_autoencoder" && "text-ok",
+                    e.source === "fused" && "text-warn",
                   )}
                 >
                   {e.source.replace("_", " ")}

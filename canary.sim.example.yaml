@@ -73,6 +73,9 @@ models:
     contamination: 0.01
     per_mode_contamination: {}
     random_state: 42
+    # Phase 7.2 per-mode calibrated thresholds (held-out clean split).
+    calibration_holdout_fraction: 0.2
+    target_flag_rate: 0.02
   lstm_autoencoder:
     enabled: false
     sequence_length: 30
@@ -88,6 +91,12 @@ models:
     min_delta: 0.0
     random_state: 42
     threshold_k: 3.0
+  fusion:
+    enabled: true
+    severity_threshold: 0.5
+    agreement_boost: 0.25
+    behavior_warning_severity: 0.5
+    behavior_critical_severity: 1.0
 
 dashboard:
   host: 0.0.0.0

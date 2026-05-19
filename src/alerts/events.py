@@ -18,9 +18,13 @@ from pydantic import BaseModel, ConfigDict, Field
 if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import time
     import pandas as pd
 
+    from src.alerts.fusion import FusedResult
     from src.models.inference import LSTMInferenceResult
 
-AnomalySource = Literal["isolation_forest", "lstm_autoencoder"]
+#: ``fused`` (Phase 7.2) is the agreement-aware calibrated severity over the
+#: per-tick IF + LSTM + behavior-residual sources. The per-source events are
+#: still emitted alongside it.
+AnomalySource = Literal["isolation_forest", "lstm_autoencoder", "fused"]
 
 
 class AnomalyEvent(BaseModel):
@@ -90,6 +94,33 @@ class AnomalyEvent(BaseModel):
         )
 
     @classmethod
+    def from_fused(
+        cls,
+        result: FusedResult,
+        *,
+        model_version: str,
+        severity_threshold: float,
+    ) -> AnomalyEvent:
+        """Build the fused event (Phase 7.2).
+
+        ``score`` is the agreement-aware severity in ``[0, 1]`` and
+        ``threshold`` is the configured emit boundary, so the dashboard and
+        tuner can reason about it on the same score/threshold contract as the
+        per-source events. The per-source breakdown lives in ``detail`` (the
+        seed of 7.2a's richer attribution).
+        """
+        return cls(
+            timestamp=result.timestamp,
+            source="fused",
+            model_version=model_version,
+            score=result.severity,
+            threshold=severity_threshold,
+            affected_channels=tuple(result.contributing),
+            operating_mode=result.operating_mode,
+            detail=result.to_detail(),
+        )
+
+    @classmethod
     def from_isolation_forest_row(
         cls,
         row: pd.Series,
@@ -100,15 +131,22 @@ class AnomalyEvent(BaseModel):
         mode_column: str = "operating_mode",
         affected_channels: tuple[str, ...] = (),
         session: str | None = None,
+        threshold: float | None = None,
     ) -> AnomalyEvent:
-        """Build an event from one row of a scored Isolation Forest frame."""
+        """Build an event from one row of a scored Isolation Forest frame.
+
+        ``threshold`` is the 7.2 per-mode calibrated decision boundary when
+        the row was scored by a calibrated mode (``None`` for a legacy
+        contamination-label mode, preserving the old "IF has no fixed
+        threshold" contract).
+        """
         mode = row.get(mode_column)
         return cls(
             timestamp=timestamp,
             source="isolation_forest",
             model_version=model_version,
             score=float(row[score_column]),
-            threshold=None,
+            threshold=threshold,
             affected_channels=affected_channels,
             operating_mode=None if mode is None else str(mode),
             session=session,

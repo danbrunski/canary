@@ -33,12 +33,15 @@ from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
 from src.alerts.tuning import AlertTuner
 from src.models.isolation_forest import (
+    CALIBRATED_ANOMALY_COLUMN,
+    CALIBRATED_THRESHOLD_COLUMN,
     LABEL_COLUMN,
     MISSING_FEATURES_COLUMN,
     SCORE_COLUMN,
 )
 
 if TYPE_CHECKING:  # avoid importing torch-touching modules at import time
+    from src.alerts.fusion import FusedResult
     from src.models.inference import LSTMInferenceResult
 
 log = logging.getLogger(__name__)
@@ -117,20 +120,33 @@ class AnomalyEventEmitter:
         score_column: str = SCORE_COLUMN,
         label_column: str = LABEL_COLUMN,
         missing_features_column: str = MISSING_FEATURES_COLUMN,
+        calibrated_anomaly_column: str = CALIBRATED_ANOMALY_COLUMN,
+        calibrated_threshold_column: str = CALIBRATED_THRESHOLD_COLUMN,
         mode_column: str = "operating_mode",
     ) -> AnomalyEvent | None:
         """Emit an event from one row of a scored Isolation Forest frame.
 
-        Anomaly rule mirrors ``TrainedIsolationForest.score``: label ``-1``
-        OR the missing-features dropout flag. Rows that hit neither
-        ``suppressed_not_anomaly`` and return ``None`` without persisting.
+        Anomaly rule (Phase 7.2): prefer the per-mode *calibrated* verdict
+        (``isolation_forest_calibrated_anomaly``) when the row's mode was
+        calibrated; otherwise fall back to the legacy contamination label
+        (``-1``). The missing-features dropout flag forces anomalous in both
+        cases. Rows that hit neither ``suppressed_not_anomaly`` and return
+        ``None`` without persisting.
         """
-        label = row.get(label_column)
         missing = bool(row.get(missing_features_column, False))
-        is_anomaly = missing or (label is not None and int(label) == -1)
+        calibrated = row.get(calibrated_anomaly_column)
+        if calibrated is not None and pd.notna(calibrated):
+            is_anomaly = missing or bool(calibrated)
+        else:
+            label = row.get(label_column)
+            is_anomaly = missing or (label is not None and pd.notna(label) and int(label) == -1)
         if not is_anomaly:
             self.counters.suppressed_not_anomaly += 1
             return None
+        raw_threshold = row.get(calibrated_threshold_column)
+        threshold = (
+            float(raw_threshold) if raw_threshold is not None and pd.notna(raw_threshold) else None
+        )
         event = AnomalyEvent.from_isolation_forest_row(
             row,
             model_version=model_version,
@@ -139,6 +155,7 @@ class AnomalyEventEmitter:
             mode_column=mode_column,
             affected_channels=affected_channels,
             session=session,
+            threshold=threshold,
         )
         if missing:
             # tag dropout vs ordinary outlier so the dashboard can render
@@ -146,6 +163,30 @@ class AnomalyEventEmitter:
             detail = dict(event.detail)
             detail["missing_features"] = True
             event = event.model_copy(update={"detail": detail})
+        return self._emit(event)
+
+    def emit_fused(
+        self,
+        result: FusedResult,
+        *,
+        model_version: str,
+        severity_threshold: float,
+    ) -> AnomalyEvent | None:
+        """Emit the fused event (Phase 7.2), if anomalous + not deduped/tuned.
+
+        Goes through the same ``_emit`` gate as the per-source events, so
+        dedupe and the operator tuner now also operate on the fused event —
+        its ``(source="fused", model_version)`` dedupe key is independent of
+        the per-detector keys, so keeping both streams doesn't cross-suppress.
+        """
+        if not result.is_anomaly:
+            self.counters.suppressed_not_anomaly += 1
+            return None
+        event = AnomalyEvent.from_fused(
+            result,
+            model_version=model_version,
+            severity_threshold=severity_threshold,
+        )
         return self._emit(event)
 
     def _emit(self, event: AnomalyEvent) -> AnomalyEvent | None:

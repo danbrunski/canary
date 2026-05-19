@@ -10,6 +10,14 @@ export type EvidenceSource = "isolation_forest" | "lstm_autoencoder";
 
 export const SOURCES: EvidenceSource[] = ["isolation_forest", "lstm_autoencoder"];
 
+/** Narrow an `AnomalyEvent.source` (which now also includes the Phase 7.2
+ *  `fused` source) to a per-detector `EvidenceSource`. The evidence cards are
+ *  per-detector; a fused event is shown via its `detail.sources` breakdown,
+ *  not as its own card here (7.2a enriches this). */
+export function isEvidenceSource(source: string): source is EvidenceSource {
+  return (SOURCES as readonly string[]).includes(source);
+}
+
 export const SOURCE_LABEL: Record<EvidenceSource, string> = {
   isolation_forest: "Isolation Forest",
   lstm_autoencoder: "LSTM",

@@ -119,12 +119,18 @@ def test_validate_unsupported_format_version_raises() -> None:
 
 
 def test_known_model_types_match_anomaly_sources() -> None:
-    """5.15 ↔ 5.1: KNOWN_MODEL_TYPES must equal AnomalyEvent's source literal."""
+    """5.15 ↔ 5.1: every trainable model type has a matching anomaly source.
+
+    Phase 7.2 adds the derived ``fused`` source, which has *no* model
+    artifact (it's the agreement-aware combination of the others), so it is
+    deliberately an ``AnomalySource`` that is not a ``KNOWN_MODEL_TYPE``. The
+    managed-model invariant is therefore: model types are exactly the
+    non-derived sources."""
     from typing import get_args
 
     from src.alerts.events import AnomalySource
 
-    assert set(KNOWN_MODEL_TYPES) == set(get_args(AnomalySource))
+    assert set(KNOWN_MODEL_TYPES) == set(get_args(AnomalySource)) - {"fused"}
 
 
 # ---------------------------------------------------------------------------

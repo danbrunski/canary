@@ -149,7 +149,8 @@ function mostRecentEvent(
     const t = Date.parse(e.timestamp);
     if (Number.isNaN(t)) continue;
     const ageMs = now - t;
-    const src = e.source === "lstm_autoencoder" ? "LSTM" : "IF";
+    const src =
+      e.source === "lstm_autoencoder" ? "LSTM" : e.source === "fused" ? "Fused" : "IF";
     const mode = e.operating_mode ? ` (${e.operating_mode})` : "";
     return { fresh: ageMs >= 0 && ageMs < 60_000, label: `${src}${mode}` };
   }

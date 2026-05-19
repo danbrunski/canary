@@ -80,6 +80,12 @@ models:
     # Optional task-2.8 tuning output, e.g. {idle: 0.005, city: 0.01}
     per_mode_contamination: {}
     random_state: 42
+    # Phase 7.2: per-mode score thresholds calibrated on a held-out clean
+    # split instead of the fixed-contamination label. holdout = tail
+    # fraction reserved (not fit on); target_flag_rate = allowed nominal
+    # flag fraction (threshold = 1-target_flag_rate quantile of holdout).
+    calibration_holdout_fraction: 0.2
+    target_flag_rate: 0.02
   lstm_autoencoder:
     enabled: true
     sequence_length: 30
@@ -95,6 +101,15 @@ models:
     min_delta: 0.0
     random_state: 42
     threshold_k: 3.0
+  # Phase 7.2: fuse IF + LSTM + behavior residuals into one
+  # agreement-aware calibrated severity (a "fused" AnomalyEvent). The
+  # per-source events still fire alongside it.
+  fusion:
+    enabled: true
+    severity_threshold: 0.5
+    agreement_boost: 0.25
+    behavior_warning_severity: 0.5
+    behavior_critical_severity: 1.0
 
 dashboard:
   host: 0.0.0.0

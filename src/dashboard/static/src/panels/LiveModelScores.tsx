@@ -13,9 +13,10 @@ const LEVEL_TONE: Record<AnomalyLevel, string> = {
 const SOURCE_LABEL: Record<ScoreSource, string> = {
   isolation_forest: "isolation forest",
   lstm_autoencoder: "lstm autoencoder",
+  fused: "fused severity",
 };
 
-const SOURCES: ScoreSource[] = ["isolation_forest", "lstm_autoencoder"];
+const SOURCES: ScoreSource[] = ["isolation_forest", "lstm_autoencoder", "fused"];
 
 /** One model's live readout: current normalized index + level + raw value,
  *  and a fixed-scale (0–100, threshold ref at 50) sparkline of recent ticks.

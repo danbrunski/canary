@@ -313,11 +313,19 @@ models:
     enabled: true
     n_estimators: 200
     contamination: 0.01
+    calibration_holdout_fraction: 0.2   # Phase 7.2 held-out calibration split
+    target_flag_rate: 0.02              # per-mode threshold = 1-this quantile
   lstm_autoencoder:
     enabled: true
     sequence_length: 30
     latent_dim: 32
     threshold_k: 3.0
+  fusion:                               # Phase 7.2 IF+LSTM+behavior fusion
+    enabled: true
+    severity_threshold: 0.5
+    agreement_boost: 0.25
+    behavior_warning_severity: 0.5
+    behavior_critical_severity: 1.0
 
 dashboard:
   host: 0.0.0.0

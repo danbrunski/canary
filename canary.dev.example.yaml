@@ -64,6 +64,9 @@ models:
     contamination: 0.01
     per_mode_contamination: {}
     random_state: 42
+    # Phase 7.2 per-mode calibrated thresholds (held-out clean split).
+    calibration_holdout_fraction: 0.2
+    target_flag_rate: 0.02
   lstm_autoencoder:
     # Keep disabled until a trained artifact exists under daemon.models_dir.
     # Flip to true after training (CPU Torch is installed by setup_pi_dev.sh
@@ -82,6 +85,12 @@ models:
     min_delta: 0.0
     random_state: 42
     threshold_k: 3.0
+  fusion:
+    enabled: true
+    severity_threshold: 0.5
+    agreement_boost: 0.25
+    behavior_warning_severity: 0.5
+    behavior_critical_severity: 1.0
 
 dashboard:
   # LAN-only, no auth in v1. 0.0.0.0 so a laptop/phone on the same network
