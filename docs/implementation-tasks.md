@@ -718,13 +718,26 @@ be read each tick, not snapshotted at startup.
   the acting logic lives only in the sweeper. Depends on 8.1, 8.2.
   (Effort: S)
 
-- [ ] **8.4 — Storage-lifecycle tests (P0/P1).** Unit: `enforce_storage_cap`
+- [~] **8.4 — Storage-lifecycle tests (P0/P1).** Unit: `enforce_storage_cap`
   eviction order, pin exclusion, active/protect exclusion, stop-when-only-
   pinned. Task: interval honored, age+cap both run, emergency path triggers
   below threshold, active dir survives an engine-run-time rotation.
   Regression: assert the assembled `run_daemon` task set includes the
   retention sweeper — the missing-wiring gap that let this ship. Depends on
   8.1–8.3. (Effort: S–M)
+  Done (everything buildable pre-8.3): the unit suite landed with 8.2
+  (`tests/test_parquet_writer.py` — eviction order, pin/protect exclusion,
+  stop-when-only-pinned, non-session ignore, non-positive-cap, missing
+  root). Added in `tests/test_daemon.py`: `interval honored` (no busy-loop),
+  `age+cap both run in one tick`, `active dir survives an engine-run-time
+  rotation` (live `active_session_path` read each tick), and the keystone
+  regression `test_run_daemon_wires_retention_sweeper_task` — monkeypatches
+  the sweeper and asserts `run_daemon` schedules it with the configured
+  retention/cap/interval and the live `writer.paths.root` callable, closing
+  the missing-wiring gap (R13). Remaining: the "emergency path triggers
+  below `storage_warning_mb`" task test, which exercises the 8.3 acting
+  low-space guard and ships with that feature (its target does not exist
+  yet).
 
 - [ ] **8.5 — Config + doc reconciliation (P0).** Add `storage_max_mb`
   (under `collection:`) and `retention_sweep_seconds` (under `daemon:`) to

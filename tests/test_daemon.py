@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -423,6 +424,143 @@ async def test_retention_sweeper_enforces_byte_cap_and_keeps_active(
     assert active.exists()
 
 
+async def test_retention_sweeper_honors_interval(tmp_path: Path) -> None:
+    """The sweeper waits interval_seconds between passes (no busy-loop)."""
+    expired1 = tmp_path / "2000-01-01T000000"
+    active = tmp_path / "2099-01-01T000000"
+    expired1.mkdir()
+    active.mkdir()
+    stop = asyncio.Event()
+
+    task = asyncio.create_task(
+        run_retention_sweeper(
+            tmp_path,
+            retention_days=1,
+            stop_event=stop,
+            interval_seconds=30.0,
+            active_session_path=lambda: active,
+        )
+    )
+    try:
+        # The first sweep runs immediately on loop entry.
+        for _ in range(40):
+            if not expired1.exists():
+                break
+            await asyncio.sleep(0.02)
+        assert not expired1.exists(), "first (immediate) sweep should delete expired1"
+
+        # A second expired dir created now must survive: the next sweep is
+        # 30 s out, far beyond this bounded wait.
+        expired2 = tmp_path / "2000-01-02T000000"
+        expired2.mkdir()
+        await asyncio.sleep(0.4)
+        assert expired2.exists(), "interval not honored: swept again before interval elapsed"
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+
+async def test_retention_sweeper_runs_age_and_cap_in_one_tick(tmp_path: Path) -> None:
+    """A single sweep applies both the age sweep and the byte cap."""
+    now = datetime.now(UTC)
+
+    def _name(dt: datetime) -> str:
+        return dt.strftime("%Y-%m-%dT%H%M%S")
+
+    def _session(name: str, mib: int) -> Path:
+        session = tmp_path / name
+        session.mkdir()
+        (session / "telemetry-00000.parquet").write_bytes(b"\0" * (mib * 1024 * 1024))
+        return session
+
+    expired = _session("2000-01-01T000000", 1)  # age-expired
+    fresh_old = _session(_name(now - timedelta(seconds=30)), 1)
+    fresh_mid = _session(_name(now - timedelta(seconds=20)), 1)
+    fresh_new = _session(_name(now - timedelta(seconds=10)), 1)
+    active = _session(_name(now + timedelta(seconds=10)), 1)
+    stop = asyncio.Event()
+
+    async def _wait() -> None:
+        for _ in range(80):
+            if not (expired.exists() or fresh_old.exists() or fresh_mid.exists()):
+                return
+            await asyncio.sleep(0.05)
+        raise AssertionError("age+cap sweep did not converge")
+
+    task = asyncio.create_task(
+        run_retention_sweeper(
+            tmp_path,
+            retention_days=1,
+            stop_event=stop,
+            interval_seconds=0.05,
+            active_session_path=lambda: active,
+            storage_max_mb=2,
+        )
+    )
+    try:
+        await asyncio.wait_for(_wait(), timeout=5.0)
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert not expired.exists()  # removed by the age sweep
+    assert not fresh_old.exists()  # evicted oldest-first by the byte cap
+    assert not fresh_mid.exists()  # evicted by the byte cap
+    assert fresh_new.exists()  # cap satisfied before reaching this one
+    assert active.exists()  # never evicted
+
+
+async def test_retention_sweeper_protects_active_across_rotation(tmp_path: Path) -> None:
+    """active_session_path is read live each tick: after an engine-run-time
+    rotation moves the active dir, the new active is protected and the
+    formerly-active dir becomes collectable."""
+    first = tmp_path / "2000-01-01T000000"
+    other = tmp_path / "2000-01-02T000000"
+    first.mkdir()
+    other.mkdir()
+    (first / "telemetry-00000.parquet").write_bytes(b"first")
+    (other / "telemetry-00000.parquet").write_bytes(b"other")
+    active_holder: dict[str, Path] = {"path": first}
+    stop = asyncio.Event()
+
+    task = asyncio.create_task(
+        run_retention_sweeper(
+            tmp_path,
+            retention_days=1,
+            stop_event=stop,
+            interval_seconds=0.05,
+            active_session_path=lambda: active_holder["path"],
+        )
+    )
+    try:
+        # Both dirs are age-expired, but `first` is the live session, so only
+        # `other` is collectable while `first` is active.
+        for _ in range(60):
+            if not other.exists():
+                break
+            await asyncio.sleep(0.05)
+        assert not other.exists(), "expired non-active dir was not removed"
+        assert first.exists(), "active dir must never be deleted"
+
+        # Emulate rotate_session(): the writer moved to a fresh dir. The
+        # sweeper reads active_session_path() live, so `first` is no longer
+        # protected and the new dir is.
+        rotated = tmp_path / "2000-01-03T000000"
+        rotated.mkdir()
+        (rotated / "telemetry-00000.parquet").write_bytes(b"rotated")
+        active_holder["path"] = rotated
+
+        for _ in range(60):
+            if not first.exists():
+                break
+            await asyncio.sleep(0.05)
+        assert not first.exists(), "formerly-active dir not collected after rotation"
+        assert rotated.exists(), "the post-rotation active dir must be protected"
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+
 # ---------------------------------------------------------------------------
 # DaemonConfig defaults
 # ---------------------------------------------------------------------------
@@ -507,6 +645,75 @@ async def test_run_daemon_starts_retention_sweeper_and_protects_active_session(
 
     assert not old.exists()
     assert active.exists()
+
+
+async def test_run_daemon_wires_retention_sweeper_task(
+    config: CanaryConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: the assembled run_daemon task set must include the
+    retention sweeper, threaded with the configured cap, retention, interval,
+    and the *live* active-session callable. This is the exact missing-wiring
+    gap that let the unbounded-storage bug ship (Phase 8 / R13)."""
+    import src.daemon as daemon_mod
+    from src.daemon import run_daemon
+
+    config.collection.session_retention_days = 7
+    config.collection.storage_max_mb = 1234
+    config.daemon.retention_sweep_seconds = 42.0
+
+    captured: dict[str, Any] = {}
+
+    async def _spy(
+        storage_path: Path,
+        retention_days: int,
+        stop_event: asyncio.Event,
+        *,
+        interval_seconds: float,
+        active_session_path: Callable[[], Path],
+        storage_max_mb: int | None = None,
+    ) -> None:
+        captured.update(
+            storage_path=storage_path,
+            retention_days=retention_days,
+            interval_seconds=interval_seconds,
+            storage_max_mb=storage_max_mb,
+            active_session_path=active_session_path(),
+        )
+        await stop_event.wait()
+
+    monkeypatch.setattr(daemon_mod, "run_retention_sweeper", _spy)
+
+    components = build_components(config)
+    writer = ParquetTelemetryWriter(config.collection.storage_path)
+    stop = asyncio.Event()
+
+    async def _run() -> None:
+        await run_daemon(
+            config,
+            stop,
+            collectors=[],
+            writer=writer,
+            components=components,
+            enable_live_inference=False,
+        )
+
+    daemon_task = asyncio.create_task(_run())
+    try:
+        for _ in range(60):
+            if captured:
+                break
+            await asyncio.sleep(0.02)
+        assert captured, "run_daemon did not start the retention sweeper task"
+    finally:
+        stop.set()
+        await asyncio.wait_for(daemon_task, timeout=5.0)
+
+    assert captured["storage_path"] == config.collection.storage_path
+    assert captured["retention_days"] == 7
+    assert captured["interval_seconds"] == 42.0
+    assert captured["storage_max_mb"] == 1234
+    assert captured["active_session_path"] == writer.paths.root
 
 
 # ---------------------------------------------------------------------------
