@@ -35,6 +35,9 @@ collection:
   storage_path: data/sessions
   session_retention_days: 30
   storage_warning_mb: 500
+  # Byte-cap ring buffer (oldest unpinned sessions evicted past this;
+  # pinned + active never touched). null disables it.
+  storage_max_mb: 4000
   reconnect_initial_delay_seconds: 10
   reconnect_max_delay_seconds: 60
   queue_max_size: 10000

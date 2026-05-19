@@ -37,6 +37,9 @@ collection:
   storage_path: data/sim/sessions
   session_retention_days: 7
   storage_warning_mb: 500
+  # Byte-cap ring buffer (oldest unpinned sessions evicted past this;
+  # pinned + active never touched). null disables it.
+  storage_max_mb: 2000
   # Simulation: replay a real recorded drive (the 18-min 2026-05-11
   # capture) onto the telemetry queue instead of opening hardware. The
   # daemon decodes it via bindings.yaml exactly like a live drive, so the

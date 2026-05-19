@@ -76,7 +76,11 @@ from src.preprocessing.feature_pipeline import (
 from src.preprocessing.live import LiveFeatureSource
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.monitor import warn_if_storage_low
-from src.storage.parquet_writer import ParquetTelemetryWriter, delete_expired_sessions
+from src.storage.parquet_writer import (
+    ParquetTelemetryWriter,
+    delete_expired_sessions,
+    enforce_storage_cap,
+)
 from src.telemetry import (
     DECODED_SOURCE,
     SOURCE_SEP,
@@ -821,8 +825,13 @@ async def run_retention_sweeper(
     *,
     interval_seconds: float,
     active_session_path: Callable[[], Path],
+    storage_max_mb: int | None = None,
 ) -> None:
-    """Periodically delete expired session dirs from the production daemon.
+    """Periodically prune session dirs from the production daemon.
+
+    Each tick does an age sweep (``delete_expired_sessions``) and, when
+    ``storage_max_mb`` is set, a byte-cap sweep (``enforce_storage_cap``) —
+    the bounded ring buffer that keeps the SD card from filling unattended.
 
     The active session is read through ``active_session_path`` on every tick,
     not captured once at startup, because ``ParquetTelemetryWriter`` rotates
@@ -850,6 +859,23 @@ async def run_retention_sweeper(
                         "active_session": str(active),
                     },
                 )
+            if storage_max_mb is not None:
+                evicted = enforce_storage_cap(
+                    storage_path,
+                    storage_max_mb,
+                    protect={active},
+                )
+                if evicted:
+                    log.info(
+                        "storage cap evicted sessions",
+                        extra={
+                            "count": len(evicted),
+                            "reclaimed_bytes": sum(sizes_before.get(path, 0) for path in evicted),
+                            "sessions": [str(path) for path in evicted],
+                            "storage_max_mb": storage_max_mb,
+                            "active_session": str(active),
+                        },
+                    )
         except Exception:  # noqa: BLE001 — cleanup must not kill capture
             log.exception("retention sweep failed", extra={"storage_path": str(storage_path)})
         try:
@@ -966,7 +992,7 @@ async def run_daemon(
         the IF model manager has a loaded artifact; otherwise the task
         becomes a passive wait on ``stop_event``)
       * ``poll_model_managers`` → hot-swap loop
-      * ``run_retention_sweeper`` → age-based session retention
+      * ``run_retention_sweeper`` → age-based + byte-cap session retention
       * the dashboard via ``serve_in_background``
 
     Returns the components so a caller can inspect counters / model
@@ -1032,6 +1058,7 @@ async def run_daemon(
             stop_event,
             interval_seconds=config.daemon.retention_sweep_seconds,
             active_session_path=lambda: storage_writer.paths.root,
+            storage_max_mb=config.collection.storage_max_mb,
         )
     )
     inference_tasks: list[asyncio.Task[Any]] = []

@@ -83,6 +83,12 @@ class CollectionConfig(_Strict):
     storage_path: Path
     session_retention_days: int
     storage_warning_mb: int
+    #: Byte-bounded ring buffer. When set, the daemon's retention sweeper
+    #: evicts oldest unpinned sessions until total session bytes fall under
+    #: this cap (pinned + active dirs are never evicted). ``None`` disables
+    #: the cap (age-only retention) — the safe default for configs predating
+    #: Phase 8.2.
+    storage_max_mb: int | None = None
     reconnect_initial_delay_seconds: float = 10.0
     reconnect_max_delay_seconds: float = 60.0
     queue_max_size: int = 10_000

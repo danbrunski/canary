@@ -47,6 +47,12 @@ collection:
   storage_path: /data/canary
   session_retention_days: 30
   storage_warning_mb: 500
+  # Byte-bounded ring buffer: the daemon's retention sweeper evicts the
+  # oldest unpinned sessions once total session bytes exceed this cap
+  # (pinned + active dirs are never evicted). Size it below the storage
+  # partition's free space with headroom. Omit / set null to disable the
+  # cap and keep age-only retention.
+  storage_max_mb: 8000
   reconnect_initial_delay_seconds: 10
   reconnect_max_delay_seconds: 60
   queue_max_size: 10000

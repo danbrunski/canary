@@ -234,3 +234,67 @@ def delete_expired_sessions(
             shutil.rmtree(child)
             deleted.append(child)
     return deleted
+
+
+def _dir_tree_size(root: Path) -> int:
+    """Total size in bytes of every regular file under ``root`` (recursive)."""
+    total = 0
+    for child in root.rglob("*"):
+        try:
+            if child.is_file():
+                total += child.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def enforce_storage_cap(
+    sessions_root: Path,
+    max_mb: int,
+    *,
+    protect: Iterable[Path] | None = None,
+) -> list[Path]:
+    """Evict oldest session directories until total session bytes are under cap.
+
+    This is the byte-bounded ring buffer: ``delete_expired_sessions`` bounds
+    sessions by *age*; this bounds them by *total size*. Only timestamp-named
+    session directories are measured and evicted — ``scratch`` / ``_archive``
+    and other non-session entries are neither counted nor removed.
+
+    Eviction is oldest-first by directory name (ISO timestamp, so lexical
+    order is chronological — the same convention as ``delete_expired_sessions``).
+    A directory containing ``.canary-pin`` or listed in ``protect`` (the live
+    session dir) is never deleted, even if that means staying over the cap.
+    Returns the deleted directories, oldest first.
+    """
+    if max_mb <= 0:
+        raise ValueError("max_mb must be positive")
+    if not sessions_root.exists():
+        return []
+
+    protected = {path.resolve() for path in protect or ()}
+    cap_bytes = max_mb * 1024 * 1024
+
+    sessions: list[tuple[Path, int]] = []
+    for child in sorted(sessions_root.iterdir()):
+        if not child.is_dir():
+            continue
+        try:
+            datetime.strptime(child.name, "%Y-%m-%dT%H%M%S")
+        except ValueError:
+            continue
+        sessions.append((child, _dir_tree_size(child)))
+
+    total = sum(size for _, size in sessions)
+    deleted: list[Path] = []
+    for child, size in sessions:  # sorted() above => oldest first
+        if total <= cap_bytes:
+            break
+        if child.resolve() in protected:
+            continue
+        if (child / ".canary-pin").exists():
+            continue
+        shutil.rmtree(child)
+        deleted.append(child)
+        total -= size
+    return deleted

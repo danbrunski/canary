@@ -9,7 +9,11 @@ import pyarrow.parquet as pq
 import pytest
 
 from src.storage import parquet_writer
-from src.storage.parquet_writer import ParquetTelemetryWriter, delete_expired_sessions
+from src.storage.parquet_writer import (
+    ParquetTelemetryWriter,
+    delete_expired_sessions,
+    enforce_storage_cap,
+)
 from src.telemetry import TelemetryRecord
 
 
@@ -276,3 +280,88 @@ def test_delete_expired_sessions_keeps_protected_old_sessions(tmp_path: Path) ->
 def test_delete_expired_sessions_rejects_negative_retention(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="retention_days"):
         delete_expired_sessions(tmp_path, retention_days=-1)
+
+
+# ---------------------------------------------------------------------------
+# enforce_storage_cap — the byte-bounded ring buffer (Phase 8.2)
+# ---------------------------------------------------------------------------
+
+
+def _make_session(root: Path, name: str, mib: int) -> Path:
+    session = root / name
+    session.mkdir()
+    (session / "telemetry-00000.parquet").write_bytes(b"\0" * (mib * 1024 * 1024))
+    return session
+
+
+def test_enforce_storage_cap_evicts_oldest_first_until_under_cap(tmp_path: Path) -> None:
+    oldest = _make_session(tmp_path, "2026-05-01T000000", 1)
+    middle = _make_session(tmp_path, "2026-05-02T000000", 1)
+    newest = _make_session(tmp_path, "2026-05-03T000000", 1)
+
+    deleted = enforce_storage_cap(tmp_path, max_mb=2)
+
+    assert deleted == [oldest]
+    assert not oldest.exists()
+    assert middle.exists()
+    assert newest.exists()
+
+
+def test_enforce_storage_cap_noop_when_under_cap(tmp_path: Path) -> None:
+    a = _make_session(tmp_path, "2026-05-01T000000", 1)
+    b = _make_session(tmp_path, "2026-05-02T000000", 1)
+
+    assert enforce_storage_cap(tmp_path, max_mb=10) == []
+    assert a.exists()
+    assert b.exists()
+
+
+def test_enforce_storage_cap_never_evicts_pinned_or_protected(tmp_path: Path) -> None:
+    pinned = _make_session(tmp_path, "2026-05-01T000000", 1)
+    (pinned / ".canary-pin").write_text('{"pinned": true}\n')
+    protected = _make_session(tmp_path, "2026-05-02T000000", 1)
+    evictable = _make_session(tmp_path, "2026-05-03T000000", 1)
+
+    deleted = enforce_storage_cap(tmp_path, max_mb=1, protect={protected})
+
+    # Cap is 1 MiB and 3 MiB is present, but only the unpinned, unprotected
+    # dir may go — staying over cap is correct when nothing else is evictable.
+    assert deleted == [evictable]
+    assert pinned.exists()
+    assert protected.exists()
+    assert not evictable.exists()
+
+
+def test_enforce_storage_cap_stops_when_only_pinned_remain(tmp_path: Path) -> None:
+    a = _make_session(tmp_path, "2026-05-01T000000", 1)
+    b = _make_session(tmp_path, "2026-05-02T000000", 1)
+    for session in (a, b):
+        (session / ".canary-pin").write_text("{}\n")
+
+    assert enforce_storage_cap(tmp_path, max_mb=1) == []
+    assert a.exists()
+    assert b.exists()
+
+
+def test_enforce_storage_cap_ignores_non_session_entries(tmp_path: Path) -> None:
+    session = _make_session(tmp_path, "2026-05-03T000000", 1)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    (scratch / "blob.bin").write_bytes(b"\0" * (5 * 1024 * 1024))
+
+    # scratch is not a timestamp dir: not measured, not evictable. The only
+    # session is under cap, so nothing is removed.
+    assert enforce_storage_cap(tmp_path, max_mb=2) == []
+    assert session.exists()
+    assert scratch.exists()
+
+
+def test_enforce_storage_cap_rejects_non_positive_cap(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="max_mb"):
+        enforce_storage_cap(tmp_path, max_mb=0)
+    with pytest.raises(ValueError, match="max_mb"):
+        enforce_storage_cap(tmp_path, max_mb=-1)
+
+
+def test_enforce_storage_cap_missing_root_is_noop(tmp_path: Path) -> None:
+    assert enforce_storage_cap(tmp_path / "nope", max_mb=1) == []

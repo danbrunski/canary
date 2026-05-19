@@ -26,6 +26,10 @@ collection:
   storage_path: /data/canary/sessions
   session_retention_days: 30
   storage_warning_mb: 500
+  # Byte-cap ring buffer, sized below the SD card's free space with
+  # headroom (~1.25 GB/day KOEO). Oldest unpinned sessions are evicted
+  # past this; pinned + active dirs are never touched.
+  storage_max_mb: 16000
   reconnect_initial_delay_seconds: 10
   reconnect_max_delay_seconds: 60
   queue_max_size: 10000

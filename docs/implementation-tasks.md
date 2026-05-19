@@ -689,13 +689,26 @@ be read each tick, not snapshotted at startup.
   active-session protection. Regression coverage proves the daemon wiring
   deletes an expired session while preserving the active one.
 
-- [ ] **8.2 — Byte-bounded storage cap / true ring buffer (P0).** Add
+- [x] **8.2 — Byte-bounded storage cap / true ring buffer (P0).** Add
   `collection.storage_max_mb` and `enforce_storage_cap(sessions_root,
   max_mb, *, protect=...)` in `parquet_writer.py`: when total bytes under
   the root exceed the cap, delete oldest-first unpinned non-protected
   timestamp dirs until under cap or only pinned/active remain. Called from
   the 8.1 sweeper after the age sweep. This is the bounded ring buffer 1.12
   claimed but never implemented. Depends on 8.1. (Effort: S–M)
+  Done: `enforce_storage_cap` measures only timestamp session dirs (scratch/
+  `_archive` and other non-session entries are never counted or evicted),
+  evicts oldest-first by dir name, and never removes a `.canary-pin` or
+  `protect`-listed (live) dir — staying over cap is the correct outcome when
+  nothing else is evictable. `run_retention_sweeper` runs it after the age
+  sweep when `storage_max_mb` is set, reusing the same live-`writer.paths.root`
+  protection and structured reclaim logging. `collection.storage_max_mb`
+  (`int | None`, `None` = disabled — safe for pre-8.2 configs) is in the
+  Pydantic model and all four `canary*.example.yaml` files. Covered by 7 new
+  `enforce_storage_cap` unit tests (eviction order, pin/protect exclusion,
+  stop-when-only-pinned, non-session ignore, non-positive-cap reject, missing
+  root) plus a daemon sweeper byte-cap test. Remaining Phase-8 doc wording
+  (`daemon-architecture.md:98`, `CANary-overview.md`) is 8.5.
 
 - [ ] **8.3 — Acting low-space guard (P1).** When the sweeper sees
   `free_space_mb(storage_path) < storage_warning_mb`, run an emergency
@@ -721,8 +734,10 @@ be read each tick, not snapshotted at startup.
   drift rule). Fix `docs/daemon-architecture.md:98`: retention is a
   periodic in-process sweep with a byte cap, not "sweeps on shutdown"
   (false on the production path). Depends on 8.1, 8.2. (Effort: S)
-  Started: `retention_sweep_seconds` is wired through config/examples/docs
-  with 8.1. `storage_max_mb` and byte-cap doc wording remain after 8.2.
+  Started: `retention_sweep_seconds` (8.1) and `storage_max_mb` (8.2) are
+  wired through `src/config.py` and all four `canary*.example.yaml` files.
+  Remaining: byte-cap wording in `docs/CANary-overview.md` (config-drift
+  rule) and the `docs/daemon-architecture.md:98` "sweeps on shutdown" fix.
 
 - [ ] **8.6 — Operator-intent / idle-gating for auto-started sessions
   (P2).** `run_daemon` opens a session and records whenever it runs;

@@ -383,6 +383,46 @@ async def test_retention_sweeper_deletes_expired_sessions_and_keeps_active(
     assert active.exists()
 
 
+async def test_retention_sweeper_enforces_byte_cap_and_keeps_active(
+    tmp_path: Path,
+) -> None:
+    # retention_days is huge so the age sweep never fires; the byte cap is
+    # the only thing that can evict here.
+    old = tmp_path / "2099-01-01T000000"
+    active = tmp_path / "2099-01-02T000000"
+    old.mkdir()
+    active.mkdir()
+    (old / "telemetry-00000.parquet").write_bytes(b"\0" * (2 * 1024 * 1024))
+    (active / "telemetry-00000.parquet").write_bytes(b"\0" * (2 * 1024 * 1024))
+    stop = asyncio.Event()
+
+    async def _wait_until_deleted() -> None:
+        for _ in range(40):
+            if not old.exists():
+                return
+            await asyncio.sleep(0.05)
+        raise AssertionError("retention sweeper did not enforce the byte cap")
+
+    task = asyncio.create_task(
+        run_retention_sweeper(
+            tmp_path,
+            retention_days=36500,
+            stop_event=stop,
+            interval_seconds=0.05,
+            active_session_path=lambda: active,
+            storage_max_mb=3,
+        )
+    )
+    try:
+        await asyncio.wait_for(_wait_until_deleted(), timeout=2.0)
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert not old.exists()
+    assert active.exists()
+
+
 # ---------------------------------------------------------------------------
 # DaemonConfig defaults
 # ---------------------------------------------------------------------------
