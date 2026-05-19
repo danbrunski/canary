@@ -561,6 +561,46 @@ async def test_retention_sweeper_protects_active_across_rotation(tmp_path: Path)
         await asyncio.wait_for(task, timeout=1.0)
 
 
+async def test_retention_sweeper_emergency_evicts_below_warning(tmp_path: Path) -> None:
+    """The acting low-space guard fires when free space is below the warning
+    threshold, evicting oldest non-pinned/non-protected dirs while preserving
+    pinned + active. retention_days is huge and storage_max_mb is unset so the
+    age sweep and byte cap are no-ops — only the emergency path can act here.
+    The warning threshold is set absurdly high so the real free_space_mb is
+    always below it (the trigger condition) without faking the filesystem."""
+    old = tmp_path / "2099-01-01T000000"
+    pinned = tmp_path / "2099-01-02T000000"
+    active = tmp_path / "2099-01-03T000000"
+    for session in (old, pinned, active):
+        session.mkdir()
+        (session / "telemetry-00000.parquet").write_bytes(b"x")
+    (pinned / ".canary-pin").write_text("{}\n")
+    stop = asyncio.Event()
+
+    task = asyncio.create_task(
+        run_retention_sweeper(
+            tmp_path,
+            retention_days=36500,
+            stop_event=stop,
+            interval_seconds=0.05,
+            active_session_path=lambda: active,
+            storage_max_mb=None,
+            storage_warning_mb=10**9,  # ~1 PB: always above real free space
+        )
+    )
+    try:
+        for _ in range(60):
+            if not old.exists():
+                break
+            await asyncio.sleep(0.05)
+        assert not old.exists(), "emergency guard did not evict below the warning threshold"
+        assert pinned.exists(), "emergency guard must never evict a pinned dir"
+        assert active.exists(), "emergency guard must never evict the active dir"
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+
 # ---------------------------------------------------------------------------
 # DaemonConfig defaults
 # ---------------------------------------------------------------------------
@@ -660,6 +700,7 @@ async def test_run_daemon_wires_retention_sweeper_task(
 
     config.collection.session_retention_days = 7
     config.collection.storage_max_mb = 1234
+    config.collection.storage_warning_mb = 567
     config.daemon.retention_sweep_seconds = 42.0
 
     captured: dict[str, Any] = {}
@@ -672,12 +713,14 @@ async def test_run_daemon_wires_retention_sweeper_task(
         interval_seconds: float,
         active_session_path: Callable[[], Path],
         storage_max_mb: int | None = None,
+        storage_warning_mb: int | None = None,
     ) -> None:
         captured.update(
             storage_path=storage_path,
             retention_days=retention_days,
             interval_seconds=interval_seconds,
             storage_max_mb=storage_max_mb,
+            storage_warning_mb=storage_warning_mb,
             active_session_path=active_session_path(),
         )
         await stop_event.wait()
@@ -713,6 +756,7 @@ async def test_run_daemon_wires_retention_sweeper_task(
     assert captured["retention_days"] == 7
     assert captured["interval_seconds"] == 42.0
     assert captured["storage_max_mb"] == 1234
+    assert captured["storage_warning_mb"] == 567
     assert captured["active_session_path"] == writer.paths.root
 
 

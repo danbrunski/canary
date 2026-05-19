@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from src.storage import parquet_writer
 from src.storage.parquet_writer import (
     ParquetTelemetryWriter,
     delete_expired_sessions,
+    emergency_evict_for_free_space,
     enforce_storage_cap,
 )
 from src.telemetry import TelemetryRecord
@@ -365,3 +367,104 @@ def test_enforce_storage_cap_rejects_non_positive_cap(tmp_path: Path) -> None:
 
 def test_enforce_storage_cap_missing_root_is_noop(tmp_path: Path) -> None:
     assert enforce_storage_cap(tmp_path / "nope", max_mb=1) == []
+
+
+# ---------------------------------------------------------------------------
+# emergency_evict_for_free_space — the acting low-space guard (Phase 8.3)
+# ---------------------------------------------------------------------------
+
+
+def _free_by_dir_count(
+    root: Path, by_count: dict[int, float], default: float
+) -> Callable[[Path], float]:
+    """A free-space probe whose result depends on how many dirs remain.
+
+    Models the real filesystem: deleting a session dir raises free space, so
+    the guard must re-probe after every delete (not assume a fixed value).
+    """
+
+    def probe(_path: Path) -> float:
+        remaining = sum(1 for child in root.iterdir() if child.is_dir())
+        return by_count.get(remaining, default)
+
+    return probe
+
+
+def test_emergency_evict_noop_when_space_healthy(tmp_path: Path) -> None:
+    a = tmp_path / "2026-05-01T000000"
+    b = tmp_path / "2026-05-02T000000"
+    a.mkdir()
+    b.mkdir()
+
+    deleted = emergency_evict_for_free_space(
+        tmp_path, warning_mb=500, free_space_mb=lambda _p: 1000.0
+    )
+
+    assert deleted == []
+    assert a.exists()
+    assert b.exists()
+
+
+def test_emergency_evict_oldest_first_until_recovered(tmp_path: Path) -> None:
+    oldest = tmp_path / "2026-05-01T000000"
+    second = tmp_path / "2026-05-02T000000"
+    third = tmp_path / "2026-05-03T000000"
+    newest = tmp_path / "2026-05-04T000000"
+    for session in (oldest, second, third, newest):
+        session.mkdir()
+
+    # 4 dirs => 100 MiB free, 3 => 300, 2 => 600 (recovered past the 500 cap).
+    probe = _free_by_dir_count(tmp_path, {4: 100.0, 3: 300.0, 2: 600.0}, 9999.0)
+
+    deleted = emergency_evict_for_free_space(tmp_path, warning_mb=500, free_space_mb=probe)
+
+    assert deleted == [oldest, second]  # stopped as soon as free >= warning
+    assert not oldest.exists()
+    assert not second.exists()
+    assert third.exists()
+    assert newest.exists()
+
+
+def test_emergency_evict_skips_pinned_and_protected(tmp_path: Path) -> None:
+    oldest = tmp_path / "2026-05-01T000000"
+    pinned = tmp_path / "2026-05-02T000000"
+    protected = tmp_path / "2026-05-03T000000"
+    newest = tmp_path / "2026-05-04T000000"
+    for session in (oldest, pinned, protected, newest):
+        session.mkdir()
+    (pinned / ".canary-pin").write_text("{}\n")
+
+    # Never recovers: the guard is as aggressive as it can be but must still
+    # never touch pinned or protected (active) dirs.
+    deleted = emergency_evict_for_free_space(
+        tmp_path,
+        warning_mb=500,
+        protect={protected},
+        free_space_mb=lambda _p: 0.0,
+    )
+
+    assert deleted == [oldest, newest]
+    assert pinned.exists()
+    assert protected.exists()
+
+
+def test_emergency_evict_ignores_non_session_entries(tmp_path: Path) -> None:
+    session = tmp_path / "2026-05-01T000000"
+    session.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    (scratch / "blob.bin").write_bytes(b"\0")
+
+    deleted = emergency_evict_for_free_space(tmp_path, warning_mb=500, free_space_mb=lambda _p: 0.0)
+
+    assert deleted == [session]
+    assert scratch.exists()
+
+
+def test_emergency_evict_rejects_negative_warning(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="warning_mb"):
+        emergency_evict_for_free_space(tmp_path, warning_mb=-1)
+
+
+def test_emergency_evict_missing_root_is_noop(tmp_path: Path) -> None:
+    assert emergency_evict_for_free_space(tmp_path / "nope", warning_mb=500) == []

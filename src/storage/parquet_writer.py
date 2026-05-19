@@ -12,6 +12,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.session import SessionPaths, make_session_dir
+from src.storage.monitor import free_space_mb as _default_free_space_mb
 from src.telemetry import TelemetryRecord
 
 _PA: Any = pa
@@ -297,4 +298,51 @@ def enforce_storage_cap(
         shutil.rmtree(child)
         deleted.append(child)
         total -= size
+    return deleted
+
+
+def emergency_evict_for_free_space(
+    sessions_root: Path,
+    warning_mb: float,
+    *,
+    protect: Iterable[Path] | None = None,
+    free_space_mb: Callable[[Path], float] = _default_free_space_mb,
+) -> list[Path]:
+    """Oldest-first eviction until filesystem free space recovers.
+
+    ``enforce_storage_cap`` bounds the *session footprint*; this is the
+    safety net for the *filesystem* — when free space on ``sessions_root``
+    falls below ``warning_mb`` (a smaller card than expected, other data on
+    the partition, or the byte cap disabled), delete oldest unpinned,
+    non-protected timestamp session dirs until free space recovers to
+    ``warning_mb`` or only pinned/active dirs remain. Free space is re-probed
+    after every delete because it is a filesystem property, not a function of
+    session bytes alone. Aggressive relative to the byte cap: it ignores
+    ``storage_max_mb`` and will delete every evictable dir if that is what it
+    takes to keep the disk writable. Returns the evicted dirs, oldest first.
+    """
+    if warning_mb < 0:
+        raise ValueError("warning_mb must be non-negative")
+    if not sessions_root.exists():
+        return []
+    if free_space_mb(sessions_root) >= warning_mb:
+        return []
+
+    protected = {path.resolve() for path in protect or ()}
+    deleted: list[Path] = []
+    for child in sorted(sessions_root.iterdir()):
+        if free_space_mb(sessions_root) >= warning_mb:
+            break
+        if not child.is_dir():
+            continue
+        try:
+            datetime.strptime(child.name, "%Y-%m-%dT%H%M%S")
+        except ValueError:
+            continue
+        if child.resolve() in protected:
+            continue
+        if (child / ".canary-pin").exists():
+            continue
+        shutil.rmtree(child)
+        deleted.append(child)
     return deleted

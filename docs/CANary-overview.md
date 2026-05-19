@@ -96,7 +96,7 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 
 #### FR-03 — Data Storage
 - The system SHALL write all collected telemetry to timestamped Parquet files on local storage (microSD or USB SSD)
-- The system SHALL implement a rolling ring buffer that retains the last N days of raw data (configurable, default 30 days)
+- The system SHALL implement a rolling ring buffer bounded by **both** age (`session_retention_days`, default 30) **and** total bytes (`collection.storage_max_mb`), plus an emergency low-space eviction when filesystem free space falls below `collection.storage_warning_mb`; all three run in the periodic in-process `run_retention_sweeper` and never delete the active or a pinned session
 - The system SHALL write a new file per ignition session (keyed on engine run time reset)
 
 #### FR-04 — Preprocessing
@@ -296,7 +296,8 @@ collection:
   obd_poll_rate_hz: 1
   storage_path: /data/canary
   session_retention_days: 30
-  storage_warning_mb: 500
+  storage_warning_mb: 500       # also the acting low-space eviction floor
+  storage_max_mb: 8000          # byte-cap ring buffer; null disables the cap
 
 preprocessing:
   resample_hz: 1

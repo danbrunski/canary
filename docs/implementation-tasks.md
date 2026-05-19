@@ -17,11 +17,14 @@ Torque-parity telemetry, OBD coverage reporting, dataset/training/tuning
 ML-ops, and the reworked dashboard. Remaining work is hardware-gated or
 in-truck (live-ECU reads, write/parked actions, companion sync/publish,
 acceptance matrix) plus the Phase 7 anomaly-architecture hardening from
-the 2026-05-17 review and the Phase 8 storage-lifecycle/disk-safety fix
-from the 2026-05-17 disk investigation (retention is configured but never
-wired into the production daemon; no byte cap; low-space guard only logs).
-Phase 9 adds a TCN sequence detector alongside the Isolation Forest and
-LSTM without changing the current IF/LSTM v1 acceptance gate.
+the 2026-05-17 review. The Phase 8 storage-lifecycle/disk-safety fix from
+the 2026-05-17 disk investigation is landed (8.1–8.5): the production
+daemon now runs a periodic in-process retention sweeper doing age +
+byte-cap (`storage_max_mb`) + emergency low-space eviction, always
+protecting the active and pinned sessions; only the optional P2
+operator-intent/idle-gating design task (8.6) remains. Phase 9 adds a TCN
+sequence detector alongside the Isolation Forest and LSTM without changing
+the current IF/LSTM v1 acceptance gate.
 
 Completed tasks below are collapsed to their title line to keep this
 plan navigable; the full original description for any `[x]` item is in
@@ -710,15 +713,31 @@ be read each tick, not snapshotted at startup.
   root) plus a daemon sweeper byte-cap test. Remaining Phase-8 doc wording
   (`daemon-architecture.md:98`, `CANary-overview.md`) is 8.5.
 
-- [ ] **8.3 — Acting low-space guard (P1).** When the sweeper sees
+- [x] **8.3 — Acting low-space guard (P1).** When the sweeper sees
   `free_space_mb(storage_path) < storage_warning_mb`, run an emergency
   oldest-first eviction (same pin/active rules, aggressive target) with
   structured before/after logging. `warn_if_storage_low` stays the cheap
   per-flush log so the hot drain path remains non-blocking and log-only;
   the acting logic lives only in the sweeper. Depends on 8.1, 8.2.
   (Effort: S)
+  Done: `emergency_evict_for_free_space(sessions_root, warning_mb, *,
+  protect=, free_space_mb=)` in `parquet_writer.py` deletes oldest-first
+  unpinned/unprotected timestamp dirs, **re-probing free space after every
+  delete** (it is a filesystem property), stopping when free space recovers
+  to `warning_mb` or only pinned/active remain — aggressive relative to the
+  byte cap (ignores `storage_max_mb`, will clear every evictable dir if the
+  disk demands it). The free-space probe is injected (default
+  `monitor.free_space_mb`) so it is unit-testable without faking the FS.
+  `run_retention_sweeper` runs it after the byte cap when
+  `storage_warning_mb` is set, gated on `free_space_mb < threshold`, with
+  `log.warning` before/after free-MiB + reclaimed bytes; `run_daemon`
+  threads `config.collection.storage_warning_mb`. `warn_if_storage_low`
+  unchanged (still the log-only hot-path check). Covered by 7
+  `emergency_evict_for_free_space` unit tests (no-op when healthy,
+  oldest-first-until-recovered with a count-driven probe, pin/protect skip,
+  non-session ignore, negative-warning reject, missing root).
 
-- [~] **8.4 — Storage-lifecycle tests (P0/P1).** Unit: `enforce_storage_cap`
+- [x] **8.4 — Storage-lifecycle tests (P0/P1).** Unit: `enforce_storage_cap`
   eviction order, pin exclusion, active/protect exclusion, stop-when-only-
   pinned. Task: interval honored, age+cap both run, emergency path triggers
   below threshold, active dir survives an engine-run-time rotation.
@@ -734,12 +753,15 @@ be read each tick, not snapshotted at startup.
   regression `test_run_daemon_wires_retention_sweeper_task` — monkeypatches
   the sweeper and asserts `run_daemon` schedules it with the configured
   retention/cap/interval and the live `writer.paths.root` callable, closing
-  the missing-wiring gap (R13). Remaining: the "emergency path triggers
-  below `storage_warning_mb`" task test, which exercises the 8.3 acting
-  low-space guard and ships with that feature (its target does not exist
-  yet).
+  the missing-wiring gap (R13). The emergency-path task test landed with
+  8.3: `test_retention_sweeper_emergency_evicts_below_warning` drives the
+  sweeper with an absurdly high `storage_warning_mb` (always above real
+  free space) and age/byte-cap disabled, asserting the guard evicts the
+  old dir while preserving pinned + active. The wiring regression spy was
+  extended to also assert `storage_warning_mb` is threaded. 8.4 fully
+  closed.
 
-- [ ] **8.5 — Config + doc reconciliation (P0).** Add `storage_max_mb`
+- [x] **8.5 — Config + doc reconciliation (P0).** Add `storage_max_mb`
   (under `collection:`) and `retention_sweep_seconds` (under `daemon:`) to
   `src/config.py` and **all** of `canary.example.yaml`,
   `canary.pi.example.yaml`, `canary.dev.example.yaml`,
@@ -747,8 +769,13 @@ be read each tick, not snapshotted at startup.
   drift rule). Fix `docs/daemon-architecture.md:98`: retention is a
   periodic in-process sweep with a byte cap, not "sweeps on shutdown"
   (false on the production path). Depends on 8.1, 8.2. (Effort: S)
-  Started: `retention_sweep_seconds` (8.1) and `storage_max_mb` (8.2) are
-  wired through `src/config.py` and all four `canary*.example.yaml` files.
+  Done: `retention_sweep_seconds` (8.1) and `storage_max_mb` (8.2) are
+  wired through `src/config.py` and all four `canary*.example.yaml` files;
+  `docs/daemon-architecture.md:98` now describes the periodic in-process
+  age + byte-cap + low-space sweep (no longer "sweeps on shutdown");
+  `docs/CANary-overview.md` FR-03 + the example config block document the
+  dual age/byte bound and the low-space floor. No new config knob was
+  needed for 8.3 (it reuses `storage_warning_mb`).
   Remaining: byte-cap wording in `docs/CANary-overview.md` (config-drift
   rule) and the `docs/daemon-architecture.md:98` "sweeps on shutdown" fix.
 
@@ -928,7 +955,7 @@ These get touched in multiple phases — keep them in mind, don't defer to the e
 | R10 | Torque Pro parity can grow without a finish line. | Phase 6.28 defines the parity checklist and evidence requirements. |
 | R11 | False-positive tuning can accidentally hide real anomalies. | Phase 6.24–6.26 require feedback labels, versioned threshold/suppression changes, before/after estimates, and rollback. |
 | R12 | Training data exports can become untraceable once copied off the Pi. | Phase 6.20 requires manifests with config hash, channel schema, sessions, tags, and quality warnings for every export. |
-| R13 | Retention/disk bounding is unwired in the production daemon; the SD card fills unattended → failed writes → corrupt unclean state. | Phase 8.1/8.2 wire a periodic in-daemon sweeper + byte cap; 8.4 adds a regression test that `run_daemon` includes the sweeper. ~37 days KOEO runway buys time but it is not self-correcting. |
+| R13 | Retention/disk bounding is unwired in the production daemon; the SD card fills unattended → failed writes → corrupt unclean state. | **Resolved (8.1–8.5).** `run_daemon` runs a periodic in-process sweeper: age + byte cap (`storage_max_mb`) + emergency low-space eviction, always protecting active/pinned dirs. The system is now self-correcting; 8.4's `test_run_daemon_wires_retention_sweeper_task` regression guards the wiring gap that originally let this ship. |
 | R14 | Sessions auto-start with no operator intent; KOEO body/chassis CAN accumulates full-rate low-value data. | Phase 8.6 designs an optional record-arming gate without breaking Done-Definition v1 #2 continuous logging. Secondary to R13. |
 | R15 | Adding TCN creates a third detector that can duplicate alerts and exceed the Pi CPU budget if treated as "just another neural model." | Phase 9 keeps TCN disabled until calibrated, benchmarked, and wired through the same feature spec, evidence, fusion, hot-swap, and performance gates as IF/LSTM. |
 
