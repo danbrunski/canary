@@ -214,18 +214,47 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
       ) : (
         <div className="mt-1">
           <div className="mb-1.5 flex justify-between gap-2 text-[0.78rem] text-fg-dim">
-            <b className="text-fg">Channel explorer</b>
+            <b className="text-fg">Gauge table</b>
             <span>{visibleChannels.length} visible</span>
           </div>
-          <div className="grid max-h-[44rem] grid-cols-[repeat(auto-fit,minmax(270px,1fr))] gap-1.5 overflow-y-auto">
-            {visibleChannels.map(([key, snap]) => (
-              <ChannelRow
-                key={key}
-                channelKey={key}
-                snapshot={snap}
-                binding={bindings[key]}
-              />
-            ))}
+          <div className="max-h-[44rem] overflow-auto rounded-[8px] border border-border-soft bg-black/20">
+            <table
+              aria-label="Live telemetry values"
+              className="w-full min-w-[42rem] border-collapse font-console text-[0.78rem] tabular-nums"
+            >
+              <thead className="sticky top-0 z-[1] bg-elev text-left text-[0.62rem] uppercase tracking-[0.12em] text-fg-faint">
+                <tr>
+                  <th scope="col" className="py-1.5 pl-2.5 pr-3 font-semibold">
+                    Signal
+                  </th>
+                  <th scope="col" className="py-1.5 pr-3 font-semibold">
+                    Source
+                  </th>
+                  <th scope="col" className="py-1.5 pr-3 text-right font-semibold">
+                    Value
+                  </th>
+                  <th scope="col" className="py-1.5 pr-3 font-semibold">
+                    Unit
+                  </th>
+                  <th scope="col" className="py-1.5 pr-3 font-semibold">
+                    Status
+                  </th>
+                  <th scope="col" className="py-1.5 pr-2.5 text-right font-semibold">
+                    Age
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleChannels.map(([key, snap]) => (
+                  <ChannelTableRow
+                    key={key}
+                    channelKey={key}
+                    snapshot={snap}
+                    binding={bindings[key]}
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -233,7 +262,7 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
   );
 }
 
-function ChannelRow({
+function ChannelTableRow({
   channelKey,
   snapshot,
   binding,
@@ -243,25 +272,41 @@ function ChannelRow({
   binding?: BindingDisplay;
 }) {
   const rendered = renderChannel(snapshot, binding);
+  const status = statusMeta(rendered);
   return (
-    <div
+    <tr
       className={cn(
-        "grid w-full grid-cols-[minmax(0,1fr)_auto_3rem] items-center gap-2 rounded-tile border border-border-soft bg-[linear-gradient(180deg,var(--color-elev-2),var(--color-elev))] px-2.5 py-2 text-left text-fg",
-        bandUtility(rendered.bandClass),
+        "border-b border-border-soft align-middle last:border-0 hover:bg-elev-2/65",
+        bandRowUtility(rendered.bandClass),
       )}
     >
-      <span className="flex min-w-0 flex-col">
-        <b className="overflow-hidden text-ellipsis whitespace-nowrap">{prettyChannel(channelKey)}</b>
-        <small className="text-[0.72rem] text-fg-dim">{snapshot.latest.source}</small>
-      </span>
-      <span className="font-num font-bold tabular-nums">
-        {rendered.text}
-        {rendered.unit && (
-          <em className="ml-1 text-[0.72rem] not-italic text-fg-dim">{rendered.unit}</em>
+      <th
+        scope="row"
+        className="max-w-[20rem] overflow-hidden text-ellipsis whitespace-nowrap py-1.5 pl-2.5 pr-3 text-left font-semibold text-fg"
+        title={channelKey}
+      >
+        {prettyChannel(channelKey)}
+      </th>
+      <td className="py-1.5 pr-3 text-[0.72rem] uppercase text-fg-dim">
+        {snapshot.latest.source}
+      </td>
+      <td
+        className={cn(
+          "py-1.5 pr-3 text-right font-bold text-fg",
+          rendered.bandClass === "band-bad" && "text-bad",
+          rendered.bandClass === "band-warn" && "text-warn",
         )}
-      </span>
-      <span className="text-[0.72rem] text-fg-dim">{formatAge(snapshot.latest.timestamp)}</span>
-    </div>
+      >
+        {rendered.text}
+      </td>
+      <td className="py-1.5 pr-3 text-fg-dim">{rendered.unit || "-"}</td>
+      <td className={cn("py-1.5 pr-3 text-[0.72rem] uppercase", status.className)}>
+        <span title={status.title}>{status.text}</span>
+      </td>
+      <td className="py-1.5 pr-2.5 text-right text-fg-dim">
+        {formatAge(snapshot.latest.timestamp)}
+      </td>
+    </tr>
   );
 }
 
@@ -380,6 +425,45 @@ function bandUtility(bandClass: RenderedValue["bandClass"]): string {
     return "border-warn/55 bg-[linear-gradient(180deg,rgba(255,209,102,0.12),rgba(255,209,102,0.03))]";
   }
   return "";
+}
+
+function bandRowUtility(bandClass: RenderedValue["bandClass"]): string {
+  if (bandClass === "band-bad") return "bg-bad/10";
+  if (bandClass === "band-warn") return "bg-warn/10";
+  return "even:bg-white/[0.015]";
+}
+
+function statusMeta(rendered: RenderedValue): {
+  text: string;
+  className: string;
+  title: string;
+} {
+  if (rendered.bandClass === "band-bad") {
+    return {
+      text: "out",
+      className: "text-bad",
+      title: "Outside the configured plausible range.",
+    };
+  }
+  if (rendered.bandClass === "band-warn") {
+    return {
+      text: "edge",
+      className: "text-warn",
+      title: "Near the edge of the configured plausible range.",
+    };
+  }
+  if (rendered.raw) {
+    return {
+      text: "raw",
+      className: "text-fg-faint",
+      title: "Raw CAN integer; scaling and units have not been pinned yet.",
+    };
+  }
+  return {
+    text: "ok",
+    className: "text-ok",
+    title: "Decoded engineering value.",
+  };
 }
 
 interface RenderedValue {

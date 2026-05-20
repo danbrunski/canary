@@ -177,6 +177,10 @@ describe("TelemetryPanel", () => {
     expect(screen.getByText("2 live values")).toBeInTheDocument();
     expect(screen.queryByText("0x1F9")).not.toBeInTheDocument();
     expect(screen.getByText("2 visible")).toBeInTheDocument();
+    expect(
+      screen.getByRole("table", { name: "Live telemetry values" }),
+    ).toHaveClass("font-console");
+    expect(screen.getByRole("columnheader", { name: "Signal" })).toBeInTheDocument();
     // No combined multi-channel chart — each tile carries its own sparkline.
     expect(screen.queryByText("Live chart")).not.toBeInTheDocument();
   });
