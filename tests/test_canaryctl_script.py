@@ -245,6 +245,7 @@ def test_parse_args_falls_back_to_env_file(tmp_path: Path, monkeypatch: pytest.M
 
     args = canaryctl.parse_args(["status"])
     assert args.host == "http://pi:8000"
+    # Legacy CANARY_TOKEN still resolves so older env files keep working.
     assert args.token == "secrettok"
 
     # A real env var still wins over the file.
@@ -255,3 +256,29 @@ def test_parse_args_falls_back_to_env_file(tmp_path: Path, monkeypatch: pytest.M
     assert canaryctl.parse_args(["--host", "http://flag:8000", "status"]).host == (
         "http://flag:8000"
     )
+
+
+def test_parse_args_prefers_control_token_over_legacy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``CANARY_CONTROL_TOKEN`` is the canonical name; legacy ``CANARY_TOKEN`` loses.
+
+    Same precedence within either source (env or file) — file value of
+    ``CANARY_CONTROL_TOKEN`` wins over file value of ``CANARY_TOKEN``,
+    and env var of ``CANARY_CONTROL_TOKEN`` wins over env var of
+    ``CANARY_TOKEN``. Operators following the post-2026-05-19 install
+    instructions get the new name; older operators see no regression.
+    """
+    for var in ("CANARY_HOST", "CANARY_URL", "CANARY_TOKEN", "CANARY_CONTROL_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    env_file = tmp_path / "env"
+    env_file.write_text(
+        "CANARY_HOST=http://pi:8000\nCANARY_TOKEN=legacy\nCANARY_CONTROL_TOKEN=canonical\n"
+    )
+    monkeypatch.setenv("CANARY_ENV_FILE", str(env_file))
+    assert canaryctl.parse_args(["status"]).token == "canonical"
+
+    # And env var: control wins over legacy regardless of order.
+    monkeypatch.setenv("CANARY_TOKEN", "legacy-env")
+    monkeypatch.setenv("CANARY_CONTROL_TOKEN", "canonical-env")
+    assert canaryctl.parse_args(["status"]).token == "canonical-env"

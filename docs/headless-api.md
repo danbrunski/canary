@@ -58,7 +58,7 @@ to the systemd service as `CANARY_CONTROL_TOKEN`. On the laptop:
 
 ```bash
 export CANARY_HOST=http://192.168.0.230:8000
-export CANARY_TOKEN='<token from /etc/canary/control.token>'
+export CANARY_CONTROL_TOKEN='<token from /etc/canary/control.token>'
 ```
 
 Or persist them once so every shell picks them up — `canaryctl` reads
@@ -68,13 +68,14 @@ Or persist them once so every shell picks them up — `canaryctl` reads
 mkdir -p ~/.canary && chmod 700 ~/.canary
 cat > ~/.canary/env <<'EOF'
 CANARY_HOST=http://192.168.0.230:8000
-CANARY_TOKEN=<token from /etc/canary/control.token>
+CANARY_CONTROL_TOKEN=<token from /etc/canary/control.token>
 EOF
 chmod 600 ~/.canary/env
 ```
 
 Precedence: `--host/--token` flags > exported env vars > `~/.canary/env`.
-Point elsewhere with `CANARY_ENV_FILE`.
+Point elsewhere with `CANARY_ENV_FILE`. The older `CANARY_TOKEN` name is
+still accepted as a fallback for existing env files.
 
 Then use `canaryctl`:
 
@@ -104,17 +105,17 @@ scripts/canaryctl.py models upload isolation_forest \
 Equivalent raw HTTP:
 
 ```bash
-curl -H "Authorization: Bearer $CANARY_TOKEN" \
+curl -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"purpose":"next drive","protocol":"drive"}' \
   "$CANARY_HOST/control/captures"
 
-curl -H "Authorization: Bearer $CANARY_TOKEN" \
+curl -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"label":"highway_cruise","fields":{"speed_target":70}}' \
   "$CANARY_HOST/control/captures/current/tags"
 
-curl -H "Authorization: Bearer $CANARY_TOKEN" \
+curl -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"reason":"arrived"}' \
   "$CANARY_HOST/control/captures/current/stop"
@@ -175,7 +176,7 @@ Live telemetry and anomalies stream over WebSockets:
 ```bash
 websocat ws://canary.local:8000/ws/telemetry
 websocat ws://canary.local:8000/ws/anomalies
-websocat "ws://canary.local:8000/ws/control?token=$CANARY_TOKEN"
+websocat "ws://canary.local:8000/ws/control?token=$CANARY_CONTROL_TOKEN"
 ```
 
 The dashboard uses the same streams. Slow clients drop old messages rather

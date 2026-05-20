@@ -32,14 +32,16 @@ the vars aren't already exported:
 mkdir -p ~/.canary && chmod 700 ~/.canary
 cat > ~/.canary/env <<EOF
 CANARY_HOST=http://<pi-ip>:8000
-CANARY_TOKEN=$(ssh canary@<pi-ip> sudo cat /etc/canary/control.token)
+CANARY_CONTROL_TOKEN=$(ssh canary@<pi-ip> sudo cat /etc/canary/control.token)
 EOF
 chmod 600 ~/.canary/env
 scripts/canaryctl.py version          # sanity: reaches the daemon
 ```
 
-(`export CANARY_HOST=... CANARY_TOKEN=...` still works and overrides the
-file; an explicit `--host/--token` flag overrides both.)
+(`export CANARY_HOST=... CANARY_CONTROL_TOKEN=...` still works and
+overrides the file; an explicit `--host/--token` flag overrides both.
+The older `CANARY_TOKEN` name is still accepted as a fallback for
+existing env files.)
 
 (`canaryctl.py` is in the repo; clone it on the laptop or `scp` it.)
 

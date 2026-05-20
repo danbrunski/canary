@@ -65,7 +65,7 @@ Reach it:  http://${ip_addr:-<pi-ip>}:8000/   (or http://${host_name}.local:8000
 
 From your phone/laptop on the same network:
   export CANARY_HOST=http://${ip_addr:-<pi-ip>}:8000
-  export CANARY_TOKEN="\$(ssh ${CANARY_USER}@${host_name}.local sudo cat ${TOKEN_FILE})"
+  export CANARY_CONTROL_TOKEN="\$(ssh ${CANARY_USER}@${host_name}.local sudo cat ${TOKEN_FILE})"
   scripts/canaryctl.py preflight
 
 When the Canable is plugged into the OBD-II port, can0 auto-comes-up.

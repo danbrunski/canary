@@ -90,7 +90,7 @@ sudo CANARY_TORCH=cpu scripts/install_pi.sh
 
 The wrapper also creates `/etc/canary/control.token` and writes
 `CANARY_CONTROL_TOKEN` into `/etc/canary/canary.env` for the systemd service.
-Use that token from the laptop as `CANARY_TOKEN` for `scripts/canaryctl.py`.
+Use that token from the laptop as `CANARY_CONTROL_TOKEN` for `scripts/canaryctl.py`.
 
 ## Verifying CUDA
 

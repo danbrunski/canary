@@ -51,7 +51,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--pi-token",
-        default=os.environ.get("CANARY_TOKEN") or os.environ.get("CANARY_CONTROL_TOKEN"),
+        default=os.environ.get("CANARY_CONTROL_TOKEN") or os.environ.get("CANARY_TOKEN"),
         help="Default Pi control token for sync/publish.",
     )
     parser.add_argument(

@@ -155,7 +155,7 @@ For control commands from a laptop, copy the token once:
 
 ```bash
 export CANARY_HOST=http://canary.local:8000
-export CANARY_TOKEN='<contents of /etc/canary/control.token on the Pi>'
+export CANARY_CONTROL_TOKEN='<contents of /etc/canary/control.token on the Pi>'
 ```
 
 Then:

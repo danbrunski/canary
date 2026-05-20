@@ -7,7 +7,7 @@ Examples:
   scripts/canaryctl.py --host http://192.168.0.230:8000 tag highway_cruise
   scripts/canaryctl.py --host http://192.168.0.230:8000 capture stop
 
-Set CANARY_HOST and CANARY_TOKEN to avoid repeating flags.
+Set CANARY_HOST and CANARY_CONTROL_TOKEN to avoid repeating flags.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def _load_env_file(path: Path) -> dict[str, str]:
         if mode & (stat.S_IRWXG | stat.S_IRWXO):
             print(
                 f"warning: {path} is accessible by other users; "
-                f"chmod 600 it (it holds CANARY_TOKEN).",
+                f"chmod 600 it (it holds CANARY_CONTROL_TOKEN).",
                 file=sys.stderr,
             )
     except OSError:
@@ -78,7 +78,7 @@ def _resolve_default(file_env: dict[str, str], *names: str) -> str | None:
     """First non-empty value across the process env, then the env file.
 
     A real environment variable always wins over the file, so an inline
-    ``CANARY_TOKEN=... canaryctl ...`` or an explicit export still overrides.
+    ``CANARY_CONTROL_TOKEN=... canaryctl ...`` or an explicit export still overrides.
     """
     for name in names:
         value = os.environ.get(name)
@@ -107,10 +107,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--token",
-        default=_resolve_default(file_env, "CANARY_TOKEN", "CANARY_CONTROL_TOKEN"),
+        default=_resolve_default(file_env, "CANARY_CONTROL_TOKEN", "CANARY_TOKEN"),
         help=(
-            "Bearer token for /control endpoints. Defaults to $CANARY_TOKEN, "
-            "then CANARY_TOKEN in ~/.canary/env."
+            "Bearer token for /control endpoints. Defaults to "
+            "$CANARY_CONTROL_TOKEN, then CANARY_CONTROL_TOKEN in "
+            "~/.canary/env (CANARY_TOKEN accepted as a fallback)."
         ),
     )
 
