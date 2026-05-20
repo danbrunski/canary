@@ -33,6 +33,33 @@ running or not.
   The detectors firing 200×/sec at saturation severity is annoying, not
   dangerous — don't add runtime kill-switches; fix the model.
 
+## Check `vehicle_state` before drawing conclusions
+
+`GET /status.vehicle_state` (and the equivalent block from
+`mcp__canary__get_status`) is a derived classification of what the
+daemon is actually seeing right now:
+
+- `engine_running` — OBD fresh + RPM ≥ 400. Truck is in normal mode.
+- `ignition_only` — OBD fresh + RPM == 0. KOEO; ECM responds but engine off.
+- `engine_off` — CAN fresh, OBD stale. Plugged in, key out.
+- `no_data` — neither bus fresh. Pi probably disconnected.
+- `replay` — runtime replay is active; the "OBD"/"CAN" you see is
+  re-emitted from a stored session.
+- `unknown` — the rule table didn't classify it cleanly; trust the raw
+  fields.
+
+**Always read this field before concluding anything about detector
+behavior.** "IF and LSTM aren't firing" reads very differently when
+`state` is `engine_off` (expected) vs `engine_running` (a real bug),
+and again differently when `state` is `replay` (you're testing, not
+seeing the truck). The classifier returns the raw signals — `rpm`,
+`coolant_temp`, `run_time`, `obd_freshness_seconds`,
+`can_freshness_seconds` — alongside the verdict so you can second-guess.
+
+For controlled detector evaluation, prefer the replay path
+(`mcp__canary__start_replay`) over live telemetry — see
+[[feedback_replay_to_test_models]] in memory.
+
 ## What MCP gives you
 
 `canary-mcp` (port 8001 on the Pi) exposes the live daemon to MCP

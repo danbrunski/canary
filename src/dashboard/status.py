@@ -5,13 +5,141 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.config import CanaryConfig
+from src.control.replay_control import ReplayController
 from src.models.health import HealthMonitor
 from src.preprocessing.loader import discover_sessions
+
+VehicleStateName = Literal[
+    "engine_running",
+    "ignition_only",
+    "engine_off",
+    "no_data",
+    "replay",
+    "unknown",
+]
+
+#: A channel that's been quiet longer than this is treated as "not flowing"
+#: for the vehicle-state classification. OBD polls at ~1 Hz so 10 s is well
+#: past the slowest realistic refresh.
+_FRESHNESS_THRESHOLD_SECONDS = 10.0
+
+#: Below this RPM (with OBD fresh) we call it "ignition_only / KOEO" rather
+#: than "engine running" — most idle 4-cyl gas engines sit around 700–800,
+#: so 400 is well below any actually-running state but above sensor jitter.
+_RPM_RUNNING_THRESHOLD = 400.0
+
+
+@dataclass(frozen=True)
+class VehicleState:
+    """Derived operational state — what's the truck doing right now?
+
+    Surfaced in ``GET /status.vehicle_state`` so dashboards / agents stop
+    guessing whether "no anomalies" means the detectors are broken vs. the
+    engine just isn't running. The class is also documented in
+    ``CLAUDE.md`` because the live-vs-engine-off-vs-replay confusion has
+    been a recurring source of wrong conclusions.
+    """
+
+    state: VehicleStateName
+    rpm: float | None = None
+    coolant_temp: float | None = None
+    run_time: float | None = None
+    obd_freshness_seconds: float | None = None
+    can_freshness_seconds: float | None = None
+    replay_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        def _round(value: float | None) -> float | None:
+            return None if value is None else round(value, 2)
+
+        return {
+            "state": self.state,
+            "rpm": _round(self.rpm),
+            "coolant_temp": _round(self.coolant_temp),
+            "run_time": _round(self.run_time),
+            "obd_freshness_seconds": _round(self.obd_freshness_seconds),
+            "can_freshness_seconds": _round(self.can_freshness_seconds),
+            "replay_id": self.replay_id,
+        }
+
+
+def classify_vehicle_state(
+    *,
+    rpm: float | None,
+    coolant_temp: float | None,
+    run_time: float | None,
+    obd_freshness_seconds: float | None,
+    can_freshness_seconds: float | None,
+    replay_id: str | None = None,
+    freshness_threshold_seconds: float = _FRESHNESS_THRESHOLD_SECONDS,
+    rpm_running_threshold: float = _RPM_RUNNING_THRESHOLD,
+) -> VehicleState:
+    """Classify the live data source from a few derived signals.
+
+    Pure function so the rule table is testable without spinning up the
+    daemon. The I/O side (Parquet reads, replay-status fetch) lives in
+    :func:`build_status`.
+
+    Precedence:
+
+    1. ``replay`` overrides everything when a replay is running, even if
+       OBD/CAN telemetry is also flowing — the replayed records ARE the
+       OBD/CAN telemetry from the agent's perspective.
+    2. If neither OBD nor CAN have refreshed within
+       ``freshness_threshold_seconds``, ``no_data`` (Pi probably
+       disconnected or daemon idle).
+    3. RPM above ``rpm_running_threshold`` (with OBD fresh) →
+       ``engine_running``.
+    4. OBD fresh but RPM == 0 → ``ignition_only`` (key on, engine off —
+       OBD responds, RUN_TIME is 0).
+    5. OBD stale but CAN fresh → ``engine_off`` (plugged into the bus
+       but the ECM isn't responding to OBD, typical of full power-down).
+    6. Anything else → ``unknown`` (caller should still trust the raw
+       fields).
+    """
+    if replay_id is not None:
+        return VehicleState(
+            state="replay",
+            rpm=rpm,
+            coolant_temp=coolant_temp,
+            run_time=run_time,
+            obd_freshness_seconds=obd_freshness_seconds,
+            can_freshness_seconds=can_freshness_seconds,
+            replay_id=replay_id,
+        )
+
+    obd_fresh = (
+        obd_freshness_seconds is not None and obd_freshness_seconds <= freshness_threshold_seconds
+    )
+    can_fresh = (
+        can_freshness_seconds is not None and can_freshness_seconds <= freshness_threshold_seconds
+    )
+
+    if not obd_fresh and not can_fresh:
+        state: VehicleStateName = "no_data"
+    elif obd_fresh and rpm is not None and rpm >= rpm_running_threshold:
+        state = "engine_running"
+    elif obd_fresh and (rpm is None or rpm == 0):
+        state = "ignition_only"
+    elif can_fresh and not obd_fresh:
+        state = "engine_off"
+    else:
+        state = "unknown"
+
+    return VehicleState(
+        state=state,
+        rpm=rpm,
+        coolant_temp=coolant_temp,
+        run_time=run_time,
+        obd_freshness_seconds=obd_freshness_seconds,
+        can_freshness_seconds=can_freshness_seconds,
+    )
 
 
 @dataclass(frozen=True)
@@ -33,6 +161,9 @@ class StatusSnapshot:
     #: the daemon hasn't wired an emitter in. The dashboard surfaces this as
     #: "is the anomaly path firing?".
     emitter_counters: dict[str, int] | None = None
+    #: Derived operational state (engine_running, ignition_only,
+    #: engine_off, no_data, replay) — see :class:`VehicleState`.
+    vehicle_state: VehicleState | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +175,7 @@ class StatusSnapshot:
             "vehicle": self.vehicle,
             "emitter_counters": self.emitter_counters,
             "health": self.health,
+            "vehicle_state": (None if self.vehicle_state is None else self.vehicle_state.to_dict()),
         }
 
 
@@ -80,12 +212,90 @@ def _resolve_latest_session(storage_path: Path) -> Path | None:
     return sessions[-1] if sessions else None
 
 
+def _derive_vehicle_state(
+    storage_path: Path,
+    *,
+    replay_controller: ReplayController | None,
+    now: datetime | None = None,
+) -> VehicleState:
+    """Read latest-per-channel + replay state and run the classifier.
+
+    Reads only the newest session's Parquet via :func:`read_latest_per_channel`,
+    which is what the rest of the dashboard already uses — cheap enough for
+    /status' polling cadence. On any I/O failure we return ``state="unknown"``
+    rather than 500-ing — operators routinely hit /status to *diagnose*
+    storage issues, so it shouldn't be the thing that breaks first.
+    """
+    replay_id: str | None = None
+    if replay_controller is not None:
+        replay_state = replay_controller.status()
+        if replay_state.running:
+            replay_id = replay_state.replay_id
+
+    now_dt = datetime.now(UTC) if now is None else now
+    rpm: float | None = None
+    coolant: float | None = None
+    run_time: float | None = None
+    obd_latest_ts: datetime | None = None
+    can_latest_ts: datetime | None = None
+
+    # Deferred import: src.dashboard.readers imports _resolve_latest_session
+    # from this module, so importing it at module load creates a cycle.
+    from src.dashboard.readers import read_latest_per_channel
+
+    try:
+        rows = read_latest_per_channel(storage_path)
+    except (OSError, ValueError):
+        rows = []
+
+    for row in rows:
+        source = row.get("source")
+        channel = row.get("channel")
+        value = row.get("value")
+        ts_raw = row.get("timestamp")
+        ts: datetime | None = None
+        if isinstance(ts_raw, str):
+            try:
+                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+            except ValueError:
+                ts = None
+        elif isinstance(ts_raw, datetime):
+            ts = ts_raw if ts_raw.tzinfo else ts_raw.replace(tzinfo=UTC)
+
+        if source == "obd":
+            if ts is not None and (obd_latest_ts is None or ts > obd_latest_ts):
+                obd_latest_ts = ts
+            if isinstance(value, (int, float)):
+                if channel == "RPM":
+                    rpm = float(value)
+                elif channel == "COOLANT_TEMP":
+                    coolant = float(value)
+                elif channel == "RUN_TIME":
+                    run_time = float(value)
+        elif source == "can":
+            if ts is not None and (can_latest_ts is None or ts > can_latest_ts):
+                can_latest_ts = ts
+
+    obd_freshness = (now_dt - obd_latest_ts).total_seconds() if obd_latest_ts is not None else None
+    can_freshness = (now_dt - can_latest_ts).total_seconds() if can_latest_ts is not None else None
+
+    return classify_vehicle_state(
+        rpm=rpm,
+        coolant_temp=coolant,
+        run_time=run_time,
+        obd_freshness_seconds=obd_freshness,
+        can_freshness_seconds=can_freshness,
+        replay_id=replay_id,
+    )
+
+
 def build_status(
     config: CanaryConfig,
     *,
     models_dir: Path | None = None,
     emitter: AnomalyEventEmitter | None = None,
     health_monitor: HealthMonitor | None = None,
+    replay_controller: ReplayController | None = None,
 ) -> StatusSnapshot:
     """Assemble the status snapshot used by ``GET /status``."""
     storage = config.collection.storage_path
@@ -113,7 +323,14 @@ def build_status(
         vehicle=f"{config.vehicle.year} {config.vehicle.make} {config.vehicle.model}".strip(),
         emitter_counters=emitter.counters.to_dict() if emitter is not None else None,
         health=health_monitor.snapshot() if health_monitor is not None else None,
+        vehicle_state=_derive_vehicle_state(storage, replay_controller=replay_controller),
     )
 
 
-__all__ = ["StatusSnapshot", "build_status"]
+__all__ = [
+    "StatusSnapshot",
+    "VehicleState",
+    "VehicleStateName",
+    "build_status",
+    "classify_vehicle_state",
+]

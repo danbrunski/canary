@@ -219,6 +219,7 @@ def create_app(
             models_dir=models_dir,
             emitter=emitter,
             health_monitor=health_monitor,
+            replay_controller=replay_controller,
         ).to_dict()
         if replay_controller is not None:
             payload["replay"] = replay_controller.status().to_dict()

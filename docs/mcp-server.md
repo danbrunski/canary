@@ -16,7 +16,7 @@ Read tools:
 
 | Tool | Wraps |
 |---|---|
-| `get_status` | `GET /status` |
+| `get_status` | `GET /status` (incl. derived `vehicle_state.{state, rpm, coolant_temp, run_time, obd_freshness_seconds, can_freshness_seconds, replay_id}` — check this before concluding anything about detector behavior; states are `engine_running`, `ignition_only`, `engine_off`, `no_data`, `replay`, `unknown`) |
 | `get_config` | `GET /config` |
 | `get_recent_anomalies` | `GET /anomalies` (+ client-side source/mode filter) |
 | `get_recent_telemetry` | `GET /telemetry/latest` |
