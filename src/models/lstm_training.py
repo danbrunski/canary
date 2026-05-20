@@ -27,6 +27,7 @@ from src.models.lstm_autoencoder import (
 from src.models.manifest import validate_model_feature_spec
 from src.models.sequence_dataset import SequenceWindowDataset
 from src.preprocessing.feature_pipeline import build_feature_spec
+from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.timefmt import format_timestamp as _format_timestamp
 
@@ -214,6 +215,13 @@ class LSTMAutoencoderManifest:
     schema: Mapping[str, Any]
     history: tuple[EpochLoss, ...]
     thresholds: Mapping[str, Any] | None = None
+    #: Per-channel z-score scaler ({means, stds, columns, std_floor}) fit on
+    #: the training corpus and applied at inference. Pre-scaler artifacts
+    #: (May 2026 era) have ``None`` here; the load-time guard refuses them
+    #: when thresholds are also present, since a calibrated threshold against
+    #: raw-magnitude reconstruction errors won't match scaled-input
+    #: reconstruction errors at inference.
+    scaler: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -239,6 +247,7 @@ class LSTMAutoencoderManifest:
             "schema": dict(self.schema),
             "history": [loss.to_dict() for loss in self.history],
             "thresholds": None if self.thresholds is None else dict(self.thresholds),
+            "scaler": None if self.scaler is None else dict(self.scaler),
         }
 
     @classmethod
@@ -266,6 +275,7 @@ class LSTMAutoencoderManifest:
             schema=dict(data["schema"]),
             history=tuple(EpochLoss.from_dict(item) for item in data["history"]),
             thresholds=None if data.get("thresholds") is None else dict(data["thresholds"]),
+            scaler=None if data.get("scaler") is None else dict(data["scaler"]),
         )
 
 
@@ -295,6 +305,7 @@ def train_lstm_autoencoder(
     trained_at: datetime | pd.Timestamp | str | None = None,
     calibrate_thresholds: bool = True,
     feature_spec: Mapping[str, Any] | None = None,
+    scaler: ZScoreScaler | None = None,
 ) -> TrainedLSTMAutoencoder:
     """Train an autoencoder on clean sequence windows.
 
@@ -428,6 +439,7 @@ def train_lstm_autoencoder(
         },
         schema=schema,
         history=tuple(history),
+        scaler=_resolve_manifest_scaler(scaler, dataset).to_dict(),
     )
     trained = TrainedLSTMAutoencoder(model=model, manifest=manifest)
     if not calibrate_thresholds:
@@ -624,6 +636,57 @@ def _validate_loaded_lstm_manifest(
 
     if manifest.thresholds is not None:
         _validate_lstm_thresholds(manifest.thresholds, feature_columns=feature_columns)
+        # The threshold is computed on the model's reconstruction error
+        # distribution during calibration. If training applied a scaler,
+        # those errors are in *scaled* units; if it didn't, they're in raw
+        # OBD/CAN units. Inference must match — and the only way it knows
+        # which is which is via the saved scaler. A calibrated manifest
+        # without a scaler is the May 2026 degenerate-fit artifact shape:
+        # threshold of 171,895 against live scores of 87, completely
+        # unworkable. Refuse it loudly at load.
+        if manifest.scaler is None:
+            raise ValueError(
+                "LSTM manifest has calibrated thresholds but no scaler — "
+                "the threshold scale won't match inference. Retrain on "
+                "current code so the artifact carries a scaler dict."
+            )
+        _validate_lstm_scaler(manifest.scaler, feature_columns=feature_columns)
+
+
+def _resolve_manifest_scaler(
+    scaler: ZScoreScaler | None,
+    dataset: SequenceWindowDataset,
+) -> ZScoreScaler:
+    """Pick the scaler to embed in the manifest.
+
+    Production callers (``scripts/train_lstm.py``) fit a scaler on the raw
+    feature frame, apply it, then pass the fitted scaler in — that one
+    represents raw → scaled and is what inference applies to incoming
+    windows. Test callers don't bother and pass the dataset's frame
+    pre-scaled; for those, we fit a fresh scaler on whatever the dataset
+    actually contains so the manifest stays self-consistent (means/stds
+    match the model's expected input distribution). The post-load guard
+    requires *some* scaler to exist, so this branch ensures we never write
+    an artifact without one.
+    """
+    if scaler is not None:
+        return scaler
+    return ZScoreScaler.fit(dataset.frame, columns=dataset.feature_columns)
+
+
+def _validate_lstm_scaler(
+    scaler: Mapping[str, Any],
+    *,
+    feature_columns: tuple[str, ...],
+) -> None:
+    """Round-trip the scaler dict + ensure every feature column has stats."""
+    try:
+        loaded = ZScoreScaler.from_dict(dict(scaler))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"invalid LSTM scaler in manifest: {exc}") from exc
+    missing = [column for column in feature_columns if column not in loaded.means]
+    if missing:
+        raise ValueError("LSTM scaler missing means for: " + ", ".join(sorted(missing)))
 
 
 def _validate_lstm_thresholds(

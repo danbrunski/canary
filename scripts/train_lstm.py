@@ -55,6 +55,7 @@ from src.preprocessing.feature_pipeline import (
     build_feature_spec,
     sequence_feature_columns,
 )
+from src.preprocessing.normalization import ZScoreScaler
 
 log = logging.getLogger(__name__)
 
@@ -70,12 +71,18 @@ def build_dataset(
     sequence_length: int | None = None,
     feature_columns: Sequence[str] | None = None,
     stride: int = DEFAULT_SEQUENCE_STRIDE,
+    scaler: ZScoreScaler | None = None,
 ) -> SequenceWindowDataset:
     """Build a sliding-window dataset from recorded sessions via the shared pipeline.
 
     When ``feature_columns`` is given (e.g. a trained model's schema), they must
     all be present and numeric; otherwise the trainable numeric columns are
     discovered automatically.
+
+    When ``scaler`` is given, the feature columns are z-scored before window
+    construction so the LSTM trains on a sane numeric scale (raw OBD values
+    range from coolant ~30 to RPM ~5000, which makes MAE loss meaningless
+    without normalization).
     """
     features = (
         feature_frame
@@ -102,6 +109,8 @@ def build_dataset(
         if sequence_length is None
         else sequence_length
     )
+    if scaler is not None:
+        features = scaler.transform(features)
     return SequenceWindowDataset(
         features,
         sequence_length=length,
@@ -125,15 +134,48 @@ def train(
     model_version: str | None = None,
 ) -> TrainedLSTMAutoencoder:
     """Build windows, train + calibrate the LSTM autoencoder, write artifact + manifest."""
+    # Build the raw feature frame once so the scaler and the dataset see
+    # exactly the same source rows. The scaler is fit on the trainable
+    # numeric columns; the dataset then z-scores via that scaler before
+    # windowing. Inference re-applies the same scaler (loaded from the
+    # manifest) before calling LSTMInferenceEngine.score_window.
+    features = (
+        feature_frame
+        if feature_frame is not None
+        else build_feature_frame(
+            session_dirs,
+            config,
+            bindings_path=bindings_path,
+            cache_dir=feature_cache_dir,
+            force_rebuild=rebuild_feature_cache,
+        )
+    )
+    columns = sequence_feature_columns(features)
+    if not columns:
+        raise ValueError(
+            "no trainable feature columns — the sessions produced no numeric "
+            "signal columns. Did you convert them to Parquet, and is "
+            f"{bindings_path} present so CAN payloads get decoded?"
+        )
+    # Drop rows where any of the chosen feature columns is NaN before fitting
+    # the scaler. Otherwise per-column means/stds reflect spurious
+    # imputed-zero rows the model can't really learn from, and the
+    # threshold ends up calibrated against a fractured error distribution.
+    # Mirrors IsolationForest training's missing-feature row drop.
+    clean_features = features.dropna(subset=columns)
+    scaler = ZScoreScaler.fit(clean_features, columns=columns)
+
     dataset = build_dataset(
         session_dirs,
         config,
         bindings_path=bindings_path,
-        feature_frame=feature_frame,
+        feature_frame=clean_features,
         feature_cache_dir=feature_cache_dir,
         rebuild_feature_cache=rebuild_feature_cache,
         sequence_length=sequence_length,
         stride=stride,
+        feature_columns=columns,
+        scaler=scaler,
     )
     if len(dataset) == 0:
         raise ValueError(
@@ -154,6 +196,7 @@ def train(
             sequence_length=dataset.sequence_length,
             sequence_stride=dataset.stride,
         ),
+        scaler=scaler,
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)

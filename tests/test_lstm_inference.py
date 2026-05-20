@@ -208,6 +208,48 @@ def test_sequence_buffer_resets_on_session_change() -> None:
     assert session == "s2"
 
 
+def test_score_window_applies_scaler_before_forward_pass() -> None:
+    """Inference must apply the manifest's scaler so reconstruction errors
+    are in the same units the threshold was calibrated against.
+
+    Pins the May 2026 LSTM bug — degenerate fit because training saw raw OBD
+    values, threshold calibrated on raw-value reconstruction errors, but
+    inference at the time did not scale and produced score=88 against
+    threshold=171,895. New code scales identically at train and inference.
+    """
+    import numpy as np
+
+    trained = _trained()
+    assert trained.manifest.scaler is not None
+    engine = LSTMInferenceEngine(trained)
+    # Materialized scaler attributes exist and are populated for the
+    # feature columns in order.
+    assert engine._scaler_means is not None
+    assert engine._scaler_stds is not None
+    assert engine._scaler_means.shape == (len(engine.feature_columns),)
+    assert engine._scaler_stds.shape == (len(engine.feature_columns),)
+    # Per-column means roughly match the training data (mean ≈ 700 for rpm).
+    assert 698.0 < float(engine._scaler_means[0]) < 702.0
+    # Per-column std is non-zero and used as the divisor (not floored to 1).
+    assert engine._scaler_stds[0] > 0.0
+
+    # End-to-end: feeding raw values (close to the training distribution)
+    # produces a small reconstruction error.
+    raw_window = np.array([[700.0, 1.0]] * engine.sequence_length, dtype=np.float32)
+    result = engine.score_window(
+        raw_window,
+        timestamp="2026-05-20T00:00:00Z",
+        session="s",
+        window_start_timestamp="2026-05-20T00:00:00Z",
+        window_end_timestamp="2026-05-20T00:00:01Z",
+    )
+    # On a window inside the training distribution, the global reconstruction
+    # error should be in the same single-digit / fractional range as the
+    # calibrated threshold — not the four-digit raw-value scale the
+    # May 2026 artifact produced.
+    assert result.global_score < 100.0
+
+
 def test_score_window_validates_shape() -> None:
     import numpy as np
 

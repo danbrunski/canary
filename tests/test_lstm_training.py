@@ -19,6 +19,7 @@ from src.models.lstm_training import (
 )
 from src.models.manifest import validate_manifest_common
 from src.models.sequence_dataset import SequenceWindowDataset
+from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -48,8 +49,8 @@ def _config(**updates):
     return base.model_copy(update=defaults)
 
 
-def _dataset(rows: int = 14, sequence_length: int = 4) -> SequenceWindowDataset:
-    frame = pd.DataFrame(
+def _frame(rows: int = 14) -> pd.DataFrame:
+    return pd.DataFrame(
         {
             SESSION_COLUMN: ["clean"] * rows,
             TIMESTAMP_COLUMN: pd.date_range("2026-05-12T00:00:00Z", periods=rows, freq="s"),
@@ -57,8 +58,20 @@ def _dataset(rows: int = 14, sequence_length: int = 4) -> SequenceWindowDataset:
             "speed": [float(idx % 5) for idx in range(rows)],
         }
     )
+
+
+def _scaler(frame: pd.DataFrame | None = None) -> ZScoreScaler:
+    """Per-feature z-score scaler for the synthetic test data."""
+    return ZScoreScaler.fit(frame if frame is not None else _frame(), columns=["rpm", "speed"])
+
+
+def _dataset(rows: int = 14, sequence_length: int = 4) -> SequenceWindowDataset:
+    frame = _frame(rows)
+    scaler = _scaler(frame)
+    # Tests run the model on the same scaled frame inference will see; the
+    # ``LSTMInferenceEngine`` z-scores in-line so train/serve stay aligned.
     return SequenceWindowDataset(
-        frame,
+        scaler.transform(frame),
         sequence_length=sequence_length,
         feature_columns=["rpm", "speed"],
     )
@@ -179,6 +192,52 @@ def test_load_rejects_lstm_architecture_feature_mismatch(tmp_path: Path) -> None
     torch.save(payload, artifact)
 
     with pytest.raises(ValueError, match="input_size"):
+        load_lstm_autoencoder_model(artifact)
+
+
+def test_save_persists_scaler_in_manifest(tmp_path: Path) -> None:
+    """A trained artifact must carry the scaler it was fit against.
+
+    Pre-scaler LSTM artifacts (May 2026) produced reconstruction errors of
+    ~80k against raw OBD values; the threshold was calibrated on those raw
+    errors. At inference, raw input → ~80k error vs ~80k threshold, the
+    model never fired. Pin that the new training pipeline writes a scaler.
+    """
+    _torch()
+    dataset = _dataset()
+    trained = train_lstm_autoencoder(
+        dataset,
+        _config(max_epochs=1),
+        trained_at="2026-05-20T12:00:00Z",
+        scaler=_scaler(),
+    )
+    artifact = tmp_path / "lstm.pt"
+    trained.save(artifact)
+
+    payload = json.loads(default_lstm_manifest_path(artifact).read_text())
+    assert payload["scaler"] is not None
+    assert payload["scaler"]["columns"] == ["rpm", "speed"]
+    assert "rpm" in payload["scaler"]["means"]
+    assert "speed" in payload["scaler"]["stds"]
+
+
+def test_load_rejects_lstm_threshold_without_scaler(tmp_path: Path) -> None:
+    """Calibrated thresholds + no scaler is the May 2026 degenerate shape — refuse it."""
+    torch = _torch()
+    dataset = _dataset()
+    trained = train_lstm_autoencoder(
+        dataset,
+        _config(max_epochs=1),
+        trained_at="2026-05-20T12:00:00Z",
+    )
+    artifact = tmp_path / "lstm.pt"
+    trained.save(artifact)
+
+    payload = torch.load(artifact, map_location="cpu", weights_only=False)
+    payload["manifest"]["scaler"] = None
+    torch.save(payload, artifact)
+
+    with pytest.raises(ValueError, match="no scaler"):
         load_lstm_autoencoder_model(artifact)
 
 

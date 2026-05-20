@@ -207,6 +207,26 @@ class LSTMInferenceEngine:
         self._device = self._torch.device(device)
         self.trained.model.to(device=self._device, dtype=getattr(self._torch, dtype))
         self.trained.model.eval()
+        # Materialize the per-column (means, stds) arrays once so each
+        # ``score_window`` is a single broadcast subtract+divide instead of
+        # building Python dicts per call. ``manifest.scaler`` is required
+        # when thresholds are present (the load-time guard enforces it),
+        # but allow ``None`` here so test doubles without a scaler keep
+        # working as long as they also don't provide thresholds.
+        self._scaler_means: np.ndarray[Any, np.dtype[np.float64]] | None
+        self._scaler_stds: np.ndarray[Any, np.dtype[np.float64]] | None
+        if trained.manifest.scaler is not None:
+            from src.preprocessing.normalization import ZScoreScaler
+
+            scaler = ZScoreScaler.from_dict(dict(trained.manifest.scaler))
+            self._scaler_means = np.array(
+                [scaler.means[col] for col in self.feature_columns], dtype=np.float64
+            )
+            stds = np.array([scaler.stds[col] for col in self.feature_columns], dtype=np.float64)
+            self._scaler_stds = np.where(stds >= scaler.std_floor, stds, 1.0)
+        else:
+            self._scaler_means = None
+            self._scaler_stds = None
 
     def observe(self, row: Mapping[str, Any] | pd.Series) -> LSTMInferenceResult | None:
         """Append one row and score the current window once enough rows exist."""
@@ -239,7 +259,17 @@ class LSTMInferenceEngine:
                 f"({self.sequence_length}, {len(self.feature_columns)}); got {window.shape}"
             )
         started = self.time_fn()
-        tensor = self._torch.as_tensor(window, dtype=getattr(self._torch, self.dtype))
+        # z-score against the training-time scaler so reconstruction error
+        # is in the same scale as the calibrated threshold. Without this
+        # the model sees raw OBD values (RPM 0-5000, etc.) and produces
+        # huge errors that the threshold never approaches — the May 2026
+        # degenerate-fit shape.
+        scaled_window: np.ndarray[Any, np.dtype[np.float32]] = window
+        if self._scaler_means is not None and self._scaler_stds is not None:
+            scaled_window = (
+                (window.astype(np.float64) - self._scaler_means) / self._scaler_stds
+            ).astype(np.float32)
+        tensor = self._torch.as_tensor(scaled_window, dtype=getattr(self._torch, self.dtype))
         tensor = tensor.unsqueeze(0).to(self._device)
         with self._torch.no_grad():
             # Phase 7.2a: one forward → all reductions + the actual/recon
