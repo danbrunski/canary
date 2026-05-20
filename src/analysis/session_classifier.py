@@ -58,23 +58,26 @@ DERIVED_TAGS_FILENAME = "derived_tags.jsonl"
 #: Increment when the classifier semantics change (new detectors, changed
 #: disposition rules, new fields). Stale sidecars are detected via
 #: comparison against this so the corpus can be re-classified in batch.
-CLASSIFIER_VERSION = "0.1.0"
+CLASSIFIER_VERSION = "0.2.0"
 
 SCHEMA_VERSION = 1
 
 Disposition = Literal["ready", "review", "quarantine"]
 
-#: When the fraction of complete (non-NaN) feature rows drops below this,
-#: the session is quarantined. Tuned for the 2026-05-20 corpus where
-#: a session with degraded OBD polling can sit at 30-40% — those are
-#: bad training inputs but worth keeping for diagnostic replay.
-_DEFAULT_QUARANTINE_COMPLETENESS = 0.5
+#: When more than this fraction of session rows have ``operating_mode ==
+#: unknown``, the session is quarantined — the segmenter couldn't
+#: classify the regime, so per-mode behavior models can't fit on it.
+#: This is the *primary* quality gate because OBD round-robin polling
+#: structurally means most rows have many NaN feature columns at any
+#: given second (we round-robin one PID per second across ~30 PIDs).
+#: A row-level "complete features" check would mark every real session
+#: as bad data; mode coverage is the meaningful signal.
+_DEFAULT_QUARANTINE_UNKNOWN_FRACTION = 0.9
 
-#: When more than this fraction of the session sits in ``unknown_mode``,
-#: the session goes to ``review`` (operator can decide). Above this the
-#: segmenter is having trouble classifying — either the input data is
-#: weird or the operating_modes config doesn't cover the actual regime.
-_DEFAULT_REVIEW_UNKNOWN_FRACTION = 0.5
+#: Sessions between ``_DEFAULT_REVIEW_UNKNOWN_FRACTION`` and
+#: ``_DEFAULT_QUARANTINE_UNKNOWN_FRACTION`` go to ``review`` so the
+#: operator can decide whether to use them as training input.
+_DEFAULT_REVIEW_UNKNOWN_FRACTION = 0.3
 
 
 @dataclass(frozen=True)
@@ -421,13 +424,21 @@ def _decide_disposition(
     mode_seconds: Mapping[str, float],
     duration_seconds: float,
 ) -> Disposition:
+    """Decide based on operating-mode coverage, not per-row feature completeness.
+
+    Rationale: OBD polling is round-robin so any one row has most
+    columns NaN. The per-row "complete features" metric is informational
+    but not a usable disposition signal — the IF / LSTM trainers already
+    drop missing-feature rows internally and still produce a working
+    model from a session with 10% complete rows. What actually matters
+    is whether the segmenter could assign modes to most rows.
+    """
     if duration_seconds <= 0:
         return "quarantine"
-    completeness = float(quality.get("complete_row_fraction", 0.0))
-    if completeness < _DEFAULT_QUARANTINE_COMPLETENESS:
-        return "quarantine"
     unknown_fraction = float(quality.get("unknown_mode_fraction", 0.0))
-    if unknown_fraction > _DEFAULT_REVIEW_UNKNOWN_FRACTION:
+    if unknown_fraction >= _DEFAULT_QUARANTINE_UNKNOWN_FRACTION:
+        return "quarantine"
+    if unknown_fraction >= _DEFAULT_REVIEW_UNKNOWN_FRACTION:
         return "review"
     return "ready"
 

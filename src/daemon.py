@@ -1044,6 +1044,52 @@ async def poll_model_managers(
             continue
 
 
+async def poll_behavior_models(
+    path: Path,
+    live_source: LiveFeatureSource,
+    stop_event: asyncio.Event,
+    *,
+    interval_seconds: float,
+) -> None:
+    """Hot-reload ``behavior_models.yaml`` when its mtime changes.
+
+    Mirrors :class:`ModelManager`'s mtime-poll pattern: stat the file each
+    tick, reload + swap when the mtime advances. Without this, deploying
+    a refitted behavior model requires a daemon restart — the May 2026
+    storm-quieting refit ran into exactly that wall, and operator
+    coordination on a no-restart Pi is annoying. Reload errors log + skip;
+    the previous in-memory set keeps running.
+    """
+    last_mtime: float | None = None
+    if path.exists():
+        last_mtime = path.stat().st_mtime
+    while not stop_event.is_set():
+        try:
+            if path.exists():
+                mtime = path.stat().st_mtime
+                if last_mtime is None or mtime > last_mtime:
+                    new_models = load_behavior_models(path)
+                    live_source.behavior_models = new_models
+                    log.info(
+                        "behavior models hot-reloaded",
+                        extra={
+                            "path": str(path),
+                            "count": len(new_models.models),
+                            "names": [m.name for m in new_models.models],
+                        },
+                    )
+                    last_mtime = mtime
+        except Exception:  # noqa: BLE001 — keep the previous models; log + retry
+            log.exception(
+                "behavior model hot-reload failed; keeping previous",
+                extra={"path": str(path)},
+            )
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            continue
+
+
 async def run_retention_sweeper(
     storage_path: Path,
     retention_days: int,
@@ -1361,6 +1407,20 @@ async def run_daemon(
             active_replay_dir=lambda: _active_replay_dir(components),
         )
     )
+    behavior_models_task: asyncio.Task[Any] | None = None
+    if live_source is not None:
+        # Hot-reload the behavior-models YAML so refit deployments don't
+        # require a daemon restart (otherwise a ``label_sessions →
+        # refit_behavior_models → upload`` cycle stops here until the
+        # operator can ssh in and ``systemctl restart canary``).
+        behavior_models_task = asyncio.create_task(
+            poll_behavior_models(
+                DEFAULT_BEHAVIOR_MODELS_PATH,
+                live_source,
+                stop_event,
+                interval_seconds=config.daemon.model_poll_seconds,
+            )
+        )
     inference_tasks: list[asyncio.Task[Any]] = []
     if live_source is not None:
         # One unified task scores IF + LSTM + behavior per tick and fuses
@@ -1398,6 +1458,12 @@ async def run_daemon(
                 await retention_task
             except asyncio.CancelledError:
                 pass
+            if behavior_models_task is not None:
+                behavior_models_task.cancel()
+                try:
+                    await behavior_models_task
+                except asyncio.CancelledError:
+                    pass
             for task in inference_tasks:
                 # Each inference task observes stop_event and returns on its
                 # own; this is the join + cancel safety net.
