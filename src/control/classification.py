@@ -1,0 +1,168 @@
+"""Daemon-side helpers for serving session classification sidecars.
+
+The classifier itself (:func:`src.analysis.session_classifier.classify_session`)
+is pure; this module wraps it for the control-plane HTTP endpoints + MCP
+tools. The shape we expose mirrors :class:`SessionClassification.to_dict`
+plus a few aggregate views useful for dashboards / agents.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
+
+from src.analysis.session_classifier import (
+    DERIVED_TAGS_FILENAME,
+    classify_session,
+    read_classification,
+    write_classification,
+)
+from src.config import CanaryConfig
+
+log = logging.getLogger(__name__)
+
+_SESSION_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
+
+
+def _iter_session_dirs(storage_path: Path) -> Iterable[Path]:
+    if not storage_path.exists():
+        return ()
+    return (
+        child
+        for child in sorted(storage_path.iterdir())
+        if child.is_dir() and _SESSION_DIR_RE.match(child.name)
+    )
+
+
+def get_session_classification(storage_path: Path, session_id: str) -> dict[str, Any] | None:
+    """Return the sidecar JSON for one session, or ``None`` when absent.
+
+    The session id is validated against the live-session regex so a caller
+    can't request ``_replay-*`` or ``_archive``; those have their own
+    flows.
+    """
+    if not _SESSION_DIR_RE.match(session_id):
+        return None
+    session_dir = storage_path / session_id
+    if not session_dir.is_dir():
+        return None
+    classification = read_classification(session_dir)
+    return None if classification is None else classification.to_dict()
+
+
+def classify_one_session(
+    config: CanaryConfig,
+    session_id: str,
+) -> dict[str, Any]:
+    """Run the classifier on one session and persist the sidecar.
+
+    Raises ``ValueError`` for invalid session ids or non-live names;
+    ``FileNotFoundError`` when the session has no telemetry parquet.
+    """
+    if not _SESSION_DIR_RE.match(session_id):
+        raise ValueError(f"refusing to classify non-live-session id {session_id!r}")
+    session_dir = config.collection.storage_path / session_id
+    if not session_dir.is_dir():
+        raise FileNotFoundError(f"session {session_id!r} not found under {session_dir.parent}")
+    classification = classify_session(session_dir, config)
+    write_classification(session_dir, classification)
+    return classification.to_dict()
+
+
+def corpus_mode_summary(storage_path: Path) -> dict[str, Any]:
+    """Aggregate mode-coverage hours across every classified session.
+
+    The result block looks like::
+
+        {
+          "classified_session_count": 24,
+          "unclassified_session_count": 1,
+          "mode_seconds": {"warmup": 1820.0, "idle": 9230.0, ...},
+          "event_counts": {"cold_start": 6, "hard_accel": 12, ...},
+          "by_disposition": {"ready": 22, "review": 1, "quarantine": 1}
+        }
+
+    "Classified" means the sidecar exists. "Unclassified" means a
+    well-formed live-session directory under ``storage_path`` has no
+    sidecar. ``label_sessions.py --all`` is the way to close that gap.
+    """
+    classified = 0
+    unclassified = 0
+    mode_totals: dict[str, float] = {}
+    event_totals: dict[str, int] = {}
+    by_disposition: dict[str, int] = {"ready": 0, "review": 0, "quarantine": 0}
+    for session_dir in _iter_session_dirs(storage_path):
+        classification = read_classification(session_dir)
+        if classification is None:
+            unclassified += 1
+            continue
+        classified += 1
+        for mode, seconds in classification.mode_seconds.items():
+            mode_totals[mode] = mode_totals.get(mode, 0.0) + float(seconds)
+        for event, count in classification.event_counts.items():
+            event_totals[event] = event_totals.get(event, 0) + int(count)
+        by_disposition[classification.disposition] = (
+            by_disposition.get(classification.disposition, 0) + 1
+        )
+    return {
+        "classified_session_count": classified,
+        "unclassified_session_count": unclassified,
+        "mode_seconds": {k: round(v, 2) for k, v in mode_totals.items()},
+        "event_counts": event_totals,
+        "by_disposition": by_disposition,
+    }
+
+
+def list_events_by_kind(
+    storage_path: Path,
+    *,
+    kind: str | None = None,
+    limit: int = 200,
+) -> dict[str, Any]:
+    """Walk every session's ``derived_tags.jsonl`` and surface matching events.
+
+    Used to answer "show me every hard_accel I've ever recorded" without
+    re-running the classifier. Results are sorted newest-first and
+    truncated at ``limit``.
+    """
+    if limit <= 0:
+        return {"events": [], "count": 0, "truncated": False}
+    collected: list[dict[str, Any]] = []
+    for session_dir in _iter_session_dirs(storage_path):
+        derived = session_dir / DERIVED_TAGS_FILENAME
+        if not derived.exists():
+            continue
+        try:
+            for line in derived.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if kind is not None and record.get("label") != kind:
+                    continue
+                record.setdefault("session_id", session_dir.name)
+                collected.append(record)
+        except OSError:
+            continue
+    collected.sort(key=lambda record: record.get("timestamp", ""), reverse=True)
+    truncated = len(collected) > limit
+    return {
+        "events": collected[:limit],
+        "count": min(len(collected), limit),
+        "truncated": truncated,
+    }
+
+
+__all__ = [
+    "classify_one_session",
+    "corpus_mode_summary",
+    "get_session_classification",
+    "list_events_by_kind",
+]

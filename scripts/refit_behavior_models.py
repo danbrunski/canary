@@ -33,6 +33,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from src.analysis.refit import Recipe, default_recipes, refit_all
+from src.analysis.session_classifier import read_classification
 from src.config import CanaryConfig
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
@@ -194,8 +195,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     log.info("built feature frame", extra={"rows": len(frame), "columns": len(frame.columns)})
 
+    # Load each session's classifier sidecar so recipes that require
+    # specific events (e.g. ``coolant_warmup`` requires ``cold_start``)
+    # filter the input frame down to eligible sessions. Sessions
+    # without a sidecar yet are excluded from event-gated recipes; they
+    # still feed un-gated ones. Run ``scripts/label_sessions.py`` to
+    # close the gap before relying on event-gated training.
+    session_events: dict[str, set[str]] = {}
+    for session in sessions:
+        classification = read_classification(session)
+        if classification is None:
+            continue
+        session_events[session.name] = set(classification.event_counts.keys())
+    log.info(
+        "loaded session classifications for event-gated recipes",
+        extra={"classified": len(session_events), "total_sessions": len(sessions)},
+    )
+
     models, results = refit_all(
-        recipes, frame, sessions=[s.name for s in sessions], existing=existing
+        recipes,
+        frame,
+        sessions=[s.name for s in sessions],
+        existing=existing,
+        session_events=session_events,
     )
 
     _print_report(results, frame_rows=len(frame))

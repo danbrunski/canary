@@ -70,6 +70,12 @@ from src.alerts.tuning import (
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
+from src.control.classification import (
+    classify_one_session,
+    corpus_mode_summary,
+    get_session_classification,
+    list_events_by_kind,
+)
 from src.control.jobs import JobController
 from src.control.models import publish_model_artifact
 from src.control.preflight import build_preflight
@@ -538,6 +544,55 @@ def create_app(
             tmp_path,
             media_type="application/zip",
             filename=f"{session_id}.zip",
+        )
+
+    @app.get("/control/sessions/{session_id}/classification")
+    def get_session_classification_endpoint(
+        session_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        payload = get_session_classification(config.collection.storage_path, session_id)
+        if payload is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no classification sidecar for session {session_id!r}",
+            )
+        return {"classification": payload}
+
+    @app.post("/control/sessions/{session_id}/classification", status_code=201)
+    def post_session_classification(
+        session_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            payload = classify_one_session(config, session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        publish_control_event(
+            "classification.write",
+            "ok",
+            {"session_id": session_id, "disposition": payload.get("disposition")},
+        )
+        return {"classification": payload}
+
+    @app.get("/control/classifications/summary")
+    def get_corpus_classification_summary(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        return corpus_mode_summary(config.collection.storage_path)
+
+    @app.get("/control/classifications/events")
+    def get_corpus_events(
+        kind: str | None = Query(default=None),
+        limit: int = Query(default=200, ge=1, le=2000),
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        return list_events_by_kind(
+            config.collection.storage_path,
+            kind=kind,
+            limit=limit,
         )
 
     @app.post("/control/jobs", status_code=201)

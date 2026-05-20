@@ -15,20 +15,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import refit_behavior_models as refit_cli  # noqa: E402
 
 
-def _frame() -> pd.DataFrame:
-    """A minimal feature frame that satisfies the coolant_warmup recipe."""
+def _frame(session_name: str = "2026-05-13T120000") -> pd.DataFrame:
+    """A minimal feature frame that satisfies the coolant_warmup recipe.
+
+    Carries ``operating_mode=warmup`` + the recipe's required columns so
+    the now-mode-gated ``coolant_warmup`` actually finds matching rows.
+    Includes ``session`` so the event-gating filter (added Phase C) can
+    intersect with classifier-loaded session_events.
+    """
     rng = np.random.default_rng(0)
     n = 400
     t = np.linspace(0, 600, n)
     return pd.DataFrame(
         {
+            "session": [session_name] * n,
             "obd:RUN_TIME": t,
             "obd:RPM": np.clip(750 + rng.normal(0, 30, n), 600, 6000),
             "obd:COOLANT_TEMP": 25 + 60 * (1 - np.exp(-t / 120)) + rng.normal(0, 0.5, n),
             "obd:ENGINE_LOAD": np.clip(20 + rng.normal(0, 5, n), 0, 100),
             "obd:TIMING_ADVANCE": 8 + 0.005 * 750 + rng.normal(0, 0.5, n),
             "obd:SHORT_FUEL_TRIM_1": rng.normal(0, 2, n),
-            "operating_mode": ["idle"] * n,
+            "operating_mode": ["warmup"] * n,
         }
     )
 
@@ -87,11 +94,44 @@ def test_select_recipes_rejects_unknown_name() -> None:
 
 
 def _patch_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Stub out session discovery + the feature pipeline so we don't need real Parquet."""
+    """Stub out session discovery + the feature pipeline so we don't need real Parquet.
+
+    Also writes a synthetic ``classification.json`` carrying a
+    ``cold_start`` event so the post-Phase-C event-gated ``coolant_warmup``
+    recipe finds the session eligible.
+    """
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
+    # Mirror what ``label_sessions.py`` would write — minimal but valid.
+    import json
+
+    (session / "classification.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "classifier_version": "0.1.0",
+                "classified_at": "2026-05-13T12:00:00Z",
+                "session_id": session.name,
+                "duration_seconds": 600.0,
+                "summary": {
+                    "mode_seconds": {"warmup": 600.0},
+                    "event_counts": {"cold_start": 1},
+                },
+                "mode_segments": [],
+                "events": [
+                    {
+                        "timestamp": "2026-05-13T12:00:00Z",
+                        "kind": "cold_start",
+                        "fields": {},
+                    }
+                ],
+                "quality": {},
+                "disposition": "ready",
+            }
+        )
+    )
     monkeypatch.setattr(refit_cli, "discover_sessions", lambda _root: [session])
-    monkeypatch.setattr(refit_cli, "build_feature_frame", lambda *_a, **_k: _frame())
+    monkeypatch.setattr(refit_cli, "build_feature_frame", lambda *_a, **_k: _frame(session.name))
     return session
 
 

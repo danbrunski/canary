@@ -37,6 +37,9 @@ from src.mcp_server.tools import (
     bindings as bindings_tool,
 )
 from src.mcp_server.tools import (
+    classification as classification_tool,
+)
+from src.mcp_server.tools import (
     jobs as jobs_tool,
 )
 from src.mcp_server.tools import (
@@ -62,6 +65,9 @@ from src.mcp_server.tools import (
 )
 from src.mcp_server.write_tools import (
     captures as captures_tool,
+)
+from src.mcp_server.write_tools import (
+    classification as classification_write_tool,
 )
 from src.mcp_server.write_tools import (
     feedback as feedback_tool,
@@ -238,6 +244,41 @@ def _register_read_tools(
     async def get_training_runs() -> dict[str, Any]:
         """Training-run history (the latest record per run from the ledger)."""
         return await sessions_tool.get_training_runs(client)
+
+    @mcp.tool()
+    async def get_session_classification(session_id: str) -> dict[str, Any]:
+        """Modes + events + disposition sidecar for one session.
+
+        Returns the post-hoc classifier output: mode_segments (timeline of
+        warmup/idle/city/highway/etc.), event_counts (cold_start,
+        hard_accel, ...), and a disposition (ready/review/quarantine).
+        404 when the sidecar hasn't been generated yet — call
+        ``classify_session`` or run ``scripts/label_sessions.py``.
+        """
+        return await classification_tool.get_session_classification(client, session_id=session_id)
+
+    @mcp.tool()
+    async def get_corpus_mode_summary() -> dict[str, Any]:
+        """Aggregate mode-coverage hours + event counts across all classified sessions.
+
+        Answers "do I have enough warmup data to retrain?" — look at
+        ``mode_seconds.warmup`` and ``event_counts.cold_start``.
+        """
+        return await classification_tool.get_corpus_mode_summary(client)
+
+    @mcp.tool()
+    async def list_events_by_kind(
+        kind: str | None = None,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        """Corpus-wide event search through ``derived_tags.jsonl`` sidecars.
+
+        ``kind`` filters to events of one type (``hard_accel``,
+        ``cold_start``, ``cruise``, ``hard_brake``, ``idle_period``,
+        ``stop``, ``wot_run``); ``None`` returns all kinds. Newest-first,
+        capped at ``limit``.
+        """
+        return await classification_tool.list_events_by_kind(client, kind=kind, limit=limit)
 
     @mcp.tool()
     async def list_jobs() -> dict[str, Any]:
@@ -550,6 +591,17 @@ def _register_write_tools(
             model_type=model_type,
             artifact_path=Path(artifact_path),
             manifest=manifest,
+        )
+
+    @mcp.tool()
+    async def classify_session(session_id: str) -> dict[str, Any]:
+        """Run the post-hoc classifier on one session; writes the sidecar.
+
+        Idempotent — re-running overwrites the existing ``classification.json``
+        with the current classifier version's output. Audit-logged.
+        """
+        return await classification_write_tool.classify_session(
+            client, audit, session_id=session_id
         )
 
     @mcp.tool()

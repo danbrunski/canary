@@ -24,7 +24,7 @@ session discovery, the preprocessing pipeline, and writing the YAML.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -39,6 +39,7 @@ from src.decode.behavior_models import (
     BehaviorModels,
     DeviationConfig,
 )
+from src.preprocessing.resampler import SESSION_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
 
 log = logging.getLogger(__name__)
@@ -60,6 +61,11 @@ class _RecipeBase:
     deviation: DeviationConfig | None = None
     min_samples: int = 50  # below this, skip the recipe rather than fit a brittle surface
     notes: str | None = None
+    #: Auto-detected events (see ``src.analysis.events``) the *source session*
+    #: must contain for any of its rows to feed this recipe. Use to gate
+    #: warmup-specific surfaces to sessions that actually start cold, etc.
+    #: Empty tuple means "no event requirement" — back-compat default.
+    require_session_events: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -124,6 +130,13 @@ def default_recipes() -> list[Recipe]:
             x_column="obd:RUN_TIME",
             x_axis_name="time_since_start",
             x_axis_unit="s",
+            # Surface only describes the cold-to-warm transient — restrict to
+            # ``warmup`` operating mode AND require sessions that actually
+            # contain a cold_start event. Without these gates the model fit
+            # to "all data" reverts to the R²=0.41 May 2026 surface that
+            # flooded the dashboard with warmup-storm anomalies.
+            operating_mode="warmup",
+            require_session_events=("cold_start",),
             fit_method="binned_lookup",  # warmup is sigmoid-ish, polys overshoot
             n_knots=12,
             min_samples=120,
@@ -221,12 +234,20 @@ def fit_recipe(
     *,
     sessions: Sequence[str] = (),
     next_version_for: dict[str, int] | None = None,
+    session_events: Mapping[str, set[str]] | None = None,
 ) -> RecipeResult:
     """Run one recipe; return a ``RecipeResult`` (never raises on missing data).
 
     ``next_version_for`` lets the batch driver pre-compute the version each
     recipe's output should claim — typically one more than any previously
     persisted version of the same-named model. Default is version 1.
+
+    ``session_events`` (when given) maps session_id → set of detected event
+    kinds (from each session's classifier sidecar). Rows from sessions
+    missing any of ``recipe.require_session_events`` are filtered out
+    before fitting — that's the structural fix for "coolant_warmup fit on
+    warm-restart sessions", because warm restarts don't contain a
+    ``cold_start`` event.
     """
     version = (next_version_for or {}).get(recipe.name, 1)
 
@@ -244,6 +265,46 @@ def fit_recipe(
                 None,
                 skipped=True,
                 reason=f"no rows in operating_mode={recipe.operating_mode!r}",
+            )
+
+    # 1b. require_session_events filter — drop rows from sessions that don't
+    # carry every event kind in ``recipe.require_session_events``. Only
+    # applies when ``session_events`` is provided; otherwise no-op so
+    # callers that haven't wired up the classifier still work.
+    if recipe.require_session_events and session_events is not None:
+        if SESSION_COLUMN not in sub.columns:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason=f"no {SESSION_COLUMN} column in frame; can't enforce event gate",
+            )
+        required_events = set(recipe.require_session_events)
+        eligible_sessions = {
+            session_id
+            for session_id, events in session_events.items()
+            if required_events.issubset(events)
+        }
+        if not eligible_sessions:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason=(
+                    f"no session in corpus carries every required event "
+                    f"{sorted(required_events)!r} (have {len(session_events)} classified)"
+                ),
+            )
+        sub = sub[sub[SESSION_COLUMN].isin(eligible_sessions)]
+        if sub.empty:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason=(
+                    f"no rows in operating_mode={recipe.operating_mode!r} from sessions "
+                    f"that contain required events {sorted(required_events)!r}"
+                ),
             )
 
     # 2. required columns present?
@@ -284,6 +345,7 @@ def refit_all(
     *,
     sessions: Sequence[str] = (),
     existing: BehaviorModels | None = None,
+    session_events: Mapping[str, set[str]] | None = None,
 ) -> tuple[BehaviorModels, list[RecipeResult]]:
     """Fit every recipe; return the new ``BehaviorModels`` + per-recipe results.
 
@@ -308,7 +370,13 @@ def refit_all(
     results: list[RecipeResult] = []
     fitted: dict[str, BehaviorModel1D | BehaviorModel2D] = {}
     for recipe in recipes:
-        res = fit_recipe(recipe, frame, sessions=sessions, next_version_for=next_version_for)
+        res = fit_recipe(
+            recipe,
+            frame,
+            sessions=sessions,
+            next_version_for=next_version_for,
+            session_events=session_events,
+        )
         results.append(res)
         if res.model is not None:
             fitted[recipe.name] = res.model
