@@ -100,6 +100,13 @@ class CollectionConfig(_Strict):
     replay_session: str | None = None
     replay_speed: float = 1.0
     replay_loop: bool = True
+    #: Age in days at which ``_replay-*`` session directories are evicted by
+    #: the retention sweeper. Independent from ``session_retention_days``
+    #: because replay output is test data that the operator may want to
+    #: keep visible briefly but not forever. Set to a large value to keep
+    #: replays around indefinitely; the ``_`` prefix already excludes them
+    #: from training discovery and from the live-session listing.
+    replay_retention_days: int = 7
 
 
 class OperatingModeSpec(_Strict):

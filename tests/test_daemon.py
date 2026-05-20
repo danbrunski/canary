@@ -714,6 +714,8 @@ async def test_run_daemon_wires_retention_sweeper_task(
         active_session_path: Callable[[], Path],
         storage_max_mb: int | None = None,
         storage_warning_mb: int | None = None,
+        replay_retention_days: int | None = None,
+        active_replay_dir: Callable[[], Path | None] | None = None,
     ) -> None:
         captured.update(
             storage_path=storage_path,
@@ -722,6 +724,8 @@ async def test_run_daemon_wires_retention_sweeper_task(
             storage_max_mb=storage_max_mb,
             storage_warning_mb=storage_warning_mb,
             active_session_path=active_session_path(),
+            replay_retention_days=replay_retention_days,
+            active_replay_dir=active_replay_dir() if active_replay_dir else None,
         )
         await stop_event.wait()
 

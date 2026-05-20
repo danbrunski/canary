@@ -73,6 +73,12 @@ from src.control.capture import CaptureConflictError, CaptureController, NoActiv
 from src.control.jobs import JobController
 from src.control.models import publish_model_artifact
 from src.control.preflight import build_preflight
+from src.control.replay_control import (
+    ReplayConflictError,
+    ReplayController,
+    ReplayNotFoundError,
+    ReplayNotRunningError,
+)
 from src.control.sessions import (
     delete_session,
     list_sessions,
@@ -107,6 +113,7 @@ from src.dashboard.schemas import (
     FeedbackRequest,
     JobSubmitRequest,
     ModelUploadRequest,
+    ReplayStartRequest,
     SessionMetadataRequest,
     SessionPinRequest,
     TuningRevertRequest,
@@ -148,6 +155,7 @@ def create_app(
     enable_dev_cors: bool = False,
     capture_controller: CaptureController | None = None,
     job_controller: JobController | None = None,
+    replay_controller: ReplayController | None = None,
     control_broadcaster: Broadcaster | None = None,
     audit_logger: ControlAuditLogger | None = None,
     control_token: str | None = None,
@@ -206,12 +214,15 @@ def create_app(
 
     @app.get("/status")
     def get_status() -> dict[str, Any]:
-        return build_status(
+        payload = build_status(
             config,
             models_dir=models_dir,
             emitter=emitter,
             health_monitor=health_monitor,
         ).to_dict()
+        if replay_controller is not None:
+            payload["replay"] = replay_controller.status().to_dict()
+        return payload
 
     @app.get("/config")
     def get_config() -> dict[str, Any]:
@@ -374,6 +385,49 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         publish_control_event("capture.stop", "ok", capture.to_dict())
         return {"capture": capture.to_dict()}
+
+    def _replay() -> ReplayController:
+        if replay_controller is None:
+            raise HTTPException(status_code=503, detail="replay API is not available")
+        return replay_controller
+
+    @app.post("/control/replay", status_code=201)
+    async def post_replay_start(
+        request: ReplayStartRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        controller = _replay()
+        try:
+            status = await controller.start(
+                request.session_id,
+                speed=request.speed,
+                loop=request.loop,
+            )
+        except ReplayConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ReplayNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        publish_control_event("replay.start", "ok", status.to_dict())
+        return {"replay": status.to_dict()}
+
+    @app.post("/control/replay/stop")
+    async def post_replay_stop(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        controller = _replay()
+        try:
+            status = await controller.stop()
+        except ReplayNotRunningError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        publish_control_event("replay.stop", "ok", status.to_dict())
+        return {"replay": status.to_dict()}
+
+    @app.get("/control/replay")
+    def get_replay(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        controller = _replay()
+        return {"replay": controller.status().to_dict()}
 
     @app.get("/control/sessions")
     def get_control_sessions(

@@ -73,6 +73,9 @@ from src.mcp_server.write_tools import (
     models as models_write_tool,
 )
 from src.mcp_server.write_tools import (
+    replay as replay_write_tool,
+)
+from src.mcp_server.write_tools import (
     sessions as sessions_write_tool,
 )
 from src.mcp_server.write_tools import (
@@ -548,6 +551,37 @@ def _register_write_tools(
             artifact_path=Path(artifact_path),
             manifest=manifest,
         )
+
+    @mcp.tool()
+    async def start_replay(
+        session_id: str,
+        speed: float = 1.0,
+        loop: bool = False,
+    ) -> dict[str, Any]:
+        """Replay a stored session into the live pipeline (isolated outputs).
+
+        Parquet writes go to ``<storage>/_replay-<id>/`` and anomalies to
+        ``<anomalies_dir>/_replay/<id>.jsonl`` — both excluded from training
+        discovery and feedback. Use to evaluate IF + LSTM end-to-end on the
+        Pi with no truck attached.
+        """
+        return await replay_write_tool.start_replay(
+            client,
+            audit,
+            session_id=session_id,
+            speed=speed,
+            loop=loop,
+        )
+
+    @mcp.tool()
+    async def stop_replay() -> dict[str, Any]:
+        """Cancel the in-flight replay; daemon returns to live capture."""
+        return await replay_write_tool.stop_replay(client, audit)
+
+    @mcp.tool()
+    async def get_replay_status() -> dict[str, Any]:
+        """Snapshot of the current replay (idle, running, source, paths)."""
+        return await replay_write_tool.get_replay_status(client)
 
 
 def _register_resources(

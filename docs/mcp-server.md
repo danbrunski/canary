@@ -48,6 +48,7 @@ Write tools (audit-logged with `actor="mcp"` via
 | `set_tuning` / `estimate_tuning` / `revert_tuning` | `POST /control/tuning[...]` |
 | `upload_model_artifact` | base64-encodes a local artifact + `POST /control/models/{type}/artifact` |
 | `replay_window` | submits a `replay_window` daemon job, polls until done, returns the inference report |
+| `start_replay` / `stop_replay` / `get_replay_status` | `POST /control/replay[...]` — runtime replay-into-collector with isolated outputs (see "End-to-end session replay" below) |
 
 Resources (URI-addressable; clients pin these to a conversation for stable context):
 
@@ -203,6 +204,48 @@ Use cases:
   same known-anomalous window, diff against the old historical event.
 - **Why didn't it fire?** Replay a window where the operator expected an
   anomaly; the IF/LSTM score traces show how close it came.
+
+---
+
+## End-to-end session replay (`start_replay` / `stop_replay`)
+
+`replay_window` is an offline batch — it re-scores one stored window in
+the daemon's job runner and hands back a report. When you want to
+exercise the *whole* pipeline (drain → Parquet → live inference →
+emitter → anomaly broadcaster) as if the truck were running, use the
+runtime replay instead:
+
+```text
+mcp__canary__start_replay(session_id="2026-05-18T033527", speed=3.0)
+mcp__canary__get_replay_status()
+mcp__canary__stop_replay()
+```
+
+The daemon re-emits the stored session's telemetry onto the same
+asyncio queue real CAN/OBD collectors feed, so IF + LSTM + behavior
+detectors fire on the replayed stream and the dashboard's WebSocket
+feeds light up live.
+
+**Isolation contract** — replays never contaminate real data:
+
+* Parquet writes go to `<storage>/_replay-<replay_id>/`. The leading
+  `_` excludes the dir from
+  [`discover_sessions`](../src/preprocessing/loader.py) (training input),
+  from the `GET /control/sessions` regex filter, and from the
+  timestamp-based retention sweep.
+* Anomalies go to `<anomalies_dir>/_replay/<replay_id>.jsonl`. The
+  `_replay/` subdir is outside
+  [`read_events_dir`](../src/alerts/event_logger.py)'s glob, so feedback
+  / refit jobs never see replay anomalies as real.
+* A separate retention sweeper evicts `_replay-*` dirs after
+  `collection.replay_retention_days` (default 7) so the disk doesn't
+  silently fill.
+
+**Caveat:** real CAN/OBD collectors keep running during a replay (the
+daemon doesn't stop them). On a Pi sitting on the bench this is fine;
+if you ever start a replay while live data is genuinely flowing, the
+two streams interleave into `_replay-<id>/`. Stop the live capture
+first if you care about clean replay output.
 
 ---
 

@@ -62,6 +62,7 @@ from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.jobs import JobController
+from src.control.replay_control import ReplayController
 from src.dashboard.api import DEFAULT_BINDINGS_PATH, create_app
 from src.dashboard.behavior_live import BehaviorLiveState, BehaviorObservation
 from src.dashboard.broadcast import Broadcaster
@@ -84,6 +85,7 @@ from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.monitor import free_space_mb, warn_if_storage_low
 from src.storage.parquet_writer import (
     ParquetTelemetryWriter,
+    delete_expired_replays,
     delete_expired_sessions,
     emergency_evict_for_free_space,
     enforce_storage_cap,
@@ -126,6 +128,7 @@ class DaemonComponents:
     behavior_live: BehaviorLiveState = field(default_factory=BehaviorLiveState)
     capture_controller: CaptureController | None = None
     job_controller: JobController | None = None
+    replay_controller: ReplayController | None = None
 
 
 def build_components(config: CanaryConfig) -> DaemonComponents:
@@ -1050,6 +1053,8 @@ async def run_retention_sweeper(
     active_session_path: Callable[[], Path],
     storage_max_mb: int | None = None,
     storage_warning_mb: int | None = None,
+    replay_retention_days: int | None = None,
+    active_replay_dir: Callable[[], Path | None] | None = None,
 ) -> None:
     """Periodically prune session dirs from the production daemon.
 
@@ -1103,6 +1108,25 @@ async def run_retention_sweeper(
                             "active_session": str(active),
                         },
                     )
+            if replay_retention_days is not None:
+                active_replay = active_replay_dir() if active_replay_dir is not None else None
+                protected_replays: set[Path] = (
+                    {active_replay} if active_replay is not None else set()
+                )
+                evicted_replays = delete_expired_replays(
+                    storage_path,
+                    replay_retention_days,
+                    protect=protected_replays,
+                )
+                if evicted_replays:
+                    log.info(
+                        "expired replays deleted",
+                        extra={
+                            "count": len(evicted_replays),
+                            "replays": [str(path) for path in evicted_replays],
+                            "replay_retention_days": replay_retention_days,
+                        },
+                    )
             if storage_warning_mb is not None:
                 free_before = free_space_mb(storage_path)
                 if free_before < storage_warning_mb:
@@ -1132,6 +1156,21 @@ async def run_retention_sweeper(
             await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
         except TimeoutError:
             continue
+
+
+def _active_replay_dir(components: DaemonComponents) -> Path | None:
+    """Return the in-flight replay's session directory, or ``None`` if idle.
+
+    Protects the active replay from the ``_replay-*`` retention sweep so a
+    multi-day replay isn't yanked out from under itself by its own scheduler.
+    """
+    controller = components.replay_controller
+    if controller is None:
+        return None
+    status = controller.status()
+    if not status.running or status.output_session_dir is None:
+        return None
+    return Path(status.output_session_dir)
 
 
 def _session_sizes(sessions_root: Path) -> dict[Path, int]:
@@ -1183,6 +1222,7 @@ async def serve_in_background(
         emitter=components.emitter,
         capture_controller=components.capture_controller,
         job_controller=components.job_controller,
+        replay_controller=components.replay_controller,
         audit_logger=components.audit_logger,
         feedback_store=FeedbackStore(components.config.daemon.feedback_log),
         alert_tuner=components.alert_tuner,
@@ -1255,6 +1295,12 @@ async def run_daemon(
         ParquetTelemetryWriter(config.collection.storage_path) if writer is None else writer
     )
     components.capture_controller = CaptureController(lambda: storage_writer.paths.root)
+    components.replay_controller = ReplayController(
+        queue=queue,
+        writer=storage_writer,
+        anomaly_logger=components.event_logger,
+        storage_root=config.collection.storage_path,
+    )
 
     # Build the live source (no-op if bindings/behavior_models are absent on
     # disk — observe still works, just without decoded:* / deviation:* columns).
@@ -1311,6 +1357,8 @@ async def run_daemon(
             active_session_path=lambda: storage_writer.paths.root,
             storage_max_mb=config.collection.storage_max_mb,
             storage_warning_mb=config.collection.storage_warning_mb,
+            replay_retention_days=config.collection.replay_retention_days,
+            active_replay_dir=lambda: _active_replay_dir(components),
         )
     )
     inference_tasks: list[asyncio.Task[Any]] = []

@@ -48,17 +48,27 @@ class AnomalyEventLogger:
     """
 
     def __init__(self, directory: Path) -> None:
-        self.directory = Path(directory)
+        self._base_directory = Path(directory)
+        self.directory = self._base_directory
         self.directory.mkdir(parents=True, exist_ok=True)
         self._date: str | None = None
         self._fp: IO[str] | None = None
+        self._replay_path: Path | None = None
 
     @property
     def current_path(self) -> Path | None:
+        if self._replay_path is not None:
+            return self._replay_path
         return None if self._date is None else event_log_path(self.directory, self._date)
 
     def log(self, event: AnomalyEvent) -> Path:
         """Append one event; return the file it landed in."""
+        if self._replay_path is not None:
+            if self._fp is None:
+                self._fp = self._replay_path.open("a")
+            self._fp.write(event.to_json_line() + "\n")
+            self._fp.flush()
+            return self._replay_path
         date = _event_date(event)
         if date != self._date or self._fp is None:
             self._roll_to(date)
@@ -73,11 +83,37 @@ class AnomalyEventLogger:
         self._fp = event_log_path(self.directory, date).open("a")
         self._date = date
 
+    def enter_replay_mode(self, replay_id: str) -> Path:
+        """Redirect appends to ``<base_dir>/_replay/<replay_id>.jsonl``.
+
+        One file per replay (no daily rotation) so the run is reviewable as
+        a unit. The ``_replay/`` subdir is excluded from
+        :func:`read_events_dir`'s glob, so feedback/refit jobs that read
+        ``<anomalies_dir>/anomalies-*.jsonl`` never see replay events.
+        """
+        if self._fp is not None:
+            self._fp.close()
+            self._fp = None
+        self._date = None
+        replay_dir = self._base_directory / "_replay"
+        replay_dir.mkdir(parents=True, exist_ok=True)
+        self._replay_path = replay_dir / f"{replay_id}.jsonl"
+        return self._replay_path
+
+    def exit_replay_mode(self) -> None:
+        """Resume per-day appends under the base directory."""
+        if self._fp is not None:
+            self._fp.close()
+            self._fp = None
+        self._replay_path = None
+        self._date = None
+
     def close(self) -> None:
         if self._fp is not None:
             self._fp.close()
             self._fp = None
             self._date = None
+            self._replay_path = None
 
     def __enter__(self) -> AnomalyEventLogger:
         return self

@@ -116,6 +116,50 @@ class ParquetTelemetryWriter:
         self._last_flush = self._clock()
         return flushed
 
+    def enter_replay_mode(self, replay_id: str) -> Path | None:
+        """Flush + redirect writes to ``<out_root>/_replay-<replay_id>/``.
+
+        The leading ``_`` excludes the directory from training discovery
+        (:mod:`src.preprocessing.loader`), from the ``GET /control/sessions``
+        listing (timestamp-only regex), and from the byte-bounded retention
+        sweep (timestamp parse fails) — see ``_replay-*`` isolation in
+        ``docs/mcp-server.md``.
+        """
+        flushed = self.flush()
+        replay_root = self._out_root / f"_replay-{replay_id}"
+        replay_root.mkdir(parents=True, exist_ok=True)
+        from src.session import session_paths
+
+        self.paths = session_paths(replay_root)
+        self.session_paths.append(self.paths)
+        self._chunk_index = 0
+        self._last_flush = self._clock()
+        return flushed
+
+    def exit_replay_mode(self, *, started_at: datetime | None = None) -> Path | None:
+        """Flush the replay buffer and roll back to a fresh live session dir.
+
+        :func:`make_session_dir` collides if called twice in one wall-clock
+        second (it uses ``exist_ok=False`` on purpose to make collisions
+        loud). After a short replay, the post-replay timestamp can match
+        the pre-replay one — bump forward a second until the new dir name
+        is available.
+        """
+        flushed = self.flush()
+        clock_now = self._clock() if started_at is None else started_at
+        existing_names = {p.root.name for p in self.session_paths}
+        attempt = clock_now
+        for _ in range(60):
+            name = attempt.astimezone(UTC).strftime("%Y-%m-%dT%H%M%S")
+            if name not in existing_names and not (self._out_root / name).exists():
+                break
+            attempt = attempt + timedelta(seconds=1)
+        self.paths = make_session_dir(self._out_root, attempt)
+        self.session_paths.append(self.paths)
+        self._chunk_index = 0
+        self._last_flush = self._clock()
+        return flushed
+
     def _rotate_if_engine_run_time_reset(self, record: TelemetryRecord) -> None:
         run_time = _engine_run_time_seconds(record)
         if run_time is None:
@@ -230,6 +274,49 @@ def delete_expired_sessions(
         if child.resolve() in protected:
             continue
         if (child / ".canary-pin").exists():
+            continue
+        if started_at < cutoff:
+            shutil.rmtree(child)
+            deleted.append(child)
+    return deleted
+
+
+def delete_expired_replays(
+    sessions_root: Path,
+    replay_retention_days: int,
+    *,
+    now: datetime | None = None,
+    protect: Iterable[Path] | None = None,
+) -> list[Path]:
+    """Evict ``_replay-<replay_id>`` directories older than the configured age.
+
+    Mirrors :func:`delete_expired_sessions` but for the isolated replay
+    output tree. The replay_id is the same sortable
+    ``YYYY-MM-DDTHHMMSS`` form used by live sessions, just with a
+    ``_replay-`` prefix that excludes the dir from training discovery
+    and the live-session listing. Anything under ``sessions_root`` that
+    doesn't match the prefix + timestamp shape is ignored.
+    """
+    if replay_retention_days < 0:
+        raise ValueError("replay_retention_days must be non-negative")
+    if not sessions_root.exists():
+        return []
+
+    protected = {path.resolve() for path in protect or ()}
+    cutoff = (datetime.now(UTC) if now is None else now.astimezone(UTC)) - timedelta(
+        days=replay_retention_days
+    )
+    prefix = "_replay-"
+    deleted: list[Path] = []
+    for child in sorted(sessions_root.iterdir()):
+        if not child.is_dir() or not child.name.startswith(prefix):
+            continue
+        replay_id = child.name[len(prefix) :]
+        try:
+            started_at = datetime.strptime(replay_id, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
+        except ValueError:
+            continue
+        if child.resolve() in protected:
             continue
         if started_at < cutoff:
             shutil.rmtree(child)

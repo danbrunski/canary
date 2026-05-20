@@ -73,6 +73,14 @@ class TuningRevertRequest(_ControlRequest):
     by: str | None = None
 
 
+class ReplayStartRequest(_ControlRequest):
+    """Start a replay of a stored session into the live capture pipeline."""
+
+    session_id: str = Field(..., min_length=1)
+    speed: float = Field(default=1.0, gt=0.0, le=100.0)
+    loop: bool = False
+
+
 __all__ = [
     "CaptureStartRequest",
     "CaptureStopRequest",
@@ -80,6 +88,7 @@ __all__ = [
     "FeedbackRequest",
     "JobSubmitRequest",
     "ModelUploadRequest",
+    "ReplayStartRequest",
     "SessionMetadataRequest",
     "SessionPinRequest",
     "TuningRevertRequest",
