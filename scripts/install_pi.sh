@@ -50,6 +50,9 @@ fi
 
 install -d -m 0755 "${CANARY_CONFIG_DIR}"
 install -d -m 0755 "${CANARY_DATA_DIR}" "${CANARY_DATA_DIR}/sessions" "${CANARY_DATA_DIR}/anomalies"
+# canary-mcp writes its audit log here as user ``canary``; pre-create so
+# ControlAuditLogger doesn't try to ``mkdir`` under a path it can't reach.
+install -d -m 0750 "${CANARY_DATA_DIR}/audit"
 
 chown -R "${CANARY_USER}:${CANARY_GROUP}" "${CANARY_HOME}" "${CANARY_DATA_DIR}"
 
@@ -65,7 +68,7 @@ if [[ ! -f "${CANARY_CONTROL_TOKEN_FILE}" ]]; then
     >"${CANARY_CONTROL_TOKEN_FILE}"
   chown root:"${CANARY_GROUP}" "${CANARY_CONTROL_TOKEN_FILE}"
   chmod 0640 "${CANARY_CONTROL_TOKEN_FILE}"
-  echo "Created ${CANARY_CONTROL_TOKEN_FILE}; use it as CANARY_TOKEN from your laptop."
+  echo "Created ${CANARY_CONTROL_TOKEN_FILE}; export it as CANARY_CONTROL_TOKEN from your laptop."
 else
   echo "Keeping existing ${CANARY_CONTROL_TOKEN_FILE}."
 fi
@@ -73,7 +76,9 @@ fi
 cat >"${CANARY_ENV}" <<EOF
 CANARY_HOME=${CANARY_HOME}
 CANARY_CONFIG=${CANARY_CONFIG}
+CANARY_DATA_DIR=${CANARY_DATA_DIR}
 CANARY_CONTROL_TOKEN=$(cat "${CANARY_CONTROL_TOKEN_FILE}")
+CANARY_MCP_AUDIT_PATH=${CANARY_DATA_DIR}/audit/mcp.jsonl
 EOF
 chown root:"${CANARY_GROUP}" "${CANARY_ENV}"
 chmod 0640 "${CANARY_ENV}"
@@ -100,7 +105,7 @@ Next:
   2. Bring up can0 for your chosen OBD/CAN mode; see docs/can-setup.md
   3. Start with: sudo systemctl start canary canary-mcp
   4. Watch logs: sudo journalctl -u canary -f  (or -u canary-mcp -f)
-  5. Export the laptop token: export CANARY_TOKEN="$(cat "${CANARY_CONTROL_TOKEN_FILE}")"
+  5. Export the laptop token: export CANARY_CONTROL_TOKEN="$(cat "${CANARY_CONTROL_TOKEN_FILE}")"
   6. Open: http://<pi-hostname-or-ip>:8000/status
   7. MCP server: http://<pi-hostname-or-ip>:8001/mcp (see docs/mcp-server.md)
 EOF

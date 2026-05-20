@@ -16,7 +16,11 @@ from typing import Any
 DEFAULT_DAEMON_URL = "http://127.0.0.1:8000"
 DEFAULT_BIND_HOST = "0.0.0.0"
 DEFAULT_BIND_PORT = 8001
-DEFAULT_AUDIT_PATH = Path("/var/lib/canary/audit/mcp.jsonl")
+# Default data root matches ``scripts/install_pi.sh``'s ``CANARY_DATA_DIR``;
+# the audit log lives one level under it so ``ControlAuditLogger``'s
+# ``mkdir(parents=True)`` doesn't need write access under ``/var/lib``.
+DEFAULT_DATA_DIR = Path("/data/canary")
+DEFAULT_AUDIT_PATH = DEFAULT_DATA_DIR / "audit" / "mcp.jsonl"
 
 
 @dataclass(frozen=True)
@@ -108,13 +112,20 @@ def load_from_env() -> MCPConfig:
         anomalies_dir = _anomalies_dir_from_config_yaml(config_env)
     signals_env = os.environ.get("CANARY_SIGNALS_PATH")
     log_fallback_env = os.environ.get("CANARY_MCP_LOG_FALLBACK")
+    data_dir_env = os.environ.get("CANARY_DATA_DIR")
+    if audit_env := os.environ.get("CANARY_MCP_AUDIT_PATH"):
+        audit_path = Path(audit_env)
+    elif data_dir_env:
+        audit_path = Path(data_dir_env) / "audit" / "mcp.jsonl"
+    else:
+        audit_path = DEFAULT_AUDIT_PATH
     return MCPConfig(
         daemon_url=os.environ.get("CANARY_DAEMON_URL", DEFAULT_DAEMON_URL).rstrip("/"),
         daemon_token=os.environ.get("CANARY_CONTROL_TOKEN") or None,
         bind_host=os.environ.get("CANARY_MCP_HOST", DEFAULT_BIND_HOST),
         bind_port=int(os.environ.get("CANARY_MCP_PORT", str(DEFAULT_BIND_PORT))),
         control_token=os.environ.get("CANARY_CONTROL_TOKEN") or None,
-        audit_path=Path(os.environ.get("CANARY_MCP_AUDIT_PATH", str(DEFAULT_AUDIT_PATH))),
+        audit_path=audit_path,
         storage_path=storage_path,
         signals_path=Path(signals_env) if signals_env else None,
         log_fallback_path=Path(log_fallback_env) if log_fallback_env else None,

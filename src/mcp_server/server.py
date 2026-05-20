@@ -14,10 +14,13 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from pydantic import AnyHttpUrl
 
 from src.mcp_server import resources as resource_handlers
 from src.mcp_server.audit import MCPAuditLogger
+from src.mcp_server.auth import StaticBearerVerifier
 from src.mcp_server.client import DaemonClient
 from src.mcp_server.config import MCPConfig, load_from_env
 from src.mcp_server.parquet_query import TelemetryQuery
@@ -86,9 +89,36 @@ def _resolve_storage_path(config: MCPConfig) -> Path | None:
     return None
 
 
+def _build_auth(
+    config: MCPConfig,
+) -> tuple[AuthSettings | None, StaticBearerVerifier | None]:
+    """Wire ``CANARY_CONTROL_TOKEN`` into FastMCP's bearer-auth middleware.
+
+    Returns ``(None, None)`` when the token is unset so HTTP stays open for
+    dev tunnelling and stdio remains unaffected either way. When the token
+    is set, both HTTP and SSE endpoints reject requests lacking
+    ``Authorization: Bearer <token>``.
+
+    The synthetic issuer / resource URLs satisfy ``AuthSettings``' Pydantic
+    validation but only surface in the ``WWW-Authenticate`` header on 401
+    responses — we're a resource server, not an OAuth issuer.
+    """
+    if not config.control_token:
+        return None, None
+    # ``bind_host`` can be ``0.0.0.0``; fall back to a loopback literal for
+    # the WWW-Authenticate hint since clients won't dial 0.0.0.0 anyway.
+    host = config.bind_host if config.bind_host not in ("", "0.0.0.0") else "127.0.0.1"
+    auth = AuthSettings(
+        issuer_url=AnyHttpUrl("http://127.0.0.1/"),
+        resource_server_url=AnyHttpUrl(f"http://{host}:{config.bind_port}/mcp"),
+    )
+    return auth, StaticBearerVerifier(config.control_token)
+
+
 def build_server(config: MCPConfig | None = None) -> FastMCP:
     """Construct a :class:`FastMCP` with all CANary tools registered."""
     cfg = config or load_from_env()
+    auth_settings, token_verifier = _build_auth(cfg)
     mcp = FastMCP(
         name="canary",
         instructions=(
@@ -100,7 +130,11 @@ def build_server(config: MCPConfig | None = None) -> FastMCP:
         host=cfg.bind_host,
         port=cfg.bind_port,
         # 0.0.0.0 binds to the LAN — TransportSecuritySettings warns about
-        # that by default; we know and accept it.
+        # that by default; we know and accept it. Auth is enforced via the
+        # token verifier below when CANARY_CONTROL_TOKEN is set; stdio
+        # ignores it (whoever spawns the process is already trusted).
+        auth=auth_settings,
+        token_verifier=token_verifier,
     )
 
     client = DaemonClient(cfg.daemon_url, cfg.daemon_token)

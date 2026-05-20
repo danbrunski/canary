@@ -68,8 +68,11 @@ Resources (URI-addressable; clients pin these to a conversation for stable conte
 
 - **`streamable-http`** (default) — for LAN clients. Binds to
   `CANARY_MCP_HOST:CANARY_MCP_PORT` (default `0.0.0.0:8001`) and serves at
-  `/mcp`. Honors `Authorization: Bearer ${CANARY_CONTROL_TOKEN}` when the
-  token is set.
+  `/mcp`. When `CANARY_CONTROL_TOKEN` is set (the install path always sets
+  it), every request must carry `Authorization: Bearer <token>` — others
+  get `401 Unauthorized` from FastMCP's `RequireAuthMiddleware`. Leaving
+  the token unset keeps the transport open, intended only for local dev
+  tunnelling.
 - **`stdio`** — for local debugging or SSH-tunneled access. No port, no
   auth (whoever spawns the process is already trusted).
 - **`sse`** — legacy SSE transport for older clients.
@@ -100,11 +103,12 @@ Environment variables (set in `/etc/canary/canary.env` alongside the daemon's):
 
 ```ini
 CANARY_DAEMON_URL=http://127.0.0.1:8000
-CANARY_CONTROL_TOKEN=<shared with the daemon>
-CANARY_STORAGE_PATH=/var/lib/canary/sessions   # falls back to $CANARY_CONFIG
+CANARY_CONTROL_TOKEN=<shared with the daemon>     # required for HTTP/SSE inbound auth
+CANARY_DATA_DIR=/data/canary                       # matches scripts/install_pi.sh
+CANARY_STORAGE_PATH=/data/canary/sessions          # falls back to $CANARY_CONFIG
 CANARY_MCP_HOST=0.0.0.0
 CANARY_MCP_PORT=8001
-CANARY_MCP_AUDIT_PATH=/var/lib/canary/audit/mcp.jsonl
+CANARY_MCP_AUDIT_PATH=/data/canary/audit/mcp.jsonl # defaults to $CANARY_DATA_DIR/audit/mcp.jsonl
 CANARY_SIGNALS_PATH=/opt/canary/data/fsm/signals.json   # enables signal_lookup
 CANARY_MCP_LOG_FALLBACK=/var/log/canary/daemon.jsonl    # used if journalctl absent
 CANARY_MCP_DAEMON_UNIT=canary                            # systemd unit for tail

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.mcp_server.config import (
+    DEFAULT_AUDIT_PATH,
     DEFAULT_BIND_PORT,
     DEFAULT_DAEMON_URL,
     load_from_env,
@@ -111,6 +112,38 @@ def test_anomalies_dir_from_config_yaml(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setenv("CANARY_CONFIG", str(config_file))
     cfg = load_from_env()
     assert cfg.anomalies_dir == Path("/var/canary/anomalies")
+
+
+def test_audit_path_defaults_under_install_data_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without an env override, the audit log sits under the install data dir.
+
+    The previous default (``/var/lib/canary/audit/mcp.jsonl``) didn't match
+    ``scripts/install_pi.sh``, which sets up ``/data/canary``. The MCP user
+    can't ``mkdir`` under ``/var/lib`` and crash-looped on first start.
+    """
+    for var in ("CANARY_MCP_AUDIT_PATH", "CANARY_DATA_DIR"):
+        monkeypatch.delenv(var, raising=False)
+    cfg = load_from_env()
+    assert cfg.audit_path == DEFAULT_AUDIT_PATH
+    assert str(DEFAULT_AUDIT_PATH).startswith("/data/canary")
+
+
+def test_audit_path_follows_data_dir_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """``CANARY_DATA_DIR`` reroutes the audit log so an operator can relocate the tree."""
+    monkeypatch.delenv("CANARY_MCP_AUDIT_PATH", raising=False)
+    monkeypatch.setenv("CANARY_DATA_DIR", str(tmp_path))
+    cfg = load_from_env()
+    assert cfg.audit_path == tmp_path / "audit" / "mcp.jsonl"
+
+
+def test_audit_path_explicit_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """An explicit ``CANARY_MCP_AUDIT_PATH`` overrides the data-dir derivation."""
+    monkeypatch.setenv("CANARY_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CANARY_MCP_AUDIT_PATH", str(tmp_path / "elsewhere.jsonl"))
+    cfg = load_from_env()
+    assert cfg.audit_path == tmp_path / "elsewhere.jsonl"
 
 
 def test_anomalies_dir_falls_back_to_daemon_default(
