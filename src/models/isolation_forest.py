@@ -581,6 +581,18 @@ def _validate_loaded_artifact(
     manifest_modes = tuple(mode.mode for mode in manifest.modes)
     if not manifest_modes:
         raise ValueError("IsolationForest manifest contains no trained modes")
+    # Phase 7.2 introduced per-mode calibrated thresholds. An artifact whose
+    # ``modes`` carry no ``score_threshold`` is pre-7.2 (or training broke
+    # silently). Fusion treats null thresholds as "never fire", so the
+    # detector loads cleanly but is functionally a no-op. Catch that here
+    # rather than discovering it in production.
+    if not any(mode.calibrated for mode in manifest.modes):
+        raise ValueError(
+            "IsolationForest manifest has no calibrated score_threshold on any "
+            "mode — likely a pre-Phase-7.2 artifact, or calibration was disabled "
+            "at training time. Retrain on current code (calibration_holdout_fraction"
+            " > 0 in canary.yaml) before deploying."
+        )
     model_modes = {str(mode) for mode in dict(payload["models"])}
     missing_modes = [mode for mode in manifest_modes if mode not in model_modes]
     if missing_modes:

@@ -36,6 +36,12 @@ class _IFConfig:
     contamination: float = 0.05
     per_mode_contamination: dict[str, float] = field(default_factory=dict)
     random_state: int = 42
+    # Calibration on by default so the load-time guard (which refuses an
+    # artifact with no calibrated mode) doesn't trip the standard tests.
+    # Tests that specifically want pre-7.2 / uncalibrated artifacts set
+    # ``calibration_holdout_fraction=0`` to opt out.
+    calibration_holdout_fraction: float = 0.2
+    target_flag_rate: float = 0.02
 
 
 def _two_mode_frame() -> pd.DataFrame:
@@ -236,6 +242,35 @@ def test_load_rejects_manifest_with_all_nan_feature_health(tmp_path: Path) -> No
         load_isolation_forest_model(artifact)
 
 
+def test_load_rejects_artifact_with_no_calibrated_threshold(tmp_path: Path) -> None:
+    """Pre-Phase-7.2 artifacts (no ``score_threshold``) refuse to load.
+
+    The May 18 IF artifact in production had this exact shape and quietly
+    locked the detector at severity=0 forever. The guard turns the silent
+    no-op into a loud refusal at deploy time.
+    """
+    joblib = pytest.importorskip("joblib")
+    frame = _two_mode_frame()
+    trained = fit_isolation_forest(
+        frame,
+        _IFConfig(n_estimators=20),
+        feature_columns=["obd:RPM", "obd:SPEED"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+    artifact = tmp_path / "isolation_forest.joblib"
+    trained.save(artifact)
+
+    # Strip the calibrated threshold from every mode, mimicking a manifest
+    # written before Phase 7.2 added the field.
+    payload = joblib.load(artifact)
+    for mode in payload["manifest"]["modes"]:
+        mode["score_threshold"] = None
+    joblib.dump(payload, artifact)
+
+    with pytest.raises(ValueError, match="no calibrated score_threshold"):
+        load_isolation_forest_model(artifact)
+
+
 def test_load_rejects_scaler_schema_mismatch(tmp_path: Path) -> None:
     joblib = pytest.importorskip("joblib")
     frame = _two_mode_frame()
@@ -413,9 +448,19 @@ def test_mode_summary_from_dict_is_back_compat_without_calibration() -> None:
 
 
 def test_legacy_config_without_calibration_attrs_disables_it() -> None:
+    @dataclass(frozen=True)
+    class _LegacyConfig:
+        # No calibration_holdout_fraction / target_flag_rate — getattr falls
+        # back to 0.0 in ``_calibration_params``, disabling Phase 7.2 entirely.
+        enabled: bool = True
+        n_estimators: int = 50
+        contamination: float = 0.05
+        per_mode_contamination: dict[str, float] = field(default_factory=dict)
+        random_state: int = 42
+
     trained = fit_isolation_forest(
         _two_mode_frame(),
-        _IFConfig(),  # no calibration_holdout_fraction / target_flag_rate
+        _LegacyConfig(),
         feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"],
         fitted_at="2026-05-12T01:02:03Z",
     )

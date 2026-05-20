@@ -22,6 +22,12 @@ class _IFConfig:
     contamination: float = 0.05
     per_mode_contamination: dict[str, float] = field(default_factory=dict)
     random_state: int = 42
+    # Calibration on so the resulting artifact survives the deploy-time
+    # guard in ``_validate_loaded_artifact``. The replay-script tests use
+    # 40 rows per mode, so the holdout fraction needs to clear
+    # ``_MIN_CALIBRATION_SAMPLES`` (10) — 0.3 → 12 holdout samples.
+    calibration_holdout_fraction: float = 0.3
+    target_flag_rate: float = 0.05
 
 
 def _config() -> CanaryConfig:
