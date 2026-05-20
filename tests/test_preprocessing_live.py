@@ -244,13 +244,31 @@ def test_known_channels_lists_observed_columns(config: CanaryConfig) -> None:
 
 def test_segmenter_runs_when_rpm_speed_throttle_present(config: CanaryConfig) -> None:
     src = LiveFeatureSource(config=config)
-    # Idle: RPM<=900, SPEED<=0 per the example config
+    # warmup vs idle in the example config splits on coolant_temp (cold
+    # idle is its own mode, see canary.example.yaml). Warm coolant + idle
+    # RPM/speed → idle.
     src.observe(TelemetryRecord.obd(1.0, "RPM", 750.0, "rpm"))
     src.observe(TelemetryRecord.obd(1.0, "SPEED", 0.0, "km/h"))
     src.observe(TelemetryRecord.obd(1.0, "THROTTLE_POS", 10.0, "%"))
+    src.observe(TelemetryRecord.obd(1.0, "COOLANT_TEMP", 85.0, "C"))
     row = src.tick(datetime(2026, 5, 13, 12, 0, tzinfo=UTC))
     assert row is not None
     assert row["operating_mode"].iloc[0] == "idle"
+
+
+def test_segmenter_picks_warmup_when_coolant_temp_is_cold(config: CanaryConfig) -> None:
+    """Cold idle (stopped + cold coolant) now lands in its own ``warmup`` bucket
+    rather than the steady-state ``idle`` mode, so per-mode behavior fits
+    don't conflate the two regimes.
+    """
+    src = LiveFeatureSource(config=config)
+    src.observe(TelemetryRecord.obd(1.0, "RPM", 750.0, "rpm"))
+    src.observe(TelemetryRecord.obd(1.0, "SPEED", 0.0, "km/h"))
+    src.observe(TelemetryRecord.obd(1.0, "THROTTLE_POS", 10.0, "%"))
+    src.observe(TelemetryRecord.obd(1.0, "COOLANT_TEMP", 30.0, "C"))
+    row = src.tick(datetime(2026, 5, 13, 12, 0, tzinfo=UTC))
+    assert row is not None
+    assert row["operating_mode"].iloc[0] == "warmup"
 
 
 def test_segmenter_falls_back_to_all_without_signal_columns(config: CanaryConfig) -> None:

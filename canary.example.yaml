@@ -62,9 +62,18 @@ preprocessing:
   resample_hz: 1
   rolling_window_seconds: 30
   operating_modes:
+    # Cold-start: stopped + coolant below thermostat. Fitting behavior
+    # models per-mode lets the warmup surface be its own thing instead of
+    # an outlier the steady-state idle model has to absorb (and fire on).
+    # 70 °C is conservative — the 195 °F (~90 °C) thermostat opens above
+    # that, so anything below is unambiguously warming up.
+    warmup:
+      speed_max: 0
+      coolant_temp_max: 70
     idle:
       rpm_max: 900
       speed_max: 0
+      coolant_temp_min: 70
     city:
       speed_max: 50
     highway:

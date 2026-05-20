@@ -55,11 +55,16 @@ DEFAULT_FEATURE_CACHE_DIR = Path("data/cache/feature_frames")
 #: detector. Per-mode models materialize once OBD data exists.
 ALL_MODE = "all"
 
-#: OBD channels the operating-mode segmenter needs as inputs.
+#: OBD channels the operating-mode segmenter needs as inputs. ``coolant_temp``
+#: is required for the cold-start / warm-idle split (see ``warmup`` /
+#: ``idle`` modes in canary.example.yaml — without it the segmenter can't
+#: tell a cold engine from a warm one and behavior models fit one surface
+#: to both regimes, which is what caused the May 2026 R²=0.41 warmup mess.
 _SEGMENTER_SIGNAL_COLUMNS = {
     "rpm": "obd:RPM",
     "speed": "obd:SPEED",
     "throttle": "obd:THROTTLE_POS",
+    "coolant_temp": "obd:COOLANT_TEMP",
 }
 
 FEATURE_SPEC_VERSION = 1

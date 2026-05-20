@@ -116,6 +116,14 @@ class OperatingModeSpec(_Strict):
     speed_max: float | None = None
     throttle_min: float | None = None
     throttle_max: float | None = None
+    #: Coolant-temperature gates (°C). Lets the segmenter pull "cold engine
+    #: warming up" out of the same RPM/speed band as warm steady-state idle —
+    #: without this the behavior models fit one surface to both regimes and
+    #: fire on every cold-start cycle. See ``warmup`` in
+    #: ``canary.example.yaml`` for a representative threshold; the gating
+    #: signal is ``obd:COOLANT_TEMP`` (degC).
+    coolant_temp_min: float | None = None
+    coolant_temp_max: float | None = None
 
 
 class PreprocessingConfig(_Strict):

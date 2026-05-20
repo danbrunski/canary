@@ -74,6 +74,12 @@ def _two_mode_resampled(seed: int = 0) -> pd.DataFrame:
                     rng.normal(32.0, 2.5, size=n),
                 ]
             ),
+            # Warm coolant for both halves so the warmup/idle split in the
+            # example config resolves to idle (warmup requires
+            # coolant_temp <= 70). Synthetic test data isn't modeling cold
+            # starts; this just keeps the test's mode count stable across
+            # the warmup-mode refactor.
+            "obd:COOLANT_TEMP": np.full(n * 2, 85.0),
         }
     )
 

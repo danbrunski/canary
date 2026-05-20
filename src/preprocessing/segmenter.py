@@ -16,6 +16,7 @@ DEFAULT_SIGNAL_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "rpm": ("obd:RPM", "obd:rpm"),
     "speed": ("obd:SPEED", "obd:speed"),
     "throttle": ("obd:THROTTLE_POS", "obd:throttle_pos"),
+    "coolant_temp": ("obd:COOLANT_TEMP", "obd:coolant_temp"),
 }
 
 
@@ -106,6 +107,8 @@ def _required_signals(spec: OperatingModeSpec) -> list[str]:
         signals.append("speed")
     if spec.throttle_min is not None or spec.throttle_max is not None:
         signals.append("throttle")
+    if spec.coolant_temp_min is not None or spec.coolant_temp_max is not None:
+        signals.append("coolant_temp")
     return signals
 
 
@@ -135,4 +138,6 @@ def _bounds(spec: OperatingModeSpec, signal: str) -> tuple[float | None, float |
         return spec.speed_min, spec.speed_max
     if signal == "throttle":
         return spec.throttle_min, spec.throttle_max
+    if signal == "coolant_temp":
+        return spec.coolant_temp_min, spec.coolant_temp_max
     raise ValueError(f"unknown operating-mode signal {signal!r}")

@@ -211,6 +211,9 @@ def test_segment_or_constant_uses_segmenter_when_obd_present(tmp_path: Path):
             "obd:RPM": [800.0, 850.0, 900.0],
             "obd:SPEED": [0.0, 0.0, 0.0],
             "obd:THROTTLE_POS": [10.0, 12.0, 11.0],
+            # Warm coolant so the example config's idle/warmup split resolves
+            # to idle (warmup wants coolant_temp_max=70).
+            "obd:COOLANT_TEMP": [85.0, 85.0, 85.0],
         }
     )
     out = _segment_or_constant(resampled, _config())
@@ -345,7 +348,7 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
         "preprocessing": {
             "resample_hz": 1,
             "rolling_window_seconds": 30,
-            "operating_modes": ["city", "highway", "idle", "wot"],
+            "operating_modes": ["city", "highway", "idle", "warmup", "wot"],
         },
     }
 

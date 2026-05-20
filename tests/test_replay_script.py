@@ -52,6 +52,11 @@ def _write_obd_session(root: Path, name: str = "2026-05-11T120000", n: int = 80)
                 TelemetryRecord.obd(t, "RPM", rpm, "rpm"),
                 TelemetryRecord.obd(t, "SPEED", speed, "km/h"),
                 TelemetryRecord.obd(t, "THROTTLE_POS", throttle, "%"),
+                # Warm coolant so the idle/warmup split in canary.example.yaml
+                # resolves to ``idle`` for the stopped half rather than
+                # ``unknown``. The synthetic test data isn't trying to
+                # represent a cold start.
+                TelemetryRecord.obd(t, "COOLANT_TEMP", 85.0, "C"),
             ]
         )
     write_records_to_parquet(records, session, max_rows=10_000)
@@ -64,19 +69,23 @@ def test_replay_sessions_builds_preprocessing_report(tmp_path: Path) -> None:
     result = replay_sessions([session], _config())
     report = result.report
 
-    assert report["rows"]["long"] == 240
+    # 4 OBD channels × 80 ticks each (RPM/SPEED/THROTTLE_POS/COOLANT_TEMP).
+    # COOLANT_TEMP is now required by ``_SEGMENTER_SIGNAL_COLUMNS`` so the
+    # synthetic session must include it for the idle/warmup split to resolve.
+    assert report["rows"]["long"] == 320
     assert report["rows"]["wide"] == 80
     assert report["rows"]["resampled"] == 80
     assert report["rows"]["features"] == 80
-    assert report["sources"] == {"obd": 240}
-    assert report["channels"]["by_source"] == {"obd": 3}
+    assert report["sources"] == {"obd": 320}
+    assert report["channels"]["by_source"] == {"obd": 4}
     assert report["numeric_value_columns"] == [
+        "obd:COOLANT_TEMP",
         "obd:RPM",
         "obd:SPEED",
         "obd:THROTTLE_POS",
     ]
-    assert report["numeric_value_column_count"] == 3
-    assert report["rolling_feature_column_count"] == 9
+    assert report["numeric_value_column_count"] == 4
+    assert report["rolling_feature_column_count"] == 12
     assert report["mode_counts"] == {"idle": 40, "city": 40}
     assert report["complete_model_input_rows"] > 0
     assert report["scoring"] is None
@@ -114,7 +123,7 @@ def test_replay_main_prints_json_report(tmp_path: Path, capsys) -> None:
     assert rc == 0
     out = capsys.readouterr().out
     assert '"rows"' in out
-    assert '"numeric_value_column_count": 3' in out
+    assert '"numeric_value_column_count": 4' in out
 
 
 def test_replay_main_returns_error_for_missing_session(tmp_path: Path, capsys) -> None:
