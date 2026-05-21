@@ -70,8 +70,8 @@ def test_user_extensible_operating_modes(tmp_path: Path):
     custom = tmp_path / "custom.yaml"
     custom.write_text(
         EXAMPLE_YAML.read_text().replace(
-            "    wot:\n      throttle_min: 80",
-            "    wot:\n      throttle_min: 80\n    offroad:\n      speed_max: 30\n",
+            "    highway:\n      speed_min: 80",
+            "    highway:\n      speed_min: 80\n    offroad:\n      speed_max: 30\n",
         )
     )
     config = CanaryConfig.from_yaml(custom)

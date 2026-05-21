@@ -78,8 +78,12 @@ preprocessing:
       speed_max: 50
     highway:
       speed_min: 80
-    wot:
-      throttle_min: 80
+    # Wide-open-throttle is a transient *event* (see ``wot_run`` in
+    # ``src/analysis/events/``) not an operating mode. As a mode it
+    # would steal hundreds of rows from city/highway into a per-mode
+    # IF model that's data-starved — same data-sparsity failure mode
+    # the warmup work just fixed. Keep WOT as an event marker; let
+    # high-throttle moments score against the city / highway models.
 
 models:
   isolation_forest:
