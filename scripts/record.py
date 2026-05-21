@@ -52,6 +52,29 @@ from src.storage.monitor import free_space_mb
 log = logging.getLogger(__name__)
 
 
+def _resolve_did_names_to_hex(dids: Sequence[str]) -> tuple[str, ...]:
+    """Translate symbolic DID names (``ECM_INJECTOR_PW_B1``) to 4-char hex.
+
+    Names not found in ``data/dids.yaml`` and inputs that already look like
+    hex pass through unchanged. The downstream validator catches any
+    leftover garbage (typos that match neither a name nor a valid hex).
+    Returns a tuple to match the ``ObdSpec.dids`` field type.
+    """
+    from pathlib import Path
+
+    from src.decode.dids import load_did_map
+
+    dids_path = Path("data/dids.yaml")
+    if not dids_path.exists():
+        return tuple(dids)
+    try:
+        did_map = load_did_map(dids_path)
+    except Exception:  # noqa: BLE001 — let the validator catch the bad input
+        return tuple(dids)
+    by_name = {entry.name: f"{entry.did:04X}" for entry in did_map.dids}
+    return tuple(by_name.get(d, d) for d in dids)
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="record",
@@ -355,6 +378,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if args.obd_port is None:
                     args.obd_port = config.hardware.elm327_port
                 resolve_pids(pids)  # fail fast on a typo, before the CAN capture starts
+                # DIDs may be given as 4-char hex (legacy) or as symbolic
+                # names from data/dids.yaml (the canary.example.yaml default,
+                # e.g. ECM_INJECTOR_PW_B1). Resolve names to hex so the
+                # ELM327 path accepts the same config the Canable path uses.
+                dids = _resolve_did_names_to_hex(dids)
                 for did in dids:
                     if len(did) != 4 or any(c not in "0123456789abcdefABCDEF" for c in did):
                         raise ValueError(f"--obd-dids: {did!r} is not a 4-character hex DID")

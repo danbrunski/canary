@@ -38,9 +38,17 @@ collection:
   # `auto` walks the ECU's supported Mode-01 PID bitmask and polls every PID
   # CANary has a decoder for. Add explicit names/hex PIDs to force extras.
   obd_pids: [auto]
-  # Known Mode-22 DIDs to poll as DID_<hex> readings; exploratory sweeps still
-  # use tools/scan_constant_dids.py until that tool is moved to Canable-native.
-  obd_dids: []
+  # Known Mode-22 DIDs to poll as ``did:<NAME>`` readings, characterized in
+  # data/dids.yaml. These four unlock the high-value fuel/air behavior
+  # surfaces (injector_pw_vs_rpm_load, afr_bank_balance_vs_rpm,
+  # afr_voltage_vs_rpm_load, tps_voltage_per_pct) — recipes that target
+  # ``did:*`` outputs silently skip if the DID isn't being polled.
+  # Exploratory sweeps still use tools/scan_constant_dids.py.
+  obd_dids:
+    - ECM_INJECTOR_PW_B1       # fuel-delivery commanded per intake stroke
+    - ECM_AF_SENSOR_V_B1       # wideband AFR sensor V, bank 1 (pre-cat)
+    - ECM_AF_SENSOR_V_B2       # wideband AFR sensor V, bank 2 (pre-cat)
+    - ECM_THROTTLE_POS_SENSOR_1  # raw TPS voltage, for sensor-drift detection
   obd_did_request_id: 0x7E0
   obd_request_timeout_seconds: 1.0
   obd_poll_rate_hz: 1

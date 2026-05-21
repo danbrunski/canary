@@ -57,17 +57,29 @@ def test_default_recipes_have_unique_names() -> None:
     assert len(names) == len(set(names)), f"duplicate recipe names: {names}"
 
 
-def test_default_recipes_only_use_obd_columns() -> None:
-    """Default recipes should not require decoded-CAN or DID columns — those
-    surfaces wait on Mode 22 DID identification (4.E.4)."""
+def test_default_recipe_axes_are_obd_columns() -> None:
+    """Recipe AXES must be obd:* — RPM / ENGINE_LOAD / RUN_TIME / THROTTLE_POS
+    are the stable mode inputs always present when OBD is polling.
+
+    OUTPUTS may be obd:* (original surfaces), derived:* (computed by
+    ``compute_anomaly_signals`` — air mass per cycle, bank balances, TPS
+    ratio), or did:* (Mode 22 DID surfaces — injector PW, AFR voltage —
+    which skip cleanly until the DIDs are polled). The output prefix is no
+    longer constrained to obd:* now that the fuel/air surfaces (Phase
+    2026-05) are in the catalog.
+    """
+    allowed_output_prefixes = ("obd:", "derived:", "did:")
     for recipe in default_recipes():
-        cols = (
-            [recipe.x_column, recipe.output]
+        axes = (
+            [recipe.x_column]
             if isinstance(recipe, Surface1DRecipe)
-            else [recipe.x_column, recipe.y_column, recipe.output]
+            else [recipe.x_column, recipe.y_column]
         )
-        for col in cols:
-            assert col.startswith("obd:"), f"{recipe.name} requires {col}; should use obd:* only"
+        for axis in axes:
+            assert axis.startswith("obd:"), f"{recipe.name} axis {axis} must be obd:*"
+        assert recipe.output.startswith(allowed_output_prefixes), (
+            f"{recipe.name} output {recipe.output} has an unexpected prefix"
+        )
 
 
 # ---------------------------------------------------------------------------

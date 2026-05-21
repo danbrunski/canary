@@ -206,6 +206,180 @@ def default_recipes() -> list[Recipe]:
                 "drift shift cells off zero."
             ),
         ),
+        # ----- Phase 1: derived-signal surfaces (no DIDs required) --------
+        Surface2DRecipe(
+            name="air_mass_per_cycle_vs_rpm_load",
+            output="derived:AIR_MASS_PER_CYCLE",
+            output_unit="g/cycle",
+            x_column="obd:RPM",
+            y_column="obd:ENGINE_LOAD",
+            x_axis_name="rpm",
+            y_axis_name="engine_load",
+            x_axis_unit="rpm",
+            y_axis_unit="%",
+            min_samples=500,
+            deviation=DeviationConfig(kind="relative", warning_band=3.0, critical_band=6.0),
+            notes=(
+                "Volumetric efficiency proxy — MAF translated to grams per "
+                "four-stroke cycle. Detects intake leak (low VE), exhaust "
+                "restriction (low VE at high RPM), MAF drift (whole-surface "
+                "shift). Fed by ``compute_anomaly_signals``."
+            ),
+        ),
+        Surface1DRecipe(
+            name="stft_bank_balance_vs_rpm",
+            output="derived:STFT_BANK_BALANCE",
+            output_unit="%",
+            x_column="obd:RPM",
+            x_axis_name="rpm",
+            x_axis_unit="rpm",
+            fit_method="poly",
+            degree=1,  # Expected ~constant zero across RPM; linear fit highlights slope drift
+            min_samples=300,
+            deviation=DeviationConfig(kind="absolute", warning_band=3.0, critical_band=6.0),
+            notes=(
+                "STFT delta between banks. Expected ~0 everywhere; a non-zero "
+                "intercept means bank-specific fuel bias. Fed by "
+                "``compute_anomaly_signals`` from STFT_B1 - STFT_B2."
+            ),
+        ),
+        Surface1DRecipe(
+            name="ltft_bank_balance_vs_rpm",
+            output="derived:LTFT_BANK_BALANCE",
+            output_unit="%",
+            x_column="obd:RPM",
+            x_axis_name="rpm",
+            x_axis_unit="rpm",
+            fit_method="poly",
+            degree=1,
+            min_samples=300,
+            deviation=DeviationConfig(kind="absolute", warning_band=4.0, critical_band=8.0),
+            notes=(
+                "LTFT delta between banks — the slow / drift channel "
+                "(STFT is the fast one). Persistent non-zero indicates "
+                "long-term bank asymmetry: gradual injector wear, "
+                "exhaust leak, vacuum leak."
+            ),
+        ),
+        Surface1DRecipe(
+            name="cat_warmup",
+            output="obd:CATALYST_TEMP_B1S1",
+            output_unit="degC",
+            x_column="obd:RUN_TIME",
+            x_axis_name="time_since_start",
+            x_axis_unit="s",
+            # Cat light-off mirrors coolant warmup — gate on warmup + cold_start
+            # for the same reasons (the surface only describes cold-start
+            # transients; warm-restart and steady-state shouldn't fit it).
+            operating_mode="warmup",
+            require_session_events=("cold_start",),
+            fit_method="binned_lookup",
+            n_knots=12,
+            min_samples=120,
+            deviation=DeviationConfig(kind="absolute", warning_band=30.0, critical_band=80.0),
+            notes=(
+                "Catalyst light-off curve. Detects cat aging (slower "
+                "light-off), exhaust restriction (faster temp rise), "
+                "secondary air failure. Sister surface to coolant_warmup."
+            ),
+        ),
+        # ----- Phase 2: DID-dependent surfaces (skip until DIDs are polled) --
+        Surface2DRecipe(
+            name="injector_pw_vs_rpm_load",
+            output="did:ECM_INJECTOR_PW_B1",
+            output_unit="raw",  # scale not yet locked; raw counts are stable for anomaly detection
+            x_column="obd:RPM",
+            y_column="obd:ENGINE_LOAD",
+            x_axis_name="rpm",
+            y_axis_name="engine_load",
+            x_axis_unit="rpm",
+            y_axis_unit="%",
+            min_samples=500,
+            deviation=DeviationConfig(kind="relative", warning_band=3.0, critical_band=6.0),
+            notes=(
+                "Direct fuel-delivery surface. Detects injector wear (PW "
+                "creeps up over months for same load), fuel pressure drop "
+                "(same signature), MAF drift (PW shifts because ECM thinks "
+                "less air than reality). Needs ``ECM_INJECTOR_PW_B1`` in "
+                "``obd_dids``."
+            ),
+        ),
+        Surface1DRecipe(
+            name="injector_pw_warmup",
+            output="did:ECM_INJECTOR_PW_B1",
+            output_unit="raw",
+            x_column="obd:RUN_TIME",
+            x_axis_name="time_since_start",
+            x_axis_unit="s",
+            operating_mode="warmup",
+            require_session_events=("cold_start",),
+            fit_method="binned_lookup",
+            n_knots=12,
+            min_samples=120,
+            deviation=DeviationConfig(kind="relative", warning_band=10.0, critical_band=25.0),
+            notes=(
+                "Cold-start enrichment curve. PW is elevated during warmup "
+                "(typically 2-3× nominal) and decays smoothly as coolant "
+                "rises. Detects CTS sensor drift (wrong enrichment), "
+                "stuck-open injector, prime-pulse failure."
+            ),
+        ),
+        Surface1DRecipe(
+            name="afr_bank_balance_vs_rpm",
+            output="derived:AFR_BANK_BALANCE",
+            output_unit="V",
+            x_column="obd:RPM",
+            x_axis_name="rpm",
+            x_axis_unit="rpm",
+            fit_method="poly",
+            degree=1,
+            min_samples=300,
+            deviation=DeviationConfig(kind="absolute", warning_band=0.05, critical_band=0.15),
+            notes=(
+                "Wideband AFR sensor voltage delta between banks. Expected "
+                "~0V; non-zero indicates bank-specific vacuum leak, "
+                "single-injector wear, exhaust leak ahead of one sensor, "
+                "single coil pack misfire. Sharpest bank-asymmetry detector "
+                "available once AF sensor DIDs are polling."
+            ),
+        ),
+        Surface2DRecipe(
+            name="afr_voltage_vs_rpm_load",
+            output="did:ECM_AF_SENSOR_V_B1",
+            output_unit="V",
+            x_column="obd:RPM",
+            y_column="obd:ENGINE_LOAD",
+            x_axis_name="rpm",
+            y_axis_name="engine_load",
+            x_axis_unit="rpm",
+            y_axis_unit="%",
+            min_samples=500,
+            deviation=DeviationConfig(kind="absolute", warning_band=0.10, critical_band=0.25),
+            notes=(
+                "Wideband AFR sensor voltage map. ~2.15V at stoich (closed "
+                "loop), richer (lower V) at WOT, leaner (higher V) under "
+                "decel-fuel-cut. Detects O2 sensor aging (whole-surface "
+                "drift), systemic rich/lean (offset), closed-loop "
+                "oscillation amplitude drift."
+            ),
+        ),
+        Surface1DRecipe(
+            name="tps_voltage_per_pct",
+            output="derived:TPS_VOLTAGE_PER_PCT",
+            output_unit="V/%",
+            x_column="obd:THROTTLE_POS",
+            x_axis_name="throttle_pct",
+            x_axis_unit="%",
+            fit_method="poly",
+            degree=1,
+            min_samples=300,
+            deviation=DeviationConfig(kind="relative", warning_band=5.0, critical_band=12.0),
+            notes=(
+                "Raw TPS voltage vs ECM-calculated throttle percent. "
+                "Expected to be near-linear / constant ratio. Drift detects "
+                "TPS calibration shift before any DTC fires."
+            ),
+        ),
     ]
 
 

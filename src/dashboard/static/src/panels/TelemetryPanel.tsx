@@ -36,6 +36,14 @@ const DEFAULT_PIN_CANDIDATES = [
   "obd:MAF",
   "obd:THROTTLE_POS",
   "obd:CONTROL_MODULE_VOLTAGE",
+  // Nissan Mode-22 DIDs (characterized in data/dids.yaml). Pinned so a
+  // fresh dashboard load shows the values whenever the operator turns
+  // on DID polling — keeps them visible alongside the standard PIDs
+  // instead of buried in the alphabetical full list.
+  "did:ECM_INJECTOR_PW_B1",
+  "did:ECM_AF_SENSOR_V_B1",
+  "did:ECM_AF_SENSOR_V_B2",
+  "did:ECM_THROTTLE_POS_SENSOR_1",
 ];
 
 const PIN_STORAGE_KEY = "canary.drive.pinned";

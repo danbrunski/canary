@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.analysis.derived import compute_anomaly_signals
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import append_deviation_columns
 from src.decode.behavior_models import (
@@ -227,6 +228,11 @@ def featurize_wide_frame(
     the batch path always did — the two are value-identical.
     """
     framed = segment_or_constant(wide, config)
+    # Derived anomaly signals (air mass per cycle, bank-balance asymmetries,
+    # AFR/TPS cross-checks) appended BEFORE behavior deviations + feature
+    # extraction so recipes can target them as outputs and the rolling
+    # feature builder picks up their derivatives.
+    framed = compute_anomaly_signals(framed)
     if behavior_models is not None and behavior_models.models:
         framed = append_deviation_columns(framed, behavior_models)
     cfg = feature_config or FeatureConfig(

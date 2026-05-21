@@ -35,6 +35,7 @@ __all__ = [
     "FUEL_PROPERTIES",
     "FuelProperties",
     "TripSummary",
+    "compute_anomaly_signals",
     "compute_derived_channels",
     "fuel_properties",
     "summarize_trip",
@@ -231,6 +232,89 @@ def compute_derived_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> 
             spinning = omega > 0
             torque[spinning] = power_kw[spinning] * 1000.0 / omega[spinning]
             out["derived:ESTIMATED_TORQUE_NM"] = torque
+    return out
+
+
+def compute_anomaly_signals(wide: pd.DataFrame) -> pd.DataFrame:
+    """Append ``derived:<NAME>`` columns useful for anomaly detection.
+
+    Sister to :func:`compute_derived_channels` (which computes trip-meter
+    style outputs like FUEL_USED_L for the dashboard). This function adds
+    the *physical-residual* signals the behavior / IF / LSTM detectors
+    consume: bank-balance asymmetries, air mass per cycle, AFR errors,
+    TPS sensor cross-check. Each output is gated on its inputs being
+    present so a session without OBD or without DID polling skips
+    cleanly rather than NaN-filling.
+
+    Outputs (added when inputs are present):
+
+    * ``derived:AIR_MASS_PER_CYCLE`` — MAF translated to grams of air
+      per engine cycle (4-stroke: one cycle = 2 revs of crank, all
+      cylinders combined). Stable in a healthy engine for a given
+      RPM/load operating point. Inputs: ``obd:MAF``, ``obd:RPM``.
+
+    * ``derived:STFT_BANK_BALANCE`` / ``derived:LTFT_BANK_BALANCE`` —
+      short / long fuel trim difference between banks. Expected ~0
+      everywhere; nonzero indicates bank-specific fuel or air issue.
+      Inputs: ``obd:SHORT_FUEL_TRIM_1/2``, ``obd:LONG_FUEL_TRIM_1/2``.
+
+    * ``derived:AFR_BANK_BALANCE`` — wideband AFR sensor voltage
+      difference between banks. Once the AF-sensor DIDs are polling
+      (see ``obd_dids`` in ``canary.example.yaml``), this becomes the
+      sharpest bank-asymmetry detector available. Inputs:
+      ``did:ECM_AF_SENSOR_V_B1``, ``did:ECM_AF_SENSOR_V_B2``.
+
+    * ``derived:TPS_VOLTAGE_PER_PCT`` — raw TPS voltage divided by the
+      ECM-calculated throttle percent. Expected to be linear (constant
+      ratio) within the operating range. Drift means the calibration
+      curve is shifting before any DTC. Inputs:
+      ``did:ECM_THROTTLE_POS_SENSOR_1``, ``obd:THROTTLE_POS``.
+
+    The function is pure; caller is responsible for ordering it
+    correctly in the feature pipeline (it expects mode segmentation
+    and any other prior steps to have run first if they care about
+    `operating_mode`).
+    """
+    if wide.empty:
+        return wide.copy()
+    out = wide.copy()
+
+    # Air mass per cycle (g/cycle). Two-rev-per-cycle 4-stroke:
+    # mass_per_cycle = MAF[g/s] * 120 / RPM. The factor 120 = 60[s/min] * 2[revs/cycle].
+    maf = _series(out, "obd:MAF")
+    rpm = _series(out, "obd:RPM", "decoded:ECM_RPM")
+    if maf is not None and rpm is not None:
+        rpm_safe = rpm.where(rpm > 0)
+        out["derived:AIR_MASS_PER_CYCLE"] = (maf * 120.0 / rpm_safe).astype(float)
+
+    # Per-bank fuel trim asymmetry. Both STFT and LTFT versions, since
+    # they characterize fast (closed-loop) and slow (drift) bias paths.
+    stft_b1 = _series(out, "obd:SHORT_FUEL_TRIM_1")
+    stft_b2 = _series(out, "obd:SHORT_FUEL_TRIM_2")
+    if stft_b1 is not None and stft_b2 is not None:
+        out["derived:STFT_BANK_BALANCE"] = (stft_b1 - stft_b2).astype(float)
+    ltft_b1 = _series(out, "obd:LONG_FUEL_TRIM_1")
+    ltft_b2 = _series(out, "obd:LONG_FUEL_TRIM_2")
+    if ltft_b1 is not None and ltft_b2 is not None:
+        out["derived:LTFT_BANK_BALANCE"] = (ltft_b1 - ltft_b2).astype(float)
+
+    # Wideband AFR voltage asymmetry (DID-dependent).
+    afr_b1 = _series(out, "did:ECM_AF_SENSOR_V_B1")
+    afr_b2 = _series(out, "did:ECM_AF_SENSOR_V_B2")
+    if afr_b1 is not None and afr_b2 is not None:
+        out["derived:AFR_BANK_BALANCE"] = (afr_b1 - afr_b2).astype(float)
+
+    # TPS voltage vs calculated throttle %. Inputs span different units
+    # (V vs %) so the ratio is the useful invariant — a TPS that's drifted
+    # to a different voltage range produces a different ratio.
+    tps_v = _series(out, "did:ECM_THROTTLE_POS_SENSOR_1")
+    tps_pct = _series(out, "obd:THROTTLE_POS")
+    if tps_v is not None and tps_pct is not None:
+        # Guard against div-by-zero at closed throttle (pct = 0); the metric
+        # is meaningful only when the pedal is being pressed.
+        pct_safe = tps_pct.where(tps_pct > 1.0)
+        out["derived:TPS_VOLTAGE_PER_PCT"] = (tps_v / pct_safe).astype(float)
+
     return out
 
 
