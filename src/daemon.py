@@ -74,9 +74,11 @@ from src.decode.behavior_models import (
 )
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
+from src.decode.dids import load_did_map
 from src.models.health import HealthMonitor
 from src.models.manager import ModelManager, manager_for_artifact
 from src.preprocessing.feature_pipeline import (
+    DEFAULT_DIDS_PATH,
     FeatureSpecReconciliation,
     reconcile_feature_frame_to_spec,
 )
@@ -996,11 +998,16 @@ def build_live_feature_source(
     # (decoded:*) AND the DBC files (dbc:*). The live source must mirror both
     # or every inference tick fails on the model's required dbc:* columns.
     dbc_database = load_dbc_dir(DEFAULT_DBC_DIR)
+    # Mode-22 DID map — lets the live source decode raw DID_<hex> poll
+    # responses into named did:<NAME> values, matching the offline
+    # build_feature_frame path so did:* feature columns line up.
+    did_map = load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None
     return LiveFeatureSource(
         config=components.config,
         bindings=bindings,
         behavior_models=behavior_models,
         dbc_database=dbc_database,
+        did_map=did_map,
     )
 
 

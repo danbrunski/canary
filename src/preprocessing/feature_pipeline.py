@@ -32,6 +32,7 @@ from src.decode.behavior_models import (
 )
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, decode_can_rows_dbc, load_dbc_dir
+from src.decode.dids import decode_did_rows, load_did_map
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.features import FeatureConfig, compute_features
 from src.preprocessing.loader import PARQUET_PATTERN, read_session, to_wide
@@ -47,6 +48,10 @@ log = logging.getLogger(__name__)
 
 #: Default location of the hand-edited CAN signal bindings file.
 DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
+
+#: Default location of the Mode-22 DID map (data/dids.yaml). Used to decode
+#: raw ``DID_<hex>`` poll readings into named ``did:<NAME>`` signals.
+DEFAULT_DIDS_PATH = Path("data/dids.yaml")
 
 #: Default retrain-time cache for model-ready feature frames.
 DEFAULT_FEATURE_CACHE_DIR = Path("data/cache/feature_frames")
@@ -133,6 +138,7 @@ def build_feature_frame(
         load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
     )
     dbc_database = load_dbc_dir(dbc_dir)
+    did_map = load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None
 
     # Decode → pivot → resample one session at a time. resample_wide and
     # compute_features already group by session (no cross-session bleed), so
@@ -149,6 +155,12 @@ def build_feature_frame(
                 long = decode_can_rows(long, bindings)
             if dbc_database is not None:
                 long = decode_can_rows_dbc(long, dbc_database)
+            if did_map is not None:
+                # Decode raw Mode-22 ``DID_<hex>`` poll rows into named,
+                # scaled ``did:<NAME>`` signals so the fuel/air recipes +
+                # IF/LSTM see them (otherwise the raw hex-string readings
+                # are non-numeric and dropped by to_wide).
+                long = decode_did_rows(long, did_map)
             # Raw CAN frames are ~98% of the rows and carry no numeric value
             # (the bytes live in `payload`); they exist only to be decoded into
             # the decoded:* / dbc:* rows appended above. Once decoded they're
@@ -277,6 +289,9 @@ def _feature_frame_cache_metadata(
         "bindings": _file_cache_entry(bindings_path),
         "behavior_models": _file_cache_entry(behavior_models_path),
         "dbc": _directory_cache_entry(dbc_dir, pattern="*.dbc"),
+        # Hash the DID map so editing dids.yaml (new DID, fixed scale)
+        # invalidates cached frames that decoded did:* columns.
+        "dids": _file_cache_entry(DEFAULT_DIDS_PATH),
     }
     return {**payload, "cache_key": _stable_hash(payload)}
 

@@ -47,6 +47,13 @@ from src.can_ids import parse_can_channel
 from src.config import CanaryConfig
 from src.decode.behavior_models import BehaviorModels
 from src.decode.bindings import Bindings, Signal
+from src.decode.dids import (
+    DID_SOURCE,
+    DidEntry,
+    DidMap,
+    apply_scaling,
+    decode_did_raw,
+)
 from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.features import FeatureConfig
 from src.telemetry import (
@@ -75,12 +82,14 @@ class LiveFeatureSource:
     bindings: Bindings | None = None
     behavior_models: BehaviorModels | None = None
     dbc_database: Any | None = None
+    did_map: DidMap | None = None
     session: str = "live"
 
     _current_values: dict[str, float] = field(default_factory=dict)
     _buffer: deque[dict[str, Any]] = field(init=False)
     _bindings_by_id: dict[int, list[Signal]] = field(init=False)
     _dbc_message_by_id: dict[int, Any] = field(init=False)
+    _did_by_hex: dict[str, DidEntry] = field(init=False)
     _feature_config: FeatureConfig = field(init=False)
     _max_rows: int = field(init=False)
 
@@ -113,6 +122,12 @@ class LiveFeatureSource:
         if self.dbc_database is not None:
             for msg in self.dbc_database.messages:
                 self._dbc_message_by_id[msg.frame_id] = msg
+        # DID map indexed by 4-char hex so a raw "DID_1208" reading resolves
+        # to its DidEntry in O(1).
+        self._did_by_hex = {}
+        if self.did_map is not None:
+            for entry in self.did_map.dids:
+                self._did_by_hex[f"{entry.did:04X}"] = entry
 
     # ------------------------------------------------------------------
     # observe — update the current-value dict
@@ -124,6 +139,14 @@ class LiveFeatureSource:
         Side-effects only. Emitting a wide row is a separate tick.
         """
         if record.source == "obd":
+            # Raw Mode-22 DID poll responses arrive as obd-source records with
+            # channel "DID_<hex>" and a hex-string payload value. Decode them
+            # into named ``did:<NAME>`` numerics so live inference + the gauge
+            # see the engineering value, not an undecodable hex string. Mirror
+            # of decode_did_rows on the offline path.
+            if self._did_by_hex and record.channel.startswith("DID_"):
+                self._apply_did_decode(record)
+                return
             value = _to_float(record.value)
             if value is not None:
                 self._current_values[channel_key(OBD_SOURCE, record.channel)] = value
@@ -210,6 +233,32 @@ class LiveFeatureSource:
             except (TypeError, ValueError):
                 continue  # named choice / enum signals — skip in numeric path
             self._current_values[channel_key(DBC_SOURCE, signal_name)] = numeric
+
+    def _apply_did_decode(self, record: TelemetryRecord) -> None:
+        """Mirror ``decode_did_rows``: decode a raw ``DID_<hex>`` reading into
+        a ``did:<NAME>`` current value.
+
+        The reading's value is the Mode-22 response payload as a hex string.
+        Decode it against the DID map, apply scale/offset (or fall back to
+        the raw integer when the scale isn't pinned — same policy as the
+        offline path), and store under ``did:<NAME>``.
+        """
+        hex_id = record.channel[len("DID_") :].upper()
+        entry = self._did_by_hex.get(hex_id)
+        if entry is None:
+            return
+        if not isinstance(record.value, str) or not record.value:
+            return
+        try:
+            payload = bytes.fromhex(record.value)
+        except ValueError:
+            return
+        raw_int = decode_did_raw(entry, payload)
+        if raw_int is None:
+            return
+        scaled = apply_scaling(entry, raw_int)
+        numeric = float(scaled) if scaled is not None else float(raw_int)
+        self._current_values[channel_key(DID_SOURCE, entry.name)] = numeric
 
     # ------------------------------------------------------------------
     # tick — emit one feature row
