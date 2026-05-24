@@ -1047,6 +1047,143 @@ so a fail keeps the LSTM as default at low cost.
 
 ---
 
+## Phase 10 — In-Vehicle Power & Graceful Auto-Shutdown
+
+Goal: the Pi rides out cranking voltage-sag and under-voltage, then powers
+down *cleanly* ~30 s after the truck is switched off — with **no new wires
+tapped for an ignition signal** and **zero risk of self-powering-off on a
+benchtop**. Hardware runway comes from a Geekworm X1202 UPS HAT (4×18650);
+the *when-to-shut-down* decision is derived entirely from the CAN/OBD bus
+via the existing `vehicle_state` classifier. Motivated by the 2026-05-24
+under-voltage incident (see `power_status()` / `vcgencmd get_throttled` in
+`src/models/health.py`); this is the software realisation of the
+graceful-shutdown half of 5.21 and supersedes that task's
+buck-converter-from-ACC approach.
+
+**Power topology (why CAN, not a power-loss pin).** The UPS is fed from
+*constant* 12 V (battery), not a switched/ACC circuit. So the truck's key
+state never reaches the Pi as a power event — which is precisely why the
+X1202's own power-loss GPIO can't be the key signal, and why we read key
+status off the bus instead. The UPS battery rides cranking sag and supplies
+the ~30 s post-key-off shutdown window; it is also the safety net if the
+truck battery is disconnected entirely.
+
+**Shutdown predicate (v1).** Reuse `classify_vehicle_state`
+(`src/dashboard/status.py`) — don't invent a second rule table. Map its
+states to power intent:
+
+- `engine_running` / `ignition_only` → **key-on / alive**: hold the Pi up,
+  and **arm** the watchdog (proof we are in a live vehicle this
+  power-cycle). Covers KOEO, cranking, running, and "engine off but key
+  still on" (OBD answers, RPM 0 → `ignition_only`).
+- `engine_off` (CAN fresh, OBD stale) → on-bus-but-ECM-silent: hold up,
+  logged as a "pending power-down" precursor (do **not** count toward the
+  countdown in v1 — see open questions).
+- `no_data` (neither bus fresh) → if **armed**, start the grace countdown;
+  if never armed (the bench case), do nothing.
+- `replay` / `unknown` → no-op; never shut down.
+
+Trigger: `armed AND vehicle_state == no_data continuously for
+shutdown_grace_seconds (~30 s)`. Returning to any key-on state cancels a
+pending countdown (operator turned the key back on).
+
+**Benchtop-safety invariant (the headline requirement).** The watchdog
+*latches armed only after observing a live bus* (a key-on state) since
+boot. A Pi that boots and never sees the bus sits in its *initial*
+`no_data`, which is not a transition-from-live, so it never arms and never
+auto-shuts — manual power-off only. This is what makes "running on a
+desktop, never read CAN to begin with" safe by construction, independent of
+the config default.
+
+**Cranking robustness.** Never act on a single sample; the grace window
+absorbs momentary CAN dropouts during crank, and the UPS handles the
+voltage sag in hardware. The watchdog re-arms when the bus returns.
+
+- [ ] **10.1 — Key-state → power-intent state machine (P1).** A pure,
+  testable module (e.g. `src/power/shutdown_watchdog.py`) consuming the
+  existing `VehicleState` and emitting a decision via
+  `DISARMED → ARMED → PENDING_SHUTDOWN → (cancel→ARMED | SHUTTING_DOWN)`.
+  Encodes the v1 predicate and the latch-on-first-contact arm rule above.
+  No I/O, no daemon coupling — mirrors how `classify_vehicle_state` is a
+  pure rule table. Unit tests: bench cold-boot never arms; KOEO-only arms
+  then shuts on key-out; `engine_off` holds; momentary `no_data` < grace
+  cancels; key-back-on cancels a pending countdown; replay/unknown no-op.
+  (Effort: S–M)
+
+- [ ] **10.2 — Daemon power-watchdog task (P1).** Wire 10.1 into
+  `run_daemon` as a periodic async task modeled on `run_retention_sweeper`
+  (poll every `power.poll_seconds`), sharing the freshness inputs
+  `build_status` / `classify_vehicle_state` already compute — refactor to
+  one source of truth, don't duplicate the Parquet freshness reads. On
+  trigger: log loudly, close the active session cleanly (flush/fsync the
+  Parquet writers so nothing is lost), set the daemon `stop_event`, then
+  invoke OS poweroff. Respect the existing bounded shutdown caps
+  (`DASHBOARD_SHUTDOWN_SECONDS` / `DRAIN_SHUTDOWN_SECONDS`,
+  [[project_daemon_shutdown_hang]]) so a wedged task can't pin the box
+  half-powered-off. (Effort: M)
+
+- [ ] **10.3 — Poweroff privilege + systemd ordering (P1).** Grant the
+  `canary` service the minimum needed to call `systemctl poweroff` (a
+  polkit rule or a tight sudoers entry) via `scripts/install_pi.sh` +
+  `docs/pi-setup.md`. Confirm systemd stops `canary.service` through the
+  existing SIGTERM/graceful path as part of poweroff so shutdown isn't
+  double-handled. Document this as the *one* outward action the otherwise
+  read-only daemon is permitted, scoped to poweroff only. (Effort: S)
+
+- [ ] **10.4 — `power` config block + safe defaults (P1).** Add to
+  `src/config.py` and every `canary*.yaml`: `auto_shutdown_enabled`
+  (default **false**), `shutdown_grace_seconds` (default 30),
+  `poll_seconds`, and the arm/trigger knobs. Default-off so bench/dev Pis
+  never self-power-off (same bring-up posture as LSTM-disabled-by-default);
+  the in-vehicle Pi opts in via `/etc/canary/canary.yaml`. Tests: parse
+  round-trip; disabled ⇒ the watchdog is a no-op even fed a synthetic
+  key-out sequence. (Effort: S)
+
+- [ ] **10.5 — X1202 UPS integration + battery safety-net (P2).** Document
+  the power topology (UPS on constant 12 V, not ACC — the rationale for
+  CAN-based detection over wiring the UPS power-loss GPIO to ignition) in
+  `docs/pi-setup.md`, superseding the buck-converter note in 5.21.
+  Optionally read X1202 battery state over I²C and add an **independent**
+  shutdown trigger on critically-low UPS battery, OR'd with the CAN
+  trigger, so a disconnected truck battery / drained pack still ends in a
+  clean shutdown rather than a hard power cut (SD-card protection). Gate
+  this trigger on the UPS actually being present so it can't fire on a
+  wall-powered bench. Surface UPS battery + the existing `power_status()`
+  throttle flags on the dashboard System page alongside the host vitals
+  (CPU temp/usage/memory). (Effort: M)
+
+- [ ] **10.6 — In-vehicle validation: key-off → bus-sleep timeline (P1,
+  truck task).** Before trusting the predicate, capture the actual Xterra
+  timeline: with the daemon running, log `vehicle_state` + OBD/CAN
+  freshness through a real key-off and a cold crank, and measure how long
+  after key removal the CAN bus actually goes silent
+  (`engine_off → no_data`). Confirms 30 s is sized right and resolves
+  whether `engine_off` should count toward the countdown *on this vehicle*.
+  Must pass before flipping `auto_shutdown_enabled` on the truck. (Effort:
+  S, gated on truck time)
+
+Open questions:
+
+- **How long does this Xterra's body/chassis CAN stay awake after key
+  removal?** (10.6 measures it.) If it lingers in `engine_off` for minutes,
+  decide whether `engine_off` joins `no_data` in the countdown vs. waiting
+  for full silence — trades UPS battery runway against false-shutdown
+  safety.
+- **Mid-drive OBD-polling failure** can mis-classify a running engine as
+  `engine_off`. v1 is safe because the trigger requires total `no_data`
+  (CAN keeps flowing while driving), but a CAN-derived running-evidence
+  signal (decoded CAN RPM or a frame-rate heuristic) would let us treat
+  `engine_off` more aggressively without risking a false shutdown — defer
+  to a hardening follow-up.
+- **Operator inhibit.** A control-plane / dashboard `power.inhibit` toggle
+  (and/or a GPIO button) to keep the Pi up for an in-driveway debugging
+  session with the key out. Probably worth it; design alongside 10.4.
+
+Suggested sequence: 10.1 → 10.4 → 10.2 → 10.3 → 10.6 (validate on the
+truck) → enable on the Pi → 10.5.
+
+---
+
 ## Cross-Cutting Concerns
 
 These get touched in multiple phases — keep them in mind, don't defer to the end.
