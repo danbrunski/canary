@@ -138,9 +138,19 @@ interface RecentAnomaly {
   label: string;
 }
 
+//: Last 60 s — something is firing right now ("● active").
+const ANOMALY_ACTIVE_MS = 60_000;
+//: Beyond this the strip reverts to "nominal". The event list (Anomalies
+//: panel) keeps full history; this spine answers "anything wrong *now*?".
+//: Without it the freshest event sticks forever — e.g. a pre-restart false
+//: positive showing "○ recent · Fused (warmup)" long after the truck went
+//: quiet (and, on a fresh page load, a day-old event from the log history).
+const ANOMALY_RECENT_MS = 5 * 60_000;
+
 /** The freshest anomaly + whether it's "active" (last 60 s) vs just recent.
- *  Event timestamps are ISO-8601; unparseable ones are skipped rather than
- *  treated as "now". */
+ *  Returns null once the freshest event is older than the recent window, so the
+ *  strip clears to "nominal". Event timestamps are ISO-8601; unparseable ones
+ *  are skipped rather than treated as "now". */
 function mostRecentEvent(
   events: AnomalyEvent[],
   now: number,
@@ -149,6 +159,7 @@ function mostRecentEvent(
     const t = Date.parse(e.timestamp);
     if (Number.isNaN(t)) continue;
     const ageMs = now - t;
+    if (ageMs >= ANOMALY_RECENT_MS) return null;
     const src =
       e.source === "lstm_autoencoder"
         ? "LSTM"
@@ -158,7 +169,7 @@ function mostRecentEvent(
             ? "Behavior"
             : "IF";
     const mode = e.operating_mode ? ` (${e.operating_mode})` : "";
-    return { fresh: ageMs >= 0 && ageMs < 60_000, label: `${src}${mode}` };
+    return { fresh: ageMs >= 0 && ageMs < ANOMALY_ACTIVE_MS, label: `${src}${mode}` };
   }
   return null;
 }
