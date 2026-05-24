@@ -8,7 +8,7 @@ import {
   definitionValueClass,
   placeholderClass,
 } from "../styles";
-import type { StatusResponse } from "../types";
+import type { PowerStatus, StatusResponse } from "../types";
 import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
 import { type Tone, toneClass } from "../util/format";
 
@@ -37,6 +37,35 @@ const formatTemp = (c: number | null | undefined): string =>
 const formatPct = (fraction: number | null | undefined): string =>
   fraction == null ? "—" : `${(fraction * 100).toFixed(0)}%`;
 
+const POWER_EVENT_LABELS: Record<string, string> = {
+  under_voltage: "under-voltage",
+  arm_frequency_capped: "freq capped",
+  throttling: "throttled",
+  soft_temp_limit: "temp limit",
+};
+
+/** Live power state → label + tone. Under-voltage or active throttling is a
+ *  power-supply fault (bad); a frequency cap / soft-temp-limit is a warn. */
+function currentPower(p: PowerStatus | null | undefined): {
+  label: string;
+  tone: Tone | undefined;
+} {
+  if (p == null) return { label: "—", tone: undefined };
+  if (p.now.under_voltage) return { label: "under-voltage", tone: "bad" };
+  if (p.now.currently_throttled) return { label: "throttled", tone: "bad" };
+  if (p.now.arm_frequency_capped) return { label: "freq capped", tone: "warn" };
+  if (p.now.soft_temp_limit) return { label: "temp-limited", tone: "warn" };
+  return { label: "ok", tone: "ok" };
+}
+
+/** Sticky "has occurred since boot" flags — the past-detected anomalies. */
+function pastPowerEvents(p: PowerStatus | null | undefined): string[] {
+  if (p == null) return [];
+  return Object.entries(p.since_boot)
+    .filter(([, occurred]) => occurred)
+    .map(([key]) => POWER_EVENT_LABELS[key] ?? key);
+}
+
 /** System health: storage, host vitals (Pi temp/CPU/memory), latest
  *  session, vehicle line, data freshness.
  *
@@ -52,6 +81,9 @@ export function SystemPanel({ status, channels, statusError }: SystemPanelProps)
   const freshness = computeFreshness(channels);
   const stale = freshness !== null && freshness > STALE_THRESHOLD_MS;
   const system = status?.health?.system ?? null;
+  const power = status?.health?.power ?? null;
+  const powerNow = currentPower(power);
+  const powerEvents = pastPowerEvents(power);
 
   return (
     <Panel title="System">
@@ -93,6 +125,25 @@ export function SystemPanel({ status, channels, statusError }: SystemPanelProps)
               {formatPct(system?.mem_used_fraction)}
               {system?.mem_total_mb != null && (
                 <span className="text-fg-dim"> of {system.mem_total_mb.toFixed(0)} MB</span>
+              )}
+            </dd>
+          </div>
+          <div className={definitionRowClass}>
+            <dt className={definitionTermClass}>power</dt>
+            <dd className={cn(definitionValueClass, toneClass(powerNow.tone))}>
+              {powerNow.label}
+            </dd>
+          </div>
+          <div className={definitionRowClass}>
+            <dt className={definitionTermClass}>power events</dt>
+            <dd className={cn(definitionValueClass, powerEvents.length > 0 && "text-warn")}>
+              {power == null
+                ? "—"
+                : powerEvents.length === 0
+                  ? "none"
+                  : powerEvents.join(", ")}
+              {powerEvents.length > 0 && (
+                <span className="text-fg-dim"> (since boot)</span>
               )}
             </dd>
           </div>

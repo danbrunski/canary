@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
+import src.models.health as health_mod
 from src.config import CanaryConfig
 from src.dashboard.api import build_status, create_app
 from src.models.health import (
     HealthMonitor,
     feature_drift,
+    power_status,
     reconstruction_error_drift,
     system_metrics,
 )
@@ -33,6 +36,65 @@ def test_cpu_percent_needs_a_baseline_then_reports_a_fraction() -> None:
     # Second snapshot can diff; on Linux that's a 0..1 fraction, None elsewhere.
     cpu = mon.snapshot(now_epoch=1.0)["system"]["cpu_percent"]
     assert cpu is None or 0.0 <= cpu <= 1.0
+
+
+def test_power_status_decodes_throttled_bitmask(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 0x50000 = under-voltage + throttling have occurred since boot, nothing live
+    # (the exact 2026-05-24 incident reading).
+    monkeypatch.setattr(health_mod, "_read_throttled_raw", lambda: 0x50000)
+    assert power_status() == {
+        "raw": 0x50000,
+        "now": {
+            "under_voltage": False,
+            "arm_frequency_capped": False,
+            "currently_throttled": False,
+            "soft_temp_limit": False,
+        },
+        "since_boot": {
+            "under_voltage": True,
+            "arm_frequency_capped": False,
+            "throttling": True,
+            "soft_temp_limit": False,
+        },
+    }
+
+
+def test_power_status_flags_live_under_voltage(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(health_mod, "_read_throttled_raw", lambda: 0x10001)  # bit0 + bit16
+    status = power_status()
+    assert status is not None
+    assert status["now"]["under_voltage"] is True
+    assert status["since_boot"]["under_voltage"] is True
+
+
+def test_power_status_none_when_vcgencmd_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(health_mod, "_read_throttled_raw", lambda: None)
+    assert power_status() is None
+
+
+def test_snapshot_includes_power_behind_a_ttl_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+
+    def _fake_raw() -> int:
+        calls["n"] += 1
+        return 0x0
+
+    monkeypatch.setattr(health_mod, "_read_throttled_raw", _fake_raw)
+    mon = HealthMonitor()
+    snap = mon.snapshot(now_epoch=0.0)
+    assert snap["power"] == {
+        "raw": 0,
+        "now": dict.fromkeys(
+            ("under_voltage", "arm_frequency_capped", "currently_throttled", "soft_temp_limit"),
+            False,
+        ),
+        "since_boot": dict.fromkeys(
+            ("under_voltage", "arm_frequency_capped", "throttling", "soft_temp_limit"), False
+        ),
+    }
+    # Second snapshot within the TTL reuses the cache — no extra subprocess read.
+    mon.snapshot(now_epoch=1.0)
+    assert calls["n"] == 1
 
 
 def test_feature_drift_flags_and_schema_mismatch() -> None:

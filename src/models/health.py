@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
+import time
 from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -36,6 +38,7 @@ log = logging.getLogger(__name__)
 __all__ = [
     "HealthMonitor",
     "feature_drift",
+    "power_status",
     "reconstruction_error_drift",
     "system_metrics",
 ]
@@ -114,6 +117,70 @@ def _read_cpu_times() -> tuple[float, float] | None:
         return None
     idle = vals[3] + (vals[4] if len(vals) > 4 else 0.0)  # idle + iowait
     return idle, sum(vals)
+
+
+# ---------------------------------------------------------------------------
+# Power / throttling — Raspberry Pi firmware status (vcgencmd get_throttled)
+# ---------------------------------------------------------------------------
+
+#: ``vcgencmd get_throttled`` returns a bitmask. The low nibble is *live*
+#: conditions; bits 16-19 latch "has occurred since boot" (sticky until reboot).
+#: Under-voltage is a power-supply problem, not heat — so we surface it
+#: distinctly from the thermal soft-limit. See [[project_daemon_shutdown_hang]]
+#: (separate issue) and the 2026-05-24 under-voltage incident.
+_THROTTLE_BITS_NOW: dict[int, str] = {
+    0: "under_voltage",
+    1: "arm_frequency_capped",
+    2: "currently_throttled",
+    3: "soft_temp_limit",
+}
+_THROTTLE_BITS_SINCE_BOOT: dict[int, str] = {
+    16: "under_voltage",
+    17: "arm_frequency_capped",
+    18: "throttling",
+    19: "soft_temp_limit",
+}
+
+
+def power_status() -> dict[str, Any] | None:
+    """Decode ``vcgencmd get_throttled`` into current + since-boot power flags.
+
+    Returns ``{"raw": int, "now": {...}, "since_boot": {...}}`` where each inner
+    dict maps a condition name to a bool. ``None`` when ``vcgencmd`` is absent
+    or fails (a dev laptop / container) — never raises. The since-boot flags are
+    the "past-detected" anomalies: once the firmware throttles or browns out,
+    the bit stays set until the next reboot.
+    """
+    raw = _read_throttled_raw()
+    if raw is None:
+        return None
+    return {
+        "raw": raw,
+        "now": {name: bool(raw & (1 << bit)) for bit, name in _THROTTLE_BITS_NOW.items()},
+        "since_boot": {
+            name: bool(raw & (1 << bit)) for bit, name in _THROTTLE_BITS_SINCE_BOOT.items()
+        },
+    }
+
+
+def _read_throttled_raw() -> int | None:
+    """Raw integer from ``vcgencmd get_throttled`` (format ``throttled=0x...``),
+    or ``None`` when vcgencmd is missing/errors/times out."""
+    try:
+        completed = subprocess.run(
+            ["vcgencmd", "get_throttled"],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    _, _, value = completed.stdout.strip().partition("=")
+    try:
+        return int(value, 16)
+    except ValueError:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +306,22 @@ class HealthMonitor:
         self._last_swap_version: str | None = None
         self._obd_scheduler: dict[str, Any] | None = None
         self._cpu_prev: tuple[float, float] | None = None
+        #: (monotonic_ts, value) cache so /status polling doesn't spawn a
+        #: vcgencmd subprocess every call — the flags barely move at a glance.
+        self._power_cache: tuple[float, dict[str, Any] | None] | None = None
+
+    #: How long a cached power_status() reading stays fresh (seconds).
+    _POWER_TTL_SECONDS = 5.0
+
+    def _power_status_cached(self) -> dict[str, Any] | None:
+        """`power_status()` behind a short TTL — snapshot() runs on every
+        /status poll, and a subprocess per poll would be wasteful on the Pi."""
+        now = time.monotonic()
+        if self._power_cache is not None and now - self._power_cache[0] < self._POWER_TTL_SECONDS:
+            return self._power_cache[1]
+        status = power_status()
+        self._power_cache = (now, status)
+        return status
 
     def _cpu_percent(self) -> float | None:
         """Busy fraction (0..1) of total CPU time since the previous
@@ -322,6 +405,7 @@ class HealthMonitor:
             "model_swaps": dict(self._swaps),
             "active_model_version": self._last_swap_version,
             "system": system_metrics(),
+            "power": self._power_status_cached(),
         }
         snap["system"]["cpu_percent"] = self._cpu_percent()
         if self._obd_scheduler is not None:

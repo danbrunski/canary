@@ -89,9 +89,29 @@ export interface StatusHealth {
   model_swaps: Record<string, number>;
   active_model_version: string | null;
   system: Record<string, number | null>;
+  power?: PowerStatus | null;
   feature_drift?: Record<string, unknown>;
   reconstruction_error_drift?: Record<string, unknown>;
   obd_scheduler?: Record<string, unknown>;
+}
+
+/** `/status.health.power` — decoded `vcgencmd get_throttled`. `now` is live
+ *  conditions; `since_boot` flags latch once they've occurred (the
+ *  "past-detected" anomalies). `null` off-Pi / when vcgencmd is unavailable. */
+export interface PowerStatus {
+  raw: number;
+  now: {
+    under_voltage: boolean;
+    arm_frequency_capped: boolean;
+    currently_throttled: boolean;
+    soft_temp_limit: boolean;
+  };
+  since_boot: {
+    under_voltage: boolean;
+    arm_frequency_capped: boolean;
+    throttling: boolean;
+    soft_temp_limit: boolean;
+  };
 }
 
 /** Response from `GET /telemetry/latest?n=...`. */
