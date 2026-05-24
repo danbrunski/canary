@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -134,21 +135,33 @@ class GpsTracker:
             self._last_persist_epoch = epoch
 
     def persist(self) -> None:
-        """Atomically write the odometer totals to the state sidecar."""
+        """Atomically + durably write the odometer totals to the state sidecar.
+
+        fsync the temp file and the directory so the totals survive a hard
+        power loss (key-off, no UPS); at worst we lose the deltas since the last
+        persist (bounded by ``persist_interval_seconds``).
+        """
         if self._state_path is None:
             return
         try:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._state_path.with_name(f".{self._state_path.name}.tmp")
-            tmp.write_text(
-                json.dumps(
-                    {
-                        "distance_km": self._totals.distance_km,
-                        "moving_time_s": self._totals.moving_time_s,
-                    }
-                )
+            payload = json.dumps(
+                {
+                    "distance_km": self._totals.distance_km,
+                    "moving_time_s": self._totals.moving_time_s,
+                }
             )
+            with open(tmp, "w") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
             tmp.replace(self._state_path)
+            dir_fd = os.open(self._state_path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
         except OSError as exc:
             log.warning(
                 "trip odometer persist failed",

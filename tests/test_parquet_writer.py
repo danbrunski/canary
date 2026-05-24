@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
@@ -18,6 +19,11 @@ from src.storage.parquet_writer import (
     enforce_storage_cap,
 )
 from src.telemetry import TelemetryRecord
+
+
+def _write_valid_parquet(path: Path) -> None:
+    """A real (PAR1-terminated) Parquet file, so the husk sweep keeps it."""
+    pq.write_table(pa.table({"x": [1]}), path)
 
 
 def test_writer_flushes_records_to_readable_parquet(tmp_path: Path) -> None:
@@ -296,7 +302,7 @@ def test_delete_empty_sessions_removes_husk_but_keeps_data_session(tmp_path: Pat
     husk.mkdir()
     with_data = tmp_path / "2026-05-10T010000"
     with_data.mkdir()
-    (with_data / "telemetry-00000.parquet").write_bytes(b"data")
+    _write_valid_parquet(with_data / "telemetry-00000.parquet")
 
     sweep = delete_empty_sessions(tmp_path, now=now)
 
@@ -310,7 +316,7 @@ def test_delete_empty_sessions_drops_zero_byte_parquet_keeps_session(tmp_path: P
     now = datetime(2026, 5, 11, tzinfo=UTC)
     session = tmp_path / "2026-05-10T000000"
     session.mkdir()
-    (session / "telemetry-00000.parquet").write_bytes(b"data")
+    _write_valid_parquet(session / "telemetry-00000.parquet")
     empty1 = session / "telemetry-00001.parquet"
     empty2 = session / "telemetry-00002.parquet"
     empty1.write_bytes(b"")
@@ -350,6 +356,49 @@ def test_delete_empty_sessions_protects_active_pinned_and_recent(tmp_path: Path)
 
     assert sweep.removed_sessions == []
     assert active.exists() and pinned.exists() and recent.exists()
+
+
+def test_delete_empty_sessions_removes_truncated_parquet_keeps_session(tmp_path: Path) -> None:
+    """A chunk killed mid-write by a power loss (no PAR1 footer) is dropped, the
+    rest of the session survives."""
+    now = datetime(2026, 5, 11, tzinfo=UTC)
+    session = tmp_path / "2026-05-10T000000"
+    session.mkdir()
+    _write_valid_parquet(session / "telemetry-00000.parquet")
+    truncated = session / "telemetry-00001.parquet"
+    truncated.write_bytes(b"PAR1\x00\x00\x00garbage-no-footer")  # non-empty, no trailing PAR1
+
+    sweep = delete_empty_sessions(tmp_path, now=now)
+
+    assert sweep.removed_files == [truncated]
+    assert session.exists()
+    assert (session / "telemetry-00000.parquet").exists()
+    assert not truncated.exists()
+
+
+def test_delete_empty_sessions_removes_dir_of_only_truncated_parquet(tmp_path: Path) -> None:
+    now = datetime(2026, 5, 11, tzinfo=UTC)
+    husk = tmp_path / "2026-05-10T000000"
+    husk.mkdir()
+    (husk / "telemetry-00000.parquet").write_bytes(b"truncated-tail")
+
+    sweep = delete_empty_sessions(tmp_path, now=now)
+
+    assert sweep.removed_sessions == [husk]
+    assert not husk.exists()
+
+
+def test_flushed_chunk_is_complete_and_durable(tmp_path: Path) -> None:
+    """Each flushed chunk is a complete (PAR1-terminated) Parquet with no
+    leftover temp file — the property the per-chunk fsync protects."""
+    writer = ParquetTelemetryWriter(tmp_path, max_rows=1)
+    path = writer.write(TelemetryRecord.obd(1000.0, "RPM", 800, "rpm"))
+    assert path is not None
+    with path.open("rb") as handle:
+        handle.seek(-4, 2)
+        assert handle.read(4) == b"PAR1"
+    assert pq.read_table(path).num_rows == 1
+    assert list(path.parent.glob("*.tmp")) == []
 
 
 # ---------------------------------------------------------------------------

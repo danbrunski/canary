@@ -1,7 +1,18 @@
-"""Buffered Parquet storage for normalized telemetry records."""
+"""Buffered Parquet storage for normalized telemetry records.
+
+Durability note: the Pi has no UPS — it loses power the instant the ignition
+key turns off, mid-write, every drive. So each flushed chunk is fsync'd before
+it is published (and the directory entry fsync'd after the rename): once
+``flush()`` returns, that chunk has survived a power cut, and only the rows
+still buffered since the last flush (bounded by ``flush_interval_seconds`` /
+``max_rows``) can be lost. A chunk caught mid-write still leaves a truncated
+tail, which the loader skips and the husk sweep removes.
+"""
 
 from __future__ import annotations
 
+import logging
+import os
 import shutil
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -15,6 +26,8 @@ import pyarrow.parquet as pq
 from src.session import SessionPaths, make_session_dir
 from src.storage.monitor import free_space_mb as _default_free_space_mb
 from src.telemetry import TelemetryRecord
+
+log = logging.getLogger(__name__)
 
 _PA: Any = pa
 _PQ: Any = pq
@@ -234,12 +247,58 @@ def _engine_run_time_seconds(record: TelemetryRecord) -> float | None:
 
 
 def _write_table_atomic(table: Any, path: Path, *, compression: str) -> None:
-    """Write Parquet to a same-directory temp file, then publish atomically."""
+    """Write Parquet to a same-directory temp file, then publish atomically.
+
+    fsync the temp file before the rename and the directory after it, so the
+    chunk is durable on disk the moment this returns — without it a hard power
+    cut (key-off, no UPS) can leave the rename committed but the data still in
+    the page cache, i.e. a renamed-but-empty truncated chunk.
+    """
     tmp_path = path.with_name(f"{path.name}.tmp")
     if tmp_path.exists():
         tmp_path.unlink()
     _PQ.write_table(table, tmp_path, compression=compression)
+    _fsync_path(tmp_path)
     tmp_path.replace(path)
+    _fsync_path(path.parent)
+
+
+def _fsync_path(path: Path) -> None:
+    """Best-effort fsync of a file or directory; logs and continues on failure.
+
+    A failed fsync means that write isn't guaranteed durable, but crashing the
+    collector would lose more — so it's best-effort. Used to make each Parquet
+    chunk + its directory entry survive a power loss.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError as exc:
+        log.warning("fsync open failed for %s: %s", path, exc)
+        return
+    try:
+        os.fsync(fd)
+    except OSError as exc:
+        log.warning("fsync failed for %s: %s", path, exc)
+    finally:
+        os.close(fd)
+
+
+def _is_truncated_parquet(path: Path) -> bool:
+    """True if a non-empty file lacks the trailing ``PAR1`` magic.
+
+    A Parquet file always ends with the 4-byte ``PAR1`` footer magic; a chunk
+    killed mid-write (power loss) is renamed into place but lacks it. Reading
+    the last four bytes is enough to spot it without parsing.
+    """
+    try:
+        size = path.stat().st_size
+        if size < 8:
+            return True
+        with path.open("rb") as handle:
+            handle.seek(-4, os.SEEK_END)
+            return handle.read(4) != b"PAR1"
+    except OSError:
+        return False
 
 
 def delete_expired_sessions(
@@ -348,8 +407,9 @@ def delete_empty_sessions(
     and the live-session list. For each timestamp session dir — skipping
     ``protect`` (the live session), pinned dirs, and anything newer than
     ``min_age_seconds`` (so a just-created session that hasn't flushed its first
-    file isn't raced) — this drops 0-byte parquet files, then removes the whole
-    directory if no data survives anywhere in its tree.
+    file isn't raced) — this drops 0-byte *and* truncated parquet files (a chunk
+    killed mid-write by a power loss, missing its ``PAR1`` footer), then removes
+    the whole directory if no data survives anywhere in its tree.
     """
     if not sessions_root.exists():
         return EmptySessionSweep([], [])
@@ -371,7 +431,7 @@ def delete_empty_sessions(
             continue
         for parquet in child.glob("*.parquet"):
             try:
-                if parquet.stat().st_size == 0:
+                if parquet.stat().st_size == 0 or _is_truncated_parquet(parquet):
                     parquet.unlink()
                     removed_files.append(parquet)
             except OSError:
