@@ -222,12 +222,12 @@ def test_live_and_offline_obd_feature_rows_share_contract(
 
 def test_buffer_caps_at_max_rows(config: CanaryConfig) -> None:
     src = LiveFeatureSource(config=config)
-    # _max_rows defaults to max(32, window_seconds * resample_hz * 2)
-    # = max(32, 30*1*2) = 60 for the example config
-    for i in range(200):
+    # _max_rows = max(32, window_seconds*hz*2, idle_transient_lookback_seconds*hz + hz)
+    # = max(32, 30*1*2, 180*1 + 1) = 181 for the example config (lookback dominates).
+    for i in range(400):
         src.observe(TelemetryRecord.obd(float(i), "RPM", float(700 + i), "rpm"))
         src.tick(datetime(2026, 5, 13, 12, 0, tzinfo=UTC) + timedelta(seconds=i))
-    assert src.buffer_size <= 60
+    assert src.buffer_size <= 181
 
 
 def test_known_channels_lists_observed_columns(config: CanaryConfig) -> None:

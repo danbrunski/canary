@@ -22,11 +22,14 @@ incremental version:
 3. **feature_columns** — the columns a downstream inference engine will
    see. Stable across ticks once observation has begun.
 
-The ring buffer holds ``2 × window_seconds * resample_hz`` rows so
-``compute_features`` always has a full window even right after startup.
-At 1 Hz with 30 s windows that's 60 rows — trivial to recompute each
-tick. Higher resample rates scale linearly; revisit if it ever becomes
-the bottleneck (NFR-01 budget is <50% Pi 5 CPU).
+The ring buffer holds enough rows for both rolling features and the
+segmenter's recent-motion lookback: ``max(2 × window_seconds,
+idle_transient_lookback_seconds) × resample_hz`` (plus slack). The window
+term keeps ``compute_features`` full right after startup; the lookback term
+lets serve-time idle_transient vs idle see the preceding drive, matching
+training. At 1 Hz with a 30 s window and 180 s lookback that's ~181 rows —
+still trivial to recompute each tick. Higher resample rates scale linearly;
+revisit if it ever becomes the bottleneck (NFR-01 budget is <50% Pi 5 CPU).
 
 Decode policy intentionally matches the offline path:
 ``decode_can_rows`` emits the *raw integer* (not scaled), because the
@@ -106,8 +109,12 @@ class LiveFeatureSource:
         window_s = self.config.preprocessing.rolling_window_seconds
         # Keep a slack factor — pandas' time-window rolling can use anything
         # in the buffer, but we want enough rows to actually fill a window
-        # plus a margin so the ROC shift doesn't fall off the end.
-        self._max_rows = max(32, int(window_s * hz * 2))
+        # plus a margin so the ROC shift doesn't fall off the end. The buffer
+        # must also span the segmenter's recent-motion lookback so serve-time
+        # idle_transient vs idle matches training (a multi-minute stop still
+        # sees the preceding drive); at 1 Hz that's a few hundred trivial rows.
+        recent_motion_s = self.config.preprocessing.idle_transient_lookback_seconds
+        self._max_rows = max(32, int(window_s * hz * 2), int(recent_motion_s * hz) + int(hz))
         self._buffer = deque(maxlen=self._max_rows)
         self._feature_config = FeatureConfig(window_seconds=window_s)
         # Pre-index bindings by CAN ID so decode is O(signals per ID), not

@@ -50,6 +50,13 @@ CALIBRATED_ANOMALY_COLUMN = "isolation_forest_calibrated_anomaly"
 #: the mode falls back to the legacy contamination-label decision.
 _MIN_CALIBRATION_SAMPLES = 10
 
+#: A feature must be non-NaN in at least this fraction of a mode's rows to join
+#: that mode's feature set. Excludes foreign-mode deviation surfaces that leak a
+#: few rows across a boundary via the rolling window (which would otherwise empty
+#: the mode in the ``dropna``). The populated/leaked split is wide (~0.95 vs
+#: ~0.03), so the exact cutoff isn't delicate.
+_MIN_MODE_FEATURE_COVERAGE = 0.5
+
 
 class IsolationForestConfigLike(Protocol):
     """Subset of ``src.config.IsolationForestConfig`` needed by the trainer."""
@@ -393,12 +400,23 @@ def fit_isolation_forest(
         mode = str(raw_mode)
         if len(group) == 0:
             continue
-        # Per-mode feature set: only the columns actually populated in this
+        # Per-mode feature set: only the columns densely populated in this
         # mode. A deviation surface gated to a *different* operating_mode is
         # all-NaN here, so it's excluded — rather than dropping every row of
         # this mode (the global dropna that silently blanked the detector,
         # because each mode-gated surface is NaN outside its own mode).
-        mode_feats = [c for c in selected_features if group[c].notna().any()]
+        # ``.any()`` is too permissive, though: a foreign-mode deviation leaks
+        # into a handful of this mode's rows through the rolling window at a
+        # mode boundary (its 30 s mean/std carries a few rows past the
+        # transition). That sparse non-NaN qualified the column, then the
+        # ``dropna`` below emptied the whole mode on it (e.g. warmup deviations,
+        # ~3 % populated in idle, zeroed the idle model entirely). Require a real
+        # coverage fraction so only genuinely-present features count.
+        mode_feats = [
+            c
+            for c in selected_features
+            if float(group[c].notna().mean()) >= _MIN_MODE_FEATURE_COVERAGE
+        ]
         if not mode_feats:
             continue
         mode_complete = group.dropna(subset=mode_feats)

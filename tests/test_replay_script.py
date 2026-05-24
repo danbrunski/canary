@@ -110,8 +110,11 @@ def test_replay_sessions_can_score_with_isolation_forest_artifact(tmp_path: Path
     scoring = result.report["scoring"]
     assert scoring["model_version"] == "replay-test"
     assert scoring["rows"] == 80
-    assert scoring["score_distribution"]["finite_count"] == 50
-    assert scoring["score_distribution"]["pos_inf_count"] == 30
+    # Per-mode feature coverage (>=50%) keeps foreign-mode deviation leakage out
+    # of mode_feats, so rows are no longer dropped on it: nearly all score now
+    # (only the leading roc-warmup row is non-finite).
+    assert scoring["score_distribution"]["finite_count"] == 79
+    assert scoring["score_distribution"]["pos_inf_count"] == 1
     assert set(scoring["predicted_anomalies_by_mode"]) == {"city", "idle"}
 
 

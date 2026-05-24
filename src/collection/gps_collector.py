@@ -43,6 +43,29 @@ DEFAULT_RECONNECT_POLICY = ReconnectPolicy()
 #: motion while keeping a parked vehicle in koeo/idle.
 _STATIONARY_SPEED_KMH = 5.0
 
+#: The floor alone isn't enough: a marginal fix computes SOG noise *above* it
+#: (observed: a 5–6 satellite fix at HDOP>1.5 jittered to ~9 km/h, leaking a
+#: parked truck into ``city``). Speed-over-ground is only trustworthy from a
+#: confident fix, so we gate emission on satellite count + HDOP. Fix quality
+#: tracks sky view, not motion — genuine driving holds 10+ satellites at
+#: HDOP<1 regardless of speed — so this never suppresses real movement. Below
+#: the bar we omit ``gps:speed`` entirely (rather than assert a bogus 0) so the
+#: segmenter falls back to the wheel-speed PID, which reads a true 0 in KOEO and
+#: real speed when driving. Health channels are emitted whenever present, so a
+#: ``None`` (receiver not reporting GSA) leaves the gate open — preserving the
+#: floor-only behavior for receivers that don't surface fix quality.
+_MIN_SPEED_FIX_SATELLITES = 7
+_MAX_SPEED_FIX_HDOP = 2.0
+
+
+def _speed_fix_trustworthy(reading: GpsReading) -> bool:
+    """True unless the fix is demonstrably too marginal to trust its SOG."""
+    if reading.num_satellites is not None and reading.num_satellites < _MIN_SPEED_FIX_SATELLITES:
+        return False
+    if reading.hdop is not None and reading.hdop > _MAX_SPEED_FIX_HDOP:
+        return False
+    return True
+
 
 @dataclass(frozen=True)
 class GpsSpec:
@@ -76,7 +99,10 @@ def reading_to_records(reading: GpsReading, timestamp: float) -> list[TelemetryR
     emitted whenever known — even with no fix — so the dashboard can show "no
     fix, N sats acquired". Position/speed/heading are emitted only with a valid
     fix, so a no-fix epoch never injects a bogus 0 km/h that would read as
-    "stopped"; the segmenter then falls back to ``obd:SPEED``.
+    "stopped"; the segmenter then falls back to ``obd:SPEED``. ``speed`` is
+    additionally withheld on a marginal fix (see ``_speed_fix_trustworthy``):
+    its SOG noise is untrustworthy, so deferring to the wheel-speed PID beats
+    asserting a jittered value.
     """
     records: list[TelemetryRecord] = []
 
@@ -91,7 +117,7 @@ def reading_to_records(reading: GpsReading, timestamp: float) -> list[TelemetryR
         add("hdop", float(reading.hdop), "")
 
     if reading.has_fix:
-        if reading.speed_kmh is not None:
+        if reading.speed_kmh is not None and _speed_fix_trustworthy(reading):
             speed = float(reading.speed_kmh)
             add("speed", 0.0 if speed < _STATIONARY_SPEED_KMH else speed, "km/h")
         if reading.heading_deg is not None:

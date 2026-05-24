@@ -19,7 +19,7 @@ import pandas as pd
 
 from src.config import CanaryConfig
 from src.dataframe_utils import require_columns as _require_columns
-from src.preprocessing.features import FeatureConfig, compute_features
+from src.preprocessing.features import _FEATURE_SUFFIXES, FeatureConfig, compute_features
 from src.preprocessing.loader import TelemetryValueKind, read_sessions, to_wide
 from src.preprocessing.resampler import (
     GAP_SUFFIX,
@@ -176,7 +176,11 @@ def sequence_frame_from_sessions(
             }
         )
 
-    segmented = segment_operating_modes(resampled, config.preprocessing.operating_modes)
+    segmented = segment_operating_modes(
+        resampled,
+        config.preprocessing.operating_modes,
+        recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
+    )
     return compute_features(
         segmented,
         config=FeatureConfig(window_seconds=config.preprocessing.rolling_window_seconds),
@@ -203,6 +207,16 @@ def build_sequence_windows(
         features = tuple(column for column in features if column not in gap_set)
         if not features:
             raise ValueError("no numeric sequence feature columns available")
+    # When gaps are auto-resolved, only honor those for channels that are
+    # actually features. A channel never seen in a session (e.g. ``gps:*`` in a
+    # non-GPS capture, or a CAN frame absent from a given drive) reads as
+    # perpetually stale, so its always-True ``__gap`` flag would reject *every*
+    # window in that session — silently zeroing the corpus the moment GPS and
+    # non-GPS sessions mix. Its staleness is irrelevant to a window over
+    # features. An explicit ``gap_columns`` is honored verbatim.
+    if gap_columns is None:
+        feature_bases = {_channel_base(column) for column in features}
+        gaps = tuple(gap for gap in gaps if gap[: -len(GAP_SUFFIX)] in feature_bases)
     windows: list[SequenceWindow] = []
 
     for session, group in ordered.groupby(SESSION_COLUMN, sort=True, dropna=False):
@@ -282,6 +296,15 @@ def _numeric_value_columns(frame: pd.DataFrame) -> list[str]:
         and not str(column).endswith(GAP_SUFFIX)
         and pd.api.types.is_numeric_dtype(frame[column])
     ]
+
+
+def _channel_base(column: str) -> str:
+    """Strip a rolling-feature suffix (``__mean``/``__std``/``__roc``) to the raw
+    channel, so a feature and its derivatives map to one ``<channel>__gap``."""
+    for suffix in _FEATURE_SUFFIXES:
+        if column.endswith(suffix):
+            return column[: -len(suffix)]
+    return column
 
 
 def _ordered_frame(frame: pd.DataFrame) -> pd.DataFrame:

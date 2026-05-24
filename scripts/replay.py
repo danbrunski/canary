@@ -84,7 +84,11 @@ def replay_sessions(
     wide = to_wide(long, value=value)
     numeric_columns = _numeric_value_columns(wide)
     resampled = _resample_numeric(wide, numeric_columns, config)
-    segmented = segment_operating_modes(resampled, config.preprocessing.operating_modes)
+    segmented = segment_operating_modes(
+        resampled,
+        config.preprocessing.operating_modes,
+        recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
+    )
     features = compute_features(
         segmented,
         config=FeatureConfig(window_seconds=config.preprocessing.rolling_window_seconds),

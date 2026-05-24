@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.analysis.committees import append_committee_residuals, non_trainable_committee_outputs
 from src.analysis.derived import compute_anomaly_signals
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import append_deviation_columns
@@ -36,7 +37,7 @@ from src.decode.dids import decode_did_rows, load_did_map
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.features import FeatureConfig, compute_features
 from src.preprocessing.loader import PARQUET_PATTERN, read_session, to_wide
-from src.preprocessing.resampler import ResampleConfig, resample_wide
+from src.preprocessing.resampler import GAP_SUFFIX, ResampleConfig, resample_wide
 from src.preprocessing.segmenter import (
     MODE_COLUMN,
     SegmenterConfig,
@@ -68,9 +69,10 @@ ALL_MODE = "all"
 #: to both regimes, which is what caused the May 2026 R²=0.41 warmup mess.
 _SEGMENTER_SIGNAL_COLUMNS: dict[str, str | tuple[str, ...]] = {
     "rpm": "obd:RPM",
-    # GPS ground speed preferred over the OBD wheel-speed PID, coalesced
-    # row-wise (see segmenter) so segmentation still works from either alone.
-    "speed": ("gps:speed", "obd:SPEED"),
+    # OBD wheel-speed PID is the reliable primary; GPS is the back-stop when OBD
+    # is absent, coalesced row-wise (see segmenter). GPS↔OBD disagreement is a
+    # sensor-committee residual, not a coalesce winner.
+    "speed": ("obd:SPEED", "gps:speed"),
     "throttle": "obd:THROTTLE_POS",
     "coolant_temp": "obd:COOLANT_TEMP",
 }
@@ -211,11 +213,40 @@ def build_feature_frame(
             ", ".join(skipped),
         )
     resampled = pd.concat(resampled_parts, ignore_index=True)
+    resampled = _drop_fully_stale_rows(resampled)
 
     features = featurize_wide_frame(resampled, config, behavior_models=behavior_models).features
     if cache_path is not None and cache_metadata is not None:
         _write_feature_frame_cache(cache_path, features, cache_metadata)
     return features
+
+
+def _drop_fully_stale_rows(resampled: pd.DataFrame) -> pd.DataFrame:
+    """Drop resampled rows where *every* gap-flagged channel is stale.
+
+    The resampler emits a row per second across a session's whole span and
+    forward-fills values across data gaps, flagging each fast channel's
+    staleness in a ``<channel>__gap`` column. A row with *all* gap flags set had
+    no fresh observation that second — it's a synthesized fill (e.g. a session
+    left open across a long power-off gap), not telemetry, and training on it
+    poisons the affected mode (a 12 h gap forward-fills into tens of thousands
+    of identical "warmup" rows). Rows with only *some* channels stale (a slow
+    PID between updates) are real observations and kept. The live path snapshots
+    real ticks and never resamples, so there's no serve-side counterpart —
+    dropping here moves training rows toward "seconds actually observed", which
+    is what serve scores.
+    """
+    gap_cols = [c for c in resampled.columns if str(c).endswith(GAP_SUFFIX)]
+    if not gap_cols or resampled.empty:
+        return resampled
+    fully_stale = resampled[gap_cols].fillna(True).all(axis=1)
+    dropped = int(fully_stale.sum())
+    if dropped:
+        log.info(
+            "dropped fully-stale (gap-filled) rows from training frame",
+            extra={"dropped": dropped, "total": len(resampled)},
+        )
+    return resampled.loc[~fully_stale].reset_index(drop=True)
 
 
 @dataclass(frozen=True)
@@ -265,6 +296,11 @@ def featurize_wide_frame(
     # extraction so recipes can target them as outputs and the rolling
     # feature builder picks up their derivatives.
     framed = compute_anomaly_signals(framed)
+    # Sensor-committee divergence residuals (redundant sensors of one quantity,
+    # e.g. OBD↔GPS speed). Distinct from the physical residuals above; gated on
+    # input quality. Non-trainable committees are emitted here but excluded from
+    # the trained feature set below — see analysis.committees.
+    framed = append_committee_residuals(framed)
     if behavior_models is not None and behavior_models.models:
         framed = append_deviation_columns(framed, behavior_models)
     cfg = feature_config or FeatureConfig(
@@ -428,7 +464,10 @@ def segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> pd.Dat
         out = resampled.copy()
         out[MODE_COLUMN] = ALL_MODE
         return out
-    seg_cfg = SegmenterConfig(signal_columns=dict(_SEGMENTER_SIGNAL_COLUMNS))
+    seg_cfg = SegmenterConfig(
+        signal_columns=dict(_SEGMENTER_SIGNAL_COLUMNS),
+        recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
+    )
     # A signal is available when *any* of its candidate columns is present, so
     # the speed gate is satisfied by gps:speed or obd:SPEED.
     have_inputs = all(
@@ -464,6 +503,7 @@ def trainable_feature_columns(features: pd.DataFrame) -> list[str]:
 def candidate_feature_columns(features: pd.DataFrame) -> list[str]:
     """Numeric, non-structural feature candidates before all-NaN filtering."""
     skip_exact = {"session", "timestamp", MODE_COLUMN}
+    non_trainable_committees = non_trainable_committee_outputs()
     cols: list[str] = []
     for raw in features.columns:
         col = str(raw)
@@ -472,6 +512,10 @@ def candidate_feature_columns(features: pd.DataFrame) -> list[str]:
         # GPS position/quality channels (and their rolling derivatives) are
         # logged but never modeled — see NON_TRAINABLE_GPS_CHANNELS.
         if _base_feature_name(col) in NON_TRAINABLE_GPS_CHANNELS:
+            continue
+        # Committee divergence residuals marked non-trainable: computed and
+        # logged, but kept out of the trained set — see analysis.committees.
+        if _base_feature_name(col) in non_trainable_committees:
             continue
         if pd.api.types.is_numeric_dtype(features[col]):
             cols.append(col)
@@ -507,15 +551,48 @@ def sequence_feature_columns(features: pd.DataFrame) -> list[str]:
       missing it. Requiring presence in all sessions yields a schema that is
       dense by construction (the resampler already forward-fills within a
       session), so windows actually form.
+    * **Drops sparsely-sampled channels.** A round-robin-polled OBD PID is
+      stale most ticks (its ``__gap`` flag set), so ``_window_has_gap`` rejects
+      every window the moment such a channel is in the set — collapsing the
+      corpus to zero windows even though each value is forward-filled. These are
+      not dense per-tick sequences (the IF, which imputes, consumes them); only
+      channels fresh on nearly every tick belong here.
     """
     base = [
         col for col in trainable_feature_columns(features) if not col.startswith(DEVIATION_PREFIX)
     ]
+    base = _dense_sequence_columns(base, features)
     if "session" not in features.columns or features["session"].nunique() <= 1:
         return base
     notna = features[base].notna()
     observed_per_session = notna.groupby(features["session"].to_numpy()).any()
     return [col for col in base if bool(observed_per_session[col].all())]
+
+
+#: A channel whose ``__gap`` flag is set on more than this fraction of ticks is
+#: too sparsely sampled to be an LSTM sequence input (round-robin OBD PIDs sit
+#: near 1.0; broadcast CAN channels near 0.0 — the split is wide, so the exact
+#: cutoff isn't delicate).
+_MAX_SEQUENCE_GAP_RATE = 0.1
+
+
+def _dense_sequence_columns(columns: list[str], features: pd.DataFrame) -> list[str]:
+    """Keep only columns whose channel is fresh on nearly every tick.
+
+    Sparsity is read from the per-channel ``<channel>__gap`` flag. A column with
+    no gap flag (slow channels aren't gap-tracked; they're forward-filled and
+    never reject a window) is kept.
+    """
+    gap_rate: dict[str, float] = {
+        str(col)[: -len(GAP_SUFFIX)]: float(features[col].mean())
+        for col in features.columns
+        if str(col).endswith(GAP_SUFFIX)
+    }
+    return [
+        col
+        for col in columns
+        if gap_rate.get(_base_feature_name(col), 0.0) <= _MAX_SEQUENCE_GAP_RATE
+    ]
 
 
 def build_feature_spec(

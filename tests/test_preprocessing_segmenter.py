@@ -199,21 +199,21 @@ def test_default_segmenter_config_picks_up_coolant_temp_column() -> None:
     assert config.signal_columns["coolant_temp"] == ("obd:COOLANT_TEMP",)
 
 
-def test_default_segmenter_config_prefers_gps_speed_with_obd_fallback() -> None:
-    """When both speed sources are present, GPS leads and OBD trails."""
+def test_default_segmenter_config_prefers_obd_speed_with_gps_fallback() -> None:
+    """When both speed sources are present, OBD (reliable VSS) leads, GPS trails."""
     frame = pd.DataFrame(columns=["obd:RPM", "obd:SPEED", "gps:speed"])
     config = default_segmenter_config(frame)
-    assert config.signal_columns["speed"] == ("gps:speed", "obd:SPEED")
+    assert config.signal_columns["speed"] == ("obd:SPEED", "gps:speed")
 
 
-def test_segment_coalesces_gps_speed_over_obd_per_row() -> None:
-    """GPS speed wins where present; rows without a GPS fix fall back to OBD."""
+def test_segment_coalesces_obd_speed_over_gps_per_row() -> None:
+    """OBD speed wins where present; rows without OBD fall back to GPS."""
     frame = pd.DataFrame(
         [
-            # GPS fix present, reads highway speed; OBD disagrees → GPS wins.
-            {"obd:RPM": 2200.0, "obd:SPEED": 5.0, "gps:speed": 95.0},
-            # No GPS fix this row (NaN) → coalesce falls back to OBD city speed.
-            {"obd:RPM": 1500.0, "obd:SPEED": 35.0, "gps:speed": float("nan")},
+            # OBD present reads highway; a jittery GPS disagrees → OBD wins.
+            {"obd:RPM": 2200.0, "obd:SPEED": 95.0, "gps:speed": 5.0},
+            # OBD speed missing this row (NaN) → coalesce falls back to GPS city speed.
+            {"obd:RPM": 1500.0, "obd:SPEED": float("nan"), "gps:speed": 35.0},
         ]
     )
     modes = {
@@ -238,3 +238,101 @@ def test_segment_uses_gps_speed_when_obd_speed_absent() -> None:
     }
     segmented = segment_operating_modes(frame, modes)
     assert list(segmented[MODE_COLUMN]) == ["highway", "city"]
+
+
+# ---------------------------------------------------------------------------
+# idle_transient (recent-motion sub-mode)
+# ---------------------------------------------------------------------------
+
+
+def _idle_split_modes() -> dict[str, OperatingModeSpec]:
+    """Warm-idle band split into transient (recent motion) vs standing."""
+    return {
+        "idle_transient": OperatingModeSpec(
+            rpm_max=900, speed_max=0, coolant_temp_min=70, recent_speed_min=8
+        ),
+        "idle": OperatingModeSpec(rpm_max=900, speed_max=0, coolant_temp_min=70),
+        "city": OperatingModeSpec(speed_max=50),
+    }
+
+
+def _drive_then_stop_frame(drive_s: int, stop_s: int, *, session: str = "A") -> pd.DataFrame:
+    t0 = pd.Timestamp("2026-05-24T19:00:00Z")
+    rows = []
+    for i in range(drive_s):
+        rows.append(
+            {
+                "session": session,
+                "timestamp": t0 + pd.Timedelta(seconds=i),
+                "obd:RPM": 1500.0,
+                "obd:SPEED": 40.0,
+                "obd:COOLANT_TEMP": 90.0,
+            }
+        )
+    for i in range(drive_s, drive_s + stop_s):
+        rows.append(
+            {
+                "session": session,
+                "timestamp": t0 + pd.Timedelta(seconds=i),
+                "obd:RPM": 750.0,
+                "obd:SPEED": 0.0,
+                "obd:COOLANT_TEMP": 90.0,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def test_idle_transient_after_recent_motion() -> None:
+    """A stop within the lookback of driving is idle_transient, not idle."""
+    frame = _drive_then_stop_frame(drive_s=5, stop_s=6)
+    out = segment_operating_modes(frame, _idle_split_modes(), recent_motion_window_seconds=30)
+    modes = list(out[MODE_COLUMN])
+    assert modes[:5] == ["city"] * 5
+    assert modes[5:] == ["idle_transient"] * 6
+
+
+def test_idle_standing_from_rest_is_idle() -> None:
+    """Stopped from the start (no prior motion) is steady idle, never transient."""
+    frame = _drive_then_stop_frame(drive_s=0, stop_s=8)
+    out = segment_operating_modes(frame, _idle_split_modes(), recent_motion_window_seconds=30)
+    assert list(out[MODE_COLUMN]) == ["idle"] * 8
+
+
+def test_idle_transient_decays_to_idle_past_lookback() -> None:
+    """Once the last motion falls out of the window, a long stop becomes idle."""
+    frame = _drive_then_stop_frame(drive_s=3, stop_s=20)
+    out = segment_operating_modes(frame, _idle_split_modes(), recent_motion_window_seconds=8)
+    modes = list(out[MODE_COLUMN])
+    assert modes[:3] == ["city"] * 3
+    # Motion (last at second 2) stays in an 8 s trailing window briefly, then the
+    # stop decays to standing idle.
+    assert "idle_transient" in modes
+    assert modes[-1] == "idle"
+
+
+def test_recent_speed_does_not_bleed_across_sessions() -> None:
+    """Motion in one session must not make another session's idle transient."""
+    moved = _drive_then_stop_frame(drive_s=4, stop_s=3, session="A")
+    rested = _drive_then_stop_frame(drive_s=0, stop_s=7, session="B")
+    frame = pd.concat([moved, rested], ignore_index=True)
+    out = segment_operating_modes(frame, _idle_split_modes(), recent_motion_window_seconds=60)
+    assert set(out[out.session == "B"][MODE_COLUMN]) == {"idle"}
+
+
+def test_recent_speed_is_ephemeral_not_a_column() -> None:
+    """The derived recent_speed must never leak into the output frame."""
+    frame = _drive_then_stop_frame(drive_s=3, stop_s=3)
+    out = segment_operating_modes(frame, _idle_split_modes(), recent_motion_window_seconds=30)
+    assert "recent_speed" not in out.columns
+
+
+def test_idle_transient_skipped_without_timestamp() -> None:
+    """No timestamp column → recent_speed can't be derived; warm stops are idle."""
+    frame = pd.DataFrame(
+        [
+            {"obd:RPM": 750.0, "obd:SPEED": 0.0, "obd:COOLANT_TEMP": 90.0},
+            {"obd:RPM": 750.0, "obd:SPEED": 0.0, "obd:COOLANT_TEMP": 90.0},
+        ]
+    )
+    out = segment_operating_modes(frame, _idle_split_modes())
+    assert list(out[MODE_COLUMN]) == ["idle", "idle"]

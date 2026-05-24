@@ -62,15 +62,39 @@ def test_reading_to_records_with_fix_emits_speed_position_and_health() -> None:
 
 
 def test_reading_to_records_snaps_stationary_jitter_to_zero() -> None:
-    # Parked GPS reports a few km/h of SOG noise; it must read as stopped so a
+    # Even on a confident fix, sub-floor SOG noise must read as stopped so a
     # parked truck stays in koeo/idle instead of matching city.
-    reading = GpsReading(has_fix=True, fix_quality=1, num_satellites=6, speed_kmh=3.6)
+    reading = GpsReading(has_fix=True, fix_quality=1, num_satellites=12, hdop=0.8, speed_kmh=3.6)
     records = {record.channel: record for record in reading_to_records(reading, 1000.0)}
     assert records["speed"].value == 0.0
 
 
 def test_reading_to_records_keeps_real_speed_above_floor() -> None:
-    reading = GpsReading(has_fix=True, fix_quality=1, num_satellites=8, speed_kmh=42.0)
+    reading = GpsReading(has_fix=True, fix_quality=1, num_satellites=8, hdop=0.9, speed_kmh=42.0)
+    records = {record.channel: record for record in reading_to_records(reading, 1000.0)}
+    assert records["speed"].value == pytest.approx(42.0)
+
+
+def test_reading_to_records_omits_speed_on_few_satellites() -> None:
+    # A marginal fix jitters SOG above the floor (observed ~9 km/h at 5 sats);
+    # speed is withheld so the segmenter defers to the wheel-speed PID.
+    reading = GpsReading(has_fix=True, fix_quality=1, num_satellites=5, hdop=2.5, speed_kmh=9.0)
+    records = {record.channel: record for record in reading_to_records(reading, 1000.0)}
+    assert "speed" not in records
+    # Health + position still flow through; only SOG is untrusted.
+    assert "num_satellites" in records
+
+
+def test_reading_to_records_omits_speed_on_high_hdop() -> None:
+    reading = GpsReading(has_fix=True, fix_quality=1, num_satellites=12, hdop=3.0, speed_kmh=9.0)
+    records = {record.channel: record for record in reading_to_records(reading, 1000.0)}
+    assert "speed" not in records
+
+
+def test_reading_to_records_emits_speed_when_fix_health_unknown() -> None:
+    # Receiver not surfacing GSA (no sats/HDOP): leave the gate open and keep
+    # the floor-only behavior rather than dropping speed everywhere.
+    reading = GpsReading(has_fix=True, fix_quality=1, speed_kmh=42.0)
     records = {record.channel: record for record in reading_to_records(reading, 1000.0)}
     assert records["speed"].value == pytest.approx(42.0)
 

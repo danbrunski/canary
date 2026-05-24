@@ -146,12 +146,28 @@ class OperatingModeSpec(_Strict):
     #: signal is ``obd:COOLANT_TEMP`` (degC).
     coolant_temp_min: float | None = None
     coolant_temp_max: float | None = None
+    #: Recent-motion gates (km/h) on a derived ``recent_speed`` signal — the
+    #: trailing max ground speed over ``idle_transient_lookback_seconds``. Lets
+    #: the segmenter pull a *transient stop* (stopped now, but driving moments
+    #: ago — a stop light) out of the same warm RPM/zero-speed band as a steady
+    #: standing idle (driveway / pre-drive). Without it both collapse to one
+    #: ``idle`` model that can't tell "stopped mid-drive" from "never moved".
+    #: ``recent_speed`` is computed per session, so it never bleeds across
+    #: sessions, and is ephemeral — it gates segmentation only, never a feature.
+    recent_speed_min: float | None = None
+    recent_speed_max: float | None = None
 
 
 class PreprocessingConfig(_Strict):
     resample_hz: float
     rolling_window_seconds: int
     operating_modes: dict[str, OperatingModeSpec]
+    #: Trailing window (s) for the segmenter's derived ``recent_speed`` signal
+    #: (see ``OperatingModeSpec.recent_speed_*``). Sized to outlast a typical
+    #: red light so a multi-minute stop stays ``idle_transient`` rather than
+    #: decaying into standing ``idle``. The live ring buffer is grown to hold at
+    #: least this many seconds so serve-time segmentation matches training.
+    idle_transient_lookback_seconds: int = 180
     #: Skip per-mode segmentation entirely and fit/score a single model over a
     #: constant ``operating_mode = "all"``. Use when the corpus covers one
     #: regime, or when the OBD mode signals (RPM/SPEED/THROTTLE) are too sparse

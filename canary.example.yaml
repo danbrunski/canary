@@ -77,6 +77,11 @@ collection:
 preprocessing:
   resample_hz: 1
   rolling_window_seconds: 30
+  # Trailing window for the segmenter's derived recent_speed signal (the
+  # trailing max ground speed), which separates a transient stop from steady
+  # idle. The live ring buffer is grown to hold at least this many seconds so
+  # serve-time segmentation matches training.
+  idle_transient_lookback_seconds: 180
   operating_modes:
     # Key-on / engine-off (KOEO): engine not running, so RPM reads 0. Must
     # come first and win before any running regime — otherwise a warm-but-off
@@ -98,6 +103,19 @@ preprocessing:
       rpm_min: 400
       speed_max: 0
       coolant_temp_max: 70
+    # Transient stop: warm + stopped now, but the truck was driving within the
+    # last idle_transient_lookback_seconds (a stop light / stop sign mid-drive).
+    # Pulled out before steady idle so a stoplight dwell isn't modeled as the
+    # same regime as a driveway warm-up idle. recent_speed is the trailing max
+    # ground speed; >= 8 km/h means "moved recently". Must precede idle.
+    idle_transient:
+      rpm_min: 400
+      rpm_max: 900
+      speed_max: 0
+      coolant_temp_min: 70
+      recent_speed_min: 8
+    # Steady standing idle: warm, stopped, and NOT moving recently (driveway /
+    # pre-drive). Catches the stopped-warm rows idle_transient didn't.
     idle:
       rpm_min: 400
       rpm_max: 900
