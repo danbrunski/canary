@@ -24,6 +24,7 @@ interface DashboardShellProps {
   controlReady: boolean;
   sourceLabel?: string;
   events: AnomalyEvent[];
+  liveMode?: string | null;
   status: StatusResponse | null;
   channels: Map<string, ChannelSnapshot>;
   children: ReactNode;
@@ -46,6 +47,7 @@ export function DashboardShell({
   controlReady,
   sourceLabel = "live pi",
   events,
+  liveMode,
   status,
   channels,
   children,
@@ -62,7 +64,7 @@ export function DashboardShell({
             {driving ? "drive" : "workbench"}
           </div>
         </div>
-        <OperatingModeIndicator events={events} />
+        <OperatingModeIndicator events={events} liveMode={liveMode} />
         <div className="ml-auto flex gap-2 text-[0.78rem] text-fg-dim">
           <span className="inline-flex min-h-6 items-center rounded-full border border-border-soft bg-black/25 px-2 text-[0.68rem] uppercase tracking-[0.06em] text-fg-faint">
             {sourceLabel}

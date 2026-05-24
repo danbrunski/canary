@@ -58,6 +58,7 @@ export default function App() {
       controlReady={controlToken.hasToken}
       sourceLabel={companion.baseUrl ? "live pi + laptop" : "live pi"}
       events={anomalies.events}
+      liveMode={behaviorLive?.operating_mode ?? null}
       status={status}
       channels={telemetry.channels}
     >

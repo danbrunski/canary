@@ -3,18 +3,22 @@ import { cn } from "../styles";
 
 interface OperatingModeIndicatorProps {
   events: AnomalyEvent[];
+  /** Live mode from `/models/behavior/live`, refreshed every inference tick.
+   *  Preferred source: it stays current even when no anomalies fire — e.g.
+   *  engine-off `koeo`, where models don't score so the anomaly stream goes
+   *  silent and its last `operating_mode` would otherwise stick. */
+  liveMode?: string | null;
 }
 
-/** Current operating mode badge (Task 5.11). Reads the most recent anomaly
- *  event's `operating_mode` — that's the freshest cue the daemon publishes.
- *  When inference hasn't emitted anything yet, falls back to "unknown".
- *
- *  In a future revision, the daemon can publish operating-mode transitions
- *  on the telemetry broadcaster as a synthesized "system:mode" channel; for
- *  now the anomaly stream is sufficient and avoids a second producer. */
-export function OperatingModeIndicator({ events }: OperatingModeIndicatorProps) {
+/** Current operating mode badge (Task 5.11). Prefers the live behavior-stream
+ *  mode; falls back to the most recent anomaly event's `operating_mode` if the
+ *  live feed isn't up yet, then "unknown". */
+export function OperatingModeIndicator({
+  events,
+  liveMode,
+}: OperatingModeIndicatorProps) {
   const recent = events.find((e) => e.operating_mode !== null);
-  const mode = recent?.operating_mode ?? "unknown";
+  const mode = liveMode ?? recent?.operating_mode ?? "unknown";
   return (
     <div className="inline-flex min-w-[6.5rem] flex-col items-center rounded-full border border-border-soft bg-elev-2 px-4 py-1">
       <span className="text-[0.56rem] uppercase tracking-[0.18em] text-fg-faint">
@@ -25,8 +29,7 @@ export function OperatingModeIndicator({ events }: OperatingModeIndicatorProps) 
           "text-base font-semibold uppercase tracking-[0.06em]",
           mode === "idle" && "text-ok",
           (mode === "city" || mode === "highway") && "text-accent",
-          mode === "wot" && "text-warn",
-          mode === "unknown" && "text-fg-dim",
+          (mode === "koeo" || mode === "unknown") && "text-fg-dim",
         )}
       >
         {mode}
