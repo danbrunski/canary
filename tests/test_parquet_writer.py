@@ -12,6 +12,7 @@ import pytest
 from src.storage import parquet_writer
 from src.storage.parquet_writer import (
     ParquetTelemetryWriter,
+    delete_empty_sessions,
     delete_expired_sessions,
     emergency_evict_for_free_space,
     enforce_storage_cap,
@@ -282,6 +283,73 @@ def test_delete_expired_sessions_keeps_protected_old_sessions(tmp_path: Path) ->
 def test_delete_expired_sessions_rejects_negative_retention(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="retention_days"):
         delete_expired_sessions(tmp_path, retention_days=-1)
+
+
+# ---------------------------------------------------------------------------
+# delete_empty_sessions — crash-loop / interrupted-write husk cleanup
+# ---------------------------------------------------------------------------
+
+
+def test_delete_empty_sessions_removes_husk_but_keeps_data_session(tmp_path: Path) -> None:
+    now = datetime(2026, 5, 11, tzinfo=UTC)
+    husk = tmp_path / "2026-05-10T000000"  # empty — no files at all
+    husk.mkdir()
+    with_data = tmp_path / "2026-05-10T010000"
+    with_data.mkdir()
+    (with_data / "telemetry-00000.parquet").write_bytes(b"data")
+
+    sweep = delete_empty_sessions(tmp_path, now=now)
+
+    assert sweep.removed_sessions == [husk]
+    assert sweep.removed_files == []
+    assert not husk.exists()
+    assert with_data.exists()
+
+
+def test_delete_empty_sessions_drops_zero_byte_parquet_keeps_session(tmp_path: Path) -> None:
+    now = datetime(2026, 5, 11, tzinfo=UTC)
+    session = tmp_path / "2026-05-10T000000"
+    session.mkdir()
+    (session / "telemetry-00000.parquet").write_bytes(b"data")
+    empty1 = session / "telemetry-00001.parquet"
+    empty2 = session / "telemetry-00002.parquet"
+    empty1.write_bytes(b"")
+    empty2.write_bytes(b"")
+
+    sweep = delete_empty_sessions(tmp_path, now=now)
+
+    assert sweep.removed_sessions == []
+    assert set(sweep.removed_files) == {empty1, empty2}
+    assert session.exists()
+    assert (session / "telemetry-00000.parquet").exists()
+    assert not empty1.exists() and not empty2.exists()
+
+
+def test_delete_empty_sessions_removes_dir_of_only_zero_byte_parquet(tmp_path: Path) -> None:
+    now = datetime(2026, 5, 11, tzinfo=UTC)
+    husk = tmp_path / "2026-05-10T000000"
+    husk.mkdir()
+    (husk / "telemetry-00000.parquet").write_bytes(b"")
+
+    sweep = delete_empty_sessions(tmp_path, now=now)
+
+    assert sweep.removed_sessions == [husk]
+    assert not husk.exists()
+
+
+def test_delete_empty_sessions_protects_active_pinned_and_recent(tmp_path: Path) -> None:
+    now = datetime(2026, 5, 11, tzinfo=UTC)
+    active = tmp_path / "2026-05-10T000000"  # empty but live
+    pinned = tmp_path / "2026-05-10T010000"  # empty but pinned
+    recent = tmp_path / "2026-05-11T000000"  # empty but inside min_age window
+    for d in (active, pinned, recent):
+        d.mkdir()
+    (pinned / ".canary-pin").write_text("{}\n")
+
+    sweep = delete_empty_sessions(tmp_path, now=now, protect={active}, min_age_seconds=120.0)
+
+    assert sweep.removed_sessions == []
+    assert active.exists() and pinned.exists() and recent.exists()
 
 
 # ---------------------------------------------------------------------------

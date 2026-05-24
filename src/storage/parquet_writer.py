@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -322,6 +323,63 @@ def delete_expired_replays(
             shutil.rmtree(child)
             deleted.append(child)
     return deleted
+
+
+@dataclass(frozen=True)
+class EmptySessionSweep:
+    """What :func:`delete_empty_sessions` removed in one pass."""
+
+    removed_sessions: list[Path]  # husk dirs with no surviving data
+    removed_files: list[Path]  # 0-byte parquet dropped from kept sessions
+
+
+def delete_empty_sessions(
+    sessions_root: Path,
+    *,
+    now: datetime | None = None,
+    protect: Iterable[Path] | None = None,
+    min_age_seconds: float = 120.0,
+) -> EmptySessionSweep:
+    """Remove crash-loop / interrupted-write session husks.
+
+    A daemon that crash-loops (or is killed mid-flush) leaves timestamp-named
+    session dirs that are empty or hold only 0-byte ``*.parquet`` files. The age
+    sweep won't catch them (they're recent) and they clutter training discovery
+    and the live-session list. For each timestamp session dir — skipping
+    ``protect`` (the live session), pinned dirs, and anything newer than
+    ``min_age_seconds`` (so a just-created session that hasn't flushed its first
+    file isn't raced) — this drops 0-byte parquet files, then removes the whole
+    directory if no data survives anywhere in its tree.
+    """
+    if not sessions_root.exists():
+        return EmptySessionSweep([], [])
+
+    protected = {path.resolve() for path in protect or ()}
+    now_dt = datetime.now(UTC) if now is None else now.astimezone(UTC)
+    removed_sessions: list[Path] = []
+    removed_files: list[Path] = []
+    for child in sorted(sessions_root.iterdir()):
+        if not child.is_dir():
+            continue
+        try:
+            started_at = datetime.strptime(child.name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
+        except ValueError:
+            continue
+        if child.resolve() in protected or (child / ".canary-pin").exists():
+            continue
+        if (now_dt - started_at).total_seconds() < min_age_seconds:
+            continue
+        for parquet in child.glob("*.parquet"):
+            try:
+                if parquet.stat().st_size == 0:
+                    parquet.unlink()
+                    removed_files.append(parquet)
+            except OSError:
+                continue
+        if _dir_tree_size(child) == 0:
+            shutil.rmtree(child)
+            removed_sessions.append(child)
+    return EmptySessionSweep(removed_sessions, removed_files)
 
 
 def _dir_tree_size(root: Path) -> int:

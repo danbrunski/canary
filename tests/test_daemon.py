@@ -687,6 +687,72 @@ async def test_run_daemon_starts_retention_sweeper_and_protects_active_session(
     assert active.exists()
 
 
+async def test_run_daemon_propagates_collector_failure_without_hanging(
+    config: CanaryConfig,
+) -> None:
+    """Regression: a collector that raises must drive run_daemon to *exit* —
+    propagate the exception so asyncio.run returns non-zero and systemd's
+    Restart=on-failure fires — not wedge in shutdown (uvicorn "Waiting for
+    background tasks to complete", a stuck drain). The outer wait_for is the
+    teeth: if the shutdown path hangs again this fails on timeout rather than
+    hanging the whole suite. See project_daemon_shutdown_hang."""
+    from src.daemon import run_daemon
+
+    components = build_components(config)
+    stop = asyncio.Event()
+
+    async def _boom(_queue: asyncio.Queue[Any], _stop: asyncio.Event) -> None:
+        raise RuntimeError("collector boom")
+
+    with pytest.raises(RuntimeError, match="collector boom"):
+        await asyncio.wait_for(
+            run_daemon(
+                config,
+                stop,
+                collectors=[_boom],
+                components=components,
+                enable_live_inference=False,
+            ),
+            timeout=20.0,
+        )
+
+
+async def test_serve_in_background_force_exits_when_server_wont_stop(
+    config: CanaryConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: if uvicorn ignores should_exit and keeps "waiting for
+    background tasks" (an open WebSocket), serve_in_background must still return
+    by force-exiting + cancelling, not block forever. Simulated with a fake
+    server whose serve() only ends on cancellation."""
+    import src.daemon as daemon_mod
+    from src.daemon import serve_in_background
+
+    monkeypatch.setattr(daemon_mod, "DASHBOARD_SHUTDOWN_SECONDS", 0.2)
+    components = build_components(config)
+
+    class _WedgedServer:
+        def __init__(self) -> None:
+            self.started = True
+            self.should_exit = False
+            self.force_exit = False
+
+        async def serve(self) -> None:
+            # Ignores should_exit — only stops when cancelled (the safety net).
+            await asyncio.Event().wait()
+
+    wedged = _WedgedServer()
+
+    async def _use() -> None:
+        async with serve_in_background(components, server_factory=lambda config: wedged):
+            pass
+
+    # Returns well inside the bound; if the force-exit path regresses this
+    # times out (fails) instead of hanging the suite.
+    await asyncio.wait_for(_use(), timeout=5.0)
+    assert wedged.force_exit is True
+
+
 async def test_run_daemon_wires_retention_sweeper_task(
     config: CanaryConfig,
     monkeypatch: pytest.MonkeyPatch,

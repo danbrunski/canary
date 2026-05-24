@@ -87,6 +87,7 @@ from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.monitor import free_space_mb, warn_if_storage_low
 from src.storage.parquet_writer import (
     ParquetTelemetryWriter,
+    delete_empty_sessions,
     delete_expired_replays,
     delete_expired_sessions,
     emergency_evict_for_free_space,
@@ -1144,6 +1145,16 @@ async def run_retention_sweeper(
                         "active_session": str(active),
                     },
                 )
+            husks = delete_empty_sessions(storage_path, protect={active})
+            if husks.removed_sessions or husks.removed_files:
+                log.info(
+                    "empty session husks cleaned",
+                    extra={
+                        "removed_sessions": len(husks.removed_sessions),
+                        "removed_zero_byte_files": len(husks.removed_files),
+                        "active_session": str(active),
+                    },
+                )
             if storage_max_mb is not None:
                 evicted = enforce_storage_cap(
                     storage_path,
@@ -1246,6 +1257,16 @@ def _tree_size(root: Path) -> int:
     return total
 
 
+#: Hard caps on the shutdown path. A collector failure propagates an exception
+#: that *must* reach ``asyncio.run`` so the process exits non-zero and systemd's
+#: ``Restart=on-failure`` fires. Every await between the failure and that exit
+#: is bounded so a wedged background task (uvicorn waiting on an open WebSocket,
+#: a stuck drain) can't silently pin the daemon "active (running)" with a dead
+#: port. See [[project_daemon_shutdown_hang]].
+DASHBOARD_SHUTDOWN_SECONDS = 5.0
+DRAIN_SHUTDOWN_SECONDS = 5.0
+
+
 @asynccontextmanager
 async def serve_in_background(
     components: DaemonComponents,
@@ -1295,6 +1316,10 @@ async def serve_in_background(
         port=components.config.dashboard.port,
         log_level="info",
         lifespan="on",
+        # Cap uvicorn's own graceful shutdown so it stops waiting on lingering
+        # background tasks (e.g. an open /ws/anomalies WebSocket) instead of
+        # hanging "Waiting for background tasks to complete" forever.
+        timeout_graceful_shutdown=int(DASHBOARD_SHUTDOWN_SECONDS),
     )
     server = server_factory(config=server_config)
     serve_task = asyncio.create_task(server.serve())
@@ -1307,7 +1332,17 @@ async def serve_in_background(
         yield server
     finally:
         server.should_exit = True
-        await serve_task
+        # Belt-and-suspenders around timeout_graceful_shutdown: if uvicorn still
+        # doesn't return (older versions, a wedged lifespan task), force it down
+        # so the daemon can finish exiting rather than pinning the unit "active".
+        try:
+            await asyncio.wait_for(serve_task, timeout=DASHBOARD_SHUTDOWN_SECONDS + 2.0)
+        except TimeoutError:
+            log.warning("dashboard graceful shutdown timed out; forcing server down")
+            server.force_exit = True
+            serve_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await serve_task
 
 
 # ---------------------------------------------------------------------------
@@ -1453,8 +1488,17 @@ async def run_daemon(
         finally:
             stop_event.set()
             await asyncio.gather(*collector_tasks, return_exceptions=True)
-            await queue.join()
-            await drain_task
+            # Bound the drain: if the drain task wedged, queue.join() would block
+            # forever and the collector exception below would never reach
+            # asyncio.run — the unit would sit "active" with a dead port.
+            try:
+                await asyncio.wait_for(queue.join(), timeout=DRAIN_SHUTDOWN_SECONDS)
+                await asyncio.wait_for(drain_task, timeout=DRAIN_SHUTDOWN_SECONDS)
+            except TimeoutError:
+                log.warning("telemetry drain shutdown timed out; cancelling")
+                drain_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await drain_task
             poll_task.cancel()
             try:
                 await poll_task
