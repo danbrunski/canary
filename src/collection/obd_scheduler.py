@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from src.collection.can_obd_client import DEFAULT_REQUEST_ID, PID_DECODERS
@@ -23,6 +25,29 @@ TIER_RATE_FACTORS: dict[PollTier, float] = {
 }
 
 _PID_IDS_BY_NAME: dict[str, int] = {name: pid for pid, (name, _decoder) in PID_DECODERS.items()}
+
+# DID name→identifier lives in data/dids.yaml (not a static table like PIDs), so
+# resolve it lazily and cache. Path is repo-root-relative so cwd doesn't matter.
+_DIDS_YAML_PATH = Path(__file__).resolve().parents[2] / "data" / "dids.yaml"
+
+
+@lru_cache(maxsize=1)
+def _did_ids_by_name() -> dict[str, int]:
+    """Symbolic DID name → identifier from data/dids.yaml.
+
+    Empty when the file is absent or unparseable — callers then accept only
+    4-char hex, matching the pre-resolution behavior. Mirrors how
+    ``parse_pid_token`` resolves PID names against ``_PID_IDS_BY_NAME``.
+    """
+    from src.decode.dids import load_did_map
+
+    if not _DIDS_YAML_PATH.exists():
+        return {}
+    try:
+        did_map = load_did_map(_DIDS_YAML_PATH)
+    except Exception:  # noqa: BLE001 — bad YAML shouldn't crash the collector
+        return {}
+    return {entry.name: entry.did for entry in did_map.dids}
 
 
 class _PidDiscoveryClient(Protocol):
@@ -130,10 +155,16 @@ def parse_pid_token(token: str) -> int | None:
 
 
 def parse_did_token(token: str) -> int:
-    normalized = token.strip().upper()
-    if len(normalized) != 4 or any(c not in "0123456789ABCDEF" for c in normalized):
-        raise ValueError(f"DID must be a 4-character hex string, got {token!r}")
-    return int(normalized, 16)
+    stripped = token.strip()
+    normalized = stripped.upper()
+    if len(normalized) == 4 and all(c in "0123456789ABCDEF" for c in normalized):
+        return int(normalized, 16)
+    by_name = _did_ids_by_name().get(stripped)
+    if by_name is not None:
+        return by_name
+    raise ValueError(
+        f"DID must be a 4-character hex string or a name from data/dids.yaml, got {token!r}"
+    )
 
 
 def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_PollRequest]:
