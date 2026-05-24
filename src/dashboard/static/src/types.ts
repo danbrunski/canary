@@ -163,14 +163,12 @@ export type AppMode = "driving" | "parked";
 export type NavGroupId = "live" | "diagnostics" | "models" | "data" | "control";
 
 export type WorkbenchItem =
-  | "live-gauges"
   | "live-charts"
   | "live-alarms"
   | "live-builder"
   | "diag-anomalies"
-  | "diag-coverage"
+  | "diag-data"
   | "diag-dtc"
-  | "diag-did"
   | "diag-system"
   | "diag-tpms"
   | "models-overview"
@@ -511,6 +509,26 @@ export interface ObdCoverageResponse {
   backed_off_count: number;
   undecoded_supported: string[];
   rows: ObdCoverageRow[];
+}
+
+/** `GET /can/coverage` — static catalog of decodable broadcast-CAN signals
+ *  (bindings + DBC) with their source CAN IDs. The CAN tab overlays live values
+ *  + discovered/undecoded IDs from the telemetry stream client-side. */
+export interface CanSignal {
+  can_id: number;
+  can_id_hex: string;
+  name: string;
+  unit: string;
+  source: "decoded" | "dbc";
+  /** Telemetry-stream key for the live value, e.g. `decoded:ECM_RPM`. */
+  channel: string;
+}
+
+export interface CanCoverageResponse {
+  signals: CanSignal[];
+  signal_count: number;
+  decoded_id_count: number;
+  decoded_ids_hex: string[];
 }
 
 /** `GET /control/datasets/health` — mirrors `CorpusHealth.to_dict()`

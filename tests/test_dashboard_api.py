@@ -239,6 +239,51 @@ signals:
     assert out["decoded:ENGINE_RPM"]["scale"] == 0.125
 
 
+def test_read_can_coverage_catalogs_signals_with_can_ids(tmp_path: Path) -> None:
+    """CAN broadcast catalog: one row per signal carrying its source CAN ID,
+    sorted by (can_id, name), with channel keys the frontend looks up live."""
+    from src.dashboard.api import read_can_coverage
+
+    yaml = """
+schema_version: 1
+vehicle: {make: Nissan, model: Xterra, year: 2008}
+signals:
+  - name: COOLANT_TEMP
+    module: ECM
+    can_id: 0x551
+    byte_start: 0
+    byte_length: 1
+    unit: degC
+    confidence: confirmed
+  - name: ECM_RPM
+    module: ECM
+    can_id: 0x1F9
+    byte_start: 2
+    byte_length: 2
+    scale: 0.125
+    offset: 0
+    unit: rpm
+    confidence: high
+"""
+    path = tmp_path / "bindings.yaml"
+    path.write_text(yaml)
+    empty_dbc = tmp_path / "dbc"
+    empty_dbc.mkdir()
+
+    cov = read_can_coverage(path, dbc_dir=empty_dbc)
+
+    assert cov["signal_count"] == 2
+    assert cov["decoded_id_count"] == 2
+    assert set(cov["decoded_ids_hex"]) == {"0x1F9", "0x551"}
+    # sorted by (can_id, name): 0x1F9 (505) before 0x551 (1361)
+    assert [s["can_id_hex"] for s in cov["signals"]] == ["0x1F9", "0x551"]
+    rpm = next(s for s in cov["signals"] if s["name"] == "ECM_RPM")
+    assert rpm["can_id_hex"] == "0x1F9"
+    assert rpm["channel"] == "decoded:ECM_RPM"
+    assert rpm["source"] == "decoded"
+    assert rpm["unit"] == "rpm"
+
+
 def test_bindings_endpoint_returns_display_payload(
     config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
 ) -> None:

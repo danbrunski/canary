@@ -4,19 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   DatasetHealthResponse,
-  ObdCoverageResponse,
   TrainingRunsResponse,
 } from "../types";
 
 const mocks = vi.hoisted(() => ({
-  getObdCoverage: vi.fn(),
   getDatasetHealth: vi.fn(),
   getTrainingRuns: vi.fn(),
   submitJob: vi.fn(),
 }));
 
 vi.mock("../api/http", () => ({
-  getObdCoverage: mocks.getObdCoverage,
   getDatasetHealth: mocks.getDatasetHealth,
   getTrainingRuns: mocks.getTrainingRuns,
   submitJob: mocks.submitJob,
@@ -26,7 +23,6 @@ vi.mock("../api/http", () => ({
   },
 }));
 
-const { ObdCoveragePanel } = await import("./ObdCoveragePanel");
 const { DatasetHealthPanel } = await import("./DatasetHealthPanel");
 const { TrainingPanel } = await import("./TrainingPanel");
 
@@ -38,47 +34,11 @@ const COMPANION = {
 };
 
 beforeEach(() => {
-  mocks.getObdCoverage.mockReset();
   mocks.getDatasetHealth.mockReset();
   mocks.getTrainingRuns.mockReset();
   mocks.submitJob.mockReset();
 });
 afterEach(() => vi.clearAllMocks());
-
-describe("ObdCoveragePanel", () => {
-  it("renders the coverage summary + a decoded row", async () => {
-    const resp: ObdCoverageResponse = {
-      supported_count: 2,
-      decoded_count: 1,
-      supported_not_decoded_count: 1,
-      responded_count: 1,
-      backed_off_count: 0,
-      undecoded_supported: ["MONITOR_STATUS_DRIVE_CYCLE"],
-      rows: [
-        {
-          mode: 1,
-          pid: 12,
-          pid_hex: "0x0C",
-          status: "decoded",
-          channel: "RPM",
-          display_name: "Engine RPM",
-          category: "engine",
-          unit: "rpm",
-          poll_tier: "fast",
-          responded_recently: true,
-          backed_off: false,
-        },
-      ],
-    };
-    mocks.getObdCoverage.mockResolvedValue(resp);
-    render(createElement(ObdCoveragePanel));
-    expect(await screen.findByText("Engine RPM")).toBeInTheDocument();
-    expect(screen.getByText("1 decoded / 2 supported")).toBeInTheDocument();
-    expect(
-      screen.getByText(/MONITOR_STATUS_DRIVE_CYCLE/),
-    ).toBeInTheDocument();
-  });
-});
 
 describe("DatasetHealthPanel", () => {
   it("prompts for a token when none is set (no fetch)", () => {

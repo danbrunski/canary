@@ -9,6 +9,7 @@ import type {
   BehaviorLiveResponse,
   BehaviorModelsResponse,
   BindingsByChannel,
+  CanCoverageResponse,
   CaptureResponse,
   CaptureTagResponse,
   DatasetHealthResponse,
@@ -333,6 +334,13 @@ export function getObdCoverage(
   signal?: AbortSignal,
 ): Promise<ObdCoverageResponse> {
   return fetchJson("/obd/coverage", { signal });
+}
+
+/** `/can/coverage` — static catalog of decodable broadcast-CAN signals. */
+export function getCanCoverage(
+  signal?: AbortSignal,
+): Promise<CanCoverageResponse> {
+  return fetchJson("/can/coverage", { signal });
 }
 
 /** `/dids` is read-only + unauthenticated, like `/bindings` (Task 6.16). */

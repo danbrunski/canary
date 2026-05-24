@@ -109,6 +109,7 @@ from src.dashboard.readers import (
     read_anomalies_since,
     read_behavior_models,
     read_bindings_for_display,
+    read_can_coverage,
     read_latest_per_channel,
     read_latest_telemetry_rows,
     read_obd_coverage,
@@ -311,6 +312,13 @@ def create_app(
         # Read-only honesty surface (Task 6.3 / Risk R7): which public PIDs
         # the ECU supports, which CANary decodes, which are undecoded gaps.
         return read_obd_coverage(config.collection.storage_path)
+
+    @app.get("/can/coverage")
+    def get_can_coverage() -> dict[str, Any]:
+        # Static catalog of decodable broadcast-CAN signals (bindings + DBC)
+        # with their source CAN IDs. The CAN tab overlays live values and
+        # discovered/undecoded IDs from the telemetry stream client-side.
+        return read_can_coverage(bindings_path)
 
     def require_control_auth(
         request: Request,

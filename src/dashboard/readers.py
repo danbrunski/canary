@@ -16,6 +16,7 @@ from src.decode.behavior_models import (
     load_behavior_models,
 )
 from src.decode.bindings import load_bindings
+from src.decode.dbc import DEFAULT_DBC_DIR, dbc_channel, load_dbc_dir
 from src.preprocessing.decode import decoded_channel
 from src.preprocessing.loader import PARQUET_PATTERN
 
@@ -186,6 +187,68 @@ def read_bindings_for_display(
     return out
 
 
+def read_can_coverage(
+    bindings_path: Path = DEFAULT_BINDINGS_PATH,
+    *,
+    dbc_dir: Path = DEFAULT_DBC_DIR,
+) -> dict[str, Any]:
+    """Static catalog of decodable CAN *broadcast* signals (bindings + DBC).
+
+    One row per signal with its source CAN ID, so the dashboard's CAN tab can
+    render ``CAN ID · signal · live value`` and flag undecoded IDs. This is just
+    the catalog (cheap, no corpus read) — the live value, the discovered/active
+    state, and the undecoded-ID rows are overlaid client-side from the telemetry
+    stream (``channels`` keyed by ``decoded:<NAME>`` / ``dbc:<NAME>`` / ``can:0x<ID>``).
+    """
+    signals: list[dict[str, Any]] = []
+    seen: set[tuple[int, str]] = set()
+
+    if bindings_path.exists():
+        for signal in load_bindings(bindings_path).signals:
+            key = (signal.can_id, signal.name)
+            if key in seen:
+                continue
+            seen.add(key)
+            signals.append(
+                {
+                    "can_id": signal.can_id,
+                    "can_id_hex": f"0x{signal.can_id:X}",
+                    "name": signal.name,
+                    "unit": "" if signal.unit == "unknown" else signal.unit,
+                    "source": "decoded",
+                    "channel": decoded_channel(signal.name),
+                }
+            )
+
+    database = load_dbc_dir(dbc_dir)
+    if database is not None:
+        for message in database.messages:
+            for signal in message.signals:
+                key = (int(message.frame_id), signal.name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                signals.append(
+                    {
+                        "can_id": int(message.frame_id),
+                        "can_id_hex": f"0x{int(message.frame_id):X}",
+                        "name": signal.name,
+                        "unit": getattr(signal, "unit", "") or "",
+                        "source": "dbc",
+                        "channel": dbc_channel(signal.name),
+                    }
+                )
+
+    signals.sort(key=lambda row: (row["can_id"], row["name"]))
+    decoded_ids = sorted({row["can_id"] for row in signals})
+    return {
+        "signals": signals,
+        "signal_count": len(signals),
+        "decoded_id_count": len(decoded_ids),
+        "decoded_ids_hex": [f"0x{cid:X}" for cid in decoded_ids],
+    }
+
+
 def read_behavior_models(path: Path = DEFAULT_BEHAVIOR_MODELS_PATH) -> dict[str, Any]:
     """Return ``behavior_models.yaml`` as a JSON-safe payload for the dashboard."""
     if not path.exists():
@@ -198,6 +261,7 @@ __all__ = [
     "read_anomalies_since",
     "read_behavior_models",
     "read_bindings_for_display",
+    "read_can_coverage",
     "read_latest_per_channel",
     "read_latest_telemetry_rows",
     "read_obd_coverage",

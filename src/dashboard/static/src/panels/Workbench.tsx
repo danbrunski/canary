@@ -24,14 +24,12 @@ import { BehaviorModelsPanel } from "./BehaviorModelsPanel";
 import { ChartsPanel } from "./ChartsPanel";
 import { ControlPanel } from "./ControlPanel";
 import { CustomDashboardPanel } from "./CustomDashboardPanel";
+import { DataSourcesPanel } from "./DataSourcesPanel";
 import { DatasetHealthPanel } from "./DatasetHealthPanel";
-import { DidWorkbenchPanel } from "./DidWorkbenchPanel";
 import { ModelHealthPanel } from "./ModelHealthPanel";
 import { ModelPanel } from "./ModelPanel";
-import { ObdCoveragePanel } from "./ObdCoveragePanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
 import { SystemPanel } from "./SystemPanel";
-import { TelemetryPanel } from "./TelemetryPanel";
 import { TestSessionPanel } from "./TestSessionPanel";
 import { TrainingPanel } from "./TrainingPanel";
 import { TuningPanel } from "./TuningPanel";
@@ -95,8 +93,8 @@ export function Workbench({ active, onNavigate, data }: WorkbenchProps) {
 
 function renderItem(item: WorkbenchItem, d: DashboardData) {
   switch (item) {
-    case "live-gauges":
-      return <TelemetryPanel channels={d.channels} bindings={d.bindings} />;
+    case "diag-data":
+      return <DataSourcesPanel channels={d.channels} status={d.status} />;
     case "diag-anomalies":
       return (
         <AnomalyPanel events={d.events} token={d.token} liveScores={d.liveScores} />
@@ -139,10 +137,6 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
       return <AlarmsPanel channels={d.channels} />;
     case "live-builder":
       return <CustomDashboardPanel channels={d.channels} />;
-    case "diag-did":
-      return <DidWorkbenchPanel />;
-    case "diag-coverage":
-      return <ObdCoveragePanel />;
     case "diag-dtc":
       return (
         <PlaceholderPanel

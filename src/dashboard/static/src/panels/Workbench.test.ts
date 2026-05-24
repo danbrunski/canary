@@ -35,14 +35,14 @@ function renderAt(active: WorkbenchItem) {
 
 describe("Workbench navigation", () => {
   it("renders all five group labels", () => {
-    renderAt("live-gauges");
+    renderAt("live-charts");
     for (const label of ["Live", "Diagnostics", "Models", "Data", "Control"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });
 
   it("renders the active item's panel and switches on navigate", () => {
-    let active: WorkbenchItem = "live-gauges";
+    let active: WorkbenchItem = "live-charts";
     const { rerender } = render(
       createElement(Workbench, {
         active,
@@ -67,7 +67,7 @@ describe("Workbench navigation", () => {
   });
 
   it("marks not-yet-built items with a 'soon' hint", () => {
-    renderAt("live-gauges");
+    renderAt("live-charts");
     expect(screen.getAllByText("soon").length).toBeGreaterThan(0);
   });
 });

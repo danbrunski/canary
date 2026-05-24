@@ -40,7 +40,7 @@ describe("useHashRoute", () => {
     window.history.replaceState(null, "", "#wb/not-a-real-view");
     const { result } = renderHook(() => useHashRoute());
     expect(result.current.mode).toBe("parked");
-    expect(result.current.item).toBe("live-gauges");
+    expect(result.current.item).toBe("live-charts");
   });
 });
 
