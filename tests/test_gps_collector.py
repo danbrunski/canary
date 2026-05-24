@@ -61,6 +61,20 @@ def test_reading_to_records_with_fix_emits_speed_position_and_health() -> None:
     assert all(record.source == "gps" for record in records.values())
 
 
+def test_reading_to_records_snaps_stationary_jitter_to_zero() -> None:
+    # Parked GPS reports a few km/h of SOG noise; it must read as stopped so a
+    # parked truck stays in koeo/idle instead of matching city.
+    reading = GpsReading(has_fix=True, fix_quality=1, num_satellites=6, speed_kmh=3.6)
+    records = {record.channel: record for record in reading_to_records(reading, 1000.0)}
+    assert records["speed"].value == 0.0
+
+
+def test_reading_to_records_keeps_real_speed_above_floor() -> None:
+    reading = GpsReading(has_fix=True, fix_quality=1, num_satellites=8, speed_kmh=42.0)
+    records = {record.channel: record for record in reading_to_records(reading, 1000.0)}
+    assert records["speed"].value == pytest.approx(42.0)
+
+
 class _FakeSerial:
     """Serial stand-in: yields canned lines, then sets stop and returns EOF."""
 

@@ -34,6 +34,15 @@ log = logging.getLogger(__name__)
 
 DEFAULT_RECONNECT_POLICY = ReconnectPolicy()
 
+#: Ground speed below this (km/h) is reported as 0. A GPS receiver has a
+#: speed-over-ground noise floor — even stationary it computes a small SOG
+#: (empirically, parked jitter reached ~4 km/h on a marginal 6-satellite fix).
+#: Left unsnapped it fails the stopped modes' ``speed_max: 0`` gate, so a parked
+#: truck falls through to ``city`` (whose only gate is speed_max). 5 km/h
+#: (~3 mph) is far below any real driving speed, so this never suppresses genuine
+#: motion while keeping a parked vehicle in koeo/idle.
+_STATIONARY_SPEED_KMH = 5.0
+
 
 @dataclass(frozen=True)
 class GpsSpec:
@@ -83,7 +92,8 @@ def reading_to_records(reading: GpsReading, timestamp: float) -> list[TelemetryR
 
     if reading.has_fix:
         if reading.speed_kmh is not None:
-            add("speed", float(reading.speed_kmh), "km/h")
+            speed = float(reading.speed_kmh)
+            add("speed", 0.0 if speed < _STATIONARY_SPEED_KMH else speed, "km/h")
         if reading.heading_deg is not None:
             add("heading", float(reading.heading_deg), "deg")
         if reading.latitude is not None:
