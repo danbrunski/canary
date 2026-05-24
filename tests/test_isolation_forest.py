@@ -143,6 +143,75 @@ def test_score_orients_anomaly_score_so_outlier_is_larger() -> None:
     assert scored.loc[1, MODEL_MODE_COLUMN] == "idle"
 
 
+def _mode_gated_deviation_frame() -> pd.DataFrame:
+    """Two modes where each carries a deviation surface gated to the *other*
+    mode (all-NaN outside its own mode) — the shape that blanked the detector:
+    every row had at least one NaN in the global feature set."""
+    rng = np.random.default_rng(7)
+    n = 60
+    timestamps = pd.date_range("2026-05-11T00:00:00Z", periods=n * 2, freq="1s")
+    idle_only = np.concatenate([rng.normal(0.0, 1.0, n), np.full(n, np.nan)])
+    warmup_only = np.concatenate([np.full(n, np.nan), rng.normal(0.0, 1.0, n)])
+    rpm = np.concatenate([rng.normal(800.0, 12.0, n), rng.normal(1200.0, 40.0, n)])
+    return pd.DataFrame(
+        {
+            SESSION_COLUMN: ["s"] * (n * 2),
+            TIMESTAMP_COLUMN: timestamps,
+            MODE_COLUMN: ["idle"] * n + ["warmup"] * n,
+            "obd:RPM": rpm,
+            "deviation:idle_only": idle_only,
+            "deviation:warmup_only": warmup_only,
+        }
+    )
+
+
+def test_per_mode_feature_set_excludes_other_modes_deviation_surfaces() -> None:
+    trained = fit_isolation_forest(
+        _mode_gated_deviation_frame(),
+        _IFConfig(n_estimators=25),
+        feature_columns=["obd:RPM", "deviation:idle_only", "deviation:warmup_only"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+    # Each mode's model is trained only on the columns populated in that mode.
+    assert trained.mode_feature_columns["idle"] == ("obd:RPM", "deviation:idle_only")
+    assert trained.mode_feature_columns["warmup"] == ("obd:RPM", "deviation:warmup_only")
+    assert trained.manifest.to_dict()["schema"]["mode_feature_columns"] == {
+        "idle": ["obd:RPM", "deviation:idle_only"],
+        "warmup": ["obd:RPM", "deviation:warmup_only"],
+    }
+
+
+def test_other_modes_deviation_nan_does_not_suppress_the_verdict() -> None:
+    trained = fit_isolation_forest(
+        _mode_gated_deviation_frame(),
+        _IFConfig(n_estimators=25),
+        feature_columns=["obd:RPM", "deviation:idle_only", "deviation:warmup_only"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+    # A live idle row: warmup_only is NaN by design (wrong mode) but the idle
+    # model never required it, so the verdict must score, not flag missing.
+    idle_row = pd.DataFrame(
+        {
+            SESSION_COLUMN: ["live"],
+            TIMESTAMP_COLUMN: pd.to_datetime(["2026-05-12T00:00:00Z"], utc=True),
+            MODE_COLUMN: ["idle"],
+            "obd:RPM": [805.0],
+            "deviation:idle_only": [0.1],
+            "deviation:warmup_only": [np.nan],
+        }
+    )
+    scored = trained.score(idle_row)
+    assert bool(scored.loc[0, MISSING_FEATURES_COLUMN]) is False
+    assert np.isfinite(scored.loc[0, SCORE_COLUMN])
+    assert scored.loc[0, MODEL_MODE_COLUMN] == "idle"
+
+    # But a genuinely-missing in-mode feature still suppresses (idle_only NaN).
+    broken = idle_row.copy()
+    broken["deviation:idle_only"] = [np.nan]
+    scored_broken = trained.score(broken)
+    assert bool(scored_broken.loc[0, MISSING_FEATURES_COLUMN]) is True
+
+
 def test_rows_with_missing_features_are_labeled_anomalous() -> None:
     frame = _two_mode_frame()
     trained = fit_isolation_forest(

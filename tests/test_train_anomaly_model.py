@@ -348,7 +348,7 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
         "preprocessing": {
             "resample_hz": 1,
             "rolling_window_seconds": 30,
-            "operating_modes": ["city", "highway", "idle", "warmup"],
+            "operating_modes": ["city", "highway", "idle", "koeo", "warmup"],
         },
     }
 

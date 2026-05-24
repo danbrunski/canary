@@ -206,6 +206,19 @@ class TrainedIsolationForest:
         return str(self.manifest.schema["mode_column"])
 
     @property
+    def mode_feature_columns(self) -> dict[str, tuple[str, ...]]:
+        """Per-mode feature subsets — each mode's model omits deviation
+        surfaces gated to other modes (all-NaN in this mode). Empty for legacy
+        artifacts, where callers fall back to the global ``feature_columns``."""
+        raw = self.manifest.schema.get("mode_feature_columns", {})
+        return {str(mode): tuple(str(c) for c in cols) for mode, cols in raw.items()}
+
+    def _features_for(self, model_key: str) -> tuple[str, ...]:
+        """Feature columns the ``model_key`` model was trained on (its mode's
+        subset), falling back to the global set for legacy artifacts."""
+        return self.mode_feature_columns.get(model_key, self.feature_columns)
+
+    @property
     def score_thresholds(self) -> dict[str, float]:
         """Per-mode held-out-calibrated decision boundaries (7.2).
 
@@ -263,7 +276,17 @@ class TrainedIsolationForest:
         for mode, group in scaled.groupby(self.mode_column, sort=True, dropna=False):
             mode_key = str(mode)
             indexes = group.index
-            missing_features = group[list(self.feature_columns)].isna().any(axis=1)
+            model_key = mode_key if mode_key in self.models else fallback_key
+            # Check missing features against the feature set the chosen model was
+            # actually trained on (its mode's subset), not the global union — a
+            # deviation surface gated to a different mode is NaN here by design
+            # and must not count as a sensor-dropout that suppresses the verdict.
+            feats = (
+                list(self._features_for(model_key))
+                if model_key is not None
+                else list(self.feature_columns)
+            )
+            missing_features = group[feats].isna().any(axis=1)
 
             if missing_features.any():
                 missing_indexes = missing_features[missing_features].index
@@ -276,7 +299,6 @@ class TrainedIsolationForest:
             if complete_indexes.empty:
                 continue
 
-            model_key = mode_key if mode_key in self.models else fallback_key
             if model_key is None:
                 # No model for this mode and no single-model fallback to route
                 # through. Withhold rather than crash the tick: flag the rows
@@ -287,7 +309,7 @@ class TrainedIsolationForest:
                 out.loc[complete_indexes, MISSING_FEATURES_COLUMN] = True
                 continue
 
-            x = scaled.loc[complete_indexes, list(self.feature_columns)].to_numpy(dtype=np.float32)
+            x = scaled.loc[complete_indexes, feats].to_numpy(dtype=np.float32)
             model = self.models[model_key]
             # sklearn's decision_function is positive for inliers and
             # negative for outliers. Negating gives a more natural
@@ -353,22 +375,34 @@ def fit_isolation_forest(
     )
     validate_model_feature_spec(schema, context="IsolationForest training feature spec")
 
-    complete = frame.dropna(subset=selected_features).copy()
-    if complete.empty:
-        raise ValueError("no complete rows available to train IsolationForest")
-
-    scaler = ZScoreScaler.fit(complete, columns=selected_features)
-    scaled = scaler.transform(complete)
+    # The scaler is NaN-aware (per-column skipna), so fit it on the full frame:
+    # every column gets stats from its own populated rows, including
+    # behavior-deviation surfaces that are NaN outside their operating mode.
+    scaler = ZScoreScaler.fit(frame, columns=selected_features)
+    scaled = scaler.transform(frame)
     seed = config.random_state if random_state is None else random_state
 
     isolation_forest_cls = _isolation_forest_cls()
     models: dict[str, Any] = {}
+    mode_feature_columns: dict[str, list[str]] = {}
     modes: list[ModeTrainingSummary] = []
+    used_index: list[Any] = []
 
     holdout_fraction, target_flag_rate = _calibration_params(config)
     for raw_mode, group in scaled.groupby(mode_column, sort=True, dropna=False):
         mode = str(raw_mode)
         if len(group) == 0:
+            continue
+        # Per-mode feature set: only the columns actually populated in this
+        # mode. A deviation surface gated to a *different* operating_mode is
+        # all-NaN here, so it's excluded — rather than dropping every row of
+        # this mode (the global dropna that silently blanked the detector,
+        # because each mode-gated surface is NaN outside its own mode).
+        mode_feats = [c for c in selected_features if group[c].notna().any()]
+        if not mode_feats:
+            continue
+        mode_complete = group.dropna(subset=mode_feats)
+        if mode_complete.empty:
             continue
         contamination = _contamination_for_mode(config, mode)
 
@@ -378,7 +412,7 @@ def fit_isolation_forest(
         # than on the training distribution. Fall back to fitting on all
         # rows (legacy contamination label) when there isn't enough holdout.
         ordered_index = (
-            pd.to_datetime(complete.loc[group.index, timestamp_column], utc=True)
+            pd.to_datetime(frame.loc[mode_complete.index, timestamp_column], utc=True)
             .sort_values(kind="stable")
             .index
         )
@@ -391,7 +425,7 @@ def fit_isolation_forest(
         else:
             fit_index, holdout_index, n_holdout = ordered_index, ordered_index[:0], 0
 
-        x = group.loc[fit_index, list(selected_features)].to_numpy(dtype=np.float32)
+        x = mode_complete.loc[fit_index, mode_feats].to_numpy(dtype=np.float32)
         if len(x) == 0:
             continue
         model = isolation_forest_cls(
@@ -401,12 +435,14 @@ def fit_isolation_forest(
         )
         model.fit(x)
         models[mode] = model
+        mode_feature_columns[mode] = mode_feats
+        used_index.extend(mode_complete.index.tolist())
 
         score_threshold: float | None = None
         score_scale: float | None = None
         achieved_flag_rate: float | None = None
         if calibrate:
-            hx = group.loc[holdout_index, list(selected_features)].to_numpy(dtype=np.float32)
+            hx = mode_complete.loc[holdout_index, mode_feats].to_numpy(dtype=np.float32)
             holdout_scores = -model.decision_function(hx)
             score_threshold = float(np.quantile(holdout_scores, 1.0 - target_flag_rate))
             achieved_flag_rate = float(np.mean(holdout_scores >= score_threshold))
@@ -417,7 +453,7 @@ def fit_isolation_forest(
             _mode_summary(
                 mode=mode,
                 contamination=contamination,
-                frame=complete.loc[group.index],
+                frame=frame.loc[mode_complete.index],
                 session_column=session_column,
                 timestamp_column=timestamp_column,
                 score_threshold=score_threshold,
@@ -430,6 +466,10 @@ def fit_isolation_forest(
 
     if not models:
         raise ValueError("no per-mode IsolationForest models were trained")
+
+    # The rows actually used across all per-mode models (disjoint by mode) —
+    # for the manifest's data hash, span, sessions, and complete-row count.
+    complete = frame.loc[sorted(set(used_index))]
 
     created_at = _format_timestamp(_coerce_timestamp(fitted_at))
     version = model_version or f"isolation_forest_{created_at.replace(':', '')}"
@@ -463,6 +503,7 @@ def fit_isolation_forest(
         schema={
             **schema,
             "mode_column": mode_column,
+            "mode_feature_columns": mode_feature_columns,
             "timestamp_column": timestamp_column,
             "session_column": session_column,
             "score_column": SCORE_COLUMN,
