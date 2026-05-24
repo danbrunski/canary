@@ -57,6 +57,7 @@ from src.alerts.fusion import (
     lstm_source,
 )
 from src.alerts.tuning import AlertTuner, load_tuning_config
+from src.analysis.gps_tracker import GpsTracker
 from src.collection.queueing import QueueDepthMonitor
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
@@ -132,6 +133,8 @@ class DaemonComponents:
     capture_controller: CaptureController | None = None
     job_controller: JobController | None = None
     replay_controller: ReplayController | None = None
+    #: GPS live-state + trip odometer, or ``None`` when no GPS is enabled.
+    gps_tracker: GpsTracker | None = None
 
 
 def build_components(config: CanaryConfig) -> DaemonComponents:
@@ -162,6 +165,9 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         behavior_live=BehaviorLiveState(),
         capture_controller=None,
         job_controller=_make_job_controller(config),
+        gps_tracker=(
+            GpsTracker(state_path=config.daemon.trip_state) if config.hardware.gps.enabled else None
+        ),
     )
 
 
@@ -250,6 +256,7 @@ async def drain_queue_with_broadcast(
     *,
     telemetry_broadcaster: Broadcaster | None = None,
     live_source: LiveFeatureSource | None = None,
+    gps_tracker: GpsTracker | None = None,
     poll_interval: float = 0.5,
     storage_path: Path | None = None,
     storage_warning_mb: int | None = None,
@@ -297,10 +304,17 @@ async def drain_queue_with_broadcast(
                     live_source.observe(record)
                 except Exception:  # noqa: BLE001 — live inference is best-effort
                     log.exception("live_source.observe failed; skipping record")
+            if gps_tracker is not None:
+                try:
+                    gps_tracker.observe(record)
+                except Exception:  # noqa: BLE001 — odometer is best-effort
+                    log.exception("gps_tracker.observe failed; skipping record")
         finally:
             queue.task_done()
             queue_monitor.observe(queue)
 
+    if gps_tracker is not None:
+        gps_tracker.persist()
     writer.close()
     if storage_path is not None and storage_warning_mb is not None:
         warn_if_storage_low(storage_path, storage_warning_mb)
@@ -1302,6 +1316,7 @@ async def serve_in_background(
         alert_tuner=components.alert_tuner,
         health_monitor=components.health_monitor,
         behavior_live=components.behavior_live,
+        gps_tracker=components.gps_tracker,
     )
     if components.job_controller is not None:
         loop = asyncio.get_running_loop()
@@ -1423,6 +1438,7 @@ async def run_daemon(
             stop_event,
             telemetry_broadcaster=components.telemetry_broadcaster,
             live_source=live_source,
+            gps_tracker=components.gps_tracker,
             storage_path=config.collection.storage_path,
             storage_warning_mb=config.collection.storage_warning_mb,
             queue_warning_fraction=config.collection.queue_warning_fraction,

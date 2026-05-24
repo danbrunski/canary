@@ -8,9 +8,13 @@ import {
   definitionValueClass,
   placeholderClass,
 } from "../styles";
-import type { PowerStatus, StatusResponse } from "../types";
+import type { GpsStatus, PowerStatus, StatusResponse, TripStats } from "../types";
 import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
 import { type Tone, toneClass } from "../util/format";
+
+const KM_PER_MILE = 1.609344;
+const M_PER_FT = 0.3048;
+const CARDINALS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
 interface SystemPanelProps {
   status: StatusResponse | null;
@@ -66,6 +70,40 @@ function pastPowerEvents(p: PowerStatus | null | undefined): string[] {
     .map(([key]) => POWER_EVENT_LABELS[key] ?? key);
 }
 
+/** GPS fix → label + tone. A current fix is good; no/stale fix is a warn (the
+ *  GPS is optional, so its absence is informational, never an error). */
+function gpsFix(g: GpsStatus): { label: string; tone: Tone | undefined } {
+  if (g.has_fix) return { label: `fix · ${g.num_satellites} sats`, tone: "ok" };
+  const acquiring = g.num_satellites > 0 ? `acquiring · ${g.num_satellites} sats` : "no fix";
+  return { label: acquiring, tone: "warn" };
+}
+
+const formatCoords = (g: GpsStatus): string =>
+  g.latitude == null || g.longitude == null
+    ? "—"
+    : `${g.latitude.toFixed(5)}, ${g.longitude.toFixed(5)}`;
+
+const formatAltitude = (m: number | null): string =>
+  m == null ? "—" : `${(m / M_PER_FT).toFixed(0)} ft`;
+
+/** GPS speed arrives in km/h; show mph for this US vehicle. */
+const formatGpsSpeed = (kmh: number | null): string =>
+  kmh == null ? "—" : `${(kmh / KM_PER_MILE).toFixed(0)} mph`;
+
+const formatHeading = (deg: number | null): string =>
+  deg == null ? "—" : `${deg.toFixed(0)}° ${CARDINALS[Math.round(deg / 45) % 8]}`;
+
+const formatMiles = (t: TripStats): string =>
+  `${t.distance_miles.toFixed(1)} mi`;
+
+function formatDriveTime(seconds: number): string {
+  const total = Math.floor(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m ${total % 60}s`;
+}
+
 /** System health: storage, host vitals (Pi temp/CPU/memory), latest
  *  session, vehicle line, data freshness.
  *
@@ -84,6 +122,9 @@ export function SystemPanel({ status, channels, statusError }: SystemPanelProps)
   const power = status?.health?.power ?? null;
   const powerNow = currentPower(power);
   const powerEvents = pastPowerEvents(power);
+  const gps = status?.gps ?? null;
+  const trip = status?.trip ?? null;
+  const gpsFixState = gps ? gpsFix(gps) : null;
 
   return (
     <Panel title="System">
@@ -147,6 +188,52 @@ export function SystemPanel({ status, channels, statusError }: SystemPanelProps)
               )}
             </dd>
           </div>
+          {gps && gpsFixState && (
+            <>
+              <div className={definitionRowClass}>
+                <dt className={definitionTermClass}>gps</dt>
+                <dd className={cn(definitionValueClass, toneClass(gpsFixState.tone))}>
+                  {gpsFixState.label}
+                  {gps.hdop != null && gps.has_fix && (
+                    <span className="text-fg-dim"> · hdop {gps.hdop.toFixed(1)}</span>
+                  )}
+                </dd>
+              </div>
+              <div className={definitionRowClass}>
+                <dt className={definitionTermClass}>location</dt>
+                <dd className={definitionValueClass}>{formatCoords(gps)}</dd>
+              </div>
+              <div className={definitionRowClass}>
+                <dt className={definitionTermClass}>altitude</dt>
+                <dd className={definitionValueClass}>{formatAltitude(gps.altitude)}</dd>
+              </div>
+              <div className={definitionRowClass}>
+                <dt className={definitionTermClass}>gps speed</dt>
+                <dd className={definitionValueClass}>{formatGpsSpeed(gps.speed)}</dd>
+              </div>
+              <div className={definitionRowClass}>
+                <dt className={definitionTermClass}>heading</dt>
+                <dd className={definitionValueClass}>{formatHeading(gps.heading)}</dd>
+              </div>
+            </>
+          )}
+          {trip && (
+            <>
+              <div className={definitionRowClass}>
+                <dt className={definitionTermClass}>trip distance</dt>
+                <dd className={definitionValueClass}>
+                  {formatMiles(trip)}
+                  <span className="text-fg-dim"> ({trip.distance_km.toFixed(1)} km)</span>
+                </dd>
+              </div>
+              <div className={definitionRowClass}>
+                <dt className={definitionTermClass}>drive time</dt>
+                <dd className={definitionValueClass}>
+                  {formatDriveTime(trip.moving_time_seconds)}
+                </dd>
+              </div>
+            </>
+          )}
           <div className={definitionRowClass}>
             <dt className={definitionTermClass}>latest session</dt>
             <dd className={definitionValueClass}>{status.latest_session ?? "none yet"}</dd>

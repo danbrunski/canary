@@ -16,6 +16,7 @@ from src.collection.can_obd_collector import (
     ObdSchedulerMetrics,
     collect_can_obd_from_config,
 )
+from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.obd_collector import ObdSpec, collect_obd
 from src.collection.pids import REQUIRED_PIDS
 from src.collection.queueing import QueueDepthMonitor
@@ -108,6 +109,10 @@ def _default_collectors(
         initial_delay_seconds=config.collection.reconnect_initial_delay_seconds,
         max_delay_seconds=config.collection.reconnect_max_delay_seconds,
     )
+    # GPS runs alongside whatever OBD/CAN source is configured (it's an
+    # independent serial device), so it's appended to every branch's collector
+    # list rather than gated on obd_source.
+    gps_collectors = _gps_collectors(config, reconnect_policy)
 
     if config.collection.obd_source == "canable":
         can_obd_spec = CanObdSpec(
@@ -128,7 +133,7 @@ def _default_collectors(
                 on_scheduler_metrics=obd_scheduler_metrics_callback,
             )
 
-        return [canable_obd]
+        return [canable_obd, *gps_collectors]
 
     async def can(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
         await collect_can_from_config(
@@ -139,7 +144,7 @@ def _default_collectors(
         )
 
     if config.collection.obd_source == "disabled":
-        return [can]
+        return [can, *gps_collectors]
 
     obd_pids = (
         config.collection.obd_pids
@@ -156,7 +161,27 @@ def _default_collectors(
     async def obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
         await collect_obd(obd_spec, queue, stop, reconnect_policy=reconnect_policy)
 
-    return [can, obd]
+    return [can, obd, *gps_collectors]
+
+
+def _gps_collectors(
+    config: CanaryConfig,
+    reconnect_policy: ReconnectPolicy,
+) -> list[CollectorStarter]:
+    """A GPS collector starter, or empty when no GPS is configured/enabled."""
+    gps = config.hardware.gps
+    if gps is None or not gps.enabled:
+        return []
+    spec = GpsSpec(
+        device=gps.device,
+        baudrate=gps.baudrate,
+        read_timeout_seconds=gps.read_timeout_seconds,
+    )
+
+    async def gps_collector(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
+        await collect_gps_from_config(spec, queue, stop, reconnect_policy=reconnect_policy)
+
+    return [gps_collector]
 
 
 async def run_collection(

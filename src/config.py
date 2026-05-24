@@ -68,9 +68,31 @@ class CanBusConfig(_Strict):
     bitrate: int
 
 
+class GpsConfig(_Strict):
+    """Serial NMEA GPS receiver for operating-mode detection.
+
+    Optional and defaulted-disabled so configs without a GPS keep loading and
+    behave exactly as before. When ``enabled``, the daemon runs a serial
+    collector that parses NMEA 0183 (GGA/RMC/VTG) and emits ``gps:*`` telemetry
+    records. ``gps:speed`` (km/h, matching ``obd:SPEED``) feeds the operating-
+    mode segmenter; position/heading/quality are logged but excluded from model
+    features (see ``feature_pipeline.NON_TRAINABLE_GPS_CHANNELS``).
+    """
+
+    enabled: bool = False
+    #: Serial device path. Prefer the stable ``/dev/serial/by-id/...`` symlink
+    #: over ``/dev/ttyUSB0``, which renumbers when USB devices re-enumerate.
+    device: str = "/dev/ttyUSB0"
+    baudrate: int = 9600
+    #: Serial read timeout (seconds). Also bounds how quickly the collector
+    #: notices a stop request while waiting for the next NMEA line.
+    read_timeout_seconds: float = 2.0
+
+
 class HardwareConfig(_Strict):
     elm327_port: str
     can: CanBusConfig
+    gps: GpsConfig = GpsConfig()
 
 
 class CollectionConfig(_Strict):
@@ -220,6 +242,10 @@ class DaemonConfig(_Strict):
     training_ledger: Path = Path("data/control/training_runs.jsonl")
     tuning_config: Path = Path("data/control/tuning.yaml")
     tuning_audit: Path = Path("data/control/tuning_audit.jsonl")
+    #: Persisted GPS trip odometer (cumulative distance + moving time). Survives
+    #: daemon restarts so the System page shows lifetime "miles / time driven
+    #: with the unit plugged in" rather than per-process totals.
+    trip_state: Path = Path("data/control/trip_odometer.json")
     isolation_forest_artifact: str = "isolation_forest/model.joblib"
     lstm_artifact: str = "lstm_autoencoder/model.pt"
     model_poll_seconds: float = 30.0

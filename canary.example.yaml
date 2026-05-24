@@ -29,6 +29,14 @@ hardware:
     interface: slcan
     channel: /dev/ttyACM0
     bitrate: 500000
+  # Optional serial NMEA GPS receiver. Disabled by default; the daemon runs
+  # normally without it. When enabled, gps:speed feeds operating-mode detection
+  # and gps:* position is logged (but excluded from model features). Prefer a
+  # stable /dev/serial/by-id/... symlink for `device`.
+  gps:
+    enabled: false
+    device: /dev/ttyUSB0
+    baudrate: 9600
 
 collection:
   # canable = one Canable does broadcast CAN + read-only OBD ISO-TP.

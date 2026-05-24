@@ -149,6 +149,35 @@ def test_build_status_surfaces_emitter_counters(config: CanaryConfig, tmp_path: 
     }
 
 
+def test_build_status_gps_and_trip_absent_without_tracker(config: CanaryConfig) -> None:
+    snap = build_status(config)
+    assert snap.gps is None
+    assert snap.trip is None
+
+
+def test_build_status_surfaces_gps_and_trip(config: CanaryConfig) -> None:
+    """When the daemon wires a GPS tracker, /status carries fix + odometer."""
+    from src.analysis.gps_tracker import GpsTracker
+    from src.telemetry import TelemetryRecord
+
+    tracker = GpsTracker()
+    base = 1000.0
+    tracker.observe(TelemetryRecord.gps(base, "fix_quality", 1, ""))
+    tracker.observe(TelemetryRecord.gps(base, "num_satellites", 7, ""))
+    tracker.observe(TelemetryRecord.gps(base, "speed", 36.0, "km/h"))
+    tracker.observe(TelemetryRecord.gps(base + 1.0, "speed", 36.0, "km/h"))
+
+    snap = build_status(config, gps_tracker=tracker)
+    assert snap.gps is not None
+    assert snap.gps["fix_quality"] == 1
+    assert snap.gps["num_satellites"] == 7
+    assert snap.trip is not None
+    assert snap.trip["distance_km"] == pytest.approx(0.01, abs=1e-6)
+    payload = snap.to_dict()
+    assert payload["gps"]["fix_quality"] == 1
+    assert payload["trip"]["distance_km"] == pytest.approx(0.01, abs=1e-6)
+
+
 def test_read_bindings_for_display_returns_empty_when_file_missing(tmp_path: Path) -> None:
     from src.dashboard.api import read_bindings_for_display
 

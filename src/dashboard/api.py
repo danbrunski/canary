@@ -67,6 +67,7 @@ from src.alerts.tuning import (
     load_tuning_version,
     save_tuning_config,
 )
+from src.analysis.gps_tracker import GpsTracker
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
@@ -169,6 +170,7 @@ def create_app(
     alert_tuner: AlertTuner | None = None,
     health_monitor: HealthMonitor | None = None,
     behavior_live: BehaviorLiveState | None = None,
+    gps_tracker: GpsTracker | None = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -226,6 +228,7 @@ def create_app(
             emitter=emitter,
             health_monitor=health_monitor,
             replay_controller=replay_controller,
+            gps_tracker=gps_tracker,
         ).to_dict()
         if replay_controller is not None:
             payload["replay"] = replay_controller.status().to_dict()

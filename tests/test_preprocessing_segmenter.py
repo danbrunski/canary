@@ -134,10 +134,11 @@ def test_default_segmenter_config_detects_lowercase_columns() -> None:
 
     config = default_segmenter_config(frame)
 
+    # Each signal keeps the (ordered) tuple of present candidate columns.
     assert config.signal_columns == {
-        "rpm": "obd:rpm",
-        "speed": "obd:speed",
-        "throttle": "obd:throttle_pos",
+        "rpm": ("obd:rpm",),
+        "speed": ("obd:speed",),
+        "throttle": ("obd:throttle_pos",),
     }
 
 
@@ -195,4 +196,45 @@ def test_segment_operating_modes_marks_warmup_unknown_when_coolant_temp_missing(
 def test_default_segmenter_config_picks_up_coolant_temp_column() -> None:
     frame = pd.DataFrame(columns=["obd:RPM", "obd:SPEED", "obd:THROTTLE_POS", "obd:COOLANT_TEMP"])
     config = default_segmenter_config(frame)
-    assert config.signal_columns["coolant_temp"] == "obd:COOLANT_TEMP"
+    assert config.signal_columns["coolant_temp"] == ("obd:COOLANT_TEMP",)
+
+
+def test_default_segmenter_config_prefers_gps_speed_with_obd_fallback() -> None:
+    """When both speed sources are present, GPS leads and OBD trails."""
+    frame = pd.DataFrame(columns=["obd:RPM", "obd:SPEED", "gps:speed"])
+    config = default_segmenter_config(frame)
+    assert config.signal_columns["speed"] == ("gps:speed", "obd:SPEED")
+
+
+def test_segment_coalesces_gps_speed_over_obd_per_row() -> None:
+    """GPS speed wins where present; rows without a GPS fix fall back to OBD."""
+    frame = pd.DataFrame(
+        [
+            # GPS fix present, reads highway speed; OBD disagrees → GPS wins.
+            {"obd:RPM": 2200.0, "obd:SPEED": 5.0, "gps:speed": 95.0},
+            # No GPS fix this row (NaN) → coalesce falls back to OBD city speed.
+            {"obd:RPM": 1500.0, "obd:SPEED": 35.0, "gps:speed": float("nan")},
+        ]
+    )
+    modes = {
+        "city": OperatingModeSpec(speed_max=50),
+        "highway": OperatingModeSpec(speed_min=80),
+    }
+    segmented = segment_operating_modes(frame, modes)
+    assert list(segmented[MODE_COLUMN]) == ["highway", "city"]
+
+
+def test_segment_uses_gps_speed_when_obd_speed_absent() -> None:
+    """Pure-GPS frame (no OBD speed column at all) still segments by speed."""
+    frame = pd.DataFrame(
+        [
+            {"obd:RPM": 2200.0, "gps:speed": 95.0},
+            {"obd:RPM": 1500.0, "gps:speed": 30.0},
+        ]
+    )
+    modes = {
+        "city": OperatingModeSpec(speed_max=50),
+        "highway": OperatingModeSpec(speed_min=80),
+    }
+    segmented = segment_operating_modes(frame, modes)
+    assert list(segmented[MODE_COLUMN]) == ["highway", "city"]

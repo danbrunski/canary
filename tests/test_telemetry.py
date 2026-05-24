@@ -10,6 +10,7 @@ from src.telemetry import (
     CAN_SOURCE,
     DBC_SOURCE,
     DECODED_SOURCE,
+    GPS_SOURCE,
     OBD_SOURCE,
     TelemetryRecord,
     TelemetrySource,
@@ -71,4 +72,9 @@ def test_namespace_helpers_agree_with_the_decode_path_wrappers() -> None:
 
 def test_telemetry_source_literal_stays_in_sync_with_constants() -> None:
     # DBC_SOURCE is deliberately excluded — DBC values never ride a record.
-    assert set(get_args(TelemetrySource)) == {OBD_SOURCE, CAN_SOURCE, DECODED_SOURCE}
+    assert set(get_args(TelemetrySource)) == {
+        OBD_SOURCE,
+        CAN_SOURCE,
+        DECODED_SOURCE,
+        GPS_SOURCE,
+    }

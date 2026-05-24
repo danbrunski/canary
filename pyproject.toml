@@ -9,6 +9,10 @@ dependencies = [
     "obd>=0.7",
     "python-can>=4.0",
     "cantools>=39.0",
+    # Serial NMEA GPS collector reads /dev/tty* directly via pyserial. It's
+    # already a transitive dep (obd / python-can's slcan), but src.collection
+    # .gps_collector imports `serial` directly, so pin it explicitly.
+    "pyserial>=3.5",
     "pandas>=2.0",
     "pyarrow>=15.0",
     "scikit-learn>=1.4",
@@ -99,6 +103,8 @@ module = [
     "torch.*",
     "duckdb",
     "duckdb.*",
+    "serial",
+    "serial.*",
 ]
 ignore_missing_imports = true
 

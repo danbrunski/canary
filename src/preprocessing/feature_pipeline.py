@@ -66,12 +66,32 @@ ALL_MODE = "all"
 #: ``idle`` modes in canary.example.yaml — without it the segmenter can't
 #: tell a cold engine from a warm one and behavior models fit one surface
 #: to both regimes, which is what caused the May 2026 R²=0.41 warmup mess.
-_SEGMENTER_SIGNAL_COLUMNS = {
+_SEGMENTER_SIGNAL_COLUMNS: dict[str, str | tuple[str, ...]] = {
     "rpm": "obd:RPM",
-    "speed": "obd:SPEED",
+    # GPS ground speed preferred over the OBD wheel-speed PID, coalesced
+    # row-wise (see segmenter) so segmentation still works from either alone.
+    "speed": ("gps:speed", "obd:SPEED"),
     "throttle": "obd:THROTTLE_POS",
     "coolant_temp": "obd:COOLANT_TEMP",
 }
+
+#: GPS channels logged for trip reconstruction and data-quality context but
+#: deliberately excluded from model features. Absolute position would teach the
+#: detectors location identity; heading wraps at 360°; and fix-quality /
+#: satellite-count / HDOP describe the receiver, not the vehicle. Only
+#: ``gps:speed`` (coalesced into the segmenter's speed signal) and its rolling
+#: derivatives feed the IF / LSTM.
+NON_TRAINABLE_GPS_CHANNELS: frozenset[str] = frozenset(
+    {
+        "gps:latitude",
+        "gps:longitude",
+        "gps:altitude",
+        "gps:heading",
+        "gps:fix_quality",
+        "gps:num_satellites",
+        "gps:hdop",
+    }
+)
 
 FEATURE_SPEC_VERSION = 1
 FEATURE_FRAME_CACHE_VERSION = 1
@@ -409,7 +429,11 @@ def segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> pd.Dat
         out[MODE_COLUMN] = ALL_MODE
         return out
     seg_cfg = SegmenterConfig(signal_columns=dict(_SEGMENTER_SIGNAL_COLUMNS))
-    have_inputs = all(col in resampled.columns for col in seg_cfg.signal_columns.values())
+    # A signal is available when *any* of its candidate columns is present, so
+    # the speed gate is satisfied by gps:speed or obd:SPEED.
+    have_inputs = all(
+        _signal_present(resampled, value) for value in seg_cfg.signal_columns.values()
+    )
     if have_inputs:
         return segment_operating_modes(
             resampled, config.preprocessing.operating_modes, config=seg_cfg
@@ -445,9 +469,19 @@ def candidate_feature_columns(features: pd.DataFrame) -> list[str]:
         col = str(raw)
         if col in skip_exact or col.endswith("__gap"):
             continue
+        # GPS position/quality channels (and their rolling derivatives) are
+        # logged but never modeled — see NON_TRAINABLE_GPS_CHANNELS.
+        if _base_feature_name(col) in NON_TRAINABLE_GPS_CHANNELS:
+            continue
         if pd.api.types.is_numeric_dtype(features[col]):
             cols.append(col)
     return cols
+
+
+def _signal_present(frame: pd.DataFrame, value: str | tuple[str, ...]) -> bool:
+    """True when at least one of a segmenter signal's candidate columns exists."""
+    columns = (value,) if isinstance(value, str) else value
+    return any(column in frame.columns for column in columns)
 
 
 #: Prefix of behavior-model deviation columns (raw + __mean/__std/__roc).

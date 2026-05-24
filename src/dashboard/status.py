@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from src.alerts.emitter import AnomalyEventEmitter
+from src.analysis.gps_tracker import GpsTracker
 from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
 from src.models.health import HealthMonitor
@@ -164,6 +165,12 @@ class StatusSnapshot:
     #: Derived operational state (engine_running, ignition_only,
     #: engine_off, no_data, replay) — see :class:`VehicleState`.
     vehicle_state: VehicleState | None = None
+    #: Latest GPS fix snapshot (fix quality, satellites, lat/long/alt/speed/
+    #: heading, age) or ``None`` when no GPS is configured/observed.
+    gps: dict[str, Any] | None = None
+    #: Cumulative trip odometer (distance + moving time) from the GPS stream,
+    #: or ``None`` when no GPS is configured.
+    trip: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -176,6 +183,8 @@ class StatusSnapshot:
             "emitter_counters": self.emitter_counters,
             "health": self.health,
             "vehicle_state": (None if self.vehicle_state is None else self.vehicle_state.to_dict()),
+            "gps": self.gps,
+            "trip": self.trip,
         }
 
 
@@ -296,6 +305,7 @@ def build_status(
     emitter: AnomalyEventEmitter | None = None,
     health_monitor: HealthMonitor | None = None,
     replay_controller: ReplayController | None = None,
+    gps_tracker: GpsTracker | None = None,
 ) -> StatusSnapshot:
     """Assemble the status snapshot used by ``GET /status``."""
     storage = config.collection.storage_path
@@ -324,6 +334,8 @@ def build_status(
         emitter_counters=emitter.counters.to_dict() if emitter is not None else None,
         health=health_monitor.snapshot() if health_monitor is not None else None,
         vehicle_state=_derive_vehicle_state(storage, replay_controller=replay_controller),
+        gps=gps_tracker.gps_status() if gps_tracker is not None else None,
+        trip=gps_tracker.trip_status() if gps_tracker is not None else None,
     )
 
 

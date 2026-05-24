@@ -72,6 +72,34 @@ export interface StatusResponse {
     suppressed_tuning: number;
   } | null;
   health: StatusHealth | null;
+  /** Latest GPS fix snapshot; null when no GPS is configured. */
+  gps?: GpsStatus | null;
+  /** Cumulative GPS trip odometer; null when no GPS is configured. */
+  trip?: TripStats | null;
+}
+
+/** `/status.gps` — latest GPS fix from the serial NMEA receiver. Position
+ *  fields are null until a fix is acquired; `has_fix` also goes false once the
+ *  last fix is stale. */
+export interface GpsStatus {
+  has_fix: boolean;
+  fix_quality: number;
+  num_satellites: number;
+  age_seconds: number;
+  latitude: number | null;
+  longitude: number | null;
+  altitude: number | null;
+  speed: number | null;
+  heading: number | null;
+  hdop: number | null;
+}
+
+/** `/status.trip` — cumulative trip odometer integrated from GPS speed,
+ *  persisted across daemon restarts. */
+export interface TripStats {
+  distance_km: number;
+  distance_miles: number;
+  moving_time_seconds: number;
 }
 
 /** `/status.health` — mirrors `HealthMonitor.snapshot()` (Task 6.27).
