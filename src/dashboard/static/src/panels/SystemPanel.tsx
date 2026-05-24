@@ -10,6 +10,7 @@ import {
 } from "../styles";
 import type { StatusResponse } from "../types";
 import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
+import { type Tone, toneClass } from "../util/format";
 
 interface SystemPanelProps {
   status: StatusResponse | null;
@@ -17,7 +18,31 @@ interface SystemPanelProps {
   statusError: Error | null;
 }
 
-/** System health: storage, latest session, vehicle line, data freshness.
+/** Pi soft-throttles around 80 °C; warn before then. */
+function tempTone(c: number | null | undefined): Tone | undefined {
+  if (c == null) return undefined;
+  if (c > 80) return "bad";
+  if (c > 70) return "warn";
+  return undefined;
+}
+
+/** CPU/memory pressure: warn past 85 % utilization. */
+function loadTone(fraction: number | null | undefined): Tone | undefined {
+  return fraction != null && fraction > 0.85 ? "warn" : undefined;
+}
+
+const formatTemp = (c: number | null | undefined): string =>
+  c == null ? "—" : `${c.toFixed(1)} °C`;
+
+const formatPct = (fraction: number | null | undefined): string =>
+  fraction == null ? "—" : `${(fraction * 100).toFixed(0)}%`;
+
+/** System health: storage, host vitals (Pi temp/CPU/memory), latest
+ *  session, vehicle line, data freshness.
+ *
+ *  Host vitals come from `/status.health.system` (mirrors
+ *  `HealthMonitor.snapshot()`); each reads "—" until the Pi reports it
+ *  (cpu_percent needs a second poll for its baseline, temp is null off-Pi).
  *
  *  Stale-data detection uses the newest timestamp seen across all
  *  channels (shared `computeFreshness`) — if it's more than 10 s old,
@@ -26,6 +51,7 @@ interface SystemPanelProps {
 export function SystemPanel({ status, channels, statusError }: SystemPanelProps) {
   const freshness = computeFreshness(channels);
   const stale = freshness !== null && freshness > STALE_THRESHOLD_MS;
+  const system = status?.health?.system ?? null;
 
   return (
     <Panel title="System">
@@ -47,6 +73,27 @@ export function SystemPanel({ status, channels, statusError }: SystemPanelProps)
             <dd className={definitionValueClass}>
               {status.free_mb.toFixed(0)} MB free{" "}
               <span className="text-fg-dim">at {status.storage_path}</span>
+            </dd>
+          </div>
+          <div className={definitionRowClass}>
+            <dt className={definitionTermClass}>cpu temp</dt>
+            <dd className={cn(definitionValueClass, toneClass(tempTone(system?.cpu_temp_c)))}>
+              {formatTemp(system?.cpu_temp_c)}
+            </dd>
+          </div>
+          <div className={definitionRowClass}>
+            <dt className={definitionTermClass}>cpu usage</dt>
+            <dd className={cn(definitionValueClass, toneClass(loadTone(system?.cpu_percent)))}>
+              {formatPct(system?.cpu_percent)}
+            </dd>
+          </div>
+          <div className={definitionRowClass}>
+            <dt className={definitionTermClass}>memory</dt>
+            <dd className={cn(definitionValueClass, toneClass(loadTone(system?.mem_used_fraction)))}>
+              {formatPct(system?.mem_used_fraction)}
+              {system?.mem_total_mb != null && (
+                <span className="text-fg-dim"> of {system.mem_total_mb.toFixed(0)} MB</span>
+              )}
             </dd>
           </div>
           <div className={definitionRowClass}>

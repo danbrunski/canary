@@ -47,14 +47,17 @@ __all__ = [
 
 
 def system_metrics() -> dict[str, float | None]:
-    """Coarse host load/memory. Linux ``/proc`` + ``getloadavg``; ``None``
-    for any field the platform doesn't expose (never raises)."""
+    """Coarse host load/memory/temperature. Linux ``/proc`` + ``getloadavg``
+    + thermal ``/sys``; ``None`` for any field the platform doesn't expose
+    (never raises). Note: ``cpu_percent`` (a delta over time) lives on
+    :class:`HealthMonitor`, not here — these reads are all single-shot."""
     out: dict[str, float | None] = {
         "load_1m": None,
         "cpu_count": None,
         "load_per_cpu": None,
         "mem_used_fraction": None,
         "mem_total_mb": None,
+        "cpu_temp_c": _cpu_temp_c(),
     }
     try:
         load1 = os.getloadavg()[0]
@@ -80,6 +83,37 @@ def system_metrics() -> dict[str, float | None]:
     except (OSError, ValueError, IndexError):
         pass
     return out
+
+
+def _cpu_temp_c() -> float | None:
+    """SoC temperature in °C from the Linux thermal sysfs — the Raspberry Pi
+    exposes its CPU zone at ``thermal_zone0``. ``None`` when no thermal zone
+    is present (e.g. a dev laptop / container)."""
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as fh:
+            milli = float(fh.read().strip())
+    except (OSError, ValueError):
+        return None
+    return round(milli / 1000.0, 1)
+
+
+def _read_cpu_times() -> tuple[float, float] | None:
+    """``(idle_jiffies, total_jiffies)`` from ``/proc/stat``'s aggregate
+    ``cpu`` line, or ``None`` when unavailable. A single reading is
+    meaningless — the caller diffs two to get utilization over the interval."""
+    try:
+        with open("/proc/stat") as fh:
+            fields = fh.readline().split()
+    except OSError:
+        return None
+    if len(fields) < 5 or fields[0] != "cpu":
+        return None
+    try:
+        vals = [float(x) for x in fields[1:]]
+    except ValueError:
+        return None
+    idle = vals[3] + (vals[4] if len(vals) > 4 else 0.0)  # idle + iowait
+    return idle, sum(vals)
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +238,24 @@ class HealthMonitor:
         self._swaps: dict[str, int] = {"swapped": 0, "rejected": 0, "unchanged": 0, "error": 0}
         self._last_swap_version: str | None = None
         self._obd_scheduler: dict[str, Any] | None = None
+        self._cpu_prev: tuple[float, float] | None = None
+
+    def _cpu_percent(self) -> float | None:
+        """Busy fraction (0..1) of total CPU time since the previous
+        snapshot. ``None`` on the first call (no baseline yet) or where
+        ``/proc/stat`` is absent. Stateful by necessity — utilization is a
+        delta between two readings, not an instantaneous level."""
+        sample = _read_cpu_times()
+        if sample is None:
+            return None
+        prev, self._cpu_prev = self._cpu_prev, sample
+        if prev is None:
+            return None
+        d_idle = sample[0] - prev[0]
+        d_total = sample[1] - prev[1]
+        if d_total <= 0:
+            return None
+        return round(max(0.0, min(1.0, 1.0 - d_idle / d_total)), 4)
 
     def observe_inference(
         self,
@@ -271,6 +323,7 @@ class HealthMonitor:
             "active_model_version": self._last_swap_version,
             "system": system_metrics(),
         }
+        snap["system"]["cpu_percent"] = self._cpu_percent()
         if self._obd_scheduler is not None:
             snap["obd_scheduler"] = dict(self._obd_scheduler)
         if scaler is not None and live_means is not None:

@@ -22,8 +22,17 @@ from src.models.health import (
 
 def test_system_metrics_is_safe_and_shaped() -> None:
     m = system_metrics()
-    for key in ("load_1m", "cpu_count", "mem_used_fraction", "mem_total_mb"):
+    for key in ("load_1m", "cpu_count", "mem_used_fraction", "mem_total_mb", "cpu_temp_c"):
         assert key in m  # value may be None on a platform that lacks it
+
+
+def test_cpu_percent_needs_a_baseline_then_reports_a_fraction() -> None:
+    mon = HealthMonitor()
+    # First snapshot has no prior /proc/stat reading to diff against.
+    assert mon.snapshot(now_epoch=0.0)["system"]["cpu_percent"] is None
+    # Second snapshot can diff; on Linux that's a 0..1 fraction, None elsewhere.
+    cpu = mon.snapshot(now_epoch=1.0)["system"]["cpu_percent"]
+    assert cpu is None or 0.0 <= cpu <= 1.0
 
 
 def test_feature_drift_flags_and_schema_mismatch() -> None:
