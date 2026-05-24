@@ -70,15 +70,28 @@ preprocessing:
   resample_hz: 1
   rolling_window_seconds: 30
   operating_modes:
+    # Key-on / engine-off (KOEO): engine not running, so RPM reads 0. Must
+    # come first and win before any running regime — otherwise a warm-but-off
+    # truck matches warmup/idle on coolant+speed alone (neither required the
+    # engine to be running) and the dashboard mislabels a parked, keyed-on
+    # truck as "warmup". rpm_max: 0 mirrors the vehicle_state "ignition_only"
+    # rule (OBD fresh + RPM == 0).
+    koeo:
+      rpm_max: 0
+      speed_max: 0
     # Cold-start: stopped + coolant below thermostat. Fitting behavior
     # models per-mode lets the warmup surface be its own thing instead of
     # an outlier the steady-state idle model has to absorb (and fire on).
     # 70 °C is conservative — the 195 °F (~90 °C) thermostat opens above
-    # that, so anything below is unambiguously warming up.
+    # that, so anything below is unambiguously warming up. rpm_min: 400
+    # requires the engine actually running (matches _RPM_RUNNING_THRESHOLD)
+    # so KOEO can't land here.
     warmup:
+      rpm_min: 400
       speed_max: 0
       coolant_temp_max: 70
     idle:
+      rpm_min: 400
       rpm_max: 900
       speed_max: 0
       coolant_temp_min: 70
