@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from src.control.replay_control import (
     ReplayNotFoundError,
     ReplayNotRunningError,
 )
+from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import (
     ParquetTelemetryWriter,
     delete_expired_replays,
@@ -86,6 +88,36 @@ def test_writer_flush_during_replay_writes_under_replay_dir(tmp_path: Path) -> N
     writer.write(_record())
     files = list((tmp_path / "_replay-2026-05-19T180000").glob("*.parquet"))
     assert len(files) == 1
+
+
+async def test_async_writer_serializes_replay_mode_with_inflight_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = ParquetTelemetryWriter(tmp_path, max_rows=1)
+    async_writer = AsyncParquetTelemetryWriter(writer)
+    original_write = writer.write
+    write_started = threading.Event()
+    release_write = threading.Event()
+
+    def slow_write(record: TelemetryRecord) -> Path | None:
+        write_started.set()
+        assert release_write.wait(timeout=2.0)
+        return original_write(record)
+
+    monkeypatch.setattr(writer, "write", slow_write)
+    write_task = asyncio.create_task(async_writer.write(_record()))
+    assert await asyncio.to_thread(write_started.wait, 1.0)
+
+    replay_task = asyncio.create_task(async_writer.enter_replay_mode("2026-05-19T180000"))
+    await asyncio.sleep(0.05)
+    assert not replay_task.done()
+
+    release_write.set()
+    await write_task
+    await replay_task
+
+    assert writer.paths.root.name == "_replay-2026-05-19T180000"
 
 
 # --------------------------------------------------------------------------- #

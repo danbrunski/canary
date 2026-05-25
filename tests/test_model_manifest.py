@@ -120,19 +120,29 @@ def test_validate_unsupported_format_version_raises() -> None:
 
 
 def test_known_model_types_match_anomaly_sources() -> None:
-    """5.15 ↔ 5.1: every trainable model type has a matching anomaly source.
+    """5.15 ↔ 5.1: model types and anomaly sources stay aligned.
 
-    Phase 7.2's ``fused`` and Phase 7.4's ``behavior`` sources have *no*
-    model artifact (fused is the agreement-aware combination; behavior is a
+    Phase 7.2's ``fused`` and Phase 7.4's ``behavior`` sources have *no* model
+    artifact (fused is the agreement-aware combination; behavior is a
     physics-residual detector), so they are deliberately ``AnomalySource``
-    members that are not ``KNOWN_MODEL_TYPE``\\ s. The managed-model
-    invariant is therefore: model types are exactly the non-derived
-    sources."""
+    members that are not ``KNOWN_MODEL_TYPE``\\ s.
+
+    The sequence-detector slot is backbone-interchangeable
+    (``lstm_autoencoder`` / ``tcn_autoencoder``, only one active at a time) but
+    publishes under a single stable ``lstm_autoencoder`` source, so the
+    alternate backbone is a known model type *without* its own source. Net
+    invariants: every non-derived source is a known model type, and the only
+    model types lacking a 1:1 source are the alternate sequence backbones that
+    reuse the sequence-detector source."""
     from typing import get_args
 
     from src.alerts.events import AnomalySource
 
-    assert set(KNOWN_MODEL_TYPES) == set(get_args(AnomalySource)) - {"fused", "behavior"}
+    non_derived_sources = set(get_args(AnomalySource)) - {"fused", "behavior"}
+    sequence_backbones = {"lstm_autoencoder", "tcn_autoencoder"}
+
+    assert non_derived_sources <= set(KNOWN_MODEL_TYPES)
+    assert set(KNOWN_MODEL_TYPES) - non_derived_sources == sequence_backbones - {"lstm_autoencoder"}
 
 
 # ---------------------------------------------------------------------------

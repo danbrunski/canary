@@ -25,12 +25,12 @@ import numpy as np
 import pandas as pd
 
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
-from src.models.lstm_training import (
-    LSTMThresholdCalibration,
-    ReconstructionErrorDistribution,
-    TrainedLSTMAutoencoder,
-)
+from src.models.lstm_training import TrainedLSTMAutoencoder
 from src.models.sequence_dataset import SequenceWindow, SequenceWindowDataset
+from src.models.sequence_training import (
+    ReconstructionErrorDistribution,
+    SequenceThresholdCalibration,
+)
 
 #: Default ``k`` multipliers swept by the benchmark. The calibrated ``k`` from
 #: the manifest is always merged in so the as-shipped point is visible.
@@ -178,7 +178,7 @@ def benchmark_false_positives(
     if dataset.sequence_length != manifest_sequence_length:
         raise ValueError("benchmark dataset sequence_length does not match trained model")
 
-    calibration = LSTMThresholdCalibration.from_dict(trained.manifest.thresholds)
+    calibration = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
     feature_columns = tuple(dataset.feature_columns)
     global_errors, channel_errors = _reconstruction_errors(
         trained, dataset, batch_size=batch_size, device=device
@@ -320,7 +320,7 @@ def _k_sweep(
     *,
     global_errors: np.ndarray[Any, np.dtype[np.float64]],
     channel_errors: np.ndarray[Any, np.dtype[np.float64]],
-    calibration: LSTMThresholdCalibration,
+    calibration: SequenceThresholdCalibration,
     feature_columns: Sequence[str],
     total_duration_seconds: float,
     window_count: int,

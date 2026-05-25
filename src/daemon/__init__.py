@@ -14,6 +14,7 @@ from typing import Any
 import uvicorn
 
 from src.config import CanaryConfig
+from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import ParquetTelemetryWriter
 
 from . import runtime as _runtime
@@ -68,7 +69,7 @@ async def run_daemon(
     stop_event: Any,
     *,
     collectors: Sequence[Callable[..., Any]] | None = None,
-    writer: ParquetTelemetryWriter | None = None,
+    writer: ParquetTelemetryWriter | AsyncParquetTelemetryWriter | None = None,
     components: DaemonComponents | None = None,
     enable_live_inference: bool = True,
 ) -> DaemonComponents:

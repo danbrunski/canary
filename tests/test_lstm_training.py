@@ -11,7 +11,6 @@ import pytest
 from src.config import CanaryConfig
 from src.models.lstm_training import (
     LSTMAutoencoderManifest,
-    LSTMThresholdCalibration,
     calibrate_lstm_thresholds,
     default_lstm_manifest_path,
     load_lstm_autoencoder_model,
@@ -19,6 +18,7 @@ from src.models.lstm_training import (
 )
 from src.models.manifest import validate_manifest_common
 from src.models.sequence_dataset import SequenceWindowDataset
+from src.models.sequence_training import SequenceThresholdCalibration
 from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
@@ -122,7 +122,7 @@ def test_train_lstm_autoencoder_produces_manifest() -> None:
     assert manifest.schema["feature_health"]["constant_columns"] == []
     validate_manifest_common(manifest.to_dict())
     assert manifest.thresholds is not None
-    calibration = LSTMThresholdCalibration.from_dict(manifest.thresholds)
+    calibration = SequenceThresholdCalibration.from_dict(manifest.thresholds)
     assert calibration.threshold_k == 2.0
     assert calibration.window_count == len(dataset)
     assert calibration.training_data_hash == manifest.training_data_hash
@@ -292,7 +292,7 @@ def test_calibrate_lstm_thresholds_can_be_run_explicitly() -> None:
 
     assert trained.manifest.thresholds is None
     assert calibrated.manifest.thresholds is not None
-    calibration = LSTMThresholdCalibration.from_dict(calibrated.manifest.thresholds)
+    calibration = SequenceThresholdCalibration.from_dict(calibrated.manifest.thresholds)
     assert calibration.threshold_k == 1.5
     assert calibration.calibrated_at == "2026-05-12T13:00:00Z"
     assert calibration.global_error.count == len(dataset)

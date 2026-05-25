@@ -44,11 +44,8 @@ from src.models.lstm_autoencoder import (
     build_lstm_autoencoder,
 )
 from src.models.lstm_training import (
-    EpochLoss,
     LSTMAutoencoderManifest,
     LSTMAutoencoderTrainingConfigLike,
-    LSTMThresholdCalibration,
-    ReconstructionErrorDistribution,
     TrainedLSTMAutoencoder,
     calibrate_lstm_thresholds,
     default_lstm_manifest_path,
@@ -73,12 +70,28 @@ from src.models.sequence_registry import (
     SequenceBackend,
     resolve_sequence_backend,
 )
+from src.models.sequence_training import (
+    EpochLoss,
+    ReconstructionErrorDistribution,
+    SequenceThresholdCalibration,
+    calibrate_sequence_thresholds,
+)
 from src.models.tcn import (
     MissingTCNDependencyError,
     TCNAutoencoder,
     TCNAutoencoderArchitecture,
     TCNAutoencoderConfigLike,
     build_tcn_autoencoder,
+)
+from src.models.tcn_training import (
+    TCNAutoencoderManifest,
+    TCNAutoencoderTrainingConfigLike,
+    TrainedTCNAutoencoder,
+    calibrate_tcn_thresholds,
+    default_tcn_manifest_path,
+    load_tcn_autoencoder_model,
+    save_tcn_autoencoder_model,
+    train_tcn_autoencoder,
 )
 
 __all__ = [
@@ -121,6 +134,14 @@ __all__ = [
     "TCNAutoencoderArchitecture",
     "TCNAutoencoderConfigLike",
     "build_tcn_autoencoder",
+    "TCNAutoencoderManifest",
+    "TCNAutoencoderTrainingConfigLike",
+    "TrainedTCNAutoencoder",
+    "calibrate_tcn_thresholds",
+    "default_tcn_manifest_path",
+    "load_tcn_autoencoder_model",
+    "save_tcn_autoencoder_model",
+    "train_tcn_autoencoder",
     "LSTMAutoencoder",
     "LSTMAutoencoderArchitecture",
     "LSTMAutoencoderConfigLike",
@@ -130,7 +151,8 @@ __all__ = [
     "EpochLoss",
     "LSTMAutoencoderManifest",
     "LSTMAutoencoderTrainingConfigLike",
-    "LSTMThresholdCalibration",
+    "SequenceThresholdCalibration",
+    "calibrate_sequence_thresholds",
     "ReconstructionErrorDistribution",
     "TrainedLSTMAutoencoder",
     "calibrate_lstm_thresholds",

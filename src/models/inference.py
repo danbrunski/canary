@@ -18,8 +18,8 @@ import numpy as np
 import pandas as pd
 
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
-from src.models.lstm_training import LSTMThresholdCalibration
 from src.models.sequence_protocol import TrainedSequenceModel
+from src.models.sequence_training import SequenceThresholdCalibration
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.timefmt import format_timestamp
 
@@ -273,7 +273,7 @@ class SequenceInferenceEngine:
         self.device = device
         self.dtype = dtype
         self.time_fn = time_fn
-        self.calibration = LSTMThresholdCalibration.from_dict(trained.manifest.thresholds)
+        self.calibration = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
         self.feature_columns = trained.feature_columns
         self.sequence_length = int(trained.manifest.schema["sequence_length"])
         self.buffer = SequenceWindowBuffer(

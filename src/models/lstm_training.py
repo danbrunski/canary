@@ -7,16 +7,14 @@ reconstruction-error thresholds.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-import numpy as np
 import pandas as pd
 
 from src.models.lstm_autoencoder import (
@@ -26,18 +24,26 @@ from src.models.lstm_autoencoder import (
 )
 from src.models.manifest import validate_model_feature_spec
 from src.models.sequence_dataset import SequenceWindowDataset
+from src.models.sequence_training import (
+    EpochLoss,
+    SequenceThresholdCalibration,
+    calibrate_sequence_thresholds,
+    coerce_timestamp,
+    cpu_state_dict,
+    evaluate_loss,
+    max_window_timestamp,
+    min_window_timestamp,
+    split_dataset,
+    train_one_epoch,
+    training_data_hash,
+    training_sessions,
+)
 from src.preprocessing.feature_pipeline import build_feature_spec
 from src.preprocessing.normalization import ZScoreScaler
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.timefmt import format_timestamp as _format_timestamp
 
 ARTIFACT_FORMAT_VERSION = 1
 MODEL_TYPE = "lstm_autoencoder"
-
-#: Phase 7.5 — minimum validation-window count for a per-mode LSTM
-#: reconstruction-error band to be persisted. Below this the mode falls back
-#: to the global threshold at inference (mirrors IF's calibration floor).
-_LSTM_MIN_CALIBRATION_SAMPLES = 10
 
 
 class LSTMAutoencoderTrainingConfigLike(Protocol):
@@ -57,136 +63,6 @@ class LSTMAutoencoderTrainingConfigLike(Protocol):
     min_delta: float
     random_state: int
     threshold_k: float
-
-
-@dataclass(frozen=True)
-class EpochLoss:
-    """Training and validation loss for one epoch."""
-
-    epoch: int
-    train_loss: float
-    validation_loss: float | None
-
-    def to_dict(self) -> dict[str, int | float | None]:
-        return {
-            "epoch": self.epoch,
-            "train_loss": self.train_loss,
-            "validation_loss": self.validation_loss,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> EpochLoss:
-        raw_validation = data.get("validation_loss")
-        return cls(
-            epoch=int(data["epoch"]),
-            train_loss=float(data["train_loss"]),
-            validation_loss=None if raw_validation is None else float(raw_validation),
-        )
-
-
-@dataclass(frozen=True)
-class ReconstructionErrorDistribution:
-    """Summary statistics and threshold for one reconstruction-error distribution."""
-
-    count: int
-    mean: float
-    std: float
-    minimum: float
-    maximum: float
-    p50: float
-    p90: float
-    p95: float
-    p99: float
-    threshold: float
-
-    def to_dict(self) -> dict[str, int | float]:
-        return {
-            "count": self.count,
-            "mean": self.mean,
-            "std": self.std,
-            "minimum": self.minimum,
-            "maximum": self.maximum,
-            "p50": self.p50,
-            "p90": self.p90,
-            "p95": self.p95,
-            "p99": self.p99,
-            "threshold": self.threshold,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> ReconstructionErrorDistribution:
-        return cls(
-            count=int(data["count"]),
-            mean=float(data["mean"]),
-            std=float(data["std"]),
-            minimum=float(data["minimum"]),
-            maximum=float(data["maximum"]),
-            p50=float(data["p50"]),
-            p90=float(data["p90"]),
-            p95=float(data["p95"]),
-            p99=float(data["p99"]),
-            threshold=float(data["threshold"]),
-        )
-
-
-@dataclass(frozen=True)
-class LSTMThresholdCalibration:
-    """Global and per-channel reconstruction-error thresholds."""
-
-    threshold_k: float
-    calibrated_at: str
-    training_data_hash: str
-    window_count: int
-    global_error: ReconstructionErrorDistribution
-    channel_errors: Mapping[str, ReconstructionErrorDistribution]
-    #: Phase 7.5 — per-operating-mode reconstruction-error distribution and
-    #: threshold, computed on the validation set's window-end mode. ``None``
-    #: (or absent in the manifest) for models trained before 7.5 / when no
-    #: mode had enough validation windows; inference then falls back to
-    #: ``global_error.threshold`` (back-compat with the pre-7.5 contract).
-    per_mode_errors: Mapping[str, ReconstructionErrorDistribution] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        out: dict[str, Any] = {
-            "threshold_k": self.threshold_k,
-            "calibrated_at": self.calibrated_at,
-            "training_data_hash": self.training_data_hash,
-            "window_count": self.window_count,
-            "global_error": self.global_error.to_dict(),
-            "channel_errors": {
-                channel: distribution.to_dict()
-                for channel, distribution in self.channel_errors.items()
-            },
-        }
-        if self.per_mode_errors is not None:
-            out["per_mode_errors"] = {
-                mode: distribution.to_dict() for mode, distribution in self.per_mode_errors.items()
-            }
-        return out
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> LSTMThresholdCalibration:
-        raw_per_mode = data.get("per_mode_errors")
-        per_mode = (
-            None
-            if raw_per_mode is None
-            else {
-                str(mode): ReconstructionErrorDistribution.from_dict(distribution)
-                for mode, distribution in dict(raw_per_mode).items()
-            }
-        )
-        return cls(
-            threshold_k=float(data["threshold_k"]),
-            calibrated_at=str(data["calibrated_at"]),
-            training_data_hash=str(data["training_data_hash"]),
-            window_count=int(data["window_count"]),
-            global_error=ReconstructionErrorDistribution.from_dict(data["global_error"]),
-            channel_errors={
-                str(channel): ReconstructionErrorDistribution.from_dict(distribution)
-                for channel, distribution in dict(data["channel_errors"]).items()
-            },
-            per_mode_errors=per_mode,
-        )
 
 
 @dataclass(frozen=True)
@@ -327,7 +203,11 @@ def train_lstm_autoencoder(
         device=device,
         dtype=dtype,
     )
-    train_subset, validation_subset = _split_dataset(dataset, config, data, torch)
+    train_subset, validation_subset = split_dataset(
+        dataset,
+        validation_fraction=config.validation_fraction,
+        random_state=config.random_state,
+    )
     train_loader = data.DataLoader(
         train_subset,
         batch_size=config.batch_size,
@@ -352,7 +232,7 @@ def train_lstm_autoencoder(
     early_stopped = False
 
     for epoch in range(1, config.max_epochs + 1):
-        train_loss = _train_one_epoch(
+        train_loss = train_one_epoch(
             model,
             train_loader,
             optimizer=optimizer,
@@ -361,7 +241,7 @@ def train_lstm_autoencoder(
         validation_loss = (
             None
             if validation_loader is None
-            else _evaluate_loss(model, validation_loader, device=device_obj)
+            else evaluate_loss(model, validation_loader, device=device_obj)
         )
         history.append(
             EpochLoss(epoch=epoch, train_loss=train_loss, validation_loss=validation_loss)
@@ -373,7 +253,7 @@ def train_lstm_autoencoder(
             best_train_loss = train_loss
             best_validation_loss = validation_loss
             best_monitor_loss = monitor_loss
-            best_state = _cpu_state_dict(model)
+            best_state = cpu_state_dict(model)
             epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
@@ -387,7 +267,7 @@ def train_lstm_autoencoder(
     model.to(device_obj)
     model.eval()
 
-    created_at = _format_timestamp(_coerce_timestamp(trained_at))
+    created_at = _format_timestamp(coerce_timestamp(trained_at))
     version = model_version or f"lstm_autoencoder_{created_at.replace(':', '')}"
     train_count = len(train_subset)
     validation_count = 0 if validation_subset is None else len(validation_subset)
@@ -408,10 +288,10 @@ def train_lstm_autoencoder(
         model_type=MODEL_TYPE,
         model_version=version,
         created_at=created_at,
-        training_data_hash=_training_data_hash(dataset),
-        training_start_timestamp=_min_window_timestamp(dataset),
-        training_end_timestamp=_max_window_timestamp(dataset),
-        training_sessions=_training_sessions(dataset),
+        training_data_hash=training_data_hash(dataset),
+        training_start_timestamp=min_window_timestamp(dataset),
+        training_end_timestamp=max_window_timestamp(dataset),
+        training_sessions=training_sessions(dataset),
         input_rows=len(dataset.frame),
         input_windows=len(dataset),
         train_windows=train_count,
@@ -461,84 +341,19 @@ def calibrate_lstm_thresholds(
     device: str = "cpu",
     calibrated_at: datetime | pd.Timestamp | str | None = None,
 ) -> TrainedLSTMAutoencoder:
-    """Compute and attach reconstruction-error thresholds to a trained bundle.
+    """Attach masked reconstruction-error thresholds to a trained bundle.
 
-    Global errors are per-window MAE over all timesteps and channels. Per-channel
-    errors are per-window MAE over timesteps for each feature column. Thresholds
-    are ``mean + threshold_k * population_std``.
+    Thin wrapper over :func:`calibrate_sequence_thresholds` (shared with the
+    TCN backbone) that writes the calibration into the LSTM manifest.
     """
-    if threshold_k < 0:
-        raise ValueError("threshold_k must be non-negative")
-    if batch_size <= 0:
-        raise ValueError("batch_size must be positive")
-    if len(dataset) == 0:
-        raise ValueError("no sequence windows available to calibrate LSTM thresholds")
-    if tuple(dataset.feature_columns) != trained.feature_columns:
-        raise ValueError("calibration dataset feature columns do not match trained model")
-    manifest_sequence_length = int(trained.manifest.schema["sequence_length"])
-    if dataset.sequence_length != manifest_sequence_length:
-        raise ValueError("calibration dataset sequence_length does not match trained model")
-
-    torch, _nn, _optim, data = _torch_training_modules()
-    device_obj = torch.device(device)
-    loader = data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
-    trained.model.to(device_obj)
-    trained.model.eval()
-
-    global_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
-    channel_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
-    with torch.no_grad():
-        for value, mask, delta in loader:
-            value = value.to(device_obj)
-            mask = mask.to(device_obj)
-            delta = delta.to(device_obj)
-            global_errors = trained.model.reconstruction_error(
-                value, mask, delta, reduction="sample"
-            )
-            channel_errors = trained.model.reconstruction_error(
-                value, mask, delta, reduction="channel"
-            )
-            global_chunks.append(global_errors.detach().cpu().numpy().astype(np.float64))
-            channel_chunks.append(channel_errors.detach().cpu().numpy().astype(np.float64))
-
-    global_values = np.concatenate(global_chunks)
-    channel_matrix = np.concatenate(channel_chunks, axis=0)
-    global_distribution = _error_distribution(global_values, threshold_k=threshold_k)
-    channel_distributions = {
-        column: _error_distribution(channel_matrix[:, index], threshold_k=threshold_k)
-        for index, column in enumerate(dataset.feature_columns)
-    }
-
-    # Phase 7.5 — per-operating-mode global thresholds. The mode for a window
-    # is the mode of its last row (the row the score is attributed to);
-    # ``shuffle=False`` above keeps the loader/dataset order aligned with
-    # ``global_values``. Modes with fewer than the floor of validation
-    # windows fall back to ``global_error`` at inference, matching IF's
-    # ``_MIN_CALIBRATION_SAMPLES`` philosophy.
-    per_mode_distributions: dict[str, ReconstructionErrorDistribution] = {}
-    frame = dataset.frame
-    if MODE_COLUMN in frame.columns:
-        by_mode: dict[str, list[int]] = {}
-        for index, window in enumerate(dataset.windows):
-            raw = frame.iloc[window.end_row - 1].get(MODE_COLUMN)
-            if raw is None or pd.isna(raw):
-                continue
-            by_mode.setdefault(str(raw), []).append(index)
-        for mode, indexes in by_mode.items():
-            if len(indexes) < _LSTM_MIN_CALIBRATION_SAMPLES:
-                continue
-            per_mode_distributions[mode] = _error_distribution(
-                global_values[indexes], threshold_k=threshold_k
-            )
-
-    calibration = LSTMThresholdCalibration(
+    calibration = calibrate_sequence_thresholds(
+        trained.model,
+        dataset,
+        feature_columns=trained.feature_columns,
         threshold_k=threshold_k,
-        calibrated_at=_format_timestamp(_coerce_timestamp(calibrated_at)),
-        training_data_hash=_training_data_hash(dataset),
-        window_count=len(dataset),
-        global_error=global_distribution,
-        channel_errors=channel_distributions,
-        per_mode_errors=per_mode_distributions if per_mode_distributions else None,
+        batch_size=batch_size,
+        device=device,
+        calibrated_at=calibrated_at,
     )
     manifest = replace(trained.manifest, thresholds=calibration.to_dict())
     return TrainedLSTMAutoencoder(model=trained.model, manifest=manifest)
@@ -558,7 +373,7 @@ def save_lstm_autoencoder_model(
         {
             "artifact_format_version": ARTIFACT_FORMAT_VERSION,
             "model_type": MODEL_TYPE,
-            "state_dict": _cpu_state_dict(trained.model),
+            "state_dict": cpu_state_dict(trained.model),
             "manifest": manifest,
         },
         artifact_path,
@@ -700,7 +515,7 @@ def _validate_lstm_thresholds(
     feature_columns: tuple[str, ...],
 ) -> None:
     try:
-        calibration = LSTMThresholdCalibration.from_dict(thresholds)
+        calibration = SequenceThresholdCalibration.from_dict(thresholds)
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"invalid LSTM thresholds in manifest: {exc}") from exc
 
@@ -739,160 +554,6 @@ def _validate_config(config: LSTMAutoencoderTrainingConfigLike) -> None:
         raise ValueError("min_delta must be non-negative")
     if config.threshold_k < 0:
         raise ValueError("threshold_k must be non-negative")
-
-
-def _split_dataset(
-    dataset: SequenceWindowDataset,
-    config: LSTMAutoencoderTrainingConfigLike,
-    data: Any,
-    torch: Any,
-) -> tuple[Any, Any | None]:
-    n = len(dataset)
-    validation_count = 0
-    if config.validation_fraction > 0 and n > 1:
-        validation_count = int(round(n * config.validation_fraction))
-        validation_count = max(1, validation_count)
-        validation_count = min(validation_count, n - 1)
-    if validation_count == 0:
-        return data.Subset(dataset, list(range(n))), None
-
-    generator = torch.Generator().manual_seed(config.random_state)
-    permutation = torch.randperm(n, generator=generator).tolist()
-    validation_indexes = sorted(int(index) for index in permutation[:validation_count])
-    train_indexes = sorted(int(index) for index in permutation[validation_count:])
-    return data.Subset(dataset, train_indexes), data.Subset(dataset, validation_indexes)
-
-
-def _masked_mse_loss(reconstruction: Any, value: Any, mask: Any) -> Any:
-    """Masked MSE: ``sum(m ⊙ (recon − x)²) / sum(m)`` over the whole batch.
-
-    Only observed cells (``mask == 1``) count, so the model is never trained to
-    reconstruct a forward-filled fill. A degenerate all-stale batch (sum(m)==0)
-    is clamped to a denominator of 1 so the loss is 0 rather than NaN.
-    """
-    squared = ((reconstruction - value) ** 2) * mask
-    denominator = mask.sum().clamp(min=1.0)
-    return squared.sum() / denominator
-
-
-def _train_one_epoch(
-    model: LSTMAutoencoder,
-    loader: Any,
-    *,
-    optimizer: Any,
-    device: Any,
-) -> float:
-    model.train()
-    losses: list[float] = []
-    for value, mask, delta in loader:
-        value = value.to(device)
-        mask = mask.to(device)
-        delta = delta.to(device)
-        optimizer.zero_grad(set_to_none=True)
-        reconstruction = model(value, mask, delta)
-        loss = _masked_mse_loss(reconstruction, value, mask)
-        loss.backward()
-        optimizer.step()
-        losses.append(float(loss.detach().cpu().item()))
-    return float(np.mean(losses))
-
-
-def _evaluate_loss(
-    model: LSTMAutoencoder,
-    loader: Any,
-    *,
-    device: Any,
-) -> float:
-    torch = _torch_module()
-    model.eval()
-    losses: list[float] = []
-    with torch.no_grad():
-        for value, mask, delta in loader:
-            value = value.to(device)
-            mask = mask.to(device)
-            delta = delta.to(device)
-            reconstruction = model(value, mask, delta)
-            loss = _masked_mse_loss(reconstruction, value, mask)
-            losses.append(float(loss.detach().cpu().item()))
-    return float(np.mean(losses))
-
-
-def _cpu_state_dict(model: LSTMAutoencoder) -> dict[str, Any]:
-    return {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
-
-
-def _training_data_hash(dataset: SequenceWindowDataset) -> str:
-    digest = hashlib.sha256()
-    digest.update(
-        json.dumps(
-            {
-                "feature_columns": list(dataset.feature_columns),
-                "sequence_length": dataset.sequence_length,
-                "windows": [window.to_dict() for window in dataset.windows],
-            },
-            sort_keys=True,
-        ).encode("utf-8")
-    )
-    for window in dataset.windows:
-        values = dataset.frame.iloc[window.start_row : window.end_row][
-            list(dataset.feature_columns)
-        ].to_numpy(dtype=np.float64)
-        digest.update(np.ascontiguousarray(values).tobytes())
-    return f"sha256:{digest.hexdigest()}"
-
-
-def _error_distribution(
-    values: np.ndarray[Any, np.dtype[np.float64]],
-    *,
-    threshold_k: float,
-) -> ReconstructionErrorDistribution:
-    if values.size == 0:
-        raise ValueError("cannot calibrate thresholds from an empty error distribution")
-    finite = values[np.isfinite(values)]
-    if finite.size == 0:
-        raise ValueError("cannot calibrate thresholds from non-finite reconstruction errors")
-    mean = float(np.mean(finite))
-    std = float(np.std(finite, ddof=0))
-    p50, p90, p95, p99 = np.quantile(finite, [0.5, 0.9, 0.95, 0.99])
-    return ReconstructionErrorDistribution(
-        count=int(finite.size),
-        mean=mean,
-        std=std,
-        minimum=float(np.min(finite)),
-        maximum=float(np.max(finite)),
-        p50=float(p50),
-        p90=float(p90),
-        p95=float(p95),
-        p99=float(p99),
-        threshold=float(mean + threshold_k * std),
-    )
-
-
-def _training_sessions(dataset: SequenceWindowDataset) -> tuple[str, ...]:
-    return tuple(sorted({window.session for window in dataset.windows}))
-
-
-def _min_window_timestamp(dataset: SequenceWindowDataset) -> str | None:
-    if not dataset.windows:
-        return None
-    timestamps = [pd.Timestamp(window.start_timestamp) for window in dataset.windows]
-    return _format_timestamp(min(timestamps))
-
-
-def _max_window_timestamp(dataset: SequenceWindowDataset) -> str | None:
-    if not dataset.windows:
-        return None
-    timestamps = [pd.Timestamp(window.end_timestamp) for window in dataset.windows]
-    return _format_timestamp(max(timestamps))
-
-
-def _coerce_timestamp(value: datetime | pd.Timestamp | str | None) -> pd.Timestamp:
-    if value is None:
-        return pd.Timestamp(datetime.now(tz=UTC))
-    timestamp = pd.Timestamp(value)
-    if timestamp.tzinfo is None:
-        return timestamp.tz_localize("UTC")
-    return timestamp.tz_convert("UTC")
 
 
 def _optional_str(value: Any) -> str | None:

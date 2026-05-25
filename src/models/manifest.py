@@ -36,9 +36,15 @@ from pydantic import BaseModel, ConfigDict, Field
 #: manifest's schema. Increment in lockstep with a migration plan.
 CURRENT_MANIFEST_FORMAT_VERSION = 1
 
-#: Set of model_type values both trainers emit today. Keep this in sync with
+#: Set of model_type values the trainers emit today. Keep this in sync with
 #: ``AnomalyEvent.AnomalySource`` so dashboard payloads round-trip cleanly.
-KNOWN_MODEL_TYPES: tuple[str, ...] = ("isolation_forest", "lstm_autoencoder")
+#: ``lstm_autoencoder`` and ``tcn_autoencoder`` are the two interchangeable
+#: sequence-detector backbones (only one is active at a time).
+KNOWN_MODEL_TYPES: tuple[str, ...] = (
+    "isolation_forest",
+    "lstm_autoencoder",
+    "tcn_autoencoder",
+)
 
 
 class ModelManifestCommon(BaseModel):
@@ -307,4 +313,4 @@ __all__ = [
 
 
 # Type alias for typing-only callers that don't want to import Literal directly.
-ModelType = Literal["isolation_forest", "lstm_autoencoder"]
+ModelType = Literal["isolation_forest", "lstm_autoencoder", "tcn_autoencoder"]

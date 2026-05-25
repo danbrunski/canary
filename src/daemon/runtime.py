@@ -12,6 +12,7 @@ from src.config import CanaryConfig
 from src.control.capture import CaptureController
 from src.control.replay_control import ReplayController
 from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH
+from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 
@@ -39,7 +40,7 @@ async def run_daemon(
     stop_event: asyncio.Event,
     *,
     collectors: Sequence[Callable[..., Any]] | None = None,
-    writer: ParquetTelemetryWriter | None = None,
+    writer: ParquetTelemetryWriter | AsyncParquetTelemetryWriter | None = None,
     components: DaemonComponents | None = None,
     enable_live_inference: bool = True,
 ) -> DaemonComponents:
@@ -63,7 +64,7 @@ async def run_daemon(
     """
     components = components or build_components(config)
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=config.collection.queue_max_size)
-    storage_writer = (
+    storage_writer = ensure_async_writer(
         ParquetTelemetryWriter(config.collection.storage_path) if writer is None else writer
     )
     components.capture_controller = CaptureController(lambda: storage_writer.paths.root)

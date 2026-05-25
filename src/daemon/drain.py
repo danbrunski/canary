@@ -12,6 +12,7 @@ from src.collection.queueing import QueueDepthMonitor
 from src.dashboard.broadcast import Broadcaster
 from src.models.health import HealthMonitor
 from src.preprocessing.live import LiveFeatureSource
+from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.monitor import warn_if_storage_low
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
@@ -101,7 +102,7 @@ def _enqueue_sink(
 
 async def run_storage_sink(
     queue: asyncio.Queue[TelemetryRecord],
-    writer: ParquetTelemetryWriter,
+    writer: ParquetTelemetryWriter | AsyncParquetTelemetryWriter,
     stop_event: asyncio.Event,
     *,
     poll_interval: float = 0.5,
@@ -111,6 +112,7 @@ async def run_storage_sink(
     health_monitor: HealthMonitor | None = None,
 ) -> None:
     """Persist telemetry to Parquet from its own queue."""
+    async_writer = ensure_async_writer(writer)
     queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
     if storage_path is not None and storage_warning_mb is not None:
         warn_if_storage_low(storage_path, storage_warning_mb)
@@ -122,10 +124,9 @@ async def run_storage_sink(
             try:
                 record = await asyncio.wait_for(queue.get(), timeout=poll_interval)
             except TimeoutError:
-                if writer.flush_due():
-                    _storage_call(
-                        writer.flush,
-                        "storage",
+                if await async_writer.flush_due():
+                    await _storage_call(
+                        async_writer.flush,
                         health_monitor=health_monitor,
                     )
                     if storage_path is not None and storage_warning_mb is not None:
@@ -133,9 +134,8 @@ async def run_storage_sink(
                 continue
 
             try:
-                _storage_call(
-                    writer.write,
-                    "storage",
+                await _storage_call(
+                    async_writer.write,
                     record,
                     health_monitor=health_monitor,
                 )
@@ -145,7 +145,7 @@ async def run_storage_sink(
                 _observe_queue(health_monitor, "storage", queue)
     finally:
         try:
-            _storage_call(writer.close, "storage", health_monitor=health_monitor)
+            await _storage_call(async_writer.close, health_monitor=health_monitor)
         finally:
             if storage_path is not None and storage_warning_mb is not None:
                 warn_if_storage_low(storage_path, storage_warning_mb)
@@ -254,7 +254,7 @@ async def run_gps_sink(
 
 async def drain_queue_with_broadcast(
     queue: asyncio.Queue[TelemetryRecord],
-    writer: ParquetTelemetryWriter,
+    writer: ParquetTelemetryWriter | AsyncParquetTelemetryWriter,
     stop_event: asyncio.Event,
     *,
     telemetry_broadcaster: Broadcaster | None = None,
@@ -275,13 +275,14 @@ async def drain_queue_with_broadcast(
     sinks: list[TelemetrySink] = []
     sink_tasks: list[asyncio.Task[None]] = []
 
+    async_writer = ensure_async_writer(writer)
     storage_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
     sinks.append(TelemetrySink("storage", storage_queue, "drop_newest"))
     sink_tasks.append(
         asyncio.create_task(
             run_storage_sink(
                 storage_queue,
-                writer,
+                async_writer,
                 stop_event,
                 poll_interval=poll_interval,
                 storage_path=storage_path,
@@ -387,16 +388,15 @@ def _sink_queue_size(queue: asyncio.Queue[TelemetryRecord]) -> int:
     return queue.maxsize if queue.maxsize > 0 else 10_000
 
 
-def _storage_call(
+async def _storage_call(
     func: Any,
-    sink_name: str,
     *args: Any,
     health_monitor: HealthMonitor | None,
 ) -> Any:
     try:
-        return func(*args)
+        return await func(*args)
     except Exception as exc:  # noqa: BLE001 — storage failures must be visible, not fatal
-        _note_error(health_monitor, sink_name, exc)
+        _note_error(health_monitor, "storage", exc)
         log.exception("telemetry storage sink failed")
         return None
 

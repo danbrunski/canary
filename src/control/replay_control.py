@@ -34,6 +34,7 @@ from pathlib import Path
 
 from src.alerts.event_logger import AnomalyEventLogger
 from src.collection.replay import replay_session
+from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 
@@ -104,27 +105,25 @@ class ReplayController:
         self,
         *,
         queue: asyncio.Queue[TelemetryRecord],
-        writer: ParquetTelemetryWriter,
+        writer: ParquetTelemetryWriter | AsyncParquetTelemetryWriter,
         anomaly_logger: AnomalyEventLogger,
         storage_root: Path,
     ) -> None:
         self._queue = queue
-        self._writer = writer
+        self._writer = ensure_async_writer(writer)
         self._anomaly_logger = anomaly_logger
         self._storage_root = Path(storage_root)
         self._task: asyncio.Task[None] | None = None
+        self._cleanup_task: asyncio.Task[None] | None = None
         self._stop_event: asyncio.Event | None = None
         self._status: ReplayStatus = ReplayStatus(running=False)
 
     def status(self) -> ReplayStatus:
         """Return the current status snapshot.
 
-        ``running`` reflects the controller's view; if the underlying task
-        exits on its own (e.g. ``loop=False`` and the source exhausted),
-        ``running`` is updated lazily on the next ``status()`` call.
+        ``running`` reflects the controller's view. Replay task cleanup is
+        scheduled on the event loop that started the replay.
         """
-        if self._task is not None and self._task.done():
-            self._reap_finished_task()
         return self._status
 
     async def start(
@@ -153,8 +152,12 @@ class ReplayController:
             raise ReplayNotFoundError(f"session {source_session_id!r} not found")
 
         replay_id = _utc_now().strftime("%Y-%m-%dT%H%M%S")
-        self._writer.enter_replay_mode(replay_id)
-        anomalies_path = self._anomaly_logger.enter_replay_mode(replay_id)
+        await self._writer.enter_replay_mode(replay_id)
+        try:
+            anomalies_path = self._anomaly_logger.enter_replay_mode(replay_id)
+        except Exception:
+            await self._writer.exit_replay_mode()
+            raise
 
         stop_event = asyncio.Event()
         speed = speed if speed > 0 else 1.0
@@ -170,6 +173,7 @@ class ReplayController:
         )
         self._task = task
         self._stop_event = stop_event
+        task.add_done_callback(self._schedule_cleanup)
         self._status = ReplayStatus(
             running=True,
             replay_id=replay_id,
@@ -194,7 +198,7 @@ class ReplayController:
     async def stop(self) -> ReplayStatus:
         """Cancel the in-flight replay and roll the writer/logger back live."""
         if self._task is None or self._task.done():
-            self._reap_finished_task()
+            await self._reap_finished_task()
             if not self._status.running:
                 raise ReplayNotRunningError("no replay in flight")
 
@@ -214,29 +218,41 @@ class ReplayController:
             except (asyncio.CancelledError, Exception):
                 pass
 
-        self._reap_finished_task()
+        if self._cleanup_task is not None:
+            await self._cleanup_task
+        else:
+            await self._reap_finished_task()
         return self._status
 
-    def _reap_finished_task(self) -> None:
+    def _schedule_cleanup(self, _task: asyncio.Task[None]) -> None:
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self._reap_finished_task())
+
+    async def _reap_finished_task(self) -> None:
         """Reset state + roll writer/logger back to live mode after replay ends."""
-        if self._task is None or not self._task.done():
+        task = self._task
+        if task is None or not task.done():
             return
-        if self._task.exception() is not None:
-            log.exception(
+        self._task = None
+        self._stop_event = None
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            exc = None
+        if exc is not None:
+            log.error(
                 "replay task raised",
-                exc_info=self._task.exception(),
+                exc_info=(type(exc), exc, exc.__traceback__),
                 extra={"replay_id": self._status.replay_id},
             )
         try:
-            self._writer.exit_replay_mode()
+            await self._writer.exit_replay_mode()
         except Exception:
             log.exception("writer.exit_replay_mode failed")
         try:
             self._anomaly_logger.exit_replay_mode()
         except Exception:
             log.exception("anomaly_logger.exit_replay_mode failed")
-        self._task = None
-        self._stop_event = None
         self._status = ReplayStatus(running=False)
 
 
