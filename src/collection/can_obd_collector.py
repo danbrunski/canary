@@ -24,7 +24,6 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
 
@@ -39,10 +38,15 @@ from src.collection.can_collector import (
 )
 from src.collection.can_collector import _write_manifest as write_recording_manifest
 from src.collection.can_obd_client import (
+    PID_DECODERS,
+)
+from src.collection.isotp import (
     DEFAULT_RESPONSE_ID_MAX,
     DEFAULT_RESPONSE_ID_MIN,
-    PID_DECODERS,
+    FLOW_CONTROL_CTS,
+    IsoTpResponseAssembler,
     ObdResponse,
+    build_request_payload,
 )
 from src.collection.obd_collector import JsonlReadingWriter, ObdReading, reading_to_record
 from src.collection.obd_scheduler import (
@@ -82,18 +86,6 @@ log = logging.getLogger(__name__)
 AUTO_PROBE_TIMEOUT_SECONDS = 0.25
 AUTO_BASELINE_PID_NAMES = tuple(name for _pid, (name, _decoder) in sorted(PID_DECODERS.items()))
 SCHEDULER_METRICS_INTERVAL_SECONDS = 5.0
-
-_PCI_SINGLE_FRAME = 0x0
-_PCI_FIRST_FRAME = 0x1
-_PCI_CONSECUTIVE_FRAME = 0x2
-_FLOW_CONTROL_CTS = bytes([0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-
-
-@dataclass
-class _ReassemblyBuffer:
-    total_length: int
-    received: bytearray
-    next_sequence: int
 
 
 def parse_can_id(value: str | int) -> int:
@@ -553,17 +545,16 @@ def _query_with_tap(
 ) -> ObdResponse | None:
     message = can.Message(
         arbitration_id=request.request_id,
-        data=_build_request_payload(request.service, request.identifier),
+        data=build_request_payload(request.service, request.identifier),
         is_extended_id=False,
     )
     bus.send(message)
     stats.requests_sent += 1
 
-    expected_service = 0x40 | request.service
     request_deadline = time.monotonic() + timeout_seconds
     if deadline_monotonic is not None:
         request_deadline = min(request_deadline, deadline_monotonic)
-    pending: dict[int, _ReassemblyBuffer] = {}
+    assembler = IsoTpResponseAssembler(service=request.service, identifier=request.identifier)
 
     while not _should_stop(stop_event, request_deadline):
         remaining = max(0.001, request_deadline - time.monotonic())
@@ -575,50 +566,21 @@ def _query_with_tap(
         data = bytes(msg.data)
         if not data:
             continue
-        pci_high = (data[0] >> 4) & 0x0F
         responder = int(msg.arbitration_id)
-
-        if pci_high == _PCI_SINGLE_FRAME:
-            if _is_negative_response(data, request.service):
-                return None
-            payload = _handle_single_frame(data, expected_service, request.identifier)
-            if payload is None:
-                continue
-            return ObdResponse(expected_service, request.identifier, payload, responder)
-
-        if pci_high == _PCI_FIRST_FRAME:
-            total_len, first_bytes = _parse_first_frame(data)
-            if first_bytes is None:
-                continue
-            pending[responder] = _ReassemblyBuffer(total_len, bytearray(first_bytes), 1)
+        result = assembler.accept(responder, data)
+        if result.negative_response:
+            return None
+        if result.flow_control_id is not None:
             bus.send(
                 can.Message(
-                    arbitration_id=responder - 8,
-                    data=_FLOW_CONTROL_CTS,
+                    arbitration_id=result.flow_control_id,
+                    data=FLOW_CONTROL_CTS,
                     is_extended_id=False,
                 )
             )
             continue
-
-        if pci_high == _PCI_CONSECUTIVE_FRAME:
-            buf = pending.get(responder)
-            if buf is None:
-                continue
-            sequence = data[0] & 0x0F
-            if sequence != (buf.next_sequence & 0x0F):
-                pending.pop(responder, None)
-                continue
-            remaining_bytes = buf.total_length - len(buf.received)
-            take = min(7, remaining_bytes)
-            buf.received.extend(data[1 : 1 + take])
-            buf.next_sequence += 1
-            if len(buf.received) >= buf.total_length:
-                body = bytes(buf.received[: buf.total_length])
-                pending.pop(responder, None)
-                payload = _extract_service_payload(body, expected_service, request.identifier)
-                if payload is None:
-                    continue
-                return ObdResponse(expected_service, request.identifier, payload, responder)
+        if result.response is not None:
+            return result.response
     return None
 
 
@@ -661,61 +623,6 @@ def _drain_frames_until(
     while not _should_stop(stop_event, target):
         remaining = max(0.001, target - time.monotonic())
         _recv_and_tap(bus, on_frame, stats, timeout=min(0.05, remaining))
-
-
-def _build_request_payload(service: int, identifier: int | None) -> bytes:
-    if identifier is None:
-        body = bytes([0x01, service])
-    elif 0 <= identifier <= 0xFF:
-        body = bytes([0x02, service, identifier])
-    elif 0 <= identifier <= 0xFFFF:
-        body = bytes([0x03, service, (identifier >> 8) & 0xFF, identifier & 0xFF])
-    else:
-        raise ValueError(f"identifier out of range: 0x{identifier:X}")
-    return body + bytes(8 - len(body))
-
-
-def _handle_single_frame(data: bytes, expected_service: int, identifier: int) -> bytes | None:
-    length = data[0] & 0x0F
-    if length == 0 or length > 7 or len(data) < 1 + length:
-        return None
-    body = data[1 : 1 + length]
-    return _extract_service_payload(body, expected_service, identifier)
-
-
-def _is_negative_response(data: bytes, service: int) -> bool:
-    length = data[0] & 0x0F
-    if length < 3 or len(data) < 1 + length:
-        return False
-    body = data[1 : 1 + length]
-    return len(body) >= 3 and body[0] == 0x7F and body[1] == service
-
-
-def _extract_service_payload(
-    body: bytes,
-    expected_service: int,
-    identifier: int,
-) -> bytes | None:
-    if not body or body[0] != expected_service:
-        return None
-    if 0 <= identifier <= 0xFF:
-        if len(body) < 2 or body[1] != identifier:
-            return None
-        return body[2:]
-    if 0 <= identifier <= 0xFFFF:
-        if len(body) < 3 or body[1] != (identifier >> 8) & 0xFF or body[2] != identifier & 0xFF:
-            return None
-        return body[3:]
-    return None
-
-
-def _parse_first_frame(data: bytes) -> tuple[int, bytes | None]:
-    if len(data) < 2:
-        return 0, None
-    total_length = ((data[0] & 0x0F) << 8) | data[1]
-    if total_length == 0:
-        return 0, None
-    return total_length, bytes(data[2:8])
 
 
 def _should_stop(stop_event: threading.Event, deadline_monotonic: float | None) -> bool:

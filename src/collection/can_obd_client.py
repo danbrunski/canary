@@ -50,44 +50,23 @@ from typing import Any
 
 import can
 
+from src.collection.isotp import (
+    DEFAULT_REQUEST_ID,
+    DEFAULT_RESPONSE_ID_MAX,
+    DEFAULT_RESPONSE_ID_MIN,
+    FLOW_CONTROL_CTS,
+    PCI_SINGLE_FRAME,
+    IsoTpResponseAssembler,
+    ObdResponse,
+    build_request_payload,
+    extract_service_payload,
+    handle_single_frame,
+    is_negative_response,
+    pci_type,
+    positive_response_service,
+)
+
 log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-#: Standard OBD-II functional request ID (broadcast to all responder ECUs).
-DEFAULT_REQUEST_ID = 0x7DF
-
-#: Response IDs span 0x7E8–0x7EF (engine, transmission, etc.). Setting the
-#: range with a min+max lets the client accept whichever ECU answered.
-DEFAULT_RESPONSE_ID_MIN = 0x7E8
-DEFAULT_RESPONSE_ID_MAX = 0x7EF
-
-#: ISO-TP PCI nibble values, in the high nibble of byte 0 of each frame.
-_PCI_SINGLE_FRAME = 0x0
-_PCI_FIRST_FRAME = 0x1
-_PCI_CONSECUTIVE_FRAME = 0x2
-_PCI_FLOW_CONTROL = 0x3
-
-#: Default ISO-TP flow-control: continue, block-size=0 (all frames), STmin=0.
-_FLOW_CONTROL_CTS = bytes([0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-
-
-@dataclass(frozen=True)
-class ObdResponse:
-    """One service-N reply, post-ISO-TP-reassembly.
-
-    ``payload`` is the *service data only*: bytes after the positive-response
-    service ID (e.g. ``0x41`` for Mode 01) and any echoed PID byte.
-    Decoders consume it directly.
-    """
-
-    service: int  # 0x41 / 0x43 / 0x49 — service ID of the positive response
-    pid: int | None  # PID echo (Mode 01/09 carry this); None for Mode 03
-    payload: bytes
-    responder_id: int  # which ECU answered (0x7E8 = engine, 0x7E9 = trans, …)
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +253,7 @@ class CanObdClient:
             log.warning("CAN send failed", extra={"service": service, "pid": pid})
             return []
 
-        expected_service = 0x40 | service
+        expected_service = positive_response_service(service)
         deadline = self._time_fn() + self._timeout
         quiet_deadline: float | None = None
         responses: dict[int, ObdResponse] = {}
@@ -292,17 +271,12 @@ class CanObdClient:
             data = bytes(frame.data)
             if not data:
                 continue
-            pci_high = (data[0] >> 4) & 0x0F
-            if pci_high != _PCI_SINGLE_FRAME:
+            if pci_type(data) != PCI_SINGLE_FRAME:
                 continue
-            length = data[0] & 0x0F
-            body = data[1 : 1 + length] if 1 <= length <= 7 and len(data) >= 1 + length else b""
-            if len(body) >= 3 and body[0] == 0x7F and body[1] == service:
+            if is_negative_response(data, service):
                 quiet_deadline = self._time_fn() + quiet_seconds
                 continue
-            payload = self._handle_single_frame(
-                data, expected_service, pid if expect_pid_echo else None
-            )
+            payload = handle_single_frame(data, expected_service, pid if expect_pid_echo else None)
             if payload is None:
                 continue
             responder = int(frame.arbitration_id)
@@ -318,15 +292,7 @@ class CanObdClient:
 
     def _build_request(self, *, service: int, pid: int | None) -> bytes:
         """Single-frame request body. Padded to 8 bytes with 0x00."""
-        if pid is None:
-            body = bytes([0x01, service])  # PCI=0x01 (1 data byte), service
-        elif 0 <= pid <= 0xFF:
-            body = bytes([0x02, service, pid])  # PCI=0x02 (2 data bytes)
-        elif 0 <= pid <= 0xFFFF:
-            body = bytes([0x03, service, (pid >> 8) & 0xFF, pid & 0xFF])
-        else:
-            raise ValueError(f"PID/DID identifier out of range: 0x{pid:X}")
-        return body + bytes(8 - len(body))
+        return build_request_payload(service, pid)
 
     def _collect_response(
         self,
@@ -335,11 +301,8 @@ class CanObdClient:
         pid_echo: int | None,
     ) -> ObdResponse | None:
         """Read frames until a matching response is assembled or we time out."""
-        expected_service = 0x40 | service
         deadline = self._time_fn() + self._timeout
-        # Per-responder ISO-TP reassembly buffer keyed by responder ID, since
-        # multiple ECUs can answer a 0x7DF broadcast in quick succession.
-        pending: dict[int, _ReassemblyBuffer] = {}
+        assembler = IsoTpResponseAssembler(service=service, identifier=pid_echo)
 
         while self._time_fn() < deadline:
             remaining = max(0.001, deadline - self._time_fn())
@@ -351,37 +314,16 @@ class CanObdClient:
             data = bytes(frame.data)
             if not data:
                 continue
-            pci_high = (data[0] >> 4) & 0x0F
-            responder = frame.arbitration_id
-
-            if pci_high == _PCI_SINGLE_FRAME:
-                length = data[0] & 0x0F
-                body = data[1 : 1 + length] if 1 <= length <= 7 and len(data) >= 1 + length else b""
+            responder = int(frame.arbitration_id)
+            result = assembler.accept(responder, data)
+            if result.negative_response:
                 # Definitive negative response to *our* service (7F SS NRC):
                 # stop now instead of waiting out the timeout. Critical for
                 # DID sweeps — an absent DID otherwise costs a full timeout
                 # each (hours over a 0x0000–0xFFFF range). Same return value
                 # (None) as before, just immediate.
-                if len(body) >= 3 and body[0] == 0x7F and body[1] == service:
-                    return None
-                payload = self._handle_single_frame(data, expected_service, pid_echo)
-                if payload is None:
-                    continue
-                return ObdResponse(
-                    service=expected_service,
-                    pid=pid_echo,
-                    payload=payload,
-                    responder_id=responder,
-                )
-            if pci_high == _PCI_FIRST_FRAME:
-                total_len, first_bytes = _parse_first_frame(data)
-                if first_bytes is None:
-                    continue
-                pending[responder] = _ReassemblyBuffer(
-                    total_length=total_len,
-                    received=bytearray(first_bytes),
-                    next_sequence=1,
-                )
+                return None
+            if result.flow_control_id is not None:
                 # Send flow control: continue, block-size=0, STmin=0.
                 # ECUs typically address flow control to the requester's
                 # functional address, but since we sent on 0x7DF and the
@@ -389,48 +331,19 @@ class CanObdClient:
                 # tester-address (one less for engine, etc.). Standard is
                 # responder_id - 8 (e.g. 0x7E8 → 0x7E0). The Xterra's engine
                 # ECU expects 0x7E0.
-                tester_id = responder - 8
                 try:
                     self._bus.send(
                         can.Message(
-                            arbitration_id=tester_id,
-                            data=_FLOW_CONTROL_CTS,
+                            arbitration_id=result.flow_control_id,
+                            data=FLOW_CONTROL_CTS,
                             is_extended_id=False,
                         )
                     )
                 except can.CanError:
                     log.warning("CAN flow-control send failed", extra={"responder": responder})
                 continue
-            if pci_high == _PCI_CONSECUTIVE_FRAME:
-                buf = pending.get(responder)
-                if buf is None:
-                    continue  # consecutive frame for a transfer we didn't start
-                sequence = data[0] & 0x0F
-                expected_sequence = buf.next_sequence & 0x0F
-                if sequence != expected_sequence:
-                    log.debug(
-                        "isotp sequence mismatch; dropping in-progress transfer",
-                        extra={"got": sequence, "expected": expected_sequence},
-                    )
-                    pending.pop(responder, None)
-                    continue
-                remaining_bytes = buf.total_length - len(buf.received)
-                take = min(7, remaining_bytes)
-                buf.received.extend(data[1 : 1 + take])
-                buf.next_sequence += 1
-                if len(buf.received) >= buf.total_length:
-                    payload = bytes(buf.received[: buf.total_length])
-                    pending.pop(responder, None)
-                    decoded = self._extract_service_payload(payload, expected_service, pid_echo)
-                    if decoded is None:
-                        continue
-                    return ObdResponse(
-                        service=expected_service,
-                        pid=pid_echo,
-                        payload=decoded,
-                        responder_id=responder,
-                    )
-                continue
+            if result.response is not None:
+                return result.response
             # Flow-control frames from another transfer are not ours; ignore.
         return None
 
@@ -438,48 +351,13 @@ class CanObdClient:
     def _handle_single_frame(
         data: bytes, expected_service: int, pid_echo: int | None
     ) -> bytes | None:
-        length = data[0] & 0x0F
-        if length == 0 or length > 7 or len(data) < 1 + length:
-            return None
-        body = data[1 : 1 + length]
-        return CanObdClient._extract_service_payload(body, expected_service, pid_echo)
+        return handle_single_frame(data, expected_service, pid_echo)
 
     @staticmethod
     def _extract_service_payload(
         body: bytes, expected_service: int, pid_echo: int | None
     ) -> bytes | None:
-        if not body or body[0] != expected_service:
-            return None
-        offset = 1
-        if pid_echo is not None:
-            if 0 <= pid_echo <= 0xFF:
-                if len(body) < 2 or body[1] != pid_echo:
-                    return None
-                offset = 2
-            elif 0 <= pid_echo <= 0xFFFF:
-                if len(body) < 3 or body[1] != (pid_echo >> 8) & 0xFF or body[2] != pid_echo & 0xFF:
-                    return None
-                offset = 3
-            else:
-                return None
-        return body[offset:]
-
-
-@dataclass
-class _ReassemblyBuffer:
-    total_length: int
-    received: bytearray
-    next_sequence: int
-
-
-def _parse_first_frame(data: bytes) -> tuple[int, bytes | None]:
-    """Pull total length + the first 6 payload bytes out of an ISO-TP first frame."""
-    if len(data) < 2:
-        return 0, None
-    total_length = ((data[0] & 0x0F) << 8) | data[1]
-    if total_length == 0:
-        return 0, None
-    return total_length, bytes(data[2:8])
+        return extract_service_payload(body, expected_service, pid_echo)
 
 
 # ---------------------------------------------------------------------------

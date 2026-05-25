@@ -3,6 +3,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Sparkline } from "../components/Sparkline";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import {
+  isEmptyRawCan,
+  prettyChannel,
+  renderChannel,
+  sparkSeries,
+  type RenderedValue,
+} from "../lib/telemetryDisplay";
+import {
   buttonClass,
   cn,
   inputClass,
@@ -13,9 +20,10 @@ import {
   placeholderClass,
 } from "../styles";
 import type { BindingDisplay, BindingsByChannel } from "../types";
-import { formatNumber } from "../util/format";
 import { writeJson } from "../util/storage";
 import { formatAge } from "../util/time";
+
+export { renderChannel } from "../lib/telemetryDisplay";
 
 interface TelemetryPanelProps {
   channels: Map<string, ChannelSnapshot>;
@@ -472,96 +480,4 @@ function statusMeta(rendered: RenderedValue): {
     className: "text-ok",
     title: "Decoded engineering value.",
   };
-}
-
-interface RenderedValue {
-  text: string;
-  unit: string;
-  bandClass: "" | "band-warn" | "band-bad";
-  /** True when this is the *raw* decoded integer, not an engineering value:
-   *  a decoded CAN channel whose binding has no pinned scale (or no binding
-   *  at all). The UI flags it so a 12-digit accumulator reads as
-   *  "raw, scaling not reverse-engineered yet", not a broken gauge. */
-  raw: boolean;
-}
-
-/** Apply binding scale/offset/unit, decide whether to color the card. */
-export function renderChannel(
-  snapshot: ChannelSnapshot,
-  binding: BindingDisplay | undefined,
-): RenderedValue {
-  const raw = snapshot.latest.value;
-  if (raw === null || raw === undefined) {
-    return { text: "—", unit: "", bandClass: "", raw: false };
-  }
-  // Non-numeric (VIN string, bool) — pass through, no binding math applies
-  if (typeof raw === "string" || typeof raw === "boolean") {
-    return { text: String(raw), unit: cleanUnit(snapshot.latest.unit), bandClass: "", raw: false };
-  }
-  if (!Number.isFinite(raw)) {
-    return { text: "—", unit: "", bandClass: "", raw: false };
-  }
-  // Apply binding scale + offset when present. Decoded CAN channels carry
-  // the raw integer from the bytes; OBD channels are pre-scaled by
-  // python-obd so the binding doesn't apply to them, but the unit + bounds
-  // still do.
-  const isDecoded = snapshot.latest.source === "decoded";
-  let value = raw;
-  if (binding && binding.scale !== null && isDecoded) {
-    value = raw * binding.scale + (binding.offset ?? 0);
-  }
-  // A decoded channel with no pinned scale (or no binding at all) is the
-  // raw integer from the CAN bytes, not an engineering value.
-  const rawDisplay = isDecoded && (!binding || binding.scale === null);
-  const unit = cleanUnit(binding?.unit) || cleanUnit(snapshot.latest.unit);
-  const text = formatNumber(value);
-
-  // Plausibility-band coloring. Warning when value is on the boundary
-  // (>= 90% of the range below min or above max). Bad when outside.
-  let bandClass: "" | "band-warn" | "band-bad" = "";
-  if (binding) {
-    const lo = binding.plausible_min;
-    const hi = binding.plausible_max;
-    if ((lo !== null && value < lo) || (hi !== null && value > hi)) {
-      bandClass = "band-bad";
-    } else if (lo !== null && hi !== null) {
-      const span = hi - lo;
-      const margin = span * 0.05;
-      if (value < lo + margin || value > hi - margin) bandClass = "band-warn";
-    }
-  }
-
-  return { text, unit, bandClass, raw: rawDisplay };
-}
-
-/** ``unknown`` is a placeholder in bindings.yaml for a not-yet-RE'd unit —
- *  render nothing rather than the literal word "unknown". */
-function cleanUnit(unit: string | null | undefined): string {
-  if (!unit || unit === "unknown") return "";
-  return unit;
-}
-
-/** Sparkline series in engineering units when scale is pinned — otherwise
- *  the auto-axis would interpret raw bytes, which looks weird (a coolant
- *  trace bottoming at 53 isn't useful). */
-function sparkSeries(
-  snapshot: ChannelSnapshot,
-  binding: BindingDisplay | undefined,
-): number[] {
-  if (!binding || binding.scale === null || snapshot.latest.source !== "decoded") {
-    return snapshot.history;
-  }
-  const offset = binding.offset ?? 0;
-  return snapshot.history.map((raw) => raw * binding.scale! + offset);
-}
-
-/** Drop the source prefix so the card reads `RPM` instead of `obd:RPM`. */
-function prettyChannel(key: string): string {
-  const idx = key.indexOf(":");
-  if (idx === -1) return key;
-  return key.slice(idx + 1);
-}
-
-function isEmptyRawCan(snapshot: ChannelSnapshot): boolean {
-  return snapshot.latest.source === "can" && snapshot.latest.value === null;
 }
