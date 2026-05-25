@@ -138,7 +138,7 @@ def train(
     # exactly the same source rows. The scaler is fit on the trainable
     # numeric columns; the dataset then z-scores via that scaler before
     # windowing. Inference re-applies the same scaler (loaded from the
-    # manifest) before calling LSTMInferenceEngine.score_window.
+    # manifest) before calling SequenceInferenceEngine.score_window.
     features = (
         feature_frame
         if feature_frame is not None

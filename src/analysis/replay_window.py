@@ -1,7 +1,7 @@
 """Offline replay of a single session window through the inference pipeline.
 
 Composes the existing pieces — :func:`scripts.replay.replay_sessions` for
-preprocessing + Isolation Forest scoring, :class:`LSTMInferenceEngine` for
+preprocessing + Isolation Forest scoring, :class:`SequenceInferenceEngine` for
 window-level LSTM scoring, and the on-disk anomaly log — into a single
 structured report. The output is consumed by the MCP ``replay_window`` tool
 and intended for inference debugging: "what does today's model say about this
@@ -297,7 +297,7 @@ def _build_lstm_block(
         }
 
     try:
-        from src.models.inference import LSTMInferenceEngine
+        from src.models.inference import SequenceInferenceEngine
         from src.models.lstm_training import load_lstm_autoencoder_model
     except MissingLSTMAutoencoderDependencyError as exc:
         warnings.append(f"LSTM dependency missing: {exc}")
@@ -321,7 +321,7 @@ def _build_lstm_block(
             "anomalies": [],
         }
 
-    engine = LSTMInferenceEngine(trained, device="cpu")
+    engine = SequenceInferenceEngine(trained, device="cpu")
     windows: list[dict[str, Any]] = []
     truncated = False
     for row in cast(list[dict[str, Any]], features.to_dict(orient="records")):

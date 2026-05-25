@@ -12,7 +12,7 @@ models:
     - 0.0
     - 705.0
   operating_mode: warmup
-  version: 4
+  version: 5
   fit:
     sample_count: 1029
     r_squared: 0.46807673989226384
@@ -28,7 +28,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-25T03:05:40.482667+00:00'
+    fitted_at: '2026-05-25T15:17:44.286232+00:00'
     training_data_hash: sha256:fa3e004ac50cf29a
     kind: lookup_table
     x_knots:
@@ -75,7 +75,7 @@ models:
     - 71.0
     - 92.0
   operating_mode: idle
-  version: 4
+  version: 5
   fit:
     sample_count: 2889
     r_squared: 0.011644715114945359
@@ -91,7 +91,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-25T03:05:40.491064+00:00'
+    fitted_at: '2026-05-25T15:17:44.296865+00:00'
     training_data_hash: sha256:d2b25d21f581b476
     kind: lookup_table
     x_knots:
@@ -142,7 +142,7 @@ models:
     - 22.745098114013672
     - 38.431373596191406
     - 100.0
-  version: 4
+  version: 5
   fit:
     sample_count: 11598
     sessions:
@@ -157,7 +157,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-25T03:05:40.505712+00:00'
+    fitted_at: '2026-05-25T15:17:44.310246+00:00'
     training_data_hash: sha256:99ba15f15ca996e5
     kind: grid_binned_mean
     cells:
@@ -302,7 +302,7 @@ models:
     - 22.745098114013672
     - 38.431373596191406
     - 100.0
-  version: 4
+  version: 5
   fit:
     sample_count: 11685
     sessions:
@@ -317,7 +317,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-25T03:05:40.520578+00:00'
+    fitted_at: '2026-05-25T15:17:44.325010+00:00'
     training_data_hash: sha256:b3b5cc453a42d685
     kind: grid_binned_mean
     cells:
@@ -464,7 +464,7 @@ models:
     - 28.627450942993164
     - 48.6274528503418
     - 100.0
-  version: 3
+  version: 4
   fit:
     sample_count: 7756
     sessions:
@@ -479,7 +479,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-25T03:05:40.532211+00:00'
+    fitted_at: '2026-05-25T15:17:44.336359+00:00'
     training_data_hash: sha256:3c1a9e7d03964517
     kind: grid_binned_mean
     cells:
@@ -645,10 +645,10 @@ models:
     domain:
     - 0.0
     - 4312.5
-  version: 3
+  version: 4
   fit:
     sample_count: 11701
-    r_squared: 0.002128765588829462
+    r_squared: 0.005319472636369116
     sessions:
     - 2026-05-18T015823
     - 2026-05-18T021421
@@ -661,18 +661,20 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-25T03:05:40.547603+00:00'
-    training_data_hash: sha256:1c101a8da9460519
+    fitted_at: '2026-05-25T15:17:44.352535+00:00'
+    training_data_hash: sha256:68032e581f5a3ebd
     kind: poly
     coefficients:
-    - 0.6008852271841599
-    - 0.00014605810882922598
+    - 0.6237873499023413
+    - 0.0001227864277066818
   deviation:
     kind: absolute
     warning_band: 3.0
     critical_band: 6.0
-  notes: STFT delta between banks. Expected ~0 everywhere; a non-zero intercept means
-    bank-specific fuel bias. Fed by ``compute_anomaly_signals`` from STFT_B1 - STFT_B2.
+  notes: "STFT delta between banks, time-smoothed over STFT_BANK_BALANCE_SMOOTHING_SECONDS\
+    \ so routine transients (round-robin sampling skew) don't trip it \u2014 only\
+    \ sustained imbalance does. Expected ~0 everywhere; a non-zero intercept means\
+    \ bank-specific fuel bias. Fed by ``compute_anomaly_signals`` from STFT_B1 - STFT_B2."
 - name: ltft_bank_balance_vs_rpm
   kind: surface_1d
   output: derived:LTFT_BANK_BALANCE
@@ -684,7 +686,7 @@ models:
     domain:
     - 0.0
     - 4312.5
-  version: 3
+  version: 4
   fit:
     sample_count: 11690
     r_squared: 0.007449648073902138
@@ -700,7 +702,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-25T03:05:40.562852+00:00'
+    fitted_at: '2026-05-25T15:17:44.364606+00:00'
     training_data_hash: sha256:05f56d2de3692bdd
     kind: poly
     coefficients:
@@ -725,7 +727,7 @@ models:
     - 0.0
     - 705.0
   operating_mode: warmup
-  version: 3
+  version: 4
   fit:
     sample_count: 1027
     r_squared: 0.8728978847168759
@@ -741,7 +743,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-25T03:05:40.577992+00:00'
+    fitted_at: '2026-05-25T15:17:44.374674+00:00'
     training_data_hash: sha256:977d2d5412d81e30
     kind: lookup_table
     x_knots:

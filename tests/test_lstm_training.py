@@ -69,7 +69,7 @@ def _dataset(rows: int = 14, sequence_length: int = 4) -> SequenceWindowDataset:
     frame = _frame(rows)
     scaler = _scaler(frame)
     # Tests run the model on the same scaled frame inference will see; the
-    # ``LSTMInferenceEngine`` z-scores in-line so train/serve stay aligned.
+    # ``SequenceInferenceEngine`` z-scores in-line so train/serve stay aligned.
     return SequenceWindowDataset(
         scaler.transform(frame),
         sequence_length=sequence_length,

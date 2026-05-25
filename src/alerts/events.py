@@ -20,7 +20,7 @@ if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import tim
     import pandas as pd
 
     from src.alerts.fusion import FusedResult
-    from src.models.inference import LSTMInferenceResult
+    from src.models.inference import SequenceInferenceResult
 
 #: ``fused`` (Phase 7.2) is the agreement-aware calibrated severity over the
 #: per-tick IF + LSTM + behavior-residual sources. ``behavior`` (Phase 7.4)
@@ -73,11 +73,11 @@ class AnomalyEvent(BaseModel):
     @classmethod
     def from_lstm_result(
         cls,
-        result: LSTMInferenceResult,
+        result: SequenceInferenceResult,
         *,
         operating_mode: str | None = None,
     ) -> AnomalyEvent:
-        """Build an event from a ``LSTMInferenceResult`` (caller checks
+        """Build an event from a ``SequenceInferenceResult`` (caller checks
         ``is_anomaly``).
 
         Phase 7.2a — when the result carries top-channel evidence, the

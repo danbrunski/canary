@@ -72,9 +72,68 @@ def test_air_mass_per_cycle_handles_zero_rpm_safely() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_stft_bank_balance_emitted_with_both_banks() -> None:
+def test_stft_bank_balance_is_time_smoothed() -> None:
+    """STFT bank balance is a trailing time-mean of the raw delta, not the raw
+    delta itself — fast-channel sampling-skew transients are averaged out."""
     frame = _base(3).assign(
         **{
+            "obd:SHORT_FUEL_TRIM_1": [0.0, 2.0, -3.0],
+            "obd:SHORT_FUEL_TRIM_2": [0.0, 0.0, 1.0],
+        }
+    )
+    # raw delta = [0, 2, -4]; 30 s window @ 1 Hz, min_periods=1 → running mean.
+    out = compute_anomaly_signals(frame)
+    smoothed = out["derived:STFT_BANK_BALANCE"].to_list()
+    assert math.isclose(smoothed[0], 0.0, abs_tol=1e-9)
+    assert math.isclose(smoothed[1], 1.0, abs_tol=1e-9)  # mean(0, 2)
+    assert math.isclose(smoothed[2], -2.0 / 3.0, abs_tol=1e-9)  # mean(0, 2, -4)
+
+
+def test_stft_bank_balance_attenuates_transient_keeps_sustained() -> None:
+    """A one-sample spike is damped below the recipe's 6% band; a sustained
+    offset converges to its true value — the whole point of smoothing."""
+    rows = 60
+    # Bank 2 flat at 0; bank 1 spikes to +8 for a single sample then a
+    # sustained +5 offset for the rest.
+    b1 = [0.0] + [8.0] + [5.0] * (rows - 2)
+    frame = _base(rows).assign(
+        **{
+            "obd:SHORT_FUEL_TRIM_1": b1,
+            "obd:SHORT_FUEL_TRIM_2": [0.0] * rows,
+        }
+    )
+    out = compute_anomaly_signals(frame)["derived:STFT_BANK_BALANCE"]
+    assert out.iloc[1] < 6.0  # the lone +8 spike is averaged down, doesn't trip
+    assert math.isclose(out.iloc[-1], 5.0, abs_tol=0.5)  # sustained offset survives
+
+
+def test_stft_bank_balance_does_not_bleed_across_sessions() -> None:
+    """Each session's smoothing window is independent — session B's first row
+    sees only itself, not session A's tail."""
+    frame = pd.DataFrame(
+        {
+            "session": ["a", "a", "b", "b"],
+            "timestamp": pd.to_datetime(
+                [
+                    "2026-05-20T12:00:00Z",
+                    "2026-05-20T12:00:01Z",
+                    "2026-05-20T12:00:02Z",
+                    "2026-05-20T12:00:03Z",
+                ]
+            ),
+            "obd:SHORT_FUEL_TRIM_1": [10.0, 10.0, 0.0, 0.0],
+            "obd:SHORT_FUEL_TRIM_2": [0.0, 0.0, 0.0, 0.0],
+        }
+    )
+    out = compute_anomaly_signals(frame)["derived:STFT_BANK_BALANCE"].to_list()
+    assert math.isclose(out[2], 0.0, abs_tol=1e-9)  # session b row 0 ≠ session a's 10
+
+
+def test_stft_bank_balance_falls_back_to_raw_without_session_columns() -> None:
+    """A bare frame (no session/timestamp) can't be windowed — pass the raw
+    delta through rather than erroring, for trivial unit-test callers."""
+    frame = pd.DataFrame(
+        {
             "obd:SHORT_FUEL_TRIM_1": [0.0, 2.0, -3.0],
             "obd:SHORT_FUEL_TRIM_2": [0.0, 0.0, 1.0],
         }
@@ -83,7 +142,8 @@ def test_stft_bank_balance_emitted_with_both_banks() -> None:
     assert out["derived:STFT_BANK_BALANCE"].to_list() == [0.0, 2.0, -4.0]
 
 
-def test_ltft_bank_balance_emitted_with_both_banks() -> None:
+def test_ltft_bank_balance_is_not_smoothed() -> None:
+    """LTFT is the slow / drift channel by design — left raw, no smoothing."""
     frame = _base(3).assign(
         **{
             "obd:LONG_FUEL_TRIM_1": [1.0, 2.0, 5.0],

@@ -58,6 +58,9 @@ preprocessing:
       throttle_min: 80
 
 models:
+  # Active sequence-detector backbone ("lstm" = GRU-D today). The selected
+  # backend's own `enabled` flag still gates loading.
+  sequence_detector: lstm
   isolation_forest:
     enabled: true
     n_estimators: 200

@@ -18,7 +18,8 @@ import numpy as np
 import pandas as pd
 
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
-from src.models.lstm_training import LSTMThresholdCalibration, TrainedLSTMAutoencoder
+from src.models.lstm_training import LSTMThresholdCalibration
+from src.models.sequence_protocol import TrainedSequenceModel
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.timefmt import format_timestamp
 
@@ -33,8 +34,8 @@ LSTM_TOP_CHANNELS = 5
 
 
 @dataclass(frozen=True)
-class LSTMInferenceResult:
-    """One LSTM inference result for the current sliding window."""
+class SequenceInferenceResult:
+    """One sequence-detector inference result for the current sliding window."""
 
     model_version: str
     timestamp: str
@@ -92,8 +93,8 @@ def _base_channel(column: str) -> str:
     return column
 
 
-class LSTMSequenceBuffer:
-    """Fixed-length buffer for GRU-D feature rows (value + mask + Δt).
+class SequenceWindowBuffer:
+    """Fixed-length buffer for sequence-detector feature rows (value + mask + Δt).
 
     Each appended row is split into a value vector, an observed-mask vector
     (``1`` where the channel was freshly observed this tick, derived from
@@ -140,7 +141,7 @@ class LSTMSequenceBuffer:
         )
         self._last_timestamp: pd.Timestamp | None = None
         #: Phase 7.5 — the most recent appended row's operating mode, used by
-        #: ``LSTMInferenceEngine.observe`` to pick the per-mode threshold.
+        #: ``SequenceInferenceEngine.observe`` to pick the per-mode threshold.
         self._last_mode: str | None = None
 
     def append(self, row: Mapping[str, Any] | pd.Series) -> bool:
@@ -255,12 +256,12 @@ class LSTMSequenceBuffer:
         return start_timestamp, end_timestamp, session
 
 
-class LSTMInferenceEngine:
-    """Streaming LSTM autoencoder inference over model-ready feature rows."""
+class SequenceInferenceEngine:
+    """Streaming sequence-autoencoder inference over model-ready feature rows."""
 
     def __init__(
         self,
-        trained: TrainedLSTMAutoencoder,
+        trained: TrainedSequenceModel,
         *,
         device: str = "cpu",
         dtype: str = "float32",
@@ -275,7 +276,7 @@ class LSTMInferenceEngine:
         self.calibration = LSTMThresholdCalibration.from_dict(trained.manifest.thresholds)
         self.feature_columns = trained.feature_columns
         self.sequence_length = int(trained.manifest.schema["sequence_length"])
-        self.buffer = LSTMSequenceBuffer(
+        self.buffer = SequenceWindowBuffer(
             feature_columns=self.feature_columns,
             sequence_length=self.sequence_length,
             dtype=dtype,
@@ -305,7 +306,7 @@ class LSTMInferenceEngine:
             self._scaler_means = None
             self._scaler_stds = None
 
-    def observe(self, row: Mapping[str, Any] | pd.Series) -> LSTMInferenceResult | None:
+    def observe(self, row: Mapping[str, Any] | pd.Series) -> SequenceInferenceResult | None:
         """Append one row and score the current window once enough rows exist."""
         if not self.buffer.append(row):
             return None
@@ -332,7 +333,7 @@ class LSTMInferenceEngine:
         window_start_timestamp: str,
         window_end_timestamp: str,
         operating_mode: str | None = None,
-    ) -> LSTMInferenceResult:
+    ) -> SequenceInferenceResult:
         """Score one complete ``(T, F)`` sequence window.
 
         ``mask`` / ``delta`` are the GRU-D per-cell observed-mask and Δt windows.
@@ -446,7 +447,7 @@ class LSTMInferenceEngine:
         # `channel_thresholds` are still computed and carried in the event
         # detail so a genuine (global) anomaly stays fully drillable.
         is_anomaly = global_score > global_threshold
-        return LSTMInferenceResult(
+        return SequenceInferenceResult(
             model_version=trained_version(self.trained),
             timestamp=timestamp,
             session=session,
@@ -465,9 +466,9 @@ class LSTMInferenceEngine:
         )
 
 
-def trained_version(trained: TrainedLSTMAutoencoder) -> str:
-    """Return the manifest model version for a trained LSTM bundle."""
-    return trained.manifest.model_version
+def trained_version(trained: TrainedSequenceModel) -> str:
+    """Return the manifest model version for a trained sequence-detector bundle."""
+    return str(trained.manifest.model_version)
 
 
 def _format_timestamp(value: Any) -> str:

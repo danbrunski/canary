@@ -22,7 +22,7 @@ from src.alerts.events import AnomalyEvent
 
 
 class _FakeLSTMResult:
-    """Stand-in for ``LSTMInferenceResult``; matches the attribute surface
+    """Stand-in for ``SequenceInferenceResult``; matches the attribute surface
     ``AnomalyEvent.from_lstm_result`` reads. Adding fields to the real type
     will surface here as missing-attr errors, which is the failure mode we want."""
 

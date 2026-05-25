@@ -231,8 +231,11 @@ def default_recipes() -> list[Recipe]:
             min_samples=300,
             deviation=DeviationConfig(kind="absolute", warning_band=3.0, critical_band=6.0),
             notes=(
-                "STFT delta between banks. Expected ~0 everywhere; a non-zero "
-                "intercept means bank-specific fuel bias. Fed by "
+                "STFT delta between banks, time-smoothed over "
+                "STFT_BANK_BALANCE_SMOOTHING_SECONDS so routine transients "
+                "(round-robin sampling skew) don't trip it — only sustained "
+                "imbalance does. Expected ~0 everywhere; a non-zero intercept "
+                "means bank-specific fuel bias. Fed by "
                 "``compute_anomaly_signals`` from STFT_B1 - STFT_B2."
             ),
         ),

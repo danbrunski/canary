@@ -133,6 +133,10 @@ preprocessing:
     # high-throttle moments score against the city / highway models.
 
 models:
+  # Which backbone fills the single sequence-detector slot. Only "lstm"
+  # (GRU-D) ships today; the selected backend's own `enabled` flag below still
+  # gates whether it loads. A future TCN backbone widens this to "tcn".
+  sequence_detector: lstm
   isolation_forest:
     enabled: true
     n_estimators: 200

@@ -4,9 +4,9 @@ from src.models.inference import (
     LSTM_ANOMALY_COLUMN,
     LSTM_SCORE_COLUMN,
     LSTM_THRESHOLD_COLUMN,
-    LSTMInferenceEngine,
-    LSTMInferenceResult,
-    LSTMSequenceBuffer,
+    SequenceInferenceEngine,
+    SequenceInferenceResult,
+    SequenceWindowBuffer,
 )
 from src.models.isolation_forest import (
     LABEL_COLUMN,
@@ -67,6 +67,12 @@ from src.models.sequence_dataset import (
     resolve_sequence_feature_columns,
     sequence_frame_from_sessions,
 )
+from src.models.sequence_protocol import SequenceAutoencoder, TrainedSequenceModel
+from src.models.sequence_registry import (
+    SEQUENCE_BACKENDS,
+    SequenceBackend,
+    resolve_sequence_backend,
+)
 
 __all__ = [
     "LABEL_COLUMN",
@@ -95,9 +101,14 @@ __all__ = [
     "LSTM_ANOMALY_COLUMN",
     "LSTM_SCORE_COLUMN",
     "LSTM_THRESHOLD_COLUMN",
-    "LSTMInferenceEngine",
-    "LSTMInferenceResult",
-    "LSTMSequenceBuffer",
+    "SequenceInferenceEngine",
+    "SequenceInferenceResult",
+    "SequenceWindowBuffer",
+    "SequenceAutoencoder",
+    "TrainedSequenceModel",
+    "SEQUENCE_BACKENDS",
+    "SequenceBackend",
+    "resolve_sequence_backend",
     "LSTMAutoencoder",
     "LSTMAutoencoderArchitecture",
     "LSTMAutoencoderConfigLike",

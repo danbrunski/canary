@@ -21,6 +21,7 @@ from src.dashboard.behavior_live import BehaviorLiveState
 from src.dashboard.broadcast import Broadcaster
 from src.models.health import HealthMonitor
 from src.models.manager import ModelManager, manager_for_artifact
+from src.models.sequence_registry import resolve_sequence_backend
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +51,11 @@ class DaemonComponents:
     model_managers: dict[str, ModelManager[Any]]
     alert_tuner: AlertTuner
     health_monitor: HealthMonitor
+    #: ``model_type`` of the active sequence-detector slot (e.g.
+    #: ``"lstm_autoencoder"``), or ``None`` when no sequence detector is
+    #: enabled. The serve loop looks up its manager by this key, so switching
+    #: backbones is a config change, not a code change.
+    sequence_model_type: str | None = None
     behavior_live: BehaviorLiveState = field(default_factory=BehaviorLiveState)
     capture_controller: CaptureController | None = None
     job_controller: JobController | None = None
@@ -81,6 +87,7 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         audit_logger=audit_logger,
         emitter=emitter,
         model_managers=model_managers,
+        sequence_model_type=_sequence_model_type(config),
         alert_tuner=tuner,
         health_monitor=HealthMonitor(),
         behavior_live=BehaviorLiveState(),
@@ -140,29 +147,48 @@ def _make_broadcasting_emitter(
 
 
 def _load_model_managers(config: CanaryConfig) -> dict[str, ModelManager[Any]]:
-    """Build one ``ModelManager`` per detector, loading the initial artifact
-    if present. Missing artifacts are fine — the manager keeps polling, and
-    ``current`` is ``None`` until something lands."""
+    """Build one ``ModelManager`` per active detector, loading the initial
+    artifact if present. Missing artifacts are fine — the manager keeps polling,
+    and ``current`` is ``None`` until something lands.
+
+    Two detector roles: the always-on row-wise Isolation Forest, and one
+    *selectable* sequence detector resolved from the
+    :mod:`~src.models.sequence_registry` (GRU-D LSTM today; a TCN later). The
+    sequence manager is keyed by its ``model_type`` so the published anomaly
+    source and dashboard vocab stay stable across backbones.
+    """
     managers: dict[str, ModelManager[Any]] = {}
-    if_path = config.daemon.models_dir / config.daemon.isolation_forest_artifact
-    lstm_path = config.daemon.models_dir / config.daemon.lstm_artifact
 
     if config.models.isolation_forest.enabled:
         from src.models.isolation_forest import load_isolation_forest_model
 
+        if_path = config.daemon.models_dir / config.daemon.isolation_forest_artifact
         managers["isolation_forest"] = manager_for_artifact(
             if_path, load_isolation_forest_model, model_type="isolation_forest"
         )
-    if config.models.lstm_autoencoder.enabled:
-        try:
-            from src.models.lstm_training import load_lstm_autoencoder_model
-        except ImportError:
-            log.warning("lstm_autoencoder enabled but torch is unavailable; skipping ModelManager")
+
+    backend = resolve_sequence_backend(config)
+    if backend is not None:
+        missing = backend.missing_requirements()
+        if missing:
+            log.warning(
+                "sequence detector %s enabled but %s unavailable; skipping ModelManager",
+                backend.model_type,
+                ", ".join(missing),
+            )
         else:
-            managers["lstm_autoencoder"] = manager_for_artifact(
-                lstm_path, load_lstm_autoencoder_model, model_type="lstm_autoencoder"
+            managers[backend.model_type] = manager_for_artifact(
+                backend.artifact_path(config),
+                backend.load_model,
+                model_type=backend.model_type,
             )
     return managers
+
+
+def _sequence_model_type(config: CanaryConfig) -> str | None:
+    """``model_type`` of the configured sequence detector, or ``None`` if off."""
+    backend = resolve_sequence_backend(config)
+    return backend.model_type if backend is not None else None
 
 
 # ---------------------------------------------------------------------------

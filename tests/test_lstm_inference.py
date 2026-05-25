@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from src.config import CanaryConfig
-from src.models.inference import LSTMInferenceEngine, LSTMSequenceBuffer
+from src.models.inference import SequenceInferenceEngine, SequenceWindowBuffer
 from src.models.lstm_training import train_lstm_autoencoder
 from src.models.sequence_dataset import SequenceWindowDataset
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
@@ -73,7 +73,7 @@ def _trained(**config_updates):
 
 def test_sequence_buffer_scores_only_after_full_window() -> None:
     _torch()
-    engine = LSTMInferenceEngine(_trained(), time_fn=_fake_clock())
+    engine = SequenceInferenceEngine(_trained(), time_fn=_fake_clock())
     frame = _frame()
 
     assert engine.observe(frame.iloc[0]) is None
@@ -92,7 +92,7 @@ def test_sequence_buffer_scores_only_after_full_window() -> None:
 
 
 def test_inference_result_to_dict_is_json_safe() -> None:
-    engine = LSTMInferenceEngine(_trained(), time_fn=_fake_clock())
+    engine = SequenceInferenceEngine(_trained(), time_fn=_fake_clock())
     result = None
     for _, row in _frame().iloc[:4].iterrows():
         result = engine.observe(row)
@@ -114,7 +114,7 @@ def test_score_window_populates_top_channel_evidence(tmp_path: Path) -> None:
     each, and an actual-vs-reconstructed overlay so the dashboard can
     render the divergence without round-tripping through the model."""
     _torch()
-    engine = LSTMInferenceEngine(_trained(), time_fn=_fake_clock())
+    engine = SequenceInferenceEngine(_trained(), time_fn=_fake_clock())
     result = None
     for _, row in _frame().iloc[:4].iterrows():
         result = engine.observe(row)
@@ -142,7 +142,7 @@ def test_inference_flags_anomaly_against_low_thresholds() -> None:
         for channel, distribution in dict(thresholds["channel_errors"]).items()
     }
     trained = replace(trained, manifest=replace(trained.manifest, thresholds=thresholds))
-    engine = LSTMInferenceEngine(trained, time_fn=_fake_clock())
+    engine = SequenceInferenceEngine(trained, time_fn=_fake_clock())
 
     result = None
     for _, row in _frame().iloc[:4].iterrows():
@@ -164,11 +164,11 @@ def test_inference_engine_requires_calibrated_thresholds() -> None:
     )
 
     with pytest.raises(ValueError, match="calibrated thresholds"):
-        LSTMInferenceEngine(trained)
+        SequenceInferenceEngine(trained)
 
 
 def test_sequence_buffer_resets_on_missing_or_non_finite_features() -> None:
-    buffer = LSTMSequenceBuffer(feature_columns=("rpm", "speed"), sequence_length=2)
+    buffer = SequenceWindowBuffer(feature_columns=("rpm", "speed"), sequence_length=2)
 
     incomplete = {
         SESSION_COLUMN: "s1",
@@ -197,7 +197,7 @@ def test_sequence_buffer_derives_mask_and_delta_from_gap_flags() -> None:
     mirroring how the offline dataset builds mask/Δt."""
     import numpy as np
 
-    buffer = LSTMSequenceBuffer(feature_columns=("rpm", "speed"), sequence_length=3)
+    buffer = SequenceWindowBuffer(feature_columns=("rpm", "speed"), sequence_length=3)
     # rpm: fresh, fresh, stale.  speed: no gap column ⇒ always observed.
     rows = [
         {
@@ -239,7 +239,7 @@ def test_sequence_buffer_derives_mask_and_delta_from_gap_flags() -> None:
 
 
 def test_sequence_buffer_resets_on_session_change() -> None:
-    buffer = LSTMSequenceBuffer(feature_columns=("rpm", "speed"), sequence_length=2)
+    buffer = SequenceWindowBuffer(feature_columns=("rpm", "speed"), sequence_length=2)
     row = {
         TIMESTAMP_COLUMN: "2026-05-12T00:00:00Z",
         "rpm": 1.0,
@@ -268,7 +268,7 @@ def test_score_window_applies_scaler_before_forward_pass() -> None:
 
     trained = _trained()
     assert trained.manifest.scaler is not None
-    engine = LSTMInferenceEngine(trained)
+    engine = SequenceInferenceEngine(trained)
     # Materialized scaler attributes exist and are populated for the
     # feature columns in order.
     assert engine._scaler_means is not None
@@ -303,7 +303,7 @@ def test_score_window_masked_score_ignores_stale_cells() -> None:
     the model was calibrated against."""
     import numpy as np
 
-    engine = LSTMInferenceEngine(_trained())
+    engine = SequenceInferenceEngine(_trained())
     window = np.array([[700.0, 1.0]] * engine.sequence_length, dtype=np.float32)
     all_fresh = np.ones_like(window)
     delta = np.zeros_like(window)
@@ -340,7 +340,7 @@ def test_score_window_masked_score_ignores_stale_cells() -> None:
 def test_score_window_validates_shape() -> None:
     import numpy as np
 
-    engine = LSTMInferenceEngine(_trained())
+    engine = SequenceInferenceEngine(_trained())
 
     with pytest.raises(ValueError, match="window shape"):
         engine.score_window(

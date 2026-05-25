@@ -71,7 +71,11 @@ async def run_live_inference(
 
     interval = tick_seconds or 1.0 / max(components.config.preprocessing.resample_hz, 1.0)
     if_manager = components.model_managers.get("isolation_forest")
-    lstm_manager = components.model_managers.get("lstm_autoencoder")
+    sequence_manager = (
+        components.model_managers.get(components.sequence_model_type)
+        if components.sequence_model_type is not None
+        else None
+    )
     fusion = FusionScorer(components.config.models.fusion)
     severity_threshold = components.config.models.fusion.severity_threshold
     if if_manager is None:
@@ -79,8 +83,8 @@ async def run_live_inference(
             "isolation_forest model manager absent; IF scoring disabled — the "
             "behavior overlay + fusion still run off the live feature source"
         )
-    lstm_engine: Any = None
-    lstm_engine_version: str | None = None
+    sequence_engine: Any = None
+    sequence_engine_version: str | None = None
 
     while not stop_event.is_set():
         try:
@@ -110,15 +114,17 @@ async def run_live_inference(
                         )
                     )
 
-            lstm_version: str | None = None
-            lstm_loaded = lstm_manager.current if lstm_manager is not None else None
-            if lstm_loaded is not None and row is not None:
-                lstm_version = lstm_loaded.manifest.model_version
-                if lstm_engine_version != lstm_version:
-                    lstm_engine = _build_lstm_engine(lstm_loaded)
-                    lstm_engine_version = lstm_version if lstm_engine is not None else None
-                if lstm_engine is not None:
-                    result = _lstm_observe(lstm_engine, row)
+            sequence_version: str | None = None
+            sequence_loaded = sequence_manager.current if sequence_manager is not None else None
+            if sequence_loaded is not None and row is not None:
+                sequence_version = sequence_loaded.manifest.model_version
+                if sequence_engine_version != sequence_version:
+                    sequence_engine = _build_sequence_engine(sequence_loaded)
+                    sequence_engine_version = (
+                        sequence_version if sequence_engine is not None else None
+                    )
+                if sequence_engine is not None:
+                    result = _sequence_observe(sequence_engine, row)
                     if result is not None:
                         _publish_score(
                             components.scores_broadcaster,
@@ -170,7 +176,7 @@ async def run_live_inference(
                 )
 
             if fusion.enabled and sources and timestamp_str is not None:
-                fused_version = f"if={if_version or '-'}|lstm={lstm_version or '-'}"
+                fused_version = f"if={if_version or '-'}|lstm={sequence_version or '-'}"
                 fused = fusion.fuse(sources, timestamp=timestamp_str, operating_mode=operating_mode)
                 _publish_score(
                     components.scores_broadcaster,
@@ -196,16 +202,16 @@ async def run_live_inference(
             continue
 
 
-def _build_lstm_engine(loaded: Any) -> Any:
-    """Build an ``LSTMInferenceEngine`` for a freshly-swapped model, or
-    ``None`` on a bad checkpoint (retried next tick). Mirrors the standalone
-    ``run_live_inference_lstm`` hot-swap idiom."""
+def _build_sequence_engine(loaded: Any) -> Any:
+    """Build a ``SequenceInferenceEngine`` for a freshly-swapped model, or
+    ``None`` on a bad checkpoint (retried next tick). Backbone-agnostic: the
+    engine drives whichever sequence detector the manager loaded."""
     try:
-        from src.models.inference import LSTMInferenceEngine
+        from src.models.inference import SequenceInferenceEngine
 
-        return LSTMInferenceEngine(loaded.artifact)
+        return SequenceInferenceEngine(loaded.artifact)
     except Exception:  # noqa: BLE001 — bad checkpoint shouldn't kill the task
-        log.exception("failed to build LSTMInferenceEngine; will retry next tick")
+        log.exception("failed to build SequenceInferenceEngine; will retry next tick")
         return None
 
 
@@ -222,7 +228,7 @@ async def run_live_inference_lstm(
     LSTM-manager's current loaded model each tick (so hot-swap takes
     effect immediately), pulls a one-row feature frame from ``source``,
     and feeds the model-specific ``feature_columns`` through
-    ``LSTMInferenceEngine.observe``. Schema-alignment policy:
+    ``SequenceInferenceEngine.observe``. Schema-alignment policy:
 
     * **Missing columns are NaN.** The LSTM buffer's
       ``append`` clears itself on a non-finite value, so during the
@@ -249,19 +255,19 @@ async def run_live_inference_lstm(
         loaded = lstm_manager.current
         if loaded is not None:
             # Rebuild the engine only when the manager has swapped — same
-            # idiom as the IF path; an LSTMInferenceEngine is cheap to
+            # idiom as the IF path; an SequenceInferenceEngine is cheap to
             # construct, expensive to load (torch tensors). Hot-swap takes
             # effect on the very next tick after ModelManager.poll() reports
             # ``swapped``.
             new_version = loaded.manifest.model_version
             if engine_version != new_version:
                 try:
-                    from src.models.inference import LSTMInferenceEngine
+                    from src.models.inference import SequenceInferenceEngine
 
-                    engine = LSTMInferenceEngine(loaded.artifact)
+                    engine = SequenceInferenceEngine(loaded.artifact)
                     engine_version = new_version
                 except Exception:  # noqa: BLE001 — bad checkpoint shouldn't kill the task
-                    log.exception("failed to build LSTMInferenceEngine; will retry next tick")
+                    log.exception("failed to build SequenceInferenceEngine; will retry next tick")
                     engine = None
                     engine_version = None
 
@@ -269,7 +275,7 @@ async def run_live_inference_lstm(
             try:
                 row = source.tick(datetime.now(UTC))
                 if row is not None:
-                    result = _lstm_observe(engine, row)
+                    result = _sequence_observe(engine, row)
                     if result is not None:
                         # Every scored window → /ws/scores (live readout),
                         # then the emitter still gates the anomaly feed on
@@ -295,24 +301,24 @@ async def run_live_inference_lstm(
             continue
 
 
-def _lstm_observe(engine: Any, row: Any) -> Any:
-    """Align ``row`` to the LSTM engine's expected feature columns and observe.
+def _sequence_observe(engine: Any, row: Any) -> Any:
+    """Align ``row`` to the sequence engine's expected feature columns and observe.
 
-    ``LSTMSequenceBuffer.append`` already handles missing-column / non-finite
+    ``SequenceWindowBuffer.append`` already handles missing-column / non-finite
     cases by clearing the buffer (return False, no result), so we don't need
     to pre-validate — we just present the columns the engine asks for. The
-    return value is ``LSTMInferenceResult`` once a full window is ready,
+    return value is ``SequenceInferenceResult`` once a full window is ready,
     ``None`` otherwise.
 
-    GRU-D needs each value column's ``<channel>__gap`` flag to derive the
-    observed-mask. ``reconcile_feature_frame_to_spec`` only keeps structural +
-    value columns (it's shared with the IF path), so re-attach the gap columns
-    from the original live row after reconciling.
+    The GRU-D backbone needs each value column's ``<channel>__gap`` flag to
+    derive the observed-mask. ``reconcile_feature_frame_to_spec`` only keeps
+    structural + value columns (it's shared with the IF path), so re-attach the
+    gap columns from the original live row after reconciling.
     """
     schema = _schema_for_engine(engine)
     aligned, report = reconcile_feature_frame_to_spec(row, schema)
     _log_schema_reconciliation_once(
-        "lstm_autoencoder",
+        _engine_model_type(engine),
         _engine_version(engine),
         report,
     )
@@ -353,6 +359,14 @@ def _engine_version(engine: Any) -> str:
     manifest = getattr(trained, "manifest", None)
     version = getattr(manifest, "model_version", None) or getattr(engine, "model_version", None)
     return str(version or "unknown")
+
+
+def _engine_model_type(engine: Any) -> str:
+    """``model_type`` of the engine's loaded model, for log attribution. Falls
+    back to a generic label for test doubles without a manifest."""
+    trained = getattr(engine, "trained", None)
+    manifest = getattr(trained, "manifest", None)
+    return str(getattr(manifest, "model_type", None) or "sequence_autoencoder")
 
 
 def _log_schema_reconciliation_once(
@@ -735,7 +749,7 @@ __all__ = [
     "run_live_inference",
     "run_live_inference_lstm",
     "_finite_or_none",
-    "_lstm_observe",
+    "_sequence_observe",
     "_observe_behavior",
     "_publish_score",
     "_score_and_emit",

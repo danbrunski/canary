@@ -882,7 +882,7 @@ async def test_run_live_inference_lstm_emits_on_full_window(config: CanaryConfig
     )
 
     class _FakeLSTMEngine:
-        """Stand-in for LSTMInferenceEngine: returns a result on every observe."""
+        """Stand-in for SequenceInferenceEngine: returns a result on every observe."""
 
         feature_columns = ("obd:RPM",)
 
@@ -928,12 +928,12 @@ async def test_run_live_inference_lstm_emits_on_full_window(config: CanaryConfig
             return SwapAttempt(kind="no_change")
 
     components.model_managers["lstm_autoencoder"] = _StubLSTMManager()  # type: ignore[assignment]
-    # Patch the lazy-imported LSTMInferenceEngine inside daemon.
+    # Patch the lazy-imported SequenceInferenceEngine inside daemon.
     import src.daemon as daemon_mod
     import src.models.inference as inf_mod
 
-    original = getattr(inf_mod, "LSTMInferenceEngine", None)
-    inf_mod.LSTMInferenceEngine = _FakeLSTMEngine  # type: ignore[assignment,misc]
+    original = getattr(inf_mod, "SequenceInferenceEngine", None)
+    inf_mod.SequenceInferenceEngine = _FakeLSTMEngine  # type: ignore[assignment,misc]
     try:
         source = build_live_feature_source(components)
         source.observe(TelemetryRecord.obd(1.0, "RPM", 700.0, "rpm"))
@@ -950,22 +950,22 @@ async def test_run_live_inference_lstm_emits_on_full_window(config: CanaryConfig
             await asyncio.wait_for(task, timeout=1.0)
     finally:
         if original is not None:
-            inf_mod.LSTMInferenceEngine = original  # type: ignore[assignment]
-        elif hasattr(inf_mod, "LSTMInferenceEngine"):
-            delattr(inf_mod, "LSTMInferenceEngine")
+            inf_mod.SequenceInferenceEngine = original  # type: ignore[assignment]
+        elif hasattr(inf_mod, "SequenceInferenceEngine"):
+            delattr(inf_mod, "SequenceInferenceEngine")
         del daemon_mod  # keep linter quiet about unused import
 
     assert msg["source"] == "lstm_autoencoder"
     assert msg["model_version"] == "fake_lstm_v1"
 
 
-async def test_lstm_observe_helper_fills_missing_columns_with_nan() -> None:
+async def test_sequence_observe_helper_fills_missing_columns_with_nan() -> None:
     """A column the live source hasn't seen yet should arrive as NaN — the
     LSTM buffer will reject it and clear, which is the correct "wait for
     schema" behavior."""
     import pandas as pd
 
-    from src.daemon import _lstm_observe
+    from src.daemon import _sequence_observe
 
     captured: dict[str, Any] = {}
 
@@ -979,7 +979,7 @@ async def test_lstm_observe_helper_fills_missing_columns_with_nan() -> None:
     row = pd.DataFrame(
         [{"timestamp": "now", "session": "live", "obd:RPM": 700.0, "obd:EXTRA": 1.0}]
     )
-    _lstm_observe(_Captor(), row)
+    _sequence_observe(_Captor(), row)
     assert captured["series"]["obd:RPM"] == 700.0
     assert "obd:EXTRA" not in captured["series"]
     # obd:SPEED wasn't in the row → NaN

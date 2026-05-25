@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import VehicleParameters
+from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 __all__ = [
     "FUEL_PROPERTIES",
@@ -54,6 +55,19 @@ _IDLE_SPEED_CEIL_KPH = 3.0
 _LAUNCH_SPEED_KPH = 2.0 * _KPH_PER_MPH
 #: Cap per-row dt so a capture gap can't inflate integrated totals.
 _MAX_DT_S = 5.0
+#: STFT is the *fast* closed-loop fuel-trim channel: ``STFT_B1`` and
+#: ``STFT_B2`` are polled at different points in the OBD round-robin, so during
+#: a transient (tip-in/out, shift) the per-bank samples catch different phases
+#: of the same swing and their instantaneous difference is dominated by sampling
+#: skew, not real bank asymmetry. We therefore difference a *time-smoothed* STFT
+#: so the bank-balance residual only trips on **sustained** imbalance (a real
+#: fault, which LTFT — the slow channel — would corroborate), not on routine
+#: driving transients. A module constant, not config: train and serve MUST use
+#: the identical window or the fitted surface and live scoring would diverge, and
+#: a config field could drift between the training box and the Pi. Kept well
+#: under the live ring buffer's span (``idle_transient_lookback_seconds``, 180 s
+#: by default) so the serve-side smoothing window is always fully populated.
+STFT_BANK_BALANCE_SMOOTHING_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -92,6 +106,39 @@ def _series(wide: pd.DataFrame, *names: str) -> pd.Series | None:
             if col.notna().any():
                 return col.astype(float)
     return None
+
+
+def _session_time_smooth(wide: pd.DataFrame, values: pd.Series, seconds: float) -> pd.Series:
+    """Session-aware, time-based trailing rolling mean of ``values``.
+
+    Mirrors :func:`compute_features`' windowing exactly — group by
+    ``session``, order by ``timestamp``, and take a ``{seconds}s`` trailing
+    mean on a datetime index — so a window for one session never bleeds rows
+    from another even when they are wall-clock adjacent. ``min_periods=1`` so
+    the first samples of a session (and the live buffer right after startup)
+    still get a value (the mean of what's available so far) rather than NaN,
+    which a downstream behavior recipe would otherwise skip.
+
+    Falls back to the raw series when ``session``/``timestamp`` are absent
+    (e.g. a bare-frame unit test) — the only real callers, the offline and
+    live feature pipelines, always carry both columns.
+    """
+    if SESSION_COLUMN not in wide.columns or TIMESTAMP_COLUMN not in wide.columns:
+        return values
+    frame = pd.DataFrame(
+        {
+            SESSION_COLUMN: wide[SESSION_COLUMN].to_numpy(),
+            "_ts": pd.to_datetime(wide[TIMESTAMP_COLUMN], utc=True).to_numpy(),
+            "_v": values.to_numpy(dtype=float),
+        },
+        index=wide.index,
+    )
+    out = pd.Series(np.nan, index=wide.index, dtype=float)
+    for _, group in frame.groupby(SESSION_COLUMN, sort=False, dropna=False):
+        ordered = group.sort_values("_ts", kind="stable")
+        smoothed = ordered.set_index("_ts")["_v"].rolling(f"{int(seconds)}s", min_periods=1).mean()
+        out.loc[ordered.index] = smoothed.to_numpy(dtype=float)
+    return out
 
 
 def _dt_seconds(wide: pd.DataFrame) -> pd.Series:
@@ -255,8 +302,12 @@ def compute_anomaly_signals(wide: pd.DataFrame) -> pd.DataFrame:
 
     * ``derived:STFT_BANK_BALANCE`` / ``derived:LTFT_BANK_BALANCE`` —
       short / long fuel trim difference between banks. Expected ~0
-      everywhere; nonzero indicates bank-specific fuel or air issue.
-      Inputs: ``obd:SHORT_FUEL_TRIM_1/2``, ``obd:LONG_FUEL_TRIM_1/2``.
+      everywhere; sustained nonzero indicates a bank-specific fuel or air
+      issue. The STFT version is **time-smoothed**
+      (``STFT_BANK_BALANCE_SMOOTHING_SECONDS``) because the fast STFT channel's
+      instantaneous bank delta is dominated by round-robin sampling skew during
+      transients; the slow LTFT version is left raw (it is already the drift
+      channel). Inputs: ``obd:SHORT_FUEL_TRIM_1/2``, ``obd:LONG_FUEL_TRIM_1/2``.
 
     * ``derived:AFR_BANK_BALANCE`` — wideband AFR sensor voltage
       difference between banks. Once the AF-sensor DIDs are polling
@@ -292,7 +343,14 @@ def compute_anomaly_signals(wide: pd.DataFrame) -> pd.DataFrame:
     stft_b1 = _series(out, "obd:SHORT_FUEL_TRIM_1")
     stft_b2 = _series(out, "obd:SHORT_FUEL_TRIM_2")
     if stft_b1 is not None and stft_b2 is not None:
-        out["derived:STFT_BANK_BALANCE"] = (stft_b1 - stft_b2).astype(float)
+        # Time-smooth the difference (linear, so == difference of smoothed
+        # banks) to reject sampling-skew transients; see
+        # STFT_BANK_BALANCE_SMOOTHING_SECONDS. The raw per-bank STFT columns
+        # are left instantaneous — only the *asymmetry* signal is corrupted by
+        # asynchronous polling, not the per-bank trims themselves.
+        out["derived:STFT_BANK_BALANCE"] = _session_time_smooth(
+            out, stft_b1 - stft_b2, STFT_BANK_BALANCE_SMOOTHING_SECONDS
+        ).astype(float)
     ltft_b1 = _series(out, "obd:LONG_FUEL_TRIM_1")
     ltft_b2 = _series(out, "obd:LONG_FUEL_TRIM_2")
     if ltft_b1 is not None and ltft_b2 is not None:

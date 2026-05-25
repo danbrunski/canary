@@ -42,7 +42,7 @@ from src.models.isolation_forest import (
 
 if TYPE_CHECKING:  # avoid importing torch-touching modules at import time
     from src.alerts.fusion import FusedResult
-    from src.models.inference import LSTMInferenceResult
+    from src.models.inference import SequenceInferenceResult
 
 log = logging.getLogger(__name__)
 
@@ -98,11 +98,11 @@ class AnomalyEventEmitter:
 
     def emit_lstm(
         self,
-        result: LSTMInferenceResult,
+        result: SequenceInferenceResult,
         *,
         operating_mode: str | None = None,
     ) -> AnomalyEvent | None:
-        """Emit an event from a streaming LSTM result, if anomalous + not deduped."""
+        """Emit an event from a streaming sequence-detector result, if anomalous + not deduped."""
         if not result.is_anomaly:
             self.counters.suppressed_not_anomaly += 1
             return None
@@ -276,7 +276,7 @@ def _seconds(timestamp: str) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Streaming IF inference — analogous to LSTMInferenceEngine
+# Streaming IF inference — analogous to SequenceInferenceEngine
 # ---------------------------------------------------------------------------
 
 
@@ -285,7 +285,7 @@ class IsolationForestInferenceEngine:
 
     Thin wrapper around ``TrainedIsolationForest.score`` that takes one
     row at a time and returns the single scored row. Symmetric with
-    ``LSTMInferenceEngine.observe`` so the daemon can wire both detectors
+    ``SequenceInferenceEngine.observe`` so the daemon can wire both detectors
     through the same row-processing loop.
     """
 

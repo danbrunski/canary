@@ -22,10 +22,10 @@ from .components import DaemonComponents, build_components
 from .drain import _record_to_dict, drain_queue_with_broadcast
 from .inference import (
     _finite_or_none,
-    _lstm_observe,
     _observe_behavior,
     _publish_score,
     _score_and_emit,
+    _sequence_observe,
     build_live_feature_source,
     run_live_inference,
     run_live_inference_lstm,
@@ -93,7 +93,7 @@ __all__ = [
     "run_retention_sweeper",
     "serve_in_background",
     "_finite_or_none",
-    "_lstm_observe",
+    "_sequence_observe",
     "_observe_behavior",
     "_publish_score",
     "_record_to_dict",

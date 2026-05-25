@@ -234,6 +234,12 @@ class ModelsConfig(_Strict):
     isolation_forest: IsolationForestConfig
     lstm_autoencoder: LSTMAutoencoderConfig
     fusion: FusionConfig = Field(default_factory=FusionConfig)
+    #: Which backbone fills the single sequence-detector slot. The selected
+    #: backend's own ``enabled`` flag still gates whether it loads (so an
+    #: existing ``lstm_autoencoder.enabled: false`` keeps the slot off). A TCN
+    #: backbone widens this to ``Literal["lstm", "tcn"]``; see
+    #: ``src/models/sequence_registry.py``.
+    sequence_detector: Literal["lstm"] = "lstm"
 
 
 class DashboardConfig(_Strict):

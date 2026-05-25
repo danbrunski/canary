@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from src.alerts.event_logger import AnomalyEventLogger, event_log_path, read_events, read_events_dir
 from src.alerts.events import AnomalyEvent
-from src.models.inference import LSTMInferenceResult
+from src.models.inference import SequenceInferenceResult
 
 
 def _event(**overrides: object) -> AnomalyEvent:
@@ -63,7 +63,7 @@ def test_event_rejects_unknown_source() -> None:
 
 
 def test_event_from_lstm_result() -> None:
-    result = LSTMInferenceResult(
+    result = SequenceInferenceResult(
         model_version="lstm-v9",
         timestamp="2026-05-13T01:00:10Z",
         session="2026-05-13T005522",
