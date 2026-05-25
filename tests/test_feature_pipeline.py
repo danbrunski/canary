@@ -21,6 +21,7 @@ from src.preprocessing.feature_pipeline import (
     ALL_MODE,
     FeaturizedFrame,
     _drop_fully_stale_rows,
+    align_features_to_schema,
     featurize_wide_frame,
     sequence_feature_columns,
 )
@@ -161,3 +162,24 @@ def test_featurize_wide_frame_skips_deviation_without_models(
 
     assert not [c for c in result.features.columns if str(c).startswith("deviation:")]
     assert not [c for c in result.operating_frame.columns if str(c).startswith("deviation:")]
+
+
+def test_align_features_to_schema_adds_absent_columns_as_nan() -> None:
+    """A drive lacking a sensor family (no GPS) gets the absent model columns
+    back as all-NaN so they're scored as masked-missing, not a crash."""
+    frame = pd.DataFrame({"decoded:ECM_RPM": [700.0, 705.0], "obd:SPEED": [0.0, 1.0]})
+
+    aligned = align_features_to_schema(
+        frame, ["decoded:ECM_RPM", "obd:SPEED", "gps:speed", "gps:speed__mean"]
+    )
+
+    # Present columns are untouched; absent ones are added as all-NaN.
+    assert list(aligned["decoded:ECM_RPM"]) == [700.0, 705.0]
+    assert "gps:speed" in aligned.columns
+    assert aligned["gps:speed"].isna().all()
+    assert aligned["gps:speed__mean"].isna().all()
+
+
+def test_align_features_to_schema_is_noop_when_complete() -> None:
+    frame = pd.DataFrame({"a": [1.0], "b": [2.0]})
+    assert align_features_to_schema(frame, ["a", "b"]) is frame

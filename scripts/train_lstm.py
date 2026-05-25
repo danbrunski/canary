@@ -51,6 +51,7 @@ from src.models.sequence_dataset import DEFAULT_SEQUENCE_STRIDE, SequenceWindowD
 from src.preprocessing import discover_sessions
 from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
+    align_features_to_schema,
     build_feature_frame,
     build_feature_spec,
     sequence_feature_columns,
@@ -109,6 +110,11 @@ def build_dataset(
         if sequence_length is None
         else sequence_length
     )
+    # A held-out drive may lack a whole sensor family the model trained with
+    # (e.g. no GPS fix). Add those columns as all-NaN so they're scored as
+    # masked-missing rather than crashing the scaler / window slice.
+    if feature_columns is not None:
+        features = align_features_to_schema(features, columns)
     if scaler is not None:
         features = scaler.transform(features)
     return SequenceWindowDataset(

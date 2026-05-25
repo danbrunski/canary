@@ -230,12 +230,13 @@ async def run_live_inference_lstm(
     and feeds the model-specific ``feature_columns`` through
     ``SequenceInferenceEngine.observe``. Schema-alignment policy:
 
-    * **Missing columns are NaN.** The LSTM buffer's
-      ``append`` clears itself on a non-finite value, so during the
-      schema-warmup window (channels still arriving) we don't emit; once
-      every trained ``feature_column`` is present, the buffer fills and
-      starts emitting. This matches the model's "wait for a clean window"
-      contract from training time.
+    * **Missing columns are NaN → masked.** The LSTM buffer treats a
+      non-finite / absent feature cell as unobserved (masked + imputed),
+      exactly as the offline dataset does, so a channel still warming up —
+      or a whole sensor family absent on this drive (e.g. no GPS fix) —
+      doesn't stall the detector. The buffer fills over ``sequence_length``
+      ticks and scores on whatever channels it has; the model was trained on
+      GPS-less sessions this same way.
     * **Extra columns are dropped.** The source naturally carries
       whatever's been observed; the engine only reads its trained set.
 

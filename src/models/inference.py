@@ -147,10 +147,18 @@ class SequenceWindowBuffer:
     def append(self, row: Mapping[str, Any] | pd.Series) -> bool:
         """Append a feature row and return whether a full window is ready.
 
-        Rows missing a feature or containing non-finite feature values reset the
-        buffer. A session change also resets the buffer so windows never span
-        sessions. The mask comes from ``¬<channel>__gap`` (absent gap column ⇒
-        observed); Δt is accumulated from the mask and the inter-tick interval.
+        A feature that is absent or non-finite this tick (a channel still
+        warming up, or a whole sensor family missing on this drive — e.g. no GPS
+        fix) is treated as **unobserved**: its cell is masked and imputed, never
+        a reason to drop the row. This mirrors the offline dataset, which masks
+        all-NaN / leading-NaN cells rather than discarding them, so the model —
+        trained on GPS-less sessions exactly this way — keeps scoring on the
+        channels it *does* have. Only a fully unobserved tick (no finite feature
+        at all) resets the buffer, as does a session change so windows never
+        span sessions.
+
+        The mask is ``¬<channel>__gap`` AND value-is-finite; Δt is accumulated
+        from the mask and the inter-tick interval.
         """
         session = str(row.get(self.session_column, ""))
         timestamp_str = _format_timestamp(row.get(self.timestamp_column))
@@ -159,23 +167,25 @@ class SequenceWindowBuffer:
             self.clear()
         self._session = session
 
-        try:
-            values = np.asarray(
-                [float(row[column]) for column in self.feature_columns],
-                dtype=self.dtype,
-            )
-        except (KeyError, TypeError, ValueError):
-            self.clear()
-            return False
-
-        if not bool(np.isfinite(values).all()):
+        values = np.array(
+            [_coerce_feature_value(row.get(column)) for column in self.feature_columns],
+            dtype=np.float64,
+        )
+        finite = np.isfinite(values)
+        if not finite.any():
+            # No signal at all this tick — treat it as a gap and restart the
+            # window rather than score an entirely masked sequence.
             self.clear()
             return False
 
         mask = self._row_mask(row)
+        # An absent / non-finite channel is unobserved regardless of any gap
+        # flag; the value is imputed downstream (0 in z-scored space) and the
+        # mask keeps it out of the reconstruction error.
+        mask[~finite] = 0.0
         delta = self._advance_delta(mask, timestamp)
 
-        self._values.append(values)
+        self._values.append(values.astype(self.dtype))
         self._masks.append(mask)
         self._deltas.append(delta.astype(self.dtype))
         self._metadata.append((timestamp_str, session))
@@ -362,6 +372,11 @@ class SequenceInferenceEngine:
             scaled_window = (
                 (window.astype(np.float64) - self._scaler_means) / self._scaler_stds
             ).astype(np.float32)
+        # Impute unobserved (non-finite) cells to 0 in z-scored space — the
+        # channel mean — exactly as the offline dataset does (`where(isfinite,
+        # value, 0)`), so a masked GPS-less cell never feeds the model a NaN.
+        # The mask already keeps these cells out of the reconstruction error.
+        scaled_window = np.where(np.isfinite(scaled_window), scaled_window, 0.0).astype(np.float32)
         torch_dtype = getattr(self._torch, self.dtype)
         value_t = (
             self._torch.as_tensor(scaled_window, dtype=torch_dtype).unsqueeze(0).to(self._device)
@@ -495,6 +510,21 @@ def _is_nan(value: Any) -> bool:
         return bool(pd.isna(value))
     except (TypeError, ValueError):
         return False
+
+
+def _coerce_feature_value(value: Any) -> float:
+    """Coerce a row's feature cell to float; absent / non-numeric ⇒ NaN.
+
+    NaN flags the cell as unobserved for the mask — an absent sensor (no GPS) or
+    a channel before its first observation, both legitimately masked rather than
+    fatal.
+    """
+    if value is None:
+        return float("nan")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")
 
 
 def _torch_module() -> Any:

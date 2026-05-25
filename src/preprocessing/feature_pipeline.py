@@ -435,6 +435,34 @@ def sequence_feature_columns(features: pd.DataFrame) -> list[str]:
     ]
 
 
+def align_features_to_schema(
+    features: pd.DataFrame, feature_columns: Sequence[str]
+) -> pd.DataFrame:
+    """Ensure every model feature column exists, adding absent ones as all-NaN.
+
+    A drive may legitimately lack a whole sensor family — e.g. no GPS fix, so no
+    ``gps:*`` channels — while the model's schema (trained on a corpus that did
+    have it) still expects those columns. The GRU-D mask/Δt path already treats
+    an all-NaN channel as unobserved (it imputes the cell and masks it, so the
+    loss never scores a fill), which is exactly how the model saw GPS-less
+    sessions at training time. So an absent column should be scored as
+    masked-missing, never raise in the scaler or the ``.loc`` window slice.
+
+    Returns ``features`` unchanged when nothing is missing.
+    """
+    missing = [str(column) for column in feature_columns if column not in features.columns]
+    if not missing:
+        return features
+    aligned = features.copy()
+    for column in missing:
+        aligned[column] = np.nan
+    log.info(
+        "aligned feature frame to model schema; absent columns masked as unobserved",
+        extra={"missing_columns": missing, "missing_count": len(missing)},
+    )
+    return aligned
+
+
 def build_feature_spec(
     features: pd.DataFrame,
     feature_columns: Sequence[str],

@@ -167,28 +167,93 @@ def test_inference_engine_requires_calibrated_thresholds() -> None:
         SequenceInferenceEngine(trained)
 
 
-def test_sequence_buffer_resets_on_missing_or_non_finite_features() -> None:
+def test_inference_scores_when_a_channel_is_never_observed() -> None:
+    """A whole channel absent for an entire drive (e.g. no GPS fix) is masked,
+    and the detector still scores on the channels it has — no NaN, no stall."""
+    import math
+
+    engine = SequenceInferenceEngine(_trained(), time_fn=_fake_clock())
+    result = None
+    for i in range(4):
+        # 'speed' never appears; only 'rpm' is present on every tick.
+        result = engine.observe(
+            {
+                SESSION_COLUMN: "s1",
+                TIMESTAMP_COLUMN: f"2026-05-12T00:00:0{i}Z",
+                "rpm": 700.0 + (i % 3),
+            }
+        )
+    assert result is not None
+    assert math.isfinite(result.global_score)
+    assert math.isfinite(result.channel_scores["rpm"])
+    # The never-observed channel contributes no reconstruction error.
+    assert result.channel_scores["speed"] == 0.0
+
+
+def test_sequence_buffer_masks_missing_or_non_finite_features() -> None:
+    """An absent or non-finite feature is masked (unobserved), not a reason to
+    drop the row — so a drive lacking a whole sensor family (e.g. no GPS fix)
+    still scores on the channels it has, mirroring how the model saw GPS-less
+    sessions at training time."""
+    import numpy as np
+
     buffer = SequenceWindowBuffer(feature_columns=("rpm", "speed"), sequence_length=2)
 
-    incomplete = {
-        SESSION_COLUMN: "s1",
-        TIMESTAMP_COLUMN: "2026-05-12T00:00:00Z",
-        "rpm": 1.0,
-    }
-    assert buffer.append(incomplete) is False
+    # Row 1: 'speed' is absent entirely. Accepted; 'speed' masked unobserved.
+    assert (
+        buffer.append({SESSION_COLUMN: "s1", TIMESTAMP_COLUMN: "2026-05-12T00:00:00Z", "rpm": 1.0})
+        is False
+    )
     assert buffer.ready is False
+    # Row 2: 'speed' present but non-finite. Also masked, and the window fills.
     assert (
         buffer.append(
             {
                 SESSION_COLUMN: "s1",
-                TIMESTAMP_COLUMN: "2026-05-12T00:00:00Z",
+                TIMESTAMP_COLUMN: "2026-05-12T00:00:01Z",
                 "rpm": 1.0,
+                "speed": float("nan"),
+            }
+        )
+        is True
+    )
+    assert buffer.ready is True
+    mask = buffer.mask_array()
+    assert mask.shape == (2, 2)
+    assert np.array_equal(mask[:, 0], np.ones(2, dtype=mask.dtype))  # rpm observed
+    assert np.array_equal(mask[:, 1], np.zeros(2, dtype=mask.dtype))  # speed masked
+
+
+def test_sequence_buffer_resets_on_fully_unobserved_row() -> None:
+    """A tick with no finite feature at all is a genuine gap → restart the
+    window (the only remaining reset besides a session change)."""
+    buffer = SequenceWindowBuffer(feature_columns=("rpm", "speed"), sequence_length=2)
+
+    full = {SESSION_COLUMN: "s1", "rpm": 1.0, "speed": 2.0}
+    assert buffer.append({TIMESTAMP_COLUMN: "2026-05-12T00:00:00Z", **full}) is False
+    # Fully unobserved tick clears the partial fill.
+    assert (
+        buffer.append(
+            {
+                SESSION_COLUMN: "s1",
+                TIMESTAMP_COLUMN: "2026-05-12T00:00:01Z",
+                "rpm": float("nan"),
                 "speed": float("nan"),
             }
         )
         is False
     )
     assert buffer.ready is False
+    # Cleared: it now takes two fresh rows to become ready again.
+    base = {"rpm": 1.0, "speed": 2.0}
+    assert (
+        buffer.append({SESSION_COLUMN: "s1", TIMESTAMP_COLUMN: "2026-05-12T00:00:02Z", **base})
+        is False
+    )
+    assert (
+        buffer.append({SESSION_COLUMN: "s1", TIMESTAMP_COLUMN: "2026-05-12T00:00:03Z", **base})
+        is True
+    )
 
 
 def test_sequence_buffer_derives_mask_and_delta_from_gap_flags() -> None:
