@@ -22,8 +22,12 @@ set -euo pipefail
 #
 # Everything is env-overridable:
 #   PI_USER PI_HOST PI_SESSIONS PI_CONFIG PI_REPO
-#   SESSIONS_ROOT LAPTOP_CONFIG BINDINGS IF_OUT LSTM_OUT BEHAVIOR_OUT DEVICE
-#   EXPECT_RESAMPLE_HZ EXPECT_ROLLING_WINDOW_SECONDS RSYNC_DELETE
+#   SESSIONS_ROOT LAPTOP_CONFIG BINDINGS IF_OUT LSTM_OUT TCN_OUT BEHAVIOR_OUT
+#   DEVICE SEQUENCE_MODEL EXPECT_RESAMPLE_HZ EXPECT_ROLLING_WINDOW_SECONDS RSYNC_DELETE
+#
+# SEQUENCE_MODEL (lstm|tcn) overrides which sequence backbone retrains; default
+# follows models.sequence_detector in the laptop config. Both lstm/tcn artifact
+# dirs are pushed when present, so a backbone switch needs no push-side change.
 
 PI_USER="${PI_USER:-canary}"
 PI_HOST="${PI_HOST:-192.168.137.2}"
@@ -41,6 +45,8 @@ LAPTOP_CONFIG="${LAPTOP_CONFIG:-./canary.laptop.yaml}"
 BINDINGS="${BINDINGS:-data/bindings.yaml}"
 IF_OUT="${IF_OUT:-models/isolation_forest}"
 LSTM_OUT="${LSTM_OUT:-models/lstm_autoencoder}"
+TCN_OUT="${TCN_OUT:-models/tcn_autoencoder}"
+SEQUENCE_MODEL="${SEQUENCE_MODEL:-}"   # empty = follow config; or lstm|tcn
 BEHAVIOR_OUT="${BEHAVIOR_OUT:-data/behavior_models.yaml}"
 DEVICE="${DEVICE:-cuda}"          # cuda=NVIDIA, cpu=fallback; mps is macOS-only
 EXPECT_RESAMPLE_HZ="${EXPECT_RESAMPLE_HZ:-1}"
@@ -107,16 +113,19 @@ do_pull() {
 do_train() {
   assert_preprocessing
   local rc_retrain=0 rc_refit=0
-  step "retrain Isolation Forest + LSTM autoencoder (device=${DEVICE})"
+  step "retrain Isolation Forest + sequence detector (device=${DEVICE})"
   # `|| rc=$?` keeps `set -e` from aborting here: retrain exits non-zero only
-  # when EVERY trainer failed; a partial run (e.g. IF ok, LSTM failed) is exit
-  # 0 by contract. The behavior refit below is independent of the anomaly
+  # when EVERY trainer failed; a partial run (e.g. IF ok, sequence failed) is
+  # exit 0 by contract. The behavior refit below is independent of the anomaly
   # trainers and must run regardless, so it is never skipped by a retrain
-  # failure.
+  # failure. retrain trains IF + the configured sequence backbone (or the
+  # SEQUENCE_MODEL override) into models/<model_type>.
+  local seq_args=()
+  [[ -n "${SEQUENCE_MODEL}" ]] && seq_args=(--sequence-model "${SEQUENCE_MODEL}")
   "${PY}" scripts/retrain.py \
     --sessions-root "${SESSIONS_ROOT}" --all \
     --config "${LAPTOP_CONFIG}" --bindings "${BINDINGS}" \
-    --if-out "${IF_OUT}" --lstm-out "${LSTM_OUT}" \
+    --if-out "${IF_OUT}" "${seq_args[@]}" \
     --device "${DEVICE}" || rc_retrain=$?
   step "refit behavior models"
   "${PY}" scripts/refit_behavior_models.py \
@@ -135,8 +144,12 @@ do_push() {
   step "push artifacts -> ${REMOTE}:${PI_REPO}"
   rsync "${RSYNC_OPTS[@]}" -e "ssh ${SSH_OPTS[*]}" \
     "${IF_OUT}/"   "${REMOTE}:${PI_REPO}/${IF_OUT}/"
-  rsync "${RSYNC_OPTS[@]}" -e "ssh ${SSH_OPTS[*]}" \
-    "${LSTM_OUT}/" "${REMOTE}:${PI_REPO}/${LSTM_OUT}/"
+  # Push whichever sequence backbone(s) were trained — only one is active, but
+  # syncing both when present means a backbone switch needs no push-side change.
+  for seq_out in "${LSTM_OUT}" "${TCN_OUT}"; do
+    [[ -d "${seq_out}" ]] && rsync "${RSYNC_OPTS[@]}" -e "ssh ${SSH_OPTS[*]}" \
+      "${seq_out}/" "${REMOTE}:${PI_REPO}/${seq_out}/"
+  done
   rsync "${RSYNC_OPTS[@]}" -e "ssh ${SSH_OPTS[*]}" \
     "${BEHAVIOR_OUT}" "${REMOTE}:${PI_REPO}/${BEHAVIOR_OUT}"
   cat <<EOF

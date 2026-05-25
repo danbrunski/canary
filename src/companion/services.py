@@ -236,6 +236,8 @@ def _artifact_path(config: CanaryConfig, model_type: str) -> Path:
         return config.daemon.models_dir / config.daemon.isolation_forest_artifact
     if model_type == "lstm_autoencoder":
         return config.daemon.models_dir / config.daemon.lstm_artifact
+    if model_type == "tcn_autoencoder":
+        return config.daemon.models_dir / config.daemon.tcn_artifact
     raise HTTPException(status_code=400, detail=f"unsupported model type: {model_type}")
 
 

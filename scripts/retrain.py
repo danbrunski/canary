@@ -2,9 +2,11 @@
 """Retrain both anomaly detectors from recent sessions (Task 5.17).
 
 Manual trigger in v1; cron later. The companion piece to `refit_behavior_models.py`:
-runs the Isolation Forest trainer (`scripts/train_anomaly_model.train`) and
-the LSTM autoencoder trainer (`scripts/train_lstm.train`) over the same
-session set, side by side, in one process.
+runs the Isolation Forest trainer (`scripts/train_anomaly_model.train`) and the
+**configured sequence-detector** trainer — the GRU-D LSTM (`scripts/train_lstm`)
+or the TCN (`scripts/train_tcn`), selected by ``models.sequence_detector`` and
+overridable with ``--sequence-model`` — over the same session set, side by side,
+in one process. Only the *selected* sequence backbone is trained, never both.
 
 Each trainer writes its own ``model.joblib`` (or ``model.pt``) +
 ``model.manifest.json`` under a dedicated output directory. The
@@ -16,10 +18,11 @@ Usage:
 
     .venv/bin/python scripts/retrain.py
     .venv/bin/python scripts/retrain.py --days 14
-    .venv/bin/python scripts/retrain.py --skip-lstm    # IF-only refresh
-    .venv/bin/python scripts/retrain.py --skip-if      # LSTM-only refresh
+    .venv/bin/python scripts/retrain.py --skip-sequence   # IF-only refresh
+    .venv/bin/python scripts/retrain.py --skip-if         # sequence-only refresh
+    .venv/bin/python scripts/retrain.py --sequence-model tcn
 
-Skips on failure: a broken LSTM trainer doesn't prevent the IF artifact from
+Skips on failure: a broken sequence trainer doesn't prevent the IF artifact from
 landing (or vice versa) — partial coverage beats none. Each trainer's
 ``train()`` already validates inputs and raises with a useful message; we
 log + continue.
@@ -39,6 +42,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import train_anomaly_model as if_trainer  # noqa: E402
 import train_lstm as lstm_trainer  # noqa: E402
+import train_tcn as tcn_trainer  # noqa: E402
 from refit_behavior_models import _filter_sessions_by_age  # noqa: E402
 
 from src.alerts.feedback import DEFAULT_FEEDBACK_PATH, FeedbackStore  # noqa: E402
@@ -61,6 +65,13 @@ from src.preprocessing.feature_pipeline import (  # noqa: E402
 )
 
 log = logging.getLogger(__name__)
+
+#: Selectable sequence-detector backbones: config selector value → (model_type,
+#: trainer module). Only the configured/selected backbone is trained per run.
+SEQUENCE_TRAINERS: dict[str, tuple[str, object]] = {
+    "lstm": ("lstm_autoencoder", lstm_trainer),
+    "tcn": ("tcn_autoencoder", tcn_trainer),
+}
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -115,25 +126,32 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Output directory for the Isolation Forest artifact + manifest.",
     )
     parser.add_argument(
-        "--lstm-out",
+        "--sequence-model",
+        choices=sorted(SEQUENCE_TRAINERS),
+        default=None,
+        help="Sequence-detector backbone to retrain (default: models.sequence_detector).",
+    )
+    parser.add_argument(
+        "--sequence-out",
         type=Path,
-        default=Path("models/lstm_autoencoder"),
-        help="Output directory for the LSTM autoencoder artifact + manifest.",
+        default=None,
+        help="Output directory for the sequence model artifact + manifest "
+        "(default: models/<model_type>).",
     )
     parser.add_argument(
         "--skip-if",
         action="store_true",
-        help="Skip the Isolation Forest trainer (LSTM-only refresh).",
+        help="Skip the Isolation Forest trainer (sequence-only refresh).",
     )
     parser.add_argument(
-        "--skip-lstm",
+        "--skip-sequence",
         action="store_true",
-        help="Skip the LSTM autoencoder trainer (IF-only refresh).",
+        help="Skip the sequence-detector trainer (IF-only refresh).",
     )
     parser.add_argument(
         "--device",
         default="cpu",
-        help="LSTM training device (cpu / cuda). Default cpu — Pi target.",
+        help="Sequence-model training device (cpu / cuda). Default cpu — Pi target.",
     )
     parser.add_argument(
         "--feature-cache",
@@ -211,8 +229,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(args.log_level)
     config = CanaryConfig.from_yaml(args.config)
 
-    if args.skip_if and args.skip_lstm:
-        print("error: --skip-if and --skip-lstm together leave nothing to do.", file=sys.stderr)
+    # Resolve the sequence-detector backbone (config default, --sequence-model
+    # override) and stash the resolved model_type + output dir on args so the
+    # report/failure helpers stay backbone-agnostic.
+    sequence_model = args.sequence_model or config.models.sequence_detector
+    seq_model_type, seq_trainer = SEQUENCE_TRAINERS[sequence_model]
+    args.sequence_model = sequence_model
+    args.sequence_out = args.sequence_out or Path("models") / seq_model_type
+    args.seq_model_type = seq_model_type
+
+    if args.skip_if and args.skip_sequence:
+        print(
+            "error: --skip-if and --skip-sequence together leave nothing to do.",
+            file=sys.stderr,
+        )
         return 1
 
     sessions: list[Path] = list(args.sessions)
@@ -233,7 +263,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         extra={
             "sessions": len(sessions),
             "skip_if": args.skip_if,
-            "skip_lstm": args.skip_lstm,
+            "skip_sequence": args.skip_sequence,
+            "sequence_model": seq_model_type,
         },
     )
 
@@ -248,16 +279,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         log.info("isolation_forest disabled in config; skipping")
         results["isolation_forest"] = "skipped (disabled in config)"
         args.skip_if = True
-    if not args.skip_lstm and not config.models.lstm_autoencoder.enabled:
-        log.info("lstm_autoencoder disabled in config; skipping")
-        results["lstm_autoencoder"] = "skipped (disabled in config)"
-        args.skip_lstm = True
+    if not args.skip_sequence and not getattr(config.models, seq_model_type).enabled:
+        log.info("%s disabled in config; skipping", seq_model_type)
+        results[seq_model_type] = "skipped (disabled in config)"
+        args.skip_sequence = True
 
     ledger = None if args.no_ledger else TrainingLedger(args.ledger)
     feedback_labels = {} if args.no_feedback_policy else FeedbackStore(args.feedback).labels()
-    any_trainer_requested = not args.skip_if or not args.skip_lstm
+    any_trainer_requested = not args.skip_if or not args.skip_sequence
     needs_shared_feature_frame = any_trainer_requested and (
-        (not args.skip_if and not args.skip_lstm) or bool(feedback_labels)
+        (not args.skip_if and not args.skip_sequence) or bool(feedback_labels)
     )
     shared_feature_frame = None
     feedback_report: RetrainingFeedbackReport | None = None
@@ -329,27 +360,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             log.exception("isolation forest trainer failed", extra={"error": str(exc)})
             results["isolation_forest"] = f"failed: {exc}"
 
-    if not args.skip_lstm:
+    if not args.skip_sequence:
         try:
-            lstm_trainer.train(
+            seq_trainer.train(  # type: ignore[attr-defined]
                 sessions,
                 config,
-                args.lstm_out,
+                args.sequence_out,
                 bindings_path=args.bindings,
                 device=args.device,
                 **feature_kwargs,
             )
-            results["lstm_autoencoder"] = "ok"
+            results[seq_model_type] = "ok"
             _ingest_ledger(
                 ledger,
-                args.lstm_out,
+                args.sequence_out,
                 "succeeded",
                 args.job_id,
                 feedback_report=feedback_report,
             )
         except Exception as exc:  # noqa: BLE001
-            log.exception("lstm trainer failed", extra={"error": str(exc)})
-            results["lstm_autoencoder"] = f"failed: {exc}"
+            log.exception(
+                "sequence trainer failed", extra={"error": str(exc), "model": seq_model_type}
+            )
+            results[seq_model_type] = f"failed: {exc}"
 
     _print_report(sessions, results, args, feedback_report=feedback_report)
     # Partial success is the documented contract (a broken LSTM must not block
@@ -426,8 +459,8 @@ def _mark_requested_failures(
 ) -> None:
     if not args.skip_if:
         results["isolation_forest"] = status
-    if not args.skip_lstm:
-        results["lstm_autoencoder"] = status
+    if not args.skip_sequence:
+        results[args.seq_model_type] = status
 
 
 def _print_report(
@@ -447,7 +480,7 @@ def _print_report(
             f"{feedback_report.excluded_labels} excluded labels, "
             f"{feedback_report.excluded_rows} rows removed"
         )
-    out_dirs = {"isolation_forest": args.if_out, "lstm_autoencoder": args.lstm_out}
+    out_dirs = {"isolation_forest": args.if_out, args.seq_model_type: args.sequence_out}
     for name, out_dir in out_dirs.items():
         if name not in results:
             continue

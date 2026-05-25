@@ -19,6 +19,7 @@ from src.control.sessions import resolve_session
 JobKind = Literal[
     "retrain_if",
     "retrain_lstm",
+    "retrain_tcn",
     "retrain_all",
     "refit_behavior_models",
     "corpus_report",
@@ -30,6 +31,7 @@ EventCallback = Callable[[dict[str, Any]], None]
 ALLOWED_JOB_KINDS: set[str] = {
     "retrain_if",
     "retrain_lstm",
+    "retrain_tcn",
     "retrain_all",
     "refit_behavior_models",
     "corpus_report",
@@ -210,10 +212,12 @@ class JobController:
                 *job_arg,
                 "--if-out",
                 str(self._config.daemon.models_dir / "isolation_forest"),
-                "--skip-lstm",
+                "--skip-sequence",
             ]
-        if kind == "retrain_lstm":
+        if kind in ("retrain_lstm", "retrain_tcn"):
             device = str(params.get("device", "cpu"))
+            sequence_model = "lstm" if kind == "retrain_lstm" else "tcn"
+            model_type = "lstm_autoencoder" if kind == "retrain_lstm" else "tcn_autoencoder"
             return [
                 str(self._python),
                 "scripts/retrain.py",
@@ -222,14 +226,21 @@ class JobController:
                 *bindings_arg,
                 *ledger_arg,
                 *job_arg,
-                "--lstm-out",
-                str(self._config.daemon.models_dir / "lstm_autoencoder"),
+                "--sequence-model",
+                sequence_model,
+                "--sequence-out",
+                str(self._config.daemon.models_dir / model_type),
                 "--skip-if",
                 "--device",
                 device,
             ]
         if kind == "retrain_all":
             device = str(params.get("device", "cpu"))
+            # IF + the *configured* sequence backbone (retrain.py defaults
+            # --sequence-model to models.sequence_detector); point its output at
+            # the matching artifact dir so the daemon's ModelManager finds it.
+            sequence_model = self._config.models.sequence_detector
+            model_type = "lstm_autoencoder" if sequence_model == "lstm" else "tcn_autoencoder"
             return [
                 str(self._python),
                 "scripts/retrain.py",
@@ -240,8 +251,10 @@ class JobController:
                 *job_arg,
                 "--if-out",
                 str(self._config.daemon.models_dir / "isolation_forest"),
-                "--lstm-out",
-                str(self._config.daemon.models_dir / "lstm_autoencoder"),
+                "--sequence-model",
+                sequence_model,
+                "--sequence-out",
+                str(self._config.daemon.models_dir / model_type),
                 "--device",
                 device,
             ]

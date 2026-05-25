@@ -49,7 +49,7 @@ def test_retrain_calls_both_trainers(
             "--all",
             "--if-out",
             str(tmp_path / "if"),
-            "--lstm-out",
+            "--sequence-out",
             str(tmp_path / "lstm"),
             # Not a feedback test; isolate from the machine's ambient
             # data/control/anomaly_feedback.jsonl (the feedback path is
@@ -121,7 +121,7 @@ def test_retrain_applies_feedback_policy_for_single_trainer(
             "--sessions-root",
             str(tmp_path / "sessions"),
             "--all",
-            "--skip-lstm",
+            "--skip-sequence",
             "--feedback",
             str(feedback_path),
         ]
@@ -156,7 +156,7 @@ def test_retrain_skip_if(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert calls == ["lstm"]
 
 
-def test_retrain_skip_lstm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_retrain_skip_sequence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
     monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
@@ -172,12 +172,50 @@ def test_retrain_skip_lstm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
             "--sessions-root",
             str(tmp_path / "sessions"),
             "--all",
-            "--skip-lstm",
+            "--skip-sequence",
             "--no-feedback-policy",
         ]
     )
     assert rc == 0
     assert calls == ["if"]
+
+
+def test_retrain_sequence_model_tcn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--sequence-model tcn dispatches to the TCN trainer, not the LSTM one."""
+    import yaml
+
+    data = yaml.safe_load(Path("canary.example.yaml").read_text())
+    data["models"]["tcn_autoencoder"]["enabled"] = True
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(yaml.safe_dump(data))
+
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+
+    calls: list[str] = []
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: calls.append("if"))
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: calls.append("lstm"))
+    monkeypatch.setattr(retrain.tcn_trainer, "train", lambda *a, **k: calls.append("tcn"))
+
+    rc = retrain.main(
+        [
+            "--config",
+            str(cfg_path),
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--sequence-model",
+            "tcn",
+            "--skip-if",
+            "--no-feedback-policy",
+        ]
+    )
+    assert rc == 0
+    assert calls == ["tcn"]
+    assert "tcn_autoencoder" in capsys.readouterr().out
 
 
 def test_retrain_both_skip_returns_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -190,7 +228,7 @@ def test_retrain_both_skip_returns_error(tmp_path: Path, monkeypatch: pytest.Mon
             str(tmp_path / "sessions"),
             "--all",
             "--skip-if",
-            "--skip-lstm",
+            "--skip-sequence",
         ]
     )
     assert rc == 1

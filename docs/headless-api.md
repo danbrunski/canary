@@ -155,9 +155,10 @@ Allowed job kinds:
 
 | Kind | What It Runs |
 | --- | --- |
-| `retrain_if` | `scripts/retrain.py --skip-lstm` |
-| `retrain_lstm` | `scripts/retrain.py --skip-if` |
-| `retrain_all` | `scripts/retrain.py` for both detectors |
+| `retrain_if` | `scripts/retrain.py --skip-sequence` |
+| `retrain_lstm` | `scripts/retrain.py --skip-if --sequence-model lstm` |
+| `retrain_tcn` | `scripts/retrain.py --skip-if --sequence-model tcn` |
+| `retrain_all` | `scripts/retrain.py` (IF + the configured sequence backbone) |
 | `refit_behavior_models` | `scripts/refit_behavior_models.py` |
 | `corpus_report` | `tools/corpus_report.py --out data/analyses/...` |
 
