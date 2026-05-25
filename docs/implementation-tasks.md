@@ -949,7 +949,23 @@ drop-in interchangeable. Motivation (stateless fixed windows — no
 cross-mode hidden-state reset logic; ~3–5× faster training; clean Conv1D
 export for a possible future NPU offload) and the broader compute/LLM
 deployment rationale are captured in
-`docs/llm-assist-and-compute-roadmap.md`. Depends on 7.1/7.3 for
+`docs/llm-assist-and-compute-roadmap.md`.
+
+**Open contract question — missing-data handling (added 2026-05-25).** Since
+this phase was first drafted, the LSTM-AE became a **GRU-D** model
+(`docs/lstm-gru-d.md`): it consumes `(value, mask, Δt)` per channel and
+*decays* stale inputs and hidden state toward the channel mean, with a masked
+loss so fabricated fills are never scored. This is the established fix for
+canary's multi-rate, gappy telemetry (CAN ~1 Hz, OBD round-robin ~25 s, GPS
+~1 Hz) and is the LSTM slot's main source of accuracy on slow channels. A plain
+Conv1D TCN-AE has **no equivalent inductive bias**, so the interchange contract
+must spell out how the TCN handles missingness: either (a) consume the existing
+mask/Δt tensors as extra input channels and let the conv stack *learn*
+staleness — simplest, keeps ops export-clean for the Hailo contingency, but
+loses GRU-D's decay-toward-mean prior; or (b) add a decay/masking front-end,
+which recovers the prior but sacrifices the export-clean simplicity that is the
+TCN's primary strategic justification. Pick (a) for v1 and treat the resulting
+slow-channel accuracy gap as the key thing 9.7 must measure. Depends on 7.1/7.3 for
 feature-spec safety; for 7.2 fusion the TCN occupies the single
 sequence-detector source — it does **not** add a fusion source or a
 parallel alert stream.
@@ -972,7 +988,11 @@ parallel alert stream.
   configurable channels/kernel/dropout/receptive field, deterministic CPU
   inference, and unit tests for I/O shapes, receptive-field padding,
   serialization, missing-Torch behavior, and finite loss. Reuse
-  `src/models/sequence_dataset.py` as-is (same windowing as the LSTM-AE);
+  `src/models/sequence_dataset.py` as-is (same windowing as the LSTM-AE) —
+  note this now emits `(value, mask, Δt)` per channel for GRU-D, so the TCN
+  inherits those tensors and must decide how to consume mask/Δt (v1: feed them
+  as extra Conv1D input channels per option (a) above; do **not** silently drop
+  them, or the model loses all staleness information on slow channels);
   add only what the reconstruction objective needs. Keep the module
   export-clean (standard Conv1D, no exotic ops) so the deferred NPU-offload
   contingency in the roadmap doc stays open without being built now.
@@ -1023,7 +1043,11 @@ parallel alert stream.
   retrain integration, run an offline spike: train the TCN-AE on recorded
   sessions and compare it head-to-head with the LSTM-AE on the same
   nominal/anomaly splits — per-fault recall, alert rate, detection latency,
-  score correlation, drift, CPU, memory, artifact size. Gate: the TCN-AE
+  score correlation, drift, CPU, memory, artifact size. **Break recall and
+  FP rate out by channel rate-class** (dense ~1 Hz CAN vs slow/gappy OBD DIDs
+  and GPS), not just in aggregate: GRU-D's masking advantage concentrates on
+  the slow channels, so an aggregate-only metric can hide a TCN deficit exactly
+  where it matters. Gate: the TCN-AE
   must **match or beat the LSTM-AE at ≤1 FP/hr within the Pi budget** to
   become the recommended default; if it does not, it ships as a selectable
   alternative (disabled by default) and the LSTM stays default — it is not

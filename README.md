@@ -20,12 +20,20 @@ detecting subtle signs of trouble before they become failures.
 
 - **Dual-channel ingestion** — raw CAN frames plus OBD-II Mode 01 / selected
   Mode 22 reads through one Canable-native `python-can` path; the legacy ELM327
-  path remains for emulator/fallback coverage.
-- **Parquet ring buffer** — timestamped, columnar, rotated per ignition session, with
-  configurable retention.
-- **Operating-mode segmentation** — Idle / City / Highway / WOT / Off-road, so models
-  see context-appropriate signal ranges.
-- **Layered models** — Isolation Forest baseline → LSTM Autoencoder → CNN-LSTM hybrid.
+  path remains for emulator/fallback coverage. An optional serial NMEA GPS
+  receiver adds ground-speed and position channels.
+- **Parquet ring buffer** — timestamped, columnar, rotated per ignition session,
+  bounded by both age and total bytes, with an emergency low-space sweep.
+- **Operating-mode segmentation** — KOEO / warmup / idle / city / highway (with
+  a transient-stop sub-mode), so models see context-appropriate signal ranges.
+  Behavior models are fit and thresholded per mode.
+- **Layered detection** — per-mode Isolation Forest + a GRU-D masking-aware LSTM
+  autoencoder (handles canary's multi-rate, gappy telemetry without fabricating
+  fills) + first-class behavior residuals, combined in a calibrated-severity
+  fusion layer.
+- **Sensor committees & physics residuals** — redundant-sensor cross-checks
+  (e.g. OBD speed ↔ GPS) and physical-relationship residuals (fuel-trim bank
+  balance, MAF/RPM air mass) surface sensor faults and engine misbehavior.
 - **Local dashboard** — FastAPI + WebSocket, accessible only over the vehicle's LAN.
 - **Read-only by design** — active OBD polling may transmit diagnostic read
   requests, but the system never issues write or actuation commands.
@@ -172,13 +180,17 @@ canary/
 │   └── canary.service        # Headless daemon unit
 ├── src/
 │   ├── main.py               # Entry point
+│   ├── daemon.py             # Live capture + inference loop
 │   ├── config.py             # YAML → Pydantic
 │   ├── log.py
-│   ├── collection/           # OBD + CAN ingestion
+│   ├── collection/           # OBD + CAN + GPS ingestion
 │   ├── storage/              # Parquet ring buffer
 │   ├── preprocessing/        # Resample, segment, features
-│   ├── models/               # Isolation Forest, LSTM AE
-│   ├── alerts/
+│   ├── analysis/             # Derived signals, sensor committees, refit
+│   ├── models/               # Isolation Forest, GRU-D LSTM AE, fusion
+│   ├── alerts/               # Fusion + anomaly event logging
+│   ├── control/              # Authenticated control API
+│   ├── mcp_server/           # MCP surface for agents
 │   └── dashboard/            # FastAPI + WebSocket
 └── tests/
 ```
@@ -187,12 +199,14 @@ canary/
 
 ## Status
 
-The software stack is past the original Phase 1 collection milestone:
-preprocessing, IF/LSTM training and inference, bindings decode, behavior-model
-surfaces, dashboard, alert logging, and model hot-swap are implemented. The
-Canable-native OBD collector is now the default hardware path. The remaining v1
-work is mostly operational: real drive captures for training/validation, Pi
-deployment, and long-run vehicle validation.
+The software stack is well past the original Phase 1 collection milestone:
+preprocessing, per-mode Isolation Forest, the GRU-D masking-aware LSTM
+autoencoder, behavior residuals fused into a calibrated severity score, sensor
+committees, GPS ingestion, bindings decode, behavior-model surfaces, dashboard,
+alert logging, and model hot-swap are all implemented. The Canable-native OBD
+collector is the default hardware path, and deployment to the in-vehicle Pi is
+active. The remaining v1 work is mostly operational: accumulating real drive
+captures for training/validation and long-run vehicle validation.
 
 See [`docs/implementation-tasks.md`](docs/implementation-tasks.md) for the current
 task breakdown and [`docs/data-collection-plan.md`](docs/data-collection-plan.md)
@@ -208,7 +222,7 @@ Vehicle OBD-II Port (J1962)
    Canable USB / SocketCAN
   (CAN sniff + OBD ISO-TP)
           │
-    Raspberry Pi 5 (8 GB)
+    Raspberry Pi 5 (8 GB) ──── optional serial NMEA GPS (USB)
 
 Optional RE rig: add an NT510 via an OBD-II splitter when a capture needs a
 human-driven diagnostic stimulus. The ELM327 path is retained only for legacy

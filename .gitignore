@@ -47,6 +47,9 @@ canary.yaml
 # Live Pi config pulled by scripts/sync-train.sh for exact-match preprocessing
 # (may contain the vehicle VIN — never commit).
 canary.laptop.yaml
+# Local copy of the Pi's serve config (scp'd from /etc/canary/canary.yaml) used
+# to train with serve-time params; machine-specific device paths — never commit.
+canary.train.yaml
 
 # CANary telemetry artifacts (not committed; can be large)
 *.parquet
