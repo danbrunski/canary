@@ -160,19 +160,12 @@ def default_recipes() -> list[Recipe]:
             deviation=DeviationConfig(kind="absolute", warning_band=100.0, critical_band=250.0),
             notes=("Cold-idle RPM target curve. Vacuum leaks / IACV faults show as elevated idle."),
         ),
-        Surface1DRecipe(
-            name="timing_advance_vs_rpm",
-            output="obd:TIMING_ADVANCE",
-            output_unit="degBTDC",
-            x_column="obd:RPM",
-            x_axis_name="rpm",
-            x_axis_unit="rpm",
-            fit_method="poly",
-            degree=2,
-            min_samples=300,
-            deviation=DeviationConfig(kind="absolute", warning_band=4.0, critical_band=10.0),
-            notes="Heavy load-dependence — better as a 2D surface; this is the 1D rollup.",
-        ),
+        # NOTE: the 1D ``timing_advance_vs_rpm`` rollup was removed — timing
+        # advance is heavily load-dependent, so an RPM-only surface fit on an
+        # idle-heavy corpus predicts the idle value (~23°) and fires "critical"
+        # on every normal cruise (~39°): 292 false alarms vs 6 for the 2D
+        # version on a known-good drive. The load-conditioned surface below
+        # supersedes it.
         Surface2DRecipe(
             name="timing_advance_vs_rpm_load",
             output="obd:TIMING_ADVANCE",

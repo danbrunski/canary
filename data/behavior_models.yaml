@@ -12,7 +12,7 @@ models:
     - 0.0
     - 705.0
   operating_mode: warmup
-  version: 3
+  version: 4
   fit:
     sample_count: 1029
     r_squared: 0.46807673989226384
@@ -28,7 +28,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-24T23:12:27.216460+00:00'
+    fitted_at: '2026-05-25T03:05:40.482667+00:00'
     training_data_hash: sha256:fa3e004ac50cf29a
     kind: lookup_table
     x_knots:
@@ -75,7 +75,7 @@ models:
     - 71.0
     - 92.0
   operating_mode: idle
-  version: 3
+  version: 4
   fit:
     sample_count: 2889
     r_squared: 0.011644715114945359
@@ -91,7 +91,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-24T23:12:27.235429+00:00'
+    fitted_at: '2026-05-25T03:05:40.491064+00:00'
     training_data_hash: sha256:d2b25d21f581b476
     kind: lookup_table
     x_knots:
@@ -115,45 +115,6 @@ models:
     warning_band: 100.0
     critical_band: 250.0
   notes: Cold-idle RPM target curve. Vacuum leaks / IACV faults show as elevated idle.
-- name: timing_advance_vs_rpm
-  kind: surface_1d
-  output: obd:TIMING_ADVANCE
-  output_unit: degBTDC
-  axis:
-    name: rpm
-    channel: obd:RPM
-    unit: rpm
-    domain:
-    - 0.0
-    - 4312.5
-  version: 3
-  fit:
-    sample_count: 11611
-    r_squared: 0.7450152201843561
-    sessions:
-    - 2026-05-18T015823
-    - 2026-05-18T021421
-    - 2026-05-18T024234
-    - 2026-05-18T024456
-    - 2026-05-18T032933
-    - 2026-05-18T033254
-    - 2026-05-18T033527
-    - 2026-05-20T033820
-    - 2026-05-24T190027
-    - 2026-05-24T190535
-    - 2026-05-24T193045
-    fitted_at: '2026-05-24T23:12:27.272509+00:00'
-    training_data_hash: sha256:736219ea28719a88
-    kind: poly
-    coefficients:
-    - 59.2150809935892
-    - -0.05650596207019729
-    - 1.5579952879634197e-05
-  deviation:
-    kind: absolute
-    warning_band: 4.0
-    critical_band: 10.0
-  notes: "Heavy load-dependence \u2014 better as a 2D surface; this is the 1D rollup."
 - name: timing_advance_vs_rpm_load
   kind: surface_2d
   output: obd:TIMING_ADVANCE
@@ -181,7 +142,7 @@ models:
     - 22.745098114013672
     - 38.431373596191406
     - 100.0
-  version: 3
+  version: 4
   fit:
     sample_count: 11598
     sessions:
@@ -196,7 +157,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-24T23:12:27.316922+00:00'
+    fitted_at: '2026-05-25T03:05:40.505712+00:00'
     training_data_hash: sha256:99ba15f15ca996e5
     kind: grid_binned_mean
     cells:
@@ -341,7 +302,7 @@ models:
     - 22.745098114013672
     - 38.431373596191406
     - 100.0
-  version: 3
+  version: 4
   fit:
     sample_count: 11685
     sessions:
@@ -356,7 +317,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-24T23:12:27.356745+00:00'
+    fitted_at: '2026-05-25T03:05:40.520578+00:00'
     training_data_hash: sha256:b3b5cc453a42d685
     kind: grid_binned_mean
     cells:
@@ -503,7 +464,7 @@ models:
     - 28.627450942993164
     - 48.6274528503418
     - 100.0
-  version: 2
+  version: 3
   fit:
     sample_count: 7756
     sessions:
@@ -518,7 +479,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-24T23:12:27.388899+00:00'
+    fitted_at: '2026-05-25T03:05:40.532211+00:00'
     training_data_hash: sha256:3c1a9e7d03964517
     kind: grid_binned_mean
     cells:
@@ -684,7 +645,7 @@ models:
     domain:
     - 0.0
     - 4312.5
-  version: 2
+  version: 3
   fit:
     sample_count: 11701
     r_squared: 0.002128765588829462
@@ -700,7 +661,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-24T23:12:27.421286+00:00'
+    fitted_at: '2026-05-25T03:05:40.547603+00:00'
     training_data_hash: sha256:1c101a8da9460519
     kind: poly
     coefficients:
@@ -723,7 +684,7 @@ models:
     domain:
     - 0.0
     - 4312.5
-  version: 2
+  version: 3
   fit:
     sample_count: 11690
     r_squared: 0.007449648073902138
@@ -739,7 +700,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-24T23:12:27.454105+00:00'
+    fitted_at: '2026-05-25T03:05:40.562852+00:00'
     training_data_hash: sha256:05f56d2de3692bdd
     kind: poly
     coefficients:
@@ -764,7 +725,7 @@ models:
     - 0.0
     - 705.0
   operating_mode: warmup
-  version: 2
+  version: 3
   fit:
     sample_count: 1027
     r_squared: 0.8728978847168759
@@ -780,7 +741,7 @@ models:
     - 2026-05-24T190027
     - 2026-05-24T190535
     - 2026-05-24T193045
-    fitted_at: '2026-05-24T23:12:27.479068+00:00'
+    fitted_at: '2026-05-25T03:05:40.577992+00:00'
     training_data_hash: sha256:977d2d5412d81e30
     kind: lookup_table
     x_knots:

@@ -95,6 +95,25 @@ NON_TRAINABLE_GPS_CHANNELS: frozenset[str] = frozenset(
     }
 )
 
+#: Monotonic counters / odometers / run-clocks: they only ever increase (or
+#: reset on a DTC clear / key cycle), so their absolute level and rolling
+#: derivatives carry no anomaly signal — yet the LSTM can't reconstruct an
+#: ever-rising ramp and flags it on every window (RUN_TIME/DISTANCE were the
+#: top false-alarm contributors on a known-good drive), and they add noise to
+#: the IF. Excluded from trained features but kept in the frame so behavior
+#: models can still read them (e.g. ``obd:RUN_TIME`` is the coolant_warmup
+#: time-since-start axis). Same mechanism as NON_TRAINABLE_GPS_CHANNELS.
+NON_TRAINABLE_COUNTER_CHANNELS: frozenset[str] = frozenset(
+    {
+        "obd:RUN_TIME",
+        "obd:DISTANCE_SINCE_DTC_CLEAR",
+        "obd:DISTANCE_W_MIL",
+        "obd:WARMUPS_SINCE_DTC_CLEAR",
+        "decoded:ODOMETER_ACCUMULATOR_385",
+        "dbc:ODOMETER_ACCUMULATOR_385",
+    }
+)
+
 FEATURE_SPEC_VERSION = 1
 FEATURE_FRAME_CACHE_VERSION = 1
 
@@ -512,6 +531,10 @@ def candidate_feature_columns(features: pd.DataFrame) -> list[str]:
         # GPS position/quality channels (and their rolling derivatives) are
         # logged but never modeled — see NON_TRAINABLE_GPS_CHANNELS.
         if _base_feature_name(col) in NON_TRAINABLE_GPS_CHANNELS:
+            continue
+        # Monotonic counters / odometers / run-clocks — see
+        # NON_TRAINABLE_COUNTER_CHANNELS (kept in frame for behavior axes).
+        if _base_feature_name(col) in NON_TRAINABLE_COUNTER_CHANNELS:
             continue
         # Committee divergence residuals marked non-trainable: computed and
         # logged, but kept out of the trained set — see analysis.committees.
