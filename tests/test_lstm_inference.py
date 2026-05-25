@@ -191,6 +191,53 @@ def test_sequence_buffer_resets_on_missing_or_non_finite_features() -> None:
     assert buffer.ready is False
 
 
+def test_sequence_buffer_derives_mask_and_delta_from_gap_flags() -> None:
+    """The GRU-D serve buffer derives the observed-mask from ``¬<channel>__gap``
+    and accumulates Δt across ticks (reset on observed, +interval on stale),
+    mirroring how the offline dataset builds mask/Δt."""
+    import numpy as np
+
+    buffer = LSTMSequenceBuffer(feature_columns=("rpm", "speed"), sequence_length=3)
+    # rpm: fresh, fresh, stale.  speed: no gap column ⇒ always observed.
+    rows = [
+        {
+            SESSION_COLUMN: "s",
+            TIMESTAMP_COLUMN: "2026-05-12T00:00:00Z",
+            "rpm": 1.0,
+            "speed": 2.0,
+            "rpm__gap": False,
+        },
+        {
+            SESSION_COLUMN: "s",
+            TIMESTAMP_COLUMN: "2026-05-12T00:00:01Z",
+            "rpm": 1.0,
+            "speed": 2.0,
+            "rpm__gap": False,
+        },
+        {
+            SESSION_COLUMN: "s",
+            TIMESTAMP_COLUMN: "2026-05-12T00:00:02Z",
+            "rpm": 1.0,
+            "speed": 2.0,
+            "rpm__gap": True,
+        },
+    ]
+    for row in rows:
+        ready = buffer.append(row)
+    assert ready is True
+
+    mask = buffer.mask_array()
+    delta = buffer.delta_array()
+    # rpm (col 0): observed, observed, stale.
+    assert mask[:, 0].tolist() == [1.0, 1.0, 0.0]
+    # speed (col 1): always observed (no gap column present).
+    assert mask[:, 1].tolist() == [1.0, 1.0, 1.0]
+    # rpm Δt: 0 while fresh, then 1 s on the stale tick.
+    assert delta[:, 0].tolist() == [0.0, 0.0, 1.0]
+    assert delta[:, 1].tolist() == [0.0, 0.0, 0.0]
+    assert np.asarray(buffer.window_array()).shape == (3, 2)
+
+
 def test_sequence_buffer_resets_on_session_change() -> None:
     buffer = LSTMSequenceBuffer(feature_columns=("rpm", "speed"), sequence_length=2)
     row = {
@@ -248,6 +295,46 @@ def test_score_window_applies_scaler_before_forward_pass() -> None:
     # calibrated threshold — not the four-digit raw-value scale the
     # May 2026 artifact produced.
     assert result.global_score < 100.0
+
+
+def test_score_window_masked_score_ignores_stale_cells() -> None:
+    """The serve-time global score is a masked mean — a stale (mask=0) cell with
+    a wildly off value must not move the score, matching the masked thresholds
+    the model was calibrated against."""
+    import numpy as np
+
+    engine = LSTMInferenceEngine(_trained())
+    window = np.array([[700.0, 1.0]] * engine.sequence_length, dtype=np.float32)
+    all_fresh = np.ones_like(window)
+    delta = np.zeros_like(window)
+    baseline = engine.score_window(
+        window,
+        mask=all_fresh,
+        delta=delta,
+        timestamp="t",
+        session="s",
+        window_start_timestamp="t0",
+        window_end_timestamp="t1",
+    )
+
+    # Corrupt one cell's value but mark it stale (mask=0): the masked score must
+    # be unchanged because the corrupted cell doesn't contribute.
+    corrupted = window.copy()
+    corrupted[0, 0] = 1e6
+    partial_mask = all_fresh.copy()
+    partial_mask[0, 0] = 0.0
+    masked = engine.score_window(
+        corrupted,
+        mask=partial_mask,
+        delta=delta,
+        timestamp="t",
+        session="s",
+        window_start_timestamp="t0",
+        window_end_timestamp="t1",
+    )
+    # The stale corrupted cell is excluded; the masked global stays small.
+    assert masked.global_score < 100.0
+    assert masked.channel_scores["rpm"] < baseline.channel_scores["rpm"] + 1.0
 
 
 def test_score_window_validates_shape() -> None:

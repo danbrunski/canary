@@ -113,7 +113,7 @@ def test_train_lstm_autoencoder_produces_manifest() -> None:
     assert manifest.schema["feature_columns"] == ["rpm", "speed"]
     assert manifest.architecture["input_size"] == 2
     assert manifest.architecture["sequence_length"] == 4
-    assert manifest.hyperparams["loss"] == "mae"
+    assert manifest.hyperparams["loss"] == "masked_mse"
     assert manifest.hyperparams["optimizer"] == "adam"
     assert manifest.training_data_hash.startswith("sha256:")
     assert manifest.input_rows == len(dataset.frame)
@@ -170,10 +170,10 @@ def test_save_and_load_lstm_autoencoder_checkpoint(tmp_path: Path) -> None:
     assert loaded.manifest.model_version == "save-load-test"
     assert loaded.manifest.thresholds == trained.manifest.thresholds
 
-    sample = dataset[0].unsqueeze(0)
+    value, mask, delta = (tensor.unsqueeze(0) for tensor in dataset[0])
     with torch.no_grad():
-        reconstructed = loaded.model(sample)
-    assert tuple(reconstructed.shape) == tuple(sample.shape)
+        reconstructed = loaded.model(value, mask, delta)
+    assert tuple(reconstructed.shape) == tuple(value.shape)
 
 
 def test_load_rejects_lstm_architecture_feature_mismatch(tmp_path: Path) -> None:

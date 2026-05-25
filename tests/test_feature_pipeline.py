@@ -52,8 +52,10 @@ def test_drop_fully_stale_rows_noop_without_gap_columns() -> None:
     assert len(out) == 2
 
 
-def test_sequence_feature_columns_drops_sparse_channels() -> None:
-    # dbc:* fresh every tick (gap-rate 0); obd:* round-robin-stale (gap-rate ~1).
+def test_sequence_feature_columns_keeps_sparse_channels() -> None:
+    """GRU-D feeds missingness to the model, so the old density filter is gone:
+    a sparse round-robin OBD PID is kept at its native rate (masking handles
+    its staleness) rather than dropped from the sequence feature set."""
     n = 40
     frame = pd.DataFrame(
         {
@@ -69,7 +71,28 @@ def test_sequence_feature_columns_drops_sparse_channels() -> None:
     cols = sequence_feature_columns(frame)
     bases = {c.split("__")[0] for c in cols}
     assert "dbc:ECM_RPM" in bases  # dense channel kept
-    assert "obd:FUEL_LEVEL" not in bases  # sparse round-robin channel dropped
+    assert "obd:FUEL_LEVEL" in bases  # sparse round-robin channel now also kept
+
+
+def test_sequence_feature_columns_drops_all_nan_and_deviations() -> None:
+    """The only remaining drops are the deviation: family (NaN-by-contract,
+    IF-only) and all-NaN-everywhere columns."""
+    n = 5
+    frame = pd.DataFrame(
+        {
+            "session": ["s1"] * n,
+            "timestamp": pd.date_range("2026-05-24T19:00:00Z", periods=n, freq="1s"),
+            MODE_COLUMN: ["city"] * n,
+            "dbc:ECM_RPM": [float(800 + i) for i in range(n)],
+            "deviation:coolant_warmup": [0.1] * n,
+            "obd:NEVER_SEEN": [float("nan")] * n,
+        }
+    )
+    cols = sequence_feature_columns(frame)
+    bases = {c.split("__")[0] for c in cols}
+    assert "dbc:ECM_RPM" in bases
+    assert "deviation:coolant_warmup" not in bases  # deviation family dropped
+    assert "obd:NEVER_SEEN" not in bases  # all-NaN dropped
 
 
 @pytest.fixture

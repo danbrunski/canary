@@ -317,7 +317,7 @@ def train_lstm_autoencoder(
     if len(dataset) == 0:
         raise ValueError("no sequence windows available to train LSTM autoencoder")
 
-    torch, nn, optim, data = _torch_training_modules()
+    torch, _nn, optim, data = _torch_training_modules()
     torch.manual_seed(config.random_state)
 
     device_obj = torch.device(device)
@@ -340,7 +340,6 @@ def train_lstm_autoencoder(
         else data.DataLoader(validation_subset, batch_size=config.batch_size, shuffle=False)
     )
 
-    loss_fn = nn.L1Loss()
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
 
     best_epoch = 0
@@ -356,14 +355,13 @@ def train_lstm_autoencoder(
         train_loss = _train_one_epoch(
             model,
             train_loader,
-            loss_fn=loss_fn,
             optimizer=optimizer,
             device=device_obj,
         )
         validation_loss = (
             None
             if validation_loader is None
-            else _evaluate_loss(model, validation_loader, loss_fn=loss_fn, device=device_obj)
+            else _evaluate_loss(model, validation_loader, device=device_obj)
         )
         history.append(
             EpochLoss(epoch=epoch, train_loss=train_loss, validation_loss=validation_loss)
@@ -432,7 +430,7 @@ def train_lstm_autoencoder(
             "early_stopping_patience": config.early_stopping_patience,
             "min_delta": config.min_delta,
             "random_state": config.random_state,
-            "loss": "mae",
+            "loss": "masked_mse",
             "optimizer": "adam",
             "device": str(device_obj),
             "dtype": dtype,
@@ -490,10 +488,16 @@ def calibrate_lstm_thresholds(
     global_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
     channel_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
     with torch.no_grad():
-        for batch in loader:
-            batch = batch.to(device_obj)
-            global_errors = trained.model.reconstruction_error(batch, reduction="sample")
-            channel_errors = trained.model.reconstruction_error(batch, reduction="channel")
+        for value, mask, delta in loader:
+            value = value.to(device_obj)
+            mask = mask.to(device_obj)
+            delta = delta.to(device_obj)
+            global_errors = trained.model.reconstruction_error(
+                value, mask, delta, reduction="sample"
+            )
+            channel_errors = trained.model.reconstruction_error(
+                value, mask, delta, reduction="channel"
+            )
             global_chunks.append(global_errors.detach().cpu().numpy().astype(np.float64))
             channel_chunks.append(channel_errors.detach().cpu().numpy().astype(np.float64))
 
@@ -593,6 +597,7 @@ def load_lstm_autoencoder_model(
         num_layers=int(architecture["num_layers"]),
         latent_dim=int(architecture["latent_dim"]),
         dropout=float(architecture["dropout"]),
+        decoder_type=str(architecture.get("decoder_type", "gru")),
     )
     model.load_state_dict(payload["state_dict"])
     model.to(device=torch.device(device), dtype=getattr(torch, dtype))
@@ -758,21 +763,34 @@ def _split_dataset(
     return data.Subset(dataset, train_indexes), data.Subset(dataset, validation_indexes)
 
 
+def _masked_mse_loss(reconstruction: Any, value: Any, mask: Any) -> Any:
+    """Masked MSE: ``sum(m ⊙ (recon − x)²) / sum(m)`` over the whole batch.
+
+    Only observed cells (``mask == 1``) count, so the model is never trained to
+    reconstruct a forward-filled fill. A degenerate all-stale batch (sum(m)==0)
+    is clamped to a denominator of 1 so the loss is 0 rather than NaN.
+    """
+    squared = ((reconstruction - value) ** 2) * mask
+    denominator = mask.sum().clamp(min=1.0)
+    return squared.sum() / denominator
+
+
 def _train_one_epoch(
     model: LSTMAutoencoder,
     loader: Any,
     *,
-    loss_fn: Any,
     optimizer: Any,
     device: Any,
 ) -> float:
     model.train()
     losses: list[float] = []
-    for batch in loader:
-        batch = batch.to(device)
+    for value, mask, delta in loader:
+        value = value.to(device)
+        mask = mask.to(device)
+        delta = delta.to(device)
         optimizer.zero_grad(set_to_none=True)
-        reconstruction = model(batch)
-        loss = loss_fn(reconstruction, batch)
+        reconstruction = model(value, mask, delta)
+        loss = _masked_mse_loss(reconstruction, value, mask)
         loss.backward()
         optimizer.step()
         losses.append(float(loss.detach().cpu().item()))
@@ -783,17 +801,19 @@ def _evaluate_loss(
     model: LSTMAutoencoder,
     loader: Any,
     *,
-    loss_fn: Any,
     device: Any,
 ) -> float:
     torch = _torch_module()
     model.eval()
     losses: list[float] = []
     with torch.no_grad():
-        for batch in loader:
-            batch = batch.to(device)
-            reconstruction = model(batch)
-            losses.append(float(loss_fn(reconstruction, batch).detach().cpu().item()))
+        for value, mask, delta in loader:
+            value = value.to(device)
+            mask = mask.to(device)
+            delta = delta.to(device)
+            reconstruction = model(value, mask, delta)
+            loss = _masked_mse_loss(reconstruction, value, mask)
+            losses.append(float(loss.detach().cpu().item()))
     return float(np.mean(losses))
 
 

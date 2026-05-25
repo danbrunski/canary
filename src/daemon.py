@@ -609,6 +609,11 @@ def _lstm_observe(engine: Any, row: Any) -> Any:
     to pre-validate — we just present the columns the engine asks for. The
     return value is ``LSTMInferenceResult`` once a full window is ready,
     ``None`` otherwise.
+
+    GRU-D needs each value column's ``<channel>__gap`` flag to derive the
+    observed-mask. ``reconcile_feature_frame_to_spec`` only keeps structural +
+    value columns (it's shared with the IF path), so re-attach the gap columns
+    from the original live row after reconciling.
     """
     schema = _schema_for_engine(engine)
     aligned, report = reconcile_feature_frame_to_spec(row, schema)
@@ -617,7 +622,12 @@ def _lstm_observe(engine: Any, row: Any) -> Any:
         _engine_version(engine),
         report,
     )
-    return engine.observe(aligned.iloc[0])
+    observed = aligned.iloc[0].to_dict()
+    for column in row.columns:
+        name = str(column)
+        if name.endswith("__gap") and name not in observed:
+            observed[name] = row.iloc[0][column]
+    return engine.observe(observed)
 
 
 def _schema_for_engine(engine: Any) -> dict[str, Any]:

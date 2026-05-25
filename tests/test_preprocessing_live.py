@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from src.config import CanaryConfig
@@ -213,6 +214,79 @@ def test_live_and_offline_obd_feature_rows_share_contract(
     for column in expected_columns - {"timestamp", "session", "operating_mode"}:
         assert last_live[column] == pytest.approx(last_offline[column], nan_ok=True)
     assert last_live["operating_mode"] == last_offline["operating_mode"]
+
+
+# ---------------------------------------------------------------------------
+# GRU-D mask / Δt parity with the resampler
+# ---------------------------------------------------------------------------
+
+
+def test_live_gap_flag_matches_resampler_for_same_observations(config: CanaryConfig) -> None:
+    """The live serve path has no resampler, so it derives each channel's
+    ``__gap`` (mask = ¬gap) and Δt from per-channel last-observed timestamps.
+    For the same observation history those flags must match what
+    ``resample_wide`` would emit, or train and serve disagree on staleness."""
+    from src.preprocessing.resampler import (
+        SESSION_COLUMN,
+        TIMESTAMP_COLUMN,
+        ResampleConfig,
+        gap_column,
+        resample_wide,
+    )
+
+    base = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    # RPM is a fast channel observed at t=0 and t=4 only (so it goes stale in
+    # between). The resampler's max_gap at 1 Hz is 2 s (interval × factor 2).
+    observe_ticks = {0, 4}
+
+    src = LiveFeatureSource(config=config)
+    live_gap: list[bool] = []
+    for i in range(8):
+        if i in observe_ticks:
+            src.observe(TelemetryRecord.obd(float((base).timestamp() + i), "RPM", 800.0, "rpm"))
+        row = src.tick(base + timedelta(seconds=i))
+        assert row is not None
+        live_gap.append(bool(row[gap_column("obd:RPM")].iloc[0]))
+
+    # Offline equivalent: the same two observations through the resampler.
+    wide = pd.DataFrame(
+        {
+            SESSION_COLUMN: ["s"] * len(observe_ticks),
+            TIMESTAMP_COLUMN: [base + timedelta(seconds=i) for i in sorted(observe_ticks)],
+            "obd:RPM": [800.0] * len(observe_ticks),
+        }
+    )
+    resampled = resample_wide(wide, config=ResampleConfig(hz=config.preprocessing.resample_hz))
+    resampler_gap = resampled[gap_column("obd:RPM")].astype(bool).tolist()
+
+    # The resampler's grid spans only [first_obs, last_obs] (t=0..4); the live
+    # path ticks on past the last observation (t=5..7). Over the overlapping
+    # span the gap pattern is identical: fresh at t=0,1,2 (age ≤ 2 s) and t=4,
+    # stale at t=3.
+    assert resampler_gap == [False, False, False, True, False]
+    assert live_gap[: len(resampler_gap)] == resampler_gap
+    # Past the last observation the live path keeps ageing: fresh at t=4,5,6
+    # (age ≤ 2), stale again at t=7.
+    assert live_gap == [False, False, False, True, False, False, False, True]
+
+
+def test_live_channel_age_tracks_seconds_since_observation(config: CanaryConfig) -> None:
+    """``channel_age_seconds`` (the GRU-D Δt source) counts seconds since the
+    channel's last observation, resetting on every fresh ``observe``."""
+    base = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    src = LiveFeatureSource(config=config)
+    src.observe(TelemetryRecord.obd(base.timestamp(), "RPM", 800.0, "rpm"))
+    ages = []
+    for i in range(4):
+        now = base + timedelta(seconds=i)
+        src.tick(now)
+        ages.append(src.channel_age_seconds("obd:RPM", now))
+    assert ages == [0.0, 1.0, 2.0, 3.0]
+    # A fresh observation resets the age to 0.
+    later = base + timedelta(seconds=5)
+    src.observe(TelemetryRecord.obd(later.timestamp(), "RPM", 810.0, "rpm"))
+    src.tick(later)
+    assert src.channel_age_seconds("obd:RPM", later) == 0.0
 
 
 # ---------------------------------------------------------------------------

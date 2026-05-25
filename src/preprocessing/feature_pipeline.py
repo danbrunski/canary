@@ -533,65 +533,23 @@ DEVIATION_PREFIX = "deviation:"
 
 
 def sequence_feature_columns(features: pd.DataFrame) -> list[str]:
-    """LSTM-autoencoder feature columns: dense sensor sequences only.
+    """GRU-D LSTM-autoencoder feature columns: all trainable sensor channels.
 
     Differs from :func:`trainable_feature_columns` (which the Isolation Forest
-    uses) in two ways the sequence windower requires, because
-    ``_window_has_missing_features`` rejects a whole window on *any* NaN:
+    uses) in one way: it **drops the entire ``deviation:`` family** (raw and
+    rolling aggregates). Deviations are behavior-model-derived scores that are
+    NaN by contract whenever the model can't speak (off operating-regime) —
+    scattered NaN, not a gap. They are designed for the IF path, which imputes;
+    an autoencoder reconstructing sensor *sequences* should not consume them.
 
-    * **Drops the entire ``deviation:`` family** (raw and rolling aggregates).
-      Deviations are behavior-model-derived scores that are NaN by contract
-      whenever the model can't speak (off operating-regime) — scattered NaN,
-      not a gap. They are designed for the IF path, which imputes; an
-      autoencoder reconstructing sensor *sequences* should not consume them,
-      and keeping them collapses every window outside their regime.
-    * **Keeps only columns observed in every session.** A channel present in
-      some drives but not this one is all-NaN for that session; in the
-      cross-session union that silently rejects every window in the sessions
-      missing it. Requiring presence in all sessions yields a schema that is
-      dense by construction (the resampler already forward-fills within a
-      session), so windows actually form.
-    * **Drops sparsely-sampled channels.** A round-robin-polled OBD PID is
-      stale most ticks (its ``__gap`` flag set), so ``_window_has_gap`` rejects
-      every window the moment such a channel is in the set — collapsing the
-      corpus to zero windows even though each value is forward-filled. These are
-      not dense per-tick sequences (the IF, which imputes, consumes them); only
-      channels fresh on nearly every tick belong here.
+    The previous density / every-session pruning is **gone**: GRU-D feeds
+    missingness to the model via the mask/Δt channels, so a round-robin OBD PID
+    (stale most ticks) or a channel absent from some drives is kept at its native
+    rate rather than dropped. The only remaining drop is all-NaN-everywhere
+    columns, inherited from :func:`trainable_feature_columns`.
     """
-    base = [
-        col for col in trainable_feature_columns(features) if not col.startswith(DEVIATION_PREFIX)
-    ]
-    base = _dense_sequence_columns(base, features)
-    if "session" not in features.columns or features["session"].nunique() <= 1:
-        return base
-    notna = features[base].notna()
-    observed_per_session = notna.groupby(features["session"].to_numpy()).any()
-    return [col for col in base if bool(observed_per_session[col].all())]
-
-
-#: A channel whose ``__gap`` flag is set on more than this fraction of ticks is
-#: too sparsely sampled to be an LSTM sequence input (round-robin OBD PIDs sit
-#: near 1.0; broadcast CAN channels near 0.0 — the split is wide, so the exact
-#: cutoff isn't delicate).
-_MAX_SEQUENCE_GAP_RATE = 0.1
-
-
-def _dense_sequence_columns(columns: list[str], features: pd.DataFrame) -> list[str]:
-    """Keep only columns whose channel is fresh on nearly every tick.
-
-    Sparsity is read from the per-channel ``<channel>__gap`` flag. A column with
-    no gap flag (slow channels aren't gap-tracked; they're forward-filled and
-    never reject a window) is kept.
-    """
-    gap_rate: dict[str, float] = {
-        str(col)[: -len(GAP_SUFFIX)]: float(features[col].mean())
-        for col in features.columns
-        if str(col).endswith(GAP_SUFFIX)
-    }
     return [
-        col
-        for col in columns
-        if gap_rate.get(_base_feature_name(col), 0.0) <= _MAX_SEQUENCE_GAP_RATE
+        col for col in trainable_feature_columns(features) if not col.startswith(DEVIATION_PREFIX)
     ]
 
 
@@ -632,6 +590,13 @@ def build_feature_spec(
             "rolling_window_seconds": config.preprocessing.rolling_window_seconds,
             "operating_modes": sorted(config.preprocessing.operating_modes),
         }
+        # The resampler's max_gap is what flips a channel's ``__gap`` flag to
+        # stale at training time. GRU-D serve must mirror it exactly (it has no
+        # resampler), so persist it on the spec. ResampleConfig.max_gap =
+        # (1 / hz) * max_gap_factor (default factor 2.0).
+        spec["max_gap_seconds"] = float(
+            ResampleConfig(hz=config.preprocessing.resample_hz).max_gap.total_seconds()
+        )
     if sequence_length is not None:
         spec["sequence_length"] = sequence_length
     if sequence_stride is not None:

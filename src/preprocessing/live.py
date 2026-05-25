@@ -41,7 +41,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
@@ -59,6 +59,7 @@ from src.decode.dids import (
 )
 from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.features import FeatureConfig
+from src.preprocessing.resampler import ResampleConfig, gap_column, is_slow_channel
 from src.telemetry import (
     DBC_SOURCE,
     DECODED_SOURCE,
@@ -89,12 +90,20 @@ class LiveFeatureSource:
     session: str = "live"
 
     _current_values: dict[str, float] = field(default_factory=dict)
+    #: Per-channel wall-clock timestamp of the last fresh ``observe()``. GRU-D
+    #: serve derives each channel's mask (``age ≤ max_gap``) and Δt (``age``)
+    #: from this, mirroring the resampler's ``__gap`` rule with no resampler.
+    _last_observed_at: dict[str, datetime] = field(default_factory=dict)
     _buffer: deque[dict[str, Any]] = field(init=False)
     _bindings_by_id: dict[int, list[Signal]] = field(init=False)
     _dbc_message_by_id: dict[int, Any] = field(init=False)
     _did_by_hex: dict[str, DidEntry] = field(init=False)
     _feature_config: FeatureConfig = field(init=False)
     _max_rows: int = field(init=False)
+    #: Resampler ``max_gap`` in seconds — the staleness cutoff that flips a
+    #: channel's mask to 0. Mirrors ``ResampleConfig(hz).max_gap`` so train and
+    #: serve agree on what "stale" means for the same observation history.
+    _max_gap_seconds: float = field(init=False)
 
     #: Last wide-row operating point (raw channels + ``operating_mode`` +
     #: ``deviation:*``) from :meth:`tick`. The daemon reads this to compute
@@ -117,6 +126,12 @@ class LiveFeatureSource:
         self._max_rows = max(32, int(window_s * hz * 2), int(recent_motion_s * hz) + int(hz))
         self._buffer = deque(maxlen=self._max_rows)
         self._feature_config = FeatureConfig(window_seconds=window_s)
+        # Mirror the resampler's max_gap (interval × max_gap_factor) used at
+        # training time, so a channel reads stale at serve exactly when its
+        # ``__gap`` flag would have been set offline.
+        self._max_gap_seconds = float(
+            ResampleConfig(hz=self.config.preprocessing.resample_hz).max_gap.total_seconds()
+        )
         # Pre-index bindings by CAN ID so decode is O(signals per ID), not
         # O(all signals) per CAN frame.
         self._bindings_by_id = {}
@@ -140,6 +155,18 @@ class LiveFeatureSource:
     # observe — update the current-value dict
     # ------------------------------------------------------------------
 
+    def _set_value(self, channel: str, value: float, observed_at: datetime) -> None:
+        """Store a channel's current value and stamp its observation time.
+
+        The observation time drives the GRU-D serve mask/Δt: at each tick a
+        channel is fresh iff ``now − observed_at ≤ max_gap``. ``observed_at`` is
+        normalized to tz-aware UTC so age arithmetic against the tick's ``now``
+        never mixes naive/aware datetimes.
+        """
+        self._current_values[channel] = value
+        ts = observed_at if observed_at.tzinfo is not None else observed_at.replace(tzinfo=UTC)
+        self._last_observed_at[channel] = ts
+
     def observe(self, record: TelemetryRecord) -> None:
         """Apply one ``TelemetryRecord`` to the running current-values dict.
 
@@ -156,7 +183,7 @@ class LiveFeatureSource:
                 return
             value = _to_float(record.value)
             if value is not None:
-                self._current_values[channel_key(OBD_SOURCE, record.channel)] = value
+                self._set_value(channel_key(OBD_SOURCE, record.channel), value, record.timestamp)
             return
         if record.source == "can":
             self._apply_can_decode(record)
@@ -165,7 +192,7 @@ class LiveFeatureSource:
         # stored as-is; the pipeline will surface it as a new column.
         value = _to_float(record.value)
         if value is not None:
-            self._current_values[channel_key(record.source, record.channel)] = value
+            self._set_value(channel_key(record.source, record.channel), value, record.timestamp)
 
     def decode_for_telemetry(self, record: TelemetryRecord) -> tuple[TelemetryRecord, ...]:
         """Return decoded signal rows for a raw CAN record.
@@ -209,7 +236,9 @@ class LiveFeatureSource:
             # normalizes downstream and most bindings have no pinned scale.
             value = _to_float(decoded.value)
             if value is not None:
-                self._current_values[channel_key(DECODED_SOURCE, decoded.channel)] = value
+                self._set_value(
+                    channel_key(DECODED_SOURCE, decoded.channel), value, record.timestamp
+                )
         self._apply_dbc_decode(record)
 
     def _apply_dbc_decode(self, record: TelemetryRecord) -> None:
@@ -239,7 +268,7 @@ class LiveFeatureSource:
                 numeric = float(value)
             except (TypeError, ValueError):
                 continue  # named choice / enum signals — skip in numeric path
-            self._current_values[channel_key(DBC_SOURCE, signal_name)] = numeric
+            self._set_value(channel_key(DBC_SOURCE, signal_name), numeric, record.timestamp)
 
     def _apply_did_decode(self, record: TelemetryRecord) -> None:
         """Mirror ``decode_did_rows``: decode a raw ``DID_<hex>`` reading into
@@ -265,7 +294,7 @@ class LiveFeatureSource:
             return
         scaled = apply_scaling(entry, raw_int)
         numeric = float(scaled) if scaled is not None else float(raw_int)
-        self._current_values[channel_key(DID_SOURCE, entry.name)] = numeric
+        self._set_value(channel_key(DID_SOURCE, entry.name), numeric, record.timestamp)
 
     # ------------------------------------------------------------------
     # tick — emit one feature row
@@ -282,11 +311,16 @@ class LiveFeatureSource:
         if not self._current_values:
             self.latest_operating_point = None
             return None
+        now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
         # Snapshot — copy so a later observation can't mutate this tick's row.
-        snapshot = {
-            "timestamp": pd.Timestamp(now, tz="UTC") if now.tzinfo is None else pd.Timestamp(now),
+        snapshot: dict[str, Any] = {
+            "timestamp": pd.Timestamp(now_utc),
             "session": self.session,
             **self._current_values,
+            # Per-channel ``__gap`` flags mirror the resampler so the GRU-D
+            # serve path derives mask (¬gap) and Δt (age) identically to
+            # training. Slow channels aren't gap-tracked offline either.
+            **self._gap_flags(now_utc),
         }
         self._buffer.append(snapshot)
 
@@ -318,6 +352,40 @@ class LiveFeatureSource:
         if featured.empty:
             return None
         return featured.iloc[[-1]].reset_index(drop=True)
+
+    def _gap_flags(self, now: datetime) -> dict[str, bool]:
+        """Per-channel ``<channel>__gap`` flags for the current tick.
+
+        Mirrors ``resampler._gap_flags``: a fast channel is stale (``True``)
+        when the seconds since its last observation exceed ``max_gap``. Slow
+        channels (``is_slow_channel``) aren't gap-tracked offline, so they get
+        no flag here either — the GRU-D mask then treats them as always
+        observed (forward-filled), matching the resampler's forward-fill of
+        slow channels with no gap column.
+        """
+        flags: dict[str, bool] = {}
+        for channel in self._current_values:
+            if is_slow_channel(channel):
+                continue
+            observed_at = self._last_observed_at.get(channel)
+            if observed_at is None:
+                flags[gap_column(channel)] = True
+                continue
+            age = (now - observed_at).total_seconds()
+            flags[gap_column(channel)] = age > self._max_gap_seconds
+        return flags
+
+    def channel_age_seconds(self, channel: str, now: datetime) -> float | None:
+        """Seconds since ``channel`` was last observed (Δt), or ``None``.
+
+        Used by the GRU-D serve adapter to build the per-cell Δt input. ``now``
+        is normalized to tz-aware UTC to match the stored observation stamps.
+        """
+        observed_at = self._last_observed_at.get(channel)
+        if observed_at is None:
+            return None
+        now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        return max((now_utc - observed_at).total_seconds(), 0.0)
 
     # ------------------------------------------------------------------
     # Introspection

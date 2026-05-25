@@ -252,10 +252,16 @@ def _reconstruction_errors(
     global_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
     channel_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
     with torch.no_grad():
-        for batch in loader:
-            batch = batch.to(device_obj)
-            global_errors = trained.model.reconstruction_error(batch, reduction="sample")
-            channel_errors = trained.model.reconstruction_error(batch, reduction="channel")
+        for value, mask, delta in loader:
+            value = value.to(device_obj)
+            mask = mask.to(device_obj)
+            delta = delta.to(device_obj)
+            global_errors = trained.model.reconstruction_error(
+                value, mask, delta, reduction="sample"
+            )
+            channel_errors = trained.model.reconstruction_error(
+                value, mask, delta, reduction="channel"
+            )
             global_chunks.append(global_errors.detach().cpu().numpy().astype(np.float64))
             channel_chunks.append(channel_errors.detach().cpu().numpy().astype(np.float64))
     return np.concatenate(global_chunks), np.concatenate(channel_chunks, axis=0)

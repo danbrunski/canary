@@ -19,7 +19,7 @@ import pandas as pd
 
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
 from src.models.lstm_training import LSTMThresholdCalibration, TrainedLSTMAutoencoder
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.timefmt import format_timestamp
 
 LSTM_SCORE_COLUMN = "lstm_reconstruction_error"
@@ -84,8 +84,25 @@ class LSTMInferenceResult:
         }
 
 
+def _base_channel(column: str) -> str:
+    """Strip a rolling-feature suffix to the raw channel for ``__gap`` lookup."""
+    for suffix in ("__mean", "__std", "__roc"):
+        if column.endswith(suffix):
+            return column[: -len(suffix)]
+    return column
+
+
 class LSTMSequenceBuffer:
-    """Fixed-length buffer for model-ready feature rows."""
+    """Fixed-length buffer for GRU-D feature rows (value + mask + Δt).
+
+    Each appended row is split into a value vector, an observed-mask vector
+    (``1`` where the channel was freshly observed this tick, derived from
+    ``¬<channel>__gap``), and a Δt vector (seconds since each channel was last
+    observed). Δt is accumulated **inside the buffer** exactly as
+    ``sequence_dataset`` accumulates it offline — reset to 0 on an observed tick,
+    otherwise incremented by the inter-tick second delta — so train and serve
+    feed the encoder identical Δt for the same observation history.
+    """
 
     def __init__(
         self,
@@ -107,14 +124,23 @@ class LSTMSequenceBuffer:
         self.session_column = session_column
         self.mode_column = mode_column
         self.dtype = dtype
+        self._gap_columns = tuple(
+            f"{_base_channel(column)}{GAP_SUFFIX}" for column in feature_columns
+        )
         self._values: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(maxlen=sequence_length)
+        self._masks: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(maxlen=sequence_length)
+        self._deltas: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(maxlen=sequence_length)
         self._metadata: deque[tuple[str, str]] = deque(maxlen=sequence_length)
         self._session: str | None = None
+        #: Running per-channel Δt (seconds since last observed) carried across
+        #: ticks so it survives the deque's bounded length, mirroring the
+        #: dataset's per-session cumulative Δt.
+        self._delta_accumulator: np.ndarray[Any, np.dtype[np.float64]] = np.zeros(
+            len(feature_columns), dtype=np.float64
+        )
+        self._last_timestamp: pd.Timestamp | None = None
         #: Phase 7.5 — the most recent appended row's operating mode, used by
-        #: ``LSTMInferenceEngine.observe`` to pick the per-mode threshold
-        #: (when the calibration carries one). Tracked separately from the
-        #: timestamp/session metadata deque to avoid touching ``metadata()``'s
-        #: 3-tuple contract.
+        #: ``LSTMInferenceEngine.observe`` to pick the per-mode threshold.
         self._last_mode: str | None = None
 
     def append(self, row: Mapping[str, Any] | pd.Series) -> bool:
@@ -122,10 +148,12 @@ class LSTMSequenceBuffer:
 
         Rows missing a feature or containing non-finite feature values reset the
         buffer. A session change also resets the buffer so windows never span
-        sessions.
+        sessions. The mask comes from ``¬<channel>__gap`` (absent gap column ⇒
+        observed); Δt is accumulated from the mask and the inter-tick interval.
         """
         session = str(row.get(self.session_column, ""))
-        timestamp = _format_timestamp(row.get(self.timestamp_column))
+        timestamp_str = _format_timestamp(row.get(self.timestamp_column))
+        timestamp = _coerce_timestamp(row.get(self.timestamp_column))
         if self._session is not None and session != self._session:
             self.clear()
         self._session = session
@@ -143,11 +171,46 @@ class LSTMSequenceBuffer:
             self.clear()
             return False
 
+        mask = self._row_mask(row)
+        delta = self._advance_delta(mask, timestamp)
+
         self._values.append(values)
-        self._metadata.append((timestamp, session))
+        self._masks.append(mask)
+        self._deltas.append(delta.astype(self.dtype))
+        self._metadata.append((timestamp_str, session))
         raw_mode = row.get(self.mode_column)
         self._last_mode = raw_mode if isinstance(raw_mode, str) else None
         return self.ready
+
+    def _row_mask(
+        self, row: Mapping[str, Any] | pd.Series
+    ) -> np.ndarray[Any, np.dtype[np.float32]]:
+        """Per-channel observed mask: ``¬<channel>__gap`` (absent ⇒ observed)."""
+        mask = np.ones(len(self.feature_columns), dtype=self.dtype)
+        for index, gap_column in enumerate(self._gap_columns):
+            if gap_column in row:
+                raw = row[gap_column]
+                stale = bool(raw) if raw is not None and not _is_nan(raw) else True
+                mask[index] = 0.0 if stale else 1.0
+        return mask
+
+    def _advance_delta(
+        self,
+        mask: np.ndarray[Any, np.dtype[np.float32]],
+        timestamp: pd.Timestamp | None,
+    ) -> np.ndarray[Any, np.dtype[np.float64]]:
+        """Update the running Δt accumulator and return this tick's Δt vector."""
+        step_seconds = 0.0
+        if timestamp is not None and self._last_timestamp is not None:
+            step_seconds = max((timestamp - self._last_timestamp).total_seconds(), 0.0)
+        observed = mask > 0.5
+        # Accumulate first, then reset observed channels to 0 — an observed
+        # tick has Δt 0, a stale tick carries the prior age plus this step.
+        self._delta_accumulator = self._delta_accumulator + step_seconds
+        self._delta_accumulator[observed] = 0.0
+        if timestamp is not None:
+            self._last_timestamp = timestamp
+        return self._delta_accumulator.copy()
 
     @property
     def ready(self) -> bool:
@@ -155,9 +218,13 @@ class LSTMSequenceBuffer:
 
     def clear(self) -> None:
         self._values.clear()
+        self._masks.clear()
+        self._deltas.clear()
         self._metadata.clear()
         self._session = None
         self._last_mode = None
+        self._delta_accumulator = np.zeros(len(self.feature_columns), dtype=np.float64)
+        self._last_timestamp = None
 
     @property
     def last_mode(self) -> str | None:
@@ -168,6 +235,16 @@ class LSTMSequenceBuffer:
         if not self.ready:
             raise ValueError("sequence buffer is not ready")
         return np.stack(tuple(self._values), axis=0)
+
+    def mask_array(self) -> np.ndarray[Any, np.dtype[np.float32]]:
+        if not self.ready:
+            raise ValueError("sequence buffer is not ready")
+        return np.stack(tuple(self._masks), axis=0)
+
+    def delta_array(self) -> np.ndarray[Any, np.dtype[np.float32]]:
+        if not self.ready:
+            raise ValueError("sequence buffer is not ready")
+        return np.stack(tuple(self._deltas), axis=0)
 
     def metadata(self) -> tuple[str, str, str]:
         """Return start timestamp, end timestamp, and current session."""
@@ -235,6 +312,8 @@ class LSTMInferenceEngine:
         start_timestamp, end_timestamp, session = self.buffer.metadata()
         return self.score_window(
             self.buffer.window_array(),
+            mask=self.buffer.mask_array(),
+            delta=self.buffer.delta_array(),
             timestamp=end_timestamp,
             session=session,
             window_start_timestamp=start_timestamp,
@@ -246,42 +325,67 @@ class LSTMInferenceEngine:
         self,
         window: np.ndarray[Any, np.dtype[np.float32]],
         *,
+        mask: np.ndarray[Any, np.dtype[np.float32]] | None = None,
+        delta: np.ndarray[Any, np.dtype[np.float32]] | None = None,
         timestamp: str,
         session: str,
         window_start_timestamp: str,
         window_end_timestamp: str,
         operating_mode: str | None = None,
     ) -> LSTMInferenceResult:
-        """Score one complete ``(T, F)`` sequence window."""
-        if window.shape != (self.sequence_length, len(self.feature_columns)):
+        """Score one complete ``(T, F)`` sequence window.
+
+        ``mask`` / ``delta`` are the GRU-D per-cell observed-mask and Δt windows.
+        When omitted (callers that only have values, e.g. tests scoring a raw
+        window) every cell is treated as freshly observed with Δt 0 — the
+        all-fresh case the model reduces to a plain autoencoder on.
+        """
+        expected_shape = (self.sequence_length, len(self.feature_columns))
+        if window.shape != expected_shape:
             raise ValueError(
                 "window shape must be "
                 f"({self.sequence_length}, {len(self.feature_columns)}); got {window.shape}"
             )
+        if mask is None:
+            mask = np.ones(expected_shape, dtype=np.float32)
+        if delta is None:
+            delta = np.zeros(expected_shape, dtype=np.float32)
+        if mask.shape != expected_shape or delta.shape != expected_shape:
+            raise ValueError("mask and delta must match the value window shape")
         started = self.time_fn()
-        # z-score against the training-time scaler so reconstruction error
-        # is in the same scale as the calibrated threshold. Without this
-        # the model sees raw OBD values (RPM 0-5000, etc.) and produces
-        # huge errors that the threshold never approaches — the May 2026
-        # degenerate-fit shape.
+        # z-score the *values* against the training-time scaler so reconstruction
+        # error is in the same scale as the calibrated threshold. Mask and Δt are
+        # model-structure inputs and pass through unscaled.
         scaled_window: np.ndarray[Any, np.dtype[np.float32]] = window
         if self._scaler_means is not None and self._scaler_stds is not None:
             scaled_window = (
                 (window.astype(np.float64) - self._scaler_means) / self._scaler_stds
             ).astype(np.float32)
-        tensor = self._torch.as_tensor(scaled_window, dtype=getattr(self._torch, self.dtype))
-        tensor = tensor.unsqueeze(0).to(self._device)
+        torch_dtype = getattr(self._torch, self.dtype)
+        value_t = (
+            self._torch.as_tensor(scaled_window, dtype=torch_dtype).unsqueeze(0).to(self._device)
+        )
+        mask_t = self._torch.as_tensor(mask, dtype=torch_dtype).unsqueeze(0).to(self._device)
+        delta_t = self._torch.as_tensor(delta, dtype=torch_dtype).unsqueeze(0).to(self._device)
         with self._torch.no_grad():
             # Phase 7.2a: one forward → all reductions + the actual/recon
-            # arrays the dashboard overlay needs. Cheaper than calling
-            # ``reconstruction_error`` twice for separate reductions and
-            # never running ``forward`` again for the overlays.
-            reconstructed = self.trained.model.forward(tensor)
-            error_tensor = (reconstructed - tensor).abs()
-            global_score = float(error_tensor.mean().item())
-            channel_values = error_tensor.mean(dim=1).detach().cpu().numpy()[0].astype(float)
+            # arrays the dashboard overlay needs. The error is **masked** so a
+            # forward-filled (stale) cell never inflates the score, matching the
+            # masked thresholds calibrated at training time.
+            reconstructed = self.trained.model.forward(value_t, mask_t, delta_t)
+            error_tensor = (reconstructed - value_t).abs() * mask_t
+            denom = float(mask_t.sum().item())
+            global_score = float(error_tensor.sum().item() / denom) if denom > 0 else 0.0
+            mask_per_channel = mask_t.sum(dim=1).detach().cpu().numpy()[0].astype(float)  # (F,)
+            channel_sums = error_tensor.sum(dim=1).detach().cpu().numpy()[0].astype(float)  # (F,)
+            channel_values = np.divide(
+                channel_sums,
+                mask_per_channel,
+                out=np.zeros_like(channel_sums),
+                where=mask_per_channel > 0,
+            )
             timestep_error_np = error_tensor.detach().cpu().numpy()[0].astype(float)  # (T, F)
-            actual_np = tensor.detach().cpu().numpy()[0].astype(float)  # (T, F)
+            actual_np = value_t.detach().cpu().numpy()[0].astype(float)  # (T, F)
             reconstructed_np = reconstructed.detach().cpu().numpy()[0].astype(float)  # (T, F)
         latency_ms = (self.time_fn() - started) * 1000.0
 
@@ -370,6 +474,26 @@ def _format_timestamp(value: Any) -> str:
     if value is None or value == "":
         return ""
     return format_timestamp(value)
+
+
+def _coerce_timestamp(value: Any) -> pd.Timestamp | None:
+    """Parse a row's timestamp into a UTC ``pd.Timestamp`` for Δt arithmetic."""
+    if value is None or value == "":
+        return None
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError):
+        return None
+    if timestamp.tzinfo is None:
+        return timestamp.tz_localize("UTC")
+    return timestamp.tz_convert("UTC")
+
+
+def _is_nan(value: Any) -> bool:
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
 
 
 def _torch_module() -> Any:

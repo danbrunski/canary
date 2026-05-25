@@ -1,10 +1,18 @@
 """Sliding-window datasets for sequence models.
 
-The LSTM autoencoder consumes fixed-length windows shaped ``(T, F)`` from
-preprocessed telemetry. PyTorch's ``DataLoader`` then batches those samples
-into ``(B, T, F)``. Window discovery is deliberately implemented without a
-torch dependency so CI can validate the filtering rules before the optional
-``ml`` extra is installed.
+The GRU-D LSTM autoencoder consumes fixed-length windows shaped ``(T, F)`` from
+preprocessed telemetry, together with a per-cell **mask** ``(T, F)`` (1 where a
+channel was freshly observed, 0 where the value is carried forward / stale) and
+**Δt** ``(T, F)`` (seconds since each channel's last real observation). PyTorch's
+``DataLoader`` then collates those into ``(B, T, F)`` triples. Window discovery
+is deliberately implemented without a torch dependency so CI can validate the
+masking rules before the optional ``ml`` extra is installed.
+
+Unlike the pre-GRU-D pipeline this module no longer *rejects* windows that touch
+a gap: every window inside a session is valid, and staleness is handed to the
+model through the mask/Δt channels rather than dropped. The only remaining guard
+is leading rows before a channel's first observation, which are imputed to 0
+(the empirical mean in z-scored feature space) and masked as unobserved.
 """
 
 from __future__ import annotations
@@ -40,7 +48,7 @@ class MissingSequenceDependencyError(ImportError):
 
 @dataclass(frozen=True)
 class SequenceWindow:
-    """One valid sequence window in a sorted model-ready frame."""
+    """One sequence window in a sorted model-ready frame."""
 
     session: str
     start_row: int
@@ -64,19 +72,30 @@ class SequenceWindow:
 
 @dataclass(frozen=True)
 class SequenceWindowBuildResult:
-    """Resolved feature/gap columns and valid windows for a frame."""
+    """Resolved feature/gap columns and windows for a frame.
+
+    ``frame`` is the sorted, session-grouped frame the windows index into.
+    ``mask`` / ``delta`` are full-frame ``(rows, F)`` float arrays in
+    ``feature_columns`` order; a window slices the same row range out of all of
+    ``values``/``mask``/``delta``. Δt is the cumulative seconds since the last
+    observed (``mask == 1``) tick per channel, reset to 0 on every observation
+    and accumulating the inter-row time delta otherwise.
+    """
 
     frame: pd.DataFrame
     feature_columns: tuple[str, ...]
     gap_columns: tuple[str, ...]
     windows: tuple[SequenceWindow, ...]
+    mask: np.ndarray[Any, np.dtype[np.float64]]
+    delta: np.ndarray[Any, np.dtype[np.float64]]
 
 
 class SequenceWindowDataset:
     """Map-style PyTorch dataset for fixed-length telemetry windows.
 
-    ``__getitem__`` returns one tensor shaped ``(sequence_length, n_features)``.
-    A standard PyTorch ``DataLoader`` will collate those into ``(B, T, F)``.
+    ``__getitem__`` returns a ``(value, mask, delta)`` tuple of tensors, each
+    shaped ``(sequence_length, n_features)``. A standard PyTorch ``DataLoader``
+    collates those into three ``(B, T, F)`` tensors.
     """
 
     def __init__(
@@ -103,7 +122,13 @@ class SequenceWindowDataset:
         self.sequence_length = sequence_length
         self.stride = stride
         self.dtype = dtype
-        self._values = self.frame.loc[:, list(self.feature_columns)].to_numpy(dtype=dtype)
+        # Values are imputed to 0 wherever unobserved (leading NaN before a
+        # channel's first observation); the mask records the imputation so the
+        # loss never scores a fill. See ``_window_value_mask_delta``.
+        raw = self.frame.loc[:, list(self.feature_columns)].to_numpy(dtype="float64")
+        self._mask = build.mask
+        self._values = np.where(np.isfinite(raw), raw, 0.0).astype(dtype)
+        self._delta = build.delta.astype(dtype)
 
     @classmethod
     def from_sessions(
@@ -139,9 +164,12 @@ class SequenceWindowDataset:
     def __getitem__(self, index: int) -> Any:
         torch = _torch_module()
         window = self.windows[index]
-        values = self._values[window.start_row : window.end_row].copy()
+        rows = slice(window.start_row, window.end_row)
         dtype = getattr(torch, self.dtype)
-        return torch.as_tensor(values, dtype=dtype)
+        value = torch.as_tensor(self._values[rows], dtype=dtype)
+        mask = torch.as_tensor(self._mask[rows].astype(self.dtype), dtype=dtype)
+        delta = torch.as_tensor(self._delta[rows], dtype=dtype)
+        return value, mask, delta
 
     def window_metadata(self, index: int) -> SequenceWindow:
         """Return timestamps/session for a sample without materializing a tensor."""
@@ -195,7 +223,15 @@ def build_sequence_windows(
     feature_columns: Iterable[str] | None = None,
     gap_columns: Iterable[str] | None = None,
 ) -> SequenceWindowBuildResult:
-    """Return valid windows that stay inside sessions and avoid gaps/NaNs."""
+    """Return every window that stays inside a session, with per-cell mask/Δt.
+
+    GRU-D feeds missingness to the model, so this no longer rejects windows that
+    touch a gap or contain forward-filled cells — every contiguous window inside
+    a session is valid. The mask (``1`` where the channel was freshly observed,
+    derived from ``¬<channel>__gap``) and Δt (cumulative seconds since the last
+    observation per channel) are computed once over the full frame and sliced
+    per window.
+    """
     _validate_window_params(sequence_length, stride)
     _require_columns(frame, [SESSION_COLUMN, TIMESTAMP_COLUMN])
 
@@ -208,27 +244,22 @@ def build_sequence_windows(
         if not features:
             raise ValueError("no numeric sequence feature columns available")
     # When gaps are auto-resolved, only honor those for channels that are
-    # actually features. A channel never seen in a session (e.g. ``gps:*`` in a
-    # non-GPS capture, or a CAN frame absent from a given drive) reads as
-    # perpetually stale, so its always-True ``__gap`` flag would reject *every*
-    # window in that session — silently zeroing the corpus the moment GPS and
-    # non-GPS sessions mix. Its staleness is irrelevant to a window over
-    # features. An explicit ``gap_columns`` is honored verbatim.
+    # actually features (an absent channel's perpetually-stale gap flag is
+    # irrelevant to the mask of features that *are* present). An explicit
+    # ``gap_columns`` is honored verbatim.
     if gap_columns is None:
         feature_bases = {_channel_base(column) for column in features}
         gaps = tuple(gap for gap in gaps if gap[: -len(GAP_SUFFIX)] in feature_bases)
-    windows: list[SequenceWindow] = []
 
+    mask, delta = _frame_mask_delta(ordered, features, gaps, gap_columns is not None)
+
+    windows: list[SequenceWindow] = []
     for session, group in ordered.groupby(SESSION_COLUMN, sort=True, dropna=False):
         positions = group.index.to_numpy(dtype=int)
         if len(positions) < sequence_length:
             continue
         for local_start in range(0, len(positions) - sequence_length + 1, stride):
             row_positions = positions[local_start : local_start + sequence_length]
-            if _window_has_gap(ordered, row_positions, gaps):
-                continue
-            if _window_has_missing_features(ordered, row_positions, features):
-                continue
             start_row = int(row_positions[0])
             end_row = int(row_positions[-1]) + 1
             timestamps = pd.to_datetime(ordered.loc[row_positions, TIMESTAMP_COLUMN], utc=True)
@@ -247,7 +278,71 @@ def build_sequence_windows(
         feature_columns=features,
         gap_columns=gaps,
         windows=tuple(windows),
+        mask=mask,
+        delta=delta,
     )
+
+
+def _frame_mask_delta(
+    ordered: pd.DataFrame,
+    features: Sequence[str],
+    gaps: Sequence[str],
+    explicit_gaps: bool,
+) -> tuple[np.ndarray[Any, np.dtype[np.float64]], np.ndarray[Any, np.dtype[np.float64]]]:
+    """Compute per-cell observed-mask and Δt over the full frame.
+
+    Mask is ``1`` where a channel is freshly observed. For an auto-resolved
+    ``<channel>__gap`` column the resampler already encodes freshness, so
+    ``mask = ¬gap`` AND the value is non-NaN. A channel with no gap column
+    (slow / forward-filled, or an explicit gap-column caller) is observed
+    wherever its value is non-NaN. Δt resets to 0 on every observed tick and
+    accumulates the inter-row second delta within a session otherwise.
+    """
+    n_rows = len(ordered)
+    n_features = len(features)
+    mask = np.zeros((n_rows, n_features), dtype=np.float64)
+    delta = np.zeros((n_rows, n_features), dtype=np.float64)
+    if n_rows == 0 or n_features == 0:
+        return mask, delta
+
+    gap_by_base = {gap[: -len(GAP_SUFFIX)]: gap for gap in gaps if gap.endswith(GAP_SUFFIX)}
+    values = ordered.loc[:, list(features)].to_numpy(dtype="float64")
+    observed_value = np.isfinite(values)
+
+    for col_index, column in enumerate(features):
+        fresh = observed_value[:, col_index]
+        if not explicit_gaps:
+            gap_col = gap_by_base.get(_channel_base(column))
+            if gap_col is not None and gap_col in ordered.columns:
+                not_gap = ~ordered[gap_col].fillna(True).astype(bool).to_numpy()
+                fresh = fresh & not_gap
+        mask[:, col_index] = fresh.astype(np.float64)
+
+    # Per-session cumulative Δt: seconds since the channel was last fresh.
+    session_codes = pd.factorize(ordered[SESSION_COLUMN], sort=False)[0]
+    timestamps = pd.to_datetime(ordered[TIMESTAMP_COLUMN], utc=True).to_numpy()
+    for _code in np.unique(session_codes):
+        rows = np.flatnonzero(session_codes == _code)
+        if rows.size == 0:
+            continue
+        row_times = timestamps[rows]
+        # Inter-row seconds (0 at the session's first row).
+        step_seconds = np.zeros(rows.size, dtype=np.float64)
+        if rows.size > 1:
+            diffs = (row_times[1:] - row_times[:-1]) / np.timedelta64(1, "s")
+            step_seconds[1:] = np.maximum(diffs.astype(np.float64), 0.0)
+        for col_index in range(n_features):
+            col_fresh = mask[rows, col_index] > 0.5
+            acc = 0.0
+            col_delta = np.zeros(rows.size, dtype=np.float64)
+            for local_index in range(rows.size):
+                if col_fresh[local_index]:
+                    acc = 0.0
+                else:
+                    acc += step_seconds[local_index]
+                col_delta[local_index] = acc
+            delta[rows, col_index] = col_delta
+    return mask, delta
 
 
 def resolve_sequence_feature_columns(
@@ -313,25 +408,6 @@ def _ordered_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return ordered.sort_values([SESSION_COLUMN, TIMESTAMP_COLUMN], kind="stable").reset_index(
         drop=True
     )
-
-
-def _window_has_gap(
-    frame: pd.DataFrame,
-    row_positions: np.ndarray[Any, np.dtype[np.int_]],
-    gap_columns: Sequence[str],
-) -> bool:
-    if not gap_columns:
-        return False
-    return bool(frame.loc[row_positions, list(gap_columns)].fillna(False).astype(bool).any().any())
-
-
-def _window_has_missing_features(
-    frame: pd.DataFrame,
-    row_positions: np.ndarray[Any, np.dtype[np.int_]],
-    feature_columns: Sequence[str],
-) -> bool:
-    values = frame.loc[row_positions, list(feature_columns)]
-    return bool(values.isna().any().any())
 
 
 def _validate_window_params(sequence_length: int, stride: int) -> None:
