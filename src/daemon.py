@@ -1076,6 +1076,62 @@ async def poll_model_managers(
             continue
 
 
+async def poll_config(
+    path: Path,
+    live_source: LiveFeatureSource,
+    stop_event: asyncio.Event,
+    *,
+    interval_seconds: float,
+) -> None:
+    """Hot-reload operating-mode config from ``canary.yaml`` when its mtime changes.
+
+    Swaps ``live_source.config`` so ``operating_modes`` (and the segmenter's
+    recent-motion window) take effect without a restart — the common config
+    edit. STRUCTURAL fields baked into the live source at construction —
+    ``resample_hz``, ``rolling_window_seconds``, ``idle_transient_lookback_seconds``
+    (ring-buffer size / feature window / gap horizon) — can't be hot-applied; if
+    those change we log + skip the whole swap, so a half-applied structural
+    change can't skew segmentation. Those (and model/fusion/emitter/hardware
+    config, owned elsewhere) still need a restart. Errors log + keep the
+    previous config.
+    """
+
+    def _structural(cfg: CanaryConfig) -> tuple[float, int, int]:
+        p = cfg.preprocessing
+        return (p.resample_hz, p.rolling_window_seconds, p.idle_transient_lookback_seconds)
+
+    last_mtime: float | None = path.stat().st_mtime if path.exists() else None
+    while not stop_event.is_set():
+        try:
+            if path.exists():
+                mtime = path.stat().st_mtime
+                if last_mtime is None or mtime > last_mtime:
+                    new_config = CanaryConfig.from_yaml(path)
+                    if _structural(new_config) != _structural(live_source.config):
+                        log.warning(
+                            "config change touches structural fields (resample_hz / "
+                            "rolling_window_seconds / idle_transient_lookback_seconds); "
+                            "restart required — not hot-reloaded",
+                            extra={"path": str(path)},
+                        )
+                    else:
+                        live_source.config = new_config
+                        log.info(
+                            "config hot-reloaded (operating modes)",
+                            extra={
+                                "path": str(path),
+                                "modes": sorted(new_config.preprocessing.operating_modes),
+                            },
+                        )
+                    last_mtime = mtime
+        except Exception:  # noqa: BLE001 — keep the previous config; log + retry
+            log.exception("config hot-reload failed; keeping previous", extra={"path": str(path)})
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            continue
+
+
 async def poll_behavior_models(
     path: Path,
     live_source: LiveFeatureSource,
@@ -1489,6 +1545,18 @@ async def run_daemon(
                 interval_seconds=config.daemon.model_poll_seconds,
             )
         )
+    config_task: asyncio.Task[Any] | None = None
+    if live_source is not None:
+        # Hot-reload operating-mode config so an operating_modes edit doesn't
+        # require a restart (structural changes still do — see poll_config).
+        config_task = asyncio.create_task(
+            poll_config(
+                Path(os.environ.get("CANARY_CONFIG", "canary.yaml")),
+                live_source,
+                stop_event,
+                interval_seconds=config.daemon.model_poll_seconds,
+            )
+        )
     inference_tasks: list[asyncio.Task[Any]] = []
     if live_source is not None:
         # One unified task scores IF + LSTM + behavior per tick and fuses
@@ -1539,6 +1607,12 @@ async def run_daemon(
                 behavior_models_task.cancel()
                 try:
                     await behavior_models_task
+                except asyncio.CancelledError:
+                    pass
+            if config_task is not None:
+                config_task.cancel()
+                try:
+                    await config_task
                 except asyncio.CancelledError:
                     pass
             for task in inference_tasks:

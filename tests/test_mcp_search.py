@@ -15,7 +15,10 @@ from src.mcp_server.tools.search import search_anomaly_log
 def _anomaly_event(**overrides: Any) -> dict[str, Any]:
     """Minimal ``AnomalyEvent``-shaped dict for fixtures."""
     base: dict[str, Any] = {
-        "timestamp": "2026-05-18T12:00:00+00:00",
+        # Relative so fixtures never age out of search_anomaly_log's default
+        # 7-day lookback — a hardcoded date silently broke these tests a week
+        # after it was written. Tests pinning a specific date override it.
+        "timestamp": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
         "source": "isolation_forest",
         "model_version": "1.0",
         "score": 0.5,

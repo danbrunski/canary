@@ -14,6 +14,7 @@ from src.models.manifest import (
     ManifestValidationError,
     ModelManifestCommon,
     load_manifest_common,
+    schema_serviceable,
     schemas_compatible,
     validate_manifest_common,
     validate_model_feature_spec,
@@ -190,6 +191,32 @@ def test_schemas_incompatible_when_key_missing() -> None:
     a = validate_manifest_common(_good_payload())
     b = validate_manifest_common(_good_payload(schema={}))  # no feature_columns
     assert not schemas_compatible(a, b)
+
+
+def test_schema_serviceable_accepts_subset() -> None:
+    # A retrain that DROPS columns (e.g. counter exclusion): the running pipeline
+    # already produces a superset, so reconcile serves it without a restart.
+    running = validate_manifest_common(_good_payload(schema={"feature_columns": ["a", "b", "c"]}))
+    candidate = validate_manifest_common(
+        _good_payload(model_version="b", schema={"feature_columns": ["a", "c"]})
+    )
+    assert schema_serviceable(running, candidate)
+    assert schema_serviceable(running, running)  # identical is trivially serviceable
+
+
+def test_schema_serviceable_rejects_expansion() -> None:
+    # A new column the running pipeline may not produce → not safe to hot-swap.
+    running = validate_manifest_common(_good_payload(schema={"feature_columns": ["a", "b"]}))
+    candidate = validate_manifest_common(
+        _good_payload(model_version="b", schema={"feature_columns": ["a", "b", "new"]})
+    )
+    assert not schema_serviceable(running, candidate)
+
+
+def test_schema_serviceable_false_when_key_missing() -> None:
+    running = validate_manifest_common(_good_payload())
+    candidate = validate_manifest_common(_good_payload(schema={}))
+    assert not schema_serviceable(running, candidate)
 
 
 # ---------------------------------------------------------------------------

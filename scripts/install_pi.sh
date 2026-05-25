@@ -87,6 +87,22 @@ install -m 0644 "${CANARY_HOME}/systemd/canary.service" "${CANARY_SERVICE}"
 install -m 0644 "${CANARY_HOME}/systemd/canary-mcp.service" \
   "$(dirname "${CANARY_SERVICE}")/canary-mcp.service"
 
+# Let the canary user restart the services without a password, so model/code
+# deploys (and the MCP control plane) can roll the daemon without an interactive
+# sudo. Scoped to exactly the restart/try-restart verbs for these two units —
+# nothing else. Validated with `visudo -c`; a malformed sudoers file would lock
+# out sudo, so we discard it on failure.
+SYSTEMCTL="$(command -v systemctl)"
+CANARY_SUDOERS="/etc/sudoers.d/canary-restart"
+cat >"${CANARY_SUDOERS}" <<EOF
+${CANARY_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} restart canary.service, ${SYSTEMCTL} restart canary, ${SYSTEMCTL} restart canary-mcp.service, ${SYSTEMCTL} restart canary-mcp, ${SYSTEMCTL} try-restart canary.service, ${SYSTEMCTL} try-restart canary-mcp.service
+EOF
+chmod 0440 "${CANARY_SUDOERS}"
+if ! visudo -cf "${CANARY_SUDOERS}" >/dev/null; then
+  echo "WARNING: generated ${CANARY_SUDOERS} failed validation; removing it" >&2
+  rm -f "${CANARY_SUDOERS}"
+fi
+
 cd "${CANARY_HOME}"
 runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
   --venv "${CANARY_HOME}/.venv" \

@@ -40,7 +40,7 @@ from src.models.manifest import (
     ManifestValidationError,
     ModelManifestCommon,
     load_manifest_common,
-    schemas_compatible,
+    schema_serviceable,
     validate_model_feature_spec,
 )
 
@@ -162,11 +162,12 @@ class ModelManager(Generic[T]):
                 )
                 return SwapAttempt(kind="rejected", detail=str(exc))
 
-            if self._current is not None and not schemas_compatible(
+            if self._current is not None and not schema_serviceable(
                 self._current.manifest, manifest
             ):
                 log.warning(
-                    "rejecting new manifest: feature columns don't match running model",
+                    "rejecting new manifest: feature columns not serviceable by the "
+                    "running pipeline (schema expansion needs a restart)",
                     extra={
                         "path": str(manifest_path),
                         "running_version": self._current.manifest.model_version,
@@ -175,7 +176,8 @@ class ModelManager(Generic[T]):
                 )
                 return SwapAttempt(
                     kind="rejected",
-                    detail="feature_columns mismatch — refit on the same schema first",
+                    detail="feature_columns add columns the running pipeline may not "
+                    "produce — restart to load a new schema",
                     new_version=manifest.model_version,
                 )
 

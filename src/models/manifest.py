@@ -195,6 +195,32 @@ def schemas_compatible(
     return list(a_cols) == list(b_cols)
 
 
+def schema_serviceable(
+    running: ModelManifestCommon,
+    candidate: ModelManifestCommon,
+    *,
+    feature_columns_key: str = "feature_columns",
+) -> bool:
+    """Return True if a hot-swap to ``candidate`` is safe without a restart.
+
+    The conservative rule (``schemas_compatible``) demands identical feature
+    columns, which forces a daemon restart for any retrain that changes the
+    feature set (e.g. dropping monotonic-counter channels). But the live
+    pipeline that fed ``running`` produces *at least* ``running``'s columns, and
+    the daemon reconciles each frame to the model's spec at scoring time
+    (dropping extras, filling missing). So a candidate whose columns are a
+    **subset** of the running model's is guaranteed serviceable — the pipeline
+    already produces every column it needs. Schema *expansions* (new columns the
+    running pipeline may not produce) still fall back to a restart, where a fresh
+    load can't silently serve unsatisfiable features.
+    """
+    running_cols = running.schema_.get(feature_columns_key)
+    candidate_cols = candidate.schema_.get(feature_columns_key)
+    if running_cols is None or candidate_cols is None:
+        return False
+    return set(candidate_cols) <= set(running_cols)
+
+
 def _validate_feature_columns(schema: Mapping[str, Any], *, context: str) -> tuple[str, ...]:
     raw_columns = schema.get("feature_columns")
     if not isinstance(raw_columns, list | tuple):
@@ -274,6 +300,7 @@ __all__ = [
     "ModelManifestCommon",
     "load_manifest_common",
     "schemas_compatible",
+    "schema_serviceable",
     "validate_model_feature_spec",
     "validate_manifest_common",
 ]
