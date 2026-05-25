@@ -8,12 +8,14 @@ import {
   getCurrentCapture,
   getJobLogs,
   getPreflight,
+  getSequenceDetector,
   listJobs,
   listSessions,
   pinSession,
   startCapture,
   stopCapture,
   submitJob,
+  switchSequenceDetector,
   syncSessionToCompanion,
   tagCapture,
   unpinSession,
@@ -29,6 +31,7 @@ import type {
   CaptureState,
   JobRecord,
   PreflightResponse,
+  SequenceDetectorStatus,
   SessionSummary,
   VersionResponse,
 } from "../types";
@@ -63,6 +66,7 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
   const [capture, setCapture] = useState<CaptureState | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [jobs, setJobs] = useState<JobRecord[]>([]);
+  const [sequenceDetector, setSequenceDetector] = useState<SequenceDetectorStatus | null>(null);
   const { notice, setNotice, busy, run: runAction } = useAsyncAction();
   const [purpose, setPurpose] = useState("");
   const [protocol, setProtocol] = useState("drive");
@@ -88,19 +92,21 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
 
   const refreshControl = useCallback(async () => {
     if (!token) return;
-    const [nextPreflight, nextVersion, nextCapture, nextSessions, nextJobs] =
+    const [nextPreflight, nextVersion, nextCapture, nextSessions, nextJobs, nextSequence] =
       await Promise.all([
         getPreflight(token),
         getControlVersion(token),
         getCurrentCapture(token),
         listSessions(token),
         listJobs(token),
+        getSequenceDetector(token),
       ]);
     setPreflight(nextPreflight);
     setVersion(nextVersion);
     setCapture(nextCapture.capture);
     setSessions(nextSessions.sessions);
     setJobs(nextJobs.jobs.slice().reverse());
+    setSequenceDetector(nextSequence.sequence_detector);
     setSelectedSessionId((current) => {
       if (current && nextSessions.sessions.some((s) => s.session_id === current)) {
         return current;
@@ -116,6 +122,7 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
       setCapture(null);
       setSessions([]);
       setJobs([]);
+      setSequenceDetector(null);
       return;
     }
     const controller = new AbortController();
@@ -238,6 +245,12 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
     run("job logs", async () => {
       const logs = await getJobLogs(token, jobId);
       setJobLog(logs.log);
+    });
+
+  const switchBackbone = (backbone: "lstm" | "tcn") =>
+    run(`sequence switch → ${backbone}`, async () => {
+      const next = await switchSequenceDetector(token, backbone);
+      setSequenceDetector(next.sequence_detector);
     });
 
   const uploadModel = () =>
@@ -467,12 +480,48 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
 
         <section className={panelClass}>
           <header className={panelHeaderClass}>
+            <h2 className={panelTitleClass}>Sequence Detector</h2>
+            <span className="text-[0.8rem] text-fg-dim">{sequenceDetector?.active ?? "—"}</span>
+          </header>
+          <p className="mb-2 text-[0.75rem] text-fg-dim">
+            Live backbone for the sequence slot. A switch takes effect immediately and is not
+            persisted — set the durable default via <code>models.sequence_detector</code>.
+          </p>
+          <div className="grid grid-cols-2 gap-2 max-[1100px]:grid-cols-1">
+            {(["lstm", "tcn"] as const).map((backbone) => {
+              const info = sequenceDetector?.available[`${backbone}_autoencoder`];
+              const isActive = info?.active ?? false;
+              return (
+                <button
+                  key={backbone}
+                  type="button"
+                  className={cn(buttonClass, isActive && "border-accent")}
+                  onClick={() => switchBackbone(backbone)}
+                  disabled={!token || !!busy || isActive}
+                  title={
+                    info?.artifact_present
+                      ? `artifact: ${info.version ?? "present"}`
+                      : "no trained artifact yet"
+                  }
+                >
+                  {backbone.toUpperCase()}
+                  {isActive ? " (active)" : ""}
+                  {info && !info.artifact_present ? " · no artifact" : ""}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className={panelClass}>
+          <header className={panelHeaderClass}>
             <h2 className={panelTitleClass}>Model Upload</h2>
           </header>
           <div className="grid grid-cols-1 gap-2">
             <select className={selectClass} value={modelType} onChange={(event) => setModelType(event.target.value)}>
               <option value="isolation_forest">isolation_forest</option>
               <option value="lstm_autoencoder">lstm_autoencoder</option>
+              <option value="tcn_autoencoder">tcn_autoencoder</option>
             </select>
             <input className={inputClass} type="file" onChange={(event) => setArtifactFile(event.target.files?.[0] ?? null)} />
             <input className={inputClass} type="file" accept="application/json,.json" onChange={(event) => setManifestFile(event.target.files?.[0] ?? null)} />

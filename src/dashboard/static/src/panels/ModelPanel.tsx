@@ -28,6 +28,7 @@ interface ModelPanelProps {
 export function ModelPanel({ status, events }: ModelPanelProps) {
   const versions = status?.model_versions ?? {};
   const counters = status?.emitter_counters ?? null;
+  const sequence = status?.sequence_detector ?? null;
 
   const lstmEvents = events.filter((e) => e.source === "lstm_autoencoder");
   const meanLstmLatency =
@@ -49,6 +50,16 @@ export function ModelPanel({ status, events }: ModelPanelProps) {
               <dd className={definitionValueClass}>{version ?? "no version"}</dd>
             </div>
           ))
+        )}
+        {sequence?.active && (
+          <div className={definitionRowClass}>
+            <dt className={definitionTermClass}>sequence detector</dt>
+            <dd className={definitionValueClass}>
+              {sequence.active}
+              {sequence.active_version ? ` (${sequence.active_version})` : ""}
+              {sequence.active !== `${sequence.selector}_autoencoder` ? " — live override" : ""}
+            </dd>
+          </div>
         )}
         {meanLstmLatency !== null && (
           <div className={definitionRowClass}>

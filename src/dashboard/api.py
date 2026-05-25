@@ -51,6 +51,7 @@ from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.jobs import JobController
 from src.control.replay_control import ReplayController
+from src.control.sequence_detector import SequenceDetectorController
 from src.dashboard.behavior_live import BehaviorLiveState
 from src.dashboard.broadcast import Broadcaster
 from src.dashboard.paths import (
@@ -116,6 +117,7 @@ def create_app(
     health_monitor: HealthMonitor | None = None,
     behavior_live: BehaviorLiveState | None = None,
     gps_tracker: GpsTracker | None = None,
+    sequence_detector_controller: SequenceDetectorController | None = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -180,6 +182,7 @@ def create_app(
         health_monitor=health_monitor,
         behavior_live=behavior_live,
         gps_tracker=gps_tracker,
+        sequence_detector_controller=sequence_detector_controller,
     )
     register_control_routes(
         app,
@@ -193,6 +196,7 @@ def create_app(
         audit_logger=audit_logger,
         feedback_store=feedback_store,
         alert_tuner=alert_tuner,
+        sequence_detector_controller=sequence_detector_controller,
         publish_control_event=publish_control_event,
     )
     register_stream_routes(

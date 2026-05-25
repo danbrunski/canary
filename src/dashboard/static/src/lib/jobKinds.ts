@@ -7,6 +7,7 @@ export const JOB_KINDS = [
   "corpus_report",
   "retrain_if",
   "retrain_lstm",
+  "retrain_tcn",
   "retrain_all",
   "refit_behavior_models",
 ];

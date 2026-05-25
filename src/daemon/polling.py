@@ -28,7 +28,10 @@ async def poll_model_managers(
     minute-to-hour scale so 30s default is fine.
     """
     while not stop_event.is_set():
-        for name, manager in managers.items():
+        # Snapshot: a live sequence-detector swap (Phase 9.6) mutates this dict
+        # from the control thread, which would otherwise raise "dict changed
+        # size during iteration" here.
+        for name, manager in list(managers.items()):
             try:
                 attempt = manager.poll()
             except Exception:  # noqa: BLE001 — manager.poll already swallows + logs internally

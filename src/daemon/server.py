@@ -53,6 +53,7 @@ async def serve_in_background(
         health_monitor=components.health_monitor,
         behavior_live=components.behavior_live,
         gps_tracker=components.gps_tracker,
+        sequence_detector_controller=components.sequence_detector_controller,
     )
     if components.job_controller is not None:
         loop = asyncio.get_running_loop()

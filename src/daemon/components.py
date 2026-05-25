@@ -17,6 +17,7 @@ from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.jobs import JobController
 from src.control.replay_control import ReplayController
+from src.control.sequence_detector import SequenceDetectorController
 from src.dashboard.behavior_live import BehaviorLiveState
 from src.dashboard.broadcast import Broadcaster
 from src.models.health import HealthMonitor
@@ -62,6 +63,9 @@ class DaemonComponents:
     replay_controller: ReplayController | None = None
     #: GPS live-state + trip odometer, or ``None`` when no GPS is enabled.
     gps_tracker: GpsTracker | None = None
+    #: Live read/swap of the active sequence-detector backbone (set in
+    #: ``build_components`` once the component record exists).
+    sequence_detector_controller: SequenceDetectorController | None = None
 
 
 def build_components(config: CanaryConfig) -> DaemonComponents:
@@ -77,7 +81,7 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
     emitter = _make_broadcasting_emitter(event_logger, anomalies_bus, tuner=tuner)
     model_managers = _load_model_managers(config)
 
-    return DaemonComponents(
+    components = DaemonComponents(
         config=config,
         telemetry_broadcaster=telemetry_bus,
         anomalies_broadcaster=anomalies_bus,
@@ -97,6 +101,10 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
             GpsTracker(state_path=config.daemon.trip_state) if config.hardware.gps.enabled else None
         ),
     )
+    # Needs a reference back to the assembled record (model_managers +
+    # sequence_model_type are what it swaps), so wire it after construction.
+    components.sequence_detector_controller = SequenceDetectorController(components)
+    return components
 
 
 def _make_job_controller(config: CanaryConfig) -> JobController:

@@ -76,6 +76,22 @@ export interface StatusResponse {
   gps?: GpsStatus | null;
   /** Cumulative GPS trip odometer; null when no GPS is configured. */
   trip?: TripStats | null;
+  /** Active sequence-detector backbone + what's available to switch to (9.6). */
+  sequence_detector?: SequenceDetectorStatus | null;
+}
+
+/** `/status.sequence_detector` (and `GET/POST /control/sequence-detector`).
+ *  Which sequence backbone (LSTM | TCN) is live, plus per-backbone artifact
+ *  availability. `selector` is the durable config default; `active` is the live
+ *  in-process choice (a switch is not persisted across restart). */
+export interface SequenceDetectorStatus {
+  selector: string;
+  active: string | null;
+  active_version: string | null;
+  available: Record<
+    string,
+    { selector: string; artifact_present: boolean; version: string | null; active: boolean }
+  >;
 }
 
 /** `/status.gps` — latest GPS fix from the serial NMEA receiver. Position

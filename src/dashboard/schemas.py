@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class _ControlRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class SequenceDetectorRequest(_ControlRequest):
+    #: Selector value for the backbone to activate (registry: lstm | tcn).
+    backbone: Literal["lstm", "tcn"]
 
 
 class CaptureStartRequest(_ControlRequest):

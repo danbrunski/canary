@@ -34,6 +34,10 @@ from src.control.replay_control import (
     ReplayNotFoundError,
     ReplayNotRunningError,
 )
+from src.control.sequence_detector import (
+    SequenceDetectorController,
+    SequenceDetectorUnavailableError,
+)
 from src.control.sessions import (
     delete_session,
     list_sessions,
@@ -54,6 +58,7 @@ from src.dashboard.schemas import (
     JobSubmitRequest,
     ModelUploadRequest,
     ReplayStartRequest,
+    SequenceDetectorRequest,
     SessionMetadataRequest,
     SessionPinRequest,
     TuningRevertRequest,
@@ -79,6 +84,7 @@ def register_control_routes(
     audit_logger: ControlAuditLogger | None,
     feedback_store: FeedbackStore | None,
     alert_tuner: AlertTuner | None,
+    sequence_detector_controller: SequenceDetectorController | None = None,
     publish_control_event: Callable[[str, str, dict[str, Any]], None],
 ) -> None:
 
@@ -104,6 +110,34 @@ def register_control_routes(
         if job_controller is None:
             raise HTTPException(status_code=503, detail="job API is not available")
         return job_controller
+
+    def _sequence_detector() -> SequenceDetectorController:
+        if sequence_detector_controller is None:
+            raise HTTPException(
+                status_code=503, detail="sequence-detector control is not available"
+            )
+        return sequence_detector_controller
+
+    @app.get("/control/sequence-detector")
+    def get_sequence_detector(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        return {"sequence_detector": _sequence_detector().status().to_dict()}
+
+    @app.post("/control/sequence-detector")
+    def post_sequence_detector(
+        request: SequenceDetectorRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        controller = _sequence_detector()
+        try:
+            status = controller.switch(request.backbone)
+        except SequenceDetectorUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        publish_control_event("sequence_detector.switch", "ok", status.to_dict())
+        return {"sequence_detector": status.to_dict()}
 
     @app.post("/control/captures", status_code=201)
     def post_capture(

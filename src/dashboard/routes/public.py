@@ -10,6 +10,7 @@ from src.alerts.feedback import FeedbackStore, annotate_events_with_feedback
 from src.analysis.gps_tracker import GpsTracker
 from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
+from src.control.sequence_detector import SequenceDetectorController
 from src.dashboard.behavior_live import BehaviorLiveState
 from src.dashboard.readers import (
     echo_config,
@@ -41,6 +42,7 @@ def register_public_routes(
     health_monitor: HealthMonitor | None,
     behavior_live: BehaviorLiveState | None,
     gps_tracker: GpsTracker | None,
+    sequence_detector_controller: SequenceDetectorController | None = None,
 ) -> None:
     @app.get("/status")
     def get_status() -> dict[str, Any]:
@@ -54,6 +56,8 @@ def register_public_routes(
         ).to_dict()
         if replay_controller is not None:
             payload["replay"] = replay_controller.status().to_dict()
+        if sequence_detector_controller is not None:
+            payload["sequence_detector"] = sequence_detector_controller.status().to_dict()
         return payload
 
     @app.get("/config")

@@ -20,6 +20,7 @@ import type {
   JobsResponse,
   ObdCoverageResponse,
   PreflightResponse,
+  SequenceDetectorStatus,
   SessionSummary,
   SessionsResponse,
   StatusResponse,
@@ -107,6 +108,28 @@ export function getCurrentCapture(
   signal?: AbortSignal,
 ): Promise<CaptureResponse> {
   return controlJson<CaptureResponse>("/control/captures/current", token, { signal });
+}
+
+export function getSequenceDetector(
+  token: string,
+  signal?: AbortSignal,
+): Promise<{ sequence_detector: SequenceDetectorStatus }> {
+  return controlJson<{ sequence_detector: SequenceDetectorStatus }>(
+    "/control/sequence-detector",
+    token,
+    { signal },
+  );
+}
+
+export function switchSequenceDetector(
+  token: string,
+  backbone: "lstm" | "tcn",
+): Promise<{ sequence_detector: SequenceDetectorStatus }> {
+  return controlJson<{ sequence_detector: SequenceDetectorStatus }>(
+    "/control/sequence-detector",
+    token,
+    { method: "POST", body: jsonBody({ backbone }) },
+  );
 }
 
 export function startCapture(
