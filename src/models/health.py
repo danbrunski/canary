@@ -305,6 +305,7 @@ class HealthMonitor:
         self._swaps: dict[str, int] = {"swapped": 0, "rejected": 0, "unchanged": 0, "error": 0}
         self._last_swap_version: str | None = None
         self._obd_scheduler: dict[str, Any] | None = None
+        self._telemetry_sinks: dict[str, dict[str, Any]] = {}
         self._cpu_prev: tuple[float, float] | None = None
         #: (monotonic_ts, value) cache so /status polling doesn't spawn a
         #: vcgencmd subprocess every call — the flags barely move at a glance.
@@ -370,6 +371,35 @@ class HealthMonitor:
         else:
             self._obd_scheduler = dict(metrics)
 
+    def observe_telemetry_queue(self, name: str, queue: Any) -> None:
+        """Record queue depth for one telemetry sink."""
+        state = self._sink_state(name)
+        state["queue_depth"] = int(queue.qsize())
+        state["queue_max_size"] = int(queue.maxsize)
+
+    def note_telemetry_drop(self, name: str, *, count: int = 1) -> None:
+        """Record explicit data loss at a telemetry sink."""
+        state = self._sink_state(name)
+        state["dropped_records"] = int(state.get("dropped_records", 0)) + count
+
+    def note_telemetry_error(self, name: str, exc: BaseException) -> None:
+        """Record the latest exception from one telemetry sink."""
+        state = self._sink_state(name)
+        state["errors"] = int(state.get("errors", 0)) + 1
+        state["last_error"] = f"{type(exc).__name__}: {exc}"
+
+    def _sink_state(self, name: str) -> dict[str, Any]:
+        return self._telemetry_sinks.setdefault(
+            name,
+            {
+                "queue_depth": None,
+                "queue_max_size": None,
+                "dropped_records": 0,
+                "errors": 0,
+                "last_error": None,
+            },
+        )
+
     def snapshot(
         self,
         *,
@@ -410,6 +440,10 @@ class HealthMonitor:
         snap["system"]["cpu_percent"] = self._cpu_percent()
         if self._obd_scheduler is not None:
             snap["obd_scheduler"] = dict(self._obd_scheduler)
+        if self._telemetry_sinks:
+            snap["telemetry_sinks"] = {
+                name: dict(state) for name, state in sorted(self._telemetry_sinks.items())
+            }
         if scaler is not None and live_means is not None:
             snap["feature_drift"] = feature_drift(live_means, scaler).to_dict()
         if lstm_thresholds is not None:

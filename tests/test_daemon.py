@@ -15,14 +15,17 @@ from src.alerts.events import AnomalyEvent
 from src.config import CanaryConfig, DaemonConfig
 from src.daemon import (
     DaemonComponents,
+    TelemetrySink,
     _record_to_dict,
     build_components,
     build_live_feature_source,
     drain_queue_with_broadcast,
     poll_model_managers,
     run_retention_sweeper,
+    run_telemetry_fanout,
 )
 from src.dashboard.broadcast import Broadcaster
+from src.models.health import HealthMonitor
 from src.models.manager import ModelManager
 from src.models.manifest import CURRENT_MANIFEST_FORMAT_VERSION
 from src.storage.parquet_writer import ParquetTelemetryWriter
@@ -156,6 +159,68 @@ def test_build_components_constructs_if_manager_when_enabled(
 # ---------------------------------------------------------------------------
 # drain_queue_with_broadcast
 # ---------------------------------------------------------------------------
+
+
+async def test_telemetry_fanout_delivers_one_record_to_every_sink() -> None:
+    ingest: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    storage: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=8)
+    live: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=8)
+    stop = asyncio.Event()
+    record = TelemetryRecord.obd(1_778_000_000.0, "RPM", 700.0, "rpm")
+    await ingest.put(record)
+    stop.set()
+
+    await run_telemetry_fanout(
+        ingest,
+        [
+            TelemetrySink("storage", storage, "drop_newest"),
+            TelemetrySink("live", live, "drop_oldest"),
+        ],
+        stop,
+    )
+
+    assert storage.get_nowait() is record
+    assert live.get_nowait() is record
+
+
+async def test_telemetry_fanout_drops_oldest_for_live_overflow() -> None:
+    ingest: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    live: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=1)
+    stop = asyncio.Event()
+    health = HealthMonitor()
+    for i in range(3):
+        await ingest.put(TelemetryRecord.obd(1_778_000_000.0 + i, "RPM", float(700 + i), "rpm"))
+    stop.set()
+
+    await run_telemetry_fanout(
+        ingest,
+        [TelemetrySink("live", live, "drop_oldest")],
+        stop,
+        health_monitor=health,
+    )
+
+    assert live.get_nowait().value == 702.0
+    assert health.snapshot()["telemetry_sinks"]["live"]["dropped_records"] == 2
+
+
+async def test_telemetry_fanout_marks_storage_overflow_as_explicit_loss() -> None:
+    ingest: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    storage: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=1)
+    stop = asyncio.Event()
+    health = HealthMonitor()
+    for i in range(3):
+        await ingest.put(TelemetryRecord.obd(1_778_000_000.0 + i, "RPM", float(700 + i), "rpm"))
+    stop.set()
+
+    await run_telemetry_fanout(
+        ingest,
+        [TelemetrySink("storage", storage, "drop_newest")],
+        stop,
+        health_monitor=health,
+    )
+
+    assert storage.get_nowait().value == 700.0
+    assert health.snapshot()["telemetry_sinks"]["storage"]["dropped_records"] == 2
 
 
 async def test_drain_publishes_each_record_to_broadcaster(tmp_path: Path) -> None:

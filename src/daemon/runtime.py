@@ -111,6 +111,7 @@ async def run_daemon(
             storage_path=config.collection.storage_path,
             storage_warning_mb=config.collection.storage_warning_mb,
             queue_warning_fraction=config.collection.queue_warning_fraction,
+            health_monitor=components.health_monitor,
         )
     )
     poll_task = asyncio.create_task(

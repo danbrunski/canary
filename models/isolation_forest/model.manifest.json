@@ -1,7 +1,7 @@
 {
   "artifact_format_version": 1,
   "complete_rows": 11072,
-  "created_at": "2026-05-25T03:17:29.056007Z",
+  "created_at": "2026-05-25T15:32:40.822685Z",
   "dropped_missing_feature_rows": 651,
   "hyperparams": {
     "calibration_holdout_fraction": 0.2,
@@ -13,7 +13,7 @@
   },
   "input_rows": 11723,
   "model_type": "isolation_forest",
-  "model_version": "isolation_forest_2026-05-25T031729.056007Z",
+  "model_version": "isolation_forest_2026-05-25T153240.822685Z",
   "modes": [
     {
       "achieved_flag_rate": 0.020512820512820513,
@@ -22,8 +22,8 @@
       "holdout_samples": 195,
       "mode": "city",
       "n_samples": 977,
-      "score_scale": 0.02435720816468996,
-      "score_threshold": -0.006494870450165004,
+      "score_scale": 0.023408133101439726,
+      "score_threshold": -0.0013493390861379277,
       "sessions": [
         "2026-05-24T190027",
         "2026-05-24T190535",
@@ -39,8 +39,8 @@
       "holdout_samples": 309,
       "mode": "highway",
       "n_samples": 1545,
-      "score_scale": 0.030578722959895492,
-      "score_threshold": -0.02520181699682596,
+      "score_scale": 0.03197062644371746,
+      "score_threshold": -0.01831586065622654,
       "sessions": [
         "2026-05-24T190535",
         "2026-05-24T193045"
@@ -55,8 +55,8 @@
       "holdout_samples": 543,
       "mode": "idle",
       "n_samples": 2718,
-      "score_scale": 0.01486412451516734,
-      "score_threshold": -0.31838134729858075,
+      "score_scale": 0.01490250586527202,
+      "score_threshold": -0.3224043979025586,
       "sessions": [
         "2026-05-18T015823",
         "2026-05-18T024456",
@@ -74,8 +74,8 @@
       "holdout_samples": 55,
       "mode": "idle_transient",
       "n_samples": 275,
-      "score_scale": 0.04100059263928242,
-      "score_threshold": -0.06886315437005922,
+      "score_scale": 0.03994593968569596,
+      "score_threshold": -0.0752165813477472,
       "sessions": [
         "2026-05-24T190535",
         "2026-05-24T193045"
@@ -90,8 +90,8 @@
       "holdout_samples": 738,
       "mode": "koeo",
       "n_samples": 3693,
-      "score_scale": 0.08436936183724025,
-      "score_threshold": -0.01849481797344551,
+      "score_scale": 0.08998613652611218,
+      "score_threshold": -0.013558451120557735,
       "sessions": [
         "2026-05-18T015823",
         "2026-05-18T021421",
@@ -110,8 +110,8 @@
       "holdout_samples": 153,
       "mode": "unknown",
       "n_samples": 766,
-      "score_scale": 0.024068460103133123,
-      "score_threshold": -0.008100851414702273,
+      "score_scale": 0.023066053709060078,
+      "score_threshold": -0.005366612207528743,
       "sessions": [
         "2026-05-24T190535",
         "2026-05-24T193045"
@@ -126,8 +126,8 @@
       "holdout_samples": 219,
       "mode": "warmup",
       "n_samples": 1098,
-      "score_scale": 0.009388161798450903,
-      "score_threshold": -0.1402920811575251,
+      "score_scale": 0.010009378928340914,
+      "score_threshold": -0.12341380730281465,
       "sessions": [
         "2026-05-18T015823",
         "2026-05-18T024456",
@@ -657,10 +657,10 @@
       "derived:LTFT_BANK_BALANCE__mean": -1.8684291222106935,
       "derived:LTFT_BANK_BALANCE__roc": 0.00022232363958228456,
       "derived:LTFT_BANK_BALANCE__std": 0.6306112210530004,
-      "derived:STFT_BANK_BALANCE": 0.7526457284287787,
-      "derived:STFT_BANK_BALANCE__mean": 0.7511927852655249,
-      "derived:STFT_BANK_BALANCE__roc": -0.00041851455194768784,
-      "derived:STFT_BANK_BALANCE__std": 1.6188621707247877,
+      "derived:STFT_BANK_BALANCE": 0.7511927852655249,
+      "derived:STFT_BANK_BALANCE__mean": 0.7439975762894167,
+      "derived:STFT_BANK_BALANCE__roc": 8.1756424102255e-05,
+      "derived:STFT_BANK_BALANCE__std": 0.4228180552094538,
       "deviation:air_mass_per_cycle_vs_rpm_load": 4.736374355007538e-10,
       "deviation:air_mass_per_cycle_vs_rpm_load__mean": 0.0010497649465823575,
       "deviation:air_mass_per_cycle_vs_rpm_load__roc": -6.855406417906259e-05,
@@ -685,10 +685,10 @@
       "deviation:ltft_bank_balance_vs_rpm__mean": -0.006827412577289403,
       "deviation:ltft_bank_balance_vs_rpm__roc": 0.00022991511651641086,
       "deviation:ltft_bank_balance_vs_rpm__std": 0.6320351749443994,
-      "deviation:stft_bank_balance_vs_rpm": -6.648438138418162e-10,
-      "deviation:stft_bank_balance_vs_rpm__mean": -0.0007574492251733218,
-      "deviation:stft_bank_balance_vs_rpm__roc": -0.00044013926223041407,
-      "deviation:stft_bank_balance_vs_rpm__std": 1.6202906964137622,
+      "deviation:stft_bank_balance_vs_rpm": -6.735533235185361e-09,
+      "deviation:stft_bank_balance_vs_rpm__mean": -0.006731898733160819,
+      "deviation:stft_bank_balance_vs_rpm__roc": 6.0394737147262344e-05,
+      "deviation:stft_bank_balance_vs_rpm__std": 0.42404824437620336,
       "deviation:timing_advance_vs_rpm_load": -4.817936122982764e-09,
       "deviation:timing_advance_vs_rpm_load__mean": -0.06250412381500979,
       "deviation:timing_advance_vs_rpm_load__roc": 0.001962723965585774,
@@ -988,10 +988,10 @@
       "derived:LTFT_BANK_BALANCE__mean": 1.426020344815015,
       "derived:LTFT_BANK_BALANCE__roc": 0.06982917618182083,
       "derived:LTFT_BANK_BALANCE__std": 1.0773915432557295,
-      "derived:STFT_BANK_BALANCE": 3.4123754508496793,
-      "derived:STFT_BANK_BALANCE__mean": 1.8148155252406895,
-      "derived:STFT_BANK_BALANCE__roc": 0.15217877391689058,
-      "derived:STFT_BANK_BALANCE__std": 2.404584524886679,
+      "derived:STFT_BANK_BALANCE": 1.8148155252406895,
+      "derived:STFT_BANK_BALANCE__mean": 1.6463013514969767,
+      "derived:STFT_BANK_BALANCE__roc": 0.06831161517938959,
+      "derived:STFT_BANK_BALANCE__std": 0.6779015469945229,
       "deviation:air_mass_per_cycle_vs_rpm_load": 0.4336381836560691,
       "deviation:air_mass_per_cycle_vs_rpm_load__mean": 0.21544110343850195,
       "deviation:air_mass_per_cycle_vs_rpm_load__roc": 0.02020594555055011,
@@ -1016,10 +1016,10 @@
       "deviation:ltft_bank_balance_vs_rpm__mean": 1.4152099270289495,
       "deviation:ltft_bank_balance_vs_rpm__roc": 0.06987545012664129,
       "deviation:ltft_bank_balance_vs_rpm__std": 1.0780044349854476,
-      "deviation:stft_bank_balance_vs_rpm": 3.4109839262178587,
-      "deviation:stft_bank_balance_vs_rpm__mean": 1.8116563399347339,
-      "deviation:stft_bank_balance_vs_rpm__roc": 0.15226793225254803,
-      "deviation:stft_bank_balance_vs_rpm__std": 2.404683037421285,
+      "deviation:stft_bank_balance_vs_rpm": 1.8110838148417314,
+      "deviation:stft_bank_balance_vs_rpm__mean": 1.6415448680728655,
+      "deviation:stft_bank_balance_vs_rpm__roc": 0.06840977730457375,
+      "deviation:stft_bank_balance_vs_rpm__std": 0.678879332229914,
       "deviation:timing_advance_vs_rpm_load": 5.913195565653414,
       "deviation:timing_advance_vs_rpm_load__mean": 2.8777000236247505,
       "deviation:timing_advance_vs_rpm_load__roc": 0.2787379215100667,
@@ -3504,7 +3504,7 @@
           "nan_count": 6,
           "non_finite_count": 0,
           "non_null_count": 11717,
-          "unique_finite_count": 62
+          "unique_finite_count": 613
         },
         "derived:STFT_BANK_BALANCE__mean": {
           "constant": false,
@@ -3513,7 +3513,7 @@
           "nan_count": 6,
           "non_finite_count": 0,
           "non_null_count": 11717,
-          "unique_finite_count": 613
+          "unique_finite_count": 4644
         },
         "derived:STFT_BANK_BALANCE__roc": {
           "constant": false,
@@ -3522,7 +3522,7 @@
           "nan_count": 336,
           "non_finite_count": 0,
           "non_null_count": 11387,
-          "unique_finite_count": 77
+          "unique_finite_count": 770
         },
         "derived:STFT_BANK_BALANCE__std": {
           "constant": false,
@@ -3531,7 +3531,7 @@
           "nan_count": 19,
           "non_finite_count": 0,
           "non_null_count": 11704,
-          "unique_finite_count": 3358
+          "unique_finite_count": 6675
         },
         "deviation:air_mass_per_cycle_vs_rpm_load": {
           "constant": false,
@@ -3756,7 +3756,7 @@
           "nan_count": 22,
           "non_finite_count": 0,
           "non_null_count": 11701,
-          "unique_finite_count": 1608
+          "unique_finite_count": 4144
         },
         "deviation:stft_bank_balance_vs_rpm__mean": {
           "constant": false,
@@ -3765,7 +3765,7 @@
           "nan_count": 22,
           "non_finite_count": 0,
           "non_null_count": 11701,
-          "unique_finite_count": 5764
+          "unique_finite_count": 7369
         },
         "deviation:stft_bank_balance_vs_rpm__roc": {
           "constant": false,
@@ -3774,7 +3774,7 @@
           "nan_count": 352,
           "non_finite_count": 0,
           "non_null_count": 11371,
-          "unique_finite_count": 2281
+          "unique_finite_count": 4100
         },
         "deviation:stft_bank_balance_vs_rpm__std": {
           "constant": false,
@@ -3783,7 +3783,7 @@
           "nan_count": 35,
           "non_finite_count": 0,
           "non_null_count": 11688,
-          "unique_finite_count": 6075
+          "unique_finite_count": 7434
         },
         "deviation:timing_advance_vs_rpm_load": {
           "constant": false,
@@ -7017,7 +7017,7 @@
     ],
     "timestamp_column": "timestamp"
   },
-  "training_data_hash": "sha256:6ce8117ad0675251d6ac31615db8c327c4c18594a123cf43fd00596c50e49e8e",
+  "training_data_hash": "sha256:d6cc4f8e2b3fb6d39d2acf1f5b7623b502a947d387971d4be22dcfafb15be424",
   "training_end_timestamp": "2026-05-24T19:59:35Z",
   "training_sessions": [
     "2026-05-18T015823",

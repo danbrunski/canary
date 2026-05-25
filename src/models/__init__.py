@@ -73,6 +73,13 @@ from src.models.sequence_registry import (
     SequenceBackend,
     resolve_sequence_backend,
 )
+from src.models.tcn import (
+    MissingTCNDependencyError,
+    TCNAutoencoder,
+    TCNAutoencoderArchitecture,
+    TCNAutoencoderConfigLike,
+    build_tcn_autoencoder,
+)
 
 __all__ = [
     "LABEL_COLUMN",
@@ -109,6 +116,11 @@ __all__ = [
     "SEQUENCE_BACKENDS",
     "SequenceBackend",
     "resolve_sequence_backend",
+    "MissingTCNDependencyError",
+    "TCNAutoencoder",
+    "TCNAutoencoderArchitecture",
+    "TCNAutoencoderConfigLike",
+    "build_tcn_autoencoder",
     "LSTMAutoencoder",
     "LSTMAutoencoderArchitecture",
     "LSTMAutoencoderConfigLike",

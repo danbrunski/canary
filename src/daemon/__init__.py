@@ -19,7 +19,16 @@ from src.storage.parquet_writer import ParquetTelemetryWriter
 from . import runtime as _runtime
 from . import server as _server
 from .components import DaemonComponents, build_components
-from .drain import _record_to_dict, drain_queue_with_broadcast
+from .drain import (
+    TelemetrySink,
+    _record_to_dict,
+    drain_queue_with_broadcast,
+    run_gps_sink,
+    run_live_source_sink,
+    run_storage_sink,
+    run_telemetry_broadcast_sink,
+    run_telemetry_fanout,
+)
 from .inference import (
     _finite_or_none,
     _observe_behavior,
@@ -81,6 +90,7 @@ __all__ = [
     "DASHBOARD_SHUTDOWN_SECONDS",
     "DRAIN_SHUTDOWN_SECONDS",
     "DaemonComponents",
+    "TelemetrySink",
     "build_components",
     "build_live_feature_source",
     "drain_queue_with_broadcast",
@@ -88,9 +98,14 @@ __all__ = [
     "poll_config",
     "poll_model_managers",
     "run_daemon",
+    "run_gps_sink",
+    "run_live_source_sink",
     "run_live_inference",
     "run_live_inference_lstm",
     "run_retention_sweeper",
+    "run_storage_sink",
+    "run_telemetry_broadcast_sink",
+    "run_telemetry_fanout",
     "serve_in_background",
     "_finite_or_none",
     "_sequence_observe",
