@@ -157,19 +157,22 @@ def train(
             "signal columns. Did you convert them to Parquet, and is "
             f"{bindings_path} present so CAN payloads get decoded?"
         )
-    # Drop rows where any of the chosen feature columns is NaN before fitting
-    # the scaler. Otherwise per-column means/stds reflect spurious
-    # imputed-zero rows the model can't really learn from, and the
-    # threshold ends up calibrated against a fractured error distribution.
-    # Mirrors IsolationForest training's missing-feature row drop.
-    clean_features = features.dropna(subset=columns)
-    scaler = ZScoreScaler.fit(clean_features, columns=columns)
+    # GRU-D handles missing values via its observed-mask, so keep EVERY row and
+    # let masking ignore the gaps. Dropping rows with any NaN here (as the IF
+    # path does — the IF can't mask) would discard every session missing a
+    # channel — e.g. all the no-GPS historical idle sessions, whose gps:speed is
+    # NaN throughout — collapsing the corpus from ~11k windows to just the few
+    # fully-instrumented drives (~3.5k) and starving the autoencoder. Fully
+    # blank rows are already removed upstream (``_drop_fully_stale_rows``). The
+    # scaler is fit skipna, so per-column means/stds use each channel's real
+    # observations regardless of other channels' gaps.
+    scaler = ZScoreScaler.fit(features, columns=columns)
 
     dataset = build_dataset(
         session_dirs,
         config,
         bindings_path=bindings_path,
-        feature_frame=clean_features,
+        feature_frame=features,
         feature_cache_dir=feature_cache_dir,
         rebuild_feature_cache=rebuild_feature_cache,
         sequence_length=sequence_length,
