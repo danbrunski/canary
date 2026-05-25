@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -13,11 +14,18 @@ from scripts.fp_benchmark import run_false_positive_benchmark
 from src.config import CanaryConfig
 from src.models.false_positive_benchmark import (
     DEFAULT_K_GRID,
+    _per_window_thresholds,
+    _window_modes,
     benchmark_false_positives,
 )
 from src.models.lstm_training import train_lstm_autoencoder
-from src.models.sequence_dataset import SequenceWindowDataset
+from src.models.sequence_dataset import SequenceWindow, SequenceWindowDataset
+from src.models.sequence_training import (
+    ReconstructionErrorDistribution,
+    SequenceThresholdCalibration,
+)
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
@@ -267,3 +275,137 @@ def test_cli_main_reports_errors(tmp_path: Path, capsys: pytest.CaptureFixture[s
     exit_code = fp_benchmark_main(["--model", str(tmp_path / "missing.pt"), str(tmp_path / "nope")])
     assert exit_code == 1
     assert "error:" in capsys.readouterr().err
+
+
+def _dist(mean: float, std: float, threshold: float) -> ReconstructionErrorDistribution:
+    return ReconstructionErrorDistribution(
+        count=100,
+        mean=mean,
+        std=std,
+        minimum=0.0,
+        maximum=mean + 5 * std,
+        p50=mean,
+        p90=mean + std,
+        p95=mean + 1.5 * std,
+        p99=mean + 2 * std,
+        threshold=threshold,
+    )
+
+
+def _calibration(
+    *, per_mode: dict[str, ReconstructionErrorDistribution] | None = None
+) -> SequenceThresholdCalibration:
+    return SequenceThresholdCalibration(
+        threshold_k=3.0,
+        calibrated_at="2026-05-12T00:00:00Z",
+        training_data_hash="hash",
+        window_count=100,
+        global_error=_dist(0.1, 0.1, 0.5),
+        channel_errors={"rpm": _dist(0.05, 0.05, 0.2), "speed": _dist(0.05, 0.05, 0.2)},
+        per_mode_errors=per_mode,
+    )
+
+
+def test_per_window_thresholds_use_mode_band_with_global_fallback() -> None:
+    calibration = _calibration(
+        per_mode={"idle": _dist(0.05, 0.02, 0.30), "highway": _dist(0.2, 0.3, 0.95)}
+    )
+    # idle/highway resolve to their bands; an uncalibrated mode and a missing
+    # mode both fall back to the global threshold (0.5) — exactly as the daemon.
+    thresholds = _per_window_thresholds(["idle", "highway", "city", None], calibration)
+    assert list(thresholds) == pytest.approx([0.30, 0.95, 0.5, 0.5])
+
+
+def test_per_window_thresholds_recompute_band_at_k() -> None:
+    calibration = _calibration(per_mode={"idle": _dist(0.05, 0.02, 0.30)})
+    # k=0 → band collapses to the mean; an unbanded mode uses the global mean.
+    at_zero = _per_window_thresholds(["idle", "highway"], calibration, k=0.0)
+    assert at_zero == pytest.approx([0.05, 0.1])
+    # k=2 → mean + 2*std per band.
+    at_two = _per_window_thresholds(["idle"], calibration, k=2.0)
+    assert at_two == pytest.approx([0.05 + 2 * 0.02])
+
+
+def test_window_modes_reads_last_row_else_none() -> None:
+    frame = pd.DataFrame({MODE_COLUMN: ["idle", "idle", "city", "highway", "highway"]})
+    windows = [
+        SequenceWindow("s", 0, 3, "t0", "t2"),
+        SequenceWindow("s", 2, 5, "t2", "t4"),
+    ]
+    dataset = SimpleNamespace(frame=frame, windows=windows)
+    # Window mode is its *last* row's mode, mirroring buffer.last_mode at serve.
+    assert _window_modes(dataset) == ["city", "highway"]  # type: ignore[arg-type]
+    # No mode column → every window falls back to None (→ global threshold).
+    no_mode = SimpleNamespace(frame=pd.DataFrame({"rpm": [1.0, 2.0, 3.0]}), windows=windows)
+    assert _window_modes(no_mode) == [None, None]  # type: ignore[arg-type]
+
+
+def test_window_flag_uses_global_error_not_channel_union() -> None:
+    """Regression: a window fires on the global error only, never the per-channel
+    union — the saturating flood the live emitter already dropped."""
+    torch = _torch()
+    seq_len, n_features, n_windows = 4, 2, 5
+
+    class _StubModel:
+        def to(self, *args: object, **kwargs: object) -> _StubModel:
+            return self
+
+        def eval(self) -> _StubModel:
+            return self
+
+        def reconstruction_error(
+            self, value: object, mask: object, delta: object, *, reduction: str
+        ) -> object:
+            batch = int(value.shape[0])  # type: ignore[attr-defined]
+            if reduction == "sample":
+                return torch.full((batch,), 0.1)  # under the global threshold (0.5)
+            if reduction == "channel":
+                out = torch.zeros((batch, n_features))
+                out[:, 0] = 9.0  # channel 0 blows past its band (0.2) every window
+                return out
+            raise AssertionError(reduction)
+
+    class _StubDataset:
+        def __init__(self) -> None:
+            self.feature_columns = ["rpm", "speed"]
+            self.sequence_length = seq_len
+            self.frame = pd.DataFrame({"rpm": [0.0] * 64})  # no mode column → global band
+            self.windows = [
+                SequenceWindow(
+                    "h",
+                    i,
+                    i + seq_len,
+                    f"2026-05-12T00:00:0{i}Z",
+                    f"2026-05-12T00:00:0{i + seq_len}Z",
+                )
+                for i in range(n_windows)
+            ]
+
+        def __len__(self) -> int:
+            return n_windows
+
+        def __getitem__(self, index: int) -> tuple[object, object, object]:
+            zeros = torch.zeros((seq_len, n_features))
+            return zeros, torch.ones((seq_len, n_features)), zeros
+
+    trained = SimpleNamespace(
+        model=_StubModel(),
+        feature_columns=("rpm", "speed"),
+        manifest=SimpleNamespace(
+            thresholds=_calibration().to_dict(),
+            schema={"sequence_length": seq_len},
+            model_version="stub",
+        ),
+    )
+
+    report = benchmark_false_positives(trained, _StubDataset())  # type: ignore[arg-type]
+
+    # The channels did exceed — that stays visible as drill-down evidence …
+    assert any(
+        summary.channel == "rpm" and summary.exceedances == n_windows
+        for summary in report.channel_summaries
+    )
+    # … but the window flag fires on the (sub-threshold) global error only.
+    assert report.flagged_windows == 0
+    assert report.false_positive_rate == 0.0
+    assert report.global_exceedances == 0

@@ -47,6 +47,7 @@ from src.models.false_positive_benchmark import (  # noqa: E402
 from src.models.tcn import MissingTCNDependencyError  # noqa: E402
 from src.preprocessing import discover_sessions  # noqa: E402
 from src.preprocessing.feature_pipeline import DEFAULT_BINDINGS_PATH  # noqa: E402
+from src.preprocessing.normalization import ZScoreScaler  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -166,12 +167,21 @@ def run_backbone(
         device=device,
     )
     artifact_path = out_dir / "model.pt"
+    # Z-score the held-out frame with the freshly trained model's own scaler so
+    # benchmark reconstruction error matches the calibrated-threshold domain
+    # (same scaling the live serve path applies per window).
+    scaler = (
+        ZScoreScaler.from_dict(dict(trained.manifest.scaler))
+        if trained.manifest.scaler is not None
+        else None
+    )
     eval_dataset = trainer.build_dataset(  # type: ignore[attr-defined]
         eval_sessions,
         config,
         bindings_path=bindings_path,
         sequence_length=int(trained.manifest.schema["sequence_length"]),
         feature_columns=trained.feature_columns,
+        scaler=scaler,
     )
     report = benchmark_false_positives(trained, eval_dataset, k_grid=k_grid, device=device)
     return BackboneResult(

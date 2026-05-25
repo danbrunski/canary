@@ -1,10 +1,22 @@
-"""False-positive benchmark for the LSTM autoencoder (Task 3.6).
+"""False-positive benchmark for the sequence autoencoders (Task 3.6).
 
-Runs a trained, threshold-calibrated LSTM over held-out *clean* sessions and
-reports how often it would fire. The headline number is the false-positive
-rate (FPR): the fraction of evaluated windows flagged anomalous at the
-threshold baked into the model manifest. Because the windows are clean, every
-flag is by definition a false positive.
+Runs a trained, threshold-calibrated sequence detector (LSTM or TCN) over
+held-out *clean* sessions and reports how often it would fire. The headline
+number is the false-positive rate (FPR): the fraction of evaluated windows
+flagged anomalous. Because the windows are clean, every flag is by definition a
+false positive.
+
+The window flag **mirrors the live emit policy** (``SequenceInference`` in
+``src.models.inference``): a window fires when its *global* (masked-mean)
+reconstruction error exceeds the threshold for the window's **operating mode**
+(``per_mode_errors[mode].threshold``), falling back to the single global
+threshold when the mode has no calibrated band. It deliberately does **not**
+OR in per-channel exceedances: the per-channel thresholds run far too tight
+live (with a few hundred channels at idle/warmup at least one is essentially
+always over its band, so a union flag saturates to ~100% even in-sample), which
+is exactly why the daemon dropped its ``or bool(anomalous_channels)`` clause.
+Per-channel exceedances are still computed and reported as drill-down
+diagnostics (``channel_summaries``), never as the firing trigger.
 
 The report also sweeps a grid of ``k`` multipliers, recomputing thresholds as
 ``mean + k * std`` from the *training* error distribution stored in the
@@ -31,6 +43,7 @@ from src.models.sequence_training import (
     ReconstructionErrorDistribution,
     SequenceThresholdCalibration,
 )
+from src.preprocessing.segmenter import MODE_COLUMN
 
 #: Default ``k`` multipliers swept by the benchmark. The calibrated ``k`` from
 #: the manifest is always merged in so the as-shipped point is visible.
@@ -152,6 +165,61 @@ class FalsePositiveBenchmarkReport:
         }
 
 
+def _window_modes(dataset: SequenceWindowDataset) -> list[str | None]:
+    """Operating mode for each window, taken from its *last* row.
+
+    Mirrors the live path, which scores a window under ``buffer.last_mode`` —
+    the mode of the most recently appended row (``inference.py``). Returns
+    ``None`` per window when the frame carries no mode column (e.g. raw test
+    frames that skip segmentation), so the caller falls back to the global
+    threshold.
+    """
+    frame = dataset.frame
+    if MODE_COLUMN not in frame.columns:
+        return [None] * len(dataset.windows)
+    modes = frame[MODE_COLUMN].to_numpy()
+    row_count = len(modes)
+    resolved: list[str | None] = []
+    for window in dataset.windows:
+        last_row = window.end_row - 1
+        if 0 <= last_row < row_count and modes[last_row] is not None:
+            value = modes[last_row]
+            resolved.append(None if pd.isna(value) else str(value))
+        else:
+            resolved.append(None)
+    return resolved
+
+
+def _per_window_thresholds(
+    modes: Sequence[str | None],
+    calibration: SequenceThresholdCalibration,
+    *,
+    k: float | None = None,
+) -> np.ndarray[Any, np.dtype[np.float64]]:
+    """Per-window global-error threshold, per the window's operating mode.
+
+    With ``k is None`` each band's calibrated ``threshold`` is used (the
+    as-shipped point); otherwise the band is recomputed as ``mean + k * std``
+    for the sweep. A window whose mode has no calibrated band — or any window
+    when ``per_mode_errors`` is absent — falls back to the global band, exactly
+    as the daemon does.
+    """
+
+    def band(distribution: ReconstructionErrorDistribution) -> float:
+        return distribution.threshold if k is None else distribution.mean + k * distribution.std
+
+    global_threshold = band(calibration.global_error)
+    per_mode = calibration.per_mode_errors or {}
+    mode_thresholds = {mode: band(distribution) for mode, distribution in per_mode.items()}
+
+    def threshold_for(mode: str | None) -> float:
+        if mode is not None and mode in mode_thresholds:
+            return mode_thresholds[mode]
+        return global_threshold
+
+    return np.array([threshold_for(mode) for mode in modes], dtype=np.float64)
+
+
 def benchmark_false_positives(
     trained: TrainedSequenceModel,
     dataset: SequenceWindowDataset,
@@ -189,9 +257,16 @@ def benchmark_false_positives(
         [calibration.channel_errors[column].threshold for column in feature_columns],
         dtype=np.float64,
     )
+    # Fire on the global error vs the window's operating-mode threshold, exactly
+    # as the live emitter does. The per-channel exceedances below are diagnostics
+    # only — never part of the flag (a union over hundreds of tight per-channel
+    # bands saturates to ~100%, the flood the daemon already removed).
+    window_modes = _window_modes(dataset)
+    per_window_threshold = _per_window_thresholds(window_modes, calibration)
+    flagged = global_errors > per_window_threshold
+    # Mode-agnostic single-threshold view, reported alongside as a reference.
     global_exceed = global_errors > global_threshold
     channel_exceed = channel_errors > channel_thresholds
-    flagged = global_exceed | channel_exceed.any(axis=1)
 
     window_count = int(global_errors.size)
     durations = _session_durations(dataset.windows)
@@ -203,9 +278,8 @@ def benchmark_false_positives(
     session_summaries = _session_summaries(dataset.windows, flagged, durations)
     k_sweep = _k_sweep(
         global_errors=global_errors,
-        channel_errors=channel_errors,
+        window_modes=window_modes,
         calibration=calibration,
-        feature_columns=feature_columns,
         total_duration_seconds=total_duration,
         window_count=window_count,
         k_grid=k_grid,
@@ -318,26 +392,19 @@ def _session_summaries(
 def _k_sweep(
     *,
     global_errors: np.ndarray[Any, np.dtype[np.float64]],
-    channel_errors: np.ndarray[Any, np.dtype[np.float64]],
+    window_modes: Sequence[str | None],
     calibration: SequenceThresholdCalibration,
-    feature_columns: Sequence[str],
     total_duration_seconds: float,
     window_count: int,
     k_grid: Sequence[float] | None,
 ) -> tuple[KSweepPoint, ...]:
-    channel_means = np.array(
-        [calibration.channel_errors[column].mean for column in feature_columns], dtype=np.float64
-    )
-    channel_stds = np.array(
-        [calibration.channel_errors[column].std for column in feature_columns], dtype=np.float64
-    )
     points: list[KSweepPoint] = []
     for k in _resolve_k_grid(k_grid, calibration.threshold_k):
+        # Same firing rule as the headline number, swept across k: global error
+        # vs the window's per-mode band recomputed at mean + k * std.
+        per_window_threshold = _per_window_thresholds(window_modes, calibration, k=k)
         global_threshold = calibration.global_error.mean + k * calibration.global_error.std
-        channel_thresholds = channel_means + k * channel_stds
-        flagged = (global_errors > global_threshold) | (channel_errors > channel_thresholds).any(
-            axis=1
-        )
+        flagged = global_errors > per_window_threshold
         flagged_count = int(flagged.sum())
         alerts_per_hour = _alerts_per_hour(flagged_count, total_duration_seconds)
         points.append(

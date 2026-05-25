@@ -230,6 +230,14 @@ def evaluate(
     k_grid: Sequence[float] | None = None,
 ) -> FalsePositiveBenchmarkReport | None:
     """Run the false-positive benchmark on held-out clean sessions and print a summary."""
+    # Z-score the held-out frame with the model's own scaler so reconstruction
+    # error lands in the same domain as the calibrated thresholds — the live
+    # serve path scales every window the same way before scoring.
+    scaler = (
+        ZScoreScaler.from_dict(dict(trained.manifest.scaler))
+        if trained.manifest.scaler is not None
+        else None
+    )
     dataset = build_dataset(
         session_dirs,
         config,
@@ -237,6 +245,7 @@ def evaluate(
         sequence_length=int(trained.manifest.schema["sequence_length"]),
         feature_columns=trained.feature_columns,
         stride=stride,
+        scaler=scaler,
     )
     if len(dataset) == 0:
         log.warning("held-out sessions produced no sequence windows; skipping evaluation")
