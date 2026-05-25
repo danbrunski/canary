@@ -80,3 +80,6 @@ models/*.pth
 models/*.pkl
 models/*.joblib
 models/*.onnx
+# Underscore-prefixed dirs are scratch (bake-off / replay output), excluded
+# everywhere else by the leading-`_` convention — keep them out of git too.
+models/_*/
