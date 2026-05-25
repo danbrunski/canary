@@ -59,6 +59,20 @@ def _load_lstm(path: Path) -> TrainedSequenceModel:
     return load_lstm_autoencoder_model(path)
 
 
+def _tcn_enabled(config: CanaryConfig) -> bool:
+    return config.models.tcn_autoencoder.enabled
+
+
+def _tcn_artifact(config: CanaryConfig) -> Path:
+    return config.daemon.models_dir / config.daemon.tcn_artifact
+
+
+def _load_tcn(path: Path) -> TrainedSequenceModel:
+    from src.models.tcn_training import load_tcn_autoencoder_model
+
+    return load_tcn_autoencoder_model(path)
+
+
 LSTM_BACKEND = SequenceBackend(
     selector="lstm",
     model_type="lstm_autoencoder",
@@ -68,9 +82,21 @@ LSTM_BACKEND = SequenceBackend(
     load_model=_load_lstm,
 )
 
-#: All registered backbones, keyed by their config selector value. A TCN adds
-#: one entry here (and one arm to the ``sequence_detector`` config ``Literal``).
-SEQUENCE_BACKENDS: dict[str, SequenceBackend] = {LSTM_BACKEND.selector: LSTM_BACKEND}
+TCN_BACKEND = SequenceBackend(
+    selector="tcn",
+    model_type="tcn_autoencoder",
+    requires=("torch",),
+    is_enabled=_tcn_enabled,
+    artifact_path=_tcn_artifact,
+    load_model=_load_tcn,
+)
+
+#: All registered backbones, keyed by their config selector value. Adding a new
+#: backbone is one entry here plus one arm on the ``sequence_detector``
+#: config ``Literal``.
+SEQUENCE_BACKENDS: dict[str, SequenceBackend] = {
+    backend.selector: backend for backend in (LSTM_BACKEND, TCN_BACKEND)
+}
 
 
 def resolve_sequence_backend(config: CanaryConfig) -> SequenceBackend | None:

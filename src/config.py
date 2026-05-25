@@ -230,16 +230,45 @@ class LSTMAutoencoderConfig(_Strict):
     threshold_k: float
 
 
+class TCNAutoencoderConfig(_Strict):
+    """Dilated causal TCN autoencoder — the alternate sequence-detector backbone.
+
+    Fully defaulted (and ``enabled: false`` by default) so configs without a
+    ``tcn_autoencoder`` block keep loading; selecting it requires both
+    ``sequence_detector: tcn`` and ``enabled: true``.
+    """
+
+    enabled: bool = False
+    sequence_length: int = 30
+    channels: int = 64
+    kernel_size: int = 3
+    num_levels: int = 4
+    latent_dim: int = 32
+    dropout: float = 0.0
+    #: Feed a bounded per-channel Δt decay as extra conv input channels (the
+    #: GRU-D freshness gate). When false the TCN sees value+mask only.
+    use_delta_decay: bool = True
+    batch_size: int = 64
+    learning_rate: float = 0.001
+    max_epochs: int = 100
+    validation_fraction: float = 0.2
+    early_stopping_patience: int = 10
+    min_delta: float = 0.0
+    random_state: int = 42
+    threshold_k: float = 3.0
+
+
 class ModelsConfig(_Strict):
     isolation_forest: IsolationForestConfig
     lstm_autoencoder: LSTMAutoencoderConfig
+    tcn_autoencoder: TCNAutoencoderConfig = Field(default_factory=TCNAutoencoderConfig)
     fusion: FusionConfig = Field(default_factory=FusionConfig)
     #: Which backbone fills the single sequence-detector slot. The selected
     #: backend's own ``enabled`` flag still gates whether it loads (so an
-    #: existing ``lstm_autoencoder.enabled: false`` keeps the slot off). A TCN
-    #: backbone widens this to ``Literal["lstm", "tcn"]``; see
+    #: existing ``lstm_autoencoder.enabled: false`` keeps the slot off, and
+    #: ``tcn_autoencoder`` defaults to disabled). See
     #: ``src/models/sequence_registry.py``.
-    sequence_detector: Literal["lstm"] = "lstm"
+    sequence_detector: Literal["lstm", "tcn"] = "lstm"
 
 
 class DashboardConfig(_Strict):
@@ -270,6 +299,7 @@ class DaemonConfig(_Strict):
     trip_state: Path = Path("data/control/trip_odometer.json")
     isolation_forest_artifact: str = "isolation_forest/model.joblib"
     lstm_artifact: str = "lstm_autoencoder/model.pt"
+    tcn_artifact: str = "tcn_autoencoder/model.pt"
     model_poll_seconds: float = 30.0
     retention_sweep_seconds: float = 3600.0
     broadcaster_queue_size: int = 100

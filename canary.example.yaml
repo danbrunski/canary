@@ -133,9 +133,10 @@ preprocessing:
     # high-throttle moments score against the city / highway models.
 
 models:
-  # Which backbone fills the single sequence-detector slot. Only "lstm"
-  # (GRU-D) ships today; the selected backend's own `enabled` flag below still
-  # gates whether it loads. A future TCN backbone widens this to "tcn".
+  # Which backbone fills the single sequence-detector slot: "lstm" (GRU-D) or
+  # "tcn" (dilated causal Conv1d). Only one is active at a time; the selected
+  # backend's own `enabled` flag below still gates whether it loads. Both
+  # publish under the same anomaly source, so switching is a config change.
   sequence_detector: lstm
   isolation_forest:
     enabled: true
@@ -157,6 +158,26 @@ models:
     num_layers: 1
     latent_dim: 32
     dropout: 0.0
+    batch_size: 64
+    learning_rate: 0.001
+    max_epochs: 100
+    validation_fraction: 0.2
+    early_stopping_patience: 10
+    min_delta: 0.0
+    random_state: 42
+    threshold_k: 3.0
+  # Alternate sequence-detector backbone (active when sequence_detector: tcn).
+  # Dilated causal Conv1d autoencoder; consumes the same value+mask+Δt windows.
+  # receptive field = 1 + 2*(kernel_size-1)*(2**num_levels - 1).
+  tcn_autoencoder:
+    enabled: false
+    sequence_length: 30
+    channels: 64
+    kernel_size: 3
+    num_levels: 4
+    latent_dim: 32
+    dropout: 0.0
+    use_delta_decay: true
     batch_size: 64
     learning_rate: 0.001
     max_epochs: 100
