@@ -25,8 +25,8 @@ import numpy as np
 import pandas as pd
 
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
-from src.models.lstm_training import TrainedLSTMAutoencoder
 from src.models.sequence_dataset import SequenceWindow, SequenceWindowDataset
+from src.models.sequence_protocol import TrainedSequenceModel
 from src.models.sequence_training import (
     ReconstructionErrorDistribution,
     SequenceThresholdCalibration,
@@ -153,7 +153,7 @@ class FalsePositiveBenchmarkReport:
 
 
 def benchmark_false_positives(
-    trained: TrainedLSTMAutoencoder,
+    trained: TrainedSequenceModel,
     dataset: SequenceWindowDataset,
     *,
     k_grid: Sequence[float] | None = None,
@@ -236,7 +236,7 @@ def benchmark_false_positives(
 
 
 def _reconstruction_errors(
-    trained: TrainedLSTMAutoencoder,
+    trained: TrainedSequenceModel,
     dataset: SequenceWindowDataset,
     *,
     batch_size: int,
@@ -246,8 +246,11 @@ def _reconstruction_errors(
     data = importlib.import_module("torch.utils.data")
     device_obj = torch.device(device)
     loader = data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
-    trained.model.to(device_obj)
-    trained.model.eval()
+    # ``reconstruction_error`` isn't on the SequenceAutoencoder protocol (only
+    # forward/to/eval are); both backbones implement it, so reach it via Any.
+    model: Any = trained.model
+    model.to(device_obj)
+    model.eval()
 
     global_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
     channel_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
@@ -256,12 +259,8 @@ def _reconstruction_errors(
             value = value.to(device_obj)
             mask = mask.to(device_obj)
             delta = delta.to(device_obj)
-            global_errors = trained.model.reconstruction_error(
-                value, mask, delta, reduction="sample"
-            )
-            channel_errors = trained.model.reconstruction_error(
-                value, mask, delta, reduction="channel"
-            )
+            global_errors = model.reconstruction_error(value, mask, delta, reduction="sample")
+            channel_errors = model.reconstruction_error(value, mask, delta, reduction="channel")
             global_chunks.append(global_errors.detach().cpu().numpy().astype(np.float64))
             channel_chunks.append(channel_errors.detach().cpu().numpy().astype(np.float64))
     return np.concatenate(global_chunks), np.concatenate(channel_chunks, axis=0)
