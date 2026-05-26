@@ -14,7 +14,7 @@ import logging
 import multiprocessing
 import os
 from collections.abc import Mapping, Sequence
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -205,6 +205,15 @@ def _worker_process_session(
 #: the pool consistently beats serial wall time on our corpus.
 _PARALLEL_SESSION_THRESHOLD = 3
 
+#: Default per-process worker cap when ``max_workers`` is auto-resolved. A
+#: spawn-mode worker re-imports pandas/pyarrow (~200 MB) and then loads one
+#: session's parquet → long → wide pivot in memory — big drives (e.g. 484
+#: chunks ≈ 37 MB on disk) peak at 1–3 GB per worker. 10 workers on the 11 GB
+#: dev laptop OOM-killed the retrain at first cut, so the auto-cap stays
+#: conservative; callers with more RAM (or smaller sessions) can pass an
+#: explicit ``max_workers`` to raise it.
+_PARALLEL_WORKER_CAP = 4
+
 
 def build_feature_frame(
     session_dirs: Sequence[Path],
@@ -285,41 +294,13 @@ def build_feature_frame(
     resampled_parts: list[pd.DataFrame] = []
     skipped: list[str] = []
 
-    effective_workers = (
-        min(len(session_dirs), os.cpu_count() or 1)
-        if max_workers is None
-        else max(1, int(max_workers))
-    )
+    if max_workers is None:
+        effective_workers = min(len(session_dirs), os.cpu_count() or 1, _PARALLEL_WORKER_CAP)
+    else:
+        effective_workers = max(1, int(max_workers))
     parallel = effective_workers > 1 and len(session_dirs) >= _PARALLEL_SESSION_THRESHOLD
 
-    if parallel:
-        log.info(
-            "building feature frame in parallel",
-            extra={"sessions": len(session_dirs), "workers": effective_workers},
-        )
-        with ProcessPoolExecutor(
-            max_workers=effective_workers,
-            initializer=_init_feature_worker,
-            initargs=(bindings, dbc_database, did_map, resample_config),
-            # ``spawn`` re-imports the codebase per worker rather than forking
-            # the parent's address space, which avoids the classic fork-with-
-            # threads deadlock (numpy / torch keep background threads alive).
-            # The extra ~0.5-1 s of worker startup is rounded off by even a
-            # single-session feature build.
-            mp_context=multiprocessing.get_context("spawn"),
-        ) as pool:
-            # ``map`` preserves order, so the concatenated frame is identical to
-            # the serial run — no ordering drift between runs.
-            for name, frame, err in pool.map(_worker_process_session, session_dirs):
-                if frame is not None:
-                    resampled_parts.append(frame)
-                else:
-                    skipped.append(name)
-                    log.warning(
-                        "skipping unreadable session",
-                        extra={"session": name, "error": err},
-                    )
-    else:
+    def _build_serial() -> None:
         for session_dir in session_dirs:
             try:
                 resampled_parts.append(
@@ -333,6 +314,54 @@ def build_feature_frame(
                     "skipping unreadable session",
                     extra={"session": str(session_dir), "error": f"{type(exc).__name__}: {exc}"},
                 )
+
+    if parallel:
+        log.info(
+            "building feature frame in parallel",
+            extra={"sessions": len(session_dirs), "workers": effective_workers},
+        )
+        try:
+            with ProcessPoolExecutor(
+                max_workers=effective_workers,
+                initializer=_init_feature_worker,
+                initargs=(bindings, dbc_database, did_map, resample_config),
+                # ``spawn`` re-imports the codebase per worker rather than
+                # forking the parent's address space, which avoids the classic
+                # fork-with-threads deadlock (numpy / torch keep background
+                # threads alive). The extra ~0.5-1 s of worker startup is
+                # rounded off by even a single-session feature build.
+                mp_context=multiprocessing.get_context("spawn"),
+            ) as pool:
+                # ``map`` preserves order, so the concatenated frame is
+                # identical to the serial run — no ordering drift between runs.
+                for name, frame, err in pool.map(_worker_process_session, session_dirs):
+                    if frame is not None:
+                        resampled_parts.append(frame)
+                    else:
+                        skipped.append(name)
+                        log.warning(
+                            "skipping unreadable session",
+                            extra={"session": name, "error": err},
+                        )
+        except BrokenExecutor as exc:
+            # OOM-kill, segfault, or a worker dying mid-task all surface as
+            # BrokenExecutor. Don't fail the retrain — fall back to the
+            # serial path that's been in production all along. Partial
+            # results from the pool are dropped (we can't trust the ordering
+            # or completeness) and we restart fresh, serially.
+            log.warning(
+                "parallel feature build aborted (worker died); falling back to serial",
+                extra={
+                    "sessions": len(session_dirs),
+                    "workers": effective_workers,
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
+            resampled_parts.clear()
+            skipped.clear()
+            _build_serial()
+    else:
+        _build_serial()
     if not resampled_parts:
         raise ValueError(
             f"no readable sessions among the {len(session_dirs)} given "
