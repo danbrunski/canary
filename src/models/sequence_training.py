@@ -435,6 +435,26 @@ def torch_module() -> Any:
     return torch
 
 
+def default_training_device() -> str:
+    """``"cuda"`` when a CUDA device is available, otherwise ``"cpu"``.
+
+    The training CLIs (``train_lstm``, ``train_tcn``, ``retrain``,
+    ``sequence_bakeoff``) use this as their ``--device`` default so the dev
+    laptop's GPU is exercised automatically while the Pi (no CUDA) falls
+    through to CPU. Explicit ``--device`` overrides win. Library entry points
+    keep ``device="cpu"`` as their hard default — the serve path on the Pi
+    must stay deterministic regardless of where the trainer ran.
+    """
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
+    try:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:  # noqa: BLE001 — driver/library issue → CPU is always safe
+        return "cpu"
+
+
 __all__ = [
     "MIN_CALIBRATION_SAMPLES",
     "EpochLoss",
@@ -444,6 +464,7 @@ __all__ = [
     "calibrate_sequence_thresholds",
     "coerce_timestamp",
     "cpu_state_dict",
+    "default_training_device",
     "error_distribution",
     "evaluate_loss",
     "masked_mse_loss",

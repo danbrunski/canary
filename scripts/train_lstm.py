@@ -48,6 +48,7 @@ from src.models.lstm_training import (
     train_lstm_autoencoder,
 )
 from src.models.sequence_dataset import DEFAULT_SEQUENCE_STRIDE, SequenceWindowDataset
+from src.models.sequence_training import default_training_device
 from src.preprocessing import discover_sessions
 from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
@@ -396,8 +397,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--device",
-        default="cpu",
-        help="Torch device for training/inference (default: cpu).",
+        default=default_training_device(),
+        help="Torch device for training (default: cuda when available, else cpu).",
     )
     parser.add_argument(
         "--model-version",

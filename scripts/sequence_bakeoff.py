@@ -44,6 +44,7 @@ from src.models.false_positive_benchmark import (  # noqa: E402
     FalsePositiveBenchmarkReport,
     benchmark_false_positives,
 )
+from src.models.sequence_training import default_training_device  # noqa: E402
 from src.models.tcn import MissingTCNDependencyError  # noqa: E402
 from src.preprocessing import discover_sessions  # noqa: E402
 from src.preprocessing.feature_pipeline import DEFAULT_BINDINGS_PATH  # noqa: E402
@@ -352,7 +353,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=["lstm", "tcn"],
         help="Backbones to compare (default: both).",
     )
-    parser.add_argument("--device", default="cpu", help="Torch device (default cpu).")
+    parser.add_argument(
+        "--device",
+        default=default_training_device(),
+        help="Torch device (default: cuda when available, else cpu).",
+    )
     parser.add_argument(
         "--evaluate-k",
         type=float,
@@ -396,6 +401,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(args.log_level)
     config = CanaryConfig.from_yaml(args.config)
 
+    log.info("bake-off device=%s", args.device)
     sessions = _resolve_training_sessions(args)
     if not sessions:
         print(

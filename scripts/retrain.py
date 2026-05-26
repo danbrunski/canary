@@ -53,6 +53,7 @@ from src.models.retraining_policy import (  # noqa: E402
     RetrainingFeedbackReport,
     apply_retraining_feedback_policy,
 )
+from src.models.sequence_training import default_training_device  # noqa: E402
 from src.models.training_ledger import (  # noqa: E402
     DEFAULT_TRAINING_LEDGER_PATH,
     TrainingLedger,
@@ -169,8 +170,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--device",
-        default="cpu",
-        help="Sequence-model training device (cpu / cuda). Default cpu — Pi target.",
+        default=default_training_device(),
+        help="Sequence-model training device. Default: cuda when available (dev "
+        "laptop), else cpu (Pi). Artifacts load device-agnostically at serve "
+        "time, so GPU training is safe for the Pi deployment.",
     )
     parser.add_argument(
         "--feature-cache",
@@ -311,6 +314,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "skip_if": args.skip_if,
             "skip_sequence": args.skip_sequence,
             "sequence_model": seq_model_type,
+            "device": args.device,
         },
     )
 
