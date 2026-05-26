@@ -228,6 +228,16 @@ class LSTMAutoencoderConfig(_Strict):
     min_delta: float = 0.0
     random_state: int = 42
     threshold_k: float
+    #: Feature columns to exclude from anomaly scoring. Each entry matches
+    #: itself plus its rolling-derivative siblings (``__mean``, ``__std``,
+    #: ``__roc``), so listing ``obd:FUEL_LEVEL`` silences all four. Applied
+    #: at *train* time (excluded from ``feature_columns`` in the manifest,
+    #: so the model never learns them) **and** at *serve* time (the live
+    #: window's mask is forced to 0 at these indices, so a stale artifact
+    #: that still includes them can't push the global score). Use for
+    #: behavior signals — fuel level, HVAC blower, module voltage — that
+    #: drift naturally over a drive without being a health signal.
+    suppress_channels: tuple[str, ...] = ()
 
 
 class TCNAutoencoderConfig(_Strict):
@@ -256,6 +266,10 @@ class TCNAutoencoderConfig(_Strict):
     min_delta: float = 0.0
     random_state: int = 42
     threshold_k: float = 3.0
+    #: Feature columns to exclude from anomaly scoring (same contract as
+    #: ``LSTMAutoencoderConfig.suppress_channels`` — each entry expands to
+    #: its rolling-derivative siblings). Applied at train + serve.
+    suppress_channels: tuple[str, ...] = ()
 
 
 class ModelsConfig(_Strict):

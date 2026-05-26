@@ -951,7 +951,10 @@ async def test_run_live_inference_lstm_emits_on_full_window(config: CanaryConfig
 
         feature_columns = ("obd:RPM",)
 
-        def __init__(self, _artifact: object) -> None:
+        def __init__(self, _artifact: object, **_kwargs: Any) -> None:
+            # ``**_kwargs`` swallows new keyword arguments the production
+            # engine grows (e.g. ``suppress_channels``) so this stub doesn't
+            # need a hand-edit every time the real signature evolves.
             self._ticks = 0
 
         def observe(self, _row: Any) -> Any:

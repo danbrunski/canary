@@ -265,7 +265,20 @@ async def run_live_inference_lstm(
                 try:
                     from src.models.inference import SequenceInferenceEngine
 
-                    engine = SequenceInferenceEngine(loaded.artifact)
+                    # Pick the suppress list from whichever backbone the
+                    # hot-swapped artifact belongs to, so an LSTM↔TCN switch
+                    # honours the right config knob. ``getattr`` chain falls
+                    # through cleanly for stub artifacts used in tests.
+                    artifact_manifest = getattr(loaded.artifact, "manifest", None)
+                    model_type = getattr(artifact_manifest, "model_type", None)
+                    if model_type == "tcn_autoencoder":
+                        seq_cfg: Any = components.config.models.tcn_autoencoder
+                    else:
+                        seq_cfg = components.config.models.lstm_autoencoder
+                    engine = SequenceInferenceEngine(
+                        loaded.artifact,
+                        suppress_channels=tuple(getattr(seq_cfg, "suppress_channels", ())),
+                    )
                     engine_version = new_version
                 except Exception:  # noqa: BLE001 — bad checkpoint shouldn't kill the task
                     log.exception("failed to build SequenceInferenceEngine; will retry next tick")

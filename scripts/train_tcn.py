@@ -55,6 +55,7 @@ from src.preprocessing.feature_pipeline import (
     align_features_to_schema,
     build_feature_frame,
     build_feature_spec,
+    expand_suppress_channels,
     sequence_feature_columns,
 )
 from src.preprocessing.normalization import ZScoreScaler
@@ -162,6 +163,22 @@ def train(
             "signal columns. Did you convert them to Parquet, and is "
             f"{bindings_path} present so CAN payloads get decoded?"
         )
+    # Exclude config-suppressed channels (and their rolling-derivative siblings)
+    # at train time so the manifest's ``feature_columns`` reflects what the
+    # model actually scores on. The serve path also masks these at runtime —
+    # belt + suspenders, and lets the operator add a noise channel mid-cycle
+    # without an immediate retrain.
+    suppressed = expand_suppress_channels(
+        tuple(config.models.tcn_autoencoder.suppress_channels), columns
+    )
+    if suppressed:
+        log.info(
+            "excluding suppressed channels from TCN training schema",
+            extra={"suppressed": list(suppressed)},
+        )
+        columns = [c for c in columns if c not in set(suppressed)]
+        if not columns:
+            raise ValueError("suppress_channels excludes every trainable column")
     # Mask handles missingness, so keep every row (mirrors the LSTM path); the
     # scaler is fit skipna so per-channel stats use each channel's observations.
     scaler = ZScoreScaler.fit(features, columns=columns)

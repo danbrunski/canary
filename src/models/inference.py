@@ -10,7 +10,7 @@ from __future__ import annotations
 import importlib
 import time
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -276,6 +276,7 @@ class SequenceInferenceEngine:
         device: str = "cpu",
         dtype: str = "float32",
         time_fn: Callable[[], float] = time.perf_counter,
+        suppress_channels: Sequence[str] = (),
     ) -> None:
         if trained.manifest.thresholds is None:
             raise ValueError("trained LSTM manifest has no calibrated thresholds")
@@ -290,6 +291,21 @@ class SequenceInferenceEngine:
             feature_columns=self.feature_columns,
             sequence_length=self.sequence_length,
             dtype=dtype,
+        )
+        # Resolve suppress_channels (config-driven; base names auto-expand to
+        # rolling-derivative siblings) into integer indices into
+        # ``feature_columns`` once. ``score_window`` then just zeros the mask
+        # at those indices per call. Channels missing from the trained
+        # schema drop out — a config typo or a renamed channel is a no-op,
+        # not a serve crash.
+        from src.preprocessing.feature_pipeline import expand_suppress_channels
+
+        suppressed = expand_suppress_channels(tuple(suppress_channels), self.feature_columns)
+        self.suppressed_channels: tuple[str, ...] = suppressed
+        column_index = {col: idx for idx, col in enumerate(self.feature_columns)}
+        self._suppressed_indices: np.ndarray[Any, np.dtype[np.intp]] = np.array(
+            [column_index[col] for col in suppressed if col in column_index],
+            dtype=np.intp,
         )
         self._torch = _torch_module()
         self._device = self._torch.device(device)
@@ -363,6 +379,14 @@ class SequenceInferenceEngine:
             delta = np.zeros(expected_shape, dtype=np.float32)
         if mask.shape != expected_shape or delta.shape != expected_shape:
             raise ValueError("mask and delta must match the value window shape")
+        # Suppress configured noise channels by forcing their mask column to 0
+        # for the whole window. Reconstruction error is masked downstream
+        # (``masked_mean``), so a 0 mask cleanly excludes them from the global
+        # score AND from the top-channel evidence — without touching weights.
+        # Copy first so test callers passing their own mask aren't mutated.
+        if self._suppressed_indices.size:
+            mask = mask.copy()
+            mask[:, self._suppressed_indices] = 0.0
         started = self.time_fn()
         # z-score the *values* against the training-time scaler so reconstruction
         # error is in the same scale as the calibrated threshold. Mask and Δt are

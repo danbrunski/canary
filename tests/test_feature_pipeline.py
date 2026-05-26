@@ -242,3 +242,38 @@ def test_build_feature_frame_skips_parallel_under_threshold(tmp_path: Path) -> N
     auto = build_feature_frame(sessions, config, max_workers=4)  # 4 ignored: N<threshold
 
     pd.testing.assert_frame_equal(serial, auto)
+
+
+def test_expand_suppress_channels_matches_base_and_rolling_siblings() -> None:
+    """Listing a base channel auto-includes its rolling-derivative siblings
+    (``__mean``, ``__std``, ``__roc``) — the operator lists the sensor once."""
+    from src.preprocessing.feature_pipeline import expand_suppress_channels
+
+    columns = [
+        "obd:FUEL_LEVEL",
+        "obd:FUEL_LEVEL__mean",
+        "obd:FUEL_LEVEL__std",
+        "obd:FUEL_LEVEL__roc",
+        "dbc:RPM",
+        "dbc:RPM__mean",
+        "obd:UNRELATED",
+    ]
+    matched = expand_suppress_channels(["obd:FUEL_LEVEL"], columns)
+    assert matched == (
+        "obd:FUEL_LEVEL",
+        "obd:FUEL_LEVEL__mean",
+        "obd:FUEL_LEVEL__std",
+        "obd:FUEL_LEVEL__roc",
+    )
+
+
+def test_expand_suppress_channels_silently_drops_unknown_entries() -> None:
+    """A typo or a channel that disappears from the corpus should become a
+    no-op, not break the serve path."""
+    from src.preprocessing.feature_pipeline import expand_suppress_channels
+
+    columns = ["obd:RPM", "obd:RPM__mean"]
+    # ``obd:DOES_NOT_EXIST`` doesn't match anything → empty result
+    assert expand_suppress_channels(["obd:DOES_NOT_EXIST"], columns) == ()
+    # Empty input → empty output, no exceptions
+    assert expand_suppress_channels([], columns) == ()

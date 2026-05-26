@@ -420,3 +420,59 @@ def test_score_window_validates_shape() -> None:
 def _fake_clock():
     values = iter([1.0, 1.1, 2.0, 2.1, 3.0, 3.1])
     return lambda: next(values)
+
+
+def test_sequence_inference_suppress_channels_silences_alert_from_noise_channel() -> None:
+    """A channel listed in ``suppress_channels`` has its mask forced to 0 for
+    the whole window. Its reconstruction error then no longer contributes to
+    the masked global score, so a wildly OOD value in a *suppressed* channel
+    can't fire an alert — exactly the knob we need for fuel-level/HVAC noise."""
+    import math
+
+    import numpy as np
+
+    _torch()
+    trained = _trained()
+    seq_len = trained.manifest.schema["sequence_length"]
+
+    # rpm fits the training distribution (~700); speed is wildly OOD.
+    # Without suppression the speed channel drives a large reconstruction
+    # error → the masked global score blows past the calibrated threshold.
+    window = np.zeros((seq_len, 2), dtype=np.float32)
+    window[:, 0] = 700.0  # rpm — normal
+    window[:, 1] = 9999.0  # speed — extreme OOD value
+
+    common = dict(
+        timestamp="2026-05-12T12:00:00Z",
+        session="s1",
+        window_start_timestamp="2026-05-12T12:00:00Z",
+        window_end_timestamp="2026-05-12T12:00:03Z",
+    )
+
+    plain = SequenceInferenceEngine(_trained())
+    r_plain = plain.score_window(window, **common)
+
+    suppressed = SequenceInferenceEngine(_trained(), suppress_channels=("speed",))
+    r_supp = suppressed.score_window(window, **common)
+
+    # Sanity: both scored a finite global score, same shape of result.
+    assert math.isfinite(r_plain.global_score)
+    assert math.isfinite(r_supp.global_score)
+    # The suppressed channel contributes zero to both the per-channel
+    # evidence (score=0, not in anomalous_channels) and the global score.
+    assert r_supp.channel_scores["speed"] == 0.0
+    assert "speed" not in r_supp.anomalous_channels
+    # The OOD perturbation that fired the unsuppressed engine no longer fires
+    # the suppressed engine — same window, same model, just the mask knob.
+    assert r_plain.global_score > r_supp.global_score
+    assert r_plain.is_anomaly is True
+    assert r_supp.is_anomaly is False
+
+
+def test_sequence_inference_suppress_channels_silently_ignores_unknown() -> None:
+    """An entry that doesn't match any trained feature column is a no-op,
+    not a hard failure — typo-resistance and renamed-channel resilience.
+    Engine still constructs and scores cleanly."""
+    _torch()
+    engine = SequenceInferenceEngine(_trained(), suppress_channels=("not_a_real_channel",))
+    assert engine.suppressed_channels == ()

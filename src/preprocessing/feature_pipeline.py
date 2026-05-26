@@ -573,6 +573,41 @@ def sequence_feature_columns(features: pd.DataFrame) -> list[str]:
     ]
 
 
+#: Rolling derivatives that ``compute_features`` appends to every base channel.
+#: ``expand_suppress_channels`` recognises these suffixes so the operator can
+#: list the base sensor once and have the four feature-pipeline siblings come
+#: along.
+_ROLLING_SUFFIXES: tuple[str, ...] = ("__mean", "__std", "__roc")
+
+
+def expand_suppress_channels(
+    suppress_bases: Sequence[str], feature_columns: Sequence[str]
+) -> tuple[str, ...]:
+    """Expand each ``suppress_channels`` entry to the matching base column
+    plus its rolling-derivative siblings.
+
+    Listing ``obd:FUEL_LEVEL`` matches all of ``obd:FUEL_LEVEL``,
+    ``obd:FUEL_LEVEL__mean``, ``obd:FUEL_LEVEL__std``, ``obd:FUEL_LEVEL__roc``.
+    Entries that don't match any column are silently dropped (a typo or a
+    channel that disappears from the corpus becomes a no-op, not a hard
+    failure that breaks the serve path). Order matches ``feature_columns``
+    so the result composes cleanly with index lookups.
+    """
+    suppress_set = {str(s) for s in suppress_bases}
+    if not suppress_set:
+        return ()
+    matched: list[str] = []
+    for column in feature_columns:
+        if column in suppress_set:
+            matched.append(column)
+            continue
+        for suffix in _ROLLING_SUFFIXES:
+            if column.endswith(suffix) and column[: -len(suffix)] in suppress_set:
+                matched.append(column)
+                break
+    return tuple(matched)
+
+
 def align_features_to_schema(
     features: pd.DataFrame, feature_columns: Sequence[str]
 ) -> pd.DataFrame:

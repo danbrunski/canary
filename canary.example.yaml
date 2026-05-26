@@ -166,6 +166,16 @@ models:
     min_delta: 0.0
     random_state: 42
     threshold_k: 3.0
+    # Behavior signals that drift naturally over a drive (fuel level, HVAC
+    # controls, alternator voltage) but aren't vehicle-health signals. Each
+    # entry matches itself + rolling-derivative siblings (__mean/__std/__roc).
+    # Applied at train + serve — listing one here keeps the column out of the
+    # next manifest's feature_columns AND forces mask=0 on the live path so a
+    # stale artifact's column can't push the global score.
+    # suppress_channels:
+    #   - obd:FUEL_LEVEL
+    #   - dbc:HVAC_BLOWER_LIGHTING_358_1
+    #   - decoded:HVAC_BLOWER_LIGHTING_358_1
   # Alternate sequence-detector backbone (active when sequence_detector: tcn).
   # Dilated causal Conv1d autoencoder; consumes the same value+mask+Δt windows.
   # receptive field = 1 + 2*(kernel_size-1)*(2**num_levels - 1).
