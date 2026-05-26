@@ -180,6 +180,7 @@ def train_tcn_autoencoder(
     model_version: str | None = None,
     trained_at: datetime | pd.Timestamp | str | None = None,
     calibrate_thresholds: bool = True,
+    calibration_dataset: SequenceWindowDataset | None = None,
     feature_spec: Mapping[str, Any] | None = None,
     scaler: ZScoreScaler | None = None,
 ) -> TrainedTCNAutoencoder:
@@ -189,6 +190,13 @@ def train_tcn_autoencoder(
     ``SequenceWindowDataset``. Masked-MSE loss, optional validation split, and
     early stopping are shared with the LSTM backbone via
     :mod:`src.models.sequence_training`.
+
+    ``calibration_dataset`` (when given) is a *held-out* clean session, scaled
+    with the same scaler, that the reconstruction-error thresholds are
+    calibrated on instead of the training windows. In-sample calibration
+    underestimates real cross-session error and floods alerts on unseen drives;
+    out-of-sample calibration is the production path. Defaults to in-sample
+    (back-compat) when omitted.
     """
     _validate_config(config)
     if len(dataset) == 0:
@@ -320,7 +328,7 @@ def train_tcn_autoencoder(
         return trained
     return calibrate_tcn_thresholds(
         trained,
-        dataset,
+        calibration_dataset if calibration_dataset is not None else dataset,
         threshold_k=config.threshold_k,
         batch_size=config.batch_size,
         device=device,

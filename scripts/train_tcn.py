@@ -132,8 +132,17 @@ def train(
     stride: int = DEFAULT_SEQUENCE_STRIDE,
     device: str = "cpu",
     model_version: str | None = None,
+    calibration_sessions: Sequence[Path] | None = None,
 ) -> TrainedTCNAutoencoder:
-    """Build windows, train + calibrate the TCN autoencoder, write artifact + manifest."""
+    """Build windows, train + calibrate the TCN autoencoder, write artifact + manifest.
+
+    When ``calibration_sessions`` is given (held out from ``session_dirs``), the
+    reconstruction-error thresholds are calibrated on those *unseen* clean
+    drives — out-of-sample. In-sample calibration on the training windows
+    underestimates real cross-session error and floods alerts on unseen drives;
+    a held-out calibration set produces thresholds that actually reflect what
+    fresh drives look like. Falls back to in-sample when omitted.
+    """
     features = (
         feature_frame
         if feature_frame is not None
@@ -174,12 +183,32 @@ def train(
             f"sequence_length, or every window contained a gap/missing feature "
             f"({len(dataset.feature_columns)} feature columns considered)"
         )
+    calibration_ds: SequenceWindowDataset | None = None
+    if calibration_sessions:
+        calibration_ds = build_dataset(
+            calibration_sessions,
+            config,
+            bindings_path=bindings_path,
+            feature_cache_dir=feature_cache_dir,
+            rebuild_feature_cache=rebuild_feature_cache,
+            sequence_length=sequence_length,
+            stride=stride,
+            feature_columns=columns,
+            scaler=scaler,
+        )
+        if len(calibration_ds) == 0:
+            raise ValueError(
+                "calibration sessions produced no windows — they're shorter "
+                "than sequence_length, or had no usable feature data"
+            )
+
     trained = train_tcn_autoencoder(
         dataset,
         config.models.tcn_autoencoder,
         device=device,
         model_version=model_version,
         trained_at=datetime.now(UTC),
+        calibration_dataset=calibration_ds,
         feature_spec=build_feature_spec(
             dataset.frame,
             dataset.feature_columns,
@@ -366,6 +395,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Held-out clean session(s) to run the false-positive benchmark on.",
     )
     parser.add_argument(
+        "--calibration-sessions",
+        nargs="+",
+        type=Path,
+        default=None,
+        metavar="SESSION",
+        help="Held-out clean session(s) for *out-of-sample* threshold calibration. "
+        "These must be excluded from the training sessions. Without this flag "
+        "thresholds are calibrated on the training windows themselves, which "
+        "underestimates real cross-session error and inflates false positives.",
+    )
+    parser.add_argument(
         "--evaluate-k",
         type=float,
         nargs="+",
@@ -382,14 +422,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
-    """Pick the training sessions, excluding any --evaluate sessions when discovered."""
+    """Pick the training sessions, excluding any --evaluate / --calibration-sessions."""
     if args.sessions:
         return list(args.sessions)
     discovered = discover_sessions(args.sessions_root)
     if not discovered:
         return None
+    held_out: set[Path] = set()
     if args.evaluate:
-        held_out = {Path(p).resolve() for p in args.evaluate}
+        held_out.update(Path(p).resolve() for p in args.evaluate)
+    if args.calibration_sessions:
+        held_out.update(Path(p).resolve() for p in args.calibration_sessions)
+    if held_out:
         kept = [s for s in discovered if Path(s).resolve() not in held_out]
         if kept:
             return kept
@@ -420,6 +464,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             stride=args.stride,
             device=args.device,
             model_version=args.model_version,
+            calibration_sessions=args.calibration_sessions,
         )
     except MissingTCNDependencyError as e:
         print(f"error: {e}", file=sys.stderr)

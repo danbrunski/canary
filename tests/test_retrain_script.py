@@ -310,3 +310,87 @@ def test_retrain_returns_error_when_all_requested_trainers_fail(
         ]
     )
     assert rc == 1
+
+
+def test_retrain_auto_holds_out_most_recent_session_for_calibration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default: out-of-sample calibration. ``retrain`` auto-holds-out the
+    most-recent discovered session and passes it as ``calibration_sessions``
+    to the sequence trainer — in-sample calibration is the deprecated path."""
+    root = tmp_path / "sessions"
+    sessions = [root / "2026-05-13T120000", root / "2026-05-14T120000", root / "2026-05-15T120000"]
+    for s in sessions:
+        s.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: list(sessions))
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+
+    seen: dict[str, object] = {}
+
+    def _seq_train(positional_sessions: list[Path], *_a: object, **kwargs: object) -> None:
+        seen["sessions"] = list(positional_sessions)
+        seen["calibration_sessions"] = kwargs.get("calibration_sessions")
+
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(retrain.lstm_trainer, "train", _seq_train)
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(root),
+            "--all",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--sequence-out",
+            str(tmp_path / "lstm"),
+            "--no-feedback-policy",
+        ]
+    )
+    assert rc == 0
+    # Most-recent session held out for calibration; trainer sees the other two.
+    assert seen["calibration_sessions"] == [sessions[-1]]
+    assert seen["sessions"] == sessions[:-1]
+
+
+def test_retrain_no_calibration_holdout_keeps_full_training_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--no-calibration-holdout opts back into in-sample calibration: every
+    discovered session goes to training, no calibration_sessions passed."""
+    root = tmp_path / "sessions"
+    sessions = [root / "2026-05-13T120000", root / "2026-05-14T120000", root / "2026-05-15T120000"]
+    for s in sessions:
+        s.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: list(sessions))
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(
+        retrain.lstm_trainer,
+        "train",
+        lambda positional, *a, **k: seen.update(
+            sessions=list(positional), calibration_sessions=k.get("calibration_sessions")
+        ),
+    )
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(root),
+            "--all",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--sequence-out",
+            str(tmp_path / "lstm"),
+            "--no-feedback-policy",
+            "--no-calibration-holdout",
+        ]
+    )
+    assert rc == 0
+    assert seen["calibration_sessions"] is None
+    assert seen["sessions"] == sessions  # nothing held out

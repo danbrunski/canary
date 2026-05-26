@@ -171,3 +171,47 @@ def test_sequence_inference_engine_serves_a_tcn_bundle() -> None:
     assert isinstance(result, SequenceInferenceResult)
     assert math.isfinite(result.global_score)
     assert set(result.channel_scores) == {"rpm", "speed"}
+
+
+def test_train_tcn_autoencoder_calibrates_on_held_out_dataset_when_given() -> None:
+    """Out-of-sample calibration: when ``calibration_dataset`` is supplied,
+    thresholds come from those held-out windows, not the training ones.
+    In-sample calibration underestimates real cross-session error; this knob
+    is the production-correct path."""
+    train_ds = _dataset(rows=14)
+    # Different-sized held-out dataset so we can tell from window_count which
+    # one the calibration ran on. Same scaler (fit on training) for parity with
+    # the real CLI flow.
+    held_out_frame = _frame(rows=8)
+    held_out_frame.loc[:, [SESSION_COLUMN]] = "calib"
+    scaler = ZScoreScaler.fit(_frame(14), columns=["rpm", "speed"])
+    calib_ds = SequenceWindowDataset(
+        scaler.transform(held_out_frame),
+        sequence_length=4,
+        feature_columns=["rpm", "speed"],
+    )
+    assert len(train_ds) != len(calib_ds)  # the smoking-gun signal
+
+    trained = train_tcn_autoencoder(
+        train_ds,
+        _Cfg(max_epochs=2),
+        trained_at="2026-05-12T12:00:00Z",
+        model_version="oos-calib",
+        calibration_dataset=calib_ds,
+    )
+    assert trained.manifest.thresholds is not None
+    calibration = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
+    # Calibration ran on the held-out dataset — not the training set.
+    assert calibration.window_count == len(calib_ds)
+    # Sanity-check it didn't silently fall through to in-sample.
+    assert calibration.window_count != len(train_ds)
+
+
+def test_train_tcn_autoencoder_defaults_to_in_sample_calibration() -> None:
+    """Back-compat: omitting ``calibration_dataset`` keeps the previous
+    behaviour — calibrate on the training windows."""
+    dataset = _dataset()
+    trained = train_tcn_autoencoder(dataset, _Cfg(max_epochs=2), trained_at="2026-05-12T12:00:00Z")
+    assert trained.manifest.thresholds is not None
+    calibration = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
+    assert calibration.window_count == len(dataset)

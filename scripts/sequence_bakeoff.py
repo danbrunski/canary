@@ -156,8 +156,15 @@ def run_backbone(
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
     device: str = "cpu",
     k_grid: Sequence[float] | None = None,
+    calibration_sessions: Sequence[Path] | None = None,
 ) -> BackboneResult:
-    """Train one backbone, benchmark it on held-out sessions, summarize."""
+    """Train one backbone, benchmark it on held-out sessions, summarize.
+
+    ``calibration_sessions`` (held out from training, and distinct from the
+    eval sessions) drives the trainer's out-of-sample threshold calibration
+    so the bake-off's FPR reflects production firing on unseen drives instead
+    of the in-sample memorization artifact.
+    """
     trainer = backbone.trainer
     trained = trainer.train(  # type: ignore[attr-defined]
         train_sessions,
@@ -165,6 +172,7 @@ def run_backbone(
         out_dir,
         bindings_path=bindings_path,
         device=device,
+        calibration_sessions=calibration_sessions,
     )
     artifact_path = out_dir / "model.pt"
     # Z-score the held-out frame with the freshly trained model's own scaler so
@@ -208,12 +216,18 @@ def run_bakeoff(
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
     device: str = "cpu",
     k_grid: Sequence[float] | None = None,
+    calibration_sessions: Sequence[Path] | None = None,
 ) -> list[BackboneResult]:
     """Train + benchmark each requested backbone on identical splits.
 
     The selected backbones are force-enabled in the in-memory config for the
     run — the bake-off is an offline experiment, so it trains both regardless of
     which one ``sequence_detector`` ships.
+
+    ``calibration_sessions`` are passed through to each backbone's trainer so
+    thresholds are calibrated on those *unseen* drives (out-of-sample) rather
+    than the training windows. They must be distinct from ``eval_sessions`` so
+    the FP benchmark stays a true held-out test.
     """
     results: list[BackboneResult] = []
     for key in backbones:
@@ -232,6 +246,7 @@ def run_bakeoff(
                 bindings_path=bindings_path,
                 device=device,
                 k_grid=k_grid,
+                calibration_sessions=calibration_sessions,
             )
         )
     return results
@@ -310,6 +325,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="SESSION",
         help="Held-out clean session(s) to benchmark both backbones on.",
     )
+    parser.add_argument(
+        "--calibration-sessions",
+        nargs="+",
+        type=Path,
+        default=None,
+        metavar="SESSION",
+        help="Held-out clean session(s) for out-of-sample threshold calibration. "
+        "Must be distinct from --evaluate (and absent from positional train "
+        "sessions) so calibration and benchmark stay independent. Without this "
+        "thresholds are calibrated on the training windows themselves, which "
+        "inflates cross-session false positives on both backbones.",
+    )
     parser.add_argument("--config", type=Path, default=Path("canary.yaml"))
     parser.add_argument("--bindings", type=Path, default=DEFAULT_BINDINGS_PATH)
     parser.add_argument(
@@ -350,11 +377,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
     if args.sessions:
-        return list(args.sessions)
+        # Explicit training sessions: strip any calibration sessions the caller
+        # may have left in the positional list by accident — calibration must
+        # be unseen by the model.
+        held_out = {Path(p).resolve() for p in (args.calibration_sessions or ())}
+        return [s for s in args.sessions if Path(s).resolve() not in held_out] or None
     discovered = discover_sessions(args.sessions_root)
     if not discovered:
         return None
     held_out = {Path(p).resolve() for p in args.evaluate}
+    held_out.update(Path(p).resolve() for p in (args.calibration_sessions or ()))
     kept = [s for s in discovered if Path(s).resolve() not in held_out]
     return kept or None
 
@@ -372,6 +404,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
+    # Guard: calibration and evaluation must be disjoint so the FP benchmark
+    # stays a true held-out test (no peeking).
+    if args.calibration_sessions:
+        eval_set = {Path(p).resolve() for p in args.evaluate}
+        overlap = [p for p in args.calibration_sessions if Path(p).resolve() in eval_set]
+        if overlap:
+            print(
+                "error: --calibration-sessions must be disjoint from --evaluate "
+                f"(overlap: {[str(p) for p in overlap]}).",
+                file=sys.stderr,
+            )
+            return 1
+
     try:
         results = run_bakeoff(
             sessions,
@@ -382,6 +427,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             bindings_path=args.bindings,
             device=args.device,
             k_grid=args.evaluate_k,
+            calibration_sessions=args.calibration_sessions,
         )
     except MissingTCNDependencyError as e:
         print(f"error: {e}", file=sys.stderr)

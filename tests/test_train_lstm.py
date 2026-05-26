@@ -199,7 +199,32 @@ def test_resolve_training_sessions_excludes_evaluate_sessions(tmp_path: Path) ->
     held_out = _write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
 
     resolved = _resolve_training_sessions(
-        SimpleNamespace(sessions=[], sessions_root=root, evaluate=[held_out])
+        SimpleNamespace(
+            sessions=[], sessions_root=root, evaluate=[held_out], calibration_sessions=None
+        )
+    )
+
+    assert resolved is not None
+    assert [Path(p).name for p in resolved] == ["a"]
+
+
+def test_resolve_training_sessions_excludes_calibration_sessions(tmp_path: Path) -> None:
+    """Out-of-sample calibration: --calibration-sessions are held out from the
+    training set too, alongside --evaluate, so the model never trains on data
+    its thresholds will be calibrated against."""
+    root = tmp_path / "sessions"
+    root.mkdir()
+    _write_obd_session(root, "a", rows=10, start_epoch=1_778_500_000.0)
+    calib = _write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
+    held_out = _write_obd_session(root, "c", rows=10, start_epoch=1_778_700_000.0)
+
+    resolved = _resolve_training_sessions(
+        SimpleNamespace(
+            sessions=[],
+            sessions_root=root,
+            evaluate=[held_out],
+            calibration_sessions=[calib],
+        )
     )
 
     assert resolved is not None

@@ -132,6 +132,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Sequence-detector backbone to retrain (default: models.sequence_detector).",
     )
     parser.add_argument(
+        "--calibration-sessions",
+        nargs="+",
+        type=Path,
+        default=None,
+        metavar="SESSION",
+        help="Held-out clean session(s) for the sequence detector's *out-of-sample* "
+        "threshold calibration. Excluded from the training set automatically. "
+        "Default: auto-hold-out the most-recent discovered session — in-sample "
+        "calibration inflates cross-session false positives. Pass "
+        "--no-calibration-holdout to disable.",
+    )
+    parser.add_argument(
+        "--no-calibration-holdout",
+        action="store_true",
+        help="Skip the automatic calibration holdout and calibrate sequence "
+        "thresholds on the training windows (the pre-fix behavior; only useful "
+        "when you have too few sessions to spare one for calibration).",
+    )
+    parser.add_argument(
         "--sequence-out",
         type=Path,
         default=None,
@@ -258,10 +277,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
+    # Pick the calibration holdout for the sequence detector. Out-of-sample
+    # threshold calibration is the default — in-sample mean+k·σ underestimates
+    # cross-session error and floods false positives on unseen drives. Explicit
+    # --calibration-sessions wins; otherwise auto-hold-out the most-recent
+    # discovered session. With fewer than 3 sessions we can't afford to hold
+    # one out, so we log and fall back to in-sample.
+    calibration_sessions: list[Path] = []
+    if not args.skip_sequence:
+        if args.calibration_sessions:
+            requested = {Path(p).resolve() for p in args.calibration_sessions}
+            calibration_sessions = [s for s in sessions if Path(s).resolve() in requested]
+            sessions = [s for s in sessions if Path(s).resolve() not in requested]
+        elif not args.no_calibration_holdout:
+            if len(sessions) >= 3:
+                # discover_sessions sorts ascending by capture time, so the last
+                # entry is the freshest clean drive — the most representative
+                # held-out anchor for fresh-drive deployment.
+                calibration_sessions = [sessions[-1]]
+                sessions = sessions[:-1]
+            else:
+                log.warning(
+                    "too few sessions for an out-of-sample calibration holdout; "
+                    "falling back to in-sample (cross-session FPR likely inflated)",
+                    extra={"session_count": len(sessions)},
+                )
+
     log.info(
         "starting retrain",
         extra={
             "sessions": len(sessions),
+            "calibration_sessions": [str(s) for s in calibration_sessions],
             "skip_if": args.skip_if,
             "skip_sequence": args.skip_sequence,
             "sequence_model": seq_model_type,
@@ -368,6 +414,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.sequence_out,
                 bindings_path=args.bindings,
                 device=args.device,
+                calibration_sessions=calibration_sessions or None,
                 **feature_kwargs,
             )
             results[seq_model_type] = "ok"

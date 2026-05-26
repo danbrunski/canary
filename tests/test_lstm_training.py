@@ -336,3 +336,32 @@ def test_train_lstm_autoencoder_rejects_empty_dataset() -> None:
 
     with pytest.raises(ValueError, match="no sequence windows"):
         train_lstm_autoencoder(empty, _config())
+
+
+def test_train_lstm_autoencoder_calibrates_on_held_out_dataset_when_given() -> None:
+    """LSTM mirror of the TCN out-of-sample calibration contract: a held-out
+    ``calibration_dataset`` drives the manifest thresholds instead of the
+    training windows."""
+    train_ds = _dataset(rows=14)
+    held_out_frame = _frame(rows=8)
+    held_out_frame.loc[:, [SESSION_COLUMN]] = "calib"
+    scaler = _scaler()
+    calib_ds = SequenceWindowDataset(
+        scaler.transform(held_out_frame),
+        sequence_length=4,
+        feature_columns=["rpm", "speed"],
+    )
+    assert len(train_ds) != len(calib_ds)
+
+    trained = train_lstm_autoencoder(
+        train_ds,
+        _config(max_epochs=2),
+        trained_at="2026-05-12T12:00:00Z",
+        model_version="oos-calib",
+        calibration_dataset=calib_ds,
+    )
+    assert trained.manifest.thresholds is not None
+    calibration = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
+    # Calibration ran on the held-out dataset, not the training one.
+    assert calibration.window_count == len(calib_ds)
+    assert calibration.window_count != len(train_ds)
