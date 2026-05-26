@@ -183,3 +183,62 @@ def test_align_features_to_schema_adds_absent_columns_as_nan() -> None:
 def test_align_features_to_schema_is_noop_when_complete() -> None:
     frame = pd.DataFrame({"a": [1.0], "b": [2.0]})
     assert align_features_to_schema(frame, ["a", "b"]) is frame
+
+
+def _write_session(root: Path, name: str, *, rows: int, start_epoch: float) -> Path:
+    """Tiny OBD-only session for the parallel-feature-build regression test."""
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    session = root / name
+    records = []
+    for i in range(rows):
+        t = start_epoch + i
+        records.extend(
+            [
+                TelemetryRecord.obd(t, "RPM", 780.0 + (i % 4), "rpm"),
+                TelemetryRecord.obd(t, "SPEED", float(i % 5), "km/h"),
+                TelemetryRecord.obd(t, "THROTTLE_POS", 6.0 + (i % 3), "%"),
+            ]
+        )
+    write_records_to_parquet(records, session, max_rows=10_000)
+    return session
+
+
+def test_build_feature_frame_parallel_matches_serial(tmp_path: Path) -> None:
+    """The ProcessPool-parallel per-session feature build must produce a frame
+    byte-equal to the serial path — same rows in the same order, identical
+    feature values. Sessions are independent so this should hold exactly."""
+    from src.preprocessing.feature_pipeline import build_feature_frame
+
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    # 3 sessions ⇒ above the parallel threshold; forcing max_workers=2 forces
+    # the pool path. Each session is distinct (different start epochs) so we
+    # also indirectly check ordering is preserved.
+    sessions = [
+        _write_session(tmp_path, f"s{i}", rows=60, start_epoch=1_780_000_000.0 + i * 1000.0)
+        for i in range(3)
+    ]
+
+    serial = build_feature_frame(sessions, config, max_workers=1)
+    parallel = build_feature_frame(sessions, config, max_workers=2)
+
+    pd.testing.assert_frame_equal(serial, parallel)
+
+
+def test_build_feature_frame_skips_parallel_under_threshold(tmp_path: Path) -> None:
+    """Below the threshold (here: 2 sessions), the pool isn't spun up even when
+    ``max_workers`` would allow it — pool startup cost would outweigh the win.
+    The result still has to equal the serial path."""
+    from src.preprocessing.feature_pipeline import build_feature_frame
+
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    sessions = [
+        _write_session(tmp_path, f"s{i}", rows=60, start_epoch=1_780_000_000.0 + i * 1000.0)
+        for i in range(2)
+    ]
+
+    serial = build_feature_frame(sessions, config, max_workers=1)
+    auto = build_feature_frame(sessions, config, max_workers=4)  # 4 ignored: N<threshold
+
+    pd.testing.assert_frame_equal(serial, auto)

@@ -44,7 +44,10 @@ from src.models.false_positive_benchmark import (  # noqa: E402
     FalsePositiveBenchmarkReport,
     benchmark_false_positives,
 )
-from src.models.sequence_training import default_training_device  # noqa: E402
+from src.models.sequence_training import (  # noqa: E402
+    configure_torch_threads,
+    default_training_device,
+)
 from src.models.tcn import MissingTCNDependencyError  # noqa: E402
 from src.preprocessing import discover_sessions  # noqa: E402
 from src.preprocessing.feature_pipeline import DEFAULT_BINDINGS_PATH  # noqa: E402
@@ -399,6 +402,7 @@ def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
+    configure_torch_threads()
     config = CanaryConfig.from_yaml(args.config)
 
     log.info("bake-off device=%s", args.device)

@@ -53,7 +53,10 @@ from src.models.retraining_policy import (  # noqa: E402
     RetrainingFeedbackReport,
     apply_retraining_feedback_policy,
 )
-from src.models.sequence_training import default_training_device  # noqa: E402
+from src.models.sequence_training import (  # noqa: E402
+    configure_torch_threads,
+    default_training_device,
+)
 from src.models.training_ledger import (  # noqa: E402
     DEFAULT_TRAINING_LEDGER_PATH,
     TrainingLedger,
@@ -249,6 +252,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
+    configure_torch_threads()
     config = CanaryConfig.from_yaml(args.config)
 
     # Resolve the sequence-detector backbone (config default, --sequence-model

@@ -11,7 +11,10 @@ training CLIs stay thin and behave identically.
 from __future__ import annotations
 
 import logging
+import multiprocessing
+import os
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -124,6 +127,85 @@ NON_TRAINABLE_COUNTER_CHANNELS: frozenset[str] = frozenset(
 FEATURE_SPEC_VERSION = 1
 
 
+#: Worker-process state for the parallel feature build. Populated once per
+#: process via :func:`_init_feature_worker` so the heavy decoder objects
+#: (bindings, DBC database, DID map) are sent across the pool boundary one time
+#: per worker — not pickled per submitted session.
+_FEATURE_WORKER_STATE: dict[str, Any] = {}
+
+
+def _init_feature_worker(
+    bindings: Any,
+    dbc_database: Any,
+    did_map: Any,
+    resample_config: ResampleConfig,
+) -> None:
+    _FEATURE_WORKER_STATE["bindings"] = bindings
+    _FEATURE_WORKER_STATE["dbc"] = dbc_database
+    _FEATURE_WORKER_STATE["dids"] = did_map
+    _FEATURE_WORKER_STATE["resample"] = resample_config
+
+
+def _decode_session_to_resampled(
+    session_dir: Path,
+    bindings: Any,
+    dbc_database: Any,
+    did_map: Any,
+    resample_config: ResampleConfig,
+) -> pd.DataFrame:
+    """The per-session pipeline: parquet → decode → wide → resample.
+
+    Top-level (not nested) so :class:`ProcessPoolExecutor` can pickle it. The
+    serial path also calls it directly, so there's exactly one implementation
+    of the per-session work.
+    """
+    long = read_session(session_dir)
+    if bindings is not None:
+        long = decode_can_rows(long, bindings)
+    if dbc_database is not None:
+        long = decode_can_rows_dbc(long, dbc_database)
+    if did_map is not None:
+        # Decode raw Mode-22 ``DID_<hex>`` poll rows into named, scaled
+        # ``did:<NAME>`` signals so the fuel/air recipes + IF/LSTM see them
+        # (otherwise the raw hex-string readings are non-numeric and dropped
+        # by to_wide).
+        long = decode_did_rows(long, did_map)
+    # Raw CAN frames are ~98% of the rows and carry no numeric value
+    # (the bytes live in `payload`); they exist only to be decoded into the
+    # decoded:* / dbc:* rows appended above. Once decoded they're dead weight
+    # — their pivot columns are all-NaN and dropped by
+    # ``trainable_feature_columns`` anyway. Dropping them here collapses the
+    # ``to_wide`` pivot's row volume ~50× — the actual OOM cause.
+    long = long[long["source"] != "can"]
+    wide = to_wide(long, coerce_numeric=True)
+    return resample_wide(wide, config=resample_config)
+
+
+def _worker_process_session(
+    session_dir: Path,
+) -> tuple[str, pd.DataFrame | None, str | None]:
+    """ProcessPool task body. Returns ``(session_name, frame_or_none, error_or_none)``
+    so a single bad session is reported as a skip rather than killing the pool."""
+    state = _FEATURE_WORKER_STATE
+    try:
+        frame = _decode_session_to_resampled(
+            session_dir,
+            state["bindings"],
+            state["dbc"],
+            state["dids"],
+            state["resample"],
+        )
+        return session_dir.name, frame, None
+    except Exception as exc:  # noqa: BLE001 — one bad session must not kill the corpus
+        return session_dir.name, None, f"{type(exc).__name__}: {exc}"
+
+
+#: Skip the process pool below this session count: per-session work is short
+#: enough that a fork + IPC round-trip wipes out the parallel win. Above this,
+#: the pool consistently beats serial wall time on our corpus.
+_PARALLEL_SESSION_THRESHOLD = 3
+
+
 def build_feature_frame(
     session_dirs: Sequence[Path],
     config: CanaryConfig,
@@ -133,6 +215,7 @@ def build_feature_frame(
     dbc_dir: Path = DEFAULT_DBC_DIR,
     cache_dir: Path | None = None,
     force_rebuild: bool = False,
+    max_workers: int | None = None,
 ) -> pd.DataFrame:
     """Run the full preprocessing pipeline over ``session_dirs`` into a feature frame.
 
@@ -192,38 +275,64 @@ def build_feature_frame(
     # per-session-then-concat is identical to concat-then-resample — but peak
     # memory is now one session's raw bus-rate pivot instead of all of them
     # concatenated, which OOM-kills the Pi on a full corpus.
+    #
+    # Sessions are independent, so for >= _PARALLEL_SESSION_THRESHOLD inputs we
+    # fan the per-session pipeline out across a ProcessPoolExecutor (one process
+    # per session, capped at the CPU count). Caller can pin ``max_workers=1`` to
+    # force the serial path — kept exactly as it was for back-compat with tests
+    # and the Pi cold-start fall-back, where multiprocessing overhead would lose.
     resample_config = ResampleConfig(hz=config.preprocessing.resample_hz)
     resampled_parts: list[pd.DataFrame] = []
     skipped: list[str] = []
-    for session_dir in session_dirs:
-        try:
-            long = read_session(session_dir)
-            if bindings is not None:
-                long = decode_can_rows(long, bindings)
-            if dbc_database is not None:
-                long = decode_can_rows_dbc(long, dbc_database)
-            if did_map is not None:
-                # Decode raw Mode-22 ``DID_<hex>`` poll rows into named,
-                # scaled ``did:<NAME>`` signals so the fuel/air recipes +
-                # IF/LSTM see them (otherwise the raw hex-string readings
-                # are non-numeric and dropped by to_wide).
-                long = decode_did_rows(long, did_map)
-            # Raw CAN frames are ~98% of the rows and carry no numeric value
-            # (the bytes live in `payload`); they exist only to be decoded into
-            # the decoded:* / dbc:* rows appended above. Once decoded they're
-            # dead weight: their pivot columns are all-NaN and dropped by
-            # trainable_feature_columns anyway (the model has zero can:*
-            # features). Dropping them here is output-equivalent but collapses
-            # the to_wide pivot's row volume ~50x — the actual OOM cause.
-            long = long[long["source"] != "can"]
-            wide = to_wide(long, coerce_numeric=True)
-            resampled_parts.append(resample_wide(wide, config=resample_config))
-        except Exception as exc:  # noqa: BLE001 — one bad session must not kill the corpus
-            skipped.append(session_dir.name)
-            log.warning(
-                "skipping unreadable session",
-                extra={"session": str(session_dir), "error": f"{type(exc).__name__}: {exc}"},
-            )
+
+    effective_workers = (
+        min(len(session_dirs), os.cpu_count() or 1)
+        if max_workers is None
+        else max(1, int(max_workers))
+    )
+    parallel = effective_workers > 1 and len(session_dirs) >= _PARALLEL_SESSION_THRESHOLD
+
+    if parallel:
+        log.info(
+            "building feature frame in parallel",
+            extra={"sessions": len(session_dirs), "workers": effective_workers},
+        )
+        with ProcessPoolExecutor(
+            max_workers=effective_workers,
+            initializer=_init_feature_worker,
+            initargs=(bindings, dbc_database, did_map, resample_config),
+            # ``spawn`` re-imports the codebase per worker rather than forking
+            # the parent's address space, which avoids the classic fork-with-
+            # threads deadlock (numpy / torch keep background threads alive).
+            # The extra ~0.5-1 s of worker startup is rounded off by even a
+            # single-session feature build.
+            mp_context=multiprocessing.get_context("spawn"),
+        ) as pool:
+            # ``map`` preserves order, so the concatenated frame is identical to
+            # the serial run — no ordering drift between runs.
+            for name, frame, err in pool.map(_worker_process_session, session_dirs):
+                if frame is not None:
+                    resampled_parts.append(frame)
+                else:
+                    skipped.append(name)
+                    log.warning(
+                        "skipping unreadable session",
+                        extra={"session": name, "error": err},
+                    )
+    else:
+        for session_dir in session_dirs:
+            try:
+                resampled_parts.append(
+                    _decode_session_to_resampled(
+                        session_dir, bindings, dbc_database, did_map, resample_config
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 — one bad session must not kill the corpus
+                skipped.append(session_dir.name)
+                log.warning(
+                    "skipping unreadable session",
+                    extra={"session": str(session_dir), "error": f"{type(exc).__name__}: {exc}"},
+                )
     if not resampled_parts:
         raise ValueError(
             f"no readable sessions among the {len(session_dirs)} given "

@@ -29,6 +29,7 @@ from src.models.sequence_training import (
     calibrate_sequence_thresholds,
     coerce_timestamp,
     cpu_state_dict,
+    dataloader_kwargs_for_device,
     evaluate_loss,
     max_window_timestamp,
     min_window_timestamp,
@@ -217,16 +218,23 @@ def train_tcn_autoencoder(
         validation_fraction=config.validation_fraction,
         random_state=config.random_state,
     )
+    loader_kwargs = dataloader_kwargs_for_device(device)
     train_loader = data.DataLoader(
         train_subset,
         batch_size=config.batch_size,
         shuffle=True,
         generator=torch.Generator().manual_seed(config.random_state),
+        **loader_kwargs,
     )
     validation_loader = (
         None
         if validation_subset is None
-        else data.DataLoader(validation_subset, batch_size=config.batch_size, shuffle=False)
+        else data.DataLoader(
+            validation_subset,
+            batch_size=config.batch_size,
+            shuffle=False,
+            **loader_kwargs,
+        )
     )
 
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)

@@ -48,7 +48,7 @@ from src.models.lstm_training import (
     train_lstm_autoencoder,
 )
 from src.models.sequence_dataset import DEFAULT_SEQUENCE_STRIDE, SequenceWindowDataset
-from src.models.sequence_training import default_training_device
+from src.models.sequence_training import configure_torch_threads, default_training_device
 from src.preprocessing import discover_sessions
 from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
@@ -462,6 +462,7 @@ def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
+    configure_torch_threads()
     config = CanaryConfig.from_yaml(args.config)
 
     sessions = _resolve_training_sessions(args)

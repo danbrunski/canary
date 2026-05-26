@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -283,7 +284,12 @@ def calibrate_sequence_thresholds(
 
     torch, _nn, _optim, data = torch_training_modules()
     device_obj = torch.device(device)
-    loader = data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    loader = data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        **dataloader_kwargs_for_device(device),
+    )
     model.to(device_obj)
     model.eval()
 
@@ -455,6 +461,40 @@ def default_training_device() -> str:
         return "cpu"
 
 
+def dataloader_kwargs_for_device(device: str) -> dict[str, Any]:
+    """``num_workers`` + ``pin_memory`` tuned to the training device.
+
+    On CUDA we ask for two prefetch workers and page-locked host memory so the
+    host→device copy overlaps the kernel; on CPU there's no copy to overlap and
+    the extra worker processes just add IPC noise, so we stay single-process
+    (matching the conservative Pi-friendly defaults). Picked off ``device`` so
+    callers don't need to know the rule.
+    """
+    if str(device).startswith("cuda"):
+        return {"num_workers": 2, "pin_memory": True}
+    return {"num_workers": 0, "pin_memory": False}
+
+
+def configure_torch_threads(thread_count: int | None = None) -> None:
+    """Pin torch's intra-op thread pool to ``thread_count`` (default: all CPUs).
+
+    Training CLIs call this at startup so CPU-bound code paths (the FP
+    benchmark, threshold calibration, and the CPU fall-back of the trainers
+    themselves) saturate every available core instead of the conservative
+    half-cores torch picks by default. A no-op when torch is not installed.
+    """
+    try:
+        import torch
+    except ImportError:
+        return
+    if thread_count is None:
+        thread_count = os.cpu_count() or 1
+    try:
+        torch.set_num_threads(int(thread_count))
+    except Exception:  # noqa: BLE001 — exotic builds without the OpenMP backend
+        return
+
+
 __all__ = [
     "MIN_CALIBRATION_SAMPLES",
     "EpochLoss",
@@ -463,7 +503,9 @@ __all__ = [
     "SequenceThresholdCalibration",
     "calibrate_sequence_thresholds",
     "coerce_timestamp",
+    "configure_torch_threads",
     "cpu_state_dict",
+    "dataloader_kwargs_for_device",
     "default_training_device",
     "error_distribution",
     "evaluate_loss",

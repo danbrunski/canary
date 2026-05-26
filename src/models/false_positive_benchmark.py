@@ -42,6 +42,7 @@ from src.models.sequence_protocol import TrainedSequenceModel
 from src.models.sequence_training import (
     ReconstructionErrorDistribution,
     SequenceThresholdCalibration,
+    dataloader_kwargs_for_device,
 )
 from src.preprocessing.segmenter import MODE_COLUMN
 
@@ -319,7 +320,12 @@ def _reconstruction_errors(
     torch = _torch_module()
     data = importlib.import_module("torch.utils.data")
     device_obj = torch.device(device)
-    loader = data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    loader = data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        **dataloader_kwargs_for_device(device),
+    )
     # ``reconstruction_error`` isn't on the SequenceAutoencoder protocol (only
     # forward/to/eval are); both backbones implement it, so reach it via Any.
     model: Any = trained.model
