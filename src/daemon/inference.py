@@ -119,7 +119,10 @@ async def run_live_inference(
             if sequence_loaded is not None and row is not None:
                 sequence_version = sequence_loaded.manifest.model_version
                 if sequence_engine_version != sequence_version:
-                    sequence_engine = _build_sequence_engine(sequence_loaded)
+                    sequence_engine = _build_sequence_engine(
+                        sequence_loaded,
+                        suppress_channels=_suppress_channels_for(components, sequence_loaded),
+                    )
                     sequence_engine_version = (
                         sequence_version if sequence_engine is not None else None
                     )
@@ -202,17 +205,34 @@ async def run_live_inference(
             continue
 
 
-def _build_sequence_engine(loaded: Any) -> Any:
+def _build_sequence_engine(loaded: Any, *, suppress_channels: tuple[str, ...] = ()) -> Any:
     """Build a ``SequenceInferenceEngine`` for a freshly-swapped model, or
     ``None`` on a bad checkpoint (retried next tick). Backbone-agnostic: the
-    engine drives whichever sequence detector the manager loaded."""
+    engine drives whichever sequence detector the manager loaded.
+
+    ``suppress_channels`` is forwarded so config-listed noise channels (fuel
+    level, HVAC, etc.) get their mask zeroed at every window — keeps the
+    runtime mask knob honoured from *every* engine-construction path.
+    """
     try:
         from src.models.inference import SequenceInferenceEngine
 
-        return SequenceInferenceEngine(loaded.artifact)
+        return SequenceInferenceEngine(loaded.artifact, suppress_channels=suppress_channels)
     except Exception:  # noqa: BLE001 — bad checkpoint shouldn't kill the task
         log.exception("failed to build SequenceInferenceEngine; will retry next tick")
         return None
+
+
+def _suppress_channels_for(components: Any, loaded: Any) -> tuple[str, ...]:
+    """Pick the right backbone's ``suppress_channels`` for the loaded
+    artifact's ``model_type``, so an LSTM↔TCN switch honours its own knob."""
+    artifact_manifest = getattr(loaded.artifact, "manifest", None)
+    model_type = getattr(artifact_manifest, "model_type", None)
+    if model_type == "tcn_autoencoder":
+        seq_cfg = components.config.models.tcn_autoencoder
+    else:
+        seq_cfg = components.config.models.lstm_autoencoder
+    return tuple(getattr(seq_cfg, "suppress_channels", ()))
 
 
 async def run_live_inference_lstm(
@@ -262,28 +282,11 @@ async def run_live_inference_lstm(
             # ``swapped``.
             new_version = loaded.manifest.model_version
             if engine_version != new_version:
-                try:
-                    from src.models.inference import SequenceInferenceEngine
-
-                    # Pick the suppress list from whichever backbone the
-                    # hot-swapped artifact belongs to, so an LSTM↔TCN switch
-                    # honours the right config knob. ``getattr`` chain falls
-                    # through cleanly for stub artifacts used in tests.
-                    artifact_manifest = getattr(loaded.artifact, "manifest", None)
-                    model_type = getattr(artifact_manifest, "model_type", None)
-                    if model_type == "tcn_autoencoder":
-                        seq_cfg: Any = components.config.models.tcn_autoencoder
-                    else:
-                        seq_cfg = components.config.models.lstm_autoencoder
-                    engine = SequenceInferenceEngine(
-                        loaded.artifact,
-                        suppress_channels=tuple(getattr(seq_cfg, "suppress_channels", ())),
-                    )
-                    engine_version = new_version
-                except Exception:  # noqa: BLE001 — bad checkpoint shouldn't kill the task
-                    log.exception("failed to build SequenceInferenceEngine; will retry next tick")
-                    engine = None
-                    engine_version = None
+                engine = _build_sequence_engine(
+                    loaded,
+                    suppress_channels=_suppress_channels_for(components, loaded),
+                )
+                engine_version = new_version if engine is not None else None
 
         if engine is not None:
             try:
