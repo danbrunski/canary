@@ -316,14 +316,18 @@ def test_retrain_auto_holds_out_most_recent_session_for_calibration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Default: out-of-sample calibration. ``retrain`` auto-holds-out the
-    most-recent discovered session and passes it as ``calibration_sessions``
-    to the sequence trainer — in-sample calibration is the deprecated path."""
+    most-recent *substantial* discovered session and passes it as
+    ``calibration_sessions`` to the sequence trainer — in-sample calibration
+    is the deprecated path."""
     root = tmp_path / "sessions"
     sessions = [root / "2026-05-13T120000", root / "2026-05-14T120000", root / "2026-05-15T120000"]
     for s in sessions:
         s.mkdir(parents=True)
     monkeypatch.setattr(retrain, "discover_sessions", lambda _root: list(sessions))
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    # Stub session sizes so each looks "substantial" without writing parquet —
+    # the auto-holdout filter is gated on parquet byte totals.
+    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
 
     seen: dict[str, object] = {}
 
@@ -352,6 +356,62 @@ def test_retrain_auto_holds_out_most_recent_session_for_calibration(
     # Most-recent session held out for calibration; trainer sees the other two.
     assert seen["calibration_sessions"] == [sessions[-1]]
     assert seen["sessions"] == sessions[:-1]
+
+
+def test_retrain_skips_tiny_sessions_when_picking_calibration_holdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An in-progress single-chunk capture at the tail of the corpus (a few KB
+    on disk) doesn't have the rows to anchor a useful calibration band, so
+    auto-holdout walks back to the most-recent *substantial* session instead.
+    Without this, a glitch capture would silently push every mode to the
+    global threshold."""
+    root = tmp_path / "sessions"
+    real_a = root / "2026-05-13T120000"
+    real_b = root / "2026-05-14T120000"
+    tiny = root / "2026-05-15T172257"  # truncated in-progress capture
+    sessions = [real_a, real_b, tiny]
+    for s in sessions:
+        s.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: list(sessions))
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+
+    def _fake_bytes(p: Path) -> int:
+        return 22_000 if p == tiny else 5_000_000
+
+    monkeypatch.setattr(retrain, "_session_parquet_bytes", _fake_bytes)
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(
+        retrain.lstm_trainer,
+        "train",
+        lambda positional, *a, **k: seen.update(
+            sessions=list(positional), calibration_sessions=k.get("calibration_sessions")
+        ),
+    )
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(root),
+            "--all",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--sequence-out",
+            str(tmp_path / "lstm"),
+            "--no-feedback-policy",
+        ]
+    )
+    assert rc == 0
+    # The tiny tail session is skipped; the previous substantial one is held
+    # out, and the training set keeps the tiny session (it still contributes
+    # whatever rows the dataset can extract — that's fine for training, just
+    # not as a calibration anchor).
+    assert seen["calibration_sessions"] == [real_b]
+    assert seen["sessions"] == [real_a, tiny]
 
 
 def test_retrain_no_calibration_holdout_keeps_full_training_set(

@@ -77,6 +77,31 @@ SEQUENCE_TRAINERS: dict[str, tuple[str, object]] = {
     "tcn": ("tcn_autoencoder", tcn_trainer),
 }
 
+#: Minimum total parquet bytes for a session to be considered "substantial"
+#: enough to anchor an out-of-sample calibration holdout. A single in-progress
+#: capture (1 truncated chunk a few KB on disk) doesn't have the rows to form
+#: useful per-mode bands — auto-holdout skips it and picks an earlier real
+#: drive instead. ~1 MB is roughly a minute of telemetry at our chunk rate;
+#: way below any actual drive (the 05-18 short idles are still ~1.5 MB).
+_MIN_CALIBRATION_HOLDOUT_BYTES = 1_000_000
+
+
+def _session_parquet_bytes(session_dir: Path) -> int:
+    try:
+        return sum(p.stat().st_size for p in session_dir.glob("telemetry-*.parquet"))
+    except OSError:
+        return 0
+
+
+def _pick_calibration_holdout(sessions: Sequence[Path]) -> Path | None:
+    """The most-recent *substantial* session, or ``None`` if every candidate
+    is below the minimum size. ``discover_sessions`` returns oldest→newest,
+    so we walk in reverse to prefer the freshest real drive."""
+    for session in reversed(sessions):
+        if _session_parquet_bytes(session) >= _MIN_CALIBRATION_HOLDOUT_BYTES:
+            return session
+    return None
+
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -288,27 +313,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     # threshold calibration is the default — in-sample mean+k·σ underestimates
     # cross-session error and floods false positives on unseen drives. Explicit
     # --calibration-sessions wins; otherwise auto-hold-out the most-recent
-    # discovered session. With fewer than 3 sessions we can't afford to hold
-    # one out, so we log and fall back to in-sample.
+    # *substantial* discovered session — abandoned in-progress captures (single
+    # truncated chunk a few KB on disk) are skipped because they don't have the
+    # rows to make a useful calibration band, and picking them would just push
+    # everything to the global threshold. With fewer than 3 sessions we can't
+    # afford to hold one out, so we log and fall back to in-sample.
     calibration_sessions: list[Path] = []
     if not args.skip_sequence:
         if args.calibration_sessions:
             requested = {Path(p).resolve() for p in args.calibration_sessions}
             calibration_sessions = [s for s in sessions if Path(s).resolve() in requested]
             sessions = [s for s in sessions if Path(s).resolve() not in requested]
-        elif not args.no_calibration_holdout:
-            if len(sessions) >= 3:
-                # discover_sessions sorts ascending by capture time, so the last
-                # entry is the freshest clean drive — the most representative
-                # held-out anchor for fresh-drive deployment.
-                calibration_sessions = [sessions[-1]]
-                sessions = sessions[:-1]
+        elif not args.no_calibration_holdout and len(sessions) >= 3:
+            holdout = _pick_calibration_holdout(sessions)
+            if holdout is not None:
+                calibration_sessions = [holdout]
+                sessions = [s for s in sessions if s != holdout]
             else:
                 log.warning(
-                    "too few sessions for an out-of-sample calibration holdout; "
-                    "falling back to in-sample (cross-session FPR likely inflated)",
+                    "no substantial session available for out-of-sample "
+                    "calibration; falling back to in-sample",
                     extra={"session_count": len(sessions)},
                 )
+        elif not args.no_calibration_holdout:
+            log.warning(
+                "too few sessions for an out-of-sample calibration holdout; "
+                "falling back to in-sample (cross-session FPR likely inflated)",
+                extra={"session_count": len(sessions)},
+            )
 
     log.info(
         "starting retrain",
