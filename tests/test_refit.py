@@ -307,6 +307,65 @@ def test_refit_all_drops_retired_recipes_from_existing() -> None:
     assert names == ["coolant_warmup"]  # retired_surface dropped
 
 
+def test_refit_all_carries_over_priors_outside_refit_subset_when_catalog_given() -> None:
+    """``--recipe foo`` should refit only foo while preserving the other
+    canonical surfaces from disk — they're in the catalog but not the refit
+    subset, so they carry over unchanged instead of being dropped."""
+    frame = _warmup_frame()
+    coolant = Surface1DRecipe(
+        name="coolant_warmup",
+        output="obd:COOLANT_TEMP",
+        x_column="obd:RUN_TIME",
+        fit_method="poly",
+        min_samples=50,
+    )
+    other = Surface1DRecipe(
+        name="other_surface",
+        output="obd:COOLANT_TEMP",
+        x_column="obd:RUN_TIME",
+    )
+    catalog = [coolant, other]
+    existing = BehaviorModels(
+        schema_version=1,
+        models=[
+            _existing_model("coolant_warmup", version=2),
+            _existing_model("other_surface", version=5),
+        ],
+    )
+
+    new_models, results = refit_all([coolant], frame, existing=existing, catalog=catalog)
+
+    by_name = {m.name: m for m in new_models.models}
+    assert set(by_name) == {"coolant_warmup", "other_surface"}
+    assert by_name["coolant_warmup"].version == 3  # refit → bumped
+    assert by_name["other_surface"].version == 5  # not in refit subset → carried over
+    assert [r.name for r in results] == ["coolant_warmup"]  # results only for what we ran
+
+
+def test_refit_all_still_drops_retired_priors_when_catalog_given() -> None:
+    """Priors not in the canonical catalog are still retired, even when
+    ``--recipe`` doesn't list them."""
+    frame = _warmup_frame()
+    coolant = Surface1DRecipe(
+        name="coolant_warmup",
+        output="obd:COOLANT_TEMP",
+        x_column="obd:RUN_TIME",
+        fit_method="poly",
+        min_samples=50,
+    )
+    catalog = [coolant]
+    existing = BehaviorModels(
+        schema_version=1,
+        models=[
+            _existing_model("coolant_warmup", version=1),
+            _existing_model("retired_surface", version=5),
+        ],
+    )
+
+    new_models, _ = refit_all([coolant], frame, existing=existing, catalog=catalog)
+    assert {m.name for m in new_models.models} == {"coolant_warmup"}
+
+
 def test_refit_all_first_run_starts_at_version_1() -> None:
     frame = _warmup_frame()
     recipe = Surface1DRecipe(

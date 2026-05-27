@@ -183,6 +183,43 @@ def default_recipes() -> list[Recipe]:
             ),
         ),
         Surface2DRecipe(
+            name="timing_advance_vs_rpm_iat",
+            output="obd:TIMING_ADVANCE",
+            output_unit="degBTDC",
+            x_column="obd:RPM",
+            y_column="obd:INTAKE_TEMP",
+            x_axis_name="rpm",
+            y_axis_name="intake_temp",
+            x_axis_unit="rpm",
+            y_axis_unit="degC",
+            min_samples=500,
+            # Same band shape as the load-axis sibling — timing magnitudes and
+            # cell-spread are the same; what differs is what we're trying to
+            # catch.
+            deviation=DeviationConfig(kind="relative", warning_band=3.0, critical_band=6.0),
+            notes=(
+                "Thermal-compensation surface for ignition. Cold dense charge "
+                "lets the ECU advance more; hot charge gets retarded to keep "
+                "knock margin. The surface learns the ECU's actual (RPM, IAT) "
+                "→ timing map, so we read deviations from what the engine "
+                "*normally* does at this thermal+rpm operating point — "
+                "ambient-invariant by construction (the same IAT bin sees "
+                "summer afternoons and winter mornings).\n\n"
+                "Catches:\n"
+                "* Sustained knock-retard activity (negative residuals "
+                "  clustered at the hot-IAT side of the surface — detonation "
+                "  triggers spark pull-back).\n"
+                "* IAT sensor lying to the ECU — timing tracks the *reported* "
+                "  IAT, so a stuck or biased sensor leaves the surface's "
+                "  predicted timing matching the wrong cell, and actual "
+                "  timing drifts off the learned map.\n"
+                "* Firmware / calibration drift after an ECU re-flash.\n\n"
+                "Complementary to ``timing_advance_vs_rpm_load`` (load-axis "
+                "compensation) — both feed the same timing output through "
+                "different physical axes."
+            ),
+        ),
+        Surface2DRecipe(
             name="fuel_trim_vs_rpm_load",
             output="obd:SHORT_FUEL_TRIM_1",
             output_unit="%",
@@ -516,26 +553,35 @@ def refit_all(
     sessions: Sequence[str] = (),
     existing: BehaviorModels | None = None,
     session_events: Mapping[str, set[str]] | None = None,
+    catalog: Sequence[Recipe] | None = None,
 ) -> tuple[BehaviorModels, list[RecipeResult]]:
-    """Fit every recipe; return the new ``BehaviorModels`` + per-recipe results.
+    """Fit ``recipes``; return the new ``BehaviorModels`` + per-recipe results.
 
-    Models present in ``existing`` whose recipe successfully refitted have
-    their ``version`` bumped one above the prior one. Models that didn't
-    refit (skipped) carry over from ``existing`` unchanged — partial
-    refits don't lose previously-known surfaces. Models in ``existing``
-    that aren't in the recipe set are dropped on the floor (a recipe
-    catalog change is how surfaces retire).
+    ``recipes`` is the set being refit this round. ``catalog`` is the
+    canonical full set — used only for retirement decisions: priors whose
+    name isn't in ``catalog`` are dropped, and priors that *are* in
+    ``catalog`` but *aren't* in ``recipes`` (the caller chose not to refit
+    them this round, e.g. ``--recipe foo`` on the CLI) are carried over
+    from ``existing`` unchanged. When ``catalog`` is ``None``, ``recipes``
+    is treated as the catalog — appropriate for a full refit.
+
+    Models that successfully refit have their ``version`` bumped one above
+    the prior. Models that ran but were skipped (e.g. insufficient samples)
+    carry over from ``existing`` unchanged.
     """
+    catalog_names = {r.name for r in (catalog if catalog is not None else recipes)}
+    refit_names = {r.name for r in recipes}
+
     next_version_for: dict[str, int] = {}
     carry_over: dict[str, BehaviorModel1D | BehaviorModel2D] = {}
     if existing is not None:
-        prior = {m.name: m for m in existing.models}
-        recipe_names = {r.name for r in recipes}
-        for name, prior_model in prior.items():
-            if name in recipe_names:
+        for prior_model in existing.models:
+            name = prior_model.name
+            if name not in catalog_names:
+                continue  # retired
+            carry_over[name] = prior_model
+            if name in refit_names:
                 next_version_for[name] = prior_model.version + 1
-                carry_over[name] = prior_model
-            # else: retired recipe, drop the prior model
 
     results: list[RecipeResult] = []
     fitted: dict[str, BehaviorModel1D | BehaviorModel2D] = {}
@@ -554,10 +600,30 @@ def refit_all(
             # Skipped this round, but we know it from before — keep it
             fitted[recipe.name] = carry_over[recipe.name]
 
+    # Carry over canonical priors the caller didn't refit this round, so
+    # `--recipe foo` doesn't clobber the other surfaces on disk.
+    for name, prior_model in carry_over.items():
+        if name not in fitted and name not in refit_names:
+            fitted[name] = prior_model
+
+    # Output order: refit recipes first in their declared order, then any
+    # carried-over priors in their original `existing` order.
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for recipe in recipes:
+        if recipe.name in fitted and recipe.name not in seen:
+            ordered.append(recipe.name)
+            seen.add(recipe.name)
+    if existing is not None:
+        for prior_model in existing.models:
+            if prior_model.name in fitted and prior_model.name not in seen:
+                ordered.append(prior_model.name)
+                seen.add(prior_model.name)
+
     schema_version = existing.schema_version if existing is not None else 1
     return BehaviorModels(
         schema_version=schema_version,
-        models=[fitted[name] for name in (r.name for r in recipes) if name in fitted],
+        models=[fitted[name] for name in ordered],
     ), results
 
 

@@ -173,7 +173,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
-    recipes = _select_recipes(default_recipes(), args.recipe)
+    catalog = default_recipes()
+    recipes = _select_recipes(catalog, args.recipe)
     log.info(
         "starting refit",
         extra={
@@ -218,6 +219,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         sessions=[s.name for s in sessions],
         existing=existing,
         session_events=session_events,
+        catalog=catalog,
     )
 
     _print_report(results, frame_rows=len(frame))
