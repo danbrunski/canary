@@ -342,6 +342,7 @@ def test_train_lstm_autoencoder_calibrates_on_held_out_dataset_when_given() -> N
     """LSTM mirror of the TCN out-of-sample calibration contract: a held-out
     ``calibration_dataset`` drives the manifest thresholds instead of the
     training windows."""
+    _torch()
     train_ds = _dataset(rows=14)
     held_out_frame = _frame(rows=8)
     held_out_frame.loc[:, [SESSION_COLUMN]] = "calib"

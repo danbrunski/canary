@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from src.config import CanaryConfig
 from src.daemon.components import _load_model_managers, _sequence_model_type
 from src.models.sequence_registry import (
@@ -54,10 +56,12 @@ def test_resolve_none_when_selected_backend_disabled() -> None:
 
 
 def test_missing_requirements_reports_absent_modules() -> None:
+    # Use a stdlib module for the "present" case so the test doesn't depend on
+    # whether the ML extras (torch) are installed.
     present = SequenceBackend(
         selector="x",
         model_type="x",
-        requires=("torch",),
+        requires=("json",),
         is_enabled=lambda _c: True,
         artifact_path=lambda c: c.daemon.models_dir,
         load_model=lambda _p: object(),  # type: ignore[arg-type,return-value]
@@ -67,7 +71,7 @@ def test_missing_requirements_reports_absent_modules() -> None:
     absent = SequenceBackend(
         selector="x",
         model_type="x",
-        requires=("torch", "definitely_not_a_real_module_xyz"),
+        requires=("json", "definitely_not_a_real_module_xyz"),
         is_enabled=lambda _c: True,
         artifact_path=lambda c: c.daemon.models_dir,
         load_model=lambda _p: object(),  # type: ignore[arg-type,return-value]
@@ -76,6 +80,10 @@ def test_missing_requirements_reports_absent_modules() -> None:
 
 
 def test_daemon_loads_selected_sequence_backend() -> None:
+    # Both registered backbones require torch; without it the daemon
+    # gracefully skips the sequence manager, so this wiring test only
+    # makes sense when the ML extras are installed.
+    pytest.importorskip("torch")
     tcn_cfg = _config(selector="tcn", lstm=False, tcn=True)
     managers = _load_model_managers(tcn_cfg)
     assert "tcn_autoencoder" in managers

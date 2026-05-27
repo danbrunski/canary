@@ -45,6 +45,8 @@ def test_status_reports_selector_active_and_availability(tmp_path: Path) -> None
 
 
 def test_switch_swaps_active_backbone_and_frees_the_old_manager(tmp_path: Path) -> None:
+    # The real switch loads the target backbone, which requires torch.
+    pytest.importorskip("torch")
     comp = _components(tmp_path, active="lstm_autoencoder")
     controller = SequenceDetectorController(comp)
 
@@ -115,6 +117,8 @@ def test_status_endpoint_includes_sequence_detector_block(tmp_path: Path) -> Non
 
 
 def test_post_switches_active_backbone(tmp_path: Path) -> None:
+    # The real switch loads the target backbone, which requires torch.
+    pytest.importorskip("torch")
     client = _client(tmp_path)
     response = client.post("/control/sequence-detector", json={"backbone": "tcn"}, headers=_auth())
     assert response.status_code == 200
