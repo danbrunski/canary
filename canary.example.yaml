@@ -167,13 +167,17 @@ models:
     random_state: 42
     threshold_k: 3.0
     # Behavior signals that drift naturally over a drive (fuel level, HVAC
-    # controls, alternator voltage) but aren't vehicle-health signals. Each
-    # entry matches itself + rolling-derivative siblings (__mean/__std/__roc).
-    # Applied at train + serve — listing one here keeps the column out of the
-    # next manifest's feature_columns AND forces mask=0 on the live path so a
-    # stale artifact's column can't push the global score.
+    # controls, intake-air temperature) but aren't vehicle-health signals
+    # for *this* detector — they're better handled by the behavior surfaces
+    # that learn the ECU's response to them (see e.g.
+    # ``timing_advance_vs_rpm_iat`` for IAT). Each entry matches itself +
+    # rolling-derivative siblings (__mean/__std/__roc).
+    # Applied at train + serve — listing one here keeps the column out of
+    # the next manifest's feature_columns AND forces mask=0 on the live
+    # path so a stale artifact's column can't push the global score.
     # suppress_channels:
     #   - obd:FUEL_LEVEL
+    #   - obd:INTAKE_TEMP
     #   - dbc:HVAC_BLOWER_LIGHTING_358_1
     #   - decoded:HVAC_BLOWER_LIGHTING_358_1
   # Alternate sequence-detector backbone (active when sequence_detector: tcn).
