@@ -78,7 +78,12 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
     event_logger = AnomalyEventLogger(config.daemon.anomalies_dir)
     audit_logger = ControlAuditLogger(config.daemon.audit_log)
     tuner = AlertTuner(load_tuning_config(config.daemon.tuning_config))
-    emitter = _make_broadcasting_emitter(event_logger, anomalies_bus, tuner=tuner)
+    emitter = _make_broadcasting_emitter(
+        event_logger,
+        anomalies_bus,
+        tuner=tuner,
+        min_seconds_between_events=config.alerts.min_seconds_between_events,
+    )
     model_managers = _load_model_managers(config)
 
     components = DaemonComponents(
@@ -127,6 +132,7 @@ def _make_broadcasting_emitter(
     anomalies_bus: Broadcaster,
     *,
     tuner: AlertTuner | None = None,
+    min_seconds_between_events: float = 1.0,
 ) -> AnomalyEventEmitter:
     """Wrap ``AnomalyEventLogger`` so every persisted event is also published
     on the broadcaster — keeps the logger-as-source-of-truth + the live-push
@@ -151,6 +157,7 @@ def _make_broadcasting_emitter(
     return AnomalyEventEmitter(
         _BroadcastingLogger(logger, anomalies_bus),  # type: ignore[arg-type]
         tuner=tuner,
+        min_seconds_between_events=min_seconds_between_events,
     )
 
 

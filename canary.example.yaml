@@ -224,6 +224,15 @@ models:
     behavior_warning_severity: 0.5
     behavior_critical_severity: 1.0
 
+# Phase 7.5: shared emission policy. A detector must be over threshold for
+# min_consecutive_ticks consecutive ~1 Hz ticks before it emits an event or
+# counts as a firing fusion source (real faults persist; single-tick blips
+# were the historical flood), and an emitted (source, model) pair then goes
+# quiet for min_seconds_between_events.
+alerts:
+  min_consecutive_ticks: 3
+  min_seconds_between_events: 30.0
+
 dashboard:
   host: 0.0.0.0
   port: 8000

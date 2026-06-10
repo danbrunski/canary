@@ -214,6 +214,24 @@ class IsolationForestConfig(_Strict):
     target_flag_rate: float = Field(default=0.02, gt=0.0, le=0.5)
 
 
+class AlertsConfig(_Strict):
+    """Emission policy shared by every detector (Phase 7.5).
+
+    All defaulted so configs predating it keep loading.
+    """
+
+    #: A detector (IF / sequence / each behavior surface) must be over its
+    #: threshold for this many CONSECUTIVE inference ticks (~1 Hz) before it
+    #: emits an event or counts as a firing fusion source. Real faults
+    #: persist; single-tick blips are the historical flood. 1 = legacy
+    #: fire-on-first-tick behavior.
+    min_consecutive_ticks: int = Field(default=3, ge=1)
+    #: Per-(source, model) refractory window between emitted events. The old
+    #: 1.0 s default was a no-op at the 1 Hz tick — a sustained deviation
+    #: emitted ~3600 events/hour per source.
+    min_seconds_between_events: float = Field(default=30.0, ge=0.0)
+
+
 class FusionConfig(_Strict):
     """Phase 7.2 — per-tick fusion of IF + LSTM + behavior residuals into one
     agreement-aware calibrated severity. All defaulted so configs predating
@@ -247,6 +265,12 @@ class LSTMAutoencoderConfig(_Strict):
     min_delta: float = 0.0
     random_state: int = 42
     threshold_k: float
+    #: When set (0–1), calibrate thresholds as this quantile of the
+    #: reconstruction-error distribution instead of ``mean + k·σ``.
+    #: Reconstruction errors are right-skewed and stride-1 windows heavily
+    #: autocorrelated, so σ is a poor tail proxy; a quantile targets the
+    #: alert budget directly (like the IF's ``target_flag_rate``).
+    threshold_quantile: float | None = Field(default=None, gt=0.0, lt=1.0)
     #: Feature columns to exclude from anomaly scoring. Each entry matches
     #: itself plus its rolling-derivative siblings (``__mean``, ``__std``,
     #: ``__roc``), so listing ``obd:FUEL_LEVEL`` silences all four. Applied
@@ -285,6 +309,8 @@ class TCNAutoencoderConfig(_Strict):
     min_delta: float = 0.0
     random_state: int = 42
     threshold_k: float = 3.0
+    #: Same contract as ``LSTMAutoencoderConfig.threshold_quantile``.
+    threshold_quantile: float | None = Field(default=None, gt=0.0, lt=1.0)
     #: Feature columns to exclude from anomaly scoring (same contract as
     #: ``LSTMAutoencoderConfig.suppress_channels`` — each entry expands to
     #: its rolling-derivative siblings). Applied at train + serve.
@@ -347,6 +373,7 @@ class CanaryConfig(_Strict):
     models: ModelsConfig
     dashboard: DashboardConfig
     daemon: DaemonConfig = DaemonConfig()
+    alerts: AlertsConfig = AlertsConfig()
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:

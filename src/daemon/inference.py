@@ -10,7 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from src.alerts.emitter import AnomalyEventEmitter, IsolationForestInferenceEngine
-from src.alerts.fusion import FusionScorer, FusionSource, isolation_forest_source, lstm_source
+from src.alerts.fusion import (
+    FusionScorer,
+    FusionSource,
+    PersistenceGate,
+    downgrade_unsustained,
+    isolation_forest_source,
+    lstm_source,
+)
 from src.dashboard.behavior_live import BehaviorLiveState, BehaviorObservation
 from src.dashboard.broadcast import Broadcaster
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
@@ -19,6 +26,7 @@ from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
     BehaviorModel1D,
     load_behavior_models,
+    unknown_operating_modes,
 )
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
@@ -78,6 +86,9 @@ async def run_live_inference(
     )
     fusion = FusionScorer(components.config.models.fusion)
     severity_threshold = components.config.models.fusion.severity_threshold
+    # Phase 7.5: every detector must be over threshold for K consecutive
+    # ticks before it emits or counts as a firing fusion source.
+    persistence = PersistenceGate(components.config.alerts.min_consecutive_ticks)
     if if_manager is None:
         log.info(
             "isolation_forest model manager absent; IF scoring disabled — the "
@@ -106,11 +117,15 @@ async def run_live_inference(
                     components.emitter,
                     components.health_monitor,
                     scores=components.scores_broadcaster,
+                    persistence=persistence,
                 )
                 if if_input is not None:
                     sources.append(
-                        isolation_forest_source(
-                            if_input.score, if_input.threshold, scale=if_input.scale
+                        downgrade_unsustained(
+                            isolation_forest_source(
+                                if_input.score, if_input.threshold, scale=if_input.scale
+                            ),
+                            persistence.active("isolation_forest"),
                         )
                     )
 
@@ -139,16 +154,36 @@ async def run_live_inference(
                             timestamp=result.timestamp,
                             missing_features=False,
                         )
-                        components.emitter.emit_lstm(result, operating_mode=operating_mode)
-                        sources.append(lstm_source(result.global_score, result.global_threshold))
+                        seq_sustained = persistence.observe("lstm_autoencoder", result.is_anomaly)
+                        if result.is_anomaly and not seq_sustained:
+                            components.emitter.counters.suppressed_persistence += 1
+                        else:
+                            components.emitter.emit_lstm(result, operating_mode=operating_mode)
+                        sources.append(
+                            downgrade_unsustained(
+                                lstm_source(result.global_score, result.global_threshold),
+                                seq_sustained,
+                            )
+                        )
 
             # Behavior overlay (unchanged) + first-class residual detector
             # (Phase 7.4): each fired model emits its own behavior event and
             # publishes a /ws/scores frame, *and* feeds the fusion path.
             warn_severity = components.config.models.fusion.behavior_warning_severity
             for residual in _observe_behavior(source, components.behavior_live):
-                behavior = fusion.behavior_source(f"behavior:{residual.name}", residual.severity)
-                if not behavior.fired or not residual.mode_match:
+                # Sibling surfaces grading the same output channel share a
+                # fusion group so they count as one agreeing voice, not two.
+                behavior = fusion.behavior_source(
+                    f"behavior:{residual.name}",
+                    residual.severity,
+                    group=f"behavior:{residual.channel}",
+                )
+                raw_fired = behavior.fired and residual.mode_match
+                sustained = persistence.observe(f"behavior:{residual.name}", raw_fired)
+                if not raw_fired:
+                    continue
+                if not sustained:
+                    components.emitter.counters.suppressed_persistence += 1
                     continue
                 sources.append(behavior)
                 ev_ts = timestamp_str or residual.timestamp
@@ -499,12 +534,18 @@ def _score_and_emit(
     health: HealthMonitor | None = None,
     *,
     scores: Broadcaster | None = None,
+    persistence: PersistenceGate | None = None,
 ) -> _IFFusionInput | None:
     """Run one feature row through IF.score → emitter. Best-effort.
 
     Returns the IF fusion input on a trustworthy tick, or ``None`` when the
     verdict was suppressed (missing-feature schema warmup) and so must not
     contribute to fusion either — the per-source emit policy is unchanged.
+
+    ``persistence`` (when given) is advanced once per trustworthy tick with
+    the calibrated over-threshold verdict; the per-source event is withheld
+    until the streak is sustained. The caller reads ``persistence.active``
+    to downgrade the fusion source consistently.
 
     The model's expected ``feature_columns`` are a subset of what the
     live source produces; missing columns surface as NaN, which
@@ -607,14 +648,31 @@ def _score_and_emit(
         affected_channels = tuple(name for name, _ in ranked)
     except Exception:  # noqa: BLE001 — attribution is best-effort, never blocks an emit
         log.exception("isolation_forest feature_contributors ranking failed")
-    emitter.emit_isolation_forest_row(
-        scored,
-        model_version=engine.model_version,
-        timestamp=str(timestamp),
-        affected_channels=affected_channels,
-        feature_contributors=feature_contributors or None,
-    )
     score_val = scored.get(SCORE_COLUMN)
+    suppress_emit = False
+    if persistence is not None:
+        # Same firing rule the fusion source uses: calibrated over-threshold.
+        # Uncalibrated rows (no threshold) can't latch the gate and keep the
+        # legacy ungated emit path; non-firing ticks still flow to the
+        # emitter so its suppressed_not_anomaly accounting stays truthful.
+        raw_fired = (
+            score_val is not None
+            and pd.notna(score_val)
+            and calibrated_threshold is not None
+            and float(score_val) >= calibrated_threshold
+        )
+        sustained = persistence.observe("isolation_forest", raw_fired)
+        if raw_fired and not sustained:
+            suppress_emit = True
+            emitter.counters.suppressed_persistence += 1
+    if not suppress_emit:
+        emitter.emit_isolation_forest_row(
+            scored,
+            model_version=engine.model_version,
+            timestamp=str(timestamp),
+            affected_channels=affected_channels,
+            feature_contributors=feature_contributors or None,
+        )
     if score_val is None or pd.isna(score_val):
         return None
     return _IFFusionInput(
@@ -744,6 +802,18 @@ def build_live_feature_source(
     behavior_models = (
         load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
     )
+    if behavior_models is not None:
+        mismatched = unknown_operating_modes(
+            behavior_models,
+            components.config.preprocessing.operating_modes,
+        )
+        if mismatched:
+            log.warning(
+                "behavior models gated on operating modes the live segmenter "
+                "can't emit — they will NEVER evaluate; add the modes to "
+                "preprocessing.operating_modes",
+                extra={"models": mismatched},
+            )
     # The training feature pipeline decodes CAN twice — bindings.yaml
     # (decoded:*) AND the DBC files (dbc:*). The live source must mirror both
     # or every inference tick fails on the model's required dbc:* columns.

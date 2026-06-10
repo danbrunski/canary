@@ -237,3 +237,69 @@ def test_emit_if_falls_back_to_label_when_uncalibrated(tmp_path: Path) -> None:
     )
     assert ev is not None  # legacy label rule
     assert ev.threshold is None  # no calibrated threshold for this mode
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.5: persistence gate + grouped agreement
+# ---------------------------------------------------------------------------
+
+
+def test_persistence_gate_requires_consecutive_ticks() -> None:
+    from src.alerts.fusion import PersistenceGate
+
+    gate = PersistenceGate(3)
+    assert not gate.observe("lstm", True)
+    assert not gate.observe("lstm", True)
+    assert gate.observe("lstm", True)  # third consecutive tick latches
+    assert gate.active("lstm")
+    assert gate.observe("lstm", True)  # stays latched while firing
+    # One quiet tick resets the streak entirely.
+    assert not gate.observe("lstm", False)
+    assert not gate.active("lstm")
+    assert not gate.observe("lstm", True)
+    assert gate.suppressed == 3  # ticks 1, 2 and the post-reset tick
+
+
+def test_persistence_gate_keys_are_independent() -> None:
+    from src.alerts.fusion import PersistenceGate
+
+    gate = PersistenceGate(2)
+    assert not gate.observe("a", True)
+    assert not gate.observe("b", True)
+    assert gate.observe("a", True)
+    assert not gate.active("b")
+
+
+def test_downgrade_unsustained_keeps_evidence_but_kills_severity() -> None:
+    from src.alerts.fusion import downgrade_unsustained
+
+    src = lstm_source(0.10, 0.05)
+    assert src.fired
+    gated = downgrade_unsustained(src, sustained=False)
+    assert not gated.fired and gated.severity == 0.0
+    assert gated.score == src.score  # evidence retained
+    assert downgrade_unsustained(src, sustained=True) is src
+
+
+def test_fuse_grouped_siblings_count_as_one_agreeing_voice() -> None:
+    """Two surfaces grading the same output channel are shared evidence —
+    no agreement boost between them; an independent detector still boosts."""
+    fs = FusionScorer(FusionConfig(agreement_boost=0.25, severity_threshold=0.5))
+    siblings = [
+        fs.behavior_source(
+            "behavior:timing_advance_vs_rpm_load", "warning", group="behavior:obd:TIMING_ADVANCE"
+        ),
+        fs.behavior_source(
+            "behavior:timing_advance_vs_rpm_iat", "warning", group="behavior:obd:TIMING_ADVANCE"
+        ),
+    ]
+    fused = fs.fuse(list(siblings), timestamp="t", operating_mode=None)
+    assert fused.severity == 0.5  # max(0.5, 0.5) + 0 boost — one group
+    assert fused.agreement == 2  # both still listed as contributing evidence
+
+    with_if = fs.fuse(
+        [*siblings, lstm_source(0.05, 0.05)],
+        timestamp="t",
+        operating_mode=None,
+    )
+    assert with_if.severity == 0.75  # two independent groups → one boost

@@ -57,12 +57,16 @@ class EmitterCounters:
     #: Suppressed by an operator tuning rule (Task 6.25) — distinct from
     #: dedupe so the dashboard can show "tuning is muting N/hr" explicitly.
     suppressed_tuning: int = 0
+    #: Over-threshold ticks withheld by the persistence gate (Phase 7.5) —
+    #: the detector fired but hadn't fired for min_consecutive_ticks yet.
+    suppressed_persistence: int = 0
 
     def reset(self) -> None:
         self.emitted = 0
         self.suppressed_not_anomaly = 0
         self.suppressed_dedupe = 0
         self.suppressed_tuning = 0
+        self.suppressed_persistence = 0
 
     def to_dict(self) -> dict[str, int]:
         """JSON-safe snapshot — what ``GET /status`` exposes per detector."""
@@ -71,6 +75,7 @@ class EmitterCounters:
             "suppressed_not_anomaly": self.suppressed_not_anomaly,
             "suppressed_dedupe": self.suppressed_dedupe,
             "suppressed_tuning": self.suppressed_tuning,
+            "suppressed_persistence": self.suppressed_persistence,
         }
 
 

@@ -32,7 +32,7 @@ can fuse without touching the model layers — same discipline as the emitter.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from src.config import FusionConfig
@@ -52,6 +52,12 @@ class FusionSource:
     :class:`FusionScorer` stays a pure combiner. A source with no calibrated
     threshold is represented with ``fired=False, severity=0.0`` — it is kept
     for evidence/observability but can never inflate the fused severity.
+
+    ``group`` declares shared evidence: sources in the same group (e.g. two
+    behavior surfaces grading the same output channel) count as ONE agreeing
+    voice for the agreement boost — the boost models *independent*
+    corroboration, and sibling surfaces firing on the same residual aren't
+    independent. ``None`` ⇒ the source is its own group.
     """
 
     name: str
@@ -59,6 +65,62 @@ class FusionSource:
     threshold: float | None
     fired: bool
     severity: float
+    group: str | None = None
+
+
+class PersistenceGate:
+    """Require K consecutive firing ticks per key before a detector counts.
+
+    The structural fix for the alert-flood class: every detector here scores
+    at ~1 Hz, so a single-tick blip (sensor glitch, round-robin sampling
+    skew, one bad window) otherwise becomes an event AND a fusion source
+    instantly. Real faults the system exists to catch — vacuum leaks, knock
+    retard, thermostat failures — persist across ticks; a deviation that
+    can't survive ``required`` consecutive ticks is noise.
+
+    Streaks reset on the first non-firing tick. Keys are detector names
+    (``"isolation_forest"``, ``"lstm_autoencoder"``, ``"behavior:<model>"``)
+    so each detector latches independently. Call :meth:`observe` exactly
+    once per key per tick; :meth:`active` reads the latched state without
+    advancing it.
+    """
+
+    def __init__(self, required: int) -> None:
+        self._required = max(1, int(required))
+        self._streaks: dict[str, int] = {}
+        self.suppressed = 0
+
+    @property
+    def required(self) -> int:
+        return self._required
+
+    def observe(self, key: str, firing: bool) -> bool:
+        """Advance ``key``'s streak with this tick's verdict; return whether
+        the detector is sustained (streak ≥ required)."""
+        if not firing:
+            self._streaks.pop(key, None)
+            return False
+        streak = self._streaks.get(key, 0) + 1
+        self._streaks[key] = streak
+        if streak < self._required:
+            self.suppressed += 1
+            return False
+        return True
+
+    def active(self, key: str) -> bool:
+        """Whether ``key`` is currently latched (read-only)."""
+        return self._streaks.get(key, 0) >= self._required
+
+
+def downgrade_unsustained(source: FusionSource, sustained: bool) -> FusionSource:
+    """Downgrade a fired-but-not-yet-sustained source to non-firing.
+
+    The downgraded source stays in the evidence list (score visible on the
+    fused event) but can't inflate fused severity or count as agreement.
+    """
+    if source.fired and not sustained:
+        return replace(source, fired=False, severity=0.0)
+    return source
 
 
 def _bounded(value: float) -> float:
@@ -120,12 +182,16 @@ class FusionScorer:
     def enabled(self) -> bool:
         return self._config.enabled
 
-    def behavior_source(self, name: str, severity_band: str) -> FusionSource:
+    def behavior_source(
+        self, name: str, severity_band: str, *, group: str | None = None
+    ) -> FusionSource:
         """A behavior-residual source from a graded deviation band.
 
         The band is the behavior decoder's own calibrated verdict, so its
         configured severity *is* the magnitude — no scale needed. ``"ok"``
-        (or anything unrecognized) does not fire.
+        (or anything unrecognized) does not fire. ``group`` should identify
+        the graded output channel so sibling surfaces over the same signal
+        don't double-count as agreement.
         """
         if severity_band == "critical":
             sev = self._config.behavior_critical_severity
@@ -134,7 +200,9 @@ class FusionScorer:
         else:
             sev = 0.0
         fired = sev > 0.0
-        return FusionSource(name, sev, 0.0 if fired else None, fired, sev if fired else 0.0)
+        return FusionSource(
+            name, sev, 0.0 if fired else None, fired, sev if fired else 0.0, group=group
+        )
 
     def fuse(
         self,
@@ -154,7 +222,12 @@ class FusionScorer:
         if not firing:
             return FusedResult(0.0, False, operating_mode, timestamp, present, ())
         base = max(s.severity for s in firing)
-        boost = self._config.agreement_boost * (len(firing) - 1)
+        # Agreement counts *independent* voices: sources sharing a ``group``
+        # (sibling surfaces grading the same output channel) collapse to one
+        # before the boost — two timing surfaces over the same excursion are
+        # one piece of evidence, not corroboration.
+        independent_groups = {s.group or s.name for s in firing}
+        boost = self._config.agreement_boost * (len(independent_groups) - 1)
         severity = _bounded(base + boost)
         return FusedResult(
             severity=severity,
@@ -204,6 +277,8 @@ __all__ = [
     "FusionScorer",
     "FusionSource",
     "FusedResult",
+    "PersistenceGate",
+    "downgrade_unsustained",
     "isolation_forest_source",
     "lstm_source",
 ]
