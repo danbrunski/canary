@@ -44,6 +44,17 @@ from src.preprocessing.segmenter import MODE_COLUMN
 
 log = logging.getLogger(__name__)
 
+#: RPM column used by the engine-running gate.
+RPM_COLUMN = "obd:RPM"
+
+#: Matches the vehicle_state classifier's engine_running threshold. KOEO rows
+#: read RPM == 0 with wildly off-map outputs (TIMING_ADVANCE ≈ 63° vs ~17° at
+#: idle), and an unfiltered KOEO-heavy corpus poisons both the fitted cells
+#: and the auto-edge quantiles — the May 2026 IAT surface shipped a
+#: 62.9° ± 5.0 "expectation" in its idle cell that would fire critical on
+#: every heat-soaked summer idle.
+ENGINE_RUNNING_MIN_RPM = 400.0
+
 
 # ---------------------------------------------------------------------------
 # Recipes
@@ -66,6 +77,12 @@ class _RecipeBase:
     #: warmup-specific surfaces to sessions that actually start cold, etc.
     #: Empty tuple means "no event requirement" — back-compat default.
     require_session_events: tuple[str, ...] = ()
+    #: Engine-running gate: drop rows where ``obd:RPM`` < this before fitting
+    #: (and before 2D auto-edge computation, so the quantiles aren't dragged
+    #: to 0 by KOEO mass). ``None`` = no gate — for surfaces that genuinely
+    #: describe key-on-engine-off behavior. Catalog recipes that describe
+    #: *running* behavior set ``ENGINE_RUNNING_MIN_RPM`` explicitly.
+    min_rpm: float | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +117,9 @@ class Surface2DRecipe(_RecipeBase):
     x_edges: tuple[float, ...] | None = None
     y_edges: tuple[float, ...] | None = None
     auto_bin_count: int = 8
+    #: Cells with fewer samples than this evaluate as off-map at serve time
+    #: instead of grading against a one-/six-sample "expectation".
+    min_cell_count: int = 30
 
 
 Recipe = Surface1DRecipe | Surface2DRecipe
@@ -137,6 +157,7 @@ def default_recipes() -> list[Recipe]:
             # flooded the dashboard with warmup-storm anomalies.
             operating_mode="warmup",
             require_session_events=("cold_start",),
+            min_rpm=ENGINE_RUNNING_MIN_RPM,  # KOEO rows have RUN_TIME=0 — not warmup data
             fit_method="binned_lookup",  # warmup is sigmoid-ish, polys overshoot
             n_knots=12,
             min_samples=120,
@@ -154,6 +175,7 @@ def default_recipes() -> list[Recipe]:
             x_axis_name="coolant_temp",
             x_axis_unit="degC",
             operating_mode="idle",
+            min_rpm=ENGINE_RUNNING_MIN_RPM,  # keep KOEO rows (rpm=0) out of the idle curve
             fit_method="binned_lookup",
             n_knots=8,
             min_samples=200,
@@ -177,7 +199,12 @@ def default_recipes() -> list[Recipe]:
             x_axis_unit="rpm",
             y_axis_unit="%",
             min_samples=500,
-            deviation=DeviationConfig(kind="relative", warning_band=3.0, critical_band=6.0),
+            min_rpm=ENGINE_RUNNING_MIN_RPM,  # KOEO timing reads ~63°; see ENGINE_RUNNING_MIN_RPM
+            # sigma_floor = one LSB of PID 0x0E (0.5°/bit): a cell fit on a
+            # quantization-flat idle stretch can't alert on single-bit flicker.
+            deviation=DeviationConfig(
+                kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+            ),
             notes=(
                 "Ignition surface. Knock-retard activity shows as drops vs. the baseline cell mean."
             ),
@@ -193,10 +220,13 @@ def default_recipes() -> list[Recipe]:
             x_axis_unit="rpm",
             y_axis_unit="degC",
             min_samples=500,
+            min_rpm=ENGINE_RUNNING_MIN_RPM,  # KOEO timing reads ~63°; see ENGINE_RUNNING_MIN_RPM
             # Same band shape as the load-axis sibling — timing magnitudes and
             # cell-spread are the same; what differs is what we're trying to
-            # catch.
-            deviation=DeviationConfig(kind="relative", warning_band=3.0, critical_band=6.0),
+            # catch. sigma_floor = one LSB of PID 0x0E.
+            deviation=DeviationConfig(
+                kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+            ),
             notes=(
                 "Thermal-compensation surface for ignition. Cold dense charge "
                 "lets the ECU advance more; hot charge gets retarded to keep "
@@ -230,7 +260,11 @@ def default_recipes() -> list[Recipe]:
             x_axis_unit="rpm",
             y_axis_unit="%",
             min_samples=500,
-            deviation=DeviationConfig(kind="relative", warning_band=3.0, critical_band=6.0),
+            min_rpm=ENGINE_RUNNING_MIN_RPM,  # no fueling KOEO — trims are frozen zeros there
+            # sigma_floor = one LSB of the trim PIDs (100/128 ≈ 0.78 %).
+            deviation=DeviationConfig(
+                kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=100.0 / 128.0
+            ),
             notes=(
                 "STFT B1 surface. Vacuum leaks / injector wear / fuel-quality "
                 "drift shift cells off zero."
@@ -248,7 +282,11 @@ def default_recipes() -> list[Recipe]:
             x_axis_unit="rpm",
             y_axis_unit="%",
             min_samples=500,
-            deviation=DeviationConfig(kind="relative", warning_band=3.0, critical_band=6.0),
+            min_rpm=ENGINE_RUNNING_MIN_RPM,
+            # sigma_floor ≈ one MAF LSB (0.01 g/s) translated to g/cycle at idle.
+            deviation=DeviationConfig(
+                kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.002
+            ),
             notes=(
                 "Volumetric efficiency proxy — MAF translated to grams per "
                 "four-stroke cycle. Detects intake leak (low VE), exhaust "
@@ -266,6 +304,7 @@ def default_recipes() -> list[Recipe]:
             fit_method="poly",
             degree=1,  # Expected ~constant zero across RPM; linear fit highlights slope drift
             min_samples=300,
+            min_rpm=ENGINE_RUNNING_MIN_RPM,
             deviation=DeviationConfig(kind="absolute", warning_band=3.0, critical_band=6.0),
             notes=(
                 "STFT delta between banks, time-smoothed over "
@@ -286,6 +325,7 @@ def default_recipes() -> list[Recipe]:
             fit_method="poly",
             degree=1,
             min_samples=300,
+            min_rpm=ENGINE_RUNNING_MIN_RPM,
             deviation=DeviationConfig(kind="absolute", warning_band=4.0, critical_band=8.0),
             notes=(
                 "LTFT delta between banks — the slow / drift channel "
@@ -306,6 +346,7 @@ def default_recipes() -> list[Recipe]:
             # transients; warm-restart and steady-state shouldn't fit it).
             operating_mode="warmup",
             require_session_events=("cold_start",),
+            min_rpm=ENGINE_RUNNING_MIN_RPM,
             fit_method="binned_lookup",
             n_knots=12,
             min_samples=120,
@@ -328,7 +369,11 @@ def default_recipes() -> list[Recipe]:
             x_axis_unit="rpm",
             y_axis_unit="%",
             min_samples=500,
-            deviation=DeviationConfig(kind="relative", warning_band=3.0, critical_band=6.0),
+            min_rpm=ENGINE_RUNNING_MIN_RPM,  # injectors don't fire KOEO — PW is a frozen zero
+            # sigma_floor = 1 raw count (scale constant not yet pinned).
+            deviation=DeviationConfig(
+                kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=1.0
+            ),
             notes=(
                 "Direct fuel-delivery surface. Detects injector wear (PW "
                 "creeps up over months for same load), fuel pressure drop "
@@ -346,10 +391,16 @@ def default_recipes() -> list[Recipe]:
             x_axis_unit="s",
             operating_mode="warmup",
             require_session_events=("cold_start",),
+            min_rpm=ENGINE_RUNNING_MIN_RPM,
             fit_method="binned_lookup",
             n_knots=12,
             min_samples=120,
-            deviation=DeviationConfig(kind="relative", warning_band=10.0, critical_band=25.0),
+            # reference_std is auto-filled from the fit residuals (raw-count
+            # scaling isn't pinned, so it can't be declared upfront);
+            # sigma_floor = 1 raw count bounds it from below.
+            deviation=DeviationConfig(
+                kind="relative", warning_band=10.0, critical_band=25.0, sigma_floor=1.0
+            ),
             notes=(
                 "Cold-start enrichment curve. PW is elevated during warmup "
                 "(typically 2-3× nominal) and decays smoothly as coolant "
@@ -367,6 +418,7 @@ def default_recipes() -> list[Recipe]:
             fit_method="poly",
             degree=1,
             min_samples=300,
+            min_rpm=ENGINE_RUNNING_MIN_RPM,  # unheated/idle-off AF sensors read garbage KOEO
             deviation=DeviationConfig(kind="absolute", warning_band=0.05, critical_band=0.15),
             notes=(
                 "Wideband AFR sensor voltage delta between banks. Expected "
@@ -387,6 +439,7 @@ def default_recipes() -> list[Recipe]:
             x_axis_unit="rpm",
             y_axis_unit="%",
             min_samples=500,
+            min_rpm=ENGINE_RUNNING_MIN_RPM,
             deviation=DeviationConfig(kind="absolute", warning_band=0.10, critical_band=0.25),
             notes=(
                 "Wideband AFR sensor voltage map. ~2.15V at stoich (closed "
@@ -406,6 +459,10 @@ def default_recipes() -> list[Recipe]:
             fit_method="poly",
             degree=1,
             min_samples=300,
+            # min_rpm deliberately unset: the V-per-%% relationship is
+            # engine-state-independent, and parked KOEO throttle sweeps are
+            # the best full-range coverage this surface ever sees.
+            # reference_std auto-fills from the fit residuals.
             deviation=DeviationConfig(kind="relative", warning_band=5.0, critical_band=12.0),
             notes=(
                 "Raw TPS voltage vs ECM-calculated throttle percent. "
@@ -458,8 +515,30 @@ def fit_recipe(
     """
     version = (next_version_for or {}).get(recipe.name, 1)
 
-    # 1. operating_mode filter (cheap, scope-narrowing)
+    # 0. engine-running gate — applied before everything else so KOEO rows
+    # can't reach the fitters OR the 2D auto-edge quantiles.
     sub = frame
+    if recipe.min_rpm is not None:
+        if RPM_COLUMN not in sub.columns:
+            # The gate is load-bearing (KOEO contamination); silently fitting
+            # without it would re-introduce the bug it exists to prevent.
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason=f"no {RPM_COLUMN} column in frame; can't enforce min_rpm gate",
+            )
+        rpm = pd.to_numeric(sub[RPM_COLUMN], errors="coerce")
+        sub = sub[rpm >= recipe.min_rpm]
+        if sub.empty:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason=f"no rows with {RPM_COLUMN} >= {recipe.min_rpm} (engine-running gate)",
+            )
+
+    # 1. operating_mode filter (cheap, scope-narrowing)
     if recipe.operating_mode is not None:
         if MODE_COLUMN not in sub.columns:
             return RecipeResult(
@@ -692,6 +771,7 @@ def _fit_2d(
         deviation=recipe.deviation,
         version=version,
         notes=recipe.notes,
+        min_cell_count=recipe.min_cell_count,
     )
 
 
@@ -713,6 +793,8 @@ def _auto_edges(series: pd.Series, n_bins: int) -> list[float]:
 
 # Helpers consumers may want to inspect
 __all__ = [
+    "ENGINE_RUNNING_MIN_RPM",
+    "RPM_COLUMN",
     "Recipe",
     "RecipeResult",
     "Surface1DRecipe",

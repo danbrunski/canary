@@ -187,3 +187,50 @@ def test_fit_persists_training_data_hash_stable() -> None:
     frame2 = _warmup_frame(seed=43)
     m3 = fit_polynomial(frame2, x_column="t", y_column="coolant", name="t", output="y", degree=3)
     assert m1.fit.training_data_hash != m3.fit.training_data_hash
+
+
+# ---------------------------------------------------------------------------
+# relative reference_std auto-fill
+# ---------------------------------------------------------------------------
+
+
+def test_relative_deviation_reference_std_auto_fills_from_residuals() -> None:
+    """1D fits with relative bands and no declared reference_std get one from
+    the fit residuals — recipes for unscaled outputs (raw injector counts)
+    can't declare it upfront, and without it the model schema rejects the fit."""
+    import numpy as np
+    import pandas as pd
+
+    from src.decode.behavior_models import DeviationConfig
+
+    rng = np.random.default_rng(7)
+    x = rng.uniform(0, 100, 500)
+    y = 2.0 * x + rng.normal(0, 3.0, 500)
+    frame = pd.DataFrame({"x": x, "y": y})
+
+    model = fit_polynomial(
+        frame,
+        x_column="x",
+        y_column="y",
+        name="tps_ratio",
+        output="derived:TPS_VOLTAGE_PER_PCT",
+        degree=1,
+        deviation=DeviationConfig(kind="relative", warning_band=5.0, critical_band=12.0),
+    )
+    assert model.deviation is not None
+    assert model.deviation.reference_std == pytest.approx(3.0, rel=0.2)
+
+    # An explicitly declared reference_std always wins over the residual fill.
+    explicit = fit_polynomial(
+        frame,
+        x_column="x",
+        y_column="y",
+        name="tps_ratio",
+        output="derived:TPS_VOLTAGE_PER_PCT",
+        degree=1,
+        deviation=DeviationConfig(
+            kind="relative", warning_band=5.0, critical_band=12.0, reference_std=9.0
+        ),
+    )
+    assert explicit.deviation is not None
+    assert explicit.deviation.reference_std == 9.0

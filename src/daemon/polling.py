@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config import CanaryConfig
-from src.decode.behavior_models import load_behavior_models
+from src.decode.behavior_models import load_behavior_models, unknown_operating_modes
 from src.models.health import HealthMonitor
 from src.models.manager import ModelManager
 from src.preprocessing.live import LiveFeatureSource
@@ -147,6 +147,17 @@ async def poll_behavior_models(
                             "names": [m.name for m in new_models.models],
                         },
                     )
+                    mismatched = unknown_operating_modes(
+                        new_models,
+                        live_source.config.preprocessing.operating_modes,
+                    )
+                    if mismatched:
+                        log.warning(
+                            "behavior models gated on operating modes the live "
+                            "segmenter can't emit — they will NEVER evaluate; "
+                            "add the modes to preprocessing.operating_modes",
+                            extra={"models": mismatched},
+                        )
                     last_mtime = mtime
         except Exception:  # noqa: BLE001 — keep the previous models; log + retry
             log.exception(

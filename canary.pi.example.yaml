@@ -54,15 +54,28 @@ preprocessing:
   resample_hz: 1
   rolling_window_seconds: 30
   operating_modes:
-    idle:
+    koeo:
+      rpm_max: 0
+      speed_max: 0
+    warmup:
+      rpm_min: 400
+      speed_max: 0
+      coolant_temp_max: 70
+    idle_transient:
+      rpm_min: 400
       rpm_max: 900
       speed_max: 0
+      coolant_temp_min: 70
+      recent_speed_min: 8
+    idle:
+      rpm_min: 400
+      rpm_max: 900
+      speed_max: 0
+      coolant_temp_min: 70
     city:
       speed_max: 50
     highway:
       speed_min: 80
-    wot:
-      throttle_min: 80
 
 models:
   # Active sequence-detector backbone ("lstm" = GRU-D today). The selected

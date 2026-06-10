@@ -59,6 +59,7 @@ def fit_grid_binned_mean(
     version: int = 1,
     notes: str | None = None,
     fitted_at: str | None = None,
+    min_cell_count: int = 1,
 ) -> BehaviorModel2D:
     """Bin ``(x, y)`` into the configured grid and compute per-cell stats.
 
@@ -66,7 +67,9 @@ def fit_grid_binned_mean(
     are dropped. Rows with ``x`` or ``y`` outside ``[edges[0], edges[-1]]`` are
     also dropped (they would land in a "before first / after last" bin we
     don't model). Each cell stores mean / std (ddof=0, the population std —
-    matches what ``ZScoreScaler`` uses) / count.
+    matches what ``ZScoreScaler`` uses) / count. ``min_cell_count`` is
+    persisted on the model: cells below it still carry their stats in the
+    YAML (useful for inspection) but evaluate as off-map.
     """
     x_edges_arr = np.asarray(x_edges, dtype=float)
     y_edges_arr = np.asarray(y_edges, dtype=float)
@@ -143,6 +146,7 @@ def fit_grid_binned_mean(
         fit=fit,
         deviation=deviation,
         notes=notes,
+        min_cell_count=min_cell_count,
     )
 
 
@@ -155,7 +159,9 @@ def evaluate_2d(model: BehaviorModel2D, x: float, y: float) -> GridCell | None:
     """Look up the cell ``(x, y)`` falls into. Returns ``None`` when:
 
     * ``(x, y)`` is outside the grid extent, OR
-    * the cell has ``count == 0`` (operating point never observed during fit)
+    * the cell has ``count < model.min_cell_count`` (operating point never
+      observed during fit, or observed too few times for its mean/std to be
+      a trustworthy expectation)
 
     Returning the whole ``GridCell`` (not just ``mean``) lets the decoder
     layer compute relative deviations using the per-cell ``std``, which is
@@ -169,7 +175,7 @@ def evaluate_2d(model: BehaviorModel2D, x: float, y: float) -> GridCell | None:
     i = _bin_index(x, np.asarray(x_axis.bin_edges, dtype=float))
     j = _bin_index(y, np.asarray(y_axis.bin_edges, dtype=float))
     cell = model.fit.cells[i * y_axis.bin_count + j]
-    if cell.count == 0:
+    if cell.count < max(1, model.min_cell_count):
         return None
     return cell
 

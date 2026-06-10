@@ -431,3 +431,71 @@ def test_deviation_config_persists_on_fitted_model() -> None:
     result = fit_recipe(recipe, frame)
     assert result.model is not None
     assert result.model.deviation == dev
+
+
+# ---------------------------------------------------------------------------
+# engine-running gate (min_rpm)
+# ---------------------------------------------------------------------------
+
+
+def test_min_rpm_gate_excludes_koeo_rows_from_fit_and_auto_edges() -> None:
+    """KOEO rows (rpm=0, wildly different output) must reach neither the
+    fitted cells nor the auto-edge quantiles."""
+    import numpy as np
+
+    rng = np.random.default_rng(3)
+    n_koeo, n_run = 600, 1400
+    frame = pd.DataFrame(
+        {
+            "obd:RPM": np.concatenate([np.zeros(n_koeo), rng.uniform(700, 3000, n_run)]),
+            "obd:ENGINE_LOAD": np.concatenate(
+                [rng.uniform(0, 5, n_koeo), rng.uniform(15, 80, n_run)]
+            ),
+            # KOEO timing reads ~63°; running ~17°.
+            "obd:TIMING_ADVANCE": np.concatenate(
+                [np.full(n_koeo, 63.0), rng.normal(17.0, 2.0, n_run)]
+            ),
+        }
+    )
+    recipe = Surface2DRecipe(
+        name="timing_gated",
+        output="obd:TIMING_ADVANCE",
+        x_column="obd:RPM",
+        y_column="obd:ENGINE_LOAD",
+        min_samples=100,
+        min_rpm=400.0,
+        min_cell_count=1,
+        deviation=DeviationConfig(kind="relative", warning_band=3.0, critical_band=6.0),
+    )
+    result = fit_recipe(recipe, frame)
+    assert result.fitted, result.reason
+    model = result.model
+    assert model is not None
+    # No KOEO mass: the grid starts at running RPM and no cell mean is near 63°.
+    assert model.axes[0].bin_edges[0] >= 400.0
+    populated = [cell for cell in model.fit.cells if cell.count > 0]
+    assert populated
+    assert all(cell.mean < 40.0 for cell in populated)
+    assert model.fit.sample_count == n_run
+
+
+def test_min_rpm_gate_requires_rpm_column() -> None:
+    """The gate is load-bearing — a frame without obd:RPM must skip, not
+    silently fit unfiltered."""
+    frame = pd.DataFrame(
+        {
+            "x": [1.0, 2.0, 3.0] * 50,
+            "y": [1.0, 2.0, 3.0] * 50,
+        }
+    )
+    recipe = Surface1DRecipe(
+        name="gated",
+        output="y",
+        x_column="x",
+        min_samples=10,
+        min_rpm=400.0,
+        deviation=DeviationConfig(kind="absolute", warning_band=1.0, critical_band=2.0),
+    )
+    result = fit_recipe(recipe, frame)
+    assert result.skipped
+    assert "min_rpm" in result.reason

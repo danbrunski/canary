@@ -290,9 +290,16 @@ def _deviation_score(
     abs_delta = abs(delta)
     if dev_cfg.kind == "absolute":
         return abs_delta
-    # relative
+    # relative — ``None`` std means off-map / unconfigured (no grading);
+    # the sigma_floor then bounds a *present* std from below so a cell fit
+    # on quantization-flat data can neither hair-trigger (std below the
+    # sensor LSB) nor go silently dead (std exactly 0).
     local_std = _local_std(model, operating_point, dev_cfg)
-    if local_std is None or local_std <= 0:
+    if local_std is None:
+        return None
+    if dev_cfg.sigma_floor is not None:
+        local_std = max(local_std, dev_cfg.sigma_floor)
+    if local_std <= 0:
         return None
     return abs_delta / local_std
 

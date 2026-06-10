@@ -39,6 +39,7 @@ from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
     dump_behavior_models,
     load_behavior_models,
+    unknown_operating_modes,
 )
 from src.log import configure_logging
 from src.preprocessing import discover_sessions
@@ -223,6 +224,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     _print_report(results, frame_rows=len(frame))
+
+    # A model gated on a mode this config's segmenter never emits can't be
+    # fit from this frame (and won't evaluate on a daemon running the same
+    # mode set) — usually a sign the refit ran with canary.yaml where
+    # canary.train.yaml was intended.
+    mismatched = unknown_operating_modes(models, config.preprocessing.operating_modes)
+    if mismatched:
+        log.warning(
+            "catalog models gated on operating modes missing from %s — "
+            "they were carried over un-refit and won't evaluate under this "
+            "mode set: %s",
+            args.config,
+            mismatched,
+        )
 
     if args.dry_run:
         log.info("dry-run; not writing")

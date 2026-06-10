@@ -312,3 +312,83 @@ def test_append_deviation_columns_honors_output_columns_override() -> None:
     )
     # expected 40, actual 50 → deviation 10
     assert out["deviation:coolant_warmup"].iloc[0] == pytest.approx(10.0)
+
+
+# ---------------------------------------------------------------------------
+# sigma_floor (relative deviation)
+# ---------------------------------------------------------------------------
+
+
+def _make_quantized_timing_surface(sigma_floor: float | None) -> BehaviorModel2D:
+    """One cell fit on quantization-flat data (std below the 0.5°/LSB step)
+    and one cell where the std collapsed to exactly 0."""
+    cells = [
+        GridCell(mean=17.0, std=0.13, count=292),  # flat idle stretch
+        GridCell(mean=17.0, std=0.0, count=125),  # perfectly flat — std 0
+        GridCell(mean=30.0, std=2.0, count=400),  # healthy spread
+        GridCell(mean=35.0, std=2.5, count=350),
+    ]
+    return BehaviorModel2D(
+        name="timing",
+        kind="surface_2d",
+        output="obd:TIMING_ADVANCE",
+        output_unit="degBTDC",
+        axes=(
+            Axis2D(name="rpm", channel="obd:RPM", unit="rpm", bin_edges=[400, 1500, 4000]),
+            Axis2D(name="iat", channel="obd:INTAKE_TEMP", unit="degC", bin_edges=[0, 30, 60]),
+        ),
+        fit=GridBinnedMeanFit(
+            kind="grid_binned_mean",
+            cells=cells,
+            sample_count=1167,
+            sessions=["s1"],
+            fitted_at="now",
+        ),
+        deviation=DeviationConfig(
+            kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=sigma_floor
+        ),
+    )
+
+
+def test_sigma_floor_stops_sub_lsb_hair_trigger() -> None:
+    """Without the floor, a 0.5° flicker on a std=0.13 cell scores 3.8σ
+    (false warning); with the floor it scores 1.0σ (ok)."""
+    point = {"obd:RPM": 800.0, "obd:INTAKE_TEMP": 20.0}  # cell 0: std 0.13
+    unfloored = _make_quantized_timing_surface(sigma_floor=None)
+    res = deviation(unfloored, 17.5, point)
+    assert res is not None and res.severity == "warning"
+
+    floored = _make_quantized_timing_surface(sigma_floor=0.5)
+    res = deviation(floored, 17.5, point)
+    assert res is not None and res.severity == "ok"
+    # A genuine excursion still alerts through the floor.
+    res = deviation(floored, 21.0, point)  # 4.0° / 0.5 = 8σ
+    assert res is not None and res.severity == "critical"
+
+
+def test_sigma_floor_revives_zero_std_cells() -> None:
+    """A std=0.0 cell is permanently mute without the floor; with it the
+    cell grades like any other."""
+    point = {"obd:RPM": 800.0, "obd:INTAKE_TEMP": 45.0}  # cell 1: std 0.0
+    unfloored = _make_quantized_timing_surface(sigma_floor=None)
+    res = deviation(unfloored, 25.0, point)  # 8° off and silent
+    assert res is not None and res.severity == "ok"
+
+    floored = _make_quantized_timing_surface(sigma_floor=0.5)
+    res = deviation(floored, 25.0, point)  # 8° / 0.5 = 16σ
+    assert res is not None and res.severity == "critical"
+
+
+def test_sigma_floor_does_not_revive_off_map_points() -> None:
+    """The floor bounds a *present* std; empty cells stay off-map."""
+    model = _make_fuel_surface()
+    assert model.deviation is None  # uses bands below
+    model = model.model_copy(
+        update={
+            "deviation": DeviationConfig(
+                kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+            )
+        }
+    )
+    res = deviation(model, 99.0, {"obd:RPM": 2000.0, "obd:MAF": 20.0})  # count=0 cell
+    assert res is not None and res.severity == "ok" and res.expected is None

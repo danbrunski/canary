@@ -233,3 +233,32 @@ def test_evaluate_2d_handles_right_edge_inclusively() -> None:
     )
     # x = top edge should still map to a real cell, not None
     assert evaluate_2d(model, 4000.0, 15.0) is not None
+
+
+# ---------------------------------------------------------------------------
+# min_cell_count gate
+# ---------------------------------------------------------------------------
+
+
+def test_evaluate_2d_treats_sparse_cells_as_off_map() -> None:
+    """Cells below ``min_cell_count`` evaluate as None — a six-sample mean is
+    not an expectation worth alerting against."""
+    frame = _fuel_surface_frame(n=2000)
+    # Push almost everything into the low-rpm half so the top cell is sparse.
+    sparse = frame[frame["rpm"] > 3950]  # a handful of rows
+    dense = frame[frame["rpm"] <= 3950]
+    assert 0 < len(sparse) < 30
+    model = fit_grid_binned_mean(
+        pd.concat([dense, sparse]),
+        x_column="rpm",
+        y_column="maf",
+        output_column="pw",
+        name="fuel_surface",
+        output="ECM_INJECTOR_PW",
+        x_edges=[600, 3950, 4000],
+        y_edges=[1, 30],
+        min_cell_count=30,
+    )
+    assert model.min_cell_count == 30
+    assert evaluate_2d(model, 700.0, 15.0) is not None  # dense cell still grades
+    assert evaluate_2d(model, 3975.0, 15.0) is None  # sparse cell is off-map

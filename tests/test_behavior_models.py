@@ -289,3 +289,22 @@ def test_flatten_grid_rejects_empty() -> None:
         flatten_grid([])
     with pytest.raises(ValueError, match="at least one cell"):
         flatten_grid([[]])
+
+
+def test_unknown_operating_modes_flags_unservable_models() -> None:
+    """A catalog model gated on a mode the segmenter can't emit silently
+    never evaluates — the loader-side check makes that loud."""
+    from src.decode.behavior_models import unknown_operating_modes
+
+    models = BehaviorModels(
+        schema_version=1,
+        models=[
+            _model_1d().model_copy(update={"name": "coolant_warmup", "operating_mode": "warmup"}),
+            _model_1d().model_copy(update={"name": "idle_rpm", "operating_mode": "idle"}),
+            _model_1d().model_copy(update={"name": "ungated", "operating_mode": None}),
+        ],
+    )
+    assert unknown_operating_modes(models, {"idle", "city", "highway"}) == {
+        "coolant_warmup": "warmup"
+    }
+    assert unknown_operating_modes(models, {"idle", "warmup"}) == {}

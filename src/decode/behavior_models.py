@@ -26,7 +26,7 @@ during RE; auto-written by the refit CLI (4.E.8) once it exists.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -203,15 +203,23 @@ class DeviationConfig(_Strict):
 
     ``absolute`` — fixed thresholds on ``|actual − expected|`` in output units.
     ``relative`` — multiples of the local std (so per-cell std for 2D grids;
-    1D polys must declare an explicit ``reference_std`` because the residual
-    band is global). ``warning_band`` < ``critical_band`` is required; either
-    can be ``None`` to suppress that band.
+    1D fits use ``reference_std``, which the fitters auto-fill from the
+    residual std when not declared). ``warning_band`` < ``critical_band``
+    is required; either can be ``None`` to suppress that band.
+
+    ``sigma_floor`` (relative kind only) is a lower bound on the local std,
+    in output units. A cell fit on a quantization-flat stretch of data can
+    carry a std below the sensor's LSB (the May 2026 IAT surface shipped a
+    0.13° cell against a 0.5°/LSB PID — one LSB flicker fired warning) or
+    exactly 0.0 (which silently disabled alerting in that cell). Set it to
+    roughly the output's quantization step; both failure modes go away.
     """
 
     kind: Literal["absolute", "relative"]
     warning_band: float | None = Field(default=None, ge=0)
     critical_band: float | None = Field(default=None, ge=0)
-    reference_std: float | None = None  # required for kind=relative on 1D fits
+    reference_std: float | None = None  # for kind=relative on 1D fits (auto-filled at fit time)
+    sigma_floor: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _check_bands(self) -> DeviationConfig:
@@ -269,6 +277,11 @@ class BehaviorModel2D(_Strict):
     fit: Fit2D
     deviation: DeviationConfig | None = None
     notes: str | None = None
+    #: Cells with fewer fit samples than this evaluate to ``None`` (off-map)
+    #: instead of grading against a near-meaningless mean/std. Default 1
+    #: keeps pre-existing YAML artifacts (which only excluded count==0)
+    #: loading with unchanged behavior.
+    min_cell_count: int = Field(default=1, ge=1)
 
     @model_validator(mode="after")
     def _check_cells(self) -> BehaviorModel2D:
@@ -301,6 +314,27 @@ def load_behavior_models(path: Path) -> BehaviorModels:
     """Load and validate a ``behavior_models.yaml`` file."""
     raw = yaml.safe_load(path.read_text())
     return BehaviorModels.model_validate(raw)
+
+
+def unknown_operating_modes(
+    models: BehaviorModels,
+    configured_modes: Collection[str],
+) -> dict[str, str]:
+    """Catalog models whose ``operating_mode`` the active segmenter can't emit.
+
+    Returns ``{model_name: operating_mode}`` for every mismatch. A model
+    gated on a mode outside the configured vocabulary silently never
+    evaluates — the May 2026 warmup surfaces returned ``None`` on every
+    live tick because the daemon config lacked the ``warmup`` mode the
+    training config defined. Callers (daemon model load/hot-reload, refit
+    CLI) should log these loudly; an empty dict means full coverage.
+    """
+    configured = set(configured_modes)
+    return {
+        model.name: model.operating_mode
+        for model in models.models
+        if model.operating_mode is not None and model.operating_mode not in configured
+    }
 
 
 def dump_behavior_models(models: BehaviorModels, path: Path) -> None:

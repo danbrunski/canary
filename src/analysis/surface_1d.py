@@ -83,6 +83,7 @@ def fit_polynomial(
     coeffs = np.polynomial.polynomial.polyfit(x, y, deg=degree)
     predicted = np.polynomial.polynomial.polyval(x, coeffs)
     r_squared = _coefficient_of_determination(y, predicted)
+    deviation = _fill_relative_reference_std(name, deviation, y, predicted)
 
     domain = (float(x.min()), float(x.max())) if domain is None else domain
     fit = PolynomialFit(
@@ -180,6 +181,7 @@ def fit_binned_lookup(
 
     predicted = np.interp(x, x_knots, y_knots)
     r_squared = _coefficient_of_determination(y, predicted)
+    deviation = _fill_relative_reference_std(name, deviation, y, predicted)
 
     domain = (float(x.min()), float(x.max())) if domain is None else domain
     fit = LookupTableFit(
@@ -228,6 +230,35 @@ def evaluate_1d(model: BehaviorModel1D, x: float) -> float | None:
         return float(np.polynomial.polynomial.polyval(x, fit.coefficients))
     # LookupTableFit
     return float(np.interp(x, fit.x_knots, fit.y_knots))
+
+
+def _fill_relative_reference_std(
+    name: str,
+    deviation: DeviationConfig | None,
+    actual: np.ndarray,
+    predicted: np.ndarray,
+) -> DeviationConfig | None:
+    """Auto-fill ``reference_std`` for relative bands from the fit residuals.
+
+    1D fits carry one global residual band (unlike 2D grids' per-cell std),
+    and recipes for outputs whose scaling isn't pinned yet (raw injector-PW
+    counts) can't declare a meaningful ``reference_std`` upfront. Filling it
+    from the residual std around the fitted curve makes ``relative`` bands
+    self-calibrating and mirrors what the 2D fitter does per cell. An
+    explicit ``reference_std`` in the recipe always wins.
+    """
+    if deviation is None or deviation.kind != "relative" or deviation.reference_std is not None:
+        return deviation
+    residual_std = float(np.std(actual - predicted))  # ddof=0, matches the 2D cells
+    if deviation.sigma_floor is not None:
+        residual_std = max(residual_std, deviation.sigma_floor)
+    if residual_std <= 0:
+        raise ValueError(
+            f"{name}: relative deviation needs a positive residual std, but the fit "
+            "residuals are exactly zero — declare reference_std (or sigma_floor) "
+            "explicitly or use absolute bands"
+        )
+    return deviation.model_copy(update={"reference_std": residual_std})
 
 
 def _clean_xy(frame: pd.DataFrame, x_column: str, y_column: str) -> tuple[np.ndarray, np.ndarray]:
