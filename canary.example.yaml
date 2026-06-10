@@ -52,12 +52,26 @@ collection:
   # afr_voltage_vs_rpm_load, tps_voltage_per_pct) — recipes that target
   # ``did:*`` outputs silently skip if the DID isn't being polled.
   # Exploratory sweeps still use tools/scan_constant_dids.py.
+  #
+  # When the ECU gates Mode 22 behind a UDS session (the 2008 Nissan ECM
+  # does — see the access block in data/dids.yaml), DIDs are read in short
+  # scheduled session windows because that session is mutually exclusive
+  # with Mode 01 on the bus: every obd_did_window_interval_seconds the
+  # daemon sends 10 <session>, reads each active DID once, then goes quiet
+  # for obd_did_session_lapse_seconds so the session expires and Mode 01
+  # resumes. /status.obd_scheduler.did_profile shows the live window state.
   obd_dids:
     - ECM_INJECTOR_PW_B1       # fuel-delivery commanded per intake stroke
     - ECM_AF_SENSOR_V_B1       # wideband AFR sensor V, bank 1 (pre-cat)
     - ECM_AF_SENSOR_V_B2       # wideband AFR sensor V, bank 2 (pre-cat)
     - ECM_THROTTLE_POS_SENSOR_1  # raw TPS voltage, for sensor-drift detection
   obd_did_request_id: 0x7E0
+  # auto = take the gating session (0xC0) + keep-alive cadence from
+  # data/dids.yaml's access block; null = force bare polling; int = override.
+  obd_did_session: auto
+  obd_did_window_interval_seconds: 60.0   # effective per-DID sample interval
+  obd_did_window_max_seconds: 10.0        # hard cap; windows close much sooner
+  obd_did_session_lapse_seconds: 5.0      # quiet time for the session to expire
   obd_request_timeout_seconds: 1.0
   obd_poll_rate_hz: 1
   storage_path: /data/canary

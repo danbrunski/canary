@@ -15,6 +15,7 @@ from src.collection.can_obd_collector import (
     CanObdSpec,
     ObdSchedulerMetrics,
     collect_can_obd_from_config,
+    resolve_did_session_spec,
 )
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.obd_collector import ObdSpec, collect_obd
@@ -122,6 +123,7 @@ def _default_collectors(
             dids=config.collection.obd_dids,
             did_request_id=config.collection.obd_did_request_id,
             request_timeout_seconds=config.collection.obd_request_timeout_seconds,
+            did_session=resolve_did_session_spec(config.collection),
         )
 
         async def canable_obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:

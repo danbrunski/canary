@@ -36,7 +36,12 @@ from src.collection.can_collector import (
     make_session_dir,
     record,
 )
-from src.collection.can_obd_collector import CanObdSpec, parse_can_id, record_can_obd
+from src.collection.can_obd_collector import (
+    CanObdSpec,
+    parse_can_id,
+    record_can_obd,
+    resolve_did_session_spec,
+)
 from src.collection.obd_collector import (
     JsonlReadingWriter,
     ObdSpec,
@@ -346,6 +351,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 dids=dids,
                 did_request_id=parse_can_id(args.obd_did_header),
                 request_timeout_seconds=config.collection.obd_request_timeout_seconds,
+                did_session=resolve_did_session_spec(config.collection),
             )
             log.info(
                 "starting Canable-native OBD capture",

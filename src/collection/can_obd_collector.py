@@ -55,7 +55,10 @@ from src.collection.obd_scheduler import (
     DEFAULT_DID_REQUEST_ID,
     CanObdLoopStats,
     CanObdSpec,
+    DidSessionSpec,
+    DidWindowController,
     ObdSchedulerMetrics,
+    RequestFilter,
     _bus_budget_requests_per_second,
     _count_active_requests,
     _initial_request_states,
@@ -69,6 +72,7 @@ from src.collection.obd_scheduler import (
     build_poll_requests,
     parse_did_token,
     parse_pid_token,
+    resolve_did_session_spec,
 )
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
 from src.collection.reconnect import (
@@ -121,6 +125,10 @@ def run_can_obd_loop(
     )
     requests = build_poll_requests(client, spec)
     budget_rps = _bus_budget_requests_per_second(spec)
+    did_indices = [index for index, request in enumerate(requests) if request.kind == "did"]
+    controller: DidWindowController | None = None
+    if spec.did_session is not None and did_indices:
+        controller = DidWindowController(spec.did_session, did_indices, now=time.monotonic())
     if requests:
         log.info(
             "canable obd streaming started",
@@ -130,6 +138,9 @@ def run_can_obd_loop(
                 "poll_tiers": {r.channel: r.poll_tier for r in requests},
                 "bus_budget_requests_per_second": budget_rps,
                 "auto_miss_backoff_seconds": AUTO_MISS_BACKOFF_SECONDS,
+                "did_session_windows": (
+                    controller.snapshot(time.monotonic()) if controller is not None else None
+                ),
             },
         )
     else:
@@ -141,7 +152,16 @@ def run_can_obd_loop(
     while not _should_stop(stop_event, deadline_monotonic):
         now = time.monotonic()
         if on_scheduler_metrics is not None and now >= next_metrics_at:
-            on_scheduler_metrics(_scheduler_metrics(requests, request_states, spec, stats, now))
+            on_scheduler_metrics(
+                _scheduler_metrics(
+                    requests,
+                    request_states,
+                    spec,
+                    stats,
+                    now,
+                    did_profile=controller.snapshot(now) if controller is not None else None,
+                )
+            )
             stats.scheduler_snapshots += 1
             next_metrics_at = now + max(0.1, scheduler_metrics_interval_seconds)
 
@@ -149,7 +169,28 @@ def run_can_obd_loop(
             _recv_and_tap(bus, on_frame, stats, timeout=0.2)
             continue
 
-        active_request_count = _count_active_requests(requests, request_states, now)
+        eligible: RequestFilter | None = None
+        if controller is not None:
+            controller.advance(request_states, now)
+            if controller.session_control_due(request_states, now) and now >= next_budget_at:
+                ok = _send_session_control(
+                    bus,
+                    spec.did_session,  # type: ignore[arg-type]  # controller implies non-None
+                    request_id=spec.did_request_id,
+                    timeout_seconds=spec.request_timeout_seconds,
+                    on_frame=on_frame,
+                    stop_event=stop_event,
+                    stats=stats,
+                    deadline_monotonic=deadline_monotonic,
+                )
+                controller.on_session_response(ok=ok, states=request_states, now=time.monotonic())
+                next_budget_at = max(next_budget_at + 1.0 / budget_rps, time.monotonic())
+                continue
+            eligible = partial(controller.request_eligible, now=now)
+
+        active_request_count = _count_active_requests(
+            requests, request_states, now, eligible=eligible
+        )
         if active_request_count == 0:
             _drain_frames_until(
                 bus,
@@ -172,9 +213,12 @@ def run_can_obd_loop(
             )
             continue
 
-        selection = _select_next_due_request(requests, request_states, now)
+        selection = _select_next_due_request(requests, request_states, now, eligible=eligible)
         if selection is None:
-            next_due = _next_due_at(requests, request_states, now)
+            next_due = _next_due_at(requests, request_states, now, eligible=eligible)
+            if controller is not None:
+                transition_at = controller.next_transition_at()
+                next_due = transition_at if next_due is None else min(next_due, transition_at)
             if next_due is not None:
                 wait_until = next_due if next_budget_at <= now else min(next_due, next_budget_at)
                 _drain_frames_until(
@@ -186,7 +230,7 @@ def run_can_obd_loop(
                     deadline_monotonic,
                 )
             continue
-        request, request_state = selection
+        request_index, request, request_state = selection
 
         timeout_seconds = spec.request_timeout_seconds
         if request.auto_probe and (request.fast_probe or request_state.missed_responses > 0):
@@ -222,13 +266,24 @@ def run_can_obd_loop(
             request_state.timeouts += 1
             stats.request_timeouts += 1
         _update_response_state(request_state, emitted=emitted, now=time.monotonic())
+        if controller is not None:
+            controller.on_request_attempted(request_index)
 
         request_state.next_due_at = _next_request_due_at(request, request_state, spec)
         next_budget_at = max(next_budget_at + 1.0 / budget_rps, time.monotonic())
 
     if on_scheduler_metrics is not None:
         on_scheduler_metrics(
-            _scheduler_metrics(requests, request_states, spec, stats, time.monotonic())
+            _scheduler_metrics(
+                requests,
+                request_states,
+                spec,
+                stats,
+                time.monotonic(),
+                did_profile=(
+                    controller.snapshot(time.monotonic()) if controller is not None else None
+                ),
+            )
         )
         stats.scheduler_snapshots += 1
     return stats
@@ -533,6 +588,43 @@ def _response_to_reading(
     return ObdReading(timestamp, name, value, unit)
 
 
+def _send_session_control(
+    bus: can.BusABC,
+    session_spec: DidSessionSpec,
+    *,
+    request_id: int,
+    timeout_seconds: float,
+    on_frame: Callable[[can.Message], None],
+    stop_event: threading.Event,
+    stats: CanObdLoopStats,
+    deadline_monotonic: float | None,
+) -> bool:
+    """Send ``10 <session>`` (UDS DiagnosticSessionControl) and await ``50 <session>``.
+
+    Opens or keeps alive the Mode-22 gating session. Session *control* only —
+    no memory write, no actuation; the read-only posture of the collector is
+    unchanged. Returns True on a positive response.
+    """
+    request = _PollRequest(
+        kind="session",
+        service=0x10,
+        identifier=session_spec.session,
+        request_id=request_id,
+        channel="UDS_SESSION_CONTROL",
+    )
+    stats.session_controls_sent += 1
+    response = _query_with_tap(
+        bus,
+        request,
+        timeout_seconds=timeout_seconds,
+        on_frame=on_frame,
+        stop_event=stop_event,
+        stats=stats,
+        deadline_monotonic=deadline_monotonic,
+    )
+    return response is not None
+
+
 def _query_with_tap(
     bus: can.BusABC,
     request: _PollRequest,
@@ -637,6 +729,7 @@ __all__ = [
     "DEFAULT_DID_REQUEST_ID",
     "CanObdLoopStats",
     "CanObdSpec",
+    "DidSessionSpec",
     "ObdSchedulerMetrics",
     "build_poll_requests",
     "collect_can_obd_from_config",
@@ -644,5 +737,6 @@ __all__ = [
     "parse_did_token",
     "parse_pid_token",
     "record_can_obd",
+    "resolve_did_session_spec",
     "run_can_obd_loop",
 ]

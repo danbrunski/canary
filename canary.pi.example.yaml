@@ -27,7 +27,14 @@ hardware:
 collection:
   obd_source: canable
   obd_pids: [auto]
-  obd_dids: []
+  # Identified Mode-22 DIDs (data/dids.yaml), read via scheduled 10 C0
+  # session windows — one window per minute, mutually exclusive with
+  # Mode 01. See canary.example.yaml for the obd_did_* cadence knobs.
+  obd_dids:
+    - ECM_INJECTOR_PW_B1       # fuel-delivery commanded per intake stroke
+    - ECM_AF_SENSOR_V_B1       # wideband AFR sensor V, bank 1 (pre-cat)
+    - ECM_AF_SENSOR_V_B2       # wideband AFR sensor V, bank 2 (pre-cat)
+    - ECM_THROTTLE_POS_SENSOR_1  # raw TPS voltage, for sensor-drift detection
   obd_did_request_id: 0x7E0
   obd_request_timeout_seconds: 1.0
   obd_poll_rate_hz: 1

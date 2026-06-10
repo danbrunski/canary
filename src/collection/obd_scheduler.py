@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from src.collection.can_obd_client import DEFAULT_REQUEST_ID, PID_DECODERS
 from src.collection.obd_registry import PollTier, lookup
-from src.config import CanBusConfig
+from src.config import CanBusConfig, CollectionConfig
+
+if TYPE_CHECKING:
+    from src.decode.dids import DidAccess, DidMap
 
 AUTO_PIDS = "auto"
 DEFAULT_DID_REQUEST_ID = 0x7E0
@@ -32,6 +36,23 @@ _DIDS_YAML_PATH = Path(__file__).resolve().parents[2] / "data" / "dids.yaml"
 
 
 @lru_cache(maxsize=1)
+def _load_did_map() -> DidMap | None:
+    """Parsed data/dids.yaml, or ``None`` when absent/unparseable.
+
+    ``None`` keeps the collector running without DID metadata — callers fall
+    back to hex-only token parsing and session-less polling.
+    """
+    from src.decode.dids import load_did_map
+
+    if not _DIDS_YAML_PATH.exists():
+        return None
+    try:
+        return load_did_map(_DIDS_YAML_PATH)
+    except Exception:  # noqa: BLE001 — bad YAML shouldn't crash the collector
+        return None
+
+
+@lru_cache(maxsize=1)
 def _did_ids_by_name() -> dict[str, int]:
     """Symbolic DID name → identifier from data/dids.yaml.
 
@@ -39,19 +60,77 @@ def _did_ids_by_name() -> dict[str, int]:
     4-char hex, matching the pre-resolution behavior. Mirrors how
     ``parse_pid_token`` resolves PID names against ``_PID_IDS_BY_NAME``.
     """
-    from src.decode.dids import load_did_map
-
-    if not _DIDS_YAML_PATH.exists():
-        return {}
-    try:
-        did_map = load_did_map(_DIDS_YAML_PATH)
-    except Exception:  # noqa: BLE001 — bad YAML shouldn't crash the collector
+    did_map = _load_did_map()
+    if did_map is None:
         return {}
     return {entry.name: entry.did for entry in did_map.dids}
 
 
+def did_access() -> DidAccess | None:
+    """The access block of data/dids.yaml (gating session, keep-alive)."""
+    did_map = _load_did_map()
+    return None if did_map is None else did_map.access
+
+
 class _PidDiscoveryClient(Protocol):
     def query_supported_mode_01_pids(self) -> tuple[int, ...]: ...
+
+
+@dataclass(frozen=True)
+class DidSessionSpec:
+    """Mode-22 session-window policy for ECUs that gate DID reads.
+
+    Some ECMs (the 2008 Nissan ECM among them — see data/dids.yaml access
+    notes) refuse service 0x22 outside a non-default UDS session entered via
+    ``10 <session>``, and stop answering standard Mode 01 while that session
+    is held. The two are mutually exclusive on the bus, so DIDs are read in
+    short scheduled *windows*: enter the session, read every active DID once
+    (re-sending ``10 <session>`` every ``keepalive_seconds`` — TesterPresent
+    is rejected on this ECM), then go silent for ``lapse_seconds`` so the
+    session expires and Mode 01 answers again.
+    """
+
+    session: int
+    keepalive_seconds: float = 2.0
+    window_interval_seconds: float = 60.0
+    window_max_seconds: float = 10.0
+    lapse_seconds: float = 5.0
+
+
+def resolve_did_session_spec(collection: CollectionConfig) -> DidSessionSpec | None:
+    """Resolve the Mode-22 session policy from config + data/dids.yaml.
+
+    ``obd_did_session: "auto"`` (the default) takes the gating session from
+    the dids.yaml ``access`` block — the vehicle protocol map is the source
+    of truth for *how* to reach Mode 22; canary.yaml only carries the
+    operational cadence (window interval/length). Returns ``None`` when no
+    DIDs are configured or no session gates them (DIDs are then polled
+    bare, interleaved with Mode 01 — correct for ECUs that don't gate 0x22).
+    """
+    if not collection.obd_dids:
+        return None
+    access = did_access()
+    session: int | None
+    if collection.obd_did_session == "auto":
+        session = access.session if access is not None else None
+    else:
+        session = collection.obd_did_session
+    if session is None:
+        return None
+    keepalive = collection.obd_did_session_keepalive_seconds
+    if keepalive is None:
+        keepalive = (
+            access.keepalive_seconds
+            if access is not None and access.keepalive_seconds
+            else DidSessionSpec.keepalive_seconds
+        )
+    return DidSessionSpec(
+        session=session,
+        keepalive_seconds=keepalive,
+        window_interval_seconds=collection.obd_did_window_interval_seconds,
+        window_max_seconds=collection.obd_did_window_max_seconds,
+        lapse_seconds=collection.obd_did_session_lapse_seconds,
+    )
 
 
 @dataclass(frozen=True)
@@ -64,6 +143,9 @@ class CanObdSpec:
     dids: tuple[str, ...] = ()
     did_request_id: int = DEFAULT_DID_REQUEST_ID
     request_timeout_seconds: float = 1.0
+    #: ``None`` = poll DIDs bare, interleaved with Mode 01 (ECUs that don't
+    #: gate 0x22). Set = scheduled mutually-exclusive session windows.
+    did_session: DidSessionSpec | None = None
 
 
 @dataclass
@@ -75,11 +157,12 @@ class CanObdLoopStats:
     request_timeouts: int = 0
     bus_errors: int = 0
     scheduler_snapshots: int = 0
+    session_controls_sent: int = 0
 
 
 @dataclass(frozen=True)
 class _PollRequest:
-    kind: Literal["pid", "did"]
+    kind: Literal["pid", "did", "session"]
     service: int
     identifier: int
     request_id: int
@@ -103,6 +186,148 @@ class _PollRequestState:
     bus_errors: int = 0
 
 
+#: Eligibility predicate the DID-window controller injects into request
+#: selection: ``(request_index, request) -> bool``.
+RequestFilter = Callable[[int, "_PollRequest"], bool]
+
+
+class DidWindowController:
+    """Mutually-exclusive Mode-22 window scheduler (risk R8 / Task 6.15).
+
+    Drives three phases inside ``run_can_obd_loop``:
+
+    * ``mode01`` — normal polling; DID requests are ineligible. At
+      ``window_interval_seconds`` cadence (and only while at least one DID
+      isn't backed off) the loop sends ``10 <session>`` to open a window.
+    * ``window`` — only DIDs are eligible; each active DID is read once.
+      ``10 <session>`` is re-sent every ``keepalive_seconds``. The window
+      closes when every pending DID was attempted, on keep-alive failure,
+      or at ``window_max_seconds``.
+    * ``lapse`` — nothing diagnostic is sent so the ECM's session expires
+      (S3 timeout) and Mode 01 answers again. Broadcast capture continues
+      throughout — only the request side pauses.
+
+    Mode 01 misses are *prevented* (requests deferred, not timed out), so
+    the 30 s auto-miss backoff never punishes channels for a DID window.
+    """
+
+    def __init__(
+        self,
+        spec: DidSessionSpec,
+        did_indices: Sequence[int],
+        *,
+        now: float,
+    ) -> None:
+        self._spec = spec
+        self._did_indices = tuple(did_indices)
+        self.phase: Literal["mode01", "window", "lapse"] = "mode01"
+        self._next_window_at = now + spec.window_interval_seconds
+        self._window_deadline = 0.0
+        self._lapse_until = 0.0
+        self._last_session_sent = 0.0
+        self._pending: set[int] = set()
+        self.windows_opened = 0
+        self.windows_completed = 0
+        self.session_failures = 0
+        self.keepalives_sent = 0
+
+    def advance(self, states: Sequence[_PollRequestState], now: float) -> None:
+        """Apply phase transitions that don't require bus I/O."""
+        if self.phase == "window":
+            live = any(states[i].suppressed_until <= now for i in self._pending)
+            if now >= self._window_deadline or not live:
+                self._close_window(now)
+        elif self.phase == "lapse" and now >= self._lapse_until:
+            self.phase = "mode01"
+
+    def session_control_due(self, states: Sequence[_PollRequestState], now: float) -> bool:
+        """Whether the loop should send ``10 <session>`` now."""
+        if self.phase == "mode01":
+            if now < self._next_window_at:
+                return False
+            if all(states[i].suppressed_until > now for i in self._did_indices):
+                # Every DID is backed off; don't burn a window on them.
+                self._next_window_at = now + self._spec.window_interval_seconds
+                return False
+            return True
+        if self.phase == "window":
+            return now - self._last_session_sent >= self._spec.keepalive_seconds
+        return False
+
+    def on_session_response(
+        self,
+        *,
+        ok: bool,
+        states: Sequence[_PollRequestState],
+        now: float,
+    ) -> None:
+        self._last_session_sent = now
+        if self.phase == "mode01":
+            if ok:
+                self.phase = "window"
+                self.windows_opened += 1
+                self._window_deadline = now + self._spec.window_max_seconds
+                self._pending = {i for i in self._did_indices if states[i].suppressed_until <= now}
+                # Every pending DID is due "this window" regardless of tier.
+                for i in self._pending:
+                    states[i].next_due_at = now
+            else:
+                self.session_failures += 1
+                self._next_window_at = now + self._spec.window_interval_seconds
+        elif self.phase == "window":
+            if ok:
+                self.keepalives_sent += 1
+            else:
+                # Session lost mid-window: let it lapse, resume Mode 01.
+                self.session_failures += 1
+                self._close_window(now)
+
+    def request_eligible(self, index: int, request: _PollRequest, *, now: float) -> bool:
+        del now  # phase state already advanced this tick
+        if self.phase == "window":
+            return request.kind == "did" and index in self._pending
+        if self.phase == "lapse":
+            return False
+        return request.kind == "pid"
+
+    def on_request_attempted(self, index: int) -> None:
+        self._pending.discard(index)
+
+    def next_transition_at(self) -> float:
+        if self.phase == "window":
+            return min(
+                self._window_deadline,
+                self._last_session_sent + self._spec.keepalive_seconds,
+            )
+        if self.phase == "lapse":
+            return self._lapse_until
+        return self._next_window_at
+
+    def _close_window(self, now: float) -> None:
+        self.phase = "lapse"
+        self._lapse_until = now + self._spec.lapse_seconds
+        self._next_window_at = now + self._spec.window_interval_seconds
+        self.windows_completed += 1
+        self._pending.clear()
+
+    def snapshot(self, now: float) -> dict[str, Any]:
+        """DID profile state for ``/status.obd_scheduler.did_profile``."""
+        return {
+            "phase": self.phase,
+            "session": f"0x{self._spec.session:02X}",
+            "did_request_count": len(self._did_indices),
+            "next_window_in_seconds": (
+                round(max(0.0, self._next_window_at - now), 3) if self.phase == "mode01" else 0.0
+            ),
+            "window_interval_seconds": self._spec.window_interval_seconds,
+            "window_max_seconds": self._spec.window_max_seconds,
+            "windows_opened": self.windows_opened,
+            "windows_completed": self.windows_completed,
+            "session_failures": self.session_failures,
+            "keepalives_sent": self.keepalives_sent,
+        }
+
+
 @dataclass(frozen=True)
 class ObdSchedulerMetrics:
     """Live state of the adaptive OBD poll scheduler."""
@@ -118,6 +343,8 @@ class ObdSchedulerMetrics:
     response_rate: float | None
     by_tier: dict[str, dict[str, float | int | None]]
     requests: list[dict[str, Any]] = field(default_factory=list)
+    #: Mode-22 session-window state, ``None`` when no session gates DIDs.
+    did_profile: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +359,7 @@ class ObdSchedulerMetrics:
             "response_rate": self.response_rate,
             "by_tier": self.by_tier,
             "requests": self.requests,
+            "did_profile": self.did_profile,
         }
 
 
@@ -305,11 +533,13 @@ def _count_active_requests(
     requests: list[_PollRequest],
     states: list[_PollRequestState],
     now: float,
+    *,
+    eligible: RequestFilter | None = None,
 ) -> int:
     return sum(
         1
-        for _request, state in zip(requests, states, strict=True)
-        if not _is_request_suppressed(state, now)
+        for index, (request, state) in enumerate(zip(requests, states, strict=True))
+        if not _is_request_suppressed(state, now) and (eligible is None or eligible(index, request))
     )
 
 
@@ -317,27 +547,33 @@ def _select_next_due_request(
     requests: list[_PollRequest],
     states: list[_PollRequestState],
     now: float,
-) -> tuple[_PollRequest, _PollRequestState] | None:
+    *,
+    eligible: RequestFilter | None = None,
+) -> tuple[int, _PollRequest, _PollRequestState] | None:
     candidates = [
         (state.next_due_at, index, request, state)
         for index, (request, state) in enumerate(zip(requests, states, strict=True))
-        if not _is_request_suppressed(state, now) and state.next_due_at <= now
+        if not _is_request_suppressed(state, now)
+        and state.next_due_at <= now
+        and (eligible is None or eligible(index, request))
     ]
     if not candidates:
         return None
-    _due_at, _index, request, state = min(candidates, key=lambda item: (item[0], item[1]))
-    return request, state
+    _due_at, index, request, state = min(candidates, key=lambda item: (item[0], item[1]))
+    return index, request, state
 
 
 def _next_due_at(
     requests: list[_PollRequest],
     states: list[_PollRequestState],
     now: float,
+    *,
+    eligible: RequestFilter | None = None,
 ) -> float | None:
     due_times = [
         state.next_due_at
-        for _request, state in zip(requests, states, strict=True)
-        if not _is_request_suppressed(state, now)
+        for index, (request, state) in enumerate(zip(requests, states, strict=True))
+        if not _is_request_suppressed(state, now) and (eligible is None or eligible(index, request))
     ]
     return min(due_times) if due_times else None
 
@@ -356,6 +592,8 @@ def _scheduler_metrics(
     spec: CanObdSpec,
     stats: CanObdLoopStats,
     now: float,
+    *,
+    did_profile: dict[str, Any] | None = None,
 ) -> ObdSchedulerMetrics:
     active = _count_active_requests(requests, states, now)
     backed_off = sum(
@@ -442,6 +680,7 @@ def _scheduler_metrics(
         ),
         by_tier=by_tier,
         requests=request_rows,
+        did_profile=did_profile,
     )
 
 
@@ -451,8 +690,12 @@ __all__ = [
     "DEFAULT_DID_REQUEST_ID",
     "CanObdLoopStats",
     "CanObdSpec",
+    "DidSessionSpec",
+    "DidWindowController",
     "ObdSchedulerMetrics",
     "build_poll_requests",
+    "did_access",
     "parse_did_token",
     "parse_pid_token",
+    "resolve_did_session_spec",
 ]

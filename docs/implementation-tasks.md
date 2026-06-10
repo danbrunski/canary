@@ -442,13 +442,17 @@ training/model-health visualization, and Torque Pro parity.
 
 ### 6C. Nissan proprietary telemetry and diagnostics
 
-- [ ] **6.15 — Live Nissan DID telemetry profile.** Make `data/dids.yaml` a
-  first-class daemon input. The daemon must be able to enter UDS session
-  `10 C0`, keep it alive, poll confirmed DIDs like `0x1208`, decode names and
-  units through `src/decode/dids.py`, emit stable telemetry channels, and
-  expose the active DID profile on the dashboard. Because `10 C0` is mutually
-  exclusive with normal Mode 01 polling on the current ECM, add explicit
-  profile switching or scheduled windows rather than silently mixing modes.
+- [x] **6.15 — Live Nissan DID telemetry profile.** `data/dids.yaml` is a
+  first-class daemon input: `resolve_did_session_spec` reads its access
+  block (session `0xC0`, 2 s keep-alive) and `DidWindowController`
+  (`src/collection/obd_scheduler.py`) schedules mutually-exclusive Mode-22
+  windows inside `run_can_obd_loop` — enter `10 C0`, read each active DID
+  once (keep-alive re-sent mid-window), then stay quiet through a lapse so
+  the session expires and Mode 01 resumes without tripping its 30 s miss
+  backoff. Cadence knobs: `obd_did_session*` / `obd_did_window_*` under
+  `collection:`. The live profile state is exposed at
+  `/status.obd_scheduler.did_profile`. Decoding to `did:<NAME>` channels
+  was already wired end-to-end (`src/decode/dids.py` + preprocessing/live).
 - [~] **6.16 — DID map dashboard/workbench.** Backend `GET /dids` serves
   the read-only `data/dids.yaml` catalog (+tests); `DidWorkbenchPanel`
   (Diagnostics▸Nissan DIDs) renders it — hex id, name, confidence

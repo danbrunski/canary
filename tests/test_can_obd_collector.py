@@ -16,12 +16,14 @@ from src.collection.can_collector import make_session_dir
 from src.collection.can_obd_collector import (
     AUTO_BASELINE_PID_NAMES,
     CanObdSpec,
+    DidSessionSpec,
     ObdSchedulerMetrics,
     build_poll_requests,
     parse_can_id,
     parse_did_token,
     parse_pid_token,
     record_can_obd,
+    resolve_did_session_spec,
     run_can_obd_loop,
 )
 from src.collection.obd_collector import JsonlReadingWriter
@@ -325,6 +327,237 @@ def test_scheduler_metrics_report_rates_and_backoff_state() -> None:
     assert by_channel["ENGINE_LOAD"]["backed_off"] is True
     assert by_channel["ENGINE_LOAD"]["timeouts"] >= 1
     assert by_channel["RPM"]["responses"] >= 1
+
+
+# --- Mode 22 session windows (Task 6.15 / risk R8) --------------------------
+
+
+class _SessionGatedBus:
+    """Models the 2008 Nissan ECM's Mode-22 gating.
+
+    * ``22 xxxx`` outside the 0xC0 session → ``7F 22 80`` (refused);
+    * ``10 C0`` → ``50 C0`` and the session holds for ``session_ttl`` seconds
+      (refreshed by re-sending ``10 C0``);
+    * Mode 01 goes silent while the session is held (mutual exclusion).
+    """
+
+    def __init__(self, session_ttl: float = 0.08) -> None:
+        # ttl defaults below the tests' lapse_seconds (0.1) so the session
+        # expires during the lapse, like the real ECM's S3 timeout does.
+        self.sent: list[can.Message] = []
+        self._responses: list[can.Message] = []
+        self._session_until = 0.0
+        self._ttl = session_ttl
+
+    def _in_session(self) -> bool:
+        return time.monotonic() < self._session_until
+
+    def send(self, msg: can.Message) -> None:
+        self.sent.append(msg)
+        data = bytes(msg.data)
+        if msg.arbitration_id == 0x7E0 and data[:3] == bytes([0x02, 0x10, 0xC0]):
+            self._session_until = time.monotonic() + self._ttl
+            self._responses.append(
+                can.Message(
+                    arbitration_id=0x7E8,
+                    data=bytes([0x02, 0x50, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00]),
+                    is_extended_id=False,
+                )
+            )
+        elif msg.arbitration_id == 0x7DF and data[:3] == bytes([0x02, 0x01, 0x0C]):
+            if not self._in_session():
+                self._responses.append(
+                    can.Message(
+                        arbitration_id=0x7E8,
+                        data=bytes([0x04, 0x41, 0x0C, 0x0A, 0xF0, 0x00, 0x00, 0x00]),
+                        is_extended_id=False,
+                    )
+                )
+        elif msg.arbitration_id == 0x7E0 and data[:4] == bytes([0x03, 0x22, 0x11, 0x01]):
+            if self._in_session():
+                self._responses.append(
+                    can.Message(
+                        arbitration_id=0x7E8,
+                        data=bytes([0x05, 0x62, 0x11, 0x01, 0x12, 0x34, 0x00, 0x00]),
+                        is_extended_id=False,
+                    )
+                )
+            else:
+                self._responses.append(
+                    can.Message(
+                        arbitration_id=0x7E8,
+                        data=bytes([0x03, 0x7F, 0x22, 0x80, 0x00, 0x00, 0x00, 0x00]),
+                        is_extended_id=False,
+                    )
+                )
+
+    def recv(self, timeout: float = 0.0) -> can.Message | None:
+        if self._responses:
+            return self._responses.pop(0)
+        if timeout:
+            time.sleep(min(timeout, 0.002))
+        return None
+
+
+def _window_spec(**overrides: float) -> CanObdSpec:
+    session = DidSessionSpec(
+        session=0xC0,
+        keepalive_seconds=float(overrides.pop("keepalive_seconds", 0.15)),
+        window_interval_seconds=float(overrides.pop("window_interval_seconds", 0.25)),
+        window_max_seconds=float(overrides.pop("window_max_seconds", 0.5)),
+        lapse_seconds=float(overrides.pop("lapse_seconds", 0.1)),
+    )
+    assert not overrides, f"unused overrides: {overrides}"
+    return CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        poll_rate_hz=20.0,
+        pids=("RPM",),
+        dids=("1101",),
+        request_timeout_seconds=0.05,
+        did_session=session,
+    )
+
+
+def test_did_session_windows_read_gated_dids_and_resume_mode_01() -> None:
+    """On a session-gated ECM, DIDs are read inside 10 C0 windows and Mode 01
+    polling resumes after the lapse — neither starves the other."""
+    bus = _SessionGatedBus()
+    stop = threading.Event()
+    readings: list[Any] = []
+
+    def on_reading(reading: Any) -> None:
+        readings.append(reading)
+        pids = [r.pid for r in readings]
+        # Done once we've seen a DID reading AND a Mode 01 reading after it.
+        if "DID_1101" in pids and "RPM" in pids[pids.index("DID_1101") :]:
+            stop.set()
+
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _window_spec(),
+        on_frame=lambda _msg: None,
+        on_reading=on_reading,
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 5.0,
+    )
+
+    pids = [r.pid for r in readings]
+    assert "DID_1101" in pids, "gated DID was never read through a session window"
+    did_at = pids.index("DID_1101")
+    assert "RPM" in pids[:did_at], "Mode 01 should poll before the first window"
+    assert "RPM" in pids[did_at:], "Mode 01 should resume after the window lapses"
+    by_pid = {r.pid: r for r in readings}
+    assert by_pid["DID_1101"].value == "1234"
+    assert stats.session_controls_sent >= 1
+    # The 22 request must only ever follow a 10 C0 on the wire.
+    wire = [bytes(m.data)[:2] for m in bus.sent]
+    first_did = wire.index(bytes([0x03, 0x22]))
+    assert bytes([0x02, 0x10]) in wire[:first_did]
+
+
+def test_did_requests_stay_quiet_outside_windows() -> None:
+    """Between windows no 22/10 frames are sent — Mode 01 runs undisturbed."""
+    bus = _SessionGatedBus()
+    stop = threading.Event()
+    readings: list[Any] = []
+
+    spec = _window_spec(window_interval_seconds=10.0)  # first window far away
+
+    def on_reading(reading: Any) -> None:
+        readings.append(reading)
+        if sum(1 for r in readings if r.pid == "RPM") >= 3:
+            stop.set()
+
+    run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        spec,
+        on_frame=lambda _msg: None,
+        on_reading=on_reading,
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 2.0,
+    )
+
+    services = {bytes(m.data)[1] for m in bus.sent}
+    assert 0x01 in services
+    assert 0x22 not in services, "DID polled outside a session window"
+    assert 0x10 not in services, "session opened before the configured interval"
+
+
+def test_failed_session_entry_skips_window_and_keeps_mode_01_alive() -> None:
+    """An ECM that refuses 10 C0 must not wedge the loop or starve Mode 01."""
+
+    class _RefusesSessionBus(_SessionGatedBus):
+        def send(self, msg: can.Message) -> None:
+            data = bytes(msg.data)
+            if msg.arbitration_id == 0x7E0 and data[:2] == bytes([0x02, 0x10]):
+                self.sent.append(msg)
+                self._responses.append(
+                    can.Message(
+                        arbitration_id=0x7E8,
+                        data=bytes([0x03, 0x7F, 0x10, 0x11, 0x00, 0x00, 0x00, 0x00]),
+                        is_extended_id=False,
+                    )
+                )
+                return
+            super().send(msg)
+
+    bus = _RefusesSessionBus()
+    stop = threading.Event()
+    readings: list[Any] = []
+    snapshots: list[ObdSchedulerMetrics] = []
+
+    def on_reading(reading: Any) -> None:
+        readings.append(reading)
+
+    def until_failure_seen(metrics: ObdSchedulerMetrics) -> None:
+        snapshots.append(metrics)
+        profile = metrics.did_profile
+        if profile is not None and profile["session_failures"] >= 1:
+            # Wait for Mode 01 proof-of-life after the failed window attempt.
+            if any(r.pid == "RPM" for r in readings[-3:]):
+                stop.set()
+
+    run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _window_spec(),
+        on_frame=lambda _msg: None,
+        on_reading=on_reading,
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 5.0,
+        on_scheduler_metrics=until_failure_seen,
+        scheduler_metrics_interval_seconds=0.05,
+    )
+
+    profile = snapshots[-1].to_dict()["did_profile"]
+    assert profile["session_failures"] >= 1
+    assert profile["phase"] == "mode01"
+    services = {bytes(m.data)[1] for m in bus.sent}
+    assert 0x22 not in services, "DID must not be polled when the session never opened"
+    assert any(r.pid == "RPM" for r in readings)
+
+
+def test_resolve_did_session_spec_reads_dids_yaml_access_block() -> None:
+    """`auto` pulls session 0xC0 + 2 s keep-alive from data/dids.yaml."""
+    from src.config import CollectionConfig
+
+    collection = CollectionConfig(
+        obd_dids=("1101",),
+        obd_poll_rate_hz=1.0,
+        storage_path=Path("/tmp/canary-test"),
+        session_retention_days=1,
+        storage_warning_mb=100,
+    )
+    spec = resolve_did_session_spec(collection)
+    assert spec is not None
+    assert spec.session == 0xC0
+    assert spec.keepalive_seconds == 2.0
+    assert spec.window_interval_seconds == 60.0
+
+    no_dids = collection.model_copy(update={"obd_dids": ()})
+    assert resolve_did_session_spec(no_dids) is None
+
+    forced_off = collection.model_copy(update={"obd_did_session": None})
+    assert resolve_did_session_spec(forced_off) is None
 
 
 # --- record_can_obd reconnect resilience -----------------------------------

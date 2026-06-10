@@ -100,6 +100,25 @@ class CollectionConfig(_Strict):
     obd_pids: tuple[str, ...] = ("auto",)
     obd_dids: tuple[str, ...] = ()
     obd_did_request_id: int = 0x7E0
+    #: Mode-22 gating session (UDS 0x10 sub-function). ``"auto"`` (default)
+    #: reads it from data/dids.yaml's access block; ``null`` forces bare DID
+    #: polling (ECUs that answer 0x22 in the default session); an int
+    #: overrides the map. When a session gates Mode 22 it is mutually
+    #: exclusive with Mode 01 on the bus, so DIDs are polled in short
+    #: scheduled windows (see the obd_did_window_* knobs below).
+    obd_did_session: int | Literal["auto"] | None = "auto"
+    #: ``null`` → keep-alive cadence from dids.yaml access block (or 2.0 s).
+    obd_did_session_keepalive_seconds: float | None = None
+    #: How often a DID window opens. Each window reads every active DID once,
+    #: so this is the effective per-DID sample interval.
+    obd_did_window_interval_seconds: float = 60.0
+    #: Hard cap on one window's duration (it normally closes much sooner,
+    #: as soon as every active DID has been attempted once).
+    obd_did_window_max_seconds: float = 10.0
+    #: Quiet time after a window so the ECM's diagnostic session expires
+    #: (S3 timeout) before Mode 01 polling resumes — resuming earlier would
+    #: time the first Mode 01 polls out into their 30 s miss backoff.
+    obd_did_session_lapse_seconds: float = 5.0
     obd_request_timeout_seconds: float = 1.0
     obd_poll_rate_hz: float
     storage_path: Path
