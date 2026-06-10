@@ -344,6 +344,7 @@ def train_lstm_autoencoder(
         batch_size=config.batch_size,
         device=device,
         calibrated_at=created_at,
+        threshold_quantile=getattr(config, "threshold_quantile", None),
     )
 
 
@@ -355,6 +356,7 @@ def calibrate_lstm_thresholds(
     batch_size: int = 64,
     device: str = "cpu",
     calibrated_at: datetime | pd.Timestamp | str | None = None,
+    threshold_quantile: float | None = None,
 ) -> TrainedLSTMAutoencoder:
     """Attach masked reconstruction-error thresholds to a trained bundle.
 
@@ -369,6 +371,7 @@ def calibrate_lstm_thresholds(
         batch_size=batch_size,
         device=device,
         calibrated_at=calibrated_at,
+        threshold_quantile=threshold_quantile,
     )
     manifest = replace(trained.manifest, thresholds=calibration.to_dict())
     return TrainedLSTMAutoencoder(model=trained.model, manifest=manifest)
@@ -429,7 +432,18 @@ def load_lstm_autoencoder_model(
         dropout=float(architecture["dropout"]),
         decoder_type=str(architecture.get("decoder_type", "gru")),
     )
-    model.load_state_dict(payload["state_dict"])
+    # Pre-target checkpoints (before decay_input_target existed) load with
+    # that one key missing: their decay weights are zero, which makes the
+    # target term ``(1−γ_x)·x̄`` inert regardless of x̄, so the zeros init
+    # reproduces the old behavior bit-for-bit. Anything else missing or
+    # unexpected is a real mismatch and must still fail loudly.
+    missing, unexpected = model.load_state_dict(payload["state_dict"], strict=False)
+    tolerated = {"encoder_cell.decay_input_target"}
+    if unexpected or not set(missing) <= tolerated:
+        raise RuntimeError(
+            f"LSTM checkpoint state dict mismatch: missing={sorted(missing)} "
+            f"unexpected={sorted(unexpected)}"
+        )
     model.to(device=torch.device(device), dtype=getattr(torch, dtype))
     model.eval()
     return TrainedLSTMAutoencoder(model=model, manifest=manifest)

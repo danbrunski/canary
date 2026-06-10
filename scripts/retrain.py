@@ -93,14 +93,71 @@ def _session_parquet_bytes(session_dir: Path) -> int:
         return 0
 
 
-def _pick_calibration_holdout(sessions: Sequence[Path]) -> Path | None:
-    """The most-recent *substantial* session, or ``None`` if every candidate
-    is below the minimum size. ``discover_sessions`` returns oldest→newest,
-    so we walk in reverse to prefer the freshest real drive."""
+#: A mode must run at least this long in a session (per the classifier
+#: sidecar) before the session counts as "covering" that mode for holdout
+#: selection — a 5 s highway blip can't calibrate a highway band.
+_MIN_HOLDOUT_MODE_SECONDS = 60.0
+
+
+def _session_mode_coverage(session: Path) -> set[str] | None:
+    """Modes a session meaningfully covers, from its classifier sidecar.
+
+    ``None`` when the session hasn't been classified (run
+    ``scripts/label_sessions.py``) — callers treat that as unknown coverage.
+    """
+    from src.analysis.session_classifier import read_classification
+
+    classification = read_classification(session)
+    if classification is None:
+        return None
+    return {
+        mode
+        for mode, seconds in classification.mode_seconds.items()
+        if seconds >= _MIN_HOLDOUT_MODE_SECONDS and mode != "unknown"
+    }
+
+
+def _pick_calibration_holdouts(
+    sessions: Sequence[Path],
+    *,
+    max_holdouts: int = 3,
+) -> list[Path]:
+    """Most-recent substantial sessions, chosen for operating-mode coverage.
+
+    The historical single auto-holdout had a blind spot: if the freshest
+    drive was an idle session, highway/city earned no per-mode band AND the
+    global fallback threshold was calibrated from an idle-dominated error
+    distribution — too tight or too loose for the first real drive.
+
+    Walk newest→oldest: the freshest substantial session anchors the holdout
+    (the legacy rule, so unclassified corpora behave exactly as before);
+    further sessions are added only when their classifier sidecar covers a
+    mode not yet held out, until every mode seen in the classified corpus is
+    covered or ``max_holdouts`` is reached.
+    """
+    corpus_modes: set[str] = set()
+    for session in sessions:
+        modes = _session_mode_coverage(session)
+        if modes:
+            corpus_modes |= modes
+
+    selected: list[Path] = []
+    covered: set[str] = set()
     for session in reversed(sessions):
-        if _session_parquet_bytes(session) >= _MIN_CALIBRATION_HOLDOUT_BYTES:
-            return session
-    return None
+        if len(selected) >= max_holdouts:
+            break
+        if _session_parquet_bytes(session) < _MIN_CALIBRATION_HOLDOUT_BYTES:
+            continue
+        modes = _session_mode_coverage(session)
+        if not selected:
+            selected.append(session)
+            covered |= modes or set()
+        elif modes and modes - covered:
+            selected.append(session)
+            covered |= modes
+        if corpus_modes and covered >= corpus_modes:
+            break
+    return selected
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -325,10 +382,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             calibration_sessions = [s for s in sessions if Path(s).resolve() in requested]
             sessions = [s for s in sessions if Path(s).resolve() not in requested]
         elif not args.no_calibration_holdout and len(sessions) >= 3:
-            holdout = _pick_calibration_holdout(sessions)
-            if holdout is not None:
-                calibration_sessions = [holdout]
-                sessions = [s for s in sessions if s != holdout]
+            # Hold out up to 3 sessions for mode coverage, but always keep
+            # at least 2 for training.
+            holdouts = _pick_calibration_holdouts(sessions, max_holdouts=min(3, len(sessions) - 2))
+            if holdouts:
+                calibration_sessions = holdouts
+                held = set(holdouts)
+                sessions = [s for s in sessions if s not in held]
             else:
                 log.warning(
                     "no substantial session available for out-of-sample "

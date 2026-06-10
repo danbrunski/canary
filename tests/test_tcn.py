@@ -87,8 +87,11 @@ def test_delta_decay_freshness_is_one_at_zero_and_decays_with_lag() -> None:
     model = _model(use_delta_decay=True, input_size=3)
     assert model.delta_decay is not None
     zero = torch.zeros(2, 3, 8)
-    # Zero-init weights ⇒ freshness 1 everywhere regardless of Δt at init.
+    # Zero bias ⇒ freshness exactly 1 at Δt=0 (fresh cells pass through).
     assert torch.allclose(model.delta_decay(zero), torch.ones_like(zero))
+    # Positive weight init ⇒ Δt>0 already decays at init (a zero-init gate
+    # sat at the ReLU's zero-gradient point and could never train).
+    assert torch.all(model.delta_decay(torch.full((1, 3, 4), 25.0)) < 1.0)
     # With a positive per-channel decay rate, larger Δt ⇒ smaller freshness.
     with torch.no_grad():
         model.delta_decay.weight.fill_(0.1)
@@ -96,6 +99,25 @@ def test_delta_decay_freshness_is_one_at_zero_and_decays_with_lag() -> None:
     assert torch.all(fresh < 1.0)
     fresher = model.delta_decay(torch.full((1, 3, 4), 1.0))
     assert torch.all(fresher > fresh)
+
+
+def test_delta_decay_gate_trains_at_default_init() -> None:
+    """Regression for the dead-gate bug: zero-init put the pre-activation at
+    ReLU's zero-gradient point, so the freshness channel was a constant 1.0
+    forever and Δt was entirely unused by the TCN."""
+    torch.manual_seed(0)
+    model = _model(use_delta_decay=True, input_size=3)
+    value, mask, delta = _window(2, 8, 3)
+    delta = delta + 3.0  # everything somewhat stale
+
+    loss = model.reconstruction_error(value, mask, delta, reduction="global")
+    loss.backward()
+
+    assert model.delta_decay is not None
+    assert model.delta_decay.weight.grad is not None
+    assert float(model.delta_decay.weight.grad.abs().sum()) > 0.0
+    assert model.delta_decay.bias.grad is not None
+    assert float(model.delta_decay.bias.grad.abs().sum()) > 0.0
 
 
 def test_reconstruction_error_reductions() -> None:

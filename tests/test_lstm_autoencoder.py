@@ -84,10 +84,10 @@ def test_encode_decode_shapes() -> None:
 def test_gru_d_decay_is_identity_at_delta_zero_and_vanishes_at_large_delta() -> None:
     """γ_x → 1 and γ_h → 1 at δ=0 (default init b=0); both → 0 as δ → ∞.
 
-    At δ=0 the decay is ``exp(−relu(b))`` and the parameters initialize to 0,
+    At δ=0 the decay is ``exp(−relu(b))`` and the biases initialize to 0,
     so freshly-observed cells pass through undecayed. As δ grows the relu
     argument grows (non-negative weights drive it), so the decay collapses
-    toward 0 — a long-stale value relaxes to the channel mean (0).
+    toward 0 — a long-stale value relaxes to the channel's decay target.
     """
     torch = _torch()
     cell = GRUDEncoderCell(input_size=3, hidden_size=5)
@@ -106,9 +106,10 @@ def test_gru_d_decay_is_identity_at_delta_zero_and_vanishes_at_large_delta() -> 
         assert float(cell.hidden_decay(big_delta).max()) == pytest.approx(0.0)
 
 
-def test_gru_d_cell_decays_stale_value_toward_mean() -> None:
-    """A stale cell's contribution is ``γ_x · x_last``; with the decay weight
-    large and δ large, x̂ collapses to 0 (the mean) regardless of x_last."""
+def test_gru_d_cell_decays_stale_value_toward_target() -> None:
+    """A stale cell's contribution is ``γ_x·x_last + (1−γ_x)·x̄``; with the
+    decay weight large and δ large, x̂ collapses to the trainable target
+    regardless of x_last (target init 0 = the z-space corpus mean)."""
     torch = _torch()
     cell = GRUDEncoderCell(input_size=2, hidden_size=4)
     with torch.no_grad():
@@ -118,11 +119,57 @@ def test_gru_d_cell_decays_stale_value_toward_mean() -> None:
     mask = torch.zeros(1, 2)  # everything stale
     delta = torch.full((1, 2), 1e6)
     last_observed = torch.full((1, 2), 999.0)
-    # Reproduce x̂ = m·x + (1−m)·γ_x·x_last with the cell's own decay.
+    # Reproduce x̂ = m·x + (1−m)·(γ_x·x_last + (1−γ_x)·x̄) with the cell's decay.
     with torch.no_grad():
         gamma_x = cell.input_decay(delta)
-        x_hat = mask * value + (1.0 - mask) * (gamma_x * last_observed)
+        x_hat = mask * value + (1.0 - mask) * (
+            gamma_x * last_observed + (1.0 - gamma_x) * cell.decay_input_target
+        )
         assert float(x_hat.abs().max()) == pytest.approx(0.0, abs=1e-4)
+
+    # A learned non-zero target moves where the stale value relaxes to.
+    with torch.no_grad():
+        cell.decay_input_target.fill_(2.5)
+        gamma_x = cell.input_decay(delta)
+        x_hat = mask * value + (1.0 - mask) * (
+            gamma_x * last_observed + (1.0 - gamma_x) * cell.decay_input_target
+        )
+        assert float(x_hat.min()) == pytest.approx(2.5, abs=1e-4)
+
+
+def test_gru_d_input_decay_gate_trains_at_default_init() -> None:
+    """Regression for the dead-gate bug: with the old zero-init, the decay
+    pre-activation was identically 0 where ReLU's gradient is 0, so
+    ∂loss/∂w and ∂loss/∂b were zero for EVERY batch and the gate could
+    never leave hold-last-observed. The positive init must give stale
+    cells a live gradient."""
+    torch = _torch()
+    torch.manual_seed(0)
+    model = LSTMAutoencoder(
+        input_size=3,
+        sequence_length=4,
+        hidden_size=6,
+        num_layers=1,
+        latent_dim=2,
+    )
+    value = torch.randn(2, 4, 3)
+    # Channel 1: observed at t=0 (so last_observed is non-zero, giving the
+    # γ pathway something to decay), stale with growing δ afterwards.
+    mask = torch.ones(2, 4, 3)
+    mask[:, 1:, 1] = 0.0
+    delta = torch.zeros(2, 4, 3)
+    delta[:, 1:, 1] = torch.tensor([2.0, 4.0, 6.0])
+
+    loss = model.reconstruction_error(value, mask, delta, reduction="global")
+    loss.backward()
+
+    cell = model.encoder_cell
+    assert cell.decay_input_weight.grad is not None
+    assert float(cell.decay_input_weight.grad.abs().sum()) > 0.0
+    assert cell.decay_input_bias.grad is not None
+    assert float(cell.decay_input_bias.grad.abs().sum()) > 0.0
+    assert cell.decay_input_target.grad is not None
+    assert float(cell.decay_input_target.grad.abs().sum()) > 0.0
 
 
 def test_masked_reconstruction_error_ignores_filled_cells() -> None:

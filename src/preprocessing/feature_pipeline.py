@@ -520,10 +520,26 @@ def candidate_feature_columns(features: pd.DataFrame) -> list[str]:
     """Numeric, non-structural feature candidates before all-NaN filtering."""
     skip_exact = {"session", "timestamp", MODE_COLUMN}
     non_trainable_committees = non_trainable_committee_outputs()
+    # ``dbc:*`` signals that also exist as ``decoded:*`` are the same wire
+    # bytes decoded twice (data/dbc/xterra_2008.dbc was *emitted from*
+    # bindings.yaml). Training both double-weights those signals in the IF
+    # and doubles their share of sequence reconstruction loss for zero new
+    # information — keep the ``decoded:*`` copy, drop the duplicate.
+    # Genuinely external DBC signals (no bindings counterpart) still train.
+    decoded_signal_names = {
+        _base_feature_name(str(c)).removeprefix("decoded:")
+        for c in features.columns
+        if str(c).startswith("decoded:")
+    }
     cols: list[str] = []
     for raw in features.columns:
         col = str(raw)
         if col in skip_exact or col.endswith("__gap"):
+            continue
+        if (
+            col.startswith("dbc:")
+            and _base_feature_name(col).removeprefix("dbc:") in decoded_signal_names
+        ):
             continue
         # GPS position/quality channels (and their rolling derivatives) are
         # logged but never modeled — see NON_TRAINABLE_GPS_CHANNELS.

@@ -163,7 +163,12 @@ class _DeltaDecay(_module_base()):  # type: ignore[misc]
 
     The GRU-D input-decay gate, reused here as a *static* bounded transform of
     Δt so the conv stack gets a well-scaled staleness channel instead of raw
-    seconds. Zero-init ⇒ a freshly-observed cell (Δt=0) starts at freshness 1.
+    seconds. ``w`` is init small-positive, NOT zero: with ``w = b = 0`` the
+    pre-activation is identically 0 where ReLU's gradient is 0, so the gate
+    could never train and the freshness channel stayed a constant 1.0 —
+    silently wasting a third of the encoder's input width. Positive ``w``
+    gives stale cells a live gradient while a freshly-observed cell (Δt=0)
+    still starts at freshness ``exp(−relu(b)) = 1`` with ``b = 0``.
     """
 
     weight: Any
@@ -172,7 +177,7 @@ class _DeltaDecay(_module_base()):  # type: ignore[misc]
     def __init__(self, input_size: int) -> None:
         torch, nn = _torch_modules()
         super().__init__()
-        self.weight = nn.Parameter(torch.zeros(input_size))
+        self.weight = nn.Parameter(torch.empty(input_size).uniform_(0.01, 0.1))
         self.bias = nn.Parameter(torch.zeros(input_size))
 
     def forward(self, delta_bft: Any) -> Any:

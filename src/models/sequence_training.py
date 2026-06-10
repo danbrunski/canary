@@ -139,6 +139,10 @@ class SequenceThresholdCalibration:
     #: ``None`` when no mode cleared :data:`MIN_CALIBRATION_SAMPLES`; inference
     #: then falls back to ``global_error.threshold``.
     per_mode_errors: Mapping[str, ReconstructionErrorDistribution] | None = None
+    #: When set, thresholds were taken as this quantile of the error
+    #: distribution instead of ``mean + k·σ`` (recorded for provenance —
+    #: the threshold values themselves are already baked in).
+    threshold_quantile: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -156,6 +160,8 @@ class SequenceThresholdCalibration:
             out["per_mode_errors"] = {
                 mode: distribution.to_dict() for mode, distribution in self.per_mode_errors.items()
             }
+        if self.threshold_quantile is not None:
+            out["threshold_quantile"] = self.threshold_quantile
         return out
 
     @classmethod
@@ -169,6 +175,7 @@ class SequenceThresholdCalibration:
                 for mode, distribution in dict(raw_per_mode).items()
             }
         )
+        raw_quantile = data.get("threshold_quantile")
         return cls(
             threshold_k=float(data["threshold_k"]),
             calibrated_at=str(data["calibrated_at"]),
@@ -180,6 +187,7 @@ class SequenceThresholdCalibration:
                 for channel, distribution in dict(data["channel_errors"]).items()
             },
             per_mode_errors=per_mode,
+            threshold_quantile=None if raw_quantile is None else float(raw_quantile),
         )
 
 
@@ -236,7 +244,22 @@ def split_dataset(
     validation_fraction: float,
     random_state: int,
 ) -> tuple[Any, Any | None]:
-    """Random train/validation split into ``torch.utils.data.Subset`` views."""
+    """Leakage-aware train/validation split into ``torch.utils.data.Subset`` views.
+
+    Windows are built at stride 1, so adjacent windows share T−1 of T rows.
+    A random window-level split therefore put each validation window between
+    two train windows containing ~97% of its content — validation loss
+    tracked train loss almost exactly, early stopping rarely stopped for the
+    right reason, and ``best_validation_loss`` was optimistic. (The same
+    mechanism inflated in-sample threshold calibration to FPR ≈ 1.0 on
+    unseen drives before calibration moved to held-out sessions.)
+
+    Strategy: hold out whole *sessions* (seeded shuffle, smallest-first so
+    one long drive can't swallow the entire validation budget) until
+    ``validation_fraction`` of windows is reached. A single-session corpus
+    falls back to a contiguous tail block with a ``sequence_length`` gap of
+    windows dropped between train and validation so they share no rows.
+    """
     torch, _nn, _optim, data = torch_training_modules()
     n = len(dataset)
     validation_count = 0
@@ -247,10 +270,44 @@ def split_dataset(
     if validation_count == 0:
         return data.Subset(dataset, list(range(n))), None
 
-    generator = torch.Generator().manual_seed(random_state)
-    permutation = torch.randperm(n, generator=generator).tolist()
-    validation_indexes = sorted(int(index) for index in permutation[:validation_count])
-    train_indexes = sorted(int(index) for index in permutation[validation_count:])
+    window_sessions = [window.session for window in dataset.windows]
+    session_order = list(dict.fromkeys(window_sessions))
+    if len(session_order) > 1:
+        counts = {session: 0 for session in session_order}
+        for session in window_sessions:
+            counts[session] += 1
+        generator = torch.Generator().manual_seed(random_state)
+        shuffled = [
+            session_order[i]
+            for i in torch.randperm(len(session_order), generator=generator).tolist()
+        ]
+        # Smallest-first within the shuffle so the holdout lands near the
+        # requested fraction instead of jumping to one huge drive.
+        shuffled.sort(key=lambda session: counts[session])
+        validation_sessions: set[str] = set()
+        held = 0
+        for session in shuffled:
+            if held >= validation_count or len(validation_sessions) == len(session_order) - 1:
+                break
+            validation_sessions.add(session)
+            held += counts[session]
+        train_indexes = [
+            i for i, session in enumerate(window_sessions) if session not in validation_sessions
+        ]
+        validation_indexes = [
+            i for i, session in enumerate(window_sessions) if session in validation_sessions
+        ]
+        if train_indexes and validation_indexes:
+            return data.Subset(dataset, train_indexes), data.Subset(dataset, validation_indexes)
+
+    # Single session (or degenerate multi-session split): contiguous tail
+    # block, with a sequence_length-window gap so train and validation
+    # windows share no underlying rows.
+    gap = int(dataset.sequence_length)
+    validation_start = n - validation_count
+    train_end = max(1, validation_start - gap)
+    train_indexes = list(range(train_end))
+    validation_indexes = list(range(validation_start, n))
     return data.Subset(dataset, train_indexes), data.Subset(dataset, validation_indexes)
 
 
@@ -263,12 +320,15 @@ def calibrate_sequence_thresholds(
     batch_size: int = 64,
     device: str = "cpu",
     calibrated_at: datetime | pd.Timestamp | str | None = None,
+    threshold_quantile: float | None = None,
 ) -> SequenceThresholdCalibration:
     """Compute global / per-channel / per-mode reconstruction-error thresholds.
 
     Global errors are per-window masked MAE over all cells; per-channel errors
     are per-window masked MAE over timesteps; thresholds are
-    ``mean + threshold_k · population_std``. Backbone-agnostic — any model with
+    ``mean + threshold_k · population_std`` (or, with ``threshold_quantile``,
+    that quantile of the errors — see :func:`error_distribution`).
+    Backbone-agnostic — any model with
     ``reconstruction_error(value, mask, delta, reduction=...)`` works.
     """
     if threshold_k < 0:
@@ -307,9 +367,15 @@ def calibrate_sequence_thresholds(
 
     global_values = np.concatenate(global_chunks)
     channel_matrix = np.concatenate(channel_chunks, axis=0)
-    global_distribution = error_distribution(global_values, threshold_k=threshold_k)
+    global_distribution = error_distribution(
+        global_values, threshold_k=threshold_k, threshold_quantile=threshold_quantile
+    )
     channel_distributions = {
-        column: error_distribution(channel_matrix[:, index], threshold_k=threshold_k)
+        column: error_distribution(
+            channel_matrix[:, index],
+            threshold_k=threshold_k,
+            threshold_quantile=threshold_quantile,
+        )
         for index, column in enumerate(dataset.feature_columns)
     }
 
@@ -327,10 +393,19 @@ def calibrate_sequence_thresholds(
                 continue
             by_mode.setdefault(str(raw), []).append(index)
         for mode, indexes in by_mode.items():
-            if len(indexes) < MIN_CALIBRATION_SAMPLES:
+            # The floor counts EFFECTIVE (non-overlapping) windows: at
+            # stride 1, ten windows share almost all their rows — ten
+            # seconds of one idle is not enough evidence for a mode to own
+            # its own mean+k·σ band.
+            starts = [dataset.windows[i].start_row for i in indexes]
+            if _non_overlapping_window_count(starts, dataset.sequence_length) < (
+                MIN_CALIBRATION_SAMPLES
+            ):
                 continue
             per_mode_distributions[mode] = error_distribution(
-                global_values[indexes], threshold_k=threshold_k
+                global_values[indexes],
+                threshold_k=threshold_k,
+                threshold_quantile=threshold_quantile,
             )
 
     return SequenceThresholdCalibration(
@@ -341,14 +416,42 @@ def calibrate_sequence_thresholds(
         global_error=global_distribution,
         channel_errors=channel_distributions,
         per_mode_errors=per_mode_distributions if per_mode_distributions else None,
+        threshold_quantile=threshold_quantile,
     )
+
+
+def _non_overlapping_window_count(start_rows: list[int], sequence_length: int) -> int:
+    """Largest set of mutually non-overlapping windows among ``start_rows``.
+
+    Greedy earliest-end-first selection — the standard interval-scheduling
+    argument makes this exact for fixed-length windows.
+    """
+    count = 0
+    next_free: int | None = None
+    for start in sorted(start_rows):
+        if next_free is None or start >= next_free:
+            count += 1
+            next_free = start + max(1, int(sequence_length))
+    return count
 
 
 def error_distribution(
     values: np.ndarray[Any, np.dtype[np.float64]],
     *,
     threshold_k: float,
+    threshold_quantile: float | None = None,
 ) -> ReconstructionErrorDistribution:
+    """Summarize an error distribution and pick its alert threshold.
+
+    Default threshold is ``mean + k·σ``; pass ``threshold_quantile`` to use
+    a quantile instead. Reconstruction errors are right-skewed and stride-1
+    windows are heavily autocorrelated, so σ is a poor tail estimator and
+    ``k`` has no calibrated false-positive meaning — a quantile (e.g. 0.999
+    of held-out errors) targets the alert budget directly, matching how the
+    IF side calibrates to ``target_flag_rate``.
+    """
+    if threshold_quantile is not None and not 0.0 < threshold_quantile < 1.0:
+        raise ValueError("threshold_quantile must be in (0, 1)")
     if values.size == 0:
         raise ValueError("cannot calibrate thresholds from an empty error distribution")
     finite = values[np.isfinite(values)]
@@ -357,6 +460,10 @@ def error_distribution(
     mean = float(np.mean(finite))
     std = float(np.std(finite, ddof=0))
     p50, p90, p95, p99 = np.quantile(finite, [0.5, 0.9, 0.95, 0.99])
+    if threshold_quantile is not None:
+        threshold = float(np.quantile(finite, threshold_quantile))
+    else:
+        threshold = float(mean + threshold_k * std)
     return ReconstructionErrorDistribution(
         count=int(finite.size),
         mean=mean,
@@ -367,7 +474,7 @@ def error_distribution(
         p90=float(p90),
         p95=float(p95),
         p99=float(p99),
-        threshold=float(mean + threshold_k * std),
+        threshold=threshold,
     )
 
 

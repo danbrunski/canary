@@ -6,8 +6,10 @@ cell is real, this model follows Che et al. (*Recurrent Neural Networks for
 Multivariate Time Series with Missing Values*, GRU-D): it consumes, per channel
 and timestep, a **value**, an observed/stale **mask**, and **Δt** (seconds since
 the channel's last real observation), and learns to **decay** stale inputs and
-hidden state toward the channel mean (0 in z-scored feature space). The
-reconstruction loss is masked so a forward-filled value never contributes.
+hidden state toward a trainable per-channel target (init = the channel mean,
+0 in z-scored feature space — the paper's trainable-mean variant). The
+reconstruction loss is masked (MSE in training, MAE for scoring) so a
+forward-filled value never contributes.
 
 The encoder is a GRU-D cell run as an explicit timestep loop (PyTorch's
 ``nn.GRU`` cannot express the decay). The decoder is a plain GRU/LSTM that
@@ -85,10 +87,12 @@ class GRUDEncoderCell(_module_base()):  # type: ignore[misc]
 
     For per-channel input decay ``γ_x = exp(−relu(w_x ⊙ δ + b_x))`` (diagonal,
     length-F) and hidden decay ``γ_h = exp(−relu(W_h · δ + b_h))`` (projects δ →
-    hidden). The decayed input is ``x̂ = m·x + (1−m)·γ_x·x_last`` — stale values
-    relax toward 0 (the empirical mean in scaled space). The hidden state is
-    decayed before the GRU update: ``ĥ = γ_h ⊙ h``. The GRU update reads
-    ``[x̂ ‖ m]`` so the network always knows which cells were observed.
+    hidden). The decayed input is ``x̂ = m·x + (1−m)·(γ_x·x_last + (1−γ_x)·x̄)``
+    — stale values relax toward a **trainable per-channel target** ``x̄``
+    (init 0 = the global corpus mean in z-space; the GRU-D paper's
+    trainable-mean variant). The hidden state is decayed before the GRU
+    update: ``ĥ = γ_h ⊙ h``. The GRU update reads ``[x̂ ‖ m]`` so the network
+    always knows which cells were observed.
     """
 
     input_size: int
@@ -96,6 +100,7 @@ class GRUDEncoderCell(_module_base()):  # type: ignore[misc]
     gru_cell: Any
     decay_input_weight: Any
     decay_input_bias: Any
+    decay_input_target: Any
     decay_hidden: Any
 
     def __init__(self, input_size: int, hidden_size: int) -> None:
@@ -106,12 +111,28 @@ class GRUDEncoderCell(_module_base()):  # type: ignore[misc]
         # GRU update consumes [x̂ ‖ mask] → 2F-wide input.
         self.gru_cell = nn.GRUCell(input_size * 2, hidden_size)
         # Diagonal per-channel input decay: γ_x = exp(−relu(w_x ⊙ δ + b_x)).
-        # Zero-init both so a freshly-observed cell (δ=0) passes through
-        # undecayed (γ_x = exp(−relu(0)) = 1) at the start of training.
-        self.decay_input_weight = nn.Parameter(torch.zeros(input_size))
+        # w is init small-POSITIVE, not zero: with w = b = 0 the
+        # pre-activation is identically 0 where PyTorch's ReLU has zero
+        # gradient, so ∂loss/∂w = ∂loss/∂b = 0 for every batch and the gate
+        # can never train — decay silently degenerates to permanent
+        # hold-last-observed (the models deployed through May 2026 did
+        # exactly that). Positive w gives every stale cell (δ > 0) a live
+        # gradient while keeping the fresh-cell identity
+        # γ_x(δ=0) = exp(−relu(b)) = 1 with b = 0.
+        self.decay_input_weight = nn.Parameter(torch.empty(input_size).uniform_(0.01, 0.1))
         self.decay_input_bias = nn.Parameter(torch.zeros(input_size))
+        # Decay target x̄: what a long-stale channel relaxes toward.
+        # Trainable per channel because engine signals are mode mixtures —
+        # the global z-space mean (0) blends idle/city/highway RPM into a
+        # value no real gap drifts toward. Init 0 keeps the classic
+        # decay-to-corpus-mean behavior at the start of training and exact
+        # state-dict compatibility with pre-target checkpoints (whose w = 0
+        # makes the target term inert anyway).
+        self.decay_input_target = nn.Parameter(torch.zeros(input_size))
         # Hidden-state decay projects δ (F) → hidden: γ_h = exp(−relu(W_h·δ+b_h)).
-        # Zero-init the bias so γ_h = 1 at δ=0 (no decay when nothing is stale).
+        # Zero-init the bias so γ_h = 1 at δ=0 (no decay when nothing is stale);
+        # the nn.Linear weight keeps its default nonzero init, which is why this
+        # half of the decay always trained even when the input gate was stuck.
         self.decay_hidden = nn.Linear(input_size, hidden_size)
         nn.init.zeros_(self.decay_hidden.bias)
 
@@ -145,9 +166,11 @@ class GRUDEncoderCell(_module_base()):  # type: ignore[misc]
         Returns ``(hidden_next, last_observed_next)``.
         """
         gamma_x = self.input_decay(delta)
-        # Decay the last-observed value toward 0 (the mean) for stale channels;
-        # keep the real value where observed.
-        x_hat = mask * value + (1.0 - mask) * (gamma_x * last_observed)
+        # Decay the last-observed value toward the trainable per-channel
+        # target for stale channels; keep the real value where observed.
+        x_hat = mask * value + (1.0 - mask) * (
+            gamma_x * last_observed + (1.0 - gamma_x) * self.decay_input_target
+        )
         gamma_h = self.hidden_decay(delta)
         decayed_hidden = gamma_h * hidden
         gru_input = _cat([x_hat, mask], dim=-1)

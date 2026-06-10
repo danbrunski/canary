@@ -105,7 +105,11 @@ def test_train_lstm_autoencoder_produces_manifest() -> None:
     assert manifest.model_version == "unit-lstm"
     assert manifest.created_at == "2026-05-12T12:00:00Z"
     assert manifest.input_windows == len(dataset)
-    assert manifest.train_windows + manifest.validation_windows == len(dataset)
+    # Leakage-aware split: single-session datasets drop a sequence_length
+    # gap of windows between train and validation, so the two no longer
+    # sum to the total — they must just both exist and not exceed it.
+    assert manifest.train_windows >= 1
+    assert manifest.train_windows + manifest.validation_windows <= len(dataset)
     assert manifest.validation_windows >= 1
     assert manifest.best_epoch in {loss.epoch for loss in manifest.history}
     assert manifest.best_train_loss >= 0
@@ -366,3 +370,36 @@ def test_train_lstm_autoencoder_calibrates_on_held_out_dataset_when_given() -> N
     # Calibration ran on the held-out dataset, not the training one.
     assert calibration.window_count == len(calib_ds)
     assert calibration.window_count != len(train_ds)
+
+
+def test_load_tolerates_pre_decay_target_checkpoints(tmp_path: Path) -> None:
+    """Checkpoints written before ``decay_input_target`` existed must still
+    load: their decay weights are zero (the dead-gate era), which makes the
+    target term inert, so the zeros init reproduces the old behavior. Any
+    other state-dict mismatch must still fail loudly."""
+    torch = _torch()
+    trained = train_lstm_autoencoder(
+        _dataset(),
+        _config(max_epochs=1),
+        trained_at="2026-05-12T12:00:00Z",
+        model_version="pre-target",
+    )
+    artifact = tmp_path / "lstm.pt"
+    trained.save(artifact)
+
+    # Rewrite the checkpoint as a pre-target artifact: drop the new key and
+    # zero the decay weights like the old init did.
+    payload = torch.load(artifact, map_location="cpu", weights_only=False)
+    del payload["state_dict"]["encoder_cell.decay_input_target"]
+    payload["state_dict"]["encoder_cell.decay_input_weight"].zero_()
+    torch.save(payload, artifact)
+
+    loaded = load_lstm_autoencoder_model(artifact)
+    assert float(loaded.model.encoder_cell.decay_input_target.abs().sum()) == 0.0
+
+    # A genuinely wrong state dict still fails.
+    payload = torch.load(artifact, map_location="cpu", weights_only=False)
+    del payload["state_dict"]["encoder_cell.decay_input_weight"]
+    torch.save(payload, artifact)
+    with pytest.raises(RuntimeError, match="state dict mismatch"):
+        load_lstm_autoencoder_model(artifact)

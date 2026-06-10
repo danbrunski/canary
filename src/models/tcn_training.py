@@ -341,6 +341,7 @@ def train_tcn_autoencoder(
         batch_size=config.batch_size,
         device=device,
         calibrated_at=created_at,
+        threshold_quantile=getattr(config, "threshold_quantile", None),
     )
 
 
@@ -352,6 +353,7 @@ def calibrate_tcn_thresholds(
     batch_size: int = 64,
     device: str = "cpu",
     calibrated_at: datetime | pd.Timestamp | str | None = None,
+    threshold_quantile: float | None = None,
 ) -> TrainedTCNAutoencoder:
     """Attach masked reconstruction-error thresholds to a trained bundle.
 
@@ -366,6 +368,7 @@ def calibrate_tcn_thresholds(
         batch_size=batch_size,
         device=device,
         calibrated_at=calibrated_at,
+        threshold_quantile=threshold_quantile,
     )
     manifest = replace(trained.manifest, thresholds=calibration.to_dict())
     return TrainedTCNAutoencoder(model=trained.model, manifest=manifest)

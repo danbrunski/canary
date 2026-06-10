@@ -23,6 +23,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from scripts.train_lstm import build_dataset
 from src.config import CanaryConfig
 from src.models.false_positive_benchmark import (
     FalsePositiveBenchmarkReport,
@@ -30,7 +31,7 @@ from src.models.false_positive_benchmark import (
 )
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
 from src.models.lstm_training import load_lstm_autoencoder_model
-from src.models.sequence_dataset import SequenceWindowDataset
+from src.preprocessing.normalization import ZScoreScaler
 
 
 def run_false_positive_benchmark(
@@ -43,16 +44,31 @@ def run_false_positive_benchmark(
     batch_size: int = 64,
     device: str = "cpu",
 ) -> FalsePositiveBenchmarkReport:
-    """Load a trained LSTM and benchmark its false-positive rate on the sessions."""
+    """Load a trained LSTM and benchmark its false-positive rate on the sessions.
+
+    Routes through the SAME pipeline the trainer uses (``build_dataset``:
+    bindings/DBC/DID decode → derived signals → deviation columns →
+    features) and re-applies the manifest's z-score scaler, so windows are
+    scored in the calibrated-threshold domain. The old path here skipped
+    decode + scaling entirely, which either crashed on the model's
+    ``decoded:*``/``dbc:*`` schema or scored raw OBD units against scaled
+    thresholds.
+    """
     if not session_dirs:
         raise ValueError("at least one held-out session directory is required")
     trained = load_lstm_autoencoder_model(model_path, device=device)
-    dataset = SequenceWindowDataset.from_sessions(
+    scaler = (
+        ZScoreScaler.from_dict(dict(trained.manifest.scaler))
+        if trained.manifest.scaler is not None
+        else None
+    )
+    dataset = build_dataset(
         [Path(path) for path in session_dirs],
         config,
         sequence_length=int(trained.manifest.schema["sequence_length"]),
-        stride=stride,
         feature_columns=trained.feature_columns,
+        stride=stride,
+        scaler=scaler,
     )
     return benchmark_false_positives(
         trained,

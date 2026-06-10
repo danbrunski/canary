@@ -83,7 +83,11 @@ def test_train_tcn_autoencoder_produces_manifest() -> None:
     assert manifest.model_type == "tcn_autoencoder"
     assert manifest.model_version == "unit-tcn"
     assert manifest.input_windows == len(dataset)
-    assert manifest.train_windows + manifest.validation_windows == len(dataset)
+    # Leakage-aware split: single-session datasets drop a sequence_length
+    # gap of windows between train and validation, so the two no longer
+    # sum to the total — they must just both exist and not exceed it.
+    assert manifest.train_windows >= 1
+    assert manifest.train_windows + manifest.validation_windows <= len(dataset)
     assert manifest.schema["feature_columns"] == ["rpm", "speed"]
     assert manifest.architecture["input_size"] == 2
     assert manifest.architecture["kernel_size"] == 2
