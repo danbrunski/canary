@@ -1,7 +1,7 @@
 {
   "artifact_format_version": 1,
   "complete_rows": 11072,
-  "created_at": "2026-05-25T15:32:40.822685Z",
+  "created_at": "2026-05-26T15:48:53.081692Z",
   "dropped_missing_feature_rows": 651,
   "hyperparams": {
     "calibration_holdout_fraction": 0.2,
@@ -13,7 +13,7 @@
   },
   "input_rows": 11723,
   "model_type": "isolation_forest",
-  "model_version": "isolation_forest_2026-05-25T153240.822685Z",
+  "model_version": "isolation_forest_2026-05-26T154853.081692Z",
   "modes": [
     {
       "achieved_flag_rate": 0.020512820512820513,

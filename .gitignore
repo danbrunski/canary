@@ -61,6 +61,9 @@ data/raw/
 data/cache/
 # Laptop training mirror: sessions rsync'd off the Pi by scripts/sync-train.sh.
 /sessions/
+# Laptop pull of the Pi's live session dirs (telemetry parquet + control/
+# classification json sidecars); large, never committed.
+/pi_sessions/
 # control-plane tokens, audit log, job ledger — never commit
 data/control/
 
