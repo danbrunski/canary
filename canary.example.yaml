@@ -237,6 +237,19 @@ dashboard:
   host: 0.0.0.0
   port: 8000
 
+# Multiple-vehicle profiles. When enabled (the default), the daemon reads the
+# VIN at startup (OBD-II Mode 09 PID 0x02) and scopes every vehicle-specific
+# path under <base>/<slug>/ so two vehicles never share a corpus or models.
+# An unknown VIN is auto-registered with a blank display name you set later in
+# the dashboard's Profiles panel. With no VIN available (disabled/virtual OBD)
+# the `vehicle:` block above is used as the default profile. Pass
+# `--profile <slug>` to force one (sim/replay). Defaults shown; block optional.
+# profiles:
+#   enabled: true
+#   registry_path: profiles.yaml        # VIN → profile index (a data file)
+#   auto_register: true
+#   vin_probe_timeout_seconds: 2.0
+
 # Optional. Defaults match the values shown; uncomment / edit for production.
 # daemon:
 #   anomalies_dir: data/anomalies

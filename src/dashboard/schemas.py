@@ -65,6 +65,13 @@ class FeedbackRequest(_ControlRequest):
     labeled_by: str | None = None
 
 
+class ProfileNameUpdateRequest(_ControlRequest):
+    """Set a vehicle profile's editable display name (blank is allowed — it
+    clears the name back to unset)."""
+
+    name: str = Field(..., max_length=255)
+
+
 class TuningUpdateRequest(_ControlRequest):
     """Replace the tuning config. ``version`` is auto-bumped."""
 

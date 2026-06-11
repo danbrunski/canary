@@ -30,6 +30,8 @@ import type {
   TuningConfig,
   TuningEstimate,
   TuningResponse,
+  VehicleProfile,
+  VehicleProfilesResponse,
   VersionResponse,
 } from "../types";
 import { controlJson, fetchJson, HttpError, jsonBody } from "./core";
@@ -383,6 +385,25 @@ export function revertTuning(
     method: "POST",
     body: jsonBody({ version }),
   });
+}
+
+export function getProfiles(
+  token: string,
+  signal?: AbortSignal,
+): Promise<VehicleProfilesResponse> {
+  return controlJson<VehicleProfilesResponse>("/control/profiles", token, { signal });
+}
+
+export function updateProfileName(
+  token: string,
+  slug: string,
+  name: string,
+): Promise<{ profile: VehicleProfile }> {
+  return controlJson<{ profile: VehicleProfile }>(
+    `/control/profiles/${encodeURIComponent(slug)}/name`,
+    token,
+    { method: "POST", body: jsonBody({ name }) },
+  );
 }
 
 export function getFeedback(

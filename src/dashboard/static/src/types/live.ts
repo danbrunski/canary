@@ -78,6 +78,8 @@ export interface StatusResponse {
   trip?: TripStats | null;
   /** Active sequence-detector backbone + what's available to switch to (9.6). */
   sequence_detector?: SequenceDetectorStatus | null;
+  /** Active vehicle profile {slug, name, vin}; null on a non-scoped daemon. */
+  profile?: { slug: string; name: string; vin: string | null } | null;
 }
 
 /** `/status.sequence_detector` (and `GET/POST /control/sequence-detector`).

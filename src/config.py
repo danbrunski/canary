@@ -356,6 +356,11 @@ class DaemonConfig(_Strict):
     #: daemon restarts so the System page shows lifetime "miles / time driven
     #: with the unit plugged in" rather than per-process totals.
     trip_state: Path = Path("data/control/trip_odometer.json")
+    #: Behavior-model surfaces (hand-edited / refit-written). A config field
+    #: rather than a hardcoded path so it can be scoped per vehicle profile
+    #: (see ``src/profiles.py``). Cwd-relative like the sibling paths; the
+    #: systemd unit ``cd``s to the clone so the default resolves there.
+    behavior_models: Path = Path("data/behavior_models.yaml")
     isolation_forest_artifact: str = "isolation_forest/model.joblib"
     lstm_artifact: str = "lstm_autoencoder/model.pt"
     tcn_artifact: str = "tcn_autoencoder/model.pt"
@@ -363,6 +368,28 @@ class DaemonConfig(_Strict):
     retention_sweep_seconds: float = 3600.0
     broadcaster_queue_size: int = 100
     control_token_env: str = "CANARY_CONTROL_TOKEN"
+
+
+class ProfilesConfig(_Strict):
+    """Multi-vehicle profile resolution (see ``src/profiles.py``).
+
+    When the Pi is plugged into a vehicle, the daemon reads the VIN
+    (OBD-II Mode 09 PID 0x02) at startup and resolves it to a profile slug,
+    then scopes every vehicle-specific path under ``<base>/<slug>/`` so two
+    vehicles never share a training corpus or model set. All fields default so
+    configs predating profiles keep loading; with the probe disabled or no VIN
+    available the ``vehicle:`` block is used as the fallback/default profile.
+    """
+
+    enabled: bool = True
+    #: VIN → profile registry (a daemon-managed *data* file, not canary.yaml).
+    #: Not scoped per vehicle — it is the index that maps VIN to slug.
+    registry_path: Path = Path("profiles.yaml")
+    #: Persist a freshly-seen VIN to the registry automatically (with a blank
+    #: display name for the operator to fill in via the dashboard).
+    auto_register: bool = True
+    #: How long the startup VIN probe waits for the ECU's Mode 09 response.
+    vin_probe_timeout_seconds: float = 2.0
 
 
 class CanaryConfig(_Strict):
@@ -374,6 +401,7 @@ class CanaryConfig(_Strict):
     dashboard: DashboardConfig
     daemon: DaemonConfig = DaemonConfig()
     alerts: AlertsConfig = AlertsConfig()
+    profiles: ProfilesConfig = ProfilesConfig()
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:

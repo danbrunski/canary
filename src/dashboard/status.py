@@ -171,6 +171,10 @@ class StatusSnapshot:
     #: Cumulative trip odometer (distance + moving time) from the GPS stream,
     #: or ``None`` when no GPS is configured.
     trip: dict[str, Any] | None = None
+    #: Active vehicle profile ``{slug, name, vin}`` (multi-vehicle support), or
+    #: ``None`` when the daemon isn't running on a profile-scoped config (bare
+    #: app / tests). ``name`` is the operator-editable display label.
+    profile: dict[str, str | None] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -185,6 +189,7 @@ class StatusSnapshot:
             "vehicle_state": (None if self.vehicle_state is None else self.vehicle_state.to_dict()),
             "gps": self.gps,
             "trip": self.trip,
+            "profile": self.profile,
         }
 
 
@@ -298,6 +303,27 @@ def _derive_vehicle_state(
     )
 
 
+def _active_profile(config: CanaryConfig) -> dict[str, str | None] | None:
+    """The active vehicle profile ``{slug, name, vin}``.
+
+    The slug is recoverable as the scoped storage path's final component (see
+    ``src.profiles.scope_config``); name/vin come from the registry, falling
+    back to the ``vehicle:`` block's derived label for the default profile that
+    may not be registered yet.
+    """
+    slug = config.collection.storage_path.name
+    fallback_name = f"{config.vehicle.year} {config.vehicle.make} {config.vehicle.model}".strip()
+    try:
+        from src.profiles import load_registry
+
+        for profile in load_registry(config.profiles.registry_path):
+            if profile.slug == slug:
+                return {"slug": profile.slug, "name": profile.name, "vin": profile.vin}
+    except Exception:  # noqa: BLE001 — status must never fail on a bad registry
+        return None
+    return {"slug": slug, "name": fallback_name, "vin": config.vehicle.vin or None}
+
+
 def build_status(
     config: CanaryConfig,
     *,
@@ -336,6 +362,7 @@ def build_status(
         vehicle_state=_derive_vehicle_state(storage, replay_controller=replay_controller),
         gps=gps_tracker.gps_status() if gps_tracker is not None else None,
         trip=gps_tracker.trip_status() if gps_tracker is not None else None,
+        profile=_active_profile(config),
     )
 
 

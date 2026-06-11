@@ -39,6 +39,7 @@ async def serve_in_background(
         components.config,
         anomalies_dir=components.config.daemon.anomalies_dir,
         models_dir=components.config.daemon.models_dir,
+        behavior_models_path=components.config.daemon.behavior_models,
         telemetry_broadcaster=components.telemetry_broadcaster,
         anomalies_broadcaster=components.anomalies_broadcaster,
         scores_broadcaster=components.scores_broadcaster,

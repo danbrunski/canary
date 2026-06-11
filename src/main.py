@@ -24,6 +24,7 @@ from src.collection.queueing import QueueDepthMonitor
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig
 from src.log import configure_logging
+from src.profiles import resolve_active_profile, scope_config
 from src.storage.monitor import warn_if_storage_low
 from src.storage.parquet_writer import ParquetTelemetryWriter, delete_expired_sessions
 from src.telemetry import TelemetryRecord
@@ -54,6 +55,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Run only the collection loop (no dashboard, no model managers, "
             "no broadcasters). Useful when running `record.py`-style headless "
             "captures or when the dashboard port is occupied."
+        ),
+    )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help=(
+            "Force a vehicle profile slug (skips the startup VIN probe). Use for "
+            "sim/replay or to target a specific vehicle's models. Default: resolve "
+            "the profile by reading the VIN at startup."
         ),
     )
     parser.add_argument(
@@ -289,6 +300,19 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
     configure_logging(args.log_level)
     config = CanaryConfig.from_yaml(args.config)
+    if config.profiles.enabled:
+        # Identify the vehicle (by VIN) and scope every vehicle-specific path
+        # under its profile slug, so two vehicles never share a corpus/models.
+        profile = resolve_active_profile(config, override_slug=args.profile)
+        config = scope_config(config, profile)
+        log.info(
+            "active vehicle profile",
+            extra={
+                "slug": profile.slug,
+                "name": profile.name or None,
+                "vin": profile.vin or None,
+            },
+        )
     asyncio.run(run(config, full_daemon=not args.collection_only))
 
 

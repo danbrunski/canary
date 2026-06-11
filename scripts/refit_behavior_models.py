@@ -36,7 +36,6 @@ from src.analysis.refit import Recipe, default_recipes, refit_all
 from src.analysis.session_classifier import read_classification
 from src.config import CanaryConfig
 from src.decode.behavior_models import (
-    DEFAULT_BEHAVIOR_MODELS_PATH,
     dump_behavior_models,
     load_behavior_models,
     unknown_operating_modes,
@@ -44,6 +43,7 @@ from src.decode.behavior_models import (
 from src.log import configure_logging
 from src.preprocessing import discover_sessions
 from src.preprocessing.feature_pipeline import build_feature_frame
+from src.profiles import resolve_profile_for_tooling, scope_config
 
 log = logging.getLogger(__name__)
 
@@ -66,8 +66,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--sessions-root",
         type=Path,
-        default=Path("data/sessions"),
-        help="Where to discover sessions when none are given explicitly.",
+        default=None,
+        help=(
+            "Where to discover sessions when none are given explicitly. "
+            "Default: the (profile-scoped) collection.storage_path from --config."
+        ),
+    )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help=(
+            "Vehicle profile slug to scope sessions/output to (see profiles.yaml). "
+            "Default: the vehicle: block's profile. No VIN probe is performed."
+        ),
     )
     parser.add_argument(
         "--days",
@@ -99,8 +111,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--out",
         type=Path,
-        default=DEFAULT_BEHAVIOR_MODELS_PATH,
-        help=f"Output YAML. Default {DEFAULT_BEHAVIOR_MODELS_PATH}.",
+        default=None,
+        help="Output YAML. Default: the (profile-scoped) daemon.behavior_models from --config.",
     )
     parser.add_argument(
         "--recipe",
@@ -161,14 +173,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(args.log_level)
     config = CanaryConfig.from_yaml(args.config)
 
+    # Scope sessions/output to a vehicle profile so a refit reads and writes the
+    # right vehicle's tree. Offline tool: no VIN probe — --profile or default.
+    scoped = (
+        scope_config(config, resolve_profile_for_tooling(config, args.profile))
+        if config.profiles.enabled
+        else config
+    )
+    sessions_root = args.sessions_root or scoped.collection.storage_path
+    out: Path = args.out or scoped.daemon.behavior_models
+
     sessions: list[Path] = list(args.sessions)
     if not sessions:
-        sessions = discover_sessions(args.sessions_root)
+        sessions = discover_sessions(sessions_root)
         if not args.use_all_sessions:
             sessions = _filter_sessions_by_age(sessions, args.days, datetime.now(UTC))
     if not sessions:
         print(
-            f"error: no sessions found under {args.sessions_root} within --days {args.days}. "
+            f"error: no sessions found under {sessions_root} within --days {args.days}. "
             "Pass session paths directly or use --all.",
             file=sys.stderr,
         )
@@ -181,19 +203,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         extra={
             "sessions": len(sessions),
             "recipes": [r.name for r in recipes],
-            "out": str(args.out),
+            "out": str(out),
             "dry_run": args.dry_run,
         },
     )
 
-    existing = load_behavior_models(args.out) if args.out.exists() else None
+    existing = load_behavior_models(out) if out.exists() else None
     if existing is not None:
         log.info("loaded prior models", extra={"count": len(existing.models)})
 
     # The feature pipeline gives the wide, resampled, segmented frame the
     # fitters expect — same path the IF / LSTM trainers consume.
     frame = build_feature_frame(
-        sessions, config, bindings_path=args.bindings, behavior_models_path=args.out
+        sessions, config, bindings_path=args.bindings, behavior_models_path=out
     )
     log.info("built feature frame", extra={"rows": len(frame), "columns": len(frame.columns)})
 
@@ -229,7 +251,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # fit from this frame (and won't evaluate on a daemon running the same
     # mode set) — usually a sign the refit ran with canary.yaml where
     # canary.train.yaml was intended.
-    mismatched = unknown_operating_modes(models, config.preprocessing.operating_modes)
+    mismatched = unknown_operating_modes(models, scoped.preprocessing.operating_modes)
     if mismatched:
         log.warning(
             "catalog models gated on operating modes missing from %s — "
@@ -243,11 +265,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         log.info("dry-run; not writing")
         return 0
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = args.out.with_suffix(args.out.suffix + ".tmp")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(out.suffix + ".tmp")
     dump_behavior_models(models, tmp)
-    tmp.replace(args.out)
-    log.info("wrote behavior models", extra={"path": str(args.out), "count": len(models.models)})
+    tmp.replace(out)
+    log.info("wrote behavior models", extra={"path": str(out), "count": len(models.models)})
     return 0
 
 

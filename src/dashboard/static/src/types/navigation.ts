@@ -26,7 +26,8 @@ export type WorkbenchItem =
   | "data-health"
   | "data-export"
   | "control-main"
-  | "control-test";
+  | "control-test"
+  | "control-profiles";
 
 export interface NavItemDef {
   id: WorkbenchItem;

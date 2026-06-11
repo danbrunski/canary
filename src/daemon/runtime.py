@@ -11,7 +11,6 @@ from typing import Any
 from src.config import CanaryConfig
 from src.control.capture import CaptureController
 from src.control.replay_control import ReplayController
-from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
@@ -144,7 +143,7 @@ async def run_daemon(
         # operator can ssh in and ``systemctl restart canary``).
         behavior_models_task = asyncio.create_task(
             poll_behavior_models(
-                DEFAULT_BEHAVIOR_MODELS_PATH,
+                config.daemon.behavior_models,
                 live_source,
                 stop_event,
                 interval_seconds=config.daemon.model_poll_seconds,

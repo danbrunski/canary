@@ -23,7 +23,6 @@ from src.dashboard.broadcast import Broadcaster
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.decode.behavior_decoder import deviation
 from src.decode.behavior_models import (
-    DEFAULT_BEHAVIOR_MODELS_PATH,
     BehaviorModel1D,
     load_behavior_models,
     unknown_operating_modes,
@@ -797,7 +796,9 @@ def build_live_feature_source(
     # Repo-root-anchored (see api.DEFAULT_BINDINGS_PATH) so live CAN decode
     # finds bindings.yaml regardless of the daemon's launch cwd.
     bindings_path = bindings_path or DEFAULT_BINDINGS_PATH
-    behavior_models_path = behavior_models_path or DEFAULT_BEHAVIOR_MODELS_PATH
+    # Scoped per vehicle profile (config.daemon.behavior_models is rewritten to
+    # <base>/<slug>/behavior_models.yaml by src.profiles.scope_config).
+    behavior_models_path = behavior_models_path or components.config.daemon.behavior_models
     bindings = load_bindings(bindings_path) if bindings_path.exists() else None
     behavior_models = (
         load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None

@@ -57,6 +57,7 @@ from src.dashboard.schemas import (
     FeedbackRequest,
     JobSubmitRequest,
     ModelUploadRequest,
+    ProfileNameUpdateRequest,
     ReplayStartRequest,
     SequenceDetectorRequest,
     SessionMetadataRequest,
@@ -69,6 +70,7 @@ from src.dashboard.status import _resolve_latest_session
 from src.dashboard.version import _canary_version, _git_sha
 from src.models.training_ledger import TrainingLedger
 from src.preprocessing.loader import discover_sessions
+from src.profiles import load_registry, update_profile_name
 
 
 def register_control_routes(
@@ -263,6 +265,34 @@ def register_control_routes(
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"session": summarize_session(session).to_dict()}
+
+    @app.get("/control/profiles")
+    def get_control_profiles(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        # The active profile's slug is the scoped storage path's final component
+        # (see src.profiles.scope_config).
+        active_slug = config.collection.storage_path.name
+        profiles = load_registry(config.profiles.registry_path)
+        return {
+            "profiles": [profile.to_dict() for profile in profiles],
+            "active_slug": active_slug,
+            "count": len(profiles),
+        }
+
+    @app.post("/control/profiles/{slug}/name")
+    def post_control_profile_name(
+        slug: str,
+        request: ProfileNameUpdateRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            profile = update_profile_name(config.profiles.registry_path, slug, request.name)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"no profile with slug {slug!r}") from exc
+        payload = {"profile": profile.to_dict()}
+        publish_control_event("profile.rename", "ok", payload)
+        return payload
 
     @app.post("/control/sessions/{session_id}/metadata")
     def post_control_session_metadata(
