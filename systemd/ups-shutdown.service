@@ -19,6 +19,12 @@ ExecStartPre=-/sbin/modprobe i2c-dev
 Environment=UPS_PLD_GPIO=6
 Environment=UPS_SHUTDOWN_DELAY=30
 Environment=UPS_I2C_ADDR=0x36
+# Only power off while the battery is genuinely discharging, so bench-top USB-C
+# power (PLD reads "no input" but the pack is idle) never trips a shutdown.
+Environment=UPS_REQUIRE_DISCHARGE=1
+Environment=UPS_MIN_DISCHARGE_RATE=6
+Environment=UPS_CRITICAL_SOC=15
+Environment=UPS_DISCHARGE_WINDOW=20
 ExecStart=/usr/bin/python3 ${CANARY_HOME}/scripts/ups_shutdown_watch.py
 Restart=on-failure
 RestartSec=5

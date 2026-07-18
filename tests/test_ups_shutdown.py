@@ -60,3 +60,92 @@ def test_seconds_lost_tracks_elapsed() -> None:
 def test_presence_guard_disabled_with_zero_addr() -> None:
     # addr == 0 disables the i2c guard (always "present").
     assert ups.ups_present(bus=1, addr=0) is True
+
+
+# --------------------------------------------------------------------------
+# Discharge gate: bench (USB-C, battery idle) vs. key-off (battery draining)
+# --------------------------------------------------------------------------
+def test_discharge_estimator_needs_min_span() -> None:
+    e = ups.DischargeEstimator(window_s=20.0, min_span_s=5.0)
+    e.update(soc=80.0, now=0.0)
+    assert e.rate_pct_per_hour() is None  # single sample
+    e.update(soc=79.9, now=2.0)
+    assert e.rate_pct_per_hour() is None  # span < min_span_s
+
+
+def test_discharge_estimator_reports_negative_rate_on_drain() -> None:
+    e = ups.DischargeEstimator(window_s=60.0, min_span_s=5.0)
+    # ~1% SoC lost over 60s => -60 %/hr (a Pi 5 on a small cell).
+    e.update(soc=80.0, now=0.0)
+    e.update(soc=79.0, now=60.0)
+    rate = e.rate_pct_per_hour()
+    assert rate is not None and rate == -60.0
+
+
+def test_bench_flat_soc_is_not_on_battery() -> None:
+    """USB-C on the bench: SoC holds flat -> not discharging -> hold."""
+    e = ups.DischargeEstimator(window_s=30.0)
+    for t in range(0, 40, 2):
+        e.update(soc=97.0, now=float(t))
+    state = ups.on_battery(e.rate_pct_per_hour(), 97.0, min_discharge_rate=6.0, critical_soc=15.0)
+    assert state is False
+
+
+def test_keyoff_drain_is_on_battery() -> None:
+    e = ups.DischargeEstimator(window_s=30.0)
+    # Drop ~0.5%/10s = 180 %/hr, well past the 6 %/hr floor.
+    e.update(soc=90.0, now=0.0)
+    e.update(soc=89.5, now=10.0)
+    state = ups.on_battery(e.rate_pct_per_hour(), 89.5, min_discharge_rate=6.0, critical_soc=15.0)
+    assert state is True
+
+
+def test_critical_soc_forces_on_battery_even_without_rate() -> None:
+    # No rate yet, but SoC already critically low while input is lost.
+    state = ups.on_battery(None, 12.0, min_discharge_rate=6.0, critical_soc=15.0)
+    assert state is True
+
+
+def test_on_battery_unknown_without_gauge_data() -> None:
+    state = ups.on_battery(None, None, min_discharge_rate=6.0, critical_soc=15.0)
+    assert state is None
+
+
+def test_trickle_below_floor_is_not_on_battery() -> None:
+    # Slow self-discharge (~2 %/hr) must not look like a real drain.
+    state = ups.on_battery(-2.0, 88.0, min_discharge_rate=6.0, critical_soc=15.0)
+    assert state is False
+
+
+def test_power_truly_lost_requires_discharge_when_gated() -> None:
+    # PLD high but battery idle (bench) -> not actionable.
+    assert ups.power_truly_lost(True, False, require_discharge=True) is False
+    # PLD high and draining (key-off) -> actionable.
+    assert ups.power_truly_lost(True, True, require_discharge=True) is True
+    # Unknown battery state holds when gated.
+    assert ups.power_truly_lost(True, None, require_discharge=True) is False
+    # Input present -> never actionable regardless of battery.
+    assert ups.power_truly_lost(False, True, require_discharge=True) is False
+
+
+def test_power_truly_lost_legacy_pld_only() -> None:
+    # With the gate off, PLD alone decides (old behavior).
+    assert ups.power_truly_lost(True, None, require_discharge=False) is True
+    assert ups.power_truly_lost(False, True, require_discharge=False) is False
+
+
+def test_bench_never_counts_down_end_to_end() -> None:
+    """Fused pipeline: PLD high + flat SoC must never reach shutdown."""
+    decider = ups.ShutdownDecider(delay_s=30.0)
+    e = ups.DischargeEstimator(window_s=30.0)
+    fired = False
+    for t in range(0, 300, 2):  # 5 minutes on the bench
+        e.update(soc=96.0, now=float(t))
+        state = ups.on_battery(
+            e.rate_pct_per_hour(), 96.0, min_discharge_rate=6.0, critical_soc=15.0
+        )
+        lost = ups.power_truly_lost(True, state, require_discharge=True)
+        if decider.update(power_lost=lost, now=float(t)):
+            fired = True
+    assert fired is False
+    assert decider.counting_down is False
