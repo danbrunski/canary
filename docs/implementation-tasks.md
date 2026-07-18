@@ -1180,6 +1180,19 @@ voltage sag in hardware. The watchdog re-arms when the bus returns.
   throttle flags on the dashboard System page alongside the host vitals
   (CPU temp/usage/memory). (Effort: M)
 
+  - **Update 2026-07-18 — topology changed + power-loss watchdog landed.**
+    The UPS (X1202) is wired to a **switched** cigarette-lighter feed (6–18 V
+    DC5521), *not* constant 12 V — so key-on auto-powers the Pi, the battery
+    rides cranking, and key-off should trigger a delayed shutdown. Implemented
+    the independent watchdog: `scripts/ups_shutdown_watch.py` +
+    `systemd/ups-shutdown.service` watch the X1202 power-loss line (GPIO6:
+    LOW=good, HIGH=battery), debounce `UPS_SHUTDOWN_DELAY` (30 s, so cranking
+    dips are ignored), then `systemctl poweroff`. Armed only when the fuel
+    gauge answers at i²c 0x36 (bench-safe); `i2c-dev` autoloaded via
+    `systemd/canary-modules.conf`. Still TODO: read battery **SOC** for a
+    low-battery trigger (OR'd in), surface UPS SOC on the dashboard System
+    page, and fold the topology note into `docs/pi-setup.md`.
+
 - [ ] **10.6 — In-vehicle validation: key-off → bus-sleep timeline (P1,
   truck task).** Before trusting the predicate, capture the actual Xterra
   timeline: with the daemon running, log `vehicle_state` + OBD/CAN

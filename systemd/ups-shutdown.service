@@ -1,0 +1,27 @@
+[Unit]
+Description=CANary UPS (X1202) power-loss auto-shutdown watchdog
+Documentation=https://wiki.geekworm.com/X1202
+# Independent safety watchdog: deliberately NOT After/Requires canary.service,
+# so it still powers the Pi down cleanly if the daemon is hung or dead.
+After=multi-user.target
+# The watchdog self-disarms if the UPS fuel gauge is absent; the only hard
+# requirement is the GPIO chardev.
+ConditionPathExists=/dev/gpiochip0
+
+[Service]
+Type=simple
+# Runs as root: needs to read the GPIO chardev and to power the system off.
+EnvironmentFile=/etc/canary/canary.env
+# dtparam=i2c_arm=on enables the bus, but /dev/i2c-1 only appears once i2c-dev
+# is loaded; ensure it so the UPS-present guard (fuel gauge at 0x36) can arm.
+ExecStartPre=-/sbin/modprobe i2c-dev
+# Tunables (see scripts/ups_shutdown_watch.py header for the full list):
+Environment=UPS_PLD_GPIO=6
+Environment=UPS_SHUTDOWN_DELAY=30
+Environment=UPS_I2C_ADDR=0x36
+ExecStart=/usr/bin/python3 ${CANARY_HOME}/scripts/ups_shutdown_watch.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -2,7 +2,8 @@
 Description=Bring up SocketCAN can0 for CANary capture
 # Run before the canary daemon so the link exists when it opens the bus.
 Before=canary.service
-# can0 is a USB CAN device; (re)appears as a net device.
+# can0 is the Waveshare 2-CH CAN HAT (MCP2515, SPI); appears as a net device
+# once the mcp251x driver probes at boot.
 BindsTo=sys-subsystem-net-devices-can0.device
 After=sys-subsystem-net-devices-can0.device
 
@@ -11,13 +12,12 @@ Type=oneshot
 RemainAfterExit=yes
 Environment=CAN_IFACE=can0
 Environment=CAN_BITRATE=500000
-# No `restart-ms`: the Canable runs gs_usb/candleLight firmware, whose driver
-# implements no bus-off restart (do_set_mode), so the kernel rejects
-# IFLA_CAN_RESTART_MS ("Device doesn't support restart from Bus Off") and the
-# whole `type can` call errors. Bus-off and USB re-enumeration recovery is
-# handled at the application layer by the recorder's ReconnectPolicy
-# (src/collection/can_collector.py). See docs/canable-firmware.md.
-ExecStart=/sbin/ip link set ${CAN_IFACE} type can bitrate ${CAN_BITRATE}
+# `restart-ms 100` = kernel auto-recovers the controller from CAN bus-off.
+# The mcp251x (MCP2515) driver implements do_set_mode, so unlike the old
+# gs_usb Canable it accepts IFLA_CAN_RESTART_MS. This is the link-layer
+# companion to the recorder's app-level ReconnectPolicy
+# (src/collection/can_collector.py).
+ExecStart=/sbin/ip link set ${CAN_IFACE} type can bitrate ${CAN_BITRATE} restart-ms 100
 ExecStart=/sbin/ip link set ${CAN_IFACE} up
 ExecStop=/sbin/ip link set ${CAN_IFACE} down
 # Don't fail the unit if the device is gone at stop time.

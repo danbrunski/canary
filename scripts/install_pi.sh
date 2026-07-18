@@ -86,6 +86,15 @@ chmod 0640 "${CANARY_ENV}"
 install -m 0644 "${CANARY_HOME}/systemd/canary.service" "${CANARY_SERVICE}"
 install -m 0644 "${CANARY_HOME}/systemd/canary-mcp.service" \
   "$(dirname "${CANARY_SERVICE}")/canary-mcp.service"
+# UPS power-loss auto-shutdown watchdog (Geekworm X1202). Independent of the
+# canary daemon; self-disarms when no UPS is present. Runs on system python3
+# (uses lgpio), not the venv.
+install -m 0644 "${CANARY_HOME}/systemd/ups-shutdown.service" \
+  "$(dirname "${CANARY_SERVICE}")/ups-shutdown.service"
+# Load i2c-dev at boot so /dev/i2c-1 (X1202 fuel gauge at 0x36) exists.
+install -m 0644 "${CANARY_HOME}/systemd/canary-modules.conf" \
+  /etc/modules-load.d/canary.conf
+modprobe i2c-dev 2>/dev/null || true
 
 # Let the canary user restart the services without a password, so model/code
 # deploys (and the MCP control plane) can roll the daemon without an interactive
@@ -112,6 +121,7 @@ runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
 systemctl daemon-reload
 systemctl enable canary.service
 systemctl enable canary-mcp.service
+systemctl enable ups-shutdown.service
 
 cat <<EOF
 CANary Pi install complete.
