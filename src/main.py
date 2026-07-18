@@ -309,7 +309,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "active vehicle profile",
             extra={
                 "slug": profile.slug,
-                "name": profile.name or None,
+                "profile_name": profile.name or None,
                 "vin": profile.vin or None,
             },
         )

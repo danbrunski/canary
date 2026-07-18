@@ -89,7 +89,7 @@ def fit_grid_binned_mean(
     if len(x) == 0:
         log.warning(
             "no in-range samples for 2D fit",
-            extra={"name": name, "x_column": x_column, "y_column": y_column},
+            extra={"surface_name": name, "x_column": x_column, "y_column": y_column},
         )
 
     x_bins = _digitize_into_bins(x, x_edges_arr)
