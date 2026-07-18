@@ -1,0 +1,5 @@
+# Model manifests are generated training metadata. Keep them tracked (the
+# daemon + dashboard read them at runtime and they're small), but mark them
+# generated so a retrain doesn't flood `git diff` / GitHub with thousands of
+# lines. Run `git diff --text -- <file>` when you actually want to see changes.
+models/**/*.manifest.json linguist-generated=true -diff

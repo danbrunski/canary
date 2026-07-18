@@ -1,0 +1,16 @@
+schema_version: 1
+profiles:
+- slug: nissan-xterra-2008
+  vin: ''
+  name: 2008 Nissan Xterra
+  make: Nissan
+  model: Xterra
+  year: 2008
+  parameters:
+    mass_kg: 1900.0
+    fuel_type: gasoline
+    displacement_l: 4.0
+    volumetric_efficiency: 0.85
+    drivetrain_loss_fraction: 0.15
+    thermal_efficiency: 0.3
+    tire_diameter_m: null
