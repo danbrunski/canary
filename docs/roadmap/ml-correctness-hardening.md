@@ -104,11 +104,18 @@ drops, and inference never consults vehicle state.
   `EmitterCounters.skipped_vehicle_state` surfaced at `/status` (commit
   `41127f1`). No koeo model exists yet, so `ignition_only` stays gated
   out with the rest.
-- [ ] **1.6 — Retrain + verify.** Phase 1 changes the training
+- [~] **1.6 — Retrain + verify.** Phase 1 changes the training
   distribution (rows that used to be ffilled/kept are now NaN/dropped).
   Retrain IF + sequence detector, replay a known-good session
   end-to-end, and compare event diff (`replay_window` `_diff_events`)
-  before deploying.
+  before deploying. — laptop half landed: smoke retrain (12 sessions,
+  reduced epochs) + LSTM replay diff against a real held-out session;
+  findings + two pre-existing tooling bugs surfaced (not fixed, deferred
+  to Q3) in `data/analyses/ml-hardening-1.6-retrain-replay-diff-2026-07-19.md`
+  (commit `2a3f8ae`). **blocked-overnight**: the IF-side replay diff
+  (needs Q3's `scripts/replay.py`/`build_feature_frame` CAN-decode
+  parity fix) and the actual Pi deploy (needs the operator's truck +
+  `scp` + daemon restart) are both out of scope for this run.
 
 ## Phase 2 — Missing-channel handling + IF hardening (T1/T2)
 

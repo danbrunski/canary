@@ -6,3 +6,5 @@ ml-correctness-hardening.md 1.1+1.2 — done — bounded ffill + gap flags for s
 ml-correctness-hardening.md 1.3 — done — segmenter treats gap-flagged coolant as absent for mode rules (commit e0c90ea)
 ml-correctness-hardening.md 1.4 — done — LiveFeatureSource.tick() returns None on fully-stale + per-channel bounded ffill parity with offline resampler (commit f495cd2)
 ml-correctness-hardening.md 1.5 — done — IF/LSTM scoring gated on vehicle_state in {engine_running, replay}; behavior overlay stays ungated; skipped_vehicle_state counter added (commit 41127f1)
+ml-correctness-hardening.md 1.6 — laptop half done, blocked-overnight (IF replay diff + Pi deploy) — smoke retrain + LSTM replay diff, report + 2 pre-existing tooling bugs surfaced for Q3 (commit 2a3f8ae)
+OVERNIGHT-QUEUE.md Q2 — done — ml-correctness-hardening.md Phase 1 (1.1-1.6) complete or annotated blocked-overnight

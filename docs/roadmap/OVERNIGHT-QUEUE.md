@@ -44,10 +44,11 @@ other session (`mcp-and-power-hardening.md` — never touch).
   `_numeric_value_columns` + shared resample/segment prefix; shared
   reconnect loop with GPS fail-fast). Do these before feature work
   touches the same files. *(1.1 and 1.2 come later — see Q10, Q13.)*
-- [ ] **Q2 — ml-correctness-hardening.md Phase 1** (stale-data
+- [x] **Q2 — ml-correctness-hardening.md Phase 1** (stale-data
   visibility, live parity, vehicle-state gating). Task 1.6: laptop
   retrain + offline replay diff only; the Pi deploy half is
-  blocked-overnight.
+  blocked-overnight. — 1.1-1.5 landed; 1.6 laptop half landed
+  (blocked-overnight: IF-side replay diff + Pi deploy).
 - [ ] **Q3 — ml-correctness-hardening.md Phase 8 + eval-longitudinal
   Phase 2** (eval realism + the fault-injection benchmark, built on
   Q2's corrected pipeline). Includes the 2.1/2.2 parity pre-flight
