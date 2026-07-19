@@ -31,7 +31,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -49,6 +49,17 @@ from src.preprocessing.segmenter import MODE_COLUMN
 #: Default ``k`` multipliers swept by the benchmark. The calibrated ``k`` from
 #: the manifest is always merged in so the as-shipped point is visible.
 DEFAULT_K_GRID: tuple[float, ...] = (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0)
+
+#: Default quantile grid swept when the manifest was calibrated via
+#: ``threshold_quantile`` (8.3). Limited to the four quantiles
+#: ``ReconstructionErrorDistribution`` actually persists — the raw training
+#: error array isn't kept in the manifest, so these are the only points whose
+#: threshold value we can recover without re-running calibration.
+DEFAULT_QUANTILE_GRID: tuple[float, ...] = (0.5, 0.9, 0.95, 0.99)
+
+#: Quantile fraction -> ``ReconstructionErrorDistribution`` field holding
+#: that quantile's value, as persisted in the manifest.
+_NAMED_QUANTILE_FIELDS: dict[float, str] = {0.5: "p50", 0.9: "p90", 0.95: "p95", 0.99: "p99"}
 
 #: v1 done-definition budget: at most one alert per hour on a clean drive.
 V1_ALERTS_PER_HOUR_BUDGET = 1.0
@@ -98,7 +109,13 @@ class SessionFalsePositiveSummary:
 
 @dataclass(frozen=True)
 class KSweepPoint:
-    """FPR and alert rate at one candidate ``k`` (threshold = mean + k * std)."""
+    """FPR and alert rate at one candidate threshold.
+
+    ``k`` is a σ multiplier (``threshold = mean + k * std``) when
+    ``FalsePositiveBenchmarkReport.threshold_provenance == "k_sigma"``, or a
+    quantile fraction (0.0-1.0) when it's ``"quantile"`` (8.3) — check the
+    parent report's ``threshold_provenance`` before interpreting this field.
+    """
 
     k: float
     global_threshold: float
@@ -124,6 +141,14 @@ class FalsePositiveBenchmarkReport:
 
     model_version: str
     threshold_k: float
+    #: Whether the manifest's *calibrated* threshold (and therefore
+    #: ``k_sweep``'s parameterization — 8.3) came from ``mean + k·σ`` or
+    #: from a quantile of the training error distribution
+    #: (``threshold_quantile``). When ``"quantile"``, each ``k_sweep`` point's
+    #: ``k`` field holds the swept quantile fraction (e.g. 0.95), not a σ
+    #: multiplier — sweeping k·σ candidates against a quantile-calibrated
+    #: production threshold compares apples to oranges.
+    threshold_provenance: Literal["k_sigma", "quantile"]
     evaluated_sessions: tuple[str, ...]
     window_count: int
     sequence_length: int
@@ -145,6 +170,7 @@ class FalsePositiveBenchmarkReport:
         return {
             "model_version": self.model_version,
             "threshold_k": self.threshold_k,
+            "threshold_provenance": self.threshold_provenance,
             "evaluated_sessions": list(self.evaluated_sessions),
             "window_count": self.window_count,
             "sequence_length": self.sequence_length,
@@ -191,22 +217,56 @@ def _window_modes(dataset: SequenceWindowDataset) -> list[str | None]:
     return resolved
 
 
+def _quantile_band(
+    distribution: ReconstructionErrorDistribution,
+    quantile: float,
+    calibrated_quantile: float | None,
+) -> float:
+    """A distribution's threshold value at ``quantile``.
+
+    The manifest only persists four named quantiles (p50/p90/p95/p99) plus
+    the calibrated threshold itself — there's no raw error array to compute
+    an arbitrary quantile from. When ``quantile`` is the model's own
+    calibrated quantile, ``distribution.threshold`` already *is* that value
+    (``calibrate_sequence_thresholds`` computes it the same way at train
+    time), so no lookup is needed; otherwise it must be one of the four
+    named points.
+    """
+    if calibrated_quantile is not None and quantile == calibrated_quantile:
+        return distribution.threshold
+    field = _NAMED_QUANTILE_FIELDS.get(quantile)
+    if field is None:
+        raise ValueError(
+            f"quantile {quantile} is not available from the persisted manifest; "
+            f"only {sorted(_NAMED_QUANTILE_FIELDS)} plus the calibrated quantile "
+            "can be recovered without raw training errors"
+        )
+    return float(getattr(distribution, field))
+
+
 def _per_window_thresholds(
     modes: Sequence[str | None],
     calibration: SequenceThresholdCalibration,
     *,
     k: float | None = None,
+    quantile: float | None = None,
 ) -> np.ndarray[Any, np.dtype[np.float64]]:
     """Per-window global-error threshold, per the window's operating mode.
 
-    With ``k is None`` each band's calibrated ``threshold`` is used (the
-    as-shipped point); otherwise the band is recomputed as ``mean + k * std``
-    for the sweep. A window whose mode has no calibrated band — or any window
-    when ``per_mode_errors`` is absent — falls back to the global band, exactly
-    as the daemon does.
+    With ``k`` and ``quantile`` both ``None`` each band's calibrated
+    ``threshold`` is used (the as-shipped point, whatever its provenance);
+    ``k`` recomputes the band as ``mean + k * std`` for a k-sigma sweep;
+    ``quantile`` looks up the band's value at that quantile for a
+    quantile-provenance sweep (8.3) — mutually exclusive with ``k``. A window
+    whose mode has no calibrated band — or any window when ``per_mode_errors``
+    is absent — falls back to the global band, exactly as the daemon does.
     """
+    if k is not None and quantile is not None:
+        raise ValueError("k and quantile are mutually exclusive sweep parameterizations")
 
     def band(distribution: ReconstructionErrorDistribution) -> float:
+        if quantile is not None:
+            return _quantile_band(distribution, quantile, calibration.threshold_quantile)
         return distribution.threshold if k is None else distribution.mean + k * distribution.std
 
     global_threshold = band(calibration.global_error)
@@ -291,6 +351,9 @@ def benchmark_false_positives(
     return FalsePositiveBenchmarkReport(
         model_version=trained.manifest.model_version,
         threshold_k=calibration.threshold_k,
+        threshold_provenance=(
+            "quantile" if calibration.threshold_quantile is not None else "k_sigma"
+        ),
         evaluated_sessions=tuple(sorted({window.session for window in dataset.windows})),
         window_count=window_count,
         sequence_length=dataset.sequence_length,
@@ -404,6 +467,22 @@ def _k_sweep(
     window_count: int,
     k_grid: Sequence[float] | None,
 ) -> tuple[KSweepPoint, ...]:
+    """Sweep candidate thresholds and report FPR/alert-rate at each (8.3).
+
+    A model calibrated via ``threshold_quantile`` never actually used
+    ``mean + k·σ`` — sweeping k·σ candidates against it compares apples to
+    oranges and can recommend a "k" the production config doesn't even have a
+    knob for. When the manifest carries a calibrated quantile, sweep quantile
+    fractions instead (``_quantile_sweep``); otherwise sweep k as before.
+    """
+    if calibration.threshold_quantile is not None:
+        return _quantile_sweep(
+            global_errors=global_errors,
+            window_modes=window_modes,
+            calibration=calibration,
+            total_duration_seconds=total_duration_seconds,
+            window_count=window_count,
+        )
     points: list[KSweepPoint] = []
     for k in _resolve_k_grid(k_grid, calibration.threshold_k):
         # Same firing rule as the headline number, swept across k: global error
@@ -416,6 +495,43 @@ def _k_sweep(
         points.append(
             KSweepPoint(
                 k=float(k),
+                global_threshold=float(global_threshold),
+                flagged_windows=flagged_count,
+                false_positive_rate=flagged_count / window_count,
+                alerts_per_hour=alerts_per_hour,
+                meets_v1_budget=alerts_per_hour <= V1_ALERTS_PER_HOUR_BUDGET,
+            )
+        )
+    return tuple(points)
+
+
+def _quantile_sweep(
+    *,
+    global_errors: np.ndarray[Any, np.dtype[np.float64]],
+    window_modes: Sequence[str | None],
+    calibration: SequenceThresholdCalibration,
+    total_duration_seconds: float,
+    window_count: int,
+) -> tuple[KSweepPoint, ...]:
+    """Quantile-provenance counterpart to the k-sigma sweep above.
+
+    Each point's ``k`` field holds the swept quantile fraction (not a σ
+    multiplier). Limited to the four quantiles the manifest persists plus the
+    model's own calibrated quantile — see ``_quantile_band``.
+    """
+    calibrated_quantile = calibration.threshold_quantile
+    assert calibrated_quantile is not None  # guarded by the caller
+    quantiles = sorted({*DEFAULT_QUANTILE_GRID, calibrated_quantile})
+    points: list[KSweepPoint] = []
+    for q in quantiles:
+        per_window_threshold = _per_window_thresholds(window_modes, calibration, quantile=q)
+        global_threshold = _quantile_band(calibration.global_error, q, calibrated_quantile)
+        flagged = global_errors > per_window_threshold
+        flagged_count = int(flagged.sum())
+        alerts_per_hour = _alerts_per_hour(flagged_count, total_duration_seconds)
+        points.append(
+            KSweepPoint(
+                k=float(q),
                 global_threshold=float(global_threshold),
                 flagged_windows=flagged_count,
                 false_positive_rate=flagged_count / window_count,

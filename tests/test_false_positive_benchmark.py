@@ -14,6 +14,7 @@ from scripts.fp_benchmark import run_false_positive_benchmark
 from src.config import CanaryConfig
 from src.models.false_positive_benchmark import (
     DEFAULT_K_GRID,
+    DEFAULT_QUANTILE_GRID,
     _per_window_thresholds,
     _window_modes,
     benchmark_false_positives,
@@ -134,6 +135,25 @@ def test_benchmark_report_round_trips_through_json() -> None:
     assert payload["k_sweep"]
     assert set(point["k"] for point in payload["k_sweep"]) >= set(DEFAULT_K_GRID)
     assert payload["feature_column_count"] == len(FEATURE_COLUMNS)
+
+
+def test_benchmark_uses_quantile_sweep_when_calibrated_via_quantile() -> None:
+    """8.3 end-to-end: a model calibrated with threshold_quantile sweeps
+    quantile fractions, not k-sigma multipliers that were never actually
+    used to set its production threshold."""
+    trained = _trained(threshold_quantile=0.9)
+    held_out = _dataset(_frame("holdout", rows=20, start="2026-05-12T01:00:00Z"))
+
+    report = benchmark_false_positives(trained, held_out)
+
+    assert report.threshold_provenance == "quantile"
+    swept = {point.k for point in report.k_sweep}
+    assert swept >= set(DEFAULT_QUANTILE_GRID)
+    assert 0.9 in swept  # the calibrated quantile is always merged in
+    # None of the k-sigma grid's larger values (5, 8, 10 — meaningless as
+    # quantile fractions) leaked into the quantile sweep.
+    assert all(0.0 <= k <= 1.0 for k in swept)
+    assert [point.k for point in report.k_sweep] == sorted(point.k for point in report.k_sweep)
 
 
 def test_benchmark_rejects_uncalibrated_model() -> None:
@@ -293,10 +313,13 @@ def _dist(mean: float, std: float, threshold: float) -> ReconstructionErrorDistr
 
 
 def _calibration(
-    *, per_mode: dict[str, ReconstructionErrorDistribution] | None = None
+    *,
+    per_mode: dict[str, ReconstructionErrorDistribution] | None = None,
+    threshold_quantile: float | None = None,
 ) -> SequenceThresholdCalibration:
     return SequenceThresholdCalibration(
         threshold_k=3.0,
+        threshold_quantile=threshold_quantile,
         calibrated_at="2026-05-12T00:00:00Z",
         training_data_hash="hash",
         window_count=100,
@@ -324,6 +347,39 @@ def test_per_window_thresholds_recompute_band_at_k() -> None:
     # k=2 → mean + 2*std per band.
     at_two = _per_window_thresholds(["idle"], calibration, k=2.0)
     assert at_two == pytest.approx([0.05 + 2 * 0.02])
+
+
+def test_per_window_thresholds_quantile_uses_named_fields() -> None:
+    """8.3: a quantile band looks up the distribution's persisted p50/p90/
+    p95/p99 field directly — no mean+k*std formula involved."""
+    calibration = _calibration(per_mode={"idle": _dist(0.05, 0.02, 0.30)})
+    idle = calibration.per_mode_errors["idle"]  # type: ignore[index]
+    at_p90 = _per_window_thresholds(["idle"], calibration, quantile=0.9)
+    assert at_p90 == pytest.approx([idle.p90])
+    at_p99 = _per_window_thresholds(["idle", "highway"], calibration, quantile=0.99)
+    # "highway" has no band -> falls back to the global distribution's p99.
+    assert at_p99 == pytest.approx([idle.p99, calibration.global_error.p99])
+
+
+def test_per_window_thresholds_quantile_matching_calibrated_uses_threshold_field() -> None:
+    """The model's own calibrated quantile reuses `.threshold` directly
+    (that's exactly how it was computed at train time) rather than
+    requiring a matching named p50/p90/p95/p99 field."""
+    calibration = _calibration(per_mode={"idle": _dist(0.05, 0.02, 0.42)}, threshold_quantile=0.999)
+    at_calibrated = _per_window_thresholds(["idle"], calibration, quantile=0.999)
+    assert at_calibrated == pytest.approx([0.42])  # the band's .threshold, not a p999 field
+
+
+def test_per_window_thresholds_quantile_rejects_unrecoverable_quantile() -> None:
+    calibration = _calibration()
+    with pytest.raises(ValueError, match="not available"):
+        _per_window_thresholds(["idle"], calibration, quantile=0.75)
+
+
+def test_per_window_thresholds_k_and_quantile_are_mutually_exclusive() -> None:
+    calibration = _calibration()
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        _per_window_thresholds(["idle"], calibration, k=3.0, quantile=0.9)
 
 
 def test_window_modes_reads_last_row_else_none() -> None:
