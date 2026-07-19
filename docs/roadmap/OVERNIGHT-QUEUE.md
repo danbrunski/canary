@@ -129,8 +129,10 @@ coordination, and any `blocked-overnight` annotations added en route.
 Starts only when Q1–Q16 are done. Sources: `online-training-strategy.md`,
 `imu-gps-integration.md`, `llm-assist-and-compute-roadmap.md` (each now
 has an "Implementation checklist" section — task truth lives there),
-plus the unchecked tail of `docs/implementation-tasks.md` Phase 6/8 and
-the one open box in `data-collection-plan.md` §4.
+`dashboard-ux.md` (2026-07-19 UX review — surface built-but-invisible
+backend features), plus the unchecked tail of
+`docs/implementation-tasks.md` Phase 6/8 and the one open box in
+`data-collection-plan.md` §4.
 
 ## Round-2 pre-made decisions (operator-approved defaults)
 
@@ -187,7 +189,15 @@ the one open box in `data-collection-plan.md` §4.
   (structured-card contract, card renderer with absent-state, enriched
   anomaly-review labels into feedback + retrain, import-isolation
   guard test). No model hosting.
-- [ ] **Q24 — reconciliation sweep.** Audit `docs/implementation-tasks.md`
+- [ ] **Q24 — dashboard-ux.md, all phases** (vehicle_state badge +
+  replay banner; replay control card; Sessions panel extraction from
+  ControlPanel — coordinate with Q16's god-panel splits, which land
+  first; replay_window re-score button on ModelEvidencePanel;
+  shell-level token entry — merge with Q16's ResourceGate/TokenField,
+  don't duplicate; DiagnosticsPanel deletion + README dashboard-section
+  refresh). Everything testable against fixtures/local daemon; Pi live
+  verify is a morning task.
+- [ ] **Q25 — reconciliation sweep.** Audit `docs/implementation-tasks.md`
   checkboxes against everything rounds 1–2 landed and close the loops:
   6.4's live-DTC remainder vs the Q8 reader, 6.7's GPX/KML vs Q15,
   3.5's remaining note, 9.7's default-backbone decision vs Q7, 1.16 /
@@ -201,6 +211,8 @@ Hardware purchases + wiring (BNO055/BMP390/10 Hz GPS w/ PPS — Q22's 2b),
 authoring real accepted-baseline overrides from the Q17 disposition
 report, declaring the golden baseline + enabling the scheduler (Q19),
 the 6.5 Mode 04 decision, 6.28/6.29 acceptance runs, 6.39 offline-loop
-proof with the Pi, and the data-collection §2 drive backlog (cold-start,
-load-sweep, A/C pairs, off-road) that Q17's report will make more
-valuable.
+proof with the Pi, live verify of the Q24 dashboard surfaces on the Pi
+(replay banner/card against a real `start_replay`, vehicle_state badge
+across key-on/engine-off states), and the data-collection §2 drive
+backlog (cold-start, load-sweep, A/C pairs, off-road) that Q17's report
+will make more valuable.
