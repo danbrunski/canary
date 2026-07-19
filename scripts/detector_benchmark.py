@@ -597,8 +597,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--tolerance",
         type=float,
         default=DEFAULT_TOLERANCE,
+        # argparse runs `help % params` for every action (for %(default)s
+        # etc.), so a literal "%" here must be doubled or it's parsed as a
+        # (broken) format spec.
         help=f"Relative regression tolerance for --baseline compare (default "
-        f"{DEFAULT_TOLERANCE:.0%}; see DEFAULT_TOLERANCE for the rationale).",
+        f"{DEFAULT_TOLERANCE * 100:.0f}%%; see DEFAULT_TOLERANCE for the rationale).",
     )
     parser.add_argument(
         "--out",
