@@ -59,6 +59,7 @@ from src.preprocessing.feature_pipeline import (
 from src.preprocessing.feature_pipeline import (
     trainable_feature_columns as _trainable_feature_columns,
 )
+from src.preprocessing.resampler import is_slow_channel
 from src.telemetry import DECODED_SOURCE, source_of
 
 log = logging.getLogger(__name__)
@@ -167,9 +168,18 @@ def evaluate(
         timestamps.iloc[2 * len(timestamps) // 3 + 10],
     )
     spike_value = float(resampled[channel].dropna().max() * 5 + 1000)
+    resample_config = ResampleConfig(
+        hz=config.preprocessing.resample_hz,
+        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+    )
+    max_gap_seconds = (
+        resample_config.slow_channel_max_gap_seconds
+        if is_slow_channel(channel)
+        else resample_config.max_gap.total_seconds()
+    )
     inj = AnomalyInjector(resampled)
     inj.spike(channel=channel, start=t_a, end=t_b, value=spike_value)
-    inj.dropout(channel=channel, start=t_c, end=t_d)
+    inj.dropout(channel=channel, start=t_c, end=t_d, max_gap_seconds=max_gap_seconds)
 
     # Same shared wide→features builder the trainer/serve paths use, so the
     # injected-fault evaluation scores the model on byte-identical schema (7.1).

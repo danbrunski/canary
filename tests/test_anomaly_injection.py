@@ -210,18 +210,77 @@ def test_drift_with_empty_window_still_records():
 # ---------------------------------------------------------------------------
 
 
-def test_dropout_sets_nan_in_window():
-    inj = AnomalyInjector(_clean_frame(10))
+def test_dropout_holds_last_value_then_nans_past_the_ceiling():
+    """8.1: production never sees a raw NaN the instant a channel stops
+    reporting — resample_wide forward-fills up to a ceiling first. A rising
+    RPM channel proves this is a genuine *hold*, not a coincidence (COOLANT's
+    old test used a flat channel, so a bug that just left the value alone
+    entirely would have passed it too)."""
+    rpm_values = [700.0 + 10 * i for i in range(10)]
+    inj = AnomalyInjector(_clean_frame(10, channels={"obd:RPM": rpm_values}))
     inj.dropout(
-        channel="obd:COOLANT",
+        channel="obd:RPM",
         start="2026-05-11T15:00:03Z",
-        end="2026-05-11T15:00:06Z",
+        end="2026-05-11T15:00:07Z",  # rows 3,4,5,6
+        max_gap_seconds=2.0,
     )
-    coolant = inj.df["obd:COOLANT"]
-    assert coolant.iloc[2] == 85.0
-    assert np.isnan(coolant.iloc[3])
-    assert np.isnan(coolant.iloc[5])
-    assert coolant.iloc[6] == 85.0
+    rpm = inj.df["obd:RPM"]
+    gap = inj.df["obd:RPM__gap"]
+    # Pre-window: unaffected, no gap flag.
+    assert rpm.iloc[2] == 720.0
+    assert not gap.iloc[2]
+    # Within the ceiling (age 0, 1 second < 2s): held at row 2's value (720),
+    # NOT the channel's real (would-be) value at that row — a plausible but
+    # stale reading, the insidious part of a real dropout. The gap flag is
+    # NOT yet set here: production flips value and flag together at the same
+    # threshold (resampler._gap_flags's `ages > max_gap` drives both), so a
+    # detector reading the mask sees nothing unusual yet either.
+    assert rpm.iloc[3] == 720.0
+    assert rpm.iloc[4] == 720.0
+    assert not gap.iloc[3]
+    assert not gap.iloc[4]
+    # Past the ceiling (age 2, 3 seconds >= 2s): NaN AND the gap flag flip
+    # together, same as resample_wide's own bounded-ffill cutoff.
+    assert np.isnan(rpm.iloc[5])
+    assert np.isnan(rpm.iloc[6])
+    assert gap.iloc[5]
+    assert gap.iloc[6]
+    # After the window: untouched, gap flag stays False.
+    assert rpm.iloc[7] == 770.0
+    assert not gap.iloc[7]
+
+
+def test_dropout_at_session_start_has_nothing_to_hold():
+    """No pre-window observation exists → there was never a fresh value for
+    the resampler to have been forward-filling, so the window goes NaN AND
+    gap-flagged immediately (matching resampler._gap_flags: an all-empty
+    observation history is stale everywhere, not just past the ceiling) —
+    the large max_gap_seconds below would otherwise keep the gap flag False
+    for a while, proving this is genuinely the no-pre-observation branch."""
+    inj = AnomalyInjector(_clean_frame(5))
+    inj.dropout(
+        channel="obd:RPM",
+        start="2026-05-11T15:00:00Z",
+        end="2026-05-11T15:00:02Z",
+        max_gap_seconds=10.0,
+    )
+    rpm = inj.df["obd:RPM"]
+    gap = inj.df["obd:RPM__gap"]
+    assert np.isnan(rpm.iloc[0])
+    assert np.isnan(rpm.iloc[1])
+    assert gap.iloc[0]
+    assert gap.iloc[1]
+
+
+def test_dropout_rejects_non_positive_max_gap_seconds():
+    inj = AnomalyInjector(_clean_frame(5))
+    with pytest.raises(ValueError, match="max_gap_seconds must be positive"):
+        inj.dropout(
+            channel="obd:RPM",
+            start="2026-05-11T15:00:01Z",
+            end="2026-05-11T15:00:03Z",
+            max_gap_seconds=0.0,
+        )
 
 
 def test_dropout_records_window_kind():
@@ -230,6 +289,7 @@ def test_dropout_records_window_kind():
         channel="obd:RPM",
         start="2026-05-11T15:00:01Z",
         end="2026-05-11T15:00:03Z",
+        max_gap_seconds=10.0,
     )
     assert inj.windows[0].kind == "dropout"
     assert inj.windows[0].parameter is None
@@ -324,6 +384,7 @@ def test_labels_unions_across_multiple_windows():
         channel="obd:COOLANT",
         start="2026-05-11T15:00:10Z",
         end="2026-05-11T15:00:12Z",
+        max_gap_seconds=10.0,
     )
     labels = inj.labels()
     assert labels.iloc[3]
@@ -347,6 +408,7 @@ def test_labels_overlapping_windows_collapse_to_or():
         channel="obd:COOLANT",
         start="2026-05-11T15:00:04Z",
         end="2026-05-11T15:00:08Z",
+        max_gap_seconds=10.0,
     )
     labels = inj.labels()
     # Union: rows 2..7 are all anomalous (some on RPM, some on COOLANT, overlap on 4-5)
@@ -386,6 +448,7 @@ def test_chaining_returns_self_and_accumulates_windows():
             channel="obd:COOLANT",
             start="2026-05-11T15:00:14Z",
             end="2026-05-11T15:00:16Z",
+            max_gap_seconds=10.0,
         )
     )
     assert result is inj

@@ -10,8 +10,12 @@ modeling a real sensor failure mode:
   * **drift**   — channel ramps linearly away from baseline over the
                   window. Models slow miscalibration or gradual degradation
                   (O2 sensor aging, thermostat sticking).
-  * **dropout** — channel becomes NaN for the window. Models a sensor
-                  losing power, disconnecting, or the bus dropping frames.
+  * **dropout** — channel holds its last value (with its `__gap` flag set)
+                  until a per-channel-class ceiling, then goes NaN — the
+                  production-visible signature of a sensor losing power,
+                  disconnecting, or the bus dropping frames (see
+                  `resample_wide`'s bounded forward-fill), not an
+                  immediately-obvious raw NaN.
   * **stuck**   — channel is frozen at its pre-window value. Models a
                   sensor that fails-in-place — one of the most insidious
                   failures because the value still looks plausible.
@@ -35,7 +39,7 @@ import numpy as np
 import pandas as pd
 
 from src.dataframe_utils import require_columns as _require_columns
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 
 AnomalyKind = Literal["spike", "drift", "dropout", "stuck", "scale"]
 
@@ -187,18 +191,73 @@ class AnomalyInjector:
         channel: str,
         start: pd.Timestamp | str,
         end: pd.Timestamp | str,
+        max_gap_seconds: float,
     ) -> AnomalyInjector:
-        """Set `channel` to NaN for `[start, end)`.
+        """Simulate a sensor power loss, adapter disconnect, or dropped frames
+        for `[start, end)` — the production-visible signature (8.1), not an
+        immediately-obvious raw NaN.
 
-        Models a sensor power loss, adapter disconnect, or dropped frames.
-        Downstream code that doesn't gracefully handle NaN will surface
-        the problem; the IsolationForest pipeline's plausibility checks
-        already exercise this.
+        ``resample_wide`` never emits raw NaN the instant a channel stops
+        reporting: it forward-fills the last real value for up to a
+        per-channel-class ceiling (``max_gap_seconds`` — pass
+        ``ResampleConfig.max_gap.total_seconds()`` for a fast channel or
+        ``ResampleConfig.slow_channel_max_gap_seconds`` for a slow one, e.g.
+        via ``resampler.is_slow_channel``), then NaNs the cell *and* flips its
+        ``__gap`` flag once the gap exceeds that ceiling — both transitions
+        happen in the same instant (``resampler._gap_flags``'s ``ages >
+        max_gap`` drives both the NaN-out and the gap column together; there
+        is no real state where a channel is held at a stale-but-plausible
+        value while its ``__gap`` flag is already set). This mirrors that
+        exactly: the channel holds its last pre-window value (a
+        plausible-looking, undetectable-by-flag reading — the insidious part
+        of a real dropout) until ``max_gap_seconds`` in, then goes NaN with
+        ``__gap`` set True at the same row. The `<channel>__gap` column is
+        created ``False`` elsewhere if absent.
+
+        Age is measured from `start` (not from the channel's true last
+        observation, which may differ by a fraction of a row-interval if the
+        channel wasn't observed on the exact row before `start`) — an
+        acceptable simplification for fault-injection benchmarking, not a
+        scientific replica.
         """
         s, e = _normalize_window(start, end)
         self._require_channel(channel)
-        mask = self._mask_for(s, e)
-        self._df.loc[mask, channel] = np.nan
+        if max_gap_seconds <= 0:
+            raise ValueError("max_gap_seconds must be positive")
+
+        timestamps = pd.to_datetime(self._df[TIMESTAMP_COLUMN], utc=True)
+        mask = (timestamps >= s) & (timestamps < e)
+
+        # Held value = last real observation strictly before `start` (same
+        # lookup `stuck()` uses). No pre-window data → there was never a
+        # fresh value for the resampler to have been forward-filling, so the
+        # whole window goes NaN immediately rather than holding a fabricated
+        # reading.
+        pre = self._df.loc[timestamps < s, channel].dropna()
+        has_pre_observation = not pre.empty
+        held_value = float(pre.iloc[-1]) if has_pre_observation else np.nan
+
+        ceiling = pd.Timedelta(seconds=max_gap_seconds)
+        age_since_start = timestamps - s
+        within_ceiling = mask & (age_since_start < ceiling)
+        beyond_ceiling = mask & ~within_ceiling
+
+        self._df.loc[within_ceiling, channel] = held_value
+        self._df.loc[beyond_ceiling, channel] = np.nan
+
+        gap_col = gap_column(channel)
+        if gap_col not in self._df.columns:
+            self._df[gap_col] = False
+        if has_pre_observation:
+            # Flips in lockstep with the NaN transition — see the docstring.
+            self._df.loc[beyond_ceiling, gap_col] = True
+        else:
+            # No real observation exists anywhere before `start` to forward-
+            # fill from — resampler._gap_flags treats an all-empty history as
+            # stale everywhere (`observed_at.empty → True` for every row), not
+            # just past the ceiling, so the whole window is flagged too.
+            self._df.loc[mask, gap_col] = True
+
         self._windows.append(InjectionWindow(channel=channel, kind="dropout", start=s, end=e))
         return self
 

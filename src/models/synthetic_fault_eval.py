@@ -42,7 +42,7 @@ from src.models.isolation_forest import (
 )
 from src.preprocessing.anomaly_injection import AnomalyInjector, AnomalyKind
 from src.preprocessing.feature_pipeline import featurize_wide_frame
-from src.preprocessing.resampler import TIMESTAMP_COLUMN
+from src.preprocessing.resampler import TIMESTAMP_COLUMN, ResampleConfig, is_slow_channel
 
 DEFAULT_FAULT_KINDS: tuple[AnomalyKind, ...] = (
     "spike",
@@ -128,12 +128,26 @@ def _hours_covered(frame: pd.DataFrame) -> float:
     return max(span / 3600.0, 1.0 / 3600.0)  # floor at 1 second to avoid div-by-zero
 
 
+def _max_gap_seconds_for(channel: str, config: CanaryConfig) -> float:
+    """The same fast/slow forward-fill ceiling ``resample_wide`` applies to
+    ``channel``, so a synthetic dropout (8.1) holds its value for exactly as
+    long as production would before the cell goes NaN."""
+    resample_config = ResampleConfig(
+        hz=config.preprocessing.resample_hz,
+        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+    )
+    if is_slow_channel(channel):
+        return resample_config.slow_channel_max_gap_seconds
+    return resample_config.max_gap.total_seconds()
+
+
 def _inject_one(
     resampled: pd.DataFrame,
     *,
     kind: AnomalyKind,
     channel: str,
     rng: np.random.Generator,
+    config: CanaryConfig,
 ) -> AnomalyInjector:
     """Inject one fault of ``kind`` into a copy of ``resampled``.
 
@@ -161,7 +175,12 @@ def _inject_one(
     elif kind == "drift":
         inj.drift(channel=channel, start=start, end=end, total_delta=nominal_std * 10 + 100)
     elif kind == "dropout":
-        inj.dropout(channel=channel, start=start, end=end)
+        inj.dropout(
+            channel=channel,
+            start=start,
+            end=end,
+            max_gap_seconds=_max_gap_seconds_for(channel, config),
+        )
     elif kind == "stuck":
         inj.stuck(channel=channel, start=start, end=end)
     elif kind == "scale":
@@ -220,7 +239,7 @@ def evaluate_detectors(
         if_hits = 0
         fused_hits = 0
         for _ in range(n_injections):
-            inj = _inject_one(resampled, kind=kind, channel=fault_channel, rng=rng)
+            inj = _inject_one(resampled, kind=kind, channel=fault_channel, rng=rng, config=config)
             featurized = featurize_wide_frame(inj.df, config).features
             scored = trained_if.score(featurized)
             timestamps = pd.to_datetime(featurized[TIMESTAMP_COLUMN], utc=True)
