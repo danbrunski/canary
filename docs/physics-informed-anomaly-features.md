@@ -21,10 +21,17 @@ dashboard/export/trip review:
 - `derived:ESTIMATED_TORQUE_NM`
 - cumulative trip channels such as distance, fuel used, CO2, and idle time
 
-The shared anomaly preprocessing path does **not** yet append these derived
-channels before `compute_features`. Today the IF/LSTM training path sees raw
-OBD/decoded values, behavior-model deviation columns, and their rolling
-mean/std/rate-of-change features.
+The shared anomaly preprocessing path now **does** append an
+anomaly-oriented derived set before `compute_features`:
+`compute_anomaly_signals` (`src/analysis/derived.py`) contributes
+`derived:AIR_MASS_PER_CYCLE`, `derived:STFT_BANK_BALANCE` /
+`LTFT_BANK_BALANCE` / `AFR_BANK_BALANCE`, and
+`derived:TPS_VOLTAGE_PER_PCT`, followed by committee residuals and
+behavior-model deviation columns (`src/preprocessing/feature_pipeline.py`,
+`featurize_wide_frame` tail). Still open from the plan below: the
+explicit `physics_residual:` / `relational:` equation-backed columns
+(MAF vs speed-density, fuel-rate vs MAF, power vs fuel, MAP vs baro) and
+the 2nd-derivative/curvature features.
 
 ## Design principle
 
@@ -217,7 +224,7 @@ blanket*:
     the warmup curve, which is a 2nd-derivative signature (the failure mode
     `coolant_warmup` in `behavior_models.yaml` already calls out).
   - **RPM jerk** — misfire / stumble.
-  - **IMU jerk** — d(accel)/dt, already planned in `imu-gps-integration.md`.
+  - **IMU jerk** — d(accel)/dt, already planned in `roadmap/imu-gps-integration.md`.
 
 Model-split, same as correlations: rate and curvature matter most for the
 **IF**, which is memoryless and per-row — without them it sees no dynamics at

@@ -158,7 +158,7 @@ Any MCP-aware Qwen runtime (Qwen-Agent, an Ollama client wrapping
 tool-call mode, etc.) can point at `http://127.0.0.1:8001/mcp` with the
 same bearer token. Same tool surface, two clients.
 
-See also [`docs/llm-assist-and-compute-roadmap.md`](./llm-assist-and-compute-roadmap.md)
+See also [`docs/roadmap/llm-assist-and-compute-roadmap.md`](./roadmap/llm-assist-and-compute-roadmap.md)
 for the broader on-device LLM plan; the MCP server is what gives every
 listed feature its data hook.
 
@@ -291,7 +291,8 @@ ORDER BY session DESC;
 ## Auditing
 
 Every write-tool invocation appends a record to
-`CANARY_MCP_AUDIT_PATH` (default `/var/lib/canary/audit/mcp.jsonl`),
+`CANARY_MCP_AUDIT_PATH` (default `/data/canary/audit/mcp.jsonl`, i.e.
+`$CANARY_DATA_DIR/audit/mcp.jsonl`),
 namespaced `mcp.<tool>` and tagged `actor="mcp"`. Entries are written on
 both success and failure so a later "what did Claude touch?" review can
 diff against operator-driven changes (which still go through

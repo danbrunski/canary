@@ -178,14 +178,19 @@ The existing control plane already has most of the required primitives:
 - `GET /control/jobs/{id}/logs`
 - `POST /control/models/{type}/artifact`
 
-Additional sync-oriented API work is still needed:
+Since shipped on the companion side (`src/companion/routes.py` /
+`services.py`, run via `scripts/canary_companion.py`): session sync
+(`POST /companion/sync/sessions/{id}`, `/companion/sessions/import`) and
+model publish to the Pi (`publish_model_to_pi`,
+`upload_local_model_artifact`), backed by the SQLite library
+(`src/companion/library.py`).
+
+Additional sync-oriented API work still needed:
 
 - session inventory fields for byte size, file checksums, channel count,
   capture labels, anomaly count, and export readiness
 - resumable or chunked session downloads for large drive captures
 - filtered exports by capture window, channel set, and resample rate
-- model-bundle upload that includes artifact, manifest, training-run record,
-  checksums, and optional compatibility report
 - Pi-side "model received / loaded / active" status after upload
 
 The companion app should treat sync as repeatable. If a download or upload is

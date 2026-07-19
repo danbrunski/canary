@@ -209,7 +209,7 @@ active. The remaining v1 work is mostly operational: accumulating real drive
 captures for training/validation and long-run vehicle validation.
 
 See [`docs/implementation-tasks.md`](docs/implementation-tasks.md) for the current
-task breakdown and [`docs/data-collection-plan.md`](docs/data-collection-plan.md)
+task breakdown and [`docs/roadmap/data-collection-plan.md`](docs/roadmap/data-collection-plan.md)
 for the capture backlog.
 
 ---

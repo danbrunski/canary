@@ -2,7 +2,8 @@
 
 In-vehicle quickstart for driving a capture from a phone/laptop via the
 control API. Assumes `sudo bash scripts/deploy_truck.sh` has been run (Pi
-boots with `canary.service` + `can0.service` enabled and a control token).
+boots with `canary.service`, `canary-mcp.service`, `ups-shutdown.service`
++ `can0.service` enabled and a control token).
 
 Full API reference: `docs/headless-api.md`. SocketCAN details:
 `docs/can-setup.md`. Running the Pi as its own field WiFi AP (no router):
@@ -84,7 +85,7 @@ scripts/canaryctl.py sessions export <session_id> --out drive.zip
 
 Pin keeps a good drive from being aged out by retention; export pulls it
 to the laptop for training. Map the drive backlog (cold-start, city,
-highway, load-sweep …) onto `docs/data-collection-plan.md`.
+highway, load-sweep …) onto `docs/roadmap/data-collection-plan.md`.
 
 ## If something looks wrong
 

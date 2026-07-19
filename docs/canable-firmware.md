@@ -1,8 +1,14 @@
 # CANable Firmware (candleLight / gs_usb)
 
-The Pi's USB-CAN adapter (a CANable2, STM32G431) **must run candleLight
-(gs_usb) firmware**, not slcan. This documents why, how to build/flash it, how
-to verify, and how to roll back.
+This doc covers the **Canable USB path**. The current in-vehicle rig is
+the Waveshare 2-CH CAN HAT (MCP2515/SPI, mcp251x driver), which needs no
+firmware management; the Canable remains a fully supported option for
+bench work, second-vehicle use, and fallback — this doc applies whenever
+one is the adapter.
+
+When used, the CANable2 (STM32G431) **must run candleLight (gs_usb)
+firmware**, not slcan. This documents why, how to build/flash it, how to
+verify, and how to roll back.
 
 ## Why candleLight, not slcan
 
@@ -88,9 +94,12 @@ Then drive (or run a capture) and confirm `canaryctl status` populates
 
 The gs_usb driver for this firmware implements no bus-off restart, so the
 kernel rejects `IFLA_CAN_RESTART_MS` ("Device doesn't support restart from Bus
-Off"). `can0.service` and `scripts/canup.sh` therefore deliberately do **not**
-pass `restart-ms` — adding it makes the whole `ip link set type can` call error
-(the bitrate only survived by attribute-ordering luck).
+Off"). `scripts/canup.sh` therefore deliberately does **not** pass
+`restart-ms` — adding it makes the whole `ip link set type can` call error
+(the bitrate only survived by attribute-ordering luck). Note
+`systemd/can0.service` now targets the MCP2515 HAT, whose mcp251x driver
+*does* support `restart-ms 100`; if you point that unit back at a
+Canable, drop the `restart-ms` argument.
 
 Bus-off and full USB re-enumeration recovery is handled instead at the
 **application layer** by the recorder's bounded-backoff reconnect

@@ -121,7 +121,8 @@ Values calculated from other columns, not read off the bus. Two producers:
 
 The difference between a behavior model's expected value and the actual
 reading, per tick. Produced by `src/decode/behavior_decoder.py` from the
-surfaces in `data/behavior_models.yaml`. These feed both the direct
+surfaces in `behavior_models.yaml` (profile-scoped when vehicle profiles
+are enabled, e.g. `data/nissan-xterra-2008/behavior_models.yaml`). These feed both the direct
 behavior anomaly events and the IF/LSTM feature set (the unsupervised
 detectors learn the normal residual distribution). See
 `docs/behavior-model-inference.md`.

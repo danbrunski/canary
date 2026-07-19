@@ -64,10 +64,13 @@ plain GRU (or LSTM) from the repeated latent → `Linear` → reconstructed valu
 
 ## Loss & scoring
 
-**Masked MSE**: `sum(m ⊙ (x̂_recon − x)²) / sum(m)` — only observed cells count,
-both in training loss and in `reconstruction_error` at serve (a fabricated
-fill never contributes to the anomaly score). Per-mode error thresholds are
-calibrated on masked errors exactly as today.
+**Masked, observed cells only** — a fabricated fill never contributes.
+As shipped (`src/models/lstm_autoencoder.py`): masked **MSE**
+`sum(m ⊙ (x̂_recon − x)²) / sum(m)` for the training loss, masked **MAE**
+for `reconstruction_error` at serve/scoring. Per-mode error thresholds
+are calibrated on the masked scoring metric. (A TCN backbone with the
+same `(value, mask, delta)` contract is also available — see
+`src/models/tcn.py` and `models.sequence_detector` in config.)
 
 ## Removed (superseded)
 

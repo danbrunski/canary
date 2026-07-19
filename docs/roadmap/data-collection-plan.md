@@ -114,7 +114,14 @@ You don't need all of it.
 Every new drive also sharpens the CAN bindings (more PIDs → more
 cross-reference → more decoded signals become ML features), so it compounds.
 
-### Status (2026-05-17) — pipeline proven, corpus not yet sufficient
+### Status (2026-05-17; moved to docs/roadmap/ 2026-07-18) — pipeline proven, corpus not yet sufficient
+
+> 2026-07-18 note: the software-prep checklist below is essentially
+> complete and the models have since been retrained on a multi-session
+> corpus (see `docs/implementation-tasks.md` Phases 5/7/9). The part of
+> this doc that remains open — and the reason it lives in roadmap/ — is
+> the **drive-capture backlog** in §2: cold-start, load-sweep, off-road,
+> and A/C sessions are still the corpus gaps that matter.
 
 - **Isolation Forest baseline trained** (`models/isolation_forest/`, gitignored
   binary + tracked manifest) on the single 18-min drive `2026-05-11T222447`:

@@ -7,7 +7,9 @@ dependencies are called out explicitly.
 
 Status legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
-Status (as of 2026-05-17): Phases 0–5 are shipped (dual-channel
+Status (as of 2026-07-18): Phases 0–5, 7, 8, and 9 are shipped; Phase 6
+has a companion/RE tail; Phase 10 is in flight (UPS watchdog landed).
+Original note (2026-05-17): Phases 0–5 are shipped (dual-channel
 collection, feature pipeline, Isolation Forest + LSTM, CAN RE/bindings,
 behavior models, dashboard, alerts, model management, Pi service,
 authenticated control plane). OBD runs the Canable-native path (ELM327
@@ -94,7 +96,7 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
   the 18-min drive 2026-05-11T222447, and the three 2026-05-13 ELM327
   rig-bring-up sessions: KOEO baseline, rev-with-OBD, NT510-active). Each
   documented under `data/analyses/<session>.md`; `data/sessions.md` is the
-  consolidated index now. `docs/data-collection-plan.md` lays out the
+  consolidated index now. `docs/roadmap/data-collection-plan.md` lays out the
   remaining captures (cold-start / idle baseline / city / highway /
   load-sweep / off-road / A/C / Mode-22 DIDs) and how much is enough to
   start the ML + behavior-model work. Parallel OBD (`record.py --obd-port`)
@@ -401,7 +403,12 @@ training/model-health visualization, and Torque Pro parity.
   deliberate exception to CANary's read-only default because Torque parity
   requires it; it must never be available while driving.
 - [x] **6.6 — Trip, fuel, and performance calculations.** `src/analysis/derived.py`
-- [ ] **6.7 — GPS and route logging.** Support at least one GPS source for the
+- [~] **6.7 — GPS and route logging.** *Largely shipped:*
+  `src/collection/gps_collector.py` + `gps_nmea.py`, `GpsConfig`,
+  `gps:*` telemetry rows, satellite/HDOP speed gate, trip odometer
+  (`src/analysis/gps_tracker.py`), and the OBD↔GPS speed committee.
+  *Remaining:* dashboard route/map display, GPX/KML export. Original
+  scope: Support at least one GPS source for the
   Pi/truck workflow: browser Geolocation from the dashboard, USB GNSS through
   `gpsd`, or both. Store `source="gps"` telemetry rows, display route/speed on
   the dashboard, cross-check GPS speed against OBD speed, and export GPX/KML
@@ -533,7 +540,11 @@ training/model-health visualization, and Torque Pro parity.
   Done: `src/companion/api.py` serves the local library with dashboard-shaped
   sessions, `/telemetry/latest`, `/anomalies`, dataset list/health, training
   jobs/runs, model artifacts, publish, queued actions, and sync-state endpoints.
-- [ ] **6.34 — Pi session sync.** Build resumable sync from the Pi control API:
+- [~] **6.34 — Pi session sync.** *Primitives shipped:*
+  `POST /companion/sync/sessions/{id}` + `/companion/sessions/import`
+  (`src/companion/routes.py`) into the SQLite library. *Remaining:*
+  resumable/chunked downloads, checksum validation, retry-after-interrupt.
+  Original scope: Build resumable sync from the Pi control API:
   session inventory, selected session/capture downloads, checksum validation,
   duplicate detection, pin-on-Pi, retry after interruption, and import into the
   local library.
@@ -549,13 +560,17 @@ training/model-health visualization, and Torque Pro parity.
   Pi is reachable. Persist logs, metrics, manifests, plots, artifacts,
   false-positive benchmark output, compute target, and approval state in a
   shared training-run ledger.
-- [ ] **6.37 — Model publish queue.** Package approved model artifacts with
+- [~] **6.37 — Model publish queue.** *Core path shipped:*
+  `publish_model_to_pi` + `upload_local_model_artifact`
+  (`src/companion/routes.py`/`services.py`). *Remaining:* queue/retry
+  semantics, compatibility report, accepted/active confirmation.
+  Original scope: Package approved model artifacts with
   manifest, training-run record, checksums, and compatibility report; upload
   them to the Pi when reachable; confirm accepted/active status; and preserve
   local + Pi audit history. Failed uploads must be retryable.
-- [ ] **6.38 — Companion packaging.** Start with a repo-runner
-  `scripts/canary_companion.py` that starts the local API and serves/opens the
-  built frontend. Later package as Tauri/Electron for Linux/macOS/Windows; keep
+- [~] **6.38 — Companion packaging.** The repo-runner
+  `scripts/canary_companion.py` (starts the local API and serves/opens the
+  built frontend) *exists*. Later package as Tauri/Electron for Linux/macOS/Windows; keep
   phone/tablet as review/sync/publish surfaces unless mobile training proves
   practical.
 - [ ] **6.39 — Offline workflow acceptance test.** Prove the full loop: collect
@@ -953,7 +968,7 @@ drop-in interchangeable. Motivation (stateless fixed windows — no
 cross-mode hidden-state reset logic; ~3–5× faster training; clean Conv1D
 export for a possible future NPU offload) and the broader compute/LLM
 deployment rationale are captured in
-`docs/llm-assist-and-compute-roadmap.md`.
+`docs/roadmap/llm-assist-and-compute-roadmap.md`.
 
 **Open contract question — missing-data handling (added 2026-05-25).** Since
 this phase was first drafted, the LSTM-AE became a **GRU-D** model
@@ -974,7 +989,7 @@ feature-spec safety; for 7.2 fusion the TCN occupies the single
 sequence-detector source — it does **not** add a fusion source or a
 parallel alert stream.
 
-- [ ] **9.1 — Sequence-AE contract + TCN shape (P1).** Lock a shared
+- [x] **9.1 — Sequence-AE contract + TCN shape (P1).** Lock a shared
   "sequence autoencoder" contract that both the existing LSTM-AE and the new
   TCN-AE satisfy: `model_type` slot semantics, artifact layout
   (`models/tcn/...`), manifest fields, threshold metrics, and score/evidence
@@ -987,7 +1002,7 @@ parallel alert stream.
   dashboard/event labels stay accurate regardless of which is active.
   (Effort: S)
 
-- [ ] **9.2 — PyTorch TCN-AE module + sequence dataset reuse (P1).**
+- [x] **9.2 — PyTorch TCN-AE module + sequence dataset reuse (P1).**
   Implement `src/models/tcn.py` with residual/dilated causal blocks,
   configurable channels/kernel/dropout/receptive field, deterministic CPU
   inference, and unit tests for I/O shapes, receptive-field padding,
@@ -1002,7 +1017,7 @@ parallel alert stream.
   contingency in the roadmap doc stays open without being built now.
   (Effort: M)
 
-- [ ] **9.3 — TCN training, calibration, manifest (P1).** Add
+- [x] **9.3 — TCN training, calibration, manifest (P1).** Add
   `scripts/train_tcn.py` and `src/models/tcn_training.py` mirroring the LSTM
   trainer's normal-only path: shared feature-frame builder, scaler
   compatibility, validation split, global + per-channel residual
@@ -1013,7 +1028,7 @@ parallel alert stream.
   all-NaN/constant selected features; record enough metrics for direct
   LSTM-vs-TCN comparison. (Effort: M–L)
 
-- [ ] **9.4 — Retrain orchestration + ledger (P1).** Extend
+- [x] **9.4 — Retrain orchestration + ledger (P1).** Extend
   `scripts/retrain.py` to train IF + the *configured* sequence model
   (`--sequence-model {lstm,tcn}`, default from config; `--skip-sequence`),
   not IF+LSTM+TCN unconditionally. Shared cached feature frames,
@@ -1023,7 +1038,7 @@ parallel alert stream.
   either sequence model trains locally or on the Pi via the existing
   workflow. (Effort: M)
 
-- [ ] **9.5 — Live inference + selectable hot-swap (P1).** Add a
+- [x] **9.5 — Live inference + selectable hot-swap (P1).** Add a
   `TCNInferenceEngine` that fills the **same sequence-detector slot** the
   LSTM engine fills — only one sequence engine active at a time, chosen by
   config/hot-swap. Reuse the LSTM sequence-buffer/reset semantics, emit one
@@ -1033,7 +1048,7 @@ parallel alert stream.
   examples, status snapshots, and `/ws/scores` so switching `lstm`↔`tcn`
   never disturbs IF and produces no second stream. (Effort: M–L)
 
-- [ ] **9.6 — Dashboard, evidence, operator selection (P1/P2).** The TCN
+- [x] **9.6 — Dashboard, evidence, operator selection (P1/P2).** The TCN
   reuses the existing sequence-AE source vocabulary (same `AnomalyEvent`
   source, score normalization, suppression/tuning rules, evidence parsing,
   live-score panels, health/drift summaries, training-run comparison) —
@@ -1043,7 +1058,11 @@ parallel alert stream.
   never removed. For 7.2 fusion, IF + sequence-detector is unchanged
   regardless of backing implementation. (Effort: M)
 
-- [ ] **9.7 — Parity evaluation + Pi/FP proof (P1).** Before the live and
+- [~] **9.7 — Parity evaluation + Pi/FP proof (P1).** *Status: bake-off
+  harness (`scripts/sequence_bakeoff.py`) built and rerun with held-out
+  (out-of-sample) calibration — both backbones ≈0 FP on unseen drives;
+  the default-backbone decision is still open pending a broader
+  real-data corpus.* Original scope: Before the live and
   retrain integration, run an offline spike: train the TCN-AE on recorded
   sessions and compare it head-to-head with the LSTM-AE on the same
   nominal/anomaly splits — per-fault recall, alert rate, detection latency,
@@ -1060,11 +1079,11 @@ parallel alert stream.
   reconstruction-error distributions and can move the FP rate — see the
   roadmap doc). (Effort: M)
 
-- [ ] **9.8 — Config/docs/tests (P1).** Add the `sequence_detector:
+- [x] **9.8 — Config/docs/tests (P1).** Add the `sequence_detector:
   lstm | tcn` selector and both artifact paths to `src/config.py`, every
   `canary*.yaml` example, `docs/headless-api.md`, `docs/runbooks.md`,
   `docs/daemon-architecture.md`, README model summaries, and a pointer to
-  `docs/llm-assist-and-compute-roadmap.md`. Tests: config parsing, selector
+  `docs/roadmap/llm-assist-and-compute-roadmap.md`. Tests: config parsing, selector
   round-trip, manifest validation, model-manager model-type rejection, swap
   with both/one/neither artifact present, retrain skip/partial-success,
   dashboard source typing, no-artifact/no-Torch startup. (Effort: S–M)

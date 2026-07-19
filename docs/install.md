@@ -88,9 +88,14 @@ LSTM inference on the Pi:
 sudo CANARY_TORCH=cpu scripts/install_pi.sh
 ```
 
-The wrapper also creates `/etc/canary/control.token` and writes
-`CANARY_CONTROL_TOKEN` into `/etc/canary/canary.env` for the systemd service.
-Use that token from the laptop as `CANARY_CONTROL_TOKEN` for `scripts/canaryctl.py`.
+The wrapper does considerably more than dependencies: it creates
+`/etc/canary/control.token`, writes `CANARY_CONTROL_TOKEN` into
+`/etc/canary/canary.env`, and installs + enables `canary.service`,
+`canary-mcp.service`, and `ups-shutdown.service`, plus the tmpfiles
+config for `/run/canary`, the i2c modules-load entry, and the
+`canary-restart` sudoers drop-in. See `docs/pi-setup.md` for the full
+deployment walkthrough. Use the token from the laptop as
+`CANARY_CONTROL_TOKEN` for `scripts/canaryctl.py`.
 
 ## Verifying CUDA
 

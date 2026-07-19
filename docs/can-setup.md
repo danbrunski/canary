@@ -86,20 +86,27 @@ sudo CAN_LISTEN_ONLY=1 scripts/canup.sh        # passive CAN-only
 sudo CAN_IFACE=can1 CAN_BITRATE=250000 scripts/canup.sh
 ```
 
-It sets `restart-ms 100` so the controller auto-recovers from a CAN bus-off
-event (electrical noise / transient short on the vehicle bus).
+Note on `restart-ms` (bus-off auto-recovery): support depends on the
+adapter driver. The mcp251x driver (Waveshare 2-CH CAN HAT, the current
+in-vehicle rig) accepts it, and `systemd/can0.service` sets
+`restart-ms 100`. The gs_usb driver (Canable) rejects it, which is why
+`scripts/canup.sh` deliberately does *not* pass it — on a Canable,
+bus-off recovery is a re-plug / `canup.sh` re-run.
 
 ## Persistent, Auto-Recovering can0 (in-vehicle)
 
-A by-hand `ip link` bring-up does not survive a reboot or a mid-drive USB
-re-enumeration of the Canable (the in-vehicle analogue of the WSL `usbipd`
-drop). Two artifacts make the link come back without a human:
+A by-hand `ip link` bring-up does not survive a reboot. Two artifacts
+make the link come back without a human:
 
 - `systemd/can0.service` — a `oneshot` unit that configures + raises the
-  link at the configured bitrate, ordered `Before=canary.service`.
+  link at the configured bitrate (with `restart-ms 100` for drivers that
+  support it), ordered `Before=canary.service`. This covers the SPI CAN
+  HAT, which enumerates at boot and never "re-plugs".
 - `systemd/70-canable-can0.rules` — a udev rule that (re)starts
-  `can0.service` every time the `can0` net device appears, so a re-plug or
-  brown-out auto-recovers the link.
+  `can0.service` every time the `can0` net device appears. This is the
+  Canable/USB half of the story: a mid-drive USB re-enumeration or
+  brown-out auto-recovers the link. Harmless when the HAT is the
+  adapter.
 
 ```bash
 sudo install -m0644 systemd/can0.service /etc/systemd/system/can0.service

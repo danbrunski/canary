@@ -75,7 +75,8 @@ discipline.
 ## Two new sources, slotted into the existing model
 
 `src/telemetry.py` defines `TelemetrySource = Literal["obd", "can",
-"decoded"]` and the wide-frame layer keys columns off
+"decoded", "gps"]` (the `gps` member and `.gps()` factory shipped with
+Phase 1 below) and the wide-frame layer keys columns off
 `source + ":" + channel` (`src/preprocessing/loader.py:38`). The Parquet
 schema (`TelemetryRecord.parquet_row`) is long-format and entirely
 source-agnostic — **new sources need no storage migration**. The ripple
@@ -83,7 +84,7 @@ is bounded and enumerable:
 
 | Touch point | Change |
 |---|---|
-| `src/telemetry.py` | Extend the `TelemetrySource` Literal with `"imu"`, `"gps"`; add `.imu()` / `.gps()` factory classmethods mirroring `.obd()` |
+| `src/telemetry.py` | ✅ `"gps"` + `.gps()` shipped. Remaining: extend the Literal with `"imu"`; add `.imu()` mirroring `.obd()` |
 | `src/preprocessing/live.py:102` | The `obd`/`can`/else router gains explicit `imu`/`gps` handling instead of falling through the catch-all |
 | `src/preprocessing/loader.py` | None structurally — `to_wide` pivots on `source_channel` already. Decimation (below) is a new pre-pivot step |
 | `src/config.py` | New `ImuConfig` / `GpsConfig` blocks alongside `CollectionConfig`, same `_Strict` pattern |
@@ -263,11 +264,13 @@ logic, low current, off the Pi rails. No conflict with the Canable
 
 ## Phased rollout
 
-1. **GPS first, lowest risk.** `gps_collector.py` + `gps:*` channels +
-   the bus-independent `stopped` / `highway_cruise` tags + clock
-   discipline. No frame math; immediate auto-tag value; validates the
-   new-source plumbing end to end (telemetry Literal, live router,
-   Parquet, wide frame) with the simpler sensor.
+1. **GPS first, lowest risk.** ✅ **Shipped** —
+   `src/collection/gps_collector.py` + `gps_nmea.py`, `gps:*` channels,
+   `GpsConfig`, satellite/HDOP speed quality-gate, and
+   `src/analysis/gps_tracker.py` (trip odometer) are live. The
+   new-source plumbing (telemetry Literal, live router, Parquet, wide
+   frame) is validated end to end. The auto-tagger (`scripts/autotag.py`)
+   is **not** built yet — it moves to Phase 2 alongside the IMU tags.
 2. **IMU + frame resolution.** `imu_collector.py`, decimation step,
    `imu_frame.py`, the `hard_accel` / `hard_brake` / `cornering` /
    `launch` tags. Recommend BNO055 to keep step 1–2 of frame resolution

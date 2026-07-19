@@ -186,10 +186,12 @@ Versioning: each refit increments a `version` field. Older versions stay on
 disk for drift comparison. Manifest tracks which version the daemon is
 currently serving.
 
-Open question: do we keep this in `bindings.yaml` or a sibling
-`data/behavior_models.yaml`? Probably the sibling — behavior models grow much
-larger than the per-byte bindings, and rev-fitting them shouldn't require
-hand-editing the bindings file. **Decision deferred to task 4.E.1.**
+Resolved (task 4.E.1): the surfaces live in a sibling
+`behavior_models.yaml`, not in `bindings.yaml`. With vehicle profiles
+the live file is profile-scoped — e.g.
+`data/nissan-xterra-2008/behavior_models.yaml` — via
+`scope_config` (`src/profiles.py`); the unscoped `data/behavior_models.yaml`
+is the single-vehicle default.
 
 ## Integration with anomaly detection
 

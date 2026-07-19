@@ -195,7 +195,8 @@ already in place). No model runs on the handheld.
 ## Cross-references
 
 - `docs/implementation-tasks.md` — Phase 9 (selectable TCN/LSTM sequence
-  autoencoder), Phase 7 (feature-spec safety 7.1/7.3, alert fusion 7.2).
+  autoencoder — since shipped), Phase 7 (feature-spec safety 7.1/7.3,
+  alert fusion 7.2).
 - `docs/companion-app-plan.md` — the companion path referenced in D2.
 - `docs/daemon-architecture.md` — capture/detection runtime the base tier
   must not regress.

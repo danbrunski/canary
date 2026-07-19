@@ -8,10 +8,12 @@
 
 CANary is an on-vehicle software system that continuously reads telemetry from
 a 2008 Nissan Xterra (and broadly any OBD-II compliant vehicle) via raw CAN bus
-capture and standardized OBD-II diagnostic reads. The current hardware direction
-is a single Canable / SocketCAN interface for both broadcast CAN capture and
-read-only ISO-TP OBD requests; the original ELM327 path remains in the repo as a
-legacy fallback but is no longer the target hardware path.
+capture and standardized OBD-II diagnostic reads. The hardware interface is a
+single SocketCAN device (`can0`) used for both broadcast CAN capture and
+read-only ISO-TP OBD requests. Two SocketCAN adapters are supported
+first-class: the Waveshare 2-CH CAN HAT (MCP2515/SPI, the current in-vehicle
+rig) and the Canable USB (gs_usb/candleLight). The original ELM327 path
+remains in the repo as a legacy fallback.
 
 The system runs headlessly on a Raspberry Pi 5 mounted in-vehicle, logs all telemetry to local storage, and surfaces anomaly alerts via a local network dashboard or notification mechanism.
 
@@ -183,7 +185,7 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 | Configuration | YAML via `pyyaml` |
 | Testing | `pytest`, virtual CAN buses, `ELM327-emulator` for legacy path |
 | Deployment | `systemd` service, optional Docker |
-| Hardware | Raspberry Pi 5 (8 GB), Canable USB / SocketCAN adapter; ELM327 optional legacy fallback |
+| Hardware | Raspberry Pi 5 (8 GB); SocketCAN adapter — Waveshare 2-CH CAN HAT (MCP2515/SPI, current) or Canable USB (gs_usb); ELM327 optional legacy fallback |
 
 ---
 
@@ -192,7 +194,9 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 ```
 Vehicle OBD-II Port (J1962)
          │
-Canable USB / SocketCAN
+SocketCAN adapter (can0)
+Waveshare 2-CH CAN HAT (MCP2515/SPI, current)
+or Canable USB (gs_usb)
 (broadcast CAN + OBD ISO-TP)
          │
     Raspberry Pi 5 (8 GB)
@@ -235,42 +239,48 @@ Canable USB / SocketCAN
 
 ## Development Phases
 
-### Phase 1 — Data Collection (Weeks 1–2)
+All five original phases have shipped; the system is deployed and live
+in-vehicle. `docs/implementation-tasks.md` is the maintained task index;
+`docs/roadmap/` holds the open plans. Historical checklist:
+
+### Phase 1 — Data Collection
 - [x] Implement legacy `python-obd` + ELM327 path and emulator tests
-- [x] Move OBD collection onto the Canable-native client for current hardware
-- [ ] Install and verify `python-can` + Canable on Pi 5
+- [x] Move OBD collection onto the SocketCAN-native client
+- [x] Install and verify `python-can` + SocketCAN adapter on Pi 5
 - [x] Implement dual-channel async data collection with Parquet logging
-- [ ] Log 10+ diverse drive sessions (city, highway, cold start, idle, off-road)
-- [ ] Validate offline using `ELM327-emulator`
+- [x] Log 10+ drive sessions — diversity gaps (cold start, load sweep,
+  off-road) still open; see `docs/roadmap/data-collection-plan.md`
+- [x] Validate offline using `ELM327-emulator`
 
-### Phase 2 — Preprocessing & Baseline Model (Weeks 3–4)
-- [ ] Build resampling and normalization pipeline
-- [ ] Implement operating mode segmentation
-- [ ] Train Isolation Forest on clean sessions
-- [ ] Validate with synthetic anomaly injection
-- [ ] Tune `contamination` parameter per operating mode
+### Phase 2 — Preprocessing & Baseline Model
+- [x] Build resampling and normalization pipeline
+- [x] Implement operating mode segmentation
+- [x] Train Isolation Forest on clean sessions
+- [x] Validate with synthetic anomaly injection
+- [x] Tune `contamination` parameter per operating mode
 
-### Phase 3 — LSTM Autoencoder (Weeks 5–8)
-- [ ] Implement sliding window dataset loader
-- [ ] Build and train LSTM Autoencoder in PyTorch
-- [ ] Implement real-time sliding window inference loop
-- [ ] Calibrate detection threshold from training MAE distribution
-- [ ] Benchmark false positive rate on held-out normal sessions
+### Phase 3 — LSTM Autoencoder
+- [x] Implement sliding window dataset loader
+- [x] Build and train LSTM Autoencoder in PyTorch (GRU-D masking-aware;
+  a TCN backbone is also available via `models.sequence_detector`)
+- [x] Implement real-time sliding window inference loop
+- [x] Calibrate detection threshold (held-out, per-mode)
+- [x] Benchmark false positive rate on held-out normal sessions
 
-### Phase 4 — CAN Reverse Engineering Integration (Weeks 6–10, parallel)
-- [ ] Complete CAN RE sessions using Z1 tool + Canable + SavvyCAN
-- [ ] Build Xterra DBC file for decoded Consult III signals
-- [ ] Integrate decoded CAN channels as additional ML features
+### Phase 4 — CAN Reverse Engineering Integration (ongoing)
+- [x] CAN RE workflow + tooling (`docs/can-re-workflow.md`); sessions ongoing
+- [x] Emit Xterra DBC for decoded signals (`data/dbc/xterra_2008.dbc`)
+- [x] Integrate decoded CAN channels as additional ML features
 - [ ] Validate ABS wheel speed anomaly detection (bearing wear scenario)
 
-### Phase 5 — Dashboard & Deployment (Weeks 9–12)
-- [ ] Implement FastAPI backend with WebSocket telemetry stream
-- [ ] Build React/TypeScript PWA dashboard for live visualization
-- [ ] Support phone/head-unit mirroring as the primary in-vehicle display
+### Phase 5 — Dashboard & Deployment
+- [x] Implement FastAPI backend with WebSocket telemetry stream
+- [x] Build React/TypeScript PWA dashboard for live visualization
+- [x] Support phone/head-unit mirroring as the primary in-vehicle display
 - [ ] Keep official Android Auto, if pursued, as a limited status/alert
   companion rather than the full diagnostic dashboard
-- [ ] Package as systemd service with auto-start
-- [ ] Mount hardware permanently in vehicle
+- [x] Package as systemd service with auto-start
+- [x] Mount hardware permanently in vehicle
 
 ---
 
@@ -341,41 +351,42 @@ daemon:
 
 ```
 canary/
-├── canary.yaml                  # Main configuration
-├── README.md
-├── requirements.txt
-├── systemd/
-│   └── canary.service
+├── canary*.yaml                 # Configurations (dev / Pi / bench variants)
+├── systemd/                     # canary, canary-mcp, ups-shutdown, can0 units
+├── scripts/                     # Operational CLIs: record, retrain, refit,
+│                                #   canaryctl, install_pi.sh, bake-offs, …
+├── tools/                       # RE + analysis one-shots (job runners)
 ├── src/
-│   ├── __init__.py
 │   ├── main.py                  # Entry point
-│   ├── collection/
-│   │   ├── obd_collector.py     # legacy python-obd async collection
-│   │   ├── can_obd_client.py    # Canable-native OBD Mode 01/03/09/22 client
-│   │   ├── can_obd_collector.py # one-bus CAN + OBD streaming collector
-│   │   └── can_collector.py     # python-can SocketCAN/slcan collection
-│   ├── storage/
-│   │   └── parquet_writer.py    # Timestamped Parquet ring buffer
-│   ├── preprocessing/
-│   │   ├── resampler.py
-│   │   ├── features.py          # Rolling features, rate-of-change
-│   │   └── segmenter.py         # Operating mode classification
-│   ├── models/
-│   │   ├── isolation_forest.py
-│   │   ├── lstm_autoencoder.py
-│   │   └── model_manager.py     # Load / version / swap models
-│   ├── alerts/
-│   │   └── event_logger.py
-│   └── dashboard/
-│       ├── api.py               # FastAPI + WebSocket
-│       └── static/              # Web dashboard frontend
-├── data/
-│   └── dbc/
-│       └── xterra_2008.dbc      # CAN signal definitions (WIP)
-├── models/
-│   └── .gitkeep                 # Trained model artifacts (not committed)
-└── tests/
-    ├── test_preprocessing.py
-    ├── test_isolation_forest.py
-    └── test_lstm_autoencoder.py
+│   ├── config.py                # Pydantic config (all sections)
+│   ├── telemetry.py             # TelemetryRecord + sources (obd/can/decoded/gps)
+│   ├── session.py / profiles.py # Session dirs; VIN-keyed vehicle profiles
+│   ├── collection/              # OBD/CAN/GPS collectors, scheduler, replay
+│   ├── storage/                 # Parquet ring buffer + retention
+│   ├── preprocessing/           # Loader, resampling, segmentation, features,
+│   │                            #   shared featurize tail, anomaly injection
+│   ├── decode/                  # bindings/DBC/DID decode, behavior models,
+│   │                            #   DTC catalog
+│   ├── analysis/                # Derived signals, committees, surfaces,
+│   │                            #   session classifier, refit, replay window
+│   ├── models/                  # IF, LSTM/GRU-D, TCN, training, manifests,
+│   │                            #   manager (hot-swap), benchmarks
+│   ├── alerts/                  # Events, emitter, fusion, feedback
+│   ├── daemon/                  # Runtime assembly, drain, inference,
+│   │                            #   retention sweeper
+│   ├── control/                 # Sessions, jobs, replay, classification,
+│   │                            #   tuning (authenticated control plane)
+│   ├── dashboard/               # FastAPI app, routes/, schemas, status,
+│   │   └── static/              #   React/TS PWA (Vite)
+│   ├── mcp_server/              # canary-mcp: tools/, write_tools/, audit
+│   ├── companion/               # Laptop-side library + sync/publish API
+│   └── datasets/                # Dataset export / health
+├── data/                        # bindings.yaml, dids.yaml, dbc/, per-vehicle
+│                                #   trees (e.g. nissan-xterra-2008/)
+├── models/                      # Trained artifacts + manifests (binaries
+│                                #   gitignored; deployed via scp)
+├── docs/                        # References (this file); docs/roadmap/ for
+│                                #   open plans
+└── tests/                       # pytest suite (FE tests live in
+                                 #   src/dashboard/static)
 ```

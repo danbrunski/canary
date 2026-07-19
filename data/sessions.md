@@ -2,7 +2,7 @@
 
 Running index of recording sessions (task 1.16). Raw captures live under
 `data/sessions/<timestamp>/` (gitignored); per-session findings are in
-`data/analyses/<timestamp>.md`. See `docs/data-collection-plan.md` for what's
+`data/analyses/<timestamp>.md`. See `docs/roadmap/data-collection-plan.md` for what's
 still needed before the ML / behavior-model work.
 
 OBD column: `Y` = recorded with `--obd-port` (has `pids.jsonl`); `—` = CAN-only.
@@ -27,7 +27,7 @@ OBD column: `Y` = recorded with `--obd-port` (has `pids.jsonl`); `—` = CAN-onl
 | 2026-05-16T225450 | warm idle, NT510 cooling-fan active test | — | Actuator test (svc 0x30 ch 0x33/0x34 = fan stage 1/2). New binding **`COOLING_FAN_1F9_0`** (0x1F9:0, bit 0x40 low / 0x80 high) — command + broadcast corroborate. | [analysis](analyses/2026-05-16T225450.md) |
 | 2026-05-16T231901 | warm idle, NT510 cylinder power-balance | — | Cyl-cut command map (svc 0x30 ch 0x0C, cyl=bitmask). Engine balanced/healthy. **Negative result**: no per-cylinder broadcast encoding (diagnostic-only). Mid-session usbipd drop recovered. | [analysis](analyses/2026-05-16T231901.md) |
 
-## Still needed (see docs/data-collection-plan.md)
+## Still needed (see docs/roadmap/data-collection-plan.md)
 
 Cold-start · warm-idle baseline · city drive · highway drive · load-sweep
 (grid-coverage) drive · off-road/4-Lo · A/C on↔off · Mode 22 DID exploration —

@@ -1,7 +1,7 @@
 """Feedback write tool — operator/LLM labels on anomaly events.
 
 This is the active-labeling loop from
-``docs/llm-assist-and-compute-roadmap.md`` exposed as an MCP tool: when the
+``docs/roadmap/llm-assist-and-compute-roadmap.md`` exposed as an MCP tool: when the
 detector flags an event, Claude can record whether it's a true or false
 positive (plus an optional note) and that label flows into the retraining
 ledger.

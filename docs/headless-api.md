@@ -49,7 +49,12 @@ Endpoint summary:
 | `GET /telemetry/latest?n=N` | newest `N` telemetry rows from disk |
 | `GET /anomalies?since=...` | persisted anomaly events from JSONL |
 | `GET /bindings` | decoded CAN binding metadata for display |
+| `GET /dids` | Mode 22 DID catalog metadata |
 | `GET /models/behavior` | behavior-model surfaces for dashboard panels |
+| `GET /models/behavior/live?series=` | per-model expected/actual/deviation live view (`series=false` drops the rolling trail) |
+| `GET /obd/coverage` | OBD PID/DID coverage summary |
+| `GET /can/coverage` | broadcast CAN ID coverage summary |
+| `GET /test-profiles` | available UI test profiles |
 
 ## Control API
 
@@ -150,6 +155,18 @@ Control endpoints:
 | `GET /control/jobs/{id}/logs` | fetch captured stdout/stderr for one job |
 | `POST /control/jobs/{id}/cancel` | request cancellation for a queued or running job |
 | `POST /control/models/{type}/artifact` | publish an uploaded model artifact and manifest |
+| `GET /control/sessions/{id}/classification` | read a session's mode/event/disposition sidecar |
+| `POST /control/sessions/{id}/classification` | (re)run the session classifier and persist the sidecar |
+| `GET /control/classifications/summary` | corpus-wide per-mode seconds + event counts |
+| `GET /control/classifications/events` | sessions containing a given derived event kind |
+| `GET /control/sequence-detector` / `POST /control/sequence-detector` | inspect / switch the live sequence backbone (lstm\|tcn) |
+| `POST /control/replay` / `POST /control/replay/stop` / `GET /control/replay` | run a stored session through the live pipeline with isolated `_replay-*` outputs |
+| `GET /control/profiles` / `POST /control/profiles/{slug}/name` | list vehicle profiles / set a profile display name |
+| `GET /control/power` / `POST /control/power/keepalive` | UPS watchdog status / set or cancel the keep-alive hold |
+| `GET /control/feedback` / `POST /control/feedback` | read / record anomaly-feedback verdicts |
+| `GET /control/training-runs` | training-run ledger |
+| `GET /control/datasets/health` | corpus readiness + per-mode counts |
+| `GET /control/tuning` / `POST /control/tuning` / `POST /control/tuning/estimate` / `POST /control/tuning/revert` | inspect / set / estimate / revert alert-tuning overrides |
 
 Allowed job kinds:
 
@@ -177,6 +194,7 @@ Live telemetry and anomalies stream over WebSockets:
 ```bash
 websocat ws://canary.local:8000/ws/telemetry
 websocat ws://canary.local:8000/ws/anomalies
+websocat ws://canary.local:8000/ws/scores
 websocat "ws://canary.local:8000/ws/control?token=$CANARY_CONTROL_TOKEN"
 ```
 

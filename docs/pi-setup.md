@@ -68,9 +68,14 @@ actual clone path into `/etc/canary/canary.env`.
 
 ## 3. Install CANary
 
-The Pi installer creates a non-root `canary` user/group, creates
-`/etc/canary` and `/data/canary`, installs the Python virtualenv, installs the
-systemd unit, generates `/etc/canary/control.token`, and enables the service.
+The Pi installer creates a `canary` user/group (make it a login user —
+SSH/rsync run as `canary@`), creates `/etc/canary` and `/data/canary`,
+installs the Python virtualenv, generates `/etc/canary/control.token`,
+and installs + enables the systemd units: `canary.service`,
+`canary-mcp.service` (MCP server, port 8001), and
+`ups-shutdown.service` (X1202 UPS watchdog). It also installs
+`/etc/tmpfiles.d/canary.conf` (the shared `/run/canary` runtime dir),
+the i2c modules-load config, and the `canary-restart` sudoers drop-in.
 
 ```bash
 sudo scripts/install_pi.sh
@@ -92,13 +97,16 @@ sudo nano /etc/canary/canary.yaml
 
 ## 4. Bring Up SocketCAN
 
-The Canable must run **candleLight/gs_usb** firmware so it appears as a native
-`can0` (slcan firmware exposes only `/dev/ttyACM0` and breaks the headless
-automation). If `can0` does not appear on plug-in, reflash per
-**`docs/canable-firmware.md`** before continuing.
+Two SocketCAN adapters are supported. The **Waveshare 2-CH CAN HAT**
+(MCP2515/SPI — current in-vehicle rig) enumerates as `can0` at boot once
+the SPI overlay is configured, and `systemd/can0.service` raises it with
+`restart-ms 100`. A **Canable USB** must run **candleLight/gs_usb**
+firmware so it appears as a native `can0` (slcan firmware exposes only
+`/dev/ttyACM0` and breaks the headless automation) — if `can0` does not
+appear on plug-in, reflash per **`docs/canable-firmware.md`**.
 
-With candleLight firmware `can0` appears automatically; bring it up for the
-default active read-only OBD + CAN mode:
+Once `can0` exists, bring it up for the default active read-only
+OBD + CAN mode:
 
 ```bash
 sudo ip link set can0 down || true
@@ -139,8 +147,8 @@ exists.
 ## 6. Start And Inspect
 
 ```bash
-sudo systemctl start canary
-sudo systemctl status canary
+sudo systemctl start canary canary-mcp
+sudo systemctl status canary canary-mcp ups-shutdown
 sudo journalctl -u canary -f
 ```
 
