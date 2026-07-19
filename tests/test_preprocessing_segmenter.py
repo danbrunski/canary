@@ -336,3 +336,65 @@ def test_idle_transient_skipped_without_timestamp() -> None:
     )
     out = segment_operating_modes(frame, _idle_split_modes())
     assert list(out[MODE_COLUMN]) == ["idle", "idle"]
+
+
+def _warmup_modes() -> dict[str, OperatingModeSpec]:
+    return {
+        "warmup": OperatingModeSpec(coolant_temp_max=60),
+        "idle": OperatingModeSpec(rpm_max=1200, speed_max=0),
+    }
+
+
+def test_stale_coolant_falls_to_unknown_instead_of_warmup() -> None:
+    """1.3 regression: a gap-flagged (frozen/forward-filled) coolant reading
+    must not confidently drive the warmup/idle split. A cold-stuck sensor
+    reading e.g. 40C forever would otherwise misclassify a fully warm engine
+    as perpetually warming up."""
+    frame = pd.DataFrame(
+        [
+            {
+                "obd:RPM": 800.0,
+                "obd:SPEED": 0.0,
+                "obd:COOLANT_TEMP": 40.0,
+                "obd:COOLANT_TEMP__gap": False,
+            },
+            {
+                "obd:RPM": 800.0,
+                "obd:SPEED": 0.0,
+                "obd:COOLANT_TEMP": 40.0,
+                "obd:COOLANT_TEMP__gap": True,
+            },
+        ]
+    )
+
+    out = segment_operating_modes(frame, _warmup_modes())
+
+    # Row 0: fresh reading, genuinely cold -> warmup.
+    assert out.loc[0, MODE_COLUMN] == "warmup"
+    # Row 1: same raw value, but flagged stale -> treated as absent, not a
+    # confident warmup classification. Falls through to idle (coolant not
+    # required there) rather than unknown, since idle only gates on rpm/speed.
+    assert out.loc[1, MODE_COLUMN] == "idle"
+
+
+def test_stale_coolant_falls_to_unknown_when_no_fallback_mode_matches() -> None:
+    frame = pd.DataFrame(
+        [
+            {"obd:RPM": 5000.0, "obd:COOLANT_TEMP": 40.0, "obd:COOLANT_TEMP__gap": True},
+        ]
+    )
+
+    out = segment_operating_modes(frame, _warmup_modes())
+
+    assert out.loc[0, MODE_COLUMN] == UNKNOWN_MODE
+
+
+def test_fresh_coolant_without_gap_column_still_segments() -> None:
+    """No __gap column present at all (pre-resampler frame) -> treated as
+    always-fresh, not always-stale — gap_masked only fires when a resampler
+    actually produced the flag."""
+    frame = pd.DataFrame([{"obd:RPM": 800.0, "obd:COOLANT_TEMP": 40.0}])
+
+    out = segment_operating_modes(frame, _warmup_modes())
+
+    assert out.loc[0, MODE_COLUMN] == "warmup"

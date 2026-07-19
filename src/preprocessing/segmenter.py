@@ -8,9 +8,19 @@ from dataclasses import dataclass
 import pandas as pd
 
 from src.config import OperatingModeSpec
+from src.preprocessing.resampler import gap_column
 
 MODE_COLUMN = "operating_mode"
 UNKNOWN_MODE = "unknown"
+
+#: Signals whose coalesced value is nulled out on a stale (gap-flagged) row
+#: before mode-rule evaluation, so a frozen sensor can't confidently mis-mode
+#: a row — it falls to ``unknown`` instead. Narrowly scoped to coolant (the
+#: signal that actually gates warmup/idle) rather than every signal: rpm/
+#: speed/throttle are always-fast, always-gap-tracked already, and gating
+#: them too would silently shrink segmentation coverage far beyond this
+#: fix's intent.
+_STALE_GATED_SIGNALS = frozenset({"coolant_temp"})
 
 #: Derived signal name for the trailing-max ground speed (km/h) used to tell a
 #: transient stop (recently driving) from a steady standing idle. Ephemeral:
@@ -111,7 +121,11 @@ def segment_operating_modes(
     # behavior.
     coalesced: dict[str, pd.Series] = {}
     for signal in seg_config.signal_columns:
-        series = _coalesced_series(result, _candidates(seg_config, signal))
+        series = _coalesced_series(
+            result,
+            _candidates(seg_config, signal),
+            gap_masked=signal in _STALE_GATED_SIGNALS,
+        )
         if series is not None:
             coalesced[signal] = series
 
@@ -199,18 +213,40 @@ def _candidates(config: SegmenterConfig, signal: str) -> tuple[str, ...]:
     return (value,) if isinstance(value, str) else tuple(value)
 
 
-def _coalesced_series(frame: pd.DataFrame, candidates: tuple[str, ...]) -> pd.Series | None:
+def _coalesced_series(
+    frame: pd.DataFrame,
+    candidates: tuple[str, ...],
+    *,
+    gap_masked: bool = False,
+) -> pd.Series | None:
     """Row-wise first-non-NaN over the candidate columns present in ``frame``.
 
     Returns ``None`` when none of the candidates is a column in the frame, so
     callers can treat the signal as missing.
+
+    ``gap_masked`` treats a candidate's gap-flagged (stale/forward-filled)
+    rows as absent for *that* candidate before the coalesce picks a value —
+    so a frozen reading doesn't confidently drive a mode rule. If a
+    ``<candidate>__gap`` column isn't present (segmenter called pre-1.2, or
+    on a frame the resampler never touched), the candidate is treated as
+    always-fresh — no gap column means no known staleness, not the reverse.
     """
     present = [column for column in candidates if column in frame.columns]
     if not present:
         return None
-    series = pd.to_numeric(frame[present[0]], errors="coerce")
+
+    def _values(column: str) -> pd.Series:
+        values = pd.to_numeric(frame[column], errors="coerce")
+        if gap_masked:
+            gap_col = gap_column(column)
+            if gap_col in frame.columns:
+                stale = frame[gap_col].fillna(True).astype(bool)
+                values = values.where(~stale)
+        return values
+
+    series = _values(present[0])
     for column in present[1:]:
-        series = series.fillna(pd.to_numeric(frame[column], errors="coerce"))
+        series = series.fillna(_values(column))
     return series
 
 
