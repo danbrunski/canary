@@ -177,9 +177,12 @@ EOF
 # Managed by canary scripts/install_pi.sh — GPS-disciplined offline time.
 #
 # gpsd publishes GPS time to SHM unit 0. NMEA time has no PPS pulse to align
-# to, so accuracy is ~0.1-0.5 s — orders of magnitude better than the hours of
-# drift we're correcting, and far tighter than telemetry needs.
-refclock SHM 0 refid GPS precision 1e-1 offset 0.0
+# to, so it arrives a few hundred ms late — receiver- and baud-dependent (this
+# one measured ~350 ms). precision must be honest about that: claiming 1e-1
+# makes chrony flag GPS as a falseticker against network NTP and refuse to use
+# it. 5e-1 covers the real lag and is still three orders of magnitude tighter
+# than the hours of drift being corrected, and far tighter than telemetry needs.
+refclock SHM 0 refid GPS precision 5e-1 offset 0.0
 
 # Step the clock by ANY offset, at ANY point in the session — not just the
 # first few updates. The failure being fixed is a large correction landing
