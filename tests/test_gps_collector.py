@@ -191,3 +191,34 @@ async def test_collect_gps_from_config_returns_immediately_when_already_stopped(
         timeout=2.0,
     )
     assert opened is False
+
+
+async def test_collect_gps_from_config_fails_fast_on_bad_config() -> None:
+    """Regression: unlike the other three collectors, this one's reconnect
+    loop used to catch every ``Exception`` — including ``ValueError`` from a
+    malformed spec — so a bad config spun in the backoff loop forever
+    instead of surfacing immediately. It now shares `run_with_reconnect`,
+    whose default `reraise=(ValueError,)` fixes this for all four."""
+    stop = asyncio.Event()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    attempts = 0
+
+    def bad_config(spec: GpsSpec) -> _FakeSerial:
+        nonlocal attempts
+        attempts += 1
+        raise ValueError("baudrate must be positive")
+
+    policy = ReconnectPolicy(initial_delay_seconds=0.01, max_delay_seconds=0.01)
+    with pytest.raises(ValueError, match="baudrate"):
+        await asyncio.wait_for(
+            collect_gps_from_config(
+                GpsSpec(device="/dev/ttyUSB0"),
+                queue,
+                stop,
+                factory=bad_config,
+                reconnect_policy=policy,
+            ),
+            timeout=1.0,
+        )
+
+    assert attempts == 1  # no reconnect retries — fails fast

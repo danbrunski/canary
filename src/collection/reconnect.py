@@ -6,7 +6,7 @@ import asyncio
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TypeVar
@@ -146,3 +146,66 @@ class BusReconnector:
         self.delay = self.policy.initial_delay_seconds
         self.logger.info("bus reconnected", extra={"total_reconnects": self.reconnects})
         return RebuildOutcome.REBUILT, bus
+
+
+ResourceT = TypeVar("ResourceT")
+
+
+async def run_with_reconnect(
+    attempt: Callable[[Callable[[ResourceT], None]], Awaitable[None]],
+    *,
+    stop_event: asyncio.Event,
+    policy: ReconnectPolicy | None,
+    teardown: Callable[[ResourceT], None],
+    log: logging.Logger,
+    reconnect_message: str,
+    log_extra: Callable[[], Mapping[str, object]] | None = None,
+    reraise: tuple[type[BaseException], ...] = (ValueError,),
+) -> None:
+    """Shared async collector skeleton: build a resource, run until it fails
+    or `stop_event` fires, reconnect with backoff on any other error.
+
+    Lifted from four near-identical copies (`can_collector.collect_can_from_config`,
+    `obd_collector.collect_obd`, `can_obd_collector.collect_can_obd_from_config`,
+    `gps_collector.collect_gps_from_config`) — the GPS copy was missing the
+    fail-fast re-raise on bad config (`reraise`), so an invalid device spec
+    spun forever in the reconnect loop instead of surfacing immediately.
+
+    `attempt` builds its resource and hands it to the `capture` callback it
+    receives *before* awaiting the run, so `teardown` still runs if the
+    resource fails mid-run rather than only on a clean return. `policy is
+    None` disables reconnecting entirely — the first failure propagates,
+    matching every collector's existing "no policy = crash" contract.
+    """
+    delay = policy.initial_delay_seconds if policy is not None else 0.0
+    while not stop_event.is_set():
+        resource: ResourceT | None = None
+
+        def _capture(built: ResourceT) -> None:
+            nonlocal resource
+            resource = built
+
+        try:
+            await attempt(_capture)
+            return
+        except reraise:
+            raise
+        except Exception as exc:
+            if stop_event.is_set():
+                return
+            if policy is None:
+                raise
+            log.warning(
+                reconnect_message,
+                extra={
+                    **(dict(log_extra()) if log_extra is not None else {}),
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "reconnect_delay_seconds": delay,
+                },
+            )
+            if await wait_for_stop_or_timeout(stop_event, delay):
+                return
+            delay = policy.next_delay(delay)
+        finally:
+            if resource is not None:
+                teardown(resource)

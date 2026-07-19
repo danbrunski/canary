@@ -26,7 +26,7 @@ from src.collection.gps_nmea import GpsReading, sentence_type, update_reading
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
 from src.collection.reconnect import (
     ReconnectPolicy,
-    wait_for_stop_or_timeout,
+    run_with_reconnect,
 )
 from src.telemetry import TelemetryRecord
 
@@ -178,44 +178,35 @@ async def collect_gps_from_config(
     now_fn: Callable[[], float] = time.time,
 ) -> None:
     """Own a configured serial GPS for the daemon queue-producer path."""
-    delay = reconnect_policy.initial_delay_seconds if reconnect_policy is not None else 0.0
     drop_counter = QueueDropCounter("gps")
 
-    while not stop_event.is_set():
-        reader: SerialReader | None = None
+    async def _attempt(capture: Callable[[SerialReader], None]) -> None:
+        reader = factory(spec)
+        capture(reader)
+        log.info(
+            "gps collection started",
+            extra={"device": spec.device, "baudrate": spec.baudrate},
+        )
+        await collect_gps(
+            reader,
+            queue,
+            stop_event,
+            now_fn=now_fn,
+            drop_counter=drop_counter,
+        )
+
+    def _teardown(reader: SerialReader) -> None:
         try:
-            reader = factory(spec)
-            log.info(
-                "gps collection started",
-                extra={"device": spec.device, "baudrate": spec.baudrate},
-            )
-            await collect_gps(
-                reader,
-                queue,
-                stop_event,
-                now_fn=now_fn,
-                drop_counter=drop_counter,
-            )
-            return
-        except Exception as exc:  # noqa: BLE001 — serial drops must reconnect, not crash the daemon
-            if stop_event.is_set():
-                return
-            if reconnect_policy is None:
-                raise
-            log.warning(
-                "gps collector failed; reconnecting",
-                extra={
-                    "device": spec.device,
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "reconnect_delay_seconds": delay,
-                },
-            )
-            if await wait_for_stop_or_timeout(stop_event, delay):
-                return
-            delay = reconnect_policy.next_delay(delay)
-        finally:
-            if reader is not None:
-                try:
-                    reader.close()
-                except Exception:  # noqa: BLE001 — best-effort close on a possibly-dead handle
-                    pass
+            reader.close()
+        except Exception:  # noqa: BLE001 — best-effort close on a possibly-dead handle
+            pass
+
+    await run_with_reconnect(
+        _attempt,
+        stop_event=stop_event,
+        policy=reconnect_policy,
+        teardown=_teardown,
+        log=log,
+        reconnect_message="gps collector failed; reconnecting",
+        log_extra=lambda: {"device": spec.device, "baudrate": spec.baudrate},
+    )

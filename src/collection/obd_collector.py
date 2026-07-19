@@ -39,7 +39,7 @@ from typing import Any, Protocol
 import obd
 
 from src.collection.queueing import DropCallback, QueueDropCounter, put_nowait_or_drop
-from src.collection.reconnect import ReconnectPolicy, wait_for_stop_or_timeout
+from src.collection.reconnect import ReconnectPolicy, run_with_reconnect
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
@@ -416,40 +416,29 @@ async def collect_obd(
     """Run python-obd Async as a daemon queue producer until stopped."""
     loop = asyncio.get_running_loop()
     on_drop = QueueDropCounter("obd") if drop_counter is None else drop_counter
-    delay = reconnect_policy.initial_delay_seconds if reconnect_policy is not None else 0.0
 
-    while not stop_event.is_set():
-        conn: ObdConnection | None = None
+    async def _attempt(capture: Callable[[ObdConnection], None]) -> None:
+        conn = factory(spec, queue_reading_callback(queue, loop, on_drop=on_drop))
+        capture(conn)
+        conn.start()
+        log.info("obd collection started", extra={"port": spec.port})
+        await stop_event.wait()
+
+    def _teardown(conn: ObdConnection) -> None:
         try:
-            conn = factory(spec, queue_reading_callback(queue, loop, on_drop=on_drop))
-            conn.start()
-            log.info("obd collection started", extra={"port": spec.port})
-            await stop_event.wait()
-            return
-        except ValueError:
-            raise
-        except Exception as exc:
-            if stop_event.is_set():
-                return
-            if reconnect_policy is None:
-                raise
-            log.warning(
-                "obd collector failed; reconnecting",
-                extra={
-                    "port": spec.port,
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "reconnect_delay_seconds": delay,
-                },
-            )
-            if await wait_for_stop_or_timeout(stop_event, delay):
-                return
-            delay = reconnect_policy.next_delay(delay)
-        finally:
-            if conn is not None:
-                try:
-                    conn.stop()
-                except Exception:
-                    log.exception("failed to stop obd connection")
+            conn.stop()
+        except Exception:
+            log.exception("failed to stop obd connection")
+
+    await run_with_reconnect(
+        _attempt,
+        stop_event=stop_event,
+        policy=reconnect_policy,
+        teardown=_teardown,
+        log=log,
+        reconnect_message="obd collector failed; reconnecting",
+        log_extra=lambda: {"port": spec.port},
+    )
 
 
 def supervise_obd_capture(

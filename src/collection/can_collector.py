@@ -30,7 +30,7 @@ from src.collection.reconnect import (
     BusReconnector,
     RebuildOutcome,
     ReconnectPolicy,
-    wait_for_stop_or_timeout,
+    run_with_reconnect,
 )
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
@@ -132,47 +132,32 @@ async def collect_can_from_config(
     reconnect_policy: ReconnectPolicy | None = DEFAULT_RECONNECT_POLICY,
 ) -> None:
     """Own a configured Bus for the daemon queue-producer path."""
-    delay = reconnect_policy.initial_delay_seconds if reconnect_policy is not None else 0.0
     drop_counter = QueueDropCounter("can")
 
-    while not stop_event.is_set():
-        bus: can.BusABC | None = None
-        try:
-            bus = factory(spec)
-            log.info(
-                "can collection started",
-                extra={"interface": spec.interface, "channel": spec.channel},
-            )
-            await collect_can(
-                bus,
-                queue,
-                stop_event,
-                poll_interval=poll_interval,
-                drop_counter=drop_counter,
-            )
-            return
-        except ValueError:
-            raise
-        except Exception as exc:
-            if stop_event.is_set():
-                return
-            if reconnect_policy is None:
-                raise
-            log.warning(
-                "can collector failed; reconnecting",
-                extra={
-                    "interface": spec.interface,
-                    "channel": spec.channel,
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "reconnect_delay_seconds": delay,
-                },
-            )
-            if await wait_for_stop_or_timeout(stop_event, delay):
-                return
-            delay = reconnect_policy.next_delay(delay)
-        finally:
-            if bus is not None:
-                bus.shutdown()
+    async def _attempt(capture: Callable[[can.BusABC], None]) -> None:
+        bus = factory(spec)
+        capture(bus)
+        log.info(
+            "can collection started",
+            extra={"interface": spec.interface, "channel": spec.channel},
+        )
+        await collect_can(
+            bus,
+            queue,
+            stop_event,
+            poll_interval=poll_interval,
+            drop_counter=drop_counter,
+        )
+
+    await run_with_reconnect(
+        _attempt,
+        stop_event=stop_event,
+        policy=reconnect_policy,
+        teardown=lambda bus: bus.shutdown(),
+        log=log,
+        reconnect_message="can collector failed; reconnecting",
+        log_extra=lambda: {"interface": spec.interface, "channel": spec.channel},
+    )
 
 
 def record(

@@ -75,7 +75,7 @@ style issues, and go first.
   callers switched over; closes the `GAP_SUFFIX` drift (gap flags no
   longer counted as feature columns in session-classifier quality
   stats).
-- [ ] **1.4 — Shared async reconnect loop.** The
+- [x] **1.4 — Shared async reconnect loop.** The
   `while not stop_event…try build→run…except→backoff` skeleton is
   copied 4×: `can_collector.py:125-175`, `obd_collector.py:407-452`,
   `can_obd_collector.py:311-376`, `gps_collector.py:171-221` — and the
@@ -85,7 +85,11 @@ style issues, and go first.
   reraise=(ValueError,))` into `src/collection/reconnect.py` (the
   `BusReconnector` precedent lives there); all four collectors adopt
   it; GPS gains fail-fast. This closes the deferred CAN-reconnect
-  dedup (memory note) — ELM327 path included, not deleted.
+  dedup (memory note) — ELM327 path included, not deleted. — landed:
+  `run_with_reconnect` in `src/collection/reconnect.py`; all four
+  collectors (`can_collector`, `obd_collector`, `gps_collector`,
+  `can_obd_collector`) adopted; GPS now re-raises `ValueError`
+  immediately instead of retrying it.
 
 ## Phase 2 — Big mechanical wins
 

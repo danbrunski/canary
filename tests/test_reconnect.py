@@ -8,14 +8,18 @@ behaviour without a red test.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import time
+
+import pytest
 
 from src.collection.reconnect import (
     BusReconnector,
     RebuildOutcome,
     ReconnectPolicy,
+    run_with_reconnect,
     wait_or_stop,
 )
 
@@ -137,3 +141,77 @@ def test_wait_or_stop_semantics() -> None:
     assert wait_or_stop(fired, 5.0) is True  # returns immediately, not after 5s
     idle = threading.Event()
     assert wait_or_stop(idle, 0.0) is False
+
+
+async def test_run_with_reconnect_retries_then_succeeds() -> None:
+    stop_event = asyncio.Event()
+    attempts = 0
+    torn_down: list[str] = []
+
+    async def attempt(capture: object) -> None:
+        nonlocal attempts
+        attempts += 1
+        capture("resource")  # type: ignore[operator]
+        if attempts < 3:
+            raise RuntimeError("transient failure")
+        stop_event.set()
+
+    await asyncio.wait_for(
+        run_with_reconnect(
+            attempt,
+            stop_event=stop_event,
+            policy=ZERO,
+            teardown=torn_down.append,
+            log=LOG,
+            reconnect_message="test collector failed; reconnecting",
+        ),
+        timeout=2.0,
+    )
+
+    assert attempts == 3
+    assert torn_down == ["resource", "resource", "resource"]  # every attempt tears down
+
+
+async def test_run_with_reconnect_reraises_value_error_immediately() -> None:
+    stop_event = asyncio.Event()
+    attempts = 0
+
+    async def attempt(capture: object) -> None:
+        nonlocal attempts
+        attempts += 1
+        raise ValueError("bad config")
+
+    with pytest.raises(ValueError, match="bad config"):
+        await asyncio.wait_for(
+            run_with_reconnect(
+                attempt,
+                stop_event=stop_event,
+                policy=ZERO,
+                teardown=lambda _resource: None,
+                log=LOG,
+                reconnect_message="test collector failed; reconnecting",
+            ),
+            timeout=2.0,
+        )
+
+    assert attempts == 1  # no reconnect retry on a re-raised exception type
+
+
+async def test_run_with_reconnect_no_policy_propagates_first_failure() -> None:
+    stop_event = asyncio.Event()
+
+    async def attempt(capture: object) -> None:
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await asyncio.wait_for(
+            run_with_reconnect(
+                attempt,
+                stop_event=stop_event,
+                policy=None,
+                teardown=lambda _resource: None,
+                log=LOG,
+                reconnect_message="test collector failed; reconnecting",
+            ),
+            timeout=2.0,
+        )

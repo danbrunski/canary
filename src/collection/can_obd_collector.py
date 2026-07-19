@@ -79,7 +79,7 @@ from src.collection.reconnect import (
     BusReconnector,
     RebuildOutcome,
     ReconnectPolicy,
-    wait_for_stop_or_timeout,
+    run_with_reconnect,
 )
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
@@ -308,65 +308,53 @@ async def collect_can_obd_from_config(
         thread_stop.set()
 
     mirror_task = asyncio.create_task(_mirror_stop())
-    delay = reconnect_policy.initial_delay_seconds if reconnect_policy is not None else 0.0
+
+    async def _attempt(capture: Callable[[can.BusABC], None]) -> None:
+        thread_stop.clear()
+        try:
+            bus = factory(spec.can)
+            capture(bus)
+
+            def on_frame(msg: can.Message) -> None:
+                record = frame_to_record(msg)
+                loop.call_soon_threadsafe(
+                    partial(put_nowait_or_drop, queue, record, on_drop=drop_counter)
+                )
+
+            def on_reading(reading: ObdReading) -> None:
+                record = reading_to_record(reading)
+                loop.call_soon_threadsafe(
+                    partial(put_nowait_or_drop, queue, record, on_drop=drop_counter)
+                )
+
+            metrics_callback = None
+            if on_scheduler_metrics is not None:
+
+                def metrics_callback(metrics: ObdSchedulerMetrics) -> None:
+                    loop.call_soon_threadsafe(on_scheduler_metrics, metrics)
+
+            await asyncio.to_thread(
+                run_can_obd_loop,
+                bus,
+                spec,
+                on_frame=on_frame,
+                on_reading=on_reading,
+                stop_event=thread_stop,
+                on_scheduler_metrics=metrics_callback,
+            )
+        finally:
+            thread_stop.set()
+
     try:
-        while not stop_event.is_set():
-            bus: can.BusABC | None = None
-            thread_stop.clear()
-            try:
-                bus = factory(spec.can)
-
-                def on_frame(msg: can.Message) -> None:
-                    record = frame_to_record(msg)
-                    loop.call_soon_threadsafe(
-                        partial(put_nowait_or_drop, queue, record, on_drop=drop_counter)
-                    )
-
-                def on_reading(reading: ObdReading) -> None:
-                    record = reading_to_record(reading)
-                    loop.call_soon_threadsafe(
-                        partial(put_nowait_or_drop, queue, record, on_drop=drop_counter)
-                    )
-
-                metrics_callback = None
-                if on_scheduler_metrics is not None:
-
-                    def metrics_callback(metrics: ObdSchedulerMetrics) -> None:
-                        loop.call_soon_threadsafe(on_scheduler_metrics, metrics)
-
-                await asyncio.to_thread(
-                    run_can_obd_loop,
-                    bus,
-                    spec,
-                    on_frame=on_frame,
-                    on_reading=on_reading,
-                    stop_event=thread_stop,
-                    on_scheduler_metrics=metrics_callback,
-                )
-                return
-            except ValueError:
-                raise
-            except Exception as exc:
-                if stop_event.is_set():
-                    return
-                if reconnect_policy is None:
-                    raise
-                log.warning(
-                    "canable obd collector failed; reconnecting",
-                    extra={
-                        "interface": spec.can.interface,
-                        "channel": spec.can.channel,
-                        "error": f"{type(exc).__name__}: {exc}",
-                        "reconnect_delay_seconds": delay,
-                    },
-                )
-                if await wait_for_stop_or_timeout(stop_event, delay):
-                    return
-                delay = reconnect_policy.next_delay(delay)
-            finally:
-                thread_stop.set()
-                if bus is not None:
-                    bus.shutdown()
+        await run_with_reconnect(
+            _attempt,
+            stop_event=stop_event,
+            policy=reconnect_policy,
+            teardown=lambda bus: bus.shutdown(),
+            log=log,
+            reconnect_message="canable obd collector failed; reconnecting",
+            log_extra=lambda: {"interface": spec.can.interface, "channel": spec.can.channel},
+        )
     finally:
         mirror_task.cancel()
         try:
