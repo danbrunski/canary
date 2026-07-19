@@ -122,3 +122,86 @@ Pi deploys + live verifies (Q2/Q5/Q8/Q12/Q14), ledger backfill facts
 (Q9), ntfy topic + enable notifications (Q12), capture sessions for
 wideband probe / PW scale / DID pinning (Q11), refactoring 2.2
 coordination, and any `blocked-overnight` annotations added en route.
+
+---
+
+# Round 2 — after Q16
+
+Starts only when Q1–Q16 are done. Sources: `online-training-strategy.md`,
+`imu-gps-integration.md`, `llm-assist-and-compute-roadmap.md` (each now
+has an "Implementation checklist" section — task truth lives there),
+plus the unchecked tail of `docs/implementation-tasks.md` Phase 6/8 and
+the one open box in `data-collection-plan.md` §4.
+
+## Round-2 pre-made decisions (operator-approved defaults)
+
+- **`accepted_baselines.yaml` ships empty** (schema + commented example,
+  zero active overrides). Authoring real overrides is a morning task —
+  never invent an override for the actual truck overnight.
+- **Retrain scheduler default disabled** (`online_training.enabled:
+  false`); systemd-timer alternative documented, not installed. Golden
+  baseline: build the mechanics, but *declaring* the golden run is an
+  operator morning action.
+- **Promotion gate semantics** (online-training 3.3): challenger promotes
+  only on held-out validation + agreement-with-golden within tolerance;
+  a scheduled retrain can never auto-`active`.
+- **6.38 Tauri/Electron packaging: not queued** — heavy new dependency
+  surface; the repo-runner stays. Revisit interactively.
+- **6.5 Mode 04 clear-DTC: not queued** — it is a deliberate write-path
+  exception to read-only CANary and needs an explicit operator decision
+  plus the truck. Leave unchecked; do not implement overnight.
+- **All IMU work targets `source: disabled` default** and must be fully
+  testable with synthetic data (BNO055 is the assumed sensor per the
+  doc). New committees land `trainable=False` compute-but-exclude.
+
+## Queue — round 2
+
+- [ ] **Q17 — online-training-strategy.md Phase 1** (FSM physical
+  limits, reject gate at train+score, `accepted_baselines.yaml`
+  schema/loader, disposition classifier + ledger summary, disposition
+  report CLI run over the stored corpus with the report committed).
+- [ ] **Q18 — online-training-strategy.md Phase 2** (directional
+  `DeviationConfig`, override→alert path incl. `review_by` expiry
+  behavior, dashboard overrides card, docs).
+- [ ] **Q19 — online-training-strategy.md Phase 3** (rolling-window
+  retrain, disabled-by-default scheduler, champion/challenger promotion
+  gate, golden-baseline mechanics + divergence signal, runbook).
+  Enabling on the Pi + declaring golden are morning tasks.
+- [ ] **Q20 — companion offline workflow: implementation-tasks 6.34
+  (remaining: resumable/chunked sync, checksums, retry) + 6.35 offline
+  dashboard/library mode + 6.36 training target selector + 6.37
+  (remaining: queue/retry semantics, compatibility report). Test
+  against the local companion API with fixture sessions; 6.39 (full
+  Pi round-trip proof) blocked-overnight.**
+- [ ] **Q21 — corpus + capture hygiene: implementation-tasks 6.19
+  (proprietary-protocol regression corpus from stored Mode 22/DTC
+  exchanges) + data-collection-plan §4 Canable-native broad DID sweep
+  CLI (bench verify blocked) + implementation-tasks 8.6 record-arming
+  gate (design doc + config-gated implementation, default off, live
+  verify blocked).**
+- [ ] **Q22 — imu-gps-integration.md Phase 2a** (imu source plumbing,
+  ImuConfig, decimation, imu_frame math, offline autotagger — GPS-only
+  tags must work on existing sessions now — live tag hook, segmenter
+  accel modes, committee declarations). Phase 2b entirely
+  blocked-overnight (hardware).
+- [ ] **Q23 — llm-assist-and-compute-roadmap.md seams checklist**
+  (structured-card contract, card renderer with absent-state, enriched
+  anomaly-review labels into feedback + retrain, import-isolation
+  guard test). No model hosting.
+- [ ] **Q24 — reconciliation sweep.** Audit `docs/implementation-tasks.md`
+  checkboxes against everything rounds 1–2 landed and close the loops:
+  6.4's live-DTC remainder vs the Q8 reader, 6.7's GPX/KML vs Q15,
+  3.5's remaining note, 9.7's default-backbone decision vs Q7, 1.16 /
+  4.E.4 status notes pointing at the capture backlog. Update
+  cross-references and `docs/CANary-overview.md` checkmarks. Pure doc
+  work, no code.
+
+## Round-2 morning backlog
+
+Hardware purchases + wiring (BNO055/BMP390/10 Hz GPS w/ PPS — Q22's 2b),
+authoring real accepted-baseline overrides from the Q17 disposition
+report, declaring the golden baseline + enabling the scheduler (Q19),
+the 6.5 Mode 04 decision, 6.28/6.29 acceptance runs, 6.39 offline-loop
+proof with the Pi, and the data-collection §2 drive backlog (cold-start,
+load-sweep, A/C pairs, off-road) that Q17's report will make more
+valuable.

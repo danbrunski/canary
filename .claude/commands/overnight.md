@@ -21,18 +21,53 @@ checkboxes**; check a queue entry only when its source-doc phase is
 fully checked or annotated blocked. Resume wherever the queue left off
 — never restart from the top of a completed entry.
 
+**Reading the roadmap docs:** `file:line` anchors in task text date
+from the 2026-07-18 review and drift as work lands — locate code by
+the cited symbol/function name (Grep), treating line numbers as hints
+only. When a task says a decision was made ("operator-approved", "see
+OVERNIGHT-QUEUE.md"), implement that option — never re-open the
+choice.
+
+You are the **orchestrator**: a thin loop that selects a task, dispatches
+it to the `implementer`, gets it independently checked by the `verifier`,
+and disposes of the result (commit, checkbox, log). You keep all judgment
+— task ordering, blocked calls, conflict handling, commits — and push the
+heavy implementation churn into the `implementer` subagent so your own
+context survives the whole queue.
+
 **Per-task protocol:**
 1. Restate the task and its acceptance in one line.
-2. Implement it. Repo conventions: `.venv/bin/python` always; match
-   surrounding style; no new dependencies without logging it in the
-   overnight log.
-3. Run the whole-repo gate (`ruff check . && ruff format --check . &&
-   mypy src && pytest`) plus `pnpm test` in `src/dashboard/static` for
-   FE changes (re-run `TuningFeedback.test.ts` once on flake before
-   treating it as a failure).
-4. Spawn the `verifier` agent with the task text + diff. Fix what it
-   confirms; re-verify. Two consecutive FAILs on the same task → mark
-   it blocked and move on.
+2. Dispatch the `implementer` agent with the task text + acceptance.
+   It writes the code + tests, drives the whole-repo gate to green, and
+   returns `IMPLEMENTED` (diff-stat + changelog + gate output) or
+   `BLOCKED: <reason>`. On BLOCKED, treat it like a blocked task
+   (step 5). **Echo the returned diff-stat and changelog into your own
+   transcript** — the /goal evaluator and the verifier both read from
+   here, so the evidence must land in the main thread, not stay in the
+   subagent. Run implementers strictly one at a time: they share one
+   working tree and the other session may be editing it, so concurrent
+   implementers will conflict.
+3. Re-confirm the gate yourself in the main session (`ruff check . &&
+   ruff format --check . && mypy src && pytest`, plus `pnpm test` and
+   `pnpm typecheck` in `src/dashboard/static` for FE changes; re-run
+   `TuningFeedback.test.ts` once on flake). The implementer claims
+   green — verify it is, and inspect its diff before proceeding. Vet any
+   `NEW DEP:` it flagged: accept only if the task warrants it, and log
+   it in the overnight log.
+4. Spawn the `verifier` agent with the task text + diff. It is a
+   distinct, deliberately write-less agent so it cannot fix-and-pass its
+   own target — keep it separate from the implementer. Fix what it
+   confirms (dispatch a follow-up to the implementer, or edit directly
+   for a one-liner); re-verify. Two consecutive FAILs on the same task →
+   mark it blocked and move on.
+   - **If the verifier call errors or stalls mid-stream** ("Response
+     stalled mid-stream", terminal API error, no verdict returned):
+     resume it via `SendMessage` to the returned agentId asking it to
+     finish the check. If no agentId came back (the agent never
+     started), redispatch a fresh `verifier` with the same task text +
+     diff. Do not treat a transport failure as a PASS or a FAIL, and
+     do not skip verification — a stalled call is an infra hiccup, not
+     a verdict.
 5. Check the box in the roadmap doc (`[x]`, one-line note of what
    landed), or annotate `[~] blocked-overnight: <reason>`.
 6. Commit — one commit per task, gate green, message references the

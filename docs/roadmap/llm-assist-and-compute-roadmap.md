@@ -204,3 +204,31 @@ already in place). No model runs on the handheld.
   optional on-Pi Qwen) inspect daemon state, query telemetry, and drive
   the labeling loop in feature 5. The MCP server is the data hook every
   feature here implicitly depends on.
+
+## Implementation checklist — seams only (sequencing step 1)
+
+No model hosting. Everything here must satisfy the Status discipline:
+import-isolated, feature-flagged, no daemon dependency when disabled,
+dashboard cards degrade cleanly when the tier is absent.
+
+- [ ] **S.1 — Structured-card contract.** Define the JSON schema for
+  LLM-assist outputs (differential card: ranked hypotheses, each with
+  supporting/refuting evidence references and the mandatory
+  "hypotheses-not-verdicts" framing; narrative card: sectioned text +
+  source-session references). Pydantic models + JSON-schema doc; the
+  producer is absent for now, the contract is the seam.
+- [ ] **S.2 — Dashboard card renderer.** A panel/card component that
+  renders S.1 documents from a feature-flagged endpoint, with an
+  explicit empty/absent state when the tier is disabled (the default).
+  FE tests over a fixture card.
+- [ ] **S.3 — Enriched-label capture loop (case 5, model-free core).**
+  Extend the anomaly-review flow so a review can attach a hypothesis
+  string + one clarifying question/answer pair to the feedback record
+  (`src/alerts/feedback.py` schema + `anomaly_feedback.jsonl`), flowing
+  into the retraining ledger like existing verdicts. Works today with
+  operator-authored text; an LLM later fills the same fields. Tests for
+  schema round-trip + retrain consumption.
+- [ ] **S.4 — Analysis module boundary.** Ensure any future LLM code
+  has an import-isolated home (`src/analysis/llm_assist/` or similar)
+  with a feature flag in config (default off) and a test asserting the
+  capture path imports no torch/LLM modules when disabled.

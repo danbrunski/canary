@@ -44,6 +44,8 @@ and is out of scope until the guards below exist.
 | Training run lineage + promotion lifecycle + rollback | `src/models/training_ledger.py` | Done — `unpublished → active`, latest-line-wins per `run_id` |
 | Reactive operator verdicts feeding retrain | `src/alerts/feedback.py` | Done — `true_positive/false_positive/ignored/needs_review`, `data/control/anomaly_feedback.jsonl` |
 | Observed-vs-FSM-spec range scoring | `src/analysis/fsm.py`, `src/analysis/range_match.py` | Done — built for DID binding; **reusable as the validation screen** |
+| Held-out threshold calibration in retrain | `scripts/retrain.py` (`--calibration-sessions`, automatic holdout via `_pick_calibration_holdouts`) | Done — and ml-hardening Phase 3 makes in-sample calibration a loud refusal at the library layer |
+| Per-vehicle data partitioning | `src/profiles.py` (`scope_config`) | Done — everything this doc adds is per-vehicle state and must live under the profile scope |
 | Scheduled trigger + training-data validation | — | **Missing. This doc.** |
 
 The delta to "online" is small in mechanism (a scheduler + a rolling
@@ -302,3 +304,161 @@ as separate stages; a row must pass both.
 | Champion/challenger promotion | `src/models/manager.py` + the ledger lifecycle |
 | Reactive verdicts (existing) | `src/alerts/feedback.py` — the override's reactive cousin |
 | Regime gate (existing) | `src/preprocessing/segmenter.py` |
+
+## Validity check vs the 2026-07 ML-hardening review (2026-07-19)
+
+This doc predates the five-subsystem ML review
+(`ml-correctness-hardening.md`) and the vehicle-profiles migration. The
+core design — three normals, the disposition table, directional
+provenanced overrides, train-on-recentered-data — survives both intact;
+the literature check even reinforces it (the review's verdict was
+"hardening, not rearchitecting", and nothing in ADBench/TimeEval touches
+the guard-model problem this doc solves). Four specifics are updated,
+and the checklist below encodes them:
+
+1. **Reject = per-cell NaN, not row drops.** ml-hardening Phases 1–2
+   built real missingness machinery (bounded ffill, universal `__gap`
+   flags, GRU-D masks, IF missing-channel policy). A physically
+   impossible value should be NaN'd *per cell* so it flows through that
+   machinery as missingness, with a counted reject reason — not dropped
+   as a whole row (which would discard the other channels' good data)
+   and not handled by parallel new plumbing. "Never reaches the scaler,
+   never alerts" still holds; the mechanism is cell-level.
+2. **Calibration is held-out, always.** The FPR≈1.0 flood traced to
+   in-sample calibration; retrain already auto-carves a calibration
+   holdout and ml-hardening Phase 3 (queue Q4) makes in-sample a
+   refusal/loud-manifest-stamp. The scheduler must never pass
+   `--no-calibration-holdout`, and an `in_sample`-stamped artifact is
+   categorically ineligible for champion promotion. Rolling-window
+   selection must therefore always reserve holdout sessions from the
+   window.
+3. **The promotion gate has teeth now: the fault-injection benchmark.**
+   "Challenger agrees with golden on a holdout" is necessary but weak
+   against the central danger (a model that quietly learned the fault
+   still agrees on clean data). The Q3 benchmark
+   (`eval-longitudinal-and-dtc.md` Phase 2) measures recall on injected
+   faults directly — the challenger must show **recall non-regression
+   vs golden on the injected-fault suite** plus held-out FP/hr within
+   budget, not just score agreement.
+4. **Everything here is profile-scoped.** `scope_config`
+   (`src/profiles.py`) partitions all vehicle-specific state by VIN.
+   `accepted_baselines.yaml`, dispositions, and the golden-baseline
+   declaration are *this-vehicle* facts by definition (a second vehicle
+   must not inherit the Xterra's weak-injector override) — the override
+   file lives under the profile-scoped data tree, not a flat `data/`
+   path, and golden is declared per profile.
+
+Also noted, no change needed: `DeviationConfig.kind="relative"` becomes
+`sigma` (alias kept) in ml-hardening 9.4 — the directional variant below
+is added against the post-rename scheme and obeys the 4.2 σ-floor schema
+rule; ECOD (2.6), if adopted, is batch-fit like IF, so the
+rolling-window-rebuild mechanism covers it unchanged.
+
+## Implementation checklist
+
+Task-level truth for the overnight queue lives here. Phases map 1:1 to
+"Phased rollout" above; the design sections are the spec each task is
+verified against, as amended by the validity check above.
+
+### Phase 1 — data-quality gate + disposition report (no auto-retrain)
+
+- [ ] **1.1 — FSM physical limits.** Extend `src/analysis/fsm.py` to
+  extract absolute physical min/max per channel alongside nominal
+  ranges, where the FSM data actually carries them. **Fallback if it
+  doesn't** (likely — sensor-open/-short and decode-rollover values are
+  decode-level knowledge, not FSM spec): curate an explicit
+  physical-limits table in code (typed dict beside the FSM loader),
+  seeded with the doc's examples (coolant −40 °C = sensor open, RPM
+  16383 = decode rollover, negative MAF, IAT ≥ 250 °C) plus obvious
+  bounds for the other polled channels; leave channels you're unsure
+  about out of the table entirely rather than guessing tight bounds —
+  an absent limit means "no reject", which is safe. Emit in the same
+  structure `range_match.py` consumes. Tests over the table.
+- [ ] **1.2 — Reject gate (train *and* score).** New module (e.g.
+  `src/preprocessing/quality_gate.py`) that NaNs
+  physical-impossibility values **per cell** before the scaler in
+  training *and* before scoring live — the NaN then flows through the
+  existing missingness machinery (`__gap` flags, GRU-D mask, IF
+  missing-channel policy) so garbage is a data-quality failure, never an
+  anomaly alert and never a whole-row drop. Per-channel reject counts
+  are logged and returned, never silently swallowed. Wire into the
+  training loaders and the live feature path; tests for both.
+- [ ] **1.3 — `accepted_baselines.yaml` schema + loader.** Strict-Pydantic
+  loader beside `src/decode/behavior_models.py` implementing the schema
+  in "Directional overrides" (channel/behavior_model target, optional
+  `operating_mode` scope, `accepted_center`, directional band,
+  provenance with `declared_by/declared_at/review_by/reason`). The file
+  is **profile-scoped** — resolved through `scope_config` under the
+  active vehicle's data tree, not a flat `data/` path. Ship it with
+  `schema_version: 1` and **zero active overrides** (commented worked
+  example only — authoring real overrides is an operator task).
+  Round-trip + validation-failure tests.
+- [ ] **1.4 — Disposition classifier.** Implement the four-tier table
+  (Reject / Accept-recenter / Quarantine / Accept) as a pure function
+  over a wide frame + limits + overrides; record a per-run `dispositions`
+  summary in the training-ledger record
+  (`src/models/training_ledger.py`). Tests cover each tier and the
+  regime-gate-then-disposition ordering.
+- [ ] **1.5 — Disposition report CLI.** `scripts/disposition_report.py`
+  (or a `scripts/retrain.py --disposition-report` mode) that runs the
+  screen over stored sessions and writes a per-channel
+  persistently-outside-nominal report to `data/analyses/` — the
+  artifact the operator disposes from. Run it over the current corpus
+  and commit the report.
+
+### Phase 2 — directional overrides surfaced
+
+- [ ] **2.1 — Directional `DeviationConfig`.** Add a
+  `kind: directional` variant to `DeviationConfig`
+  (`src/decode/behavior_models.py:201`), against the post-9.4 naming
+  (`relative`→`sigma` rename lands in queue Q7 before this): recenter
+  on `accepted_center`, `tolerance` wander band, `worse_direction`
+  warning/critical thresholds, `better_direction: ignore`, and the same
+  σ-floor schema rule ml-hardening 4.2 enforces for `sigma` when the
+  band is std-scaled. For `behavior_model`-targeted overrides the
+  *center* comes from the surface refit on accepted data — the override
+  contributes only the one-sided band; `accepted_center` applies to
+  raw-channel overrides. Runtime deviation evaluation honors the
+  one-sided band; symmetric configs unchanged. Tests for both
+  directions and the ignore side.
+- [ ] **2.2 — Override → alert path.** Deviation/alert evaluation
+  consults active overrides: recentered band applied, worsening side
+  trips, improving side never alerts. An override past `review_by` is
+  **inert** (stops recentering/suppressing) and is surfaced as
+  needs-re-confirmation rather than silently continuing. Events
+  suppressed or recentered by an override carry the override's `reason`.
+- [ ] **2.3 — Dashboard surfacing.** "N accepted-baseline overrides
+  active" always visible (StatusStrip or Alerts context), expandable to
+  per-override provenance + review_by, expired ones flagged. FE tests.
+- [ ] **2.4 — Docs.** Update `docs/behavior-model-inference.md` +
+  runbook entry for authoring/reviewing overrides.
+
+### Phase 3 — closing the loop (only after 1–2 are proven)
+
+- [ ] **3.1 — Rolling-window selection.** `scripts/retrain.py --since` /
+  sliding-window session selection beside `--days`, disposition
+  pipeline applied to the selected window. The window selection must
+  always reserve held-out calibration sessions (the existing
+  `_pick_calibration_holdouts` path); refuse to schedule-retrain a
+  window too small to spare one.
+- [ ] **3.2 — Scheduler.** Config-gated daemon `asyncio` task
+  (`online_training:` block, **default disabled**) that fires the
+  retrain flow on cadence; a systemd-timer alternative documented, not
+  installed. No training on the capture hot path. The scheduler never
+  passes `--no-calibration-holdout` — a scheduled retrain that can't
+  calibrate out-of-sample skips and logs rather than degrading.
+- [ ] **3.3 — Champion/challenger gate.** `ModelManager` + ledger:
+  a scheduled retrain lands `unpublished`; promotion to `active`
+  requires the validation gate — **recall non-regression vs golden on
+  the fault-injection benchmark** (queue Q3), held-out FP/hr within
+  budget, holdout score agreement with golden within tolerance,
+  contamination sanity — never auto-`active`. An artifact whose
+  manifest is stamped `calibration: in_sample` (ml-hardening 3.1) is
+  categorically ineligible. Tests for gate pass/fail/rollback.
+- [ ] **3.4 — Frozen golden baseline.** Ledger support for declaring one
+  run `golden` **per vehicle profile** (an operator assertion, recorded
+  as such); golden is never auto-updated; a live-vs-golden divergence
+  metric is computed and surfaced ("normal has drifted — why?").
+  Declaring the actual golden run is an operator morning task.
+- [ ] **3.5 — Docs + runbook.** Online-training runbook: enable,
+  observe, promote, roll back, re-declare golden.

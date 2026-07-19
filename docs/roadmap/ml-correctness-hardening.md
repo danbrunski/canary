@@ -222,10 +222,11 @@ model f(RUN_TIME) with load/ambient confounding.
   version, no churn.
 - [ ] **4.6 — Warmup confounding.** Either (a) add a context axis to
   the warmup recipes (2D: RUN_TIME × engine load or ambient IAT), or
-  (b) widen bands + document the confound. Decide after checking
-  whether the corpus has enough cold starts to support (a); the same
-  lesson already retired the load-blind timing surface
-  (`refit.py:186-190`).
+  (b) widen bands + document the confound. **Decision rule
+  (operator-approved, see OVERNIGHT-QUEUE.md):** count cold-start
+  sessions with usable load/IAT spread first; ≥ 8 → do (a), fewer →
+  do (b), and log which path was taken. The same lesson already
+  retired the load-blind timing surface (`refit.py:186-190`).
 - [ ] **4.7 — Segmenter-fallback diagnostic.** When the runtime
   segmenter falls back to constant `"all"` mode (`live.py:333-335`),
   every mode-gated surface silently never fires — log it and surface a
@@ -279,7 +280,8 @@ churns on hot-swap.
   sources still emit their own events), or (b) keep OR-with-boost but
   stop double-emitting: suppress the per-source event when a fused
   event covering the same tick fires, and rename the config/docs to
-  "escalation score". Pick one; today's shape has the costs of both.
+  "escalation score". **Decision made (operator-approved, see
+  OVERNIGHT-QUEUE.md): implement (a).** Update config docs accordingly.
 - [ ] **6.3 — Tuner/gate stacking.** Document (or unify) the two
   debounce layers — built-in PersistenceGate (keyed by source) and
   `AlertTuner` `min_consecutive` (keyed by source+mode,
@@ -309,8 +311,9 @@ collectors — storage/JSONL isolation is complete
 - [ ] **7.2 — Pause live collectors during replay (decide).** Either
   refuse `start_replay` while `vehicle_state` is `engine_running`
   (replay is a bench/desk tool), or gate live collector records out of
-  the queue while a replay is active. Refusing is simpler and matches
-  actual usage.
+  the queue while a replay is active. **Decision made
+  (operator-approved, see OVERNIGHT-QUEUE.md): refuse — return 409
+  with a reason string while `engine_running`.**
 - [ ] **7.3 — Test.** Integration test: live ticks → start replay →
   stop → live ticks; assert no cross-contaminated streaks/dedupe and
   the live buffer restarts empty.
@@ -351,9 +354,10 @@ These merge into **Phase 2 of `eval-longitudinal-and-dtc.md`** (tasks
 - [ ] **9.1 — Settle the backbone bake-off.** The TCN decoder
   reconstructs from a single broadcast latent (`tcn.py:314-316`) —
   materially weaker temporal-shape modeling than the GRU decoder.
-  Unless the real-data bake-off contradicts this, make GRU-D LSTM the
-  default `sequence_detector`, and document TCN as an NPU-export
-  fallback, not an equal.
+  **Decision made (operator-approved, see OVERNIGHT-QUEUE.md): make
+  GRU-D LSTM the default `sequence_detector` and document TCN as an
+  NPU-export fallback, not an equal.** No further bake-off needed to
+  proceed.
 - [ ] **9.2 — DAMP spike (optional).** Prototype matrix-profile
   left-discords (DAMP, KDD'22) offline over a few sessions'
   per-channel streams as a model-free third opinion; evaluate in the

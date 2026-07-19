@@ -312,3 +312,67 @@ logic, low current, off the Pi rails. No conflict with the Canable
 | Auto-tagger | `scripts/autotag.py` (new) + daemon hook; writes via `src/collection/tags.py` |
 | Segmenter modes | `src/preprocessing/segmenter.py`, `src/config.py::OperatingModeSpec` |
 | Grade payoff | `data/behavior_models.yaml`, `src/analysis/refit.py` |
+
+## Implementation checklist
+
+Split by what needs hardware. Phase 2a is fully laptop-doable now
+(config default `source: disabled`, synthetic-data tests); Phase 2b is
+blocked on purchasing/wiring the IMU + baro + 10 Hz GPS.
+
+### Phase 2a — software slice (no hardware required)
+
+- [ ] **2a.1 — `imu` source plumbing.** Extend the `TelemetrySource`
+  Literal in `src/telemetry.py` with `"imu"` + an `.imu()` factory
+  mirroring `.obd()`; explicit `imu`/`gps` arms in the
+  `src/preprocessing/live.py:102` router instead of the catch-all.
+- [ ] **2a.2 — `ImuConfig`.** `src/config.py` block per the config
+  sketch (`source: bno055|mpu6050|icm20948|disabled`, default
+  `disabled`; i2c/sample-rate/mount fields), same `_Strict` pattern as
+  `GpsConfig`. Daemon startup degrades cleanly when disabled.
+- [ ] **2a.3 — Decimation step.** Pre-pivot per-resample-tick
+  aggregation for high-rate sources: `imu:ACCEL_LON_MAX/RMS`,
+  `imu:JERK_MAX`, `imu:ACCEL_LAT_MAX`. Raw rows still land in Parquet;
+  only the wide frame is decimated. Synthetic 100 Hz fixture tests.
+- [ ] **2a.4 — `imu_frame.py`.** Gravity low-pass gated on quiescent
+  windows, GPS-course heading resolution with persisted per-session yaw
+  offset, longitudinal sign from the OBD speed derivative. Synthetic
+  trajectory tests (known tilt + known maneuvers → recovered frame).
+  BNO055 path bypasses steps 1–2 (hardware fusion) but shares sign +
+  heading handling.
+- [ ] **2a.5 — Offline auto-tagger.** `scripts/autotag.py --session ...`
+  writing standard `tags.jsonl` records via
+  `src/collection/tags.py::write_tag`, idempotent/re-runnable,
+  thresholds in config with the triggering peak in tag fields. The
+  GPS-only tags (`stopped`, `highway_cruise`) must work against
+  existing stored sessions **now**; IMU-dependent tags
+  (`hard_accel`/`hard_brake`/`cornering`/`launch`) are implemented and
+  unit-tested against synthetic data, dormant until channels exist.
+- [ ] **2a.6 — Live auto-tagger hook.** Same taxonomy evaluated in the
+  daemon as thresholds trip, config-gated, off by default until 2b
+  validation.
+- [ ] **2a.7 — Segmenter accel modes.** `OperatingModeSpec` gains
+  `accel_lon_min/max`, `accel_lat_min/max`; `DEFAULT_SIGNAL_COLUMNS` +
+  `_required_signals`/`_bounds` arms; example `launch`/`hard_brake`/
+  `cornering` mode specs in the sample YAML (inert without IMU columns).
+- [ ] **2a.8 — Committee declarations.** Append the future committees
+  from `docs/sensor-committees.md` §Roadmap (longitudinal accel,
+  heading/yaw, stationary-confirm, altitude, baro-pressure,
+  vertical/grade) to `COMMITTEES` in `src/analysis/committees.py` as
+  `trainable=False` compute-but-exclude declarations gated on member
+  availability, with synthetic-data tests. They activate as hardware
+  channels appear, no code change.
+
+### Phase 2b — hardware + validation (blocked until parts arrive)
+
+- [ ] **2b.1 — Hardware.** BNO055 (UART mode — Pi I²C clock-stretching
+  caveat), BMP390 baro, 10 Hz GPS with PPS; wiring + `pi-setup.md`
+  section. *(operator)*
+- [ ] **2b.2 — `imu_collector.py`.** Sensor-rate thread, reconnect
+  supervision like `obd_collector.py`, live validation.
+- [ ] **2b.3 — PPS time discipline.** chrony/gpsd PPS; verify pre-NTP
+  session wall time.
+- [ ] **2b.4 — Threshold tuning.** Re-run the offline tagger over real
+  drives; tune θ values in config.
+- [ ] **2b.5 — Grade payoff.** `derived:GRADE` from baro + GPS speed;
+  near-flat training filter or grade context axis; refit and measure
+  deviation-band tightening.

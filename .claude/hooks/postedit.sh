@@ -26,10 +26,14 @@ case "$FILE" in
 esac
 [ -f "$FILE" ] || exit 0
 
-"$RUFF" check --fix --quiet "$FILE" >/dev/null 2>&1
+# F401 (unused import) is deliberately excluded here: mid-edit, an import
+# routinely lands one edit before its first use, and auto-stripping it just
+# forces an F821 + re-add on the next edit — pure churn. The whole-repo
+# commit gate (no --ignore) still catches genuinely-unused imports.
+"$RUFF" check --fix --ignore F401 --quiet "$FILE" >/dev/null 2>&1
 "$RUFF" format --quiet "$FILE" >/dev/null 2>&1
 
-OUT=$("$RUFF" check --quiet "$FILE" 2>&1)
+OUT=$("$RUFF" check --ignore F401 --quiet "$FILE" 2>&1)
 if [ -n "$OUT" ]; then
   echo "ruff diagnostics remain in $FILE:" >&2
   echo "$OUT" >&2

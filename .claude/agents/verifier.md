@@ -16,10 +16,14 @@ Do, in order:
    and the pytest files relevant to the diff (whole `pytest` if the
    change is broad). Any failure is an automatic FAIL — quote the
    output.
-2. **Anchor check.** The task cites specific `file:line` anchors. Read
-   each cited location and confirm the code there actually changed in
-   the way the task describes. A diff that edits adjacent code but
-   leaves the anchored behavior intact is a FAIL.
+2. **Anchor check.** The task cites specific `file:line` anchors.
+   Anchors date from the 2026-07-18 review and **line numbers drift**
+   as earlier queue work lands: resolve each anchor by its cited
+   symbol/function name (Grep for it), not the raw line number. A
+   stale line number is not a defect; the anchored *behavior* being
+   unchanged is. A diff that edits adjacent code but leaves the
+   anchored behavior intact is a FAIL. If the cited symbol no longer
+   exists, check git log/blame for a rename before concluding FAIL.
 3. **Claim check.** For each acceptance clause in the task text
    (thresholds, defaults, guards, schema rules, UI registration),
    verify it holds in the code — read it, don't trust the diff summary
