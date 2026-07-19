@@ -24,19 +24,15 @@ from typing import Any
 import pandas as pd
 
 from src.config import CanaryConfig
+from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH, load_behavior_models
 from src.models.isolation_forest import (
     LABEL_COLUMN,
     SCORE_COLUMN,
     load_isolation_forest_model,
 )
 from src.models.isolation_forest_evaluation import score_distribution
-from src.preprocessing.features import (
-    MEAN_SUFFIX,
-    ROC_SUFFIX,
-    STD_SUFFIX,
-    FeatureConfig,
-    compute_features,
-)
+from src.preprocessing.feature_pipeline import featurize_wide_frame
+from src.preprocessing.features import MEAN_SUFFIX, ROC_SUFFIX, STD_SUFFIX
 from src.preprocessing.loader import TelemetryValueKind, read_sessions, to_wide
 from src.preprocessing.resampler import (
     GAP_SUFFIX,
@@ -45,7 +41,7 @@ from src.preprocessing.resampler import (
     ResampleConfig,
     resample_wide,
 )
-from src.preprocessing.segmenter import MODE_COLUMN, segment_operating_modes
+from src.preprocessing.segmenter import MODE_COLUMN
 
 
 @dataclass(frozen=True)
@@ -74,8 +70,18 @@ def replay_sessions(
     *,
     value: TelemetryValueKind = "value_number",
     model_path: Path | None = None,
+    behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
 ) -> ReplayResult:
-    """Run recorded sessions through preprocessing and optional IF scoring."""
+    """Run recorded sessions through preprocessing and optional IF scoring.
+
+    The segment → anomaly-signal → committee → behavior-deviation →
+    rolling-feature tail is :func:`featurize_wide_frame` — the same
+    function ``build_feature_frame`` (training) and ``LiveFeatureSource.tick``
+    (serving) call — so a replayed session's feature columns match what the
+    model actually saw, instead of an open-coded subset (2.1: this used to
+    call ``compute_features`` directly and silently dropped the
+    anomaly-signal / committee / behavior-deviation columns).
+    """
     sessions = [Path(path) for path in session_dirs]
     if not sessions:
         raise ValueError("at least one session directory is required")
@@ -84,15 +90,12 @@ def replay_sessions(
     wide = to_wide(long, value=value)
     numeric_columns = _numeric_value_columns(wide)
     resampled = _resample_numeric(wide, numeric_columns, config)
-    segmented = segment_operating_modes(
-        resampled,
-        config.preprocessing.operating_modes,
-        recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
+    behavior_models = (
+        load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
     )
-    features = compute_features(
-        segmented,
-        config=FeatureConfig(window_seconds=config.preprocessing.rolling_window_seconds),
-    )
+    featurized = featurize_wide_frame(resampled, config, behavior_models=behavior_models)
+    segmented = featurized.operating_frame
+    features = featurized.features
 
     scored: pd.DataFrame | None = None
     scoring_report: dict[str, Any] | None = None

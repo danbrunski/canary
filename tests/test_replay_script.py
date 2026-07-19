@@ -136,6 +136,32 @@ def test_replay_main_returns_error_for_missing_session(tmp_path: Path, capsys) -
     assert "error:" in capsys.readouterr().err
 
 
+def test_replay_sessions_includes_derived_anomaly_signal_columns(tmp_path: Path) -> None:
+    """2.1: replay_sessions routes through featurize_wide_frame, so a
+    derived anomaly-signal column (compute_anomaly_signals, gated on
+    obd:MAF + obd:RPM being present) actually appears — it used to be
+    silently dropped by the old direct compute_features call."""
+    session = tmp_path / "2026-05-11T120000"
+    records: list[TelemetryRecord] = []
+    for i in range(40):
+        t = 1_778_500_000.0 + i
+        records.extend(
+            [
+                TelemetryRecord.obd(t, "RPM", 1800.0 + (i % 5), "rpm"),
+                TelemetryRecord.obd(t, "SPEED", 35.0, "km/h"),
+                TelemetryRecord.obd(t, "THROTTLE_POS", 18.0, "%"),
+                TelemetryRecord.obd(t, "COOLANT_TEMP", 85.0, "C"),
+                TelemetryRecord.obd(t, "MAF", 12.0 + (i % 3), "g/s"),
+            ]
+        )
+    write_records_to_parquet(records, session, max_rows=10_000)
+
+    result = replay_sessions([session], _config())
+
+    assert "derived:AIR_MASS_PER_CYCLE" in result.frames.segmented.columns
+    assert "derived:AIR_MASS_PER_CYCLE" in result.frames.features.columns
+
+
 def test_replay_reports_can_only_payload_sessions_as_unusable_numeric_features(
     tmp_path: Path,
 ) -> None:

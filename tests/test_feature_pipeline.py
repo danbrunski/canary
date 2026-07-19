@@ -244,6 +244,38 @@ def test_build_feature_frame_skips_parallel_under_threshold(tmp_path: Path) -> N
     pd.testing.assert_frame_equal(serial, auto)
 
 
+def test_build_feature_frame_tail_matches_standalone_featurize_wide_frame(
+    tmp_path: Path,
+) -> None:
+    """2.2: build_feature_frame's docstring claims its tail IS
+    featurize_wide_frame — lock that so a future edit can't silently
+    open-code a divergent copy again. Replicates build_feature_frame's own
+    head (decode → resample, via the same top-level _decode_session_to_resampled
+    it calls) with no bindings/DBC/DID (this session is OBD-only, so those
+    are no-ops), then asserts featurize_wide_frame on that resampled frame
+    is byte-identical to build_feature_frame's actual output."""
+    from src.preprocessing.feature_pipeline import (
+        _decode_session_to_resampled,
+        build_feature_frame,
+    )
+    from src.preprocessing.resampler import ResampleConfig
+
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    session = _write_session(tmp_path, "s0", rows=60, start_epoch=1_780_000_000.0)
+
+    resample_config = ResampleConfig(
+        hz=config.preprocessing.resample_hz,
+        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+    )
+    resampled = _decode_session_to_resampled(session, None, None, None, resample_config)
+    resampled = _drop_fully_stale_rows(resampled)
+    standalone = featurize_wide_frame(resampled, config).features
+
+    combined = build_feature_frame([session], config)
+
+    pd.testing.assert_frame_equal(standalone, combined)
+
+
 def test_expand_suppress_channels_matches_base_and_rolling_siblings() -> None:
     """Listing a base channel auto-includes its rolling-derivative siblings
     (``__mean``, ``__std``, ``__roc``) — the operator lists the sensor once."""
