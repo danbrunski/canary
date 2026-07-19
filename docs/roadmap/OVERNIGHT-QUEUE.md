@@ -54,9 +54,13 @@ operator history (ledger backfill facts)
   fixes. Archive a baseline benchmark report to `data/analyses/`. —
   Phase 8 (8.1-8.4) + eval-longitudinal Phase 2 (2.1-2.7) all landed;
   baseline archived (commit `c5c9558`).
-- [ ] **Q4 — ml-correctness-hardening.md Phases 2 + 3** (IF hardening;
+- [x] **Q4 — ml-correctness-hardening.md Phases 2 + 3** (IF hardening;
   calibration enforcement). Use the Q3 benchmark to decide 2.5
-  (feature-redundancy trial) and 2.6 (ECOD — adopt only if it wins).
+  (feature-redundancy trial) and 2.6 (ECOD — adopt only if it wins). —
+  2.1-2.6 + 3.1-3.3 all landed (commits `3eda014`, `5a4a0c5`,
+  `29e25e3`); 2.5/2.6 trialed on a fixed-seed synthetic corpus (real
+  multi-session corpus retrial noted as future work) — both keep
+  current defaults.
 - [ ] **Q5 — ml-correctness-hardening.md Phase 5** (mode taxonomy:
   close fall-throughs + dead zone, hysteresis). Then laptop-side
   `label_sessions.py --rebuild` + retrain + before/after mode-second
