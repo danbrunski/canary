@@ -174,6 +174,135 @@ def test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low() ->
 
 
 # ---------------------------------------------------------------------------
+# 2.3 — sequence-detector coverage (optional third detector)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluate_detectors_skips_sequence_metrics_when_no_artifact_supplied() -> None:
+    """No ``trained_sequence`` (the common case — no manifest configured/
+    available) must still run the harness end-to-end with IF/fused only,
+    not crash and not fabricate a ``sequence`` entry."""
+    config = _config()
+    resampled = _two_mode_resampled()
+    nominal_features = featurize_wide_frame(resampled, config).features
+    trained_if = fit_isolation_forest(
+        nominal_features,
+        _IFConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:THROTTLE_POS"],
+        fitted_at="2026-05-12T00:00:00Z",
+    )
+
+    report = evaluate_detectors(
+        resampled,
+        config,
+        trained_if,
+        fault_channel="obd:RPM",
+        n_injections=3,
+    )
+
+    assert "sequence" not in report["nominal_fp"]
+    assert {m["detector"] for m in report["per_fault"]} == {"isolation_forest", "fused"}
+
+
+def test_evaluate_detectors_covers_sequence_detector_when_available() -> None:
+    """When a sequence-detector artifact is supplied, every injection ticks
+    it through the real ``SequenceInferenceEngine.observe`` windowed
+    contract (not a shortcut) and a third ``detector="sequence"`` entry
+    shows up per fault kind, gated through its own fresh ``PersistenceGate``
+    key, with the same latency/late-flag bookkeeping as IF/fused."""
+    pytest.importorskip("torch")
+    from src.models.inference import SequenceInferenceEngine
+    from src.models.lstm_training import train_lstm_autoencoder
+    from src.models.sequence_dataset import SequenceWindowDataset
+    from src.models.synthetic_fault_eval import _sequence_anomalous
+    from src.preprocessing.feature_pipeline import sequence_feature_columns
+
+    config = _config()
+    resampled = _two_mode_resampled()
+    nominal_features = featurize_wide_frame(resampled, config).features
+    trained_if = fit_isolation_forest(
+        nominal_features,
+        _IFConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:THROTTLE_POS"],
+        fitted_at="2026-05-12T00:00:00Z",
+    )
+
+    seq_feature_columns = sequence_feature_columns(nominal_features)
+    lstm_config = config.models.lstm_autoencoder.model_copy(
+        update={
+            "sequence_length": 4,
+            "hidden_size": 6,
+            "num_layers": 1,
+            "latent_dim": 2,
+            "batch_size": 4,
+            "learning_rate": 0.01,
+            "max_epochs": 1,
+            "validation_fraction": 0.0,
+            "early_stopping_patience": 2,
+            "random_state": 3,
+            "threshold_k": 2.0,
+        }
+    )
+    dataset = SequenceWindowDataset(
+        nominal_features,
+        sequence_length=4,
+        feature_columns=seq_feature_columns,
+    )
+    trained_sequence = train_lstm_autoencoder(
+        dataset,
+        lstm_config,
+        trained_at="2026-05-12T00:00:00Z",
+        model_version="ci-sequence-eval",
+    )
+
+    report = evaluate_detectors(
+        resampled,
+        config,
+        trained_if,
+        fault_channel="obd:RPM",
+        n_injections=3,
+        trained_sequence=trained_sequence,
+    )
+
+    assert "sequence" in report["nominal_fp"]
+    json.loads(json.dumps(report))  # still JSON-safe with the third detector
+    sequence_metrics = [m for m in report["per_fault"] if m["detector"] == "sequence"]
+    assert {m["fault_kind"] for m in sequence_metrics} == set(DEFAULT_FAULT_KINDS)
+    for metric in sequence_metrics:
+        assert metric["runs"] == 3
+        assert len(metric["latencies_seconds"]) == metric["detected"]
+        assert all(latency >= 0.0 for latency in metric["latencies_seconds"])
+        assert len(metric["late_flags"]) == metric["detected"]
+        assert metric["late_hits"] == sum(metric["late_flags"])
+        if metric["detected"] == 0:
+            assert metric["median_time_to_detect_seconds"] is None
+        else:
+            assert metric["median_time_to_detect_seconds"] is not None
+
+    # The bookkeeping above holds vacuously if `_sequence_anomalous` never
+    # actually flags a `True` — confirmed empirically that a 1-epoch (even
+    # 20-epoch) toy LSTM this tiny catches none of the 5 synthetic fault
+    # kinds across only 3 placements each, so asserting `detected > 0`
+    # through the full injection pipeline would be either always-false or
+    # flaky depending on training luck, not a real regression gate. Prove
+    # the observe-loop wiring is actually live instead: feed an obviously
+    # out-of-distribution window (RPM channels blown up ~1000x) through the
+    # exact same `_sequence_anomalous` helper `evaluate_detectors` calls
+    # internally. If that helper (or the `observe`/`score_window` wiring
+    # behind it) were stubbed to always return `False`, this fails.
+    engine = SequenceInferenceEngine(trained_sequence)
+    ood_features = nominal_features.copy()
+    tail = ood_features.index[-10:]
+    for column in seq_feature_columns:
+        if "RPM" in column:
+            ood_features.loc[tail, column] = ood_features.loc[tail, column] * 1000.0 + 1_000_000.0
+    ood_result = _sequence_anomalous(engine, ood_features)
+    assert bool(ood_result.any()), (
+        "sequence-detector wiring never fires even on an obvious OOD window"
+    )
+
+
+# ---------------------------------------------------------------------------
 # 8.2 — post-window detection grace
 # ---------------------------------------------------------------------------
 
@@ -202,9 +331,8 @@ def test_first_sustained_detection_counts_post_window_hit_within_grace() -> None
     # the 3s grace period that closes at row 13).
     fired = _fired_series(len(timestamps), fire_at=11)
 
-    if_hit, fused_hit = _first_sustained_detection(
-        if_anomalous=fired,
-        fused_anomalous=fired,
+    hits = _first_sustained_detection(
+        signals={"isolation_forest": fired, "fused": fired},
         timestamps=timestamps,
         persistence=PersistenceGate(required=1),
         match_start=match_start,
@@ -212,11 +340,13 @@ def test_first_sustained_detection_counts_post_window_hit_within_grace() -> None
         grace_end=grace_end,
     )
 
+    if_hit = hits["isolation_forest"]
     assert if_hit is not None
     if_ts, if_late = if_hit
     assert if_ts == timestamps.iloc[11]
     assert if_late is True  # detected at/after `end`, not strictly inside [start, end)
 
+    fused_hit = hits["fused"]
     assert fused_hit is not None
     _, fused_late = fused_hit
     assert fused_late is True
@@ -238,9 +368,8 @@ def test_first_sustained_detection_still_misses_beyond_grace_period() -> None:
     # 3s grace period.
     fired = _fired_series(len(timestamps), fire_at=15)
 
-    if_hit, fused_hit = _first_sustained_detection(
-        if_anomalous=fired,
-        fused_anomalous=fired,
+    hits = _first_sustained_detection(
+        signals={"isolation_forest": fired, "fused": fired},
         timestamps=timestamps,
         persistence=PersistenceGate(required=1),
         match_start=match_start,
@@ -248,8 +377,8 @@ def test_first_sustained_detection_still_misses_beyond_grace_period() -> None:
         grace_end=grace_end,
     )
 
-    assert if_hit is None
-    assert fused_hit is None
+    assert hits["isolation_forest"] is None
+    assert hits["fused"] is None
 
 
 def test_first_sustained_detection_in_window_hit_is_not_late() -> None:
@@ -265,9 +394,8 @@ def test_first_sustained_detection_in_window_hit_is_not_late() -> None:
 
     fired = _fired_series(len(timestamps), fire_at=6)  # inside [5, 10)
 
-    if_hit, _ = _first_sustained_detection(
-        if_anomalous=fired,
-        fused_anomalous=fired,
+    hits = _first_sustained_detection(
+        signals={"isolation_forest": fired, "fused": fired},
         timestamps=timestamps,
         persistence=PersistenceGate(required=1),
         match_start=match_start,
@@ -275,6 +403,7 @@ def test_first_sustained_detection_in_window_hit_is_not_late() -> None:
         grace_end=grace_end,
     )
 
+    if_hit = hits["isolation_forest"]
     assert if_hit is not None
     if_ts, if_late = if_hit
     assert if_ts == timestamps.iloc[6]

@@ -164,11 +164,16 @@ harness (`src/models/false_positive_benchmark.py`), bake-off runner
 
 ### 2B. The benchmark
 
-- [ ] **2.3 — Sequence-detector coverage.** Extend
+- [x] **2.3 — Sequence-detector coverage.** Extend
   `synthetic_fault_eval.evaluate_detectors` to also run
   `SequenceInferenceEngine` (`src/models/inference.py:269`) over the
   injected frame (windowed `observe`/`score_window`), not just IF +
-  fusion.
+  fusion. — landed: optional `trained_sequence` param; when supplied,
+  ticks the frame row-by-row through the real production
+  `engine.observe()` contract (buffer cleared per injection run),
+  gated through the same persistence machinery as IF/fused via a
+  generalized `_first_sustained_detection(signals={...})`; absent
+  artifact is the default and produces IF/fused-only output unchanged.
 - [x] **2.4 — Time-to-detect.** Add first-detection latency (seconds
   from injection-window start to first over-threshold, post
   `PersistenceGate`) to `_DetectorMetrics` (:57) alongside

@@ -19,15 +19,20 @@ plus the multiplicative *scale* fault), this:
   late-but-real detection with recorded latency, not a miss) — and counts
   alerts outside any window for the nominal false-positive rate.
 
-The harness is intentionally IF-focused so it stays fast and torch-free in
-CI; the LSTM training-completion + per-mode threshold-population is graded
-by a separate dedicated test. The report is JSON-safe so the training
-ledger / dashboard can consume it.
+The harness stays IF/fused-only (fast, torch-free) when no sequence-detector
+artifact is supplied; passing a ``trained_sequence`` (2.3) additionally ticks
+every row through the real ``SequenceInferenceEngine.observe`` windowed
+contract, gated through its own fresh ``PersistenceGate`` key, and adds a
+third ``detector="sequence"`` metrics entry per fault (plus a ``sequence``
+block in ``nominal_fp``) — mirroring IF/fused exactly. The LSTM/TCN
+training-completion + per-mode threshold-population is graded by a separate
+dedicated test. The report is JSON-safe so the training ledger / dashboard
+can consume it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,6 +41,7 @@ import pandas as pd
 
 from src.alerts.fusion import FusionScorer, PersistenceGate, isolation_forest_source
 from src.config import CanaryConfig
+from src.models.inference import SequenceInferenceEngine
 from src.models.isolation_forest import (
     CALIBRATED_ANOMALY_COLUMN,
     CALIBRATED_THRESHOLD_COLUMN,
@@ -45,6 +51,7 @@ from src.models.isolation_forest import (
     SCORE_COLUMN,
     TrainedIsolationForest,
 )
+from src.models.sequence_protocol import TrainedSequenceModel
 from src.preprocessing.anomaly_injection import AnomalyInjector, AnomalyKind
 from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.resampler import TIMESTAMP_COLUMN, ResampleConfig, is_slow_channel
@@ -148,27 +155,48 @@ def _fused_anomalous(
     return pd.Series(out, index=scored.index)
 
 
+def _sequence_anomalous(engine: SequenceInferenceEngine, featurized: pd.DataFrame) -> pd.Series:
+    """Boolean per-row sequence-detector verdict from the real windowed
+    ``observe`` contract (2.3) — ticks ``featurized`` row-by-row through
+    ``engine`` exactly as the live daemon's ``run_live_inference_lstm`` does.
+
+    ``engine``'s buffer is cleared first so a previous run's tail sequence
+    never leaks into this one (fresh state per injection run, same reason
+    ``persistence`` is rebuilt per run). A row before the buffer has filled
+    (``observe`` returns ``None``, no verdict yet) reads as not-anomalous —
+    the live daemon simply doesn't emit anything for it either."""
+    engine.buffer.clear()
+    out = np.zeros(len(featurized), dtype=bool)
+    for i in range(len(featurized)):
+        result = engine.observe(featurized.iloc[i])
+        if result is not None:
+            out[i] = result.is_anomaly
+    return pd.Series(out, index=featurized.index)
+
+
 def _first_sustained_detection(
     *,
-    if_anomalous: pd.Series,
-    fused_anomalous: pd.Series,
+    signals: Mapping[str, pd.Series],
     timestamps: pd.Series,
     persistence: PersistenceGate,
     match_start: pd.Timestamp,
     match_end: pd.Timestamp,
     grace_end: pd.Timestamp,
-) -> tuple[tuple[pd.Timestamp, bool] | None, tuple[pd.Timestamp, bool] | None]:
+) -> dict[str, tuple[pd.Timestamp, bool] | None]:
     """First row within ``[match_start, grace_end)`` where each detector's
     persistence-gated verdict flips sustained (2.4/8.2).
 
-    ``grace_end`` extends the match window ``window_seconds`` past
-    ``match_end`` (the actual fault-injection end) so a fault whose feature
-    signature only fully forms once the rolling window has "seen" it still
-    counts as a (late) hit rather than a miss. Each return value pairs the
-    detection timestamp with whether it landed in that post-``match_end``
-    grace period (``True``) vs strictly inside ``[match_start, match_end)``
-    (``False``), so callers can keep late hits distinguishable from
-    in-window ones.
+    ``signals`` maps a detector name (its persistence-gate key, e.g.
+    ``"isolation_forest"``, ``"fused"``, ``"sequence"`` — 2.3) to its
+    per-row boolean verdict series; the return dict carries one entry per
+    ``signals`` key. ``grace_end`` extends the match window
+    ``window_seconds`` past ``match_end`` (the actual fault-injection end) so
+    a fault whose feature signature only fully forms once the rolling
+    window has "seen" it still counts as a (late) hit rather than a miss.
+    Each return value pairs the detection timestamp with whether it landed
+    in that post-``match_end`` grace period (``True``) vs strictly inside
+    ``[match_start, match_end)`` (``False``), so callers can keep late hits
+    distinguishable from in-window ones.
 
     Feeds every row of the frame through ``persistence`` in order — not just
     the match window — so a real consecutive-tick streak has to build
@@ -178,17 +206,16 @@ def _first_sustained_detection(
     must be fresh per injection run: sharing one gate across runs would leak
     streak state from a previous run's tail into the next run's start.
     """
-    if_detected: tuple[pd.Timestamp, bool] | None = None
-    fused_detected: tuple[pd.Timestamp, bool] | None = None
-    for ts, if_fired, fused_fired in zip(timestamps, if_anomalous, fused_anomalous, strict=True):
-        if_sustained = persistence.observe("isolation_forest", bool(if_fired))
-        fused_sustained = persistence.observe("fused", bool(fused_fired))
+    names = tuple(signals)
+    detected: dict[str, tuple[pd.Timestamp, bool] | None] = dict.fromkeys(names)
+    for row in zip(timestamps, *(signals[name] for name in names), strict=True):
+        ts, fired_values = row[0], row[1:]
         in_match = match_start <= ts < grace_end
-        if if_detected is None and if_sustained and in_match:
-            if_detected = (ts, ts >= match_end)
-        if fused_detected is None and fused_sustained and in_match:
-            fused_detected = (ts, ts >= match_end)
-    return if_detected, fused_detected
+        for name, fired in zip(names, fired_values, strict=True):
+            sustained = persistence.observe(name, bool(fired))
+            if detected[name] is None and sustained and in_match:
+                detected[name] = (ts, ts >= match_end)
+    return detected
 
 
 def _hours_covered(frame: pd.DataFrame) -> float:
@@ -270,39 +297,47 @@ def evaluate_detectors(
     fault_kinds: Sequence[AnomalyKind] = DEFAULT_FAULT_KINDS,
     n_injections: int = 5,
     seed: int = 42,
+    trained_sequence: TrainedSequenceModel | None = None,
 ) -> dict[str, Any]:
     """Run the synthetic-fault harness and return a JSON-safe report.
 
     ``resampled`` is the clean wide frame *before* ``featurize_wide_frame``
     (the harness re-featurizes after each injection so rolling stats reflect
-    the fault). ``trained_if`` is the model the harness grades. Returns
-    a dict with ``per_fault`` metrics for each detector + a ``nominal_fp``
-    block measured on the unmodified frame.
+    the fault). ``trained_if`` is the model the harness grades. ``trained_sequence``
+    (2.3) is optional — the LSTM/TCN artifact the daemon would actually load for
+    its configured ``sequence_detector`` backbone; when ``None`` (no manifest
+    configured/available, the common case in this test environment) the harness
+    runs exactly as before, IF/fused only. Returns a dict with ``per_fault``
+    metrics for each detector + a ``nominal_fp`` block measured on the
+    unmodified frame.
     """
     rng = np.random.default_rng(seed)
     fusion = FusionScorer(config.models.fusion)
     scales = dict(trained_if.score_scales)
+    sequence_engine = (
+        SequenceInferenceEngine(trained_sequence) if trained_sequence is not None else None
+    )
+    detector_names = ["isolation_forest", "fused", *(["sequence"] if sequence_engine else [])]
 
     # Nominal: one featurize + score pass — this is the FP rate every other
     # injection run is measured against.
     nominal_features = featurize_wide_frame(resampled, config).features
     nominal_scored = trained_if.score(nominal_features)
-    nominal_if = _if_anomalous(nominal_scored)
-    nominal_fused = _fused_anomalous(nominal_scored, fusion=fusion, scales=scales)
+    nominal_signals = {
+        "isolation_forest": _if_anomalous(nominal_scored),
+        "fused": _fused_anomalous(nominal_scored, fusion=fusion, scales=scales),
+    }
+    if sequence_engine is not None:
+        nominal_signals["sequence"] = _sequence_anomalous(sequence_engine, nominal_features)
     hours = _hours_covered(nominal_features)
     nominal_fp = {
-        "isolation_forest": {
-            "alerts": int(nominal_if.sum()),
-            "rows": int(len(nominal_if)),
+        name: {
+            "alerts": int(signal.sum()),
+            "rows": int(len(signal)),
             "hours": hours,
-            "per_hour": round(float(nominal_if.sum()) / hours, 4),
-        },
-        "fused": {
-            "alerts": int(nominal_fused.sum()),
-            "rows": int(len(nominal_fused)),
-            "hours": hours,
-            "per_hour": round(float(nominal_fused.sum()) / hours, 4),
-        },
+            "per_hour": round(float(signal.sum()) / hours, 4),
+        }
+        for name, signal in nominal_signals.items()
     }
 
     # 8.2's post-window grace: a fault whose rolling-feature signature only
@@ -312,12 +347,9 @@ def evaluate_detectors(
 
     per_fault: list[dict[str, Any]] = []
     for kind in fault_kinds:
-        if_hits = 0
-        fused_hits = 0
-        if_latencies: list[float] = []
-        fused_latencies: list[float] = []
-        if_late_flags: list[bool] = []
-        fused_late_flags: list[bool] = []
+        hit_counts = dict.fromkeys(detector_names, 0)
+        latencies: dict[str, list[float]] = {name: [] for name in detector_names}
+        late_flags: dict[str, list[bool]] = {name: [] for name in detector_names}
         for _ in range(n_injections):
             inj = _inject_one(resampled, kind=kind, channel=fault_channel, rng=rng, config=config)
             featurized = featurize_wide_frame(inj.df, config).features
@@ -328,45 +360,38 @@ def evaluate_detectors(
             # persistence config so a hit reflects what would actually alert,
             # not any single over-threshold row.
             persistence = PersistenceGate(config.alerts.min_consecutive_ticks)
-            if_hit, fused_hit = _first_sustained_detection(
-                if_anomalous=_if_anomalous(scored),
-                fused_anomalous=_fused_anomalous(scored, fusion=fusion, scales=scales),
+            signals = {
+                "isolation_forest": _if_anomalous(scored),
+                "fused": _fused_anomalous(scored, fusion=fusion, scales=scales),
+            }
+            if sequence_engine is not None:
+                signals["sequence"] = _sequence_anomalous(sequence_engine, featurized)
+            hits = _first_sustained_detection(
+                signals=signals,
                 timestamps=timestamps,
                 persistence=persistence,
                 match_start=window.start,
                 match_end=window.end,
                 grace_end=window.end + grace,
             )
-            if if_hit is not None:
-                if_ts, if_late = if_hit
-                if_hits += 1
-                if_latencies.append((if_ts - window.start).total_seconds())
-                if_late_flags.append(if_late)
-            if fused_hit is not None:
-                fused_ts, fused_late = fused_hit
-                fused_hits += 1
-                fused_latencies.append((fused_ts - window.start).total_seconds())
-                fused_late_flags.append(fused_late)
-        per_fault.append(
-            _DetectorMetrics(
-                detector="isolation_forest",
-                fault_kind=kind,
-                runs=n_injections,
-                detected=if_hits,
-                latencies_seconds=tuple(if_latencies),
-                late_flags=tuple(if_late_flags),
-            ).to_dict()
-        )
-        per_fault.append(
-            _DetectorMetrics(
-                detector="fused",
-                fault_kind=kind,
-                runs=n_injections,
-                detected=fused_hits,
-                latencies_seconds=tuple(fused_latencies),
-                late_flags=tuple(fused_late_flags),
-            ).to_dict()
-        )
+            for name in detector_names:
+                hit = hits[name]
+                if hit is not None:
+                    ts, late = hit
+                    hit_counts[name] += 1
+                    latencies[name].append((ts - window.start).total_seconds())
+                    late_flags[name].append(late)
+        for name in detector_names:
+            per_fault.append(
+                _DetectorMetrics(
+                    detector=name,
+                    fault_kind=kind,
+                    runs=n_injections,
+                    detected=hit_counts[name],
+                    latencies_seconds=tuple(latencies[name]),
+                    late_flags=tuple(late_flags[name]),
+                ).to_dict()
+            )
 
     return {
         "fault_kinds": list(fault_kinds),
