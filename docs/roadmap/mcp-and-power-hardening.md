@@ -181,18 +181,28 @@ keep-alive).
 the surface evaluator is fully separable — `featurize_wide_frame` +
 `append_deviation_columns` run offline, identically to the live path.
 
-- [ ] **3.1 — Session deviation analyzer.** New
+- [x] **3.1 — Session deviation analyzer.** New
   `src/analysis/session_deviations.py`: `analyze_session(session_dir, config,
-  models)` → load the session wide frame (reuse `build_feature_frame` /
-  `loader.read_session`) → `result = featurize_wide_frame(wide, config,
-  behavior_models=models)` → read `result.operating_frame["deviation:<name>"]`
-  columns. Aggregate per surface: `n`, mean actual/expected/deviation,
-  `%warning`, `%critical`, optionally grouped by `operating_mode`. Flag
-  never-observed gated modes via `unknown_operating_modes(models, config_modes)`.
-- [ ] **3.2 — rpm×load binning (2D surfaces).** For `surface_2d` models, also
-  return per-cell (rpm-bin × load-bin) mean deviation so a VE/airflow shift
-  shows *where* in the operating envelope it lives (idle vs load), not just an
-  average. Reuse the model's own `Axis2D.bin_edges`.
+  models)` → `_decode_session_to_resampled` (same per-session decode/resample
+  `build_feature_frame` uses) → `featurize_wide_frame(...).operating_frame`.
+  **Design change from the sketch:** severity is graded via the *scalar*
+  `behavior_decoder.deviation()` per row (not by reading the vectorized
+  `deviation:<name>` column, which only carries the raw delta with no
+  severity) — keeps this byte-identical to the live/daemon path by
+  construction. `SurfaceDeviationSummary`: `n_observed` (mode-gated rows),
+  `n_in_domain` (model actually spoke), mean actual/expected/deviation,
+  `warning_fraction`/`critical_fraction`. `unknown_operating_modes(models,
+  config.preprocessing.operating_modes.keys())` flags surfaces gated on a
+  mode this session's config can't emit.
+- [x] **3.2 — rpm×load binning (2D surfaces).** `_bin_2d_deviations`: for
+  `surface_2d` models, bins each in-domain observation into the model's own
+  `Axis2D.bin_edges` (same half-open/closed-last-bin rule as
+  `surface_2d._bin_index`, reimplemented locally rather than importing the
+  private helper) and reports per-cell `{x_bin, y_bin, n, mean_deviation}` —
+  only cells with ≥1 observation, no synthetic zero rows. 7 tests in
+  `tests/test_session_deviations.py`, including an injected +5 offset
+  recovered exactly and localized to the one visited cell (the task 3.6
+  synthetic-offset test, done alongside 3.1/3.2 rather than deferred).
 - [ ] **3.3 — CLI.** `scripts/analyze_session.py --session <id> [--mode <m>]
   [--profile <slug>]` printing a per-surface deviation table + flagged surfaces.
   Reuse `resolve_profile_for_tooling` for path scoping.
