@@ -41,12 +41,12 @@ keep-alive).
 
 ### 1A. Shared runtime plumbing
 
-- [ ] **1.1 — `/run/canary` runtime dir.** Add `systemd/tmpfiles-canary.conf`
+- [x] **1.1 — `/run/canary` runtime dir.** Add `systemd/tmpfiles-canary.conf`
   with `d /run/canary 0775 canary canary -` so both the `canary` daemon (writes
   the keep-alive file) and the root `ups-shutdown` watchdog (writes a status
   file, reads keep-alive) share it. Install + `systemd-tmpfiles --create` in
   `scripts/install_pi.sh` (near the ups-shutdown unit install, ~line 92).
-- [ ] **1.2 — Watchdog status heartbeat.** In `scripts/ups_shutdown_watch.py`,
+- [x] **1.2 — Watchdog status heartbeat.** In `scripts/ups_shutdown_watch.py`,
   write JSON `{armed,input_lost,on_battery,soc,vcell,seconds_lost,grace,
   keepalive_remaining,ts}` to `UPS_STATUS_FILE` (default
   `/run/canary/ups_status`) each poll (atomic temp+rename). Add
