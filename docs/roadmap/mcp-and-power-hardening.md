@@ -56,13 +56,18 @@ keep-alive).
 
 ### 1B. Daemon-side power reader + endpoints
 
-- [ ] **1.3 — Power reader module.** New `src/dashboard/ups.py`:
-  `read_gauge(bus,addr) -> (soc, vcell)` (canary is in the `i2c` group; mirror
-  the MAX1704x decode in the watchdog), `read_pld_level(gpio)` (via `lgpio`;
-  canary is in `gpio` group), `read_watchdog_status(path)` (parse
-  `/run/canary/ups_status`), `keepalive_remaining(path)`, `write_keepalive(path,
-  minutes)`. Keep hardware reads best-effort (return `None`/partial on error);
-  unit-test the pure parse/format bits.
+- [x] **1.3 — Power reader module.** New `src/dashboard/ups.py`. **Design
+  change from the original plan:** no direct GPIO/I2C reads from the daemon
+  process — two unprivileged processes independently claiming the same GPIO6
+  line via `lgpio` risks an EBUSY conflict, and task 1.2's heartbeat already
+  publishes everything needed (soc/vcell/armed/input_lost/on_battery/
+  seconds_lost/grace_s). So it's purely file-backed: `read_watchdog_status(path)`
+  (parses `/run/canary/ups_status`, `None` if absent/malformed),
+  `read_keepalive_remaining(path, now=...)`, `write_keepalive(minutes, path,
+  now=...)` (atomic temp+rename), `build_power_snapshot(status,
+  keepalive_remaining_s, now=..., stale_after_s=10.0)` (assembles the
+  `GET /control/power` payload, flags a stale/dead watchdog). 14 unit tests in
+  `tests/test_dashboard_ups.py`.
 - [ ] **1.4 — `UpsKeepaliveRequest` schema.** Add to `src/dashboard/schemas.py`
   (`extra="forbid"`): `minutes: float = Field(ge=0, le=720)` (0 = cancel).
   Export in `__all__`, import in `control.py` schema block.
