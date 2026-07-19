@@ -9,3 +9,4 @@ ml-correctness-hardening.md 1.5 — done — IF/LSTM scoring gated on vehicle_st
 ml-correctness-hardening.md 1.6 — laptop half done, blocked-overnight (IF replay diff + Pi deploy) — smoke retrain + LSTM replay diff, report + 2 pre-existing tooling bugs surfaced for Q3 (commit 2a3f8ae)
 OVERNIGHT-QUEUE.md Q2 — done — ml-correctness-hardening.md Phase 1 (1.1-1.6) complete or annotated blocked-overnight
 eval-longitudinal 2.1+2.2 — done — scripts/replay.py routed through featurize_wide_frame; build_feature_frame tail-identity verified + locked with a parity test (commit 05fc61a)
+ml-correctness-hardening.md 8.4 — done — __roc divides by actual elapsed time, not nominal window_seconds, across dropped-row seams (commit b84da4c)

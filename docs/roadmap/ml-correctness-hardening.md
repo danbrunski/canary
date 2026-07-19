@@ -337,10 +337,14 @@ These merge into **Phase 2 of `eval-longitudinal-and-dtc.md`** (tasks
 - [ ] **8.3 — Threshold provenance in the k-sweep.** When the manifest
   used `threshold_quantile`, sweep quantiles (not k·σ) so
   `recommended_k`-style outputs share production's parameterization.
-- [ ] **8.4 — ROC-across-gap seams.** `__roc` divides a fixed row-shift
+- [x] **8.4 — ROC-across-gap seams.** `__roc` divides a fixed row-shift
   by `window_seconds` on a grid with dropped-row holes
   (`features.py:150-154`) — compute RoC from actual timestamp deltas
   (or NaN it across seams) so gap edges don't produce spurious slopes.
+  — landed: divide by the row pair's actual elapsed time (NaN when
+  non-positive); zero behavior change on a dense grid, regression test
+  proves the old code reported 300 instead of the true 100/sec slope
+  across a 15s dropped-row seam (commit `b84da4c`).
 
 ## Phase 9 — Model-portfolio actions (T3, informed by literature)
 
