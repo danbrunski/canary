@@ -135,6 +135,12 @@ harness (`src/models/false_positive_benchmark.py`), bake-off runner
 (`scripts/sequence_bakeoff.py`), replay diff harness
 (`src/analysis/replay_window.py:402 _diff_events`).
 
+> See also `ml-correctness-hardening.md` (2026-07-18 ML review): its
+> Phase 8 (eval-harness realism — dropout injection realism, post-window
+> detection grace, threshold provenance) merges into this phase, and its
+> Phase 1 (stale-data visibility) changes the production dropout
+> signature this benchmark must reproduce.
+
 ### 2A. Parity pre-flight (do these first — they gate trust in results)
 
 - [ ] **2.1 — `scripts/replay.py` featurization divergence.** It calls

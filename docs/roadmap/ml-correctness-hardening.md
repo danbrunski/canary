@@ -1,0 +1,387 @@
+# Roadmap — ML correctness hardening
+
+Status: **planned** (2026-07-18). Straight to `main`, no feature branches.
+
+## Why this exists
+
+A five-subsystem skeptical review of the ML stack (IsolationForest,
+sequence detectors, behavior surfaces, live inference/fusion, feature
+pipeline/eval harnesses) on 2026-07-18 confirmed the foundations are
+sound — threshold directions, quantile calibration, GRU-D decay math,
+masking consistency, session-boundary isolation, scaler round-tripping,
+physics formulas, and committee gating all verified correct — and
+surfaced a ranked set of real gaps. The external literature check
+(ADBench, TimeEval/VLDB, Wu & Keogh) supports the current portfolio
+shape (physics residuals + GRU-D + cheap outlier screen) and argues
+against a model replacement; the work is hardening, not rearchitecting.
+
+Findings are grouped into phases by dependency and severity. Tier-1
+items (Phase 1–2) undermine trust in every downstream score and go
+first. Every fix that changes detection behavior must land with a
+number attached: run the Phase-2 fault-injection benchmark from
+`eval-longitudinal-and-dtc.md` (or its interim pieces) before/after.
+
+## Guiding constraints
+
+- Whole-repo gate before every commit: `ruff check . && ruff format
+  --check . && mypy src && pytest`.
+- Fix at source, quarantine bad data — no runtime tolerance machinery.
+- Prefer principled solutions over threshold hacks; when a fix changes
+  a distribution the models see (Phases 1, 5), plan a retrain and
+  verify via replay (`start_replay`) before trusting live output.
+- Don't over-engineer: this is a hobby system; the listed guards are
+  cheap assertions and schema constraints, not new frameworks.
+- Deploy note: model binaries are gitignored (scp, not pull);
+  featurization changes need a daemon restart and usually a retrain.
+
+## Review provenance
+
+Severity tags below: **T1** (corrupts data/scoring trust), **T2**
+(quality/config gap with a live instance), **T3** (design suitability).
+Each task cites the code anchor the finding was confirmed at.
+
+---
+
+## Phase 1 — Stale-data visibility (T1)
+
+**Problem.** `resample().last().ffill()` has no limit
+(`src/preprocessing/resampler.py:91-92`), and slow channels
+(COOLANT/IAT/BARO, `DEFAULT_SLOW_CHANNEL_HINTS` at `resampler.py:16`)
+get no `__gap` flags — so a dead/stuck slow sensor forward-fills
+forever, is never dropped by `_drop_fully_stale_rows`
+(`feature_pipeline.py:387-412`), and coolant specifically gates
+warmup/idle segmentation, silently misrouting every subsequent row's
+operating mode. Separately, the live path scores stale rows training
+drops, and inference never consults vehicle state.
+
+- [ ] **1.1 — Bounded forward-fill.** Add a per-channel-class ffill
+  limit in `resample_wide`: fast channels limited to `max_gap_seconds`
+  (existing config), slow channels to a new
+  `preprocessing.slow_channel_max_gap_seconds` (default generous, e.g.
+  120 s — slow sensors legitimately update slowly). Beyond the limit
+  the cell stays NaN. Unit-test: a channel that stops mid-session goes
+  NaN after the limit, and `__mean`/`__std` windows shrink accordingly.
+- [ ] **1.2 — Gap flags for slow channels.** Stop excluding slow
+  channels from gap flagging (`resampler.py:96`, `_fast_channels` at
+  `:121-124`); give them their own `max_gap` (same knob as 1.1) so a
+  stuck coolant sensor is visible to `_drop_fully_stale_rows` and to
+  the GRU-D mask. Verify the mask semantics flow through
+  `sequence_dataset._frame_mask_delta` unchanged.
+- [ ] **1.3 — Segmentation guard on stale coolant.** In the segmenter
+  path, treat a gap-flagged coolant value as absent for mode rules
+  (don't classify warmup/idle off a frozen reading) — rows fall to
+  `unknown` rather than a confidently wrong mode.
+- [ ] **1.4 — Live parity: stop scoring fully-stale ticks.**
+  `LiveFeatureSource.tick` (`src/preprocessing/live.py:303-354`) has no
+  equivalent of `_drop_fully_stale_rows`; `_current_values` holds last
+  values indefinitely. Add the same rule: when every gap-flagged channel
+  is stale, `tick()` returns None (detectors already treat None as
+  no-op, `daemon/inference.py:105`). Also NaN out individual channels
+  past their ffill limit so serve rows match Phase-1.1 training rows.
+- [ ] **1.5 — Vehicle-state gating for IF/LSTM.** `run_live_inference`
+  scores every tick; `classify_vehicle_state`
+  (`src/dashboard/status.py:73-143`) is display-only (confirmed: zero
+  references in `daemon/inference.py`). Gate IF/LSTM scoring on
+  `engine_running` (and optionally `ignition_only` if a koeo model
+  exists for the mode); skip + count skipped ticks in `/status` for
+  `engine_off`/`no_data`. Behavior surfaces keep their existing
+  mode-gating. Replay state must still score (replay re-emits running
+  data).
+- [ ] **1.6 — Retrain + verify.** Phase 1 changes the training
+  distribution (rows that used to be ffilled/kept are now NaN/dropped).
+  Retrain IF + sequence detector, replay a known-good session
+  end-to-end, and compare event diff (`replay_window` `_diff_events`)
+  before deploying.
+
+## Phase 2 — Missing-channel handling + IF hardening (T1/T2)
+
+**Problem.** One permanently absent trained channel silently blinds IF
+for that mode — `reconcile_feature_frame_to_spec` NaN-fills it
+(`feature_pipeline.py:823-825`), `score()` marks all rows missing
+(`isolation_forest.py:296-303`), `_score_and_emit` suppresses forever
+with a once-per-process log (`daemon/inference.py:619-629`,
+`_IF_MISSING_WARNED` at `:446`). Sparse modes also train meaningless
+models that emit ungated.
+
+- [ ] **2.1 — Surface IF blindness.** Replace once-per-process warn
+  with: a `missing_feature_rate` per-mode gauge already in `/status` —
+  add an explicit `detectors.isolation_forest.blind_modes` list to the
+  status payload + `get_status`, and log a fresh warning when a mode
+  *transitions* into blindness mid-drive (edge-triggered, not
+  per-tick). The dashboard SystemPanel shows it.
+- [ ] **2.2 — `min_samples_per_mode` floor.** Add a training guard
+  mirroring `_MIN_CALIBRATION_SAMPLES` (`isolation_forest.py`): modes
+  with fewer fit rows than the floor (default ≥ 100) are skipped (no
+  model persisted) rather than fitting a 200-tree forest on a handful
+  of rows. Skipped modes are listed in the manifest.
+- [ ] **2.3 — Retire the ungated legacy-label emit.** Uncalibrated
+  modes currently bypass the PersistenceGate and fire on the sklearn
+  contamination label (`daemon/inference.py:657-674` →
+  `emitter.py:147-148`). Decision: make uncalibrated modes
+  **non-emitting** (score recorded, no events) — consistent with 2.2's
+  "no meaningless models" stance. Remove or gate the
+  `emit_isolation_forest_row` legacy path at serve.
+- [ ] **2.4 — Scaler leakage nit.** Fit `ZScoreScaler` on `fit_index`
+  rows only (`isolation_forest.py:388` currently fits pre-split).
+  Cosmetic-scale effect; cheap to do during 2.2's edit.
+- [ ] **2.5 — Feature redundancy for IF.** Each channel expands 4×
+  (raw + `__mean` + `__std` + `__roc`, `features.py:14-15,34-36`),
+  diluting IF's random-split mechanism. Trial in the benchmark: IF on
+  raw+`__roc` only (or raw-only) vs current. Adopt whichever wins on
+  detection-rate/FP; keep the full set for the sequence detector
+  (masking makes it cheap there).
+- [ ] **2.6 — ECOD comparison (optional, cheap).** Add `pyod`'s ECOD as
+  a benchmark-only alternative screen in `synthetic_fault_eval` /
+  `detector_benchmark` — parameter-free, top-tier in ADBench. Promote
+  only if it beats IF on the benchmark; otherwise drop the dependency.
+
+## Phase 3 — Calibration enforcement (T2)
+
+**Problem.** Held-out threshold calibration is enforced only by the CLI
+wrappers; library entry points default to in-sample
+(`lstm_training.py:340-342`, `tcn_training.py:337-339`) — the exact
+mechanism behind the earlier FPR≈1.0 flood. The default threshold is
+also `mean + k·σ` on right-skewed errors instead of the calibrated
+quantile.
+
+- [ ] **3.1 — Hard requirement or loud refusal.** Make
+  `train_lstm_autoencoder`/`train_tcn_autoencoder` raise (or require an
+  explicit `allow_in_sample_calibration=True` escape hatch that stamps
+  `calibration: in_sample` into the manifest) when no calibration
+  dataset is provided. Load-time: daemon logs a warning when serving an
+  `in_sample`-stamped artifact.
+- [ ] **3.2 — Quantile threshold as default.** Flip
+  `threshold_quantile` from `None` to a concrete default (e.g. 0.995)
+  in `config.py:273,313` so the calibrated-FPR path is the default and
+  k·σ is the opt-out. Re-verify `false_positive_benchmark`'s k-sweep
+  provenance note (see 8.3).
+- [ ] **3.3 — Bake-off defaults.** `sequence_bakeoff` calibrates
+  in-sample unless `--calibration-sessions` is passed — make the flag
+  required (or auto-carve held-out sessions) so a default bake-off is
+  production-faithful.
+
+## Phase 4 — Behavior-surface publish gates + serve quality (T2/T3)
+
+**Problem.** No fit-quality gate actually runs (docstrings claim one;
+zero `r_squared` references in `refit.py` — confirmed), the σ-floor fix
+is convention-only (`DeviationConfig.sigma_floor` optional and may be
+0, `behavior_models.py:222`) with a live hair-trigger instance
+(`tps_voltage_per_pct`, `refit.py:452-472`, no floor), 2D serve is
+nearest-cell over per-refit auto-recomputed edges, and warmup surfaces
+model f(RUN_TIME) with load/ambient confounding.
+
+- [ ] **4.1 — Publish gate.** In `fit_recipe`/`refit_all`
+  (`refit.py:495-706`): refuse to publish a surface whose `r_squared`
+  is below a per-recipe floor (default e.g. 0.6, overridable) or whose
+  populated-cell coverage is below a floor (kills the silent all-empty
+  2D surface, `surface_2d.py:89-114`). Refusals are `RecipeResult`
+  skips with reasons, visible in the refit CLI output.
+- [ ] **4.2 — Schema-enforce the σ-floor.** Pydantic validator on
+  `BehaviorModel`/`DeviationConfig`: `kind="relative"` requires
+  `sigma_floor` present and > 0. Migration: add floors to every shipped
+  relative recipe — including `tps_voltage_per_pct` (pick a floor from
+  the fitted residual distribution, e.g. max(fit std, sensor LSB)).
+- [ ] **4.3 — Freeze 2D bin edges across versions.** `_auto_edges`
+  (`refit.py:778-791`) recomputes quantile edges each refit → versioned
+  cells cover different operating rectangles. On first fit, persist the
+  edges into the model; subsequent refits reuse stored edges unless a
+  recipe explicitly re-grids (which bumps a `grid_version`). This makes
+  cross-version drift comparison valid.
+- [ ] **4.4 — Interpolate at serve (1D-style smoothness for 2D).**
+  Replace nearest-cell `evaluate_2d` (`surface_2d.py:158-180`) with
+  bilinear interpolation over populated neighbor cells (fall back to
+  nearest when neighbors are empty). Kills severity flips from
+  operating-point drift across a bin edge.
+- [ ] **4.5 — Version bump only on change.** Consult
+  `training_data_hash` (`behavior_models.py:114-121`) before bumping
+  `version` in `refit_all` (`refit.py:662-663`); identical fit → same
+  version, no churn.
+- [ ] **4.6 — Warmup confounding.** Either (a) add a context axis to
+  the warmup recipes (2D: RUN_TIME × engine load or ambient IAT), or
+  (b) widen bands + document the confound. Decide after checking
+  whether the corpus has enough cold starts to support (a); the same
+  lesson already retired the load-blind timing surface
+  (`refit.py:186-190`).
+- [ ] **4.7 — Segmenter-fallback diagnostic.** When the runtime
+  segmenter falls back to constant `"all"` mode (`live.py:333-335`),
+  every mode-gated surface silently never fires — log it and surface a
+  flag in `/status` (complements the existing
+  `unknown_operating_modes` load-time warning).
+
+## Phase 5 — Operating-mode taxonomy fixes (T2)
+
+**Problem (verified in `canary.example.yaml`).** `city` constrains only
+`speed_max: 50` so warm idle at >900 rpm falls through to it; 50–80
+km/h is an unclassified dead zone (`highway` floors at 80); no
+hysteresis → 1 Hz mode flapping contaminates per-mode models. The
+segmenter *code* is correct; the rule set leaks.
+
+- [ ] **5.1 — Close the fall-throughs.** Add `speed_min` (e.g. 5) to
+  `city`; raise idle `rpm_max` (or add an `idle_high` mode for
+  A/C-load/fast-idle up to ~1200 rpm); add a `suburban` (50–80 km/h)
+  mode or extend `city` to meet `highway`. Update all `canary*.yaml`
+  variants + the Pi config (deploy note).
+- [ ] **5.2 — Hysteresis/debounce.** Add a dwell requirement to mode
+  transitions (e.g. new mode must hold N consecutive rows before the
+  label switches; `recent_speed` at `segmenter.py:261-294` is the
+  existing precedent for causal smoothing). Keep it in the shared
+  segmenter so batch and live agree.
+- [ ] **5.3 — Re-segment + refit.** Mode labels feed per-mode IF
+  models, sequence per-mode thresholds, behavior-surface gating, and
+  session classification. After 5.1/5.2: re-run `label_sessions.py
+  --rebuild`, retrain, and compare mode-second distributions
+  (`get_corpus_mode_summary`) before/after to confirm the dead zone and
+  fall-throughs actually closed.
+
+## Phase 6 — Persistence, fusion, and emit semantics (T3)
+
+**Problem.** `PersistenceGate` hard-resets on any non-firing tick
+(`fusion.py:100-103`) — K=3-consecutive at 1 Hz structurally cannot
+alert on intermittent faults; gate keys ignore operating mode; tick
+semantics differ between IF (freezes on missing) and LSTM/behavior
+(reset); fusion is OR-with-boost that double-emits with per-source
+events; tuner debounce stacks on the built-in gate; fused dedupe key
+churns on hot-swap.
+
+- [ ] **6.1 — M-of-N persistence.** Replace N-consecutive with an
+  M-of-N sliding window per key (e.g. 3-of-5 default, config under
+  `alerts.`), preserving flood protection while catching flicker.
+  Wall-clock-bound the window (N ticks *or* T seconds, whichever is
+  shorter) so streaks can't accumulate across long data gaps
+  (fixes the freeze inconsistency too — define observe-on-every-tick
+  semantics for all three detector paths, including IF missing ticks).
+- [ ] **6.2 — Decide what fusion is.** Either (a) make it a real
+  agreement gate: fused `is_anomaly` requires `agreement >= 2` (single
+  sources still emit their own events), or (b) keep OR-with-boost but
+  stop double-emitting: suppress the per-source event when a fused
+  event covering the same tick fires, and rename the config/docs to
+  "escalation score". Pick one; today's shape has the costs of both.
+- [ ] **6.3 — Tuner/gate stacking.** Document (or unify) the two
+  debounce layers — built-in PersistenceGate (keyed by source) and
+  `AlertTuner` `min_consecutive` (keyed by source+mode,
+  `tuning.py:319-346`). Simplest: tuner debounce *replaces* the
+  built-in requirement for that key rather than stacking.
+- [ ] **6.4 — Stable fused dedupe key.** Drop model versions from the
+  fused event's dedupe identity (`daemon/inference.py:216`,
+  `emitter.py:263`) so a hot-swap can't burst a duplicate alert inside
+  the dedupe window; keep versions in the event payload.
+- [ ] **6.5 — Benchmark the gate change.** Re-run the FP benchmark and
+  (once built) the fault-injection benchmark with intermittent-fault
+  cases (fire/gap patterns) to demonstrate 6.1 catches them at
+  unchanged clean-drive FP.
+
+## Phase 7 — Replay in-memory isolation (T3)
+
+**Problem.** Control-plane replay injects into the same live queue
+(`replay_control.py:166`) and shares `LiveFeatureSource` buffers,
+`PersistenceGate` streaks, and emitter dedupe/counters with live
+collectors — storage/JSONL isolation is complete
+(`replay_control.py:11-24`) but in-memory state is not.
+
+- [ ] **7.1 — Reset on replay boundaries.** On `enter_replay_mode` /
+  `exit_replay_mode`: clear `LiveFeatureSource` (`_current_values`,
+  buffer), reset `PersistenceGate._streaks`, and snapshot/restore or
+  segregate emitter dedupe + counters, so live→replay→live is clean.
+- [ ] **7.2 — Pause live collectors during replay (decide).** Either
+  refuse `start_replay` while `vehicle_state` is `engine_running`
+  (replay is a bench/desk tool), or gate live collector records out of
+  the queue while a replay is active. Refusing is simpler and matches
+  actual usage.
+- [ ] **7.3 — Test.** Integration test: live ticks → start replay →
+  stop → live ticks; assert no cross-contaminated streaks/dedupe and
+  the live buffer restarts empty.
+
+## Phase 8 — Eval-harness realism (T2 — feeds the benchmark roadmap)
+
+**Problem.** The synthetic harness overstates dropout recall (injects
+NaN post-resample; production produces ffill + gap flag), undercounts
+late detections (only flags strictly inside `[start, end)` count,
+`synthetic_fault_eval.py:228-231`), and the k-sweep reparameterizes
+thresholds that production may have set by quantile.
+
+These merge into **Phase 2 of `eval-longitudinal-and-dtc.md`** (tasks
+2.1–2.7 there); listed here for completeness:
+
+- [ ] **8.1 — Realistic dropout injection.** Inject dropout *pre-
+  resample* (or emulate: hold last value + set gap flags) so the
+  benchmark measures the production-visible signature, not an
+  auto-detected NaN. (Depends on Phase 1 landing first — the
+  production signature changes.)
+- [ ] **8.2 — Post-window detection grace.** Count detections within
+  `window_seconds` after injection end as (late) hits with recorded
+  latency, not misses.
+- [ ] **8.3 — Threshold provenance in the k-sweep.** When the manifest
+  used `threshold_quantile`, sweep quantiles (not k·σ) so
+  `recommended_k`-style outputs share production's parameterization.
+- [ ] **8.4 — ROC-across-gap seams.** `__roc` divides a fixed row-shift
+  by `window_seconds` on a grid with dropped-row holes
+  (`features.py:150-154`) — compute RoC from actual timestamp deltas
+  (or NaN it across seams) so gap edges don't produce spurious slopes.
+
+## Phase 9 — Model-portfolio actions (T3, informed by literature)
+
+- [ ] **9.1 — Settle the backbone bake-off.** The TCN decoder
+  reconstructs from a single broadcast latent (`tcn.py:314-316`) —
+  materially weaker temporal-shape modeling than the GRU decoder.
+  Unless the real-data bake-off contradicts this, make GRU-D LSTM the
+  default `sequence_detector`, and document TCN as an NPU-export
+  fallback, not an equal.
+- [ ] **9.2 — DAMP spike (optional).** Prototype matrix-profile
+  left-discords (DAMP, KDD'22) offline over a few sessions'
+  per-channel streams as a model-free third opinion; evaluate in the
+  benchmark. Adopt only if it adds detections the current stack
+  misses; it shares no failure modes with reconstruction/isolation
+  methods and is computationally trivial at 1 Hz.
+- [ ] **9.3 — Cold-start Δt note.** Mid-session daemon restart
+  under-reports Δt for channels last seen pre-restart
+  (`inference.py:139-141,237`) — bounded distortion on the first
+  window(s). Either persist last-observation timestamps across restart
+  or accept + document; don't build machinery beyond a comment unless
+  benchmark shows impact.
+- [ ] **9.4 — "Relative" naming.** `DeviationConfig.kind="relative"` is
+  σ-scaled (z-score), not percent-of-expected
+  (`behavior_decoder.py:291-304`). Rename to `sigma` (with backward
+  compat alias) or document loudly; today the name invites
+  misconfigured bands.
+
+---
+
+## Cross-cutting acceptance
+
+- [ ] Whole-repo `ruff` + `mypy` + `pytest` green on every commit.
+- [ ] Every phase that changes featurization, segmentation, or
+  thresholds: retrain affected models, replay a pinned known-good
+  session, and compare event diffs before Pi deploy.
+- [ ] FP benchmark (and the fault-injection benchmark once built) run
+  before/after Phases 1, 2, 5, 6 — no unexplained regression in
+  clean-drive alerts/hour or detection rate.
+- [ ] `docs/` updated where behavior changes (data-sources for
+  ffill/gap semantics, per-mode stub for taxonomy changes,
+  mcp-server/headless-api for new status fields).
+- [ ] Pi deploy verified live per phase (pull + scp binaries +
+  restart; check `vehicle_state` before interpreting detector output).
+
+## Code anchor index (from the 2026-07-18 review)
+
+| Finding | Anchor |
+|---|---|
+| Unbounded ffill | `src/preprocessing/resampler.py:91-92`; slow hints `:16`; fast-only gap flags `:96,121-124` |
+| Stale-row drop (batch-only) | `src/preprocessing/feature_pipeline.py:387-412` (called `:379`); no live equivalent in `live.py:303-354` |
+| Vehicle state unused in inference | `src/dashboard/status.py:73-143` vs `src/daemon/inference.py` (no refs) |
+| IF missing-feature suppression | `isolation_forest.py:296-303` → `daemon/inference.py:619-629`, once-warn `:446` |
+| IF holdout/threshold | fit/holdout split `isolation_forest.py:432-444`, quantile `:465`, scaler pre-split `:388` |
+| Ungated legacy emit | `daemon/inference.py:657-674` → `emitter.py:142-148` |
+| Sequence calibration defaults | `lstm_training.py:340-342`, `tcn_training.py:337-339`; guard precedent `lstm_training.py:496-502` |
+| Threshold default k·σ | `config.py:273,313`; distribution `sequence_training.py:463-466` |
+| PersistenceGate reset | `src/alerts/fusion.py:97-110`; keys `:83-85` |
+| Fusion OR + boost | `fusion.py:144-234`; behavior severities `:196-204` |
+| R² never gated | `src/analysis/refit.py` (zero refs; fit paths `:495-706`) |
+| σ-floor optional | `behavior_models.py:213-234`; hair-trigger recipe `refit.py:452-472` |
+| 2D nearest-cell + auto-edges | `surface_2d.py:158-196`; `refit.py:753,778-791` |
+| Version churn | `refit.py:662-663`; hash `behavior_models.py:114-121` |
+| Mode-rule leaks | `canary.example.yaml:99-147` (city `:139`, highway `:141`, idle `:127`) |
+| Segmenter smoothing precedent | `segmenter.py:261-294` (`recent_speed`) |
+| Replay shared queue | `src/control/replay_control.py:166`; isolation contract `:11-24` |
+| Synthetic-eval accounting | `synthetic_fault_eval.py:223,228-231`; dropout NaN `anomaly_injection.py:201` |
+| TCN broadcast-latent decoder | `src/models/tcn.py:314-316`; causal conv OK `:135-158` |
+| STFT double-smoothing | `analysis/derived.py:70,111-141,343-353` + rolling re-smooth in `compute_features` |
