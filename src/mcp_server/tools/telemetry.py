@@ -39,6 +39,9 @@ def query_telemetry(
     *,
     sql: str,
     row_limit: int | None = None,
+    session: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> dict[str, Any]:
     """Run an ad-hoc SELECT against the telemetry Parquet ring buffer.
 
@@ -47,19 +50,30 @@ def query_telemetry(
     statements are accepted; the connection is read-only and an outer LIMIT
     is applied even if the query omits one.
 
+    ``session``/``since``/``until`` scope which parquet files the ``telemetry``
+    view is built from *before* the query runs — cheaper than a full-corpus
+    scan filtered by ``WHERE session = '...'`` (both work; scoping here means
+    DuckDB never opens the excluded sessions' parquet at all). ``since``/
+    ``until`` are ISO-8601 (date or datetime) or a bare session id, and bound
+    each session's own timestamp inclusively.
+
     Examples
     --------
-    Pull a single channel from one session:
+    Pull a single channel from one session (either form works; ``session=``
+    is faster since it skips scanning every other session):
 
-        SELECT timestamp, value_number FROM telemetry
-        WHERE channel = 'RPM' AND session = '2026-05-17T120000'
-        ORDER BY timestamp
+        query_telemetry(sql="SELECT timestamp, value_number FROM telemetry "
+                             "WHERE channel = 'RPM' ORDER BY timestamp",
+                         session="2026-05-17T120000")
 
-    Count anomaly-adjacent samples by mode (joining the anomalies log is the
-    caller's responsibility; this view is telemetry only).
+    Restrict to a date range across many sessions:
+
+        query_telemetry(sql="SELECT session, avg(value_number) FROM telemetry "
+                             "WHERE channel = 'RPM' GROUP BY session",
+                         since="2026-07-01", until="2026-07-18")
     """
     try:
-        rows = query_runner.run(sql, row_limit=row_limit)
+        rows = query_runner.run(sql, row_limit=row_limit, session=session, since=since, until=until)
     except QueryValidationError as exc:
         return {"ok": False, "error": str(exc), "rows": [], "count": 0}
     return {"ok": True, "rows": rows, "count": len(rows)}

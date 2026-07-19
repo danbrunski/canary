@@ -409,14 +409,30 @@ def _register_read_tools(
     if query_runner is not None:
 
         @mcp.tool()
-        def query_telemetry(sql: str, row_limit: int | None = None) -> dict[str, Any]:
+        def query_telemetry(
+            sql: str,
+            row_limit: int | None = None,
+            session: str | None = None,
+            since: str | None = None,
+            until: str | None = None,
+        ) -> dict[str, Any]:
             """Run a single SELECT/WITH against the telemetry Parquet view.
 
             View name is `telemetry` with columns timestamp, source, channel,
             value_number, value_text, value_bool, unit, metadata_json, and a
             derived `session` column. Non-SELECT statements are rejected.
+            session/since/until scope which sessions' parquet back the view
+            for this call (cheaper than scanning the whole corpus) — since/
+            until are ISO-8601 or a bare session id, inclusive both ends.
             """
-            return telemetry_tool.query_telemetry(query_runner, sql=sql, row_limit=row_limit)
+            return telemetry_tool.query_telemetry(
+                query_runner,
+                sql=sql,
+                row_limit=row_limit,
+                session=session,
+                since=since,
+                until=until,
+            )
     else:
         logger.info(
             "query_telemetry disabled — CANARY_STORAGE_PATH unset; daemon HTTP "

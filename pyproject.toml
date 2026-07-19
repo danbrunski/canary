@@ -30,6 +30,11 @@ dependencies = [
     "mcp>=1.2",
     "httpx>=0.27",
     "duckdb>=1.0",
+    # duckdb's Python client lazily imports pytz to convert TIMESTAMPTZ
+    # columns on fetchall(); without it, any query_telemetry SELECT that
+    # returns the raw `timestamp` column (TIMESTAMPTZ) raises
+    # InvalidInputException instead of returning rows.
+    "pytz",
 ]
 
 [project.optional-dependencies]

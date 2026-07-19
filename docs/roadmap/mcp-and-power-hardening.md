@@ -229,15 +229,31 @@ the surface evaluator is fully separable — `featurize_wide_frame` +
   or missing `behavior_models.yaml`, matching `query_telemetry`'s
   convention. Documented in `docs/mcp-server.md`. 4 tool tests + 2 server
   registration-gating tests + 1 `MCPConfig` round-trip test.
-- [ ] **3.5 — `query_telemetry` scoping.** Add `session: str | None` and
-  `since`/`until` params to the MCP tool (`server.py:392`,
-  `tools/telemetry.py:37`) and push down into `TelemetryQuery._matching_files`
-  (`src/mcp_server/parquet_query.py:93`) — filter the `rglob` result by the
-  directory-name UTC timestamp so a scoped query doesn't scan every session.
-- [ ] **3.6 — Tests.** Unit-test `analyze_session` against a small synthetic
-  session with a known injected offset on one surface (assert the deviation is
-  recovered and localized to the right rpm×load cells); test the query
-  session/date push-down.
+- [x] **3.5 — `query_telemetry` scoping.** Added `session`/`since`/`until` to
+  the MCP tool, `telemetry_tool.query_telemetry`, and
+  `TelemetryQuery.run`/`_refresh_view`/`_matching_files`. The `rglob` walk
+  itself is unavoidable (cheap — filesystem metadata only) but the *result
+  list* is filtered before it reaches DuckDB's `parquet_scan`, so excluded
+  sessions' parquet content is never opened/parsed. `session` matches the
+  immediate parent directory name (works regardless of profile-scoping depth
+  between the storage root and session dirs — verified with a test). `since`/
+  `until` parse as ISO-8601 or a bare session id and bound each session's own
+  timestamp (from its directory name) inclusively; an unparseable session
+  directory is excluded under a date filter but kept on an unscoped query
+  (preserves existing behavior when no filter is set).
+
+  **Found and fixed a real production bug while testing this:** `duckdb`'s
+  Python client lazily imports `pytz` to convert `TIMESTAMPTZ` columns on
+  `fetchall()` — `pytz` was never a declared dependency, so any
+  `query_telemetry` call returning the raw `timestamp` column would raise
+  `InvalidInputException`, in production on the Pi, not just here. Added
+  `pytz` to `pyproject.toml`'s base dependencies.
+- [x] **3.6 — Tests.** The synthetic-offset test was done alongside 3.1/3.2
+  (see there) rather than deferred. Query scoping: 9 new tests in
+  `tests/test_mcp_parquet_query.py` — session scoping, nesting-depth
+  independence, inclusive since/until ranges, open-ended since, bare-session-id
+  bounds, bad-bound validation error, and the unparseable-directory edge case
+  that caught the `pytz` gap.
 
 ---
 

@@ -268,6 +268,13 @@ Only single `SELECT`/`WITH` statements are accepted; `ATTACH`, `INSERT`,
 `PRAGMA`, etc. are rejected before DuckDB sees them. An outer `LIMIT 5000`
 is wrapped around every query unless the caller passes `row_limit`.
 
+Optional `session=`, `since=`, `until=` scope which sessions' parquet build
+the `telemetry` view for that call, *before* DuckDB touches them — cheaper
+than a `WHERE session = '...'` filter (which still works, but scans every
+session's parquet content first). `session` matches a session id exactly;
+`since`/`until` accept ISO-8601 (date or datetime) or a bare session id and
+bound each session's own timestamp inclusively.
+
 Example queries Claude might issue:
 
 ```sql

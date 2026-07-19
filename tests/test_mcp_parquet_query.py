@@ -192,3 +192,116 @@ def test_telemetry_query_rejects_non_select(tmp_path: Path) -> None:
     q = TelemetryQuery(tmp_path)
     with pytest.raises(QueryValidationError):
         q.run("DROP VIEW telemetry")
+
+
+# ---------------------------------------------------------------------------
+# session / since / until scoping (task 3.5)
+# ---------------------------------------------------------------------------
+
+
+def _row(t: dt.datetime, rpm: float) -> dict[str, object]:
+    return {
+        "timestamp": t,
+        "source": "obd",
+        "channel": "RPM",
+        "value_number": rpm,
+        "value_text": None,
+        "value_bool": None,
+        "unit": "rpm",
+        "metadata_json": None,
+    }
+
+
+def _three_sessions(tmp_path: Path) -> Path:
+    """Three sessions, one per day, each with a distinct RPM so a query can
+    tell which session(s) a scoped run actually touched."""
+    _write_fixture(
+        tmp_path, "2026-07-01T090000", [_row(dt.datetime(2026, 7, 1, 9, tzinfo=dt.UTC), 100.0)]
+    )
+    _write_fixture(
+        tmp_path, "2026-07-10T090000", [_row(dt.datetime(2026, 7, 10, 9, tzinfo=dt.UTC), 200.0)]
+    )
+    _write_fixture(
+        tmp_path, "2026-07-20T090000", [_row(dt.datetime(2026, 7, 20, 9, tzinfo=dt.UTC), 300.0)]
+    )
+    return tmp_path
+
+
+def test_matching_files_session_scopes_to_one_session(tmp_path: Path) -> None:
+    _three_sessions(tmp_path)
+    q = TelemetryQuery(tmp_path)
+    files = q._matching_files(session="2026-07-10T090000")
+    assert len(files) == 1
+    assert "2026-07-10T090000" in files[0]
+
+
+def test_matching_files_session_scope_works_regardless_of_nesting_depth(tmp_path: Path) -> None:
+    """A session id matches the immediate parent dir name even when the
+    storage root sits above a profile-slug layer (multi-vehicle deployments)."""
+    scoped_root = tmp_path / "nissan-xterra-2008"
+    _write_fixture(
+        scoped_root, "2026-07-10T090000", [_row(dt.datetime(2026, 7, 10, 9, tzinfo=dt.UTC), 200.0)]
+    )
+    q = TelemetryQuery(tmp_path)  # points ABOVE the profile-slug directory
+    files = q._matching_files(session="2026-07-10T090000")
+    assert len(files) == 1
+
+
+def test_query_telemetry_session_scope_excludes_other_sessions(tmp_path: Path) -> None:
+    _three_sessions(tmp_path)
+    q = TelemetryQuery(tmp_path)
+    rows = q.run("SELECT value_number, session FROM telemetry", session="2026-07-10T090000")
+    assert [r["value_number"] for r in rows] == [200.0]
+    assert rows[0]["session"] == "2026-07-10T090000"
+
+
+def test_since_until_bound_inclusive_range(tmp_path: Path) -> None:
+    _three_sessions(tmp_path)
+    q = TelemetryQuery(tmp_path)
+    rows = q.run(
+        "SELECT value_number FROM telemetry ORDER BY value_number",
+        since="2026-07-05",
+        until="2026-07-15",
+    )
+    assert [r["value_number"] for r in rows] == [200.0]  # only the middle session
+
+
+def test_since_only_is_an_open_upper_bound(tmp_path: Path) -> None:
+    _three_sessions(tmp_path)
+    q = TelemetryQuery(tmp_path)
+    rows = q.run("SELECT value_number FROM telemetry ORDER BY value_number", since="2026-07-10")
+    assert [r["value_number"] for r in rows] == [200.0, 300.0]
+
+
+def test_since_until_accepts_bare_session_id_as_bound(tmp_path: Path) -> None:
+    """A caller can pass a session id itself as the bound, not just ISO-8601."""
+    _three_sessions(tmp_path)
+    q = TelemetryQuery(tmp_path)
+    rows = q.run(
+        "SELECT value_number FROM telemetry",
+        since="2026-07-10T090000",
+        until="2026-07-10T090000",
+    )
+    assert [r["value_number"] for r in rows] == [200.0]
+
+
+def test_bad_since_raises_query_validation_error(tmp_path: Path) -> None:
+    q = TelemetryQuery(tmp_path)
+    with pytest.raises(QueryValidationError):
+        q.run("SELECT * FROM telemetry", since="not-a-date")
+
+
+def test_date_filter_excludes_unparseable_session_dirs(tmp_path: Path) -> None:
+    """A non-session directory under the storage root (e.g. leftover content)
+    can't be range-checked, so a date-filtered query skips it rather than
+    guessing; an unscoped query still includes it (existing full-scan behavior)."""
+    weird = tmp_path / "not-a-session-dir"
+    weird.mkdir()
+    table = pa.Table.from_pylist(
+        [_row(dt.datetime(2026, 7, 10, 9, tzinfo=dt.UTC), 999.0)], schema=_SCHEMA
+    )
+    pq.write_table(table, weird / "telemetry-001.parquet")
+
+    q = TelemetryQuery(tmp_path)
+    assert len(q.run("SELECT * FROM telemetry")) == 1  # unscoped: included
+    assert q.run("SELECT * FROM telemetry", since="2026-01-01") == []  # date-filtered: excluded

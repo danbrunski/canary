@@ -14,10 +14,15 @@ single SELECT. DuckDB's read-only connection is the defense in depth.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import duckdb
+
+#: Session directory names are exactly this shape (src.session.make_session_dir:
+#: ``started_at.strftime("%Y-%m-%dT%H%M%S")``, always UTC).
+_SESSION_DIR_FORMAT = "%Y-%m-%dT%H%M%S"
 
 #: Statements that read state are allowed. Anything else (DDL, DML, ATTACH,
 #: COPY, PRAGMA, INSTALL, LOAD, etc.) is rejected before DuckDB sees it.
@@ -48,6 +53,33 @@ _DEFAULT_ROW_LIMIT = 5_000
 
 class QueryValidationError(ValueError):
     """Raised when ``validate_query`` rejects a statement."""
+
+
+def _parse_session_timestamp(session_dir_name: str) -> datetime | None:
+    """Parse a session directory name as a naive UTC datetime, or ``None`` if
+    it doesn't match the expected shape (e.g. an ``_archive``/``_replay-*``
+    directory that ended up under the storage root)."""
+    try:
+        return datetime.strptime(session_dir_name, _SESSION_DIR_FORMAT)
+    except ValueError:
+        return None
+
+
+def _parse_bound(value: str, *, label: str) -> datetime:
+    """Parse a ``since``/``until`` bound: ISO-8601 (date or datetime, ``Z`` or
+    an offset allowed) or the bare session-id shape. Returned as naive UTC so
+    it compares directly against ``_parse_session_timestamp``'s output."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        parsed = _parse_session_timestamp(value) or _raise_bad_bound(value, label)
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
+
+
+def _raise_bad_bound(value: str, label: str) -> NoReturn:
+    raise QueryValidationError(f"{label}={value!r} is not a valid ISO-8601 timestamp or session id")
 
 
 def validate_query(sql: str) -> str:
@@ -90,11 +122,56 @@ class TelemetryQuery:
         # don't keep state across queries beyond the connection itself.
         self._con = duckdb.connect(database=":memory:", read_only=False)
 
-    def _matching_files(self) -> list[str]:
-        """All ``telemetry-*.parquet`` files anywhere under the storage root."""
-        return [str(p) for p in self._storage_path.rglob("telemetry-*.parquet")]
+    def _matching_files(
+        self,
+        *,
+        session: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> list[str]:
+        """``telemetry-*.parquet`` files under the storage root, optionally
+        scoped to one session or a session-timestamp range.
 
-    def _refresh_view(self) -> bool:
+        The directory walk itself (``rglob``) always touches every session's
+        directory entries — that's just filesystem metadata, cheap even for a
+        large corpus. The scoping win is downstream: fewer paths handed to
+        DuckDB's ``parquet_scan``, so it never opens/parses parquet content
+        for sessions outside the requested scope. ``session`` matches the
+        immediate parent directory name exactly (works regardless of
+        profile-scoping depth between the storage root and the session dirs).
+        ``since``/``until`` bound the session's own timestamp (parsed from its
+        directory name), inclusive on both ends. A session directory that
+        doesn't parse as a timestamp (e.g. stray non-session content) is kept
+        when no date filter is requested, excluded when one is — an unparseable
+        name can't be range-checked.
+        """
+        since_dt = _parse_bound(since, label="since") if since else None
+        until_dt = _parse_bound(until, label="until") if until else None
+        date_filtered = since_dt is not None or until_dt is not None
+
+        matches: list[str] = []
+        for p in self._storage_path.rglob("telemetry-*.parquet"):
+            session_name = p.parent.name
+            if session is not None and session_name != session:
+                continue
+            if date_filtered:
+                ts = _parse_session_timestamp(session_name)
+                if ts is None:
+                    continue
+                if since_dt is not None and ts < since_dt:
+                    continue
+                if until_dt is not None and ts > until_dt:
+                    continue
+            matches.append(str(p))
+        return matches
+
+    def _refresh_view(
+        self,
+        *,
+        session: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> bool:
         """Recreate the ``telemetry`` view. Returns False if no files exist.
 
         Sessions appear and disappear with daemon activity — rebuilding the
@@ -103,7 +180,7 @@ class TelemetryQuery:
         view rather than erroring, so ``query_telemetry`` returns ``count=0``
         instead of a stack trace.
         """
-        files = self._matching_files()
+        files = self._matching_files(session=session, since=since, until=until)
         if not files:
             # Empty schema-less view — any column reference will fail with a
             # standard binder error, which the validator surfaces cleanly.
@@ -129,11 +206,26 @@ class TelemetryQuery:
     def close(self) -> None:
         self._con.close()
 
-    def run(self, sql: str, *, row_limit: int | None = None) -> list[dict[str, Any]]:
-        """Validate and run ``sql``. Returns up to ``row_limit`` rows as dicts."""
+    def run(
+        self,
+        sql: str,
+        *,
+        row_limit: int | None = None,
+        session: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Validate and run ``sql``. Returns up to ``row_limit`` rows as dicts.
+
+        ``session``/``since``/``until`` scope which parquet files back the
+        ``telemetry`` view for this call (see ``_matching_files``) — cheaper
+        and less error-prone than relying on every caller to write
+        ``WHERE session = '...'`` by hand, though that still works too since
+        the ``session`` column is always present.
+        """
         cleaned = validate_query(sql)
         limit = row_limit if row_limit is not None else self._default_limit
-        self._refresh_view()
+        self._refresh_view(session=session, since=since, until=until)
         # Wrap the user's query in an outer LIMIT so we don't trust them to
         # set it, but we won't override a tighter limit they wrote themselves.
         wrapped = f"SELECT * FROM ({cleaned}) AS _q LIMIT {int(limit)}"
