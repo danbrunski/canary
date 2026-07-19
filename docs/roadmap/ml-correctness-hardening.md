@@ -73,10 +73,12 @@ drops, and inference never consults vehicle state.
   `_frame_mask_delta` both already scanned generically for `__gap`
   columns, so no code change was needed in either — verified via
   tests.
-- [ ] **1.3 — Segmentation guard on stale coolant.** In the segmenter
+- [x] **1.3 — Segmentation guard on stale coolant.** In the segmenter
   path, treat a gap-flagged coolant value as absent for mode rules
   (don't classify warmup/idle off a frozen reading) — rows fall to
-  `unknown` rather than a confidently wrong mode.
+  `unknown` rather than a confidently wrong mode. — landed:
+  `_coalesced_series(gap_masked=...)` in `segmenter.py`, applied only
+  to `coolant_temp`.
 - [ ] **1.4 — Live parity: stop scoring fully-stale ticks.**
   `LiveFeatureSource.tick` (`src/preprocessing/live.py:303-354`) has no
   equivalent of `_drop_fully_stale_rows`; `_current_values` holds last
