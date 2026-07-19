@@ -86,3 +86,8 @@ models/*.onnx
 # Underscore-prefixed dirs are scratch (bake-off / replay output), excluded
 # everywhere else by the leading-`_` convention — keep them out of git too.
 models/_*/
+
+# Claude Code local/runtime state (settings.json, hooks, agents, commands ARE versioned)
+.claude/overnight-mode
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
