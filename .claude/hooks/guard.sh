@@ -4,8 +4,8 @@
 # Inert unless .claude/overnight-mode exists (created by /overnight,
 # removed manually in the morning). While active, denies actions that
 # should never happen without an operator watching: anything touching
-# the Pi (ssh/scp/rsync/systemctl/sudo), pushes, destructive rm/git, and
-# the roadmap doc owned by another session.
+# the Pi (ssh/scp/rsync/systemctl/sudo), pushes, and destructive rm/git
+# that could wipe a concurrent session's uncommitted work.
 #
 # Contract: stdin = hook JSON; exit 2 = deny (reason on stderr, fed back
 # to Claude); anything else = allow.
@@ -60,7 +60,6 @@ def evaluate():
             (r"\bsudo\b", "no privileged commands during unattended runs"),
             (r"\b(systemctl|shutdown|reboot|poweroff)\b", "no service/system control during unattended runs"),
             (r"\bgit\s+push\b", "no pushes during unattended runs; commits stay local for morning review"),
-            (r"mcp-and-power-hardening", "that roadmap doc is owned by another session"),
             # Tree-wide git commands can wipe a concurrent session's
             # uncommitted work. Block the destructive ones outright; the
             # implementer is told to clean up per-file, never tree-wide.
@@ -77,10 +76,6 @@ def evaluate():
         # recursive deletes outside /tmp are denied.
         if re.search(r"\brm\s+([^|;&]*\s)?(-\w*[rR]\w*|--recursive)\b", cmd) and "/tmp/" not in cmd:
             deny("recursive rm outside /tmp is blocked during unattended runs")
-    else:
-        path = tool_input.get("file_path", "") or ""
-        if "mcp-and-power-hardening" in path:
-            deny("that roadmap doc is owned by another session")
 
 
 try:

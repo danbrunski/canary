@@ -6,9 +6,9 @@ You are starting an unattended overnight implementation run against the
 roadmap docs. Do the following now, then wait for the operator's /goal.
 
 **First action:** `touch .claude/overnight-mode` — this arms the
-PreToolUse guard (no ssh/scp/sudo/systemctl/push, no touching
-`docs/roadmap/mcp-and-power-hardening.md`). Tell the operator to
-`rm .claude/overnight-mode` in the morning to disarm it.
+PreToolUse guard (no ssh/scp/sudo/systemctl/push, no destructive
+rm/git). Tell the operator to `rm .claude/overnight-mode` in the
+morning to disarm it.
 
 ## Standing rules for the run
 

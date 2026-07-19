@@ -154,6 +154,3 @@ overnight run plus a daytime terminal). Consequences:
   yourself changed.
 - If a file you need is already dirty with work you didn't do, treat it
   as owned by the other session: coordinate, don't overwrite.
-- `docs/roadmap/mcp-and-power-hardening.md` (and active
-  `src/mcp_server/server.py` work) is owned by another session as of
-  2026-07 — hands off without coordination.

@@ -32,9 +32,10 @@ order comes from `docs/roadmap/OVERNIGHT-QUEUE.md`.
 
 - **Guard hook** (`.claude/hooks/guard.sh`): armed only while
   `.claude/overnight-mode` exists. While armed it denies
-  ssh/scp/rsync/sudo/systemctl/`git push`, `rm -rf` outside `/tmp`, and
-  any touch of `mcp-and-power-hardening`. If a tool call is denied with
-  an "overnight guard" message, that flag is armed — `rm
+  ssh/scp/rsync/sudo/systemctl/`git push`, recursive `rm` outside
+  `/tmp`, and destructive tree-wide git (`reset --hard`, `clean`,
+  `checkout .`/`restore .`, `stash`). If a tool call is denied with an
+  "overnight guard" message, that flag is armed — `rm
   .claude/overnight-mode` disarms it (a morning task, not yours).
 - **Postedit hook** (`.claude/hooks/postedit.sh`): auto-runs
   `ruff check --fix` (F401 excluded) + `ruff format` on every Python
