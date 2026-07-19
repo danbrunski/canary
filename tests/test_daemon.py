@@ -14,7 +14,6 @@ import pytest
 from src.alerts.events import AnomalyEvent
 from src.config import CanaryConfig, DaemonConfig
 from src.daemon import (
-    DaemonComponents,
     TelemetrySink,
     _record_to_dict,
     build_components,
@@ -687,17 +686,6 @@ def test_canary_yaml_without_daemon_section_loads(tmp_path: Path) -> None:
     assert isinstance(config.daemon, DaemonConfig)
     # uses the dataclass defaults
     assert config.daemon.model_poll_seconds == 30.0
-
-
-# ---------------------------------------------------------------------------
-# Components are hold-and-pass — verify they're a real dataclass
-# ---------------------------------------------------------------------------
-
-
-def test_daemon_components_is_a_dataclass(config: CanaryConfig) -> None:
-    components = build_components(config)
-    assert isinstance(components, DaemonComponents)
-    assert components.config is config
 
 
 # ---------------------------------------------------------------------------

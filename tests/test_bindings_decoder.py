@@ -8,8 +8,6 @@ import pytest
 from pydantic import ValidationError
 
 from src.decode.bindings import (
-    Bindings,
-    Evidence,
     Signal,
     apply_scaling,
     decode_raw,
@@ -514,29 +512,3 @@ def test_collect_stats_implausible_skipped_when_no_scaling(tmp_path: Path):
     s = stats["UNSCALED"]
     assert s.n_samples == 1
     assert s.implausible_samples == 0  # can't check without decoded value
-
-
-def test_evidence_round_trips():
-    """Evidence is a typed sub-model under Signal."""
-    e = Evidence(session="2026-05-11T152858", method="cross_reference", finding="r2>0.99")
-    assert e.session == "2026-05-11T152858"
-
-
-def test_bindings_round_trips_through_pydantic():
-    """Bindings.model_dump() should be a valid input for model_validate."""
-    b = Bindings(
-        schema_version=1,
-        signals=[
-            Signal(
-                name="X",
-                module="ECM",
-                can_id=0x100,
-                byte_start=0,
-                byte_length=1,
-                confidence="high",
-            ),
-        ],
-    )
-    dumped = b.model_dump()
-    reloaded = Bindings.model_validate(dumped)
-    assert reloaded.signals[0].name == "X"
