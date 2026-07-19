@@ -33,8 +33,7 @@ Work strictly top to bottom — the order encodes real dependencies.
 
 Anything needing: the truck or a capture session; the Pi (ssh/scp/
 deploy/restart/live-daemon verification); new hardware (IMU/baro);
-operator history (ledger backfill facts); or coordination with the
-other session (`mcp-and-power-hardening.md` — never touch).
+operator history (ledger backfill facts)
 
 ---
 

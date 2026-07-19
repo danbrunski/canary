@@ -68,10 +68,21 @@ class _DetectorMetrics:
     #: (persistence-gated) detection, one entry per detected run — empty
     #: when ``detected == 0`` (2.4).
     latencies_seconds: tuple[float, ...] = ()
+    #: Parallel to ``latencies_seconds`` — True where that hit landed in
+    #: the post-window grace period (at/after the injection's ``end``,
+    #: within ``end + window_seconds``) rather than strictly inside
+    #: ``[start, end)`` (8.2). Kept separate from ``latencies_seconds`` so
+    #: downstream latency/rate consumers can exclude or flag late hits
+    #: instead of conflating them with in-window ones.
+    late_flags: tuple[bool, ...] = ()
 
     @property
     def detection_rate(self) -> float:
         return self.detected / self.runs if self.runs else 0.0
+
+    @property
+    def late_hits(self) -> int:
+        return sum(self.late_flags)
 
     @property
     def median_time_to_detect_seconds(self) -> float | None:
@@ -85,6 +96,8 @@ class _DetectorMetrics:
             "detected": self.detected,
             "detection_rate": self.detection_rate,
             "latencies_seconds": list(self.latencies_seconds),
+            "late_flags": list(self.late_flags),
+            "late_hits": self.late_hits,
             "median_time_to_detect_seconds": self.median_time_to_detect_seconds,
         }
 
@@ -143,9 +156,19 @@ def _first_sustained_detection(
     persistence: PersistenceGate,
     match_start: pd.Timestamp,
     match_end: pd.Timestamp,
-) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
-    """First row within ``[match_start, match_end)`` where each detector's
+    grace_end: pd.Timestamp,
+) -> tuple[tuple[pd.Timestamp, bool] | None, tuple[pd.Timestamp, bool] | None]:
+    """First row within ``[match_start, grace_end)`` where each detector's
     persistence-gated verdict flips sustained (2.4/8.2).
+
+    ``grace_end`` extends the match window ``window_seconds`` past
+    ``match_end`` (the actual fault-injection end) so a fault whose feature
+    signature only fully forms once the rolling window has "seen" it still
+    counts as a (late) hit rather than a miss. Each return value pairs the
+    detection timestamp with whether it landed in that post-``match_end``
+    grace period (``True``) vs strictly inside ``[match_start, match_end)``
+    (``False``), so callers can keep late hits distinguishable from
+    in-window ones.
 
     Feeds every row of the frame through ``persistence`` in order — not just
     the match window — so a real consecutive-tick streak has to build
@@ -155,16 +178,16 @@ def _first_sustained_detection(
     must be fresh per injection run: sharing one gate across runs would leak
     streak state from a previous run's tail into the next run's start.
     """
-    if_detected: pd.Timestamp | None = None
-    fused_detected: pd.Timestamp | None = None
+    if_detected: tuple[pd.Timestamp, bool] | None = None
+    fused_detected: tuple[pd.Timestamp, bool] | None = None
     for ts, if_fired, fused_fired in zip(timestamps, if_anomalous, fused_anomalous, strict=True):
         if_sustained = persistence.observe("isolation_forest", bool(if_fired))
         fused_sustained = persistence.observe("fused", bool(fused_fired))
-        in_match = match_start <= ts < match_end
+        in_match = match_start <= ts < grace_end
         if if_detected is None and if_sustained and in_match:
-            if_detected = ts
+            if_detected = (ts, ts >= match_end)
         if fused_detected is None and fused_sustained and in_match:
-            fused_detected = ts
+            fused_detected = (ts, ts >= match_end)
     return if_detected, fused_detected
 
 
@@ -293,6 +316,8 @@ def evaluate_detectors(
         fused_hits = 0
         if_latencies: list[float] = []
         fused_latencies: list[float] = []
+        if_late_flags: list[bool] = []
+        fused_late_flags: list[bool] = []
         for _ in range(n_injections):
             inj = _inject_one(resampled, kind=kind, channel=fault_channel, rng=rng, config=config)
             featurized = featurize_wide_frame(inj.df, config).features
@@ -303,20 +328,25 @@ def evaluate_detectors(
             # persistence config so a hit reflects what would actually alert,
             # not any single over-threshold row.
             persistence = PersistenceGate(config.alerts.min_consecutive_ticks)
-            if_ts, fused_ts = _first_sustained_detection(
+            if_hit, fused_hit = _first_sustained_detection(
                 if_anomalous=_if_anomalous(scored),
                 fused_anomalous=_fused_anomalous(scored, fusion=fusion, scales=scales),
                 timestamps=timestamps,
                 persistence=persistence,
                 match_start=window.start,
-                match_end=window.end + grace,
+                match_end=window.end,
+                grace_end=window.end + grace,
             )
-            if if_ts is not None:
+            if if_hit is not None:
+                if_ts, if_late = if_hit
                 if_hits += 1
                 if_latencies.append((if_ts - window.start).total_seconds())
-            if fused_ts is not None:
+                if_late_flags.append(if_late)
+            if fused_hit is not None:
+                fused_ts, fused_late = fused_hit
                 fused_hits += 1
                 fused_latencies.append((fused_ts - window.start).total_seconds())
+                fused_late_flags.append(fused_late)
         per_fault.append(
             _DetectorMetrics(
                 detector="isolation_forest",
@@ -324,6 +354,7 @@ def evaluate_detectors(
                 runs=n_injections,
                 detected=if_hits,
                 latencies_seconds=tuple(if_latencies),
+                late_flags=tuple(if_late_flags),
             ).to_dict()
         )
         per_fault.append(
@@ -333,6 +364,7 @@ def evaluate_detectors(
                 runs=n_injections,
                 detected=fused_hits,
                 latencies_seconds=tuple(fused_latencies),
+                late_flags=tuple(fused_late_flags),
             ).to_dict()
         )
 

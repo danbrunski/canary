@@ -341,9 +341,12 @@ These merge into **Phase 2 of `eval-longitudinal-and-dtc.md`** (tasks
   fast/slow ceiling instead of guessing one. Verified against a live
   `resample_wide` run — both transition at the identical row (commit
   `6123d45`).
-- [ ] **8.2 — Post-window detection grace.** Count detections within
+- [x] **8.2 — Post-window detection grace.** Count detections within
   `window_seconds` after injection end as (late) hits with recorded
-  latency, not misses.
+  latency, not misses. — landed: `_first_sustained_detection` takes a
+  separate `grace_end` and returns `(timestamp, is_late)`; `late_flags`/
+  `late_hits` added to `_DetectorMetrics`, latency still measured from
+  `window.start` for late hits (commit pending).
 - [x] **8.3 — Threshold provenance in the k-sweep.** When the manifest
   used `threshold_quantile`, sweep quantiles (not k·σ) so
   `recommended_k`-style outputs share production's parameterization. —

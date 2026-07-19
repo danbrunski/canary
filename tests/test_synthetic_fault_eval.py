@@ -133,11 +133,16 @@ def test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low() ->
             "detected",
             "detection_rate",
             "latencies_seconds",
+            "late_flags",
+            "late_hits",
             "median_time_to_detect_seconds",
         }
         # 2.4: latency bookkeeping is internally consistent with `detected`.
         assert len(metric["latencies_seconds"]) == metric["detected"]
         assert all(latency >= 0.0 for latency in metric["latencies_seconds"])
+        # 8.2: late_flags is parallel to latencies_seconds, one bool per hit.
+        assert len(metric["late_flags"]) == metric["detected"]
+        assert metric["late_hits"] == sum(metric["late_flags"])
         if metric["detected"] == 0:
             assert metric["median_time_to_detect_seconds"] is None
         else:
@@ -166,6 +171,114 @@ def test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low() ->
     # held-out drive.
     assert report["nominal_fp"]["isolation_forest"]["per_hour"] < 400.0
     assert report["nominal_fp"]["fused"]["per_hour"] < 400.0
+
+
+# ---------------------------------------------------------------------------
+# 8.2 — post-window detection grace
+# ---------------------------------------------------------------------------
+
+
+def _fired_series(n: int, *, fire_at: int) -> pd.Series:
+    """All-False boolean series of length ``n`` except row ``fire_at`` and
+    every row after it (a sustained streak from that point on)."""
+    values = [i >= fire_at for i in range(n)]
+    return pd.Series(values)
+
+
+def test_first_sustained_detection_counts_post_window_hit_within_grace() -> None:
+    """A detection that lands just after the fault window's `end` but
+    inside `end + window_seconds` counts as a hit, flagged late — not
+    conflated with an in-window hit."""
+    from src.alerts.fusion import PersistenceGate
+    from src.models.synthetic_fault_eval import _first_sustained_detection
+
+    timestamps = pd.Series(pd.date_range("2026-05-12T00:00:00Z", periods=21, freq="1s"))
+    match_start = timestamps.iloc[5]
+    match_end = timestamps.iloc[10]  # fault window is [5, 10)
+    window_seconds = 3
+    grace_end = match_end + pd.Timedelta(seconds=window_seconds)  # ts[13]
+
+    # Detector only sustains starting at row 11 (1s after `end`, i.e. inside
+    # the 3s grace period that closes at row 13).
+    fired = _fired_series(len(timestamps), fire_at=11)
+
+    if_hit, fused_hit = _first_sustained_detection(
+        if_anomalous=fired,
+        fused_anomalous=fired,
+        timestamps=timestamps,
+        persistence=PersistenceGate(required=1),
+        match_start=match_start,
+        match_end=match_end,
+        grace_end=grace_end,
+    )
+
+    assert if_hit is not None
+    if_ts, if_late = if_hit
+    assert if_ts == timestamps.iloc[11]
+    assert if_late is True  # detected at/after `end`, not strictly inside [start, end)
+
+    assert fused_hit is not None
+    _, fused_late = fused_hit
+    assert fused_late is True
+
+
+def test_first_sustained_detection_still_misses_beyond_grace_period() -> None:
+    """No regression on the boundary: a detection beyond `end + window_seconds`
+    still counts as a miss."""
+    from src.alerts.fusion import PersistenceGate
+    from src.models.synthetic_fault_eval import _first_sustained_detection
+
+    timestamps = pd.Series(pd.date_range("2026-05-12T00:00:00Z", periods=21, freq="1s"))
+    match_start = timestamps.iloc[5]
+    match_end = timestamps.iloc[10]  # fault window is [5, 10)
+    window_seconds = 3
+    grace_end = match_end + pd.Timedelta(seconds=window_seconds)  # ts[13]
+
+    # Detector only sustains starting at row 15 — 5s after `end`, past the
+    # 3s grace period.
+    fired = _fired_series(len(timestamps), fire_at=15)
+
+    if_hit, fused_hit = _first_sustained_detection(
+        if_anomalous=fired,
+        fused_anomalous=fired,
+        timestamps=timestamps,
+        persistence=PersistenceGate(required=1),
+        match_start=match_start,
+        match_end=match_end,
+        grace_end=grace_end,
+    )
+
+    assert if_hit is None
+    assert fused_hit is None
+
+
+def test_first_sustained_detection_in_window_hit_is_not_late() -> None:
+    """A hit strictly inside [start, end) stays distinguishable from a late
+    (post-`end`) one."""
+    from src.alerts.fusion import PersistenceGate
+    from src.models.synthetic_fault_eval import _first_sustained_detection
+
+    timestamps = pd.Series(pd.date_range("2026-05-12T00:00:00Z", periods=21, freq="1s"))
+    match_start = timestamps.iloc[5]
+    match_end = timestamps.iloc[10]  # fault window is [5, 10)
+    grace_end = match_end + pd.Timedelta(seconds=3)
+
+    fired = _fired_series(len(timestamps), fire_at=6)  # inside [5, 10)
+
+    if_hit, _ = _first_sustained_detection(
+        if_anomalous=fired,
+        fused_anomalous=fired,
+        timestamps=timestamps,
+        persistence=PersistenceGate(required=1),
+        match_start=match_start,
+        match_end=match_end,
+        grace_end=grace_end,
+    )
+
+    assert if_hit is not None
+    if_ts, if_late = if_hit
+    assert if_ts == timestamps.iloc[6]
+    assert if_late is False
 
 
 # ---------------------------------------------------------------------------
