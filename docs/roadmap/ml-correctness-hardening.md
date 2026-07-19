@@ -79,13 +79,17 @@ drops, and inference never consults vehicle state.
   `unknown` rather than a confidently wrong mode. — landed:
   `_coalesced_series(gap_masked=...)` in `segmenter.py`, applied only
   to `coolant_temp`.
-- [ ] **1.4 — Live parity: stop scoring fully-stale ticks.**
+- [x] **1.4 — Live parity: stop scoring fully-stale ticks.**
   `LiveFeatureSource.tick` (`src/preprocessing/live.py:303-354`) has no
   equivalent of `_drop_fully_stale_rows`; `_current_values` holds last
   values indefinitely. Add the same rule: when every gap-flagged channel
   is stale, `tick()` returns None (detectors already treat None as
   no-op, `daemon/inference.py:105`). Also NaN out individual channels
-  past their ffill limit so serve rows match Phase-1.1 training rows.
+  past their ffill limit so serve rows match Phase-1.1 training rows. —
+  landed: fully-stale gate before buffer append + per-channel bounded
+  ffill via `_bounded_values`, fast/slow ceiling parity with the offline
+  resampler; `vehicle_state_inputs()` added as no-I/O prep for 1.5
+  (commit `f495cd2`).
 - [ ] **1.5 — Vehicle-state gating for IF/LSTM.** `run_live_inference`
   scores every tick; `classify_vehicle_state`
   (`src/dashboard/status.py:73-143`) is display-only (confirmed: zero
