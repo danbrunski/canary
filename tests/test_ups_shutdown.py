@@ -134,6 +134,26 @@ def test_power_truly_lost_legacy_pld_only() -> None:
     assert ups.power_truly_lost(False, True, require_discharge=False) is False
 
 
+def test_pld_polarity_matches_vendor() -> None:
+    # Vendor pld.py: GPIO6 HIGH (1) = power OK, LOW (0) = power lost.
+    assert ups.input_lost(0) is True  # LOW  -> lost
+    assert ups.input_lost(1) is False  # HIGH -> OK
+
+
+def test_powered_high_is_not_actionable_end_to_end() -> None:
+    """Real barrel-jack power: GPIO6 HIGH -> not lost -> never counts down,
+    even though the battery (charging) obviously isn't discharging."""
+    decider = ups.ShutdownDecider(delay_s=30.0)
+    fired = False
+    for t in range(0, 120, 2):
+        input_is_lost = ups.input_lost(1)  # powered: HIGH
+        lost = ups.power_truly_lost(input_is_lost, False, require_discharge=True)
+        if decider.update(power_lost=lost, now=float(t)):
+            fired = True
+    assert fired is False
+    assert decider.counting_down is False
+
+
 def test_bench_never_counts_down_end_to_end() -> None:
     """Fused pipeline: PLD high + flat SoC must never reach shutdown."""
     decider = ups.ShutdownDecider(delay_s=30.0)

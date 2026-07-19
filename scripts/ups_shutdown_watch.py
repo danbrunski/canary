@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 """Independent UPS power-loss auto-shutdown watchdog (Geekworm X1202).
 
-Watches the X1202's power-loss-detect line (GPIO6: LOW = input power good,
-HIGH = running on battery) and, once input power has been *continuously*
-lost for ``UPS_SHUTDOWN_DELAY`` seconds, cleanly powers the Pi off — **but
-only if the battery is actually being drained**. The X1202 then cuts battery
-output, so the next time switched 12 V returns (key-on) it's a fresh
-power-apply event and the board auto-boots.
+Watches the X1202's power-loss-detect line and, once input power has been
+*continuously* lost for ``UPS_SHUTDOWN_DELAY`` seconds, cleanly powers the Pi
+off — **but only if the battery is actually being drained**. The X1202 then
+cuts battery output, so the next time switched 12 V returns (key-on) it's a
+fresh power-apply event and the board auto-boots.
+
+PLD polarity (per the vendor's ``suptronics/x120x`` ``pld.py``): GPIO6
+**HIGH = input power OK**, **LOW = input power lost**. The line is *not*
+internally pulled up — the board drives it HIGH when powered and it reads LOW
+on loss (we apply a pull-DOWN so an undriven line fails to the "lost" side).
+NB: an earlier version had this inverted (pull-up + HIGH-means-lost), which
+made the watchdog read "power lost" even on good barrel-jack power.
 
 Why the discharge check matters — bench vs. key-off:
-  The PLD line reads HIGH ("no input") in *two* very different situations:
+  Input can read "lost" in two very different situations:
     1. In the vehicle at key-off: the barrel-jack 12 V is gone and the Pi is
        running down the UPS battery. We want to shut down.
     2. On the bench: the Pi is powered from its **own USB-C**, the X1202's
@@ -31,8 +37,8 @@ Design notes:
     during cranking — a no-op: power comes back, the countdown resets. Only a
     real key-off (input gone *and* battery draining for the full delay)
     triggers shutdown.
-  * **Bench-safe (two ways).** (a) With no UPS attached, GPIO6's pull-up
-    floats HIGH and looks like "power lost"; the watchdog refuses to arm
+  * **Bench-safe (two ways).** (a) With no UPS attached, the pulled-down
+    GPIO6 reads LOW and looks like "power lost"; the watchdog refuses to arm
     unless the X1202 fuel gauge answers on I2C (``UPS_I2C_ADDR``, default
     0x36). (b) With a UPS attached but the Pi on external USB-C, the battery
     isn't discharging, so the discharge gate keeps it from ever counting down.
@@ -171,24 +177,34 @@ def on_battery(
 
 
 def power_truly_lost(
-    pld_high: bool,
+    input_is_lost: bool,
     battery_state: bool | None,
     *,
     require_discharge: bool,
 ) -> bool:
-    """Fuse the PLD line with the battery-discharge state into the boolean the
-    debouncer consumes.
+    """Fuse the PLD "input lost" signal with the battery-discharge state into
+    the boolean the debouncer consumes.
 
     With ``require_discharge`` (default), shutdown is only armed when the input
     is lost *and* the battery is confirmed discharging; an unknown battery
     state (``None``) holds (bench-safe). With it off, this collapses to the
     legacy PLD-only behavior.
     """
-    if not pld_high:
+    if not input_is_lost:
         return False
     if not require_discharge:
         return True
     return battery_state is True
+
+
+def input_lost(gpio_level: int) -> bool:
+    """Map the raw PLD GPIO level to "input power lost".
+
+    Per the vendor ``suptronics/x120x`` ``pld.py``: GPIO6 HIGH (1) = power OK,
+    LOW (0) = power lost. (The previous inverted mapping is what made the
+    watchdog fire on good barrel-jack power.)
+    """
+    return gpio_level == 0
 
 
 # --------------------------------------------------------------------------
@@ -322,7 +338,10 @@ def main() -> int:
     import lgpio  # type: ignore[import-not-found]  # noqa: PLC0415
 
     handle = lgpio.gpiochip_open(chip)
-    lgpio.gpio_claim_input(handle, pin, lgpio.SET_PULL_UP)
+    # Pull-DOWN: the board drives GPIO6 HIGH when powered and reads LOW on loss
+    # (vendor pld.py). A pull-down makes an undriven line fail to "lost", never
+    # a false "OK". (Was SET_PULL_UP, which inverted the reading.)
+    lgpio.gpio_claim_input(handle, pin, lgpio.SET_PULL_DOWN)
 
     decider = ShutdownDecider(delay_s=delay)
     estimator = DischargeEstimator(window_s=discharge_window)
@@ -346,7 +365,7 @@ def main() -> int:
     try:
         while not stop["stop"]:
             now = time.monotonic()
-            pld_high = lgpio.gpio_read(handle, pin) == 1
+            input_is_lost = input_lost(lgpio.gpio_read(handle, pin))
 
             soc = read_soc(i2c_bus, i2c_addr)
             if soc is not None:
@@ -359,17 +378,17 @@ def main() -> int:
                 critical_soc=critical_soc,
             )
             truly_lost = power_truly_lost(
-                pld_high, battery_state, require_discharge=require_discharge
+                input_is_lost, battery_state, require_discharge=require_discharge
             )
 
-            # Visibility: PLD says "no input" but the battery isn't draining ->
-            # external (bench) power present. Log once per episode, not per poll.
-            if pld_high and require_discharge and not truly_lost:
+            # Visibility: PLD reads "power lost" but the battery isn't draining
+            # -> external (bench) power present. Log once per episode, not per poll.
+            if input_is_lost and require_discharge and not truly_lost:
                 if not warned_external:
                     log.info(
-                        "input line low (no barrel-jack power) but battery not "
-                        "discharging (SoC=%s, rate=%s %%/hr) — external/bench "
-                        "power present, holding.",
+                        "PLD reads power-lost but battery not discharging "
+                        "(SoC=%s, rate=%s %%/hr) — external/bench power present, "
+                        "holding.",
                         "n/a" if soc is None else f"{soc:.1f}%",
                         "n/a" if rate is None else f"{rate:.1f}",
                     )
