@@ -17,14 +17,20 @@ EnvironmentFile=/etc/canary/canary.env
 ExecStartPre=-/sbin/modprobe i2c-dev
 # Tunables (see scripts/ups_shutdown_watch.py header for the full list):
 Environment=UPS_PLD_GPIO=6
-Environment=UPS_SHUTDOWN_DELAY=30
+# 5-minute grace on battery before shutdown = the truck->bench transition
+# budget (plug into bench power before it expires and it stays up).
+Environment=UPS_SHUTDOWN_DELAY=300
 Environment=UPS_I2C_ADDR=0x36
 # Only power off while the battery is genuinely discharging, so bench-top USB-C
 # power (PLD reads "no input" but the pack is idle) never trips a shutdown.
 Environment=UPS_REQUIRE_DISCHARGE=1
 Environment=UPS_MIN_DISCHARGE_RATE=6
 Environment=UPS_CRITICAL_SOC=15
-Environment=UPS_DISCHARGE_WINDOW=20
+# Wider window/min-span so the big 4-cell pack's slow SoC drop is detectable.
+Environment=UPS_DISCHARGE_WINDOW=120
+Environment=UPS_DISCHARGE_MIN_SPAN=40
+# Operator "keep alive N min" hold file (written by the dashboard/MCP).
+Environment=UPS_KEEPALIVE_FILE=/run/canary/ups_keepalive
 ExecStart=/usr/bin/python3 ${CANARY_HOME}/scripts/ups_shutdown_watch.py
 Restart=on-failure
 RestartSec=5

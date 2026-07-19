@@ -118,14 +118,16 @@ def test_trickle_below_floor_is_not_on_battery() -> None:
 
 
 def test_power_truly_lost_requires_discharge_when_gated() -> None:
-    # PLD high but battery idle (bench) -> not actionable.
+    # Input lost + battery idle (confirmed bench/external power) -> not actionable.
     assert ups.power_truly_lost(True, False, require_discharge=True) is False
-    # PLD high and draining (key-off) -> actionable.
+    # Input lost + draining (key-off) -> actionable.
     assert ups.power_truly_lost(True, True, require_discharge=True) is True
-    # Unknown battery state holds when gated.
-    assert ups.power_truly_lost(True, None, require_discharge=True) is False
+    # Input lost + not-yet-determined -> counts (aborts only on confirmed external
+    # power), so a real key-off shuts down predictably after the grace window.
+    assert ups.power_truly_lost(True, None, require_discharge=True) is True
     # Input present -> never actionable regardless of battery.
     assert ups.power_truly_lost(False, True, require_discharge=True) is False
+    assert ups.power_truly_lost(False, None, require_discharge=True) is False
 
 
 def test_power_truly_lost_legacy_pld_only() -> None:
@@ -152,6 +154,31 @@ def test_powered_high_is_not_actionable_end_to_end() -> None:
             fired = True
     assert fired is False
     assert decider.counting_down is False
+
+
+def test_keyoff_drain_shuts_down_after_grace() -> None:
+    """Real key-off: input lost + battery draining -> shuts down ~grace later."""
+    decider = ups.ShutdownDecider(delay_s=300.0)
+    e = ups.DischargeEstimator(window_s=120.0, min_span_s=40.0)
+    soc = 80.0
+    fired_at = None
+    for t in range(0, 400, 2):
+        soc -= 2 * (14.0 / 3600.0)  # ~14%/hr drain
+        e.update(soc, float(t))
+        st = ups.on_battery(e.rate_pct_per_hour(), soc, min_discharge_rate=6.0, critical_soc=15.0)
+        lost = ups.power_truly_lost(True, st, require_discharge=True)
+        if decider.update(power_lost=lost, now=float(t)) and fired_at is None:
+            fired_at = t
+    assert fired_at is not None
+    assert 300 <= fired_at <= 302  # counts from input-loss (None counts), fires at grace
+
+
+def test_keepalive_remaining() -> None:
+    assert ups.keepalive_remaining("1000.0", 900.0) == 100.0  # 100s left
+    assert ups.keepalive_remaining("1000", 1000.0) == 0.0  # exactly expired
+    assert ups.keepalive_remaining("1000", 1100.0) == 0.0  # expired
+    assert ups.keepalive_remaining(None, 0.0) == 0.0  # no hold file
+    assert ups.keepalive_remaining("garbage", 0.0) == 0.0  # unparseable
 
 
 def test_bench_never_counts_down_end_to_end() -> None:

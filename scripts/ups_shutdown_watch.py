@@ -42,25 +42,33 @@ Design notes:
     unless the X1202 fuel gauge answers on I2C (``UPS_I2C_ADDR``, default
     0x36). (b) With a UPS attached but the Pi on external USB-C, the battery
     isn't discharging, so the discharge gate keeps it from ever counting down.
-  * **Fail-open on gauge errors.** If SoC can't be read (transient I2C
-    glitch), the discharge state is *unknown* and — with ``UPS_REQUIRE_DISCHARGE``
-    on (default) — the watchdog holds rather than shutting down, logging a
-    warning. Set ``UPS_REQUIRE_DISCHARGE=0`` to fall back to the old
-    PLD-only behavior (shut down on input-loss regardless of battery).
+  * **Grace window = transition budget.** ``UPS_SHUTDOWN_DELAY`` (default 300s
+    / 5 min) is how long the Pi runs on battery after input loss before
+    shutting down. It doubles as the truck->bench move budget: unplug the
+    barrel jack, carry the Pi, and plug into bench USB-C before the grace
+    expires — the discharge stops, the countdown aborts, and the session is
+    never interrupted. A real key-off with no rescue shuts down after the
+    grace. ``UPS_CRITICAL_SOC`` is an independent hard floor.
+  * **Keep-alive hold.** For a bench transition *longer* than the grace, the
+    operator sets "keep alive N min" from the dashboard/MCP, which writes an
+    expiry epoch to ``UPS_KEEPALIVE_FILE``; while unexpired the watchdog holds
+    regardless of power. This is also the backstop if the gauge can't be read.
 
 Configuration is via environment variables (set in the systemd unit):
   UPS_PLD_GPIO=6            BCM pin for power-loss detect
   UPS_GPIOCHIP=0            gpiochip index (/dev/gpiochipN)
-  UPS_SHUTDOWN_DELAY=30     seconds of continuous power loss before poweroff
+  UPS_SHUTDOWN_DELAY=300    grace seconds on battery before poweroff (transition budget)
   UPS_POLL_INTERVAL=1.0     seconds between samples
   UPS_I2C_BUS=1             fuel-gauge bus (presence guard + SoC reads)
   UPS_I2C_ADDR=0x36         fuel-gauge address (0 disables the guard + gate)
-  UPS_REQUIRE_DISCHARGE=1   1 = only shut down while battery is discharging
-                            (bench-safe); 0 = legacy PLD-only behavior
+  UPS_REQUIRE_DISCHARGE=1   1 = hold while externally powered (bench-safe);
+                            0 = legacy PLD-only behavior
   UPS_MIN_DISCHARGE_RATE=6  %/hr of SoC drop that counts as "on battery"
   UPS_CRITICAL_SOC=15       at/below this SoC (%), input-lost => shut down
                             regardless of the measured rate (protect cells)
-  UPS_DISCHARGE_WINDOW=20   seconds of SoC history used to estimate the rate
+  UPS_DISCHARGE_WINDOW=120  seconds of SoC history used to estimate the rate
+  UPS_DISCHARGE_MIN_SPAN=40 min seconds of history before trusting the rate
+  UPS_KEEPALIVE_FILE=...    hold file (epoch expiry); default /run/canary/ups_keepalive
   UPS_POWEROFF_CMD=...      shutdown command (default: systemctl poweroff)
   UPS_DRY_RUN=0             1 = log instead of powering off (for testing)
 """
@@ -183,18 +191,27 @@ def power_truly_lost(
     require_discharge: bool,
 ) -> bool:
     """Fuse the PLD "input lost" signal with the battery-discharge state into
-    the boolean the debouncer consumes.
+    the boolean the debouncer counts toward shutdown.
 
-    With ``require_discharge`` (default), shutdown is only armed when the input
-    is lost *and* the battery is confirmed discharging; an unknown battery
-    state (``None``) holds (bench-safe). With it off, this collapses to the
+    With ``require_discharge`` (default): once the barrel-jack input is lost we
+    count down toward shutdown *unless we can positively confirm the Pi is
+    still externally powered* — i.e. the battery is **not** discharging
+    (``battery_state is False``, the bench-USB-C case). Discharging (``True``)
+    or not-yet-determined (``None``) both count, so a real key-off shuts down
+    predictably after the grace window even before the discharge rate is
+    confirmed, while plugging into bench power mid-countdown (which stops the
+    discharge) aborts it. With ``require_discharge`` off, this collapses to the
     legacy PLD-only behavior.
+
+    The bench stays up because a flat SoC is confirmed as ``False`` within the
+    discharge window (well under the grace period); the keep-alive hold is the
+    backstop for the rare case where the gauge can't be read.
     """
     if not input_is_lost:
         return False
     if not require_discharge:
         return True
-    return battery_state is True
+    return battery_state is not False
 
 
 def input_lost(gpio_level: int) -> bool:
@@ -205,6 +222,33 @@ def input_lost(gpio_level: int) -> bool:
     watchdog fire on good barrel-jack power.)
     """
     return gpio_level == 0
+
+
+def keepalive_remaining(text: str | None, now_wall: float) -> float:
+    """Seconds of keep-alive hold remaining, from a hold-file's contents.
+
+    The file holds a single float: the wall-clock (epoch) time the hold
+    expires. Returns 0.0 when there's no hold, it's expired, or the contents
+    are unparseable. Pure so it's unit-testable; ``read_keepalive`` does the
+    I/O. The operator sets the hold from the dashboard/MCP ("keep alive N
+    min") before unplugging for a long bench transition.
+    """
+    if text is None:
+        return 0.0
+    try:
+        expiry = float(text.strip())
+    except ValueError:
+        return 0.0
+    return max(0.0, expiry - now_wall)
+
+
+def read_keepalive(path: str) -> str | None:
+    """Read the keep-alive hold file's contents, or ``None`` if absent/unreadable."""
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return None
 
 
 # --------------------------------------------------------------------------
@@ -307,14 +351,21 @@ def main() -> int:
 
     pin = _env_int("UPS_PLD_GPIO", 6)
     chip = _env_int("UPS_GPIOCHIP", 0)
-    delay = _env_float("UPS_SHUTDOWN_DELAY", 30.0)
+    # Grace window = the operator's truck->bench transition budget: run on
+    # battery this long after input loss before shutting down. Plugging into
+    # bench power before it expires (which stops the discharge) aborts it.
+    delay = _env_float("UPS_SHUTDOWN_DELAY", 300.0)
     poll = max(0.1, _env_float("UPS_POLL_INTERVAL", 1.0))
     i2c_bus = _env_int("UPS_I2C_BUS", 1)
     i2c_addr = _env_int("UPS_I2C_ADDR", 0x36)
     require_discharge = _env_int("UPS_REQUIRE_DISCHARGE", 1) != 0
     min_discharge_rate = _env_float("UPS_MIN_DISCHARGE_RATE", 6.0)
     critical_soc = _env_float("UPS_CRITICAL_SOC", 15.0)
-    discharge_window = _env_float("UPS_DISCHARGE_WINDOW", 20.0)
+    # Wider window + min-span so the slow SoC drop of a big 4-cell pack is
+    # detected reliably (a 30s look was too subtle -> missed real discharge).
+    discharge_window = _env_float("UPS_DISCHARGE_WINDOW", 120.0)
+    discharge_min_span = _env_float("UPS_DISCHARGE_MIN_SPAN", 40.0)
+    keepalive_file = os.environ.get("UPS_KEEPALIVE_FILE", "/run/canary/ups_keepalive")
     dry_run = _env_int("UPS_DRY_RUN", 0) != 0
 
     if not ups_present(i2c_bus, i2c_addr):
@@ -344,13 +395,13 @@ def main() -> int:
     lgpio.gpio_claim_input(handle, pin, lgpio.SET_PULL_DOWN)
 
     decider = ShutdownDecider(delay_s=delay)
-    estimator = DischargeEstimator(window_s=discharge_window)
+    estimator = DischargeEstimator(window_s=discharge_window, min_span_s=discharge_min_span)
     stop = {"stop": False}
     _install_signal_handlers(stop)
 
     log.info(
-        "UPS watchdog armed: GPIO%d on gpiochip%d, %.0fs delay, poll %.1fs, "
-        "discharge-gate=%s (>= %.1f%%/hr or SoC <= %.0f%%)%s",
+        "UPS watchdog armed: GPIO%d on gpiochip%d, %.0fs grace, poll %.1fs, "
+        "discharge-gate=%s (>= %.1f%%/hr or SoC <= %.0f%%), keep-alive=%s%s",
         pin,
         chip,
         delay,
@@ -358,10 +409,12 @@ def main() -> int:
         "on" if require_discharge else "off",
         min_discharge_rate,
         critical_soc,
+        keepalive_file,
         " [DRY-RUN]" if dry_run else "",
     )
     was_counting = False
     warned_external = False
+    warned_keepalive = False
     try:
         while not stop["stop"]:
             now = time.monotonic()
@@ -380,6 +433,22 @@ def main() -> int:
             truly_lost = power_truly_lost(
                 input_is_lost, battery_state, require_discharge=require_discharge
             )
+
+            # Operator keep-alive hold: "keep alive N min" from the dashboard/MCP
+            # pins the watchdog open regardless of power (for a long bench move).
+            hold_s = keepalive_remaining(read_keepalive(keepalive_file), time.time())
+            if hold_s > 0:
+                if truly_lost and not warned_keepalive:
+                    log.warning(
+                        "input lost but keep-alive hold active (%.0fs left) — not shutting down",
+                        hold_s,
+                    )
+                    warned_keepalive = True
+                decider.update(power_lost=False, now=now)  # keep clock reset
+                was_counting = False
+                time.sleep(poll)
+                continue
+            warned_keepalive = False
 
             # Visibility: PLD reads "power lost" but the battery isn't draining
             # -> external (bench) power present. Log once per episode, not per poll.
