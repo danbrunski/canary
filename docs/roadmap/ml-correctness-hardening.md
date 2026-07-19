@@ -337,9 +337,14 @@ These merge into **Phase 2 of `eval-longitudinal-and-dtc.md`** (tasks
 - [ ] **8.2 — Post-window detection grace.** Count detections within
   `window_seconds` after injection end as (late) hits with recorded
   latency, not misses.
-- [ ] **8.3 — Threshold provenance in the k-sweep.** When the manifest
+- [x] **8.3 — Threshold provenance in the k-sweep.** When the manifest
   used `threshold_quantile`, sweep quantiles (not k·σ) so
-  `recommended_k`-style outputs share production's parameterization.
+  `recommended_k`-style outputs share production's parameterization. —
+  landed: `FalsePositiveBenchmarkReport.threshold_provenance` +
+  `_quantile_sweep`/`_quantile_band` (limited to the 4 quantiles the
+  manifest persists, p50/p90/p95/p99, plus the calibrated quantile
+  itself); k-sigma path unchanged for non-quantile models (commit
+  `d2ca42e`).
 - [x] **8.4 — ROC-across-gap seams.** `__roc` divides a fixed row-shift
   by `window_seconds` on a grid with dropped-row holes
   (`features.py:150-154`) — compute RoC from actual timestamp deltas
