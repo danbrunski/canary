@@ -99,6 +99,14 @@ class LSTMAutoencoderManifest:
     #: raw-magnitude reconstruction errors won't match scaled-input
     #: reconstruction errors at inference.
     scaler: Mapping[str, Any] | None = None
+    #: Threshold-calibration provenance (Task 3.1): ``"held_out"`` when
+    #: ``calibration_dataset`` was supplied, ``"in_sample"`` when the caller
+    #: opted into ``allow_in_sample_calibration=True`` (in-sample thresholds
+    #: underestimate cross-session error — the mechanism behind an earlier
+    #: FPR≈1.0 flood), or ``None`` when ``calibrate_thresholds=False`` left
+    #: the model uncalibrated. Load-time (``ModelManager``) logs a warning
+    #: when serving an ``"in_sample"``-stamped artifact.
+    calibration: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -125,6 +133,7 @@ class LSTMAutoencoderManifest:
             "history": [loss.to_dict() for loss in self.history],
             "thresholds": None if self.thresholds is None else dict(self.thresholds),
             "scaler": None if self.scaler is None else dict(self.scaler),
+            "calibration": self.calibration,
         }
 
     @classmethod
@@ -153,6 +162,7 @@ class LSTMAutoencoderManifest:
             history=tuple(EpochLoss.from_dict(item) for item in data["history"]),
             thresholds=None if data.get("thresholds") is None else dict(data["thresholds"]),
             scaler=None if data.get("scaler") is None else dict(data["scaler"]),
+            calibration=_optional_str(data.get("calibration")),
         )
 
 
@@ -184,6 +194,7 @@ def train_lstm_autoencoder(
     calibration_dataset: SequenceWindowDataset | None = None,
     feature_spec: Mapping[str, Any] | None = None,
     scaler: ZScoreScaler | None = None,
+    allow_in_sample_calibration: bool = False,
 ) -> TrainedLSTMAutoencoder:
     """Train an autoencoder on clean sequence windows.
 
@@ -195,11 +206,32 @@ def train_lstm_autoencoder(
     with the same scaler, that the reconstruction-error thresholds are
     calibrated on instead of the training windows — out-of-sample calibration
     avoids the cross-session false-alarm flood that in-sample thresholds cause.
-    Defaults to in-sample (back-compat) when omitted.
+
+    Task 3.1: omitting ``calibration_dataset`` now raises unless the caller
+    explicitly opts in with ``allow_in_sample_calibration=True`` — in-sample
+    calibration was the exact mechanism behind an earlier FPR≈1.0 flood, and
+    it should never be a silent default. The escape hatch stamps
+    ``calibration="in_sample"`` into the manifest so a load-time consumer
+    (``ModelManager``) can warn on it.
     """
     _validate_config(config)
     if len(dataset) == 0:
         raise ValueError("no sequence windows available to train LSTM autoencoder")
+    if calibrate_thresholds and calibration_dataset is None and not allow_in_sample_calibration:
+        raise ValueError(
+            "train_lstm_autoencoder: no calibration_dataset given. In-sample "
+            "threshold calibration underestimates cross-session reconstruction "
+            "error and can flood alerts on unseen drives — pass a held-out "
+            "calibration_dataset, or explicitly opt in with "
+            "allow_in_sample_calibration=True."
+        )
+    calibration_provenance: str | None
+    if not calibrate_thresholds:
+        calibration_provenance = None
+    elif calibration_dataset is not None:
+        calibration_provenance = "held_out"
+    else:
+        calibration_provenance = "in_sample"
 
     torch, _nn, optim, data = _torch_training_modules()
     torch.manual_seed(config.random_state)
@@ -337,7 +369,7 @@ def train_lstm_autoencoder(
     trained = TrainedLSTMAutoencoder(model=model, manifest=manifest)
     if not calibrate_thresholds:
         return trained
-    return calibrate_lstm_thresholds(
+    calibrated = calibrate_lstm_thresholds(
         trained,
         calibration_dataset if calibration_dataset is not None else dataset,
         threshold_k=config.threshold_k,
@@ -346,6 +378,8 @@ def train_lstm_autoencoder(
         calibrated_at=created_at,
         threshold_quantile=getattr(config, "threshold_quantile", None),
     )
+    stamped = replace(calibrated.manifest, calibration=calibration_provenance)
+    return TrainedLSTMAutoencoder(model=calibrated.model, manifest=stamped)
 
 
 def calibrate_lstm_thresholds(

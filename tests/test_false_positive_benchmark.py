@@ -56,6 +56,9 @@ def _config(**updates):
         "early_stopping_patience": 2,
         "random_state": 7,
         "threshold_k": 3.0,
+        # These tests exercise the k-sigma path explicitly (3.2 flipped the
+        # config default to a quantile) — override per-test to cover quantile.
+        "threshold_quantile": None,
     }
     defaults.update(updates)
     return base.model_copy(update=defaults)
@@ -88,6 +91,7 @@ def _trained(**config_updates):
         _config(**config_updates),
         trained_at="2026-05-12T12:00:00Z",
         model_version="fp-benchmark-test",
+        allow_in_sample_calibration=True,
     )
 
 
@@ -242,6 +246,7 @@ def test_run_false_positive_benchmark_end_to_end(tmp_path: Path) -> None:
         _config(sequence_length=8, threshold_k=8.0),
         trained_at="2026-05-12T12:00:00Z",
         model_version="fp-e2e",
+        allow_in_sample_calibration=True,
     )
     artifact = tmp_path / "lstm.pt"
     trained.save(artifact)
@@ -270,6 +275,7 @@ def test_cli_main_prints_json_report(tmp_path: Path, capsys: pytest.CaptureFixtu
         _config(sequence_length=8, threshold_k=8.0),
         trained_at="2026-05-12T12:00:00Z",
         model_version="fp-cli",
+        allow_in_sample_calibration=True,
     )
     artifact = tmp_path / "lstm.pt"
     trained.save(artifact)

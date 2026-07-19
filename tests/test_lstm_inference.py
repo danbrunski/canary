@@ -38,6 +38,9 @@ def _config(**updates):
         "early_stopping_patience": 2,
         "random_state": 9,
         "threshold_k": 100.0,
+        # These tests calibrate to a specific loose k-sigma band (3.2 flipped
+        # the config default to a quantile) — pin the old path explicitly.
+        "threshold_quantile": None,
     }
     defaults.update(updates)
     return base.model_copy(update=defaults)
@@ -70,6 +73,7 @@ def _trained(**config_updates):
         _config(**config_updates),
         trained_at="2026-05-12T12:00:00Z",
         model_version="inference-test",
+        allow_in_sample_calibration=True,
     )
 
 

@@ -216,21 +216,33 @@ mechanism behind the earlier FPR≈1.0 flood. The default threshold is
 also `mean + k·σ` on right-skewed errors instead of the calibrated
 quantile.
 
-- [ ] **3.1 — Hard requirement or loud refusal.** Make
+- [x] **3.1 — Hard requirement or loud refusal.** Make
   `train_lstm_autoencoder`/`train_tcn_autoencoder` raise (or require an
   explicit `allow_in_sample_calibration=True` escape hatch that stamps
   `calibration: in_sample` into the manifest) when no calibration
   dataset is provided. Load-time: daemon logs a warning when serving an
-  `in_sample`-stamped artifact.
-- [ ] **3.2 — Quantile threshold as default.** Flip
+  `in_sample`-stamped artifact. — landed: both trainers raise unless
+  `allow_in_sample_calibration=True`; manifest gains a
+  `calibration: "held_out"|"in_sample"` field; `ModelManager._maybe_load`
+  warns on an `in_sample`-stamped artifact (via manifest `extras`); CLI
+  wrappers (`train_lstm.py`/`train_tcn.py`) thread the flag + log a
+  warning for their pre-existing documented no-flag fallback.
+- [x] **3.2 — Quantile threshold as default.** Flip
   `threshold_quantile` from `None` to a concrete default (e.g. 0.995)
   in `config.py:273,313` so the calibrated-FPR path is the default and
   k·σ is the opt-out. Re-verify `false_positive_benchmark`'s k-sweep
-  provenance note (see 8.3).
-- [ ] **3.3 — Bake-off defaults.** `sequence_bakeoff` calibrates
+  provenance note (see 8.3). — landed: both trainers' `threshold_quantile`
+  default to 0.995; `false_positive_benchmark`'s `_quantile_band` already
+  handled an arbitrary calibrated quantile correctly (exact-match
+  special case), no code change needed there; k-sigma-specific test
+  fixtures pinned `threshold_quantile: None` explicitly.
+- [x] **3.3 — Bake-off defaults.** `sequence_bakeoff` calibrates
   in-sample unless `--calibration-sessions` is passed — make the flag
   required (or auto-carve held-out sessions) so a default bake-off is
-  production-faithful.
+  production-faithful. — landed: auto-carves a held-out split (reusing
+  `retrain.py`'s `_pick_calibration_holdouts`) when the flag is omitted;
+  errors (exit 1) instead of silently calibrating in-sample when the
+  corpus has fewer than 3 sessions to spare a holdout.
 
 ## Phase 4 — Behavior-surface publish gates + serve quality (T2/T3)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ import yaml
 
 from scripts.sequence_bakeoff import (
     BackboneResult,
+    _auto_carve_calibration_sessions,
     channel_rate_class,
     main,
     run_bakeoff,
@@ -17,6 +19,11 @@ from scripts.sequence_bakeoff import (
 from src.config import CanaryConfig
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+
+# Same module object scripts/sequence_bakeoff.py's bare `import retrain` binds —
+# needed to monkeypatch its byte-size gate (matches test_retrain_script.py).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import retrain  # noqa: E402
 
 pytestmark = pytest.mark.slow  # heavy ML training/bake-off; see pyproject test tiers
 
@@ -131,6 +138,7 @@ def test_main_writes_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) ->
     _torch()
     config_path = _write_config(tmp_path)
     train_session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    calib_session = _write_obd_session(tmp_path, "calib", rows=120, start_epoch=1_778_550_000.0)
     held_out = _write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
     out_json = tmp_path / "bakeoff.json"
 
@@ -145,6 +153,8 @@ def test_main_writes_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) ->
             str(tmp_path / "bakeoff"),
             "--evaluate",
             str(held_out),
+            "--calibration-sessions",
+            str(calib_session),
             "--json",
             str(out_json),
         ]
@@ -158,3 +168,72 @@ def test_main_writes_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) ->
         "lstm_autoencoder",
         "tcn_autoencoder",
     }
+
+
+def test_main_errors_without_calibration_sessions_and_too_few_to_auto_carve(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Task 3.3: a default invocation (no --calibration-sessions) with too
+    small a corpus to auto-carve a holdout must fail loudly rather than
+    silently calibrate in-sample."""
+    _torch()
+    config_path = _write_config(tmp_path)
+    train_session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    held_out = _write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
+
+    exit_code = main(
+        [
+            str(train_session),
+            "--config",
+            str(config_path),
+            "--bindings",
+            str(_no_bindings(tmp_path)),
+            "--out",
+            str(tmp_path / "bakeoff"),
+            "--evaluate",
+            str(held_out),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "calibration" in capsys.readouterr().err
+
+
+def test_main_auto_carves_calibration_sessions_when_corpus_is_large_enough(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task 3.3: with enough sessions, a default invocation auto-carves a
+    held-out calibration split instead of erroring or calibrating in-sample."""
+    _torch()
+    # Stub session sizes so each looks "substantial" without writing 1MB+ of
+    # parquet — mirrors test_retrain_script.py's auto-holdout tests.
+    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
+    config_path = _write_config(tmp_path)
+    sessions = [
+        _write_obd_session(tmp_path, f"train{i}", rows=40, start_epoch=1_778_500_000.0 + i * 1000)
+        for i in range(4)
+    ]
+    held_out = _write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
+
+    exit_code = main(
+        [
+            *[str(s) for s in sessions],
+            "--config",
+            str(config_path),
+            "--bindings",
+            str(_no_bindings(tmp_path)),
+            "--out",
+            str(tmp_path / "bakeoff"),
+            "--evaluate",
+            str(held_out),
+        ]
+    )
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "SEQUENCE-DETECTOR BAKE-OFF" in out
+
+
+def test_auto_carve_calibration_sessions_returns_empty_below_minimum(tmp_path: Path) -> None:
+    sessions = [tmp_path / "a", tmp_path / "b"]
+    assert _auto_carve_calibration_sessions(sessions) == []

@@ -297,6 +297,9 @@ def test_evaluate_detectors_covers_sequence_detector_when_available() -> None:
             "early_stopping_patience": 2,
             "random_state": 3,
             "threshold_k": 2.0,
+            # 3.2 flipped the config default to a quantile — pin the k-sigma
+            # path this test's threshold_k was tuned against.
+            "threshold_quantile": None,
         }
     )
     dataset = SequenceWindowDataset(
@@ -309,6 +312,7 @@ def test_evaluate_detectors_covers_sequence_detector_when_available() -> None:
         lstm_config,
         trained_at="2026-05-12T00:00:00Z",
         model_version="ci-sequence-eval",
+        allow_in_sample_calibration=True,
     )
 
     report = evaluate_detectors(
@@ -516,6 +520,7 @@ def test_lstm_training_completes_and_populates_per_mode_thresholds() -> None:
         tiny,
         trained_at="2026-05-12T00:00:00Z",
         model_version="ci-lstm",
+        allow_in_sample_calibration=True,
     )
     assert trained.manifest.thresholds is not None
     thresholds = dict(trained.manifest.thresholds)

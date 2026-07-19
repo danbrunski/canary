@@ -35,6 +35,7 @@ from pathlib import Path
 # Reuse the per-backbone training CLIs as importable libraries (same pattern as
 # retrain.py); they expose identical train()/build_dataset() signatures.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import retrain  # noqa: E402 — reuse its auto-holdout picker (Task 3.3)
 import train_lstm as lstm_trainer  # noqa: E402
 import train_tcn as tcn_trainer  # noqa: E402
 
@@ -399,6 +400,20 @@ def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
     return kept or None
 
 
+def _auto_carve_calibration_sessions(sessions: Sequence[Path]) -> list[Path]:
+    """Auto-hold-out calibration sessions from ``sessions`` (Task 3.3).
+
+    Reuses ``retrain.py``'s auto-holdout picker (most-recent *substantial*
+    sessions, chosen for operating-mode coverage) rather than inventing a new
+    splitting strategy. Returns ``[]`` when the corpus is too small to spare a
+    holdout (fewer than 3 sessions) — the caller must treat that as a hard
+    stop, not a silent in-sample fallback.
+    """
+    if len(sessions) < 3:
+        return []
+    return retrain._pick_calibration_holdouts(sessions, max_holdouts=min(3, len(sessions) - 2))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
@@ -427,6 +442,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 1
 
+    # Task 3.3: a default (no --calibration-sessions) invocation used to
+    # calibrate in-sample silently — the exact FPR≈1.0 flood mechanism. Auto-
+    # carve a held-out split from the training set (same convention as
+    # retrain.py's calibration_holdout); if the corpus is too small to spare
+    # one, fail loudly instead of falling back to in-sample.
+    calibration_sessions = args.calibration_sessions
+    if not calibration_sessions:
+        calibration_sessions = _auto_carve_calibration_sessions(sessions)
+        if not calibration_sessions:
+            print(
+                "error: no --calibration-sessions given and none could be "
+                "auto-carved from the training set (need at least 3 "
+                "substantial sessions to spare one for out-of-sample "
+                "calibration) — a default bake-off run must not silently "
+                "calibrate in-sample. Pass --calibration-sessions explicitly.",
+                file=sys.stderr,
+            )
+            return 1
+        held = {s.resolve() for s in calibration_sessions}
+        sessions = [s for s in sessions if Path(s).resolve() not in held]
+        log.info(
+            "auto-carved calibration holdout sessions",
+            extra={"calibration_sessions": [str(s) for s in calibration_sessions]},
+        )
+
     try:
         results = run_bakeoff(
             sessions,
@@ -437,7 +477,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             bindings_path=args.bindings,
             device=args.device,
             k_grid=args.evaluate_k,
-            calibration_sessions=args.calibration_sessions,
+            calibration_sessions=calibration_sessions,
         )
     except MissingTCNDependencyError as e:
         print(f"error: {e}", file=sys.stderr)

@@ -79,6 +79,7 @@ def test_train_tcn_autoencoder_produces_manifest() -> None:
         _Cfg(max_epochs=2),
         trained_at="2026-05-12T12:00:00Z",
         model_version="unit-tcn",
+        allow_in_sample_calibration=True,
     )
     manifest = trained.manifest
 
@@ -98,6 +99,7 @@ def test_train_tcn_autoencoder_produces_manifest() -> None:
     assert manifest.architecture["receptive_field"] == 7
     assert manifest.hyperparams["loss"] == "masked_mse"
     validate_manifest_common(manifest.to_dict())
+    assert manifest.calibration == "in_sample"
 
     assert manifest.thresholds is not None
     calibration = SequenceThresholdCalibration.from_dict(manifest.thresholds)
@@ -114,6 +116,7 @@ def test_train_tcn_autoencoder_supports_no_validation_split() -> None:
         _dataset(),
         _Cfg(validation_fraction=0.0, max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
+        allow_in_sample_calibration=True,
     )
     assert trained.manifest.validation_windows == 0
     assert trained.manifest.best_validation_loss is None
@@ -126,6 +129,7 @@ def test_save_and_load_tcn_checkpoint(tmp_path: Path) -> None:
         _Cfg(max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
         model_version="save-load-tcn",
+        allow_in_sample_calibration=True,
     )
     artifact = tmp_path / "tcn.pt"
     trained.save(artifact)
@@ -146,7 +150,10 @@ def test_save_and_load_tcn_checkpoint(tmp_path: Path) -> None:
 
 def test_load_rejects_tcn_feature_mismatch(tmp_path: Path) -> None:
     trained = train_tcn_autoencoder(
-        _dataset(), _Cfg(max_epochs=1), trained_at="2026-05-12T12:00:00Z"
+        _dataset(),
+        _Cfg(max_epochs=1),
+        trained_at="2026-05-12T12:00:00Z",
+        allow_in_sample_calibration=True,
     )
     artifact = tmp_path / "tcn.pt"
     trained.save(artifact)
@@ -163,7 +170,12 @@ def test_sequence_inference_engine_serves_a_tcn_bundle() -> None:
     """The shared serve engine must drive a TCN model with no branching — the
     whole point of the interchangeable sequence-detector slot."""
     dataset = _dataset()
-    trained = train_tcn_autoencoder(dataset, _Cfg(max_epochs=1), trained_at="2026-05-12T12:00:00Z")
+    trained = train_tcn_autoencoder(
+        dataset,
+        _Cfg(max_epochs=1),
+        trained_at="2026-05-12T12:00:00Z",
+        allow_in_sample_calibration=True,
+    )
     engine = SequenceInferenceEngine(trained)
 
     window = np.zeros((trained.manifest.architecture["sequence_length"], 2), dtype=np.float32)
@@ -206,6 +218,7 @@ def test_train_tcn_autoencoder_calibrates_on_held_out_dataset_when_given() -> No
         calibration_dataset=calib_ds,
     )
     assert trained.manifest.thresholds is not None
+    assert trained.manifest.calibration == "held_out"
     calibration = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
     # Calibration ran on the held-out dataset — not the training set.
     assert calibration.window_count == len(calib_ds)
@@ -213,11 +226,38 @@ def test_train_tcn_autoencoder_calibrates_on_held_out_dataset_when_given() -> No
     assert calibration.window_count != len(train_ds)
 
 
-def test_train_tcn_autoencoder_defaults_to_in_sample_calibration() -> None:
-    """Back-compat: omitting ``calibration_dataset`` keeps the previous
-    behaviour — calibrate on the training windows."""
+def test_train_tcn_autoencoder_requires_calibration_dataset_or_escape_hatch() -> None:
+    """Task 3.1: omitting a held-out calibration set is a hard error by
+    default — in-sample calibration was the exact mechanism behind an
+    earlier FPR≈1.0 flood, so it must never be a silent fallback."""
+    with pytest.raises(ValueError, match="calibration_dataset"):
+        train_tcn_autoencoder(_dataset(), _Cfg(max_epochs=2), trained_at="2026-05-12T12:00:00Z")
+
+
+def test_train_tcn_autoencoder_allow_in_sample_calibration_stamps_manifest() -> None:
+    """The escape hatch trains fine and stamps ``calibration="in_sample"`` so
+    a load-time consumer can flag the artifact."""
     dataset = _dataset()
-    trained = train_tcn_autoencoder(dataset, _Cfg(max_epochs=2), trained_at="2026-05-12T12:00:00Z")
+    trained = train_tcn_autoencoder(
+        dataset,
+        _Cfg(max_epochs=2),
+        trained_at="2026-05-12T12:00:00Z",
+        allow_in_sample_calibration=True,
+    )
+    assert trained.manifest.calibration == "in_sample"
     assert trained.manifest.thresholds is not None
     calibration = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
     assert calibration.window_count == len(dataset)
+
+
+def test_train_tcn_autoencoder_calibrate_thresholds_false_skips_the_gate() -> None:
+    """Deferring calibration to an explicit later call isn't the silent
+    in-sample risk 3.1 targets — no escape hatch needed."""
+    trained = train_tcn_autoencoder(
+        _dataset(),
+        _Cfg(max_epochs=1),
+        trained_at="2026-05-12T12:00:00Z",
+        calibrate_thresholds=False,
+    )
+    assert trained.manifest.calibration is None
+    assert trained.manifest.thresholds is None

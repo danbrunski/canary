@@ -100,6 +100,9 @@ class TCNAutoencoderManifest:
     history: tuple[EpochLoss, ...]
     thresholds: Mapping[str, Any] | None = None
     scaler: Mapping[str, Any] | None = None
+    #: Threshold-calibration provenance (Task 3.1) — see
+    #: ``LSTMAutoencoderManifest.calibration`` for the field contract.
+    calibration: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -126,6 +129,7 @@ class TCNAutoencoderManifest:
             "history": [loss.to_dict() for loss in self.history],
             "thresholds": None if self.thresholds is None else dict(self.thresholds),
             "scaler": None if self.scaler is None else dict(self.scaler),
+            "calibration": self.calibration,
         }
 
     @classmethod
@@ -154,6 +158,7 @@ class TCNAutoencoderManifest:
             history=tuple(EpochLoss.from_dict(item) for item in data["history"]),
             thresholds=None if data.get("thresholds") is None else dict(data["thresholds"]),
             scaler=None if data.get("scaler") is None else dict(data["scaler"]),
+            calibration=_optional_str(data.get("calibration")),
         )
 
 
@@ -184,6 +189,7 @@ def train_tcn_autoencoder(
     calibration_dataset: SequenceWindowDataset | None = None,
     feature_spec: Mapping[str, Any] | None = None,
     scaler: ZScoreScaler | None = None,
+    allow_in_sample_calibration: bool = False,
 ) -> TrainedTCNAutoencoder:
     """Train a TCN autoencoder on clean sequence windows.
 
@@ -196,12 +202,31 @@ def train_tcn_autoencoder(
     with the same scaler, that the reconstruction-error thresholds are
     calibrated on instead of the training windows. In-sample calibration
     underestimates real cross-session error and floods alerts on unseen drives;
-    out-of-sample calibration is the production path. Defaults to in-sample
-    (back-compat) when omitted.
+    out-of-sample calibration is the production path.
+
+    Task 3.1: omitting ``calibration_dataset`` now raises unless the caller
+    explicitly opts in with ``allow_in_sample_calibration=True``. The escape
+    hatch stamps ``calibration="in_sample"`` into the manifest so a load-time
+    consumer (``ModelManager``) can warn on it.
     """
     _validate_config(config)
     if len(dataset) == 0:
         raise ValueError("no sequence windows available to train TCN autoencoder")
+    if calibrate_thresholds and calibration_dataset is None and not allow_in_sample_calibration:
+        raise ValueError(
+            "train_tcn_autoencoder: no calibration_dataset given. In-sample "
+            "threshold calibration underestimates cross-session reconstruction "
+            "error and can flood alerts on unseen drives — pass a held-out "
+            "calibration_dataset, or explicitly opt in with "
+            "allow_in_sample_calibration=True."
+        )
+    calibration_provenance: str | None
+    if not calibrate_thresholds:
+        calibration_provenance = None
+    elif calibration_dataset is not None:
+        calibration_provenance = "held_out"
+    else:
+        calibration_provenance = "in_sample"
 
     torch, _nn, optim, data = _torch_training_modules()
     torch.manual_seed(config.random_state)
@@ -334,7 +359,7 @@ def train_tcn_autoencoder(
     trained = TrainedTCNAutoencoder(model=model, manifest=manifest)
     if not calibrate_thresholds:
         return trained
-    return calibrate_tcn_thresholds(
+    calibrated = calibrate_tcn_thresholds(
         trained,
         calibration_dataset if calibration_dataset is not None else dataset,
         threshold_k=config.threshold_k,
@@ -343,6 +368,8 @@ def train_tcn_autoencoder(
         calibrated_at=created_at,
         threshold_quantile=getattr(config, "threshold_quantile", None),
     )
+    stamped = replace(calibrated.manifest, calibration=calibration_provenance)
+    return TrainedTCNAutoencoder(model=calibrated.model, manifest=stamped)
 
 
 def calibrate_tcn_thresholds(

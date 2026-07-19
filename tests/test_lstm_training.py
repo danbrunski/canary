@@ -46,6 +46,9 @@ def _config(**updates):
         "early_stopping_patience": 2,
         "random_state": 7,
         "threshold_k": 2.0,
+        # These tests exercise the k-sigma path explicitly (3.2 flipped the
+        # config default to a quantile) — override per-test to cover quantile.
+        "threshold_quantile": None,
     }
     defaults.update(updates)
     return base.model_copy(update=defaults)
@@ -100,6 +103,7 @@ def test_train_lstm_autoencoder_produces_manifest() -> None:
         _config(max_epochs=2),
         trained_at="2026-05-12T12:00:00Z",
         model_version="unit-lstm",
+        allow_in_sample_calibration=True,
     )
 
     manifest = trained.manifest
@@ -127,6 +131,7 @@ def test_train_lstm_autoencoder_produces_manifest() -> None:
     assert manifest.schema["feature_health"]["selected_feature_count"] == 2
     assert manifest.schema["feature_health"]["constant_columns"] == []
     validate_manifest_common(manifest.to_dict())
+    assert manifest.calibration == "in_sample"
     assert manifest.thresholds is not None
     calibration = SequenceThresholdCalibration.from_dict(manifest.thresholds)
     assert calibration.threshold_k == 2.0
@@ -147,6 +152,7 @@ def test_train_lstm_autoencoder_supports_no_validation_split() -> None:
         _dataset(),
         _config(validation_fraction=0.0, max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
+        allow_in_sample_calibration=True,
     )
 
     assert trained.manifest.validation_windows == 0
@@ -162,6 +168,7 @@ def test_save_and_load_lstm_autoencoder_checkpoint(tmp_path: Path) -> None:
         _config(max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
         model_version="save-load-test",
+        allow_in_sample_calibration=True,
     )
     artifact = tmp_path / "lstm.pt"
 
@@ -189,6 +196,7 @@ def test_load_rejects_lstm_architecture_feature_mismatch(tmp_path: Path) -> None
         dataset,
         _config(max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
+        allow_in_sample_calibration=True,
     )
     artifact = tmp_path / "lstm.pt"
     trained.save(artifact)
@@ -216,6 +224,7 @@ def test_save_persists_scaler_in_manifest(tmp_path: Path) -> None:
         _config(max_epochs=1),
         trained_at="2026-05-20T12:00:00Z",
         scaler=_scaler(),
+        allow_in_sample_calibration=True,
     )
     artifact = tmp_path / "lstm.pt"
     trained.save(artifact)
@@ -235,6 +244,7 @@ def test_load_rejects_lstm_threshold_without_scaler(tmp_path: Path) -> None:
         dataset,
         _config(max_epochs=1),
         trained_at="2026-05-20T12:00:00Z",
+        allow_in_sample_calibration=True,
     )
     artifact = tmp_path / "lstm.pt"
     trained.save(artifact)
@@ -254,6 +264,7 @@ def test_load_rejects_lstm_threshold_feature_mismatch(tmp_path: Path) -> None:
         dataset,
         _config(max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
+        allow_in_sample_calibration=True,
     )
     artifact = tmp_path / "lstm.pt"
     trained.save(artifact)
@@ -272,6 +283,7 @@ def test_manifest_round_trip() -> None:
         _dataset(),
         _config(max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
+        allow_in_sample_calibration=True,
     )
 
     restored = LSTMAutoencoderManifest.from_dict(trained.manifest.to_dict())
@@ -307,7 +319,9 @@ def test_calibrate_lstm_thresholds_can_be_run_explicitly() -> None:
 def test_calibrate_lstm_thresholds_rejects_mismatched_schema() -> None:
     _torch()
     dataset = _dataset()
-    trained = train_lstm_autoencoder(dataset, _config(max_epochs=1))
+    trained = train_lstm_autoencoder(
+        dataset, _config(max_epochs=1), allow_in_sample_calibration=True
+    )
     mismatched = _dataset(sequence_length=3)
 
     with pytest.raises(ValueError, match="sequence_length"):
@@ -323,7 +337,41 @@ def test_train_lstm_autoencoder_rejects_invalid_inputs() -> None:
     with pytest.raises(ValueError, match="validation_fraction"):
         train_lstm_autoencoder(_dataset(), _config(validation_fraction=1.0))
     with pytest.raises(ValueError, match="threshold_k"):
-        train_lstm_autoencoder(_dataset(), _config(threshold_k=-1.0))
+        train_lstm_autoencoder(
+            _dataset(), _config(threshold_k=-1.0), allow_in_sample_calibration=True
+        )
+
+
+def test_train_lstm_autoencoder_requires_calibration_dataset_or_escape_hatch() -> None:
+    """Task 3.1: omitting a held-out calibration set is a hard error by
+    default — in-sample calibration was the exact mechanism behind an
+    earlier FPR≈1.0 flood, so it must never be silent."""
+    _torch()
+    with pytest.raises(ValueError, match="calibration_dataset"):
+        train_lstm_autoencoder(_dataset(), _config(max_epochs=1))
+
+
+def test_train_lstm_autoencoder_allow_in_sample_calibration_stamps_manifest() -> None:
+    """The escape hatch trains fine and stamps ``calibration="in_sample"`` so
+    a load-time consumer can flag the artifact."""
+    _torch()
+    trained = train_lstm_autoencoder(
+        _dataset(),
+        _config(max_epochs=1),
+        trained_at="2026-05-12T12:00:00Z",
+        allow_in_sample_calibration=True,
+    )
+    assert trained.manifest.calibration == "in_sample"
+    assert trained.manifest.thresholds is not None
+
+
+def test_train_lstm_autoencoder_calibrate_thresholds_false_skips_the_gate() -> None:
+    """Deferring calibration to an explicit later ``calibrate_lstm_thresholds``
+    call isn't the silent-in-sample risk 3.1 targets — no escape hatch needed."""
+    _torch()
+    trained = train_lstm_autoencoder(_dataset(), _config(max_epochs=1), calibrate_thresholds=False)
+    assert trained.manifest.calibration is None
+    assert trained.manifest.thresholds is None
 
 
 def test_train_lstm_autoencoder_rejects_empty_dataset() -> None:
@@ -368,6 +416,7 @@ def test_train_lstm_autoencoder_calibrates_on_held_out_dataset_when_given() -> N
         calibration_dataset=calib_ds,
     )
     assert trained.manifest.thresholds is not None
+    assert trained.manifest.calibration == "held_out"
     calibration = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
     # Calibration ran on the held-out dataset, not the training one.
     assert calibration.window_count == len(calib_ds)
@@ -385,6 +434,7 @@ def test_load_tolerates_pre_decay_target_checkpoints(tmp_path: Path) -> None:
         _config(max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
         model_version="pre-target",
+        allow_in_sample_calibration=True,
     )
     artifact = tmp_path / "lstm.pt"
     trained.save(artifact)

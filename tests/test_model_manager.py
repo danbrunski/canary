@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
+
+import pytest
 
 from src.models.manager import (
     LoadedModel,
@@ -61,25 +64,26 @@ def _write_pair(
     feature_columns: list[str] | None = None,
     schema: dict[str, object] | None = None,
     mtime: float | None = None,
+    calibration: str | None = None,
 ) -> Path:
     """Write a (artifact, manifest) pair on disk; return the manifest path."""
     manifest_path = default_manifest_sidecar(artifact_path)
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(f"artifact:{version}")
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "artifact_format_version": CURRENT_MANIFEST_FORMAT_VERSION,
-                "model_type": model_type,
-                "model_version": version,
-                "created_at": "2026-05-13T12:00:00+00:00",
-                "training_data_hash": "sha256:deadbeef",
-                "input_rows": 1000,
-                "hyperparams": {},
-                "schema": schema or _feature_schema(feature_columns or ["obd:RPM", "obd:SPEED"]),
-            }
-        )
-    )
+    payload = {
+        "artifact_format_version": CURRENT_MANIFEST_FORMAT_VERSION,
+        "model_type": model_type,
+        "model_version": version,
+        "created_at": "2026-05-13T12:00:00+00:00",
+        "training_data_hash": "sha256:deadbeef",
+        "input_rows": 1000,
+        "hyperparams": {},
+        "schema": schema or _feature_schema(feature_columns or ["obd:RPM", "obd:SPEED"]),
+    }
+    if calibration is not None:
+        # Unknown top-level keys land in ModelManifestCommon.extras (3.1).
+        payload["calibration"] = calibration
+    manifest_path.write_text(json.dumps(payload))
     if mtime is not None:
         os.utime(manifest_path, (mtime, mtime))
     return manifest_path
@@ -314,3 +318,34 @@ def test_current_is_a_dataclass_snapshot(tmp_path: Path) -> None:
     assert snap1 is not snap2
     assert snap1.manifest.model_version == "v1"
     assert snap2 is not None and snap2.manifest.model_version == "v2"
+
+
+# ---------------------------------------------------------------------------
+# Task 3.1 — in-sample calibration load-time warning
+# ---------------------------------------------------------------------------
+
+
+def test_load_initial_warns_when_manifest_is_in_sample_calibrated(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    artifact = tmp_path / "model.joblib"
+    _write_pair(artifact, version="v1", model_type="lstm_autoencoder", calibration="in_sample")
+    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    with caplog.at_level(logging.WARNING, logger="src.models.manager"):
+        result = mgr.load_initial()
+
+    assert result.kind == "swapped"
+    assert any("in-sample" in record.message for record in caplog.records)
+
+
+def test_load_initial_does_not_warn_for_held_out_calibration(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    artifact = tmp_path / "model.joblib"
+    _write_pair(artifact, version="v1", model_type="lstm_autoencoder", calibration="held_out")
+    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    with caplog.at_level(logging.WARNING, logger="src.models.manager"):
+        result = mgr.load_initial()
+
+    assert result.kind == "swapped"
+    assert not any("in-sample" in record.message for record in caplog.records)

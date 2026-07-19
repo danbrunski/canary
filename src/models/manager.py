@@ -181,6 +181,19 @@ class ModelManager(Generic[T]):
                     new_version=manifest.model_version,
                 )
 
+            # Task 3.1: an in-sample-calibrated artifact underestimates
+            # cross-session error and can flood alerts on unseen drives — not
+            # a reason to refuse it (a smoke-test/dev-holdout artifact may be
+            # deliberate), but the operator should know what's being served.
+            if manifest.extras.get("calibration") == "in_sample":
+                log.warning(
+                    "serving in-sample-calibrated artifact",
+                    extra={
+                        "path": str(manifest_path),
+                        "model_version": manifest.model_version,
+                    },
+                )
+
             try:
                 artifact = self._loader(self._artifact_path)
             except Exception as exc:  # noqa: BLE001 — loader errors are caller's bag of varied types

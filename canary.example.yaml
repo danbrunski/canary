@@ -184,6 +184,10 @@ models:
     min_delta: 0.0
     random_state: 42
     threshold_k: 3.0
+    # Task 3.2: calibrated-quantile threshold is the default path; threshold_k
+    # (mean + k·σ) above only applies when threshold_quantile is null. Errors
+    # are right-skewed, so a quantile targets the alert budget directly.
+    threshold_quantile: 0.995
     # Behavior signals that drift naturally over a drive (fuel level, HVAC
     # controls, intake-air temperature) but aren't vehicle-health signals
     # for *this* detector — they're better handled by the behavior surfaces
@@ -218,6 +222,8 @@ models:
     min_delta: 0.0
     random_state: 42
     threshold_k: 3.0
+    # Task 3.2: same contract as lstm_autoencoder.threshold_quantile above.
+    threshold_quantile: 0.995
   # Phase 7.2: fuse IF + LSTM + behavior residuals into one
   # agreement-aware calibrated severity (a "fused" AnomalyEvent). The
   # per-source events still fire alongside it.

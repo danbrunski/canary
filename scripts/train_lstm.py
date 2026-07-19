@@ -237,6 +237,11 @@ def train(
                 "calibration sessions produced no windows — they're shorter "
                 "than sequence_length, or had no usable feature data"
             )
+    else:
+        log.warning(
+            "no --calibration-sessions given; falling back to in-sample "
+            "threshold calibration (cross-session FPR likely inflated)"
+        )
 
     trained = train_lstm_autoencoder(
         dataset,
@@ -253,6 +258,10 @@ def train(
             sequence_stride=dataset.stride,
         ),
         scaler=scaler,
+        # This CLI's documented fallback (see the --calibration-sessions
+        # help text): omitting the flag is a deliberate dev/manual-run path,
+        # not the accidental-bypass 3.1 targets at the library level.
+        allow_in_sample_calibration=calibration_ds is None,
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)
