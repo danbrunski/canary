@@ -11,7 +11,12 @@ plus the multiplicative *scale* fault), this:
 * scores with the trained Isolation Forest and the fused stream (the IF
   half of fusion is exercised even when no LSTM/behavior sources are
   available, so the regression guard sees the fusion code path),
-* records detection (any flag inside the injection window) and counts
+* runs every row through a fresh ``PersistenceGate`` (config's
+  ``alerts.min_consecutive_ticks``) — a "hit" is the first row whose
+  *sustained* verdict lands within ``[start, end + rolling_window_seconds)``
+  (8.2: a fault whose feature signature only fully forms after the window
+  closes, once the rolling mean/std/roc has "seen" it, still counts as a
+  late-but-real detection with recorded latency, not a miss) — and counts
   alerts outside any window for the nominal false-positive rate.
 
 The harness is intentionally IF-focused so it stays fast and torch-free in
@@ -29,7 +34,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.alerts.fusion import FusionScorer, isolation_forest_source
+from src.alerts.fusion import FusionScorer, PersistenceGate, isolation_forest_source
 from src.config import CanaryConfig
 from src.models.isolation_forest import (
     CALIBRATED_ANOMALY_COLUMN,
@@ -59,10 +64,18 @@ class _DetectorMetrics:
     fault_kind: str
     runs: int
     detected: int
+    #: Seconds from injection-window start to the first sustained
+    #: (persistence-gated) detection, one entry per detected run — empty
+    #: when ``detected == 0`` (2.4).
+    latencies_seconds: tuple[float, ...] = ()
 
     @property
     def detection_rate(self) -> float:
         return self.detected / self.runs if self.runs else 0.0
+
+    @property
+    def median_time_to_detect_seconds(self) -> float | None:
+        return float(np.median(self.latencies_seconds)) if self.latencies_seconds else None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -71,6 +84,8 @@ class _DetectorMetrics:
             "runs": self.runs,
             "detected": self.detected,
             "detection_rate": self.detection_rate,
+            "latencies_seconds": list(self.latencies_seconds),
+            "median_time_to_detect_seconds": self.median_time_to_detect_seconds,
         }
 
 
@@ -118,6 +133,39 @@ def _fused_anomalous(
         )
         out[i] = fusion.fuse([ifsrc], timestamp="", operating_mode=str(mode)).is_anomaly
     return pd.Series(out, index=scored.index)
+
+
+def _first_sustained_detection(
+    *,
+    if_anomalous: pd.Series,
+    fused_anomalous: pd.Series,
+    timestamps: pd.Series,
+    persistence: PersistenceGate,
+    match_start: pd.Timestamp,
+    match_end: pd.Timestamp,
+) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    """First row within ``[match_start, match_end)`` where each detector's
+    persistence-gated verdict flips sustained (2.4/8.2).
+
+    Feeds every row of the frame through ``persistence`` in order — not just
+    the match window — so a real consecutive-tick streak has to build
+    exactly like the live daemon (a streak starting a couple of rows before
+    the window, or continuing into the grace period, is handled correctly
+    rather than resetting at an arbitrary slice boundary). ``persistence``
+    must be fresh per injection run: sharing one gate across runs would leak
+    streak state from a previous run's tail into the next run's start.
+    """
+    if_detected: pd.Timestamp | None = None
+    fused_detected: pd.Timestamp | None = None
+    for ts, if_fired, fused_fired in zip(timestamps, if_anomalous, fused_anomalous, strict=True):
+        if_sustained = persistence.observe("isolation_forest", bool(if_fired))
+        fused_sustained = persistence.observe("fused", bool(fused_fired))
+        in_match = match_start <= ts < match_end
+        if if_detected is None and if_sustained and in_match:
+            if_detected = ts
+        if fused_detected is None and fused_sustained and in_match:
+            fused_detected = ts
+    return if_detected, fused_detected
 
 
 def _hours_covered(frame: pd.DataFrame) -> float:
@@ -234,29 +282,48 @@ def evaluate_detectors(
         },
     }
 
+    # 8.2's post-window grace: a fault whose rolling-feature signature only
+    # fully forms after the injection window closes still counts as a late
+    # (not missed) detection, up to one full feature window past `end`.
+    grace = pd.Timedelta(seconds=config.preprocessing.rolling_window_seconds)
+
     per_fault: list[dict[str, Any]] = []
     for kind in fault_kinds:
         if_hits = 0
         fused_hits = 0
+        if_latencies: list[float] = []
+        fused_latencies: list[float] = []
         for _ in range(n_injections):
             inj = _inject_one(resampled, kind=kind, channel=fault_channel, rng=rng, config=config)
             featurized = featurize_wide_frame(inj.df, config).features
             scored = trained_if.score(featurized)
             timestamps = pd.to_datetime(featurized[TIMESTAMP_COLUMN], utc=True)
             window = inj.windows[0]
-            in_window = (timestamps >= window.start) & (timestamps < window.end)
-            if not in_window.any():
-                continue
-            if_hits += int(_if_anomalous(scored).loc[in_window].any())
-            fused_hits += int(
-                _fused_anomalous(scored, fusion=fusion, scales=scales).loc[in_window].any()
+            # Fresh gate per run — 2.4: run scoring through the production
+            # persistence config so a hit reflects what would actually alert,
+            # not any single over-threshold row.
+            persistence = PersistenceGate(config.alerts.min_consecutive_ticks)
+            if_ts, fused_ts = _first_sustained_detection(
+                if_anomalous=_if_anomalous(scored),
+                fused_anomalous=_fused_anomalous(scored, fusion=fusion, scales=scales),
+                timestamps=timestamps,
+                persistence=persistence,
+                match_start=window.start,
+                match_end=window.end + grace,
             )
+            if if_ts is not None:
+                if_hits += 1
+                if_latencies.append((if_ts - window.start).total_seconds())
+            if fused_ts is not None:
+                fused_hits += 1
+                fused_latencies.append((fused_ts - window.start).total_seconds())
         per_fault.append(
             _DetectorMetrics(
                 detector="isolation_forest",
                 fault_kind=kind,
                 runs=n_injections,
                 detected=if_hits,
+                latencies_seconds=tuple(if_latencies),
             ).to_dict()
         )
         per_fault.append(
@@ -265,6 +332,7 @@ def evaluate_detectors(
                 fault_kind=kind,
                 runs=n_injections,
                 detected=fused_hits,
+                latencies_seconds=tuple(fused_latencies),
             ).to_dict()
         )
 

@@ -15,6 +15,8 @@ from src.models.tcn import (  # noqa: E402 — after importorskip guard
     receptive_field,
 )
 
+pytestmark = pytest.mark.slow  # heavy ML training/bake-off; see pyproject test tiers
+
 
 def _model(
     *,

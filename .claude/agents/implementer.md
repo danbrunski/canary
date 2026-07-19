@@ -25,13 +25,19 @@ shown to the operator directly, so return raw facts, not prose.
    (they date from an earlier review and drift as work lands). Scratch
    scripts, debug output, and other throwaway files go under `/tmp`,
    never into the repo.
-2. **Drive the gate to green** before returning: whole-repo
-   `ruff check . && ruff format --check . && mypy src && pytest`, plus
-   `pnpm test` and `pnpm typecheck` in `src/dashboard/static` for any
-   frontend change (re-run `TuningFeedback.test.ts` once on flake before
-   treating it as a failure). Quote only the tail/summary lines of the
-   green output (the orchestrator re-runs the gate itself) — quote
-   failures in full only when returning BLOCKED.
+2. **Drive the gate to green** before returning, on the fast inner-loop
+   tier so you are not re-running the heavy ML training tests every
+   cycle:
+   `ruff check . && ruff format --check . && mypy src && pytest -m "not integration and not slow"`.
+   If your diff touches code a `slow` or `integration` test exercises
+   (the TCN/LSTM trainers, the bake-off, the benchmarks), run those
+   specific tests too (by path or `-k`) — but do NOT run the whole slow
+   suite; the orchestrator runs that once per /goal run, not per task.
+   Add `pnpm test` and `pnpm typecheck` in `src/dashboard/static` for
+   any frontend change (re-run `TuningFeedback.test.ts` once on flake
+   before treating it as a failure). Quote only the tail/summary lines
+   of the green output (the orchestrator re-runs the gate itself) —
+   quote failures in full only when returning BLOCKED.
 3. **Return**, as your entire final message:
    - `IMPLEMENTED` — then `git --no-pager diff --stat` **plus**
      `git status --short` (diff --stat misses untracked new files — the

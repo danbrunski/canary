@@ -43,6 +43,10 @@ dev = [
     "mypy>=1.10",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    # pytest-xdist powers the `-n auto` in [tool.pytest.ini_options].addopts;
+    # the suite is dominated by a few ~150 s torch-training tests, so parallel
+    # execution is the main lever. Required for a bare `pytest` to run.
+    "pytest-xdist>=3.6",
     "types-pyyaml",
     "pandas-stubs",
     # tools/extract_fsm_signals.py — pulls CONSULT-III parameter names from
@@ -117,15 +121,22 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["."]
-# Slow integration tests (Task 1.5 ELM327-emulator pty bring-up; ~45 s) are
-# opted out by default so the inner-loop suite stays under ~25 s. Run them
-# with: `.venv/bin/python -m pytest -m integration` or `-m "not integration"`
-# to explicitly exclude.
+# Test tiers (see the gate discipline in AGENTS.md):
+#   * default (bare pytest)      -> everything except `integration`; this is
+#     the COMMIT/verify gate, full coverage. Runs in parallel via -n auto.
+#   * inner loop while iterating -> add `and not slow`:
+#         .venv/bin/python -m pytest -m "not integration and not slow"
+#     drops the heavy ML training/bakeoff tests; stays well under ~30 s.
+#   * `-m integration` / `-m slow` run those tiers explicitly.
+# `-n auto` (pytest-xdist) fans the suite across all cores -- the full suite
+# is dominated by a couple of ~150 s torch-training tests, so parallelism is
+# the main lever. Debugging a single test? Add `-n0` to force serial output.
 #
 # Codex/sandbox note: do not wrap API tests in GNU `timeout`. Starlette's
 # TestClient uses AnyIO's blocking portal, and `timeout ... pytest` can make
 # those in-process requests appear hung even when direct pytest finishes.
-addopts = "-m 'not integration'"
+addopts = "-n auto -m 'not integration'"
 markers = [
     "integration: real-hardware-equivalent tests (e.g. ELM327-emulator); slow.",
+    "slow: heavy ML training / bake-off / benchmark tests (multi-second to minutes); excluded from the inner loop via `-m 'not slow'`, always run at the commit gate.",
 ]

@@ -399,6 +399,7 @@ def test_read_session_decoded_falls_back_when_no_bindings_file(tmp_path: Path):
     assert (out["source"] == "can").sum() == 2
 
 
+@pytest.mark.slow  # ~18 s: decodes a full real session against on-disk bindings
 def test_read_session_decoded_against_real_bindings_file():
     """Smoke against the committed data/bindings.yaml, if present."""
     bindings_path = Path("data/bindings.yaml")

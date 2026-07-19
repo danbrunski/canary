@@ -22,6 +22,8 @@ from src.models.tcn_training import load_tcn_autoencoder_model
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
+pytestmark = pytest.mark.slow  # heavy ML training/bake-off; see pyproject test tiers
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 

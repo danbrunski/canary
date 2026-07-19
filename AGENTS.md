@@ -101,6 +101,14 @@ to direct HTTP.
   `TuningFeedback.test.ts` once on flake before treating it as a
   regression). A pre-commit hook runs the fast gate (ruff + mypy)
   automatically.
+- **Test tiers** (pytest runs in parallel via `-n auto`, needs
+  `pytest-xdist` from the `dev` extra): bare `pytest` is the full
+  **commit gate** — everything except `integration`, incl. the `slow`
+  ML training/bake-off tests. While *iterating* on a task, run the
+  inner-loop tier `pytest -m "not integration and not slow"` (~35 s;
+  drops the heavy torch-training tests) and reserve the full run for the
+  commit gate. `-m integration` / `-m slow` run those tiers explicitly;
+  add `-n0` to force serial output when debugging one test.
 - **Pi deployment path**: `ssh canary@192.168.137.2` (or
   `canary.local`); install via `sudo bash scripts/install_pi.sh`; data
   lives under `/data/canary/`; control token at

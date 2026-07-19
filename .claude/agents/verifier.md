@@ -13,9 +13,13 @@ uncertain.
 Do, in order:
 
 1. **Gate.** Run `ruff check . && ruff format --check . && mypy src`
-   and the pytest files relevant to the diff (whole `pytest` if the
-   change is broad). Any failure is an automatic FAIL — quote the
-   output.
+   and the pytest tests relevant to the diff. Include any `slow` or
+   `integration` test that covers the code this task changed — run those
+   specific tests by path or `-k` (do not skip a slow test just because
+   it is slow, but you need not run the *whole* slow suite; the
+   orchestrator does that once per run). `pytest` runs parallel via
+   `-n auto`; add `-n0` if a failure's output is hard to read. Any
+   failure is an automatic FAIL — quote the output.
 2. **Anchor check.** The task cites specific `file:line` anchors.
    Anchors date from the 2026-07-18 review and **line numbers drift**
    as earlier queue work lands: resolve each anchor by its cited

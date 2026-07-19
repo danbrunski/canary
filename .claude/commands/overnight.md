@@ -47,13 +47,16 @@ context survives the whole queue.
    subagent. Run implementers strictly one at a time: they share one
    working tree and the other session may be editing it, so concurrent
    implementers will conflict.
-3. Re-confirm the gate yourself in the main session (`ruff check . &&
-   ruff format --check . && mypy src && pytest`, plus `pnpm test` and
-   `pnpm typecheck` in `src/dashboard/static` for FE changes; re-run
-   `TuningFeedback.test.ts` once on flake). The implementer claims
-   green — verify it is, and inspect its diff before proceeding. Vet any
-   `NEW DEP:` it flagged: accept only if the task warrants it, and log
-   it in the overnight log.
+3. Re-confirm the gate yourself in the main session — the **fast tier**
+   `ruff check . && ruff format --check . && mypy src && pytest -m "not integration and not slow"`
+   (parallel via `-n auto`), **plus** any `slow`/`integration` tests the
+   task's diff directly touches (run those by path or `-k`), **plus**
+   `pnpm test` and `pnpm typecheck` in `src/dashboard/static` for FE
+   changes; re-run `TuningFeedback.test.ts` once on flake. Do NOT run the
+   whole `slow` tier here — it runs once per /goal run (see the run-level
+   sweep below), not per task. Verify green and inspect the diff before
+   proceeding. Vet any `NEW DEP:` it flagged: accept only if the task
+   warrants it, and log it in the overnight log.
 4. Spawn the `verifier` agent with the task text + diff **and the list
    of created (untracked) files** — `git diff` alone misses new files,
    which are often the task's main artifact. It is a distinct,
@@ -76,6 +79,20 @@ context survives the whole queue.
    roadmap task id. **Never push.**
 7. Append one line to `docs/roadmap/OVERNIGHT-LOG.md`:
    `<task id> — done|blocked — <one-line summary>`.
+
+**Run-level slow-tier sweep (once per /goal, not per task):** the heavy
+ML training / bake-off / benchmark tests carry the `slow` marker and are
+excluded from the per-task gate, which runs only the fast tier plus the
+slow/integration tests a task's diff directly touches. The full `slow`
+tier is expensive (~4 min, dominated by a couple of ~150 s torch runs)
+and rarely broken by unrelated work, so run it ONCE per /goal invocation
+— bare `.venv/bin/python -m pytest` (no `-m` filter; includes `slow`,
+runs `-n auto`) — as part of the run's done-condition, before you treat
+the queue as complete. If it comes back red: the failing test's area
+usually points to the culprit task — fix it within the task rules if you
+can, else annotate that task `[~] blocked-overnight: <reason>`, and log
+it in `OVERNIGHT-LOG.md` for morning review. A clean full sweep is
+required before declaring the run done.
 
 **Hard blocks (mark blocked-overnight, never attempt):** anything
 needing the truck, the Pi, live-daemon MCP write tools, hardware,

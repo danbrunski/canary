@@ -307,6 +307,7 @@ def test_live_channel_age_tracks_seconds_since_observation(config: CanaryConfig)
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow  # ~37 s: fills the ring buffer to its cap; excluded from inner loop
 def test_buffer_caps_at_max_rows(config: CanaryConfig) -> None:
     src = LiveFeatureSource(config=config)
     # _max_rows = max(32, window_seconds*hz*2, idle_transient_lookback_seconds*hz + hz)

@@ -22,6 +22,8 @@ from src.models.sequence_training import SequenceThresholdCalibration
 from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
+pytestmark = pytest.mark.slow  # heavy ML training/bake-off; see pyproject test tiers
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
