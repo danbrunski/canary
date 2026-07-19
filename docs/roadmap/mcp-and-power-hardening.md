@@ -144,17 +144,34 @@ keep-alive).
   same param. Tests: 2 state-level + 2 endpoint-level in
   `test_behavior_live.py`, 2 passthrough/query-forwarding in
   `test_mcp_tools.py`.
-- [ ] **2.2 — `get_service_health` read tool.** New read tool returning
-  `is-active` + uptime + recent-error count for `canary`, `canary-mcp`,
-  `ups-shutdown` (via `systemctl is-active`/`show` — no sudo needed — and a
-  journald error grep). Register in `server.py`.
-- [ ] **2.3 — Watchdog log tail (doc-only).** `tail_daemon_log` already accepts
-  `unit`, so `tail_daemon_log(unit="ups-shutdown")` works today. Document it in
-  `docs/mcp-server.md` and add `ups-shutdown` to the tool's known-units hint.
-- [ ] **2.4 — `get_status` power block (optional).** Once 1.3 lands, inject SoC
-  into the status payload (`src/dashboard/status.py` `build_status`, or appended
-  in `public.py:57-60` like `replay`/`sequence_detector`) so `SystemPanel.tsx`'s
-  existing power row can show battery state alongside Pi throttle flags.
+- [x] **2.2 — `get_service_health` read tool.** New
+  `src/mcp_server/tools/service_health.py`: `systemctl show` (structured
+  key=value, not `is-active` + text-scraping) for `canary`/`canary-mcp`/
+  `ups-shutdown` (default set, overridable) → `is_active`/`active_state`/
+  `sub_state`/`restart_count`/`uptime_seconds`. **Design choice:** used
+  `NRestarts` as the crash-loop signal instead of a journald error-text grep
+  — it's authoritative and immune to false positives/negatives from log
+  wording (the UPS watchdog's own benign heartbeat-write WARNING lines would
+  have polluted a text grep), and it's exactly what would have shown the
+  2026-07-18 crash-loop (canary.service restarting every ~30s) on the very
+  first call instead of ad-hoc `journalctl` scraping over SSH.
+  `uptime_seconds` computed from `/proc/uptime` vs. systemd's
+  `ActiveEnterTimestampMonotonic` — sidesteps timezone parsing entirely.
+  `available: false` when `systemctl` isn't on PATH (dev machine), matching
+  `tail_daemon_log`'s fallback pattern. 7 tests in
+  `tests/test_mcp_service_health.py`. Documented in `docs/mcp-server.md`.
+- [x] **2.3 — Watchdog log tail (doc-only).** Confirmed `tail_daemon_log`
+  already accepts `unit`, so `tail_daemon_log(unit="ups-shutdown")` works
+  today with no code change. Documented in `docs/mcp-server.md` alongside
+  the new `get_service_health` entry.
+- [x] **2.4 — `get_status` power block (optional) — SKIPPED, superseded.**
+  This task predates Phase 1's `PowerPanel` decision. Folding UPS SoC into
+  `SystemPanel.tsx`'s existing power row would either muddy `PowerStatus`'s
+  "Pi throttle flags" semantics or duplicate `GET /control/power`'s data
+  through a second path for no real benefit — the dedicated Power/UPS panel
+  built in 1.7 already shows richer live watchdog state than a single status
+  row could. Marked optional in the original plan; judged not worth the
+  duplication now that 1.7 exists.
 
 ---
 

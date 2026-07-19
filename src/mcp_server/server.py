@@ -55,6 +55,9 @@ from src.mcp_server.tools import (
     search as search_tool,
 )
 from src.mcp_server.tools import (
+    service_health as service_health_tool,
+)
+from src.mcp_server.tools import (
     sessions as sessions_tool,
 )
 from src.mcp_server.tools import (
@@ -334,6 +337,12 @@ def _register_read_tools(
             unit=unit or cfg.daemon_unit,
             fallback_path=cfg.log_fallback_path,
         )
+
+    @mcp.tool()
+    def get_service_health(units: list[str] | None = None) -> dict[str, Any]:
+        """systemctl health (active/restart-count/uptime) for canary, canary-mcp,
+        ups-shutdown — the crash-loop tell without SSH."""
+        return service_health_tool.get_service_health(units)
 
     @mcp.tool()
     def search_anomaly_log(

@@ -28,11 +28,15 @@ Read tools:
 | `get_dids` | `GET /dids` |
 | `get_obd_coverage` | `GET /obd/coverage` |
 | `list_sessions` / `get_session` | `GET /control/sessions[/{id}]` |
+| `get_session_classification` | `GET /control/sessions/{id}/classification` — mode/event/disposition sidecar for one session |
+| `get_corpus_mode_summary` | `GET /control/classifications/summary` — per-mode seconds + event counts across the corpus |
+| `list_events_by_kind` | `GET /control/classifications/events` — sessions containing a given derived event kind (e.g. `cold_start`) |
 | `get_dataset_health` | `GET /control/datasets/health` |
 | `get_training_runs` | `GET /control/training-runs` |
 | `list_jobs` / `get_job` / `get_job_logs` | `GET /control/jobs[...]` |
 | `get_tuning` / `get_feedback` | `GET /control/{tuning,feedback}` |
 | `tail_daemon_log` | `journalctl --unit canary -o json` (fallback file when no systemd) |
+| `get_service_health` | `systemctl show {canary,canary-mcp,ups-shutdown}` — is-active/sub-state/restart-count/uptime, no SSH needed. `restart_count` climbing across polls is the crash-loop tell (this is what would have caught the 2026-07-18 UPS watchdog crash-loop instantly). |
 | `search_anomaly_log` | structured search over anomaly day-files + MCP audit log (kind=anomalies\|audit) |
 | `signal_lookup` | in-process FSM-name fuzzy match (requires `CANARY_SIGNALS_PATH`) |
 | `query_telemetry` | DuckDB over the Parquet ring buffer (requires `CANARY_STORAGE_PATH`) |
@@ -45,6 +49,7 @@ Write tools (audit-logged with `actor="mcp"` via
 | `start_capture` / `tag_current_capture` / `stop_capture` | `POST /control/captures[...]` |
 | `record_feedback` | `POST /control/feedback` |
 | `set_session_metadata` / `pin_session` / `unpin_session` | `POST /control/sessions/{id}[...]` |
+| `classify_session` | `POST /control/sessions/{id}/classification` — (re)run the session classifier and persist the sidecar |
 | `start_job` / `cancel_job` | `POST /control/jobs[...]` |
 | `set_tuning` / `estimate_tuning` / `revert_tuning` | `POST /control/tuning[...]` |
 | `set_ups_keepalive` | `POST /control/power/keepalive` — set (minutes>0) or cancel (minutes=0) the UPS watchdog keep-alive hold, for a bench transition longer than the watchdog's grace window |
