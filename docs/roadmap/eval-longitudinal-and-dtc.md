@@ -209,10 +209,15 @@ harness (`src/models/false_positive_benchmark.py`), bake-off runner
   latest prior `benchmark-*.json`, skips cleanly with no calibration
   holdouts, and fails the retrain run on regression while still
   writing the ledger record with the report path either way.
-- [ ] **2.7 — Tests.** Model on `tests/test_synthetic_fault_eval.py`
+- [x] **2.7 — Tests.** Model on `tests/test_synthetic_fault_eval.py`
   (`_two_mode_resampled` builder :49): small seeded corpus, assert a
   gross injected fault is detected and reported latency is finite;
-  assert report JSON round-trips.
+  assert report JSON round-trips. — already satisfied by
+  `test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low`
+  (Phase 7.5): uses `_two_mode_resampled`, asserts nonzero detection
+  rate for every fault kind × both detectors, finite latency
+  bookkeeping, and `json.loads(json.dumps(report))` round-trip. No new
+  code needed.
 
 ---
 
