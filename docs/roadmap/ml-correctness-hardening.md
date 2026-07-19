@@ -54,19 +54,25 @@ warmup/idle segmentation, silently misrouting every subsequent row's
 operating mode. Separately, the live path scores stale rows training
 drops, and inference never consults vehicle state.
 
-- [ ] **1.1 — Bounded forward-fill.** Add a per-channel-class ffill
+- [x] **1.1 — Bounded forward-fill.** Add a per-channel-class ffill
   limit in `resample_wide`: fast channels limited to `max_gap_seconds`
   (existing config), slow channels to a new
   `preprocessing.slow_channel_max_gap_seconds` (default generous, e.g.
   120 s — slow sensors legitimately update slowly). Beyond the limit
   the cell stays NaN. Unit-test: a channel that stops mid-session goes
   NaN after the limit, and `__mean`/`__std` windows shrink accordingly.
-- [ ] **1.2 — Gap flags for slow channels.** Stop excluding slow
+  — landed: `ResampleConfig.slow_channel_max_gap_seconds` (default
+  120s) + bounded ffill for every value column in `resampler.py`.
+- [x] **1.2 — Gap flags for slow channels.** Stop excluding slow
   channels from gap flagging (`resampler.py:96`, `_fast_channels` at
   `:121-124`); give them their own `max_gap` (same knob as 1.1) so a
   stuck coolant sensor is visible to `_drop_fully_stale_rows` and to
   the GRU-D mask. Verify the mask semantics flow through
-  `sequence_dataset._frame_mask_delta` unchanged.
+  `sequence_dataset._frame_mask_delta` unchanged. — landed: every
+  value column now gets a `__gap` column; `_drop_fully_stale_rows` and
+  `_frame_mask_delta` both already scanned generically for `__gap`
+  columns, so no code change was needed in either — verified via
+  tests.
 - [ ] **1.3 — Segmentation guard on stale coolant.** In the segmenter
   path, treat a gap-flagged coolant value as absent for mode rules
   (don't classify warmup/idle off a frozen reading) — rows fall to
