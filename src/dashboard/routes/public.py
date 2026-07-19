@@ -96,14 +96,18 @@ def register_public_routes(
         return read_behavior_models(behavior_models_path)
 
     @app.get("/models/behavior/live")
-    def get_behavior_live() -> dict[str, Any]:
+    def get_behavior_live(
+        series: bool = Query(default=True),
+    ) -> dict[str, Any]:
         # Live "you are here" overlay for Models▸Behavior: per-model
         # expected/actual/deviation/severity + a short server-side trail,
         # fed by the daemon's inference loop. Empty (not an error) when no
         # daemon is wired — the static surfaces still render standalone.
+        # series=false drops the rolling trail (the bulk of the payload) for
+        # callers that only need the latest snapshot.
         if behavior_live is None:
             return {"observed": 0, "timestamp": None, "operating_mode": None, "models": {}}
-        return behavior_live.snapshot()
+        return behavior_live.snapshot(include_series=series)
 
     @app.get("/bindings")
     def get_bindings() -> dict[str, Any]:

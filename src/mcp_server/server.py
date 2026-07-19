@@ -212,9 +212,9 @@ def _register_read_tools(
         )
 
     @mcp.tool()
-    async def get_behavior_live() -> dict[str, Any]:
-        """Live per-model expected/actual/deviation/severity + rolling trail."""
-        return await behavior_tool.get_behavior_live(client)
+    async def get_behavior_live(include_series: bool = False) -> dict[str, Any]:
+        """Live per-model expected/actual/deviation/severity; rolling trail opt-in."""
+        return await behavior_tool.get_behavior_live(client, include_series=include_series)
 
     @mcp.tool()
     async def get_behavior_models() -> dict[str, Any]:

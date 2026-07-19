@@ -7,16 +7,21 @@ from typing import Any
 from src.mcp_server.client import DaemonClient
 
 
-async def get_behavior_live(client: DaemonClient) -> dict[str, Any]:
+async def get_behavior_live(
+    client: DaemonClient, *, include_series: bool = False
+) -> dict[str, Any]:
     """Live ``you-are-here`` overlay for the behavior surfaces.
 
     Returns per-model ``expected`` / ``actual`` / ``deviation`` / ``severity``
-    for the most recent tick, plus a short rolling trail (~4 min at 1 Hz).
-    Empty (not an error) when the daemon hasn't wired a live-inference task.
-    Equivalent to ``GET /models/behavior/live`` — see
+    for the most recent tick. ``include_series=True`` also returns each
+    model's rolling trail (~4 min at 1 Hz) — the default is ``False`` because
+    with enough registered surfaces the full trail can exceed the MCP
+    tool-result size cap; pass ``True`` only when you actually need the
+    trajectory (e.g. plotting a Δ sparkline), not for a one-shot status check.
+    Equivalent to ``GET /models/behavior/live?series=...`` — see
     :mod:`src.dashboard.behavior_live` for the schema.
     """
-    return await client.get_json("/models/behavior/live")
+    return await client.get_json("/models/behavior/live", params={"series": include_series})
 
 
 async def get_behavior_models(client: DaemonClient) -> dict[str, Any]:

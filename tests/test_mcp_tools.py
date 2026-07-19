@@ -115,6 +115,34 @@ async def test_get_behavior_live_passthrough() -> None:
     await client.aclose()
 
 
+async def test_get_behavior_live_defaults_series_false() -> None:
+    """Default omits the rolling trail — this is what overflowed the MCP
+    tool-result size cap with enough registered surfaces."""
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> dict[str, Any]:
+        captured["url"] = str(request.url)
+        return {"observed": 0, "operating_mode": None, "models": {}}
+
+    client = await _fake_daemon({"GET /models/behavior/live": handler})
+    await behavior_tool.get_behavior_live(client)
+    await client.aclose()
+    assert "series=false" in captured["url"]
+
+
+async def test_get_behavior_live_include_series_true_forwards_it() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> dict[str, Any]:
+        captured["url"] = str(request.url)
+        return {"observed": 0, "operating_mode": None, "models": {}}
+
+    client = await _fake_daemon({"GET /models/behavior/live": handler})
+    await behavior_tool.get_behavior_live(client, include_series=True)
+    await client.aclose()
+    assert "series=true" in captured["url"]
+
+
 async def test_get_power_status_passthrough() -> None:
     """``get_power_status`` is a pure read — forwards GET /control/power."""
     snapshot = {"power": {"watchdog_running": True, "soc": 88.0, "on_battery": False}}

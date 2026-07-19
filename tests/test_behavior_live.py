@@ -112,6 +112,26 @@ def test_default_trail_maxlen_is_used() -> None:
     assert len(state.snapshot()["models"]["m"]["series"]) == TRAIL_MAXLEN
 
 
+def test_snapshot_include_series_false_omits_trail_but_keeps_latest() -> None:
+    state = BehaviorLiveState()
+    state.observe("t0", "idle", [_obs("warmup", 1.0, "ok")])
+    state.observe("t1", "cruise", [_obs("warmup", 6.0, "warning")])
+
+    snap = state.snapshot(include_series=False)
+    model = snap["models"]["warmup"]
+    assert "series" not in model
+    assert model["deviation"] == 6.0
+    assert model["severity"] == "warning"
+    assert snap["observed"] == 2  # top-level fields unaffected
+
+
+def test_snapshot_include_series_true_is_the_default() -> None:
+    state = BehaviorLiveState()
+    state.observe("t0", "idle", [_obs("warmup", 1.0, "ok")])
+    assert "series" in state.snapshot()["models"]["warmup"]
+    assert "series" in state.snapshot(include_series=True)["models"]["warmup"]
+
+
 # ---------------------------------------------------------------------------
 # daemon._observe_behavior
 # ---------------------------------------------------------------------------
@@ -219,3 +239,15 @@ def test_endpoint_serves_snapshot(config: CanaryConfig, tmp_path: Path) -> None:
     body = r.json()
     assert body["operating_mode"] == "idle"
     assert body["models"]["warmup"]["deviation"] == 2.0
+    assert "series" in body["models"]["warmup"]  # default: series included
+
+
+def test_endpoint_series_false_omits_trail(config: CanaryConfig, tmp_path: Path) -> None:
+    state = BehaviorLiveState()
+    state.observe("t0", "idle", [_obs("warmup", 2.0, "ok")])
+    app = create_app(config, anomalies_dir=tmp_path / "anom", behavior_live=state)
+    r = TestClient(app).get("/models/behavior/live", params={"series": "false"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["models"]["warmup"]["deviation"] == 2.0
+    assert "series" not in body["models"]["warmup"]

@@ -134,13 +134,16 @@ keep-alive).
 
 **Goal.** Kill the recurring per-session friction. Small, high-ROI.
 
-- [ ] **2.1 — `get_behavior_live` payload control.** Add `include_series: bool`
-  to `BehaviorLiveState.snapshot()` (`src/dashboard/behavior_live.py:101`) —
-  empties the per-model `series` when false. Add `?series=` query param on
-  `GET /models/behavior/live` (`src/dashboard/routes/public.py:99`). MCP tool
-  `get_behavior_live` gains `include_series: bool = False` (default off — this
-  is what overflowed the 275 KB token limit) threaded via `client.get_json(...,
-  params=…)`. FE keeps `series=true` (default) for the rolling trail.
+- [x] **2.1 — `get_behavior_live` payload control.** `include_series: bool =
+  True` added to `BehaviorLiveState.snapshot()` — omits the per-model
+  `series` key when false (rather than an empty list, so the size savings are
+  real, not just zeroed). `?series=` query param on `GET
+  /models/behavior/live` (default `true`, unchanged FE behavior — the FE
+  caller passes no param). MCP tool `get_behavior_live(include_series: bool =
+  False)` forwards `series=` to the daemon; `server.py`'s closure exposes the
+  same param. Tests: 2 state-level + 2 endpoint-level in
+  `test_behavior_live.py`, 2 passthrough/query-forwarding in
+  `test_mcp_tools.py`.
 - [ ] **2.2 — `get_service_health` read tool.** New read tool returning
   `is-active` + uptime + recent-error count for `canary`, `canary-mcp`,
   `ups-shutdown` (via `systemctl is-active`/`show` — no sudo needed — and a

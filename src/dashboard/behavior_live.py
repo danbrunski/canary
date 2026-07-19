@@ -98,11 +98,21 @@ class BehaviorLiveState:
                 }
             )
 
-    def snapshot(self) -> dict[str, Any]:
-        """JSON-safe live block for ``GET /models/behavior/live``."""
+    def snapshot(self, *, include_series: bool = True) -> dict[str, Any]:
+        """JSON-safe live block for ``GET /models/behavior/live``.
+
+        ``include_series=False`` drops the rolling trail (the bulk of the
+        payload — up to ``TRAIL_MAXLEN`` points per model) and returns just
+        the latest actual/expected/deviation/severity per model. The FE's
+        Curve trail needs the series; a one-shot status check (dashboard
+        summary tiles, MCP tool callers) doesn't and would otherwise pull the
+        whole trail on every poll for no reason — this is what made
+        ``get_behavior_live`` overflow a 275 KB MCP tool-result cap in
+        practice with enough models registered.
+        """
         models: dict[str, Any] = {}
         for name, obs in self._latest.items():
-            models[name] = {
+            entry: dict[str, Any] = {
                 "kind": obs.kind,
                 "x": obs.x,
                 "y": obs.y,
@@ -111,8 +121,10 @@ class BehaviorLiveState:
                 "deviation": obs.deviation,
                 "severity": obs.severity,
                 "mode_match": obs.mode_match,
-                "series": list(self._trail.get(name, ())),
             }
+            if include_series:
+                entry["series"] = list(self._trail.get(name, ()))
+            models[name] = entry
         return {
             "observed": self._observed,
             "timestamp": self._timestamp,
