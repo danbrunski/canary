@@ -13,3 +13,4 @@ ml-correctness-hardening.md 8.4 — done — __roc divides by actual elapsed tim
 ml-correctness-hardening.md 8.3 — done — k-sweep branches to a quantile sweep for threshold_quantile-calibrated models (commit d2ca42e)
 ml-correctness-hardening.md 8.1 — done — AnomalyInjector.dropout() reproduces resample_wide's coupled hold-then-NaN+gap signature instead of raw NaN (commit 6123d45)
 ml-correctness-hardening.md 8.2 — done — post-window detection grace: late hits distinguished from misses, latency still from window.start (commit b5bd740)
+eval-longitudinal-and-dtc.md 2.4 — done — time-to-detect latency already landed incidentally in commit 825ae0a; checkbox caught up
