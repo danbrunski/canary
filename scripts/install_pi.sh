@@ -96,6 +96,13 @@ install -m 0644 "${CANARY_HOME}/systemd/canary-modules.conf" \
   /etc/modules-load.d/canary.conf
 modprobe i2c-dev 2>/dev/null || true
 
+# /run/canary — shared runtime dir between the canary daemon and the root
+# ups-shutdown watchdog (UPS keep-alive request + status heartbeat). tmpfs
+# (/run), so systemd-tmpfiles must recreate it every boot.
+install -m 0644 "${CANARY_HOME}/systemd/tmpfiles-canary.conf" \
+  /etc/tmpfiles.d/canary.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/canary.conf
+
 # Let the canary user restart the services without a password, so model/code
 # deploys (and the MCP control plane) can roll the daemon without an interactive
 # sudo. Scoped to exactly the restart/try-restart verbs for these two units —
