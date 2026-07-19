@@ -183,14 +183,20 @@ harness (`src/models/false_positive_benchmark.py`), bake-off runner
   `_DetectorMetrics`, measured via a fresh
   `PersistenceGate(config.alerts.min_consecutive_ticks)` per injection
   run (commit `825ae0a`).
-- [ ] **2.5 — Corpus-wide CLI.** `scripts/detector_benchmark.py`: grid of
+- [x] **2.5 — Corpus-wide CLI.** `scripts/detector_benchmark.py`: grid of
   (held-out clean sessions × fault kinds × target channels), loading
   sessions via `discover_sessions`/`read_session`, injecting with
   `AnomalyInjector`, evaluating per 2.3/2.4, plus the clean-pass FP
   block. Output: per-detector × per-fault-class table of recall /
   precision / median time-to-detect / alerts-per-hour-clean, printed +
   written as JSON to `data/analyses/benchmark-<ts>.json`. Deterministic
-  seeds.
+  seeds. — landed: SHA-256-seeded grid over real sessions, precision
+  estimated from clean-pass alert rate projected over exposure time
+  (documented as an estimate — no labeled negatives exist), optional
+  sequence-detector coverage via `sequence_registry`; also fixed a
+  latent `AnomalyInjector.drift()` dtype bug (float32 columns raised
+  `LossySetitemError` on real resampled frames, masked by float64-only
+  test fixtures).
 - [ ] **2.6 — Regression compare.** `--baseline <report.json>` flag:
   diff against a previous run, flag any metric that regressed beyond a
   tolerance. This is the pre-deploy gate — run it in the retrain flow

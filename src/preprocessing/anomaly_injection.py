@@ -171,9 +171,18 @@ class AnomalyInjector:
         else:
             elapsed = (timestamps - s).dt.total_seconds().to_numpy()
             fractions = np.clip(elapsed / span_seconds, 0.0, 1.0)
-        self._df.loc[mask, channel] = (
-            self._df.loc[mask, channel].to_numpy() + fractions * total_delta
-        )
+        # `fractions` is a float64 ndarray, so `existing + fractions * total_delta`
+        # upcasts to float64 even when `channel` is float32 (real resampled
+        # frames narrow numeric channels to float32 for memory — see
+        # `loader.to_wide`). Assigning a float64 array back into a float32
+        # column that shares a consolidated block with other same-dtype
+        # columns (the normal shape of a real wide frame, not the small
+        # single-column fixtures unit tests use) raises pandas'
+        # `LossySetitemError` — cast back to the column's own dtype first so
+        # this works on real recorded sessions, not just float64 test frames.
+        existing_dtype = self._df[channel].dtype
+        drifted = self._df.loc[mask, channel].to_numpy() + fractions * total_delta
+        self._df.loc[mask, channel] = drifted.astype(existing_dtype, copy=False)
         self._windows.append(
             InjectionWindow(
                 channel=channel,
