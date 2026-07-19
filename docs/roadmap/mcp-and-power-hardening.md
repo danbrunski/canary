@@ -203,9 +203,20 @@ the surface evaluator is fully separable — `featurize_wide_frame` +
   `tests/test_session_deviations.py`, including an injected +5 offset
   recovered exactly and localized to the one visited cell (the task 3.6
   synthetic-offset test, done alongside 3.1/3.2 rather than deferred).
-- [ ] **3.3 — CLI.** `scripts/analyze_session.py --session <id> [--mode <m>]
-  [--profile <slug>]` printing a per-surface deviation table + flagged surfaces.
-  Reuse `resolve_profile_for_tooling` for path scoping.
+- [x] **3.3 — CLI.** `scripts/analyze_session.py --session <id> [--mode <m>]
+  [--profile <slug>] [--behavior-models <path>]`. Uses
+  `resolve_profile_for_tooling` + `scope_config` for path scoping (offline,
+  no VIN probe) and `src.control.sessions.resolve_session` to look up the
+  session id safely. Prints a per-surface table plus a "flagged" section
+  (nonzero warning/critical fraction, with the 2D cell breakdown) and any
+  `gated_on_missing_mode` entries. `--mode` filters displayed surfaces by
+  `operating_mode` (added that field to `SurfaceDeviationSummary`). Fixed a
+  cosmetic bug found while eyeballing real output: numpy>=2.0 reprs
+  `float64` as `np.float64(0.0)`, which leaked into `cells[].x_bin`/`y_bin` —
+  now cast to plain Python `float`. 3 end-to-end tests in
+  `tests/test_analyze_session_script.py` (table output, `--mode` filtering,
+  unknown-session error path) plus a manual real-fixture run to confirm the
+  printed table reads cleanly.
 - [ ] **3.4 — MCP tool.** `get_behavior_deviations(session, mode?)` running the
   analyzer locally in the MCP process (pandas/numpy only — no torch), like
   `query_telemetry`. Register in `server.py`; document in `docs/mcp-server.md`.

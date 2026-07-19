@@ -55,6 +55,10 @@ class SurfaceDeviationSummary:
 
     name: str
     kind: str  # "surface_1d" | "surface_2d"
+    #: The model's gate, or None if it evaluates in every mode. Lets callers
+    #: (the CLI's --mode, the MCP tool) filter surfaces without re-running
+    #: the analysis.
+    operating_mode: str | None
     #: Rows where the model's gated ``operating_mode`` (if any) was in effect.
     n_observed: int
     #: Rows where the model actually spoke (in-domain, non-empty cell).
@@ -72,6 +76,7 @@ class SurfaceDeviationSummary:
         return {
             "name": self.name,
             "kind": self.kind,
+            "operating_mode": self.operating_mode,
             "n_observed": self.n_observed,
             "n_in_domain": self.n_in_domain,
             "mean_actual": self.mean_actual,
@@ -150,8 +155,12 @@ def _bin_2d_deviations(
     for (i, j), devs in sorted(buckets.items()):
         cells.append(
             {
-                "x_bin": [x_edges[i], x_edges[i + 1]],
-                "y_bin": [y_edges[j], y_edges[j + 1]],
+                # float(): plain Python floats, not numpy scalars — numpy>=2.0
+                # reprs float64 as "np.float64(0.0)", which leaked into both
+                # the CLI table and (harmlessly, since float64 IS-A float, but
+                # still ugly) JSON output.
+                "x_bin": [float(x_edges[i]), float(x_edges[i + 1])],
+                "y_bin": [float(y_edges[j]), float(y_edges[j + 1])],
                 "n": len(devs),
                 "mean_deviation": _mean(devs),
             }
@@ -212,6 +221,7 @@ def _summarize_surface(
     return SurfaceDeviationSummary(
         name=model.name,
         kind=model.kind,
+        operating_mode=model.operating_mode,
         n_observed=n_observed,
         n_in_domain=len(expecteds),
         mean_actual=_mean(actuals),
