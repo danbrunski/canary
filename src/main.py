@@ -18,6 +18,7 @@ from src.collection.can_obd_collector import (
     resolve_did_session_spec,
 )
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
+from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
 from src.collection.obd_collector import ObdSpec, collect_obd
 from src.collection.pids import REQUIRED_PIDS
 from src.collection.queueing import QueueDepthMonitor
@@ -181,10 +182,33 @@ def _gps_collectors(
     config: CanaryConfig,
     reconnect_policy: ReconnectPolicy,
 ) -> list[CollectorStarter]:
-    """A GPS collector starter, or empty when no GPS is configured/enabled."""
+    """A GPS collector starter, or empty when no GPS is configured/enabled.
+
+    Two backends emitting the same ``gps:*`` channels: ``serial`` reads NMEA
+    from the receiver, ``gpsd`` reads gpsd's socket. They are mutually
+    exclusive by construction — gpsd holds the serial port open, so only one
+    process can have the receiver.
+    """
     gps = config.hardware.gps
     if gps is None or not gps.enabled:
         return []
+
+    if gps.source == "gpsd":
+        gpsd_spec = GpsdSpec(
+            host=gps.gpsd_host,
+            port=gps.gpsd_port,
+            read_timeout_seconds=gps.read_timeout_seconds,
+        )
+
+        async def gpsd_collector(
+            queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event
+        ) -> None:
+            await collect_gpsd_from_config(
+                gpsd_spec, queue, stop, reconnect_policy=reconnect_policy
+            )
+
+        return [gpsd_collector]
+
     spec = GpsSpec(
         device=gps.device,
         baudrate=gps.baudrate,
