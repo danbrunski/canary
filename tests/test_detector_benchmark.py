@@ -1,4 +1,4 @@
-"""Tests for the corpus-wide detector benchmark CLI (Phase 2B, Task 2.5)."""
+"""Tests for the corpus-wide detector benchmark CLI (Phase 2B, Tasks 2.5/2.6)."""
 
 from __future__ import annotations
 
@@ -15,12 +15,15 @@ pytest.importorskip("sklearn")
 
 from scripts.detector_benchmark import (  # noqa: E402
     DEFAULT_TARGET_CHANNELS,
+    DEFAULT_TOLERANCE,
     GridCell,
     aggregate_cells,
     build_report,
     cell_seed,
+    diff_reports,
     load_resampled_session,
     main,
+    print_regression_diff,
     print_report,
     run_grid,
     select_target_channels,
@@ -298,6 +301,221 @@ def test_build_report_round_trips_through_json() -> None:
     # print_report must not crash on either a populated or an empty report.
     print_report(report)
     print_report(build_report([], seed=3, n_injections=2, generated_at="20260719-120000"))
+
+
+# ---------------------------------------------------------------------------
+# diff_reports / print_regression_diff — regression compare (Task 2.6)
+# ---------------------------------------------------------------------------
+
+
+def _table_row(
+    detector: str = "isolation_forest",
+    fault_kind: str = "spike",
+    *,
+    recall: float = 0.8,
+    precision: float | None = 0.7,
+    median_time_to_detect_seconds: float | None = 3.0,
+    alerts_per_hour_clean: float = 0.5,
+) -> dict:
+    return {
+        "detector": detector,
+        "fault_kind": fault_kind,
+        "runs": 10,
+        "detected": int(round(recall * 10)),
+        "recall": recall,
+        "precision": precision,
+        "median_time_to_detect_seconds": median_time_to_detect_seconds,
+        "alerts_per_hour_clean": alerts_per_hour_clean,
+    }
+
+
+def _report_with_rows(*rows: dict) -> dict:
+    return {"sessions": ["s1"], "channels": ["obd:RPM"], "fault_kinds": [], "table": list(rows)}
+
+
+def test_diff_reports_flags_recall_drop_beyond_tolerance() -> None:
+    baseline = _report_with_rows(_table_row(recall=0.8))
+    current = _report_with_rows(_table_row(recall=0.5))  # well beyond 15% tolerance
+
+    diff = diff_reports(baseline, current, tolerance=DEFAULT_TOLERANCE)
+
+    assert diff["regressed"] is True
+    [cell] = diff["cells"]
+    assert cell["status"] == "compared"
+    assert cell["metrics"]["recall"]["regressed"] is True
+    assert cell["metrics"]["recall"]["baseline"] == 0.8
+    assert cell["metrics"]["recall"]["current"] == 0.5
+    # Metrics that didn't move aren't flagged.
+    assert cell["metrics"]["precision"]["regressed"] is False
+
+
+def test_diff_reports_flags_latency_and_alert_rate_increases() -> None:
+    baseline = _report_with_rows(
+        _table_row(median_time_to_detect_seconds=2.0, alerts_per_hour_clean=0.1)
+    )
+    current = _report_with_rows(
+        _table_row(median_time_to_detect_seconds=10.0, alerts_per_hour_clean=5.0)
+    )
+
+    diff = diff_reports(baseline, current)
+
+    [cell] = diff["cells"]
+    assert cell["metrics"]["median_time_to_detect_seconds"]["regressed"] is True
+    assert cell["metrics"]["alerts_per_hour_clean"]["regressed"] is True
+    assert diff["regressed"] is True
+
+
+def test_diff_reports_within_tolerance_is_not_flagged() -> None:
+    # A small, within-tolerance wobble (grid noise) must not be flagged.
+    baseline = _report_with_rows(_table_row(recall=0.80, alerts_per_hour_clean=0.50))
+    current = _report_with_rows(_table_row(recall=0.75, alerts_per_hour_clean=0.55))
+
+    diff = diff_reports(baseline, current, tolerance=DEFAULT_TOLERANCE)
+
+    assert diff["regressed"] is False
+    [cell] = diff["cells"]
+    assert all(not m["regressed"] for m in cell["metrics"].values())
+
+
+def test_diff_reports_none_precision_is_skipped_not_flagged() -> None:
+    baseline = _report_with_rows(_table_row(precision=None))
+    current = _report_with_rows(_table_row(precision=None))
+
+    diff = diff_reports(baseline, current)
+
+    [cell] = diff["cells"]
+    assert cell["metrics"]["precision"]["regressed"] is False
+
+
+def test_diff_reports_marks_added_and_removed_cells_without_flagging() -> None:
+    baseline = _report_with_rows(_table_row(detector="isolation_forest", fault_kind="spike"))
+    current = _report_with_rows(_table_row(detector="isolation_forest", fault_kind="dropout"))
+
+    diff = diff_reports(baseline, current)
+
+    statuses = {(c["detector"], c["fault_kind"]): c["status"] for c in diff["cells"]}
+    assert statuses[("isolation_forest", "spike")] == "removed"
+    assert statuses[("isolation_forest", "dropout")] == "added"
+    assert diff["regressed"] is False
+
+
+def test_print_regression_diff_does_not_crash(capsys: pytest.CaptureFixture[str]) -> None:
+    baseline = _report_with_rows(_table_row(recall=0.9))
+    current = _report_with_rows(_table_row(recall=0.1))
+    diff = diff_reports(baseline, current)
+    print_regression_diff(diff)
+    out = capsys.readouterr().out
+    assert "REGRESSED" in out
+    assert "recall" in out
+
+
+def test_main_baseline_flag_exits_nonzero_on_regression(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from src.models.isolation_forest import default_manifest_path
+    from src.preprocessing.feature_pipeline import featurize_wide_frame
+
+    config = _config()
+    session_a = _write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
+    long = load_resampled_session(session_a, config)
+    features = featurize_wide_frame(long, config).features
+    trained = fit_isolation_forest(
+        features,
+        _IFConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED"],
+        fitted_at="2026-05-12T00:00:00Z",
+    )
+    artifact_path = tmp_path / "models" / "if" / "model.joblib"
+    trained.save(artifact_path, default_manifest_path(artifact_path))
+
+    common_args = [
+        str(session_a),
+        "--config",
+        str(EXAMPLE_YAML),
+        "--if-model",
+        str(artifact_path),
+        "--no-sequence",
+        "--channels",
+        "obd:RPM",
+        "obd:SPEED",
+        "--fault-kinds",
+        "spike",
+        "--n-injections",
+        "2",
+        "--seed",
+        "5",
+    ]
+
+    # First run establishes the baseline report.
+    baseline_path = tmp_path / "out" / "baseline.json"
+    rc = main([*common_args, "--out", str(baseline_path), "--timestamp", "20260719-120000"])
+    assert rc == 0
+
+    # A hand-crafted, deliberately-regressed "baseline" (real detector output
+    # can't be forced to regress deterministically without a broken model) —
+    # exercises the CLI's --baseline wiring/exit-code contract end to end.
+    baseline_report = json.loads(baseline_path.read_text())
+    for row in baseline_report["table"]:
+        row["recall"] = 1.0
+    baseline_path.write_text(json.dumps(baseline_report))
+
+    out_path = tmp_path / "out" / "second.json"
+    rc = main(
+        [
+            *common_args,
+            "--out",
+            str(out_path),
+            "--timestamp",
+            "20260719-130000",
+            "--baseline",
+            str(baseline_path),
+        ]
+    )
+
+    assert rc == 3
+    out = capsys.readouterr().out
+    assert "REGRESSION COMPARE" in out
+    payload = json.loads(out_path.read_text())
+    assert payload["regressions"]["regressed"] is True
+
+
+def test_main_missing_baseline_file_reports_distinct_error_code(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from src.models.isolation_forest import default_manifest_path
+    from src.preprocessing.feature_pipeline import featurize_wide_frame
+
+    config = _config()
+    session_a = _write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
+    long = load_resampled_session(session_a, config)
+    features = featurize_wide_frame(long, config).features
+    trained = fit_isolation_forest(
+        features,
+        _IFConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED"],
+        fitted_at="2026-05-12T00:00:00Z",
+    )
+    artifact_path = tmp_path / "models" / "if" / "model.joblib"
+    trained.save(artifact_path, default_manifest_path(artifact_path))
+
+    rc = main(
+        [
+            str(session_a),
+            "--config",
+            str(EXAMPLE_YAML),
+            "--if-model",
+            str(artifact_path),
+            "--no-sequence",
+            "--out",
+            str(tmp_path / "out.json"),
+            "--baseline",
+            str(tmp_path / "nope.json"),
+        ]
+    )
+
+    # A missing baseline (2) must stay distinct from a missing IF artifact (1)
+    # and a detected regression (3) — three different failure modes.
+    assert rc == 2
 
 
 # ---------------------------------------------------------------------------

@@ -197,11 +197,18 @@ harness (`src/models/false_positive_benchmark.py`), bake-off runner
   latent `AnomalyInjector.drift()` dtype bug (float32 columns raised
   `LossySetitemError` on real resampled frames, masked by float64-only
   test fixtures).
-- [ ] **2.6 — Regression compare.** `--baseline <report.json>` flag:
+- [x] **2.6 — Regression compare.** `--baseline <report.json>` flag:
   diff against a previous run, flag any metric that regressed beyond a
   tolerance. This is the pre-deploy gate — run it in the retrain flow
   (`scripts/retrain.py`) and record the report path in the training
-  ledger (`src/models/training_ledger.py`).
+  ledger (`src/models/training_ledger.py`). — landed: `diff_reports()`
+  compares per (detector, fault_kind) cell against a 15% tolerance
+  (recall/precision down = bad, latency/alert-rate up = bad), exit
+  codes 1/2/3 distinguish missing-artifact/unreadable-baseline/
+  regression; `retrain.py`'s `_run_benchmark_gate` auto-discovers the
+  latest prior `benchmark-*.json`, skips cleanly with no calibration
+  holdouts, and fails the retrain run on regression while still
+  writing the ledger record with the report path either way.
 - [ ] **2.7 — Tests.** Model on `tests/test_synthetic_fault_eval.py`
   (`_two_mode_resampled` builder :49): small seeded corpus, assert a
   gross injected fault is detected and reported latency is finite;

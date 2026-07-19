@@ -31,15 +31,18 @@ log + continue.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 # Reuse the trainer modules as importable libraries — same pattern
 # refit_behavior_models.py uses.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import detector_benchmark  # noqa: E402
 import train_anomaly_model as if_trainer  # noqa: E402
 import train_lstm as lstm_trainer  # noqa: E402
 import train_tcn as tcn_trainer  # noqa: E402
@@ -48,6 +51,7 @@ from refit_behavior_models import _filter_sessions_by_age  # noqa: E402
 from src.alerts.feedback import DEFAULT_FEEDBACK_PATH, FeedbackStore  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
 from src.log import configure_logging  # noqa: E402
+from src.models.isolation_forest import load_isolation_forest_model  # noqa: E402
 from src.models.manifest import ManifestValidationError  # noqa: E402
 from src.models.retraining_policy import (  # noqa: E402
     RetrainingFeedbackReport,
@@ -324,6 +328,33 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Correlate ledger records with this control-plane job id.",
     )
     parser.add_argument(
+        "--skip-benchmark",
+        action="store_true",
+        help="Skip the post-retrain detector-benchmark regression gate (Task 2.6).",
+    )
+    parser.add_argument(
+        "--analyses-dir",
+        type=Path,
+        default=Path("data/analyses"),
+        help="Directory for detector_benchmark.py reports (Task 2.6 regression gate). "
+        "Also where the most recent prior report is discovered as the --baseline "
+        "when --benchmark-baseline isn't given.",
+    )
+    parser.add_argument(
+        "--benchmark-baseline",
+        type=Path,
+        default=None,
+        help="Baseline benchmark report JSON for the regression gate (default: the "
+        "most recent data/analyses/benchmark-*.json, if any).",
+    )
+    parser.add_argument(
+        "--benchmark-tolerance",
+        type=float,
+        default=detector_benchmark.DEFAULT_TOLERANCE,
+        help="Relative regression tolerance for the post-retrain benchmark gate "
+        f"(default {detector_benchmark.DEFAULT_TOLERANCE:.0%}).",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -485,6 +516,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
     )
 
+    # out_dirs of trainers that produced a fresh artifact this run — ledger
+    # ingestion is deferred until after the benchmark gate (below) so each
+    # record can link the report the gate produced against that artifact.
+    ledger_pending: list[Path] = []
+
     if not args.skip_if:
         try:
             if_trainer.train(
@@ -495,13 +531,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 **feature_kwargs,
             )
             results["isolation_forest"] = "ok"
-            _ingest_ledger(
-                ledger,
-                args.if_out,
-                "succeeded",
-                args.job_id,
-                feedback_report=feedback_report,
-            )
+            ledger_pending.append(args.if_out)
         except Exception as exc:  # noqa: BLE001 — surface + continue to the next trainer
             log.exception("isolation forest trainer failed", extra={"error": str(exc)})
             results["isolation_forest"] = f"failed: {exc}"
@@ -518,20 +548,37 @@ def main(argv: Sequence[str] | None = None) -> int:
                 **feature_kwargs,
             )
             results[seq_model_type] = "ok"
-            _ingest_ledger(
-                ledger,
-                args.sequence_out,
-                "succeeded",
-                args.job_id,
-                feedback_report=feedback_report,
-            )
+            ledger_pending.append(args.sequence_out)
         except Exception as exc:  # noqa: BLE001
             log.exception(
                 "sequence trainer failed", extra={"error": str(exc), "model": seq_model_type}
             )
             results[seq_model_type] = f"failed: {exc}"
 
-    _print_report(sessions, results, args, feedback_report=feedback_report)
+    benchmark_report_path: Path | None = None
+    benchmark_diff: dict[str, Any] | None = None
+    if not args.skip_benchmark:
+        benchmark_report_path, benchmark_diff = _run_benchmark_gate(
+            config, calibration_sessions, args
+        )
+    for out_dir in ledger_pending:
+        _ingest_ledger(
+            ledger,
+            out_dir,
+            "succeeded",
+            args.job_id,
+            feedback_report=feedback_report,
+            detector_benchmark_report_path=benchmark_report_path,
+        )
+
+    _print_report(
+        sessions,
+        results,
+        args,
+        feedback_report=feedback_report,
+        benchmark_report_path=benchmark_report_path,
+        benchmark_diff=benchmark_diff,
+    )
     # Partial success is the documented contract (a broken LSTM must not block
     # the IF artifact, and vice versa — see the module docstring). Exit
     # non-zero ONLY when every requested trainer failed, so the caller
@@ -548,6 +595,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         # legitimate no-op, not a failure; sync-train.sh proceeds to refit.
         log.warning("no trainers ran (all skipped: %s)", ", ".join(skipped) or "none")
         return 0
+    if benchmark_diff is not None and benchmark_diff["regressed"]:
+        # The benchmark gate is the pre-deploy check (Task 2.6): a regression
+        # is a hard failure of this retrain run regardless of trainer
+        # partial-success, distinct from "a trainer errored" above — the
+        # artifacts trained fine, they're just worse than the baseline.
+        log.error(
+            "post-retrain benchmark regression detected vs baseline",
+            extra={"report": str(benchmark_report_path)},
+        )
+        return 1
     if failed:
         log.warning(
             "partial retrain — ok: %s; failed: %s%s",
@@ -565,6 +622,7 @@ def _ingest_ledger(
     job_id: str | None,
     *,
     feedback_report: RetrainingFeedbackReport | None = None,
+    detector_benchmark_report_path: Path | None = None,
 ) -> None:
     """Best-effort: record the trainer's manifest in the training ledger.
 
@@ -583,6 +641,7 @@ def _ingest_ledger(
             manifest_path,
             status="succeeded" if status == "succeeded" else "failed",
             job_id=job_id,
+            detector_benchmark_report_path=detector_benchmark_report_path,
         )
         if feedback_report is not None:
             record = record.model_copy(
@@ -597,6 +656,99 @@ def _ingest_ledger(
         log.info("recorded training run", extra={"run_id": record.run_id})
     except (ManifestValidationError, OSError) as exc:
         log.warning("ledger ingest skipped: %s", exc)
+
+
+def _latest_benchmark_report(analyses_dir: Path) -> Path | None:
+    """Most recent prior `detector_benchmark.py` report under `analyses_dir`.
+
+    Filenames sort lexicographically by timestamp (`benchmark-YYYYMMDD-HHMMSS.json`),
+    so a plain sorted glob picks the latest without parsing anything.
+    """
+    if not analyses_dir.is_dir():
+        return None
+    candidates = sorted(analyses_dir.glob("benchmark-*.json"))
+    return candidates[-1] if candidates else None
+
+
+def _run_benchmark_gate(
+    config: CanaryConfig,
+    calibration_sessions: Sequence[Path],
+    args: argparse.Namespace,
+) -> tuple[Path | None, dict[str, Any] | None]:
+    """Post-retrain regression gate (Task 2.6): benchmark the freshly-trained
+    artifacts on held-out sessions and diff against the most recent prior
+    report. Returns ``(report_path, diff)``, or ``(None, None)`` when the
+    gate didn't run (skipped, or nothing to compare it against).
+
+    Requires calibration holdouts: those are sessions excluded from training
+    specifically so they're honest out-of-sample eval data (see
+    `_pick_calibration_holdouts`); scoring the benchmark against training
+    sessions would just measure memorization. No holdouts (e.g.
+    `--no-calibration-holdout`, or too small a corpus) means no honest
+    benchmark, so the gate is skipped — logged, not a failure — rather than
+    silently testing on training data.
+
+    Never raises: like the trainers themselves, an unexpected failure here is
+    logged and treated as "gate didn't run", not a retrain-flow crash.
+    """
+    if not calibration_sessions:
+        log.warning(
+            "no held-out sessions for the post-retrain benchmark gate; skipping "
+            "(see --calibration-sessions/--no-calibration-holdout)"
+        )
+        return None, None
+
+    if_model_path = args.if_out / "model.joblib"
+    try:
+        trained_if = load_isolation_forest_model(if_model_path)
+    except FileNotFoundError:
+        log.warning("no isolation forest artifact at %s; skipping benchmark gate", if_model_path)
+        return None, None
+
+    try:
+        trained_sequence = detector_benchmark._load_trained_sequence(config, None, skip=False)
+
+        sessions_loaded: list[tuple[str, Any]] = []
+        for session_dir in calibration_sessions:
+            try:
+                resampled = detector_benchmark.load_resampled_session(
+                    session_dir, config, bindings_path=args.bindings
+                )
+            except FileNotFoundError as exc:
+                log.warning("benchmark gate: skipping unreadable session %s: %s", session_dir, exc)
+                continue
+            sessions_loaded.append((session_dir.name, resampled))
+        if not sessions_loaded:
+            log.warning("benchmark gate: no readable held-out sessions; skipping")
+            return None, None
+
+        cells = detector_benchmark.run_grid(
+            sessions_loaded, config, trained_if, trained_sequence=trained_sequence
+        )
+        timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        report = detector_benchmark.build_report(
+            cells, seed=42, n_injections=5, generated_at=timestamp
+        )
+
+        baseline_path = args.benchmark_baseline or _latest_benchmark_report(args.analyses_dir)
+        diff: dict[str, Any] | None = None
+        if baseline_path is not None and Path(baseline_path).exists():
+            try:
+                baseline_report = json.loads(Path(baseline_path).read_text())
+                diff = detector_benchmark.diff_reports(
+                    baseline_report, report, tolerance=args.benchmark_tolerance
+                )
+                report["regressions"] = diff
+            except (OSError, json.JSONDecodeError) as exc:
+                log.warning("benchmark gate: cannot read baseline %s: %s", baseline_path, exc)
+
+        args.analyses_dir.mkdir(parents=True, exist_ok=True)
+        report_path = args.analyses_dir / f"benchmark-{timestamp}.json"
+        report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        return report_path, diff
+    except Exception as exc:  # noqa: BLE001 — the gate is best-effort, not a retrain crash
+        log.exception("benchmark gate failed", extra={"error": str(exc)})
+        return None, None
 
 
 def _mark_requested_failures(
@@ -616,6 +768,8 @@ def _print_report(
     args: argparse.Namespace,
     *,
     feedback_report: RetrainingFeedbackReport | None = None,
+    benchmark_report_path: Path | None = None,
+    benchmark_diff: dict[str, Any] | None = None,
 ) -> None:
     print("=" * 72)
     print(f"RETRAIN  ({len(sessions)} sessions)")
@@ -639,6 +793,14 @@ def _print_report(
         else:
             symbol = "✗"
         print(f"  {symbol} {name}  →  {out_dir}  {status}")
+    if benchmark_report_path is not None:
+        if benchmark_diff is None:
+            symbol, status = "✓", "ok (no prior baseline to compare)"
+        elif benchmark_diff["regressed"]:
+            symbol, status = "✗", "regression detected vs baseline"
+        else:
+            symbol, status = "✓", "ok"
+        print(f"  {symbol} benchmark  →  {benchmark_report_path}  {status}")
     print()
 
 

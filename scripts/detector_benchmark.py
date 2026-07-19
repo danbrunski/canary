@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""Corpus-wide detector benchmark (Phase 2B, Task 2.5).
+"""Corpus-wide detector benchmark (Phase 2B, Tasks 2.5/2.6).
 
 Grids (held-out clean sessions x fault kinds x target channels) through the
 synthetic-fault harness (`src.models.synthetic_fault_eval.evaluate_detectors`,
 2.3/2.4) and rolls the per-cell reports up into one per-detector x
 per-fault-class table: recall, an estimated precision, median time-to-detect,
 and the clean-corpus alerts-per-hour rate. Prints the table and writes the
-full report (aggregate + every per-cell detail, for later `--baseline`
-regression compare — 2.6) as JSON.
+full report (aggregate + every per-cell detail) as JSON.
+
+`--baseline <report.json>` (2.6) diffs this run's table against a previous
+one, cell by cell, and flags any metric that regressed beyond `--tolerance`
+(`diff_reports`); the pre-deploy gate `scripts/retrain.py` runs after itself.
 
 Usage:
   scripts/detector_benchmark.py --sessions-root data/sessions
   scripts/detector_benchmark.py data/sessions/a data/sessions/b \
       --if-model models/isolation_forest/model.joblib
   scripts/detector_benchmark.py --channels obd:RPM obd:SPEED --fault-kinds spike dropout
+  scripts/detector_benchmark.py --baseline data/analyses/benchmark-20260701-000000.json
 
 Requires a trained Isolation Forest artifact (`--if-model`, default
 `<models_dir>/<isolation_forest_artifact>` from config); the sequence
@@ -77,6 +81,29 @@ DEFAULT_TARGET_CHANNELS: tuple[str, ...] = (
     "obd:THROTTLE_POS",
     "obd:ENGINE_LOAD",
 )
+
+#: Regression tolerance (Task 2.6), a single global relative-change fraction
+#: applied to every metric. WHY 0.15 and not tighter: the grid is small (a
+#: handful of sessions x channels, `n_injections` runs per cell) so a per-cell
+#: `recall` can swing by a whole injection flipping detected/undetected —
+#: on an 8-run cell that's 12.5 pts of "recall" with zero real behavior
+#: change. A tolerance below that floor would flag grid noise as regression
+#: on every run; 0.15 clears it with margin while still catching an actual
+#: broken detector (whose recall/precision typically collapses by much more
+#: than one flipped run, or whose alerts-per-hour-clean — pooled over full
+#: corpus exposure hours, not a handful of runs, so it's less noisy per-run —
+#: jumps well past a 15% bump from an actual false-alarm flood).
+DEFAULT_TOLERANCE = 0.15
+
+#: Which direction is "worse" for each rollup metric a regression compare
+#: cares about — `precision` can be `None` (no denominator) and is skipped
+#: rather than treated as -inf/+inf.
+_REGRESSION_DIRECTION: dict[str, str] = {
+    "recall": "down",
+    "precision": "down",
+    "median_time_to_detect_seconds": "up",
+    "alerts_per_hour_clean": "up",
+}
 
 
 @dataclass(frozen=True)
@@ -324,8 +351,8 @@ def build_report(
     generated_at: str,
 ) -> dict[str, Any]:
     """The full JSON-safe report: aggregate table + every per-cell detail
-    (kept so a future `--baseline` regression compare — 2.6 — has the raw
-    per-session/channel numbers, not just the rolled-up table)."""
+    (kept so `--baseline` regression compare — 2.6, via `diff_reports` — has
+    the raw per-session/channel numbers, not just the rolled-up table)."""
     aggregate = aggregate_cells(cells)
     return {
         "generated_at": generated_at,
@@ -362,6 +389,97 @@ def print_report(report: dict[str, Any]) -> None:
             f"{row['recall']:>7.3f} {precision:>10} {latency:>11} "
             f"{row['alerts_per_hour_clean']:>10.3f}"
         )
+
+
+def diff_reports(
+    baseline: dict[str, Any],
+    current: dict[str, Any],
+    *,
+    tolerance: float = DEFAULT_TOLERANCE,
+) -> dict[str, Any]:
+    """Per-(detector, fault_kind) regression compare (Task 2.6).
+
+    Only cells present in BOTH reports' ``table`` are graded against
+    ``tolerance`` — a cell that only exists in one report (a detector/channel
+    dropped or added between runs) is recorded as ``added``/``removed`` for
+    visibility but can't have "regressed", there being nothing to compare.
+    """
+    baseline_by_key = {(row["detector"], row["fault_kind"]): row for row in baseline["table"]}
+    current_by_key = {(row["detector"], row["fault_kind"]): row for row in current["table"]}
+
+    cells: list[dict[str, Any]] = []
+    any_regressed = False
+    for detector, fault_kind in sorted(set(baseline_by_key) | set(current_by_key)):
+        base_row = baseline_by_key.get((detector, fault_kind))
+        cur_row = current_by_key.get((detector, fault_kind))
+        if base_row is None:
+            cells.append(
+                {"detector": detector, "fault_kind": fault_kind, "status": "added", "metrics": {}}
+            )
+            continue
+        if cur_row is None:
+            cells.append(
+                {
+                    "detector": detector,
+                    "fault_kind": fault_kind,
+                    "status": "removed",
+                    "metrics": {},
+                }
+            )
+            continue
+
+        metrics: dict[str, Any] = {}
+        for metric_name, direction in _REGRESSION_DIRECTION.items():
+            base_value = base_row.get(metric_name)
+            cur_value = cur_row.get(metric_name)
+            regressed = False
+            if base_value is not None and cur_value is not None:
+                if direction == "down":
+                    regressed = cur_value < base_value * (1 - tolerance)
+                else:
+                    regressed = cur_value > base_value * (1 + tolerance)
+            metrics[metric_name] = {
+                "baseline": base_value,
+                "current": cur_value,
+                "regressed": regressed,
+            }
+            any_regressed = any_regressed or regressed
+        cells.append(
+            {
+                "detector": detector,
+                "fault_kind": fault_kind,
+                "status": "compared",
+                "metrics": metrics,
+            }
+        )
+
+    return {"tolerance": tolerance, "regressed": any_regressed, "cells": cells}
+
+
+def print_regression_diff(diff: dict[str, Any]) -> None:
+    print("=" * 88)
+    print(f"REGRESSION COMPARE  tolerance={diff['tolerance']:.0%}")
+    print("=" * 88)
+    if not diff["cells"]:
+        print("  (no baseline cells to compare)")
+        return
+    any_flagged = False
+    for cell in diff["cells"]:
+        label = f"{cell['detector']:<16} {cell['fault_kind']:<8}"
+        if cell["status"] != "compared":
+            only_in = "current" if cell["status"] == "added" else "baseline"
+            print(f"  {label}  ({cell['status']}: only in {only_in} run)")
+            continue
+        flagged = [name for name, m in cell["metrics"].items() if m["regressed"]]
+        if not flagged:
+            continue
+        any_flagged = True
+        print(f"  REGRESSED  {label}")
+        for metric_name in flagged:
+            m = cell["metrics"][metric_name]
+            print(f"    {metric_name}: {m['baseline']:.4g} -> {m['current']:.4g}")
+    if not any_flagged:
+        print("  no regressions beyond tolerance")
 
 
 def _load_trained_sequence(
@@ -468,6 +586,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--n-injections", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--baseline",
+        type=Path,
+        default=None,
+        help="A previous run's JSON report (Task 2.6). Diffs this run's per-detector "
+        "x per-fault-class table against it and flags any metric that regressed "
+        "beyond --tolerance; nonzero exit if any cell is flagged.",
+    )
+    parser.add_argument(
+        "--tolerance",
+        type=float,
+        default=DEFAULT_TOLERANCE,
+        help=f"Relative regression tolerance for --baseline compare (default "
+        f"{DEFAULT_TOLERANCE:.0%}; see DEFAULT_TOLERANCE for the rationale).",
+    )
+    parser.add_argument(
         "--out",
         type=Path,
         default=None,
@@ -540,10 +673,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     print_report(report)
 
+    regression_diff: dict[str, Any] | None = None
+    if args.baseline is not None:
+        try:
+            baseline_report = json.loads(args.baseline.read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"error: cannot read baseline report {args.baseline}: {e}", file=sys.stderr)
+            return 2
+        regression_diff = diff_reports(baseline_report, report, tolerance=args.tolerance)
+        report["regressions"] = regression_diff
+        print_regression_diff(regression_diff)
+
     out_path = args.out or Path("data/analyses") / f"benchmark-{timestamp}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(f"wrote {out_path}")
+
+    if regression_diff is not None and regression_diff["regressed"]:
+        print("error: regression(s) detected vs baseline", file=sys.stderr)
+        return 3
     return 0
 
 

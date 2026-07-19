@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import sys
 from pathlib import Path
 
@@ -9,9 +11,12 @@ import pandas as pd
 import pytest
 
 from src.alerts.feedback import FeedbackStore
+from src.config import CanaryConfig
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import retrain  # noqa: E402
+
+EXAMPLE_YAML = Path(__file__).resolve().parents[1] / "canary.example.yaml"
 
 
 def test_retrain_calls_both_trainers(
@@ -310,6 +315,252 @@ def test_retrain_returns_error_when_all_requested_trainers_fail(
         ]
     )
     assert rc == 1
+
+
+def test_retrain_skip_benchmark_flag_prevents_gate_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+
+    def _boom(*_a: object, **_k: object) -> tuple[None, None]:
+        raise AssertionError("benchmark gate must not run with --skip-benchmark")
+
+    monkeypatch.setattr(retrain, "_run_benchmark_gate", _boom)
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--no-feedback-policy",
+            "--skip-benchmark",
+        ]
+    )
+    assert rc == 0
+
+
+def test_retrain_calls_benchmark_gate_with_calibration_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate is called (unless --skip-benchmark) once both trainers have
+    been attempted, with whatever calibration holdouts retrain picked."""
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+
+    calls: list[object] = []
+
+    def _fake_gate(config: object, calibration_sessions: object, args: object) -> tuple[None, None]:
+        calls.append(calibration_sessions)
+        return None, None
+
+    monkeypatch.setattr(retrain, "_run_benchmark_gate", _fake_gate)
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--no-feedback-policy",
+        ]
+    )
+    assert rc == 0
+    assert len(calls) == 1
+    assert calls[0] == []  # a single session can't be held out for calibration
+
+
+def test_retrain_returns_error_when_benchmark_gate_regressed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A benchmark regression fails the retrain run even though both
+    trainers themselves succeeded — the gate is a distinct pass/fail check,
+    not folded into trainer partial-success."""
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+
+    report_path = tmp_path / "analyses" / "benchmark-20260719-120000.json"
+    monkeypatch.setattr(
+        retrain,
+        "_run_benchmark_gate",
+        lambda *a, **k: (report_path, {"regressed": True, "tolerance": 0.15, "cells": []}),
+    )
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--no-feedback-policy",
+        ]
+    )
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "regression detected vs baseline" in out
+
+
+def test_retrain_ok_benchmark_does_not_fail_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+
+    report_path = tmp_path / "analyses" / "benchmark-20260719-120000.json"
+    monkeypatch.setattr(
+        retrain,
+        "_run_benchmark_gate",
+        lambda *a, **k: (report_path, {"regressed": False, "tolerance": 0.15, "cells": []}),
+    )
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--no-feedback-policy",
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "✓ benchmark" in out
+
+
+# ---------------------------------------------------------------------------
+# _run_benchmark_gate itself — every test above monkeypatches this function
+# out, so these call the real thing to cover its actual internals (empty-
+# holdouts skip, missing-artifact skip, and a real grid + baseline
+# auto-discovery run).
+# ---------------------------------------------------------------------------
+
+
+def test_run_benchmark_gate_skips_cleanly_with_no_calibration_sessions(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    args = retrain.parse_args(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--analyses-dir",
+            str(tmp_path / "analyses"),
+        ]
+    )
+
+    caplog.set_level(logging.WARNING)
+    result = retrain._run_benchmark_gate(config, [], args)
+
+    assert result == (None, None)
+    assert "no held-out sessions" in caplog.text
+
+
+def test_run_benchmark_gate_skips_cleanly_with_missing_if_artifact(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    from tests.test_detector_benchmark import _write_fixture_session
+
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    session = _write_fixture_session(tmp_path / "sessions", "2026-05-12T000000")
+    args = retrain.parse_args(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--if-out",
+            str(tmp_path / "if"),  # no model.joblib written under here
+            "--analyses-dir",
+            str(tmp_path / "analyses"),
+        ]
+    )
+
+    caplog.set_level(logging.WARNING)
+    result = retrain._run_benchmark_gate(config, [session], args)
+
+    assert result == (None, None)
+    assert "no isolation forest artifact" in caplog.text
+
+
+def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
+    tmp_path: Path,
+) -> None:
+    """End-to-end: a tiny fixture session + a real trained IF artifact + a
+    prior benchmark-*.json already on disk. Confirms the gate runs the real
+    grid, auto-discovers the prior report as --benchmark-baseline (not
+    given explicitly here), and returns a real report/diff pair."""
+    from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
+    from src.preprocessing.feature_pipeline import featurize_wide_frame
+    from tests.test_detector_benchmark import _write_fixture_session
+
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    # The gate always attempts to load the configured sequence backend (Task
+    # 2.6 has no --no-sequence knob); disable it here so this test doesn't
+    # pick up the real Torch LSTM artifact that lives under
+    # models/lstm_autoencoder in this working tree.
+    config.models.lstm_autoencoder.enabled = False
+
+    session = _write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
+    long = retrain.detector_benchmark.load_resampled_session(session, config)
+    features = featurize_wide_frame(long, config).features
+    trained = fit_isolation_forest(
+        features,
+        config.models.isolation_forest,
+        feature_columns=["obd:RPM", "obd:SPEED"],
+        fitted_at="2026-05-12T00:00:00Z",
+    )
+    if_out = tmp_path / "if"
+    artifact_path = if_out / "model.joblib"
+    trained.save(artifact_path, default_manifest_path(artifact_path))
+
+    analyses_dir = tmp_path / "analyses"
+    analyses_dir.mkdir(parents=True)
+    prior_report = analyses_dir / "benchmark-20260101-000000.json"
+    prior_report.write_text(
+        json.dumps({"generated_at": "20260101-000000", "table": [], "cells": []})
+    )
+
+    args = retrain.parse_args(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--if-out",
+            str(if_out),
+            "--analyses-dir",
+            str(analyses_dir),
+        ]
+    )
+
+    report_path, diff = retrain._run_benchmark_gate(config, [session], args)
+
+    assert report_path is not None
+    assert report_path.exists()
+    assert report_path.parent == analyses_dir
+    report = json.loads(report_path.read_text())
+    assert report["cells"]  # the real grid produced per-(session, channel) cells
+    assert diff is not None  # baseline auto-discovered from prior_report on disk
+    assert "regressed" in diff
 
 
 def test_retrain_auto_holds_out_most_recent_session_for_calibration(

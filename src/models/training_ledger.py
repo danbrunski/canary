@@ -77,6 +77,10 @@ class TrainingRunRecord(BaseModel):
     artifacts: dict[str, str] = Field(default_factory=dict)
     job_id: str | None = None
     job_log_path: str | None = None
+    #: `data/analyses/benchmark-<ts>.json` produced by `scripts/detector_benchmark.py`
+    #: against this run's artifact (the Task 2.6 pre-deploy regression gate), when
+    #: the retrain flow ran one — the report itself carries the baseline diff.
+    detector_benchmark_report_path: str | None = None
     publish_status: PublishStatus = "unpublished"
     notes: str | None = None
 
@@ -190,6 +194,7 @@ def build_run_record_from_manifest(
     job_id: str | None = None,
     job_log_path: str | None = None,
     false_positive_benchmark_path: Path | None = None,
+    detector_benchmark_report_path: Path | None = None,
     notes: str | None = None,
 ) -> TrainingRunRecord:
     """Build a :class:`TrainingRunRecord` from a trainer's manifest JSON.
@@ -201,6 +206,10 @@ def build_run_record_from_manifest(
     ``modes``). The sibling artifact (``model.pt`` / ``model.joblib``) is
     recorded if present. An optional false-positive benchmark JSON
     (``scripts/fp_benchmark.py`` output) is merged into ``metrics``.
+    ``detector_benchmark_report_path`` (``scripts/detector_benchmark.py``
+    output, Task 2.6) is recorded as-is — unlike the FP benchmark it isn't
+    read/merged here, since callers (the retrain flow) already have the
+    parsed report in hand and just need the path linked for provenance.
 
     Raises :class:`ManifestValidationError` if the manifest is unreadable or
     fails the common-schema check — the caller decides whether that's fatal
@@ -264,5 +273,10 @@ def build_run_record_from_manifest(
         artifacts=artifacts,
         job_id=job_id,
         job_log_path=job_log_path,
+        detector_benchmark_report_path=(
+            str(detector_benchmark_report_path)
+            if detector_benchmark_report_path is not None
+            else None
+        ),
         notes=notes,
     )

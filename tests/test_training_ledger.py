@@ -100,6 +100,19 @@ def test_build_from_if_manifest(tmp_path: Path) -> None:
     assert rec.artifacts["model"].endswith("model.joblib")
 
 
+def test_build_from_if_manifest_records_detector_benchmark_report_path(tmp_path: Path) -> None:
+    report = tmp_path / "analyses" / "benchmark-20260719-120000.json"
+    rec = build_run_record_from_manifest(
+        _if_manifest(tmp_path / "if"), detector_benchmark_report_path=report
+    )
+    assert rec.detector_benchmark_report_path == str(report)
+
+
+def test_build_from_if_manifest_without_benchmark_path_is_none(tmp_path: Path) -> None:
+    rec = build_run_record_from_manifest(_if_manifest(tmp_path / "if2"))
+    assert rec.detector_benchmark_report_path is None
+
+
 def test_build_from_bad_manifest_raises(tmp_path: Path) -> None:
     missing = tmp_path / "nope.json"
     with pytest.raises(ManifestValidationError):
@@ -230,6 +243,48 @@ def test_retrain_ingests_ledger_when_manifest_present(
     assert rc == 0
     runs = {r.run_id for r in TrainingLedger(ledger_path).records()}
     assert runs == {"if_run", "lstm_run"}
+
+
+def test_retrain_ledger_records_detector_benchmark_report_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task 2.6: the benchmark gate's report path links into the ledger
+    record of the run it was benchmarked against."""
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    if_out = tmp_path / "if"
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: _if_manifest(if_out, "if_run"))
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+
+    report_path = tmp_path / "analyses" / "benchmark-20260719-120000.json"
+    monkeypatch.setattr(
+        retrain,
+        "_run_benchmark_gate",
+        lambda *a, **k: (report_path, {"regressed": False, "tolerance": 0.15, "cells": []}),
+    )
+    ledger_path = tmp_path / "runs.jsonl"
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--skip-sequence",
+            "--if-out",
+            str(if_out),
+            "--no-feedback-policy",
+            "--ledger",
+            str(ledger_path),
+        ]
+    )
+
+    assert rc == 0
+    [record] = TrainingLedger(ledger_path).records()
+    assert record.detector_benchmark_report_path == str(report_path)
 
 
 def test_retrain_ledger_records_feedback_policy(
