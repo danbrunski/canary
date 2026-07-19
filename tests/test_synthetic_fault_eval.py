@@ -174,6 +174,62 @@ def test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low() ->
 
 
 # ---------------------------------------------------------------------------
+# 2.5 — IF feature-subset trial machinery (full 4x vs raw+__roc vs raw-only)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "drop_suffixes",
+    [(), ("__mean", "__std"), ("__mean", "__std", "__roc")],
+    ids=["full_4x", "raw_roc_only", "raw_only"],
+)
+def test_if_feature_subset_trains_and_evaluates_through_the_benchmark_harness(
+    drop_suffixes: tuple[str, ...],
+) -> None:
+    """The 2.5 trial machinery: restrict the full 4x IF feature set down to a
+    subset, fit IF on exactly those columns, and grade it through the same
+    ``evaluate_detectors`` harness used for the real full-vs-subset trial.
+    Proves the plumbing works for every candidate subset (not that any one of
+    them wins — that's a real-data call documented in the roadmap doc, not a
+    test assertion)."""
+    from src.preprocessing.feature_pipeline import (
+        restrict_isolation_forest_expansion,
+        trainable_feature_columns,
+    )
+
+    config = _config()
+    resampled = _two_mode_resampled()
+    nominal_features = featurize_wide_frame(resampled, config).features
+    full_columns = [
+        c
+        for c in trainable_feature_columns(nominal_features)
+        if c.split("__")[0] in {"obd:RPM", "obd:SPEED", "obd:THROTTLE_POS"}
+    ]
+    subset = restrict_isolation_forest_expansion(full_columns, drop_suffixes=drop_suffixes)
+    assert subset  # the raw channels always survive every drop_suffixes combo
+
+    trained = fit_isolation_forest(
+        nominal_features,
+        _IFConfig(),
+        feature_columns=subset,
+        fitted_at="2026-05-12T00:00:00Z",
+    )
+    # The trained artifact's schema reflects exactly the requested subset.
+    assert set(trained.feature_columns) == set(subset)
+
+    report = evaluate_detectors(
+        resampled,
+        config,
+        trained,
+        fault_channel="obd:RPM",
+        n_injections=4,
+    )
+    json.loads(json.dumps(report))  # still JSON-safe on every subset
+    assert {m["fault_kind"] for m in report["per_fault"]} == set(DEFAULT_FAULT_KINDS)
+    assert "isolation_forest" in report["nominal_fp"]
+
+
+# ---------------------------------------------------------------------------
 # 2.3 — sequence-detector coverage (optional third detector)
 # ---------------------------------------------------------------------------
 

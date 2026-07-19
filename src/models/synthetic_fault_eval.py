@@ -28,6 +28,14 @@ block in ``nominal_fp``) — mirroring IF/fused exactly. The LSTM/TCN
 training-completion + per-mode threshold-population is graded by a separate
 dedicated test. The report is JSON-safe so the training ledger / dashboard
 can consume it.
+
+Task 2.6 (ml-correctness-hardening) trialed ``pyod``'s ECOD as an optional
+fourth detector here, wired the same way ``trained_sequence`` is. ECOD lost
+decisively on the seeded synthetic-fault benchmark (mean detection rate
+~0.5-0.76 vs IF's ~0.97-0.99 across 3 seeds, and it missed "dropout" almost
+entirely: 0.0-0.05 vs IF's 1.0) so the wiring was reverted per the task's own
+instruction to drop a losing dependency rather than leave it half-adopted.
+See the roadmap doc's landed-note for the full numbers.
 """
 
 from __future__ import annotations

@@ -519,6 +519,34 @@ def trainable_feature_columns(features: pd.DataFrame) -> list[str]:
     return cols
 
 
+def restrict_isolation_forest_expansion(
+    columns: Sequence[str],
+    *,
+    drop_suffixes: Sequence[str] = (),
+) -> list[str]:
+    """Drop rolling-feature-expansion columns ending in ``drop_suffixes`` from
+    an already-resolved IF feature list (e.g. ``trainable_feature_columns``'s
+    output).
+
+    Task 2.5 (ml-correctness-hardening): each channel expands 4x (raw +
+    ``__mean`` + ``__std`` + ``__roc``) and the IF trial benchmark compared
+    that full set against raw+``__roc``-only and raw-only subsets, passing
+    the trimmed list to ``fit_isolation_forest``'s existing ``feature_columns``
+    override (no new config knob needed). The trial found the full 4x set won
+    on both detection rate and nominal FP — the diluted-random-split theory
+    didn't hold up here because ``__std``/``__roc`` collapsing to ~0 IS the
+    primary signature of a "stuck" sensor fault, not a redundant copy of the
+    raw channel — so this is unused by the default IF training path today
+    (``scripts/train_anomaly_model.py`` keeps calling
+    ``trainable_feature_columns`` unfiltered). Kept here, not deleted, so a
+    future retrial (a real multi-session corpus, a different channel mix)
+    doesn't have to rebuild the plumbing from scratch. Never applied to
+    ``sequence_feature_columns`` — the sequence detector keeps the full
+    expansion (masking makes it cheap there, per the task).
+    """
+    return [c for c in columns if not any(c.endswith(suffix) for suffix in drop_suffixes)]
+
+
 def candidate_feature_columns(features: pd.DataFrame) -> list[str]:
     """Numeric, non-structural feature candidates before all-NaN filtering."""
     skip_exact = {"session", "timestamp", MODE_COLUMN}

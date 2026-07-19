@@ -162,16 +162,50 @@ models that emit ungated.
   column exclusive to a 2.2-skipped mode gets an inert identity
   placeholder instead of starving the fit — caught by review, fixed
   before landing).
-- [ ] **2.5 — Feature redundancy for IF.** Each channel expands 4×
+- [x] **2.5 — Feature redundancy for IF.** Each channel expands 4×
   (raw + `__mean` + `__std` + `__roc`, `features.py:14-15,34-36`),
   diluting IF's random-split mechanism. Trial in the benchmark: IF on
   raw+`__roc` only (or raw-only) vs current. Adopt whichever wins on
   detection-rate/FP; keep the full set for the sequence detector
-  (masking makes it cheap there).
-- [ ] **2.6 — ECOD comparison (optional, cheap).** Add `pyod`'s ECOD as
+  (masking makes it cheap there). — landed: trial machinery is
+  `restrict_isolation_forest_expansion` (`feature_pipeline.py`) — drops
+  requested suffixes from an already-resolved IF column list, fed
+  straight into `fit_isolation_forest`'s existing `feature_columns`
+  override (no new config knob needed). Trialed full-4x vs raw+`__roc`
+  vs raw-only on a fixed-seed synthetic two-mode corpus (3 seeds,
+  20 injections/fault kind) through `evaluate_detectors`: full-4x won
+  on both axes — mean detection rate 0.97-0.99 vs raw+roc's 0.96-0.99
+  (comparable) and raw-only's 0.89-0.93 (notably worse), AND full-4x's
+  nominal FP/hr (451-499) was *lower* than raw+roc's (499-559), not
+  higher as the dilution theory predicted. The gap concentrates in the
+  "stuck" fault kind (full-4x 0.85-0.95 vs raw-only 0.45-0.65): a
+  frozen sensor's primary signature is `__std`/`__roc` collapsing to
+  ~0, not a duplicate of the raw signal — dropping them removes
+  information IF needs, it doesn't reduce redundancy. **Decision: kept
+  the current full 4x set as the production default** (no change to
+  `scripts/train_anomaly_model.py`); the restriction helper stays in
+  the tree (tested, unused by the default path) for a future retrial
+  against a real multi-session corpus. Sequence detector untouched.
+- [x] **2.6 — ECOD comparison (optional, cheap).** Add `pyod`'s ECOD as
   a benchmark-only alternative screen in `synthetic_fault_eval` /
   `detector_benchmark` — parameter-free, top-tier in ADBench. Promote
   only if it beats IF on the benchmark; otherwise drop the dependency.
+  — landed: wired ECOD as a fourth optional `evaluate_detectors`
+  detector (per-mode fit + held-out calibration mirroring IF's split,
+  in a benchmark-only `src/models/ecod_eval.py`, never imported by
+  `src/daemon/` or `model_manager.py`), trialed it against IF on the
+  same fixed-seed synthetic corpus/seeds as 2.5 (full 4x feature set
+  for both). **ECOD lost decisively**: mean detection rate 0.55-0.76 vs
+  IF's 0.97-0.99, and it missed "dropout" almost entirely (0.0-0.05 vs
+  IF's 1.0 — ECOD's empirical-CDF scoring doesn't pick up a
+  hold-then-NaN-gap signature the way IF's random splits do). FP/hr was
+  also inconsistent across seeds (174-403) despite the same calibration
+  target. Per the task's own instruction, **dropped `pyod` entirely**
+  (reverted the `evaluate_detectors`/`ecod_eval.py` wiring, the
+  `pyproject.toml` `bench` extra + mypy override, and uninstalled it
+  from the dev venv) rather than leave a losing dependency half-adopted;
+  `synthetic_fault_eval.py`'s module docstring keeps a short note of
+  what was tried so this isn't re-litigated blind next time.
 
 ## Phase 3 — Calibration enforcement (T2)
 

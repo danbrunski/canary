@@ -23,9 +23,10 @@ from src.preprocessing.feature_pipeline import (
     _drop_fully_stale_rows,
     align_features_to_schema,
     featurize_wide_frame,
+    restrict_isolation_forest_expansion,
     sequence_feature_columns,
 )
-from src.preprocessing.features import FeatureConfig
+from src.preprocessing.features import MEAN_SUFFIX, ROC_SUFFIX, STD_SUFFIX, FeatureConfig
 from src.preprocessing.resampler import GAP_SUFFIX
 from src.preprocessing.segmenter import MODE_COLUMN
 
@@ -309,3 +310,44 @@ def test_expand_suppress_channels_silently_drops_unknown_entries() -> None:
     assert expand_suppress_channels(["obd:DOES_NOT_EXIST"], columns) == ()
     # Empty input → empty output, no exceptions
     assert expand_suppress_channels([], columns) == ()
+
+
+# ---------------------------------------------------------------------------
+# 2.5 (ml-correctness-hardening) — IF feature-subset trial machinery
+# ---------------------------------------------------------------------------
+
+
+def test_restrict_isolation_forest_expansion_drops_only_requested_suffixes() -> None:
+    columns = [
+        "obd:RPM",
+        "obd:RPM__mean",
+        "obd:RPM__std",
+        "obd:RPM__roc",
+        "obd:SPEED",
+        "obd:SPEED__mean",
+        "obd:SPEED__std",
+        "obd:SPEED__roc",
+    ]
+    raw_roc_only = restrict_isolation_forest_expansion(
+        columns, drop_suffixes=(MEAN_SUFFIX, STD_SUFFIX)
+    )
+    assert raw_roc_only == ["obd:RPM", "obd:RPM__roc", "obd:SPEED", "obd:SPEED__roc"]
+
+    raw_only = restrict_isolation_forest_expansion(
+        columns, drop_suffixes=(MEAN_SUFFIX, STD_SUFFIX, ROC_SUFFIX)
+    )
+    assert raw_only == ["obd:RPM", "obd:SPEED"]
+
+    # No suffixes requested -> identity (full 4x set unchanged).
+    assert restrict_isolation_forest_expansion(columns, drop_suffixes=()) == columns
+
+
+def test_restrict_isolation_forest_expansion_is_order_preserving_and_pure() -> None:
+    """The helper must not mutate its input or reorder survivors — downstream
+    callers (fit_isolation_forest's `feature_columns` override) rely on a
+    stable, predictable column order for the manifest's feature spec."""
+    columns = ["b__roc", "a", "a__mean", "b"]
+    original = list(columns)
+    out = restrict_isolation_forest_expansion(columns, drop_suffixes=(MEAN_SUFFIX,))
+    assert columns == original  # input untouched
+    assert out == ["b__roc", "a", "b"]
