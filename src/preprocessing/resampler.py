@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from src.dataframe_utils import require_columns as _require_columns
@@ -12,6 +13,12 @@ from src.dataframe_utils import require_columns as _require_columns
 SESSION_COLUMN = "session"
 TIMESTAMP_COLUMN = "timestamp"
 GAP_SUFFIX = "__gap"
+
+#: Default forward-fill ceiling for slow channels (seconds) — generous
+#: because slow sensors (coolant, IAT, baro) legitimately update on the
+#: order of tens of seconds; this only catches a channel that's actually
+#: gone dead, not normal slow-poll cadence.
+DEFAULT_SLOW_CHANNEL_MAX_GAP_SECONDS = 120.0
 
 DEFAULT_SLOW_CHANNEL_HINTS = frozenset(
     {
@@ -32,12 +39,20 @@ class ResampleConfig:
     max_gap_factor: float = 2.0
     slow_channels: frozenset[str] = DEFAULT_SLOW_CHANNEL_HINTS
     fast_channels: frozenset[str] | None = None
+    #: Forward-fill ceiling for slow channels (seconds) — independent of
+    #: ``max_gap_factor`` because slow sensors legitimately update far less
+    #: often than the resample grid. Beyond this age a slow channel's
+    #: ffilled cell goes NaN and its ``__gap`` flag sets, same as a fast
+    #: channel past ``max_gap``.
+    slow_channel_max_gap_seconds: float = DEFAULT_SLOW_CHANNEL_MAX_GAP_SECONDS
 
     def __post_init__(self) -> None:
         if self.hz <= 0:
             raise ValueError("hz must be positive")
         if self.max_gap_factor <= 0:
             raise ValueError("max_gap_factor must be positive")
+        if self.slow_channel_max_gap_seconds <= 0:
+            raise ValueError("slow_channel_max_gap_seconds must be positive")
 
     @property
     def interval(self) -> pd.Timedelta:
@@ -46,6 +61,10 @@ class ResampleConfig:
     @property
     def max_gap(self) -> pd.Timedelta:
         return self.interval * self.max_gap_factor
+
+    @property
+    def slow_channel_max_gap(self) -> pd.Timedelta:
+        return pd.Timedelta(seconds=self.slow_channel_max_gap_seconds)
 
 
 def resample_wide(
@@ -93,9 +112,18 @@ def _resample_one_session(
     sampled.insert(0, SESSION_COLUMN, session)
     sampled = sampled.reset_index()
 
-    for column in _fast_channels(value_columns, config):
-        flags = _gap_flags(indexed[column], sampled[TIMESTAMP_COLUMN], config.max_gap)
-        sampled[gap_column(column)] = flags.to_numpy()
+    # Bounded ffill (1.1) + gap flags (1.2) for every channel — fast channels
+    # use the resample-grid-derived max_gap, slow channels (which legitimately
+    # update far less often) use their own generous ceiling. Beyond the limit
+    # the ffilled cell is NaN'd back out rather than carried forever, so a
+    # dead sensor stops silently masquerading as a live reading.
+    fast = set(_fast_channels(value_columns, config))
+    for column in value_columns:
+        max_gap = config.max_gap if column in fast else config.slow_channel_max_gap
+        stale = _gap_flags(indexed[column], sampled[TIMESTAMP_COLUMN], max_gap)
+        stale_mask = stale.to_numpy()
+        sampled[gap_column(column)] = stale_mask
+        sampled[column] = sampled[column].where(~stale_mask, np.nan)
 
     return sampled
 
@@ -142,5 +170,5 @@ def _value_columns(
 
 
 def _empty_resampled(value_columns: list[str], config: ResampleConfig) -> pd.DataFrame:
-    gap_columns = [gap_column(column) for column in _fast_channels(value_columns, config)]
+    gap_columns = [gap_column(column) for column in value_columns]
     return pd.DataFrame(columns=[SESSION_COLUMN, TIMESTAMP_COLUMN, *value_columns, *gap_columns])

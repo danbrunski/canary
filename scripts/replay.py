@@ -193,7 +193,10 @@ def _resample_numeric(
         )
     return resample_wide(
         wide,
-        config=ResampleConfig(hz=config.preprocessing.resample_hz),
+        config=ResampleConfig(
+            hz=config.preprocessing.resample_hz,
+            slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+        ),
         value_columns=numeric_columns,
     )
 

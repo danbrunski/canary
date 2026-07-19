@@ -170,7 +170,13 @@ def build_dataset(
             continue
         wide = to_wide(long, coerce_numeric=True)
         if spec.resample_hz is not None:
-            wide = resample_wide(wide, config=ResampleConfig(hz=spec.resample_hz))
+            wide = resample_wide(
+                wide,
+                config=ResampleConfig(
+                    hz=spec.resample_hz,
+                    slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+                ),
+            )
         if spec.include_tags or spec.exclude_tags:
             mask, labels = _session_window_filter(
                 wide, session_dir, spec.include_tags, spec.exclude_tags

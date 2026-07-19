@@ -194,6 +194,14 @@ class PreprocessingConfig(_Strict):
     #: skew where serving emits a mode the trainer never produced. See
     #: ``feature_pipeline.segment_or_constant``.
     single_operating_mode: bool = False
+    #: Forward-fill ceiling (s) for slow channels (coolant/IAT/baro —
+    #: ``resampler.DEFAULT_SLOW_CHANNEL_HINTS``) during resampling. Generous
+    #: relative to fast channels' ``max_gap`` (interval × ``max_gap_factor``)
+    #: because slow sensors legitimately update on the order of tens of
+    #: seconds; this only catches a channel that's gone genuinely dead.
+    #: Beyond the limit the resampled cell goes NaN and its ``__gap`` flag
+    #: sets, same treatment fast channels already got.
+    slow_channel_max_gap_seconds: float = 120.0
 
 
 class IsolationForestConfig(_Strict):

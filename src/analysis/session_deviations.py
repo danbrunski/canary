@@ -263,7 +263,10 @@ def analyze_session(
     bindings = load_bindings(bindings_path) if bindings_path.exists() else None
     dbc_database = load_dbc_dir(dbc_dir)
     did_map = load_did_map(dids_path) if dids_path.exists() else None
-    resample_config = ResampleConfig(hz=config.preprocessing.resample_hz)
+    resample_config = ResampleConfig(
+        hz=config.preprocessing.resample_hz,
+        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+    )
 
     resampled = _decode_session_to_resampled(
         Path(session_dir), bindings, dbc_database, did_map, resample_config

@@ -134,7 +134,13 @@ def evaluate(
     if bindings is not None:
         long = decode_can_rows(long, bindings)
     wide = to_wide(long, coerce_numeric=True)
-    resampled = resample_wide(wide, config=ResampleConfig(hz=config.preprocessing.resample_hz))
+    resampled = resample_wide(
+        wide,
+        config=ResampleConfig(
+            hz=config.preprocessing.resample_hz,
+            slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+        ),
+    )
 
     # Choose a numeric channel to perturb — a decoded signal if one's present.
     channel = spike_channel

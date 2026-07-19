@@ -290,7 +290,10 @@ def build_feature_frame(
     # per session, capped at the CPU count). Caller can pin ``max_workers=1`` to
     # force the serial path — kept exactly as it was for back-compat with tests
     # and the Pi cold-start fall-back, where multiprocessing overhead would lose.
-    resample_config = ResampleConfig(hz=config.preprocessing.resample_hz)
+    resample_config = ResampleConfig(
+        hz=config.preprocessing.resample_hz,
+        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+    )
     resampled_parts: list[pd.DataFrame] = []
     skipped: list[str] = []
 
@@ -695,6 +698,9 @@ def build_feature_spec(
         # (1 / hz) * max_gap_factor (default factor 2.0).
         spec["max_gap_seconds"] = float(
             ResampleConfig(hz=config.preprocessing.resample_hz).max_gap.total_seconds()
+        )
+        spec["slow_channel_max_gap_seconds"] = float(
+            config.preprocessing.slow_channel_max_gap_seconds
         )
     if sequence_length is not None:
         spec["sequence_length"] = sequence_length
