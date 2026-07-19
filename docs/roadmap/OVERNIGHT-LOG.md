@@ -20,3 +20,4 @@ eval-longitudinal-and-dtc.md 2.6 — done — regression-compare pre-deploy gate
 eval-longitudinal-and-dtc.md 2.7 — done — already satisfied by pre-existing Phase 7.5 test (test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low); checkbox caught up, no new code
 ml-correctness-hardening.md 2.1-2.4 — done — IF blindness surfacing (edge-triggered, /status), min_samples_per_mode floor + manifest.skipped_modes, non-emitting uncalibrated modes, scaler leakage fix (mode-gated-column crash caught + fixed in review) (commit 3eda014)
 OVERNIGHT-QUEUE.md Q3 — done — ml-correctness-hardening.md Phase 8 (8.1-8.4) + eval-longitudinal-and-dtc.md Phase 2 (2.1-2.7) all landed; baseline benchmark report archived to data/analyses/ (commit c5c9558)
+ml-correctness-hardening.md 2.5+2.6 — done — feature-redundancy and ECOD trials on fixed-seed synthetic corpus; both keep current defaults (full 4x feature set wins, pyod/ECOD dropped after losing decisively) (commit 5a4a0c5)
