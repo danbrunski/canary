@@ -520,6 +520,11 @@ def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
     # pick up the real Torch LSTM artifact that lives under
     # models/lstm_autoencoder in this working tree.
     config.models.lstm_autoencoder.enabled = False
+    # This fixture session is a tiny 120-row single-mode frame (96 fit rows
+    # after the 20 % calibration holdout) — well under the production
+    # min_samples_per_mode floor (Task 2.2). Lower it so the gate still
+    # trains a real model instead of skipping the only mode present.
+    config.models.isolation_forest.min_samples_per_mode = 5
 
     session = _write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
     long = retrain.detector_benchmark.load_resampled_session(session, config)

@@ -125,6 +125,7 @@ export function SystemPanel({ status, channels, statusError }: SystemPanelProps)
   const gps = status?.gps ?? null;
   const trip = status?.trip ?? null;
   const gpsFixState = gps ? gpsFix(gps) : null;
+  const blindModes = status?.detectors?.isolation_forest.blind_modes ?? [];
 
   return (
     <Panel title="System">
@@ -188,6 +189,14 @@ export function SystemPanel({ status, channels, statusError }: SystemPanelProps)
               )}
             </dd>
           </div>
+          {status.detectors && (
+            <div className={definitionRowClass}>
+              <dt className={definitionTermClass}>IF blind modes</dt>
+              <dd className={cn(definitionValueClass, blindModes.length > 0 && "text-warn")}>
+                {blindModes.length === 0 ? "none" : blindModes.join(", ")}
+              </dd>
+            </div>
+          )}
           {gps && gpsFixState && (
             <>
               <div className={definitionRowClass}>

@@ -1121,6 +1121,227 @@ async def test_score_and_emit_reconciles_missing_live_columns(
     assert not list(tmp_path.glob("anomalies-*.jsonl"))
 
 
+async def test_score_and_emit_warns_once_on_mode_blindness_transition(
+    tmp_path: Path,
+    config: CanaryConfig,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """2.1: a mode transitioning into IF blindness logs a fresh warning
+    exactly once (edge-triggered on the tick the rolling window fills),
+    not on every subsequent missing-feature tick for that mode."""
+    import logging
+
+    import pandas as pd
+
+    from src.alerts.emitter import AnomalyEventEmitter
+    from src.alerts.event_logger import AnomalyEventLogger
+    from src.daemon import _score_and_emit
+    from src.models.health import _MODE_BLIND_WINDOW as MODE_BLIND_WINDOW
+    from src.models.health import HealthMonitor
+    from src.models.manager import LoadedModel
+    from src.models.manifest import ModelManifestCommon
+
+    class _FakeTrained:
+        feature_columns = ("obd:RPM", "obd:SPEED")
+        mode_column = "operating_mode"
+        manifest = type(
+            "M",
+            (),
+            {
+                "model_version": "fake_if_schema",
+                "schema": {
+                    "feature_columns": ["obd:RPM", "obd:SPEED"],
+                    "feature_dtypes": {"obd:RPM": "float64", "obd:SPEED": "float64"},
+                    "mode_column": "operating_mode",
+                    "timestamp_column": "timestamp",
+                    "session_column": "session",
+                },
+            },
+        )()
+
+        def score(self, frame: Any) -> Any:
+            out = frame.copy()
+            missing = out[list(self.feature_columns)].isna().any(axis=1)
+            out["isolation_forest_score"] = float("inf")
+            out["isolation_forest_label"] = -1
+            out["isolation_forest_model_mode"] = out["operating_mode"]
+            out["isolation_forest_missing_features"] = missing
+            return out
+
+    loaded = LoadedModel(
+        artifact=_FakeTrained(),
+        manifest=ModelManifestCommon(
+            artifact_format_version=1,
+            model_type="isolation_forest",
+            model_version="fake_if_schema",
+            created_at="now",
+            training_data_hash="h",
+            input_rows=1,
+            schema=_FakeTrained.manifest.schema,
+        ),
+        artifact_path=Path("/tmp/x"),
+        manifest_path=Path("/tmp/x.manifest.json"),
+        manifest_mtime=0.0,
+    )
+    row = pd.DataFrame(
+        [
+            {
+                "timestamp": "2026-05-13T12:00:00Z",
+                "session": "live",
+                "operating_mode": "all",
+                # obd:SPEED is never in the live row → permanently missing.
+                "obd:RPM": 700.0,
+            }
+        ]
+    )
+    health = HealthMonitor()
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=0)
+
+    with caplog.at_level(logging.WARNING, logger="src.daemon.inference"):
+        for _ in range(MODE_BLIND_WINDOW + 3):
+            _score_and_emit(loaded, row, emitter, health)
+
+    blindness_warnings = [r for r in caplog.records if "transitioned into blindness" in r.message]
+    assert len(blindness_warnings) == 1
+    assert health.if_blind_modes == ("all",)
+
+
+async def test_score_and_emit_uncalibrated_mode_never_emits(
+    tmp_path: Path,
+    config: CanaryConfig,
+) -> None:
+    """2.3: an uncalibrated mode's raw sklearn contamination label
+    (`isolation_forest_label == -1`, no calibrated threshold/anomaly) no
+    longer reaches the emitter — the score is still recorded (health +
+    /ws/scores), but no anomaly event fires."""
+    import pandas as pd
+
+    from src.alerts.emitter import AnomalyEventEmitter
+    from src.alerts.event_logger import AnomalyEventLogger
+    from src.daemon import _score_and_emit
+    from src.models.health import HealthMonitor
+    from src.models.manager import LoadedModel
+    from src.models.manifest import ModelManifestCommon
+
+    class _FakeTrained:
+        feature_columns = ("obd:RPM",)
+        mode_column = "operating_mode"
+        manifest = type("M", (), {"model_version": "fake_if_uncalibrated"})()
+
+        def score(self, frame: Any) -> Any:
+            out = frame.copy()
+            out["isolation_forest_score"] = 0.9
+            out["isolation_forest_label"] = -1  # sklearn says "anomaly"
+            out["isolation_forest_model_mode"] = "idle"
+            out["isolation_forest_missing_features"] = False
+            # No calibrated_threshold/calibrated_anomaly columns at all —
+            # this mode never accumulated a calibration holdout.
+            return out
+
+    loaded = LoadedModel(
+        artifact=_FakeTrained(),
+        manifest=ModelManifestCommon(
+            artifact_format_version=1,
+            model_type="isolation_forest",
+            model_version="fake_if_uncalibrated",
+            created_at="now",
+            training_data_hash="h",
+            input_rows=1,
+        ),
+        artifact_path=Path("/tmp/x"),
+        manifest_path=Path("/tmp/x.manifest.json"),
+        manifest_mtime=0.0,
+    )
+    row = pd.DataFrame(
+        [
+            {
+                "timestamp": "2026-05-13T12:00:00Z",
+                "session": "live",
+                "operating_mode": "idle",
+                "obd:RPM": 900.0,
+            }
+        ]
+    )
+    health = HealthMonitor()
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=0)
+
+    result = _score_and_emit(loaded, row, emitter, health)
+
+    assert emitter.counters.emitted == 0
+    assert not list(tmp_path.glob("anomalies-*.jsonl"))
+    # The score is still recorded — non-emitting isn't the same as invisible.
+    assert health.snapshot()["observed"] == 1
+    # Fusion input still carries the raw score (threshold None, so it can't
+    # fire in fusion either — see `_IFFusionInput`).
+    assert result is not None
+    assert result.score == 0.9
+    assert result.threshold is None
+
+
+async def test_score_and_emit_calibrated_mode_still_emits(
+    tmp_path: Path,
+    config: CanaryConfig,
+) -> None:
+    """2.3 control case: a calibrated mode's over-threshold verdict is
+    unaffected by retiring the uncalibrated legacy-label path."""
+    import pandas as pd
+
+    from src.alerts.emitter import AnomalyEventEmitter
+    from src.alerts.event_logger import AnomalyEventLogger
+    from src.daemon import _score_and_emit
+    from src.models.health import HealthMonitor
+    from src.models.manager import LoadedModel
+    from src.models.manifest import ModelManifestCommon
+
+    class _FakeTrained:
+        feature_columns = ("obd:RPM",)
+        mode_column = "operating_mode"
+        manifest = type("M", (), {"model_version": "fake_if_calibrated"})()
+
+        def score(self, frame: Any) -> Any:
+            out = frame.copy()
+            out["isolation_forest_score"] = 0.9
+            out["isolation_forest_label"] = -1
+            out["isolation_forest_model_mode"] = "idle"
+            out["isolation_forest_missing_features"] = False
+            out["isolation_forest_calibrated_threshold"] = 0.5
+            out["isolation_forest_calibrated_anomaly"] = True
+            return out
+
+    loaded = LoadedModel(
+        artifact=_FakeTrained(),
+        manifest=ModelManifestCommon(
+            artifact_format_version=1,
+            model_type="isolation_forest",
+            model_version="fake_if_calibrated",
+            created_at="now",
+            training_data_hash="h",
+            input_rows=1,
+        ),
+        artifact_path=Path("/tmp/x"),
+        manifest_path=Path("/tmp/x.manifest.json"),
+        manifest_mtime=0.0,
+    )
+    row = pd.DataFrame(
+        [
+            {
+                "timestamp": "2026-05-13T12:00:00Z",
+                "session": "live",
+                "operating_mode": "idle",
+                "obd:RPM": 900.0,
+            }
+        ]
+    )
+    health = HealthMonitor()
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=0)
+
+    result = _score_and_emit(loaded, row, emitter, health)
+
+    assert emitter.counters.emitted == 1
+    assert result is not None
+    assert result.threshold == 0.5
+
+
 async def test_score_and_emit_attaches_feature_contributors_from_scaler(
     tmp_path: Path,
     config: CanaryConfig,
@@ -1176,6 +1397,11 @@ async def test_score_and_emit_attaches_feature_contributors_from_scaler(
             out["isolation_forest_label"] = -1
             out["isolation_forest_model_mode"] = "all"
             out["isolation_forest_missing_features"] = False
+            # 2.3: uncalibrated modes are non-emitting at serve, so this
+            # contributor-ranking test needs a calibrated verdict to still
+            # reach the emitter.
+            out["isolation_forest_calibrated_threshold"] = 0.5
+            out["isolation_forest_calibrated_anomaly"] = True
             return out
 
     loaded = LoadedModel(
@@ -1313,6 +1539,9 @@ async def test_run_live_inference_emits_event_when_outlier(config: CanaryConfig)
             out["isolation_forest_label"] = -1
             out["isolation_forest_model_mode"] = "idle"
             out["isolation_forest_missing_features"] = False
+            # 2.3: uncalibrated modes are non-emitting at serve.
+            out["isolation_forest_calibrated_threshold"] = 0.5
+            out["isolation_forest_calibrated_anomaly"] = True
             return out
 
     class _StubManager:
@@ -1470,6 +1699,9 @@ async def test_run_live_inference_scores_during_replay_despite_engine_off_readin
             out["isolation_forest_label"] = -1
             out["isolation_forest_model_mode"] = "idle"
             out["isolation_forest_missing_features"] = False
+            # 2.3: uncalibrated modes are non-emitting at serve.
+            out["isolation_forest_calibrated_threshold"] = 0.5
+            out["isolation_forest_calibrated_anomaly"] = True
             return out
 
     class _StubManager:
@@ -1642,6 +1874,9 @@ async def test_run_daemon_end_to_end_inference_emits_anomaly(config: CanaryConfi
             out["isolation_forest_label"] = -1
             out["isolation_forest_model_mode"] = "all"
             out["isolation_forest_missing_features"] = False
+            # 2.3: uncalibrated modes are non-emitting at serve.
+            out["isolation_forest_calibrated_threshold"] = 0.5
+            out["isolation_forest_calibrated_anomaly"] = True
             return out
 
     class _StubManager:

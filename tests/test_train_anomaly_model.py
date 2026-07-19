@@ -100,7 +100,13 @@ signals:
 
 
 def _config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    # These tests train on small synthetic sessions (a couple hundred rows
+    # after resampling + rolling-window warmup) — comfortably under the
+    # production min_samples_per_mode floor (Task 2.2). Lower it so the
+    # fixtures still exercise a real trained model rather than sparsity.
+    config.models.isolation_forest.min_samples_per_mode = 5
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +402,11 @@ def test_reconcile_feature_frame_to_spec_aligns_missing_and_extra_columns():
 def test_train_writes_artifact_and_manifest(tmp_path: Path):
     pytest.importorskip("joblib")
     pytest.importorskip("sklearn")
-    session = _write_can_session(tmp_path, "sess1", n_frames=400)
+    # n_frames=650 (~163 rows after resample) clears the production
+    # min_samples_per_mode floor (Task 2.2, 100 fit rows after the 20 %
+    # calibration holdout) — these tests go through `main`'s real
+    # canary.example.yaml config, not the lowered `_config()` fixture above.
+    session = _write_can_session(tmp_path, "sess1", n_frames=650)
     bindings = tmp_path / "bindings.yaml"
     _write_bindings(bindings)
     out = tmp_path / "model"
@@ -451,7 +461,11 @@ def test_main_errors_when_no_sessions(tmp_path: Path, capsys):
 def test_main_trains_and_reports(tmp_path: Path, capsys):
     pytest.importorskip("joblib")
     pytest.importorskip("sklearn")
-    session = _write_can_session(tmp_path, "sess1", n_frames=400)
+    # n_frames=650 (~163 rows after resample) clears the production
+    # min_samples_per_mode floor (Task 2.2, 100 fit rows after the 20 %
+    # calibration holdout) — these tests go through `main`'s real
+    # canary.example.yaml config, not the lowered `_config()` fixture above.
+    session = _write_can_session(tmp_path, "sess1", n_frames=650)
     bindings = tmp_path / "bindings.yaml"
     _write_bindings(bindings)
     rc = main(
@@ -477,7 +491,11 @@ def test_main_trains_and_reports(tmp_path: Path, capsys):
 def test_main_with_evaluate(tmp_path: Path, capsys):
     pytest.importorskip("joblib")
     pytest.importorskip("sklearn")
-    session = _write_can_session(tmp_path, "sess1", n_frames=400)
+    # n_frames=650 (~163 rows after resample) clears the production
+    # min_samples_per_mode floor (Task 2.2, 100 fit rows after the 20 %
+    # calibration holdout) — these tests go through `main`'s real
+    # canary.example.yaml config, not the lowered `_config()` fixture above.
+    session = _write_can_session(tmp_path, "sess1", n_frames=650)
     bindings = tmp_path / "bindings.yaml"
     _write_bindings(bindings)
     rc = main(

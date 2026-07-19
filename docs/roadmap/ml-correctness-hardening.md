@@ -127,27 +127,41 @@ with a once-per-process log (`daemon/inference.py:619-629`,
 `_IF_MISSING_WARNED` at `:446`). Sparse modes also train meaningless
 models that emit ungated.
 
-- [ ] **2.1 — Surface IF blindness.** Replace once-per-process warn
+- [x] **2.1 — Surface IF blindness.** Replace once-per-process warn
   with: a `missing_feature_rate` per-mode gauge already in `/status` —
   add an explicit `detectors.isolation_forest.blind_modes` list to the
   status payload + `get_status`, and log a fresh warning when a mode
   *transitions* into blindness mid-drive (edge-triggered, not
-  per-tick). The dashboard SystemPanel shows it.
-- [ ] **2.2 — `min_samples_per_mode` floor.** Add a training guard
+  per-tick). The dashboard SystemPanel shows it. — landed:
+  `HealthMonitor` tracks an 8-tick per-mode rolling window, edge-fires
+  once on the blindness transition (re-arms on recovery);
+  `detectors.isolation_forest.{blind_modes,missing_feature_rate_by_mode}`
+  wired into `build_status`/`get_status`; SystemPanel shows it.
+- [x] **2.2 — `min_samples_per_mode` floor.** Add a training guard
   mirroring `_MIN_CALIBRATION_SAMPLES` (`isolation_forest.py`): modes
   with fewer fit rows than the floor (default ≥ 100) are skipped (no
   model persisted) rather than fitting a 200-tree forest on a handful
-  of rows. Skipped modes are listed in the manifest.
-- [ ] **2.3 — Retire the ungated legacy-label emit.** Uncalibrated
+  of rows. Skipped modes are listed in the manifest. — landed:
+  `IsolationForestConfig.min_samples_per_mode` (default 100); skipped
+  modes get no persisted model and land in `manifest.skipped_modes`.
+- [x] **2.3 — Retire the ungated legacy-label emit.** Uncalibrated
   modes currently bypass the PersistenceGate and fire on the sklearn
   contamination label (`daemon/inference.py:657-674` →
   `emitter.py:147-148`). Decision: make uncalibrated modes
   **non-emitting** (score recorded, no events) — consistent with 2.2's
   "no meaningless models" stance. Remove or gate the
-  `emit_isolation_forest_row` legacy path at serve.
-- [ ] **2.4 — Scaler leakage nit.** Fit `ZScoreScaler` on `fit_index`
+  `emit_isolation_forest_row` legacy path at serve. — landed:
+  `_score_and_emit` only emits when `calibrated_threshold is not None`;
+  score still recorded via `_publish_score`/health regardless; old
+  once-per-process `_IF_MISSING_WARNED` path removed.
+- [x] **2.4 — Scaler leakage nit.** Fit `ZScoreScaler` on `fit_index`
   rows only (`isolation_forest.py:388` currently fits pre-split).
-  Cosmetic-scale effect; cheap to do during 2.2's edit.
+  Cosmetic-scale effect; cheap to do during 2.2's edit. — landed:
+  scaler now fits only on the union of surviving modes' `fit_index`
+  rows, restricted to columns those modes actually use (a mode-gated
+  column exclusive to a 2.2-skipped mode gets an inert identity
+  placeholder instead of starving the fit — caught by review, fixed
+  before landing).
 - [ ] **2.5 — Feature redundancy for IF.** Each channel expands 4×
   (raw + `__mean` + `__std` + `__roc`, `features.py:14-15,34-36`),
   diluting IF's random-split mechanism. Trial in the benchmark: IF on

@@ -538,3 +538,179 @@ def test_legacy_config_without_calibration_attrs_disables_it() -> None:
         assert mode.score_threshold is None
         assert mode.holdout_samples == 0
     assert trained.score_thresholds == {}
+
+
+# ---------------------------------------------------------------------------
+# Task 2.2 — min_samples_per_mode floor
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _MinSamplesIFConfig(_IFConfig):
+    min_samples_per_mode: int = 30
+
+
+def _three_mode_frame_with_sparse_mode() -> pd.DataFrame:
+    """`_two_mode_frame` plus a third mode with only a handful of rows —
+    too few to trust a trained forest (Task 2.2)."""
+    frame = _two_mode_frame()
+    rng = np.random.default_rng(7)
+    n_sparse = 5
+    sparse = pd.DataFrame(
+        {
+            SESSION_COLUMN: ["session-c"] * n_sparse,
+            TIMESTAMP_COLUMN: pd.date_range("2026-05-11T00:05:00Z", periods=n_sparse, freq="1s"),
+            MODE_COLUMN: ["wot"] * n_sparse,
+            "obd:RPM": rng.normal(loc=4500.0, scale=100.0, size=n_sparse),
+            "obd:SPEED": rng.normal(loc=60.0, scale=2.0, size=n_sparse),
+            "obd:LOAD": rng.normal(loc=80.0, scale=3.0, size=n_sparse),
+            "obd:RPM" + GAP_SUFFIX: [False] * n_sparse,
+            "notes": ["clean"] * n_sparse,
+        }
+    )
+    return pd.concat([frame, sparse], ignore_index=True)
+
+
+def test_sparse_mode_is_skipped_and_listed_in_manifest() -> None:
+    frame = _three_mode_frame_with_sparse_mode()
+    trained = fit_isolation_forest(
+        frame,
+        _MinSamplesIFConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+
+    # The sparse mode never got a model persisted...
+    assert "wot" not in trained.models
+    assert set(trained.models) == {"idle", "city"}
+
+    # ...and is listed in the manifest instead, with its actual fit-row count.
+    skipped = {mode.mode: mode for mode in trained.manifest.skipped_modes}
+    assert set(skipped) == {"wot"}
+    assert skipped["wot"].fit_rows == 5
+    assert skipped["wot"].min_samples_required == 30
+
+    manifest = trained.manifest.to_dict()
+    assert manifest["skipped_modes"] == [{"mode": "wot", "fit_rows": 5, "min_samples_required": 30}]
+
+
+def test_min_samples_per_mode_floor_defaults_to_disabled_for_legacy_configs() -> None:
+    """Configs/test doubles predating 2.2 (no ``min_samples_per_mode``
+    attribute) train every mode regardless of size — the exact legacy
+    behavior — via the same defensive-``getattr`` fallback ``_calibration_params``
+    already uses for its own knobs."""
+
+    @dataclass(frozen=True)
+    class _NoFloorConfig:
+        enabled: bool = True
+        n_estimators: int = 50
+        contamination: float = 0.05
+        per_mode_contamination: dict[str, float] = field(default_factory=dict)
+        random_state: int = 42
+
+    frame = _three_mode_frame_with_sparse_mode()
+    trained = fit_isolation_forest(
+        frame,
+        _NoFloorConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+    assert set(trained.models) == {"idle", "city", "wot"}
+    assert trained.manifest.skipped_modes == ()
+
+
+# ---------------------------------------------------------------------------
+# Task 2.4 — scaler leakage
+# ---------------------------------------------------------------------------
+
+
+def test_scaler_fits_only_on_fit_index_rows_not_calibration_holdout() -> None:
+    """The z-score scaler is fit on each mode's *fit* rows only — not its
+    calibration-holdout tail. Injecting a wild shift into idle's held-out
+    rows (the timestamp-ordered tail) must not move the scaler's obd:RPM
+    mean, which it would if the scaler still fit on the full pre-split
+    frame (the leak this task retires)."""
+    frame = _two_mode_frame()
+
+    def _holdout_index(mode: str) -> pd.Index:
+        rows = frame[frame[MODE_COLUMN] == mode].sort_values(TIMESTAMP_COLUMN)
+        return rows.index[-12:]  # floor(60 * 0.2) == 12, matches the calibration split
+
+    idle_holdout = _holdout_index("idle")
+    city_holdout = _holdout_index("city")
+    # Expected scaler mean: every mode's *fit* rows (excluding each mode's own
+    # holdout tail), from the original (unshifted) values — the union the
+    # scaler should be fit on regardless of the shift injected below.
+    fit_index = frame.index.difference(idle_holdout).difference(city_holdout)
+    fit_only_mean = frame.loc[fit_index, "obd:RPM"].mean()
+
+    shifted = frame.copy()
+    shifted.loc[idle_holdout, "obd:RPM"] = 500_000.0  # would blow up a leaked mean
+
+    trained = fit_isolation_forest(
+        shifted,
+        _CalibratedIFConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+
+    assert trained.scaler.means["obd:RPM"] == pytest.approx(fit_only_mean, abs=1e-6)
+
+
+def _sparse_mode_with_exclusive_deviation_frame() -> pd.DataFrame:
+    """``idle`` is densely populated; ``wot`` is sparse (5 rows) and the only
+    mode carrying ``deviation:wot_only`` (NaN everywhere else) — the shape
+    that crashed 2.4's scaler fit once 2.2's floor skips ``wot``: the column
+    is then NaN across the *entire* surviving-mode (idle) row union."""
+    rng = np.random.default_rng(11)
+    n_idle = 60
+    n_wot = 5
+    timestamps = pd.date_range("2026-05-11T00:00:00Z", periods=n_idle + n_wot, freq="1s")
+    return pd.DataFrame(
+        {
+            SESSION_COLUMN: ["s"] * (n_idle + n_wot),
+            TIMESTAMP_COLUMN: timestamps,
+            MODE_COLUMN: ["idle"] * n_idle + ["wot"] * n_wot,
+            "obd:RPM": np.concatenate(
+                [rng.normal(800.0, 12.0, n_idle), rng.normal(4500.0, 100.0, n_wot)]
+            ),
+            "deviation:wot_only": np.concatenate(
+                [np.full(n_idle, np.nan), rng.normal(0.0, 1.0, n_wot)]
+            ),
+        }
+    )
+
+
+def test_scaler_skips_column_exclusive_to_a_floor_skipped_mode() -> None:
+    """A mode-gated column that's NaN everywhere except a mode 2.2's
+    ``min_samples_per_mode`` floor goes on to skip used to starve the 2.4
+    scaler fit of every non-NaN row for that column — ``ZScoreScaler.fit``
+    raised on the all-NaN column and crashed the whole run instead of just
+    excluding the skipped mode (the bug the verifier reproduced)."""
+    frame = _sparse_mode_with_exclusive_deviation_frame()
+
+    trained = fit_isolation_forest(
+        frame,
+        _MinSamplesIFConfig(),
+        feature_columns=["obd:RPM", "deviation:wot_only"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+
+    # wot was skipped (too few fit rows) exactly as in the plain 2.2 case.
+    assert set(trained.models) == {"idle"}
+    skipped = {mode.mode for mode in trained.manifest.skipped_modes}
+    assert skipped == {"wot"}
+    assert trained.mode_feature_columns["idle"] == ("obd:RPM",)
+
+    # The scaler still declares the full feature schema (the manifest
+    # contract other code relies on), but the column no surviving mode uses
+    # gets an inert identity placeholder rather than an impossible all-NaN
+    # fit — dead weight no model ever reads.
+    assert trained.scaler.columns == ("obd:RPM", "deviation:wot_only")
+    assert trained.scaler.means["deviation:wot_only"] == 0.0
+    assert trained.scaler.stds["deviation:wot_only"] == 1.0
+    # obd:RPM, which idle's model does use, still gets a real fit off idle's
+    # own *fit* rows (its calibration-holdout tail excluded, per Task 2.4).
+    idle_rows = frame[frame[MODE_COLUMN] == "idle"].sort_values(TIMESTAMP_COLUMN)
+    idle_fit_mean = idle_rows.iloc[: -int(len(idle_rows) * 0.2)]["obd:RPM"].mean()
+    assert trained.scaler.means["obd:RPM"] == pytest.approx(idle_fit_mean, abs=1e-6)

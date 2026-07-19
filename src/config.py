@@ -220,6 +220,11 @@ class IsolationForestConfig(_Strict):
     #: ``1 - target_flag_rate`` quantile of held-out scores. This replaces the
     #: assumption that exactly ``contamination`` of nominal driving is anomalous.
     target_flag_rate: float = Field(default=0.02, gt=0.0, le=0.5)
+    #: Task 2.2 — a mode with fewer than this many *fit* rows (post-holdout
+    #: split) is skipped entirely rather than fitting a full forest on a
+    #: handful of rows: no model persisted, listed in the manifest's
+    #: ``skipped_modes`` instead.
+    min_samples_per_mode: int = Field(default=100, ge=0)
 
 
 class AlertsConfig(_Strict):

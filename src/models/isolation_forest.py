@@ -67,6 +67,7 @@ class IsolationForestConfigLike(Protocol):
     random_state: int
     calibration_holdout_fraction: float
     target_flag_rate: float
+    min_samples_per_mode: int
 
 
 class MissingModelDependencyError(ImportError):
@@ -137,6 +138,33 @@ class ModeTrainingSummary:
 
 
 @dataclass(frozen=True)
+class SkippedModeSummary:
+    """Manifest record for a mode training skipped for having too few fit
+    rows (Task 2.2) — no model was fit or persisted for it. Distinct from a
+    mode absent for lack of any usable feature coverage: this one had rows
+    and a feature set, just not enough of either to trust a 200-tree forest."""
+
+    mode: str
+    fit_rows: int
+    min_samples_required: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "fit_rows": self.fit_rows,
+            "min_samples_required": self.min_samples_required,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> SkippedModeSummary:
+        return cls(
+            mode=str(data["mode"]),
+            fit_rows=int(data["fit_rows"]),
+            min_samples_required=int(data["min_samples_required"]),
+        )
+
+
+@dataclass(frozen=True)
 class IsolationForestManifest:
     """JSON-safe metadata for a trained Isolation Forest artifact."""
 
@@ -155,6 +183,10 @@ class IsolationForestManifest:
     scaler: Mapping[str, Any]
     schema: Mapping[str, Any]
     modes: tuple[ModeTrainingSummary, ...]
+    #: Modes with a usable feature set but too few fit rows to trust a
+    #: trained forest (Task 2.2) — no model was persisted for them. Empty
+    #: for manifests written before 2.2, or when every mode cleared the floor.
+    skipped_modes: tuple[SkippedModeSummary, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -173,6 +205,7 @@ class IsolationForestManifest:
             "scaler": dict(self.scaler),
             "schema": dict(self.schema),
             "modes": [mode.to_dict() for mode in self.modes],
+            "skipped_modes": [mode.to_dict() for mode in self.skipped_modes],
         }
 
     @classmethod
@@ -193,6 +226,9 @@ class IsolationForestManifest:
             scaler=dict(data["scaler"]),
             schema=dict(data["schema"]),
             modes=tuple(ModeTrainingSummary.from_dict(mode) for mode in data["modes"]),
+            skipped_modes=tuple(
+                SkippedModeSummary.from_dict(mode) for mode in data.get("skipped_modes", [])
+            ),
         )
 
 
@@ -352,6 +388,21 @@ class TrainedIsolationForest:
         save_isolation_forest_model(self, artifact_path, manifest_path=manifest_path)
 
 
+@dataclass(frozen=True)
+class _ModeFitPlan:
+    """One mode's feature set + time-ordered fit/calibration-holdout split
+    (Task 2.4), computed against the *raw* frame before the scaler is fit —
+    NaN positions are unaffected by scaling, so this can run first and hand
+    the scaler exactly the rows models will train on."""
+
+    feats: list[str]
+    complete_index: pd.Index
+    fit_index: pd.Index
+    holdout_index: pd.Index
+    n_holdout: int
+    calibrate: bool
+
+
 def fit_isolation_forest(
     frame: pd.DataFrame,
     config: IsolationForestConfigLike,
@@ -369,7 +420,8 @@ def fit_isolation_forest(
 
     The scaler and models are fit on the same complete rows: any row missing
     one or more selected feature values is dropped from training and counted
-    in the manifest.
+    in the manifest. Modes with a usable feature set but too few fit rows are
+    skipped entirely (Task 2.2) rather than persisting a meaningless forest.
     """
     _validate_config(config)
     _require_columns(frame, [mode_column, timestamp_column, session_column])
@@ -382,21 +434,19 @@ def fit_isolation_forest(
     )
     validate_model_feature_spec(schema, context="IsolationForest training feature spec")
 
-    # The scaler is NaN-aware (per-column skipna), so fit it on the full frame:
-    # every column gets stats from its own populated rows, including
-    # behavior-deviation surfaces that are NaN outside their operating mode.
-    scaler = ZScoreScaler.fit(frame, columns=selected_features)
-    scaled = scaler.transform(frame)
     seed = config.random_state if random_state is None else random_state
-
-    isolation_forest_cls = _isolation_forest_cls()
-    models: dict[str, Any] = {}
-    mode_feature_columns: dict[str, list[str]] = {}
-    modes: list[ModeTrainingSummary] = []
-    used_index: list[Any] = []
-
     holdout_fraction, target_flag_rate = _calibration_params(config)
-    for raw_mode, group in scaled.groupby(mode_column, sort=True, dropna=False):
+    min_samples_per_mode = _min_samples_per_mode(config)
+
+    # First pass, against the *raw* (unscaled) frame: work out each mode's
+    # feature subset and time-ordered fit/calibration-holdout split. NaN
+    # positions don't depend on scaling, so this can run before the scaler
+    # exists — which is exactly what Task 2.4 needs: the scaler is fit below
+    # on the union of these ``fit_index`` rows only, not the calibration
+    # holdout tail (the previous leak) and not modes 2.2 goes on to skip.
+    mode_plans: dict[str, _ModeFitPlan] = {}
+    skipped_modes: list[SkippedModeSummary] = []
+    for raw_mode, group in frame.groupby(mode_column, sort=True, dropna=False):
         mode = str(raw_mode)
         if len(group) == 0:
             continue
@@ -422,7 +472,6 @@ def fit_isolation_forest(
         mode_complete = group.dropna(subset=mode_feats)
         if mode_complete.empty:
             continue
-        contamination = _contamination_for_mode(config, mode)
 
         # Phase 7.2: time-order the mode's rows and reserve the tail as a
         # held-out calibration set the model never sees, so the per-mode
@@ -443,9 +492,77 @@ def fit_isolation_forest(
         else:
             fit_index, holdout_index, n_holdout = ordered_index, ordered_index[:0], 0
 
-        x = mode_complete.loc[fit_index, mode_feats].to_numpy(dtype=np.float32)
-        if len(x) == 0:
+        if len(fit_index) == 0:
             continue
+
+        # Task 2.2: a forest fit on a handful of rows is a meaningless model
+        # that still emits with full sklearn-default confidence. Skip it
+        # (no model persisted) instead, and record why in the manifest.
+        if len(fit_index) < min_samples_per_mode:
+            skipped_modes.append(
+                SkippedModeSummary(
+                    mode=mode,
+                    fit_rows=len(fit_index),
+                    min_samples_required=min_samples_per_mode,
+                )
+            )
+            continue
+
+        mode_plans[mode] = _ModeFitPlan(
+            feats=mode_feats,
+            complete_index=mode_complete.index,
+            fit_index=fit_index,
+            holdout_index=holdout_index,
+            n_holdout=n_holdout,
+            calibrate=calibrate,
+        )
+
+    if not mode_plans:
+        raise ValueError("no per-mode IsolationForest models were trained")
+
+    # 2.4: fit the scaler on exactly the rows the forests below train on —
+    # every kept mode's fit rows, none of their calibration-holdout rows, and
+    # none of a skipped mode's rows. Still NaN-aware per column, so a
+    # deviation surface gated to one mode gets its stats from that mode's
+    # own fit rows same as before.
+    scaler_fit_rows = sorted({idx for plan in mode_plans.values() for idx in plan.fit_index})
+    # A feature column exclusive to a mode 2.2's floor skips entirely (e.g. a
+    # ``deviation:*`` surface mode-gated to that one mode — see
+    # ``feature_pipeline``'s mode-gated-feature docstrings) is NaN across the
+    # *whole* surviving-mode row union: no surviving mode's ``plan.feats``
+    # lists it, so it never has real values outside the now-skipped mode.
+    # Fitting the scaler over ``selected_features`` unconditionally used to
+    # crash on that column (``ZScoreScaler.fit`` rejects all-NaN columns)
+    # even though no surviving model ever reads it. Fit only on columns some
+    # surviving mode actually uses, then backfill identity placeholder stats
+    # (mean 0 / std 1) for the rest — dead parameters no model consults, kept
+    # only so ``scaler.columns`` still matches the manifest's full
+    # ``feature_columns`` schema, exactly as before.
+    used_columns = [
+        column
+        for column in selected_features
+        if any(column in plan.feats for plan in mode_plans.values())
+    ]
+    scaler = ZScoreScaler.fit(frame.loc[scaler_fit_rows], columns=used_columns)
+    unused_columns = [column for column in selected_features if column not in used_columns]
+    if unused_columns:
+        scaler = ZScoreScaler(
+            means={**scaler.means, **dict.fromkeys(unused_columns, 0.0)},
+            stds={**scaler.stds, **dict.fromkeys(unused_columns, 1.0)},
+            columns=tuple(selected_features),
+            std_floor=scaler.std_floor,
+        )
+    scaled = scaler.transform(frame)
+
+    isolation_forest_cls = _isolation_forest_cls()
+    models: dict[str, Any] = {}
+    mode_feature_columns: dict[str, list[str]] = {}
+    modes: list[ModeTrainingSummary] = []
+    used_index: list[Any] = []
+
+    for mode, plan in mode_plans.items():
+        contamination = _contamination_for_mode(config, mode)
+        x = scaled.loc[plan.fit_index, plan.feats].to_numpy(dtype=np.float32)
         model = isolation_forest_cls(
             n_estimators=config.n_estimators,
             contamination=contamination,
@@ -453,14 +570,14 @@ def fit_isolation_forest(
         )
         model.fit(x)
         models[mode] = model
-        mode_feature_columns[mode] = mode_feats
-        used_index.extend(mode_complete.index.tolist())
+        mode_feature_columns[mode] = plan.feats
+        used_index.extend(plan.complete_index.tolist())
 
         score_threshold: float | None = None
         score_scale: float | None = None
         achieved_flag_rate: float | None = None
-        if calibrate:
-            hx = mode_complete.loc[holdout_index, mode_feats].to_numpy(dtype=np.float32)
+        if plan.calibrate:
+            hx = scaled.loc[plan.holdout_index, plan.feats].to_numpy(dtype=np.float32)
             holdout_scores = -model.decision_function(hx)
             score_threshold = float(np.quantile(holdout_scores, 1.0 - target_flag_rate))
             achieved_flag_rate = float(np.mean(holdout_scores >= score_threshold))
@@ -471,19 +588,16 @@ def fit_isolation_forest(
             _mode_summary(
                 mode=mode,
                 contamination=contamination,
-                frame=frame.loc[mode_complete.index],
+                frame=frame.loc[plan.complete_index],
                 session_column=session_column,
                 timestamp_column=timestamp_column,
                 score_threshold=score_threshold,
                 score_scale=score_scale,
-                holdout_samples=n_holdout,
-                target_flag_rate=target_flag_rate if calibrate else None,
+                holdout_samples=plan.n_holdout,
+                target_flag_rate=target_flag_rate if plan.calibrate else None,
                 achieved_flag_rate=achieved_flag_rate,
             )
         )
-
-    if not models:
-        raise ValueError("no per-mode IsolationForest models were trained")
 
     # The rows actually used across all per-mode models (disjoint by mode) —
     # for the manifest's data hash, span, sessions, and complete-row count.
@@ -516,6 +630,7 @@ def fit_isolation_forest(
             "random_state": seed,
             "calibration_holdout_fraction": holdout_fraction,
             "target_flag_rate": target_flag_rate,
+            "min_samples_per_mode": min_samples_per_mode,
         },
         scaler=scaler.to_dict(),
         schema={
@@ -528,6 +643,7 @@ def fit_isolation_forest(
             "label_column": LABEL_COLUMN,
         },
         modes=tuple(modes),
+        skipped_modes=tuple(skipped_modes),
     )
     return TrainedIsolationForest(models=models, scaler=scaler, manifest=manifest)
 
@@ -604,6 +720,8 @@ def _validate_config(config: IsolationForestConfigLike) -> None:
         raise ValueError("calibration_holdout_fraction must be in [0, 1)")
     if not 0.0 < target_flag_rate <= 0.5:
         raise ValueError("target_flag_rate must be in (0, 0.5]")
+    if _min_samples_per_mode(config) < 0:
+        raise ValueError("min_samples_per_mode must be non-negative")
 
 
 def _validate_contamination(value: float, *, label: str) -> None:
@@ -621,6 +739,16 @@ def _calibration_params(config: IsolationForestConfigLike) -> tuple[float, float
     holdout_fraction = float(getattr(config, "calibration_holdout_fraction", 0.0))
     target_flag_rate = float(getattr(config, "target_flag_rate", 0.02))
     return holdout_fraction, target_flag_rate
+
+
+def _min_samples_per_mode(config: IsolationForestConfigLike) -> int:
+    """Read the Task 2.2 fit-row floor defensively — same pattern as
+    :func:`_calibration_params`. Configs/test doubles predating 2.2 don't
+    carry ``min_samples_per_mode``; absence means "no floor" (``0``),
+    preserving the exact legacy behavior of training on however few rows a
+    mode has. ``src.config.IsolationForestConfig`` defaults it to 100.
+    """
+    return int(getattr(config, "min_samples_per_mode", 0))
 
 
 def _validate_loaded_artifact(

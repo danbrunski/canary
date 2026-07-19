@@ -175,6 +175,12 @@ class StatusSnapshot:
     #: ``None`` when the daemon isn't running on a profile-scoped config (bare
     #: app / tests). ``name`` is the operator-editable display label.
     profile: dict[str, str | None] | None = None
+    #: Per-detector health beyond the aggregate ``health`` block (Task 2.1).
+    #: Currently just IF's ``blind_modes`` (operating modes whose trained
+    #: feature schema has gone permanently missing from the live stream, so
+    #: emits are suppressed for them) + the per-mode missing-feature rate
+    #: gauge that feeds it — ``None`` when no health monitor is wired.
+    detectors: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -190,6 +196,7 @@ class StatusSnapshot:
             "gps": self.gps,
             "trip": self.trip,
             "profile": self.profile,
+            "detectors": self.detectors,
         }
 
 
@@ -350,6 +357,16 @@ def build_status(
                 else manifest.parent.name
             )
             model_versions[name] = _model_version(manifest)
+    detectors: dict[str, Any] | None = None
+    if health_monitor is not None:
+        detectors = {
+            "isolation_forest": {
+                "blind_modes": list(health_monitor.if_blind_modes),
+                "missing_feature_rate_by_mode": dict(
+                    health_monitor.if_missing_feature_rate_by_mode
+                ),
+            }
+        }
     return StatusSnapshot(
         storage_path=str(storage),
         free_mb=_free_mb(storage),
@@ -363,6 +380,7 @@ def build_status(
         gps=gps_tracker.gps_status() if gps_tracker is not None else None,
         trip=gps_tracker.trip_status() if gps_tracker is not None else None,
         profile=_active_profile(config),
+        detectors=detectors,
     )
 
 

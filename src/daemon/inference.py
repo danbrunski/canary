@@ -491,9 +491,6 @@ def _log_schema_reconciliation_once(
     )
 
 
-# Model versions already warned about scoring with a missing feature schema,
-# so the fail-safe suppression logs once per version instead of every tick.
-_IF_MISSING_WARNED: set[str] = set()
 #: Phase 7.2a — how many top IF feature contributors (by ``|scaled z|``) the
 #: emitter attaches as ``detail.feature_contributors``. Keeps the per-event
 #: payload bounded for IF models with dozens of features.
@@ -548,8 +545,9 @@ def _publish_score(
 @dataclass(frozen=True)
 class _IFFusionInput:
     """The IF half of one fused tick (Phase 7.2). ``threshold``/``scale`` are
-    ``None`` for an uncalibrated (legacy) mode, so the IF source can't fire in
-    fusion — it still emits its own per-source event via the label rule."""
+    ``None`` for an uncalibrated mode, so the IF source can't fire in fusion —
+    nor does it emit its own per-source event any more (2.3: uncalibrated
+    modes are non-emitting, score-only)."""
 
     score: float
     threshold: float | None
@@ -622,23 +620,40 @@ def _score_and_emit(
     scored = engine.observe(aligned.iloc[0])
     latency_ms = (time.perf_counter() - started) * 1000.0
     timestamp = row["timestamp"].iloc[0]
+    missing = bool(scored.get(MISSING_FEATURES_COLUMN, False))
+    mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
+    mode_str = None if mode_val is None or pd.isna(mode_val) else str(mode_val)
     if health is not None:
         try:
             ts_epoch = pd.Timestamp(timestamp).timestamp()
         except (ValueError, TypeError):
             ts_epoch = None
-        health.observe_inference(
+        # 2.1: per-mode blindness is edge-triggered off the same tick health
+        # already records, so a mode transitioning into it logs a fresh
+        # warning instead of the old once-per-process one keyed on model
+        # version. blind_modes/missing_feature_rate_by_mode are then visible
+        # on /status for every tick, not just the transition.
+        newly_blind = health.observe_inference(
             latency_ms=latency_ms,
-            missing_features=bool(scored.get(MISSING_FEATURES_COLUMN, False)),
+            missing_features=missing,
             score=(
                 float(scored[SCORE_COLUMN])
                 if SCORE_COLUMN in scored and pd.notna(scored[SCORE_COLUMN])
                 else None
             ),
             data_timestamp_epoch=ts_epoch,
+            operating_mode=mode_str,
         )
-    missing = bool(scored.get(MISSING_FEATURES_COLUMN, False))
-    mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
+        if newly_blind:
+            log.warning(
+                "isolation_forest mode %r transitioned into blindness — a "
+                "trained feature column has gone permanently missing from "
+                "the live stream; anomaly emits are suppressed for this mode "
+                "until it recovers. See /status "
+                "detectors.isolation_forest.blind_modes.",
+                mode_str,
+                extra={"model_version": engine.model_version, "operating_mode": mode_str},
+            )
     raw_threshold = scored.get(CALIBRATED_THRESHOLD_COLUMN)
     calibrated_threshold = (
         float(raw_threshold) if raw_threshold is not None and pd.notna(raw_threshold) else None
@@ -654,7 +669,7 @@ def _score_and_emit(
         source="isolation_forest",
         score=scored.get(SCORE_COLUMN),
         threshold=calibrated_threshold,  # 7.2 per-mode calibrated boundary
-        operating_mode=(None if mode_val is None or pd.isna(mode_val) else str(mode_val)),
+        operating_mode=mode_str,
         model_version=engine.model_version,
         timestamp=timestamp,
         missing_features=missing,
@@ -667,15 +682,6 @@ def _score_and_emit(
     # but observable beats confidently wrong. The raw score still went onto
     # /ws/scores above so the live readout shows the degraded state.
     if missing:
-        version = engine.model_version
-        if version not in _IF_MISSING_WARNED:
-            _IF_MISSING_WARNED.add(version)
-            log.warning(
-                "isolation_forest scoring with missing feature columns; "
-                "suppressing anomaly emit until the live stream supplies the "
-                "full trained schema. Watch /status missing_feature_rate.",
-                extra={"model_version": version},
-            )
         return None
     # Phase 7.2a — cheap first-pass IF attribution: rank features by their
     # distance from the scaler's training baseline (|z|), keep the top K.
@@ -698,12 +704,14 @@ def _score_and_emit(
     except Exception:  # noqa: BLE001 — attribution is best-effort, never blocks an emit
         log.exception("isolation_forest feature_contributors ranking failed")
     score_val = scored.get(SCORE_COLUMN)
+    calibrated = calibrated_threshold is not None
     suppress_emit = False
     if persistence is not None:
         # Same firing rule the fusion source uses: calibrated over-threshold.
-        # Uncalibrated rows (no threshold) can't latch the gate and keep the
-        # legacy ungated emit path; non-firing ticks still flow to the
-        # emitter so its suppressed_not_anomaly accounting stays truthful.
+        # Uncalibrated rows (no threshold) can never raise this — they're
+        # non-emitting entirely now (2.3, below) — but still flow through so
+        # the gate's internal streak state and the emitter's
+        # suppressed_not_anomaly accounting stay truthful.
         raw_fired = (
             score_val is not None
             and pd.notna(score_val)
@@ -714,7 +722,14 @@ def _score_and_emit(
         if raw_fired and not sustained:
             suppress_emit = True
             emitter.counters.suppressed_persistence += 1
-    if not suppress_emit:
+    # 2.2/2.3: a mode with no calibrated threshold is either too sparse to
+    # trust (skipped at training, 2.2) or hasn't accumulated enough holdout
+    # yet — either way its raw sklearn contamination label no longer reaches
+    # the emitter. This retires the legacy path that used to bypass the
+    # persistence gate entirely and fire straight off that label; the score
+    # is still recorded above (health + /ws/scores) so the degraded mode
+    # stays observable, just non-emitting.
+    if calibrated and not suppress_emit:
         emitter.emit_isolation_forest_row(
             scored,
             model_version=engine.model_version,

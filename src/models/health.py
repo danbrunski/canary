@@ -290,6 +290,15 @@ class _Rolling:
     missing_feature_rows: int = 0
 
 
+#: Task 2.1 — a permanently-absent trained feature column makes every IF tick
+#: for a mode ``missing_features=True`` forever. A short run of misses right
+#: after startup (schema warmup) shouldn't immediately declare the mode
+#: "blind", so blindness only latches once a full window of *consecutive*
+#: ticks for that mode all missed — long enough to rule out a startup blip at
+#: the live ~1 Hz tick rate, short enough to catch a real dropout mid-drive.
+_MODE_BLIND_WINDOW = 8
+
+
 class HealthMonitor:
     """Rolling inference-health accumulator.
 
@@ -310,6 +319,10 @@ class HealthMonitor:
         #: (monotonic_ts, value) cache so /status polling doesn't spawn a
         #: vcgencmd subprocess every call — the flags barely move at a glance.
         self._power_cache: tuple[float, dict[str, Any] | None] | None = None
+        #: Task 2.1 — per operating-mode rolling missing-feature window (IF)
+        #: and the mode's latched blind state, keyed by mode name.
+        self._if_mode_missing: dict[str, deque[bool]] = {}
+        self._if_mode_blind: dict[str, bool] = {}
 
     #: How long a cached power_status() reading stays fresh (seconds).
     _POWER_TTL_SECONDS = 5.0
@@ -348,7 +361,16 @@ class HealthMonitor:
         missing_features: bool = False,
         score: float | None = None,
         data_timestamp_epoch: float | None = None,
-    ) -> None:
+        operating_mode: str | None = None,
+    ) -> bool:
+        """Record one inference tick.
+
+        Returns ``True`` exactly on the tick ``operating_mode`` (2.1)
+        transitions from not-blind to blind — edge-triggered, so the caller
+        can log a fresh warning instead of the old once-per-process one.
+        ``False`` when ``operating_mode`` is ``None`` (no per-mode tracking
+        possible) or the mode was already blind / never became so.
+        """
         self._roll.observed += 1
         if latency_ms is not None:
             self._roll.latencies_ms.append(float(latency_ms))
@@ -358,6 +380,35 @@ class HealthMonitor:
             self._roll.missing_feature_rows += 1
         if data_timestamp_epoch is not None:
             self._last_data_ts = data_timestamp_epoch
+        if operating_mode is None:
+            return False
+        return self._observe_if_mode_missing(operating_mode, missing_features)
+
+    def _observe_if_mode_missing(self, mode: str, missing: bool) -> bool:
+        """Update ``mode``'s rolling missing-feature window; return whether
+        this tick is the one that latched the mode into blindness (2.1)."""
+        window = self._if_mode_missing.setdefault(mode, deque(maxlen=_MODE_BLIND_WINDOW))
+        window.append(missing)
+        now_blind = len(window) == window.maxlen and all(window)
+        was_blind = self._if_mode_blind.get(mode, False)
+        self._if_mode_blind[mode] = now_blind
+        return now_blind and not was_blind
+
+    @property
+    def if_blind_modes(self) -> tuple[str, ...]:
+        """Modes currently latched blind (2.1), sorted for stable output."""
+        return tuple(sorted(mode for mode, blind in self._if_mode_blind.items() if blind))
+
+    @property
+    def if_missing_feature_rate_by_mode(self) -> dict[str, float]:
+        """Per-mode missing-feature rate over each mode's rolling window
+        (2.1) — the same signal ``blind_modes`` latches off of, surfaced as a
+        gauge so a mode heading toward blindness is visible before it fires."""
+        return {
+            mode: round(sum(window) / len(window), 4)
+            for mode, window in self._if_mode_missing.items()
+            if window
+        }
 
     def note_swap(self, kind: str, *, version: str | None = None) -> None:
         self._swaps[kind] = self._swaps.get(kind, 0) + 1

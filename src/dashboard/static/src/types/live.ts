@@ -80,6 +80,20 @@ export interface StatusResponse {
   sequence_detector?: SequenceDetectorStatus | null;
   /** Active vehicle profile {slug, name, vin}; null on a non-scoped daemon. */
   profile?: { slug: string; name: string; vin: string | null } | null;
+  /** Per-detector health beyond the aggregate `health` block (Task 2.1);
+   *  null until a health monitor is wired (tests / bare app). */
+  detectors?: DetectorsStatus | null;
+}
+
+/** `/status.detectors` (Task 2.1). `blind_modes` are operating modes whose
+ *  trained IF feature schema has gone permanently missing from the live
+ *  stream — anomaly emits are suppressed for them until they recover;
+ *  `missing_feature_rate_by_mode` is the rolling gauge that feeds it. */
+export interface DetectorsStatus {
+  isolation_forest: {
+    blind_modes: string[];
+    missing_feature_rate_by_mode: Record<string, number>;
+  };
 }
 
 /** `/status.sequence_detector` (and `GET/POST /control/sequence-detector`).

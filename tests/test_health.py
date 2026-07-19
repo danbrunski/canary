@@ -171,6 +171,59 @@ def test_empty_monitor_snapshot_is_none_safe() -> None:
     assert snap["data_freshness_seconds"] is None
 
 
+def test_observe_inference_latches_if_mode_blindness_edge_triggered() -> None:
+    """2.1: a mode only latches "blind" once a full window of consecutive
+    missing-feature ticks has landed for it, and the transition into that
+    state is reported exactly once (edge-triggered), not on every tick."""
+    mon = HealthMonitor()
+    window = health_mod._MODE_BLIND_WINDOW
+
+    # Fewer than a full window of misses: not yet blind.
+    transitions = [
+        mon.observe_inference(missing_features=True, operating_mode="idle")
+        for _ in range(window - 1)
+    ]
+    assert not any(transitions)
+    assert mon.if_blind_modes == ()
+
+    # The tick that completes the window latches it — exactly once.
+    assert mon.observe_inference(missing_features=True, operating_mode="idle") is True
+    assert mon.if_blind_modes == ("idle",)
+
+    # Further missing ticks for the same mode don't re-fire the transition.
+    assert mon.observe_inference(missing_features=True, operating_mode="idle") is False
+    assert mon.if_blind_modes == ("idle",)
+
+    # A single clean tick resets the window — the mode is no longer blind...
+    assert mon.observe_inference(missing_features=False, operating_mode="idle") is False
+    assert mon.if_blind_modes == ()
+
+    # ...and going missing again for a fresh full window re-latches (and
+    # would re-warn) rather than staying silently suppressed forever.
+    for _ in range(window - 1):
+        mon.observe_inference(missing_features=True, operating_mode="idle")
+    assert mon.observe_inference(missing_features=True, operating_mode="idle") is True
+    assert mon.if_blind_modes == ("idle",)
+
+
+def test_if_missing_feature_rate_by_mode_and_blind_modes_are_per_mode() -> None:
+    mon = HealthMonitor()
+    for _ in range(health_mod._MODE_BLIND_WINDOW):
+        mon.observe_inference(missing_features=True, operating_mode="idle")
+    mon.observe_inference(missing_features=False, operating_mode="city")
+    mon.observe_inference(missing_features=True, operating_mode="city")
+
+    assert mon.if_blind_modes == ("idle",)
+    assert mon.if_missing_feature_rate_by_mode == {"idle": 1.0, "city": 0.5}
+
+
+def test_observe_inference_without_operating_mode_never_blinds() -> None:
+    mon = HealthMonitor()
+    for _ in range(health_mod._MODE_BLIND_WINDOW + 2):
+        assert mon.observe_inference(missing_features=True) is False
+    assert mon.if_blind_modes == ()
+
+
 def test_monitor_snapshots_obd_scheduler_metrics() -> None:
     mon = HealthMonitor()
     mon.observe_obd_scheduler(
@@ -239,3 +292,29 @@ def test_status_endpoint_exposes_health(tmp_path: Path) -> None:
     body = TestClient(app).get("/status").json()
     assert body["health"]["model_swaps"]["swapped"] == 1
     assert body["health"]["active_model_version"] == "lstm_v9"
+
+
+def test_status_exposes_isolation_forest_blind_modes(tmp_path: Path) -> None:
+    """2.1: `detectors.isolation_forest.blind_modes` + the per-mode missing-
+    feature gauge are top-level on `/status`, not buried under `health`."""
+    config = _config(tmp_path)
+    mon = HealthMonitor()
+    for _ in range(health_mod._MODE_BLIND_WINDOW):
+        mon.observe_inference(missing_features=True, operating_mode="idle")
+    mon.observe_inference(missing_features=False, operating_mode="city")
+
+    snap = build_status(config, health_monitor=mon).to_dict()
+    assert snap["detectors"]["isolation_forest"]["blind_modes"] == ["idle"]
+    assert snap["detectors"]["isolation_forest"]["missing_feature_rate_by_mode"] == {
+        "idle": 1.0,
+        "city": 0.0,
+    }
+
+    app = create_app(config, anomalies_dir=tmp_path / "anomalies", health_monitor=mon)
+    body = TestClient(app).get("/status").json()
+    assert body["detectors"]["isolation_forest"]["blind_modes"] == ["idle"]
+
+
+def test_status_detectors_is_none_without_a_health_monitor(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    assert build_status(config).to_dict()["detectors"] is None
