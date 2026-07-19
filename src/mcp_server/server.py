@@ -423,6 +423,20 @@ def _register_read_tools(
             "tools remain available."
         )
 
+    if cfg.config_path is not None and cfg.config_path.exists():
+        config_path = cfg.config_path
+
+        @mcp.tool()
+        def get_behavior_deviations(session: str, mode: str | None = None) -> dict[str, Any]:
+            """Diff a stored session against the learned behavior surfaces (local,
+            no daemon HTTP call) — did a mod/retrain/change actually move behavior?"""
+            return behavior_tool.get_behavior_deviations(config_path, session=session, mode=mode)
+    else:
+        logger.info(
+            "get_behavior_deviations disabled — CANARY_CONFIG unset or unreadable; "
+            "get_behavior_live remains available for live state."
+        )
+
 
 def _register_write_tools(
     mcp: FastMCP,

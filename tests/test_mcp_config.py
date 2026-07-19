@@ -40,6 +40,7 @@ def test_load_from_env_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.daemon_unit == "canary"
     assert cfg.anomalies_dir is None
     assert cfg.auth_required is False
+    assert cfg.config_path is None
 
 
 def test_load_from_env_reads_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -144,6 +145,17 @@ def test_audit_path_explicit_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setenv("CANARY_MCP_AUDIT_PATH", str(tmp_path / "elsewhere.jsonl"))
     cfg = load_from_env()
     assert cfg.audit_path == tmp_path / "elsewhere.jsonl"
+
+
+def test_config_path_round_trips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """``CANARY_CONFIG`` is preserved verbatim as ``config_path`` (not just
+    parsed for storage_path/anomalies_dir) — get_behavior_deviations needs
+    the full typed CanaryConfig, not just these two derived fields."""
+    config_file = tmp_path / "canary.yaml"
+    config_file.write_text("collection:\n  storage_path: /var/canary/sessions\n")
+    monkeypatch.setenv("CANARY_CONFIG", str(config_file))
+    cfg = load_from_env()
+    assert cfg.config_path == config_file
 
 
 def test_anomalies_dir_falls_back_to_daemon_default(

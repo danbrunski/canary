@@ -102,11 +102,19 @@ class SessionDeviationReport:
     #: gated on").
     gated_on_missing_mode: dict[str, str]
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, mode_filter: str | None = None) -> dict[str, Any]:
+        """JSON-safe payload. ``mode_filter`` restricts ``surfaces`` to those
+        gated on that ``operating_mode`` — the single implementation the CLI
+        (``--mode``) and the MCP tool (``mode=``) both filter through."""
+        surfaces = (
+            self.surfaces
+            if mode_filter is None
+            else [s for s in self.surfaces if s.operating_mode == mode_filter]
+        )
         return {
             "session_dir": str(self.session_dir),
             "n_rows": self.n_rows,
-            "surfaces": [s.to_dict() for s in self.surfaces],
+            "surfaces": [s.to_dict() for s in surfaces],
             "gated_on_missing_mode": self.gated_on_missing_mode,
         }
 

@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from src.analysis.session_deviations import analyze_session
+from src.config import CanaryConfig
+from src.control.sessions import resolve_session
+from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH, load_behavior_models
 from src.mcp_server.client import DaemonClient
+from src.profiles import resolve_profile_for_tooling, scope_config
 
 
 async def get_behavior_live(
@@ -34,4 +40,53 @@ async def get_behavior_models(client: DaemonClient) -> dict[str, Any]:
     return await client.get_json("/models/behavior")
 
 
-__all__ = ["get_behavior_live", "get_behavior_models"]
+def get_behavior_deviations(
+    config_path: Path,
+    *,
+    session: str,
+    mode: str | None = None,
+) -> dict[str, Any]:
+    """Diff a *stored* session against the learned behavior surfaces — the
+    "did my change move behavior?" tool, run locally (no daemon HTTP call,
+    pandas/numpy only, like ``query_telemetry``).
+
+    Unlike ``get_behavior_live`` (the current live tick), this replays a
+    whole recorded drive through the same decode/segment/evaluate pipeline
+    used for training, and reports per-surface aggregates: how many rows the
+    model was gated into (``n_observed``), how many it actually spoke for
+    (``n_in_domain``), mean actual/expected/deviation, warning/critical
+    fraction, and — for the fuel/air ``surface_2d`` recipes — a per-(rpm,load)
+    -bin breakdown so a shift's *location* in the operating envelope is
+    visible, not just a session-wide average. Use this instead of ad-hoc
+    DuckDB over SSH after a mod, a retrain, or any change you want to verify
+    actually moved the numbers.
+
+    ``mode`` restricts the returned ``surfaces`` to those gated on that
+    ``operating_mode`` (surfaces with no gate are excluded when a mode filter
+    is set, matching ``scripts/analyze_session.py --mode``).
+
+    Returns ``{"ok": False, "error": ...}`` on a bad session id or a missing
+    behavior_models.yaml rather than raising, matching ``query_telemetry``'s
+    validation-error convention.
+    """
+    config = CanaryConfig.from_yaml(config_path)
+    profile = resolve_profile_for_tooling(config, None)
+    scoped = scope_config(config, profile)
+
+    try:
+        session_dir = resolve_session(scoped.collection.storage_path, session)
+    except FileNotFoundError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    behavior_models_path = scoped.daemon.behavior_models
+    if not behavior_models_path.exists():
+        behavior_models_path = DEFAULT_BEHAVIOR_MODELS_PATH
+    if not behavior_models_path.exists():
+        return {"ok": False, "error": f"no behavior_models.yaml found ({behavior_models_path})"}
+    models = load_behavior_models(behavior_models_path)
+
+    report = analyze_session(session_dir, scoped, models)
+    return {"ok": True, **report.to_dict(mode_filter=mode)}
+
+
+__all__ = ["get_behavior_live", "get_behavior_models", "get_behavior_deviations"]

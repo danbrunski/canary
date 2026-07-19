@@ -217,9 +217,18 @@ the surface evaluator is fully separable — `featurize_wide_frame` +
   `tests/test_analyze_session_script.py` (table output, `--mode` filtering,
   unknown-session error path) plus a manual real-fixture run to confirm the
   printed table reads cleanly.
-- [ ] **3.4 — MCP tool.** `get_behavior_deviations(session, mode?)` running the
-  analyzer locally in the MCP process (pandas/numpy only — no torch), like
-  `query_telemetry`. Register in `server.py`; document in `docs/mcp-server.md`.
+- [x] **3.4 — MCP tool.** `get_behavior_deviations(session, mode?)` in
+  `src/mcp_server/tools/behavior.py`, running the analyzer locally (pandas/
+  numpy only — no torch), like `query_telemetry`. Added `config_path: Path |
+  None = None` to `MCPConfig` (populated from `$CANARY_CONFIG`, which the
+  module already read for `storage_path`/`anomalies_dir` but didn't expose
+  verbatim) since the tool needs the full typed `CanaryConfig`, not just
+  those two derived fields. Conditionally registered in `server.py`
+  (mirrors `query_telemetry`'s gate) only when `CANARY_CONFIG` resolves to a
+  readable file. Returns `{"ok": False, "error": ...}` on a bad session id
+  or missing `behavior_models.yaml`, matching `query_telemetry`'s
+  convention. Documented in `docs/mcp-server.md`. 4 tool tests + 2 server
+  registration-gating tests + 1 `MCPConfig` round-trip test.
 - [ ] **3.5 — `query_telemetry` scoping.** Add `session: str | None` and
   `since`/`until` params to the MCP tool (`server.py:392`,
   `tools/telemetry.py:37`) and push down into `TelemetryQuery._matching_files`

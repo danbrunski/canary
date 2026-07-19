@@ -40,6 +40,7 @@ Read tools:
 | `search_anomaly_log` | structured search over anomaly day-files + MCP audit log (kind=anomalies\|audit) |
 | `signal_lookup` | in-process FSM-name fuzzy match (requires `CANARY_SIGNALS_PATH`) |
 | `query_telemetry` | DuckDB over the Parquet ring buffer (requires `CANARY_STORAGE_PATH`) |
+| `get_behavior_deviations` | Local, no daemon call (requires `CANARY_CONFIG`): diffs a *stored* session against the learned behavior surfaces via [`src/analysis/session_deviations.py`](../src/analysis/session_deviations.py) — the "did my change move behavior?" tool. Unlike `get_behavior_live` (current tick only), this replays a whole recorded drive through the training pipeline and reports per-surface n_observed/n_in_domain, mean actual/expected/deviation, warning/critical fraction, and (surface_2d) a per-(rpm,load)-bin breakdown. `mode=` filters to surfaces gated on that `operating_mode`. Also available as a CLI: `scripts/analyze_session.py --session <id> [--mode <m>] [--profile <slug>]`. |
 
 Write tools (audit-logged with `actor="mcp"` via
 [`src/control/audit.py`](../src/control/audit.py)):

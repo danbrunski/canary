@@ -13,6 +13,7 @@ def _config(
     storage: Path | None = None,
     signals: Path | None = None,
     anomalies: Path | None = None,
+    config_path: Path | None = None,
 ) -> MCPConfig:
     return MCPConfig(
         daemon_url="http://127.0.0.1:8000",
@@ -26,6 +27,7 @@ def _config(
         log_fallback_path=None,
         daemon_unit="canary",
         anomalies_dir=anomalies,
+        config_path=config_path,
     )
 
 
@@ -84,6 +86,7 @@ async def test_build_server_registers_phase1_and_phase2_tools(tmp_path: Path) ->
     assert expected <= names
     assert "query_telemetry" not in names
     assert "signal_lookup" not in names
+    assert "get_behavior_deviations" not in names
 
 
 async def test_query_telemetry_registered_when_storage_set(tmp_path: Path) -> None:
@@ -102,6 +105,24 @@ async def test_signal_lookup_registered_when_signals_path_set(tmp_path: Path) ->
     server = build_server(_config(tmp_path, signals=signals))
     tools = await server.list_tools()
     assert "signal_lookup" in {t.name for t in tools}
+
+
+async def test_get_behavior_deviations_registered_when_config_path_set(tmp_path: Path) -> None:
+    """``get_behavior_deviations`` appears only when CANARY_CONFIG resolved to a
+    readable file — it needs the full typed CanaryConfig, not just storage_path."""
+    config_file = tmp_path / "canary.yaml"
+    config_file.write_text("collection:\n  storage_path: /var/canary/sessions\n")
+    server = build_server(_config(tmp_path, config_path=config_file))
+    tools = await server.list_tools()
+    assert "get_behavior_deviations" in {t.name for t in tools}
+
+
+async def test_get_behavior_deviations_absent_when_config_path_unreadable(
+    tmp_path: Path,
+) -> None:
+    server = build_server(_config(tmp_path, config_path=tmp_path / "does-not-exist.yaml"))
+    tools = await server.list_tools()
+    assert "get_behavior_deviations" not in {t.name for t in tools}
 
 
 async def test_resources_registered(tmp_path: Path) -> None:

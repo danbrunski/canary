@@ -38,6 +38,10 @@ class MCPConfig:
     log_fallback_path: Path | None
     daemon_unit: str
     anomalies_dir: Path | None
+    #: Path to canary.yaml ($CANARY_CONFIG), for tools that need the full
+    #: typed CanaryConfig (get_behavior_deviations) rather than just the
+    #: derived storage_path/anomalies_dir this module already extracts.
+    config_path: Path | None = None
 
     @property
     def auth_required(self) -> bool:
@@ -131,6 +135,7 @@ def load_from_env() -> MCPConfig:
         log_fallback_path=Path(log_fallback_env) if log_fallback_env else None,
         daemon_unit=os.environ.get("CANARY_MCP_DAEMON_UNIT", "canary"),
         anomalies_dir=anomalies_dir,
+        config_path=Path(config_env) if config_env else None,
     )
 
 
