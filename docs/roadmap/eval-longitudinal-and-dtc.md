@@ -143,16 +143,24 @@ harness (`src/models/false_positive_benchmark.py`), bake-off runner
 
 ### 2A. Parity pre-flight (do these first — they gate trust in results)
 
-- [ ] **2.1 — `scripts/replay.py` featurization divergence.** It calls
+- [x] **2.1 — `scripts/replay.py` featurization divergence.** It calls
   `compute_features` directly (:99-102) instead of the shared
   `featurize_wide_frame` tail, so offline replay lacks anomaly-signal /
   committee / behavior-deviation columns. Route it through
-  `featurize_wide_frame` (`feature_pipeline.py:430`).
-- [ ] **2.2 — Verify `build_feature_frame` tail identity.** The
+  `featurize_wide_frame` (`feature_pipeline.py:430`). — landed:
+  `replay_sessions` now calls `featurize_wide_frame`, with a new
+  optional `behavior_models_path` param; regression test proves a
+  `derived:*` anomaly-signal column that the old direct-`compute_features`
+  path could never produce now appears (commit `05fc61a`).
+- [x] **2.2 — Verify `build_feature_frame` tail identity.** The
   docstring (:439) claims batch calls `featurize_wide_frame`, but the
   body (:275-347) appears to open-code the tail. Confirm byte-identical
   columns or unify; add a parity test (same session through both paths →
-  identical frames).
+  identical frames). — verified: the body already calls
+  `featurize_wide_frame` (no divergence to fix); locked with a parity
+  test comparing `build_feature_frame`'s output against an
+  independently-reconstructed head + standalone `featurize_wide_frame`
+  call (commit `05fc61a`).
 
 ### 2B. The benchmark
 
