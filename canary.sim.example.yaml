@@ -68,7 +68,7 @@ preprocessing:
       rpm_max: 1200
       speed_max: 0
     city:
-      speed_min: 5
+      speed_min: 1
       speed_max: 50
     # Closes the 50-80 km/h dead zone between city and highway.
     suburban:

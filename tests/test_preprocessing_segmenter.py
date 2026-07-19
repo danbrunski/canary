@@ -436,3 +436,32 @@ def test_50_to_80_kmh_dead_zone_now_classified() -> None:
 
     assert segmented.loc[0, MODE_COLUMN] not in {UNKNOWN_MODE, "city", "highway"}
     assert segmented.loc[0, MODE_COLUMN] == "suburban"
+
+
+def test_low_speed_creep_no_longer_falls_through_to_unknown() -> None:
+    """Regression (5.1 follow-up): 5.1's ``city.speed_min: 5`` closed the
+    >900 rpm standing-idle fall-through, but the idle bands are strict
+    ``speed_max: 0`` (no tolerance band) — so it opened a *new* 0-5 km/h
+    dead zone. A running engine creeping at low-but-nonzero speed (parking
+    lot, stop-and-go traffic) matched no mode at all. speed_min: 1 closes
+    it without reopening the original fall-through."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    frame = pd.DataFrame([{"obd:RPM": 1500.0, "obd:SPEED": 3.0, "obd:COOLANT_TEMP": 90.0}])
+
+    segmented = segment_operating_modes(frame, config.preprocessing.operating_modes)
+
+    assert segmented.loc[0, MODE_COLUMN] != UNKNOWN_MODE
+    assert segmented.loc[0, MODE_COLUMN] == "city"
+
+
+def test_high_rpm_standing_still_does_not_fall_through_to_city() -> None:
+    """The low-speed-creep fix above must not reopen the original 5.1 bug:
+    a warm, >900 rpm, exactly-stopped row (idle_high's own upper rpm bound
+    exceeded — no rpm-gated mode matches) still must not fall through to
+    ``city`` now that speed_min dropped from 5 to 1."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    frame = pd.DataFrame([{"obd:RPM": 1500.0, "obd:SPEED": 0.0, "obd:COOLANT_TEMP": 90.0}])
+
+    segmented = segment_operating_modes(frame, config.preprocessing.operating_modes)
+
+    assert segmented.loc[0, MODE_COLUMN] != "city"

@@ -149,9 +149,15 @@ preprocessing:
     # Phase 5.1 — speed_min closes the fall-through above (a >900 rpm warm
     # idle no longer satisfies city's speed gate at all) and also stops
     # ``city`` swallowing standing-idle rows that idle/idle_high didn't
-    # already claim.
+    # already claim. speed_min: 1 (not the originally-shipped 5) — the
+    # idle bands are strict speed_max: 0 (no tolerance band, see
+    # segmenter.py's plain >=/<= matching), so a >=5 gate left a 0-5 km/h
+    # dead zone (parking-lot creep, inching in stop-and-go traffic) with a
+    # running engine matching no mode at all. 1 is the OBD SPEED PID's
+    # finest resolution (whole km/h), so it's the practical noise floor:
+    # exactly-stopped (0) still misses city and falls to the idle bands.
     city:
-      speed_min: 5
+      speed_min: 1
       speed_max: 50
     # Phase 5.1 — 50-80 km/h was previously an unclassified dead zone
     # (city capped at 50, highway floored at 80); this closes it with its
