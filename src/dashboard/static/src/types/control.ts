@@ -146,3 +146,31 @@ export interface ControlEvent {
   type?: string;
   job?: JobRecord;
 }
+
+/** `GET /control/power` — UPS (X1202) watchdog state, read from the
+ *  watchdog's own heartbeat file (see scripts/ups_shutdown_watch.py). All
+ *  fields but `keepalive_remaining_s` are `null` when the watchdog isn't
+ *  running (`watchdog_running: false`) or hasn't written its first
+ *  heartbeat yet. */
+export interface PowerSnapshot {
+  watchdog_running: boolean;
+  watchdog_stale: boolean | null;
+  armed: boolean | null;
+  input_lost: boolean | null;
+  on_battery: boolean | null;
+  soc: number | null;
+  vcell: number | null;
+  seconds_lost: number | null;
+  grace_s: number | null;
+  keepalive_remaining_s: number;
+  status_age_s: number | null;
+}
+
+export interface PowerStatusResponse {
+  power: PowerSnapshot;
+}
+
+export interface PowerKeepaliveResponse {
+  power: PowerSnapshot;
+  expiry: number;
+}

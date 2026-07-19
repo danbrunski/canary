@@ -91,22 +91,39 @@ keep-alive).
 
 ### 1C. Dashboard
 
-- [ ] **1.7 — `PowerPanel.tsx`.** New panel under
-  `src/dashboard/static/src/panels/` modeled on `ProfilesPanel.tsx`: poll
-  `GET /control/power` via `useControlResource`; show SoC/VCELL/PLD/watchdog
-  state; a "keep alive" control (N-minute input + button) using `useAsyncAction`
-  → `setKeepAlive(token, minutes)` → `refresh()`. Register in `nav.ts`
-  (`{ id: "control-power", label: "Power / UPS", group: "control" }`), the
-  `WorkbenchItem` union in `types`, and the `renderItem` switch in
-  `Workbench.tsx`.
-- [ ] **1.8 — FE API client.** Add `getPowerStatus(token, signal)` and
-  `setKeepAlive(token, minutes)` to `src/dashboard/static/src/api/http.ts`
-  (`controlJson` wrapper); add response types to `src/types/live.ts`.
-- [ ] **1.9 — FE test.** `PowerPanel.test.ts` mirroring `ProfilesPanel.test.ts`
-  (mock `../api/http`, dynamic import, assert poll + keep-alive POST).
+- [x] **1.7 — `PowerPanel.tsx`.** New panel under
+  `src/dashboard/static/src/panels/`, modeled on `ProfilesPanel.tsx`: polls
+  `GET /control/power` via `useControlResource` (5s interval), shows
+  watchdog state/power source/SoC/cell voltage/shutdown countdown (while
+  on-battery)/keep-alive hold, and a "keep alive N min" + "Cancel hold"
+  control via `useAsyncAction`. Registered in `nav.ts`
+  (`control-power`/"Power / UPS"), the `WorkbenchItem` union
+  (`types/navigation.ts`), and the `renderItem` switch in `Workbench.tsx`.
+- [x] **1.8 — FE API client.** `getPowerStatus(token, signal)` and
+  `setKeepAlive(token, minutes)` added to
+  `src/dashboard/static/src/api/http.ts` (`controlJson`); response types
+  `PowerSnapshot`/`PowerStatusResponse`/`PowerKeepaliveResponse` added to
+  `src/dashboard/static/src/types/control.ts` (mirrors the `/control/power`
+  backend contract, not `types/live.ts` — that file is for the WS-streamed
+  live payload, this is a polled control-plane read).
+- [x] **1.9 — FE test.** `PowerPanel.test.ts` mirroring `ProfilesPanel.test.ts`
+  (mock `../api/http`, dynamic import); 7 cases: token gate, watchdog
+  state+SoC+vcell display, not-running notice, on-battery countdown,
+  unknown-on_battery fallback label, set + cancel keep-alive. Full FE suite
+  (20 files / 98 tests, incl. the historically-flaky `TuningFeedback.test.ts`)
+  and `pnpm typecheck` both clean.
 - [ ] **1.10 — Deploy.** `install_pi.sh` (tmpfiles), rebuild FE, pull + restart
   `canary` and `ups-shutdown`. Verify: `GET /control/power` returns live SoC;
   keep-alive button pins the watchdog (check `journalctl -u ups-shutdown`).
+  **Partially done live during development:** `canary` (backend routes)
+  verified live on the bench Pi at `1df1e73` — `GET /control/power` and the
+  `POST .../keepalive` 503-when-`/run/canary`-missing path both confirmed
+  against real hardware. `ups-shutdown` restarted by the operator and running
+  the new grace/discharge-gate code, but `/run/canary` doesn't exist yet
+  (needs `sudo bash scripts/install_pi.sh`, which only the operator can run
+  interactively) — the heartbeat write is retrying every poll and will start
+  succeeding as soon as that lands. FE rebuild + final live click-through of
+  the keep-alive button still pending.
 
 ---
 

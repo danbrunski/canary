@@ -27,7 +27,8 @@ export type WorkbenchItem =
   | "data-export"
   | "control-main"
   | "control-test"
-  | "control-profiles";
+  | "control-profiles"
+  | "control-power";
 
 export interface NavItemDef {
   id: WorkbenchItem;

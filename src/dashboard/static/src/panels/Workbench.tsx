@@ -29,6 +29,7 @@ import { DatasetHealthPanel } from "./DatasetHealthPanel";
 import { ModelHealthPanel } from "./ModelHealthPanel";
 import { ModelPanel } from "./ModelPanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
+import { PowerPanel } from "./PowerPanel";
 import { ProfilesPanel } from "./ProfilesPanel";
 import { SystemPanel } from "./SystemPanel";
 import { TestSessionPanel } from "./TestSessionPanel";
@@ -134,6 +135,8 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
       );
     case "control-profiles":
       return <ProfilesPanel token={d.token} />;
+    case "control-power":
+      return <PowerPanel token={d.token} />;
     case "live-charts":
       return <ChartsPanel channels={d.channels} />;
     case "live-alarms":

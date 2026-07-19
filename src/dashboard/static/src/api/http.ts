@@ -19,6 +19,8 @@ import type {
   JobResponse,
   JobsResponse,
   ObdCoverageResponse,
+  PowerKeepaliveResponse,
+  PowerStatusResponse,
   PreflightResponse,
   SequenceDetectorStatus,
   SessionSummary,
@@ -404,6 +406,23 @@ export function updateProfileName(
     token,
     { method: "POST", body: jsonBody({ name }) },
   );
+}
+
+export function getPowerStatus(
+  token: string,
+  signal?: AbortSignal,
+): Promise<PowerStatusResponse> {
+  return controlJson<PowerStatusResponse>("/control/power", token, { signal });
+}
+
+export function setKeepAlive(
+  token: string,
+  minutes: number,
+): Promise<PowerKeepaliveResponse> {
+  return controlJson<PowerKeepaliveResponse>("/control/power/keepalive", token, {
+    method: "POST",
+    body: jsonBody({ minutes }),
+  });
 }
 
 export function getFeedback(
