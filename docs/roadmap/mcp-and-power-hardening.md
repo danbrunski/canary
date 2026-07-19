@@ -115,15 +115,18 @@ keep-alive).
 - [ ] **1.10 — Deploy.** `install_pi.sh` (tmpfiles), rebuild FE, pull + restart
   `canary` and `ups-shutdown`. Verify: `GET /control/power` returns live SoC;
   keep-alive button pins the watchdog (check `journalctl -u ups-shutdown`).
-  **Partially done live during development:** `canary` (backend routes)
-  verified live on the bench Pi at `1df1e73` — `GET /control/power` and the
-  `POST .../keepalive` 503-when-`/run/canary`-missing path both confirmed
-  against real hardware. `ups-shutdown` restarted by the operator and running
-  the new grace/discharge-gate code, but `/run/canary` doesn't exist yet
-  (needs `sudo bash scripts/install_pi.sh`, which only the operator can run
-  interactively) — the heartbeat write is retrying every poll and will start
-  succeeding as soon as that lands. FE rebuild + final live click-through of
-  the keep-alive button still pending.
+  **Done except the one interactive-sudo step:** pulled `4630b55` on the Pi,
+  `pnpm build` succeeded (98 modules, dist rebuilt), `canary` restarted
+  (passwordless) and confirmed serving the new bundle — "Power / UPS" and
+  "Keep-alive minutes" verified present in the served JS. `GET /control/power`
+  live-tested: 200 OK, graceful `watchdog_running: false` while `/run/canary`
+  is absent. `ups-shutdown` is running the new grace/discharge-gate code
+  (operator restarted it) but can't write its heartbeat yet.
+  **Remaining, needs the operator (only `sudo bash scripts/install_pi.sh` or
+  equivalent manual tmpfiles+restart, run interactively — not something I can
+  do over this SSH session):** create `/run/canary` (via the tmpfiles.d config
+  this phase added) so the watchdog heartbeat starts writing, then click
+  through the dashboard keep-alive button once live SoC is flowing.
 
 ---
 
