@@ -60,6 +60,10 @@ class EmitterCounters:
     #: Over-threshold ticks withheld by the persistence gate (Phase 7.5) —
     #: the detector fired but hadn't fired for min_consecutive_ticks yet.
     suppressed_persistence: int = 0
+    #: IF/LSTM ticks withheld because ``classify_vehicle_state`` said the
+    #: engine wasn't running (Phase 1.5) — e.g. key-out, KOEO, no data.
+    #: Behavior surfaces are unaffected; they keep their own mode-gating.
+    skipped_vehicle_state: int = 0
 
     def reset(self) -> None:
         self.emitted = 0
@@ -67,6 +71,7 @@ class EmitterCounters:
         self.suppressed_dedupe = 0
         self.suppressed_tuning = 0
         self.suppressed_persistence = 0
+        self.skipped_vehicle_state = 0
 
     def to_dict(self) -> dict[str, int]:
         """JSON-safe snapshot — what ``GET /status`` exposes per detector."""
@@ -76,6 +81,7 @@ class EmitterCounters:
             "suppressed_dedupe": self.suppressed_dedupe,
             "suppressed_tuning": self.suppressed_tuning,
             "suppressed_persistence": self.suppressed_persistence,
+            "skipped_vehicle_state": self.skipped_vehicle_state,
         }
 
 

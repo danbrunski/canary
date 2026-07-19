@@ -21,6 +21,7 @@ from src.alerts.fusion import (
 from src.dashboard.behavior_live import BehaviorLiveState, BehaviorObservation
 from src.dashboard.broadcast import Broadcaster
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
+from src.dashboard.status import VehicleState, classify_vehicle_state
 from src.decode.behavior_decoder import deviation
 from src.decode.behavior_models import (
     BehaviorModel1D,
@@ -43,6 +44,38 @@ from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
 from .components import DaemonComponents
 
 log = logging.getLogger(__name__)
+
+#: Vehicle states IF/LSTM are allowed to score in (Phase 1.5). ``replay``
+#: re-emits real running-vehicle data through the live pipeline, so it scores
+#: like ``engine_running``. Everything else (ignition_only, engine_off,
+#: no_data, unknown) is skipped — no koeo-trained model exists yet to make
+#: ignition_only meaningful, so it stays gated out with the others.
+_SCORABLE_VEHICLE_STATES = frozenset({"engine_running", "replay"})
+
+
+def _live_vehicle_state(
+    source: LiveFeatureSource, components: DaemonComponents, now: datetime
+) -> VehicleState:
+    """No-I/O ``classify_vehicle_state`` for the inference hot loop.
+
+    Mirrors ``dashboard.status._derive_vehicle_state`` but reads
+    ``source.vehicle_state_inputs`` (in-memory) instead of re-reading the
+    latest session's Parquet — safe to call every tick.
+    """
+    replay_id: str | None = None
+    if components.replay_controller is not None:
+        replay_state = components.replay_controller.status()
+        if replay_state.running:
+            replay_id = replay_state.replay_id
+    inputs = source.vehicle_state_inputs(now)
+    return classify_vehicle_state(
+        rpm=inputs["rpm"],
+        coolant_temp=inputs["coolant_temp"],
+        run_time=inputs["run_time"],
+        obd_freshness_seconds=inputs["obd_freshness_seconds"],
+        can_freshness_seconds=inputs["can_freshness_seconds"],
+        replay_id=replay_id,
+    )
 
 
 async def run_live_inference(
@@ -72,6 +105,15 @@ async def run_live_inference(
     buffer); ``run_live_inference_lstm`` is retained standalone for its
     direct tests but is no longer spawned by ``run_daemon``.
 
+    **Vehicle-state gating (Phase 1.5).** IF and the sequence detector only
+    score ticks where ``_live_vehicle_state`` classifies as
+    ``engine_running`` or ``replay`` — ``_SCORABLE_VEHICLE_STATES``. A
+    key-out / KOEO / no-data tick is counted in
+    ``emitter.counters.skipped_vehicle_state`` instead of scored, since
+    neither detector was trained on that regime and scoring it just adds
+    noise. The behavior overlay is unaffected — it keeps its own
+    per-model ``operating_mode`` gating and still observes every tick.
+
     Best-effort: every error inside the loop is caught + logged.
     """
     import pandas as pd
@@ -98,7 +140,8 @@ async def run_live_inference(
 
     while not stop_event.is_set():
         try:
-            row = source.tick(datetime.now(UTC))
+            now = datetime.now(UTC)
+            row = source.tick(now)
             sources: list[FusionSource] = []
             timestamp_str: str | None = None
             operating_mode: str | None = None
@@ -107,9 +150,16 @@ async def run_live_inference(
                 mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
                 operating_mode = None if mode_val is None or pd.isna(mode_val) else str(mode_val)
 
+            scoring_allowed = True
+            if row is not None:
+                vehicle_state = _live_vehicle_state(source, components, now)
+                scoring_allowed = vehicle_state.state in _SCORABLE_VEHICLE_STATES
+                if not scoring_allowed:
+                    components.emitter.counters.skipped_vehicle_state += 1
+
             loaded = if_manager.current if if_manager is not None else None
             if_version = loaded.manifest.model_version if loaded is not None else None
-            if loaded is not None and row is not None:
+            if loaded is not None and row is not None and scoring_allowed:
                 if_input = _score_and_emit(
                     loaded,
                     row,
@@ -130,7 +180,7 @@ async def run_live_inference(
 
             sequence_version: str | None = None
             sequence_loaded = sequence_manager.current if sequence_manager is not None else None
-            if sequence_loaded is not None and row is not None:
+            if sequence_loaded is not None and row is not None and scoring_allowed:
                 sequence_version = sequence_loaded.manifest.model_version
                 if sequence_engine_version != sequence_version:
                     sequence_engine = _build_sequence_engine(

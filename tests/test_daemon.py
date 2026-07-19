@@ -1372,6 +1372,166 @@ async def test_run_live_inference_emits_event_when_outlier(config: CanaryConfig)
     assert IsolationForestInferenceEngine.__name__ == "IsolationForestInferenceEngine"
 
 
+def test_live_vehicle_state_classifies_running_without_parquet_io(config: CanaryConfig) -> None:
+    """1.5's helper reads only in-memory state — no Parquet, no replay."""
+    from src.daemon.inference import _live_vehicle_state, build_live_feature_source
+
+    components = build_components(config)
+    source = build_live_feature_source(components)
+    now = datetime.now(UTC)
+    source.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 2500.0, "rpm"))
+
+    state = _live_vehicle_state(source, components, now)
+
+    assert state.state == "engine_running"
+    assert state.rpm == 2500.0
+
+
+def test_live_vehicle_state_reports_no_data_before_any_observation(config: CanaryConfig) -> None:
+    from src.daemon.inference import _live_vehicle_state, build_live_feature_source
+
+    components = build_components(config)
+    source = build_live_feature_source(components)
+
+    state = _live_vehicle_state(source, components, datetime.now(UTC))
+
+    assert state.state == "no_data"
+
+
+async def test_run_live_inference_skips_if_scoring_when_engine_off(config: CanaryConfig) -> None:
+    """1.5: an always-fires IF stub must NOT emit when vehicle_state isn't
+    engine_running/replay — here RPM=0 with fresh OBD classifies as
+    ignition_only, which IF/LSTM don't score."""
+    from src.daemon import build_live_feature_source, run_live_inference
+    from src.models.manager import LoadedModel
+    from src.models.manifest import ModelManifestCommon
+
+    components = build_components(config)
+
+    class _FakeTrained:
+        feature_columns = ("obd:RPM",)
+        mode_column = "operating_mode"
+        manifest = type("M", (), {"model_version": "fake_if_v1"})()
+
+        def score(self, frame):
+            out = frame.copy()
+            out["isolation_forest_score"] = 0.9
+            out["isolation_forest_label"] = -1
+            out["isolation_forest_model_mode"] = "idle"
+            out["isolation_forest_missing_features"] = False
+            return out
+
+    class _StubManager:
+        @property
+        def current(self):
+            return LoadedModel(
+                artifact=_FakeTrained(),
+                manifest=ModelManifestCommon(
+                    artifact_format_version=1,
+                    model_type="isolation_forest",
+                    model_version="fake_if_v1",
+                    created_at="now",
+                    training_data_hash="h",
+                    input_rows=1,
+                ),
+                artifact_path=Path("/tmp/x"),
+                manifest_path=Path("/tmp/x.manifest.json"),
+                manifest_mtime=0.0,
+            )
+
+        def poll(self):
+            return None
+
+    components.model_managers["isolation_forest"] = _StubManager()  # type: ignore[assignment]
+
+    # RPM == 0 with a fresh OBD observation → ignition_only, not scorable.
+    source = build_live_feature_source(components)
+    source.observe(TelemetryRecord.obd(datetime.now(UTC).timestamp(), "RPM", 0.0, "rpm"))
+
+    sub = components.anomalies_broadcaster.subscribe()
+    stop = asyncio.Event()
+    task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
+    await asyncio.sleep(0.3)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    assert sub.queue.empty(), "IF must not emit while the engine isn't running"
+    assert components.emitter.counters.skipped_vehicle_state > 0
+
+
+async def test_run_live_inference_scores_during_replay_despite_engine_off_reading(
+    config: CanaryConfig,
+) -> None:
+    """1.5: replay overrides the engine-off/ignition-only reading — a replay
+    re-emits real running-vehicle data, so IF must still score it."""
+    from src.control.replay_control import ReplayStatus
+    from src.daemon import build_live_feature_source, run_live_inference
+    from src.models.manager import LoadedModel
+    from src.models.manifest import ModelManifestCommon
+
+    components = build_components(config)
+
+    class _FakeTrained:
+        feature_columns = ("obd:RPM",)
+        mode_column = "operating_mode"
+        manifest = type("M", (), {"model_version": "fake_if_v1"})()
+
+        def score(self, frame):
+            out = frame.copy()
+            out["isolation_forest_score"] = 0.9
+            out["isolation_forest_label"] = -1
+            out["isolation_forest_model_mode"] = "idle"
+            out["isolation_forest_missing_features"] = False
+            return out
+
+    class _StubManager:
+        @property
+        def current(self):
+            return LoadedModel(
+                artifact=_FakeTrained(),
+                manifest=ModelManifestCommon(
+                    artifact_format_version=1,
+                    model_type="isolation_forest",
+                    model_version="fake_if_v1",
+                    created_at="now",
+                    training_data_hash="h",
+                    input_rows=1,
+                ),
+                artifact_path=Path("/tmp/x"),
+                manifest_path=Path("/tmp/x.manifest.json"),
+                manifest_mtime=0.0,
+            )
+
+        def poll(self):
+            return None
+
+    components.model_managers["isolation_forest"] = _StubManager()  # type: ignore[assignment]
+
+    class _StubReplayController:
+        def status(self) -> ReplayStatus:
+            return ReplayStatus(running=True, replay_id="replay-1")
+
+    components.replay_controller = _StubReplayController()  # type: ignore[assignment]
+
+    # Same RPM==0 reading that reads ignition_only outside a replay — here
+    # the active replay must still let IF score it.
+    source = build_live_feature_source(components)
+    source.observe(TelemetryRecord.obd(datetime.now(UTC).timestamp(), "RPM", 0.0, "rpm"))
+
+    sub = components.anomalies_broadcaster.subscribe()
+    stop = asyncio.Event()
+    task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
+
+    try:
+        msg = await asyncio.wait_for(sub.get(), timeout=2.0)
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert msg["source"] == "isolation_forest"
+    assert components.emitter.counters.skipped_vehicle_state == 0
+
+
 async def test_build_live_feature_source_loads_bindings_when_present(
     tmp_path: Path, config: CanaryConfig
 ) -> None:

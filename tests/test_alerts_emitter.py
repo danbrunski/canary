@@ -217,13 +217,22 @@ def test_counters_reset_zeros_all(tmp_path: Path) -> None:
     emitter.emit_lstm(_FakeLSTMResult())
     emitter.emit_lstm(_FakeLSTMResult(is_anomaly=False))
     assert emitter.counters.emitted == 1
+    emitter.counters.skipped_vehicle_state = 3
     emitter.counters.reset()
     assert (
         emitter.counters.emitted
         == emitter.counters.suppressed_not_anomaly
         == emitter.counters.suppressed_dedupe
+        == emitter.counters.skipped_vehicle_state
         == 0
     )
+
+
+def test_counters_to_dict_includes_skipped_vehicle_state(tmp_path: Path) -> None:
+    logger = AnomalyEventLogger(tmp_path)
+    emitter = AnomalyEventEmitter(logger, min_seconds_between_events=0)
+    emitter.counters.skipped_vehicle_state = 5
+    assert emitter.counters.to_dict()["skipped_vehicle_state"] == 5
 
 
 # ---------------------------------------------------------------------------
