@@ -97,9 +97,19 @@ Config lands in `/etc/chrony/conf.d/canary-gps.conf` rather than by rewriting
 `chrony.conf`, which belongs to the admin:
 
 ```
-refclock SHM 0 refid GPS precision 1e-1 offset 0.0
+refclock SHM 0 refid GPS precision 5e-1 offset 0.0
 makestep 1 -1
 ```
+
+`precision 5e-1` is deliberately loose. NMEA time has no PPS pulse to align to,
+so it arrives a few hundred milliseconds late — measured ~355 ms on this
+receiver at 9600 baud. An optimistic `1e-1` asserts an accuracy the source
+can't meet, and chrony responds by comparing it against network NTP, finding it
+inconsistent, and marking GPS a falseticker (`#x` in `chronyc sources`) — which
+disables precisely the source we need when there is no network. At `5e-1`
+chrony accepts it (`#-`: valid, unselected only because network NTP is
+tighter), and half a second is still three orders of magnitude better than the
+drift being corrected.
 
 `makestep 1 -1` steps the clock by any offset at any time, rather than slewing.
 Slewing a 65-minute error would take days, and the failure being fixed *is* a
