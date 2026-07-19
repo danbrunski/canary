@@ -262,15 +262,40 @@ the surface evaluator is fully separable — `featurize_wide_frame` +
 **Goal.** Stop the transport-session death that forces HTTP/SSH fallbacks. Lower
 certainty — investigate before committing an approach.
 
-- [ ] **4.1 — Root-cause the session death.** Confirm it's the FastMCP transport
-  session invalidating on `canary-mcp` restart (server side) vs. the Claude Code
-  MCP client not reconnecting. Reproduce by restarting `canary-mcp` mid-session.
-- [ ] **4.2 — Server-side fix.** If server-side: evaluate stateless-HTTP mode or
-  durable/resumable session ids for the MCP server so a daemon restart doesn't
-  invalidate live client sessions.
-- [ ] **4.3 — Fallback documentation.** If client-side: harden the documented
-  HTTP-fallback path (already in `CLAUDE.md`) and add a `canary-mcp` health/
-  reconnect note. Keep `restart claude` as the clean recovery.
+- [x] **4.1 — Root-cause the session death.** Confirmed server-side by reading
+  the installed `mcp` package source (not by reproducing live — the bench Pi
+  session for that would need a real client mid-conversation, out of scope
+  for a solo debugging pass). `mcp.server.streamable_http_manager.
+  StreamableHTTPSessionManager` is stateful by default: `stateless=False`
+  tracks each connection's session id in an in-memory
+  `_server_instances: dict[str, StreamableHTTPServerTransport]` on the
+  server process. Restarting `canary-mcp` (redeploy, crash, systemd flap)
+  wipes that dict; any client still holding the old session id gets
+  rejected by the *new* process, which never heard of it. Nothing the
+  client can recover from alone — this is why `restart claude` (get a fresh
+  session) was the only clean fix found live.
+- [x] **4.2 — Server-side fix.** `StreamableHTTPSessionManager` already ships
+  a `stateless=True` mode ("creates a completely fresh transport for each
+  request with no session tracking") — exactly what's needed, already in the
+  installed dependency, no new code required beyond wiring it through.
+  Exposed as `MCPConfig.mcp_stateless` / `CANARY_MCP_STATELESS=1` → 
+  `FastMCP(..., stateless_http=cfg.mcp_stateless)`. **Deliberately opt-in, not
+  the new default:** it's a real trade-off (loses SSE resumable-stream/
+  server-push, which this codebase's tools don't currently use, but "don't
+  currently use" isn't the same guarantee as "verified safe under load") —
+  flipping a transport-level default for every MCP client (Claude Code *and*
+  Qwen-Agent per this doc) without a runway to notice a regression is exactly
+  the kind of change the project's own risk-matching guidance says to pause
+  on. Documented in `docs/mcp-server.md` under "Session resilience:
+  surviving a `canary-mcp` restart", with a recommendation to run it for a
+  while before considering it the default. 4 tests (`MCPConfig` round-trip +
+  `build_server` reaching `FastMCP.settings.stateless_http`).
+- [x] **4.3 — Fallback documentation.** Root cause turned out server-side
+  (4.1), so this became "document the real fix" rather than "hedge on a
+  client-side workaround" — done as part of 4.2's doc section, which also
+  explains *why* `restart claude` was the only recovery (a fresh client
+  session, since the old one is unrecoverable) so a future operator
+  understands the mechanism, not just the incantation.
 
 ---
 

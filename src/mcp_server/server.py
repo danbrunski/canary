@@ -153,6 +153,10 @@ def build_server(config: MCPConfig | None = None) -> FastMCP:
         # ignores it (whoever spawns the process is already trusted).
         auth=auth_settings,
         token_verifier=token_verifier,
+        # Opt-in (CANARY_MCP_STATELESS=1): no per-connection session id, so a
+        # canary-mcp restart never strands a client on an invalidated
+        # session. See MCPConfig.mcp_stateless / load_from_env's docstring.
+        stateless_http=cfg.mcp_stateless,
     )
 
     client = DaemonClient(cfg.daemon_url, cfg.daemon_token)

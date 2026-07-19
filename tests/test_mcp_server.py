@@ -14,6 +14,7 @@ def _config(
     signals: Path | None = None,
     anomalies: Path | None = None,
     config_path: Path | None = None,
+    mcp_stateless: bool = False,
 ) -> MCPConfig:
     return MCPConfig(
         daemon_url="http://127.0.0.1:8000",
@@ -28,6 +29,7 @@ def _config(
         daemon_unit="canary",
         anomalies_dir=anomalies,
         config_path=config_path,
+        mcp_stateless=mcp_stateless,
     )
 
 
@@ -123,6 +125,19 @@ async def test_get_behavior_deviations_absent_when_config_path_unreadable(
     server = build_server(_config(tmp_path, config_path=tmp_path / "does-not-exist.yaml"))
     tools = await server.list_tools()
     assert "get_behavior_deviations" not in {t.name for t in tools}
+
+
+def test_stateless_http_defaults_off(tmp_path: Path) -> None:
+    server = build_server(_config(tmp_path))
+    assert server.settings.stateless_http is False
+
+
+def test_stateless_http_opts_in(tmp_path: Path) -> None:
+    """CANARY_MCP_STATELESS=1 reaches FastMCP — no per-connection session id,
+    so a canary-mcp restart never strands a client on an invalidated
+    session (task 4.2)."""
+    server = build_server(_config(tmp_path, mcp_stateless=True))
+    assert server.settings.stateless_http is True
 
 
 async def test_resources_registered(tmp_path: Path) -> None:

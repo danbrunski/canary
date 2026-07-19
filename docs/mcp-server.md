@@ -94,6 +94,26 @@ canary-mcp --stdio               # local stdio (or via ssh)
 canary-mcp --transport sse       # legacy SSE
 ```
 
+### Session resilience: surviving a `canary-mcp` restart
+
+By default, `streamable-http` is *stateful* — each client connection gets a
+session id tracked in the server process's memory. Restart `canary-mcp`
+(redeploy, crash, a systemd flap) and that in-memory table is wiped: any
+client still holding the old session id gets rejected, and today the fix is
+"restart claude" or fall back to raw HTTP against `/control/...` (see
+`CLAUDE.md`). This is root-caused: FastMCP's `StreamableHTTPSessionManager`
+only tracks sessions when `stateless=False` (the default) — it's a server-side
+in-memory map, not anything the client can recover from on its own.
+
+Set `CANARY_MCP_STATELESS=1` to pass `stateless_http=True` to FastMCP: no
+session id is issued at all, so a restart can never strand a client. The
+trade-off is losing the SSE resumable-stream / server-push machinery that
+depends on a persistent session — this codebase's tools don't currently rely
+on that (no `@mcp.resource` subscriptions, no server-initiated push), so it's
+likely safe, but it's opt-in rather than the new default until it's been run
+that way for a while. Add it to `/etc/canary/canary.env` alongside the other
+`CANARY_MCP_*` vars and restart `canary-mcp` to pick it up.
+
 ---
 
 ## Setup on the Pi
@@ -122,6 +142,7 @@ CANARY_SIGNALS_PATH=/opt/canary/data/fsm/signals.json   # enables signal_lookup
 CANARY_MCP_LOG_FALLBACK=/var/log/canary/daemon.jsonl    # used if journalctl absent
 CANARY_MCP_DAEMON_UNIT=canary                            # systemd unit for tail
 CANARY_ANOMALIES_DIR=/data/canary/anomalies              # falls back to canary.yaml
+CANARY_MCP_STATELESS=1                # opt-in: survive canary-mcp restarts, see below
 ```
 
 ---

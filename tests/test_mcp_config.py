@@ -28,6 +28,7 @@ def test_load_from_env_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "CANARY_MCP_LOG_FALLBACK",
         "CANARY_MCP_DAEMON_UNIT",
         "CANARY_ANOMALIES_DIR",
+        "CANARY_MCP_STATELESS",
     ):
         monkeypatch.delenv(var, raising=False)
     cfg = load_from_env()
@@ -41,6 +42,7 @@ def test_load_from_env_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.anomalies_dir is None
     assert cfg.auth_required is False
     assert cfg.config_path is None
+    assert cfg.mcp_stateless is False
 
 
 def test_load_from_env_reads_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -145,6 +147,17 @@ def test_audit_path_explicit_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setenv("CANARY_MCP_AUDIT_PATH", str(tmp_path / "elsewhere.jsonl"))
     cfg = load_from_env()
     assert cfg.audit_path == tmp_path / "elsewhere.jsonl"
+
+
+def test_mcp_stateless_defaults_off_and_opts_in_on_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CANARY_MCP_STATELESS", raising=False)
+    assert load_from_env().mcp_stateless is False
+    monkeypatch.setenv("CANARY_MCP_STATELESS", "1")
+    assert load_from_env().mcp_stateless is True
+    monkeypatch.setenv("CANARY_MCP_STATELESS", "0")
+    assert load_from_env().mcp_stateless is False
+    monkeypatch.setenv("CANARY_MCP_STATELESS", "true")  # only "1" opts in, not truthy strings
+    assert load_from_env().mcp_stateless is False
 
 
 def test_config_path_round_trips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

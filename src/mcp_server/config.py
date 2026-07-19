@@ -42,6 +42,9 @@ class MCPConfig:
     #: typed CanaryConfig (get_behavior_deviations) rather than just the
     #: derived storage_path/anomalies_dir this module already extracts.
     config_path: Path | None = None
+    #: Opt-in: pass stateless_http=True to FastMCP. See CANARY_MCP_STATELESS
+    #: in load_from_env's docstring for the trade-off this exists for.
+    mcp_stateless: bool = False
 
     @property
     def auth_required(self) -> bool:
@@ -100,6 +103,16 @@ def load_from_env() -> MCPConfig:
       * ``CANARY_STORAGE_PATH`` — Parquet storage root for ``query_telemetry``.
         Falls back to ``collection.storage_path`` in ``$CANARY_CONFIG`` so the
         operator doesn't have to duplicate the path across two env files.
+      * ``CANARY_MCP_STATELESS`` — ``1`` to pass ``stateless_http=True`` to
+        FastMCP: no per-connection session id, so a ``canary-mcp`` restart
+        (redeploy, crash, systemd flap) never leaves an existing client
+        holding a now-invalid session id — the failure mode this session
+        actually hit mid-conversation once. Trade-off: the SSE resumable-
+        stream / server-push machinery that depends on a persistent session
+        stops working, so this defaults off (opt-in) rather than replacing
+        the stateful default outright. Try it if `restart claude` /
+        reconnect-after-``canary-mcp``-restart friction outweighs wanting
+        that machinery; toggle back by unsetting it if something regresses.
     """
     config_env = os.environ.get("CANARY_CONFIG")
     storage_env = os.environ.get("CANARY_STORAGE_PATH")
@@ -136,6 +149,7 @@ def load_from_env() -> MCPConfig:
         daemon_unit=os.environ.get("CANARY_MCP_DAEMON_UNIT", "canary"),
         anomalies_dir=anomalies_dir,
         config_path=Path(config_env) if config_env else None,
+        mcp_stateless=os.environ.get("CANARY_MCP_STATELESS", "").strip() == "1",
     )
 
 
