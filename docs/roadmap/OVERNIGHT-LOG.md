@@ -16,3 +16,4 @@ ml-correctness-hardening.md 8.2 — done — post-window detection grace: late h
 eval-longitudinal-and-dtc.md 2.4 — done — time-to-detect latency already landed incidentally in commit 825ae0a; checkbox caught up
 eval-longitudinal-and-dtc.md 2.3 — done — evaluate_detectors gains sequence-detector coverage via real observe() contract, generalized N-detector persistence gate (commit 719908e)
 eval-longitudinal-and-dtc.md 2.5 — done — scripts/detector_benchmark.py corpus-wide grid CLI + fixed latent AnomalyInjector.drift() float32 dtype bug (commit 90118c1)
+eval-longitudinal-and-dtc.md 2.6 — done — regression-compare pre-deploy gate: diff_reports() vs baseline, wired into retrain.py's _run_benchmark_gate, ledger records report path regardless of regression (commit 17b43a8)
