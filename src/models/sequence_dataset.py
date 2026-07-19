@@ -28,15 +28,9 @@ import pandas as pd
 from src.config import CanaryConfig
 from src.dataframe_utils import require_columns as _require_columns
 from src.preprocessing.features import _FEATURE_SUFFIXES, FeatureConfig, compute_features
-from src.preprocessing.loader import TelemetryValueKind, read_sessions, to_wide
-from src.preprocessing.resampler import (
-    GAP_SUFFIX,
-    SESSION_COLUMN,
-    TIMESTAMP_COLUMN,
-    ResampleConfig,
-    resample_wide,
-)
-from src.preprocessing.segmenter import MODE_COLUMN, segment_operating_modes
+from src.preprocessing.loader import TelemetryValueKind, resample_and_segment
+from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.preprocessing.segmenter import MODE_COLUMN
 from src.timefmt import format_timestamp as _format_timestamp
 
 DEFAULT_SEQUENCE_STRIDE = 1
@@ -187,28 +181,7 @@ def sequence_frame_from_sessions(
     if not sessions:
         raise ValueError("at least one session directory is required")
 
-    long = read_sessions(sessions)
-    wide = to_wide(long, value=value)
-    value_columns = _numeric_value_columns(wide)
-    if value_columns:
-        resampled = resample_wide(
-            wide,
-            config=ResampleConfig(hz=config.preprocessing.resample_hz),
-            value_columns=value_columns,
-        )
-    else:
-        resampled = pd.DataFrame(
-            {
-                SESSION_COLUMN: wide[SESSION_COLUMN].copy(),
-                TIMESTAMP_COLUMN: pd.to_datetime(wide[TIMESTAMP_COLUMN], utc=True),
-            }
-        )
-
-    segmented = segment_operating_modes(
-        resampled,
-        config.preprocessing.operating_modes,
-        recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
-    )
+    segmented = resample_and_segment(sessions, config, value=value)
     return compute_features(
         segmented,
         config=FeatureConfig(window_seconds=config.preprocessing.rolling_window_seconds),
@@ -380,17 +353,6 @@ def resolve_gap_columns(
         _require_columns(frame, columns)
         return columns
     return tuple(str(column) for column in frame.columns if str(column).endswith(GAP_SUFFIX))
-
-
-def _numeric_value_columns(frame: pd.DataFrame) -> list[str]:
-    skip = {SESSION_COLUMN, TIMESTAMP_COLUMN, MODE_COLUMN}
-    return [
-        str(column)
-        for column in frame.columns
-        if str(column) not in skip
-        and not str(column).endswith(GAP_SUFFIX)
-        and pd.api.types.is_numeric_dtype(frame[column])
-    ]
 
 
 def _channel_base(column: str) -> str:

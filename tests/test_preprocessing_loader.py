@@ -5,17 +5,24 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
+from src.config import CanaryConfig
 from src.preprocessing.loader import (
     channel_key,
     discover_sessions,
+    numeric_value_columns,
     read_session,
     read_sessions,
+    resample_and_segment,
     to_wide,
 )
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 
 def _write_session(
@@ -102,3 +109,56 @@ def test_to_wide_pivots_one_column_per_source_channel(tmp_path: Path) -> None:
     assert channel_key("obd", "SPEED") in wide.columns
     assert list(wide["obd:RPM"]) == [700.0, 710.0]
     assert list(wide["obd:SPEED"].dropna()) == [0.0]
+
+
+def test_numeric_value_columns_excludes_gap_flags() -> None:
+    """Regression: session_classifier.py and sequence_dataset.py each grew a
+    byte-drifted copy of this selector; only one excluded ``__gap`` columns.
+    A frozen/stuck channel's boolean gap flag must never be counted as a
+    real feature column — it would silently inflate completeness metrics.
+    """
+    frame = pd.DataFrame(
+        {
+            "session": ["s1"],
+            "timestamp": [pd.Timestamp.now(tz="UTC")],
+            "operating_mode": ["idle"],
+            "obd:COOLANT_TEMP": [85.0],
+            "obd:COOLANT_TEMP__gap": [True],
+        }
+    )
+
+    columns = numeric_value_columns(frame)
+
+    assert columns == ["obd:COOLANT_TEMP"]
+
+
+def test_resample_and_segment_runs_shared_chain(tmp_path: Path) -> None:
+    session = _write_session(
+        tmp_path,
+        "2026-05-11T120000",
+        [
+            TelemetryRecord.obd(1_778_000_000.0, "RPM", 800.0, "rpm"),
+            TelemetryRecord.obd(1_778_000_000.0, "SPEED", 0.0, "km/h"),
+            TelemetryRecord.obd(1_778_000_001.0, "RPM", 810.0, "rpm"),
+            TelemetryRecord.obd(1_778_000_001.0, "SPEED", 0.0, "km/h"),
+        ],
+    )
+
+    segmented = resample_and_segment([session], CanaryConfig.from_yaml(EXAMPLE_YAML))
+
+    assert not segmented.empty
+    assert "operating_mode" in segmented.columns
+    assert (segmented["session"] == "2026-05-11T120000").all()
+
+
+def test_resample_and_segment_handles_no_numeric_channels(tmp_path: Path) -> None:
+    session = _write_session(
+        tmp_path,
+        "2026-05-11T120000",
+        [TelemetryRecord.obd(1_778_000_000.0, "VIN", "1N4AL11D75C109151", "")],
+    )
+
+    segmented = resample_and_segment([session], CanaryConfig.from_yaml(EXAMPLE_YAML))
+
+    assert "session" in segmented.columns
+    assert "timestamp" in segmented.columns

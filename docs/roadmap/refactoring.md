@@ -61,7 +61,7 @@ style issues, and go first.
   (`services.py:188-231`) with the existing `DaemonClient`
   (`src/mcp_server/client.py`) or a shared HTTP-client module — two
   daemon-client implementations exist today.
-- [ ] **1.3 — One `_numeric_value_columns` + shared resample/segment
+- [x] **1.3 — One `_numeric_value_columns` + shared resample/segment
   prefix.** The helper is defined twice with drifted bodies
   (`src/analysis/session_classifier.py:316` lacks the `GAP_SUFFIX`
   exclusion `src/models/sequence_dataset.py:385` has). Extract one
@@ -70,7 +70,11 @@ style issues, and go first.
   `read_sessions → to_wide → resample_wide → segment_operating_modes`
   chain duplicated at `sequence_dataset.py:190-211` and
   `session_classifier.py:210-227`. Callers keep their own empty-frame
-  fallbacks.
+  fallbacks. — landed: canonical `numeric_value_columns` +
+  `resample_and_segment` in `src/preprocessing/loader.py`; both
+  callers switched over; closes the `GAP_SUFFIX` drift (gap flags no
+  longer counted as feature columns in session-classifier quality
+  stats).
 - [ ] **1.4 — Shared async reconnect loop.** The
   `while not stop_event…try build→run…except→backoff` skeleton is
   copied 4×: `can_collector.py:125-175`, `obd_collector.py:407-452`,

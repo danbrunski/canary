@@ -38,17 +38,14 @@ from typing import Any, Literal
 import pandas as pd
 
 from src.config import CanaryConfig
-from src.preprocessing.loader import read_sessions, to_wide
+from src.preprocessing.loader import numeric_value_columns, resample_and_segment
 from src.preprocessing.resampler import (
     SESSION_COLUMN,
     TIMESTAMP_COLUMN,
-    ResampleConfig,
-    resample_wide,
 )
 from src.preprocessing.segmenter import (
     MODE_COLUMN,
     UNKNOWN_MODE,
-    segment_operating_modes,
 )
 from src.timefmt import format_timestamp as _format_timestamp
 
@@ -207,24 +204,9 @@ def classify_session(
     if not chunks:
         raise FileNotFoundError(f"no telemetry parquet under {session_dir}")
 
-    long = read_sessions([session_dir])
-    if long.empty:
+    segmented = resample_and_segment([session_dir], config, value="value_number")
+    if segmented.empty:
         return _empty_classification(session_dir.name, now)
-
-    wide = to_wide(long, value="value_number")
-    if wide.empty:
-        return _empty_classification(session_dir.name, now)
-
-    resampled = resample_wide(
-        wide,
-        config=ResampleConfig(hz=config.preprocessing.resample_hz),
-        value_columns=_numeric_value_columns(wide),
-    )
-    segmented = segment_operating_modes(
-        resampled,
-        config.preprocessing.operating_modes,
-        recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
-    )
 
     mode_segments = _extract_mode_segments(segmented)
     mode_seconds = _aggregate_mode_seconds(mode_segments)
@@ -313,16 +295,6 @@ def _empty_classification(session_id: str, now: datetime | None) -> SessionClass
     )
 
 
-def _numeric_value_columns(frame: pd.DataFrame) -> list[str]:
-    """Same selection logic as the live ``sequence_frame_from_sessions``."""
-    skip = {SESSION_COLUMN, TIMESTAMP_COLUMN, MODE_COLUMN}
-    return [
-        str(column)
-        for column in frame.columns
-        if str(column) not in skip and pd.api.types.is_numeric_dtype(frame[column])
-    ]
-
-
 def _extract_mode_segments(segmented: pd.DataFrame) -> list[ModeSegment]:
     """Walk the ``operating_mode`` column and emit contiguous segments.
 
@@ -405,7 +377,7 @@ def _quality_block(
     duration_seconds: float,
 ) -> dict[str, Any]:
     """Per-session quality metrics that feed the disposition decision."""
-    feature_columns = _numeric_value_columns(segmented)
+    feature_columns = numeric_value_columns(segmented)
     if not feature_columns or segmented.empty:
         return {"complete_row_fraction": 0.0, "feature_columns": 0}
     complete = segmented[feature_columns].notna().all(axis=1).sum()

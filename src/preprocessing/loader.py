@@ -9,6 +9,15 @@ from typing import Literal
 
 import pandas as pd
 
+from src.config import CanaryConfig
+from src.preprocessing.resampler import (
+    GAP_SUFFIX,
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
+    ResampleConfig,
+    resample_wide,
+)
+from src.preprocessing.segmenter import MODE_COLUMN, segment_operating_modes
 from src.telemetry import SOURCE_SEP
 from src.telemetry import channel_key as channel_key
 
@@ -154,6 +163,68 @@ def to_wide(
                 wide[column] = converted.astype("float32")
 
     return wide
+
+
+def numeric_value_columns(frame: pd.DataFrame) -> list[str]:
+    """Numeric channel columns, excluding structural columns and gap flags.
+
+    Canonical selection shared by every batch preprocessing path that walks
+    from a wide/resampled/segmented frame to a feature-column list
+    (sequence windowing, session classification). Two independent copies of
+    this had drifted apart — one excluded ``__gap`` flag columns, the other
+    didn't — which let boolean gap flags leak into session-classifier
+    quality stats as if they were real feature channels.
+    """
+    skip = {SESSION_COLUMN, TIMESTAMP_COLUMN, MODE_COLUMN}
+    return [
+        str(column)
+        for column in frame.columns
+        if str(column) not in skip
+        and not str(column).endswith(GAP_SUFFIX)
+        and pd.api.types.is_numeric_dtype(frame[column])
+    ]
+
+
+def resample_and_segment(
+    session_dirs: Iterable[Path],
+    config: CanaryConfig,
+    *,
+    value: TelemetryValueKind = "value_number",
+) -> pd.DataFrame:
+    """Load session Parquet and run the shared ``read → wide → resample →
+    segment`` chain used by every batch preprocessing entry point.
+
+    Returns the segmented (but not yet feature-computed) frame. Empty input
+    (no sessions, no rows, no numeric channels) flows through to an empty or
+    minimal-column result rather than raising — callers decide what an empty
+    result means for them (skip, quarantine, raise).
+    """
+    sessions = [Path(path) for path in session_dirs]
+    long = read_sessions(sessions)
+    wide = to_wide(long, value=value)
+    value_columns = numeric_value_columns(wide)
+    if value_columns:
+        resampled = resample_wide(
+            wide,
+            config=ResampleConfig(hz=config.preprocessing.resample_hz),
+            value_columns=value_columns,
+        )
+    else:
+        resampled = pd.DataFrame(
+            {
+                SESSION_COLUMN: wide[SESSION_COLUMN].copy()
+                if SESSION_COLUMN in wide.columns
+                else pd.Series(dtype="object"),
+                TIMESTAMP_COLUMN: pd.to_datetime(wide[TIMESTAMP_COLUMN], utc=True)
+                if TIMESTAMP_COLUMN in wide.columns
+                else pd.Series(dtype="datetime64[ns, UTC]"),
+            }
+        )
+    return segment_operating_modes(
+        resampled,
+        config.preprocessing.operating_modes,
+        recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
+    )
 
 
 def _coalesce_value_columns(frame: pd.DataFrame) -> pd.Series:
