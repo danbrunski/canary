@@ -148,9 +148,23 @@ def _features_one_session(
         # one-row shift when the session has only one sample keeps the
         # operation defined; the resulting ROC will simply be NaN.
         n_rows = _rows_in_window(timestamps, cfg.window_seconds)
+        # Divide by the row pair's actual elapsed time, not the nominal
+        # window_seconds (8.4). On a dense grid the two are identical
+        # (n_rows was derived to make n_rows × median_delta ≈ window_seconds),
+        # but feature_pipeline._drop_fully_stale_rows can remove whole rows
+        # (a long power-off gap), leaving row-index-adjacent-but-time-distant
+        # neighbors on either side of the seam. Dividing that pair's real
+        # delta by the fixed window_seconds understates the elapsed time and
+        # manufactures a spurious slope right at the seam; the true elapsed
+        # time normalizes it away instead. A non-positive/undefined elapsed
+        # time (warmup, or a duplicate timestamp) makes the ratio meaningless
+        # — NaN it rather than divide by zero.
+        shifted_timestamps = timestamps.shift(n_rows)
+        elapsed = (timestamps - shifted_timestamps).dt.total_seconds()
+        safe_elapsed = elapsed.where(elapsed > 0)
         for col in columns:
             shifted = ordered[col].shift(n_rows)
-            roc = (ordered[col] - shifted) / cfg.window_seconds
+            roc = (ordered[col] - shifted) / safe_elapsed
             new_cols[roc_column(col)] = roc.to_numpy(dtype=FEATURE_DTYPE)
 
     # Narrow the passthrough value columns too, so the whole featurized

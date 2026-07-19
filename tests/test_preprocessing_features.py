@@ -137,6 +137,33 @@ def test_roc_negative_slope_decelerating_signal():
     assert roc.tolist() == pytest.approx([-200.0] * len(roc))
 
 
+def test_roc_uses_actual_elapsed_time_across_a_dropped_row_seam():
+    """8.4: feature_pipeline._drop_fully_stale_rows can remove whole rows
+    (a long power-off gap), leaving row-index-adjacent but time-distant
+    neighbors on either side of the seam. A fixed row-count shift divided
+    by the nominal window_seconds would understate the elapsed time and
+    manufacture a slope 3x too steep right at the seam; dividing by the
+    row pair's real elapsed time must recover the true underlying slope
+    instead."""
+    n = 20
+    # A perfectly linear 100/sec ramp...
+    df = _uniform_session("s1", n, values={"obd:RPM": [800 + 100 * i for i in range(n)]})
+    # ...with the middle 10 seconds (rows 5..14) dropped, simulating
+    # _drop_fully_stale_rows removing a long stale gap. The remaining rows
+    # (0..4, 15..19) are re-indexed contiguously, so row 5 in the surviving
+    # frame is 15 seconds — not 1 second — after row 4.
+    kept = pd.concat([df.iloc[:5], df.iloc[15:]], ignore_index=True)
+
+    out = compute_features(kept, config=FeatureConfig(window_seconds=5))
+    roc = out[roc_column("obd:RPM")]
+
+    # Rows 5..9 (surviving-frame index) are the ones whose 5-row-back shift
+    # now reaches back across the 15-second seam. The true slope is 100/sec
+    # regardless of the gap; the old fixed-window_seconds divisor would have
+    # reported 300 (1500 rpm delta / 5s) here instead.
+    assert roc.iloc[5:10].tolist() == pytest.approx([100.0] * 5)
+
+
 # ---------------------------------------------------------------------------
 # Session boundary handling
 # ---------------------------------------------------------------------------
