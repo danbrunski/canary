@@ -1,6 +1,8 @@
 # Roadmap — MCP tooling & UPS/power hardening
 
-Status: **planned** (2026-07-18). Straight to `main`, no feature branches.
+Status: **implemented and deployed** (2026-07-18/19). All 4 phases landed,
+pushed, and live-verified on the bench Pi. Straight to `main`, no feature
+branches.
 
 ## Why this exists
 
@@ -301,11 +303,21 @@ certainty — investigate before committing an approach.
 
 ## Cross-cutting acceptance
 
-- [ ] Whole-repo `ruff` + `mypy` + `pytest` green on every commit; `pnpm test`
+- [x] Whole-repo `ruff` + `mypy` + `pytest` green on every commit; `pnpm test`
   for FE phases (re-run `TuningFeedback.test.ts` on flake before treating as a
-  regression).
-- [ ] `docs/mcp-server.md` updated for every new/changed tool.
-- [ ] Each phase deployed to the Pi and verified live before starting the next.
+  regression). Held throughout — 1848 tests passing at the end (up from 1759
+  at the start of this roadmap), 98 FE tests, zero ruff/mypy findings.
+- [x] `docs/mcp-server.md` updated for every new/changed tool.
+- [x] Each phase deployed to the Pi and verified live. Phase 1 verified
+  incrementally during development. Phases 2-4 pulled + `canary`/`canary-mcp`
+  restarted at the end (`10d9e4c`); confirmed live: `GET /control/power`
+  returns real SoC/vcell/watchdog state (98.4%, 4.17V, armed, on external
+  power), an authenticated MCP `initialize` round-trip succeeds against the
+  redeployed server.
+  Found the running `ups-shutdown` process was still on the stale 30s grace
+  (started before the unit file was last updated to `UPS_SHUTDOWN_DELAY=300`)
+  — `restart ups-shutdown` isn't in the passwordless sudoers list, so the
+  operator ran it manually; confirmed live afterward: `grace_s: 300.0`.
 
 ## Code anchor index (from the 2026-07-18 code map)
 
