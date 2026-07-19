@@ -90,7 +90,7 @@ drops, and inference never consults vehicle state.
   ffill via `_bounded_values`, fast/slow ceiling parity with the offline
   resampler; `vehicle_state_inputs()` added as no-I/O prep for 1.5
   (commit `f495cd2`).
-- [ ] **1.5 — Vehicle-state gating for IF/LSTM.** `run_live_inference`
+- [x] **1.5 — Vehicle-state gating for IF/LSTM.** `run_live_inference`
   scores every tick; `classify_vehicle_state`
   (`src/dashboard/status.py:73-143`) is display-only (confirmed: zero
   references in `daemon/inference.py`). Gate IF/LSTM scoring on
@@ -98,7 +98,12 @@ drops, and inference never consults vehicle state.
   exists for the mode); skip + count skipped ticks in `/status` for
   `engine_off`/`no_data`. Behavior surfaces keep their existing
   mode-gating. Replay state must still score (replay re-emits running
-  data).
+  data). — landed: `_live_vehicle_state` (no-I/O, built on 1.4's
+  `vehicle_state_inputs`) gates IF + sequence scoring on
+  `{engine_running, replay}`; behavior overlay left ungated;
+  `EmitterCounters.skipped_vehicle_state` surfaced at `/status` (commit
+  `41127f1`). No koeo model exists yet, so `ignition_only` stays gated
+  out with the rest.
 - [ ] **1.6 — Retrain + verify.** Phase 1 changes the training
   distribution (rows that used to be ffilled/kept are now NaN/dropped).
   Retrain IF + sequence detector, replay a known-good session
