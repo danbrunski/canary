@@ -227,6 +227,7 @@ def resample_and_segment(
         resampled,
         config.preprocessing.operating_modes,
         recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
+        mode_dwell_ticks=config.preprocessing.mode_dwell_ticks,
     )
 
 

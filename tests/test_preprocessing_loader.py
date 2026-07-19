@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.config import CanaryConfig
+from src.config import CanaryConfig, OperatingModeSpec
 from src.preprocessing.loader import (
     channel_key,
     discover_sessions,
@@ -162,3 +162,55 @@ def test_resample_and_segment_handles_no_numeric_channels(tmp_path: Path) -> Non
 
     assert "session" in segmented.columns
     assert "timestamp" in segmented.columns
+
+
+# ---------------------------------------------------------------------------
+# 5.2 — mode dwell/hysteresis (batch path)
+# ---------------------------------------------------------------------------
+
+
+def _dwell_config(dwell_ticks: int) -> CanaryConfig:
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config.preprocessing.operating_modes = {
+        "city": OperatingModeSpec(speed_max=50),
+        "highway": OperatingModeSpec(speed_min=80),
+    }
+    config.preprocessing.mode_dwell_ticks = dwell_ticks
+    return config
+
+
+def _speed_session(tmp_path: Path, name: str, speeds: list[float]) -> Path:
+    records = [
+        TelemetryRecord.obd(1_778_000_000.0 + i, "SPEED", speed, "km/h")
+        for i, speed in enumerate(speeds)
+    ]
+    return _write_session(tmp_path, name, records)
+
+
+def test_mode_dwell_absorbs_single_row_spike(tmp_path: Path) -> None:
+    """A one-row highway reading surrounded by city rows must not switch the
+    label — the candidate never holds for ``mode_dwell_ticks`` in a row."""
+    session = _speed_session(tmp_path, "2026-05-11T120000", [20, 20, 20, 90, 20, 20, 20])
+
+    segmented = resample_and_segment([session], _dwell_config(dwell_ticks=3))
+
+    assert list(segmented.sort_values("timestamp")["operating_mode"]) == ["city"] * 7
+
+
+def test_mode_dwell_switches_after_sustained_transition(tmp_path: Path) -> None:
+    """3+ consecutive highway rows DO switch the label, taking effect on the
+    row that completes the dwell streak (not immediately on the first)."""
+    session = _speed_session(tmp_path, "2026-05-11T120000", [20, 20, 20, 90, 90, 90, 90, 90])
+
+    segmented = resample_and_segment([session], _dwell_config(dwell_ticks=3))
+
+    assert list(segmented.sort_values("timestamp")["operating_mode"]) == [
+        "city",
+        "city",
+        "city",
+        "city",
+        "city",
+        "highway",
+        "highway",
+        "highway",
+    ]

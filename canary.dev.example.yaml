@@ -46,16 +46,32 @@ collection:
 preprocessing:
   resample_hz: 1
   rolling_window_seconds: 30
+  # Phase 5.1/5.2 mode-taxonomy fixes (see canary.example.yaml for the full
+  # rationale comments).
   operating_modes:
     idle:
       rpm_max: 900
       speed_max: 0
+    # Fast/loaded idle — closes the fall-through where a >900 rpm standing
+    # idle matched no rpm-gated mode and landed in ``city``.
+    idle_high:
+      rpm_min: 900
+      rpm_max: 1200
+      speed_max: 0
     city:
+      speed_min: 5
       speed_max: 50
+    # Closes the 50-80 km/h dead zone between city and highway.
+    suburban:
+      speed_min: 50
+      speed_max: 80
     highway:
       speed_min: 80
     wot:
       throttle_min: 80
+  # A candidate mode must hold this many consecutive rows before the label
+  # switches — damps 1 Hz flapping at a mode boundary.
+  mode_dwell_ticks: 3
 
 models:
   isolation_forest:

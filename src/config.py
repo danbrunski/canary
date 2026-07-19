@@ -202,6 +202,14 @@ class PreprocessingConfig(_Strict):
     #: Beyond the limit the resampled cell goes NaN and its ``__gap`` flag
     #: sets, same treatment fast channels already got.
     slow_channel_max_gap_seconds: float = 120.0
+    #: Phase 5.2 — consecutive rows a candidate operating-mode label must hold
+    #: before segmentation actually switches to it. ``1`` (default) is the
+    #: legacy immediate-switch behavior. Without dwell, 1 Hz flapping at a
+    #: mode boundary (e.g. city/highway right at the speed threshold)
+    #: contaminates both models' training rows with a handful of mislabeled
+    #: ticks each way. Mirrors ``AlertsConfig.min_consecutive_ticks``'s shape;
+    #: see ``segmenter._apply_mode_dwell``.
+    mode_dwell_ticks: int = Field(default=1, ge=1)
 
 
 class IsolationForestConfig(_Strict):

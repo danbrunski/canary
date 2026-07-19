@@ -53,6 +53,11 @@ collection:
 preprocessing:
   resample_hz: 1
   rolling_window_seconds: 30
+  # Phase 5.1/5.2 (ml-correctness-hardening.md) mode-taxonomy fixes. DEPLOY
+  # NOTE: this file only seeds a fresh install (scripts/install_pi.sh skips
+  # it once /etc/canary/canary.yaml exists) — an already-provisioned Pi needs
+  # this same edit copied into its live /etc/canary/canary.yaml by hand, plus
+  # a daemon restart, before it takes effect. See OVERNIGHT-QUEUE.md Q5.
   operating_modes:
     koeo:
       rpm_max: 0
@@ -72,10 +77,26 @@ preprocessing:
       rpm_max: 900
       speed_max: 0
       coolant_temp_min: 70
+    # Fast/loaded idle (A/C compressor, high idle) — closes the fall-through
+    # where a >900 rpm standing idle matched no rpm-gated mode and landed in
+    # ``city`` (which used to only constrain speed).
+    idle_high:
+      rpm_min: 900
+      rpm_max: 1200
+      speed_max: 0
+      coolant_temp_min: 70
     city:
+      speed_min: 5
       speed_max: 50
+    # Closes the 50-80 km/h dead zone between city and highway.
+    suburban:
+      speed_min: 50
+      speed_max: 80
     highway:
       speed_min: 80
+  # A candidate mode must hold this many consecutive rows before the label
+  # switches — damps 1 Hz flapping at a mode boundary.
+  mode_dwell_ticks: 3
 
 models:
   # Active sequence-detector backbone ("lstm" = GRU-D today). The selected

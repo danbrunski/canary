@@ -135,8 +135,32 @@ preprocessing:
       rpm_max: 900
       speed_max: 0
       coolant_temp_min: 70
+    # Fast/loaded idle (A/C compressor kicking in, high idle after a cold
+    # start finishes warming): warm, stopped, RPM above steady idle but below
+    # a real rev. Phase 5.1 — without this band a >900 rpm standing idle
+    # matched no mode's rpm gate and fell through to ``city`` (which only
+    # constrained speed_max, not rpm), mislabeling a revving-but-stationary
+    # truck as city driving.
+    idle_high:
+      rpm_min: 900
+      rpm_max: 1200
+      speed_max: 0
+      coolant_temp_min: 70
+    # Phase 5.1 — speed_min closes the fall-through above (a >900 rpm warm
+    # idle no longer satisfies city's speed gate at all) and also stops
+    # ``city`` swallowing standing-idle rows that idle/idle_high didn't
+    # already claim.
     city:
+      speed_min: 5
       speed_max: 50
+    # Phase 5.1 — 50-80 km/h was previously an unclassified dead zone
+    # (city capped at 50, highway floored at 80); this closes it with its
+    # own band rather than widening city/highway, matching the taxonomy's
+    # existing fine-grained-band shape (koeo/warmup/idle_transient/idle/
+    # idle_high are all narrow bands, not a couple of wide ones).
+    suburban:
+      speed_min: 50
+      speed_max: 80
     highway:
       speed_min: 80
     # Wide-open-throttle is a transient *event* (see ``wot_run`` in
@@ -145,6 +169,12 @@ preprocessing:
     # IF model that's data-starved — same data-sparsity failure mode
     # the warmup work just fixed. Keep WOT as an event marker; let
     # high-throttle moments score against the city / highway models.
+  # Phase 5.2 — a candidate mode must hold for this many consecutive rows
+  # before segmentation actually switches to it, damping 1 Hz flapping at a
+  # mode boundary (e.g. right at the city/suburban 50 km/h edge) that would
+  # otherwise contaminate both models' training rows with mislabeled ticks.
+  # 3 mirrors alerts.min_consecutive_ticks' "N consecutive" shape.
+  mode_dwell_ticks: 3
 
 models:
   # Which backbone fills the single sequence-detector slot: "lstm" (GRU-D) or

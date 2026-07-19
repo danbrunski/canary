@@ -354,7 +354,16 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
         "preprocessing": {
             "resample_hz": 1,
             "rolling_window_seconds": 30,
-            "operating_modes": ["city", "highway", "idle", "idle_transient", "koeo", "warmup"],
+            "operating_modes": [
+                "city",
+                "highway",
+                "idle",
+                "idle_high",
+                "idle_transient",
+                "koeo",
+                "suburban",
+                "warmup",
+            ],
         },
         # GRU-D serve mirrors the resampler's max_gap = (1/hz) × factor (2.0).
         "max_gap_seconds": 2.0,

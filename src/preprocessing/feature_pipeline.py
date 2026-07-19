@@ -486,6 +486,7 @@ def segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> pd.Dat
     seg_cfg = SegmenterConfig(
         signal_columns=dict(_SEGMENTER_SIGNAL_COLUMNS),
         recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
+        mode_dwell_ticks=config.preprocessing.mode_dwell_ticks,
     )
     # A signal is available when *any* of its candidate columns is present, so
     # the speed gate is satisfied by gps:speed or obd:SPEED.

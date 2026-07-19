@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.config import CanaryConfig
+from src.config import CanaryConfig, OperatingModeSpec
 from src.decode.bindings import Bindings, load_bindings
 from src.preprocessing.feature_pipeline import build_feature_frame
 from src.preprocessing.live import LiveFeatureSource
@@ -371,6 +371,61 @@ def test_segmenter_falls_back_to_all_without_signal_columns(config: CanaryConfig
     row = src.tick(now)
     assert row is not None
     assert row["operating_mode"].iloc[0] == "all"
+
+
+# ---------------------------------------------------------------------------
+# 5.2 — mode dwell/hysteresis (live path, must agree with the batch path in
+# test_preprocessing_loader.py on the exact same speed sequence)
+# ---------------------------------------------------------------------------
+
+
+def _dwell_modes_live(config: CanaryConfig, dwell_ticks: int) -> CanaryConfig:
+    config.preprocessing.operating_modes = {
+        "city": OperatingModeSpec(speed_max=50),
+        "highway": OperatingModeSpec(speed_min=80),
+    }
+    config.preprocessing.mode_dwell_ticks = dwell_ticks
+    return config
+
+
+def _tick_speeds_live(config: CanaryConfig, speeds: list[float]) -> list[str]:
+    """Drive one observe+tick per speed reading (rpm/throttle/coolant held
+    constant so the segmenter's fixed input set is satisfied every tick) and
+    collect the emitted ``operating_mode`` per tick, in order."""
+    src = LiveFeatureSource(config=config)
+    start = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    modes: list[str] = []
+    for i, speed in enumerate(speeds):
+        now = start + timedelta(seconds=i)
+        src.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 1500.0, "rpm"))
+        src.observe(TelemetryRecord.obd(now.timestamp(), "THROTTLE_POS", 20.0, "%"))
+        src.observe(TelemetryRecord.obd(now.timestamp(), "COOLANT_TEMP", 85.0, "C"))
+        src.observe(TelemetryRecord.obd(now.timestamp(), "SPEED", speed, "km/h"))
+        row = src.tick(now)
+        assert row is not None
+        modes.append(str(row["operating_mode"].iloc[0]))
+    return modes
+
+
+def test_mode_dwell_absorbs_single_row_spike_live(config: CanaryConfig) -> None:
+    """Same scenario/expectation as the batch
+    ``test_mode_dwell_absorbs_single_row_spike`` — a one-tick highway spike
+    must not switch live serve's label either."""
+    modes = _tick_speeds_live(
+        _dwell_modes_live(config, dwell_ticks=3), [20, 20, 20, 90, 20, 20, 20]
+    )
+    assert modes == ["city"] * 7
+
+
+def test_mode_dwell_switches_after_sustained_transition_live(config: CanaryConfig) -> None:
+    """Same scenario/expectation as the batch
+    ``test_mode_dwell_switches_after_sustained_transition`` — proves live
+    serve and the batch loader agree on exactly when the dwell completes,
+    since both run the same ``segment_operating_modes`` dwell state machine."""
+    modes = _tick_speeds_live(
+        _dwell_modes_live(config, dwell_ticks=3), [20, 20, 20, 90, 90, 90, 90, 90]
+    )
+    assert modes == ["city", "city", "city", "city", "city", "highway", "highway", "highway"]
 
 
 # ---------------------------------------------------------------------------

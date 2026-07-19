@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
-from src.config import OperatingModeSpec
+from src.config import CanaryConfig, OperatingModeSpec
 from src.preprocessing.segmenter import (
     MODE_COLUMN,
     UNKNOWN_MODE,
@@ -13,6 +15,9 @@ from src.preprocessing.segmenter import (
     mode_for_row,
     segment_operating_modes,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 
 def _modes() -> dict[str, OperatingModeSpec]:
@@ -398,3 +403,36 @@ def test_fresh_coolant_without_gap_column_still_segments() -> None:
     out = segment_operating_modes(frame, _warmup_modes())
 
     assert out.loc[0, MODE_COLUMN] == "warmup"
+
+
+# ---------------------------------------------------------------------------
+# 5.1 — mode-taxonomy fall-throughs closed (real canary.example.yaml config)
+# ---------------------------------------------------------------------------
+
+
+def test_warm_fast_idle_no_longer_falls_through_to_city() -> None:
+    """Regression: ``city`` used to constrain only ``speed_max``, so a warm,
+    >900 rpm standing idle (A/C-loaded / fast idle) matched no rpm-gated mode
+    and fell through into ``city`` on speed alone. ``city`` now also requires
+    ``speed_min``, and ``idle_high`` covers the >900-1200 rpm standing band.
+    """
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    frame = pd.DataFrame([{"obd:RPM": 1000.0, "obd:SPEED": 0.0, "obd:COOLANT_TEMP": 90.0}])
+
+    segmented = segment_operating_modes(frame, config.preprocessing.operating_modes)
+
+    assert segmented.loc[0, MODE_COLUMN] != "city"
+    assert segmented.loc[0, MODE_COLUMN] == "idle_high"
+
+
+def test_50_to_80_kmh_dead_zone_now_classified() -> None:
+    """Regression: 50-80 km/h matched neither ``city`` (capped at 50) nor
+    ``highway`` (floored at 80) and fell through to ``unknown``. The new
+    ``suburban`` band closes the gap."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    frame = pd.DataFrame([{"obd:RPM": 1800.0, "obd:SPEED": 65.0, "obd:COOLANT_TEMP": 90.0}])
+
+    segmented = segment_operating_modes(frame, config.preprocessing.operating_modes)
+
+    assert segmented.loc[0, MODE_COLUMN] not in {UNKNOWN_MODE, "city", "highway"}
+    assert segmented.loc[0, MODE_COLUMN] == "suburban"

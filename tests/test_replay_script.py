@@ -86,7 +86,11 @@ def test_replay_sessions_builds_preprocessing_report(tmp_path: Path) -> None:
     ]
     assert report["numeric_value_column_count"] == 4
     assert report["rolling_feature_column_count"] == 12
-    assert report["mode_counts"] == {"idle": 40, "city": 40}
+    # Phase 5.2: canary.example.yaml now sets mode_dwell_ticks: 3, so the
+    # idle->city switch at the i=40 boundary doesn't take effect until the
+    # 3rd consecutive city row — 2 rows lean idle relative to the raw 40/40
+    # split.
+    assert report["mode_counts"] == {"idle": 42, "city": 38}
     assert report["complete_model_input_rows"] > 0
     assert report["scoring"] is None
 

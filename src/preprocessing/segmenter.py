@@ -70,6 +70,14 @@ class SegmenterConfig:
     recent_motion_window_seconds: float = DEFAULT_RECENT_MOTION_WINDOW_SECONDS
     session_column: str = "session"
     timestamp_column: str = "timestamp"
+    #: Phase 5.2 — consecutive rows a candidate mode must hold before the
+    #: label actually switches; the previous *effective* label persists
+    #: during the dwell window. ``1`` (default) is the legacy immediate-switch
+    #: behavior — every row's own raw threshold match wins, matching every
+    #: caller/test that predates this field. Mirrors the shape of
+    #: ``AlertsConfig.min_consecutive_ticks`` (also "N consecutive before it
+    #: counts"), applied to mode labels instead of alert firing.
+    mode_dwell_ticks: int = 1
 
 
 def default_segmenter_config(frame: pd.DataFrame) -> SegmenterConfig:
@@ -93,6 +101,7 @@ def segment_operating_modes(
     *,
     config: SegmenterConfig | None = None,
     recent_motion_window_seconds: float | None = None,
+    mode_dwell_ticks: int | None = None,
 ) -> pd.DataFrame:
     """Append an operating-mode label based on configured threshold rules.
 
@@ -103,6 +112,11 @@ def segment_operating_modes(
     ``recent_motion_window_seconds`` overrides ``config.recent_motion_window_seconds``
     so callers that don't build a ``SegmenterConfig`` (LSTM/labeling/replay) can
     still thread the operator-configured window and keep train/serve parity.
+    ``mode_dwell_ticks`` overrides ``config.mode_dwell_ticks`` the same way
+    (Phase 5.2 hysteresis). This is the one function both the batch loader
+    (``resample_and_segment``) and live serve (``feature_pipeline.
+    segment_or_constant``, re-run over the buffered window each tick) call —
+    dwell lives here, not duplicated per call site, so train/serve can't drift.
     """
     seg_config = default_segmenter_config(frame) if config is None else config
     window_s = (
@@ -110,6 +124,7 @@ def segment_operating_modes(
         if recent_motion_window_seconds is None
         else recent_motion_window_seconds
     )
+    dwell_ticks = seg_config.mode_dwell_ticks if mode_dwell_ticks is None else mode_dwell_ticks
     result = frame.copy()
     labels = pd.Series(seg_config.unknown_mode, index=result.index, dtype="object")
     unassigned = pd.Series(True, index=result.index)
@@ -151,6 +166,9 @@ def segment_operating_modes(
 
         labels.loc[mask] = mode_name
         unassigned &= ~mask
+
+    if dwell_ticks > 1:
+        labels = _apply_mode_dwell(labels, result, seg_config, dwell_ticks)
 
     result[seg_config.output_column] = labels
     return result
@@ -327,4 +345,64 @@ def _recent_speed_max(
         ordered = sub.sort_values("ts", kind="stable")
         rolled = ordered.set_index("ts")["v"].rolling(window).max()
         out.loc[ordered.index] = rolled.to_numpy()
+    return out
+
+
+def _apply_mode_dwell(
+    labels: pd.Series,
+    frame: pd.DataFrame,
+    config: SegmenterConfig,
+    dwell_ticks: int,
+) -> pd.Series:
+    """Causal hysteresis (Phase 5.2): a candidate mode only takes effect once
+    it has held for ``dwell_ticks`` consecutive rows (this row inclusive); the
+    previous *effective* label persists until then, so a single flapping row
+    at a mode boundary can't switch the label. Grouped by session and ordered
+    by timestamp — same shape as ``_recent_speed_max`` — so dwell never bleeds
+    across a session cut and is robust to out-of-order input. Pure function
+    over the already-computed raw label series, so it runs identically whether
+    the caller is the batch loader (full session) or live serve (the buffered
+    window re-segmented each tick): one state machine, not two.
+    """
+    ts_col = config.timestamp_column
+    work = pd.DataFrame({"label": labels.to_numpy()}, index=frame.index)
+    if ts_col in frame.columns:
+        work["ts"] = pd.to_datetime(frame[ts_col], utc=True, errors="coerce").to_numpy()
+    if config.session_column in frame.columns:
+        groups: Iterable[tuple[object, pd.DataFrame]] = work.groupby(
+            frame[config.session_column].to_numpy(), sort=False
+        )
+    else:
+        groups = [(None, work)]
+    out = labels.copy()
+    for _, sub in groups:
+        ordered = sub.sort_values("ts", kind="stable") if "ts" in sub.columns else sub
+        out.loc[ordered.index] = _debounce_sequence(list(ordered["label"]), dwell_ticks)
+    return out
+
+
+def _debounce_sequence(values: list[str], dwell_ticks: int) -> list[str]:
+    """N-consecutive dwell state machine over one ordered label sequence.
+
+    The first row has no prior state, so it always takes its own raw label.
+    After that, a new candidate only becomes the effective label once it has
+    repeated ``dwell_ticks`` times in a row (counting the row that first
+    differed from the effective label); a shorter run reverts to the
+    effective label unchanged, same as a single-row spike being absorbed.
+    """
+    if not values:
+        return values
+    effective = values[0]
+    candidate = values[0]
+    streak = 1
+    out = [effective]
+    for value in values[1:]:
+        if value == candidate:
+            streak += 1
+        else:
+            candidate = value
+            streak = 1
+        if candidate != effective and streak >= dwell_ticks:
+            effective = candidate
+        out.append(effective)
     return out
