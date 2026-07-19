@@ -15,3 +15,4 @@ ml-correctness-hardening.md 8.1 — done — AnomalyInjector.dropout() reproduce
 ml-correctness-hardening.md 8.2 — done — post-window detection grace: late hits distinguished from misses, latency still from window.start (commit b5bd740)
 eval-longitudinal-and-dtc.md 2.4 — done — time-to-detect latency already landed incidentally in commit 825ae0a; checkbox caught up
 eval-longitudinal-and-dtc.md 2.3 — done — evaluate_detectors gains sequence-detector coverage via real observe() contract, generalized N-detector persistence gate (commit 719908e)
+eval-longitudinal-and-dtc.md 2.5 — done — scripts/detector_benchmark.py corpus-wide grid CLI + fixed latent AnomalyInjector.drift() float32 dtype bug (commit 90118c1)
