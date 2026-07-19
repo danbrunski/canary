@@ -18,6 +18,7 @@ Read tools:
 |---|---|
 | `get_status` | `GET /status` (incl. derived `vehicle_state.{state, rpm, coolant_temp, run_time, obd_freshness_seconds, can_freshness_seconds, replay_id}` — check this before concluding anything about detector behavior; states are `engine_running`, `ignition_only`, `engine_off`, `no_data`, `replay`, `unknown`) |
 | `get_config` | `GET /config` |
+| `get_power_status` | `GET /control/power` — UPS SoC/cell voltage, watchdog armed/on-battery/seconds-lost/grace, active keep-alive hold. Use instead of SSH'ing in to check the `ups-shutdown` watchdog (see [ups_shutdown_watch.py](../scripts/ups_shutdown_watch.py)); `watchdog_running: false` means the systemd unit isn't up, `watchdog_stale: true` means it's up but hung. |
 | `get_recent_anomalies` | `GET /anomalies` (+ client-side source/mode filter) |
 | `get_recent_telemetry` | `GET /telemetry/latest` |
 | `get_behavior_live` | `GET /models/behavior/live` |
@@ -46,6 +47,7 @@ Write tools (audit-logged with `actor="mcp"` via
 | `set_session_metadata` / `pin_session` / `unpin_session` | `POST /control/sessions/{id}[...]` |
 | `start_job` / `cancel_job` | `POST /control/jobs[...]` |
 | `set_tuning` / `estimate_tuning` / `revert_tuning` | `POST /control/tuning[...]` |
+| `set_ups_keepalive` | `POST /control/power/keepalive` — set (minutes>0) or cancel (minutes=0) the UPS watchdog keep-alive hold, for a bench transition longer than the watchdog's grace window |
 | `upload_model_artifact` | base64-encodes a local artifact + `POST /control/models/{type}/artifact` |
 | `replay_window` | submits a `replay_window` daemon job, polls until done, returns the inference report |
 | `start_replay` / `stop_replay` / `get_replay_status` | `POST /control/replay[...]` — runtime replay-into-collector with isolated outputs (see "End-to-end session replay" below) |

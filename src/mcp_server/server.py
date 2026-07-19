@@ -46,6 +46,9 @@ from src.mcp_server.tools import (
     logs as logs_tool,
 )
 from src.mcp_server.tools import (
+    power as power_tool,
+)
+from src.mcp_server.tools import (
     replay as replay_tool,
 )
 from src.mcp_server.tools import (
@@ -77,6 +80,9 @@ from src.mcp_server.write_tools import (
 )
 from src.mcp_server.write_tools import (
     models as models_write_tool,
+)
+from src.mcp_server.write_tools import (
+    power as power_write_tool,
 )
 from src.mcp_server.write_tools import (
     replay as replay_write_tool,
@@ -176,6 +182,11 @@ def _register_read_tools(
     async def get_config() -> dict[str, Any]:
         """Echo the daemon's loaded canary.yaml as JSON."""
         return await status_tool.get_config(client)
+
+    @mcp.tool()
+    async def get_power_status() -> dict[str, Any]:
+        """UPS power state: SoC, watchdog armed/on-battery/grace, keep-alive hold."""
+        return await power_tool.get_power_status(client)
 
     @mcp.tool()
     async def get_recent_anomalies(
@@ -529,6 +540,11 @@ def _register_write_tools(
     async def revert_tuning(version: int, by: str | None = None) -> dict[str, Any]:
         """Revert to a previous tuning version (from the audit log)."""
         return await tuning_write_tool.revert_tuning(client, audit, version=version, by=by)
+
+    @mcp.tool()
+    async def set_ups_keepalive(minutes: float) -> dict[str, Any]:
+        """Set (minutes>0) or cancel (minutes=0) the UPS watchdog keep-alive hold."""
+        return await power_write_tool.set_ups_keepalive(client, audit, minutes=minutes)
 
     @mcp.tool()
     async def replay_window(

@@ -13,10 +13,12 @@ from src.mcp_server.audit import MCPAuditLogger
 from src.mcp_server.client import DaemonClient, DaemonError
 from src.mcp_server.tools import anomalies as anomalies_tool
 from src.mcp_server.tools import behavior as behavior_tool
+from src.mcp_server.tools import power as power_tool
 from src.mcp_server.tools import status as status_tool
 from src.mcp_server.tools import telemetry as telemetry_tool
 from src.mcp_server.write_tools import captures as captures_tool
 from src.mcp_server.write_tools import feedback as feedback_tool
+from src.mcp_server.write_tools import power as power_write_tool
 
 
 async def _fake_daemon(routes: dict[str, Any]) -> DaemonClient:
@@ -110,6 +112,14 @@ async def test_get_behavior_live_passthrough() -> None:
     snapshot = {"observed": 42, "operating_mode": "idle", "models": {}}
     client = await _fake_daemon({"GET /models/behavior/live": snapshot})
     assert await behavior_tool.get_behavior_live(client) == snapshot
+    await client.aclose()
+
+
+async def test_get_power_status_passthrough() -> None:
+    """``get_power_status`` is a pure read — forwards GET /control/power."""
+    snapshot = {"power": {"watchdog_running": True, "soc": 88.0, "on_battery": False}}
+    client = await _fake_daemon({"GET /control/power": snapshot})
+    assert await power_tool.get_power_status(client) == snapshot
     await client.aclose()
 
 
@@ -237,6 +247,43 @@ async def test_get_current_capture_passthrough() -> None:
     client = await _fake_daemon({"GET /control/captures/current": snapshot})
     assert await captures_tool.get_current_capture(client) == snapshot
     await client.aclose()
+
+
+async def test_set_ups_keepalive_sends_minutes_and_audits_success(tmp_path: Path) -> None:
+    """``set_ups_keepalive`` posts {minutes} and records an ``ok`` audit entry."""
+    captured: dict[str, Any] = {}
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.read())
+        return httpx.Response(
+            200, json={"power": {"keepalive_remaining_s": 600.0}, "expiry": 1700.0}
+        )
+
+    client = await _fake_daemon({"POST /control/power/keepalive": respond})
+    audit = MCPAuditLogger(tmp_path / "audit.jsonl")
+    result = await power_write_tool.set_ups_keepalive(client, audit, minutes=10.0)
+    await client.aclose()
+    assert captured["body"] == {"minutes": 10.0}
+    assert result["expiry"] == 1700.0
+    entry = json.loads((tmp_path / "audit.jsonl").read_text().splitlines()[0])
+    assert entry["action"] == "mcp.set_ups_keepalive"
+    assert entry["result"] == "ok"
+
+
+async def test_set_ups_keepalive_audits_failure(tmp_path: Path) -> None:
+    """A daemon-side rejection (e.g. runtime dir missing) audits as ``error``."""
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"detail": "UPS keep-alive file not writable"})
+
+    client = await _fake_daemon({"POST /control/power/keepalive": respond})
+    audit = MCPAuditLogger(tmp_path / "audit.jsonl")
+    with pytest.raises(DaemonError):
+        await power_write_tool.set_ups_keepalive(client, audit, minutes=5.0)
+    await client.aclose()
+    entry = json.loads((tmp_path / "audit.jsonl").read_text().splitlines()[0])
+    assert entry["action"] == "mcp.set_ups_keepalive"
+    assert entry["result"] == "error"
 
 
 async def test_record_feedback_audit_carries_label(tmp_path: Path) -> None:

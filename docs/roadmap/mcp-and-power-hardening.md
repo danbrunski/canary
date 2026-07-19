@@ -82,11 +82,12 @@ keep-alive).
   to the `/run/canary/...` constants, overridable — same pattern as
   `behavior_models_path` etc.) so tests point at `tmp_path` instead of the
   real runtime dir. 8 endpoint tests in `tests/test_control_power.py`.
-- [ ] **1.6 — MCP tools.** `get_power_status` (read tool in
-  `src/mcp_server/tools/`, GET `/control/power`) and `set_ups_keepalive`
-  (write tool in `src/mcp_server/write_tools/`, POST + audited via
-  `MCPAuditLogger`). Register closures in `server.py` `_register_read_tools` /
-  `_register_write_tools`. Update `docs/mcp-server.md`.
+- [x] **1.6 — MCP tools.** `get_power_status` (`src/mcp_server/tools/power.py`,
+  GET `/control/power`) and `set_ups_keepalive`
+  (`src/mcp_server/write_tools/power.py`, POST + audited via `MCPAuditLogger`).
+  Registered in `server.py` `_register_read_tools` / `_register_write_tools`.
+  `docs/mcp-server.md` updated. Tests in `tests/test_mcp_tools.py`
+  (passthrough + audit-success + audit-failure).
 
 ### 1C. Dashboard
 
