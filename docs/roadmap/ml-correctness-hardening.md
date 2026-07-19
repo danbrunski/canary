@@ -301,16 +301,27 @@ km/h is an unclassified dead zone (`highway` floors at 80); no
 hysteresis → 1 Hz mode flapping contaminates per-mode models. The
 segmenter *code* is correct; the rule set leaks.
 
-- [ ] **5.1 — Close the fall-throughs.** Add `speed_min` (e.g. 5) to
+- [x] **5.1 — Close the fall-throughs.** Add `speed_min` (e.g. 5) to
   `city`; raise idle `rpm_max` (or add an `idle_high` mode for
   A/C-load/fast-idle up to ~1200 rpm); add a `suburban` (50–80 km/h)
   mode or extend `city` to meet `highway`. Update all `canary*.yaml`
-  variants + the Pi config (deploy note).
-- [ ] **5.2 — Hysteresis/debounce.** Add a dwell requirement to mode
+  variants + the Pi config (deploy note). — landed: `city.speed_min: 1`
+  (started at 5, lowered after review caught a new 0-5km/h creep dead
+  zone), new `idle_high` (900-1200rpm) and `suburban` (50-80km/h)
+  modes, applied across all tracked `canary*.yaml` variants; Pi config
+  needs the same edit hand-synced at deploy (noted in
+  `canary.pi.example.yaml`, not touched on the Pi itself).
+- [x] **5.2 — Hysteresis/debounce.** Add a dwell requirement to mode
   transitions (e.g. new mode must hold N consecutive rows before the
   label switches; `recent_speed` at `segmenter.py:261-294` is the
   existing precedent for causal smoothing). Keep it in the shared
-  segmenter so batch and live agree.
+  segmenter so batch and live agree. — landed:
+  `PreprocessingConfig.mode_dwell_ticks` (default 1 = legacy immediate
+  switch; all configs set 3); `_apply_mode_dwell`/`_debounce_sequence`
+  inside the shared `segment_operating_modes`, called by both the batch
+  loader and live's rolling-buffer re-segmentation — one function, not
+  two implementations, verified to agree including at buffer-eviction
+  boundaries.
 - [ ] **5.3 — Re-segment + refit.** Mode labels feed per-mode IF
   models, sequence per-mode thresholds, behavior-surface gating, and
   session classification. After 5.1/5.2: re-run `label_sessions.py
