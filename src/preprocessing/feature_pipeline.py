@@ -397,10 +397,10 @@ def _drop_fully_stale_rows(resampled: pd.DataFrame) -> pd.DataFrame:
     left open across a long power-off gap), not telemetry, and training on it
     poisons the affected mode (a 12 h gap forward-fills into tens of thousands
     of identical "warmup" rows). Rows with only *some* channels stale (a slow
-    PID between updates) are real observations and kept. The live path snapshots
-    real ticks and never resamples, so there's no serve-side counterpart —
-    dropping here moves training rows toward "seconds actually observed", which
-    is what serve scores.
+    PID between updates) are real observations and kept. ``LiveFeatureSource.tick``
+    (src/preprocessing/live.py) applies the same all-gap-flags-set rule per tick
+    and returns ``None`` instead of emitting a row — dropping here moves training
+    rows toward "seconds actually observed", which is what serve scores.
     """
     gap_cols = [c for c in resampled.columns if str(c).endswith(GAP_SUFFIX)]
     if not gap_cols or resampled.empty:

@@ -64,6 +64,7 @@ from src.telemetry import (
     DBC_SOURCE,
     DECODED_SOURCE,
     OBD_SOURCE,
+    SOURCE_SEP,
     TelemetryRecord,
     channel_key,
 )
@@ -104,6 +105,11 @@ class LiveFeatureSource:
     #: channel's mask to 0. Mirrors ``ResampleConfig(hz).max_gap`` so train and
     #: serve agree on what "stale" means for the same observation history.
     _max_gap_seconds: float = field(init=False)
+    #: Slow-channel counterpart to ``_max_gap_seconds`` (1.1/1.2) — mirrors
+    #: ``ResampleConfig.slow_channel_max_gap``, generous relative to the fast
+    #: threshold since slow sensors (coolant/IAT/baro) legitimately update
+    #: far less often.
+    _slow_max_gap_seconds: float = field(init=False)
 
     #: Last wide-row operating point (raw channels + ``operating_mode`` +
     #: ``deviation:*``) from :meth:`tick`. The daemon reads this to compute
@@ -129,9 +135,12 @@ class LiveFeatureSource:
         # Mirror the resampler's max_gap (interval × max_gap_factor) used at
         # training time, so a channel reads stale at serve exactly when its
         # ``__gap`` flag would have been set offline.
-        self._max_gap_seconds = float(
-            ResampleConfig(hz=self.config.preprocessing.resample_hz).max_gap.total_seconds()
+        resample_config = ResampleConfig(
+            hz=self.config.preprocessing.resample_hz,
+            slow_channel_max_gap_seconds=self.config.preprocessing.slow_channel_max_gap_seconds,
         )
+        self._max_gap_seconds = float(resample_config.max_gap.total_seconds())
+        self._slow_max_gap_seconds = float(resample_config.slow_channel_max_gap.total_seconds())
         # Pre-index bindings by CAN ID so decode is O(signals per ID), not
         # O(all signals) per CAN frame.
         self._bindings_by_id = {}
@@ -304,23 +313,34 @@ class LiveFeatureSource:
         """Emit one feature row at ``now``.
 
         Returns a one-row ``DataFrame`` (so callers can index columns by
-        name) or ``None`` when there's nothing meaningful to emit
-        (no observations yet). The returned frame's index is reset; row
-        index 0 is the only row.
+        name) or ``None`` when there's nothing meaningful to emit — no
+        observations yet, or (1.4) every gap-tracked channel is stale past
+        its ffill limit, mirroring ``_drop_fully_stale_rows``'s training-side
+        rule: a tick with no fresh observation at all is a synthesized fill,
+        not real telemetry, and scoring it would train/serve-skew every
+        downstream detector. The returned frame's index is reset; row index
+        0 is the only row.
         """
         if not self._current_values:
             self.latest_operating_point = None
             return None
         now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        gap_flags = self._gap_flags(now_utc)
+        if gap_flags and all(gap_flags.values()):
+            self.latest_operating_point = None
+            return None
         # Snapshot — copy so a later observation can't mutate this tick's row.
         snapshot: dict[str, Any] = {
             "timestamp": pd.Timestamp(now_utc),
             "session": self.session,
-            **self._current_values,
-            # Per-channel ``__gap`` flags mirror the resampler so the GRU-D
-            # serve path derives mask (¬gap) and Δt (age) identically to
-            # training. Slow channels aren't gap-tracked offline either.
-            **self._gap_flags(now_utc),
+            # Bounded ffill (1.1): a channel past its own class's max_gap
+            # reads NaN here, same as the resampler NaNs the ffilled cell
+            # offline, rather than carrying the stale value forever.
+            **self._bounded_values(gap_flags),
+            # Per-channel ``__gap`` flags mirror the resampler (1.2 — every
+            # channel is now gap-tracked, fast and slow) so the GRU-D serve
+            # path derives mask (¬gap) and Δt (age) identically to training.
+            **gap_flags,
         }
         self._buffer.append(snapshot)
 
@@ -356,24 +376,75 @@ class LiveFeatureSource:
     def _gap_flags(self, now: datetime) -> dict[str, bool]:
         """Per-channel ``<channel>__gap`` flags for the current tick.
 
-        Mirrors ``resampler._gap_flags``: a fast channel is stale (``True``)
-        when the seconds since its last observation exceed ``max_gap``. Slow
-        channels (``is_slow_channel``) aren't gap-tracked offline, so they get
-        no flag here either — the GRU-D mask then treats them as always
-        observed (forward-filled), matching the resampler's forward-fill of
-        slow channels with no gap column.
+        Mirrors ``resampler._gap_flags`` post-1.2: every channel is stale
+        (``True``) when the seconds since its last observation exceed its
+        class's ceiling — fast channels use ``_max_gap_seconds``, slow
+        channels (``is_slow_channel``) their own, more generous
+        ``_slow_max_gap_seconds``.
         """
         flags: dict[str, bool] = {}
         for channel in self._current_values:
-            if is_slow_channel(channel):
-                continue
+            max_gap = (
+                self._slow_max_gap_seconds if is_slow_channel(channel) else self._max_gap_seconds
+            )
             observed_at = self._last_observed_at.get(channel)
             if observed_at is None:
                 flags[gap_column(channel)] = True
                 continue
             age = (now - observed_at).total_seconds()
-            flags[gap_column(channel)] = age > self._max_gap_seconds
+            flags[gap_column(channel)] = age > max_gap
         return flags
+
+    def _bounded_values(self, gap_flags: dict[str, bool]) -> dict[str, float]:
+        """``_current_values`` with each stale (gap-flagged) channel NaN'd out.
+
+        Mirrors the resampler's bounded ffill (1.1): a channel doesn't stay
+        pinned at its last real reading forever, it goes NaN once its age
+        exceeds the class-appropriate ceiling — same rows ``_gap_flags``
+        already marks.
+        """
+        return {
+            channel: (float("nan") if gap_flags.get(gap_column(channel)) else value)
+            for channel, value in self._current_values.items()
+        }
+
+    def vehicle_state_inputs(self, now: datetime) -> dict[str, float | None]:
+        """Cheap in-memory inputs for ``classify_vehicle_state`` (1.5).
+
+        No Parquet I/O, safe to call every inference tick — unlike
+        ``build_status``'s ``_derive_vehicle_state``, which re-reads the
+        latest session for the dashboard's polling cadence. Freshness
+        mirrors that function's per-source-family logic: OBD freshness is
+        the youngest ``obd:*`` observation age; CAN freshness is the
+        youngest ``decoded:*``/``dbc:*`` observation age (this source never
+        stores a raw ``can:*`` value — every CAN frame that matched a
+        binding or DBC message updates one of those instead).
+        """
+        now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+
+        def _freshest_age(prefix: str) -> float | None:
+            ages = [
+                (now_utc - ts).total_seconds()
+                for channel, ts in self._last_observed_at.items()
+                if channel.startswith(prefix)
+            ]
+            return min(ages) if ages else None
+
+        can_ages = (
+            age
+            for age in (
+                _freshest_age(f"{DECODED_SOURCE}{SOURCE_SEP}"),
+                _freshest_age(f"{DBC_SOURCE}{SOURCE_SEP}"),
+            )
+            if age is not None
+        )
+        return {
+            "rpm": self._current_values.get(channel_key(OBD_SOURCE, "RPM")),
+            "coolant_temp": self._current_values.get(channel_key(OBD_SOURCE, "COOLANT_TEMP")),
+            "run_time": self._current_values.get(channel_key(OBD_SOURCE, "RUN_TIME")),
+            "obd_freshness_seconds": _freshest_age(f"{OBD_SOURCE}{SOURCE_SEP}"),
+            "can_freshness_seconds": min(can_ages, default=None),
+        }
 
     def channel_age_seconds(self, channel: str, now: datetime) -> float | None:
         """Seconds since ``channel`` was last observed (Δt), or ``None``.

@@ -1004,7 +1004,7 @@ async def test_run_live_inference_lstm_emits_on_full_window(config: CanaryConfig
     inf_mod.SequenceInferenceEngine = _FakeLSTMEngine  # type: ignore[assignment,misc]
     try:
         source = build_live_feature_source(components)
-        source.observe(TelemetryRecord.obd(1.0, "RPM", 700.0, "rpm"))
+        source.observe(TelemetryRecord.obd(datetime.now(UTC).timestamp(), "RPM", 700.0, "rpm"))
 
         sub = components.anomalies_broadcaster.subscribe()
         stop = asyncio.Event()
@@ -1352,7 +1352,7 @@ async def test_run_live_inference_emits_event_when_outlier(config: CanaryConfig)
 
     # Pump a record into the live source so tick() has something to emit.
     source = build_live_feature_source(components)
-    source.observe(TelemetryRecord.obd(1.0, "RPM", 5500.0, "rpm"))
+    source.observe(TelemetryRecord.obd(datetime.now(UTC).timestamp(), "RPM", 5500.0, "rpm"))
 
     sub = components.anomalies_broadcaster.subscribe()
     stop = asyncio.Event()
@@ -1522,8 +1522,13 @@ async def test_run_daemon_end_to_end_inference_emits_anomaly(config: CanaryConfi
     async def _producer_collector(
         queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event
     ) -> None:
+        # Real wall-clock timestamps: run_live_inference ticks against
+        # datetime.now(UTC), and 1.4's fully-stale gate NaNs/drops a channel
+        # whose age exceeds max_gap — a fixed historical epoch would read as
+        # permanently stale and never score.
+        base = datetime.now(UTC).timestamp()
         for i in range(5):
-            await queue.put(TelemetryRecord.obd(1_778_000_000.0 + i, "RPM", float(700 + i), "rpm"))
+            await queue.put(TelemetryRecord.obd(base + i, "RPM", float(700 + i), "rpm"))
             await asyncio.sleep(0.02)
         await stop.wait()
 

@@ -151,9 +151,10 @@ def _config() -> CanaryConfig:
 
 def test_live_source_decodes_did_to_named_column() -> None:
     source = LiveFeatureSource(config=_config(), did_map=_did_map())
+    now = datetime(2026, 5, 21, 12, 0, tzinfo=UTC)
     # Raw DID reading: obd source, channel DID_1225, hex value.
-    source.observe(TelemetryRecord.obd(1.0, "DID_1225", "01ae", ""))
-    row = source.tick(datetime(2026, 5, 21, 12, 0, tzinfo=UTC))
+    source.observe(TelemetryRecord.obd(now.timestamp(), "DID_1225", "01ae", ""))
+    row = source.tick(now)
     assert row is not None
     assert "did:ECM_AF_SENSOR_V_B1" in row.columns
     # float32 storage in the live frame → loosen tolerance.
@@ -164,16 +165,18 @@ def test_live_source_ignores_did_when_no_map() -> None:
     """Without a DID map, a raw DID reading is just an undecodable obd value
     that ``_to_float`` drops — no crash, no column."""
     source = LiveFeatureSource(config=_config(), did_map=None)
-    source.observe(TelemetryRecord.obd(1.0, "DID_1225", "01ae", ""))
-    source.observe(TelemetryRecord.obd(1.0, "RPM", 800.0, "rpm"))
-    row = source.tick(datetime(2026, 5, 21, 12, 0, tzinfo=UTC))
+    now = datetime(2026, 5, 21, 12, 0, tzinfo=UTC)
+    source.observe(TelemetryRecord.obd(now.timestamp(), "DID_1225", "01ae", ""))
+    source.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 800.0, "rpm"))
+    row = source.tick(now)
     assert row is not None
     assert not any(c.startswith("did:") for c in row.columns)
 
 
 def test_live_source_unpinned_scale_raw_fallback() -> None:
     source = LiveFeatureSource(config=_config(), did_map=_did_map())
-    source.observe(TelemetryRecord.obd(1.0, "DID_1208", "1362", ""))
-    row = source.tick(datetime(2026, 5, 21, 12, 0, tzinfo=UTC))
+    now = datetime(2026, 5, 21, 12, 0, tzinfo=UTC)
+    source.observe(TelemetryRecord.obd(now.timestamp(), "DID_1208", "1362", ""))
+    row = source.tick(now)
     assert row is not None
     assert float(row["did:ECM_INJECTOR_PW_B1"].iloc[0]) == 4962.0
