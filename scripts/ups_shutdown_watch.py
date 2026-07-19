@@ -69,6 +69,7 @@ Configuration is via environment variables (set in the systemd unit):
   UPS_DISCHARGE_WINDOW=120  seconds of SoC history used to estimate the rate
   UPS_DISCHARGE_MIN_SPAN=40 min seconds of history before trusting the rate
   UPS_KEEPALIVE_FILE=...    hold file (epoch expiry); default /run/canary/ups_keepalive
+  UPS_STATUS_FILE=...       status heartbeat (JSON); default /run/canary/ups_status
   UPS_POWEROFF_CMD=...      shutdown command (default: systemctl poweroff)
   UPS_DRY_RUN=0             1 = log instead of powering off (for testing)
 """
@@ -76,6 +77,7 @@ Configuration is via environment variables (set in the systemd unit):
 from __future__ import annotations
 
 import fcntl
+import json
 import logging
 import os
 import signal
@@ -85,11 +87,13 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from types import FrameType
+from typing import Any
 
 log = logging.getLogger("ups_shutdown")
 
 _I2C_SLAVE = 0x0703  # linux/i2c-dev.h
 _REG_SOC = 0x04  # MAX1704x state-of-charge register (chip-agnostic decode)
+_REG_VCELL = 0x02  # MAX1704x cell-voltage register
 
 
 # --------------------------------------------------------------------------
@@ -251,6 +255,54 @@ def read_keepalive(path: str) -> str | None:
         return None
 
 
+def build_status_record(
+    *,
+    armed: bool,
+    input_is_lost: bool,
+    on_battery: bool | None,
+    soc: float | None,
+    vcell: float | None,
+    seconds_lost: float,
+    grace_s: float,
+    keepalive_remaining_s: float,
+    now_wall: float,
+) -> dict[str, Any]:
+    """Build the JSON-serializable heartbeat record written to ``UPS_STATUS_FILE``.
+
+    Pure (no I/O) so it's unit-testable; ``write_status`` does the atomic write.
+    Consumed by the daemon's power reader (``src/dashboard/ups.py``) so the
+    dashboard/MCP can show live UPS state without talking to GPIO/I2C directly
+    (those require root; the daemon runs as ``canary``).
+    """
+    return {
+        "armed": armed,
+        "input_lost": input_is_lost,
+        "on_battery": on_battery,
+        "soc": soc,
+        "vcell": vcell,
+        "seconds_lost": round(seconds_lost, 1),
+        "grace_s": grace_s,
+        "keepalive_remaining_s": round(keepalive_remaining_s, 1),
+        "ts": now_wall,
+    }
+
+
+def write_status(path: str, record: dict[str, Any]) -> None:
+    """Atomically write the status heartbeat (temp file + rename).
+
+    Best-effort: a write failure (e.g. ``/run/canary`` not yet created) is
+    logged and swallowed — the watchdog's shutdown logic never depends on this
+    file, only the daemon-side reader does.
+    """
+    tmp = f"{path}.tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(record, f)
+        os.replace(tmp, path)
+    except OSError as exc:
+        log.warning("failed to write status heartbeat %s: %s", path, exc)
+
+
 # --------------------------------------------------------------------------
 # Hardware helpers
 # --------------------------------------------------------------------------
@@ -276,12 +328,8 @@ def ups_present(bus: int, addr: int) -> bool:
         os.close(fd)
 
 
-def read_soc(bus: int, addr: int) -> float | None:
-    """Read state-of-charge (%) from the MAX1704x fuel gauge, or ``None`` on any
-    I2C error. Decode ``(hi << 8 | lo) / 256`` is the same across MAX17040 and
-    MAX17048, so this is chip-agnostic. ``addr == 0`` disables gauge reads."""
-    if addr == 0:
-        return None
+def _read_reg16(bus: int, addr: int, reg: int) -> int | None:
+    """Read a 16-bit big-endian register from an I2C device, or ``None`` on error."""
     path = f"/dev/i2c-{bus}"
     try:
         fd = os.open(path, os.O_RDWR)
@@ -289,15 +337,38 @@ def read_soc(bus: int, addr: int) -> float | None:
         return None
     try:
         fcntl.ioctl(fd, _I2C_SLAVE, addr)
-        os.write(fd, bytes([_REG_SOC]))
+        os.write(fd, bytes([reg]))
         data = os.read(fd, 2)
         if len(data) != 2:
             return None
-        return ((data[0] << 8) | data[1]) / 256.0
+        return (data[0] << 8) | data[1]
     except OSError:
         return None
     finally:
         os.close(fd)
+
+
+def read_soc(bus: int, addr: int) -> float | None:
+    """Read state-of-charge (%) from the MAX1704x fuel gauge, or ``None`` on any
+    I2C error. Decode ``raw / 256`` is the same across MAX17040 and MAX17048,
+    so this is chip-agnostic. ``addr == 0`` disables gauge reads."""
+    if addr == 0:
+        return None
+    raw = _read_reg16(bus, addr, _REG_SOC)
+    return None if raw is None else raw / 256.0
+
+
+def read_vcell(bus: int, addr: int) -> float | None:
+    """Read cell voltage (V) from the MAX1704x fuel gauge, or ``None`` on error.
+
+    VCELL is the top 12 bits of the 16-bit register, 1.25 mV/LSB (MAX17048;
+    MAX17040 uses 1.25 mV/LSB over the top 12 bits too — same decode).
+    ``addr == 0`` disables gauge reads.
+    """
+    if addr == 0:
+        return None
+    raw = _read_reg16(bus, addr, _REG_VCELL)
+    return None if raw is None else (raw >> 4) * 0.00125
 
 
 def _env_float(name: str, default: float) -> float:
@@ -366,6 +437,7 @@ def main() -> int:
     discharge_window = _env_float("UPS_DISCHARGE_WINDOW", 120.0)
     discharge_min_span = _env_float("UPS_DISCHARGE_MIN_SPAN", 40.0)
     keepalive_file = os.environ.get("UPS_KEEPALIVE_FILE", "/run/canary/ups_keepalive")
+    status_file = os.environ.get("UPS_STATUS_FILE", "/run/canary/ups_status")
     dry_run = _env_int("UPS_DRY_RUN", 0) != 0
 
     if not ups_present(i2c_bus, i2c_addr):
@@ -373,6 +445,20 @@ def main() -> int:
             "X1202 not detected at i2c-%s 0x%02x; watchdog disarmed (bench mode).",
             i2c_bus,
             i2c_addr,
+        )
+        write_status(
+            status_file,
+            build_status_record(
+                armed=False,
+                input_is_lost=False,
+                on_battery=None,
+                soc=None,
+                vcell=None,
+                seconds_lost=0.0,
+                grace_s=delay,
+                keepalive_remaining_s=0.0,
+                now_wall=time.time(),
+            ),
         )
         return 0
 
@@ -421,6 +507,7 @@ def main() -> int:
             input_is_lost = input_lost(lgpio.gpio_read(handle, pin))
 
             soc = read_soc(i2c_bus, i2c_addr)
+            vcell = read_vcell(i2c_bus, i2c_addr)
             if soc is not None:
                 estimator.update(soc, now)
             rate = estimator.rate_pct_per_hour()
@@ -437,6 +524,22 @@ def main() -> int:
             # Operator keep-alive hold: "keep alive N min" from the dashboard/MCP
             # pins the watchdog open regardless of power (for a long bench move).
             hold_s = keepalive_remaining(read_keepalive(keepalive_file), time.time())
+
+            write_status(
+                status_file,
+                build_status_record(
+                    armed=True,
+                    input_is_lost=input_is_lost,
+                    on_battery=battery_state,
+                    soc=soc,
+                    vcell=vcell,
+                    seconds_lost=decider.seconds_lost(now),
+                    grace_s=delay,
+                    keepalive_remaining_s=hold_s,
+                    now_wall=time.time(),
+                ),
+            )
+
             if hold_s > 0:
                 if truly_lost and not warned_keepalive:
                     log.warning(

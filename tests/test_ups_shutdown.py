@@ -6,6 +6,7 @@ lazily imported inside main(), so this module imports cleanly under the venv.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -196,3 +197,74 @@ def test_bench_never_counts_down_end_to_end() -> None:
             fired = True
     assert fired is False
     assert decider.counting_down is False
+
+
+# --------------------------------------------------------------------------
+# Status heartbeat (task 1.2): what the daemon-side power reader consumes
+# --------------------------------------------------------------------------
+def test_build_status_record_shape() -> None:
+    record = ups.build_status_record(
+        armed=True,
+        input_is_lost=False,
+        on_battery=False,
+        soc=87.654,
+        vcell=4.1712,
+        seconds_lost=12.345,
+        grace_s=300.0,
+        keepalive_remaining_s=0.0,
+        now_wall=1700000000.0,
+    )
+    assert record == {
+        "armed": True,
+        "input_lost": False,
+        "on_battery": False,
+        "soc": 87.654,
+        "vcell": 4.1712,
+        "seconds_lost": 12.3,
+        "grace_s": 300.0,
+        "keepalive_remaining_s": 0.0,
+        "ts": 1700000000.0,
+    }
+
+
+def test_build_status_record_disarmed_has_none_fields() -> None:
+    record = ups.build_status_record(
+        armed=False,
+        input_is_lost=False,
+        on_battery=None,
+        soc=None,
+        vcell=None,
+        seconds_lost=0.0,
+        grace_s=300.0,
+        keepalive_remaining_s=0.0,
+        now_wall=0.0,
+    )
+    assert record["armed"] is False
+    assert record["on_battery"] is None
+    assert record["soc"] is None
+
+
+def test_write_status_round_trips_json(tmp_path) -> None:
+    path = str(tmp_path / "ups_status")
+    record = ups.build_status_record(
+        armed=True,
+        input_is_lost=True,
+        on_battery=True,
+        soc=42.0,
+        vcell=3.7,
+        seconds_lost=5.0,
+        grace_s=300.0,
+        keepalive_remaining_s=0.0,
+        now_wall=123.0,
+    )
+    ups.write_status(path, record)
+    with open(path) as f:
+        loaded = json.load(f)
+    assert loaded == record
+    # No leftover temp file after the atomic rename.
+    assert not (tmp_path / "ups_status.tmp").exists()
+
+
+def test_write_status_swallows_write_failure() -> None:
+    # A directory that doesn't exist -> OSError on open(), must not raise.
+    ups.write_status("/nonexistent-dir-xyz/ups_status", {"a": 1})
