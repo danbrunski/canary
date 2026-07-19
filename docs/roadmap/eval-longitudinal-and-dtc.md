@@ -169,11 +169,15 @@ harness (`src/models/false_positive_benchmark.py`), bake-off runner
   `SequenceInferenceEngine` (`src/models/inference.py:269`) over the
   injected frame (windowed `observe`/`score_window`), not just IF +
   fusion.
-- [ ] **2.4 — Time-to-detect.** Add first-detection latency (seconds
+- [x] **2.4 — Time-to-detect.** Add first-detection latency (seconds
   from injection-window start to first over-threshold, post
   `PersistenceGate`) to `_DetectorMetrics` (:57) alongside
   `detection_rate`. Run scoring through the production gate config so
-  the number reflects what would actually alert.
+  the number reflects what would actually alert. — landed:
+  `latencies_seconds`/`median_time_to_detect_seconds` on
+  `_DetectorMetrics`, measured via a fresh
+  `PersistenceGate(config.alerts.min_consecutive_ticks)` per injection
+  run (commit `825ae0a`).
 - [ ] **2.5 — Corpus-wide CLI.** `scripts/detector_benchmark.py`: grid of
   (held-out clean sessions × fault kinds × target channels), loading
   sessions via `discover_sessions`/`read_session`, injecting with
