@@ -76,6 +76,7 @@ from src.dashboard.routes import (
 )
 from src.dashboard.security import _client_is_loopback, _require_control_auth
 from src.dashboard.status import StatusSnapshot, build_status
+from src.dashboard.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
 from src.dashboard.version import _canary_version
 from src.dashboard.websockets import _publish_on_app_loop
 from src.decode.behavior_models import (
@@ -118,6 +119,8 @@ def create_app(
     behavior_live: BehaviorLiveState | None = None,
     gps_tracker: GpsTracker | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
+    ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
+    ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -197,6 +200,8 @@ def create_app(
         feedback_store=feedback_store,
         alert_tuner=alert_tuner,
         sequence_detector_controller=sequence_detector_controller,
+        ups_status_path=ups_status_path,
+        ups_keepalive_path=ups_keepalive_path,
         publish_control_event=publish_control_event,
     )
     register_stream_routes(

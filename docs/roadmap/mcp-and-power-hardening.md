@@ -68,15 +68,20 @@ keep-alive).
   keepalive_remaining_s, now=..., stale_after_s=10.0)` (assembles the
   `GET /control/power` payload, flags a stale/dead watchdog). 14 unit tests in
   `tests/test_dashboard_ups.py`.
-- [ ] **1.4 — `UpsKeepaliveRequest` schema.** Add to `src/dashboard/schemas.py`
-  (`extra="forbid"`): `minutes: float = Field(ge=0, le=720)` (0 = cancel).
-  Export in `__all__`, import in `control.py` schema block.
-- [ ] **1.5 — Control endpoints.** In `src/dashboard/routes/control.py`
-  `register_control_routes` (~line 76): `POST /control/power/keepalive` (writes
-  expiry epoch to the keep-alive file, `publish_control_event("power.keepalive",
-  "ok", …)`) and `GET /control/power` (SoC/VCELL/PLD/watchdog/keepalive
-  remaining + grace config). Both take `_auth = Depends(require_control_auth)`.
-  Model on `post_control_profile_name` / `get_control_profiles` (lines 269-295).
+- [x] **1.4 — `UpsKeepaliveRequest` schema.** Added to `src/dashboard/schemas.py`
+  (`extra="forbid"`): `minutes: float = Field(ge=0.0, le=720.0)` (0 = cancel).
+  Exported in `__all__`, imported in `control.py`.
+- [x] **1.5 — Control endpoints.** In `src/dashboard/routes/control.py`
+  `register_control_routes`: `GET /control/power` (via
+  `build_power_snapshot` — watchdog_running/armed/input_lost/on_battery/soc/
+  vcell/seconds_lost/grace_s/keepalive_remaining_s/status_age_s) and
+  `POST /control/power/keepalive` (writes the expiry via `write_keepalive`,
+  503 on `OSError` i.e. `/run/canary` missing, `publish_control_event`). Both
+  gated on `require_control_auth`. `ups_status_path`/`ups_keepalive_path` are
+  now threaded through `register_control_routes` and `create_app` (defaulting
+  to the `/run/canary/...` constants, overridable — same pattern as
+  `behavior_models_path` etc.) so tests point at `tmp_path` instead of the
+  real runtime dir. 8 endpoint tests in `tests/test_control_power.py`.
 - [ ] **1.6 — MCP tools.** `get_power_status` (read tool in
   `src/mcp_server/tools/`, GET `/control/power`) and `set_ups_keepalive`
   (write tool in `src/mcp_server/write_tools/`, POST + audited via

@@ -64,9 +64,18 @@ from src.dashboard.schemas import (
     SessionPinRequest,
     TuningRevertRequest,
     TuningUpdateRequest,
+    UpsKeepaliveRequest,
 )
 from src.dashboard.security import _client_is_loopback, _require_control_auth
 from src.dashboard.status import _resolve_latest_session
+from src.dashboard.ups import (
+    DEFAULT_UPS_KEEPALIVE_PATH,
+    DEFAULT_UPS_STATUS_PATH,
+    build_power_snapshot,
+    read_keepalive_remaining,
+    read_watchdog_status,
+    write_keepalive,
+)
 from src.dashboard.version import _canary_version, _git_sha
 from src.models.training_ledger import TrainingLedger
 from src.preprocessing.loader import discover_sessions
@@ -87,6 +96,8 @@ def register_control_routes(
     feedback_store: FeedbackStore | None,
     alert_tuner: AlertTuner | None,
     sequence_detector_controller: SequenceDetectorController | None = None,
+    ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
+    ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
     publish_control_event: Callable[[str, str, dict[str, Any]], None],
 ) -> None:
 
@@ -292,6 +303,35 @@ def register_control_routes(
             raise HTTPException(status_code=404, detail=f"no profile with slug {slug!r}") from exc
         payload = {"profile": profile.to_dict()}
         publish_control_event("profile.rename", "ok", payload)
+        return payload
+
+    @app.get("/control/power")
+    def get_control_power(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        status = read_watchdog_status(ups_status_path)
+        keepalive_remaining_s = read_keepalive_remaining(ups_keepalive_path)
+        return {"power": build_power_snapshot(status, keepalive_remaining_s)}
+
+    @app.post("/control/power/keepalive")
+    def post_control_power_keepalive(
+        request: UpsKeepaliveRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            expiry = write_keepalive(request.minutes, ups_keepalive_path)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"UPS keep-alive file not writable ({ups_keepalive_path}): {exc}",
+            ) from exc
+        status = read_watchdog_status(ups_status_path)
+        keepalive_remaining_s = read_keepalive_remaining(ups_keepalive_path)
+        payload = {
+            "power": build_power_snapshot(status, keepalive_remaining_s),
+            "expiry": expiry,
+        }
+        publish_control_event("power.keepalive", "ok", payload)
         return payload
 
     @app.post("/control/sessions/{session_id}/metadata")

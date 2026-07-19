@@ -93,6 +93,14 @@ class ReplayStartRequest(_ControlRequest):
     loop: bool = False
 
 
+class UpsKeepaliveRequest(_ControlRequest):
+    """Set (or cancel, with 0) the UPS watchdog keep-alive hold — the
+    operator's "keep alive N min" override for a bench transition longer than
+    the watchdog's grace window. See scripts/ups_shutdown_watch.py."""
+
+    minutes: float = Field(..., ge=0.0, le=720.0)
+
+
 __all__ = [
     "CaptureStartRequest",
     "CaptureStopRequest",
@@ -105,4 +113,5 @@ __all__ = [
     "SessionPinRequest",
     "TuningRevertRequest",
     "TuningUpdateRequest",
+    "UpsKeepaliveRequest",
 ]
