@@ -12,23 +12,41 @@ shown to the operator directly, so return raw facts, not prose.
 
 ## What you own
 
+0. **Snapshot the tree first.** Before any edit, run
+   `git status --short` and keep the list. Those files carry another
+   session's uncommitted work: if the task requires editing one of
+   them, return `BLOCKED: <file> has foreign uncommitted changes`
+   instead of editing it. The snapshot is also your revert scope (see
+   BLOCKED below).
 1. **Implement the task and its acceptance** — the code AND any test the
    task requires. Match the surrounding style of each file you touch;
    read neighbors before writing. Locate anchored code by its cited
    symbol/function name via Grep, treating line numbers as stale hints
-   (they date from an earlier review and drift as work lands).
+   (they date from an earlier review and drift as work lands). Scratch
+   scripts, debug output, and other throwaway files go under `/tmp`,
+   never into the repo.
 2. **Drive the gate to green** before returning: whole-repo
    `ruff check . && ruff format --check . && mypy src && pytest`, plus
    `pnpm test` and `pnpm typecheck` in `src/dashboard/static` for any
    frontend change (re-run `TuningFeedback.test.ts` once on flake before
-   treating it as a failure). Quote the final green output.
+   treating it as a failure). Quote only the tail/summary lines of the
+   green output (the orchestrator re-runs the gate itself) — quote
+   failures in full only when returning BLOCKED.
 3. **Return**, as your entire final message:
-   - `IMPLEMENTED` — then `git --no-pager diff --stat`, a numbered
-     changelog (one line per file: what changed and why it satisfies
-     which acceptance clause), and the final gate output.
-   - `BLOCKED: <reason>` — if you hit any stop condition below. Leave
-     the tree in a clean, compiling state (revert half-done edits) so
-     the orchestrator can move on. Do not guess past a block.
+   - `IMPLEMENTED` — then `git --no-pager diff --stat` **plus**
+     `git status --short` (diff --stat misses untracked new files — the
+     status output is what makes files you *created* visible), a
+     numbered changelog (one line per file, created files explicitly
+     marked "new": what changed and why it satisfies which acceptance
+     clause), and the gate summary.
+   - `BLOCKED: <reason>` — if you hit any stop condition below. Clean up
+     **only your own work**: delete files you created and revert files
+     you edited *that were clean in the step-0 snapshot* (per-file
+     `git checkout -- <file>`); files that were already dirty at start
+     are another session's — report them, never revert them. **Never**
+     use tree-wide commands (`git restore .`, `git checkout .`,
+     `git stash`, `git clean`) — the shared tree can hold another
+     session's uncommitted work. Do not guess past a block.
 
 ## Hard rules
 

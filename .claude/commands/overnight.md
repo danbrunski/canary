@@ -54,9 +54,11 @@ context survives the whole queue.
    green — verify it is, and inspect its diff before proceeding. Vet any
    `NEW DEP:` it flagged: accept only if the task warrants it, and log
    it in the overnight log.
-4. Spawn the `verifier` agent with the task text + diff. It is a
-   distinct, deliberately write-less agent so it cannot fix-and-pass its
-   own target — keep it separate from the implementer. Fix what it
+4. Spawn the `verifier` agent with the task text + diff **and the list
+   of created (untracked) files** — `git diff` alone misses new files,
+   which are often the task's main artifact. It is a distinct,
+   deliberately write-less agent so it cannot fix-and-pass its own
+   target — keep it separate from the implementer. Fix what it
    confirms (dispatch a follow-up to the implementer, or edit directly
    for a one-liner); re-verify. Two consecutive FAILs on the same task →
    mark it blocked and move on.
