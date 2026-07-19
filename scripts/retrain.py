@@ -351,8 +351,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--benchmark-tolerance",
         type=float,
         default=detector_benchmark.DEFAULT_TOLERANCE,
+        # argparse runs `help % params` for every action (for %(default)s
+        # etc.), so a literal "%" here must be doubled or it's parsed as a
+        # (broken) format spec.
         help="Relative regression tolerance for the post-retrain benchmark gate "
-        f"(default {detector_benchmark.DEFAULT_TOLERANCE:.0%}).",
+        f"(default {detector_benchmark.DEFAULT_TOLERANCE * 100:.0f}%%).",
     )
     parser.add_argument(
         "--log-level",
