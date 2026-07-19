@@ -43,12 +43,22 @@ if tool == "Bash":
         (r"\b(systemctl|shutdown|reboot|poweroff)\b", "no service/system control during unattended runs"),
         (r"\bgit\s+push\b", "no pushes during unattended runs; commits stay local for morning review"),
         (r"mcp-and-power-hardening", "that roadmap doc is owned by another session"),
+        # Tree-wide git commands can wipe a CONCURRENT session's uncommitted
+        # work. Block the destructive ones outright; the implementer is told
+        # to clean up per-file, never tree-wide.
+        (r"\bgit\s+reset\s+(--hard|--merge|--keep)\b", "no hard/merge git reset during unattended runs; it can wipe another session's uncommitted work"),
+        (r"\bgit\s+clean\b[^|;&]*-\w*[fdx]", "no git clean during unattended runs; it can delete another session's untracked work"),
+        (r"\bgit\s+(checkout|restore)\s+[.]", "no tree-wide git checkout/restore during unattended runs; revert per-file instead"),
+        (r"\bgit\s+stash\b", "no git stash during unattended runs; it can pocket another session's uncommitted work"),
     ]
     for pattern, reason in rules:
         if re.search(pattern, cmd):
             deny(reason)
-    if re.search(r"\brm\s+(-\w*[rf]\w*\s+)+", cmd) and "/tmp/" not in cmd:
-        deny("rm -rf outside /tmp is blocked during unattended runs")
+    # Destructive removal = RECURSION (-r/-R/--recursive). Plain `rm -f file`
+    # has a bounded blast radius and is allowed; only recursive deletes
+    # outside /tmp are denied.
+    if re.search(r"\brm\s+([^|;&]*\s)?(-\w*[rR]\w*|--recursive)\b", cmd) and "/tmp/" not in cmd:
+        deny("recursive rm outside /tmp is blocked during unattended runs")
 else:
     path = tool_input.get("file_path", "") or ""
     if "mcp-and-power-hardening" in path:

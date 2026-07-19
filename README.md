@@ -1,12 +1,19 @@
 # CANary
 
-> Early anomaly detection for vehicle telemetry via OBD-II and CAN bus monitoring.
+> Early anomaly detection and diagnostics for vehicle telemetry via OBD-II and CAN bus monitoring.
 
-CANary is an on-vehicle software system that continuously reads telemetry from a 2008
-Nissan Xterra (and broadly any OBD-II compliant vehicle) via raw CAN bus capture
-(Canable / SocketCAN) and standardized OBD-II PID reads. It uses unsupervised
-machine learning to learn normal vehicle behavior and flag anomalous conditions in
-real time.
+CANary is an on-vehicle telemetry, anomaly-detection, and diagnostics platform.
+It continuously reads raw CAN bus traffic (SocketCAN — Waveshare CAN HAT or
+Canable USB) and standardized OBD-II PID reads, uses unsupervised machine
+learning to learn normal vehicle behavior and flag anomalous conditions in real
+time, and doubles as an **engine performance analysis and diagnostic
+workbench** — PID/DID exploration, learned behavior surfaces, physics-derived
+channels, trouble codes, and trip/session analysis.
+
+It is designed to be **generalized and adaptable to any OBD-II vehicle**:
+per-VIN vehicle profiles partition all learned state, and vehicle-specific
+facts live in profile/config/data files rather than code. The current install
+is a single 2008 Nissan Xterra, which serves as the development vehicle.
 
 It runs headlessly on a Raspberry Pi 5 mounted in-vehicle, logs all telemetry to local
 storage, and surfaces anomaly alerts via a local network dashboard.
@@ -19,9 +26,11 @@ detecting subtle signs of trouble before they become failures.
 ## Features
 
 - **Dual-channel ingestion** — raw CAN frames plus OBD-II Mode 01 / selected
-  Mode 22 reads through one Canable-native `python-can` path; the legacy ELM327
-  path remains for emulator/fallback coverage. An optional serial NMEA GPS
-  receiver adds ground-speed and position channels.
+  Mode 22 (Nissan DID) reads through one CAN-native `python-can` path, over
+  either the Waveshare 2-CH CAN HAT (MCP2515/SPI, the current in-vehicle rig)
+  or a Canable USB adapter; the ELM327 path remains for emulator/fallback
+  coverage. An optional serial NMEA GPS receiver adds ground-speed and
+  position channels.
 - **Parquet ring buffer** — timestamped, columnar, rotated per ignition session,
   bounded by both age and total bytes, with an emergency low-space sweep.
 - **Operating-mode segmentation** — KOEO / warmup / idle / city / highway (with
@@ -34,7 +43,19 @@ detecting subtle signs of trouble before they become failures.
 - **Sensor committees & physics residuals** — redundant-sensor cross-checks
   (e.g. OBD speed ↔ GPS) and physical-relationship residuals (fuel-trim bank
   balance, MAF/RPM air mass) surface sensor faults and engine misbehavior.
+- **Vehicle profiles** — the VIN (Mode 09) keys a per-vehicle data partition:
+  training corpus, thresholds, behavior surfaces, and session storage are all
+  profile-scoped, so the platform ports to another vehicle without
+  cross-contamination.
+- **Diagnostics workbench** — learned behavior-surface heatmaps with live
+  overlay, a Nissan DID map workbench, custom dashboards and multi-channel
+  charting, session replay through the live pipeline (isolated `_replay-*`
+  outputs), and an authenticated control plane for captures, retrains, and
+  model publishing.
 - **Local dashboard** — FastAPI + WebSocket, accessible only over the vehicle's LAN.
+- **MCP server** — the daemon's read/control surface exposed to MCP-speaking
+  agents (Claude Code and others), including ad-hoc SQL over the Parquet
+  store.
 - **Read-only by design** — active OBD polling may transmit diagnostic read
   requests, but the system never issues write or actuation commands.
 
@@ -48,8 +69,9 @@ requirements, and development phases.
 ### Prerequisites
 
 - Python 3.11+
-- For on-vehicle use: Raspberry Pi 5 (8 GB), Canable USB / SocketCAN adapter.
-  OBD reads run through the Canable-native client; no ELM327 is required.
+- For on-vehicle use: Raspberry Pi 5 plus a SocketCAN adapter — Waveshare
+  2-CH CAN HAT (current in-vehicle rig) or Canable USB. OBD reads run through
+  the CAN-native client; no ELM327 is required.
 
 ### Install (development)
 
@@ -175,23 +197,27 @@ canary/
 │   ├── CANary-overview.md    # Architecture, requirements, phases
 │   ├── pi-setup.md           # Raspberry Pi 5 bring-up
 │   ├── headless-api.md       # REST/WebSocket/browser access
-│   └── implementation-tasks.md
+│   ├── implementation-tasks.md
+│   └── roadmap/              # Planned work as checklist docs
 ├── systemd/
 │   └── canary.service        # Headless daemon unit
 ├── src/
 │   ├── main.py               # Entry point
-│   ├── daemon.py             # Live capture + inference loop
 │   ├── config.py             # YAML → Pydantic
-│   ├── log.py
+│   ├── profiles.py           # Per-VIN vehicle profiles
 │   ├── collection/           # OBD + CAN + GPS ingestion
-│   ├── storage/              # Parquet ring buffer
+│   ├── daemon/               # Live capture + inference runtime
+│   ├── storage/              # Parquet ring buffer, retention
 │   ├── preprocessing/        # Resample, segment, features
+│   ├── decode/               # Bindings, DIDs, DTC catalog, behavior models
 │   ├── analysis/             # Derived signals, sensor committees, refit
-│   ├── models/               # Isolation Forest, GRU-D LSTM AE, fusion
-│   ├── alerts/               # Fusion + anomaly event logging
-│   ├── control/              # Authenticated control API
+│   ├── models/               # Isolation Forest, GRU-D LSTM AE, TCN
+│   ├── alerts/               # Fusion, persistence gating, event logging
+│   ├── control/              # Authenticated control API + jobs
+│   ├── datasets/             # Dataset export
+│   ├── companion/            # Laptop-side library + local API
 │   ├── mcp_server/           # MCP surface for agents
-│   └── dashboard/            # FastAPI + WebSocket
+│   └── dashboard/            # FastAPI + WebSocket + React frontend
 └── tests/
 ```
 
@@ -201,14 +227,16 @@ canary/
 
 The software stack is well past the original Phase 1 collection milestone:
 preprocessing, per-mode Isolation Forest, the GRU-D masking-aware LSTM
-autoencoder, behavior residuals fused into a calibrated severity score, sensor
-committees, GPS ingestion, bindings decode, behavior-model surfaces, dashboard,
-alert logging, and model hot-swap are all implemented. The Canable-native OBD
-collector is the default hardware path, and deployment to the in-vehicle Pi is
-active. The remaining v1 work is mostly operational: accumulating real drive
-captures for training/validation and long-run vehicle validation.
+autoencoder (TCN selectable), behavior residuals fused into a calibrated
+severity score, sensor committees, GPS ingestion, bindings decode,
+behavior-model surfaces, per-VIN vehicle profiles, dashboard, alert logging,
+and model hot-swap are all implemented. The CAN-native OBD collector is the
+default hardware path and the in-vehicle Pi deployment is live. Active
+workstreams — ML correctness hardening, a fault-injection detector benchmark,
+the DTC reader, longitudinal drift tracking, and the engine-analysis
+buildout — are tracked as checklist docs in [`docs/roadmap/`](docs/roadmap/).
 
-See [`docs/implementation-tasks.md`](docs/implementation-tasks.md) for the current
+See [`docs/implementation-tasks.md`](docs/implementation-tasks.md) for the historical
 task breakdown and [`docs/roadmap/data-collection-plan.md`](docs/roadmap/data-collection-plan.md)
 for the capture backlog.
 
@@ -219,13 +247,16 @@ for the capture backlog.
 ```
 Vehicle OBD-II Port (J1962)
          │
-   Canable USB / SocketCAN
+  SocketCAN adapter — either:
+   · Waveshare 2-CH CAN HAT (MCP2515/SPI) — current in-vehicle rig
+   · Canable USB
   (CAN sniff + OBD ISO-TP)
           │
-    Raspberry Pi 5 (8 GB) ──── optional serial NMEA GPS (USB)
+      Raspberry Pi 5 ──── optional serial NMEA GPS (USB)
+                     ──── optional X1202 UPS HAT (battery-gated shutdown)
 
 Optional RE rig: add an NT510 via an OBD-II splitter when a capture needs a
-human-driven diagnostic stimulus. The ELM327 path is retained only for legacy
+human-driven diagnostic stimulus. The ELM327 path is retained for legacy
 captures and emulator coverage.
 ```
 
