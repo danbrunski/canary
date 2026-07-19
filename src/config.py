@@ -80,13 +80,25 @@ class GpsConfig(_Strict):
     """
 
     enabled: bool = False
-    #: Serial device path. Prefer the stable ``/dev/serial/by-id/...`` symlink
-    #: over ``/dev/ttyUSB0``, which renumbers when USB devices re-enumerate.
+    #: Where fixes come from. ``serial`` reads NMEA off the receiver directly.
+    #: ``gpsd`` reads gpsd's JSON socket instead, leaving the serial port to
+    #: gpsd — which is what lets chrony discipline the clock from GPS with no
+    #: network (see docs/time-sync.md). Both emit identical ``gps:*`` channels.
+    #: Defaults to ``serial`` so existing configs and WSL dev are unaffected.
+    source: Literal["serial", "gpsd"] = "serial"
+    #: Serial device path (``source: serial`` only). Prefer the stable
+    #: ``/dev/serial/by-id/...`` symlink over ``/dev/ttyUSB0``, which renumbers
+    #: when USB devices re-enumerate.
     device: str = "/dev/ttyUSB0"
     baudrate: int = 9600
     #: Serial read timeout (seconds). Also bounds how quickly the collector
-    #: notices a stop request while waiting for the next NMEA line.
+    #: notices a stop request while waiting for the next NMEA line. Reused as
+    #: the socket timeout under ``source: gpsd``.
     read_timeout_seconds: float = 2.0
+    #: gpsd endpoint (``source: gpsd`` only). gpsd runs on the same host as the
+    #: daemon; there is no reason to point this off-box.
+    gpsd_host: str = "127.0.0.1"
+    gpsd_port: int = 2947
 
 
 class HardwareConfig(_Strict):

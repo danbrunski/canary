@@ -21,6 +21,12 @@ hardware:
   # re-enumeration; find yours with: ls -l /dev/serial/by-id/
   gps:
     enabled: true
+    # gpsd owns the serial port and feeds chrony GPS time, so the Pi's clock is
+    # correct on a cold boot with no network (no RTC coin cell). Requires the
+    # gpsd stack from scripts/install_pi.sh — see docs/time-sync.md.
+    # Use `source: serial` (plus device/baudrate below) to read NMEA directly
+    # instead; identical gps:* channels, but no offline time discipline.
+    source: gpsd
     device: /dev/serial/by-id/usb-Silicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_46c3a2ada6f4ef1187fbbd1b6d9880ab-if00-port0
     baudrate: 9600
 

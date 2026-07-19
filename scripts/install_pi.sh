@@ -119,6 +119,87 @@ if ! visudo -cf "${CANARY_SUDOERS}" >/dev/null; then
   rm -f "${CANARY_SUDOERS}"
 fi
 
+# ---------------------------------------------------------------------------
+# GPS + time sync stack (gpsd feeds both canary and chrony)
+# ---------------------------------------------------------------------------
+# The Pi has no battery-backed RTC, so a cold boot away from the network comes
+# up with a stale clock and telemetry gets stamped wrong — then jumps mid-
+# session when NTP finally lands. gpsd fixes that without any network: it owns
+# the receiver's serial port, publishes GPS time into a SHM segment that chrony
+# consumes as a refclock, and serves fixes to canary over its socket.
+#
+# A serial device has one owner, so this is all-or-nothing: with gpsd running,
+# canary must be configured `gps.source: gpsd` (see docs/time-sync.md).
+# Set CANARY_INSTALL_GPS_STACK=0 to skip (e.g. a Pi with no GPS attached).
+CANARY_INSTALL_GPS_STACK="${CANARY_INSTALL_GPS_STACK:-1}"
+CANARY_GPS_DEVICE="${CANARY_GPS_DEVICE:-}"
+
+if [[ "${CANARY_INSTALL_GPS_STACK}" == "1" ]] && command -v apt-get >/dev/null 2>&1; then
+  echo "Installing GPS + time-sync stack (gpsd, chrony)..."
+  DEBIAN_FRONTEND=noninteractive apt-get install -y gpsd gpsd-clients chrony
+
+  # Autodetect the receiver when not told. The by-id symlink is stable across
+  # re-enumeration; /dev/ttyUSB0 is not, and gpsd holds this path for the life
+  # of the service, so the unstable name is a real failure mode.
+  if [[ -z "${CANARY_GPS_DEVICE}" ]]; then
+    mapfile -t _gps_candidates < <(ls /dev/serial/by-id/* 2>/dev/null || true)
+    if [[ "${#_gps_candidates[@]}" -eq 1 ]]; then
+      CANARY_GPS_DEVICE="${_gps_candidates[0]}"
+      echo "  Autodetected GPS device: ${CANARY_GPS_DEVICE}"
+    elif [[ "${#_gps_candidates[@]}" -gt 1 ]]; then
+      echo "  Multiple serial devices found; not guessing which is the GPS." >&2
+      printf '    %s\n' "${_gps_candidates[@]}" >&2
+      echo "  Re-run with CANARY_GPS_DEVICE=/dev/serial/by-id/... to configure gpsd." >&2
+    else
+      echo "  No serial device found; leaving gpsd unconfigured." >&2
+    fi
+  fi
+
+  if [[ -n "${CANARY_GPS_DEVICE}" ]]; then
+    # -n is load-bearing: without it gpsd won't open the receiver until a
+    # client connects, so chrony would have no time source during early boot —
+    # exactly when the clock is wrong and canary is deciding whether to record.
+    cat >/etc/default/gpsd <<EOF
+# Managed by canary scripts/install_pi.sh
+START_DAEMON="true"
+USBAUTO="false"
+DEVICES="${CANARY_GPS_DEVICE}"
+GPSD_OPTIONS="-n"
+EOF
+    systemctl enable gpsd.socket gpsd.service >/dev/null 2>&1 || true
+    systemctl restart gpsd.socket gpsd.service || true
+  fi
+
+  # chrony config goes in a drop-in, never by rewriting chrony.conf — that file
+  # is the admin's and may carry local NTP policy we shouldn't clobber.
+  install -d -m 0755 /etc/chrony/conf.d
+  cat >/etc/chrony/conf.d/canary-gps.conf <<'EOF'
+# Managed by canary scripts/install_pi.sh — GPS-disciplined offline time.
+#
+# gpsd publishes GPS time to SHM unit 0. NMEA time has no PPS pulse to align
+# to, so accuracy is ~0.1-0.5 s — orders of magnitude better than the hours of
+# drift we're correcting, and far tighter than telemetry needs.
+refclock SHM 0 refid GPS precision 1e-1 offset 0.0
+
+# Step the clock by ANY offset, at ANY point in the session — not just the
+# first few updates. The failure being fixed is a large correction landing
+# mid-drive and fracturing a session file; slewing a 65-minute error would
+# take days, so a step is the correct and safer behavior here. Nothing on
+# this box is safety-critical or ordering-sensitive w.r.t. wall clock.
+makestep 1 -1
+EOF
+
+  # Debian's chrony.conf pulls in conf.d by default; older configs may not.
+  if [[ -f /etc/chrony/chrony.conf ]] && ! grep -qE '^\s*confdir\s+.*conf\.d' /etc/chrony/chrony.conf; then
+    echo "confdir /etc/chrony/conf.d" >>/etc/chrony/chrony.conf
+    echo "  Added confdir include to /etc/chrony/chrony.conf"
+  fi
+
+  systemctl enable chrony >/dev/null 2>&1 || true
+  systemctl restart chrony || true
+  echo "  Set 'hardware.gps.source: gpsd' in ${CANARY_CONFIG} to use it."
+fi
+
 cd "${CANARY_HOME}"
 runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
   --venv "${CANARY_HOME}/.venv" \
@@ -141,4 +222,6 @@ Next:
   5. Export the laptop token: export CANARY_CONTROL_TOKEN="$(cat "${CANARY_CONTROL_TOKEN_FILE}")"
   6. Open: http://<pi-hostname-or-ip>:8000/status
   7. MCP server: http://<pi-hostname-or-ip>:8001/mcp (see docs/mcp-server.md)
+  8. GPS/time: verify with 'gpspipe -w -n 5' and 'chronyc sources' — the GPS
+     refclock should appear. See docs/time-sync.md
 EOF
