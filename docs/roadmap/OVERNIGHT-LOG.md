@@ -14,3 +14,4 @@ ml-correctness-hardening.md 8.3 — done — k-sweep branches to a quantile swee
 ml-correctness-hardening.md 8.1 — done — AnomalyInjector.dropout() reproduces resample_wide's coupled hold-then-NaN+gap signature instead of raw NaN (commit 6123d45)
 ml-correctness-hardening.md 8.2 — done — post-window detection grace: late hits distinguished from misses, latency still from window.start (commit b5bd740)
 eval-longitudinal-and-dtc.md 2.4 — done — time-to-detect latency already landed incidentally in commit 825ae0a; checkbox caught up
+eval-longitudinal-and-dtc.md 2.3 — done — evaluate_detectors gains sequence-detector coverage via real observe() contract, generalized N-detector persistence gate (commit 719908e)
