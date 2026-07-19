@@ -329,11 +329,18 @@ thresholds that production may have set by quantile.
 These merge into **Phase 2 of `eval-longitudinal-and-dtc.md`** (tasks
 2.1–2.7 there); listed here for completeness:
 
-- [ ] **8.1 — Realistic dropout injection.** Inject dropout *pre-
+- [x] **8.1 — Realistic dropout injection.** Inject dropout *pre-
   resample* (or emulate: hold last value + set gap flags) so the
   benchmark measures the production-visible signature, not an
   auto-detected NaN. (Depends on Phase 1 landing first — the
-  production signature changes.)
+  production signature changes.) — landed: `AnomalyInjector.dropout()`
+  emulates `resample_wide`'s bounded-ffill exactly (held value +
+  `__gap=False` until a required `max_gap_seconds` ceiling, then NaN +
+  `__gap=True` together past it, coupled the same way
+  `resampler._gap_flags` couples them); callers derive the real
+  fast/slow ceiling instead of guessing one. Verified against a live
+  `resample_wide` run — both transition at the identical row (commit
+  `6123d45`).
 - [ ] **8.2 — Post-window detection grace.** Count detections within
   `window_seconds` after injection end as (late) hits with recorded
   latency, not misses.
