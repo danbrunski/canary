@@ -48,10 +48,12 @@ operator history (ledger backfill facts)
   retrain + offline replay diff only; the Pi deploy half is
   blocked-overnight. — 1.1-1.5 landed; 1.6 laptop half landed
   (blocked-overnight: IF-side replay diff + Pi deploy).
-- [ ] **Q3 — ml-correctness-hardening.md Phase 8 + eval-longitudinal
+- [x] **Q3 — ml-correctness-hardening.md Phase 8 + eval-longitudinal
   Phase 2** (eval realism + the fault-injection benchmark, built on
   Q2's corrected pipeline). Includes the 2.1/2.2 parity pre-flight
-  fixes. Archive a baseline benchmark report to `data/analyses/`.
+  fixes. Archive a baseline benchmark report to `data/analyses/`. —
+  Phase 8 (8.1-8.4) + eval-longitudinal Phase 2 (2.1-2.7) all landed;
+  baseline archived (commit `c5c9558`).
 - [ ] **Q4 — ml-correctness-hardening.md Phases 2 + 3** (IF hardening;
   calibration enforcement). Use the Q3 benchmark to decide 2.5
   (feature-redundancy trial) and 2.6 (ECOD — adopt only if it wins).
