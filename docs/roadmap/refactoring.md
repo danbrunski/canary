@@ -167,15 +167,29 @@ style issues, and go first.
   **Time this alongside `ml-correctness-hardening.md` Phase 6**
   (persistence semantics) — one restructure, one behavior change, one
   replay verification.
-- [ ] **3.2 — Split the FE god-panels.** `ControlPanel.tsx` (580, ~8
+- [x] **3.2 — Split the FE god-panels.** `ControlPanel.tsx` (580, ~8
   concerns) → `SessionsCard`/`JobsCard`/`SequenceDetectorCard`/
   `ModelUploadCard`/`CompanionConfig` (only 2 cards extracted today);
   move its local `parseJsonObject`/`fileToBase64`/`currentPiHost`
   (`:552-576`) to `util/`. `TestSessionPanel.tsx` (605) → adopt
   `useAsyncAction`/`useControlResource` (it predates them and
   hand-rolls both, `:114-137`, `:162-246`) + split `SetupScreen` /
-  `DriveScreen`.
-- [ ] **3.3 — Shared FE gate components.** `<ResourceGate>` for the
+  `DriveScreen`. — landed: `ControlPanel.tsx` now 236 lines +
+  5 new card components, each owning its own local UI state (Capture
+  stayed inline per the task's own card list — it's wired to the
+  top-level token/busy/refresh trio, not a standalone read); moved
+  `parseJsonObject` to `util/json.ts`, `fileToBase64`/`currentPiHost`
+  to new `util/browser.ts`. `TestSessionPanel.tsx` adopted
+  `useAsyncAction` (busy/notice) and two independent
+  `useControlResource` calls (capture, preflight — kept separate so a
+  401 on one side doesn't blank the other's last-known-good value);
+  split into `TestSessionSetupScreen`/`TestSessionRecordingScreen` in
+  `TestSessionScreens.tsx` (named to avoid collision with the
+  unrelated existing `DriveScreen.tsx`, the Drive-mode gauge cluster).
+  Verified both files render correctly and the full start/tap/end
+  flow works via a mocked-backend Playwright smoke test (no
+  `pnpm test` coverage existed for either file before or after).
+- [x] **3.3 — Shared FE gate components.** `<ResourceGate>` for the
   token/loading/error 3-state repeated in 6 panels
   (`ProfilesPanel.tsx:42-52`, `TuningPanel.tsx:52-62`,
   `DatasetHealthPanel.tsx:35-45`, `PowerPanel.tsx:83-93`,
@@ -183,7 +197,16 @@ style issues, and go first.
   a shared `TokenField` (hand-rendered divergently in
   `ControlPanel.tsx:268-308` and `TestSessionPanel.tsx:281-306`);
   optionally a multi-fetch `useControlResources` for the two panels
-  that hand-roll `Promise.all` polling.
+  that hand-roll `Promise.all` polling. — landed:
+  `components/ResourceGate.tsx` (enabled/loading/error/data states,
+  generic over the resource type) adopted by all 6 named panels plus
+  `DataSourcesPanel`'s 3 unauthenticated tabs (loading/error only);
+  `components/TokenField.tsx` adopted by both `ControlPanel` and
+  `TestSessionPanel`, each keeping its own surrounding chrome (label
+  vs. status-badge+help). `useControlResources` skipped (optional;
+  no panel needed it after the gate dedup — `TrainingPanel` and
+  `TestSessionPanel`'s multi-fetch cases don't share a common shape
+  worth generalizing).
 - [ ] **3.4 — `JsonlStore` base.** Nine append-only JSONL
   implementations; `FeedbackStore` (`src/alerts/feedback.py`),
   `TrainingLedger` (`src/models/training_ledger.py`), and the job
@@ -228,14 +251,35 @@ style issues, and go first.
   ×2, `_required_int` ×2; `_torch_module` ×5 →
   `sequence_training.torch_module()` (per-backbone error types
   collapse with 2.1). ~120 lines total with 4.2/4.3.
-- [ ] **4.5 — FE formatter sweep.** SystemPanel's 8 local `format*`
+- [x] **4.5 — FE formatter sweep.** SystemPanel's 8 local `format*`
   helpers, ModelHealthPanel's shadowing `formatPercent`, and the 3×
   `formatDuration` (PowerPanel, SystemPanel, `util/time.formatElapsed`)
-  → `util/format.ts` / `util/time.ts`.
-- [ ] **4.6 — Shared vitest harness.** `test/harness.ts` with
+  → `util/format.ts` / `util/time.ts`. — landed: SystemPanel's
+  `formatTemp`/`formatCoords`/`formatAltitude`/`formatGpsSpeed`/
+  `formatHeading` moved to `util/format.ts` (its local `formatPct` was
+  a duplicate of the existing `formatPercent(v, 0)`, deleted in favor
+  of calling that directly); ModelHealthPanel's shadowing local
+  dropped, call sites now pass `formatPercent(v, 0)` explicitly. The
+  second `formatDuration` copy was actually in `TripPanel.tsx`, not
+  SystemPanel (doc drift — SystemPanel never had one); unified into
+  `util/time.ts` with a `collapseZero` option so PowerPanel
+  (round, omit "0m", "0s" floor text) and TripPanel (floor, always
+  show minutes, "—" floor text) both keep their exact prior output.
+- [x] **4.6 — Shared vitest harness.** `test/harness.ts` with
   `mockHttp(names)` + `HttpErrorStub` — the hoisted-mock +
   reset/clear lifecycle is byte-identical in 6 test files
-  (`PowerPanel.test.ts:7-25`, `ProfilesPanel.test.ts:6-24`, …).
+  (`PowerPanel.test.ts:7-25`, `ProfilesPanel.test.ts:6-24`, …). —
+  landed: `test/harness.ts`'s `mockHttp(names)` uses `vi.doMock` (not
+  `vi.mock`) deliberately — `vi.mock` is hoisted by a per-file static
+  scan for the literal call, which corrupts the closure when wrapped
+  in an imported helper (confirmed by reproducing the
+  "mocks is not defined" hoisting bug before switching); `vi.doMock`
+  is the documented non-hoisted escape hatch, safe here because every
+  caller reaches the mocked module through a dynamic
+  `await import("./Panel")`, never a static import. Adopted by all 8
+  files that actually had the pattern (Profiles, Power,
+  Tuning+Anomaly, Trip, Trends, Phase6, Dtc, DataSources) — 8, not
+  the 6 originally spotted.
 - [ ] **4.7 — Misc singles.** `CollectorStarter` alias defined twice
   (`main.py:34`, `collection/replay.py:36`); `_need()` decoder guard
   twice (`can_obd_client.py:372`, `obd_registry.py:135`); shared
