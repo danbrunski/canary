@@ -21,7 +21,10 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _cli import (  # noqa: E402  (bootstraps repo root onto sys.path)
+    add_common_args,
+    load_config,
+)
 
 from src.analysis.trip_summary_sidecar import get_or_compute_trip_summary  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
@@ -55,7 +58,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("session", help="Session id (directory name under storage_path).")
-    parser.add_argument("--config", type=Path, default=Path("canary.yaml"))
+    add_common_args(parser)
     parser.add_argument(
         "--profile",
         type=str,
@@ -83,7 +86,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def _scoped_config(args: argparse.Namespace) -> CanaryConfig:
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
     if not config.profiles.enabled:
         return config
     return scope_config(config, resolve_profile_for_tooling(config, args.profile))

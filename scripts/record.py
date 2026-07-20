@@ -30,6 +30,8 @@ import threading
 from collections.abc import Sequence
 from pathlib import Path
 
+from _cli import add_common_args, load_config
+
 from src.collection.can_collector import (
     DEFAULT_RECONNECT_POLICY,
     bus_factory,
@@ -49,7 +51,6 @@ from src.collection.obd_collector import (
     resolve_pids,
     supervise_obd_capture,
 )
-from src.config import CanaryConfig
 from src.log import configure_logging
 from src.session import PID_FILENAME
 from src.storage.monitor import free_space_mb
@@ -85,12 +86,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         prog="record",
         description="Record CAN frames to a timestamped session directory.",
     )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path("canary.yaml"),
-        help="Path to canary.yaml (default: ./canary.yaml).",
-    )
+    add_common_args(parser, help="Path to canary.yaml (default: ./canary.yaml).")
     parser.add_argument(
         "--out-dir",
         type=Path,
@@ -216,7 +212,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
 
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
     spec = config.hardware.can
 
     # Pre-flight: refuse to start if disk space is tight. A 1-hour drive at

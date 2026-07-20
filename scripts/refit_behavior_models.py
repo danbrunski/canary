@@ -29,20 +29,20 @@ import argparse
 import logging
 import sys
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from pathlib import Path
+
+from _cli import add_common_args, load_config, resolve_sessions
 
 from src.analysis.refit import Recipe, default_recipes, refit_all
 from src.analysis.session_classifier import read_classification
 from src.analysis.vehicle_ledger import VehicleLedgerStore
-from src.config import CanaryConfig
 from src.decode.behavior_models import (
     dump_behavior_models,
     load_behavior_models,
     unknown_operating_modes,
 )
 from src.log import configure_logging
-from src.preprocessing import discover_sessions
 from src.preprocessing.feature_pipeline import build_feature_frame
 from src.profiles import resolve_profile_for_tooling, scope_config
 
@@ -106,12 +106,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "into one corpus. No-op if no boundary event is recorded."
         ),
     )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path("canary.yaml"),
-        help="Path to canary.yaml (preprocessing config).",
-    )
+    add_common_args(parser, help="Path to canary.yaml (preprocessing config).")
     parser.add_argument(
         "--bindings",
         type=Path,
@@ -157,28 +152,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _filter_sessions_by_age(sessions: list[Path], days: int, now: datetime) -> list[Path]:
-    """Keep session dirs whose timestamped name falls within ``days`` of ``now``.
-
-    The convention is ``YYYY-MM-DDTHHMMSS`` (UTC, matches ``make_session_dir``).
-    Non-conforming names are kept — better to over-include than to silently
-    drop something the user explicitly placed under sessions/.
-    """
-    if days <= 0:
-        return sessions
-    cutoff = now - timedelta(days=days)
-    kept: list[Path] = []
-    for session in sessions:
-        try:
-            started = datetime.strptime(session.name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
-        except ValueError:
-            kept.append(session)  # unknown format → keep
-            continue
-        if started >= cutoff:
-            kept.append(session)
-    return kept
-
-
 def _filter_sessions_by_boundary(sessions: list[Path], boundary: date) -> list[Path]:
     """Keep session dirs whose timestamped name is on/after ``boundary`` (Task 3.5).
 
@@ -211,7 +184,7 @@ def _select_recipes(catalog: list[Recipe], names: list[str] | None) -> list[Reci
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
 
     # Scope sessions/output to a vehicle profile so a refit reads and writes the
     # right vehicle's tree. Offline tool: no VIN probe — --profile or default.
@@ -223,11 +196,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sessions_root = args.sessions_root or scoped.collection.storage_path
     out: Path = args.out or scoped.daemon.behavior_models
 
-    sessions: list[Path] = list(args.sessions)
-    if not sessions:
-        sessions = discover_sessions(sessions_root)
-        if not args.use_all_sessions:
-            sessions = _filter_sessions_by_age(sessions, args.days, datetime.now(UTC))
+    sessions = resolve_sessions(args, sessions_root)
     if args.since_boundary:
         boundary = VehicleLedgerStore(scoped.daemon.vehicle_ledger).latest_boundary()
         if boundary is not None:

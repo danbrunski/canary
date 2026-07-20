@@ -29,6 +29,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from _cli import add_common_args, load_config
+
 from src.config import CanaryConfig
 from src.log import configure_logging
 from src.profiles import (
@@ -118,7 +120,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         prog="migrate_to_profiles",
         description="Nest existing single-vehicle data under a profile slug.",
     )
-    parser.add_argument("--config", type=Path, default=Path("canary.yaml"))
+    add_common_args(parser)
     parser.add_argument(
         "--slug",
         type=str,
@@ -139,7 +141,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
     profile = resolve_profile_for_tooling(config, args.slug or None)
     slug = profile.slug
 

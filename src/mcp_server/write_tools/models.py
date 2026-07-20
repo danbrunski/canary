@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from src.mcp_server.audit import MCPAuditLogger
-from src.mcp_server.client import DaemonClient, DaemonError
+from src.mcp_server.client import DaemonClient
+from src.mcp_server.write_tools._shared import audited_post
 
 #: Cap so an LLM can't request a 10 GB upload by accident. Models on this
 #: project's roadmap are <100 MB; 200 MB is comfortable headroom.
@@ -55,21 +56,14 @@ async def upload_model_artifact(
         "artifact_size": size,
         "manifest": manifest,
     }
-    try:
-        result = await client.post_json(f"/control/models/{model_type}/artifact", body)
-    except DaemonError as exc:
-        audit.record(
-            tool="upload_model_artifact",
-            result="error",
-            payload={**audit_payload, "error": str(exc)},
-        )
-        raise
-    audit.record(
+    return await audited_post(
+        client,
+        audit,
         tool="upload_model_artifact",
-        result="ok",
-        payload={**audit_payload, "response": result},
+        path=f"/control/models/{model_type}/artifact",
+        body=body,
+        audit_payload=audit_payload,
     )
-    return result
 
 
 __all__ = ["upload_model_artifact"]

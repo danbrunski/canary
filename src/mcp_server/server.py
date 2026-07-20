@@ -559,7 +559,7 @@ def _register_write_tools(
     @mcp.tool()
     async def get_current_capture() -> dict[str, Any]:
         """Read the currently active capture window."""
-        return await captures_tool.get_current_capture(client)
+        return await sessions_tool.get_current_capture(client)
 
     @mcp.tool()
     async def record_feedback(
@@ -797,7 +797,7 @@ def _register_write_tools(
     @mcp.tool()
     async def get_replay_status() -> dict[str, Any]:
         """Snapshot of the current replay (idle, running, source, paths)."""
-        return await replay_write_tool.get_replay_status(client)
+        return await replay_tool.get_replay_status(client)
 
 
 def _register_resources(

@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from src.mcp_server.audit import MCPAuditLogger
-from src.mcp_server.client import DaemonClient, DaemonError
+from src.mcp_server.client import DaemonClient
+from src.mcp_server.write_tools._shared import audited_post
 
 
 async def set_ups_keepalive(
@@ -24,13 +25,9 @@ async def set_ups_keepalive(
     immediately.
     """
     body: dict[str, Any] = {"minutes": minutes}
-    try:
-        result = await client.post_json("/control/power/keepalive", body)
-    except DaemonError as exc:
-        audit.record(tool="set_ups_keepalive", result="error", payload={**body, "error": str(exc)})
-        raise
-    audit.record(tool="set_ups_keepalive", result="ok", payload={**body, "response": result})
-    return result
+    return await audited_post(
+        client, audit, tool="set_ups_keepalive", path="/control/power/keepalive", body=body
+    )
 
 
 __all__ = ["set_ups_keepalive"]

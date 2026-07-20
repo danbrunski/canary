@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from _cli import add_common_args, load_config
 
 from src.config import CanaryConfig
 from src.log import configure_logging
@@ -424,12 +425,7 @@ def _build_arg_parser(backend: SequenceTrainingBackend, *, prog: str) -> argpars
         default=Path("data/sessions"),
         help="Where to discover sessions when none are given explicitly.",
     )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path("canary.yaml"),
-        help="Path to canary.yaml.",
-    )
+    add_common_args(parser)
     parser.add_argument(
         "--bindings",
         type=Path,
@@ -528,7 +524,7 @@ def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
 def _run(backend: SequenceTrainingBackend, args: argparse.Namespace) -> int:
     configure_logging(args.log_level)
     configure_torch_threads()
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
 
     sessions = _resolve_training_sessions(args)
     if not sessions:

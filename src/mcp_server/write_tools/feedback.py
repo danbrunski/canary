@@ -12,7 +12,8 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from src.mcp_server.audit import MCPAuditLogger
-from src.mcp_server.client import DaemonClient, DaemonError
+from src.mcp_server.client import DaemonClient
+from src.mcp_server.write_tools._shared import audited_post
 
 FeedbackLabel = Literal["true_positive", "false_positive", "unknown"]
 
@@ -41,13 +42,9 @@ async def record_feedback(
     body: dict[str, Any] = {"anomaly_id": anomaly_id, "label": label}
     if note is not None:
         body["note"] = note
-    try:
-        result = await client.post_json("/control/feedback", body)
-    except DaemonError as exc:
-        audit.record(tool="record_feedback", result="error", payload={**body, "error": str(exc)})
-        raise
-    audit.record(tool="record_feedback", result="ok", payload={**body, "response": result})
-    return result
+    return await audited_post(
+        client, audit, tool="record_feedback", path="/control/feedback", body=body
+    )
 
 
 __all__ = ["record_feedback", "FeedbackLabel"]

@@ -46,10 +46,8 @@ import detector_benchmark  # noqa: E402
 import train_anomaly_model as if_trainer  # noqa: E402
 import train_lstm as lstm_trainer  # noqa: E402
 import train_tcn as tcn_trainer  # noqa: E402
-from refit_behavior_models import (  # noqa: E402
-    _filter_sessions_by_age,
-    _filter_sessions_by_boundary,
-)
+from _cli import add_common_args, load_config, resolve_sessions  # noqa: E402
+from refit_behavior_models import _filter_sessions_by_boundary  # noqa: E402
 
 from src.alerts.feedback import DEFAULT_FEEDBACK_PATH, FeedbackStore  # noqa: E402
 from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
@@ -70,7 +68,6 @@ from src.models.training_ledger import (  # noqa: E402
     TrainingLedger,
     build_run_record_from_manifest,
 )
-from src.preprocessing import discover_sessions  # noqa: E402
 from src.preprocessing.feature_pipeline import (  # noqa: E402
     DEFAULT_FEATURE_CACHE_DIR,
     build_feature_frame,
@@ -210,12 +207,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "into one corpus. No-op if no boundary event is recorded."
         ),
     )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path("canary.yaml"),
-        help="Path to canary.yaml.",
-    )
+    add_common_args(parser)
     parser.add_argument(
         "--bindings",
         type=Path,
@@ -382,7 +374,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
     configure_torch_threads()
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
 
     # Resolve the sequence-detector backbone (config default, --sequence-model
     # override) and stash the resolved model_type + output dir on args so the
@@ -400,11 +392,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
-    sessions: list[Path] = list(args.sessions)
-    if not sessions:
-        sessions = discover_sessions(args.sessions_root)
-        if not args.use_all_sessions:
-            sessions = _filter_sessions_by_age(sessions, args.days, datetime.now(UTC))
+    sessions = resolve_sessions(args, args.sessions_root)
     if args.since_boundary:
         boundary = VehicleLedgerStore(config.daemon.vehicle_ledger).latest_boundary()
         if boundary is not None:

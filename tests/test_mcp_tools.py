@@ -14,6 +14,7 @@ from src.mcp_server.client import DaemonClient, DaemonError
 from src.mcp_server.tools import anomalies as anomalies_tool
 from src.mcp_server.tools import behavior as behavior_tool
 from src.mcp_server.tools import power as power_tool
+from src.mcp_server.tools import sessions as sessions_tool
 from src.mcp_server.tools import status as status_tool
 from src.mcp_server.tools import telemetry as telemetry_tool
 from src.mcp_server.tools import vehicle_ledger as vehicle_ledger_tool
@@ -275,7 +276,7 @@ async def test_get_current_capture_passthrough() -> None:
     """``get_current_capture`` is a pure read — no audit, no rewriting."""
     snapshot = {"id": "cap_42", "purpose": "test"}
     client = await _fake_daemon({"GET /control/captures/current": snapshot})
-    assert await captures_tool.get_current_capture(client) == snapshot
+    assert await sessions_tool.get_current_capture(client) == snapshot
     await client.aclose()
 
 

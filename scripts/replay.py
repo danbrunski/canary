@@ -23,6 +23,11 @@ from typing import Any
 
 import pandas as pd
 
+try:
+    from _cli import add_common_args, load_config  # type: ignore[import-not-found]
+except ImportError:  # loaded as `scripts.replay` — repo root on path, not scripts/
+    from scripts._cli import add_common_args, load_config
+
 from src.config import CanaryConfig
 from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH, load_behavior_models
 from src.models.isolation_forest import (
@@ -137,12 +142,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("session_dir", type=Path, nargs="+")
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path("canary.yaml"),
-        help="Path to canary.yaml (default: ./canary.yaml).",
-    )
+    add_common_args(parser, help="Path to canary.yaml (default: ./canary.yaml).")
     parser.add_argument(
         "--model",
         type=Path,
@@ -166,7 +166,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        config = CanaryConfig.from_yaml(args.config)
+        config = load_config(args)
         result = replay_sessions(
             args.session_dir,
             config,

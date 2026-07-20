@@ -10,7 +10,8 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from src.mcp_server.audit import MCPAuditLogger
-from src.mcp_server.client import DaemonClient, DaemonError
+from src.mcp_server.client import DaemonClient
+from src.mcp_server.write_tools._shared import audited_post
 
 VehicleEventKind = Literal["maintenance", "mod", "repair", "observation", "dtc"]
 
@@ -58,15 +59,9 @@ async def record_vehicle_event(
         "affected_channels": affected_channels or [],
         "corpus_boundary": corpus_boundary,
     }
-    try:
-        result = await client.post_json("/control/vehicle-ledger", body)
-    except DaemonError as exc:
-        audit.record(
-            tool="record_vehicle_event", result="error", payload={**body, "error": str(exc)}
-        )
-        raise
-    audit.record(tool="record_vehicle_event", result="ok", payload={**body, "response": result})
-    return result
+    return await audited_post(
+        client, audit, tool="record_vehicle_event", path="/control/vehicle-ledger", body=body
+    )
 
 
 __all__ = ["record_vehicle_event", "VehicleEventKind"]

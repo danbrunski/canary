@@ -22,6 +22,11 @@ DEFAULT_TIMEOUT = 600.0
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 
 
+async def get_replay_status(client: DaemonClient) -> dict[str, Any]:
+    """Return the current live-replay state (pure read, no audit)."""
+    return await client.get_json("/control/replay")
+
+
 def _build_params(
     *,
     session_id: str,
@@ -194,4 +199,4 @@ async def replay_window(
     return {"ok": True, "job": terminal, "report": report}
 
 
-__all__ = ["replay_window", "DEFAULT_POLL_INTERVAL", "DEFAULT_TIMEOUT"]
+__all__ = ["replay_window", "get_replay_status", "DEFAULT_POLL_INTERVAL", "DEFAULT_TIMEOUT"]

@@ -18,6 +18,7 @@ from src.models.training_ledger import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import _cli  # noqa: E402
 import ledger as ledger_cli  # noqa: E402
 import retrain  # noqa: E402
 
@@ -210,7 +211,7 @@ def test_retrain_ingests_ledger_when_manifest_present(
 ) -> None:
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     if_out = tmp_path / "if"
     lstm_out = tmp_path / "lstm"
@@ -252,7 +253,7 @@ def test_retrain_ledger_records_detector_benchmark_report_path(
     record of the run it was benchmarked against."""
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     if_out = tmp_path / "if"
     monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: _if_manifest(if_out, "if_run"))
@@ -303,7 +304,7 @@ def test_retrain_ledger_records_feedback_policy(
         },
         label="false_positive",
     )
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(
         retrain,
         "build_feature_frame",
@@ -347,7 +348,7 @@ def test_retrain_ledger_hook_is_best_effort(
 ) -> None:
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     # Stub trainers that write nothing — ledger ingest must not crash retrain.
     monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)

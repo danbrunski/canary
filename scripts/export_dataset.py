@@ -21,9 +21,11 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _cli import (  # noqa: E402  (bootstraps repo root onto sys.path)
+    add_common_args,
+    load_config,
+)
 
-from src.config import CanaryConfig  # noqa: E402
 from src.datasets.export import (  # noqa: E402
     DatasetExportSpec,
     export_dataset,
@@ -34,7 +36,7 @@ from src.log import configure_logging  # noqa: E402
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="export_dataset", description=__doc__)
-    p.add_argument("--config", type=Path, default=Path("canary.yaml"))
+    add_common_args(p)
     p.add_argument(
         "--sessions-root",
         type=Path,
@@ -69,7 +71,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
     storage_root = args.sessions_root or config.collection.storage_path
 
     if args.mark_candidate is not None:

@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from src.mcp_server.audit import MCPAuditLogger
-from src.mcp_server.client import DaemonClient, DaemonError
+from src.mcp_server.client import DaemonClient
+from src.mcp_server.write_tools._shared import audited_post
 
 
 async def start_capture(
@@ -36,13 +37,9 @@ async def start_capture(
     body: dict[str, Any] = {"purpose": purpose, "protocol": protocol}
     if metadata:
         body["metadata"] = metadata
-    try:
-        result = await client.post_json("/control/captures", body)
-    except DaemonError as exc:
-        audit.record(tool="start_capture", result="error", payload={**body, "error": str(exc)})
-        raise
-    audit.record(tool="start_capture", result="ok", payload={**body, "response": result})
-    return result
+    return await audited_post(
+        client, audit, tool="start_capture", path="/control/captures", body=body
+    )
 
 
 async def tag_current_capture(
@@ -60,17 +57,13 @@ async def tag_current_capture(
     body: dict[str, Any] = {"label": label}
     if fields:
         body["fields"] = fields
-    try:
-        result = await client.post_json("/control/captures/current/tags", body)
-    except DaemonError as exc:
-        audit.record(
-            tool="tag_current_capture",
-            result="error",
-            payload={**body, "error": str(exc)},
-        )
-        raise
-    audit.record(tool="tag_current_capture", result="ok", payload={**body, "response": result})
-    return result
+    return await audited_post(
+        client,
+        audit,
+        tool="tag_current_capture",
+        path="/control/captures/current/tags",
+        body=body,
+    )
 
 
 async def stop_capture(
@@ -83,23 +76,17 @@ async def stop_capture(
     body: dict[str, Any] = {}
     if reason is not None:
         body["reason"] = reason
-    try:
-        result = await client.post_json("/control/captures/current/stop", body)
-    except DaemonError as exc:
-        audit.record(tool="stop_capture", result="error", payload={**body, "error": str(exc)})
-        raise
-    audit.record(tool="stop_capture", result="ok", payload={**body, "response": result})
-    return result
-
-
-async def get_current_capture(client: DaemonClient) -> dict[str, Any]:
-    """Read the currently active capture window (no audit — pure read)."""
-    return await client.get_json("/control/captures/current")
+    return await audited_post(
+        client,
+        audit,
+        tool="stop_capture",
+        path="/control/captures/current/stop",
+        body=body,
+    )
 
 
 __all__ = [
     "start_capture",
     "tag_current_capture",
     "stop_capture",
-    "get_current_capture",
 ]

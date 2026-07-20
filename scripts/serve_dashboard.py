@@ -28,8 +28,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import uvicorn
+from _cli import add_common_args, load_config
 
-from src.config import CanaryConfig
 from src.dashboard.api import create_app
 from src.log import configure_logging
 
@@ -44,12 +44,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Defaults from canary.yaml; --host/--port override."
         ),
     )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path("canary.yaml"),
-        help="Path to canary.yaml.",
-    )
+    add_common_args(parser)
     parser.add_argument(
         "--anomalies-dir",
         type=Path,
@@ -136,7 +131,7 @@ def warn_if_public_bind(host: str) -> bool:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
 
     host = args.host or config.dashboard.host
     port = args.port or config.dashboard.port

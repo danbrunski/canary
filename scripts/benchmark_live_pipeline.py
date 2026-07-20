@@ -29,7 +29,8 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from src.config import CanaryConfig
+from _cli import load_config
+
 from src.decode.bindings import load_bindings
 from src.preprocessing.live import LiveFeatureSource
 from src.telemetry import TelemetryRecord
@@ -85,7 +86,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
     bindings = load_bindings(args.bindings) if args.bindings.exists() else None
     source = LiveFeatureSource(config=config, bindings=bindings)
 

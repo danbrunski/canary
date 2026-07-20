@@ -11,7 +11,8 @@ from __future__ import annotations
 from typing import Any
 
 from src.mcp_server.audit import MCPAuditLogger
-from src.mcp_server.client import DaemonClient, DaemonError
+from src.mcp_server.client import DaemonClient
+from src.mcp_server.write_tools._shared import audited_post
 
 
 async def start_replay(
@@ -43,13 +44,7 @@ async def start_replay(
         ``False`` so the replay halts on its own when the source exhausts.
     """
     body: dict[str, Any] = {"session_id": session_id, "speed": speed, "loop": loop}
-    try:
-        result = await client.post_json("/control/replay", body)
-    except DaemonError as exc:
-        audit.record(tool="start_replay", result="error", payload={**body, "error": str(exc)})
-        raise
-    audit.record(tool="start_replay", result="ok", payload={**body, "response": result})
-    return result
+    return await audited_post(client, audit, tool="start_replay", path="/control/replay", body=body)
 
 
 async def stop_replay(
@@ -57,18 +52,7 @@ async def stop_replay(
     audit: MCPAuditLogger,
 ) -> dict[str, Any]:
     """Cancel the in-flight replay and roll the writer/logger back to live."""
-    try:
-        result = await client.post_json("/control/replay/stop", {})
-    except DaemonError as exc:
-        audit.record(tool="stop_replay", result="error", payload={"error": str(exc)})
-        raise
-    audit.record(tool="stop_replay", result="ok", payload={"response": result})
-    return result
+    return await audited_post(client, audit, tool="stop_replay", path="/control/replay/stop")
 
 
-async def get_replay_status(client: DaemonClient) -> dict[str, Any]:
-    """Return the current replay state (pure read, no audit)."""
-    return await client.get_json("/control/replay")
-
-
-__all__ = ["start_replay", "stop_replay", "get_replay_status"]
+__all__ = ["start_replay", "stop_replay"]

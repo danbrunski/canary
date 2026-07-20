@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import retrain  # noqa: E402 — reuse its auto-holdout picker (Task 3.3)
 import train_lstm as lstm_trainer  # noqa: E402
 import train_tcn as tcn_trainer  # noqa: E402
+from _cli import add_common_args, load_config  # noqa: E402
 
 from src.config import CanaryConfig  # noqa: E402
 from src.log import configure_logging  # noqa: E402
@@ -342,7 +343,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "thresholds are calibrated on the training windows themselves, which "
         "inflates cross-session false positives on both backbones.",
     )
-    parser.add_argument("--config", type=Path, default=Path("canary.yaml"))
+    add_common_args(parser)
     parser.add_argument("--bindings", type=Path, default=DEFAULT_BINDINGS_PATH)
     parser.add_argument(
         "--out",
@@ -418,7 +419,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
     configure_torch_threads()
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
 
     log.info("bake-off device=%s", args.device)
     sessions = _resolve_training_sessions(args)

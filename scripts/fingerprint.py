@@ -31,12 +31,15 @@ from __future__ import annotations
 
 import argparse
 import logging
-import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _cli import (  # noqa: E402  (bootstraps repo root onto sys.path)
+    add_common_args,
+    discover_live_session_dirs,
+    load_config,
+)
 
 from src.analysis.fingerprint import (  # noqa: E402
     compute_fingerprint,
@@ -56,10 +59,6 @@ from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-#: Same live-session naming convention as ``label_sessions.py`` /
-#: ``src.control.classification`` — ``_replay-*`` / ``_archive`` excluded.
-_SESSION_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
-
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -67,7 +66,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--config", type=Path, default=Path("canary.yaml"))
+    add_common_args(parser)
     parser.add_argument(
         "--profile",
         type=str,
@@ -119,18 +118,10 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def _scoped_config(args: argparse.Namespace) -> CanaryConfig:
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
     if not config.profiles.enabled:
         return config
     return scope_config(config, resolve_profile_for_tooling(config, args.profile))
-
-
-def _discover_sessions(root: Path) -> list[Path]:
-    if not root.exists():
-        return []
-    return sorted(
-        child for child in root.iterdir() if child.is_dir() and _SESSION_DIR_RE.match(child.name)
-    )
 
 
 def _run_backfill(args: argparse.Namespace, config: CanaryConfig, sessions_root: Path) -> int:
@@ -146,7 +137,7 @@ def _run_backfill(args: argparse.Namespace, config: CanaryConfig, sessions_root:
                 "no --session or --all given; backfilling only sessions missing/stale "
                 "fingerprints (use --all to force scan)"
             )
-        targets = _discover_sessions(sessions_root)
+        targets = discover_live_session_dirs(sessions_root)
 
     if not targets:
         log.warning("no sessions found at %s", sessions_root)
@@ -183,7 +174,7 @@ def _run_freeze(args: argparse.Namespace, config: CanaryConfig, sessions_root: P
     fingerprints: dict[str, dict[str, float]] = {}
     skipped_not_ready = 0
     skipped_no_fingerprint = 0
-    for session_dir in _discover_sessions(sessions_root):
+    for session_dir in discover_live_session_dirs(sessions_root):
         classification = read_classification(session_dir)
         if classification is None or classification.disposition != "ready":
             skipped_not_ready += 1

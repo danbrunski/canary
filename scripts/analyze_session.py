@@ -21,8 +21,12 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+try:
+    from _cli import add_common_args, load_config
+except ImportError:  # loaded as `scripts.analyze_session` — repo root on path, not scripts/
+    from scripts._cli import add_common_args, load_config  # type: ignore[no-redef]
+
 from src.analysis.session_deviations import SessionDeviationReport, analyze_session
-from src.config import CanaryConfig
 from src.control.sessions import resolve_session
 from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH, load_behavior_models
 from src.log import configure_logging
@@ -34,7 +38,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         prog="analyze_session",
         description="Diff a stored session against the learned behavior surfaces.",
     )
-    parser.add_argument("--config", type=Path, default=Path("canary.yaml"))
+    add_common_args(parser)
     parser.add_argument("--session", required=True, help="Session id, e.g. 2026-07-19T000112")
     parser.add_argument(
         "--mode",
@@ -118,7 +122,7 @@ def print_report(report: SessionDeviationReport, *, mode_filter: str | None) -> 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
     profile = resolve_profile_for_tooling(config, args.profile)
     config = scope_config(config, profile)
 

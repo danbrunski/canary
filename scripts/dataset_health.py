@@ -17,10 +17,12 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _cli import (  # noqa: E402  (bootstraps repo root onto sys.path)
+    add_common_args,
+    load_config,
+)
 
 from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
-from src.config import CanaryConfig  # noqa: E402
 from src.datasets.health import analyze_corpus  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.preprocessing.loader import discover_sessions  # noqa: E402
@@ -28,7 +30,7 @@ from src.preprocessing.loader import discover_sessions  # noqa: E402
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="dataset_health", description=__doc__)
-    p.add_argument("--config", type=Path, default=Path("canary.yaml"))
+    add_common_args(p)
     p.add_argument("--sessions-root", type=Path, default=None)
     p.add_argument("--json", action="store_true", help="Emit the full report as JSON.")
     p.add_argument("--min-sessions", type=int, default=3)
@@ -40,7 +42,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
     root = args.sessions_root or config.collection.storage_path
     sessions = discover_sessions(root) if root.exists() else []
     boundary_event = VehicleLedgerStore(config.daemon.vehicle_ledger).latest_boundary()

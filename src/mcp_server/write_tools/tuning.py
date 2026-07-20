@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from src.mcp_server.audit import MCPAuditLogger
-from src.mcp_server.client import DaemonClient, DaemonError
+from src.mcp_server.client import DaemonClient
+from src.mcp_server.write_tools._shared import audited_post
 
 
 async def set_tuning(
@@ -25,13 +26,7 @@ async def set_tuning(
     body: dict[str, Any] = {"config": config, "change": change}
     if by is not None:
         body["by"] = by
-    try:
-        result = await client.post_json("/control/tuning", body)
-    except DaemonError as exc:
-        audit.record(tool="set_tuning", result="error", payload={**body, "error": str(exc)})
-        raise
-    audit.record(tool="set_tuning", result="ok", payload={**body, "response": result})
-    return result
+    return await audited_post(client, audit, tool="set_tuning", path="/control/tuning", body=body)
 
 
 async def estimate_tuning(
@@ -55,13 +50,7 @@ async def estimate_tuning(
     path = "/control/tuning/estimate"
     if since is not None:
         path = f"{path}?since={since}"
-    try:
-        result = await client.post_json(path, body)
-    except DaemonError as exc:
-        audit.record(tool="estimate_tuning", result="error", payload={**body, "error": str(exc)})
-        raise
-    audit.record(tool="estimate_tuning", result="ok", payload={**body, "response": result})
-    return result
+    return await audited_post(client, audit, tool="estimate_tuning", path=path, body=body)
 
 
 async def revert_tuning(
@@ -79,13 +68,9 @@ async def revert_tuning(
     body: dict[str, Any] = {"version": version}
     if by is not None:
         body["by"] = by
-    try:
-        result = await client.post_json("/control/tuning/revert", body)
-    except DaemonError as exc:
-        audit.record(tool="revert_tuning", result="error", payload={**body, "error": str(exc)})
-        raise
-    audit.record(tool="revert_tuning", result="ok", payload={**body, "response": result})
-    return result
+    return await audited_post(
+        client, audit, tool="revert_tuning", path="/control/tuning/revert", body=body
+    )
 
 
 __all__ = ["set_tuning", "estimate_tuning", "revert_tuning"]

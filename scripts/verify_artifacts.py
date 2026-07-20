@@ -42,7 +42,10 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+try:
+    import _cli  # noqa: F401  (bootstraps repo root onto sys.path)
+except ImportError:  # loaded as `scripts.verify_artifacts` — repo root on path, not scripts/
+    import scripts._cli as _cli  # type: ignore[no-redef]  # noqa: F401
 
 from src.models.artifact_hash import sha256_file  # noqa: E402
 

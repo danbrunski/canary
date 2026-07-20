@@ -129,12 +129,14 @@ operator history (ledger backfill facts)
   landed (commits `5b513a6`, `5ef6212`, `5d93473`). Two real bugs
   caught by review: a digest-endpoint auth-consistency leak (Phase 5)
   and a digest-route catalog-wiring gap (Phase 6).
-- [ ] **Q13 — refactoring.md Phase 2 (minus 2.2) + Phase 1.2**
-  (LSTM/TCN trainer unification — deliberately AFTER Q4 so the
-  calibration-enforcement edits land once in the unified trainer;
-  `audited_post`; script CLI preamble; control.py boilerplate;
-  companion↔control route dedup). 2.2 (MCP server table) stays blocked
-  until the other session's server.py work is confirmed landed.
+- [x] **Q13 — refactoring.md Phase 2 (minus 2.2) + Phase 1.2** — landed
+  (commits `0d7498d`, `aaa696e`, plus 2.3/2.4/2.5 this task). 1.2
+  (companion↔control dedup) and 2.1 (LSTM/TCN trainer unification)
+  landed earlier; 2.3 (`audited_post` + write-tool pure-read move),
+  2.4 (`scripts/_cli.py`), 2.5 (`control.py` `_require` helper) landed
+  now. 2.2 (MCP server registration table) annotated `[~]
+  blocked-overnight` in refactoring.md — still blocked on the other
+  session's `server.py` work; correctly not attempted.
 - [ ] **Q14 — engine-analysis-and-mapping.md Phase 3 code-only**
   (Mode 06 wiring on Q8's scheduler + MonitorsPanel; Mode 02 freeze
   frame into dtc.json; Mode 09 cal-ID at startup). All live-truck

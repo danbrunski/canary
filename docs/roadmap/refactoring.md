@@ -146,8 +146,9 @@ style issues, and go first.
   NOT leak to TCN (a TCN load with a missing key still fails strict).
   Both shims' full pre-refactor public API confirmed preserved
   end-to-end; `retrain.py`/`sequence_bakeoff.py` needed zero changes.
-- [ ] **2.2 — MCP tool registration table.** *(Blocked on coordination
-  — active work in `server.py` from another session.)* 34 of 48
+- [~] **2.2 — MCP tool registration table.** blocked-overnight:
+  coordination — active work in `server.py` from another session; not
+  attempted. 34 of 48
   `@mcp.tool()` closures are pure delegation with docstrings
   duplicated from the `tools/`/`write_tools/` modules. Replace with a
   registration table (`(delegate, needs_audit, gate)`) using
@@ -155,28 +156,47 @@ style issues, and go first.
   delegate — the module docstring becomes the single source. Keep the
   ~10 conditionally-registered and 2 real-logic wrappers hand-written.
   ~300-400 lines.
-- [ ] **2.3 — `audited_post` helper for write tools.** The identical
-  12-line build-body/try-post/audit-error/audit-ok block appears ~15×
-  across `src/mcp_server/write_tools/*.py`. One helper collapses each
-  to ~2 lines (~150 lines). Also move the two pure reads
-  (`get_current_capture`, `get_replay_status`) out of `write_tools/`.
-- [ ] **2.4 — Shared script CLI preamble.** `scripts/_cli.py` with
-  `add_common_args(parser)`, `load_config(args)`,
-  `resolve_sessions(args)`: 13 scripts hand-roll
-  `CanaryConfig.from_yaml` + `discover_sessions` + `--config/--days`
-  argparse; `_resolve_training_sessions` is pasted 3×
-  (`train_lstm.py:460`, `train_tcn.py:442`, `sequence_bakeoff.py:386`);
-  `label_sessions.py:93` has a private `_discover_sessions` copy;
-  `_filter_sessions_by_age` is a private helper cross-imported by
-  `retrain.py:46`; 5 scripts hand-roll the `sys.path` bootstrap.
-  (2.1 shrinks this list first — do 2.1 → 2.4.)
-- [ ] **2.5 — `control.py` route boilerplate.** In
-  `src/dashboard/routes/control.py`: `resolve_session → 404` pasted 6×
-  (`:274-277, 343-346, 358-361, 374-377, 389-392, 410-413`) → one
-  FastAPI dependency; six identical null-guard closures (`:117, 122,
-  127, 219, 572, 619`) → one generic `_require(component, name)`;
-  standardize the 20 `publish_control_event(...); return` tails.
-  ~150-200 lines.
+- [x] **2.3 — `audited_post` helper for write tools.** Landed: added
+  `audited_post` in `src/mcp_server/write_tools/_shared.py`; migrated
+  17 of ~18 call sites across `write_tools/*.py`. `classify_session`
+  (`write_tools/classification.py`) deliberately left unmigrated — its
+  POST body (`{}`, not the built payload) and success-audit payload
+  (`disposition` extracted from the response, not the full response
+  blob) genuinely diverge from the helper's fixed shape. Moved the two
+  pure reads out of `write_tools/`: `get_current_capture` →
+  `src/mcp_server/tools/sessions.py`, `get_replay_status` →
+  `src/mcp_server/tools/replay.py`; `server.py` delegating closures and
+  `tests/test_mcp_tools.py` updated. Verified by adversarial review:
+  no lost/duplicated tool registrations, behavior preserved at every
+  migrated call site.
+- [x] **2.4 — Shared script CLI preamble.** Landed: `scripts/_cli.py`
+  with `add_common_args`, `load_config`, `resolve_sessions`,
+  `filter_sessions_by_age`, `discover_live_session_dirs`; 22 scripts
+  migrated (post-2.1 the `_resolve_training_sessions` duplication was
+  already down to `train_sequence.py`/`sequence_bakeoff.py`, which have
+  a genuine behavioral divergence — bakeoff also filters an explicit
+  `--sessions` list against held-out sessions — and were correctly left
+  unmerged). `retrain.py`'s cross-import of `refit_behavior_models.py`'s
+  private `_filter_sessions_by_age` is gone; both now share `_cli`.
+  Dual-import fallback (`from _cli import ...` / `from scripts._cli
+  import ...`) added to the 6 scripts loaded both standalone and via
+  the `scripts.*` namespace package in tests — confirmed load-bearing,
+  not defensive clutter. 3 test files' monkeypatch targets updated to
+  `_cli.discover_sessions`. Known minor leftover (not blocking):
+  `scripts/fp_benchmark.py` still hand-rolls its own `--config`
+  argparse; `scripts/canary_companion.py` has a genuine divergence
+  (`CANARY_CONFIG` env-var default) and correctly stays unmigrated.
+- [x] **2.5 — `control.py` route boilerplate.** Landed: the
+  `resolve_session → 404` dedup was already fully done by 1.2's
+  `_resolve_session` closure — confirmed intact, not re-opened. Added a
+  generic `_require(component, name, *, detail=None)` helper collapsing
+  7 null-guard closures (`_controller`, `_jobs`, `_sequence_detector`,
+  `_replay`, `_feedback`, `_vehicle_ledger`, `_tuner`), preserving each
+  one's original status code and detail text. The 20
+  `publish_control_event(...); return` tails were checked and found
+  already consistent (differ only in event name/payload/return-key) —
+  no further collapse possible without an awkward wrapper, so left
+  as-is.
 
 ## Phase 3 — Structural (do deliberately, pair with related feature work)
 

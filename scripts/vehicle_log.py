@@ -20,10 +20,12 @@ from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _cli import (  # noqa: E402  (bootstraps repo root onto sys.path)
+    add_common_args,
+    load_config,
+)
 
 from src.analysis.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore  # noqa: E402
-from src.config import CanaryConfig  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 
@@ -31,9 +33,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="vehicle_log", description="Vehicle maintenance/intervention ledger tool."
     )
-    parser.add_argument(
-        "--config", type=Path, default=Path("canary.yaml"), help="Path to canary.yaml."
-    )
+    add_common_args(parser)
     parser.add_argument(
         "--profile",
         type=str,
@@ -73,7 +73,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def _resolve_store(args: argparse.Namespace) -> VehicleLedgerStore:
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
     scoped = (
         scope_config(config, resolve_profile_for_tooling(config, args.profile))
         if config.profiles.enabled

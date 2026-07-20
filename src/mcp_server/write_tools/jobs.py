@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from src.mcp_server.audit import MCPAuditLogger
-from src.mcp_server.client import DaemonClient, DaemonError
+from src.mcp_server.client import DaemonClient
+from src.mcp_server.write_tools._shared import audited_post
 
 
 async def start_job(
@@ -21,13 +22,7 @@ async def start_job(
     See ``src/control/jobs.py`` for the registered set on this build.
     """
     body: dict[str, Any] = {"kind": kind, "params": params or {}}
-    try:
-        result = await client.post_json("/control/jobs", body)
-    except DaemonError as exc:
-        audit.record(tool="start_job", result="error", payload={**body, "error": str(exc)})
-        raise
-    audit.record(tool="start_job", result="ok", payload={**body, "response": result})
-    return result
+    return await audited_post(client, audit, tool="start_job", path="/control/jobs", body=body)
 
 
 async def cancel_job(
@@ -37,14 +32,13 @@ async def cancel_job(
     job_id: str,
 ) -> dict[str, Any]:
     """Best-effort cancellation. Already-finished jobs are a no-op."""
-    payload = {"job_id": job_id}
-    try:
-        result = await client.post_json(f"/control/jobs/{job_id}/cancel", {})
-    except DaemonError as exc:
-        audit.record(tool="cancel_job", result="error", payload={**payload, "error": str(exc)})
-        raise
-    audit.record(tool="cancel_job", result="ok", payload={**payload, "response": result})
-    return result
+    return await audited_post(
+        client,
+        audit,
+        tool="cancel_job",
+        path=f"/control/jobs/{job_id}/cancel",
+        audit_payload={"job_id": job_id},
+    )
 
 
 __all__ = ["start_job", "cancel_job"]

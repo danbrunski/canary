@@ -15,6 +15,7 @@ from src.alerts.feedback import FeedbackStore
 from src.config import CanaryConfig
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import _cli  # noqa: E402
 import retrain  # noqa: E402
 
 EXAMPLE_YAML = Path(__file__).resolve().parents[1] / "canary.example.yaml"
@@ -25,7 +26,7 @@ def test_retrain_calls_both_trainers(
 ) -> None:
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
 
     feature_frame = object()
     calls: list[str] = []
@@ -76,7 +77,7 @@ def test_retrain_applies_feedback_policy_for_single_trainer(
 ) -> None:
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     feedback_path = tmp_path / "feedback.jsonl"
     FeedbackStore(feedback_path).record(
         event={
@@ -141,7 +142,7 @@ def test_retrain_applies_feedback_policy_for_single_trainer(
 def test_retrain_skip_if(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
 
     calls: list[str] = []
     monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: calls.append("if"))
@@ -165,7 +166,7 @@ def test_retrain_skip_if(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 def test_retrain_skip_sequence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
 
     calls: list[str] = []
     monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: calls.append("if"))
@@ -199,7 +200,7 @@ def test_retrain_sequence_model_tcn(
 
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
 
     calls: list[str] = []
     monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: calls.append("if"))
@@ -247,7 +248,7 @@ def test_retrain_since_boundary_excludes_older_sessions(
     new_session = tmp_path / "sessions" / "2026-06-15T120000"
     old_session.mkdir(parents=True)
     new_session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [old_session, new_session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [old_session, new_session])
 
     seen: dict[str, list[Path]] = {}
 
@@ -274,7 +275,7 @@ def test_retrain_since_boundary_excludes_older_sessions(
 
 
 def test_retrain_both_skip_returns_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [tmp_path])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [tmp_path])
     rc = retrain.main(
         [
             "--config",
@@ -290,7 +291,7 @@ def test_retrain_both_skip_returns_error(tmp_path: Path, monkeypatch: pytest.Mon
 
 
 def test_retrain_no_sessions_returns_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [])
     rc = retrain.main(
         [
             "--config",
@@ -308,7 +309,7 @@ def test_retrain_continues_after_first_trainer_fails(
     """A broken IF trainer must not stop the LSTM trainer (and vice versa)."""
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
 
     lstm_called: list[bool] = []
@@ -346,7 +347,7 @@ def test_retrain_returns_error_when_all_requested_trainers_fail(
 ) -> None:
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
 
     def _broken(*_a: object, **_k: object) -> None:
@@ -372,7 +373,7 @@ def test_retrain_skip_benchmark_flag_prevents_gate_call(
 ) -> None:
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
@@ -403,7 +404,7 @@ def test_retrain_calls_benchmark_gate_with_calibration_sessions(
     been attempted, with whatever calibration holdouts retrain picked."""
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
@@ -439,7 +440,7 @@ def test_retrain_returns_error_when_benchmark_gate_regressed(
     not folded into trainer partial-success."""
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
@@ -471,7 +472,7 @@ def test_retrain_ok_benchmark_does_not_fail_run(
 ) -> None:
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
@@ -629,7 +630,7 @@ def test_retrain_auto_holds_out_most_recent_session_for_calibration(
     sessions = [root / "2026-05-13T120000", root / "2026-05-14T120000", root / "2026-05-15T120000"]
     for s in sessions:
         s.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: list(sessions))
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     # Stub session sizes so each looks "substantial" without writing parquet —
     # the auto-holdout filter is gated on parquet byte totals.
@@ -679,7 +680,7 @@ def test_retrain_skips_tiny_sessions_when_picking_calibration_holdout(
     sessions = [real_a, real_b, tiny]
     for s in sessions:
         s.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: list(sessions))
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
 
     def _fake_bytes(p: Path) -> int:
@@ -729,7 +730,7 @@ def test_retrain_no_calibration_holdout_keeps_full_training_set(
     sessions = [root / "2026-05-13T120000", root / "2026-05-14T120000", root / "2026-05-15T120000"]
     for s in sessions:
         s.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: list(sessions))
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
 
     seen: dict[str, object] = {}

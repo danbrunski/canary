@@ -12,6 +12,7 @@ import pytest
 
 # Importable as a module so we can call main() and patch its dependencies.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import _cli  # noqa: E402
 import refit_behavior_models as refit_cli  # noqa: E402
 
 
@@ -41,7 +42,9 @@ def _frame(session_name: str = "2026-05-13T120000", seed: int = 0) -> pd.DataFra
 
 
 # ---------------------------------------------------------------------------
-# _filter_sessions_by_age
+# _cli.filter_sessions_by_age (moved here from a private per-script copy;
+# retrain.py and refit_behavior_models.py share this one now — refactoring.md
+# Phase 2 task 2.4)
 # ---------------------------------------------------------------------------
 
 
@@ -52,7 +55,7 @@ def test_filter_keeps_recent_sessions_drops_old_ones(tmp_path: Path) -> None:
     odd = tmp_path / "manual-import"  # non-conforming name — kept
     for p in (recent, old, odd):
         p.mkdir()
-    kept = refit_cli._filter_sessions_by_age([recent, old, odd], days=14, now=now)
+    kept = _cli.filter_sessions_by_age([recent, old, odd], days=14, now=now)
     assert recent in kept
     assert old not in kept
     assert odd in kept
@@ -62,7 +65,7 @@ def test_filter_disabled_by_days_zero(tmp_path: Path) -> None:
     sessions = [tmp_path / "2020-01-01T000000", tmp_path / "2026-05-13T000000"]
     for s in sessions:
         s.mkdir()
-    kept = refit_cli._filter_sessions_by_age(sessions, days=0, now=datetime.now(UTC))
+    kept = _cli.filter_sessions_by_age(sessions, days=0, now=datetime.now(UTC))
     assert kept == sessions
 
 
@@ -151,7 +154,7 @@ def _patch_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
             }
         )
     )
-    monkeypatch.setattr(refit_cli, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(refit_cli, "build_feature_frame", lambda *_a, **_k: _frame(session.name))
     return session
 
@@ -227,7 +230,7 @@ def test_main_rejects_unknown_recipe(tmp_path: Path, monkeypatch: pytest.MonkeyP
 def test_main_no_sessions_returns_error_code(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(refit_cli, "discover_sessions", lambda _root: [])
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [])
     rc = refit_cli.main(
         [
             "--config",

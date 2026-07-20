@@ -33,9 +33,15 @@ async def get_training_runs(client: DaemonClient) -> dict[str, Any]:
     return await client.get_json("/control/training-runs")
 
 
+async def get_current_capture(client: DaemonClient) -> dict[str, Any]:
+    """Read the currently active capture window (pure read)."""
+    return await client.get_json("/control/captures/current")
+
+
 __all__ = [
     "list_sessions",
     "get_session",
     "get_dataset_health",
     "get_training_runs",
+    "get_current_capture",
 ]

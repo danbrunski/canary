@@ -31,10 +31,11 @@ from __future__ import annotations
 
 import argparse
 import logging
-import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+
+from _cli import add_common_args, discover_live_session_dirs, load_config
 
 from src.analysis.fingerprint import compute_fingerprint, write_fingerprint
 from src.analysis.session_classifier import (
@@ -45,17 +46,11 @@ from src.analysis.session_classifier import (
     read_classification,
     write_classification,
 )
-from src.config import CanaryConfig
 from src.control.trends import evaluate_and_alert_trends
 from src.log import configure_logging
 from src.storage.catalog import SessionCatalog
 
 log = logging.getLogger(__name__)
-
-#: Live-session directory names match this — the segmenter and retention
-#: sweeper agree on the convention. ``_replay-*`` / ``_archive`` are
-#: deliberately excluded so the classifier only labels real captures.
-_SESSION_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -75,7 +70,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         default=[],
         help="One session id (e.g. ``2026-05-20T160000``). Repeatable. Overrides scanning.",
     )
-    parser.add_argument("--config", type=Path, default=Path("canary.yaml"))
+    add_common_args(parser)
     parser.add_argument(
         "--all",
         action="store_true",
@@ -107,14 +102,6 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _discover_sessions(root: Path) -> list[Path]:
-    if not root.exists():
-        return []
-    return sorted(
-        child for child in root.iterdir() if child.is_dir() and _SESSION_DIR_RE.match(child.name)
-    )
-
-
 def _should_label(session_dir: Path, rebuild: bool) -> tuple[bool, SessionClassification | None]:
     existing = read_classification(session_dir)
     if rebuild:
@@ -126,7 +113,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
     configure_logging(args.log_level)
 
-    config = CanaryConfig.from_yaml(args.config)
+    config = load_config(args)
     sessions_root = args.sessions_root or config.collection.storage_path
 
     if args.session:
@@ -141,7 +128,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "no --session or --all given; labeling only sessions with stale sidecars "
                 "(use --all to force scan)"
             )
-        targets = _discover_sessions(sessions_root)
+        targets = discover_live_session_dirs(sessions_root)
 
     if not targets:
         log.warning("no sessions found at %s", sessions_root)

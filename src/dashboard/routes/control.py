@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -103,6 +103,21 @@ from src.dashboard.version import _canary_version, _git_sha
 from src.preprocessing.loader import discover_sessions
 from src.profiles import load_registry, update_profile_name
 
+_T = TypeVar("_T")
+
+
+def _require(component: _T | None, name: str, *, detail: str | None = None) -> _T:
+    """Null-guard a controller/store dependency: 503 when it wasn't wired up.
+
+    Collapses the identical ``if x is None: raise HTTPException(503, ...)``
+    closures repeated per-dependency (``_controller``, ``_jobs``, etc.) —
+    ``detail`` overrides the default message for the one call site whose
+    existing wording doesn't follow the "{name} API is not available" shape.
+    """
+    if component is None:
+        raise HTTPException(status_code=503, detail=detail or f"{name} API is not available")
+    return component
+
 
 def register_control_routes(
     app: FastAPI,
@@ -136,14 +151,10 @@ def register_control_routes(
         )
 
     def _controller() -> CaptureController:
-        if capture_controller is None:
-            raise HTTPException(status_code=503, detail="control API is not available")
-        return capture_controller
+        return _require(capture_controller, "control")
 
     def _jobs() -> JobController:
-        if job_controller is None:
-            raise HTTPException(status_code=503, detail="job API is not available")
-        return job_controller
+        return _require(job_controller, "job")
 
     def _resolve_session(session_id: str) -> Path:
         try:
@@ -157,11 +168,11 @@ def register_control_routes(
             raise HTTPException(status_code=409, detail="cannot delete the active capture session")
 
     def _sequence_detector() -> SequenceDetectorController:
-        if sequence_detector_controller is None:
-            raise HTTPException(
-                status_code=503, detail="sequence-detector control is not available"
-            )
-        return sequence_detector_controller
+        return _require(
+            sequence_detector_controller,
+            "sequence-detector",
+            detail="sequence-detector control is not available",
+        )
 
     @app.get("/control/sequence-detector")
     def get_sequence_detector(
@@ -249,9 +260,7 @@ def register_control_routes(
         return {"capture": capture.to_dict()}
 
     def _replay() -> ReplayController:
-        if replay_controller is None:
-            raise HTTPException(status_code=503, detail="replay API is not available")
-        return replay_controller
+        return _require(replay_controller, "replay")
 
     @app.post("/control/replay", status_code=201)
     async def post_replay_start(
@@ -621,9 +630,7 @@ def register_control_routes(
         return {"model": published}
 
     def _feedback() -> FeedbackStore:
-        if feedback_store is None:
-            raise HTTPException(status_code=503, detail="feedback API is not available")
-        return feedback_store
+        return _require(feedback_store, "feedback")
 
     @app.get("/control/feedback")
     def get_feedback(
@@ -666,9 +673,7 @@ def register_control_routes(
         return {"feedback": fb.to_dict()}
 
     def _vehicle_ledger() -> VehicleLedgerStore:
-        if vehicle_ledger_store is None:
-            raise HTTPException(status_code=503, detail="vehicle ledger API is not available")
-        return vehicle_ledger_store
+        return _require(vehicle_ledger_store, "vehicle ledger")
 
     @app.get("/control/vehicle-ledger")
     def get_vehicle_ledger(
@@ -703,9 +708,7 @@ def register_control_routes(
         return {"event": event.to_dict()}
 
     def _tuner() -> AlertTuner:
-        if alert_tuner is None:
-            raise HTTPException(status_code=503, detail="tuning API is not available")
-        return alert_tuner
+        return _require(alert_tuner, "tuning")
 
     def _ensure_baseline_audited(tuner: AlertTuner) -> None:
         """Snapshot the pre-change config so the first change is revertible.

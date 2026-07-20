@@ -37,6 +37,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from _cli import add_common_args
+except ImportError:  # loaded as `scripts.preflight` — repo root on path, not scripts/
+    from scripts._cli import add_common_args  # type: ignore[no-redef]
+
 from src.collection.can_collector import bus_factory
 from src.collection.can_obd_client import PID_DECODERS, CanObdClient
 from src.config import CanaryConfig, CanBusConfig
@@ -276,7 +281,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         prog="preflight",
         description="Go/no-go check before an in-vehicle CANary capture.",
     )
-    p.add_argument("--config", type=Path, default=Path("canary.yaml"))
+    add_common_args(p)
     p.add_argument("--out-dir", type=Path, default=Path("data/sessions"))
     p.add_argument("--min-free-mb", type=int, default=500)
     p.add_argument("--frames-seconds", type=float, default=5.0)
