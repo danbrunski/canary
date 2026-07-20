@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -73,6 +73,21 @@ class EmitterCounters:
         self.suppressed_persistence = 0
         self.skipped_vehicle_state = 0
 
+    def snapshot(self) -> EmitterCounters:
+        """Independent copy — the base for :meth:`restore` (Phase 7.1)."""
+        return replace(self)
+
+    def restore(self, snapshot: EmitterCounters) -> None:
+        """Load ``snapshot``'s values in place, preserving object identity
+        (other code may hold a reference to this exact instance, e.g.
+        ``GET /status``)."""
+        self.emitted = snapshot.emitted
+        self.suppressed_not_anomaly = snapshot.suppressed_not_anomaly
+        self.suppressed_dedupe = snapshot.suppressed_dedupe
+        self.suppressed_tuning = snapshot.suppressed_tuning
+        self.suppressed_persistence = snapshot.suppressed_persistence
+        self.skipped_vehicle_state = snapshot.skipped_vehicle_state
+
     def to_dict(self) -> dict[str, int]:
         """JSON-safe snapshot — what ``GET /status`` exposes per detector."""
         return {
@@ -106,6 +121,10 @@ class AnomalyEventEmitter:
         self._tuner = tuner
         self._last_emit: dict[tuple[str, str], float] = {}
         self.counters = EmitterCounters()
+        #: Pre-replay snapshots, populated by :meth:`enter_replay_mode` and
+        #: consumed by :meth:`exit_replay_mode` (Phase 7.1).
+        self._pre_replay_counters: EmitterCounters | None = None
+        self._pre_replay_last_emit: dict[tuple[str, str], float] | None = None
 
     def emit_lstm(
         self,
@@ -271,6 +290,37 @@ class AnomalyEventEmitter:
             return False
         now = _seconds(event.timestamp)
         return (now - prior) < self._min_seconds_between_events
+
+    def enter_replay_mode(self) -> None:
+        """Snapshot live dedupe/counters, then start replay with a clean
+        slate (Phase 7.1).
+
+        Unlike :class:`PersistenceGate`/``LiveFeatureSource`` (a hard
+        reset both ways), the emitter's counters are a running operational
+        total the dashboard reads continuously — dropping them to zero for
+        the replay's duration and then losing the live history entirely
+        would misrepresent live operation. Snapshot + restore instead:
+        replay gets its own clean dedupe/counter view, and live picks back
+        up exactly where it left off once the replay ends.
+        """
+        self._pre_replay_counters = self.counters.snapshot()
+        self._pre_replay_last_emit = dict(self._last_emit)
+        self.counters.reset()
+        self._last_emit = {}
+
+    def exit_replay_mode(self) -> None:
+        """Restore the pre-replay live dedupe/counters (Phase 7.1).
+
+        A no-op (beyond clearing replay's own state) if called without a
+        matching :meth:`enter_replay_mode` — defensive, mirrors the writer/
+        anomaly-logger ``exit_replay_mode`` best-effort contract.
+        """
+        if self._pre_replay_counters is not None:
+            self.counters.restore(self._pre_replay_counters)
+            self._pre_replay_counters = None
+        if self._pre_replay_last_emit is not None:
+            self._last_emit = self._pre_replay_last_emit
+            self._pre_replay_last_emit = None
 
 
 def _dedupe_identity(event: AnomalyEvent) -> tuple[str, str]:

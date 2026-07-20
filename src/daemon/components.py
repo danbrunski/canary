@@ -10,6 +10,7 @@ from typing import Any
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
+from src.alerts.fusion import PersistenceGate
 from src.alerts.tuning import AlertTuner, load_tuning_config
 from src.analysis.gps_tracker import GpsTracker
 from src.config import CanaryConfig
@@ -52,6 +53,11 @@ class DaemonComponents:
     model_managers: dict[str, ModelManager[Any]]
     alert_tuner: AlertTuner
     health_monitor: HealthMonitor
+    #: Shared across every tick of ``run_live_inference`` (IF/LSTM/behavior
+    #: keys all latch on this one instance) — held here, not as a local
+    #: inside the inference loop, so ``ReplayController`` can reach it and
+    #: reset it on the replay boundary (Phase 7.1).
+    persistence_gate: PersistenceGate
     #: ``model_type`` of the active sequence-detector slot (e.g.
     #: ``"lstm_autoencoder"``), or ``None`` when no sequence detector is
     #: enabled. The serve loop looks up its manager by this key, so switching
@@ -85,6 +91,12 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         min_seconds_between_events=config.alerts.min_seconds_between_events,
     )
     model_managers = _load_model_managers(config)
+    alerts_cfg = config.alerts
+    persistence_gate = PersistenceGate(
+        alerts_cfg.min_consecutive_ticks,
+        window=alerts_cfg.persistence_window_ticks,
+        window_seconds=alerts_cfg.persistence_window_seconds,
+    )
 
     components = DaemonComponents(
         config=config,
@@ -99,6 +111,7 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         sequence_model_type=_sequence_model_type(config),
         alert_tuner=tuner,
         health_monitor=HealthMonitor(),
+        persistence_gate=persistence_gate,
         behavior_live=BehaviorLiveState(),
         capture_controller=None,
         job_controller=_make_job_controller(config),

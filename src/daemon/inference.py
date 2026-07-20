@@ -160,13 +160,9 @@ async def run_live_inference(
     severity_threshold = components.config.models.fusion.severity_threshold
     # Phase 7.5 / 6.1: every detector must be over threshold for M ticks
     # within a trailing N-tick, T-second window before it emits or counts as
-    # a firing fusion source.
-    alerts_cfg = components.config.alerts
-    persistence = PersistenceGate(
-        alerts_cfg.min_consecutive_ticks,
-        window=alerts_cfg.persistence_window_ticks,
-        window_seconds=alerts_cfg.persistence_window_seconds,
-    )
+    # a firing fusion source. Held on `components` (not a local instance) so
+    # `ReplayController` can reach + reset it on the replay boundary (7.1).
+    persistence = components.persistence_gate
     tuner = components.alert_tuner
     if if_manager is None:
         log.info(

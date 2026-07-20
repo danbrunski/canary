@@ -21,6 +21,14 @@ Isolation contract:
   feedback / refit jobs never see replay anomalies as real.
 * WebSocket broadcasts still fire normally so the dashboard surfaces the
   in-progress replay live.
+* **In-memory isolation (Phase 7.1).** Storage/JSONL isolation above says
+  nothing about the daemon's live in-memory state — replay re-emits onto
+  the *same* queue the live collectors feed, so it flows through the same
+  ``LiveFeatureSource`` buffer, ``PersistenceGate`` M-of-N streaks, and
+  emitter dedupe/counters. ``start``/``_reap_finished_task`` reset all
+  three on both replay boundaries (entering AND exiting) so a live drive's
+  state can't leak into a replay run's results, and a replay's tail state
+  can't leak back into live once it stops.
 """
 
 from __future__ import annotations
@@ -32,8 +40,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
+from src.alerts.fusion import PersistenceGate
 from src.collection.replay import replay_session
+from src.preprocessing.live import LiveFeatureSource
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
@@ -108,15 +119,42 @@ class ReplayController:
         writer: ParquetTelemetryWriter | AsyncParquetTelemetryWriter,
         anomaly_logger: AnomalyEventLogger,
         storage_root: Path,
+        live_source: LiveFeatureSource | None = None,
+        persistence_gate: PersistenceGate | None = None,
+        emitter: AnomalyEventEmitter | None = None,
     ) -> None:
         self._queue = queue
         self._writer = ensure_async_writer(writer)
         self._anomaly_logger = anomaly_logger
         self._storage_root = Path(storage_root)
+        # In-memory state shared with live collection (Phase 7.1) — all
+        # optional so tests/callers that don't wire live inference (e.g. no
+        # model artifacts, storage-only checks) still work unchanged.
+        self._live_source = live_source
+        self._persistence_gate = persistence_gate
+        self._emitter = emitter
         self._task: asyncio.Task[None] | None = None
         self._cleanup_task: asyncio.Task[None] | None = None
         self._stop_event: asyncio.Event | None = None
         self._status: ReplayStatus = ReplayStatus(running=False)
+
+    def _reset_in_memory_state(self) -> None:
+        """Clear/segregate live in-memory state at a replay boundary (7.1).
+
+        Called on both entry to and exit from replay mode. Best-effort per
+        piece, mirroring the writer/anomaly-logger exit contract below — one
+        failing reset shouldn't block the other two.
+        """
+        if self._live_source is not None:
+            try:
+                self._live_source.reset()
+            except Exception:
+                log.exception("live_source.reset failed")
+        if self._persistence_gate is not None:
+            try:
+                self._persistence_gate.reset()
+            except Exception:
+                log.exception("persistence_gate.reset failed")
 
     def status(self) -> ReplayStatus:
         """Return the current status snapshot.
@@ -158,6 +196,17 @@ class ReplayController:
         except Exception:
             await self._writer.exit_replay_mode()
             raise
+
+        # 7.1 — reset in-memory state now that storage/JSONL are isolated,
+        # so the replay run starts from a clean live buffer / persistence
+        # streak / dedupe view instead of inheriting whatever live was doing
+        # right before this call.
+        self._reset_in_memory_state()
+        if self._emitter is not None:
+            try:
+                self._emitter.enter_replay_mode()
+            except Exception:
+                log.exception("emitter.enter_replay_mode failed")
 
         stop_event = asyncio.Event()
         speed = speed if speed > 0 else 1.0
@@ -253,6 +302,15 @@ class ReplayController:
             self._anomaly_logger.exit_replay_mode()
         except Exception:
             log.exception("anomaly_logger.exit_replay_mode failed")
+        # 7.1 — clear the replay's own buffer/streak/dedupe state so none of
+        # it bleeds back into live once this replay is done; restores the
+        # emitter's pre-replay counters/dedupe (see enter_replay_mode).
+        self._reset_in_memory_state()
+        if self._emitter is not None:
+            try:
+                self._emitter.exit_replay_mode()
+            except Exception:
+                log.exception("emitter.exit_replay_mode failed")
         self._status = ReplayStatus(running=False)
 
 

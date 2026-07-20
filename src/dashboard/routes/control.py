@@ -67,7 +67,7 @@ from src.dashboard.schemas import (
     UpsKeepaliveRequest,
 )
 from src.dashboard.security import _client_is_loopback, _require_control_auth
-from src.dashboard.status import _resolve_latest_session
+from src.dashboard.status import _derive_vehicle_state, _resolve_latest_session
 from src.dashboard.ups import (
     DEFAULT_UPS_KEEPALIVE_PATH,
     DEFAULT_UPS_STATUS_PATH,
@@ -227,6 +227,22 @@ def register_control_routes(
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
         controller = _replay()
+        # 7.2 (operator-approved, see OVERNIGHT-QUEUE.md "Replay vs live"):
+        # replay is a bench/desk tool, not something to run while actually
+        # driving — refuse outright rather than gating live collectors out
+        # of the queue while a replay is active.
+        vehicle_state = _derive_vehicle_state(
+            config.collection.storage_path, replay_controller=controller
+        )
+        if vehicle_state.state == "engine_running":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "refusing to start replay: vehicle_state=engine_running "
+                    "(replay is a bench/desk tool; wait for ignition_only/engine_off "
+                    "or key out first)"
+                ),
+            )
         try:
             status = await controller.start(
                 request.session_id,

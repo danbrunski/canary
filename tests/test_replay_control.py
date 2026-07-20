@@ -15,17 +15,23 @@ import asyncio
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
+import pandas as pd
 import pytest
 
+from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
 from src.alerts.events import AnomalyEvent
+from src.alerts.fusion import PersistenceGate
+from src.config import CanaryConfig
 from src.control.replay_control import (
     ReplayConflictError,
     ReplayController,
     ReplayNotFoundError,
     ReplayNotRunningError,
 )
+from src.preprocessing.live import LiveFeatureSource
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import (
     ParquetTelemetryWriter,
@@ -183,6 +189,52 @@ def _make_controller(tmp_path: Path) -> tuple[ReplayController, Path]:
     return controller, storage_root
 
 
+class _IsolatedController(NamedTuple):
+    """7.1 fixture bundle: a controller wired to the same in-memory objects
+    the real daemon would share between live collection and replay."""
+
+    controller: ReplayController
+    storage_root: Path
+    live_source: LiveFeatureSource
+    persistence_gate: PersistenceGate
+    emitter: AnomalyEventEmitter
+
+
+def _make_isolated_controller(tmp_path: Path) -> _IsolatedController:
+    storage_root = tmp_path / "sessions"
+    storage_root.mkdir()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    writer = ParquetTelemetryWriter(storage_root)
+    anomaly_logger = AnomalyEventLogger(tmp_path / "anomalies")
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    live_source = LiveFeatureSource(config=config)
+    persistence_gate = PersistenceGate(3, window=5)
+    emitter = AnomalyEventEmitter(
+        AnomalyEventLogger(tmp_path / "emitter_events"), min_seconds_between_events=1.0
+    )
+    controller = ReplayController(
+        queue=queue,
+        writer=writer,
+        anomaly_logger=anomaly_logger,
+        storage_root=storage_root,
+        live_source=live_source,
+        persistence_gate=persistence_gate,
+        emitter=emitter,
+    )
+    return _IsolatedController(controller, storage_root, live_source, persistence_gate, emitter)
+
+
+def _if_row(*, mode: str = "idle") -> pd.Series:
+    return pd.Series(
+        {
+            "isolation_forest_label": -1,
+            "isolation_forest_score": 0.7,
+            "isolation_forest_missing_features": False,
+            "operating_mode": mode,
+        }
+    )
+
+
 def test_controller_status_starts_idle(tmp_path: Path) -> None:
     controller, _ = _make_controller(tmp_path)
     status = controller.status()
@@ -240,6 +292,96 @@ async def test_stop_without_running_raises(tmp_path: Path) -> None:
     controller, _ = _make_controller(tmp_path)
     with pytest.raises(ReplayNotRunningError):
         await controller.stop()
+
+
+# --------------------------------------------------------------------------- #
+# 7.1 — in-memory isolation on the replay boundary
+# --------------------------------------------------------------------------- #
+
+
+async def test_start_resets_live_source_and_persistence_gate(tmp_path: Path) -> None:
+    """Entering replay must not let a live drive's observed state / M-of-N
+    streak leak into the replay run's own inference."""
+    ctl = _make_isolated_controller(tmp_path)
+    source_dir = ctl.storage_root / "2026-05-18T120000"
+    source_dir.mkdir()
+
+    now = datetime(2026, 5, 18, 12, tzinfo=UTC)
+    ctl.live_source.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 1500.0, "rpm"))
+    ctl.live_source.tick(now)
+    ctl.persistence_gate.observe("isolation_forest", True, now=0.0)
+    assert ctl.live_source.known_channels
+    assert ctl.live_source.buffer_size > 0
+
+    await ctl.controller.start("2026-05-18T120000")
+
+    assert ctl.live_source.known_channels == ()
+    assert ctl.live_source.buffer_size == 0
+    assert not ctl.persistence_gate.active("isolation_forest")
+    assert ctl.persistence_gate.suppressed == 0
+
+    await ctl.controller.stop()
+
+
+async def test_stop_resets_live_source_and_persistence_gate_again(tmp_path: Path) -> None:
+    """Exiting replay must not let the replay's own tail state bleed back
+    into live once it stops."""
+    ctl = _make_isolated_controller(tmp_path)
+    source_dir = ctl.storage_root / "2026-05-18T120000"
+    source_dir.mkdir()
+
+    await ctl.controller.start("2026-05-18T120000")
+    # Something observed *during* the replay run.
+    now = datetime(2026, 5, 18, 12, tzinfo=UTC)
+    ctl.live_source.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 3000.0, "rpm"))
+    ctl.live_source.tick(now)
+    ctl.persistence_gate.observe("lstm_autoencoder", True, now=0.0)
+    assert ctl.live_source.known_channels
+
+    await ctl.controller.stop()
+
+    assert ctl.live_source.known_channels == ()
+    assert ctl.live_source.buffer_size == 0
+    assert not ctl.persistence_gate.active("lstm_autoencoder")
+
+
+async def test_start_and_stop_snapshot_restore_emitter_counters_and_dedupe(
+    tmp_path: Path,
+) -> None:
+    """Emitter counters are a running live total (unlike the hard-reset
+    live-source/persistence-gate above): replay gets a clean view, and live
+    picks back up exactly where it left off once replay ends."""
+    ctl = _make_isolated_controller(tmp_path)
+    source_dir = ctl.storage_root / "2026-05-18T120000"
+    source_dir.mkdir()
+
+    live_event = ctl.emitter.emit_isolation_forest_row(
+        _if_row(), model_version="if_v1", timestamp="2026-05-18T11:00:00Z"
+    )
+    assert live_event is not None
+    assert ctl.emitter.counters.emitted == 1
+
+    await ctl.controller.start("2026-05-18T120000")
+    assert ctl.emitter.counters.emitted == 0  # clean slate for the replay run
+
+    replay_event = ctl.emitter.emit_isolation_forest_row(
+        _if_row(), model_version="if_v1", timestamp="2026-05-18T12:00:00Z"
+    )
+    assert replay_event is not None
+    assert ctl.emitter.counters.emitted == 1
+
+    await ctl.controller.stop()
+
+    # Live's pre-replay total is restored, unaffected by the replay run's count.
+    assert ctl.emitter.counters.emitted == 1
+    # The live dedupe entry from before replay start is intact: the exact
+    # same (source, model_version, timestamp) right after stop is still
+    # deduped against it, not treated as fresh.
+    still_deduped = ctl.emitter.emit_isolation_forest_row(
+        _if_row(), model_version="if_v1", timestamp="2026-05-18T11:00:00Z"
+    )
+    assert still_deduped is None
+    assert ctl.emitter.counters.suppressed_dedupe == 1
 
 
 # --------------------------------------------------------------------------- #

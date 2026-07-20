@@ -177,6 +177,17 @@ class PersistenceGate:
             return False
         return self._hits(history) >= self._required
 
+    def reset(self) -> None:
+        """Clear every key's window (Phase 7.1 replay isolation boundary).
+
+        A live drive's in-progress streak must not carry into a replay run
+        (and vice versa on the way back out) — called on both
+        ``enter_replay_mode`` and ``exit_replay_mode`` so neither direction
+        leaks a partial M-of-N streak across the boundary.
+        """
+        self._history.clear()
+        self.suppressed = 0
+
     def _trim(self, history: deque[tuple[float, bool]], now: float) -> None:
         while len(history) > self._window:
             history.popleft()

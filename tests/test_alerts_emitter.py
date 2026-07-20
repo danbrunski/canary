@@ -236,6 +236,72 @@ def test_counters_to_dict_includes_skipped_vehicle_state(tmp_path: Path) -> None
 
 
 # ---------------------------------------------------------------------------
+# Replay-boundary isolation (Phase 7.1)
+# ---------------------------------------------------------------------------
+
+
+def test_enter_replay_mode_gives_a_clean_slate(tmp_path: Path) -> None:
+    """Entering replay must not let a live streak/dedupe/counter carry over
+    into the replay run's own results."""
+    logger = AnomalyEventLogger(tmp_path)
+    emitter = AnomalyEventEmitter(logger, min_seconds_between_events=1.0)
+    emitter.emit_lstm(_FakeLSTMResult(timestamp="2026-05-13T12:00:00+00:00"))
+    assert emitter.counters.emitted == 1
+
+    emitter.enter_replay_mode()
+
+    assert emitter.counters.emitted == 0
+    # The live dedupe entry is gone too — an identical replay-side event at
+    # the exact same timestamp isn't spuriously deduped against live.
+    replay_event = emitter.emit_lstm(_FakeLSTMResult(timestamp="2026-05-13T12:00:00+00:00"))
+    assert replay_event is not None
+    assert emitter.counters.emitted == 1
+
+
+def test_exit_replay_mode_restores_pre_replay_counters_and_dedupe(tmp_path: Path) -> None:
+    """Live picks back up exactly where it left off once replay ends — the
+    replay run's own counters/dedupe don't leak back into live."""
+    logger = AnomalyEventLogger(tmp_path)
+    emitter = AnomalyEventEmitter(logger, min_seconds_between_events=1.0)
+    emitter.emit_lstm(_FakeLSTMResult(timestamp="2026-05-13T12:00:00+00:00"))
+    assert emitter.counters.emitted == 1
+
+    emitter.enter_replay_mode()
+    for _ in range(3):
+        emitter.emit_lstm(_FakeLSTMResult(timestamp="2026-05-13T13:00:00+00:00"))
+    assert emitter.counters.emitted == 1  # dedupe suppressed 2 of the 3
+    emitter.exit_replay_mode()
+
+    # Pre-replay live counters/dedupe are back, unaffected by the replay run.
+    assert emitter.counters.emitted == 1
+    # The live dedupe entry from before replay is still active: an
+    # identical-timestamp event right after exit is still deduped.
+    still_deduped = emitter.emit_lstm(_FakeLSTMResult(timestamp="2026-05-13T12:00:00+00:00"))
+    assert still_deduped is None
+    assert emitter.counters.suppressed_dedupe == 1
+
+
+def test_exit_replay_mode_without_enter_is_a_noop(tmp_path: Path) -> None:
+    """Defensive: mirrors the writer/anomaly-logger exit_replay_mode
+    best-effort contract — an unmatched exit shouldn't blow up or corrupt
+    state. Dedupe must survive too: a prior regression wiped ``_last_emit``
+    to ``{}`` on an unmatched exit, silently disabling live dedupe."""
+    logger = AnomalyEventLogger(tmp_path)
+    emitter = AnomalyEventEmitter(logger, min_seconds_between_events=1.0)
+    emitter.emit_lstm(_FakeLSTMResult(timestamp="2026-05-13T12:00:00+00:00"))
+    assert emitter.counters.emitted == 1
+
+    emitter.exit_replay_mode()
+
+    assert emitter.counters.emitted == 1
+    # Live dedupe state must be untouched by the unmatched exit: an
+    # identical-timestamp event right after it is still deduped.
+    still_deduped = emitter.emit_lstm(_FakeLSTMResult(timestamp="2026-05-13T12:00:00+00:00"))
+    assert still_deduped is None
+    assert emitter.counters.suppressed_dedupe == 1
+
+
+# ---------------------------------------------------------------------------
 # Bad timestamps
 # ---------------------------------------------------------------------------
 

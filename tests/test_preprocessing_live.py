@@ -537,3 +537,47 @@ def test_vehicle_state_inputs_empty_before_any_observation(config: CanaryConfig)
         "obd_freshness_seconds": None,
         "can_freshness_seconds": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# reset (Phase 7.1 — replay in-memory isolation)
+# ---------------------------------------------------------------------------
+
+
+def test_reset_clears_current_values_and_buffer(config: CanaryConfig) -> None:
+    """A live drive's observed state must not leak into a replay run (and
+    vice versa on the way back out) — reset() is called on both boundaries."""
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    src.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 1500.0, "rpm"))
+    src.tick(now)
+    assert src.known_channels
+    assert src.buffer_size > 0
+    assert src.latest_operating_point is not None
+
+    src.reset()
+
+    assert src.known_channels == ()
+    assert src.buffer_size == 0
+    assert src.latest_operating_point is None
+    assert src.tick(now) is None  # nothing observed since reset
+    assert src.vehicle_state_inputs(now) == {
+        "rpm": None,
+        "coolant_temp": None,
+        "run_time": None,
+        "obd_freshness_seconds": None,
+        "can_freshness_seconds": None,
+    }
+
+
+def test_reset_is_reusable_source_observes_normally_afterward(config: CanaryConfig) -> None:
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    src.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 1500.0, "rpm"))
+    src.reset()
+
+    later = now + timedelta(seconds=1)
+    src.observe(TelemetryRecord.obd(later.timestamp(), "RPM", 800.0, "rpm"))
+    row = src.tick(later)
+    assert row is not None
+    assert row["obd:RPM"].iloc[0] == 800.0

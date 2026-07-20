@@ -413,6 +413,29 @@ def test_persistence_gate_missing_tick_freezes_not_resets() -> None:
     assert gate.observe("k", True, now=4.0)
 
 
+def test_persistence_gate_reset_clears_history_and_suppressed_count() -> None:
+    """7.1 — replay-boundary isolation: a live streak in progress (and the
+    running suppressed counter) must not survive into the next run,
+    whichever direction the boundary crosses."""
+    from src.alerts.fusion import PersistenceGate
+
+    gate = PersistenceGate(3, window=5)
+    gate.observe("lstm", True, now=0.0)
+    gate.observe("lstm", True, now=1.0)
+    assert gate.suppressed > 0
+    assert gate.active("lstm") or gate._history  # some history accumulated
+
+    gate.reset()
+
+    assert gate.suppressed == 0
+    assert gate._history == {}
+    assert not gate.active("lstm")
+    # Gate is immediately reusable — a fresh 3-of-3 still latches after reset.
+    assert not gate.observe("lstm", True, now=10.0)
+    assert not gate.observe("lstm", True, now=11.0)
+    assert gate.observe("lstm", True, now=12.0)
+
+
 def test_downgrade_unsustained_keeps_evidence_but_kills_severity() -> None:
     from src.alerts.fusion import downgrade_unsustained
 

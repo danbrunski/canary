@@ -469,6 +469,22 @@ class LiveFeatureSource:
         now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
         return max((now_utc - observed_at).total_seconds(), 0.0)
 
+    def reset(self) -> None:
+        """Clear all observed state (Phase 7.1 replay isolation boundary).
+
+        Called on both entry to and exit from replay mode so a live drive's
+        buffer/current-values never bleed into a replay run's inference, and
+        a replay's tail state never bleeds back into live once it stops.
+        Config/bindings/segmenter setup (immutable per source) are untouched,
+        so the source is immediately usable again after this call — it just
+        starts from an empty history, same as a freshly constructed one.
+        """
+        self._current_values = {}
+        self._last_observed_at = {}
+        self._buffer = deque(maxlen=self._max_rows)
+        self.latest_operating_point = None
+        self.last_segmenter_fallback = False
+
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------

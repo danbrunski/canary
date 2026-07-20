@@ -67,16 +67,21 @@ async def run_daemon(
         ParquetTelemetryWriter(config.collection.storage_path) if writer is None else writer
     )
     components.capture_controller = CaptureController(lambda: storage_writer.paths.root)
+
+    # Build the live source (no-op if bindings/behavior_models are absent on
+    # disk — observe still works, just without decoded:* / deviation:* columns).
+    # Built before the ReplayController below so 7.1's in-memory reset can
+    # reach it (and the shared persistence gate / emitter) on replay boundaries.
+    live_source = build_live_feature_source(components) if enable_live_inference else None
     components.replay_controller = ReplayController(
         queue=queue,
         writer=storage_writer,
         anomaly_logger=components.event_logger,
         storage_root=config.collection.storage_path,
+        live_source=live_source,
+        persistence_gate=components.persistence_gate,
+        emitter=components.emitter,
     )
-
-    # Build the live source (no-op if bindings/behavior_models are absent on
-    # disk — observe still works, just without decoded:* / deviation:* columns).
-    live_source = build_live_feature_source(components) if enable_live_inference else None
 
     # Lazy import — keeps daemon module importable without the collector deps
     # at module-load time.

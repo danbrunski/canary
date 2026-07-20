@@ -426,19 +426,37 @@ churns on hot-swap.
 collectors — storage/JSONL isolation is complete
 (`replay_control.py:11-24`) but in-memory state is not.
 
-- [ ] **7.1 — Reset on replay boundaries.** On `enter_replay_mode` /
+- [x] **7.1 — Reset on replay boundaries.** On `enter_replay_mode` /
   `exit_replay_mode`: clear `LiveFeatureSource` (`_current_values`,
   buffer), reset `PersistenceGate._streaks`, and snapshot/restore or
   segregate emitter dedupe + counters, so live→replay→live is clean.
-- [ ] **7.2 — Pause live collectors during replay (decide).** Either
+  — landed: `PersistenceGate.reset()`, `LiveFeatureSource.reset()`,
+  and `AnomalyEventEmitter.enter_replay_mode()`/`exit_replay_mode()`
+  (counters/dedupe snapshotted-then-reset on entry, restored on exit —
+  a running live total, not hard-reset like the other two);
+  `ReplayController` fires all three on both entry and the single exit
+  path (`.stop()` and natural completion funnel through the same
+  reaper). A real bug (unmatched `exit_replay_mode()` silently wiping
+  live dedupe state instead of no-op'ing) caught by review and fixed
+  before landing.
+- [x] **7.2 — Pause live collectors during replay (decide).** Either
   refuse `start_replay` while `vehicle_state` is `engine_running`
   (replay is a bench/desk tool), or gate live collector records out of
   the queue while a replay is active. **Decision made
   (operator-approved, see OVERNIGHT-QUEUE.md): refuse — return 409
-  with a reason string while `engine_running`.**
-- [ ] **7.3 — Test.** Integration test: live ticks → start replay →
+  with a reason string while `engine_running`.** — landed:
+  `post_replay_start` refuses with 409 only for `engine_running`
+  (ignition_only/engine_off/no_data/replay/unknown all still allowed);
+  the MCP `start_replay` tool routes through the same HTTP endpoint,
+  no bypass.
+- [x] **7.3 — Test.** Integration test: live ticks → start replay →
   stop → live ticks; assert no cross-contaminated streaks/dedupe and
-  the live buffer restarts empty.
+  the live buffer restarts empty. — landed:
+  `tests/test_replay_isolation.py` (`-m integration`), drives a real
+  `run_daemon` through live→replay→live with a stub IF model; confirmed
+  it has teeth (fails when a reset is reverted). Not part of the
+  standard fast-tier gate; run explicitly tonight and passed
+  consistently (3/3).
 
 ## Phase 8 — Eval-harness realism (T2 — feeds the benchmark roadmap)
 
