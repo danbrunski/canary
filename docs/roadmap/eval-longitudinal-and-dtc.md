@@ -148,9 +148,11 @@ FE placeholder (`nav.ts:24` `diag-dtc`, `Workbench.tsx:143-150`).
   schema; MIL banner distinguishes on/off/unknown; stale indicator
   reads the backend's own `stale` flag, not frontend-computed; no
   clear-codes control anywhere in the component.
-- [ ] **1.10 — Deploy + live verify.** Pull + restart on the Pi; verify
+- [~] **1.10 — Deploy + live verify.** Pull + restart on the Pi; verify
   KOEO read (`vehicle_state: ignition_only`) and engine-running read;
   confirm `_replay` sessions don't poll (replay has no live OBD path).
+  blocked-overnight: needs the Pi/truck; 1.1-1.9 all landed and ready
+  for a morning deploy.
 
 ---
 
