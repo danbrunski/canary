@@ -465,6 +465,11 @@ class DaemonConfig(_Strict):
     #: (see ``src/profiles.py``). Cwd-relative like the sibling paths; the
     #: systemd unit ``cd``s to the clone so the default resolves there.
     behavior_models: Path = Path("data/behavior_models.yaml")
+    #: User-defined custom-PID formulas (Task 6.8, wired in by Task 2.6) —
+    #: schema documented in ``custom_pids.example.yaml``. Optional: absent
+    #: file ⇒ zero custom PIDs polled (``load_custom_pids`` handles that
+    #: gracefully), same posture as ``behavior_models`` above.
+    custom_pids: Path = Path("data/custom_pids.yaml")
     isolation_forest_artifact: str = "isolation_forest/model.joblib"
     lstm_artifact: str = "lstm_autoencoder/model.pt"
     tcn_artifact: str = "tcn_autoencoder/model.pt"

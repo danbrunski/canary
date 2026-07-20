@@ -14,6 +14,7 @@ from src.collection.obd_registry import PollTier, lookup
 from src.config import CanBusConfig, CollectionConfig
 
 if TYPE_CHECKING:
+    from src.collection.custom_pids import CustomPid
     from src.decode.dids import DidAccess, DidMap
 
 AUTO_PIDS = "auto"
@@ -161,6 +162,11 @@ class CanObdSpec:
     #: change on the order of minutes, not seconds. ``<= 0`` disables the
     #: DTC poll entirely (no requests added, nothing to skip at runtime).
     dtc_poll_interval_seconds: float = DEFAULT_DTC_POLL_INTERVAL_SECONDS
+    #: User-defined custom PIDs (Task 2.6) loaded once at daemon startup via
+    #: ``custom_pids.load_custom_pids`` and threaded straight through — the
+    #: scheduler never re-reads the YAML itself. Empty by default (no
+    #: ``data/custom_pids.yaml`` is the common case).
+    custom_pids: tuple[CustomPid, ...] = ()
 
 
 @dataclass
@@ -177,7 +183,7 @@ class CanObdLoopStats:
 
 @dataclass(frozen=True)
 class _PollRequest:
-    kind: Literal["pid", "did", "session", "dtc"]
+    kind: Literal["pid", "did", "session", "dtc", "custom"]
     service: int
     identifier: int
     request_id: int
@@ -185,6 +191,10 @@ class _PollRequest:
     poll_tier: PollTier = "medium"
     auto_probe: bool = False
     fast_probe: bool = False
+    #: Set only for ``kind="custom"`` — the definition ``_response_to_reading``
+    #: decodes the response through (formula, unit). ``None`` for every other
+    #: kind, which all decode via the static PID_DECODERS/DTC tables instead.
+    custom_pid: CustomPid | None = None
 
 
 @dataclass
@@ -306,8 +316,12 @@ class DidWindowController:
         # Mode 03/07/0A (Task 1.3) are standard, non-Mode-22 requests just
         # like Mode 01 — the ECM answers them in the default session, so
         # they share Mode 01's eligibility rather than being starved for
-        # the DID controller's whole lifetime.
-        return request.kind in ("pid", "dtc")
+        # the DID controller's whole lifetime. Custom PIDs (Task 2.6) get
+        # the same treatment: most use Mode 01/09, which is correct here; a
+        # custom PID declared on Mode 22 for a session-gated ECU would need
+        # the same windowed treatment as `did` (not implemented — no such
+        # custom PID exists yet, see custom_pids.example.yaml).
+        return request.kind in ("pid", "dtc", "custom")
 
     def on_request_attempted(self, index: int) -> None:
         self._pending.discard(index)
@@ -475,6 +489,22 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
                 request_id=spec.did_request_id,
                 channel=f"DID_{did:04X}",
                 poll_tier="medium",
+            )
+        )
+    for custom in spec.custom_pids:
+        # Mode 0x22 custom PIDs default to the DID request id (matches the
+        # `did` branch above); 0x01/0x09 default to the Mode-01 broadcast id.
+        # An explicit `header` on the definition always wins.
+        default_request_id = spec.did_request_id if custom.mode == 0x22 else DEFAULT_REQUEST_ID
+        requests.append(
+            _PollRequest(
+                kind="custom",
+                service=custom.mode,
+                identifier=custom.pid,
+                request_id=custom.header if custom.header is not None else default_request_id,
+                channel=f"custom:{custom.name}",
+                poll_tier=custom.poll_tier,
+                custom_pid=custom,
             )
         )
     if spec.dtc_poll_interval_seconds > 0:

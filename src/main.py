@@ -17,6 +17,7 @@ from src.collection.can_obd_collector import (
     collect_can_obd_from_config,
     resolve_did_session_spec,
 )
+from src.collection.custom_pids import load_custom_pids
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
 from src.collection.obd_collector import ObdSpec, collect_obd
@@ -128,6 +129,9 @@ def _default_collectors(
     gps_collectors = _gps_collectors(config, reconnect_policy)
 
     if config.collection.obd_source == "canable":
+        # Task 2.6: loaded once here, not per poll tick. Absent file ⇒ an
+        # empty set (load_custom_pids' own graceful-missing-file behavior).
+        custom_pids = load_custom_pids(config.daemon.custom_pids).custom_pids
         can_obd_spec = CanObdSpec(
             can=config.hardware.can,
             poll_rate_hz=config.collection.obd_poll_rate_hz,
@@ -137,6 +141,7 @@ def _default_collectors(
             request_timeout_seconds=config.collection.obd_request_timeout_seconds,
             did_session=resolve_did_session_spec(config.collection),
             dtc_poll_interval_seconds=config.collection.obd_dtc_poll_interval_seconds,
+            custom_pids=tuple(custom_pids),
         )
 
         async def canable_obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:

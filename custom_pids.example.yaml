@@ -1,0 +1,64 @@
+# CANary custom-PID example (Task 2.6).
+#
+# Copy to `data/custom_pids.yaml` and edit for your vehicle. This file is
+# OPTIONAL — with no data/custom_pids.yaml present, the daemon starts
+# normally and polls zero custom PIDs (src.collection.custom_pids.
+# load_custom_pids treats "absent" as "empty", not an error).
+#
+# Schema (src.collection.custom_pids.CustomPid):
+#   name          canonical channel name; polled as "custom:<name>"
+#   display_name  human label (dashboard / Torque CSV export)
+#   mode          request service — 0x01 (Mode 01), 0x09 (Mode 09), or
+#                 0x22 (UDS ReadDataByIdentifier). Write services (0x04,
+#                 0x2E, 0x2F) are rejected at load time: custom PIDs are
+#                 read-only by construction.
+#   pid           the PID/DID identifier (0-0xFFFF) requested under `mode`
+#   formula       a sandboxed expression over the response bytes, Torque's
+#                 convention: A, B, C... bind to payload[0], payload[1],
+#                 payload[2]..., `bytes` is the payload length. Only
+#                 arithmetic/comparison/ternary + a fixed safe function set
+#                 (abs/min/max/round/int/float/pow/sqrt/signed) are allowed
+#                 — no attribute access, indexing, calls to anything else,
+#                 imports, or comprehensions. See
+#                 src/collection/custom_pids.py's evaluate_formula.
+#   unit          display unit string (advisory only)
+#   category      dashboard grouping (default "custom")
+#   minimum/maximum  advisory bounds shown on the dashboard; out-of-range
+#                 values are still recorded, never dropped
+#   poll_tier     "fast" | "medium" | "slow" | "on_demand" (default "medium")
+#   dashboard_hint  "gauge" | "graph" | "text" | "indicator" | "list"
+#   header        optional explicit request CAN ID (e.g. 0x7E0 for an
+#                 engine-ECU Mode 22 read); omitted ⇒ the collector's
+#                 default request ID for `mode` (0x7DF broadcast for
+#                 0x01/0x09, the configured DID request ID for 0x22)
+#
+# The two entries below are ILLUSTRATIVE ONLY (Torque's own well-known
+# generic-OBD sample formulas) — not real custom PIDs for any CANary
+# vehicle profile. Delete or replace them with your own before use; an
+# empty `custom_pids: []` list is equally valid.
+
+schema_version: 1
+
+custom_pids:
+  - name: EXAMPLE_TRANS_TEMP
+    display_name: "Example: Transmission Temp (Mode 01, non-standard PID)"
+    mode: 0x01
+    pid: 0x05  # placeholder — pick the actual non-standard PID your ECU answers
+    formula: "A - 40"
+    unit: "C"
+    category: custom
+    minimum: -40
+    maximum: 215
+    poll_tier: slow
+    dashboard_hint: gauge
+
+  - name: EXAMPLE_BOOST_UDS
+    display_name: "Example: Boost Pressure (UDS ReadDataByIdentifier)"
+    mode: 0x22
+    pid: 0x1234  # placeholder DID — replace with a real, identified one
+    formula: "(A * 256 + B) / 100 - 101.3"
+    unit: "kPa"
+    category: custom
+    poll_tier: medium
+    dashboard_hint: graph
+    header: 0x7E0

@@ -143,3 +143,47 @@ async def test_default_collectors_use_canable_obd_by_default(
     assert spec.did_request_id == 0x7E0
     assert captured["queue"] is queue
     assert captured["reconnect_policy"].initial_delay_seconds == 10
+    # Task 2.6: no data/custom_pids.yaml on disk for this test config ⇒ zero
+    # custom PIDs, no crash, no warning — the common (no-file) case.
+    assert spec.custom_pids == ()
+
+
+@pytest.mark.asyncio
+async def test_default_collectors_loads_custom_pids_when_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Task 2.6: a present data/custom_pids.yaml is loaded once at startup
+    and threaded into the canable CanObdSpec."""
+    custom_pids_path = tmp_path / "custom_pids.yaml"
+    custom_pids_path.write_text(
+        "schema_version: 1\n"
+        "custom_pids:\n"
+        "  - name: OIL_PRESS\n"
+        "    display_name: Oil Pressure\n"
+        "    mode: 34\n"  # 0x22
+        "    pid: 4416\n"  # 0x1140
+        "    formula: (A*256+B)/100\n"
+        "    unit: psi\n"
+    )
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = config.model_copy(
+        update={"daemon": config.daemon.model_copy(update={"custom_pids": custom_pids_path})}
+    )
+    captured = {}
+
+    async def fake_collect_can_obd(
+        spec, queue, stop_event, *, reconnect_policy, on_scheduler_metrics=None
+    ):
+        captured["spec"] = spec
+        stop_event.set()
+
+    monkeypatch.setattr("src.main.collect_can_obd_from_config", fake_collect_can_obd)
+
+    collectors = _default_collectors(config)
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+    await collectors[0](queue, stop)
+
+    spec = captured["spec"]
+    assert len(spec.custom_pids) == 1
+    assert spec.custom_pids[0].name == "OIL_PRESS"

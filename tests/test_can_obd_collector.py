@@ -26,6 +26,7 @@ from src.collection.can_obd_collector import (
     resolve_did_session_spec,
     run_can_obd_loop,
 )
+from src.collection.custom_pids import CustomPid
 from src.collection.obd_collector import JsonlReadingWriter
 from src.collection.obd_registry import MODE01_REGISTRY
 from src.collection.reconnect import ReconnectPolicy
@@ -506,6 +507,125 @@ def test_scheduler_metrics_report_rates_and_backoff_state() -> None:
     assert by_channel["ENGINE_LOAD"]["backed_off"] is True
     assert by_channel["ENGINE_LOAD"]["timeouts"] >= 1
     assert by_channel["RPM"]["responses"] >= 1
+
+
+# --- Custom PIDs (Task 2.6) --------------------------------------------------
+
+
+def test_build_poll_requests_includes_custom_pids() -> None:
+    custom = CustomPid(
+        name="OIL_PRESS",
+        display_name="Oil Pressure",
+        mode=0x22,
+        pid=0x1140,
+        formula="(A*256+B)/100",
+        unit="psi",
+        header=0x7E0,
+        poll_tier="slow",
+    )
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=(),
+        custom_pids=(custom,),
+    )
+    requests = [r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "custom"]
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.channel == "custom:OIL_PRESS"
+    assert request.service == 0x22
+    assert request.identifier == 0x1140
+    assert request.request_id == 0x7E0
+    assert request.poll_tier == "slow"
+    assert request.custom_pid is custom
+
+
+def test_build_poll_requests_custom_pid_defaults_request_id_by_mode() -> None:
+    # No explicit `header`: Mode 22 defaults to the DID request id, Mode 01
+    # defaults to the Mode-01 broadcast id — same convention as `did`/`pid`.
+    mode22 = CustomPid(name="A", display_name="A", mode=0x22, pid=0x1, formula="A")
+    mode01 = CustomPid(name="B", display_name="B", mode=0x01, pid=0x1, formula="A")
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=(),
+        did_request_id=0x7E1,
+        custom_pids=(mode22, mode01),
+    )
+    by_name = {
+        r.custom_pid.name: r
+        for r in build_poll_requests(_StaticDiscovery(), spec)
+        if r.kind == "custom"
+    }
+    assert by_name["A"].request_id == 0x7E1
+    assert by_name["B"].request_id == 0x7DF
+
+
+class _CustomPidBus:
+    """Answers a Mode 0x22 custom-PID request for DID 0x1140."""
+
+    def __init__(self) -> None:
+        self.sent: list[can.Message] = []
+        self._responses: list[can.Message] = []
+
+    def send(self, msg: can.Message) -> None:
+        self.sent.append(msg)
+        data = bytes(msg.data)
+        if msg.arbitration_id == 0x7E0 and data[:4] == bytes([0x03, 0x22, 0x11, 0x40]):
+            self._responses.append(
+                can.Message(
+                    arbitration_id=0x7E8,
+                    data=bytes([0x05, 0x62, 0x11, 0x40, 0x03, 0xE8, 0x00, 0x00]),
+                    is_extended_id=False,
+                )
+            )
+
+    def recv(self, timeout: float = 0.0) -> can.Message | None:
+        if self._responses:
+            return self._responses.pop(0)
+        if timeout:
+            time.sleep(min(timeout, 0.005))
+        return None
+
+
+def test_custom_pid_response_decodes_through_evaluator_into_custom_channel() -> None:
+    bus = _CustomPidBus()
+    stop = threading.Event()
+    readings: list[Any] = []
+
+    def on_reading(reading: Any) -> None:
+        readings.append(reading)
+        stop.set()
+
+    custom = CustomPid(
+        name="OIL_PRESS",
+        display_name="Oil Pressure",
+        mode=0x22,
+        pid=0x1140,
+        formula="(A*256+B)/100",
+        unit="psi",
+        header=0x7E0,
+    )
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        poll_rate_hz=20.0,
+        pids=("RPM",),  # explicit, non-empty — avoids the "auto" full-catalog probe
+        custom_pids=(custom,),
+        request_timeout_seconds=0.2,
+    )
+
+    run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        spec,
+        on_frame=lambda _msg: None,
+        on_reading=on_reading,
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 1.0,
+    )
+
+    assert len(readings) == 1
+    reading = readings[0]
+    assert reading.pid == "custom:OIL_PRESS"
+    assert reading.value == 10.0
+    assert reading.unit == "psi"
 
 
 # --- Mode 22 session windows (Task 6.15 / risk R8) --------------------------

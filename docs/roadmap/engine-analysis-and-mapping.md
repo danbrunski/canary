@@ -183,12 +183,19 @@ the analysis UX.
   capture: `did:ECM_INJECTOR_PW_B1` vs computed fuel mass per cycle at
   steady states → resolve `scale` in `data/dids.yaml:99-119` so the
   channel reads in ms. Unblocks duty cycle (4.2) and the PW map in ms.
-- [ ] **2.6 — Wire the custom-PID engine.** `custom_pids.py` is
+- [x] **2.6 — Wire the custom-PID engine.** `custom_pids.py` is
   complete but unloaded (docstring `:22-24`, Tasks 6.2/6.13): load
   `data/custom_pids.yaml` at daemon start, merge into
   `build_poll_requests`, decode via the sandboxed evaluator into
   `custom:` channels. Ship an empty-but-documented
-  `custom_pids.example.yaml`.
+  `custom_pids.example.yaml`. — landed: loaded once at startup
+  (canable branch only — elm327 has no scheduler concept to thread
+  into), merged into `build_poll_requests` as `kind="custom"`, decoded
+  via the existing (untouched, unweakened) sandboxed evaluator. One
+  disclosed, bounded gap: a Mode-22 custom PID on a session-gated ECU
+  isn't yet integrated with the DID-window controller — it gets sent
+  outside the session window and cleanly no-ops (short response →
+  `[]`, no crash, no DID-window interference), not silently broken.
 - [ ] **2.7 — DID scale-pinning workbench entries.** For the still-raw
   DIDs (0x1201, 0x1206/07, 0x1110), plan physical-action-tagged
   captures (per the binding protocol) to pin scales; track in

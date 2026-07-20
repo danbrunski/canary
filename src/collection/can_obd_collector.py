@@ -42,6 +42,7 @@ from src.collection.can_obd_client import (
     decode_mil_on,
     parse_dtc_payload,
 )
+from src.collection.custom_pids import evaluate_custom_pid
 from src.collection.isotp import (
     DEFAULT_RESPONSE_ID_MAX,
     DEFAULT_RESPONSE_ID_MIN,
@@ -138,6 +139,7 @@ def run_can_obd_loop(
                 "pids": [r.channel for r in requests if r.kind == "pid"],
                 "dids": [r.channel for r in requests if r.kind == "did"],
                 "dtc_channels": [r.channel for r in requests if r.kind == "dtc"],
+                "custom_pid_channels": [r.channel for r in requests if r.kind == "custom"],
                 "poll_tiers": {r.channel: r.poll_tier for r in requests},
                 "bus_budget_requests_per_second": budget_rps,
                 "auto_miss_backoff_seconds": AUTO_MISS_BACKOFF_SECONDS,
@@ -586,6 +588,17 @@ def _response_to_reading(
         # TelemetryValue contract as every other reading.
         codes = parse_dtc_payload(response.payload)
         return [ObdReading(timestamp, request.channel, ",".join(codes), "")]
+
+    if request.kind == "custom":
+        # Task 2.6 — decode through the definition's sandboxed formula
+        # instead of a PID_DECODERS lookup. `build_poll_requests` only ever
+        # builds a "custom" request from a CustomPid, so this is set.
+        assert request.custom_pid is not None
+        decoded = evaluate_custom_pid(request.custom_pid, response.payload)
+        if decoded is None:
+            return []
+        value, unit = decoded
+        return [ObdReading(timestamp, request.channel, value, unit)]
 
     # Reuse the public PID decoder behavior without issuing another request:
     # synthesize the same DecodedPid logic locally from PID_DECODERS.

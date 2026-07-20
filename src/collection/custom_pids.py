@@ -19,9 +19,11 @@ safety-bounded equivalent:
 * Torque custom-PID CSV import/export, and versioned YAML persistence
   mirroring ``data/dids.yaml``.
 
-Daemon polling integration (scheduling these alongside the J1979 tiers)
-is Task 6.2/6.13; this module is the definition + evaluation core those
-build on, and is fully exercisable without a vehicle.
+Daemon polling integration — scheduling these alongside the J1979 tiers via
+``obd_scheduler.build_poll_requests`` (``kind="custom"`` requests) and
+decoding responses into ``custom:<name>`` telemetry channels — is wired in
+by Task 2.6 (``src.main._default_collectors`` loads ``data/custom_pids.yaml``
+once at startup via ``load_custom_pids``, or leaves it empty if absent).
 """
 
 from __future__ import annotations
