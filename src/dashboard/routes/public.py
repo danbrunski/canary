@@ -9,6 +9,7 @@ from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.feedback import FeedbackStore, annotate_events_with_feedback
 from src.analysis.gps_tracker import GpsTracker
 from src.config import CanaryConfig
+from src.control.dtc_state import DtcState
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
 from src.dashboard.behavior_live import BehaviorLiveState
@@ -41,7 +42,8 @@ def register_public_routes(
     replay_controller: ReplayController | None,
     health_monitor: HealthMonitor | None,
     behavior_live: BehaviorLiveState | None,
-    gps_tracker: GpsTracker | None,
+    dtc_state: DtcState | None = None,
+    gps_tracker: GpsTracker | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
 ) -> None:
     @app.get("/status")
@@ -148,3 +150,21 @@ def register_public_routes(
         # with their source CAN IDs. The CAN tab overlays live values and
         # discovered/undecoded IDs from the telemetry stream client-side.
         return read_can_coverage(bindings_path)
+
+    @app.get("/obd/dtc")
+    def get_obd_dtc() -> dict[str, Any]:
+        # Task 1.5: the cached DtcReport (Task 1.4) the periodic Mode
+        # 03/07/0A poll (Task 1.3) keeps current — stored/pending/permanent
+        # codes, MIL state, and staleness. Empty-but-shaped when no poll has
+        # landed yet (daemon just started, or DTC polling is disabled).
+        if dtc_state is None:
+            return {
+                "captured_at": None,
+                "stored": [],
+                "pending": [],
+                "permanent": [],
+                "mil_on": None,
+                "dtc_count": 0,
+                "stale": True,
+            }
+        return dtc_state.snapshot()

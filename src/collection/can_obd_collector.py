@@ -39,6 +39,8 @@ from src.collection.can_collector import (
 from src.collection.can_collector import _write_manifest as write_recording_manifest
 from src.collection.can_obd_client import (
     PID_DECODERS,
+    decode_mil_on,
+    parse_dtc_payload,
 )
 from src.collection.isotp import (
     DEFAULT_RESPONSE_ID_MAX,
@@ -135,6 +137,7 @@ def run_can_obd_loop(
             extra={
                 "pids": [r.channel for r in requests if r.kind == "pid"],
                 "dids": [r.channel for r in requests if r.kind == "did"],
+                "dtc_channels": [r.channel for r in requests if r.kind == "dtc"],
                 "poll_tiers": {r.channel: r.poll_tier for r in requests},
                 "bus_budget_requests_per_second": budget_rps,
                 "auto_miss_backoff_seconds": AUTO_MISS_BACKOFF_SECONDS,
@@ -254,11 +257,12 @@ def run_can_obd_loop(
             raise
         emitted = False
         if response is not None:
-            reading = _response_to_reading(request, response)
-            if reading is not None:
+            readings = _response_to_reading(request, response)
+            if readings:
                 emitted = True
-                stats.readings_emitted += 1
-                on_reading(reading)
+                stats.readings_emitted += len(readings)
+                for reading in readings:
+                    on_reading(reading)
         if emitted:
             request_state.responses += 1
             request_state.last_response_at = time.monotonic()
@@ -553,27 +557,52 @@ def record_can_obd(
     return result
 
 
+#: Mode 01 PID whose response carries both the continuous MONITOR_STATUS
+#: count channel and (Task 1.4) the MIL bit `decode_monitor_status` drops.
+_MONITOR_STATUS_PID = 0x01
+_MIL_STATUS_CHANNEL = "MIL_STATUS"
+
+
 def _response_to_reading(
     request: _PollRequest,
     response: ObdResponse,
-) -> ObdReading | None:
+) -> list[ObdReading]:
+    """Turn one raw response into zero or more decoded readings.
+
+    Usually one reading per request; PID 0x01 emits a second (MIL_STATUS,
+    Task 1.4) derived from the same payload instead of issuing another bus
+    request just for the bit ``decode_monitor_status`` doesn't surface.
+    """
     timestamp = time.time()
     if request.kind == "did":
         if not response.payload:
-            return None
-        return ObdReading(timestamp, request.channel, response.payload.hex(), "")
+            return []
+        return [ObdReading(timestamp, request.channel, response.payload.hex(), "")]
+
+    if request.kind == "dtc":
+        # Mode 03/07/0A (Task 1.3) — always emit, even with zero codes, so
+        # downstream DTC state can tell "polled, none found" from "not
+        # polled yet". Comma-joined string keeps the value on the same
+        # TelemetryValue contract as every other reading.
+        codes = parse_dtc_payload(response.payload)
+        return [ObdReading(timestamp, request.channel, ",".join(codes), "")]
 
     # Reuse the public PID decoder behavior without issuing another request:
     # synthesize the same DecodedPid logic locally from PID_DECODERS.
     entry = PID_DECODERS.get(request.identifier)
     if entry is None:
-        return None
+        return []
     name, decoder = entry
     decoded = decoder(response.payload)
     if decoded is None:
-        return None
+        return []
     value, unit = decoded
-    return ObdReading(timestamp, name, value, unit)
+    readings = [ObdReading(timestamp, name, value, unit)]
+    if request.identifier == _MONITOR_STATUS_PID:
+        mil_on = decode_mil_on(response.payload)
+        if mil_on is not None:
+            readings.append(ObdReading(timestamp, _MIL_STATUS_CHANNEL, mil_on, "bool"))
+    return readings
 
 
 def _send_session_control(
@@ -623,9 +652,15 @@ def _query_with_tap(
     stats: CanObdLoopStats,
     deadline_monotonic: float | None,
 ) -> ObdResponse | None:
+    # Mode 03/07/0A (Task 1.3) take no parameter byte at all — same shape as
+    # `CanObdClient.query_mode_03`'s `pid=None`/`expect_pid_echo=False`, so
+    # `_PollRequest.identifier` (a placeholder ``0``, the field isn't
+    # optional) must not leak into either the request bytes or the
+    # response's pid-echo match.
+    identifier = None if request.kind == "dtc" else request.identifier
     message = can.Message(
         arbitration_id=request.request_id,
-        data=build_request_payload(request.service, request.identifier),
+        data=build_request_payload(request.service, identifier),
         is_extended_id=False,
     )
     bus.send(message)
@@ -634,7 +669,7 @@ def _query_with_tap(
     request_deadline = time.monotonic() + timeout_seconds
     if deadline_monotonic is not None:
         request_deadline = min(request_deadline, deadline_monotonic)
-    assembler = IsoTpResponseAssembler(service=request.service, identifier=request.identifier)
+    assembler = IsoTpResponseAssembler(service=request.service, identifier=identifier)
 
     while not _should_stop(stop_event, request_deadline):
         remaining = max(0.001, request_deadline - time.monotonic())

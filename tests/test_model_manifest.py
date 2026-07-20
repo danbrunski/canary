@@ -125,7 +125,8 @@ def test_known_model_types_match_anomaly_sources() -> None:
     Phase 7.2's ``fused`` and Phase 7.4's ``behavior`` sources have *no* model
     artifact (fused is the agreement-aware combination; behavior is a
     physics-residual detector), so they are deliberately ``AnomalySource``
-    members that are not ``KNOWN_MODEL_TYPE``\\ s.
+    members that are not ``KNOWN_MODEL_TYPE``\\ s. Task 1.6's ``dtc`` source
+    is the same shape — a trouble code isn't a trained model.
 
     The sequence-detector slot is backbone-interchangeable
     (``lstm_autoencoder`` / ``tcn_autoencoder``, only one active at a time) but
@@ -138,7 +139,7 @@ def test_known_model_types_match_anomaly_sources() -> None:
 
     from src.alerts.events import AnomalySource
 
-    non_derived_sources = set(get_args(AnomalySource)) - {"fused", "behavior"}
+    non_derived_sources = set(get_args(AnomalySource)) - {"fused", "behavior", "dtc"}
     sequence_backbones = {"lstm_autoencoder", "tcn_autoencoder"}
 
     assert non_derived_sources <= set(KNOWN_MODEL_TYPES)

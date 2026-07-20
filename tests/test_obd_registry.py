@@ -71,6 +71,15 @@ def test_poll_tiers_are_valid() -> None:
         assert MODE01_REGISTRY[pid].poll_tier == "fast"
 
 
+def test_monitor_status_pid_is_slow_tier_and_decoded() -> None:
+    """Task 1.2: PID 0x01 (MIL/DTC count) rides the slow telemetry tier."""
+    entry = MODE01_REGISTRY[0x01]
+    assert entry.channel == "MONITOR_STATUS"
+    assert entry.poll_tier == "slow"
+    assert entry.decoder is not None
+    assert entry.decoder(bytes([0x83, 0x00, 0x00, 0x00])) == (3.0, "count")
+
+
 # ---------------------------------------------------------------------------
 # New decoders (canned raw responses)
 # ---------------------------------------------------------------------------

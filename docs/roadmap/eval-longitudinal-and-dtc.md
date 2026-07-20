@@ -70,43 +70,67 @@ FE placeholder (`nav.ts:24` `diag-dtc`, `Workbench.tsx:143-150`).
 
 ### 1A. Transport + scheduling
 
-- [ ] **1.1 — Mode 07 / 0A reads.** Add `query_mode_07` and
+- [x] **1.1 — Mode 07 / 0A reads.** Add `query_mode_07` and
   `query_mode_0A` to `can_obd_client.py` beside `query_mode_03` (:112) —
   same wire shape, reuse `parse_dtc_payload` (docstring at :564 already
   notes 03/07 share the encoding). Unit-test against captured payloads
-  including the null-filler case.
-- [ ] **1.2 — MIL / DTC-count via PID 0x01.** Add Mode 01 PID 0x01
+  including the null-filler case. — landed: reuses `pid=None` +
+  `parse_dtc_payload` exactly like `query_mode_03`.
+- [x] **1.2 — MIL / DTC-count via PID 0x01.** Add Mode 01 PID 0x01
   (decoder already in `obd_registry.py:379` — bit 7 = MIL, bits 0–6 =
   count) to the default slow-tier poll set so MIL state and DTC count
-  are cheap, continuous signals.
-- [ ] **1.3 — Periodic DTC poll.** Extend `build_poll_requests`
+  are cheap, continuous signals. — landed: PID 0x01 added to
+  `can_obd_client.PID_DECODERS` — the table `build_poll_requests`'s
+  default/auto set actually sources from (the `_MODE01_SPEC` entry
+  alone, from an earlier commit, never drove real polling).
+- [x] **1.3 — Periodic DTC poll.** Extend `build_poll_requests`
   (`src/collection/obd_scheduler.py:398`) with `kind="dtc"` requests for
   services 03/07/0A on a new configurable very-slow interval (default
   ~300 s; config under `collection.`). The unused `on_demand` tier
   scaffolding (:24-28) exists but don't build an injection API — a slow
   periodic poll is enough. Works in `ignition_only` (KOEO) too; skip
-  cleanly when OBD is stale.
-- [ ] **1.4 — Cached report in daemon state.** On each poll, assemble via
+  cleanly when OBD is stale. — landed:
+  `collection.obd_dtc_poll_interval_seconds` (default 300s). Caught and
+  fixed two real bugs: `DidWindowController.request_eligible` only let
+  `kind="pid"` through outside the DID window, which would have starved
+  dtc-kind requests forever on a DID-gated ECU (this project's actual
+  Xterra); and dtc-kind requests need `identifier=None` (Mode 03/07/0A
+  take no parameter byte) — the placeholder `identifier=0` corrupted
+  the wire request. Both verified independently by the reviewer via
+  direct `isotp.py` tracing. Minor gap noted: no test combines an
+  active DID session + a short DTC interval end-to-end (verified via
+  direct code tracing instead) — worth a follow-up test.
+- [x] **1.4 — Cached report in daemon state.** On each poll, assemble via
   `build_dtc_report(stored, pending, permanent, mil_on)` and hold the
   latest `DtcReport` in daemon state (pattern: how OBD coverage state is
-  held for `/obd/coverage`, `public.py:135`).
+  held for `/obd/coverage`, `public.py:135`). — landed: new
+  `src/control/dtc_state.py::DtcState`, wired through
+  `daemon/drain.py`'s new `run_dtc_sink`.
 
 ### 1B. Surfacing
 
-- [ ] **1.5 — `GET /obd/dtc`.** Public (unauthenticated read) route in
+- [x] **1.5 — `GET /obd/dtc`.** Public (unauthenticated read) route in
   `src/dashboard/routes/public.py` beside `/obd/coverage` (:135)
   returning the cached `DtcReport.to_dict()` + `captured_at` + a
-  `stale: bool`. Response schema in `src/dashboard/schemas.py`.
-- [ ] **1.6 — New-code events.** When a poll shows a code not present in
+  `stale: bool`. Response schema in `src/dashboard/schemas.py`. —
+  landed: `DtcCodeEntry`/`DtcReportResponse`; empty-but-shaped payload
+  when no `DtcState` is wired (tested, not dead code).
+- [x] **1.6 — New-code events.** When a poll shows a code not present in
   the previous report (per session), emit an `AnomalyEvent` with
   `source="dtc"` through `AnomalyEventEmitter._emit`
   (`src/alerts/emitter.py:240`) so new DTCs land in the anomaly JSONL,
   the WS stream, and (Phase 5) notifications. Pending→stored transitions
   count as new. No persistence gating needed — a DTC is already ECM-debounced.
-- [ ] **1.7 — Session sidecar.** On change, write `dtc.json` into the
+  — landed: `emit_dtc` goes straight through `_emit`, confirmed to
+  never touch `PersistenceGate` (which lives entirely outside the
+  DTC/emitter call path); pending→stored re-fires as `"escalated"`.
+- [x] **1.7 — Session sidecar.** On change, write `dtc.json` into the
   active session dir (atomic tmp+rename like `control.json`,
   `src/control/sessions.py:107`) so post-hoc analysis and the Phase 6
-  catalog can see per-drive DTC history.
+  catalog can see per-drive DTC history. — landed: written only when
+  the report's signature actually changes; a new session resets the
+  "already seen" baseline without losing the ECU's real stored/pending/
+  permanent state.
 - [ ] **1.8 — MCP tool.** `get_dtc` read tool: new
   `src/mcp_server/tools/dtc.py` calling `GET /obd/dtc`, registered in
   `server.py` `_register_read_tools` (:168). Document in

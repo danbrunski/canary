@@ -25,9 +25,11 @@ if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import tim
 #: ``fused`` (Phase 7.2) is the agreement-aware calibrated severity over the
 #: per-tick IF + LSTM + behavior-residual sources. ``behavior`` (Phase 7.4)
 #: is the behavior/physics-model residual promoted to a first-class
-#: detector — one event per model with a human-readable physical cause. Both
-#: are emitted alongside the per-detector events, not instead of them.
-AnomalySource = Literal["isolation_forest", "lstm_autoencoder", "fused", "behavior"]
+#: detector — one event per model with a human-readable physical cause.
+#: ``dtc`` (Task 1.6) is a new/escalated trouble code from the periodic
+#: Mode 03/07/0A poll. All are emitted alongside the per-detector events,
+#: not instead of them.
+AnomalySource = Literal["isolation_forest", "lstm_autoencoder", "fused", "behavior", "dtc"]
 
 
 class AnomalyEvent(BaseModel):
@@ -233,6 +235,46 @@ class AnomalyEvent(BaseModel):
                     }
                 ],
             },
+        )
+
+    @classmethod
+    def from_dtc(
+        cls,
+        *,
+        code: str,
+        description: str,
+        system: str,
+        status: str,
+        kind: Literal["new", "escalated"],
+        timestamp: str,
+        mil_on: bool | None = None,
+        session: str | None = None,
+    ) -> AnomalyEvent:
+        """Build a new/escalated DTC event (Task 1.6).
+
+        No fixed score/threshold contract applies here (a DTC either fired
+        or didn't) — ``score`` is a constant ``1.0`` and ``threshold`` stays
+        ``None``, matching the IF's "no fixed threshold" convention.
+        ``dedupe_key`` includes the code + status so distinct codes (or the
+        same code's pending→stored escalation) don't suppress each other
+        under the emitter's refractory window.
+        """
+        return cls(
+            timestamp=timestamp,
+            source="dtc",
+            model_version="dtc",
+            score=1.0,
+            threshold=None,
+            session=session,
+            detail={
+                "code": code,
+                "description": description,
+                "system": system,
+                "status": status,
+                "kind": kind,
+                "mil_on": mil_on,
+            },
+            dedupe_key=f"dtc:{code}:{status}",
         )
 
     @classmethod

@@ -131,6 +131,59 @@ class _TieredPidBus:
         return None
 
 
+class _DtcCapableBus:
+    """Answers Mode 01 PID 0x01 (MIL/count) plus Mode 03/07/0A (Task 1.3)."""
+
+    def __init__(self) -> None:
+        self.sent: list[can.Message] = []
+        self._responses: list[can.Message] = []
+
+    def send(self, msg: can.Message) -> None:
+        self.sent.append(msg)
+        data = bytes(msg.data)
+        if msg.arbitration_id != 0x7DF:
+            return
+        if data[:3] == bytes([0x02, 0x01, 0x01]):
+            # MIL on (bit 7) + count=3 in bits 0-6 -> 0x83.
+            payload = bytes([0x03, 0x41, 0x01, 0x83, 0x00, 0x00, 0x00, 0x00])
+        elif data[:2] == bytes([0x01, 0x03]):
+            # Stored: P0420, C0510.
+            payload = bytes([0x06, 0x43, 0x02, 0x04, 0x20, 0x45, 0x10, 0x00])
+        elif data[:2] == bytes([0x01, 0x07]):
+            # Pending: P0123.
+            payload = bytes([0x04, 0x47, 0x01, 0x01, 0x23, 0x00, 0x00, 0x00])
+        elif data[:2] == bytes([0x01, 0x0A]):
+            # Permanent: none.
+            payload = bytes([0x02, 0x4A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        else:
+            return
+        self._responses.append(
+            can.Message(arbitration_id=0x7E8, data=payload, is_extended_id=False)
+        )
+
+    def recv(self, timeout: float = 0.0) -> can.Message | None:
+        if self._responses:
+            return self._responses.pop(0)
+        if timeout:
+            time.sleep(min(timeout, 0.005))
+        return None
+
+
+class _SilentBus:
+    """Never answers anything — models a stale/no_data bus."""
+
+    def __init__(self) -> None:
+        self.sent: list[can.Message] = []
+
+    def send(self, msg: can.Message) -> None:
+        self.sent.append(msg)
+
+    def recv(self, timeout: float = 0.0) -> can.Message | None:
+        if timeout:
+            time.sleep(min(timeout, 0.005))
+        return None
+
+
 def test_parse_pid_token_accepts_auto_names_and_hex() -> None:
     assert parse_pid_token("auto") is None
     assert parse_pid_token("RPM") == 0x0C
@@ -158,7 +211,9 @@ def test_build_poll_requests_combines_auto_explicit_and_dids() -> None:
     channels = [r.channel for r in requests]
     assert channels[:2] == ["RPM", "COOLANT_TEMP"]
     assert "SPEED" in channels
-    assert channels[-1] == "DID_1101"
+    # DID requests are appended after PIDs, DTC requests (Task 1.3) after that.
+    assert "DID_1101" in channels
+    assert channels.index("DID_1101") < channels.index("DTC_STORED")
 
 
 def test_build_poll_requests_assigns_registry_poll_tiers() -> None:
@@ -191,6 +246,112 @@ def test_auto_poll_requests_probe_full_decoded_pid_catalog_when_discovery_is_spa
     for name in AUTO_BASELINE_PID_NAMES:
         assert name in channels
     assert len(channels) >= 24
+
+
+def test_monitor_status_pid_is_in_the_default_auto_poll_set() -> None:
+    """Task 1.2: PID 0x01 (MIL/DTC count) rides the default auto poll set."""
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=("auto",),
+    )
+    requests = {r.channel: r for r in build_poll_requests(_StaticDiscovery(), spec)}
+    assert requests["MONITOR_STATUS"].poll_tier == "slow"
+
+
+# ---------------------------------------------------------------------------
+# Periodic DTC poll (Task 1.3)
+# ---------------------------------------------------------------------------
+
+
+def test_build_poll_requests_adds_dtc_kind_for_services_03_07_0a() -> None:
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=(),
+        dtc_poll_interval_seconds=300.0,
+    )
+    dtc_requests = [r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "dtc"]
+    assert {(r.service, r.channel) for r in dtc_requests} == {
+        (0x03, "DTC_STORED"),
+        (0x07, "DTC_PENDING"),
+        (0x0A, "DTC_PERMANENT"),
+    }
+
+
+def test_build_poll_requests_dtc_poll_disabled_when_interval_non_positive() -> None:
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=(),
+        dtc_poll_interval_seconds=0.0,
+    )
+    assert not [r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "dtc"]
+
+
+def test_dtc_poll_reads_codes_and_mil_with_engine_off_koeo() -> None:
+    """Ignition-only (KOEO): the ECM answers OBD with RPM effectively 0/absent
+    — nothing in the DTC poll depends on RPM, so it reads exactly like it
+    would with the engine running."""
+    bus = _DtcCapableBus()
+    stop = threading.Event()
+    readings: list[Any] = []
+
+    def on_reading(reading: Any) -> None:
+        readings.append(reading)
+        seen = {r.pid for r in readings}
+        if {"DTC_STORED", "DTC_PENDING", "DTC_PERMANENT", "MIL_STATUS"} <= seen:
+            stop.set()
+
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        poll_rate_hz=20.0,
+        pids=("MONITOR_STATUS",),
+        dtc_poll_interval_seconds=0.01,
+        request_timeout_seconds=0.1,
+    )
+
+    run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        spec,
+        on_frame=lambda _msg: None,
+        on_reading=on_reading,
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 2.0,
+    )
+
+    by_channel = {r.pid: r for r in readings}
+    assert by_channel["DTC_STORED"].value == "P0420,C0510"
+    assert by_channel["DTC_PENDING"].value == "P0123"
+    assert by_channel["DTC_PERMANENT"].value == ""
+    assert by_channel["MIL_STATUS"].value is True
+    assert by_channel["MONITOR_STATUS"].value == 3.0
+
+
+def test_dtc_poll_skips_cleanly_when_bus_never_answers() -> None:
+    """Stale/no_data: the DTC requests just back off like any other request
+    — no crash, no readings, no spurious extra polling."""
+    bus = _SilentBus()
+    stop = threading.Event()
+
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        poll_rate_hz=20.0,
+        pids=("RPM",),
+        dtc_poll_interval_seconds=0.01,
+        request_timeout_seconds=0.02,
+    )
+
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        spec,
+        on_frame=lambda _msg: None,
+        on_reading=lambda _r: None,
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 0.5,
+    )
+
+    assert stats.readings_emitted == 0
+    assert stats.request_timeouts > 0
+    dtc_service_bytes = {bytes(msg.data)[:2] for msg in bus.sent}
+    assert bytes([0x01, 0x03]) in dtc_service_bytes
 
 
 def test_run_loop_emits_can_frames_pid_readings_and_did_readings() -> None:

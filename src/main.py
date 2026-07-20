@@ -136,6 +136,7 @@ def _default_collectors(
             did_request_id=config.collection.obd_did_request_id,
             request_timeout_seconds=config.collection.obd_request_timeout_seconds,
             did_session=resolve_did_session_spec(config.collection),
+            dtc_poll_interval_seconds=config.collection.obd_dtc_poll_interval_seconds,
         )
 
         async def canable_obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:

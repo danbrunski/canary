@@ -488,3 +488,84 @@ def test_emit_isolation_forest_row_back_compat_without_contributors(
     )
     assert event is not None
     assert "feature_contributors" not in event.detail
+
+
+# ---------------------------------------------------------------------------
+# DTC path (Task 1.6)
+# ---------------------------------------------------------------------------
+
+
+def test_emit_dtc_fires_on_a_single_call_no_persistence_gate(tmp_path: Path) -> None:
+    """A DTC is already ECM-debounced — one call, one event, no warm-up
+    ticks required (unlike IF/LSTM, which go through a PersistenceGate
+    before their caller ever reaches ``_emit``)."""
+    logger = AnomalyEventLogger(tmp_path)
+    emitter = AnomalyEventEmitter(logger, min_seconds_between_events=0)
+    event = emitter.emit_dtc(
+        code="P0420",
+        description="Catalyst System Efficiency Below Threshold (Bank 1)",
+        system="Powertrain",
+        status="stored",
+        kind="new",
+        timestamp="2026-05-13T12:00:00+00:00",
+        mil_on=True,
+        session="2026-05-13T120000",
+    )
+    assert event is not None
+    assert event.source == "dtc"
+    assert event.detail["code"] == "P0420"
+    assert event.detail["kind"] == "new"
+    assert event.detail["mil_on"] is True
+    assert emitter.counters.emitted == 1
+    persisted = read_events_dir(tmp_path)
+    assert len(persisted) == 1
+
+
+def test_emit_dtc_escalated_kind_lands_in_detail(tmp_path: Path) -> None:
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=0)
+    event = emitter.emit_dtc(
+        code="P0420",
+        description="desc",
+        system="Powertrain",
+        status="stored",
+        kind="escalated",
+        timestamp="2026-05-13T12:00:00+00:00",
+    )
+    assert event is not None
+    assert event.detail["kind"] == "escalated"
+    assert event.detail["status"] == "stored"
+
+
+def test_emit_dtc_dedupe_key_distinguishes_code_and_status(tmp_path: Path) -> None:
+    """Two different codes (or the same code at different statuses) in the
+    same instant must not suppress each other."""
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=5.0)
+    ts = "2026-05-13T12:00:00+00:00"
+    first = emitter.emit_dtc(
+        code="P0420",
+        description="d",
+        system="Powertrain",
+        status="pending",
+        kind="new",
+        timestamp=ts,
+    )
+    second = emitter.emit_dtc(
+        code="C0510",
+        description="d",
+        system="Chassis",
+        status="pending",
+        kind="new",
+        timestamp=ts,
+    )
+    third = emitter.emit_dtc(
+        code="P0420",
+        description="d",
+        system="Powertrain",
+        status="stored",
+        kind="escalated",
+        timestamp=ts,
+    )
+    assert first is not None
+    assert second is not None
+    assert third is not None
+    assert emitter.counters.emitted == 3

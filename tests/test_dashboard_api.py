@@ -871,6 +871,66 @@ def test_ws_endpoint_works_without_explicit_broadcaster(
         assert ws.receive_json() == {"ping": 1}
 
 
+# ---------------------------------------------------------------------------
+# GET /obd/dtc (Task 1.5)
+# ---------------------------------------------------------------------------
+
+
+def test_get_obd_dtc_without_a_dtc_state_returns_the_empty_stale_shape(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    app = create_app(config, anomalies_dir=anomalies_dir)
+    client = TestClient(app)
+    response = client.get("/obd/dtc")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["captured_at"] is None
+    assert body["stored"] == []
+    assert body["stale"] is True
+
+
+def test_get_obd_dtc_returns_the_cached_report_shape(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from src.control.dtc_state import DtcState
+    from src.dashboard.schemas import DtcReportResponse
+    from src.telemetry import TelemetryRecord
+
+    dtc_state = DtcState()
+    dtc_state.observe(
+        TelemetryRecord.obd(1_778_000_000.0, "DTC_STORED", "P0420,C0510", ""),
+        session_id="s1",
+        session_dir=None,
+        emitter=None,
+    )
+    dtc_state.observe(
+        TelemetryRecord.obd(1_778_000_000.0, "MIL_STATUS", True, ""),
+        session_id="s1",
+        session_dir=None,
+        emitter=None,
+    )
+
+    app = create_app(config, anomalies_dir=anomalies_dir, dtc_state=dtc_state)
+    client = TestClient(app)
+    response = client.get("/obd/dtc")
+    assert response.status_code == 200
+    body = response.json()
+
+    validated = DtcReportResponse.model_validate(body)
+    assert [c.code for c in validated.stored] == ["P0420", "C0510"]
+    assert validated.mil_on is True
+    assert validated.dtc_count == 2
+    assert validated.captured_at is not None
+
+    # Fresh capture -> not stale.
+    assert body["stale"] is False
+    # A snapshot taken long after captured_at is stale.
+    later = dtc_state.snapshot(now=datetime.now(UTC) + timedelta(hours=1))
+    assert later["stale"] is True
+
+
 def _event(timestamp: str, *, score: float) -> AnomalyEvent:
     return AnomalyEvent(
         timestamp=timestamp,

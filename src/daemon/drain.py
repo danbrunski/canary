@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker
 from src.collection.queueing import QueueDepthMonitor
+from src.control.dtc_state import DtcState
 from src.dashboard.broadcast import Broadcaster
 from src.models.health import HealthMonitor
 from src.preprocessing.live import LiveFeatureSource
@@ -252,6 +254,51 @@ async def run_gps_sink(
             log.exception("gps_tracker.persist failed")
 
 
+async def run_dtc_sink(
+    queue: asyncio.Queue[TelemetryRecord],
+    dtc_state: DtcState,
+    stop_event: asyncio.Event,
+    *,
+    emitter: AnomalyEventEmitter | None = None,
+    active_session_path: Callable[[], Path] | None = None,
+    poll_interval: float = 0.5,
+    queue_warning_fraction: float = 0.8,
+    health_monitor: HealthMonitor | None = None,
+) -> None:
+    """Feed DTC poll readings (Task 1.3) into the cached report + sidecar.
+
+    ``active_session_path`` mirrors the retention sweeper's callable
+    (``lambda: storage_writer.paths.root``) — read fresh on every record so a
+    session rotation mid-drive resets ``DtcState``'s per-session baseline
+    (Task 1.7) instead of pinning it to whatever session was active at
+    sink-startup.
+    """
+    queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
+    while not stop_event.is_set() or not queue.empty():
+        queue_monitor.observe(queue)
+        _observe_queue(health_monitor, "dtc", queue)
+        try:
+            record = await asyncio.wait_for(queue.get(), timeout=poll_interval)
+        except TimeoutError:
+            continue
+
+        try:
+            session_dir = active_session_path() if active_session_path is not None else None
+            dtc_state.observe(
+                record,
+                session_id=session_dir.name if session_dir is not None else None,
+                session_dir=session_dir,
+                emitter=emitter,
+            )
+        except Exception as exc:  # noqa: BLE001 — DTC bookkeeping is best-effort
+            _note_error(health_monitor, "dtc", exc)
+            log.exception("dtc_state.observe failed; skipping record")
+        finally:
+            queue.task_done()
+            queue_monitor.observe(queue)
+            _observe_queue(health_monitor, "dtc", queue)
+
+
 async def drain_queue_with_broadcast(
     queue: asyncio.Queue[TelemetryRecord],
     writer: ParquetTelemetryWriter | AsyncParquetTelemetryWriter,
@@ -260,6 +307,9 @@ async def drain_queue_with_broadcast(
     telemetry_broadcaster: Broadcaster | None = None,
     live_source: LiveFeatureSource | None = None,
     gps_tracker: GpsTracker | None = None,
+    dtc_state: DtcState | None = None,
+    dtc_emitter: AnomalyEventEmitter | None = None,
+    active_session_path: Callable[[], Path] | None = None,
     poll_interval: float = 0.5,
     storage_path: Path | None = None,
     storage_warning_mb: int | None = None,
@@ -335,6 +385,24 @@ async def drain_queue_with_broadcast(
                     gps_queue,
                     gps_tracker,
                     stop_event,
+                    poll_interval=poll_interval,
+                    queue_warning_fraction=queue_warning_fraction,
+                    health_monitor=health_monitor,
+                )
+            )
+        )
+
+    if dtc_state is not None:
+        dtc_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
+        sinks.append(TelemetrySink("dtc", dtc_queue, "drop_oldest"))
+        sink_tasks.append(
+            asyncio.create_task(
+                run_dtc_sink(
+                    dtc_queue,
+                    dtc_state,
+                    stop_event,
+                    emitter=dtc_emitter,
+                    active_session_path=active_session_path,
                     poll_interval=poll_interval,
                     queue_warning_fraction=queue_warning_fraction,
                     health_monitor=health_monitor,
@@ -423,6 +491,7 @@ def _note_error(health_monitor: HealthMonitor | None, name: str, exc: BaseExcept
 __all__ = [
     "TelemetrySink",
     "drain_queue_with_broadcast",
+    "run_dtc_sink",
     "run_gps_sink",
     "run_live_source_sink",
     "run_storage_sink",

@@ -21,6 +21,16 @@ DEFAULT_DID_REQUEST_ID = 0x7E0
 AUTO_MISS_BACKOFF_SECONDS = 30.0
 BUS_BUDGET_MULTIPLIER = 8.0
 MIN_BUS_BUDGET_REQUESTS_PER_SECOND = 2.0
+#: Default cadence for the Mode 03/07/0A DTC poll (Task 1.3). DTCs are a
+#: minutes-scale signal (nothing polls faster than the ECM's own confirm
+#: window), so ~5 min keeps it off the fast bus budget entirely.
+DEFAULT_DTC_POLL_INTERVAL_SECONDS = 300.0
+#: Service (mode) -> channel name for the periodic DTC poll requests.
+DTC_POLL_CHANNELS: dict[int, str] = {
+    0x03: "DTC_STORED",
+    0x07: "DTC_PENDING",
+    0x0A: "DTC_PERMANENT",
+}
 TIER_RATE_FACTORS: dict[PollTier, float] = {
     "fast": 1.0,
     "medium": 1.0 / 3.0,
@@ -146,6 +156,11 @@ class CanObdSpec:
     #: ``None`` = poll DIDs bare, interleaved with Mode 01 (ECUs that don't
     #: gate 0x22). Set = scheduled mutually-exclusive session windows.
     did_session: DidSessionSpec | None = None
+    #: Cadence for the Mode 03/07/0A DTC poll (Task 1.3) — deliberately its
+    #: own knob, not a ``PollTier`` scaled off ``poll_rate_hz``, since DTCs
+    #: change on the order of minutes, not seconds. ``<= 0`` disables the
+    #: DTC poll entirely (no requests added, nothing to skip at runtime).
+    dtc_poll_interval_seconds: float = DEFAULT_DTC_POLL_INTERVAL_SECONDS
 
 
 @dataclass
@@ -162,7 +177,7 @@ class CanObdLoopStats:
 
 @dataclass(frozen=True)
 class _PollRequest:
-    kind: Literal["pid", "did", "session"]
+    kind: Literal["pid", "did", "session", "dtc"]
     service: int
     identifier: int
     request_id: int
@@ -288,7 +303,11 @@ class DidWindowController:
             return request.kind == "did" and index in self._pending
         if self.phase == "lapse":
             return False
-        return request.kind == "pid"
+        # Mode 03/07/0A (Task 1.3) are standard, non-Mode-22 requests just
+        # like Mode 01 — the ECM answers them in the default session, so
+        # they share Mode 01's eligibility rather than being starved for
+        # the DID controller's whole lifetime.
+        return request.kind in ("pid", "dtc")
 
     def on_request_attempted(self, index: int) -> None:
         self._pending.discard(index)
@@ -456,6 +475,25 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
                 poll_tier="medium",
             )
         )
+    if spec.dtc_poll_interval_seconds > 0:
+        # Task 1.3: stored/pending/permanent DTCs on their own very-slow
+        # cadence. No vehicle_state gating here — the round-robin scheduler
+        # already backs off any request the ECU stops answering (the same
+        # "OBD gone stale" signal `classify_vehicle_state` uses), so a dead
+        # bus just accrues timeouts like any other request instead of
+        # hammering it, and a live one (KOEO included — DTCs read fine with
+        # the engine off) answers on schedule.
+        for service, channel in DTC_POLL_CHANNELS.items():
+            requests.append(
+                _PollRequest(
+                    kind="dtc",
+                    service=service,
+                    identifier=0,
+                    request_id=DEFAULT_REQUEST_ID,
+                    channel=channel,
+                    poll_tier="dtc",
+                )
+            )
     return requests
 
 
@@ -503,6 +541,12 @@ def _bus_budget_requests_per_second(spec: CanObdSpec) -> float:
 
 
 def _request_rate_hz(request: _PollRequest, spec: CanObdSpec) -> float:
+    if request.kind == "dtc":
+        # Fixed cadence (Task 1.3), independent of `poll_rate_hz`/tier
+        # scaling — the DTC poll doesn't get faster just because the fast
+        # telemetry tier does.
+        interval = spec.dtc_poll_interval_seconds
+        return 0.0 if interval <= 0 else 1.0 / interval
     base = max(float(spec.poll_rate_hz), 0.001)
     return base * TIER_RATE_FACTORS.get(request.poll_tier, TIER_RATE_FACTORS["medium"])
 

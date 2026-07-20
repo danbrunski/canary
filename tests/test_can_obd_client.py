@@ -19,6 +19,8 @@ from src.collection.can_obd_client import (
     decode_control_module_voltage,
     decode_evap_vapor_pressure_signed,
     decode_maf,
+    decode_mil_on,
+    decode_monitor_status,
     decode_o2_voltage,
     decode_percent_a_over_255,
     decode_percent_b_minus_128,
@@ -155,6 +157,22 @@ def test_parse_dtc_payload_recognizes_all_systems() -> None:
     # P=00, C=01, B=10, U=11 in high two bits of byte 0
     raw = bytes([0x04, 0x01, 0x23, 0x41, 0x23, 0x81, 0x23, 0xC1, 0x23])
     assert parse_dtc_payload(raw) == ["P0123", "C0123", "B0123", "U0123"]
+
+
+# ---------------------------------------------------------------------------
+# MIL / monitor-status decoding (Task 1.2/1.4)
+# ---------------------------------------------------------------------------
+
+
+def test_decode_monitor_status_masks_off_mil_bit() -> None:
+    # bit 7 set (MIL on) + count=3 in bits 0-6 -> count-only channel is 3.
+    assert decode_monitor_status(bytes([0x83, 0x00, 0x00, 0x00])) == (3.0, "count")
+
+
+def test_decode_mil_on_reads_bit_seven() -> None:
+    assert decode_mil_on(bytes([0x83, 0x00, 0x00, 0x00])) is True
+    assert decode_mil_on(bytes([0x03, 0x00, 0x00, 0x00])) is False
+    assert decode_mil_on(b"") is None
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +542,50 @@ def test_query_mode_03_single_frame() -> None:
         ecu.shutdown()
     assert resp is not None
     assert parse_dtc_payload(resp.payload) == ["P0420", "C0510"]
+
+
+def test_query_mode_07_single_frame() -> None:
+    """Mode 07 (pending DTC list, Task 1.1) — same wire shape as Mode 03."""
+    tester, ecu = _make_pair()
+    stop = threading.Event()
+    responses = {(0x07, None): bytes([0x01, 0x01, 0x23])}
+    t = threading.Thread(
+        target=_fake_ecu_loop, args=(ecu, responses), kwargs={"stop": stop}, daemon=True
+    )
+    t.start()
+    try:
+        client = CanObdClient(tester, timeout_seconds=1.0)
+        resp = client.query_mode_07()
+    finally:
+        stop.set()
+        t.join(timeout=1.0)
+        tester.shutdown()
+        ecu.shutdown()
+    assert resp is not None
+    assert parse_dtc_payload(resp.payload) == ["P0123"]
+
+
+def test_query_mode_0a_single_frame_drops_null_filler() -> None:
+    """Mode 0A (permanent DTC list, Task 1.1) — null-filler payload case."""
+    tester, ecu = _make_pair()
+    stop = threading.Event()
+    # count=2: null filler + P0420 (single-frame body is capped at 7 bytes,
+    # so this stays within that while still exercising the filler drop).
+    responses = {(0x0A, None): bytes([0x02, 0x00, 0x00, 0x04, 0x20])}
+    t = threading.Thread(
+        target=_fake_ecu_loop, args=(ecu, responses), kwargs={"stop": stop}, daemon=True
+    )
+    t.start()
+    try:
+        client = CanObdClient(tester, timeout_seconds=1.0)
+        resp = client.query_mode_0A()
+    finally:
+        stop.set()
+        t.join(timeout=1.0)
+        tester.shutdown()
+        ecu.shutdown()
+    assert resp is not None
+    assert parse_dtc_payload(resp.payload) == ["P0420"]
 
 
 def test_query_mode_22_single_frame_with_physical_request_id() -> None:

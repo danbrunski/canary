@@ -49,6 +49,7 @@ from src.analysis.gps_tracker import GpsTracker
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
+from src.control.dtc_state import DtcState
 from src.control.jobs import JobController
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
@@ -117,6 +118,7 @@ def create_app(
     alert_tuner: AlertTuner | None = None,
     health_monitor: HealthMonitor | None = None,
     behavior_live: BehaviorLiveState | None = None,
+    dtc_state: DtcState | None = None,
     gps_tracker: GpsTracker | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
@@ -184,6 +186,7 @@ def create_app(
         replay_controller=replay_controller,
         health_monitor=health_monitor,
         behavior_live=behavior_live,
+        dtc_state=dtc_state,
         gps_tracker=gps_tracker,
         sequence_detector_controller=sequence_detector_controller,
     )

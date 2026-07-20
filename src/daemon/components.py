@@ -16,6 +16,8 @@ from src.analysis.gps_tracker import GpsTracker
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
+from src.control.dtc_state import DEFAULT_STALE_AFTER_SECONDS as DEFAULT_DTC_STALE_AFTER_SECONDS
+from src.control.dtc_state import DtcState
 from src.control.jobs import JobController
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
@@ -64,6 +66,8 @@ class DaemonComponents:
     #: backbones is a config change, not a code change.
     sequence_model_type: str | None = None
     behavior_live: BehaviorLiveState = field(default_factory=BehaviorLiveState)
+    #: Cached latest DTC report + per-session diff/sidecar state (Task 1.4).
+    dtc_state: DtcState = field(default_factory=DtcState)
     capture_controller: CaptureController | None = None
     job_controller: JobController | None = None
     replay_controller: ReplayController | None = None
@@ -113,6 +117,12 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         health_monitor=HealthMonitor(),
         persistence_gate=persistence_gate,
         behavior_live=BehaviorLiveState(),
+        dtc_state=DtcState(
+            stale_after_seconds=max(
+                config.collection.obd_dtc_poll_interval_seconds * 3,
+                DEFAULT_DTC_STALE_AFTER_SECONDS,
+            )
+        ),
         capture_controller=None,
         job_controller=_make_job_controller(config),
         gps_tracker=(

@@ -101,10 +101,38 @@ class UpsKeepaliveRequest(_ControlRequest):
     minutes: float = Field(..., ge=0.0, le=720.0)
 
 
+class DtcCodeEntry(BaseModel):
+    """One described DTC — matches ``DtcDescription.to_dict()``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    description: str
+    system: str
+    generic: bool
+    curated: bool
+
+
+class DtcReportResponse(BaseModel):
+    """``GET /obd/dtc`` (Task 1.5) — the cached ``DtcReport`` plus staleness."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    captured_at: str | None
+    stored: list[DtcCodeEntry]
+    pending: list[DtcCodeEntry]
+    permanent: list[DtcCodeEntry]
+    mil_on: bool | None
+    dtc_count: int
+    stale: bool
+
+
 __all__ = [
     "CaptureStartRequest",
     "CaptureStopRequest",
     "CaptureTagRequest",
+    "DtcCodeEntry",
+    "DtcReportResponse",
     "FeedbackRequest",
     "JobSubmitRequest",
     "ModelUploadRequest",

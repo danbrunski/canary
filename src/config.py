@@ -133,6 +133,11 @@ class CollectionConfig(_Strict):
     obd_did_session_lapse_seconds: float = 5.0
     obd_request_timeout_seconds: float = 1.0
     obd_poll_rate_hz: float
+    #: Cadence (s) of the Mode 03/07/0A stored/pending/permanent DTC poll
+    #: (Task 1.3) on the Canable-native path. DTCs change on a minutes
+    #: scale, not seconds, so this is its own knob rather than a
+    #: `PollTier` scaled off `obd_poll_rate_hz`. ``<= 0`` disables it.
+    obd_dtc_poll_interval_seconds: float = 300.0
     storage_path: Path
     session_retention_days: int
     storage_warning_mb: int

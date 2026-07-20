@@ -23,7 +23,8 @@ Scope of v1:
 * **Mode 01 PID 0x00 / 0x20 / 0x40 / 0x60 / 0x80** — supported-PID
   bitmasks. ``discover_supported_pids`` walks them to enumerate what the
   ECU claims.
-* **Mode 03** — stored DTC list. Returns ``["P0123", ...]``.
+* **Mode 03 / 07 / 0A** — stored / pending / permanent DTC lists (same
+  wire shape). Returns ``["P0123", ...]``.
 * **Mode 09** — InfoType payloads (VIN, calibration ID). Multi-frame
   ISO-TP reassembly with a flow-control "clear to send" response.
 
@@ -31,9 +32,7 @@ Not in v1:
 
 * Flow-control with non-zero block-size or separation-time. We always
   request CTS=0 (all frames) which works for the response sizes
-  Mode 01 / 03 / 09 / 22 produce.
-* DTCs from Mode 07 (pending) or Mode 0A (permanent) — same wire shape
-  as Mode 03 so a one-line addition once needed.
+  Mode 01 / 03 / 07 / 0A / 09 / 22 produce.
 
 Read-only by construction: no Mode 04 / Mode 0x2E / Mode 0x2F path
 exists in this module. Tools that drive it can't accidentally send a
@@ -112,6 +111,22 @@ class CanObdClient:
     def query_mode_03(self) -> ObdResponse | None:
         """Mode 03 RequestStoredDTC: ECU returns the active stored DTC list."""
         return self._request(service=0x03, pid=None, expect_pid_echo=False)
+
+    def query_mode_07(self) -> ObdResponse | None:
+        """Mode 07 RequestPendingDTC: DTCs detected during current/last cycle.
+
+        Same wire shape as Mode 03 (``parse_dtc_payload`` handles both) — a
+        code here hasn't confirmed to a stored DTC yet.
+        """
+        return self._request(service=0x07, pid=None, expect_pid_echo=False)
+
+    def query_mode_0A(self) -> ObdResponse | None:  # noqa: N802 - "0A" is the mode number, not a word
+        """Mode 0A RequestPermanentDTC: confirmed DTCs that survive a clear
+        until their own drive-cycle criteria re-pass.
+
+        Same wire shape as Mode 03/07.
+        """
+        return self._request(service=0x0A, pid=None, expect_pid_echo=False)
 
     def query_mode_09(self, info_type: int) -> ObdResponse | None:
         """Mode 09 VehicleInfo (VIN=0x02, calibration ID=0x04, ECU name=0x0A)."""
@@ -373,6 +388,31 @@ def _need(data: bytes, n: int) -> bool:
     return len(data) >= n
 
 
+def decode_monitor_status(data: bytes) -> tuple[float, str] | None:
+    """PID 0x01 / 0x41: bit 7 of A = MIL on; bits 0-6 of A = DTC count.
+
+    Returns just the count — numeric and model-friendly for the continuous
+    slow-tier telemetry channel (Task 1.2). The MIL bit is decoded
+    separately by :func:`decode_mil_on` for the periodic DTC poll (Task
+    1.4), not folded into this channel's value.
+    """
+    if not _need(data, 1):
+        return None
+    return (float(data[0] & 0x7F), "count")
+
+
+def decode_mil_on(data: bytes) -> bool | None:
+    """PID 0x01 / 0x41, bit 7 of byte A: MIL (check-engine light) on/off.
+
+    Reads the same byte as :func:`decode_monitor_status` but returns the bit
+    ``decode_monitor_status`` deliberately drops — used when assembling a
+    ``DtcReport`` (Task 1.4), not as a telemetry channel.
+    """
+    if not _need(data, 1):
+        return None
+    return bool(data[0] & 0x80)
+
+
 def decode_rpm(data: bytes) -> tuple[float, str] | None:
     if not _need(data, 2):
         return None
@@ -515,6 +555,7 @@ def decode_catalyst_temp(data: bytes) -> tuple[float, str] | None:
 #: ``read_supported`` flow and any caller that wants to translate a numeric
 #: PID into a named telemetry channel.
 PID_DECODERS: dict[int, tuple[str, Callable[[bytes], tuple[float, str] | None]]] = {
+    0x01: ("MONITOR_STATUS", decode_monitor_status),
     0x03: ("FUEL_STATUS", decode_fuel_status),
     0x04: ("ENGINE_LOAD", decode_percent_a_over_255),
     0x05: ("COOLANT_TEMP", decode_temp_minus_40),
@@ -654,6 +695,8 @@ __all__ = [
     "decode_fuel_status",
     "decode_intake_pressure",
     "decode_maf",
+    "decode_mil_on",
+    "decode_monitor_status",
     "decode_o2_voltage",
     "decode_percent_a_over_255",
     "decode_percent_b_minus_128",

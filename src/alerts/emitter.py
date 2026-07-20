@@ -25,7 +25,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import pandas as pd
 
@@ -259,6 +259,39 @@ class AnomalyEventEmitter:
             expected=expected,
             deviation=deviation,
             operating_mode=operating_mode,
+        )
+        return self._emit(event)
+
+    def emit_dtc(
+        self,
+        *,
+        code: str,
+        description: str,
+        system: str,
+        status: str,
+        kind: Literal["new", "escalated"],
+        timestamp: str,
+        mil_on: bool | None = None,
+        session: str | None = None,
+    ) -> AnomalyEvent | None:
+        """Emit a new/escalated DTC event (Phase 1.6).
+
+        Deliberately skips the persistence gate every IF/LSTM/behavior
+        result goes through: a DTC is already ECM-debounced (it only shows
+        up here after the ECM's own confirm window), so there's nothing left
+        to wait out — a genuinely new/escalated code goes straight to
+        ``_emit`` (tuning + dedupe only), same low-level path as every other
+        source.
+        """
+        event = AnomalyEvent.from_dtc(
+            code=code,
+            description=description,
+            system=system,
+            status=status,
+            kind=kind,
+            timestamp=timestamp,
+            mil_on=mil_on,
+            session=session,
         )
         return self._emit(event)
 

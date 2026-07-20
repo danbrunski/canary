@@ -59,7 +59,10 @@ __all__ = [
     "parse_mode06_response",
 ]
 
-PollTier = Literal["fast", "medium", "slow", "on_demand"]
+#: ``"dtc"`` is only used by ``obd_scheduler._PollRequest`` (the periodic
+#: Mode 03/07/0A poll, Task 1.3) — no ``PidDefinition`` ever carries it since
+#: it isn't a Mode 01 PID cadence.
+PollTier = Literal["fast", "medium", "slow", "on_demand", "dtc"]
 Category = Literal[
     "engine",
     "fuel",
@@ -134,18 +137,6 @@ class ServiceDefinition:
 
 def _need(data: bytes, n: int) -> bool:
     return len(data) >= n
-
-
-def decode_monitor_status(data: bytes) -> tuple[float, str] | None:
-    """PID 0x01 / 0x41: bit 7 of A = MIL on; bits 0-6 of A = DTC count.
-
-    Returning the DTC count keeps the channel numeric and model-friendly; the
-    MIL bit and per-monitor readiness are surfaced through the Mode 06 / DTC
-    workflow (Task 6.4), not as a telemetry channel.
-    """
-    if not _need(data, 1):
-        return None
-    return (float(data[0] & 0x7F), "count")
 
 
 def decode_fuel_pressure(data: bytes) -> tuple[float, str] | None:
@@ -382,7 +373,7 @@ _MODE01_SPEC: tuple[
         4,
         "slow",
         "indicator",
-        decode_monitor_status,
+        _pd(0x01),
     ),  # noqa: E501
     (
         0x03,
