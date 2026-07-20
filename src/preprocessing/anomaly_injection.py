@@ -19,6 +19,13 @@ modeling a real sensor failure mode:
   * **stuck**   — channel is frozen at its pre-window value. Models a
                   sensor that fails-in-place — one of the most insidious
                   failures because the value still looks plausible.
+  * **intermittent** — alternates the `spike` mechanism's fixed anomalous
+                  value with brief returns to the true reading, repeating
+                  for the whole window. Models a marginal connector or
+                  flickering sensor (6.5): a fire-gap-fire pattern real
+                  enough that a strict N-consecutive persistence gate
+                  structurally cannot latch onto it, but an M-of-N gate
+                  (6.1) can.
 
 The injector operates on the resampler / features output (wide format,
 session + timestamp columns + per-channel numeric columns). It produces a
@@ -41,7 +48,7 @@ import pandas as pd
 from src.dataframe_utils import require_columns as _require_columns
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 
-AnomalyKind = Literal["spike", "drift", "dropout", "stuck", "scale"]
+AnomalyKind = Literal["spike", "drift", "dropout", "stuck", "scale", "intermittent"]
 
 
 @dataclass(frozen=True)
@@ -53,10 +60,11 @@ class InjectionWindow:
     start: pd.Timestamp  # inclusive
     end: pd.Timestamp  # exclusive
     # Kind-specific parameters captured for downstream reporting:
-    #   spike   → value used during the window
-    #   drift   → total_delta added by the end of the window
-    #   stuck   → the frozen value (filled in at inject time)
-    #   dropout → unused
+    #   spike        → value used during the window
+    #   drift        → total_delta added by the end of the window
+    #   stuck        → the frozen value (filled in at inject time)
+    #   dropout      → unused
+    #   intermittent → value used during "on" ticks
     parameter: float | None = None
 
 
@@ -329,6 +337,49 @@ class AnomalyInjector:
         self._df.loc[mask, channel] = self._df.loc[mask, channel].to_numpy() * factor
         self._windows.append(
             InjectionWindow(channel=channel, kind="scale", start=s, end=e, parameter=factor)
+        )
+        return self
+
+    def intermittent(
+        self,
+        *,
+        channel: str,
+        start: pd.Timestamp | str,
+        end: pd.Timestamp | str,
+        value: float,
+        on_seconds: float,
+        off_seconds: float,
+    ) -> AnomalyInjector:
+        """Fire-gap-fire: alternate `on_seconds` of the fixed anomalous
+        `value` (the same fixed-value mechanism `spike` uses) with
+        `off_seconds` back at the channel's true reading, repeating for the
+        whole `[start, end)` window (6.5).
+
+        Models a marginal connector or flickering sensor — mostly faulted
+        with brief self-clearing gaps, not a full failure. Unlike `spike`
+        (constant for the whole window), the gaps mean a strict
+        N-consecutive persistence gate can structurally never latch onto
+        this pattern (`on_seconds` sized below the gate's consecutive
+        requirement), while an M-of-N gate — tolerant of a bounded number
+        of misses within its trailing window — catches it. This is the
+        motivating scenario for 6.1's M-of-N replacement, so it deliberately
+        reuses `spike`'s exact injection mechanism rather than inventing a
+        new fault physics — the only difference from `spike` is the on/off
+        timing.
+        """
+        s, e = _normalize_window(start, end)
+        self._require_channel(channel)
+        if on_seconds <= 0 or off_seconds <= 0:
+            raise ValueError("on_seconds and off_seconds must be positive")
+        timestamps = pd.to_datetime(self._df[TIMESTAMP_COLUMN], utc=True)
+        mask = (timestamps >= s) & (timestamps < e)
+        period = on_seconds + off_seconds
+        elapsed = (timestamps - s).dt.total_seconds()
+        phase = elapsed % period
+        on_mask = mask & (phase < on_seconds)
+        self._df.loc[on_mask, channel] = value
+        self._windows.append(
+            InjectionWindow(channel=channel, kind="intermittent", start=s, end=e, parameter=value)
         )
         return self
 

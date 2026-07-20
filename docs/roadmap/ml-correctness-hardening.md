@@ -405,10 +405,18 @@ churns on hot-swap.
   `AnomalyEvent.dedupe_key` is a stable `"fused"` for fused events;
   `model_version` still carries full per-model provenance in the
   payload.
-- [ ] **6.5 — Benchmark the gate change.** Re-run the FP benchmark and
+- [x] **6.5 — Benchmark the gate change.** Re-run the FP benchmark and
   (once built) the fault-injection benchmark with intermittent-fault
   cases (fire/gap patterns) to demonstrate 6.1 catches them at
-  unchanged clean-drive FP.
+  unchanged clean-drive FP. — landed: new `"intermittent"`
+  `AnomalyKind` (fire-gap-fire, benchmark-only — excluded from
+  `DEFAULT_FAULT_KINDS` since it structurally can't clear the CI
+  guard's strict-gate floor). Same seeded injection placements through
+  strict-3-consecutive vs the 3-of-5/8s M-of-N default: detection rate
+  10/30 (33%) → 21/30 (70%), median time-to-detect 8.0s → 4.0s, clean-
+  drive gated alerts 0 under both. Independently reproduced by the
+  verifier, incl. a calibration sweep confirming the comparison point
+  isn't cherry-picked toward maximal apparent improvement.
 
 ## Phase 7 — Replay in-memory isolation (T3)
 

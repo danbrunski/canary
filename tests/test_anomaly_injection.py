@@ -352,6 +352,104 @@ def test_stuck_raises_when_all_values_are_nan():
 
 
 # ---------------------------------------------------------------------------
+# intermittent (6.5)
+# ---------------------------------------------------------------------------
+
+
+def test_intermittent_alternates_on_off_within_window():
+    """2s on / 1s off: the anomalous value holds for two ticks, then the
+    true reading returns for one, repeating for the whole window."""
+    inj = AnomalyInjector(_clean_frame(12))
+    inj.intermittent(
+        channel="obd:RPM",
+        start="2026-05-11T15:00:02Z",
+        end="2026-05-11T15:00:11Z",  # rows 2..10
+        value=4000.0,
+        on_seconds=2.0,
+        off_seconds=1.0,
+    )
+    rpm = inj.df["obd:RPM"]
+    # Period is on,on,off starting at row 2: rows 2,3 on; row 4 off;
+    # rows 5,6 on; row 7 off; rows 8,9 on; row 10 off.
+    assert rpm.iloc[1] == 800.0  # before window
+    assert list(rpm.iloc[2:11]) == [
+        4000.0,
+        4000.0,
+        800.0,
+        4000.0,
+        4000.0,
+        800.0,
+        4000.0,
+        4000.0,
+        800.0,
+    ]
+    assert rpm.iloc[11] == 800.0  # after window (end exclusive)
+
+
+def test_intermittent_never_holds_three_consecutive_on_ticks():
+    """The whole point (6.5): a strict 3-consecutive persistence gate can
+    never latch onto this pattern because no on-burst is 3 ticks long."""
+    inj = AnomalyInjector(_clean_frame(20))
+    inj.intermittent(
+        channel="obd:RPM",
+        start="2026-05-11T15:00:00Z",
+        end="2026-05-11T15:00:20Z",
+        value=4000.0,
+        on_seconds=2.0,
+        off_seconds=1.0,
+    )
+    on_mask = (inj.df["obd:RPM"] == 4000.0).to_numpy()
+    max_run = 0
+    run = 0
+    for on in on_mask:
+        run = run + 1 if on else 0
+        max_run = max(max_run, run)
+    assert max_run == 2
+
+
+def test_intermittent_records_window_kind_and_value():
+    inj = AnomalyInjector(_clean_frame(10))
+    inj.intermittent(
+        channel="obd:RPM",
+        start="2026-05-11T15:00:01Z",
+        end="2026-05-11T15:00:07Z",
+        value=4000.0,
+        on_seconds=2.0,
+        off_seconds=1.0,
+    )
+    w = inj.windows[0]
+    assert w.kind == "intermittent"
+    assert w.channel == "obd:RPM"
+    assert w.parameter == 4000.0
+
+
+def test_intermittent_only_affects_target_channel():
+    inj = AnomalyInjector(_clean_frame(10))
+    inj.intermittent(
+        channel="obd:RPM",
+        start="2026-05-11T15:00:01Z",
+        end="2026-05-11T15:00:07Z",
+        value=4000.0,
+        on_seconds=2.0,
+        off_seconds=1.0,
+    )
+    assert (inj.df["obd:COOLANT"] == 85.0).all()
+
+
+def test_intermittent_rejects_non_positive_on_off_seconds():
+    inj = AnomalyInjector(_clean_frame(5))
+    with pytest.raises(ValueError, match="on_seconds and off_seconds must be positive"):
+        inj.intermittent(
+            channel="obd:RPM",
+            start="2026-05-11T15:00:00Z",
+            end="2026-05-11T15:00:03Z",
+            value=4000.0,
+            on_seconds=0.0,
+            off_seconds=1.0,
+        )
+
+
+# ---------------------------------------------------------------------------
 # labels
 # ---------------------------------------------------------------------------
 

@@ -31,6 +31,12 @@ training-completion + per-mode threshold-population is graded by a separate
 dedicated test. The report is JSON-safe so the training ledger / dashboard
 can consume it.
 
+6.5 added a sixth kind, ``"intermittent"`` (fire-gap-fire, the pattern 6.1's
+M-of-N ``PersistenceGate`` was built to catch) — kept out of
+``DEFAULT_FAULT_KINDS`` so it doesn't change the CI regression-guard's
+acceptance floor, but fully wired through ``_inject_one``; pass
+``fault_kinds=(INTERMITTENT_FAULT_KIND,)`` explicitly to exercise it.
+
 Task 2.6 (ml-correctness-hardening) trialed ``pyod``'s ECOD as an optional
 fourth detector here, wired the same way ``trained_sequence`` is. ECOD lost
 decisively on the seeded synthetic-fault benchmark (mean detection rate
@@ -73,6 +79,14 @@ DEFAULT_FAULT_KINDS: tuple[AnomalyKind, ...] = (
     "stuck",
     "scale",
 )
+
+#: Not part of DEFAULT_FAULT_KINDS: adding it there would change the CI
+#: regression-guard's acceptance floor (`test_evaluate_detectors_grades_
+#: each_fault_kind_and_keeps_nominal_fp_low`), which was tuned against the
+#: five kinds above. It's fully wired through `_inject_one`/`evaluate_detectors`
+#: — pass `fault_kinds=("intermittent",)` (or with others) explicitly for the
+#: 6.5 persistence-gate benchmark.
+INTERMITTENT_FAULT_KIND: AnomalyKind = "intermittent"
 
 
 @dataclass(frozen=True)
@@ -302,6 +316,21 @@ def _inject_one(
         inj.stuck(channel=channel, start=start, end=end)
     elif kind == "scale":
         inj.scale(channel=channel, start=start, end=end, factor=5.0)
+    elif kind == "intermittent":
+        # 2s on / 1s off: each "on" burst is shorter than a strict
+        # 3-consecutive persistence gate's requirement (so that gate can
+        # never latch), while the 1s gap is well inside the M-of-N gate's
+        # trailing window (default 5 ticks / 8s) so 6.1 recovers it. Reuses
+        # `spike`'s exact magnitude for the "on" value — same fault
+        # physics, different timing (6.5).
+        inj.intermittent(
+            channel=channel,
+            start=start,
+            end=end,
+            value=nominal_max * 5 + 1_000,
+            on_seconds=2.0,
+            off_seconds=1.0,
+        )
     else:
         raise ValueError(f"unsupported fault kind: {kind!r}")
     return inj
@@ -425,4 +454,4 @@ def evaluate_detectors(
     }
 
 
-__all__ = ["DEFAULT_FAULT_KINDS", "evaluate_detectors"]
+__all__ = ["DEFAULT_FAULT_KINDS", "INTERMITTENT_FAULT_KIND", "evaluate_detectors"]

@@ -22,10 +22,13 @@ import pytest
 pytest.importorskip("joblib")
 pytest.importorskip("sklearn")
 
+from src.alerts.fusion import PersistenceGate  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
 from src.models.isolation_forest import fit_isolation_forest  # noqa: E402
 from src.models.synthetic_fault_eval import (  # noqa: E402
     DEFAULT_FAULT_KINDS,
+    INTERMITTENT_FAULT_KIND,
+    _if_anomalous,
     evaluate_detectors,
 )
 from src.preprocessing.feature_pipeline import featurize_wide_frame  # noqa: E402
@@ -395,7 +398,6 @@ def test_first_sustained_detection_counts_post_window_hit_within_grace() -> None
     """A detection that lands just after the fault window's `end` but
     inside `end + window_seconds` counts as a hit, flagged late — not
     conflated with an in-window hit."""
-    from src.alerts.fusion import PersistenceGate
     from src.models.synthetic_fault_eval import _first_sustained_detection
 
     timestamps = pd.Series(pd.date_range("2026-05-12T00:00:00Z", periods=21, freq="1s"))
@@ -432,7 +434,6 @@ def test_first_sustained_detection_counts_post_window_hit_within_grace() -> None
 def test_first_sustained_detection_still_misses_beyond_grace_period() -> None:
     """No regression on the boundary: a detection beyond `end + window_seconds`
     still counts as a miss."""
-    from src.alerts.fusion import PersistenceGate
     from src.models.synthetic_fault_eval import _first_sustained_detection
 
     timestamps = pd.Series(pd.date_range("2026-05-12T00:00:00Z", periods=21, freq="1s"))
@@ -461,7 +462,6 @@ def test_first_sustained_detection_still_misses_beyond_grace_period() -> None:
 def test_first_sustained_detection_in_window_hit_is_not_late() -> None:
     """A hit strictly inside [start, end) stays distinguishable from a late
     (post-`end`) one."""
-    from src.alerts.fusion import PersistenceGate
     from src.models.synthetic_fault_eval import _first_sustained_detection
 
     timestamps = pd.Series(pd.date_range("2026-05-12T00:00:00Z", periods=21, freq="1s"))
@@ -485,6 +485,130 @@ def test_first_sustained_detection_in_window_hit_is_not_late() -> None:
     if_ts, if_late = if_hit
     assert if_ts == timestamps.iloc[6]
     assert if_late is False
+
+
+# ---------------------------------------------------------------------------
+# 6.5 — benchmark the M-of-N persistence gate (6.1) against the pre-6.1
+# strict-N-consecutive gate on the fire-gap-fire "intermittent" fault kind.
+# ---------------------------------------------------------------------------
+
+
+def _gated_alert_count(
+    signal: pd.Series, timestamps: pd.Series, gate: PersistenceGate, key: str
+) -> int:
+    """Count alert *events* (transitions into sustained), not gated-true
+    ticks — the real analog of "how many times would this actually alert",
+    since the live daemon only emits on the sustain transition, not once per
+    still-firing tick after that."""
+    count = 0
+    was_sustained = False
+    for ts, fired in zip(timestamps, signal, strict=True):
+        sustained = gate.observe(key, bool(fired), now=ts.timestamp())
+        if sustained and not was_sustained:
+            count += 1
+        was_sustained = sustained
+    return count
+
+
+def test_intermittent_fault_caught_by_m_of_n_not_strict_at_unchanged_clean_fp() -> None:
+    """6.5: on the SAME injected fire-gap-fire placements (deterministic
+    seed), 6.1's M-of-N gate (3-of-5, 8s) genuinely detects the
+    ``"intermittent"`` fault kind more often than the pre-6.1 strict-3-
+    consecutive gate would have — without inflating the clean-drive alert
+    count. Uses a looser calibration (``target_flag_rate=0.15`` vs the
+    CI-floor test's ``0.05``) so individual on-ticks cross IF's threshold
+    often enough to exercise the gates at all; IsolationForest's score
+    saturates for far-outlier single-feature excursions (verified
+    empirically), so the tight production calibration barely fires per-tick
+    on this tiny synthetic corpus regardless of gate — this test isolates
+    the gate's own effect, not IF's absolute sensitivity (that's the
+    existing CI-floor test's job)."""
+    config = _config()
+    resampled = _two_mode_resampled()
+    nominal_features = featurize_wide_frame(resampled, config).features
+    trained = fit_isolation_forest(
+        nominal_features,
+        _IFConfig(target_flag_rate=0.15),
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:THROTTLE_POS"],
+        fitted_at="2026-05-12T00:00:00Z",
+    )
+
+    # config.alerts is already the 3-of-5/8s M-of-N default (canary.example.yaml,
+    # 6.1). strict_config reproduces the exact pre-6.1 gate: `window=None`
+    # falls back to `required` (strict-N-consecutive), `window_seconds=None`
+    # disables the wall-clock bound entirely — see `AlertsConfig` docstring.
+    strict_config = config.model_copy(
+        update={
+            "alerts": config.alerts.model_copy(
+                update={"persistence_window_ticks": None, "persistence_window_seconds": None}
+            )
+        }
+    )
+
+    # `evaluate_detectors` seeds its own rng from `seed` (default 42), so
+    # both calls draw the identical sequence of injection placements —
+    # the comparison is apples-to-apples on the SAME injected data, only the
+    # gate differs.
+    strict_report = evaluate_detectors(
+        resampled,
+        strict_config,
+        trained,
+        fault_channel="obd:RPM",
+        fault_kinds=(INTERMITTENT_FAULT_KIND,),
+        n_injections=30,
+    )
+    m_of_n_report = evaluate_detectors(
+        resampled,
+        config,
+        trained,
+        fault_channel="obd:RPM",
+        fault_kinds=(INTERMITTENT_FAULT_KIND,),
+        n_injections=30,
+    )
+
+    def _if_rate(report: dict) -> float:
+        (metric,) = [
+            m
+            for m in report["per_fault"]
+            if m["detector"] == "isolation_forest" and m["fault_kind"] == "intermittent"
+        ]
+        return float(metric["detection_rate"])
+
+    strict_rate = _if_rate(strict_report)
+    m_of_n_rate = _if_rate(m_of_n_report)
+
+    # The load-bearing claim: M-of-N does meaningfully better on the exact
+    # same fire-gap-fire placements a strict gate structurally struggles
+    # with (each on-burst is only 2 ticks — never 3 consecutive).
+    assert m_of_n_rate >= strict_rate + 0.2, (strict_rate, m_of_n_rate)
+    assert strict_rate <= 0.5, strict_rate
+    assert m_of_n_rate >= 0.5, m_of_n_rate
+
+    # Clean-drive FP: `evaluate_detectors`'s `nominal_fp` is intentionally
+    # pre-gate (raw per-row flag rate), so it's identical for both configs
+    # by construction — not informative for "does the LOOSER gate alert
+    # more on clean data". Instead run the actual gated alert-event count
+    # (see `_gated_alert_count`) over the same nominal (unmodified) frame
+    # through both gates: the real "at unchanged clean-drive FP" claim.
+    assert (
+        strict_report["nominal_fp"]["isolation_forest"]
+        == (m_of_n_report["nominal_fp"]["isolation_forest"])
+    )
+    nominal_scored = trained.score(nominal_features)
+    nominal_signal = _if_anomalous(nominal_scored)
+    nominal_timestamps = pd.to_datetime(nominal_features[TIMESTAMP_COLUMN], utc=True)
+    strict_gate = PersistenceGate(required=3, window=3)
+    m_of_n_gate = PersistenceGate(required=3, window=5, window_seconds=8.0)
+    strict_clean_alerts = _gated_alert_count(
+        nominal_signal, nominal_timestamps, strict_gate, "isolation_forest"
+    )
+    m_of_n_clean_alerts = _gated_alert_count(
+        nominal_signal, nominal_timestamps, m_of_n_gate, "isolation_forest"
+    )
+    # M-of-N must not alert MORE than strict on clean data — the flood-
+    # protection guarantee 6.1's docstring promises is preserved even
+    # though it's now tolerant of flicker on real faults.
+    assert m_of_n_clean_alerts <= strict_clean_alerts, (strict_clean_alerts, m_of_n_clean_alerts)
 
 
 # ---------------------------------------------------------------------------
