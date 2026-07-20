@@ -27,6 +27,7 @@ Read tools:
 | `get_bindings` | `GET /bindings` |
 | `get_dids` | `GET /dids` |
 | `get_obd_coverage` | `GET /obd/coverage` |
+| `get_dtc` | `GET /obd/dtc` — cached stored/pending/permanent DTC report (Mode 03/07/0A poll), MIL state, `captured_at`, `stale`. Read-only, no clear-codes tool. |
 | `list_sessions` / `get_session` | `GET /control/sessions[/{id}]` |
 | `get_session_classification` | `GET /control/sessions/{id}/classification` — mode/event/disposition sidecar for one session |
 | `get_corpus_mode_summary` | `GET /control/classifications/summary` — per-mode seconds + event counts across the corpus |

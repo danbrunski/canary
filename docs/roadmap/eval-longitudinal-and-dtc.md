@@ -131,17 +131,23 @@ FE placeholder (`nav.ts:24` `diag-dtc`, `Workbench.tsx:143-150`).
   the report's signature actually changes; a new session resets the
   "already seen" baseline without losing the ECU's real stored/pending/
   permanent state.
-- [ ] **1.8 — MCP tool.** `get_dtc` read tool: new
+- [x] **1.8 — MCP tool.** `get_dtc` read tool: new
   `src/mcp_server/tools/dtc.py` calling `GET /obd/dtc`, registered in
   `server.py` `_register_read_tools` (:168). Document in
-  `docs/mcp-server.md`.
-- [ ] **1.9 — Dashboard panel.** `DtcPanel.tsx` under
+  `docs/mcp-server.md`. — landed: plain passthrough, confirmed
+  registered in the built tool list, documented consistently with
+  other read tools.
+- [x] **1.9 — Dashboard panel.** `DtcPanel.tsx` under
   `src/dashboard/static/src/panels/` (model on an existing polling
   panel): MIL banner, three code lists (stored/pending/permanent) with
   `description`/`system` from the report, `captured_at`/stale indicator.
   Replace the `PlaceholderPanel` in `Workbench.tsx:143-150`, drop
   `placeholder: true` at `nav.ts:24`, add `getDtc` to `api/http.ts` +
-  types, add `DtcPanel.test.ts`. **No clear-codes control.**
+  types, add `DtcPanel.test.ts`. **No clear-codes control.** — landed:
+  TS types verified field-for-field against the real `DtcReportResponse`
+  schema; MIL banner distinguishes on/off/unknown; stale indicator
+  reads the backend's own `stale` flag, not frontend-computed; no
+  clear-codes control anywhere in the component.
 - [ ] **1.10 — Deploy + live verify.** Pull + restart on the Pi; verify
   KOEO read (`vehicle_state: ignition_only`) and engine-running read;
   confirm `_replay` sessions don't poll (replay has no live OBD path).

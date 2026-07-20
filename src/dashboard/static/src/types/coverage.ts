@@ -153,3 +153,24 @@ export interface DidMapResponse {
   access: Record<string, unknown> | null;
   dids: DidEntry[];
 }
+
+/** `GET /obd/dtc` (Task 1.5) — the cached `DtcReport` plus staleness.
+ *  Mirrors `DtcReportResponse` in `src/dashboard/schemas.py`. Read-only:
+ *  there is no clear-codes endpoint or UI control. */
+export interface DtcCodeEntry {
+  code: string;
+  description: string;
+  system: string;
+  generic: boolean;
+  curated: boolean;
+}
+
+export interface DtcReportResponse {
+  captured_at: string | null;
+  stored: DtcCodeEntry[];
+  pending: DtcCodeEntry[];
+  permanent: DtcCodeEntry[];
+  mil_on: boolean | null;
+  dtc_count: number;
+  stale: boolean;
+}

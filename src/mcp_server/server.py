@@ -40,6 +40,9 @@ from src.mcp_server.tools import (
     classification as classification_tool,
 )
 from src.mcp_server.tools import (
+    dtc as dtc_tool,
+)
+from src.mcp_server.tools import (
     jobs as jobs_tool,
 )
 from src.mcp_server.tools import (
@@ -242,6 +245,11 @@ def _register_read_tools(
     async def get_obd_coverage() -> dict[str, Any]:
         """OBD coverage: which PIDs the ECU supports, which CANary decodes."""
         return await bindings_tool.get_obd_coverage(client)
+
+    @mcp.tool()
+    async def get_dtc() -> dict[str, Any]:
+        """Cached stored/pending/permanent DTC report, MIL state, staleness."""
+        return await dtc_tool.get_dtc(client)
 
     @mcp.tool()
     async def list_sessions() -> dict[str, Any]:

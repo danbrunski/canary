@@ -26,6 +26,7 @@ import { ControlPanel } from "./ControlPanel";
 import { CustomDashboardPanel } from "./CustomDashboardPanel";
 import { DataSourcesPanel } from "./DataSourcesPanel";
 import { DatasetHealthPanel } from "./DatasetHealthPanel";
+import { DtcPanel } from "./DtcPanel";
 import { ModelHealthPanel } from "./ModelHealthPanel";
 import { ModelPanel } from "./ModelPanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
@@ -144,13 +145,7 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
     case "live-builder":
       return <CustomDashboardPanel channels={d.channels} />;
     case "diag-dtc":
-      return (
-        <PlaceholderPanel
-          title="Trouble codes"
-          task="6.4"
-          summary="Stored / pending / permanent DTCs with described, timestamped, exportable snapshots (curated + structural code lookup). Live Mode 03/07/0A read is hardware-gated."
-        />
-      );
+      return <DtcPanel />;
     case "models-training":
       return <TrainingPanel token={d.token} companion={d.companion} />;
     case "models-tuning":

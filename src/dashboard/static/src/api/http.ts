@@ -14,6 +14,7 @@ import type {
   CaptureTagResponse,
   DatasetHealthResponse,
   DidMapResponse,
+  DtcReportResponse,
   FeedbackResponse,
   JobLogsResponse,
   JobResponse,
@@ -326,6 +327,13 @@ export function getCanCoverage(
 /** `/dids` is read-only + unauthenticated, like `/bindings` (Task 6.16). */
 export function getDids(signal?: AbortSignal): Promise<DidMapResponse> {
   return fetchJson("/dids", { signal });
+}
+
+/** `/obd/dtc` is read-only + unauthenticated, like `/obd/coverage` (Task
+ *  1.5) — the cached stored/pending/permanent DTC report. No clear-codes
+ *  endpoint exists; this API surface is read-only by design. */
+export function getDtc(signal?: AbortSignal): Promise<DtcReportResponse> {
+  return fetchJson("/obd/dtc", { signal });
 }
 
 /** `/test-profiles` is read-only + unauthenticated (scanned YAML catalog);

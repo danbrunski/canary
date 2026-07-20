@@ -12,6 +12,7 @@ import pytest
 from src.mcp_server.audit import MCPAuditLogger
 from src.mcp_server.client import DaemonClient, DaemonError
 from src.mcp_server.tools import bindings as bindings_tool
+from src.mcp_server.tools import dtc as dtc_tool
 from src.mcp_server.tools import jobs as jobs_tool
 from src.mcp_server.tools import sessions as sessions_tool
 from src.mcp_server.tools import tuning as tuning_tool
@@ -58,6 +59,36 @@ async def test_bindings_dids_coverage_passthrough() -> None:
     assert (await bindings_tool.get_dids(client))["schema_version"] == 1
     assert "supported" in await bindings_tool.get_obd_coverage(client)
     await client.aclose()
+
+
+# ---------------------------------------------------------------------------
+# DTC
+# ---------------------------------------------------------------------------
+
+
+async def test_get_dtc_passthrough() -> None:
+    """``get_dtc`` forwards the cached DTC report verbatim, including staleness."""
+    report = {
+        "captured_at": "2026-07-19T12:00:00+00:00",
+        "stored": [
+            {
+                "code": "P0300",
+                "description": "Random/Multiple Cylinder Misfire Detected",
+                "system": "powertrain",
+                "generic": True,
+                "curated": True,
+            }
+        ],
+        "pending": [],
+        "permanent": [],
+        "mil_on": True,
+        "dtc_count": 1,
+        "stale": False,
+    }
+    client = await _fake_daemon({"GET /obd/dtc": report})
+    result = await dtc_tool.get_dtc(client)
+    await client.aclose()
+    assert result == report
 
 
 # ---------------------------------------------------------------------------

@@ -60,6 +60,7 @@ async def test_build_server_registers_phase1_and_phase2_tools(tmp_path: Path) ->
         "get_bindings",
         "get_dids",
         "get_obd_coverage",
+        "get_dtc",
         "list_sessions",
         "get_session",
         "get_dataset_health",
