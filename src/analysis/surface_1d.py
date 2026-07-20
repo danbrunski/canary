@@ -238,16 +238,16 @@ def _fill_relative_reference_std(
     actual: np.ndarray,
     predicted: np.ndarray,
 ) -> DeviationConfig | None:
-    """Auto-fill ``reference_std`` for relative bands from the fit residuals.
+    """Auto-fill ``reference_std`` for sigma bands from the fit residuals.
 
     1D fits carry one global residual band (unlike 2D grids' per-cell std),
     and recipes for outputs whose scaling isn't pinned yet (raw injector-PW
     counts) can't declare a meaningful ``reference_std`` upfront. Filling it
-    from the residual std around the fitted curve makes ``relative`` bands
+    from the residual std around the fitted curve makes ``sigma`` bands
     self-calibrating and mirrors what the 2D fitter does per cell. An
     explicit ``reference_std`` in the recipe always wins.
     """
-    if deviation is None or deviation.kind != "relative" or deviation.reference_std is not None:
+    if deviation is None or deviation.kind != "sigma" or deviation.reference_std is not None:
         return deviation
     residual_std = float(np.std(actual - predicted))  # ddof=0, matches the 2D cells
     if deviation.sigma_floor is not None:

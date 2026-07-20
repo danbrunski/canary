@@ -260,7 +260,7 @@ def default_recipes() -> list[Recipe]:
             # sigma_floor = one LSB of PID 0x0E (0.5°/bit): a cell fit on a
             # quantization-flat idle stretch can't alert on single-bit flicker.
             deviation=DeviationConfig(
-                kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
             ),
             notes=(
                 "Ignition surface. Knock-retard activity shows as drops vs. the baseline cell mean."
@@ -282,7 +282,7 @@ def default_recipes() -> list[Recipe]:
             # cell-spread are the same; what differs is what we're trying to
             # catch. sigma_floor = one LSB of PID 0x0E.
             deviation=DeviationConfig(
-                kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
             ),
             notes=(
                 "Thermal-compensation surface for ignition. Cold dense charge "
@@ -320,7 +320,7 @@ def default_recipes() -> list[Recipe]:
             min_rpm=ENGINE_RUNNING_MIN_RPM,  # no fueling KOEO — trims are frozen zeros there
             # sigma_floor = one LSB of the trim PIDs (100/128 ≈ 0.78 %).
             deviation=DeviationConfig(
-                kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=100.0 / 128.0
+                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=100.0 / 128.0
             ),
             notes=(
                 "STFT B1 surface. Vacuum leaks / injector wear / fuel-quality "
@@ -342,7 +342,7 @@ def default_recipes() -> list[Recipe]:
             min_rpm=ENGINE_RUNNING_MIN_RPM,
             # sigma_floor ≈ one MAF LSB (0.01 g/s) translated to g/cycle at idle.
             deviation=DeviationConfig(
-                kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.002
+                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.002
             ),
             notes=(
                 "Volumetric efficiency proxy — MAF translated to grams per "
@@ -431,7 +431,7 @@ def default_recipes() -> list[Recipe]:
             min_rpm=ENGINE_RUNNING_MIN_RPM,  # injectors don't fire KOEO — PW is a frozen zero
             # sigma_floor = 1 raw count (scale constant not yet pinned).
             deviation=DeviationConfig(
-                kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=1.0
+                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=1.0
             ),
             notes=(
                 "Direct fuel-delivery surface. Detects injector wear (PW "
@@ -460,7 +460,7 @@ def default_recipes() -> list[Recipe]:
             # from (10.0, 25.0) — same corpus/rationale as coolant_warmup
             # (WARMUP_CONTEXT_SESSION_FLOOR).
             deviation=DeviationConfig(
-                kind="relative", warning_band=15.0, critical_band=38.0, sigma_floor=1.0
+                kind="sigma", warning_band=15.0, critical_band=38.0, sigma_floor=1.0
             ),
             notes=(
                 "Cold-start enrichment curve. PW is elevated during warmup "
@@ -530,7 +530,7 @@ def default_recipes() -> list[Recipe]:
             # guard below), so the voltage LSB dominates the achievable
             # resolution of this ratio.
             deviation=DeviationConfig(
-                kind="relative", warning_band=5.0, critical_band=12.0, sigma_floor=0.005
+                kind="sigma", warning_band=5.0, critical_band=12.0, sigma_floor=0.005
             ),
             notes=(
                 "Raw TPS voltage vs ECM-calculated throttle percent. "

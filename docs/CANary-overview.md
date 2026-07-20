@@ -336,6 +336,12 @@ models:
     agreement_boost: 0.25
     behavior_warning_severity: 0.5
     behavior_critical_severity: 1.0
+    min_agreement: 2                    # 6.2: fused is_anomaly needs >=2 independent sources
+
+alerts:                                 # 6.1: M-of-N persistence, e.g. 3-of-5
+  min_consecutive_ticks: 3
+  persistence_window_ticks: 5
+  persistence_window_seconds: 8.0
 
 dashboard:
   host: 0.0.0.0

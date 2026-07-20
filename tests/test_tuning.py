@@ -119,6 +119,22 @@ def test_debounce_requires_consecutive() -> None:
     assert tuner.decide(_event(), now=2.0).emit is True  # 3/3
 
 
+def test_has_debounce_override() -> None:
+    """6.3 — the daemon's PersistenceGate wiring uses this public accessor
+    (instead of reaching for the private ``_policy_for``) to decide whether
+    a tuner debounce override fully owns a (source, mode) key's persistence
+    requirement."""
+    tuner = AlertTuner(
+        TuningConfig(
+            debounce_policies=[DebouncePolicy(source="isolation_forest", operating_mode="idle")]
+        )
+    )
+    assert tuner.has_debounce_override("isolation_forest", "idle") is True
+    assert tuner.has_debounce_override("isolation_forest", "city") is False
+    assert tuner.has_debounce_override("lstm_autoencoder", "idle") is False
+    assert AlertTuner(TuningConfig()).has_debounce_override("isolation_forest", "idle") is False
+
+
 def test_cooldown_and_hysteresis() -> None:
     tuner = AlertTuner(
         TuningConfig(debounce_policies=[DebouncePolicy(cooldown_seconds=10.0, rearm_below=2.0)])

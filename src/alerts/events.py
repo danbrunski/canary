@@ -59,6 +59,14 @@ class AnomalyEvent(BaseModel):
     window_end_timestamp: str | None = None
     latency_ms: float | None = None
     detail: dict[str, Any] = Field(default_factory=dict)
+    #: 6.4 — the emitter's dedupe identity when it differs from
+    #: ``(source, model_version)``. ``None`` (every non-fused event) falls
+    #: back to ``model_version`` as before. The fused event sets this to a
+    #: stable ``"fused"`` because its ``model_version`` embeds BOTH backing
+    #: model versions (``if=<v>|lstm=<v>``) purely for provenance — hashing
+    #: that into the dedupe key meant any IF/LSTM hot-swap changed the key
+    #: and let a duplicate fused alert burst through right at the swap.
+    dedupe_key: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
@@ -150,7 +158,12 @@ class AnomalyEvent(BaseModel):
         ``threshold`` is the configured emit boundary, so the dashboard and
         tuner can reason about it on the same score/threshold contract as the
         per-source events. The per-source breakdown lives in ``detail`` (the
-        seed of 7.2a's richer attribution).
+        seed of 7.2a's richer attribution). ``model_version`` (the
+        ``if=<v>|lstm=<v>`` provenance string) stays on the event for
+        debugging but is NOT the dedupe identity (6.4) — ``dedupe_key`` is a
+        stable ``"fused"`` so an IF/LSTM hot-swap mid-drive can't burst a
+        duplicate fused alert by changing the dedupe key underneath an
+        active refractory window.
         """
         return cls(
             timestamp=result.timestamp,
@@ -161,6 +174,7 @@ class AnomalyEvent(BaseModel):
             affected_channels=tuple(result.contributing),
             operating_mode=result.operating_mode,
             detail=result.to_detail(),
+            dedupe_key="fused",
         )
 
     @classmethod

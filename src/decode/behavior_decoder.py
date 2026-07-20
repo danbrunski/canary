@@ -284,13 +284,14 @@ def _deviation_score(
 ) -> float | None:
     """Score to compare against the bands: absolute |delta| or |delta|/std.
 
-    Returns ``None`` when the relative-mode local std is unavailable
+    Returns ``None`` when the sigma-mode local std is unavailable
     (empty grid cell, missing reference_std) — caller treats that as "ok".
     """
     abs_delta = abs(delta)
     if dev_cfg.kind == "absolute":
         return abs_delta
-    # relative — ``None`` std means off-map / unconfigured (no grading);
+    # sigma (9.4, formerly "relative") — ``None`` std means off-map /
+    # unconfigured (no grading);
     # the sigma_floor then bounds a *present* std from below so a cell fit
     # on quantization-flat data can neither hair-trigger (std below the
     # sensor LSB) nor go silently dead (std exactly 0).

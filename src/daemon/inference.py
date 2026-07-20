@@ -18,6 +18,7 @@ from src.alerts.fusion import (
     isolation_forest_source,
     lstm_source,
 )
+from src.alerts.tuning import AlertTuner
 from src.dashboard.behavior_live import BehaviorLiveState, BehaviorObservation
 from src.dashboard.broadcast import Broadcaster
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
@@ -79,6 +80,35 @@ def _live_vehicle_state(
     )
 
 
+def _persistence_sustained(
+    persistence: PersistenceGate,
+    key: str,
+    firing: bool | None,
+    *,
+    tuner: AlertTuner | None,
+    source: str,
+    mode: str | None,
+    now: float,
+) -> bool:
+    """Advance ``key`` through the persistence gate, honouring 6.3's
+    debounce-ownership rule: when an operator ``DebouncePolicy`` is active
+    for ``(source, mode)``, it fully OWNS that key's persistence
+    requirement (applied later, inside the emitter, via
+    ``AlertTuner.min_consecutive``) — the built-in gate's own M-of-N is
+    bypassed (every trustworthy tick passes straight through) rather than
+    stacking a second, redundant requirement on top of the tuner's.
+
+    A missing verdict (``firing=None``, see ``PersistenceGate``'s docstring)
+    always goes through the gate itself, bypass or not — there's no tuner
+    debounce state to "pass through" for a tick that produced no verdict at
+    all, and doing so keeps the gate's own streak correctly frozen (not
+    reset to False) for the ticks where the bypass isn't in effect.
+    """
+    if firing is not None and tuner is not None and tuner.has_debounce_override(source, mode):
+        return firing
+    return persistence.observe(key, firing, now=now)
+
+
 async def run_live_inference(
     source: LiveFeatureSource,
     components: DaemonComponents,
@@ -128,9 +158,16 @@ async def run_live_inference(
     )
     fusion = FusionScorer(components.config.models.fusion)
     severity_threshold = components.config.models.fusion.severity_threshold
-    # Phase 7.5: every detector must be over threshold for K consecutive
-    # ticks before it emits or counts as a firing fusion source.
-    persistence = PersistenceGate(components.config.alerts.min_consecutive_ticks)
+    # Phase 7.5 / 6.1: every detector must be over threshold for M ticks
+    # within a trailing N-tick, T-second window before it emits or counts as
+    # a firing fusion source.
+    alerts_cfg = components.config.alerts
+    persistence = PersistenceGate(
+        alerts_cfg.min_consecutive_ticks,
+        window=alerts_cfg.persistence_window_ticks,
+        window_seconds=alerts_cfg.persistence_window_seconds,
+    )
+    tuner = components.alert_tuner
     if if_manager is None:
         log.info(
             "isolation_forest model manager absent; IF scoring disabled — the "
@@ -184,6 +221,8 @@ async def run_live_inference(
                     components.health_monitor,
                     scores=components.scores_broadcaster,
                     persistence=persistence,
+                    tuner=tuner,
+                    now=now.timestamp(),
                 )
                 if if_input is not None:
                     sources.append(
@@ -191,7 +230,7 @@ async def run_live_inference(
                             isolation_forest_source(
                                 if_input.score, if_input.threshold, scale=if_input.scale
                             ),
-                            persistence.active("isolation_forest"),
+                            if_input.sustained,
                         )
                     )
 
@@ -220,7 +259,18 @@ async def run_live_inference(
                             timestamp=result.timestamp,
                             missing_features=False,
                         )
-                        seq_sustained = persistence.observe("lstm_autoencoder", result.is_anomaly)
+                        # 6.3: a tuner override for (lstm_autoencoder, mode)
+                        # fully owns persistence for this key instead of
+                        # stacking on the gate's own M-of-N.
+                        seq_sustained = _persistence_sustained(
+                            persistence,
+                            "lstm_autoencoder",
+                            result.is_anomaly,
+                            tuner=tuner,
+                            source="lstm_autoencoder",
+                            mode=operating_mode,
+                            now=now.timestamp(),
+                        )
                         if result.is_anomaly and not seq_sustained:
                             components.emitter.counters.suppressed_persistence += 1
                         else:
@@ -244,9 +294,25 @@ async def run_live_inference(
                     residual.severity,
                     group=f"behavior:{residual.channel}",
                 )
-                raw_fired = behavior.fired and residual.mode_match
-                sustained = persistence.observe(f"behavior:{residual.name}", raw_fired)
-                if not raw_fired:
+                # 6.1 — off-mode is a missing verdict (the model didn't
+                # evaluate this tick at all), not a miss: freeze the M-of-N
+                # window instead of pushing a False that would decay real
+                # evidence accumulated the last time this model was
+                # in-mode. On-mode-but-not-deviating is a genuine miss and
+                # still displaces a stale hit (flood protection intact).
+                verdict: bool | None = behavior.fired if residual.mode_match else None
+                # 6.3: a tuner override for (behavior, mode) fully owns
+                # persistence for this key instead of stacking.
+                sustained = _persistence_sustained(
+                    persistence,
+                    f"behavior:{residual.name}",
+                    verdict,
+                    tuner=tuner,
+                    source="behavior",
+                    mode=residual.operating_mode,
+                    now=now.timestamp(),
+                )
+                if verdict is not True:
                     continue
                 if not sustained:
                     components.emitter.counters.suppressed_persistence += 1
@@ -564,11 +630,16 @@ class _IFFusionInput:
     """The IF half of one fused tick (Phase 7.2). ``threshold``/``scale`` are
     ``None`` for an uncalibrated mode, so the IF source can't fire in fusion —
     nor does it emit its own per-source event any more (2.3: uncalibrated
-    modes are non-emitting, score-only)."""
+    modes are non-emitting, score-only). ``sustained`` (6.3) is this tick's
+    already-computed persistence verdict — carried through instead of the
+    caller re-deriving it via ``persistence.active`` so a tuner-bypassed key
+    (see ``_persistence_sustained``) downgrades the fusion source correctly
+    even though the gate's own streak state was never touched for it."""
 
     score: float
     threshold: float | None
     scale: float | None
+    sustained: bool = True
 
 
 @dataclass(frozen=True)
@@ -599,6 +670,8 @@ def _score_and_emit(
     *,
     scores: Broadcaster | None = None,
     persistence: PersistenceGate | None = None,
+    tuner: AlertTuner | None = None,
+    now: float | None = None,
 ) -> _IFFusionInput | None:
     """Run one feature row through IF.score → emitter. Best-effort.
 
@@ -607,7 +680,9 @@ def _score_and_emit(
     contribute to fusion either — the per-source emit policy is unchanged.
 
     ``persistence`` (when given) is advanced once per trustworthy tick with
-    the calibrated over-threshold verdict; the per-source event is withheld
+    the calibrated over-threshold verdict (6.3: through ``tuner``'s
+    debounce-ownership rule, see ``_persistence_sustained``); the per-source
+    event is withheld
     until the streak is sustained. The caller reads ``persistence.active``
     to downgrade the fusion source consistently.
 
@@ -723,6 +798,7 @@ def _score_and_emit(
     score_val = scored.get(SCORE_COLUMN)
     calibrated = calibrated_threshold is not None
     suppress_emit = False
+    sustained = True
     if persistence is not None:
         # Same firing rule the fusion source uses: calibrated over-threshold.
         # Uncalibrated rows (no threshold) can never raise this — they're
@@ -735,7 +811,17 @@ def _score_and_emit(
             and calibrated_threshold is not None
             and float(score_val) >= calibrated_threshold
         )
-        sustained = persistence.observe("isolation_forest", raw_fired)
+        # 6.3: a tuner debounce override for (isolation_forest, mode_str), if
+        # any, fully owns persistence for this key instead of stacking.
+        sustained = _persistence_sustained(
+            persistence,
+            "isolation_forest",
+            raw_fired,
+            tuner=tuner,
+            source="isolation_forest",
+            mode=mode_str,
+            now=now if now is not None else time.monotonic(),
+        )
         if raw_fired and not sustained:
             suppress_emit = True
             emitter.counters.suppressed_persistence += 1
@@ -760,6 +846,7 @@ def _score_and_emit(
         score=float(score_val),
         threshold=calibrated_threshold,
         scale=scale if scale is None else float(scale),
+        sustained=sustained,
     )
 
 

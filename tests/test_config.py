@@ -30,6 +30,22 @@ def test_example_yaml_loads():
     assert config.dashboard.port == 8000
     assert config.daemon.jobs_dir == Path("data/control/jobs")
     assert config.daemon.control_token_env == "CANARY_CONTROL_TOKEN"
+    # 9.1 (operator-approved decision): GRU-D LSTM is the shipped default.
+    assert config.models.sequence_detector == "lstm"
+    # 6.1: M-of-N persistence + 6.2: agreement-gated fusion.
+    assert config.alerts.min_consecutive_ticks == 3
+    assert config.alerts.persistence_window_ticks == 5
+    assert config.models.fusion.min_agreement == 2
+
+
+def test_sequence_detector_default_is_lstm():
+    """9.1 (operator-approved decision, see OVERNIGHT-QUEUE.md "Sequence
+    backbone default"): GRU-D LSTM is the shipped default sequence_detector
+    backbone even with no config override; TCN is documented as the
+    NPU-export fallback, not an equal — no further bake-off gates this."""
+    from src.config import ModelsConfig
+
+    assert ModelsConfig.model_fields["sequence_detector"].default == "lstm"
 
 
 def test_pi_example_yaml_loads():

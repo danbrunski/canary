@@ -368,6 +368,14 @@ class AlertTuner:
                 return policy
         return None
 
+    def has_debounce_override(self, source: str, mode: str | None) -> bool:
+        """6.3 — whether an operator debounce policy is active for
+        (source, mode). Used by the daemon's built-in ``PersistenceGate``
+        wiring: when true, the tuner's own ``min_consecutive`` fully owns
+        that key's persistence requirement, so the gate is bypassed for it
+        instead of stacking a second requirement on top."""
+        return self._policy_for(source, mode) is not None
+
 
 def _now() -> float:
     return datetime.now(UTC).timestamp()

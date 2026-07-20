@@ -48,7 +48,10 @@ export interface GridBinnedMeanFit extends BehaviorFitBase {
 }
 
 export interface DeviationConfig {
-  kind: "absolute" | "relative";
+  // 9.4: backend normalizes the deprecated "relative" alias to "sigma" at
+  // config load, so the API never actually serves "relative" — see
+  // DeviationConfig in src/decode/behavior_models.py.
+  kind: "absolute" | "sigma";
   warning_band: number | null;
   critical_band: number | null;
   reference_std: number | null;

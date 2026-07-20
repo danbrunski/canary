@@ -70,7 +70,13 @@ As shipped (`src/models/lstm_autoencoder.py`): masked **MSE**
 for `reconstruction_error` at serve/scoring. Per-mode error thresholds
 are calibrated on the masked scoring metric. (A TCN backbone with the
 same `(value, mask, delta)` contract is also available — see
-`src/models/tcn.py` and `models.sequence_detector` in config.)
+`src/models/tcn.py` and `models.sequence_detector` in config. **9.1
+decision (operator-approved):** GRU-D LSTM is the default
+`sequence_detector` — its GRU decoder reconstructs step-by-step from the
+latent, materially stronger temporal-shape modeling than the TCN decoder's
+single broadcast-latent reconstruction (`tcn.py`). TCN stays available and
+documented as the NPU-export fallback, not an equal; no further bake-off
+is needed to proceed with LSTM as the shipped default.)
 
 ## Removed (superseded)
 

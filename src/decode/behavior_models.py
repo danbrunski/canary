@@ -26,12 +26,15 @@ during RE; auto-written by the refit CLI (4.E.8) once it exists.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Collection, Sequence
 from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+log = logging.getLogger(__name__)
 
 #: Default location of the hand-edited / refit-written behavior-model file.
 #: Anchored to this file's repo (``src/decode/`` → up 3), not the process
@@ -202,12 +205,19 @@ class DeviationConfig(_Strict):
     """When does the runtime treat ``actual − expected`` as an anomaly?
 
     ``absolute`` — fixed thresholds on ``|actual − expected|`` in output units.
-    ``relative`` — multiples of the local std (so per-cell std for 2D grids;
+    ``sigma`` — multiples of the local std (so per-cell std for 2D grids;
     1D fits use ``reference_std``, which the fitters auto-fill from the
     residual std when not declared). ``warning_band`` < ``critical_band``
     is required; either can be ``None`` to suppress that band.
 
-    ``sigma_floor`` (relative kind only) is a lower bound on the local std,
+    9.4 — ``sigma`` was named ``relative`` through the 2026-07 review, which
+    invited misreading it as "percent of expected" (it isn't; it's a
+    z-score against the local std). ``relative`` still loads — the
+    before-validator below aliases it to ``sigma`` with a deprecation log —
+    so shipped configs/refit artifacts using the old name keep working
+    unchanged; write new ones as ``sigma``.
+
+    ``sigma_floor`` (sigma kind only) is a lower bound on the local std,
     in output units. A cell fit on a quantization-flat stretch of data can
     carry a std below the sensor's LSB (the May 2026 IAT surface shipped a
     0.13° cell against a 0.5°/LSB PID — one LSB flicker fired warning) or
@@ -215,11 +225,26 @@ class DeviationConfig(_Strict):
     roughly the output's quantization step; both failure modes go away.
     """
 
-    kind: Literal["absolute", "relative"]
+    kind: Literal["absolute", "sigma"]
     warning_band: float | None = Field(default=None, ge=0)
     critical_band: float | None = Field(default=None, ge=0)
-    reference_std: float | None = None  # for kind=relative on 1D fits (auto-filled at fit time)
+    reference_std: float | None = None  # for kind=sigma on 1D fits (auto-filled at fit time)
     sigma_floor: float | None = Field(default=None, ge=0)
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _alias_relative(cls, value: object) -> object:
+        # 9.4 — deprecated alias for "sigma"; kept accepted (not just
+        # documented) so existing behavior_models.yaml artifacts and Pi
+        # deploys don't need a coordinated rewrite to keep loading.
+        if value == "relative":
+            log.warning(
+                "DeviationConfig kind='relative' is deprecated — it means "
+                "sigma-scaled (z-score), not percent-of-expected; rename to "
+                "kind='sigma' in the source YAML/refit recipe."
+            )
+            return "sigma"
+        return value
 
     @model_validator(mode="after")
     def _check_bands(self) -> DeviationConfig:
@@ -235,14 +260,14 @@ class DeviationConfig(_Strict):
 
     @model_validator(mode="after")
     def _check_sigma_floor(self) -> DeviationConfig:
-        # 4.2 — a relative band with no floor (or a floor of 0) is a live
+        # 4.2 — a sigma band with no floor (or a floor of 0) is a live
         # hair-trigger: a cell/fit fit on quantization-flat data can carry a
         # std below the sensor's LSB (or exactly 0.0), and the May 2026 IAT
         # surface shipped exactly that. Schema-enforce it instead of relying
         # on every recipe author remembering the convention.
-        if self.kind == "relative" and not (self.sigma_floor is not None and self.sigma_floor > 0):
+        if self.kind == "sigma" and not (self.sigma_floor is not None and self.sigma_floor > 0):
             raise ValueError(
-                "kind='relative' requires a positive sigma_floor — a cell/fit std can "
+                "kind='sigma' requires a positive sigma_floor — a cell/fit std can "
                 "collapse to (near) zero on quantization-flat data and hair-trigger "
                 "without one; set it to roughly the output's sensor LSB"
             )
@@ -272,10 +297,10 @@ class BehaviorModel1D(_Strict):
     def _check_deviation(self) -> BehaviorModel1D:
         if (
             self.deviation is not None
-            and self.deviation.kind == "relative"
+            and self.deviation.kind == "sigma"
             and self.deviation.reference_std is None
         ):
-            raise ValueError(f"{self.name}: relative deviation on a 1D surface needs reference_std")
+            raise ValueError(f"{self.name}: sigma deviation on a 1D surface needs reference_std")
         return self
 
 

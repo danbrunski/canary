@@ -367,29 +367,44 @@ semantics differ between IF (freezes on missing) and LSTM/behavior
 events; tuner debounce stacks on the built-in gate; fused dedupe key
 churns on hot-swap.
 
-- [ ] **6.1 — M-of-N persistence.** Replace N-consecutive with an
+- [x] **6.1 — M-of-N persistence.** Replace N-consecutive with an
   M-of-N sliding window per key (e.g. 3-of-5 default, config under
   `alerts.`), preserving flood protection while catching flicker.
   Wall-clock-bound the window (N ticks *or* T seconds, whichever is
   shorter) so streaks can't accumulate across long data gaps
   (fixes the freeze inconsistency too — define observe-on-every-tick
   semantics for all three detector paths, including IF missing ticks).
-- [ ] **6.2 — Decide what fusion is.** Either (a) make it a real
+  — landed: `PersistenceGate` keeps a trailing (timestamp, hit) window,
+  latches on M hits within N ticks or T seconds (default 3-of-5, 8s);
+  `window=required` is provably equivalent to the old strict-N-
+  consecutive default; `firing=None` freezes the window (uniform
+  missing-verdict semantics for IF blindness, LSTM buffer-not-full, and
+  behavior off-mode ticks).
+- [x] **6.2 — Decide what fusion is.** Either (a) make it a real
   agreement gate: fused `is_anomaly` requires `agreement >= 2` (single
   sources still emit their own events), or (b) keep OR-with-boost but
   stop double-emitting: suppress the per-source event when a fused
   event covering the same tick fires, and rename the config/docs to
   "escalation score". **Decision made (operator-approved, see
   OVERNIGHT-QUEUE.md): implement (a).** Update config docs accordingly.
-- [ ] **6.3 — Tuner/gate stacking.** Document (or unify) the two
+  — landed: `FusionConfig.min_agreement` (default 2); `is_anomaly`
+  requires `severity >= threshold AND independent_groups >= min_agreement`;
+  per-source events unchanged/unsuppressed.
+- [x] **6.3 — Tuner/gate stacking.** Document (or unify) the two
   debounce layers — built-in PersistenceGate (keyed by source) and
   `AlertTuner` `min_consecutive` (keyed by source+mode,
   `tuning.py:319-346`). Simplest: tuner debounce *replaces* the
-  built-in requirement for that key rather than stacking.
-- [ ] **6.4 — Stable fused dedupe key.** Drop model versions from the
+  built-in requirement for that key rather than stacking. — landed:
+  `AlertTuner.has_debounce_override` bypasses the built-in gate
+  entirely (not stacked) at all three detector call sites when a tuner
+  override exists for that key.
+- [x] **6.4 — Stable fused dedupe key.** Drop model versions from the
   fused event's dedupe identity (`daemon/inference.py:216`,
   `emitter.py:263`) so a hot-swap can't burst a duplicate alert inside
-  the dedupe window; keep versions in the event payload.
+  the dedupe window; keep versions in the event payload. — landed:
+  `AnomalyEvent.dedupe_key` is a stable `"fused"` for fused events;
+  `model_version` still carries full per-model provenance in the
+  payload.
 - [ ] **6.5 — Benchmark the gate change.** Re-run the FP benchmark and
   (once built) the fault-injection benchmark with intermittent-fault
   cases (fire/gap patterns) to demonstrate 6.1 catches them at
@@ -465,13 +480,15 @@ These merge into **Phase 2 of `eval-longitudinal-and-dtc.md`** (tasks
 
 ## Phase 9 — Model-portfolio actions (T3, informed by literature)
 
-- [ ] **9.1 — Settle the backbone bake-off.** The TCN decoder
+- [x] **9.1 — Settle the backbone bake-off.** The TCN decoder
   reconstructs from a single broadcast latent (`tcn.py:314-316`) —
   materially weaker temporal-shape modeling than the GRU decoder.
   **Decision made (operator-approved, see OVERNIGHT-QUEUE.md): make
   GRU-D LSTM the default `sequence_detector` and document TCN as an
   NPU-export fallback, not an equal.** No further bake-off needed to
-  proceed.
+  proceed. — confirmed: `sequence_detector` already defaulted to
+  `"lstm"` in `src/config.py`; added the decision docstring + a config
+  test asserting the default so it can't silently drift.
 - [ ] **9.2 — DAMP spike (optional).** Prototype matrix-profile
   left-discords (DAMP, KDD'22) offline over a few sessions'
   per-channel streams as a model-free third opinion; evaluate in the
@@ -484,11 +501,14 @@ These merge into **Phase 2 of `eval-longitudinal-and-dtc.md`** (tasks
   window(s). Either persist last-observation timestamps across restart
   or accept + document; don't build machinery beyond a comment unless
   benchmark shows impact.
-- [ ] **9.4 — "Relative" naming.** `DeviationConfig.kind="relative"` is
+- [x] **9.4 — "Relative" naming.** `DeviationConfig.kind="relative"` is
   σ-scaled (z-score), not percent-of-expected
   (`behavior_decoder.py:291-304`). Rename to `sigma` (with backward
   compat alias) or document loudly; today the name invites
-  misconfigured bands.
+  misconfigured bands. — landed: canonical literal is now `"sigma"`;
+  a before-validator aliases legacy `"relative"` with a deprecation
+  warning. Real shipped `data/nissan-xterra-2008/behavior_models.yaml`
+  (uses `kind: relative`) confirmed still loads unchanged.
 
 ---
 

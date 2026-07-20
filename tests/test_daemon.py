@@ -1450,6 +1450,77 @@ async def test_score_and_emit_attaches_feature_contributors_from_scaler(
     assert events[0].affected_channels == ("obd:LOAD", "obd:RPM", "obd:SPEED")
 
 
+def test_persistence_sustained_tuner_override_replaces_not_stacks_with_gate() -> None:
+    """6.3: a tuner ``DebouncePolicy`` scoped to (source, mode) fully owns
+    that key's persistence requirement — every trustworthy tick passes
+    straight through the built-in ``PersistenceGate`` (bypassing its own
+    M-of-N) instead of also needing to clear a second, redundant
+    requirement before the tuner's own ``min_consecutive`` debounce
+    (applied separately, inside the emitter) even gets a look."""
+    from src.alerts.fusion import PersistenceGate
+    from src.alerts.tuning import AlertTuner, DebouncePolicy, TuningConfig
+    from src.daemon.inference import _persistence_sustained
+
+    gate = PersistenceGate(3, window=3)  # strict 3-of-3 — would need 3 real hits
+    tuner = AlertTuner(
+        TuningConfig(
+            debounce_policies=[DebouncePolicy(source="isolation_forest", operating_mode="idle")]
+        )
+    )
+
+    # A single firing tick, scoped to the tuner's override, passes straight
+    # through — the gate's own 3-of-3 requirement never applies to this key.
+    assert (
+        _persistence_sustained(
+            gate,
+            "isolation_forest",
+            True,
+            tuner=tuner,
+            source="isolation_forest",
+            mode="idle",
+            now=0.0,
+        )
+        is True
+    )
+    # The gate's own streak for this key was never advanced (no state
+    # leakage from the bypass) — it's still exactly as fresh as before.
+    assert gate.active("isolation_forest") is False
+
+    # A key outside the override's scope (different mode) is unaffected —
+    # it still goes through the built-in gate and needs its own M hits.
+    assert not _persistence_sustained(
+        gate, "isolation_forest", True, tuner=tuner, source="isolation_forest", mode="city", now=0.0
+    )
+    assert not _persistence_sustained(
+        gate, "isolation_forest", True, tuner=tuner, source="isolation_forest", mode="city", now=1.0
+    )
+    assert _persistence_sustained(
+        gate, "isolation_forest", True, tuner=tuner, source="isolation_forest", mode="city", now=2.0
+    )
+
+
+def test_persistence_sustained_missing_tick_always_goes_through_gate() -> None:
+    """A missing verdict (``firing=None``) always defers to the gate itself
+    (frozen, per ``PersistenceGate``'s own semantics) regardless of any
+    tuner bypass — there's no tuner debounce state to "pass through" for a
+    tick that produced no verdict at all."""
+    from src.alerts.fusion import PersistenceGate
+    from src.alerts.tuning import AlertTuner, DebouncePolicy, TuningConfig
+    from src.daemon.inference import _persistence_sustained
+
+    gate = PersistenceGate(3, window=3)
+    tuner = AlertTuner(
+        TuningConfig(debounce_policies=[DebouncePolicy(source="behavior", operating_mode="idle")])
+    )
+    assert (
+        _persistence_sustained(
+            gate, "behavior:x", None, tuner=tuner, source="behavior", mode="idle", now=0.0
+        )
+        is False
+    )
+    assert not gate.active("behavior:x")
+
+
 def test_finite_or_none() -> None:
     from src.daemon import _finite_or_none
 

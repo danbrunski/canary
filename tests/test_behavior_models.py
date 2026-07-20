@@ -191,6 +191,31 @@ def test_deviation_config_relative_requires_positive_sigma_floor() -> None:
     DeviationConfig(kind="absolute", warning_band=1.0, critical_band=2.0)
 
 
+def test_deviation_config_sigma_and_legacy_relative_alias_load_identically(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """9.4 — ``sigma`` is the canonical name (was ``relative``, which invited
+    reading it as percent-of-expected instead of a z-score). The deprecated
+    ``relative`` string must still load (existing behavior_models.yaml
+    artifacts and Pi deploys use it) and normalize to the exact same
+    validated config, with a deprecation warning logged."""
+    canonical = DeviationConfig(kind="sigma", warning_band=1.0, critical_band=2.0, sigma_floor=0.1)
+    assert canonical.kind == "sigma"
+
+    with caplog.at_level("WARNING"):
+        aliased = DeviationConfig(
+            kind="relative", warning_band=1.0, critical_band=2.0, sigma_floor=0.1
+        )
+    assert aliased.kind == "sigma"  # normalized, not left as "relative"
+    assert aliased == canonical  # identical validated config either way
+    assert any("deprecated" in record.message for record in caplog.records)
+
+    # An unrecognized kind is still rejected — the alias is a narrow,
+    # explicit exception, not a loosened literal.
+    with pytest.raises(ValidationError):
+        DeviationConfig(kind="percent", warning_band=1.0, critical_band=2.0)
+
+
 # ---------------------------------------------------------------------------
 # 2D cell-count enforcement
 # ---------------------------------------------------------------------------

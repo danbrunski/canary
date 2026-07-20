@@ -262,21 +262,35 @@ models:
     threshold_quantile: 0.995
   # Phase 7.2: fuse IF + LSTM + behavior residuals into one
   # agreement-aware calibrated severity (a "fused" AnomalyEvent). The
-  # per-source events still fire alongside it.
+  # per-source events still fire alongside it, independently — fusion never
+  # suppresses a per-source emit (6.2).
   fusion:
     enabled: true
     severity_threshold: 0.5
     agreement_boost: 0.25
     behavior_warning_severity: 0.5
     behavior_critical_severity: 1.0
+    # 6.2 (operator-approved): fused is_anomaly requires severity_threshold
+    # AND at least this many *independent* firing sources — a real
+    # agreement gate, not OR-with-boost. One detector firing alone, however
+    # severe, never sets the fused verdict by itself.
+    min_agreement: 2
 
-# Phase 7.5: shared emission policy. A detector must be over threshold for
-# min_consecutive_ticks consecutive ~1 Hz ticks before it emits an event or
-# counts as a firing fusion source (real faults persist; single-tick blips
-# were the historical flood), and an emitted (source, model) pair then goes
-# quiet for min_seconds_between_events.
+# Phase 7.5 / 6.1: shared emission policy. A detector must be over threshold
+# for at least min_consecutive_ticks (M) ticks within the trailing
+# persistence_window_ticks (N) — "M-of-N" — before it emits an event or
+# counts as a firing fusion source (real faults persist; a lone tick is the
+# historical flood). Default 3-of-5 tolerates one fire-gap-fire flicker per
+# window (a real intermittent-fault pattern a strict 3-consecutive gate
+# structurally could never catch) without weakening the 3 hits still
+# required. persistence_window_seconds additionally wall-clock-bounds the
+# window so a long data/replay gap can't let stale hits from before the gap
+# count toward a "fresh" streak once ticks resume. An emitted (source,
+# model) pair then goes quiet for min_seconds_between_events.
 alerts:
   min_consecutive_ticks: 3
+  persistence_window_ticks: 5
+  persistence_window_seconds: 8.0
   min_seconds_between_events: 30.0
 
 dashboard:

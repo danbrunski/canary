@@ -258,7 +258,7 @@ class AnomalyEventEmitter:
             return None
         self._logger.log(event)
         self.counters.emitted += 1
-        self._last_emit[(event.source, event.model_version)] = _seconds(event.timestamp)
+        self._last_emit[_dedupe_identity(event)] = _seconds(event.timestamp)
         if self._tuner is not None:
             self._tuner.notify_emitted(event, now=_seconds(event.timestamp))
         return event
@@ -266,12 +266,19 @@ class AnomalyEventEmitter:
     def _is_deduped(self, event: AnomalyEvent) -> bool:
         if self._min_seconds_between_events <= 0:
             return False
-        key = (event.source, event.model_version)
-        prior = self._last_emit.get(key)
+        prior = self._last_emit.get(_dedupe_identity(event))
         if prior is None:
             return False
         now = _seconds(event.timestamp)
         return (now - prior) < self._min_seconds_between_events
+
+
+def _dedupe_identity(event: AnomalyEvent) -> tuple[str, str]:
+    """Key the dedupe/refractory window on (6.4): ``dedupe_key`` when the
+    event sets one (currently only ``fused``, whose ``model_version`` embeds
+    both backing models' versions and shouldn't churn the dedupe identity on
+    a hot-swap), else the pre-6.4 ``(source, model_version)`` shape."""
+    return (event.source, event.dedupe_key or event.model_version)
 
 
 def _seconds(timestamp: str) -> float:

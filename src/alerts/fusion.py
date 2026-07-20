@@ -23,8 +23,18 @@ from whatever calibrated scale that detector has:
 
 The fused severity is the strongest single contribution plus an
 ``agreement_boost`` for every *additional* agreeing source, clamped to 1.0.
-One detector at its boundary sits at the emit edge; agreement pushes it
-decisively over. ``is_anomaly`` is ``severity >= severity_threshold``.
+
+**6.2 — fusion is a real agreement gate, not OR-with-boost.**
+(Operator-approved decision, see ``OVERNIGHT-QUEUE.md``'s "Fusion
+semantics".) ``is_anomaly`` requires BOTH ``severity >= severity_threshold``
+AND ``agreement >= min_agreement`` (independent-group count, default 2) —
+one detector firing alone, however severe, is corroborated by nothing and
+never sets the fused verdict; it still emits its own per-source event
+through the unrelated per-source emit paths (IF/LSTM/behavior events are
+never suppressed by fusion — no double-emit *suppression*, just no
+false "agreement" from a single voice). Sibling surfaces sharing a
+``group`` still collapse to one independent voice for both the boost and
+the gate, same as before.
 
 Kept narrow and dependency-light (no sklearn / torch / pandas) so the daemon
 can fuse without touching the model layers — same discipline as the emitter.
@@ -32,6 +42,8 @@ can fuse without touching the model layers — same discipline as the emitter.
 
 from __future__ import annotations
 
+import time
+from collections import deque
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -69,47 +81,113 @@ class FusionSource:
 
 
 class PersistenceGate:
-    """Require K consecutive firing ticks per key before a detector counts.
+    """Require M-of-N firing ticks (per key) within a wall-clock-bound window.
 
     The structural fix for the alert-flood class: every detector here scores
     at ~1 Hz, so a single-tick blip (sensor glitch, round-robin sampling
     skew, one bad window) otherwise becomes an event AND a fusion source
     instantly. Real faults the system exists to catch — vacuum leaks, knock
-    retard, thermostat failures — persist across ticks; a deviation that
-    can't survive ``required`` consecutive ticks is noise.
+    retard, thermostat failures — persist across ticks; a lone tick is noise.
 
-    Streaks reset on the first non-firing tick. Keys are detector names
-    (``"isolation_forest"``, ``"lstm_autoencoder"``, ``"behavior:<model>"``)
-    so each detector latches independently. Call :meth:`observe` exactly
-    once per key per tick; :meth:`active` reads the latched state without
-    advancing it.
+    **6.1 — M-of-N, not strict N-consecutive.** The old gate reset its streak
+    to zero on any single non-firing tick, so a K=3-consecutive gate at 1 Hz
+    structurally could never latch on an intermittent fault that fires,
+    gaps, fires (a real pattern for e.g. a marginal connector). This gate
+    instead keeps the trailing ``window`` (N) observed ticks per key and
+    latches once ``required`` (M) of them fired — ``window`` defaults to
+    ``required`` when not given, which reproduces the old strict-consecutive
+    behavior exactly (M-of-M), so existing single-argument callers are
+    unaffected; pass a looser ``window`` (e.g. ``required=3, window=5`` for
+    "3-of-5") to tolerate flicker without weakening the M hits still needed
+    for flood protection.
+
+    **Wall-clock bound.** ``window_seconds`` (T), when given, additionally
+    evicts any entry older than T seconds from *now* — whichever bound (N
+    ticks or T seconds) is tighter wins. Without this a data gap (replay
+    stop/start, a stalled queue, the daemon catching up after a stall) could
+    let stale hits from well before the gap count toward a "fresh" streak
+    once ticks resume; the eviction makes that structurally impossible.
+
+    **Missing ticks (``firing=None``).** A tick where the detector produced
+    no trustworthy verdict at all — IF's missing-feature blindness, a
+    behavior model that's off-mode this tick, a sequence detector whose
+    window buffer isn't full yet — is not "the detector looked and didn't
+    fire" (a real miss, which correctly displaces a stale hit from the
+    window). It's "the detector didn't get to look." The least-surprising
+    reading is a genuine no-op: :meth:`observe` leaves the window (and its
+    wall-clock bound) completely untouched and returns the unchanged
+    sustained state, so a run of missing ticks freezes rather than decays
+    the existing streak. This was already the pre-6.1 behavior for IF
+    (callers simply skipped calling ``observe`` on a blind tick); 6.1
+    extends the same semantics uniformly to every path via one explicit
+    ``None`` argument instead of each caller improvising its own skip logic.
+
+    Keys are detector names (``"isolation_forest"``, ``"lstm_autoencoder"``,
+    ``"behavior:<model>"``) so each detector latches independently. Call
+    :meth:`observe` at most once per key per tick; :meth:`active` reads the
+    latched state without advancing it (safe to call any time after the same
+    tick's ``observe`` for that key — it does not re-apply the wall-clock
+    trim against a *later* "now").
     """
 
-    def __init__(self, required: int) -> None:
+    def __init__(
+        self,
+        required: int,
+        *,
+        window: int | None = None,
+        window_seconds: float | None = None,
+    ) -> None:
         self._required = max(1, int(required))
-        self._streaks: dict[str, int] = {}
+        self._window = max(self._required, int(window) if window is not None else self._required)
+        self._window_seconds = window_seconds
+        self._history: dict[str, deque[tuple[float, bool]]] = {}
         self.suppressed = 0
 
     @property
     def required(self) -> int:
         return self._required
 
-    def observe(self, key: str, firing: bool) -> bool:
-        """Advance ``key``'s streak with this tick's verdict; return whether
-        the detector is sustained (streak ≥ required)."""
-        if not firing:
-            self._streaks.pop(key, None)
-            return False
-        streak = self._streaks.get(key, 0) + 1
-        self._streaks[key] = streak
-        if streak < self._required:
+    def observe(self, key: str, firing: bool | None, *, now: float | None = None) -> bool:
+        """Advance ``key``'s M-of-N window with this tick's verdict; return
+        whether the detector is sustained (hits within the window ≥
+        required).
+
+        ``firing=None`` is a missing-verdict tick (see class docstring): the
+        window is left untouched. ``now`` defaults to :func:`time.monotonic`
+        so real-time callers (the live daemon) get the wall-clock bound for
+        free; callers replaying historical data (the synthetic-fault
+        harness) pass the row's own timestamp so the bound reflects data
+        time, not however fast the replay loop happens to run.
+        """
+        if firing is None:
+            return self.active(key)
+        clock = now if now is not None else time.monotonic()
+        history = self._history.setdefault(key, deque())
+        history.append((clock, firing))
+        self._trim(history, clock)
+        sustained = self._hits(history) >= self._required
+        if firing and not sustained:
             self.suppressed += 1
-            return False
-        return True
+        return sustained
 
     def active(self, key: str) -> bool:
-        """Whether ``key`` is currently latched (read-only)."""
-        return self._streaks.get(key, 0) >= self._required
+        """Whether ``key`` is currently latched (read-only, no trimming)."""
+        history = self._history.get(key)
+        if not history:
+            return False
+        return self._hits(history) >= self._required
+
+    def _trim(self, history: deque[tuple[float, bool]], now: float) -> None:
+        while len(history) > self._window:
+            history.popleft()
+        if self._window_seconds is not None:
+            cutoff = now - self._window_seconds
+            while history and history[0][0] < cutoff:
+                history.popleft()
+
+    @staticmethod
+    def _hits(history: deque[tuple[float, bool]]) -> int:
+        return sum(1 for _, hit in history if hit)
 
 
 def downgrade_unsustained(source: FusionSource, sustained: bool) -> FusionSource:
@@ -215,7 +293,8 @@ class FusionScorer:
 
         Non-firing / unthresholded sources are retained in ``sources`` for
         evidence but never inflate severity. Nothing firing ⇒ severity ``0`` /
-        ``is_anomaly=False``.
+        ``is_anomaly=False``. 6.2: ``is_anomaly`` additionally requires
+        ``min_agreement`` independent firing sources — see module docstring.
         """
         present = tuple(sources)
         firing = [s for s in present if s.fired]
@@ -225,13 +304,19 @@ class FusionScorer:
         # Agreement counts *independent* voices: sources sharing a ``group``
         # (sibling surfaces grading the same output channel) collapse to one
         # before the boost — two timing surfaces over the same excursion are
-        # one piece of evidence, not corroboration.
+        # one piece of evidence, not corroboration. The same independent
+        # count gates ``is_anomaly`` (6.2) so a lone sibling pair can't pass
+        # as "agreement" any more than a single detector can.
         independent_groups = {s.group or s.name for s in firing}
         boost = self._config.agreement_boost * (len(independent_groups) - 1)
         severity = _bounded(base + boost)
+        is_anomaly = (
+            severity >= self._config.severity_threshold
+            and len(independent_groups) >= self._config.min_agreement
+        )
         return FusedResult(
             severity=severity,
-            is_anomaly=severity >= self._config.severity_threshold,
+            is_anomaly=is_anomaly,
             operating_mode=operating_mode,
             timestamp=timestamp,
             sources=present,

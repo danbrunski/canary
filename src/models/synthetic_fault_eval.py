@@ -11,8 +11,10 @@ plus the multiplicative *scale* fault), this:
 * scores with the trained Isolation Forest and the fused stream (the IF
   half of fusion is exercised even when no LSTM/behavior sources are
   available, so the regression guard sees the fusion code path),
-* runs every row through a fresh ``PersistenceGate`` (config's
-  ``alerts.min_consecutive_ticks``) — a "hit" is the first row whose
+* runs every row through a fresh ``PersistenceGate`` (config's 6.1 M-of-N —
+  ``alerts.min_consecutive_ticks`` of ``alerts.persistence_window_ticks``,
+  wall-clock-bound by ``alerts.persistence_window_seconds`` off the row's
+  own timestamp) — a "hit" is the first row whose
   *sustained* verdict lands within ``[start, end + rolling_window_seconds)``
   (8.2: a fault whose feature signature only fully forms after the window
   closes, once the rolling mean/std/roc has "seen" it, still counts as a
@@ -136,11 +138,14 @@ def _fused_anomalous(
 ) -> pd.Series:
     """Boolean fused-anomaly per row using IF as the only fusion source.
 
-    With one source the fused severity reduces to the IF source's own
-    contribution + the configured emit threshold; surfacing it through the
-    actual ``FusionScorer`` path is what the regression guard wants — the
-    behavior is identical to ``isolation_forest_source(...).fired`` at the
-    default config, but routed through the production fusion code."""
+    Surfacing it through the actual ``FusionScorer`` path exercises the
+    production fusion code even with no LSTM/behavior sources available.
+    6.2: fused ``is_anomaly`` now requires ``min_agreement`` (default 2)
+    *independent* firing sources, so with IF as the sole source here fused
+    structurally never fires — that's the intended agreement gate working,
+    not a bug in this harness; the regression guard checks the code path
+    runs cleanly (and that the FP floor is genuinely zero), not that it
+    matches IF's own verdict any more."""
     out = np.zeros(len(scored), dtype=bool)
     for i in range(len(scored)):
         row = scored.iloc[i]
@@ -219,8 +224,14 @@ def _first_sustained_detection(
     for row in zip(timestamps, *(signals[name] for name in names), strict=True):
         ts, fired_values = row[0], row[1:]
         in_match = match_start <= ts < grace_end
+        # 6.1 — the gate's wall-clock bound is keyed off *data* time (the
+        # row's own timestamp), not however fast this loop actually runs,
+        # so a synthetic frame with a real multi-second data gap exercises
+        # the same eviction the live daemon would apply, instead of every
+        # row landing within milliseconds of real wall-clock time.
+        now = ts.timestamp()
         for name, fired in zip(names, fired_values, strict=True):
-            sustained = persistence.observe(name, bool(fired))
+            sustained = persistence.observe(name, bool(fired), now=now)
             if detected[name] is None and sustained and in_match:
                 detected[name] = (ts, ts >= match_end)
     return detected
@@ -367,7 +378,11 @@ def evaluate_detectors(
             # Fresh gate per run — 2.4: run scoring through the production
             # persistence config so a hit reflects what would actually alert,
             # not any single over-threshold row.
-            persistence = PersistenceGate(config.alerts.min_consecutive_ticks)
+            persistence = PersistenceGate(
+                config.alerts.min_consecutive_ticks,
+                window=config.alerts.persistence_window_ticks,
+                window_seconds=config.alerts.persistence_window_seconds,
+            )
             signals = {
                 "isolation_forest": _if_anomalous(scored),
                 "fused": _fused_anomalous(scored, fusion=fusion, scales=scales),

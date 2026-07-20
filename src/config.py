@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal, Self
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class _Strict(BaseModel):
@@ -248,21 +248,51 @@ class IsolationForestConfig(_Strict):
 
 
 class AlertsConfig(_Strict):
-    """Emission policy shared by every detector (Phase 7.5).
+    """Emission policy shared by every detector (Phase 7.5; M-of-N 6.1).
 
     All defaulted so configs predating it keep loading.
     """
 
     #: A detector (IF / sequence / each behavior surface) must be over its
-    #: threshold for this many CONSECUTIVE inference ticks (~1 Hz) before it
-    #: emits an event or counts as a firing fusion source. Real faults
-    #: persist; single-tick blips are the historical flood. 1 = legacy
-    #: fire-on-first-tick behavior.
+    #: threshold for at least this many ticks WITHIN the trailing
+    #: ``persistence_window_ticks`` (M-of-N, 6.1) before it emits an event or
+    #: counts as a firing fusion source. Real faults persist; a lone tick is
+    #: the historical flood. 1 = legacy fire-on-first-tick behavior. Named
+    #: ``min_consecutive_ticks`` from its pre-6.1 strict-N-consecutive
+    #: shape; kept for config compatibility even though it's now the M in
+    #: M-of-N (``persistence_window_ticks`` defaults to this same value,
+    #: which reproduces the old strict-consecutive gate exactly).
     min_consecutive_ticks: int = Field(default=3, ge=1)
+    #: N — the trailing window (in ticks) the M hits above are counted
+    #: within. Must be >= min_consecutive_ticks. Default 5 against the
+    #: default M=3 gives the roadmap's "3-of-5" shape out of the box —
+    #: tolerates one fire-gap-fire flicker per window without weakening the
+    #: 3 hits still required (flood protection unchanged). ``None`` falls
+    #: back to ``min_consecutive_ticks`` itself (strict-consecutive, the
+    #: exact pre-6.1 gate) for anyone who explicitly wants that shape back.
+    persistence_window_ticks: int | None = Field(default=5, ge=1)
+    #: T — wall-clock bound (seconds) on the same window: an entry older
+    #: than this many seconds from "now" is evicted regardless of tick
+    #: count, so a long data/replay gap can't let stale hits from before the
+    #: gap count toward a streak once ticks resume. ``None`` disables the
+    #: time bound (tick-count-only, the pre-6.1 shape).
+    persistence_window_seconds: float | None = Field(default=8.0, gt=0.0)
     #: Per-(source, model) refractory window between emitted events. The old
     #: 1.0 s default was a no-op at the 1 Hz tick — a sustained deviation
     #: emitted ~3600 events/hour per source.
     min_seconds_between_events: float = Field(default=30.0, ge=0.0)
+
+    @model_validator(mode="after")
+    def _check_window(self) -> AlertsConfig:
+        if (
+            self.persistence_window_ticks is not None
+            and self.persistence_window_ticks < self.min_consecutive_ticks
+        ):
+            raise ValueError(
+                "persistence_window_ticks must be >= min_consecutive_ticks "
+                f"({self.persistence_window_ticks} < {self.min_consecutive_ticks})"
+            )
+        return self
 
 
 class FusionConfig(_Strict):
@@ -277,6 +307,14 @@ class FusionConfig(_Strict):
     #: Added to the fused severity per *additional* agreeing source beyond the
     #: first (agreement-aware boost), before clamping to 1.0.
     agreement_boost: float = Field(default=0.25, ge=0.0, le=1.0)
+    #: 6.2 (operator-approved decision, see OVERNIGHT-QUEUE.md "Fusion
+    #: semantics"): the fused event is a real agreement gate, not
+    #: OR-with-boost — ``is_anomaly`` requires at least this many
+    #: *independent* firing sources (sibling surfaces sharing a ``group``
+    #: still count as one), on top of ``severity_threshold``. A single
+    #: source at any severity never sets the fused verdict alone; it still
+    #: emits its own per-source event through the unrelated per-source path.
+    min_agreement: int = Field(default=2, ge=1)
     #: Normalized severity a "warning" / "critical" behavior-deviation band
     #: contributes as a fusion source.
     behavior_warning_severity: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -364,7 +402,12 @@ class ModelsConfig(_Strict):
     #: backend's own ``enabled`` flag still gates whether it loads (so an
     #: existing ``lstm_autoencoder.enabled: false`` keeps the slot off, and
     #: ``tcn_autoencoder`` defaults to disabled). See
-    #: ``src/models/sequence_registry.py``.
+    #: ``src/models/sequence_registry.py``. 9.1 (operator-approved decision,
+    #: see ``OVERNIGHT-QUEUE.md``): GRU-D LSTM is the shipped default — its
+    #: GRU decoder reconstructs step-by-step from the latent, materially
+    #: stronger temporal-shape modeling than the TCN decoder's single
+    #: broadcast-latent reconstruction. TCN is documented as an NPU-export
+    #: fallback, not an equal; no further bake-off gates this default.
     sequence_detector: Literal["lstm", "tcn"] = "lstm"
 
 
