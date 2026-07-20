@@ -114,10 +114,12 @@ operator history (ledger backfill facts)
   `PID_DECODERS` from the registry) turned out to be a genuine circular
   import, independently reproduced, so the reverse direction was used
   instead.
-- [ ] **Q11 — engine-analysis-and-mapping.md Phase 2, code-only slice**
+- [x] **Q11 — engine-analysis-and-mapping.md Phase 2, code-only slice**
   (2.1 wideband λ into `PID_DECODERS`; 2.3 absolute-load fix; 2.6
   custom-PID wiring + example file; 2.8 UI). 2.2/2.5/2.7 (captures)
-  and 2.4's live verification blocked-overnight.
+  and 2.4's live verification blocked-overnight. — 2.1/2.3/2.6/2.8 all
+  landed (commits `dfe24b4`, `aa0127d`, `bac96e4`). 2.2/2.4/2.5/2.7
+  remain blocked-overnight, need the truck/real captures.
 - [ ] **Q12 — eval-longitudinal-and-dtc.md Phases 5 + 6** (notifier +
   digest, shipped disabled-by-default — enabling/ntfy topic is a
   morning task; trip-end edge; session catalog + consumers incl. the
