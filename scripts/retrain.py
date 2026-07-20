@@ -46,7 +46,13 @@ import detector_benchmark  # noqa: E402
 import train_anomaly_model as if_trainer  # noqa: E402
 import train_lstm as lstm_trainer  # noqa: E402
 import train_tcn as tcn_trainer  # noqa: E402
-from _cli import add_common_args, load_config, resolve_sessions  # noqa: E402
+from _cli import (  # noqa: E402
+    add_common_args,
+    add_profile_arg,
+    load_config,
+    resolve_sessions,
+    scoped_models_dir,
+)
 from refit_behavior_models import _filter_sessions_by_boundary  # noqa: E402
 
 from src.alerts.feedback import DEFAULT_FEEDBACK_PATH, FeedbackStore  # noqa: E402
@@ -208,6 +214,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     add_common_args(parser)
+    add_profile_arg(parser)
     parser.add_argument(
         "--bindings",
         type=Path,
@@ -217,8 +224,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--if-out",
         type=Path,
-        default=Path("models/isolation_forest"),
-        help="Output directory for the Isolation Forest artifact + manifest.",
+        default=None,
+        help="Output directory for the Isolation Forest artifact + manifest. "
+        "Default: the (profile-scoped) <models_dir>/isolation_forest from --config.",
     )
     parser.add_argument(
         "--sequence-model",
@@ -382,7 +390,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     sequence_model = args.sequence_model or config.models.sequence_detector
     seq_model_type, seq_trainer = SEQUENCE_TRAINERS[sequence_model]
     args.sequence_model = sequence_model
-    args.sequence_out = args.sequence_out or Path("models") / seq_model_type
+    models_dir = scoped_models_dir(config, args.profile)
+    args.if_out = args.if_out or models_dir / "isolation_forest"
+    args.sequence_out = args.sequence_out or models_dir / seq_model_type
     args.seq_model_type = seq_model_type
 
     if args.skip_if and args.skip_sequence:

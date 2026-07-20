@@ -43,9 +43,14 @@ cd "${REPO_ROOT}"
 SESSIONS_ROOT="${SESSIONS_ROOT:-./sessions}"
 LAPTOP_CONFIG="${LAPTOP_CONFIG:-./canary.laptop.yaml}"
 BINDINGS="${BINDINGS:-data/bindings.yaml}"
-IF_OUT="${IF_OUT:-models/isolation_forest}"
-LSTM_OUT="${LSTM_OUT:-models/lstm_autoencoder}"
-TCN_OUT="${TCN_OUT:-models/tcn_autoencoder}"
+# Artifact dirs default to the profile-scoped models tree (models/<slug>/...)
+# resolved from the pulled Pi config — the same relative path the Pi daemon's
+# ModelManager watches post-profile-migration. Resolved lazily by
+# resolve_out_dirs() because the config only exists after 'pull'; env
+# overrides skip resolution entirely.
+IF_OUT="${IF_OUT:-}"
+LSTM_OUT="${LSTM_OUT:-}"
+TCN_OUT="${TCN_OUT:-}"
 SEQUENCE_MODEL="${SEQUENCE_MODEL:-}"   # empty = follow config; or lstm|tcn
 BEHAVIOR_OUT="${BEHAVIOR_OUT:-data/behavior_models.yaml}"
 DEVICE="${DEVICE:-cuda}"          # cuda=NVIDIA, cpu=fallback; mps is macOS-only
@@ -99,6 +104,27 @@ print(f"ok: resample_hz={got[0]} rolling_window_seconds={got[1]}")
 PY
 }
 
+resolve_out_dirs() {
+  [[ -n "${IF_OUT}" && -n "${LSTM_OUT}" && -n "${TCN_OUT}" ]] && return 0
+  [[ -s "${LAPTOP_CONFIG}" ]] || die "${LAPTOP_CONFIG} missing/empty — run 'pull' first."
+  local models_dir
+  models_dir="$("${PY}" - "${LAPTOP_CONFIG}" <<'PY'
+import sys
+from pathlib import Path
+from src.config import CanaryConfig
+from src.profiles import resolve_profile_for_tooling, scope_config
+cfg = CanaryConfig.from_yaml(Path(sys.argv[1]))
+if cfg.profiles.enabled:
+    cfg = scope_config(cfg, resolve_profile_for_tooling(cfg, None))
+print(cfg.daemon.models_dir)
+PY
+)" || die "could not resolve the profile-scoped models dir from ${LAPTOP_CONFIG}"
+  IF_OUT="${IF_OUT:-${models_dir}/isolation_forest}"
+  LSTM_OUT="${LSTM_OUT:-${models_dir}/lstm_autoencoder}"
+  TCN_OUT="${TCN_OUT:-${models_dir}/tcn_autoencoder}"
+  echo "artifact dirs: ${IF_OUT}  ${LSTM_OUT}  ${TCN_OUT}"
+}
+
 do_pull() {
   check_ssh
   step "pull sessions  ${REMOTE}:${PI_SESSIONS} -> ${SESSIONS_ROOT}/"
@@ -112,6 +138,7 @@ do_pull() {
 
 do_train() {
   assert_preprocessing
+  resolve_out_dirs
   local rc_retrain=0 rc_refit=0
   step "retrain Isolation Forest + sequence detector (device=${DEVICE})"
   # `|| rc=$?` keeps `set -e` from aborting here: retrain exits non-zero only
@@ -119,7 +146,7 @@ do_train() {
   # exit 0 by contract. The behavior refit below is independent of the anomaly
   # trainers and must run regardless, so it is never skipped by a retrain
   # failure. retrain trains IF + the configured sequence backbone (or the
-  # SEQUENCE_MODEL override) into models/<model_type>.
+  # SEQUENCE_MODEL override) into the profile-scoped models/<slug>/<model_type>.
   local seq_args=()
   [[ -n "${SEQUENCE_MODEL}" ]] && seq_args=(--sequence-model "${SEQUENCE_MODEL}")
   "${PY}" scripts/retrain.py \
@@ -140,6 +167,7 @@ do_train() {
 }
 
 do_push() {
+  resolve_out_dirs
   check_ssh
   step "push artifacts -> ${REMOTE}:${PI_REPO}"
   rsync "${RSYNC_OPTS[@]}" -e "ssh ${SSH_OPTS[*]}" \

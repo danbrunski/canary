@@ -27,6 +27,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.config import CanaryConfig  # noqa: E402
 from src.preprocessing import discover_sessions  # noqa: E402
+from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 
 def add_common_args(parser: argparse.ArgumentParser, *, help: str = "Path to canary.yaml.") -> None:
@@ -36,6 +37,30 @@ def add_common_args(parser: argparse.ArgumentParser, *, help: str = "Path to can
     worth keeping verbatim.
     """
     parser.add_argument("--config", type=Path, default=Path("canary.yaml"), help=help)
+
+
+def add_profile_arg(parser: argparse.ArgumentParser) -> None:
+    """Add the `--profile` flag that `scoped_models_dir` resolves output paths with."""
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="Vehicle profile slug to scope output paths to (see profiles.yaml). "
+        "Default: the vehicle: block's profile. No VIN probe is performed.",
+    )
+
+
+def scoped_models_dir(config: CanaryConfig, profile_slug: str | None) -> Path:
+    """The profile-scoped ``daemon.models_dir`` (``models/<slug>``) trainer output
+    defaults to — the same tree the daemon's ModelManager watches, so a default
+    train run lands where serving actually looks instead of the pre-profile
+    unscoped ``models/<model_type>``. Offline resolution, same contract as
+    `refit_behavior_models`: no VIN probe — ``--profile`` or the ``vehicle:``
+    block's default profile.
+    """
+    if not config.profiles.enabled:
+        return config.daemon.models_dir
+    profile = resolve_profile_for_tooling(config, profile_slug)
+    return scope_config(config, profile).daemon.models_dir
 
 
 def load_config(args: argparse.Namespace) -> CanaryConfig:
@@ -104,6 +129,8 @@ def resolve_sessions(args: argparse.Namespace, sessions_root: Path) -> list[Path
 
 __all__ = [
     "add_common_args",
+    "add_profile_arg",
+    "scoped_models_dir",
     "load_config",
     "discover_live_session_dirs",
     "filter_sessions_by_age",

@@ -20,10 +20,12 @@ clean sessions and prints the FPR, implied alerts-per-hour vs. the v1 budget
 (≤ 1 alert / hour), and a sweep of ``k`` threshold multipliers.
 
 Usage:
-  scripts/train_sequence.py --backbone lstm --sessions-root data/sessions \
-      --out models/lstm_autoencoder
+  scripts/train_sequence.py --backbone lstm --sessions-root data/sessions
   scripts/train_sequence.py --backbone tcn data/sessions/2026-05-11T222447 \
-      --out models/tcn_autoencoder --evaluate data/sessions/holdout_drive
+      --evaluate data/sessions/holdout_drive
+
+``--out`` defaults to the profile-scoped ``models/<slug>/<model_type>`` from
+``--config`` (override with ``--out``/``--profile``).
 
 Sessions must contain Parquet chunks (telemetry-*.parquet) — convert candump
 captures first with ``tools/log_to_parquet.py``. Requires the ``ml`` extra
@@ -43,7 +45,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from _cli import add_common_args, load_config
+from _cli import add_common_args, add_profile_arg, load_config, scoped_models_dir
 
 from src.config import CanaryConfig
 from src.log import configure_logging
@@ -426,6 +428,7 @@ def _build_arg_parser(backend: SequenceTrainingBackend, *, prog: str) -> argpars
         help="Where to discover sessions when none are given explicitly.",
     )
     add_common_args(parser)
+    add_profile_arg(parser)
     parser.add_argument(
         "--bindings",
         type=Path,
@@ -435,8 +438,9 @@ def _build_arg_parser(backend: SequenceTrainingBackend, *, prog: str) -> argpars
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path("models") / backend.model_type,
-        help="Output directory for model.pt + model.manifest.json.",
+        default=None,
+        help="Output directory for model.pt + model.manifest.json. "
+        f"Default: the (profile-scoped) <models_dir>/{backend.model_type} from --config.",
     )
     parser.add_argument(
         "--sequence-length",
@@ -525,6 +529,7 @@ def _run(backend: SequenceTrainingBackend, args: argparse.Namespace) -> int:
     configure_logging(args.log_level)
     configure_torch_threads()
     config = load_config(args)
+    args.out = args.out or scoped_models_dir(config, args.profile) / backend.model_type
 
     sessions = _resolve_training_sessions(args)
     if not sessions:

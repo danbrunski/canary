@@ -33,9 +33,14 @@ from pathlib import Path
 import pandas as pd
 
 try:
-    from _cli import add_common_args, load_config
+    from _cli import add_common_args, add_profile_arg, load_config, scoped_models_dir
 except ImportError:  # loaded as `scripts.train_anomaly_model` — repo root on path, not scripts/
-    from scripts._cli import add_common_args, load_config  # type: ignore[no-redef]
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_common_args,
+        add_profile_arg,
+        load_config,
+        scoped_models_dir,
+    )
 
 from src.config import CanaryConfig
 from src.decode.bindings import load_bindings
@@ -249,6 +254,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Where to discover sessions when none are given explicitly.",
     )
     add_common_args(parser)
+    add_profile_arg(parser)
     parser.add_argument(
         "--bindings",
         type=Path,
@@ -258,8 +264,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path("models/isolation_forest"),
-        help="Output directory for model.joblib + model.manifest.json.",
+        default=None,
+        help="Output directory for model.joblib + model.manifest.json. "
+        "Default: the (profile-scoped) <models_dir>/isolation_forest from --config.",
     )
     parser.add_argument(
         "--evaluate",
@@ -284,6 +291,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
     config = load_config(args)
+    args.out = args.out or scoped_models_dir(config, args.profile) / "isolation_forest"
 
     sessions: list[Path] = list(args.sessions)
     if not sessions:
