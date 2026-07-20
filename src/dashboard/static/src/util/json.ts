@@ -69,3 +69,13 @@ export function numberSeriesMap(value: unknown): Record<string, number[]> | null
   }
   return Object.keys(out).length > 0 ? out : null;
 }
+
+/** Parse `text` (blank treated as `"{}"`) as a JSON object; throws for
+ *  anything that isn't a plain object (array, null, primitive, unparseable). */
+export function parseJsonObject(text: string): Record<string, unknown> {
+  const parsed = JSON.parse(text || "{}") as unknown;
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error("Expected a JSON object.");
+  }
+  return parsed as Record<string, unknown>;
+}

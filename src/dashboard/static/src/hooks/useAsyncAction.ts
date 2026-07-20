@@ -3,6 +3,11 @@ import { useCallback, useState } from "react";
 import type { NoticeState } from "../styles";
 import { describeError } from "./useControlResource";
 
+/** The narrowed `run(label, action)` shape a panel builds around its own
+ *  `useAsyncAction` (fixed precheck + refresh) and hands down to its
+ *  extracted cards — see ControlPanel's card split (Task 3.2). */
+export type RunAction = (label: string, action: () => Promise<void>) => Promise<void>;
+
 interface RunOptions {
   /** Abort before running if this returns a message (shown as an error
    *  notice) — e.g. a "enter the control token first" gate. */

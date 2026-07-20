@@ -4,6 +4,7 @@ import { getTrainingRuns, submitJob } from "../api/http";
 import { Notice } from "../components/Notice";
 import { MetricTile } from "../components/MetricTile";
 import { Panel } from "../components/Panel";
+import { ResourceGate } from "../components/ResourceGate";
 import { TRAINING_JOB_KINDS } from "../lib/jobKinds";
 import { Sparkline } from "../components/Sparkline";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
@@ -196,29 +197,34 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
         </label>
       )}
       <Notice notice={notice} className="mb-3" />
-      {!historyEnabled ? (
-        <p className={placeholderClass}>
-          {target === "local"
+      <ResourceGate
+        enabled={historyEnabled}
+        enabledMessage={
+          target === "local"
             ? "Enter the companion API URL to read laptop training history."
-            : "Enter the Pi control token to read Pi training history."}
-        </p>
-      ) : loading ? (
-        <p className={placeholderClass}>loading runs…</p>
-      ) : error || !data ? (
-        <p className={cn(placeholderClass, "text-bad")}>{error ?? "no data"}</p>
-      ) : runs.length === 0 ? (
-        <p className={placeholderClass}>No training runs recorded yet.</p>
-      ) : (
-        <div className="flex max-h-[34rem] flex-col gap-2 overflow-y-auto">
-          {runs.map((run) => (
-            <RunCard
-              key={run.run_id}
-              run={run}
-              comparison={comparisons.get(run.run_id) ?? null}
-            />
-          ))}
-        </div>
-      )}
+            : "Enter the Pi control token to read Pi training history."
+        }
+        loading={loading}
+        loadingMessage="loading runs…"
+        error={error}
+        data={data}
+      >
+        {() =>
+          runs.length === 0 ? (
+            <p className={placeholderClass}>No training runs recorded yet.</p>
+          ) : (
+            <div className="flex max-h-[34rem] flex-col gap-2 overflow-y-auto">
+              {runs.map((run) => (
+                <RunCard
+                  key={run.run_id}
+                  run={run}
+                  comparison={comparisons.get(run.run_id) ?? null}
+                />
+              ))}
+            </div>
+          )
+        }
+      </ResourceGate>
     </Panel>
   );
 }

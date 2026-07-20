@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import { getCanCoverage, getDids, getObdCoverage } from "../api/http";
 import { Panel } from "../components/Panel";
+import { ResourceGate } from "../components/ResourceGate";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { useControlResource } from "../hooks/useControlResource";
 import { cn, placeholderClass } from "../styles";
@@ -164,14 +165,6 @@ function arrange<T>(
   return out;
 }
 
-function Loading({ what }: { what: string }) {
-  return <p className={placeholderClass}>{what}</p>;
-}
-
-function Err({ msg }: { msg: string }) {
-  return <p className={cn(placeholderClass, "text-bad")}>{msg}</p>;
-}
-
 // ---------------------------------------------------------------------------
 // OBD PIDs
 // ---------------------------------------------------------------------------
@@ -203,39 +196,40 @@ function ObdTab({
     });
   }, [data, channels, view]);
 
-  if (loading) return <Loading what="probing OBD…" />;
-  if (error || !data) return <Err msg={error ?? "no coverage data"} />;
-
   return (
-    <>
-      <Summary text={`${data.decoded_count}/${data.rows.length} PIDs supported`} />
-      <div className={SCROLL}>
-        <table className={TABLE}>
-          <thead className={THEAD}>
-            <tr>
-              <th className={TD}>PID</th>
-              <th className={TD}>Name</th>
-              <th className={TD}>Value</th>
-            </tr>
-          </thead>
-          <tbody className="font-num tabular-nums">
-            {rows.map((r: ObdCoverageRow) => {
-              const lv = liveValue(channels, r.channel ? `obd:${r.channel}` : null);
-              const supported = r.status !== "unsupported";
-              return (
-                <tr key={`${r.mode}-${r.pid}`} className={ROW}>
-                  <td className={cn(TD, "text-fg-dim")}>{r.pid_hex}</td>
-                  <td className={cn(TD, !supported && "text-fg-faint")}>
-                    {r.display_name ?? r.channel ?? "—"}
-                  </td>
-                  <td className="py-1">{valueCell(lv.active, lv.text)}</td>
+    <ResourceGate loading={loading} loadingMessage="probing OBD…" error={error} data={data}>
+      {(data) => (
+        <>
+          <Summary text={`${data.decoded_count}/${data.rows.length} PIDs supported`} />
+          <div className={SCROLL}>
+            <table className={TABLE}>
+              <thead className={THEAD}>
+                <tr>
+                  <th className={TD}>PID</th>
+                  <th className={TD}>Name</th>
+                  <th className={TD}>Value</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </>
+              </thead>
+              <tbody className="font-num tabular-nums">
+                {rows.map((r: ObdCoverageRow) => {
+                  const lv = liveValue(channels, r.channel ? `obd:${r.channel}` : null);
+                  const supported = r.status !== "unsupported";
+                  return (
+                    <tr key={`${r.mode}-${r.pid}`} className={ROW}>
+                      <td className={cn(TD, "text-fg-dim")}>{r.pid_hex}</td>
+                      <td className={cn(TD, !supported && "text-fg-faint")}>
+                        {r.display_name ?? r.channel ?? "—"}
+                      </td>
+                      <td className="py-1">{valueCell(lv.active, lv.text)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </ResourceGate>
   );
 }
 
@@ -263,50 +257,54 @@ function DidTab({
     });
   }, [data, channels, view]);
 
-  if (loading) return <Loading what="loading DID catalog…" />;
-  if (error || !data) return <Err msg={error ?? "no DID data"} />;
-
-  const responding = data.dids.filter((d) => liveValue(channels, `did:${d.name}`).active).length;
-
   return (
-    <>
-      <Summary text={`${responding}/${data.dids.length} DIDs responding`} />
-      {data.dids.length === 0 ? (
-        <p className={placeholderClass}>
-          no DIDs catalogued — pin findings into <code>data/dids.yaml</code>.
-        </p>
-      ) : (
-        <div className={SCROLL}>
-          <table className={TABLE}>
-            <thead className={THEAD}>
-              <tr>
-                <th className={TD}>DID</th>
-                <th className={TD}>Name</th>
-                <th className={TD}>Value</th>
-                <th className={TD}>Unit</th>
-                <th className={TD}>Conf.</th>
-              </tr>
-            </thead>
-            <tbody className="font-num tabular-nums">
-              {rows.map((d: DidEntry) => {
-                const lv = liveValue(channels, `did:${d.name}`);
-                return (
-                  <tr key={d.did} className={ROW}>
-                    <td className={cn(TD, "text-fg-dim")}>
-                      0x{d.did.toString(16).toUpperCase().padStart(4, "0")}
-                    </td>
-                    <td className={TD}>{d.name}</td>
-                    <td className={TD}>{valueCell(lv.active, lv.text)}</td>
-                    <td className={cn(TD, "text-fg-dim")}>{d.unit || "—"}</td>
-                    <td className={cn(TD, "text-fg-faint")}>{d.confidence}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </>
+    <ResourceGate loading={loading} loadingMessage="loading DID catalog…" error={error} data={data}>
+      {(data) => {
+        const responding = data.dids.filter(
+          (d) => liveValue(channels, `did:${d.name}`).active,
+        ).length;
+        return (
+          <>
+            <Summary text={`${responding}/${data.dids.length} DIDs responding`} />
+            {data.dids.length === 0 ? (
+              <p className={placeholderClass}>
+                no DIDs catalogued — pin findings into <code>data/dids.yaml</code>.
+              </p>
+            ) : (
+              <div className={SCROLL}>
+                <table className={TABLE}>
+                  <thead className={THEAD}>
+                    <tr>
+                      <th className={TD}>DID</th>
+                      <th className={TD}>Name</th>
+                      <th className={TD}>Value</th>
+                      <th className={TD}>Unit</th>
+                      <th className={TD}>Conf.</th>
+                    </tr>
+                  </thead>
+                  <tbody className="font-num tabular-nums">
+                    {rows.map((d: DidEntry) => {
+                      const lv = liveValue(channels, `did:${d.name}`);
+                      return (
+                        <tr key={d.did} className={ROW}>
+                          <td className={cn(TD, "text-fg-dim")}>
+                            0x{d.did.toString(16).toUpperCase().padStart(4, "0")}
+                          </td>
+                          <td className={TD}>{d.name}</td>
+                          <td className={TD}>{valueCell(lv.active, lv.text)}</td>
+                          <td className={cn(TD, "text-fg-dim")}>{d.unit || "—"}</td>
+                          <td className={cn(TD, "text-fg-faint")}>{d.confidence}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        );
+      }}
+    </ResourceGate>
   );
 }
 
@@ -370,44 +368,45 @@ function CanTab({
     });
   }, [data, channels, view]);
 
-  if (loading) return <Loading what="loading CAN catalog…" />;
-  if (error || !data) return <Err msg={error ?? "no CAN data"} />;
-
   return (
-    <>
-      <Summary text={`${data.decoded_id_count} IDs decoded · ${data.signal_count} signals`} />
-      <div className={SCROLL}>
-        <table className={TABLE}>
-          <thead className={THEAD}>
-            <tr>
-              <th className={TD}>CAN ID</th>
-              <th className={TD}>Signal</th>
-              <th className={TD}>Value</th>
-              <th className={TD}>Src</th>
-            </tr>
-          </thead>
-          <tbody className="font-num tabular-nums">
-            {rows.map((r) => {
-              const lv = liveValue(channels, r.channel);
-              return (
-                <tr key={`${r.canIdHex}-${r.signal}-${r.source}`} className={ROW}>
-                  <td className={cn(TD, "text-fg-dim")}>{r.canIdHex}</td>
-                  <td className={cn(TD, r.undecoded && "text-fg-faint")}>{r.signal}</td>
-                  <td className={TD}>
-                    {r.undecoded ? (
-                      <span className="text-fg-faint">{lv.active ? "active" : "—"}</span>
-                    ) : (
-                      valueCell(lv.active, lv.text)
-                    )}
-                  </td>
-                  <td className={cn(TD, "text-fg-faint")}>{r.undecoded ? "raw" : r.source}</td>
+    <ResourceGate loading={loading} loadingMessage="loading CAN catalog…" error={error} data={data}>
+      {(data) => (
+        <>
+          <Summary text={`${data.decoded_id_count} IDs decoded · ${data.signal_count} signals`} />
+          <div className={SCROLL}>
+            <table className={TABLE}>
+              <thead className={THEAD}>
+                <tr>
+                  <th className={TD}>CAN ID</th>
+                  <th className={TD}>Signal</th>
+                  <th className={TD}>Value</th>
+                  <th className={TD}>Src</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </>
+              </thead>
+              <tbody className="font-num tabular-nums">
+                {rows.map((r) => {
+                  const lv = liveValue(channels, r.channel);
+                  return (
+                    <tr key={`${r.canIdHex}-${r.signal}-${r.source}`} className={ROW}>
+                      <td className={cn(TD, "text-fg-dim")}>{r.canIdHex}</td>
+                      <td className={cn(TD, r.undecoded && "text-fg-faint")}>{r.signal}</td>
+                      <td className={TD}>
+                        {r.undecoded ? (
+                          <span className="text-fg-faint">{lv.active ? "active" : "—"}</span>
+                        ) : (
+                          valueCell(lv.active, lv.text)
+                        )}
+                      </td>
+                      <td className={cn(TD, "text-fg-faint")}>{r.undecoded ? "raw" : r.source}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </ResourceGate>
   );
 }
 
