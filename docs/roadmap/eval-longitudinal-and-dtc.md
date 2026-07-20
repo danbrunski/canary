@@ -452,7 +452,7 @@ so").
 
 ### 6A. Session catalog
 
-- [ ] **6.1 — Schema + store.** `src/storage/catalog.py`: SQLite,
+- [x] **6.1 — Schema + store.** `src/storage/catalog.py`: SQLite,
   modeled directly on `src/companion/library.py` (`_SCHEMA:53`,
   `SCHEMA_VERSION` + `meta` migration table, `_tx` helper). One
   `sessions` table: session_id PK, path, started_at, duration_s,
@@ -460,15 +460,24 @@ so").
   mode_seconds/event_counts/quality/fingerprint/dtc/digest as JSON
   columns, updated_at. **Sidecars remain source of truth; the catalog is
   a rebuildable index** — corruption recovery is `rebuild`, never data
-  loss.
-- [ ] **6.2 — Config + scoping.** `DaemonConfig.catalog_db` (default
-  `data/control/catalog.db`) + `scope_config` wiring.
-- [ ] **6.3 — Rebuild + incremental update.** `scripts/catalog.py
+  loss. — landed: `record_session` re-derives every column from
+  on-disk sidecars/filesystem facts at call time (only `updated_at` is
+  catalog-owned wall-clock metadata); verified corruption-recovery
+  round-trips a rebuilt row identical to the original.
+- [x] **6.2 — Config + scoping.** `DaemonConfig.catalog_db` (default
+  `data/control/catalog.db`) + `scope_config` wiring. — landed; caught
+  by this session's own exhaustive `test_scope_config_covers_every_daemon_path_field`
+  guard as intended.
+- [x] **6.3 — Rebuild + incremental update.** `scripts/catalog.py
   rebuild|status` (walk `discover_sessions` + read sidecars); update the
   row wherever sidecars are written (classification persist, pin/unpin,
   fingerprint, dtc, digest) and delete rows in the retention sweeper
-  paths (`src/storage/retention.py`).
-- [ ] **6.4 — Consumers.** (a) `parquet_query._matching_files`
+  paths (`src/storage/retention.py`). — landed: `catalog_db` defaults to
+  `None` (skip) at every low-level function, only real production call
+  sites pass it explicitly. Review caught one real gap before landing —
+  the on-demand digest HTTP route wasn't threading `catalog_db` through
+  to `get_or_compute_digest` — fixed and covered by a route-level test.
+- [x] **6.4 — Consumers.** (a) `parquet_query._matching_files`
   (`src/mcp_server/parquet_query.py:93`) — **fix the standing bug**: the
   bare `rglob` sweeps `_replay-*`/`_archive` Parquet into query results;
   filter underscore-prefixed dirs and use the catalog for session/date
@@ -481,7 +490,14 @@ so").
   session owns it; note the supersession in the commit message only.) (b) `list_sessions`
   control listing.
   (c) Phase 4 trend queries read fingerprints from the catalog instead
-  of globbing sidecars.
+  of globbing sidecars. — landed: (a) verified the old bare-rglob logic
+  really would have swept in `_replay-*`/`_archive`/`_tuning-*`, the
+  fix genuinely excludes them by default while an explicit `session=`
+  name still resolves regardless of prefix; (b) `list_sessions` left
+  filesystem-based — the currently-recording session has no catalog
+  row until first classified, so a filesystem fallback would be needed
+  regardless; (c) trends genuinely read the catalog's fingerprint
+  column when populated, falling back to sidecar globbing otherwise.
 
 ### 6B. Model artifact provenance
 

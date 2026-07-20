@@ -470,6 +470,11 @@ class DaemonConfig(_Strict):
     #: file ⇒ zero custom PIDs polled (``load_custom_pids`` handles that
     #: gracefully), same posture as ``behavior_models`` above.
     custom_pids: Path = Path("data/custom_pids.yaml")
+    #: Session catalog (Task 6.1, eval-longitudinal-and-dtc.md) — SQLite index
+    #: over session sidecars. Rebuildable from disk at any time
+    #: (``scripts/catalog.py rebuild``); never a second source of truth.
+    #: Profile-scoped like the sibling ledger paths.
+    catalog_db: Path = Path("data/control/catalog.db")
     isolation_forest_artifact: str = "isolation_forest/model.joblib"
     lstm_artifact: str = "lstm_autoencoder/model.pt"
     tcn_artifact: str = "tcn_autoencoder/model.pt"

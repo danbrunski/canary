@@ -41,12 +41,15 @@ def handle_trip_end(
     emitter: AnomalyEventEmitter | None = None,
     notifier: Notifier | None = None,
     now: datetime | None = None,
+    catalog_db: Path | None = None,
 ) -> dict[str, Any] | None:
     """Assemble + persist the digest for one completed trip, and push it.
 
     Returns the digest dict on a freshly-computed trip end, or ``None``
     when the trip has no telemetry, no session directory, or was already
-    handled (idempotent re-fire — see module docstring).
+    handled (idempotent re-fire — see module docstring). ``catalog_db``
+    (Task 6.3), when given, re-indexes the session into the catalog right
+    after the digest is written; ``None`` (the default) skips it.
     """
     if emitter is not None:
         # The next trip gets its own push budget regardless of which path
@@ -54,7 +57,7 @@ def handle_trip_end(
         emitter.reset_notification_count()
     if read_digest(session_dir) is not None:
         return None
-    digest = get_or_compute_digest(session_dir, config, now=now)
+    digest = get_or_compute_digest(session_dir, config, now=now, catalog_db=catalog_db)
     if digest is None:
         return None
     if notifier is not None and config.notifications.digest_enabled:

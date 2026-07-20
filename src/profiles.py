@@ -362,6 +362,7 @@ def scope_config(config: CanaryConfig, profile: VehicleProfile) -> CanaryConfig:
             "trend_alert_state": _scope_file(config.daemon.trend_alert_state, slug),
             "behavior_models": _scope_file(config.daemon.behavior_models, slug),
             "custom_pids": _scope_file(config.daemon.custom_pids, slug),
+            "catalog_db": _scope_file(config.daemon.catalog_db, slug),
         }
     )
     vehicle = config.vehicle.model_copy(

@@ -39,6 +39,8 @@ collection:
   storage_path: {storage_path}
   session_retention_days: 30
   storage_warning_mb: 500
+daemon:
+  catalog_db: {storage_path.parent / "catalog.db"}
 preprocessing:
   resample_hz: 1
   rolling_window_seconds: 30

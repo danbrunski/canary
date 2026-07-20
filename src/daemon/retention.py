@@ -31,6 +31,7 @@ async def run_retention_sweeper(
     storage_warning_mb: int | None = None,
     replay_retention_days: int | None = None,
     active_replay_dir: Callable[[], Path | None] | None = None,
+    catalog_db: Path | None = None,
 ) -> None:
     """Periodically prune session dirs from the production daemon.
 
@@ -56,6 +57,7 @@ async def run_retention_sweeper(
                 storage_path,
                 retention_days,
                 protect={active},
+                catalog_db=catalog_db,
             )
             if deleted:
                 log.info(
@@ -67,7 +69,7 @@ async def run_retention_sweeper(
                         "active_session": str(active),
                     },
                 )
-            husks = delete_empty_sessions(storage_path, protect={active})
+            husks = delete_empty_sessions(storage_path, protect={active}, catalog_db=catalog_db)
             if husks.removed_sessions or husks.removed_files:
                 log.info(
                     "empty session husks cleaned",
@@ -82,6 +84,7 @@ async def run_retention_sweeper(
                     storage_path,
                     storage_max_mb,
                     protect={active},
+                    catalog_db=catalog_db,
                 )
                 if evicted:
                     log.info(
@@ -103,6 +106,7 @@ async def run_retention_sweeper(
                     storage_path,
                     replay_retention_days,
                     protect=protected_replays,
+                    catalog_db=catalog_db,
                 )
                 if evicted_replays:
                     log.info(
@@ -120,6 +124,7 @@ async def run_retention_sweeper(
                         storage_path,
                         storage_warning_mb,
                         protect={active},
+                        catalog_db=catalog_db,
                     )
                     if salvaged:
                         log.warning(

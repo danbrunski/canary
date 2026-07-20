@@ -247,6 +247,102 @@ def test_matching_files_session_scope_works_regardless_of_nesting_depth(tmp_path
     assert len(files) == 1
 
 
+# ---------------------------------------------------------------------------
+# Task 6.4(a) — the standing bug: bare rglob swept _replay-*/_archive in
+# ---------------------------------------------------------------------------
+
+
+def test_old_bare_rglob_would_have_swept_in_underscore_prefixed_dirs(tmp_path: Path) -> None:
+    """Proves the bug was real, against the exact pre-fix implementation
+    (a bare ``rglob`` with no underscore filtering) — not just a check that
+    the new code happens to exclude them."""
+    _write_fixture(
+        tmp_path, "2026-07-10T090000", [_row(dt.datetime(2026, 7, 10, 9, tzinfo=dt.UTC), 200.0)]
+    )
+    _write_fixture(
+        tmp_path,
+        "_replay-2026-07-11T090000",
+        [_row(dt.datetime(2026, 7, 11, 9, tzinfo=dt.UTC), 1.0)],
+    )
+
+    old_behavior = [str(p) for p in tmp_path.rglob("telemetry-*.parquet")]
+    assert any("_replay-" in p for p in old_behavior), (
+        "fixture setup is wrong: the old bare-rglob behavior should include the replay dir"
+    )
+
+    q = TelemetryQuery(tmp_path)
+    fixed = q._matching_files()
+    assert not any("_replay-" in p for p in fixed)
+    assert any("2026-07-10T090000" in p for p in fixed)
+
+
+def test_matching_files_excludes_replay_and_archive_by_default(tmp_path: Path) -> None:
+    _write_fixture(
+        tmp_path, "2026-07-10T090000", [_row(dt.datetime(2026, 7, 10, 9, tzinfo=dt.UTC), 200.0)]
+    )
+    _write_fixture(
+        tmp_path,
+        "_replay-2026-07-11T090000",
+        [_row(dt.datetime(2026, 7, 11, 9, tzinfo=dt.UTC), 1.0)],
+    )
+    # `_archive/` nests real quarantined sessions one level deeper.
+    _write_fixture(
+        tmp_path / "_archive",
+        "2026-07-12T090000",
+        [_row(dt.datetime(2026, 7, 12, 9, tzinfo=dt.UTC), 2.0)],
+    )
+    _write_fixture(
+        tmp_path,
+        "_tuning-2026-07-13T090000",
+        [_row(dt.datetime(2026, 7, 13, 9, tzinfo=dt.UTC), 3.0)],
+    )
+
+    q = TelemetryQuery(tmp_path)
+    files = q._matching_files()
+
+    assert len(files) == 1
+    assert "2026-07-10T090000" in files[0]
+
+
+def test_matching_files_explicit_underscore_session_name_still_resolves(tmp_path: Path) -> None:
+    """The escape hatch: a query that names an underscore-prefixed session
+    explicitly (e.g. a `_tuning-*` capture, engine-tuning-support.md Phase 2)
+    must still resolve it — only the *default* sweep excludes them."""
+    _write_fixture(
+        tmp_path,
+        "_tuning-2026-07-13T090000",
+        [_row(dt.datetime(2026, 7, 13, 9, tzinfo=dt.UTC), 3.0)],
+    )
+
+    q = TelemetryQuery(tmp_path)
+    files = q._matching_files(session="_tuning-2026-07-13T090000")
+    assert len(files) == 1
+    assert "_tuning-2026-07-13T090000" in files[0]
+
+
+def test_matching_files_uses_catalog_for_explicit_session_lookup(tmp_path: Path) -> None:
+    """When a catalog is wired, an explicit ``session=`` resolves via a direct
+    row lookup instead of walking the tree — and still falls back to the walk
+    for a session the catalog doesn't know about yet."""
+    from src.storage.catalog import SessionCatalog
+
+    catalogued = _write_fixture(
+        tmp_path, "2026-07-10T090000", [_row(dt.datetime(2026, 7, 10, 9, tzinfo=dt.UTC), 200.0)]
+    ).parent
+    uncatalogued = _write_fixture(
+        tmp_path, "2026-07-11T090000", [_row(dt.datetime(2026, 7, 11, 9, tzinfo=dt.UTC), 1.0)]
+    ).parent
+
+    with SessionCatalog(tmp_path / "catalog.db") as catalog:
+        catalog.record_session(catalogued)
+
+        q = TelemetryQuery(tmp_path, catalog=catalog)
+        assert len(q._matching_files(session=catalogued.name)) == 1
+        # Falls back to the tree walk for a session never indexed.
+        assert len(q._matching_files(session=uncatalogued.name)) == 1
+        assert q._matching_files(session="does-not-exist") == []
+
+
 def test_query_telemetry_session_scope_excludes_other_sessions(tmp_path: Path) -> None:
     _three_sessions(tmp_path)
     q = TelemetryQuery(tmp_path)

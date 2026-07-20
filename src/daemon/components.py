@@ -142,7 +142,8 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
             stale_after_seconds=max(
                 config.collection.obd_dtc_poll_interval_seconds * 3,
                 DEFAULT_DTC_STALE_AFTER_SECONDS,
-            )
+            ),
+            catalog_db=config.daemon.catalog_db,
         ),
         vehicle_ledger=VehicleLedgerStore(config.daemon.vehicle_ledger),
         capture_controller=None,

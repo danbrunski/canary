@@ -219,6 +219,31 @@ def test_get_or_compute_digest_returns_none_for_missing_session(tmp_path: Path) 
     assert get_or_compute_digest(tmp_path / "nope", _config(tmp_path)) is None
 
 
+def test_get_or_compute_digest_updates_the_catalog_when_wired(tmp_path: Path) -> None:
+    from src.storage.catalog import SessionCatalog
+
+    session = _session(tmp_path)
+    config = _config(tmp_path)
+    catalog_db = tmp_path / "catalog.db"
+
+    digest = get_or_compute_digest(session, config, now=SESSION_END, catalog_db=catalog_db)
+    assert digest is not None
+
+    with SessionCatalog(catalog_db) as catalog:
+        row = catalog.get_session(session.name)
+    assert row is not None
+    assert row.digest is not None
+    assert row.digest["session_id"] == session.name
+
+
+def test_get_or_compute_digest_skips_the_catalog_by_default(tmp_path: Path) -> None:
+    session = _session(tmp_path)
+    config = _config(tmp_path)
+
+    assert get_or_compute_digest(session, config, now=SESSION_END) is not None
+    assert not (tmp_path / "catalog.db").exists()
+
+
 def test_read_digest_returns_none_when_absent(tmp_path: Path) -> None:
     session = tmp_path / "2026-05-20T180000"
     session.mkdir()

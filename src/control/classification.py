@@ -24,6 +24,7 @@ from src.analysis.session_classifier import (
 )
 from src.config import CanaryConfig
 from src.control.trends import evaluate_and_alert_trends
+from src.storage.catalog import SessionCatalog
 
 if TYPE_CHECKING:
     from src.alerts.emitter import AnomalyEventEmitter
@@ -64,6 +65,7 @@ def classify_one_session(
     session_id: str,
     *,
     emitter: AnomalyEventEmitter | None = None,
+    catalog_db: Path | None = None,
 ) -> dict[str, Any]:
     """Run the classifier on one session and persist the sidecar.
 
@@ -73,6 +75,10 @@ def classify_one_session(
     (broadcasting) emitter so a trend alert reaches the dashboard's live
     stream, not just the persisted log; ``None`` falls back to a standalone
     one (see ``evaluate_and_alert_trends``).
+    ``catalog_db`` (Task 6.3), when given, is the session catalog's DB path —
+    the classification + fingerprint sidecars just written are indexed into
+    it right after; ``None`` (the default) skips the catalog entirely so
+    callers that never wire one up never touch that file.
     """
     if not _SESSION_DIR_RE.match(session_id):
         raise ValueError(f"refusing to classify non-live-session id {session_id!r}")
@@ -95,7 +101,21 @@ def classify_one_session(
             evaluate_and_alert_trends(config, session_id, emitter=emitter)
         except Exception:  # noqa: BLE001 — trend alerting must not block classification
             log.exception("trend evaluation failed for %s", session_id)
+    _update_catalog(catalog_db, session_dir)
     return classification.to_dict()
+
+
+def _update_catalog(catalog_db: Path | None, session_dir: Path) -> None:
+    """Best-effort catalog re-index (Task 6.3) — never blocks the sidecar
+    write it rides along with; the catalog is a rebuildable index, not a
+    second source of truth."""
+    if catalog_db is None:
+        return
+    try:
+        with SessionCatalog(catalog_db) as catalog:
+            catalog.record_session(session_dir)
+    except Exception:  # noqa: BLE001 — see docstring
+        log.exception("catalog update failed for %s", session_dir.name)
 
 
 def corpus_mode_summary(storage_path: Path) -> dict[str, Any]:

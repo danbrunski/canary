@@ -38,6 +38,12 @@ class MCPConfig:
     log_fallback_path: Path | None
     daemon_unit: str
     anomalies_dir: Path | None
+    #: Session catalog DB (Task 6.1/6.4a, eval-longitudinal-and-dtc.md), for
+    #: ``query_telemetry``'s session/date pushdown. ``None`` (the default)
+    #: falls straight back to a full tree walk — never a correctness
+    #: dependency, just an optimization once ``scripts/catalog.py rebuild``
+    #: has run.
+    catalog_db: Path | None = None
     #: Path to canary.yaml ($CANARY_CONFIG), for tools that need the full
     #: typed CanaryConfig (get_behavior_deviations) rather than just the
     #: derived storage_path/anomalies_dir this module already extracts.
@@ -88,6 +94,23 @@ def _anomalies_dir_from_config_yaml(config_path: str | None) -> Path | None:
     return Path("data/anomalies") if config_path else None
 
 
+def _catalog_db_from_config_yaml(config_path: str | None) -> Path | None:
+    """Pull ``daemon.catalog_db`` out of canary.yaml, same fallback shape as
+    ``_anomalies_dir_from_config_yaml``. Unlike ``storage_path`` there's no
+    bare-env-var override for this one yet — an operator who wants
+    ``query_telemetry`` catalog pushdown sets ``CANARY_CONFIG`` (they need it
+    for ``get_behavior_deviations`` anyway). The server only actually opens
+    this path when it already exists (see ``server.py``) — never created
+    just by the MCP server starting up.
+    """
+    data = _load_canary_yaml(config_path)
+    raw = (data.get("daemon") or {}).get("catalog_db")
+    if isinstance(raw, str) and raw:
+        return Path(raw)
+    # Daemon default when nothing is set.
+    return Path("data/control/catalog.db") if config_path else None
+
+
 def load_from_env() -> MCPConfig:
     """Build :class:`MCPConfig` from the process environment.
 
@@ -103,6 +126,11 @@ def load_from_env() -> MCPConfig:
       * ``CANARY_STORAGE_PATH`` — Parquet storage root for ``query_telemetry``.
         Falls back to ``collection.storage_path`` in ``$CANARY_CONFIG`` so the
         operator doesn't have to duplicate the path across two env files.
+      * ``CANARY_CATALOG_DB`` — session catalog DB path (Task 6.1/6.4a) for
+        ``query_telemetry``'s session/date pushdown. Falls back to
+        ``daemon.catalog_db`` in ``$CANARY_CONFIG``; only actually opened
+        when the file already exists, so an MCP server that never has one
+        built never creates it.
       * ``CANARY_MCP_STATELESS`` — ``1`` to pass ``stateless_http=True`` to
         FastMCP: no per-connection session id, so a ``canary-mcp`` restart
         (redeploy, crash, systemd flap) never leaves an existing client
@@ -127,6 +155,12 @@ def load_from_env() -> MCPConfig:
         anomalies_dir = Path(anomalies_env)
     else:
         anomalies_dir = _anomalies_dir_from_config_yaml(config_env)
+    catalog_env = os.environ.get("CANARY_CATALOG_DB")
+    catalog_db: Path | None
+    if catalog_env:
+        catalog_db = Path(catalog_env)
+    else:
+        catalog_db = _catalog_db_from_config_yaml(config_env)
     signals_env = os.environ.get("CANARY_SIGNALS_PATH")
     log_fallback_env = os.environ.get("CANARY_MCP_LOG_FALLBACK")
     data_dir_env = os.environ.get("CANARY_DATA_DIR")
@@ -148,6 +182,7 @@ def load_from_env() -> MCPConfig:
         log_fallback_path=Path(log_fallback_env) if log_fallback_env else None,
         daemon_unit=os.environ.get("CANARY_MCP_DAEMON_UNIT", "canary"),
         anomalies_dir=anomalies_dir,
+        catalog_db=catalog_db,
         config_path=Path(config_env) if config_env else None,
         mcp_stateless=os.environ.get("CANARY_MCP_STATELESS", "").strip() == "1",
     )

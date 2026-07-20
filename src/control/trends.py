@@ -55,11 +55,35 @@ def _iter_session_dirs(storage_path: Path) -> Iterable[Path]:
     )
 
 
-def _ordered_fingerprints(storage_path: Path) -> list[tuple[str, dict[str, float]]]:
-    """Every session under ``storage_path`` that has a fingerprint sidecar,
-    oldest-first (session directory names are ISO timestamps, so lexical
-    sort == chronological order — same convention ``_iter_session_dirs``
-    already relies on)."""
+def _ordered_fingerprints(
+    storage_path: Path, catalog_db: Path | None = None
+) -> list[tuple[str, dict[str, float]]]:
+    """Every session under ``storage_path`` that has a fingerprint, oldest-first
+    (session directory names are ISO timestamps, so lexical sort == chronological
+    order — same convention ``_iter_session_dirs`` already relies on).
+
+    Task 6.4(c): prefer the catalog's ``fingerprint`` column over globbing
+    sidecars directly, when the catalog is actually populated — an empty/
+    never-built catalog (``catalog_db`` unset, missing, or built but empty)
+    falls straight back to the sidecar walk, so this is a pure optimization
+    once ``scripts/catalog.py rebuild`` has run, never a behavior change for
+    a deployment that hasn't wired the catalog yet.
+    """
+    if catalog_db is not None and catalog_db.exists():
+        try:
+            from src.storage.catalog import SessionCatalog
+
+            with SessionCatalog(catalog_db) as catalog:
+                rows = catalog.fingerprints_by_session()
+        except Exception:  # noqa: BLE001 — fall back to the sidecar walk below
+            log.exception("catalog fingerprint read failed; falling back to sidecar walk")
+            rows = []
+        if rows:
+            return [
+                (session_id, stats)
+                for session_id, stats in rows
+                if _SESSION_DIR_RE.match(session_id) and (storage_path / session_id).is_dir()
+            ]
     ordered: list[tuple[str, dict[str, float]]] = []
     for session_dir in _iter_session_dirs(storage_path):
         fingerprint = read_fingerprint(session_dir)
@@ -86,7 +110,7 @@ def corpus_trend_summary(
             "stats": {},
         }
     root = sessions_root or config.collection.storage_path
-    fingerprints = _ordered_fingerprints(root)
+    fingerprints = _ordered_fingerprints(root, config.daemon.catalog_db)
     trends = evaluate_trends(
         fingerprints,
         reference,
@@ -155,7 +179,7 @@ def evaluate_and_alert_trends(
     if reference is None:
         return []
     root = sessions_root or config.collection.storage_path
-    fingerprints = _ordered_fingerprints(root)
+    fingerprints = _ordered_fingerprints(root, config.daemon.catalog_db)
     trends = evaluate_trends(
         fingerprints,
         reference,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import zipfile
@@ -13,6 +14,8 @@ from typing import Any
 
 from src.preprocessing.loader import PARQUET_PATTERN
 from src.session import MANIFEST_FILENAME, TAGS_FILENAME
+
+log = logging.getLogger(__name__)
 
 METADATA_FILENAME = "control.json"
 PIN_FILENAME = ".canary-pin"
@@ -47,7 +50,19 @@ class SessionSummary:
 
 
 def list_sessions(root: Path) -> list[SessionSummary]:
-    """Return timestamp-named session directories under `root`, newest last."""
+    """Return timestamp-named session directories under `root`, newest last.
+
+    Task 6.4(b) (eval-longitudinal-and-dtc.md): deliberately left reading the
+    filesystem directly rather than the session catalog. This listing must
+    show the *currently-recording* session too — which the catalog never has
+    a row for until it's been classified/pinned/fingerprinted/digested at
+    least once — so catalog-backing it would need to fall back to a
+    filesystem check for exactly the freshest (most operationally relevant)
+    session anyway. ``summarize_session`` per directory is also genuinely
+    cheap (glob + a couple of small file reads), so there's no real perf win
+    being left on the table today. Revisit if this listing's cost becomes a
+    measured problem, not preemptively.
+    """
     if not root.exists():
         return []
     sessions = [
@@ -123,20 +138,42 @@ def is_session_pinned(session: Path) -> bool:
     return (session / PIN_FILENAME).exists()
 
 
-def pin_session(session: Path, *, reason: str | None = None) -> dict[str, Any]:
+def pin_session(
+    session: Path, *, reason: str | None = None, catalog_db: Path | None = None
+) -> dict[str, Any]:
     metadata: dict[str, Any] = {"pinned": True, "pinned_at": datetime.now(UTC).isoformat()}
     if reason is not None:
         metadata["pin_reason"] = reason
     (session / PIN_FILENAME).write_text(json.dumps(metadata, sort_keys=True) + "\n")
-    return write_session_metadata(session, metadata)
+    result = write_session_metadata(session, metadata)
+    _update_catalog(catalog_db, session)
+    return result
 
 
-def unpin_session(session: Path) -> dict[str, Any]:
+def unpin_session(session: Path, *, catalog_db: Path | None = None) -> dict[str, Any]:
     (session / PIN_FILENAME).unlink(missing_ok=True)
-    return write_session_metadata(
+    result = write_session_metadata(
         session,
         {"pinned": False, "unpinned_at": datetime.now(UTC).isoformat()},
     )
+    _update_catalog(catalog_db, session)
+    return result
+
+
+def _update_catalog(catalog_db: Path | None, session: Path) -> None:
+    """Best-effort catalog re-index (Task 6.3) — the catalog is a rebuildable
+    index, never allowed to block a real pin/unpin. ``None`` (the default)
+    skips it entirely so callers that never wire one up never touch that
+    file."""
+    if catalog_db is None:
+        return
+    try:
+        from src.storage.catalog import SessionCatalog
+
+        with SessionCatalog(catalog_db) as catalog:
+            catalog.record_session(session)
+    except Exception:  # noqa: BLE001 — see docstring
+        log.exception("catalog update failed for %s", session.name)
 
 
 def delete_session(session: Path, *, force: bool = False) -> None:

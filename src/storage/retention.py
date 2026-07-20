@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from collections.abc import Callable, Iterable
@@ -10,6 +11,28 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from src.storage.monitor import free_space_mb as _default_free_space_mb
+
+log = logging.getLogger(__name__)
+
+
+def _delete_catalog_rows(catalog_db: Path | None, deleted: Iterable[Path]) -> None:
+    """Best-effort catalog row deletion (Task 6.3) for every directory this
+    sweep actually removed. Never blocks/undoes the real deletion — the
+    catalog is a rebuildable index, not a second source of truth. ``None``
+    (the default everywhere in this module) skips it entirely."""
+    if catalog_db is None:
+        return
+    names = [path.name for path in deleted]
+    if not names:
+        return
+    try:
+        from src.storage.catalog import SessionCatalog
+
+        with SessionCatalog(catalog_db) as catalog:
+            for name in names:
+                catalog.delete_session(name)
+    except Exception:  # noqa: BLE001 — see docstring
+        log.exception("catalog row deletion failed for %s", names)
 
 
 def _is_truncated_parquet(path: Path) -> bool:
@@ -36,12 +59,15 @@ def delete_expired_sessions(
     *,
     now: datetime | None = None,
     protect: Iterable[Path] | None = None,
+    catalog_db: Path | None = None,
 ) -> list[Path]:
     """Delete timestamp-named session directories older than retention_days.
 
     ``protect`` is an explicit safety rail for live sessions. A protected
     directory is never removed even if its timestamp is older than the
-    retention cutoff. Pin files keep their existing behavior.
+    retention cutoff. Pin files keep their existing behavior. ``catalog_db``
+    (Task 6.3), when given, drops the matching catalog row for every
+    directory actually deleted; ``None`` (the default) skips it.
     """
     if retention_days < 0:
         raise ValueError("retention_days must be non-negative")
@@ -67,6 +93,7 @@ def delete_expired_sessions(
         if started_at < cutoff:
             shutil.rmtree(child)
             deleted.append(child)
+    _delete_catalog_rows(catalog_db, deleted)
     return deleted
 
 
@@ -76,6 +103,7 @@ def delete_expired_replays(
     *,
     now: datetime | None = None,
     protect: Iterable[Path] | None = None,
+    catalog_db: Path | None = None,
 ) -> list[Path]:
     """Evict ``_replay-<replay_id>`` directories older than the configured age.
 
@@ -84,7 +112,8 @@ def delete_expired_replays(
     ``YYYY-MM-DDTHHMMSS`` form used by live sessions, just with a
     ``_replay-`` prefix that excludes the dir from training discovery
     and the live-session listing. Anything under ``sessions_root`` that
-    doesn't match the prefix + timestamp shape is ignored.
+    doesn't match the prefix + timestamp shape is ignored. ``catalog_db``
+    (Task 6.3) — see :func:`delete_expired_sessions`.
     """
     if replay_retention_days < 0:
         raise ValueError("replay_retention_days must be non-negative")
@@ -110,6 +139,7 @@ def delete_expired_replays(
         if started_at < cutoff:
             shutil.rmtree(child)
             deleted.append(child)
+    _delete_catalog_rows(catalog_db, deleted)
     return deleted
 
 
@@ -127,6 +157,7 @@ def delete_empty_sessions(
     now: datetime | None = None,
     protect: Iterable[Path] | None = None,
     min_age_seconds: float = 120.0,
+    catalog_db: Path | None = None,
 ) -> EmptySessionSweep:
     """Remove crash-loop / interrupted-write session husks.
 
@@ -138,7 +169,8 @@ def delete_empty_sessions(
     ``min_age_seconds`` (so a just-created session that hasn't flushed its first
     file isn't raced) — this drops 0-byte *and* truncated parquet files (a chunk
     killed mid-write by a power loss, missing its ``PAR1`` footer), then removes
-    the whole directory if no data survives anywhere in its tree.
+    the whole directory if no data survives anywhere in its tree. ``catalog_db``
+    (Task 6.3) — see :func:`delete_expired_sessions`.
     """
     if not sessions_root.exists():
         return EmptySessionSweep([], [])
@@ -168,6 +200,7 @@ def delete_empty_sessions(
         if _dir_tree_size(child) == 0:
             shutil.rmtree(child)
             removed_sessions.append(child)
+    _delete_catalog_rows(catalog_db, removed_sessions)
     return EmptySessionSweep(removed_sessions, removed_files)
 
 
@@ -188,6 +221,7 @@ def enforce_storage_cap(
     max_mb: int,
     *,
     protect: Iterable[Path] | None = None,
+    catalog_db: Path | None = None,
 ) -> list[Path]:
     """Evict oldest session directories until total session bytes are under cap.
 
@@ -200,7 +234,8 @@ def enforce_storage_cap(
     order is chronological — the same convention as ``delete_expired_sessions``).
     A directory containing ``.canary-pin`` or listed in ``protect`` (the live
     session dir) is never deleted, even if that means staying over the cap.
-    Returns the deleted directories, oldest first.
+    Returns the deleted directories, oldest first. ``catalog_db`` (Task 6.3) —
+    see :func:`delete_expired_sessions`.
     """
     if max_mb <= 0:
         raise ValueError("max_mb must be positive")
@@ -232,6 +267,7 @@ def enforce_storage_cap(
         shutil.rmtree(child)
         deleted.append(child)
         total -= size
+    _delete_catalog_rows(catalog_db, deleted)
     return deleted
 
 
@@ -241,6 +277,7 @@ def emergency_evict_for_free_space(
     *,
     protect: Iterable[Path] | None = None,
     free_space_mb: Callable[[Path], float] = _default_free_space_mb,
+    catalog_db: Path | None = None,
 ) -> list[Path]:
     """Oldest-first eviction until filesystem free space recovers.
 
@@ -254,6 +291,7 @@ def emergency_evict_for_free_space(
     session bytes alone. Aggressive relative to the byte cap: it ignores
     ``storage_max_mb`` and will delete every evictable dir if that is what it
     takes to keep the disk writable. Returns the evicted dirs, oldest first.
+    ``catalog_db`` (Task 6.3) — see :func:`delete_expired_sessions`.
     """
     if warning_mb < 0:
         raise ValueError("warning_mb must be non-negative")
@@ -279,6 +317,7 @@ def emergency_evict_for_free_space(
             continue
         shutil.rmtree(child)
         deleted.append(child)
+    _delete_catalog_rows(catalog_db, deleted)
     return deleted
 
 

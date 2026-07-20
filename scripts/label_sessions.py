@@ -48,6 +48,7 @@ from src.analysis.session_classifier import (
 from src.config import CanaryConfig
 from src.control.trends import evaluate_and_alert_trends
 from src.log import configure_logging
+from src.storage.catalog import SessionCatalog
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +90,16 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Compute the classification but don't write the sidecar.",
+    )
+    parser.add_argument(
+        "--catalog-db",
+        type=Path,
+        default=None,
+        help=(
+            "Also re-index each labeled session into the session catalog "
+            "(Task 6.3) at this DB path. Omit to skip the catalog entirely "
+            "and run ``scripts/catalog.py rebuild`` afterward instead."
+        ),
     )
     parser.add_argument(
         "--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR")
@@ -171,6 +182,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     evaluate_and_alert_trends(config, session_dir.name, sessions_root=sessions_root)
                 except Exception:  # noqa: BLE001 — trend alerting shouldn't block the batch
                     log.exception("trend evaluation failed for %s", session_dir.name)
+            if args.catalog_db is not None:
+                try:
+                    with SessionCatalog(args.catalog_db) as catalog:
+                        catalog.record_session(session_dir)
+                except Exception:  # noqa: BLE001 — catalog update shouldn't block the batch
+                    log.exception("catalog update failed for %s", session_dir.name)
         summary[classification.disposition] += 1
         log.info(
             "%s: %s  duration=%ss  modes=%s  events=%s",

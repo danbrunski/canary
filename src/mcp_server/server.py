@@ -114,6 +114,7 @@ from src.mcp_server.write_tools import (
 from src.mcp_server.write_tools import (
     vehicle_ledger as vehicle_ledger_write_tool,
 )
+from src.storage.catalog import SessionCatalog
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,16 @@ def _resolve_storage_path(config: MCPConfig) -> Path | None:
     if config.storage_path is not None:
         return config.storage_path
     return None
+
+
+def _resolve_catalog(config: MCPConfig) -> SessionCatalog | None:
+    """Session catalog for ``query_telemetry`` pushdown (Task 6.4a), or
+    ``None`` when unset/never built. Only opened when the file already
+    exists — the MCP server never creates a catalog just by starting up;
+    that's ``scripts/catalog.py rebuild``'s job."""
+    if config.catalog_db is None or not config.catalog_db.exists():
+        return None
+    return SessionCatalog(config.catalog_db)
 
 
 def _build_auth(
@@ -181,7 +192,9 @@ def build_server(config: MCPConfig | None = None) -> FastMCP:
     audit = MCPAuditLogger(cfg.audit_path)
     storage_path = _resolve_storage_path(cfg)
     query_runner: TelemetryQuery | None = (
-        TelemetryQuery(storage_path) if storage_path is not None else None
+        TelemetryQuery(storage_path, catalog=_resolve_catalog(cfg))
+        if storage_path is not None
+        else None
     )
 
     _register_read_tools(mcp, client, query_runner, cfg)

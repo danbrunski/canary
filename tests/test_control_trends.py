@@ -105,6 +105,54 @@ def test_summary_ignores_sessions_missing_fingerprints(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Task 6.4(c) — reads fingerprints from the catalog when it's populated
+# --------------------------------------------------------------------------- #
+
+
+def test_summary_reads_the_catalog_instead_of_the_sidecar_once_populated(tmp_path: Path) -> None:
+    """Proof the catalog is actually consulted (not just a no-op path): the
+    catalog row carries a DIFFERENT value than the on-disk sidecar, and the
+    summary reflects the catalog's value."""
+    import dataclasses
+
+    from src.storage.catalog import SessionCatalog
+
+    config = _config(tmp_path)
+    config = config.model_copy(
+        update={"daemon": config.daemon.model_copy(update={"catalog_db": tmp_path / "catalog.db"})}
+    )
+    _write_epoch(config, {"idle_rpm_mean": _summary(800.0, 10.0)})
+    session_dir = _write_session_fingerprint(config, "2026-06-01T000000", {"idle_rpm_mean": 800.0})
+
+    with SessionCatalog(config.daemon.catalog_db) as catalog:
+        catalog.record_session(session_dir)
+        # Overwrite just the fingerprint column with a distinguishable value —
+        # if the summary reflects THIS, the catalog path was taken.
+        row = catalog.get_session(session_dir.name)
+        assert row is not None
+        catalog._upsert(dataclasses.replace(row, fingerprint={"idle_rpm_mean": 950.0}))
+
+    summary = corpus_trend_summary(config)
+    assert summary["stats"]["idle_rpm_mean"]["latest_value"] == 950.0
+
+
+def test_summary_falls_back_to_sidecars_when_catalog_never_built(tmp_path: Path) -> None:
+    """An unset/never-built catalog is a pure no-op — same result as before
+    6.4(c), so a deployment that hasn't run ``scripts/catalog.py rebuild``
+    yet sees no behavior change."""
+    config = _config(tmp_path)
+    config = config.model_copy(
+        update={"daemon": config.daemon.model_copy(update={"catalog_db": tmp_path / "catalog.db"})}
+    )
+    _write_epoch(config, {"idle_rpm_mean": _summary(800.0, 10.0)})
+    _write_session_fingerprint(config, "2026-06-01T000000", {"idle_rpm_mean": 800.0})
+
+    assert not config.daemon.catalog_db.exists()
+    summary = corpus_trend_summary(config)
+    assert summary["stats"]["idle_rpm_mean"]["latest_value"] == 800.0
+
+
+# --------------------------------------------------------------------------- #
 # 4.6 — evaluate_and_alert_trends
 # --------------------------------------------------------------------------- #
 

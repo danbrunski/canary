@@ -25,6 +25,7 @@ sidecars/logs the earlier phases of this doc already compute independently:
 from __future__ import annotations
 
 import json
+import logging
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -40,6 +41,8 @@ from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.config import CanaryConfig
 from src.control.dtc_state import SIDECAR_FILENAME as DTC_SIDECAR_FILENAME
 from src.timefmt import format_timestamp as _format_timestamp
+
+log = logging.getLogger(__name__)
 
 DIGEST_FILENAME = "digest.json"
 SCHEMA_VERSION = 1
@@ -295,6 +298,7 @@ def get_or_compute_digest(
     *,
     force: bool = False,
     now: datetime | None = None,
+    catalog_db: Path | None = None,
 ) -> dict[str, Any] | None:
     """Serve the sidecar, computing + persisting it on first request.
 
@@ -303,6 +307,9 @@ def get_or_compute_digest(
     idempotent/on-demand too (e.g. ``GET /sessions/{id}/digest`` before the
     trip-end hook has fired, or a session with no GPS to trigger it at
     all). Returns ``None`` when the session has no telemetry recorded yet.
+    ``catalog_db`` (Task 6.3), when given, re-indexes the session into the
+    catalog right after a freshly-computed digest is written; ``None`` (the
+    default) skips the catalog entirely.
     """
     if not session_dir.is_dir():
         return None
@@ -315,7 +322,22 @@ def get_or_compute_digest(
     except FileNotFoundError:
         return None
     write_digest(session_dir, digest)
+    _update_catalog(catalog_db, session_dir)
     return read_digest(session_dir)
+
+
+def _update_catalog(catalog_db: Path | None, session_dir: Path) -> None:
+    """Best-effort catalog re-index (Task 6.3) — never blocks the digest
+    write it rides along with. ``None`` (the default) skips it entirely."""
+    if catalog_db is None:
+        return
+    try:
+        from src.storage.catalog import SessionCatalog
+
+        with SessionCatalog(catalog_db) as catalog:
+            catalog.record_session(session_dir)
+    except Exception:  # noqa: BLE001 — see docstring
+        log.exception("catalog update failed for %s", session_dir.name)
 
 
 __all__ = [

@@ -80,6 +80,7 @@ daemon:
   model_poll_seconds: 0.05
   retention_sweep_seconds: 0.05
   broadcaster_queue_size: 16
+  catalog_db: {tmp_path / "control" / "catalog.db"}
 """
 
 
@@ -912,6 +913,7 @@ async def test_run_daemon_wires_retention_sweeper_task(
         storage_warning_mb: int | None = None,
         replay_retention_days: int | None = None,
         active_replay_dir: Callable[[], Path | None] | None = None,
+        catalog_db: Path | None = None,
     ) -> None:
         captured.update(
             storage_path=storage_path,
@@ -922,6 +924,7 @@ async def test_run_daemon_wires_retention_sweeper_task(
             active_session_path=active_session_path(),
             replay_retention_days=replay_retention_days,
             active_replay_dir=active_replay_dir() if active_replay_dir else None,
+            catalog_db=catalog_db,
         )
         await stop_event.wait()
 
@@ -958,6 +961,7 @@ async def test_run_daemon_wires_retention_sweeper_task(
     assert captured["storage_max_mb"] == 1234
     assert captured["storage_warning_mb"] == 567
     assert captured["active_session_path"] == writer.paths.root
+    assert captured["catalog_db"] == config.daemon.catalog_db
 
 
 # ---------------------------------------------------------------------------

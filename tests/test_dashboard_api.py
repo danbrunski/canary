@@ -1036,6 +1036,43 @@ def test_get_session_digest_404_for_missing_session(
     assert response.status_code == 404
 
 
+def test_get_session_digest_route_updates_the_catalog(tmp_path: Path) -> None:
+    """Task 6.3: the on-demand digest route is a real sidecar-write site too
+    (not just the trip-end hook), so it must thread ``catalog_db`` through
+    just like the neighboring pin/unpin/classify routes do."""
+    from src.storage.catalog import SessionCatalog
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    catalog_db = tmp_path / "catalog.db"
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(storage) + f"daemon:\n  catalog_db: {catalog_db}\n")
+    config = CanaryConfig.from_yaml(cfg_path)
+
+    session_id = "2026-07-19T120000"
+    session = storage / session_id
+    records = [
+        TelemetryRecord.obd(1_779_400_000.0 + i, "SPEED", 60.0, "km/h") for i in range(10)
+    ] + [TelemetryRecord.obd(1_779_400_000.0 + i, "RPM", 2000.0, "rpm") for i in range(10)]
+    write_records_to_parquet(records, session, max_rows=10_000)
+
+    app = create_app(config, anomalies_dir=tmp_path / "anomalies", control_token="secret")
+    client = TestClient(app)
+    response = client.get(
+        f"/control/sessions/{session_id}/digest",
+        headers={"Authorization": "Bearer secret"},
+    )
+    assert response.status_code == 200
+
+    with SessionCatalog(catalog_db) as catalog:
+        row = catalog.get_session(session_id)
+    assert row is not None
+    assert row.digest is not None
+    assert row.digest["session_id"] == session_id
+
+
 def _event(timestamp: str, *, score: float) -> AnomalyEvent:
     return AnomalyEvent(
         timestamp=timestamp,

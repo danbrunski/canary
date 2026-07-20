@@ -46,6 +46,7 @@ def _run_trip_end_hook(
         config,
         emitter=components.emitter,
         notifier=components.notifier,
+        catalog_db=config.daemon.catalog_db,
     )
 
 
@@ -162,6 +163,7 @@ async def run_daemon(
             storage_warning_mb=config.collection.storage_warning_mb,
             replay_retention_days=config.collection.replay_retention_days,
             active_replay_dir=lambda: _active_replay_dir(components),
+            catalog_db=config.daemon.catalog_db,
         )
     )
     behavior_models_task: asyncio.Task[Any] | None = None

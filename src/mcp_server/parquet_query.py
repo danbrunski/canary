@@ -16,9 +16,12 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import duckdb
+
+if TYPE_CHECKING:
+    from src.storage.catalog import SessionCatalog
 
 #: Session directory names are exactly this shape (src.session.make_session_dir:
 #: ``started_at.strftime("%Y-%m-%dT%H%M%S")``, always UTC).
@@ -115,9 +118,16 @@ class TelemetryQuery:
     directory name (matching :data:`src.preprocessing.loader.PARQUET_PATTERN`).
     """
 
-    def __init__(self, storage_path: Path, *, default_limit: int = _DEFAULT_ROW_LIMIT) -> None:
+    def __init__(
+        self,
+        storage_path: Path,
+        *,
+        default_limit: int = _DEFAULT_ROW_LIMIT,
+        catalog: SessionCatalog | None = None,
+    ) -> None:
         self._storage_path = Path(storage_path)
         self._default_limit = default_limit
+        self._catalog = catalog
         # In-memory DB. Per-query refresh recreates the view from disk; we
         # don't keep state across queries beyond the connection itself.
         self._con = duckdb.connect(database=":memory:", read_only=False)
@@ -132,6 +142,19 @@ class TelemetryQuery:
         """``telemetry-*.parquet`` files under the storage root, optionally
         scoped to one session or a session-timestamp range.
 
+        **Storage-isolation convention** (``AGENTS.md``): a directory whose
+        name starts with ``_`` (``_replay-*``, ``_archive``, ``_tuning-*``) is
+        excluded from a default/unscoped sweep — the same convention
+        ``src.preprocessing.loader.discover_sessions`` already applies to
+        training discovery. This check is on any path component between the
+        storage root and the file (the session dir itself, or an intervening
+        ``_archive`` layer for a quarantined session moved under it), so it
+        holds regardless of nesting depth. An **explicit** ``session=`` name
+        always resolves, underscore-prefixed or not — callers that scope a
+        query at a named ``_tuning-*``/``_replay-*`` session (e.g.
+        ``engine-tuning-support.md`` Phase 2) need that escape hatch; only the
+        unscoped sweep excludes them.
+
         The directory walk itself (``rglob``) always touches every session's
         directory entries — that's just filesystem metadata, cheap even for a
         large corpus. The scoping win is downstream: fewer paths handed to
@@ -144,18 +167,42 @@ class TelemetryQuery:
         doesn't parse as a timestamp (e.g. stray non-session content) is kept
         when no date filter is requested, excluded when one is — an unparseable
         name can't be range-checked.
+
+        When a :class:`~src.storage.catalog.SessionCatalog` was given at
+        construction, it's used to shortcut two things: an explicit
+        ``session=`` name resolves via a direct catalog lookup instead of
+        walking the whole tree (falling back to the walk when the catalog
+        doesn't know about it yet — never a correctness dependency); and a
+        date-filtered sweep reads a catalogued session's ``started_at``
+        straight from its row instead of re-parsing it from the directory
+        name. Neither ever narrows the walk itself for the ranged case — an
+        uncatalogued, freshly-started session must still show up.
         """
         since_dt = _parse_bound(since, label="since") if since else None
         until_dt = _parse_bound(until, label="until") if until else None
         date_filtered = since_dt is not None or until_dt is not None
 
+        if session is not None:
+            if self._catalog is not None:
+                row = self._catalog.get_session(session)
+                if row is not None and Path(row.path).is_dir():
+                    return [str(p) for p in sorted(Path(row.path).glob("telemetry-*.parquet"))]
+            return [
+                str(p)
+                for p in sorted(self._storage_path.rglob("telemetry-*.parquet"))
+                if p.parent.name == session
+            ]
+
         matches: list[str] = []
-        for p in self._storage_path.rglob("telemetry-*.parquet"):
+        for p in sorted(self._storage_path.rglob("telemetry-*.parquet")):
             session_name = p.parent.name
-            if session is not None and session_name != session:
+            relative_dirs = p.relative_to(self._storage_path).parts[:-1]
+            if any(part.startswith("_") for part in relative_dirs):
                 continue
             if date_filtered:
-                ts = _parse_session_timestamp(session_name)
+                ts = self._catalog_started_at(session_name) if self._catalog is not None else None
+                if ts is None:
+                    ts = _parse_session_timestamp(session_name)
                 if ts is None:
                     continue
                 if since_dt is not None and ts < since_dt:
@@ -164,6 +211,20 @@ class TelemetryQuery:
                     continue
             matches.append(str(p))
         return matches
+
+    def _catalog_started_at(self, session_name: str) -> datetime | None:
+        """``started_at`` for a catalogued session, naive UTC (matching
+        :func:`_parse_session_timestamp`'s output) — ``None`` when the catalog
+        doesn't have this session yet, so the caller falls back to parsing
+        the directory name itself."""
+        assert self._catalog is not None
+        row = self._catalog.get_session(session_name)
+        if row is None or row.started_at is None:
+            return None
+        try:
+            return datetime.fromisoformat(row.started_at).astimezone(UTC).replace(tzinfo=None)
+        except ValueError:
+            return None
 
     def _refresh_view(
         self,

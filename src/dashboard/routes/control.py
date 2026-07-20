@@ -390,7 +390,7 @@ def register_control_routes(
             session = resolve_session(config.collection.storage_path, session_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        metadata = pin_session(session, reason=request.reason)
+        metadata = pin_session(session, reason=request.reason, catalog_db=config.daemon.catalog_db)
         if request.metadata:
             metadata = write_session_metadata(session, request.metadata)
         payload = {"session": summarize_session(session).to_dict(), "metadata": metadata}
@@ -406,7 +406,7 @@ def register_control_routes(
             session = resolve_session(config.collection.storage_path, session_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        metadata = unpin_session(session)
+        metadata = unpin_session(session, catalog_db=config.daemon.catalog_db)
         payload = {"session": summarize_session(session).to_dict(), "metadata": metadata}
         publish_control_event("session.unpin", "ok", payload)
         return payload
@@ -476,7 +476,9 @@ def register_control_routes(
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
         try:
-            payload = classify_one_session(config, session_id, emitter=emitter)
+            payload = classify_one_session(
+                config, session_id, emitter=emitter, catalog_db=config.daemon.catalog_db
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except FileNotFoundError as exc:
@@ -503,7 +505,7 @@ def register_control_routes(
         # digest.json for this session.
         from src.control.digest import get_session_digest
 
-        result = get_session_digest(config, session_id)
+        result = get_session_digest(config, session_id, catalog_db=config.daemon.catalog_db)
         if result is None:
             raise HTTPException(status_code=404, detail=f"no digest for session {session_id!r}")
         return result
