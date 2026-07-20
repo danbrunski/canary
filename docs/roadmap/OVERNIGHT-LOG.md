@@ -35,3 +35,4 @@ eval-longitudinal-and-dtc.md 1.1-1.7 — done — DTC reader backend: Mode 07/0A
 eval-longitudinal-and-dtc.md 1.8-1.9 — done — get_dtc MCP tool + DtcPanel.tsx (MIL banner, stored/pending/permanent lists, stale indicator, no clear-codes control) (commit df87965)
 eval-longitudinal-and-dtc.md 1.10 — blocked-overnight — needs Pi/truck for live KOEO/engine-running verify; 1.1-1.9 all landed and ready for morning deploy
 OVERNIGHT-QUEUE.md Q8 — done — eval-longitudinal-and-dtc.md Phase 1 (1.1-1.9) complete; 1.10 blocked-overnight per this entry's own note
+eval-longitudinal-and-dtc.md 3.1-3.5 — done — vehicle ledger store/config/MCP/CLI/DTC-auto-entries/corpus-boundary integration; 3.6 blocked-overnight (needs operator history), scaffolded with one clearly-labeled placeholder entry (commit b18fc48)
