@@ -323,6 +323,9 @@ class HealthMonitor:
         #: and the mode's latched blind state, keyed by mode name.
         self._if_mode_missing: dict[str, deque[bool]] = {}
         self._if_mode_blind: dict[str, bool] = {}
+        #: 4.7 — latest live tick's segmenter-fallback state (edge-triggered
+        #: like ``if_blind_modes``, same pattern).
+        self._segmenter_fallback_active: bool = False
 
     #: How long a cached power_status() reading stays fresh (seconds).
     _POWER_TTL_SECONDS = 5.0
@@ -409,6 +412,25 @@ class HealthMonitor:
             for mode, window in self._if_mode_missing.items()
             if window
         }
+
+    def observe_segmenter_fallback(self, active: bool) -> bool:
+        """Record this tick's segmenter-fallback state (4.7).
+
+        Returns ``True`` exactly on the tick that transitions into fallback
+        (edge-triggered, mirrors :meth:`_observe_if_mode_missing`) so the
+        caller can log a fresh warning instead of spamming one per tick —
+        every mode-gated behavior surface silently stops firing for as long
+        as this is active.
+        """
+        was_active = self._segmenter_fallback_active
+        self._segmenter_fallback_active = active
+        return active and not was_active
+
+    @property
+    def segmenter_fallback_active(self) -> bool:
+        """Whether the live segmenter is currently constant-mode-fallback
+        (4.7) — ``/status`` surfaces this alongside ``if_blind_modes``."""
+        return self._segmenter_fallback_active
 
     def note_swap(self, kind: str, *, version: str | None = None) -> None:
         self._swaps[kind] = self._swaps.get(kind, 0) + 1

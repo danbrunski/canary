@@ -119,6 +119,16 @@ class LiveFeatureSource:
     #: can't outlive a data gap.
     latest_operating_point: dict[str, Any] | None = field(init=False, default=None)
 
+    #: 4.7 — whether the most recent :meth:`tick` that actually ran the
+    #: transform hit ``segment_or_constant``'s runtime fallback (segmenter
+    #: input columns missing from the buffer), as opposed to real
+    #: segmentation or an explicit ``single_operating_mode`` config. The
+    #: daemon feeds this into ``HealthMonitor`` so every mode-gated surface
+    #: silently never firing shows up on ``/status`` instead of nowhere.
+    #: Retains its last value on a tick with nothing to emit (no new
+    #: information that tick), same as ``latest_operating_point``.
+    last_segmenter_fallback: bool = field(init=False, default=False)
+
     def __post_init__(self) -> None:
         hz = max(self.config.preprocessing.resample_hz, 1.0)
         window_s = self.config.preprocessing.rolling_window_seconds
@@ -359,6 +369,7 @@ class LiveFeatureSource:
             behavior_models=self.behavior_models,
             feature_config=self._feature_config,
         )
+        self.last_segmenter_fallback = result.segmenter_fell_back
 
         # Stash the row the behavior decoder consumes (raw input channels +
         # operating_mode + deviation:*) from the pre-feature operating frame,

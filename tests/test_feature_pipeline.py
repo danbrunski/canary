@@ -128,11 +128,34 @@ def test_featurize_wide_frame_appends_rolling_features_and_mode(
     assert len(op) == len(wide)
     assert op[MODE_COLUMN].eq(ALL_MODE).all()  # only obd:RPM present -> single mode
     assert not [c for c in op.columns if c.endswith(_ROLL_SUFFIXES)]
+    # 4.7 — missing segmenter inputs is a real runtime fallback, flagged.
+    assert result.segmenter_fell_back
 
     # features carries the raw channel + its rolling derivatives + the mode.
     for col in ("obd:RPM", "obd:RPM__mean", "obd:RPM__std", "obd:RPM__roc", MODE_COLUMN):
         assert col in feats.columns
     assert len(feats) == len(wide)
+
+
+def test_featurize_wide_frame_does_not_flag_fallback_with_real_segmentation(
+    config: CanaryConfig,
+) -> None:
+    """4.7 — when the segmenter's inputs are present and it actually ran,
+    ``segmenter_fell_back`` must stay False (this complements the
+    load-time ``unknown_operating_modes`` warning, not replace it)."""
+    n = 5
+    wide = pd.DataFrame(
+        {
+            "session": ["s"] * n,
+            "timestamp": pd.date_range("2026-05-13T12:00:00Z", periods=n, freq="1s"),
+            "obd:RPM": [800.0] * n,
+            "obd:SPEED": [0.0] * n,
+            "obd:THROTTLE_POS": [10.0] * n,
+            "obd:COOLANT_TEMP": [85.0] * n,
+        }
+    )
+    result = featurize_wide_frame(wide, config)
+    assert not result.segmenter_fell_back
 
 
 def test_featurize_wide_frame_honors_feature_config_override(

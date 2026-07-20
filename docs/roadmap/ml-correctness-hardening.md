@@ -254,44 +254,65 @@ is convention-only (`DeviationConfig.sigma_floor` optional and may be
 nearest-cell over per-refit auto-recomputed edges, and warmup surfaces
 model f(RUN_TIME) with load/ambient confounding.
 
-- [ ] **4.1 — Publish gate.** In `fit_recipe`/`refit_all`
+- [x] **4.1 — Publish gate.** In `fit_recipe`/`refit_all`
   (`refit.py:495-706`): refuse to publish a surface whose `r_squared`
   is below a per-recipe floor (default e.g. 0.6, overridable) or whose
   populated-cell coverage is below a floor (kills the silent all-empty
   2D surface, `surface_2d.py:89-114`). Refusals are `RecipeResult`
-  skips with reasons, visible in the refit CLI output.
-- [ ] **4.2 — Schema-enforce the σ-floor.** Pydantic validator on
+  skips with reasons, visible in the refit CLI output. — landed:
+  `min_r_squared` (1D, default 0.6) + `min_populated_cell_fraction` (2D,
+  default 0.3, denominator is the full grid incl. empty cells) both
+  route through the existing skip-with-reason path.
+- [x] **4.2 — Schema-enforce the σ-floor.** Pydantic validator on
   `BehaviorModel`/`DeviationConfig`: `kind="relative"` requires
   `sigma_floor` present and > 0. Migration: add floors to every shipped
   relative recipe — including `tps_voltage_per_pct` (pick a floor from
-  the fitted residual distribution, e.g. max(fit std, sensor LSB)).
-- [ ] **4.3 — Freeze 2D bin edges across versions.** `_auto_edges`
+  the fitted residual distribution, e.g. max(fit std, sensor LSB)). —
+  landed: `DeviationConfig` validator rejects `sigma_floor` None/≤0 for
+  `kind="relative"` only; `tps_voltage_per_pct` gets `sigma_floor=0.005`
+  (one LSB of `ECM_THROTTLE_POS_SENSOR_1`, verified against
+  `dids.yaml`'s `scale: 0.005`).
+- [x] **4.3 — Freeze 2D bin edges across versions.** `_auto_edges`
   (`refit.py:778-791`) recomputes quantile edges each refit → versioned
   cells cover different operating rectangles. On first fit, persist the
   edges into the model; subsequent refits reuse stored edges unless a
   recipe explicitly re-grids (which bumps a `grid_version`). This makes
-  cross-version drift comparison valid.
-- [ ] **4.4 — Interpolate at serve (1D-style smoothness for 2D).**
+  cross-version drift comparison valid. — landed: refits reuse the
+  prior model's edges by default (verified against genuinely drifted,
+  not identical, data); `regrid=True` (new `--regrid <recipe>` CLI
+  flag) recomputes edges and bumps `grid_version`.
+- [x] **4.4 — Interpolate at serve (1D-style smoothness for 2D).**
   Replace nearest-cell `evaluate_2d` (`surface_2d.py:158-180`) with
   bilinear interpolation over populated neighbor cells (fall back to
   nearest when neighbors are empty). Kills severity flips from
-  operating-point drift across a bin edge.
-- [ ] **4.5 — Version bump only on change.** Consult
+  operating-point drift across a bin edge. — landed: real bin-center-
+  distance-weighted 2×2 blend; falls back to nearest containing cell
+  when a full populated quad isn't available.
+- [x] **4.5 — Version bump only on change.** Consult
   `training_data_hash` (`behavior_models.py:114-121`) before bumping
   `version` in `refit_all` (`refit.py:662-663`); identical fit → same
-  version, no churn.
-- [ ] **4.6 — Warmup confounding.** Either (a) add a context axis to
+  version, no churn. — landed: hash comparison happens after 4.1's
+  publish gate (a gated-out fit never reaches version logic), so no
+  interaction bug between the two.
+- [x] **4.6 — Warmup confounding.** Either (a) add a context axis to
   the warmup recipes (2D: RUN_TIME × engine load or ambient IAT), or
   (b) widen bands + document the confound. **Decision rule
   (operator-approved, see OVERNIGHT-QUEUE.md):** count cold-start
   sessions with usable load/IAT spread first; ≥ 8 → do (a), fewer →
   do (b), and log which path was taken. The same lesson already
-  retired the load-blind timing surface (`refit.py:186-190`).
-- [ ] **4.7 — Segmenter-fallback diagnostic.** When the runtime
+  retired the load-blind timing surface (`refit.py:186-190`). — landed:
+  real local corpus has only 2 cold-start sessions (verified), far
+  under the floor of 8 → took path (b), widened
+  coolant_warmup/cat_warmup/injector_pw_warmup bands ~50% with
+  documented rationale.
+- [x] **4.7 — Segmenter-fallback diagnostic.** When the runtime
   segmenter falls back to constant `"all"` mode (`live.py:333-335`),
   every mode-gated surface silently never fires — log it and surface a
   flag in `/status` (complements the existing
-  `unknown_operating_modes` load-time warning).
+  `unknown_operating_modes` load-time warning). — landed:
+  `detectors.segmenter.fallback_active` (edge-triggered, mirrors 2.1's
+  `if_blind_modes` pattern), only for the runtime input-missing
+  fallback (not an explicit `single_operating_mode` config).
 
 ## Phase 5 — Operating-mode taxonomy fixes (T2)
 

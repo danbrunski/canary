@@ -33,6 +33,7 @@ from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import load_did_map
 from src.models.health import HealthMonitor
 from src.preprocessing.feature_pipeline import (
+    ALL_MODE,
     DEFAULT_DIDS_PATH,
     FeatureSpecReconciliation,
     reconcile_feature_frame_to_spec,
@@ -149,6 +150,22 @@ async def run_live_inference(
                 timestamp_str = str(row["timestamp"].iloc[0])
                 mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
                 operating_mode = None if mode_val is None or pd.isna(mode_val) else str(mode_val)
+
+            # 4.7 — the segmenter falling back to constant "all" mode means
+            # every mode-gated behavior surface silently never fires; make
+            # that visible instead of nowhere, same edge-triggered pattern as
+            # IF's blind_modes (2.1).
+            newly_fallback = components.health_monitor.observe_segmenter_fallback(
+                source.last_segmenter_fallback
+            )
+            if newly_fallback:
+                log.warning(
+                    "operating-mode segmenter fell back to constant %r mode — segmenter "
+                    "input columns are missing from the live stream; every mode-gated "
+                    "behavior surface is suppressed until it recovers. See /status "
+                    "detectors.segmenter.fallback_active.",
+                    ALL_MODE,
+                )
 
             scoring_allowed = True
             if row is not None:

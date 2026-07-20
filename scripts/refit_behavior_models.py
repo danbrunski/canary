@@ -124,6 +124,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--regrid",
+        action="append",
+        default=None,
+        help=(
+            "2D recipe name(s) to explicitly re-grid this run (recompute auto bin "
+            "edges + bump grid_version) instead of reusing the prior model's stored "
+            "edges (4.3). Repeatable. Default: none — every 2D recipe reuses its "
+            "prior edges when a prior model exists."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print what would refit (recipe → fitted / skipped) but don't write --out.",
@@ -243,6 +254,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         existing=existing,
         session_events=session_events,
         catalog=catalog,
+        regrid_recipes=set(args.regrid or ()),
     )
 
     _print_report(results, frame_rows=len(frame))

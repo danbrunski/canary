@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import refit_behavior_models as refit_cli  # noqa: E402
 
 
-def _frame(session_name: str = "2026-05-13T120000") -> pd.DataFrame:
+def _frame(session_name: str = "2026-05-13T120000", seed: int = 0) -> pd.DataFrame:
     """A minimal feature frame that satisfies the coolant_warmup recipe.
 
     Carries ``operating_mode=warmup`` + the recipe's required columns so
@@ -23,7 +23,7 @@ def _frame(session_name: str = "2026-05-13T120000") -> pd.DataFrame:
     Includes ``session`` so the event-gating filter (added Phase C) can
     intersect with classifier-loaded session_events.
     """
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(seed)
     n = 400
     t = np.linspace(0, 600, n)
     return pd.DataFrame(
@@ -218,7 +218,11 @@ def test_main_no_sessions_returns_error_code(
     assert rc == 1
 
 
-def test_main_bumps_version_on_second_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_keeps_version_on_identical_second_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """4.5 — running the CLI twice against byte-identical training rows is a
+    no-op refit; it must not churn the version."""
     _patch_pipeline(monkeypatch, tmp_path)
     out = tmp_path / "behavior_models.yaml"
     args = [
@@ -233,7 +237,38 @@ def test_main_bumps_version_on_second_run(tmp_path: Path, monkeypatch: pytest.Mo
         "coolant_warmup",
     ]
     refit_cli.main(args)
-    refit_cli.main(args)  # second run — should bump version
+    refit_cli.main(args)  # second run against the same synthetic fixture data
+
+    from src.decode.behavior_models import load_behavior_models
+
+    models = load_behavior_models(out)
+    assert models.models[0].version == 1
+
+
+def test_main_bumps_version_when_underlying_data_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """4.5 — a second run against genuinely different training rows (here:
+    a different RNG seed) still bumps the version."""
+    session = _patch_pipeline(monkeypatch, tmp_path)
+    out = tmp_path / "behavior_models.yaml"
+    args = [
+        "--config",
+        "canary.example.yaml",
+        "--sessions-root",
+        str(tmp_path / "sessions"),
+        "--all",
+        "--out",
+        str(out),
+        "--recipe",
+        "coolant_warmup",
+    ]
+    refit_cli.main(args)
+
+    monkeypatch.setattr(
+        refit_cli, "build_feature_frame", lambda *_a, **_k: _frame(session.name, seed=1)
+    )
+    refit_cli.main(args)
 
     from src.decode.behavior_models import load_behavior_models
 

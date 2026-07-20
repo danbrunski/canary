@@ -60,6 +60,7 @@ def fit_grid_binned_mean(
     notes: str | None = None,
     fitted_at: str | None = None,
     min_cell_count: int = 1,
+    grid_version: int = 1,
 ) -> BehaviorModel2D:
     """Bin ``(x, y)`` into the configured grid and compute per-cell stats.
 
@@ -147,6 +148,7 @@ def fit_grid_binned_mean(
         deviation=deviation,
         notes=notes,
         min_cell_count=min_cell_count,
+        grid_version=grid_version,
     )
 
 
@@ -156,28 +158,91 @@ def fit_grid_binned_mean(
 
 
 def evaluate_2d(model: BehaviorModel2D, x: float, y: float) -> GridCell | None:
-    """Look up the cell ``(x, y)`` falls into. Returns ``None`` when:
+    """Evaluate the surface at ``(x, y)`` — bilinear-interpolated (4.4) over
+    the up-to-4 populated cells whose *centers* bracket the point, falling
+    back to the containing cell alone when a full quad isn't available
+    (grid edge, or a neighbor cell that's off-map/sparse). Returns ``None``
+    when:
 
     * ``(x, y)`` is outside the grid extent, OR
-    * the cell has ``count < model.min_cell_count`` (operating point never
-      observed during fit, or observed too few times for its mean/std to be
-      a trustworthy expectation)
+    * neither interpolation nor the containing cell has a trustworthy
+      expectation (``count < model.min_cell_count``, i.e. the operating
+      point was never observed during fit, or too rarely to trust).
 
-    Returning the whole ``GridCell`` (not just ``mean``) lets the decoder
-    layer compute relative deviations using the per-cell ``std``, which is
-    why we persist it.
+    Interpolating kills severity flips from operating-point drift across a
+    bin edge — nearest-cell-only serving made two readings a fraction of a
+    unit apart (one on either side of an edge) grade against two
+    independently-fit cell means. Returning a whole (possibly blended)
+    ``GridCell`` — not just ``mean`` — lets the decoder layer compute
+    relative deviations off ``std``, which is why we persist it.
     """
     x_axis, y_axis = model.axes
     if not x_axis.bin_edges[0] <= x <= x_axis.bin_edges[-1]:
         return None
     if not y_axis.bin_edges[0] <= y <= y_axis.bin_edges[-1]:
         return None
-    i = _bin_index(x, np.asarray(x_axis.bin_edges, dtype=float))
-    j = _bin_index(y, np.asarray(y_axis.bin_edges, dtype=float))
+    x_edges = np.asarray(x_axis.bin_edges, dtype=float)
+    y_edges = np.asarray(y_axis.bin_edges, dtype=float)
+    i = _bin_index(x, x_edges)
+    j = _bin_index(y, y_edges)
+    min_count = max(1, model.min_cell_count)
+
+    interpolated = _bilinear_cell(model, x, y, x_edges, y_edges, i, j, min_count)
+    if interpolated is not None:
+        return interpolated
+
     cell = model.fit.cells[i * y_axis.bin_count + j]
-    if cell.count < max(1, model.min_cell_count):
+    if cell.count < min_count:
         return None
     return cell
+
+
+def _bilinear_cell(
+    model: BehaviorModel2D,
+    x: float,
+    y: float,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+    i: int,
+    j: int,
+    min_count: int,
+) -> GridCell | None:
+    """Blend the 2×2 populated-cell quad around ``(x, y)`` by bin-center
+    distance, or ``None`` if no full populated quad exists (grid too
+    narrow near this edge, or any corner is off-map/sparse) — the caller
+    falls back to the single containing cell in that case."""
+    n_x, n_y = model.axes[0].bin_count, model.axes[1].bin_count
+    x_centers = (x_edges[:-1] + x_edges[1:]) / 2.0
+    y_centers = (y_edges[:-1] + y_edges[1:]) / 2.0
+
+    i0 = i if x >= x_centers[i] else i - 1
+    j0 = j if y >= y_centers[j] else j - 1
+    if i0 < 0 or i0 + 1 >= n_x or j0 < 0 or j0 + 1 >= n_y:
+        return None  # no full quad this close to the grid edge
+
+    cells = model.fit.cells
+
+    def cell_at(ii: int, jj: int) -> GridCell:
+        return cells[ii * n_y + jj]
+
+    c00, c10 = cell_at(i0, j0), cell_at(i0 + 1, j0)
+    c01, c11 = cell_at(i0, j0 + 1), cell_at(i0 + 1, j0 + 1)
+    if any(c.count < min_count for c in (c00, c10, c01, c11)):
+        return None
+
+    wx = min(max((x - x_centers[i0]) / (x_centers[i0 + 1] - x_centers[i0]), 0.0), 1.0)
+    wy = min(max((y - y_centers[j0]) / (y_centers[j0 + 1] - y_centers[j0]), 0.0), 1.0)
+
+    def blend(a00: float, a10: float, a01: float, a11: float) -> float:
+        return float(
+            a00 * (1 - wx) * (1 - wy) + a10 * wx * (1 - wy) + a01 * (1 - wx) * wy + a11 * wx * wy
+        )
+
+    return GridCell(
+        mean=blend(c00.mean, c10.mean, c01.mean, c11.mean),
+        std=blend(c00.std, c10.std, c01.std, c11.std),
+        count=min(c00.count, c10.count, c01.count, c11.count),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -189,7 +189,9 @@ def test_deviation_relative_2d_uses_cell_std() -> None:
         fit=GridBinnedMeanFit(
             kind="grid_binned_mean", cells=cells, sample_count=100, fitted_at="now"
         ),
-        deviation=DeviationConfig(kind="relative", warning_band=3.0, critical_band=6.0),
+        deviation=DeviationConfig(
+            kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.01
+        ),
     )
     # 1.0 + 1.5 (delta) → 3.0 sigma → warning
     res = deviation(model, 2.5, {"obd:RPM": 700.0, "obd:MAF": 5.0})
@@ -204,7 +206,13 @@ def test_deviation_relative_2d_uses_cell_std() -> None:
 
 def test_deviation_relative_1d_uses_reference_std() -> None:
     model = _make_coolant_model(
-        DeviationConfig(kind="relative", warning_band=2.0, critical_band=4.0, reference_std=1.0)
+        DeviationConfig(
+            kind="relative",
+            warning_band=2.0,
+            critical_band=4.0,
+            reference_std=1.0,
+            sigma_floor=0.01,
+        )
     )
     # delta = 2.5 → 2.5 sigma → warning
     res = deviation(model, 42.5, {"obd:RUN_TIME": 100.0})
@@ -319,7 +327,7 @@ def test_append_deviation_columns_honors_output_columns_override() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_quantized_timing_surface(sigma_floor: float | None) -> BehaviorModel2D:
+def _make_quantized_timing_surface(sigma_floor: float) -> BehaviorModel2D:
     """One cell fit on quantization-flat data (std below the 0.5°/LSB step)
     and one cell where the std collapsed to exactly 0."""
     cells = [
@@ -351,15 +359,16 @@ def _make_quantized_timing_surface(sigma_floor: float | None) -> BehaviorModel2D
 
 
 def test_sigma_floor_stops_sub_lsb_hair_trigger() -> None:
-    """Without the floor, a 0.5° flicker on a std=0.13 cell scores 3.8σ
-    (false warning); with the floor it scores 1.0σ (ok)."""
+    """A cell fit on quantization-flat data (std 0.13, below the 0.5°/LSB
+    step) grades a same-magnitude flicker as "ok" once floored to the LSB,
+    not a false warning. (4.2 schema-enforces sigma_floor > 0 for every
+    relative config now, so the pre-fix "unfloored" construction this test
+    used to compare against can no longer be built — see
+    test_behavior_models.py::test_deviation_config_relative_requires_positive_sigma_floor.)
+    """
     point = {"obd:RPM": 800.0, "obd:INTAKE_TEMP": 20.0}  # cell 0: std 0.13
-    unfloored = _make_quantized_timing_surface(sigma_floor=None)
-    res = deviation(unfloored, 17.5, point)
-    assert res is not None and res.severity == "warning"
-
     floored = _make_quantized_timing_surface(sigma_floor=0.5)
-    res = deviation(floored, 17.5, point)
+    res = deviation(floored, 17.5, point)  # 0.5° flicker / 0.5 floor = 1.0σ
     assert res is not None and res.severity == "ok"
     # A genuine excursion still alerts through the floor.
     res = deviation(floored, 21.0, point)  # 4.0° / 0.5 = 8σ
@@ -367,13 +376,10 @@ def test_sigma_floor_stops_sub_lsb_hair_trigger() -> None:
 
 
 def test_sigma_floor_revives_zero_std_cells() -> None:
-    """A std=0.0 cell is permanently mute without the floor; with it the
-    cell grades like any other."""
+    """A std=0.0 cell grades normally once floored, instead of the
+    permanently-mute behavior a floor-less relative config used to have
+    (now schema-unreachable — see the sibling test above)."""
     point = {"obd:RPM": 800.0, "obd:INTAKE_TEMP": 45.0}  # cell 1: std 0.0
-    unfloored = _make_quantized_timing_surface(sigma_floor=None)
-    res = deviation(unfloored, 25.0, point)  # 8° off and silent
-    assert res is not None and res.severity == "ok"
-
     floored = _make_quantized_timing_surface(sigma_floor=0.5)
     res = deviation(floored, 25.0, point)  # 8° / 0.5 = 16σ
     assert res is not None and res.severity == "critical"

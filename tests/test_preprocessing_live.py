@@ -345,6 +345,7 @@ def test_segmenter_runs_when_rpm_speed_throttle_present(config: CanaryConfig) ->
     row = src.tick(now)
     assert row is not None
     assert row["operating_mode"].iloc[0] == "idle"
+    assert not src.last_segmenter_fallback  # 4.7 — real segmentation, not a fallback
 
 
 def test_segmenter_picks_warmup_when_coolant_temp_is_cold(config: CanaryConfig) -> None:
@@ -371,6 +372,7 @@ def test_segmenter_falls_back_to_all_without_signal_columns(config: CanaryConfig
     row = src.tick(now)
     assert row is not None
     assert row["operating_mode"].iloc[0] == "all"
+    assert src.last_segmenter_fallback  # 4.7
 
 
 # ---------------------------------------------------------------------------

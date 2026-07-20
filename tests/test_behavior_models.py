@@ -77,7 +77,9 @@ def _model_2d(rows: int = 2, cols: int = 3) -> BehaviorModel2D:
         ),
         fit=_grid_fit(rows=rows, cols=cols),
         operating_mode="idle",
-        deviation=DeviationConfig(kind="relative", warning_band=3.0, critical_band=6.0),
+        deviation=DeviationConfig(
+            kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+        ),
     )
 
 
@@ -153,7 +155,9 @@ def test_relative_deviation_on_1d_needs_reference_std() -> None:
             output="y",
             axis=Axis1D(name="t", channel="obd:RUN_TIME", domain=(0.0, 600.0)),
             fit=_poly_fit(),
-            deviation=DeviationConfig(kind="relative", warning_band=1.0, critical_band=2.0),
+            deviation=DeviationConfig(
+                kind="relative", warning_band=1.0, critical_band=2.0, sigma_floor=0.1
+            ),
         )
 
 
@@ -165,11 +169,26 @@ def test_relative_deviation_on_1d_with_reference_std_ok() -> None:
         axis=Axis1D(name="t", channel="obd:RUN_TIME", domain=(0.0, 600.0)),
         fit=_poly_fit(),
         deviation=DeviationConfig(
-            kind="relative", warning_band=1.0, critical_band=2.0, reference_std=4.0
+            kind="relative",
+            warning_band=1.0,
+            critical_band=2.0,
+            reference_std=4.0,
+            sigma_floor=0.1,
         ),
     )
     assert model.deviation is not None
     assert model.deviation.reference_std == 4.0
+
+
+def test_deviation_config_relative_requires_positive_sigma_floor() -> None:
+    """4.2 — schema-enforced: kind='relative' without a sigma_floor (or a
+    non-positive one) is a live hair-trigger, not a valid config."""
+    with pytest.raises(ValidationError, match="sigma_floor"):
+        DeviationConfig(kind="relative", warning_band=1.0, critical_band=2.0)
+    with pytest.raises(ValidationError, match="sigma_floor"):
+        DeviationConfig(kind="relative", warning_band=1.0, critical_band=2.0, sigma_floor=0.0)
+    # absolute kind is unaffected — no floor required.
+    DeviationConfig(kind="absolute", warning_band=1.0, critical_band=2.0)
 
 
 # ---------------------------------------------------------------------------

@@ -262,3 +262,67 @@ def test_evaluate_2d_treats_sparse_cells_as_off_map() -> None:
     assert model.min_cell_count == 30
     assert evaluate_2d(model, 700.0, 15.0) is not None  # dense cell still grades
     assert evaluate_2d(model, 3975.0, 15.0) is None  # sparse cell is off-map
+
+
+# ---------------------------------------------------------------------------
+# bilinear interpolation (4.4)
+# ---------------------------------------------------------------------------
+
+
+def _quad_frame() -> pd.DataFrame:
+    """A 2×2 grid with four cleanly-separated corner means: (0,0)=1.0,
+    (1,0)=2.0, (0,1)=3.0, (1,1)=4.0."""
+    rpm = [700.0] * 100 + [2200.0] * 100 + [700.0] * 100 + [2200.0] * 100
+    maf = [5.0] * 100 + [5.0] * 100 + [25.0] * 100 + [25.0] * 100
+    pw = [1.0] * 100 + [2.0] * 100 + [3.0] * 100 + [4.0] * 100
+    return pd.DataFrame({"rpm": rpm, "maf": maf, "pw": pw})
+
+
+def test_evaluate_2d_interpolates_between_neighbor_cells_near_a_boundary() -> None:
+    """A point equidistant from all four corner-cell centers should grade
+    smoothly between them, not snap to any single neighbor's raw mean."""
+    model = fit_grid_binned_mean(
+        _quad_frame(),
+        x_column="rpm",
+        y_column="maf",
+        output_column="pw",
+        name="f",
+        output="pw",
+        x_edges=[600, 1500, 3000],  # centers 1050, 2250
+        y_edges=[1, 15, 30],  # centers 8, 22.5
+    )
+    # midpoint between both axes' bin centers
+    cell = evaluate_2d(model, 1650.0, 15.25)
+    assert cell is not None
+    assert cell.mean == pytest.approx(2.5)  # average of 1.0/2.0/3.0/4.0
+    # Differs from every single raw corner mean — not a hard step.
+    assert cell.mean not in (1.0, 2.0, 3.0, 4.0)
+
+
+def test_evaluate_2d_falls_back_to_nearest_when_a_neighbor_cell_is_empty() -> None:
+    """Only the low-maf row is populated; a quad that would need the empty
+    high-maf row must fall back to the single containing cell, not blend
+    with an empty neighbor."""
+    frame = pd.DataFrame(
+        {
+            "rpm": [700.0] * 100 + [2200.0] * 100,
+            "maf": [5.0] * 100 + [5.0] * 100,
+            "pw": [1.0] * 100 + [2.0] * 100,
+        }
+    )
+    model = fit_grid_binned_mean(
+        frame,
+        x_column="rpm",
+        y_column="maf",
+        output_column="pw",
+        name="f",
+        output="pw",
+        x_edges=[600, 1500, 3000],
+        y_edges=[1, 15, 30],
+    )
+    # rpm 1650 sits between the two x-bin centers; maf 8.0 is exactly the
+    # low-maf row's center, so the quad would need the (empty) high-maf row.
+    cell = evaluate_2d(model, 1650.0, 8.0)
+    assert cell is not None
+    assert cell.mean == pytest.approx(2.0)  # nearest cell's raw mean, unblended
+    assert cell.count == 100

@@ -24,7 +24,7 @@ session discovery, the preprocessing pipeline, and writing the YAML.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -55,6 +55,48 @@ RPM_COLUMN = "obd:RPM"
 #: every heat-soaked summer idle.
 ENGINE_RUNNING_MIN_RPM = 400.0
 
+# ---------------------------------------------------------------------------
+# 4.6 — warmup-surface confounding
+# ---------------------------------------------------------------------------
+#
+# The f(RUN_TIME) warmup surfaces (coolant_warmup, cat_warmup,
+# injector_pw_warmup) only ever learn the warmup curve *as it happened on
+# the sessions in the corpus* — engine load and ambient IAT are free
+# variables the RUN_TIME axis doesn't account for, so a corpus dominated by
+# one load/IAT regime bakes that regime's warmup shape into the "expected"
+# curve and then flags a real warmup under different conditions as
+# deviation. (The same lesson already retired the load-blind 1D timing
+# surface, above.)
+#
+# Operator-approved decision rule (OVERNIGHT-QUEUE.md, ml-hardening 4.6):
+# count cold-start sessions in the corpus that actually have usable
+# load/IAT spread during warmup — if there are enough to fit a second axis
+# without it collapsing to noise, add one (RUN_TIME × load/IAT, 2D); if
+# not, widen the 1D bands and document the confound instead of pretending
+# a data-starved 2D fit is better than a wide 1D one.
+#
+# Counted against this laptop's corpus as of 2026-07-19 (``data/sessions``,
+# via ``discover_sessions`` + ``count_usable_cold_start_sessions``): 14
+# discoverable sessions total, 2 carry a ``cold_start`` event, and only 1 of
+# those has enough load/IAT spread in its warmup window to be "usable" —
+# far under the floor. So the three warmup recipes below take option (b):
+# widened bands (roughly +50% over the pre-4.6 values) instead of a context
+# axis. Re-run the count once the corpus grows past the floor.
+
+#: Minimum observed spread (max − min) in at least one of these columns,
+#: within one session's ``warmup``-mode rows, for that session to count as
+#: "usable" context data — a session where load/IAT barely moved during
+#: warmup teaches a context axis nothing. Units match each column.
+WARMUP_CONTEXT_MIN_SPREAD: Mapping[str, float] = {
+    "obd:ENGINE_LOAD": 15.0,  # %
+    "obd:INTAKE_TEMP": 8.0,  # degC
+}
+
+#: >= this many usable cold-start sessions → add a context axis to the
+#: warmup recipes; fewer → widen bands + document (operator-approved,
+#: OVERNIGHT-QUEUE.md).
+WARMUP_CONTEXT_SESSION_FLOOR = 8
+
 
 # ---------------------------------------------------------------------------
 # Recipes
@@ -83,6 +125,11 @@ class _RecipeBase:
     #: describe key-on-engine-off behavior. Catalog recipes that describe
     #: *running* behavior set ``ENGINE_RUNNING_MIN_RPM`` explicitly.
     min_rpm: float | None = None
+    #: 4.1 publish gate (1D only — grid fits' R² isn't well-defined, see
+    #: ``Surface2DRecipe.min_populated_cell_fraction``). A fit whose R²
+    #: falls below this is skipped rather than published, same as a
+    #: missing-column or too-few-samples skip. ``None`` disables the gate.
+    min_r_squared: float | None = 0.6
 
 
 @dataclass(frozen=True)
@@ -120,6 +167,12 @@ class Surface2DRecipe(_RecipeBase):
     #: Cells with fewer samples than this evaluate as off-map at serve time
     #: instead of grading against a one-/six-sample "expectation".
     min_cell_count: int = 30
+    #: 4.1 publish gate — fraction of cells that must clear
+    #: ``min_cell_count`` for the grid to publish. Catches the silent
+    #: all-empty-grid case (0.0 coverage) as well as a corpus too thin to
+    #: populate most of the operating envelope; R² isn't meaningful for a
+    #: grid-binned-mean fit so coverage is this recipe family's quality gate.
+    min_populated_cell_fraction: float = 0.3
 
 
 Recipe = Surface1DRecipe | Surface2DRecipe
@@ -161,7 +214,11 @@ def default_recipes() -> list[Recipe]:
             fit_method="binned_lookup",  # warmup is sigmoid-ish, polys overshoot
             n_knots=12,
             min_samples=120,
-            deviation=DeviationConfig(kind="absolute", warning_band=5.0, critical_band=15.0),
+            # 4.6: widened from (5.0, 15.0) — the corpus doesn't have enough
+            # usable cold-start sessions to add a load/IAT context axis (see
+            # WARMUP_CONTEXT_SESSION_FLOOR above), so the band absorbs
+            # load/ambient-driven warmup-shape variance instead.
+            deviation=DeviationConfig(kind="absolute", warning_band=8.0, critical_band=22.0),
             notes=(
                 "Thermostat health — sticking open / stuck closed shows as a "
                 "flatter / delayed curve."
@@ -350,7 +407,9 @@ def default_recipes() -> list[Recipe]:
             fit_method="binned_lookup",
             n_knots=12,
             min_samples=120,
-            deviation=DeviationConfig(kind="absolute", warning_band=30.0, critical_band=80.0),
+            # 4.6: widened from (30.0, 80.0) — same corpus/rationale as
+            # coolant_warmup above (WARMUP_CONTEXT_SESSION_FLOOR).
+            deviation=DeviationConfig(kind="absolute", warning_band=45.0, critical_band=115.0),
             notes=(
                 "Catalyst light-off curve. Detects cat aging (slower "
                 "light-off), exhaust restriction (faster temp rise), "
@@ -397,9 +456,11 @@ def default_recipes() -> list[Recipe]:
             min_samples=120,
             # reference_std is auto-filled from the fit residuals (raw-count
             # scaling isn't pinned, so it can't be declared upfront);
-            # sigma_floor = 1 raw count bounds it from below.
+            # sigma_floor = 1 raw count bounds it from below. 4.6: widened
+            # from (10.0, 25.0) — same corpus/rationale as coolant_warmup
+            # (WARMUP_CONTEXT_SESSION_FLOOR).
             deviation=DeviationConfig(
-                kind="relative", warning_band=10.0, critical_band=25.0, sigma_floor=1.0
+                kind="relative", warning_band=15.0, critical_band=38.0, sigma_floor=1.0
             ),
             notes=(
                 "Cold-start enrichment curve. PW is elevated during warmup "
@@ -462,8 +523,15 @@ def default_recipes() -> list[Recipe]:
             # min_rpm deliberately unset: the V-per-%% relationship is
             # engine-state-independent, and parked KOEO throttle sweeps are
             # the best full-range coverage this surface ever sees.
-            # reference_std auto-fills from the fit residuals.
-            deviation=DeviationConfig(kind="relative", warning_band=5.0, critical_band=12.0),
+            # reference_std auto-fills from the fit residuals; sigma_floor
+            # (4.2) = one LSB of the underlying ECM_THROTTLE_POS_SENSOR_1
+            # voltage sensor (0.005 V, dids.yaml) — the pct denominator's
+            # own quantization is secondary once pct > 1 (the div-by-zero
+            # guard below), so the voltage LSB dominates the achievable
+            # resolution of this ratio.
+            deviation=DeviationConfig(
+                kind="relative", warning_band=5.0, critical_band=12.0, sigma_floor=0.005
+            ),
             notes=(
                 "Raw TPS voltage vs ECM-calculated throttle percent. "
                 "Expected to be near-linear / constant ratio. Drift detects "
@@ -471,6 +539,68 @@ def default_recipes() -> list[Recipe]:
             ),
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# 4.6 — warmup confounding: general "how many usable cold-start sessions do
+# we have" capability, decoupled from any particular corpus so it's testable
+# against a synthetic one and re-runnable against the real one as the corpus
+# grows (see the module-level count/decision recorded above).
+# ---------------------------------------------------------------------------
+
+
+def count_usable_cold_start_sessions(
+    frame: pd.DataFrame,
+    session_events: Mapping[str, set[str]],
+    *,
+    min_spread: Mapping[str, float] | None = None,
+) -> int:
+    """How many sessions in ``frame`` both carry a ``cold_start`` event AND
+    have enough load/IAT spread during their ``warmup``-mode rows to be
+    "usable" training data for a RUN_TIME × context 2D warmup surface.
+
+    A session that starts cold but sits at a near-constant load/ambient for
+    its whole warmup window can't teach a context axis anything — it's one
+    more sample at the same context bin, not a new operating point. Usable
+    means at least one of ``min_spread``'s columns swings by its floor
+    within that session's warmup rows. Defaults to
+    :data:`WARMUP_CONTEXT_MIN_SPREAD`.
+    """
+    thresholds = min_spread if min_spread is not None else WARMUP_CONTEXT_MIN_SPREAD
+    cold_start_sessions = {s for s, events in session_events.items() if "cold_start" in events}
+    if (
+        not cold_start_sessions
+        or SESSION_COLUMN not in frame.columns
+        or MODE_COLUMN not in frame.columns
+    ):
+        return 0
+    warmup = frame[
+        (frame[MODE_COLUMN] == "warmup") & frame[SESSION_COLUMN].isin(cold_start_sessions)
+    ]
+    usable = 0
+    for _session_id, rows in warmup.groupby(SESSION_COLUMN, observed=True):
+        for column, floor in thresholds.items():
+            if column not in rows.columns:
+                continue
+            values = pd.to_numeric(rows[column], errors="coerce").dropna()
+            if len(values) < 2:
+                continue
+            if float(values.max() - values.min()) >= floor:
+                usable += 1
+                break
+    return usable
+
+
+def choose_warmup_confounding_strategy(
+    usable_cold_start_sessions: int,
+) -> Literal["context_axis", "widen_bands"]:
+    """4.6 decision rule (operator-approved, OVERNIGHT-QUEUE.md): at least
+    :data:`WARMUP_CONTEXT_SESSION_FLOOR` usable cold-start sessions → add a
+    context axis; fewer → widen bands instead (what the catalog above does
+    today, per the real-corpus count recorded there)."""
+    if usable_cold_start_sessions >= WARMUP_CONTEXT_SESSION_FLOOR:
+        return "context_axis"
+    return "widen_bands"
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +629,8 @@ def fit_recipe(
     sessions: Sequence[str] = (),
     next_version_for: dict[str, int] | None = None,
     session_events: Mapping[str, set[str]] | None = None,
+    prior_model: BehaviorModel1D | BehaviorModel2D | None = None,
+    regrid: bool = False,
 ) -> RecipeResult:
     """Run one recipe; return a ``RecipeResult`` (never raises on missing data).
 
@@ -512,6 +644,13 @@ def fit_recipe(
     before fitting — that's the structural fix for "coolant_warmup fit on
     warm-restart sessions", because warm restarts don't contain a
     ``cold_start`` event.
+
+    ``prior_model`` (when given) is the same-named model from the previous
+    ``behavior_models.yaml`` — a 2D fit reuses its bin edges instead of
+    recomputing quantiles (4.3) unless ``regrid`` is set, and any
+    successful fit whose ``training_data_hash`` matches the prior's keeps
+    the prior's ``version`` instead of bumping (4.5 — a no-op refit
+    shouldn't churn the version).
     """
     version = (next_version_for or {}).get(recipe.name, 1)
 
@@ -614,7 +753,9 @@ def fit_recipe(
         if isinstance(recipe, Surface1DRecipe):
             model: BehaviorModel1D | BehaviorModel2D = _fit_1d(recipe, clean, sessions, version)
         else:
-            model = _fit_2d(recipe, clean, sessions, version)
+            model = _fit_2d(
+                recipe, clean, sessions, version, prior_model=prior_model, regrid=regrid
+            )
     except Exception as exc:  # noqa: BLE001 — log + skip; one bad recipe shouldn't kill a batch
         log.warning(
             "recipe failed to fit",
@@ -622,7 +763,59 @@ def fit_recipe(
         )
         return RecipeResult(recipe.name, None, skipped=True, reason=str(exc))
 
+    # 5. publish gate (4.1) — a fit that succeeded numerically but is too
+    # poor / too sparse to trust is refused the same way a missing-column or
+    # too-few-samples input is: a skip with a visible reason, not a silent
+    # publish.
+    gate_reason = _check_publish_gate(recipe, model)
+    if gate_reason is not None:
+        log.warning(
+            "recipe fit but failed the publish gate",
+            extra={"recipe": recipe.name, "reason": gate_reason},
+        )
+        return RecipeResult(recipe.name, None, skipped=True, reason=gate_reason)
+
+    # 6. no-op-refit version suppression (4.5) — identical training rows
+    # (same hash) means an identical fit; don't churn the version just
+    # because the refit job ran again.
+    if (
+        prior_model is not None
+        and model.fit.training_data_hash
+        and model.fit.training_data_hash == prior_model.fit.training_data_hash
+    ):
+        model = model.model_copy(update={"version": prior_model.version})
+
     return RecipeResult(recipe.name, model)
+
+
+def _check_publish_gate(recipe: Recipe, model: BehaviorModel1D | BehaviorModel2D) -> str | None:
+    """4.1 — refuse to publish a numerically-successful fit that isn't
+    trustworthy. Returns a skip reason, or ``None`` when the fit clears the
+    gate.
+
+    1D: raw R² against the recipe's floor. 2D grid fits don't have a
+    meaningful R² (the "model" is just per-cell empirical means —
+    ``surface_2d.py``), so their gate is populated-cell coverage instead —
+    this is what actually catches the silent all-empty-grid case, since an
+    empty grid's R² would be undefined either way.
+    """
+    if isinstance(recipe, Surface1DRecipe):
+        floor = recipe.min_r_squared
+        r2 = model.fit.r_squared
+        if floor is not None and r2 is not None and r2 < floor:
+            return f"r_squared={r2:.3f} below min_r_squared={floor}"
+        return None
+    assert isinstance(recipe, Surface2DRecipe)
+    assert isinstance(model, BehaviorModel2D)
+    cells = model.fit.cells
+    populated = sum(1 for c in cells if c.count >= model.min_cell_count)
+    fraction = populated / len(cells) if cells else 0.0
+    if fraction < recipe.min_populated_cell_fraction:
+        return (
+            f"populated-cell coverage {fraction:.2f} ({populated}/{len(cells)}) below "
+            f"min_populated_cell_fraction={recipe.min_populated_cell_fraction}"
+        )
+    return None
 
 
 def refit_all(
@@ -633,6 +826,7 @@ def refit_all(
     existing: BehaviorModels | None = None,
     session_events: Mapping[str, set[str]] | None = None,
     catalog: Sequence[Recipe] | None = None,
+    regrid_recipes: Collection[str] = (),
 ) -> tuple[BehaviorModels, list[RecipeResult]]:
     """Fit ``recipes``; return the new ``BehaviorModels`` + per-recipe results.
 
@@ -645,8 +839,12 @@ def refit_all(
     is treated as the catalog — appropriate for a full refit.
 
     Models that successfully refit have their ``version`` bumped one above
-    the prior. Models that ran but were skipped (e.g. insufficient samples)
-    carry over from ``existing`` unchanged.
+    the prior, unless the refit was a no-op (identical ``training_data_hash``
+    — 4.5) or the recipe failed the publish gate — see :func:`fit_recipe`.
+    Models that ran but were skipped (e.g. insufficient samples) carry over
+    from ``existing`` unchanged. ``regrid_recipes`` names 2D recipes that
+    should recompute auto-edges (and bump ``grid_version``) this round
+    instead of reusing the prior model's stored edges (4.3).
     """
     catalog_names = {r.name for r in (catalog if catalog is not None else recipes)}
     refit_names = {r.name for r in recipes}
@@ -671,6 +869,8 @@ def refit_all(
             sessions=sessions,
             next_version_for=next_version_for,
             session_events=session_events,
+            prior_model=carry_over.get(recipe.name),
+            regrid=recipe.name in regrid_recipes,
         )
         results.append(res)
         if res.model is not None:
@@ -749,9 +949,37 @@ def _fit_2d(
     frame: pd.DataFrame,
     sessions: Sequence[str],
     version: int,
+    *,
+    prior_model: BehaviorModel1D | BehaviorModel2D | None = None,
+    regrid: bool = False,
 ) -> BehaviorModel2D:
-    x_edges = recipe.x_edges or _auto_edges(frame[recipe.x_column], recipe.auto_bin_count)
-    y_edges = recipe.y_edges or _auto_edges(frame[recipe.y_column], recipe.auto_bin_count)
+    # 4.3 — freeze bin edges across versions: reuse the prior model's stored
+    # edges unless the recipe declares fixed edges (never drift, by
+    # construction) or the caller explicitly asked to re-grid. Only an
+    # explicit re-grid on an auto-edged recipe bumps grid_version — fixed
+    # recipe edges are a constant, not something that "drifts" between
+    # refits, so there's nothing to bump.
+    prior_2d = prior_model if isinstance(prior_model, BehaviorModel2D) else None
+    x_edges = _resolve_axis_edges(
+        frame[recipe.x_column],
+        recipe.x_edges,
+        prior_2d.axes[0].bin_edges if prior_2d is not None else None,
+        recipe.auto_bin_count,
+        regrid,
+    )
+    y_edges = _resolve_axis_edges(
+        frame[recipe.y_column],
+        recipe.y_edges,
+        prior_2d.axes[1].bin_edges if prior_2d is not None else None,
+        recipe.auto_bin_count,
+        regrid,
+    )
+    if prior_2d is None:
+        grid_version = 1
+    elif recipe.x_edges is None and recipe.y_edges is None and regrid:
+        grid_version = prior_2d.grid_version + 1
+    else:
+        grid_version = prior_2d.grid_version
     return fit_grid_binned_mean(
         frame,
         x_column=recipe.x_column,
@@ -772,7 +1000,25 @@ def _fit_2d(
         version=version,
         notes=recipe.notes,
         min_cell_count=recipe.min_cell_count,
+        grid_version=grid_version,
     )
+
+
+def _resolve_axis_edges(
+    column: pd.Series,
+    explicit: tuple[float, ...] | None,
+    prior_edges: Sequence[float] | None,
+    auto_bin_count: int,
+    regrid: bool,
+) -> list[float]:
+    """One axis's edges for a 2D fit (4.3): recipe-declared edges always
+    win; otherwise reuse the prior model's edges unless ``regrid`` is set
+    (or there's no prior — first fit), in which case recompute quantiles."""
+    if explicit is not None:
+        return list(explicit)
+    if prior_edges is not None and not regrid:
+        return list(prior_edges)
+    return _auto_edges(column, auto_bin_count)
 
 
 def _auto_edges(series: pd.Series, n_bins: int) -> list[float]:
@@ -795,10 +1041,14 @@ def _auto_edges(series: pd.Series, n_bins: int) -> list[float]:
 __all__ = [
     "ENGINE_RUNNING_MIN_RPM",
     "RPM_COLUMN",
+    "WARMUP_CONTEXT_MIN_SPREAD",
+    "WARMUP_CONTEXT_SESSION_FLOOR",
     "Recipe",
     "RecipeResult",
     "Surface1DRecipe",
     "Surface2DRecipe",
+    "choose_warmup_confounding_strategy",
+    "count_usable_cold_start_sessions",
     "default_recipes",
     "fit_recipe",
     "refit_all",

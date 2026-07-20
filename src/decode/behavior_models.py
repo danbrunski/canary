@@ -233,6 +233,21 @@ class DeviationConfig(_Strict):
             raise ValueError("warning_band must be < critical_band")
         return self
 
+    @model_validator(mode="after")
+    def _check_sigma_floor(self) -> DeviationConfig:
+        # 4.2 — a relative band with no floor (or a floor of 0) is a live
+        # hair-trigger: a cell/fit fit on quantization-flat data can carry a
+        # std below the sensor's LSB (or exactly 0.0), and the May 2026 IAT
+        # surface shipped exactly that. Schema-enforce it instead of relying
+        # on every recipe author remembering the convention.
+        if self.kind == "relative" and not (self.sigma_floor is not None and self.sigma_floor > 0):
+            raise ValueError(
+                "kind='relative' requires a positive sigma_floor — a cell/fit std can "
+                "collapse to (near) zero on quantization-flat data and hair-trigger "
+                "without one; set it to roughly the output's sensor LSB"
+            )
+        return self
+
 
 # ---------------------------------------------------------------------------
 # Models
@@ -282,6 +297,12 @@ class BehaviorModel2D(_Strict):
     #: keeps pre-existing YAML artifacts (which only excluded count==0)
     #: loading with unchanged behavior.
     min_cell_count: int = Field(default=1, ge=1)
+    #: 4.3 — bumped only when the grid geometry (bin edges) actually
+    #: changes, distinct from ``version`` which bumps on every successful
+    #: refit. The refit driver persists edges across refits by default so
+    #: cross-version drift comparison reads the same operating rectangles;
+    #: an explicit re-grid recomputes edges *and* bumps this.
+    grid_version: int = Field(default=1, ge=1)
 
     @model_validator(mode="after")
     def _check_cells(self) -> BehaviorModel2D:

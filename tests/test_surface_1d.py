@@ -215,7 +215,9 @@ def test_relative_deviation_reference_std_auto_fills_from_residuals() -> None:
         name="tps_ratio",
         output="derived:TPS_VOLTAGE_PER_PCT",
         degree=1,
-        deviation=DeviationConfig(kind="relative", warning_band=5.0, critical_band=12.0),
+        deviation=DeviationConfig(
+            kind="relative", warning_band=5.0, critical_band=12.0, sigma_floor=0.01
+        ),
     )
     assert model.deviation is not None
     assert model.deviation.reference_std == pytest.approx(3.0, rel=0.2)
@@ -229,7 +231,11 @@ def test_relative_deviation_reference_std_auto_fills_from_residuals() -> None:
         output="derived:TPS_VOLTAGE_PER_PCT",
         degree=1,
         deviation=DeviationConfig(
-            kind="relative", warning_band=5.0, critical_band=12.0, reference_std=9.0
+            kind="relative",
+            warning_band=5.0,
+            critical_band=12.0,
+            reference_std=9.0,
+            sigma_floor=0.01,
         ),
     )
     assert explicit.deviation is not None

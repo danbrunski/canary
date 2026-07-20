@@ -8,6 +8,8 @@ import pandas as pd
 from src.analysis.refit import (
     Surface1DRecipe,
     Surface2DRecipe,
+    choose_warmup_confounding_strategy,
+    count_usable_cold_start_sessions,
     default_recipes,
     fit_recipe,
     refit_all,
@@ -18,6 +20,7 @@ from src.decode.behavior_models import (
     BehaviorModels,
     DeviationConfig,
 )
+from src.preprocessing.resampler import SESSION_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
 
 # ---------------------------------------------------------------------------
@@ -149,9 +152,13 @@ def test_fit_recipe_2d_with_explicit_edges_overrides_auto() -> None:
         x_edges=(600.0, 1000.0, 2000.0, 4000.0),
         y_edges=(0.0, 25.0, 50.0, 100.0),
         min_samples=500,
+        # The synthetic fixture is a narrow idle-only cluster (not what this
+        # test is about) — disable the 4.1 coverage gate so it doesn't
+        # entangle with the edges-override assertion below.
+        min_populated_cell_fraction=0.0,
     )
     result = fit_recipe(recipe, frame)
-    assert result.fitted
+    assert result.fitted, result.reason
     assert result.model is not None
     assert list(result.model.axes[0].bin_edges) == [600.0, 1000.0, 2000.0, 4000.0]
 
@@ -465,7 +472,9 @@ def test_min_rpm_gate_excludes_koeo_rows_from_fit_and_auto_edges() -> None:
         min_samples=100,
         min_rpm=400.0,
         min_cell_count=1,
-        deviation=DeviationConfig(kind="relative", warning_band=3.0, critical_band=6.0),
+        deviation=DeviationConfig(
+            kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+        ),
     )
     result = fit_recipe(recipe, frame)
     assert result.fitted, result.reason
@@ -499,3 +508,252 @@ def test_min_rpm_gate_requires_rpm_column() -> None:
     result = fit_recipe(recipe, frame)
     assert result.skipped
     assert "min_rpm" in result.reason
+
+
+# ---------------------------------------------------------------------------
+# 4.1 — publish gate
+# ---------------------------------------------------------------------------
+
+
+def test_fit_recipe_1d_publish_gate_skips_poor_r_squared() -> None:
+    rng = np.random.default_rng(1)
+    n = 200
+    frame = pd.DataFrame(
+        {
+            "obd:RUN_TIME": np.linspace(0, 600, n),
+            "obd:COOLANT_TEMP": rng.normal(50, 30, n),  # pure noise vs run_time
+        }
+    )
+    recipe = Surface1DRecipe(
+        name="noisy",
+        output="obd:COOLANT_TEMP",
+        x_column="obd:RUN_TIME",
+        fit_method="poly",
+        degree=1,
+        min_samples=50,
+        min_r_squared=0.6,
+    )
+    result = fit_recipe(recipe, frame)
+    assert result.skipped
+    assert result.model is None
+    assert "r_squared" in result.reason
+
+
+def test_fit_recipe_1d_publish_gate_allows_good_fit() -> None:
+    frame = _warmup_frame()
+    recipe = Surface1DRecipe(
+        name="coolant_warmup",
+        output="obd:COOLANT_TEMP",
+        x_column="obd:RUN_TIME",
+        fit_method="poly",
+        degree=3,
+        min_samples=50,
+        min_r_squared=0.6,
+    )
+    result = fit_recipe(recipe, frame)
+    assert result.fitted, result.reason
+
+
+def test_fit_recipe_2d_publish_gate_skips_all_empty_grid() -> None:
+    """The headline 4.1 bug — every row lands in one cell, so the grid is
+    silently all-empty apart from that cell; coverage must refuse it."""
+    frame = pd.DataFrame(
+        {
+            "obd:RPM": [700.0] * 600,
+            "obd:ENGINE_LOAD": [20.0] * 600,
+            "obd:TIMING_ADVANCE": [17.0] * 600,
+        }
+    )
+    recipe = Surface2DRecipe(
+        name="timing_sparse",
+        output="obd:TIMING_ADVANCE",
+        x_column="obd:RPM",
+        y_column="obd:ENGINE_LOAD",
+        x_edges=(600.0, 1000.0, 2000.0, 4000.0),
+        y_edges=(0.0, 25.0, 50.0, 100.0),
+        min_samples=100,
+        min_populated_cell_fraction=0.3,
+    )
+    result = fit_recipe(recipe, frame)
+    assert result.skipped
+    assert result.model is None
+    assert "coverage" in result.reason
+
+
+def test_fit_recipe_2d_publish_gate_allows_well_covered_grid() -> None:
+    frame = _warmup_frame(n=2000)
+    recipe = Surface2DRecipe(
+        name="timing_vs_rpm_load",
+        output="obd:TIMING_ADVANCE",
+        x_column="obd:RPM",
+        y_column="obd:ENGINE_LOAD",
+        min_samples=500,
+        auto_bin_count=3,
+        min_populated_cell_fraction=0.3,
+    )
+    result = fit_recipe(recipe, frame)
+    assert result.fitted, result.reason
+
+
+# ---------------------------------------------------------------------------
+# 4.3 — frozen 2D bin edges across versions
+# ---------------------------------------------------------------------------
+
+
+def _timing_2d_recipe() -> Surface2DRecipe:
+    return Surface2DRecipe(
+        name="timing_vs_rpm_load",
+        output="obd:TIMING_ADVANCE",
+        x_column="obd:RPM",
+        y_column="obd:ENGINE_LOAD",
+        min_samples=500,
+        auto_bin_count=4,
+        min_populated_cell_fraction=0.0,  # not the concern of this test group
+    )
+
+
+def test_fit_recipe_2d_reuses_prior_edges_without_regrid() -> None:
+    recipe = _timing_2d_recipe()
+    first = fit_recipe(recipe, _warmup_frame(n=1000, seed=1))
+    assert first.fitted and first.model is not None
+    assert isinstance(first.model, BehaviorModel2D)
+    assert first.model.grid_version == 1
+    first_x_edges = list(first.model.axes[0].bin_edges)
+    first_y_edges = list(first.model.axes[1].bin_edges)
+
+    # Refit against genuinely different (shifted-seed) data, no regrid: the
+    # stored edges must come back unchanged even though the raw data moved.
+    second = fit_recipe(recipe, _warmup_frame(n=1000, seed=99), prior_model=first.model)
+    assert second.fitted and second.model is not None
+    assert isinstance(second.model, BehaviorModel2D)
+    assert list(second.model.axes[0].bin_edges) == first_x_edges
+    assert list(second.model.axes[1].bin_edges) == first_y_edges
+    assert second.model.grid_version == 1
+
+
+def test_fit_recipe_2d_explicit_regrid_recomputes_edges_and_bumps_grid_version() -> None:
+    recipe = _timing_2d_recipe()
+    first = fit_recipe(recipe, _warmup_frame(n=1000, seed=1))
+    assert first.fitted and first.model is not None
+    assert isinstance(first.model, BehaviorModel2D)
+
+    second = fit_recipe(
+        recipe, _warmup_frame(n=1000, seed=99), prior_model=first.model, regrid=True
+    )
+    assert second.fitted and second.model is not None
+    assert isinstance(second.model, BehaviorModel2D)
+    assert second.model.grid_version == 2
+    assert list(second.model.axes[0].bin_edges) != list(first.model.axes[0].bin_edges)
+
+
+def test_refit_all_regrid_recipes_only_regrids_named_recipes() -> None:
+    recipe = _timing_2d_recipe()
+    first_models, _ = refit_all([recipe], _warmup_frame(n=1000, seed=1), existing=None)
+    first = first_models.models[0]
+    assert isinstance(first, BehaviorModel2D)
+
+    # No --regrid: edges frozen.
+    unregridded, _ = refit_all([recipe], _warmup_frame(n=1000, seed=99), existing=first_models)
+    assert isinstance(unregridded.models[0], BehaviorModel2D)
+    assert list(unregridded.models[0].axes[0].bin_edges) == list(first.axes[0].bin_edges)
+    assert unregridded.models[0].grid_version == 1
+
+    # --regrid names this recipe: edges recompute, grid_version bumps.
+    regridded, _ = refit_all(
+        [recipe],
+        _warmup_frame(n=1000, seed=99),
+        existing=first_models,
+        regrid_recipes={"timing_vs_rpm_load"},
+    )
+    assert isinstance(regridded.models[0], BehaviorModel2D)
+    assert regridded.models[0].grid_version == 2
+
+
+# ---------------------------------------------------------------------------
+# 4.5 — version bump only on change
+# ---------------------------------------------------------------------------
+
+
+def test_refit_all_keeps_version_on_identical_refit() -> None:
+    frame = _warmup_frame(seed=5)
+    recipe = Surface1DRecipe(
+        name="coolant_warmup",
+        output="obd:COOLANT_TEMP",
+        x_column="obd:RUN_TIME",
+        fit_method="poly",
+        degree=2,
+        min_samples=50,
+    )
+    first_models, first_results = refit_all([recipe], frame, existing=None)
+    assert first_results[0].fitted
+    assert first_models.models[0].version == 1
+
+    # Refit again against byte-identical training rows — a no-op.
+    second_models, second_results = refit_all([recipe], frame, existing=first_models)
+    assert second_results[0].fitted
+    assert second_models.models[0].version == 1  # not bumped
+
+
+def test_refit_all_bumps_version_on_genuinely_different_data() -> None:
+    recipe = Surface1DRecipe(
+        name="coolant_warmup",
+        output="obd:COOLANT_TEMP",
+        x_column="obd:RUN_TIME",
+        fit_method="poly",
+        degree=2,
+        min_samples=50,
+    )
+    first_models, _ = refit_all([recipe], _warmup_frame(seed=5), existing=None)
+    second_models, results = refit_all([recipe], _warmup_frame(seed=6), existing=first_models)
+    assert results[0].fitted
+    assert second_models.models[0].version == 2
+
+
+# ---------------------------------------------------------------------------
+# 4.6 — warmup confounding decision input
+# ---------------------------------------------------------------------------
+
+
+def test_count_usable_cold_start_sessions_requires_cold_start_event() -> None:
+    frame = pd.DataFrame(
+        {
+            MODE_COLUMN: ["warmup"] * 20,
+            SESSION_COLUMN: ["s1"] * 20,
+            "obd:ENGINE_LOAD": np.linspace(10, 60, 20),  # plenty of spread
+        }
+    )
+    assert count_usable_cold_start_sessions(frame, {"s1": set()}) == 0  # no cold_start
+
+
+def test_count_usable_cold_start_sessions_requires_spread() -> None:
+    frame = pd.DataFrame(
+        {
+            MODE_COLUMN: ["warmup"] * 20,
+            SESSION_COLUMN: ["s1"] * 20,
+            "obd:ENGINE_LOAD": [20.0] * 20,  # flat
+            "obd:INTAKE_TEMP": [22.0] * 20,  # flat
+        }
+    )
+    assert count_usable_cold_start_sessions(frame, {"s1": {"cold_start"}}) == 0
+
+
+def test_count_usable_cold_start_sessions_counts_usable_sessions() -> None:
+    load_by_session = {
+        "s0": np.linspace(10, 60, 20),  # 50% spread — usable
+        "s1": [20.0] * 20,  # flat — not usable
+        "s2": np.linspace(5, 80, 20),  # usable
+    }
+    rows = [
+        {MODE_COLUMN: "warmup", SESSION_COLUMN: sid, "obd:ENGINE_LOAD": v}
+        for sid, values in load_by_session.items()
+        for v in values
+    ]
+    frame = pd.DataFrame(rows)
+    session_events = {sid: {"cold_start"} for sid in load_by_session}
+    assert count_usable_cold_start_sessions(frame, session_events) == 2
+
+
+def test_choose_warmup_confounding_strategy_branches_at_floor() -> None:
+    assert choose_warmup_confounding_strategy(7) == "widen_bands"
+    assert choose_warmup_confounding_strategy(8) == "context_axis"
+    assert choose_warmup_confounding_strategy(20) == "context_axis"

@@ -424,10 +424,17 @@ class FeaturizedFrame:
     and behavior-deviation columns but before ``compute_features`` — the live
     overlay reads its last row even during the feature-window warmup, so it is
     returned rather than recomputed.
+    ``segmenter_fell_back`` (4.7) is ``True`` when :func:`segment_or_constant`
+    used the constant ``"all"`` mode because the segmenter's *inputs* weren't
+    present in this frame — every mode-gated surface silently never fires in
+    that case. ``False`` both on normal segmentation and on an explicit
+    ``preprocessing.single_operating_mode`` config (that's an intentional
+    choice, not a diagnostic-worthy fallback).
     """
 
     features: pd.DataFrame
     operating_frame: pd.DataFrame
+    segmenter_fell_back: bool = False
 
 
 def featurize_wide_frame(
@@ -456,7 +463,7 @@ def featurize_wide_frame(
     is derived from ``config.preprocessing.rolling_window_seconds`` exactly as
     the batch path always did — the two are value-identical.
     """
-    framed = segment_or_constant(wide, config)
+    framed, segmenter_fell_back = segment_or_constant(wide, config)
     # Derived anomaly signals (air mass per cycle, bank-balance asymmetries,
     # AFR/TPS cross-checks) appended BEFORE behavior deviations + feature
     # extraction so recipes can target them as outputs and the rolling
@@ -473,16 +480,26 @@ def featurize_wide_frame(
         window_seconds=config.preprocessing.rolling_window_seconds
     )
     features = compute_features(framed, config=cfg)
-    return FeaturizedFrame(features=features, operating_frame=framed)
+    return FeaturizedFrame(
+        features=features, operating_frame=framed, segmenter_fell_back=segmenter_fell_back
+    )
 
 
-def segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> pd.DataFrame:
+def segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> tuple[pd.DataFrame, bool]:
     """Apply the operating-mode segmenter when its inputs exist, else add a
-    constant ``operating_mode = "all"`` column so a single model is fit."""
+    constant ``operating_mode = "all"`` column so a single model is fit.
+
+    Returns ``(frame, fell_back)`` — ``fell_back`` (4.7) is ``True`` only for
+    the *runtime* fallback (segmenter input columns missing from this frame),
+    not for an explicit ``single_operating_mode`` config, which is an
+    intentional choice rather than a diagnostic-worthy degradation. Callers
+    that care about the constant-mode outcome but not *why* can ignore the
+    second element.
+    """
     if config.preprocessing.single_operating_mode:
         out = resampled.copy()
         out[MODE_COLUMN] = ALL_MODE
-        return out
+        return out, False
     seg_cfg = SegmenterConfig(
         signal_columns=dict(_SEGMENTER_SIGNAL_COLUMNS),
         recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
@@ -494,13 +511,14 @@ def segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> pd.Dat
         _signal_present(resampled, value) for value in seg_cfg.signal_columns.values()
     )
     if have_inputs:
-        return segment_operating_modes(
+        segmented = segment_operating_modes(
             resampled, config.preprocessing.operating_modes, config=seg_cfg
         )
+        return segmented, False
     out = resampled.copy()
     out[MODE_COLUMN] = ALL_MODE
     log.info("no OBD PID columns present; using a single operating mode", extra={"mode": ALL_MODE})
-    return out
+    return out, True
 
 
 def trainable_feature_columns(features: pd.DataFrame) -> list[str]:

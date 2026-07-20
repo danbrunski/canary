@@ -204,9 +204,10 @@ def test_segment_or_constant_adds_constant_mode_when_no_obd(tmp_path: Path):
             "decoded:ECM_COOLANT_TEMP": [100.0, 105.0, 110.0],
         }
     )
-    out = _segment_or_constant(resampled, _config())
+    out, fell_back = _segment_or_constant(resampled, _config())
     assert MODE_COLUMN in out.columns
     assert (out[MODE_COLUMN] == ALL_MODE).all()
+    assert fell_back  # 4.7 — no segmenter inputs is a real runtime fallback
 
 
 def test_segment_or_constant_uses_segmenter_when_obd_present(tmp_path: Path):
@@ -222,10 +223,11 @@ def test_segment_or_constant_uses_segmenter_when_obd_present(tmp_path: Path):
             "obd:COOLANT_TEMP": [85.0, 85.0, 85.0],
         }
     )
-    out = _segment_or_constant(resampled, _config())
+    out, fell_back = _segment_or_constant(resampled, _config())
     assert MODE_COLUMN in out.columns
     # With RPM<900 and speed 0, the example config's "idle" mode should match.
     assert (out[MODE_COLUMN] != ALL_MODE).any() or (out[MODE_COLUMN] == "idle").any()
+    assert not fell_back  # 4.7 — real segmentation ran, not a fallback
 
 
 def test_segment_or_constant_single_mode_flag_overrides_segmenter(tmp_path: Path):
@@ -242,8 +244,10 @@ def test_segment_or_constant_single_mode_flag_overrides_segmenter(tmp_path: Path
     )
     config = _config()
     config.preprocessing.single_operating_mode = True
-    out = _segment_or_constant(resampled, config)
+    out, fell_back = _segment_or_constant(resampled, config)
     assert (out[MODE_COLUMN] == ALL_MODE).all()
+    # 4.7 — an explicit config choice, not a diagnostic-worthy fallback.
+    assert not fell_back
 
 
 # ---------------------------------------------------------------------------

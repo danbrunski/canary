@@ -224,6 +224,24 @@ def test_observe_inference_without_operating_mode_never_blinds() -> None:
     assert mon.if_blind_modes == ()
 
 
+def test_observe_segmenter_fallback_is_edge_triggered() -> None:
+    """4.7 — mirrors the IF blind-mode edge-triggered pattern: the
+    transition into fallback reports True exactly once, not every tick."""
+    mon = HealthMonitor()
+    assert mon.segmenter_fallback_active is False
+
+    assert mon.observe_segmenter_fallback(True) is True  # rising edge
+    assert mon.segmenter_fallback_active is True
+    assert mon.observe_segmenter_fallback(True) is False  # already active
+    assert mon.segmenter_fallback_active is True
+
+    assert mon.observe_segmenter_fallback(False) is False  # recovers
+    assert mon.segmenter_fallback_active is False
+
+    assert mon.observe_segmenter_fallback(True) is True  # re-latches
+    assert mon.segmenter_fallback_active is True
+
+
 def test_monitor_snapshots_obd_scheduler_metrics() -> None:
     mon = HealthMonitor()
     mon.observe_obd_scheduler(
@@ -318,3 +336,20 @@ def test_status_exposes_isolation_forest_blind_modes(tmp_path: Path) -> None:
 def test_status_detectors_is_none_without_a_health_monitor(tmp_path: Path) -> None:
     config = _config(tmp_path)
     assert build_status(config).to_dict()["detectors"] is None
+
+
+def test_status_exposes_segmenter_fallback_flag(tmp_path: Path) -> None:
+    """4.7 — `detectors.segmenter.fallback_active` is False by default and
+    flips True once the monitor observes a live fallback tick."""
+    config = _config(tmp_path)
+    mon = HealthMonitor()
+    snap = build_status(config, health_monitor=mon).to_dict()
+    assert snap["detectors"]["segmenter"]["fallback_active"] is False
+
+    mon.observe_segmenter_fallback(True)
+    snap = build_status(config, health_monitor=mon).to_dict()
+    assert snap["detectors"]["segmenter"]["fallback_active"] is True
+
+    app = create_app(config, anomalies_dir=tmp_path / "anomalies", health_monitor=mon)
+    body = TestClient(app).get("/status").json()
+    assert body["detectors"]["segmenter"]["fallback_active"] is True

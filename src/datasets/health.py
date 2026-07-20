@@ -176,7 +176,7 @@ def analyze_session(session_dir: Path, config: CanaryConfig) -> SessionHealth:
             slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
         ),
     )
-    segmented = segment_or_constant(resampled, config)
+    segmented, _fell_back = segment_or_constant(resampled, config)
     channels = sorted(
         c for c in wide.columns if c not in ("session", "timestamp") and not c.endswith(GAP_SUFFIX)
     )

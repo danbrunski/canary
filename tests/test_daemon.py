@@ -1589,6 +1589,62 @@ async def test_run_live_inference_emits_event_when_outlier(config: CanaryConfig)
     assert IsolationForestInferenceEngine.__name__ == "IsolationForestInferenceEngine"
 
 
+async def test_run_live_inference_flags_segmenter_fallback_on_status(
+    config: CanaryConfig,
+) -> None:
+    """4.7 — a live source with only obd:RPM (no SPEED/THROTTLE_POS) can't
+    run the real segmenter, so ``segment_or_constant`` falls back to
+    constant "all" mode; the daemon must latch that onto the health
+    monitor's ``segmenter_fallback_active`` flag every tick."""
+    from src.daemon import build_live_feature_source, run_live_inference
+
+    components = build_components(config)
+    assert components.health_monitor.segmenter_fallback_active is False
+
+    source = build_live_feature_source(components)
+    source.observe(TelemetryRecord.obd(datetime.now(UTC).timestamp(), "RPM", 800.0, "rpm"))
+
+    stop = asyncio.Event()
+    task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
+    try:
+        for _ in range(20):
+            if components.health_monitor.segmenter_fallback_active:
+                break
+            await asyncio.sleep(0.05)
+        assert components.health_monitor.segmenter_fallback_active is True
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+
+async def test_run_live_inference_does_not_flag_fallback_with_full_segmenter_inputs(
+    config: CanaryConfig,
+) -> None:
+    """4.7 — normal segmenter operation (all its inputs present) must not
+    set the fallback flag."""
+    from src.daemon import build_live_feature_source, run_live_inference
+
+    components = build_components(config)
+    source = build_live_feature_source(components)
+    now = datetime.now(UTC)
+    for channel, value, unit in (
+        ("RPM", 800.0, "rpm"),
+        ("SPEED", 0.0, "km/h"),
+        ("THROTTLE_POS", 10.0, "%"),
+        ("COOLANT_TEMP", 85.0, "degC"),
+    ):
+        source.observe(TelemetryRecord.obd(now.timestamp(), channel, value, unit))
+
+    stop = asyncio.Event()
+    task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
+    try:
+        await asyncio.sleep(0.2)
+        assert components.health_monitor.segmenter_fallback_active is False
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+
 def test_live_vehicle_state_classifies_running_without_parquet_io(config: CanaryConfig) -> None:
     """1.5's helper reads only in-memory state — no Parquet, no replay."""
     from src.daemon.inference import _live_vehicle_state, build_live_feature_source
