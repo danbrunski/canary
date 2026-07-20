@@ -1,27 +1,14 @@
 import { createElement } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   DatasetHealthResponse,
   TrainingRunsResponse,
 } from "../types";
+import { mockHttp } from "../test/harness";
 
-const mocks = vi.hoisted(() => ({
-  getDatasetHealth: vi.fn(),
-  getTrainingRuns: vi.fn(),
-  submitJob: vi.fn(),
-}));
-
-vi.mock("../api/http", () => ({
-  getDatasetHealth: mocks.getDatasetHealth,
-  getTrainingRuns: mocks.getTrainingRuns,
-  submitJob: mocks.submitJob,
-  HttpError: class extends Error {
-    status = 0;
-    body = "";
-  },
-}));
+const mocks = mockHttp(["getDatasetHealth", "getTrainingRuns", "submitJob"]);
 
 const { DatasetHealthPanel } = await import("./DatasetHealthPanel");
 const { TrainingPanel } = await import("./TrainingPanel");
@@ -32,13 +19,6 @@ const COMPANION = {
   setBaseUrl: vi.fn(),
   setToken: vi.fn(),
 };
-
-beforeEach(() => {
-  mocks.getDatasetHealth.mockReset();
-  mocks.getTrainingRuns.mockReset();
-  mocks.submitJob.mockReset();
-});
-afterEach(() => vi.clearAllMocks());
 
 describe("DatasetHealthPanel", () => {
   it("prompts for a token when none is set (no fetch)", () => {

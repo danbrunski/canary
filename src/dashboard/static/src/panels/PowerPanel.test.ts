@@ -1,28 +1,13 @@
 import { createElement } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { PowerSnapshot, PowerStatusResponse } from "../types";
+import { mockHttp } from "../test/harness";
 
-const mocks = vi.hoisted(() => ({
-  getPowerStatus: vi.fn(),
-  setKeepAlive: vi.fn(),
-}));
-
-vi.mock("../api/http", () => ({
-  ...mocks,
-  HttpError: class extends Error {
-    status = 0;
-    body = "";
-  },
-}));
+const mocks = mockHttp(["getPowerStatus", "setKeepAlive"]);
 
 const { PowerPanel } = await import("./PowerPanel");
-
-beforeEach(() => {
-  for (const fn of Object.values(mocks)) fn.mockReset();
-});
-afterEach(() => vi.clearAllMocks());
 
 function snapshot(overrides: Partial<PowerSnapshot> = {}): PowerStatusResponse {
   return {

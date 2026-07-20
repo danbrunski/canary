@@ -1,19 +1,11 @@
 import { createElement } from "react";
 import { render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { StatTrend, TrendsResponse } from "../types";
+import { mockHttp } from "../test/harness";
 
-const mocks = vi.hoisted(() => ({
-  getTrends: vi.fn(),
-}));
-vi.mock("../api/http", () => ({
-  getTrends: mocks.getTrends,
-  HttpError: class extends Error {
-    status = 0;
-    body = "";
-  },
-}));
+const mocks = mockHttp(["getTrends"]);
 
 const { TrendsPanel } = await import("./TrendsPanel");
 
@@ -50,11 +42,6 @@ function statTrend(overrides: Partial<StatTrend> = {}): StatTrend {
     ...overrides,
   };
 }
-
-beforeEach(() => {
-  mocks.getTrends.mockReset();
-});
-afterEach(() => vi.clearAllMocks());
 
 describe("TrendsPanel", () => {
   it("prompts for a token without one", () => {

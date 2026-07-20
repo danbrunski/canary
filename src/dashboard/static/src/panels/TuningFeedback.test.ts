@@ -1,33 +1,21 @@
 import { createElement } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { AnomalyEvent, TuningResponse } from "../types";
+import { mockHttp } from "../test/harness";
 
-const mocks = vi.hoisted(() => ({
-  getTuning: vi.fn(),
-  estimateTuning: vi.fn(),
-  updateTuning: vi.fn(),
-  revertTuning: vi.fn(),
-  getFeedback: vi.fn(),
-  postFeedback: vi.fn(),
-}));
-
-vi.mock("../api/http", () => ({
-  ...mocks,
-  HttpError: class extends Error {
-    status = 0;
-    body = "";
-  },
-}));
+const mocks = mockHttp([
+  "getTuning",
+  "estimateTuning",
+  "updateTuning",
+  "revertTuning",
+  "getFeedback",
+  "postFeedback",
+]);
 
 const { TuningPanel } = await import("./TuningPanel");
 const { AnomalyPanel } = await import("./AnomalyPanel");
-
-beforeEach(() => {
-  for (const fn of Object.values(mocks)) fn.mockReset();
-});
-afterEach(() => vi.clearAllMocks());
 
 const TUNING: TuningResponse = {
   tuning: {
