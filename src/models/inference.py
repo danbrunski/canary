@@ -136,6 +136,23 @@ class SequenceWindowBuffer:
         #: Running per-channel Δt (seconds since last observed) carried across
         #: ticks so it survives the deque's bounded length, mirroring the
         #: dataset's per-session cumulative Δt.
+        #:
+        #: 9.3 — cold-start note: this accumulator (and ``_last_timestamp``
+        #: below) always starts at zero, in-process. A ``SequenceWindowBuffer``
+        #: is rebuilt from scratch on every daemon (re)start (see
+        #: ``_build_sequence_engine`` in ``src/daemon/inference.py``), with no
+        #: persisted record of each channel's true last-observed time from
+        #: before the restart. A channel that was already stale going into the
+        #: restart therefore reports Δt=0 (not its real elapsed staleness) on
+        #: the first post-restart tick, and its Δt understates the truth until
+        #: that channel is observed fresh again — at which point it resets to
+        #: 0 correctly and accumulates truthfully from there. The distortion
+        #: is self-bounding (capped by that channel's own poll cadence, not
+        #: unbounded) and only affects the GRU-D decay gate on the first
+        #: window(s) after a restart. Given that plus this being a read-only,
+        #: not-safety-critical research daemon (no actuation depends on this
+        #: score), we accept it rather than adding cross-restart persistence
+        #: machinery for a bounded, self-correcting cold-start blip.
         self._delta_accumulator: np.ndarray[Any, np.dtype[np.float64]] = np.zeros(
             len(feature_columns), dtype=np.float64
         )

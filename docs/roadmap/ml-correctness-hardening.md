@@ -495,12 +495,17 @@ These merge into **Phase 2 of `eval-longitudinal-and-dtc.md`** (tasks
   benchmark. Adopt only if it adds detections the current stack
   misses; it shares no failure modes with reconstruction/isolation
   methods and is computationally trivial at 1 Hz.
-- [ ] **9.3 — Cold-start Δt note.** Mid-session daemon restart
+- [x] **9.3 — Cold-start Δt note.** Mid-session daemon restart
   under-reports Δt for channels last seen pre-restart
   (`inference.py:139-141,237`) — bounded distortion on the first
   window(s). Either persist last-observation timestamps across restart
   or accept + document; don't build machinery beyond a comment unless
-  benchmark shows impact.
+  benchmark shows impact. — landed: accept + document (no cross-restart
+  persistence machinery). Confirmed `SequenceWindowBuffer` really does
+  rebuild fresh on every daemon (re)start with no persisted last-
+  observed state, and confirmed the distortion is genuinely bounded —
+  a channel's Δt resets to 0 correctly on its next real observation and
+  accumulates truthfully from there.
 - [x] **9.4 — "Relative" naming.** `DeviationConfig.kind="relative"` is
   σ-scaled (z-score), not percent-of-expected
   (`behavior_decoder.py:291-304`). Rename to `sigma` (with backward
