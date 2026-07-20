@@ -122,7 +122,10 @@ def _parquet_row_count(session_dir: Path) -> int | None:
         try:
             if chunk.stat().st_size == 0:
                 continue
-            total += pq.ParquetFile(chunk).metadata.num_rows  # type: ignore[no-untyped-call]
+            # pyarrow's typing of ParquetFile.__init__ varies by version (untyped
+            # in some, annotated in others) — unused-ignore keeps this line green
+            # under both, since CI and local envs can resolve different pyarrow.
+            total += pq.ParquetFile(chunk).metadata.num_rows  # type: ignore[no-untyped-call, unused-ignore]
             seen = True
         except Exception:  # noqa: BLE001 - a corrupt/truncated chunk just doesn't count
             continue
