@@ -93,11 +93,16 @@ operator history (ledger backfill facts)
   `f578cc0`, `df87965`); caught + fixed two real bugs in core OBD
   polling infra (DID-gating starvation, identifier=0 wire corruption).
   1.10 blocked-overnight, needs the Pi/truck.
-- [ ] **Q9 — eval-longitudinal-and-dtc.md Phases 3 + 4** (vehicle
+- [x] **Q9 — eval-longitudinal-and-dtc.md Phases 3 + 4** (vehicle
   ledger — 3.6 backfill blocked-overnight, scaffold the file with a
   template entry instead; fingerprints + frozen reference epoch —
   freeze from all currently-`ready` classified sessions — trends,
-  MCP/CLI/panel).
+  MCP/CLI/panel). — 3.1-3.5 + 4.1-4.6 all landed (commits `b18fc48`,
+  `966b55a`, `cf7b650`); 3.6 blocked-overnight, scaffolded. Reference
+  epoch really frozen from the 5 currently-`ready` local sessions
+  (`7e27b2b`). Two real bugs (fabricated `voltage_at_crank_v`, an
+  unscoped cross-vehicle-profile alert-state leak) caught by review and
+  fixed before landing.
 - [ ] **Q10 — engine-analysis-and-mapping.md Phase 1 + refactoring 1.1**
   (wire derived channels live + TripSummary surface/panel/CLI; pair
   the PID-table single-sourcing with this since Q11 touches the same
