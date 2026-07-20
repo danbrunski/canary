@@ -11,6 +11,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.config import CanaryConfig
@@ -416,6 +417,63 @@ def test_retrain_job_command_passes_job_id_to_ledger(tmp_path: Path) -> None:
 
     assert "--job-id" in command
     assert command[command.index("--job-id") + 1] == "job-123"
+
+
+def test_export_dataset_job_command_shape(tmp_path: Path) -> None:
+    """Task 5.6b: the Export panel's job kind builds the exact
+    ``scripts/export_dataset.py`` invocation an operator would type by hand."""
+    storage = tmp_path / "storage"
+    (storage / "2026-05-17T120000").mkdir(parents=True)
+    (storage / "2026-05-18T090000").mkdir(parents=True)
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(storage))
+    config = CanaryConfig.from_yaml(cfg_path)
+    controller = JobController(
+        config=config,
+        repo_root=tmp_path,
+        config_path=cfg_path,
+        jobs_dir=tmp_path / "jobs",
+        python=Path(sys.executable),
+    )
+
+    command = controller._build_command(  # noqa: SLF001 - command shape is the contract here
+        "export_dataset",
+        {
+            "session_ids": ["2026-05-17T120000", "2026-05-18T090000"],
+            "channels": ["obd:RPM"],
+            "resample_hz": 1.0,
+            "formats": ["csv"],
+            "purpose": "megalogviewer",
+            "zip": False,
+        },
+        job_id="job-456",
+    )
+
+    assert "scripts/export_dataset.py" in command[1]
+    assert command.count("--session") == 2
+    assert "2026-05-17T120000" in command
+    assert "2026-05-18T090000" in command
+    assert command[command.index("--channel") + 1] == "obd:RPM"
+    assert command[command.index("--resample-hz") + 1] == "1.0"
+    assert command[command.index("--format") + 1] == "csv"
+    assert command[command.index("--purpose") + 1] == "megalogviewer"
+    assert "--no-zip" in command
+
+
+def test_export_dataset_job_requires_session_ids(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(tmp_path / "storage"))
+    config = CanaryConfig.from_yaml(cfg_path)
+    controller = JobController(
+        config=config,
+        repo_root=tmp_path,
+        config_path=cfg_path,
+        jobs_dir=tmp_path / "jobs",
+        python=Path(sys.executable),
+    )
+
+    with pytest.raises(ValueError, match="session_ids"):
+        controller._build_command("export_dataset", {}, job_id="job-789")  # noqa: SLF001
 
 
 def test_control_jobs_can_cancel_running_process(tmp_path: Path) -> None:

@@ -63,13 +63,7 @@ def _behavior_models_yaml() -> dict:
     }
 
 
-@pytest.fixture
-def env(tmp_path: Path) -> dict[str, Path]:
-    # The default profile for this vehicle block slugs to nissan-xterra-2008
-    # (see src/profiles.py:_default_profile) — the session must live there.
-    storage = tmp_path / "data"
-    slug_dir = storage / "nissan-xterra-2008"
-    session_id = "2026-07-19T000000"
+def _write_session(slug_dir: Path, session_id: str, *, timing_advance: float) -> None:
     session_dir = slug_dir / session_id
     records = []
     for i in range(10):
@@ -78,17 +72,32 @@ def env(tmp_path: Path) -> dict[str, Path]:
             [
                 TelemetryRecord.obd(t, "RPM", 500.0, "rpm"),
                 TelemetryRecord.obd(t, "ENGINE_LOAD", 25.0, "%"),
-                TelemetryRecord.obd(t, "TIMING_ADVANCE", 15.0, "degBTDC"),  # expected 10 -> Δ=+5
+                TelemetryRecord.obd(t, "TIMING_ADVANCE", timing_advance, "degBTDC"),
             ]
         )
     write_records_to_parquet(records, session_dir, max_rows=10_000)
+
+
+@pytest.fixture
+def env(tmp_path: Path) -> dict[str, Path]:
+    # The default profile for this vehicle block slugs to nissan-xterra-2008
+    # (see src/profiles.py:_default_profile) — the session must live there.
+    storage = tmp_path / "data"
+    slug_dir = storage / "nissan-xterra-2008"
+    session_id = "2026-07-19T000000"
+    _write_session(slug_dir, session_id, timing_advance=15.0)  # expected 10 -> Δ=+5
 
     cfg_path = tmp_path / "canary.yaml"
     cfg_path.write_text(_cfg_yaml(storage))
     bm_path = tmp_path / "behavior_models.yaml"
     bm_path.write_text(yaml.safe_dump(_behavior_models_yaml()))
 
-    return {"config": cfg_path, "behavior_models": bm_path, "session_id": session_id}
+    return {
+        "config": cfg_path,
+        "behavior_models": bm_path,
+        "session_id": session_id,
+        "slug_dir": slug_dir,
+    }
 
 
 def test_cli_prints_deviation_table(env: dict[str, Path], capsys: pytest.CaptureFixture) -> None:
@@ -138,6 +147,50 @@ def test_cli_unknown_session_errors_cleanly(
             "--config",
             str(env["config"]),
             "--session",
+            "2099-01-01T000000",
+            "--behavior-models",
+            str(env["behavior_models"]),
+        ]
+    )
+    assert exit_code == 1
+    assert "not found" in capsys.readouterr().err
+
+
+def test_cli_against_flag_prints_ab_comparison(
+    env: dict[str, Path], capsys: pytest.CaptureFixture
+) -> None:
+    against_id = "2026-07-20T000000"
+    _write_session(env["slug_dir"], against_id, timing_advance=20.0)  # expected 10 -> Δ=+10
+
+    exit_code = main(
+        [
+            "--config",
+            str(env["config"]),
+            "--session",
+            str(env["session_id"]),
+            "--against",
+            against_id,
+            "--behavior-models",
+            str(env["behavior_models"]),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "before" in out and "after" in out
+    assert "timing_vs_rpm_load" in out
+    assert "5.000" in out  # deviation Δ: +10 (b) - +5 (a) = +5
+
+
+def test_cli_against_unknown_session_errors_cleanly(
+    env: dict[str, Path], capsys: pytest.CaptureFixture
+) -> None:
+    exit_code = main(
+        [
+            "--config",
+            str(env["config"]),
+            "--session",
+            str(env["session_id"]),
+            "--against",
             "2099-01-01T000000",
             "--behavior-models",
             str(env["behavior_models"]),

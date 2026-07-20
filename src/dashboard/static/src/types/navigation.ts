@@ -18,6 +18,7 @@ export type WorkbenchItem =
   | "diag-dtc"
   | "diag-monitors"
   | "diag-trends"
+  | "diag-explore"
   | "diag-system"
   | "diag-tpms"
   | "models-overview"

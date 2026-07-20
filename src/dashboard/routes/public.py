@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Query
 
@@ -191,6 +191,40 @@ def register_public_routes(
                 "stale": True,
             }
         return monitor_state.snapshot()
+
+    @app.get("/analysis/binned")
+    def get_binned_analysis(
+        value: str = Query(...),
+        x: str = Query(...),
+        y: str | None = Query(default=None),
+        x_bins: int = Query(default=12, ge=2, le=64),
+        y_bins: int | None = Query(default=None, ge=2, le=64),
+        agg: str = Query(default="mean"),
+        session: str | None = Query(default=None),
+        since: str | None = Query(default=None),
+        until: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        # Task 5.1: ad-hoc binned aggregation ("trims by rpm×load") over the
+        # DuckDB parquet layer — no hand-written SQL, no refit. Public/
+        # read-only like the other stored-data reads on this router (trip
+        # summary, DTC, monitors) — no secrets, just historical telemetry.
+        from src.analysis.binned_analysis import Aggregation
+        from src.control.binned_analysis import binned_analysis_response
+
+        if agg not in ("mean", "median", "p95", "count"):
+            raise HTTPException(status_code=400, detail=f"unsupported agg: {agg!r}")
+        return binned_analysis_response(
+            config,
+            value=value,
+            x=x,
+            y=y,
+            x_bins=x_bins,
+            y_bins=y_bins,
+            agg=cast("Aggregation", agg),
+            session=session,
+            since=since,
+            until=until,
+        )
 
     @app.get("/sessions/{session_id}/trip-summary")
     def get_session_trip_summary(session_id: str) -> dict[str, Any]:

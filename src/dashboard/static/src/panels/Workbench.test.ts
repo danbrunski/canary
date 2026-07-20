@@ -60,10 +60,15 @@ describe("Workbench navigation", () => {
   });
 
   it("placeholder items explain the backend that's ready", () => {
-    // data-export is still a labeled placeholder (6.20 UI pending).
+    // data-sessions is still a labeled placeholder (6.13 UI pending).
+    renderAt("data-sessions");
+    expect(screen.getByRole("heading", { name: "Sessions" })).toBeInTheDocument();
+    expect(screen.getByText("6.13")).toBeInTheDocument();
+  });
+
+  it("data-export renders the real Export panel (Task 5.6b)", () => {
     renderAt("data-export");
-    expect(screen.getByText("Dataset export")).toBeInTheDocument();
-    expect(screen.getByText("6.20")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Export" })).toBeInTheDocument();
   });
 
   it("marks not-yet-built items with a 'soon' hint", () => {

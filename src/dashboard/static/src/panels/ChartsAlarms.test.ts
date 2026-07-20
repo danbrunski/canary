@@ -1,10 +1,18 @@
 import { createElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { AlarmsPanel } from "./AlarmsPanel";
-import { ChartsPanel } from "./ChartsPanel";
+
+// Task 5.5: spy on MultiSeriesChart so the Y-axis toggle test can assert the
+// `yAxisMode` prop it's actually wired, without depending on canvas drawing.
+vi.mock("../components/MultiSeriesChart", () => ({
+  MultiSeriesChart: vi.fn(() => null),
+}));
+
+const { MultiSeriesChart } = await import("../components/MultiSeriesChart");
+const { ChartsPanel } = await import("./ChartsPanel");
 
 function snap(value: number, history: number[]): ChannelSnapshot {
   return {
@@ -44,6 +52,24 @@ describe("ChartsPanel", () => {
     const btn = screen.getByRole("button", { name: /pause/ });
     fireEvent.click(btn);
     expect(screen.getByRole("button", { name: /resume/ })).toBeInTheDocument();
+  });
+
+  it("wires the Y-axis mode toggle through to MultiSeriesChart", () => {
+    vi.mocked(MultiSeriesChart).mockClear();
+    render(createElement(ChartsPanel, { channels }));
+    // Need a selected series for MultiSeriesChart to render at all.
+    fireEvent.click(screen.getByRole("button", { name: /obd:RPM/ }));
+    expect(MultiSeriesChart).toHaveBeenLastCalledWith(
+      expect.objectContaining({ yAxisMode: "independent" }),
+      expect.anything(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "shared" }));
+
+    expect(MultiSeriesChart).toHaveBeenLastCalledWith(
+      expect.objectContaining({ yAxisMode: "shared" }),
+      expect.anything(),
+    );
   });
 });
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.analysis.session_deviations import analyze_session
+from src.analysis.session_deviations import analyze_session, compare_sessions
 from src.config import CanaryConfig
 from src.decode.behavior_models import (
     Axis1D,
@@ -80,11 +80,12 @@ def _write_deviation_session(
     coolant_offset: float,
     timing_offset: float,
     n: int = 10,
+    session_id: str = "2026-07-19T000000",
 ) -> Path:
     """A session parked at one fixed (rpm, load) operating point, with a known
     constant offset injected into COOLANT_TEMP and TIMING_ADVANCE so the
     analyzer's recovered deviation is a known, exact number."""
-    session = root / "2026-07-19T000000"
+    session = root / session_id
     records = []
     for i in range(n):
         t = 1_780_000_000.0 + i
@@ -279,3 +280,128 @@ def test_report_to_dict_round_trips_json_safely(config: CanaryConfig, tmp_path: 
     payload = json.loads(json.dumps(report.to_dict()))
     assert payload["n_rows"] == 4
     assert payload["surfaces"][0]["name"] == "timing_vs_rpm_load"
+
+
+# ---------------------------------------------------------------------------
+# compare_sessions (Task 5.4)
+# ---------------------------------------------------------------------------
+
+
+def test_compare_sessions_computes_per_surface_and_per_cell_deltas(
+    config: CanaryConfig, tmp_path: Path
+) -> None:
+    """Session A has a +2 timing offset, session B has a +7 offset at the
+    same operating point — the A/B delta must recover the exact +5 shift,
+    localized to the one cell both sessions actually visited."""
+    session_a = _write_deviation_session(
+        tmp_path,
+        rpm=500.0,
+        load=25.0,
+        run_time_base=100.0,
+        coolant_offset=0.0,
+        timing_offset=2.0,
+        n=8,
+        session_id="2026-07-01T000000",
+    )
+    session_b = _write_deviation_session(
+        tmp_path,
+        rpm=500.0,
+        load=25.0,
+        run_time_base=100.0,
+        coolant_offset=0.0,
+        timing_offset=7.0,
+        n=8,
+        session_id="2026-07-19T000000",
+    )
+    models = BehaviorModels(schema_version=1, models=[_timing_model()])
+
+    comparison = compare_sessions(session_a, session_b, config, models)
+
+    (timing,) = comparison.surfaces
+    assert timing.name == "timing_vs_rpm_load"
+    assert timing.mean_deviation_a == pytest.approx(2.0, abs=1e-6)
+    assert timing.mean_deviation_b == pytest.approx(7.0, abs=1e-6)
+    assert timing.mean_deviation_delta == pytest.approx(5.0, abs=1e-6)
+
+    assert len(timing.cells) == 1
+    cell = timing.cells[0]
+    assert cell["x_bin"] == [0.0, 1000.0]
+    assert cell["y_bin"] == [0.0, 50.0]
+    assert cell["n_a"] == 8
+    assert cell["n_b"] == 8
+    assert cell["delta"] == pytest.approx(5.0, abs=1e-6)
+
+
+def test_compare_sessions_cell_present_only_on_one_side(
+    config: CanaryConfig, tmp_path: Path
+) -> None:
+    """Session A visits the low-rpm/low-load cell; session B visits a
+    different cell entirely — each cell should carry a delta of ``None``
+    (unmatched), not a fabricated comparison against an unvisited cell."""
+    session_a = _write_deviation_session(
+        tmp_path,
+        rpm=500.0,
+        load=25.0,
+        run_time_base=100.0,
+        coolant_offset=0.0,
+        timing_offset=2.0,
+        n=5,
+        session_id="2026-07-01T000000",
+    )
+    session_b = _write_deviation_session(
+        tmp_path,
+        rpm=1500.0,
+        load=75.0,
+        run_time_base=100.0,
+        coolant_offset=0.0,
+        timing_offset=2.0,
+        n=5,
+        session_id="2026-07-19T000000",
+    )
+    models = BehaviorModels(schema_version=1, models=[_timing_model()])
+
+    comparison = compare_sessions(session_a, session_b, config, models)
+
+    (timing,) = comparison.surfaces
+    # Two distinct operating points visited (one per session) -> two cells,
+    # each populated on only one side -> no cross-session delta for either.
+    assert len(timing.cells) == 2
+    by_bin = {(tuple(c["x_bin"]), tuple(c["y_bin"])): c for c in timing.cells}
+    low_cell = by_bin[((0.0, 1000.0), (0.0, 50.0))]
+    high_cell = by_bin[((1000.0, 2000.0), (50.0, 100.0))]
+    assert low_cell["n_a"] == 5
+    assert low_cell["n_b"] == 0
+    assert low_cell["delta"] is None
+    assert high_cell["n_a"] == 0
+    assert high_cell["n_b"] == 5
+    assert high_cell["delta"] is None
+
+
+def test_compare_sessions_to_dict_json_safe(config: CanaryConfig, tmp_path: Path) -> None:
+    import json
+
+    session_a = _write_deviation_session(
+        tmp_path,
+        rpm=500.0,
+        load=25.0,
+        run_time_base=100.0,
+        coolant_offset=0.0,
+        timing_offset=1.0,
+        n=3,
+        session_id="2026-07-01T000000",
+    )
+    session_b = _write_deviation_session(
+        tmp_path,
+        rpm=500.0,
+        load=25.0,
+        run_time_base=100.0,
+        coolant_offset=0.0,
+        timing_offset=4.0,
+        n=3,
+        session_id="2026-07-19T000000",
+    )
+    models = BehaviorModels(schema_version=1, models=[_timing_model()])
+
+    comparison = compare_sessions(session_a, session_b, config, models)
+    payload = json.loads(json.dumps(comparison.to_dict()))
+    assert payload["surfaces"][0]["mean_deviation_delta"] == pytest.approx(3.0, abs=1e-6)

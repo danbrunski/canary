@@ -401,3 +401,69 @@ def test_date_filter_excludes_unparseable_session_dirs(tmp_path: Path) -> None:
     q = TelemetryQuery(tmp_path)
     assert len(q.run("SELECT * FROM telemetry")) == 1  # unscoped: included
     assert q.run("SELECT * FROM telemetry", since="2026-01-01") == []  # date-filtered: excluded
+
+
+# ---------------------------------------------------------------------------
+# fetch_channel_rows (Tasks 5.1/5.3)
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_channel_rows_filters_by_source_channel_key(tmp_path: Path) -> None:
+    t0 = dt.datetime(2026, 5, 18, 12, 0, tzinfo=dt.UTC)
+    _write_fixture(
+        tmp_path,
+        "2026-05-18T120000",
+        [
+            _row(t0, 800.0),
+            {
+                "timestamp": t0,
+                "source": "obd",
+                "channel": "SPEED",
+                "value_number": 0.0,
+                "value_text": None,
+                "value_bool": None,
+                "unit": "kph",
+                "metadata_json": None,
+            },
+        ],
+    )
+    q = TelemetryQuery(tmp_path)
+    rows = q.fetch_channel_rows(["obd:RPM"])
+    assert len(rows) == 1
+    assert rows[0]["channel_key"] == "obd:RPM"
+    assert rows[0]["value_number"] == 800.0
+    assert rows[0]["session"] == "2026-05-18T120000"
+
+
+def test_fetch_channel_rows_empty_channel_list_short_circuits(tmp_path: Path) -> None:
+    q = TelemetryQuery(tmp_path)
+    assert q.fetch_channel_rows([]) == []
+
+
+def test_fetch_channel_rows_scopes_by_session(tmp_path: Path) -> None:
+    _three_sessions(tmp_path)
+    q = TelemetryQuery(tmp_path)
+    rows = q.fetch_channel_rows(["obd:RPM"], session="2026-07-10T090000")
+    assert [r["value_number"] for r in rows] == [200.0]
+
+
+def test_fetch_channel_rows_excludes_null_value_number(tmp_path: Path) -> None:
+    t0 = dt.datetime(2026, 5, 18, 12, 0, tzinfo=dt.UTC)
+    _write_fixture(
+        tmp_path,
+        "2026-05-18T120000",
+        [
+            {
+                "timestamp": t0,
+                "source": "obd",
+                "channel": "VIN",
+                "value_number": None,
+                "value_text": "1N4AL11D75C109151",
+                "value_bool": None,
+                "unit": "",
+                "metadata_json": None,
+            }
+        ],
+    )
+    q = TelemetryQuery(tmp_path)
+    assert q.fetch_channel_rows(["obd:VIN"]) == []

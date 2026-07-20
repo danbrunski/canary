@@ -25,6 +25,7 @@ export const NAV: NavGroupDef[] = [
       { id: "diag-dtc", label: "Trouble Codes", group: "diagnostics" },
       { id: "diag-monitors", label: "Monitors", group: "diagnostics" },
       { id: "diag-trends", label: "Drift Trends", group: "diagnostics" },
+      { id: "diag-explore", label: "Explore", group: "diagnostics" },
       { id: "diag-system", label: "System", group: "diagnostics" },
       { id: "diag-tpms", label: "TPMS", group: "diagnostics" },
     ],
@@ -47,7 +48,7 @@ export const NAV: NavGroupDef[] = [
       { id: "data-sessions", label: "Sessions", group: "data", placeholder: true },
       { id: "data-health", label: "Dataset Health", group: "data" },
       { id: "data-custom-pids", label: "Custom PIDs", group: "data" },
-      { id: "data-export", label: "Export", group: "data", placeholder: true },
+      { id: "data-export", label: "Export", group: "data" },
     ],
   },
   {

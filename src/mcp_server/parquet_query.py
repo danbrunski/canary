@@ -14,6 +14,7 @@ single SELECT. DuckDB's read-only connection is the defense in depth.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -52,6 +53,12 @@ _COMMENT_LINE = re.compile(r"--[^\n]*")
 _COMMENT_BLOCK = re.compile(r"/\*.*?\*/", re.DOTALL)
 _TRAILING_SEMI = re.compile(r";\s*$")
 _DEFAULT_ROW_LIMIT = 5_000
+#: Row cap for :meth:`TelemetryQuery.fetch_channel_rows` — Tasks 5.1/5.3 read
+#: a whole scoped session's worth of samples across a handful of channels
+#: (not an arbitrary corpus-wide sweep like ``run()``'s ad-hoc SQL), so this
+#: is generous rather than the 5k default: a multi-hour drive at 10 Hz across
+#: 3 channels is still well under it.
+_ANALYSIS_ROW_LIMIT = 200_000
 
 
 class QueryValidationError(ValueError):
@@ -294,6 +301,49 @@ class TelemetryQuery:
             cursor = self._con.execute(wrapped)
         except duckdb.Error as exc:
             raise QueryValidationError(str(exc)) from exc
+        columns = [d[0] for d in cursor.description] if cursor.description else []
+        rows = cursor.fetchall()
+        return [dict(zip(columns, row, strict=False)) for row in rows]
+
+    def fetch_channel_rows(
+        self,
+        channel_keys: Sequence[str],
+        *,
+        session: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        row_limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch ``(timestamp, session, channel_key, value_number)`` rows for
+        the given ``source:channel`` keys — the shared long-format read Task
+        5.1's binned analysis (:mod:`src.analysis.binned_analysis`) and Task
+        5.3's session time-series read (:mod:`src.analysis.session_timeseries`)
+        both pivot from, so neither has to hand-roll its own scoped SQL.
+
+        Unlike :meth:`run`, this bypasses :func:`validate_query` — the SQL
+        shape is fixed and internally built (same trust level as
+        :meth:`_refresh_view`'s own view-construction SQL), and
+        ``channel_keys`` is passed as bound DuckDB parameters rather than
+        interpolated, since (unlike the file list) it *is* caller/query-string
+        controlled. Rows with a null ``value_number`` (text/bool channels, or
+        a channel that's simply absent from the scope) are excluded — both
+        consumers bin/plot numeric series only.
+        """
+        if not channel_keys:
+            return []
+        self._refresh_view(session=session, since=since, until=until)
+        limit = row_limit if row_limit is not None else _ANALYSIS_ROW_LIMIT
+        placeholders = ", ".join("?" for _ in channel_keys)
+        sql = (
+            "SELECT timestamp, session, (source || ':' || channel) AS channel_key, "
+            "value_number "
+            "FROM telemetry "
+            f"WHERE (source || ':' || channel) IN ({placeholders}) "
+            "AND value_number IS NOT NULL "
+            "ORDER BY timestamp "
+            f"LIMIT {int(limit)}"
+        )
+        cursor = self._con.execute(sql, list(channel_keys))
         columns = [d[0] for d in cursor.description] if cursor.description else []
         rows = cursor.fetchall()
         return [dict(zip(columns, row, strict=False)) for row in rows]

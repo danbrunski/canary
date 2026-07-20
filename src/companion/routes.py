@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from src.alerts.feedback import FeedbackStore, annotate_events_with_feedback
 from src.companion.library import CanaryLibrary, LibrarySession
@@ -237,6 +237,71 @@ def register_companion_routes(
             resolve=lambda sid: _library_session_path(lib, sid),
             after_delete=lambda sid: lib.remove_session(sid, delete_files=False),
         )
+
+    @app.get("/control/sessions/{session_id}/gps.gpx")
+    def get_local_session_gps_gpx(
+        session_id: str,
+        _auth: None = Depends(require_local_auth),
+    ) -> Response:
+        """Task 5.6a: GPX export of a synced session's captured GPS track."""
+        from src.analysis.gps_export import read_gps_track, to_gpx
+        from src.control.sessions import resolve_session
+
+        try:
+            session_dir = resolve_session(lib.sessions_dir, session_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        track = read_gps_track(session_dir)
+        return Response(
+            content=to_gpx(track, name=session_id),
+            media_type="application/gpx+xml",
+            headers={"Content-Disposition": f'attachment; filename="{session_id}.gpx"'},
+        )
+
+    @app.get("/control/sessions/{session_id}/gps.kml")
+    def get_local_session_gps_kml(
+        session_id: str,
+        _auth: None = Depends(require_local_auth),
+    ) -> Response:
+        """Task 5.6a: KML export of a synced session's captured GPS track."""
+        from src.analysis.gps_export import read_gps_track, to_kml
+        from src.control.sessions import resolve_session
+
+        try:
+            session_dir = resolve_session(lib.sessions_dir, session_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        track = read_gps_track(session_dir)
+        return Response(
+            content=to_kml(track, name=session_id),
+            media_type="application/vnd.google-earth.kml+xml",
+            headers={"Content-Disposition": f'attachment; filename="{session_id}.kml"'},
+        )
+
+    @app.get("/control/sessions/{session_id}/chart")
+    def get_local_session_chart(
+        session_id: str,
+        channels: str = Query(..., description="Comma-separated source:channel keys"),
+        resample_hz: float | None = Query(default=None, gt=0),
+        _auth: None = Depends(require_local_auth),
+    ) -> dict[str, Any]:
+        # Task 5.3: the "chart" this module's own docstring
+        # (src/companion/library.py: "browse / chart / train / publish")
+        # promised but never had an endpoint for — per-channel time-series
+        # arrays for a synced session, same shape as the daemon's
+        # /control/sessions/{id}/chart, just rooted at the local library.
+        from src.control.session_timeseries import session_time_series_response
+
+        channel_list = [c.strip() for c in channels.split(",") if c.strip()]
+        try:
+            return session_time_series_response(
+                lib.sessions_dir,
+                session_id,
+                channel_list,
+                resample_hz=resample_hz,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/telemetry/latest")
     def get_local_telemetry_latest(

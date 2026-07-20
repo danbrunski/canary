@@ -37,6 +37,9 @@ from src.mcp_server.tools import (
     bindings as bindings_tool,
 )
 from src.mcp_server.tools import (
+    binned_analysis as binned_analysis_tool,
+)
+from src.mcp_server.tools import (
     classification as classification_tool,
 )
 from src.mcp_server.tools import (
@@ -295,6 +298,34 @@ def _register_read_tools(
         return await trends_tool.get_trends(client)
 
     @mcp.tool()
+    async def get_binned_analysis(
+        value: str,
+        x: str,
+        y: str | None = None,
+        x_bins: int = 12,
+        y_bins: int | None = None,
+        agg: str = "mean",
+        session: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> dict[str, Any]:
+        """Bin a value channel by an x (and optional y) channel over a
+        session/date scope — "trims by rpm×load" without hand-written SQL
+        or a refit (Task 5.1). ``agg``: mean/median/p95/count."""
+        return await binned_analysis_tool.get_binned_analysis(
+            client,
+            value=value,
+            x=x,
+            y=y,
+            x_bins=x_bins,
+            y_bins=y_bins,
+            agg=agg,
+            session=session,
+            since=since,
+            until=until,
+        )
+
+    @mcp.tool()
     async def list_sessions() -> dict[str, Any]:
         """All known capture/telemetry sessions on disk, oldest-first."""
         return await sessions_tool.list_sessions(client)
@@ -523,10 +554,16 @@ def _register_read_tools(
         config_path = cfg.config_path
 
         @mcp.tool()
-        def get_behavior_deviations(session: str, mode: str | None = None) -> dict[str, Any]:
+        def get_behavior_deviations(
+            session: str, mode: str | None = None, against: str | None = None
+        ) -> dict[str, Any]:
             """Diff a stored session against the learned behavior surfaces (local,
-            no daemon HTTP call) — did a mod/retrain/change actually move behavior?"""
-            return behavior_tool.get_behavior_deviations(config_path, session=session, mode=mode)
+            no daemon HTTP call) — did a mod/retrain/change actually move behavior?
+            Pass ``against`` to A/B ``session`` directly against a second session
+            id instead (Task 5.4: before-mod vs. after-mod, session-to-session)."""
+            return behavior_tool.get_behavior_deviations(
+                config_path, session=session, mode=mode, against=against
+            )
     else:
         logger.info(
             "get_behavior_deviations disabled — CANARY_CONFIG unset or unreadable; "

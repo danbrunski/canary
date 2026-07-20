@@ -7,3 +7,4 @@ export * from "./types/control";
 export * from "./types/coverage";
 export * from "./types/tripSummary";
 export * from "./types/digest";
+export * from "./types/analysis";

@@ -330,37 +330,39 @@ New channels go in `compute_derived_channels` (performance) or
 
 ## Phase 5 — Analysis UX (stored data becomes explorable)
 
-- [ ] **5.1 — Binned-analysis endpoint.** `GET /analysis/binned`
-  (params: value channel, x channel, y channel optional, bin counts,
-  session/date scope, agg = mean|median|p95|count) over the existing
-  DuckDB layer (`parquet_query.py`). MCP `get_binned_analysis`. This
-  answers "trims by rpm×load" without hand-written SQL or a refit.
-- [ ] **5.2 — Ad-hoc map view.** Dashboard "Explore" panel: pick
-  value/x/y → heatmap via the existing `Heatmap.tsx` component
-  (`BehaviorModelsPanel` already proves the rendering). Read-only,
-  backed by 5.1.
-- [ ] **5.3 — Historical session charting.** Time-series read endpoint
-  (session + channels + optional resample → arrays; DuckDB-backed) +
-  ChartsPanel "session mode" (load a stored session instead of the
-  live stream). This also fixes the companion-app gap — its docstring
-  promises "chart" but no endpoint exists (`src/companion/routes.py`).
-- [ ] **5.4 — A/B session comparison.** Extend
-  `src/analysis/session_deviations.py` with
-  `compare_sessions(a, b)`: per-surface and per-binned-cell deltas
-  between two sessions (before-mod vs after-mod), reusing the 5.1
-  binning. CLI flag `scripts/analyze_session.py --against <session>`
-  + MCP param. This is the mod-effect question asked directly,
-  session-to-session, instead of each-vs-model.
-- [ ] **5.5 — Chart ergonomics.** `MultiSeriesChart.tsx`: optional
-  shared/dual Y axis (per-series self-normalization prevents real
-  comparison today), hover cursor with values, X-axis time labels,
-  PNG/CSV export of the plotted window. (Zoom can wait; task 6.10
-  already tracks it.)
-- [ ] **5.6 — Exports.** (a) GPX/KML export of a session's GPS track
-  (data captured, no export path exists — grep-confirmed);
-  (b) wire the dashboard export panel placeholder (`Workbench.tsx:173`,
-  task 6.20) to the existing `scripts/export_dataset.py` backend
-  (`src/datasets/export.py:54`) for the CSV→Excel/MegaLogViewer path.
+- [x] **5.1 — Binned-analysis endpoint.** Landed: `GET /analysis/binned`
+  + MCP `get_binned_analysis`, session/date scope pushed to the DuckDB
+  query itself (not fetch-then-filter). Quantile-spaced bins with
+  mean|median|p95|count agg; degenerate (all-identical-value) channels
+  gate to a clean single bin rather than crashing.
+- [x] **5.2 — Ad-hoc map view.** Landed: new `ExplorePanel.tsx`
+  (diagnostics group) — value/x/y/bins/agg/session/date-range form,
+  reuses `Heatmap.tsx`, read-only, backed by 5.1.
+- [x] **5.3 — Historical session charting.** Landed: new time-series
+  read endpoint (native per-channel timestamps by default, one shared
+  resampled grid only when `resample_hz` requested — doesn't force
+  multi-rate channels onto one grid unasked) + `ChartsPanel` session
+  mode. Also lands the companion-app route its docstring already
+  promised but that never existed.
+- [x] **5.4 — A/B session comparison.** Landed:
+  `compare_sessions(a, b)` grades both sessions against the identical
+  fitted surface's own bin edges, so cell (i,j) means the same
+  rpm×load bin in both sessions — genuinely comparable, not
+  independently rebinned per session. Consistent after-minus-before
+  delta sign throughout. CLI `--against` flag + MCP param.
+- [x] **5.5 — Chart ergonomics.** Landed: `MultiSeriesChart.tsx` gets
+  `yAxisMode` (independent/shared — shared genuinely puts every series
+  on one real scale), hover crosshair, X-axis time labels, PNG/CSV
+  export. First pass shipped the shared-axis logic without a reachable
+  UI control; fixed same task — `ChartsPanel.tsx` now has a toggle
+  wired through to both live and session mode (one shared call site).
+- [x] **5.6 — Exports.** Landed: GPX/KML session GPS-track export
+  (hand-written XML, no new dependency; correct GPX lat/lon-attribute
+  vs. KML lon,lat,alt-comma coordinate order — verified, this is a
+  classic easy-to-invert bug). Dashboard export placeholder replaced
+  with a real `ExportPanel.tsx` wired to the existing
+  `scripts/export_dataset.py`/`src/datasets/export.py` backend via a
+  new `export_dataset` job kind.
 
 ---
 

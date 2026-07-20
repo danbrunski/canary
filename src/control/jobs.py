@@ -23,6 +23,7 @@ JobKind = Literal[
     "retrain_all",
     "refit_behavior_models",
     "corpus_report",
+    "export_dataset",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 CommandBuilder = Callable[[str, Mapping[str, Any]], Sequence[str]]
@@ -36,6 +37,7 @@ ALLOWED_JOB_KINDS: set[str] = {
     "refit_behavior_models",
     "corpus_report",
     "replay_window",
+    "export_dataset",
 }
 
 
@@ -287,6 +289,8 @@ class JobController:
             ]
         if kind == "replay_window":
             return self._replay_window_command(params, job_id=job_id, config_arg=config_arg)
+        if kind == "export_dataset":
+            return self._export_dataset_command(params, config_arg=config_arg)
         raise ValueError(f"unsupported job kind: {kind}")
 
     def _replay_window_command(
@@ -338,6 +342,45 @@ class JobController:
         max_windows = params.get("max_windows")
         if isinstance(max_windows, int) and max_windows > 0:
             command.extend(["--max-windows", str(max_windows)])
+        return command
+
+    def _export_dataset_command(
+        self, params: Mapping[str, Any], *, config_arg: list[str]
+    ) -> list[str]:
+        """Build the ``scripts/export_dataset.py`` invocation (Task 5.6b) —
+        the "Export" panel's backend, wired to the existing CLI/
+        :mod:`src.datasets.export` rather than a parallel implementation.
+        """
+        session_ids = _string_list(params.get("session_ids", []))
+        if not session_ids:
+            raise ValueError("export_dataset requires params.session_ids (at least one)")
+        command = [str(self._python), "scripts/export_dataset.py"]
+        for session_id in session_ids:
+            command.extend(["--session", session_id])
+        for channel in _string_list(params.get("channels", [])):
+            command.extend(["--channel", channel])
+        resample_hz = params.get("resample_hz")
+        if resample_hz is not None:
+            command.extend(["--resample-hz", str(resample_hz)])
+        for tag in _string_list(params.get("include_tags", [])):
+            command.extend(["--include-tag", tag])
+        for tag in _string_list(params.get("exclude_tags", [])):
+            command.extend(["--exclude-tag", tag])
+        for fmt in _string_list(params.get("formats", ["csv"])) or ["csv"]:
+            command.extend(["--format", fmt])
+        command.extend(config_arg)
+        purpose = str(params.get("purpose", ""))
+        if purpose:
+            command.extend(["--purpose", purpose])
+        if not bool(params.get("zip", True)):
+            command.append("--no-zip")
+        out_dir = params.get("out_dir")
+        command.extend(
+            ["--out", str(out_dir) if out_dir else str(self._repo_root / "data" / "datasets")]
+        )
+        name = params.get("name")
+        if name:
+            command.extend(["--name", str(name)])
         return command
 
     def _session_args(self, params: Mapping[str, Any]) -> list[str]:

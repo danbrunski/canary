@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.analysis.session_deviations import analyze_session
+from src.analysis.session_deviations import analyze_session, compare_sessions
 from src.config import CanaryConfig
 from src.control.sessions import resolve_session
 from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH, load_behavior_models
@@ -45,6 +45,7 @@ def get_behavior_deviations(
     *,
     session: str,
     mode: str | None = None,
+    against: str | None = None,
 ) -> dict[str, Any]:
     """Diff a *stored* session against the learned behavior surfaces — the
     "did my change move behavior?" tool, run locally (no daemon HTTP call,
@@ -65,6 +66,12 @@ def get_behavior_deviations(
     ``operating_mode`` (surfaces with no gate are excluded when a mode filter
     is set, matching ``scripts/analyze_session.py --mode``).
 
+    ``against`` (Task 5.4): when given, ``session`` is compared directly
+    against this second session id instead of graded standalone — a
+    before-mod/after-mod A/B, per-surface and per-binned-cell deltas
+    (``mean_deviation_delta`` etc., ``b - a``), matching
+    ``scripts/analyze_session.py --against``.
+
     Returns ``{"ok": False, "error": ...}`` on a bad session id or a missing
     behavior_models.yaml rather than raising, matching ``query_telemetry``'s
     validation-error convention.
@@ -75,6 +82,11 @@ def get_behavior_deviations(
 
     try:
         session_dir = resolve_session(scoped.collection.storage_path, session)
+        against_dir = (
+            resolve_session(scoped.collection.storage_path, against)
+            if against is not None
+            else None
+        )
     except FileNotFoundError as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -84,6 +96,10 @@ def get_behavior_deviations(
     if not behavior_models_path.exists():
         return {"ok": False, "error": f"no behavior_models.yaml found ({behavior_models_path})"}
     models = load_behavior_models(behavior_models_path)
+
+    if against_dir is not None:
+        comparison = compare_sessions(session_dir, against_dir, scoped, models)
+        return {"ok": True, **comparison.to_dict(mode_filter=mode)}
 
     report = analyze_session(session_dir, scoped, models)
     return {"ok": True, **report.to_dict(mode_filter=mode)}

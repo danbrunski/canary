@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.feedback import FEEDBACK_LABELS, FeedbackStore
@@ -529,6 +529,61 @@ def register_control_routes(
     ) -> dict[str, Any]:
         """Per-stat drift trend over the fingerprint history (Task 4.5)."""
         return corpus_trend_summary(config)
+
+    @app.get("/control/sessions/{session_id}/chart")
+    def get_session_chart(
+        session_id: str,
+        channels: str = Query(..., description="Comma-separated source:channel keys"),
+        resample_hz: float | None = Query(default=None, gt=0),
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """Task 5.3: per-channel time-series arrays for one stored session —
+        ``ChartsPanel``'s "session mode" (load a stored session instead of
+        the live stream) instead of hand-written DuckDB over SSH."""
+        from src.control.session_timeseries import session_time_series_response
+
+        channel_list = [c.strip() for c in channels.split(",") if c.strip()]
+        try:
+            return session_time_series_response(
+                config.collection.storage_path,
+                session_id,
+                channel_list,
+                resample_hz=resample_hz,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/control/sessions/{session_id}/gps.gpx")
+    def get_session_gps_gpx(
+        session_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> Response:
+        """Task 5.6a: GPX export of a session's captured GPS track."""
+        from src.analysis.gps_export import read_gps_track, to_gpx
+
+        session_dir = _resolve_session(session_id)
+        track = read_gps_track(session_dir)
+        return Response(
+            content=to_gpx(track, name=session_id),
+            media_type="application/gpx+xml",
+            headers={"Content-Disposition": f'attachment; filename="{session_id}.gpx"'},
+        )
+
+    @app.get("/control/sessions/{session_id}/gps.kml")
+    def get_session_gps_kml(
+        session_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> Response:
+        """Task 5.6a: KML export of a session's captured GPS track."""
+        from src.analysis.gps_export import read_gps_track, to_kml
+
+        session_dir = _resolve_session(session_id)
+        track = read_gps_track(session_dir)
+        return Response(
+            content=to_kml(track, name=session_id),
+            media_type="application/vnd.google-earth.kml+xml",
+            headers={"Content-Disposition": f'attachment; filename="{session_id}.kml"'},
+        )
 
     @app.get("/control/classifications/events")
     def get_corpus_events(

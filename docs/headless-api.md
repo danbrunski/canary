@@ -58,6 +58,7 @@ Endpoint summary:
 | `GET /obd/dtc` | cached stored/pending/permanent DTC report, MIL state, staleness |
 | `GET /obd/monitors` | cached Mode 06 on-board monitor sweep — per-cylinder misfire counts, raw monitor test results (value/min/max, pass/fail), staleness |
 | `GET /sessions/{id}/trip-summary` | trip-summary sidecar (duration, distance, fuel/economy/CO2, idle time/fraction, max/avg speed, 0-60, 1/4-mile) — computed on demand from the stored session on first request, cached to `trip_summary.json` after |
+| `GET /analysis/binned?value=&x=&y=&x_bins=&y_bins=&agg=&session=&since=&until=` | ad-hoc binned aggregation over the DuckDB parquet layer ("trims by rpm×load") — `agg` is `mean`\|`median`\|`p95`\|`count`; `y`/`y_bins` optional (1D when omitted) |
 
 ## Control API
 
@@ -152,6 +153,8 @@ Control endpoints:
 | `POST /control/sessions/{id}/unpin` | remove a session's retention pin |
 | `DELETE /control/sessions/{id}?force=true` | delete a session; `force=true` is required for pinned sessions |
 | `GET /control/sessions/{id}/export` | download one session as a zip archive |
+| `GET /control/sessions/{id}/chart?channels=&resample_hz=` | per-channel time-series arrays for a stored session (comma-separated `source:channel` keys); omit `resample_hz` to keep each channel's own native timestamps, set it to align every channel onto one shared forward-filled grid |
+| `GET /control/sessions/{id}/gps.gpx` / `GET /control/sessions/{id}/gps.kml` | download the session's captured GPS track as GPX or KML |
 | `POST /control/jobs` | start an allow-listed background job |
 | `GET /control/jobs` | list background jobs from the persisted job ledger |
 | `GET /control/jobs/{id}` | inspect one job |
@@ -181,10 +184,14 @@ Allowed job kinds:
 | `retrain_all` | `scripts/retrain.py` (IF + the configured sequence backbone) |
 | `refit_behavior_models` | `scripts/refit_behavior_models.py` |
 | `corpus_report` | `tools/corpus_report.py --out data/analyses/...` |
+| `export_dataset` | `scripts/export_dataset.py` — the Export panel's backend (Task 5.6b) |
 
 Job parameters are structured JSON, not shell text. Common parameters include
 `days`, `all`, and `session_ids`. LSTM jobs also accept `device`; behavior
-refits accept `recipes` and `dry_run`.
+refits accept `recipes` and `dry_run`; `export_dataset` requires
+`session_ids` (at least one) and also accepts `channels`, `resample_hz`,
+`include_tags`, `exclude_tags`, `formats` (default `["csv"]`), `purpose`,
+`zip` (default `true`), `out_dir`, and `name`.
 
 Job state is append-only in `daemon.jobs_dir/jobs.jsonl`, so recent job history
 survives daemon restarts. Control mutations are appended to

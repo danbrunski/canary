@@ -241,6 +241,176 @@ def _summarize_surface(
     )
 
 
+@dataclass(frozen=True)
+class SurfaceComparison:
+    """One surface's before/after delta between two sessions (Task 5.4) —
+    the mod-effect question asked directly, session-to-session, instead of
+    each session graded independently against the model."""
+
+    name: str
+    kind: str
+    operating_mode: str | None
+    n_observed_a: int
+    n_observed_b: int
+    n_in_domain_a: int
+    n_in_domain_b: int
+    mean_actual_a: float | None
+    mean_actual_b: float | None
+    mean_actual_delta: float | None
+    mean_expected_a: float | None
+    mean_expected_b: float | None
+    mean_expected_delta: float | None
+    mean_deviation_a: float | None
+    mean_deviation_b: float | None
+    mean_deviation_delta: float | None
+    warning_fraction_a: float | None
+    warning_fraction_b: float | None
+    critical_fraction_a: float | None
+    critical_fraction_b: float | None
+    #: Per-(x_bin, y_bin) delta, reusing the surface's own grid (the same
+    #: bins Task 5.1's ad-hoc binning would produce for this x/y pair, since
+    #: both sessions are graded against the identical fitted model) —
+    #: surface_2d only, empty for surface_1d.
+    cells: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "kind": self.kind,
+            "operating_mode": self.operating_mode,
+            "n_observed_a": self.n_observed_a,
+            "n_observed_b": self.n_observed_b,
+            "n_in_domain_a": self.n_in_domain_a,
+            "n_in_domain_b": self.n_in_domain_b,
+            "mean_actual_a": self.mean_actual_a,
+            "mean_actual_b": self.mean_actual_b,
+            "mean_actual_delta": self.mean_actual_delta,
+            "mean_expected_a": self.mean_expected_a,
+            "mean_expected_b": self.mean_expected_b,
+            "mean_expected_delta": self.mean_expected_delta,
+            "mean_deviation_a": self.mean_deviation_a,
+            "mean_deviation_b": self.mean_deviation_b,
+            "mean_deviation_delta": self.mean_deviation_delta,
+            "warning_fraction_a": self.warning_fraction_a,
+            "warning_fraction_b": self.warning_fraction_b,
+            "critical_fraction_a": self.critical_fraction_a,
+            "critical_fraction_b": self.critical_fraction_b,
+            "cells": self.cells,
+        }
+
+
+@dataclass(frozen=True)
+class SessionComparisonReport:
+    """Full A/B result: one :class:`SurfaceComparison` per surface both
+    sessions were evaluated against (Task 5.4)."""
+
+    session_a: Path
+    session_b: Path
+    surfaces: list[SurfaceComparison]
+
+    def to_dict(self, *, mode_filter: str | None = None) -> dict[str, Any]:
+        surfaces = (
+            self.surfaces
+            if mode_filter is None
+            else [s for s in self.surfaces if s.operating_mode == mode_filter]
+        )
+        return {
+            "session_a": str(self.session_a),
+            "session_b": str(self.session_b),
+            "surfaces": [s.to_dict() for s in surfaces],
+        }
+
+
+def _delta(a: float | None, b: float | None) -> float | None:
+    return None if a is None or b is None else b - a
+
+
+def _compare_surface(a: SurfaceDeviationSummary, b: SurfaceDeviationSummary) -> SurfaceComparison:
+    cells_a = {(tuple(c["x_bin"]), tuple(c["y_bin"])): c for c in a.cells}
+    cells_b = {(tuple(c["x_bin"]), tuple(c["y_bin"])): c for c in b.cells}
+    cells: list[dict[str, Any]] = []
+    for key in sorted(set(cells_a) | set(cells_b)):
+        ca, cb = cells_a.get(key), cells_b.get(key)
+        dev_a = ca["mean_deviation"] if ca else None
+        dev_b = cb["mean_deviation"] if cb else None
+        cells.append(
+            {
+                "x_bin": list(key[0]),
+                "y_bin": list(key[1]),
+                "n_a": ca["n"] if ca else 0,
+                "n_b": cb["n"] if cb else 0,
+                "mean_deviation_a": dev_a,
+                "mean_deviation_b": dev_b,
+                "delta": _delta(dev_a, dev_b),
+            }
+        )
+    return SurfaceComparison(
+        name=a.name,
+        kind=a.kind,
+        operating_mode=a.operating_mode,
+        n_observed_a=a.n_observed,
+        n_observed_b=b.n_observed,
+        n_in_domain_a=a.n_in_domain,
+        n_in_domain_b=b.n_in_domain,
+        mean_actual_a=a.mean_actual,
+        mean_actual_b=b.mean_actual,
+        mean_actual_delta=_delta(a.mean_actual, b.mean_actual),
+        mean_expected_a=a.mean_expected,
+        mean_expected_b=b.mean_expected,
+        mean_expected_delta=_delta(a.mean_expected, b.mean_expected),
+        mean_deviation_a=a.mean_deviation,
+        mean_deviation_b=b.mean_deviation,
+        mean_deviation_delta=_delta(a.mean_deviation, b.mean_deviation),
+        warning_fraction_a=a.warning_fraction,
+        warning_fraction_b=b.warning_fraction,
+        critical_fraction_a=a.critical_fraction,
+        critical_fraction_b=b.critical_fraction,
+        cells=cells,
+    )
+
+
+def compare_sessions(
+    session_a_dir: Path,
+    session_b_dir: Path,
+    config: CanaryConfig,
+    models: BehaviorModels,
+    *,
+    bindings_path: Path = DEFAULT_BINDINGS_PATH,
+    dbc_dir: Path = DEFAULT_DBC_DIR,
+    dids_path: Path = DEFAULT_DIDS_PATH,
+) -> SessionComparisonReport:
+    """A/B session comparison (Task 5.4): run :func:`analyze_session`
+    independently for ``session_a_dir`` (before) and ``session_b_dir``
+    (after) against the identical ``models``, then diff the two reports
+    surface-by-surface (and cell-by-cell for ``surface_2d``) — "did the mod
+    move behavior?" answered session-to-session instead of each session
+    graded independently against the model.
+    """
+    report_a = analyze_session(
+        session_a_dir,
+        config,
+        models,
+        bindings_path=bindings_path,
+        dbc_dir=dbc_dir,
+        dids_path=dids_path,
+    )
+    report_b = analyze_session(
+        session_b_dir,
+        config,
+        models,
+        bindings_path=bindings_path,
+        dbc_dir=dbc_dir,
+        dids_path=dids_path,
+    )
+    by_name_b = {s.name: s for s in report_b.surfaces}
+    surfaces = [
+        _compare_surface(sa, by_name_b[sa.name]) for sa in report_a.surfaces if sa.name in by_name_b
+    ]
+    return SessionComparisonReport(
+        session_a=report_a.session_dir, session_b=report_b.session_dir, surfaces=surfaces
+    )
+
+
 def analyze_session(
     session_dir: Path,
     config: CanaryConfig,
@@ -290,7 +460,10 @@ def analyze_session(
 
 
 __all__ = [
+    "SessionComparisonReport",
     "SessionDeviationReport",
+    "SurfaceComparison",
     "SurfaceDeviationSummary",
     "analyze_session",
+    "compare_sessions",
 ]

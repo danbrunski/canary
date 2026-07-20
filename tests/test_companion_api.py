@@ -169,6 +169,40 @@ def test_local_dashboard_read_endpoints_use_library_files(tmp_path: Path) -> Non
     assert sync_state["publish_history"][0]["status"] == "uploaded"
 
 
+def test_local_session_chart_endpoint(tmp_path: Path) -> None:
+    """Task 5.3: fixes companion's stale docstring "chart" promise
+    (src/companion/library.py) — a real per-channel time-series read now
+    exists over the local library's synced sessions."""
+    lib = CanaryLibrary(tmp_path / "library")
+    lib.import_session(_make_telemetry_session(tmp_path / "remote"), source_host="pi.local")
+    app = companion_api.create_app(_config(tmp_path), library=lib, static_dir=None)
+    client = TestClient(app)
+
+    response = client.get(
+        "/control/sessions/2026-05-17T120000/chart", params={"channels": "obd:RPM"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["channels"]["obd:RPM"]["values"] == [700.0, 701.0, 702.0]
+
+
+def test_local_session_gps_export_endpoints(tmp_path: Path) -> None:
+    """Task 5.6a: GPX/KML export over a synced session in the local library."""
+    lib = CanaryLibrary(tmp_path / "library")
+    lib.import_session(_make_telemetry_session(tmp_path / "remote"), source_host="pi.local")
+    app = companion_api.create_app(_config(tmp_path), library=lib, static_dir=None)
+    client = TestClient(app)
+
+    gpx = client.get("/control/sessions/2026-05-17T120000/gps.gpx")
+    assert gpx.status_code == 200
+    assert gpx.headers["content-type"].startswith("application/gpx+xml")
+
+    kml = client.get("/control/sessions/2026-05-17T120000/gps.kml")
+    assert kml.status_code == 200
+    assert kml.headers["content-type"].startswith("application/vnd.google-earth.kml+xml")
+
+
 def test_local_session_metadata_and_pin_refresh_the_library_index(tmp_path: Path) -> None:
     """refactoring.md 1.2: companion's shared-handler callers must keep their
     library-index-refresh divergence from control's — control's equivalent

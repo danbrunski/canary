@@ -28,6 +28,8 @@ import { CustomPidsPanel } from "./CustomPidsPanel";
 import { DataSourcesPanel } from "./DataSourcesPanel";
 import { DatasetHealthPanel } from "./DatasetHealthPanel";
 import { DtcPanel } from "./DtcPanel";
+import { ExplorePanel } from "./ExplorePanel";
+import { ExportPanel } from "./ExportPanel";
 import { ModelHealthPanel } from "./ModelHealthPanel";
 import { ModelPanel } from "./ModelPanel";
 import { MonitorsPanel } from "./MonitorsPanel";
@@ -148,7 +150,7 @@ function renderItem(
     case "control-power":
       return <PowerPanel token={d.token} />;
     case "live-charts":
-      return <ChartsPanel channels={d.channels} />;
+      return <ChartsPanel channels={d.channels} token={d.token} />;
     case "live-alarms":
       return <AlarmsPanel channels={d.channels} />;
     case "live-builder":
@@ -161,6 +163,8 @@ function renderItem(
       return <MonitorsPanel />;
     case "diag-trends":
       return <TrendsPanel token={d.token} />;
+    case "diag-explore":
+      return <ExplorePanel />;
     case "models-training":
       return <TrainingPanel token={d.token} companion={d.companion} />;
     case "models-tuning":
@@ -183,13 +187,7 @@ function renderItem(
     case "data-custom-pids":
       return <CustomPidsPanel token={d.token} />;
     case "data-export":
-      return (
-        <PlaceholderPanel
-          title="Dataset export"
-          task="6.20"
-          summary="Mark training candidates, pick channels, resample, include/exclude tag windows and export CSV/JSONL/Parquet/feature-matrix/ZIP with a provenance manifest."
-        />
-      );
+      return <ExportPanel token={d.token} />;
     default:
       return <PlaceholderPanel title="Not found" task="—" summary="Unknown view." />;
   }

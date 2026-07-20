@@ -9,6 +9,8 @@ import type {
   BehaviorLiveResponse,
   BehaviorModelsResponse,
   BindingsByChannel,
+  BinnedAggregation,
+  BinnedAnalysisResponse,
   CanCoverageResponse,
   CaptureResponse,
   CaptureTagResponse,
@@ -28,6 +30,7 @@ import type {
   PowerStatusResponse,
   PreflightResponse,
   SequenceDetectorStatus,
+  SessionChartResponse,
   SessionDigestResponse,
   SessionSummary,
   SessionsResponse,
@@ -44,7 +47,7 @@ import type {
   VehicleProfilesResponse,
   VersionResponse,
 } from "../types";
-import { controlJson, fetchJson, HttpError, jsonBody } from "./core";
+import { apiUrl, controlJson, fetchJson, HttpError, jsonBody } from "./core";
 
 export { HttpError } from "./core";
 
@@ -249,6 +252,40 @@ export async function downloadSession(token: string, sessionId: string): Promise
   return response.blob();
 }
 
+/** Task 5.6a: GPX/KML export of a session's captured GPS track. Uses a raw
+ *  `fetch` (not `controlJson`) like `downloadSession` above, since the
+ *  response body is the file itself, not JSON. */
+async function downloadSessionTrack(
+  token: string,
+  sessionId: string,
+  format: "gpx" | "kml",
+  baseUrl?: string,
+): Promise<Blob> {
+  const response = await fetch(apiUrl(`/control/sessions/${encodeURIComponent(sessionId)}/gps.${format}`, baseUrl), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new HttpError(response.status, await response.text());
+  }
+  return response.blob();
+}
+
+export function downloadSessionGpx(
+  token: string,
+  sessionId: string,
+  baseUrl?: string,
+): Promise<Blob> {
+  return downloadSessionTrack(token, sessionId, "gpx", baseUrl);
+}
+
+export function downloadSessionKml(
+  token: string,
+  sessionId: string,
+  baseUrl?: string,
+): Promise<Blob> {
+  return downloadSessionTrack(token, sessionId, "kml", baseUrl);
+}
+
 export function listJobs(
   token: string,
   signal?: AbortSignal,
@@ -373,6 +410,57 @@ export function getSessionDigest(
   return controlJson(`/control/sessions/${encodeURIComponent(sessionId)}/digest`, token, {
     signal,
   });
+}
+
+/** `/analysis/binned` (Task 5.1) is read-only + unauthenticated, same
+ *  posture as `/sessions/{id}/trip-summary` — no secrets, just historical
+ *  telemetry binned on demand. `y`/`yBins` omitted -> a 1D result. */
+export function getBinnedAnalysis(
+  params: {
+    value: string;
+    x: string;
+    y?: string;
+    xBins?: number;
+    yBins?: number;
+    agg?: BinnedAggregation;
+    session?: string;
+    since?: string;
+    until?: string;
+  },
+  signal?: AbortSignal,
+): Promise<BinnedAnalysisResponse> {
+  const query = new URLSearchParams({ value: params.value, x: params.x });
+  if (params.y) query.set("y", params.y);
+  if (params.xBins != null) query.set("x_bins", String(params.xBins));
+  if (params.yBins != null) query.set("y_bins", String(params.yBins));
+  if (params.agg) query.set("agg", params.agg);
+  if (params.session) query.set("session", params.session);
+  if (params.since) query.set("since", params.since);
+  if (params.until) query.set("until", params.until);
+  return fetchJson<BinnedAnalysisResponse>(`/analysis/binned?${query.toString()}`, { signal });
+}
+
+/** `/control/sessions/{id}/chart` (Task 5.3) — per-channel time-series
+ *  arrays for a stored session, authenticated like the other
+ *  `/control/sessions/{id}/...` routes; `baseUrl` lets the companion app's
+ *  local-library backend serve the identical shape (its own docstring's
+ *  stale "chart" promise, `src/companion/library.py`). */
+export function getSessionChart(
+  token: string,
+  sessionId: string,
+  channels: string[],
+  resampleHz?: number,
+  baseUrl?: string,
+  signal?: AbortSignal,
+): Promise<SessionChartResponse> {
+  const query = new URLSearchParams({ channels: channels.join(",") });
+  if (resampleHz != null) query.set("resample_hz", String(resampleHz));
+  return controlJson<SessionChartResponse>(
+    `/control/sessions/${encodeURIComponent(sessionId)}/chart?${query.toString()}`,
+    token,
+    { signal },
+    baseUrl,
+  );
 }
 
 /** `/test-profiles` is read-only + unauthenticated (scanned YAML catalog);
