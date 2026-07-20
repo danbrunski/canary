@@ -451,19 +451,21 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
     for pid in explicit_pids:
         add_pid(pid, auto_probe=False, fast_probe=False)
 
-    requests = [
-        _PollRequest(
-            kind="pid",
-            service=0x01,
-            identifier=pid,
-            request_id=DEFAULT_REQUEST_ID,
-            channel=PID_DECODERS[pid][0],
-            poll_tier=_poll_tier_for_pid(pid),
-            auto_probe=auto_probe_by_pid[pid],
-            fast_probe=fast_probe_by_pid[pid],
+    requests = []
+    for pid in pids:
+        channel, poll_tier = _pid_channel_and_tier(pid)
+        requests.append(
+            _PollRequest(
+                kind="pid",
+                service=0x01,
+                identifier=pid,
+                request_id=DEFAULT_REQUEST_ID,
+                channel=channel,
+                poll_tier=poll_tier,
+                auto_probe=auto_probe_by_pid[pid],
+                fast_probe=fast_probe_by_pid[pid],
+            )
         )
-        for pid in pids
-    ]
     for did in [parse_did_token(d) for d in spec.dids]:
         requests.append(
             _PollRequest(
@@ -497,11 +499,22 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
     return requests
 
 
-def _poll_tier_for_pid(pid: int) -> PollTier:
+def _pid_channel_and_tier(pid: int) -> tuple[str, PollTier]:
+    """Channel name + poll tier for a Mode 01 PID, both from ``MODE01_REGISTRY``.
+
+    Task 1.1: previously the channel name came from ``PID_DECODERS`` while the
+    tier came from ``MODE01_REGISTRY`` (via ``lookup``) — two different
+    tables keyed by the same pid, with nothing tying them together. Both now
+    come from a single ``lookup()`` call so they can never split. Falls back
+    to ``PID_DECODERS``'s name / a "medium" tier only if the registry somehow
+    lacks the pid (`assert_pid_tables_consistent` makes that unreachable for
+    any pid `build_poll_requests` can produce, since it only builds requests
+    for pids already in `PID_DECODERS`).
+    """
     definition = lookup(0x01, pid)
     if definition is None:
-        return "medium"
-    return definition.poll_tier
+        return PID_DECODERS[pid][0], "medium"
+    return definition.channel, definition.poll_tier
 
 
 def _update_response_state(

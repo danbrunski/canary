@@ -27,6 +27,7 @@ from src.collection.can_obd_collector import (
     run_can_obd_loop,
 )
 from src.collection.obd_collector import JsonlReadingWriter
+from src.collection.obd_registry import MODE01_REGISTRY
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanBusConfig
 
@@ -227,6 +228,23 @@ def test_build_poll_requests_assigns_registry_poll_tiers() -> None:
     assert tiers["RPM"] == "fast"
     assert tiers["COOLANT_TEMP"] == "medium"
     assert tiers["FUEL_LEVEL"] == "slow"
+
+
+def test_build_poll_requests_channel_and_tier_come_from_the_same_registry_row() -> None:
+    """Task 1.1: the scheduler used to read the channel name from
+    ``PID_DECODERS`` but the poll tier from ``MODE01_REGISTRY`` — two
+    separately-keyed tables. Both must now trace back to the same
+    ``MODE01_REGISTRY`` row for every produced pid request."""
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=("auto",),
+    )
+    requests = [r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "pid"]
+    assert requests  # sanity: the auto set isn't empty
+    for request in requests:
+        definition = MODE01_REGISTRY[request.identifier]
+        assert request.channel == definition.channel
+        assert request.poll_tier == definition.poll_tier
 
 
 def test_auto_poll_requests_probe_full_decoded_pid_catalog_when_discovery_is_sparse() -> None:

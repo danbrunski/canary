@@ -38,7 +38,7 @@ style issues, and go first.
 
 ## Phase 1 — Drifted duplications (correctness-relevant)
 
-- [ ] **1.1 — Single-source the PID tables.** `PID_DECODERS`
+- [x] **1.1 — Single-source the PID tables.** `PID_DECODERS`
   (`src/collection/can_obd_client.py:517-556`, 37 entries) re-types the
   channel names/units that `MODE01_REGISTRY`
   (`src/collection/obd_registry.py:373-1150`) also carries; nothing
@@ -47,7 +47,16 @@ style issues, and go first.
   Make the registry canonical; derive the decoder map from it (or
   generate the registry's name/unit columns from `PID_DECODERS`) and
   add a startup assertion. Keep a `PID_DECODERS` shim — it is imported
-  by `can_obd_collector.py:91` and `obd_scheduler.py:31`.
+  by `can_obd_collector.py:91` and `obd_scheduler.py:31`. — landed:
+  generated the registry's channel-NAME column from `PID_DECODERS`
+  instead (the reverse direction — deriving `PID_DECODERS` from the
+  registry is a genuine circular import, independently reproduced);
+  `assert_pid_tables_consistent()` at module import time; scheduler's
+  channel+tier now come from one `lookup()` call, not two independent
+  ones. Zero pre-existing name/decoder disagreements found. Unit
+  columns deliberately NOT derived (a decoder's unit is only produced
+  at call time with sample bytes, not statically available) — disclosed
+  scope gap, not silently dropped.
 - [ ] **1.2 — De-duplicate companion ↔ control routes.**
   `src/companion/routes.py` re-registers ~15 `/control/*` endpoints
   from `src/dashboard/routes/control.py` (sessions list/get/export/

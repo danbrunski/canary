@@ -116,6 +116,67 @@ def test_decode_catalyst_temp() -> None:
     assert decode_catalyst_temp(bytes([0x2E, 0xE0])) == (1160.0, "degC")
 
 
+def test_pid_decoders_matches_pre_refactor_golden_shape() -> None:
+    """Task 1.1: MODE01_REGISTRY's channel names are now generated from
+    PID_DECODERS (not independently hand-typed) — pin PID_DECODERS's exact
+    pre-refactor keys/names/decoders so nothing upstream can silently add,
+    drop, rename, or re-decoder a PID out from under that derivation."""
+    golden = {
+        0x01: ("MONITOR_STATUS", decode_monitor_status),
+        0x03: "FUEL_STATUS",
+        0x04: "ENGINE_LOAD",
+        0x05: ("COOLANT_TEMP", decode_temp_minus_40),
+        0x06: "SHORT_FUEL_TRIM_1",
+        0x07: "LONG_FUEL_TRIM_1",
+        0x08: "SHORT_FUEL_TRIM_2",
+        0x09: "LONG_FUEL_TRIM_2",
+        0x0B: "INTAKE_PRESSURE",
+        0x0C: ("RPM", decode_rpm),
+        0x0D: ("SPEED", decode_speed),
+        0x0E: ("TIMING_ADVANCE", decode_timing_advance),
+        0x0F: "INTAKE_TEMP",
+        0x10: ("MAF", decode_maf),
+        0x11: "THROTTLE_POS",
+        0x14: ("O2_B1S1", decode_o2_voltage),
+        0x15: ("O2_B1S2", decode_o2_voltage),
+        0x18: ("O2_B2S1", decode_o2_voltage),
+        0x19: ("O2_B2S2", decode_o2_voltage),
+        0x1F: ("RUN_TIME", decode_run_time),
+        0x21: "DISTANCE_W_MIL",
+        0x2C: "COMMANDED_EGR",
+        0x2D: "EGR_ERROR",
+        0x2E: "EVAPORATIVE_PURGE",
+        0x2F: "FUEL_LEVEL",
+        0x30: "WARMUPS_SINCE_DTC_CLEAR",
+        0x31: "DISTANCE_SINCE_DTC_CLEAR",
+        0x32: ("EVAP_VAPOR_PRESSURE", decode_evap_vapor_pressure_signed),
+        0x33: ("BAROMETRIC_PRESSURE", decode_baro),
+        0x3C: ("CATALYST_TEMP_B1S1", decode_catalyst_temp),
+        0x3D: ("CATALYST_TEMP_B2S1", decode_catalyst_temp),
+        0x3E: ("CATALYST_TEMP_B1S2", decode_catalyst_temp),
+        0x3F: ("CATALYST_TEMP_B2S2", decode_catalyst_temp),
+        0x42: ("CONTROL_MODULE_VOLTAGE", decode_control_module_voltage),
+        0x43: "ABSOLUTE_LOAD",
+        0x44: ("COMMANDED_EQUIV_RATIO", decode_commanded_lambda),
+        0x45: "RELATIVE_THROTTLE_POS",
+        0x46: "AMBIANT_AIR_TEMP",
+        0x5C: "OIL_TEMP",
+    }
+    golden_names = {
+        pid: (entry if isinstance(entry, str) else entry[0]) for pid, entry in golden.items()
+    }
+    assert set(PID_DECODERS) == set(golden_names)
+    for pid, name in golden_names.items():
+        assert PID_DECODERS[pid][0] == name, f"PID 0x{pid:02X} channel name drifted"
+    # Decoder identity for the entries where the golden data pins a specific
+    # function (percent/temp-family PIDs share formulas, so only functions
+    # unique to one PID are pinned above; the rest are covered by
+    # test_decoders_handle_short_payloads_gracefully iterating every entry).
+    for pid, entry in golden.items():
+        if isinstance(entry, tuple):
+            assert PID_DECODERS[pid][1] is entry[1], f"PID 0x{pid:02X} decoder drifted"
+
+
 def test_decoders_handle_short_payloads_gracefully() -> None:
     """Every decoder must return None on too-few bytes, never raise."""
     for _pid, (name, decoder) in PID_DECODERS.items():

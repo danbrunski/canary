@@ -8,11 +8,14 @@ unknown).
 
 from __future__ import annotations
 
+import pytest
+
 from src.collection.can_obd_client import PID_DECODERS
 from src.collection.obd_registry import (
     MODE01_REGISTRY,
     MODE09_REGISTRY,
     SERVICE_REGISTRY,
+    assert_pid_tables_consistent,
     classify_pid,
     decode_cvn,
     decode_fuel_rate,
@@ -42,6 +45,40 @@ def test_registry_reuses_pid_decoders_callables_not_copies() -> None:
     """Decoders shared with PID_DECODERS must be the *same* object."""
     for pid, (_name, decoder) in PID_DECODERS.items():
         assert MODE01_REGISTRY[pid].decoder is decoder
+
+
+def test_assert_pid_tables_consistent_passes_on_real_tables() -> None:
+    """The startup assertion (Task 1.1) is a no-op against the real tables."""
+    assert_pid_tables_consistent()
+
+
+def test_assert_pid_tables_consistent_catches_name_drift() -> None:
+    """A deliberately mismatched channel name must be caught, not silently
+    accepted."""
+    broken = dict(PID_DECODERS)
+    pid, (_name, decoder) = next(iter(broken.items()))
+    broken[pid] = ("SOME_OTHER_CHANNEL_NAME", decoder)
+    with pytest.raises(ValueError, match="channel-name drift"):
+        assert_pid_tables_consistent(pid_decoders=broken)
+
+
+def test_assert_pid_tables_consistent_catches_decoder_drift() -> None:
+    """A deliberately mismatched decoder function must be caught."""
+    pid, (name, _decoder) = next(iter(PID_DECODERS.items()))
+    broken = dict(PID_DECODERS)
+    broken[pid] = (name, lambda data: None)
+    with pytest.raises(ValueError, match="decoder drift"):
+        assert_pid_tables_consistent(pid_decoders=broken)
+
+
+def test_assert_pid_tables_consistent_catches_missing_registry_entry() -> None:
+    """A PID_DECODERS entry with no matching MODE01_REGISTRY row must be
+    caught, not silently skipped."""
+    stripped = dict(MODE01_REGISTRY)
+    pid = next(iter(PID_DECODERS))
+    del stripped[pid]
+    with pytest.raises(ValueError, match="MODE01_REGISTRY does not"):
+        assert_pid_tables_consistent(mode01_registry=stripped)
 
 
 def test_support_group_assignment() -> None:

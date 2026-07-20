@@ -26,7 +26,7 @@ registry can't synthesize a write.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -48,6 +48,7 @@ __all__ = [
     "PidDefinition",
     "PollTier",
     "ServiceDefinition",
+    "assert_pid_tables_consistent",
     "classify_pid",
     "decode_ascii",
     "decode_calibration_ids",
@@ -354,11 +355,21 @@ def mode01_support_group(pid: int) -> int:
 
 
 # (pid, channel, display, category, unit, byte_length, poll_tier, hint, decoder)
-# decoder None ⇒ supported-but-not-decoded. Decoders already in PID_DECODERS
-# are pulled from there so the table can't drift from the collector.
+# decoder None ⇒ supported-but-not-decoded. Both the decoder AND the channel
+# name are pulled from PID_DECODERS (Task 1.1) for any PID it carries, so the
+# two tables can't independently drift on what a shared PID is called or how
+# it's decoded — PID_DECODERS is canonical for the ~40 PIDs it covers; this
+# spec only hand-types name/decoder for PIDs PID_DECODERS doesn't have.
 def _pd(pid: int) -> Decoder | None:
     entry = PID_DECODERS.get(pid)
     return entry[1] if entry is not None else None
+
+
+def _pd_name(pid: int) -> str:
+    entry = PID_DECODERS.get(pid)
+    if entry is None:
+        raise KeyError(f"PID 0x{pid:02X} has no PID_DECODERS entry to source a channel name from")
+    return entry[0]
 
 
 _MODE01_SPEC: tuple[
@@ -366,7 +377,7 @@ _MODE01_SPEC: tuple[
 ] = (
     (
         0x01,
-        "MONITOR_STATUS",
+        _pd_name(0x01),
         "Monitor Status / DTC Count",
         "status",
         "count",
@@ -377,7 +388,7 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x03,
-        "FUEL_STATUS",
+        _pd_name(0x03),
         "Fuel System Status",
         "fuel",
         "bitmask",
@@ -386,10 +397,10 @@ _MODE01_SPEC: tuple[
         "indicator",
         _pd(0x03),
     ),  # noqa: E501
-    (0x04, "ENGINE_LOAD", "Calculated Engine Load", "engine", "%", 1, "fast", "gauge", _pd(0x04)),
+    (0x04, _pd_name(0x04), "Calculated Engine Load", "engine", "%", 1, "fast", "gauge", _pd(0x04)),
     (
         0x05,
-        "COOLANT_TEMP",
+        _pd_name(0x05),
         "Engine Coolant Temp",
         "temperature",
         "degC",
@@ -398,10 +409,10 @@ _MODE01_SPEC: tuple[
         "gauge",
         _pd(0x05),
     ),  # noqa: E501
-    (0x06, "SHORT_FUEL_TRIM_1", "Short Fuel Trim B1", "fuel", "%", 1, "medium", "graph", _pd(0x06)),
-    (0x07, "LONG_FUEL_TRIM_1", "Long Fuel Trim B1", "fuel", "%", 1, "medium", "graph", _pd(0x07)),
-    (0x08, "SHORT_FUEL_TRIM_2", "Short Fuel Trim B2", "fuel", "%", 1, "medium", "graph", _pd(0x08)),
-    (0x09, "LONG_FUEL_TRIM_2", "Long Fuel Trim B2", "fuel", "%", 1, "medium", "graph", _pd(0x09)),
+    (0x06, _pd_name(0x06), "Short Fuel Trim B1", "fuel", "%", 1, "medium", "graph", _pd(0x06)),
+    (0x07, _pd_name(0x07), "Long Fuel Trim B1", "fuel", "%", 1, "medium", "graph", _pd(0x07)),
+    (0x08, _pd_name(0x08), "Short Fuel Trim B2", "fuel", "%", 1, "medium", "graph", _pd(0x08)),
+    (0x09, _pd_name(0x09), "Long Fuel Trim B2", "fuel", "%", 1, "medium", "graph", _pd(0x09)),
     (
         0x0A,
         "FUEL_PRESSURE",
@@ -415,7 +426,7 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x0B,
-        "INTAKE_PRESSURE",
+        _pd_name(0x0B),
         "Intake Manifold Pressure",
         "pressure",
         "kPa",
@@ -424,12 +435,12 @@ _MODE01_SPEC: tuple[
         "gauge",
         _pd(0x0B),
     ),  # noqa: E501
-    (0x0C, "RPM", "Engine RPM", "engine", "rpm", 2, "fast", "gauge", _pd(0x0C)),
-    (0x0D, "SPEED", "Vehicle Speed", "speed", "kph", 1, "fast", "gauge", _pd(0x0D)),
-    (0x0E, "TIMING_ADVANCE", "Timing Advance", "engine", "degBTDC", 1, "fast", "graph", _pd(0x0E)),
+    (0x0C, _pd_name(0x0C), "Engine RPM", "engine", "rpm", 2, "fast", "gauge", _pd(0x0C)),
+    (0x0D, _pd_name(0x0D), "Vehicle Speed", "speed", "kph", 1, "fast", "gauge", _pd(0x0D)),
+    (0x0E, _pd_name(0x0E), "Timing Advance", "engine", "degBTDC", 1, "fast", "graph", _pd(0x0E)),
     (
         0x0F,
-        "INTAKE_TEMP",
+        _pd_name(0x0F),
         "Intake Air Temp",
         "temperature",
         "degC",
@@ -438,8 +449,8 @@ _MODE01_SPEC: tuple[
         "gauge",
         _pd(0x0F),
     ),  # noqa: E501
-    (0x10, "MAF", "Mass Air Flow", "air", "g/s", 2, "fast", "gauge", _pd(0x10)),
-    (0x11, "THROTTLE_POS", "Throttle Position", "engine", "%", 1, "fast", "gauge", _pd(0x11)),
+    (0x10, _pd_name(0x10), "Mass Air Flow", "air", "g/s", 2, "fast", "gauge", _pd(0x10)),
+    (0x11, _pd_name(0x11), "Throttle Position", "engine", "%", 1, "fast", "gauge", _pd(0x11)),
     (
         0x12,
         "SECONDARY_AIR_STATUS",
@@ -462,12 +473,12 @@ _MODE01_SPEC: tuple[
         "indicator",
         decode_bitmask_a,
     ),  # noqa: E501
-    (0x14, "O2_B1S1", "O2 Sensor B1S1", "o2", "V", 2, "medium", "graph", _pd(0x14)),
-    (0x15, "O2_B1S2", "O2 Sensor B1S2", "o2", "V", 2, "medium", "graph", _pd(0x15)),
+    (0x14, _pd_name(0x14), "O2 Sensor B1S1", "o2", "V", 2, "medium", "graph", _pd(0x14)),
+    (0x15, _pd_name(0x15), "O2 Sensor B1S2", "o2", "V", 2, "medium", "graph", _pd(0x15)),
     (0x16, "O2_B1S3", "O2 Sensor B1S3", "o2", "V", 2, "medium", "graph", decode_o2_voltage),
     (0x17, "O2_B1S4", "O2 Sensor B1S4", "o2", "V", 2, "medium", "graph", decode_o2_voltage),
-    (0x18, "O2_B2S1", "O2 Sensor B2S1", "o2", "V", 2, "medium", "graph", _pd(0x18)),
-    (0x19, "O2_B2S2", "O2 Sensor B2S2", "o2", "V", 2, "medium", "graph", _pd(0x19)),
+    (0x18, _pd_name(0x18), "O2 Sensor B2S1", "o2", "V", 2, "medium", "graph", _pd(0x18)),
+    (0x19, _pd_name(0x19), "O2 Sensor B2S2", "o2", "V", 2, "medium", "graph", _pd(0x19)),
     (0x1A, "O2_B2S3", "O2 Sensor B2S3", "o2", "V", 2, "medium", "graph", decode_o2_voltage),
     (0x1B, "O2_B2S4", "O2 Sensor B2S4", "o2", "V", 2, "medium", "graph", decode_o2_voltage),
     (
@@ -503,8 +514,8 @@ _MODE01_SPEC: tuple[
         "indicator",
         decode_bitmask_a,
     ),  # noqa: E501
-    (0x1F, "RUN_TIME", "Engine Run Time", "engine", "s", 2, "medium", "text", _pd(0x1F)),
-    (0x21, "DISTANCE_W_MIL", "Distance with MIL On", "status", "km", 2, "slow", "text", _pd(0x21)),
+    (0x1F, _pd_name(0x1F), "Engine Run Time", "engine", "s", 2, "medium", "text", _pd(0x1F)),
+    (0x21, _pd_name(0x21), "Distance with MIL On", "status", "km", 2, "slow", "text", _pd(0x21)),
     (
         0x22,
         "FUEL_RAIL_PRESSURE_VAC",
@@ -615,11 +626,11 @@ _MODE01_SPEC: tuple[
         "graph",
         decode_wide_lambda,
     ),  # noqa: E501
-    (0x2C, "COMMANDED_EGR", "Commanded EGR", "emissions", "%", 1, "medium", "graph", _pd(0x2C)),
-    (0x2D, "EGR_ERROR", "EGR Error", "emissions", "%", 1, "medium", "graph", _pd(0x2D)),
+    (0x2C, _pd_name(0x2C), "Commanded EGR", "emissions", "%", 1, "medium", "graph", _pd(0x2C)),
+    (0x2D, _pd_name(0x2D), "EGR Error", "emissions", "%", 1, "medium", "graph", _pd(0x2D)),
     (
         0x2E,
-        "EVAPORATIVE_PURGE",
+        _pd_name(0x2E),
         "Commanded Evap Purge",
         "emissions",
         "%",
@@ -628,10 +639,10 @@ _MODE01_SPEC: tuple[
         "graph",
         _pd(0x2E),
     ),  # noqa: E501
-    (0x2F, "FUEL_LEVEL", "Fuel Tank Level", "fuel", "%", 1, "slow", "gauge", _pd(0x2F)),
+    (0x2F, _pd_name(0x2F), "Fuel Tank Level", "fuel", "%", 1, "slow", "gauge", _pd(0x2F)),
     (
         0x30,
-        "WARMUPS_SINCE_DTC_CLEAR",
+        _pd_name(0x30),
         "Warm-ups Since Codes Cleared",
         "status",
         "count",
@@ -642,7 +653,7 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x31,
-        "DISTANCE_SINCE_DTC_CLEAR",
+        _pd_name(0x31),
         "Distance Since Codes Cleared",
         "status",
         "km",
@@ -653,7 +664,7 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x32,
-        "EVAP_VAPOR_PRESSURE",
+        _pd_name(0x32),
         "Evap System Vapor Pressure",
         "pressure",
         "Pa",
@@ -664,7 +675,7 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x33,
-        "BAROMETRIC_PRESSURE",
+        _pd_name(0x33),
         "Barometric Pressure",
         "pressure",
         "kPa",
@@ -763,7 +774,7 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x3C,
-        "CATALYST_TEMP_B1S1",
+        _pd_name(0x3C),
         "Catalyst Temp B1S1",
         "temperature",
         "degC",
@@ -774,7 +785,7 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x3D,
-        "CATALYST_TEMP_B2S1",
+        _pd_name(0x3D),
         "Catalyst Temp B2S1",
         "temperature",
         "degC",
@@ -785,7 +796,7 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x3E,
-        "CATALYST_TEMP_B1S2",
+        _pd_name(0x3E),
         "Catalyst Temp B1S2",
         "temperature",
         "degC",
@@ -796,7 +807,7 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x3F,
-        "CATALYST_TEMP_B2S2",
+        _pd_name(0x3F),
         "Catalyst Temp B2S2",
         "temperature",
         "degC",
@@ -818,7 +829,7 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x42,
-        "CONTROL_MODULE_VOLTAGE",
+        _pd_name(0x42),
         "Control Module Voltage",
         "electrical",
         "V",
@@ -827,10 +838,10 @@ _MODE01_SPEC: tuple[
         "gauge",
         _pd(0x42),
     ),  # noqa: E501
-    (0x43, "ABSOLUTE_LOAD", "Absolute Load Value", "engine", "%", 2, "fast", "graph", _pd(0x43)),
+    (0x43, _pd_name(0x43), "Absolute Load Value", "engine", "%", 2, "fast", "graph", _pd(0x43)),
     (
         0x44,
-        "COMMANDED_EQUIV_RATIO",
+        _pd_name(0x44),
         "Commanded Equivalence Ratio",
         "fuel",
         "ratio",
@@ -841,7 +852,7 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x45,
-        "RELATIVE_THROTTLE_POS",
+        _pd_name(0x45),
         "Relative Throttle Position",
         "engine",
         "%",
@@ -852,7 +863,7 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x46,
-        "AMBIANT_AIR_TEMP",
+        _pd_name(0x46),
         "Ambient Air Temp",
         "temperature",
         "degC",
@@ -1060,7 +1071,17 @@ _MODE01_SPEC: tuple[
         "gauge",
         decode_percent_a_over_255,
     ),  # noqa: E501
-    (0x5C, "OIL_TEMP", "Engine Oil Temp", "temperature", "degC", 1, "medium", "gauge", _pd(0x5C)),
+    (
+        0x5C,
+        _pd_name(0x5C),
+        "Engine Oil Temp",
+        "temperature",
+        "degC",
+        1,
+        "medium",
+        "gauge",
+        _pd(0x5C),
+    ),
     (
         0x5D,
         "FUEL_INJECTION_TIMING",
@@ -1139,6 +1160,44 @@ def _build_mode01() -> dict[int, PidDefinition]:
 
 
 MODE01_REGISTRY: dict[int, PidDefinition] = _build_mode01()
+
+
+def assert_pid_tables_consistent(
+    pid_decoders: Mapping[int, tuple[str, Decoder]] | None = None,
+    mode01_registry: Mapping[int, PidDefinition] | None = None,
+) -> None:
+    """Fail fast if ``PID_DECODERS`` drifts from ``MODE01_REGISTRY`` (Task 1.1).
+
+    ``_MODE01_SPEC`` already sources name+decoder for every shared PID from
+    ``PID_DECODERS`` via ``_pd``/``_pd_name``, so this should be structurally
+    unreachable in practice — but "structurally impossible" has been wrong
+    before in this codebase, so keep it as a cheap regression guard. Runs
+    once at import time against the real tables; parameterized so a test can
+    feed it a deliberately-broken pair without monkeypatching module state.
+    Raises ``ValueError`` (not ``assert``) so it can't be optimized away
+    with ``python -O``.
+    """
+    pid_decoders = PID_DECODERS if pid_decoders is None else pid_decoders
+    mode01_registry = MODE01_REGISTRY if mode01_registry is None else mode01_registry
+    for pid, (name, decoder) in pid_decoders.items():
+        definition = mode01_registry.get(pid)
+        if definition is None:
+            raise ValueError(
+                f"PID_DECODERS has 0x{pid:02X} ({name!r}) but MODE01_REGISTRY does not"
+            )
+        if definition.channel != name:
+            raise ValueError(
+                f"PID 0x{pid:02X} channel-name drift: PID_DECODERS={name!r} "
+                f"MODE01_REGISTRY={definition.channel!r}"
+            )
+        if definition.decoder is not decoder:
+            raise ValueError(
+                f"PID 0x{pid:02X} decoder drift: PID_DECODERS and MODE01_REGISTRY "
+                "reference different decoder functions"
+            )
+
+
+assert_pid_tables_consistent()
 
 
 # ---------------------------------------------------------------------------
