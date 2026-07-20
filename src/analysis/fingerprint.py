@@ -144,7 +144,7 @@ def compute_fingerprint(session_dir: Path, config: CanaryConfig) -> dict[str, fl
         return {}
     frame = frame.reset_index(drop=True)
 
-    frame = compute_anomaly_signals(frame)
+    frame = compute_anomaly_signals(frame, config.vehicle.parameters)
     frame = append_committee_residuals(frame)
     frame = _append_behavior_deviations(frame, config)
 
@@ -158,6 +158,8 @@ def compute_fingerprint(session_dir: Path, config: CanaryConfig) -> dict[str, fl
     _add_committee_stats(frame, stats)
     _add_behavior_deviation_stats(frame, stats)
     _add_misfire_stats(frame, stats)
+    _add_cat_efficiency_stats(frame, stats)
+    _add_o2_health_stats(frame, stats)
     return stats
 
 
@@ -401,6 +403,90 @@ def _add_misfire_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
             continue
         cylinder = str(column)[len(prefix) :]
         stats[f"misfire_count_cyl:{cylinder}"] = float(values.max())
+
+
+def _add_cat_efficiency_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
+    """Task 4.4 — trend the catalyst-efficiency heuristic index per bank.
+
+    ``derived:CAT_EFFICIENCY_B{1,2}``
+    (``src.analysis.derived.compute_anomaly_signals``) is a bounded 0-1
+    index, not a literal efficiency; the session mean is the natural
+    session-over-session trend stat, same pattern as
+    ``_add_bank_balance_stats`` above.
+    """
+    for bank in (1, 2):
+        values = _numeric(frame, f"derived:CAT_EFFICIENCY_B{bank}").dropna()
+        if values.empty:
+            continue
+        stats[f"cat_efficiency_mean:b{bank}"] = float(values.mean())
+
+
+#: Task 4.5 — narrowband (0-1 V) O2 sensor rich/lean switch threshold. Same
+#: physical constant as ``derived.py``'s catalyst-efficiency switch
+#: counting, duplicated rather than imported: this is an independent
+#: fingerprint-only stat, not the live ``derived:CAT_EFFICIENCY`` channel
+#: (the task is explicit that O2 sensor health is fingerprint-stat
+#: territory, not a new ``derived:`` channel).
+_O2_SWITCH_THRESHOLD_V = 0.45
+
+
+def _o2_run_durations(ts: pd.Series, state: pd.Series) -> tuple[float | None, float | None]:
+    """Mean dwell duration (s) of ``state==True`` runs and ``state==False`` runs.
+
+    A "run" is a maximal stretch of consecutive samples on one side of the
+    rich/lean threshold; its duration is last-timestamp minus first-timestamp
+    within the run — an undercount of true dwell time by one inter-sample
+    gap, acceptable for a trend stat, not a precision timer.
+    """
+    run_id = state.ne(state.shift()).cumsum()
+    grouped = pd.DataFrame({"ts": ts, "state": state, "run": run_id}).groupby("run")
+    durations = (grouped["ts"].max() - grouped["ts"].min()).dt.total_seconds()
+    run_state = grouped["state"].first()
+    rich = durations[run_state].dropna()
+    lean = durations[~run_state].dropna()
+    rich_mean = float(rich.mean()) if not rich.empty else None
+    lean_mean = float(lean.mean()) if not lean.empty else None
+    return rich_mean, lean_mean
+
+
+def _add_o2_health_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
+    """Task 4.5 — O2/AF sensor health. Fingerprint stats only, deliberately
+    **not** a ``derived:`` live channel (the task's explicit framing).
+
+    * Downstream narrowband sensor switching rate (Hz) + response asymmetry
+      (mean rich-dwell / mean lean-dwell duration — a lazy sensor is slower
+      to respond in one direction than the other; ~1 is symmetric/healthy).
+      Inputs: ``obd:O2_B{1,2}S2``.
+    * Upstream wideband λ noise (session std) and bias (session mean − 1.0,
+      stoichiometric) restricted to steady idle — the only mode where λ is
+      expected to sit near a stable setpoint rather than tracking a
+      commanded excursion. Input: ``obd:O2_WR_LAMBDA_S1`` (bank-1 upstream
+      wideband — the wideband PID this vehicle's ECM answers per Task 2.1).
+    """
+    if TIMESTAMP_COLUMN in frame.columns:
+        ts_all = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True)
+        for bank in (1, 2):
+            voltage = _numeric(frame, f"obd:O2_B{bank}S2")
+            valid = voltage.notna()
+            if valid.sum() < 2:
+                continue
+            v = voltage[valid]
+            t = ts_all[valid]
+            state = v > _O2_SWITCH_THRESHOLD_V
+            transitions = int(state.ne(state.shift()).iloc[1:].sum())
+            duration_s = (t.iloc[-1] - t.iloc[0]).total_seconds()
+            if duration_s > 0:
+                stats[f"o2_downstream_switch_rate_hz:b{bank}"] = transitions / duration_s
+            rich_mean, lean_mean = _o2_run_durations(t, state)
+            if rich_mean is not None and lean_mean is not None and lean_mean > 0:
+                stats[f"o2_downstream_response_asymmetry:b{bank}"] = rich_mean / lean_mean
+
+    if MODE_COLUMN in frame.columns:
+        idle = frame[frame[MODE_COLUMN] == _IDLE_MODE]
+        idle_lambda = _numeric(idle, "obd:O2_WR_LAMBDA_S1").dropna()
+        if len(idle_lambda) > 1:
+            stats["o2_upstream_wideband_lambda_noise_idle"] = float(idle_lambda.std())
+            stats["o2_upstream_wideband_lambda_bias_idle"] = float(idle_lambda.mean() - 1.0)
 
 
 __all__ = [

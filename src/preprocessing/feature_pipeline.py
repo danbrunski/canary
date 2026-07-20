@@ -132,6 +132,21 @@ _NON_TRAINABLE_DERIVED_INTEGRALS: frozenset[str] = frozenset(
     }
 )
 
+#: Task 4.6 — ``derived:GEAR_ESTIMATE`` is a clustered/categorical label
+#: (nearest known gear ratio), not a continuous physical residual like the
+#: rest of ``compute_instantaneous_channels``'s output. It's redundant with
+#: rpm+speed (already trained features) for anomaly purposes and a
+#: stepwise/discrete signal would only add reconstruction noise to the IF
+#: z-score scaler and the LSTM's continuous-signal assumption — explicit
+#: model-trainability decision per the engine-analysis-and-mapping.md Phase
+#: 4 acceptance checklist. Kept in the frame (same mechanism as the counters
+#: below) so analysis/UI code can still read it.
+_NON_TRAINABLE_CATEGORICAL_CHANNELS: frozenset[str] = frozenset(
+    {
+        "derived:GEAR_ESTIMATE",
+    }
+)
+
 NON_TRAINABLE_COUNTER_CHANNELS: frozenset[str] = frozenset(
     {
         "obd:RUN_TIME",
@@ -142,6 +157,7 @@ NON_TRAINABLE_COUNTER_CHANNELS: frozenset[str] = frozenset(
         "dbc:ODOMETER_ACCUMULATOR_385",
     }
     | _NON_TRAINABLE_DERIVED_INTEGRALS
+    | _NON_TRAINABLE_CATEGORICAL_CHANNELS
 )
 
 FEATURE_SPEC_VERSION = 1
@@ -484,11 +500,13 @@ def featurize_wide_frame(
     the batch path always did — the two are value-identical.
     """
     framed, segmenter_fell_back = segment_or_constant(wide, config)
-    # Derived anomaly signals (air mass per cycle, bank-balance asymmetries,
-    # AFR/TPS cross-checks) appended BEFORE behavior deviations + feature
-    # extraction so recipes can target them as outputs and the rolling
-    # feature builder picks up their derivatives.
-    framed = compute_anomaly_signals(framed)
+    # Derived anomaly signals (air mass per cycle, VE, bank-balance
+    # asymmetries, total trim, catalyst efficiency, AFR/TPS cross-checks)
+    # appended BEFORE behavior deviations + feature extraction so recipes can
+    # target them as outputs and the rolling feature builder picks up their
+    # derivatives. `vehicle` unlocks VE_PERCENT (Task 4.1), which needs the
+    # configured displacement.
+    framed = compute_anomaly_signals(framed, config.vehicle.parameters)
     # Performance channels (Task 1.1): fuel rate, instant economy,
     # boost/vacuum, estimated power/torque. Row-local only — the cumulative
     # trip integrals (FUEL_USED_L, TRIP_DISTANCE_KM, ...) are deliberately

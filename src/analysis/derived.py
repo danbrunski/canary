@@ -120,16 +120,18 @@ def _series(wide: pd.DataFrame, *names: str) -> pd.Series | None:
     return None
 
 
-def _session_time_smooth(wide: pd.DataFrame, values: pd.Series, seconds: float) -> pd.Series:
-    """Session-aware, time-based trailing rolling mean of ``values``.
+def _session_time_rolling(
+    wide: pd.DataFrame, values: pd.Series, seconds: float, how: str = "mean"
+) -> pd.Series:
+    """Session-aware, time-based trailing rolling aggregate of ``values``.
 
     Mirrors :func:`compute_features`' windowing exactly — group by
     ``session``, order by ``timestamp``, and take a ``{seconds}s`` trailing
-    mean on a datetime index — so a window for one session never bleeds rows
-    from another even when they are wall-clock adjacent. ``min_periods=1`` so
-    the first samples of a session (and the live buffer right after startup)
-    still get a value (the mean of what's available so far) rather than NaN,
-    which a downstream behavior recipe would otherwise skip.
+    ``how`` (``"mean"`` or ``"sum"``) on a datetime index — so a window for
+    one session never bleeds rows from another even when they are
+    wall-clock adjacent. ``min_periods=1`` so the first samples of a session
+    (and the live buffer right after startup) still get a value rather than
+    NaN, which a downstream behavior recipe would otherwise skip.
 
     Falls back to the raw series when ``session``/``timestamp`` are absent
     (e.g. a bare-frame unit test) — the only real callers, the offline and
@@ -148,9 +150,15 @@ def _session_time_smooth(wide: pd.DataFrame, values: pd.Series, seconds: float) 
     out = pd.Series(np.nan, index=wide.index, dtype=float)
     for _, group in frame.groupby(SESSION_COLUMN, sort=False, dropna=False):
         ordered = group.sort_values("_ts", kind="stable")
-        smoothed = ordered.set_index("_ts")["_v"].rolling(f"{int(seconds)}s", min_periods=1).mean()
-        out.loc[ordered.index] = smoothed.to_numpy(dtype=float)
+        rolling = ordered.set_index("_ts")["_v"].rolling(f"{int(seconds)}s", min_periods=1)
+        rolled = getattr(rolling, how)()
+        out.loc[ordered.index] = rolled.to_numpy(dtype=float)
     return out
+
+
+def _session_time_smooth(wide: pd.DataFrame, values: pd.Series, seconds: float) -> pd.Series:
+    """Trailing time-*mean* of ``values`` — see :func:`_session_time_rolling`."""
+    return _session_time_rolling(wide, values, seconds, how="mean")
 
 
 def _dt_seconds(wide: pd.DataFrame) -> pd.Series:
@@ -229,6 +237,48 @@ def _estimated_power_kw(
     return None
 
 
+#: Below this road speed an rpm/speed ratio is unreliable (Task 4.6): speed
+#: PID quantization dominates the ratio, and neutral/clutch-in makes RPM
+#: unrelated to road speed anyway (idle in neutral would otherwise cluster
+#: to whichever gear ratio happens to be nearest).
+_GEAR_ESTIMATE_MIN_SPEED_KPH = 8.0
+
+
+def _gear_estimate(
+    wide: pd.DataFrame,
+    vehicle: VehicleParameters,
+    speed: pd.Series | None,
+    rpm: pd.Series | None,
+) -> pd.Series | None:
+    """Gear number (1-indexed) from the rpm/speed ratio, nearest-clustered to
+    ``vehicle.gear_ratios`` (Task 4.6).
+
+    ``vehicle.gear_ratios`` is the combined gearbox × final-drive ratio for
+    each gear, lowest gear first — a per-vehicle-profile config table (see
+    ``VehicleParameters``), never hardcoded here (this platform is meant to
+    generalize to any vehicle). Empty by default, so an unconfigured vehicle
+    simply never gets this channel — same absent-input contract as every
+    other channel here, not a special case.
+
+    There is no TCM on this (manual-transmission) vehicle's bus, so this
+    ratio clustering is the *only* gear source available, not a fallback for
+    a missing TCM signal.
+    """
+    if not vehicle.gear_ratios or speed is None or rpm is None:
+        return None
+    speed_safe = speed.where(speed > _GEAR_ESTIMATE_MIN_SPEED_KPH)
+    ratio = rpm / speed_safe
+    gear = pd.Series(np.nan, index=wide.index, dtype=float)
+    valid = ratio.notna()
+    if not valid.any():
+        return gear
+    table = np.asarray(vehicle.gear_ratios, dtype=float)
+    vals = ratio[valid].to_numpy()
+    nearest = np.argmin(np.abs(vals[:, np.newaxis] - table[np.newaxis, :]), axis=1)
+    gear.loc[ratio[valid].index] = (nearest + 1).astype(float)
+    return gear
+
+
 def compute_instantaneous_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> pd.DataFrame:
     """Append the row-local (non-integrated) ``derived:<NAME>`` channels.
 
@@ -243,7 +293,8 @@ def compute_instantaneous_channels(wide: pd.DataFrame, vehicle: VehicleParameter
     Added when their inputs exist (else skipped, not zero-filled):
     ``FUEL_RATE_LPH``, ``INSTANT_ECONOMY_L_PER_100KM``,
     ``INSTANT_ECONOMY_MPG``, ``BOOST_VACUUM_KPA``, ``ESTIMATED_POWER_HP``,
-    ``ESTIMATED_TORQUE_NM``.
+    ``ESTIMATED_TORQUE_NM``, ``GEAR_ESTIMATE`` (Task 4.6 — only when
+    ``vehicle.gear_ratios`` is configured).
     """
     if wide.empty or "timestamp" not in wide.columns:
         return wide.copy()
@@ -284,6 +335,10 @@ def compute_instantaneous_channels(wide: pd.DataFrame, vehicle: VehicleParameter
             spinning = omega > 0
             torque[spinning] = power_kw[spinning] * 1000.0 / omega[spinning]
             out["derived:ESTIMATED_TORQUE_NM"] = torque
+
+    gear = _gear_estimate(out, vehicle, speed, rpm)
+    if gear is not None:
+        out["derived:GEAR_ESTIMATE"] = gear
     return out
 
 
@@ -331,7 +386,83 @@ def compute_derived_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> 
     return out
 
 
-def compute_anomaly_signals(wide: pd.DataFrame) -> pd.DataFrame:
+#: Narrowband (zirconia) O2 sensor rich/lean switch threshold — standard
+#: ~0.45 V crossover for every J1979 0-1 V narrowband sensor, not
+#: vehicle-specific. Used only for switch-counting (Task 4.4); the wideband
+#: A/F sensors report λ directly and never go through this threshold.
+_O2_SWITCH_THRESHOLD_V = 0.45
+
+#: Trailing window for the catalyst-efficiency switch-rate ratio (Task 4.4).
+#: Long enough to span several upstream closed-loop switch cycles (a few Hz)
+#: so the ratio isn't noise-dominated by a handful of samples, short enough
+#: to still track a degrading cat within one drive. Module constant, not
+#: config, for the same train/serve-parity reason as
+#: ``STFT_BANK_BALANCE_SMOOTHING_SECONDS`` above.
+CAT_EFFICIENCY_WINDOW_SECONDS = 60.0
+
+
+def _air_mass_per_cycle_g(wide: pd.DataFrame) -> pd.Series | None:
+    """Measured air mass per engine cycle (g/cycle) from MAF/RPM.
+
+    4-stroke: one cycle = 2 revs of crank, all cylinders combined.
+    ``mass_per_cycle = MAF[g/s] * 120 / RPM`` — the factor 120 = 60[s/min] *
+    2[revs/cycle]. RPM <= 0 (engine off / KOEO) is masked to NaN via
+    ``.where``, never a fake zero or a division error. Shared by
+    ``derived:AIR_MASS_PER_CYCLE`` (below) and ``derived:VE_PERCENT``
+    (Task 4.1), which normalizes this same measured mass against the
+    theoretical 100%-VE fill.
+    """
+    maf = _series(wide, "obd:MAF")
+    rpm = _series(wide, "obd:RPM", "decoded:ECM_RPM")
+    if maf is None or rpm is None:
+        return None
+    rpm_safe = rpm.where(rpm > 0)
+    return (maf * 120.0 / rpm_safe).astype(float)
+
+
+def _theoretical_air_mass_per_cycle_g(
+    wide: pd.DataFrame, vehicle: VehicleParameters
+) -> pd.Series | None:
+    """100%-VE reference fill (g/cycle): ideal-gas air mass that would fill
+    the configured displacement at the given manifold pressure/temperature.
+
+    Same ideal-gas form as the speed-density fallback in
+    ``_instant_fuel_g_s``: ``density = P[Pa] / (287.05 * T[K])``, mass =
+    density * displaced volume. Prefers MAP (``obd:INTAKE_PRESSURE``);
+    falls back to barometric pressure when MAP isn't polled — an
+    unboosted engine at rest reads close to baro anyway, so this degrades
+    gracefully instead of going silent. IAT defaults to 25 C when absent
+    (same convention as ``_instant_fuel_g_s``).
+    """
+    pressure_kpa = _series(wide, "obd:INTAKE_PRESSURE", "decoded:MAP")
+    if pressure_kpa is None:
+        pressure_kpa = _series(wide, "obd:BAROMETRIC_PRESSURE")
+    if pressure_kpa is None:
+        return None
+    iat = _series(wide, "obd:INTAKE_TEMP", "decoded:IAT")
+    iat_k = (iat if iat is not None else pd.Series(25.0, index=wide.index)) + 273.15
+    air_density = (pressure_kpa * 1000.0) / (287.05 * iat_k)  # kg/m^3
+    disp_m3 = vehicle.displacement_l / 1000.0
+    return (air_density * disp_m3 * 1000.0).astype(float)  # g/cycle at 100% VE
+
+
+def _switch_count_rolling(wide: pd.DataFrame, voltage: pd.Series, seconds: float) -> pd.Series:
+    """Trailing count of rich/lean threshold crossings, time-windowed per session.
+
+    A "crossing" is any sample where the above/below-``_O2_SWITCH_THRESHOLD_V``
+    state differs from the previous sample. Used by the catalyst-efficiency
+    switch-rate ratio (Task 4.4); a narrowband O2 trace's crossing count over
+    a trailing window approximates its switching frequency without needing a
+    uniform sample rate.
+    """
+    crossed = (voltage > _O2_SWITCH_THRESHOLD_V).astype(float)
+    transitions = crossed.diff().abs().fillna(0.0)
+    return _session_time_rolling(wide, transitions, seconds, how="sum")
+
+
+def compute_anomaly_signals(
+    wide: pd.DataFrame, vehicle: VehicleParameters | None = None
+) -> pd.DataFrame:
     """Append ``derived:<NAME>`` columns useful for anomaly detection.
 
     Sister to :func:`compute_derived_channels` (which computes trip-meter
@@ -342,12 +473,35 @@ def compute_anomaly_signals(wide: pd.DataFrame) -> pd.DataFrame:
     present so a session without OBD or without DID polling skips
     cleanly rather than NaN-filling.
 
-    Outputs (added when inputs are present):
+    ``vehicle`` is optional (default ``None``) purely so existing bare-frame
+    callers/tests don't have to thread a config through — it only gates
+    ``derived:VE_PERCENT`` (Task 4.1), which needs the configured engine
+    displacement and is skipped like any other absent-input case when
+    ``vehicle`` isn't supplied.
+
+    Outputs (added when inputs are present; each is model-trainable unless
+    noted otherwise — see ``NON_TRAINABLE_COUNTER_CHANNELS`` in
+    ``feature_pipeline.py`` for the actual exclusion mechanism):
 
     * ``derived:AIR_MASS_PER_CYCLE`` — MAF translated to grams of air
       per engine cycle (4-stroke: one cycle = 2 revs of crank, all
       cylinders combined). Stable in a healthy engine for a given
       RPM/load operating point. Inputs: ``obd:MAF``, ``obd:RPM``.
+
+    * ``derived:VE_PERCENT`` (Task 4.1) — the same measured air mass above,
+      expressed as a percentage of the *theoretical* 100%-VE fill (ideal
+      gas law over MAP-or-baro, IAT, and the configured displacement —
+      see ``_theoretical_air_mass_per_cycle_g``). Where AIR_MASS_PER_CYCLE
+      is a stable-but-uncalibrated proxy, VE_PERCENT is physics-normalized
+      and directly interpretable (~85-95% naturally-aspirated at part
+      throttle; collapsing VE = intake leak/restriction, spiking VE = MAF
+      under-reporting). Inputs: ``obd:MAF``, ``obd:RPM``, MAP-or-baro,
+      ``vehicle.displacement_l``. Optional DID cross-check
+      (``did:ECM_INTAKE_PRESSURE`` pair, 0x1206/07) deliberately **not**
+      wired here — those DIDs are still raw/scale-unpinned (Task 2.7) and
+      not yet scheduled (Task 2.4), so a cross-check would compare a
+      calibrated quantity against a wrong-scale one; noted as a follow-up
+      once 2.4/2.7 land, not forced now.
 
     * ``derived:STFT_BANK_BALANCE`` / ``derived:LTFT_BANK_BALANCE`` —
       short / long fuel trim difference between banks. Expected ~0
@@ -358,11 +512,36 @@ def compute_anomaly_signals(wide: pd.DataFrame) -> pd.DataFrame:
       transients; the slow LTFT version is left raw (it is already the drift
       channel). Inputs: ``obd:SHORT_FUEL_TRIM_1/2``, ``obd:LONG_FUEL_TRIM_1/2``.
 
+    * ``derived:TOTAL_TRIM_B1`` / ``derived:TOTAL_TRIM_B2`` (Task 4.3) —
+      LTFT + STFT per bank, the vacuum-leak-vs-MAF-skew discriminator (a
+      human reads the fitted ``total_trim_vs_rpm_load`` map: elevated only
+      at idle/low-load points → unmetered air; elevated everywhere → MAF
+      or fuel-pressure bias). No detection logic here, just the channel.
+      Inputs: same as the bank-balance pair above, per bank.
+
     * ``derived:AFR_BANK_BALANCE`` — wideband AFR sensor voltage
       difference between banks. Once the AF-sensor DIDs are polling
       (see ``obd_dids`` in ``canary.example.yaml``), this becomes the
       sharpest bank-asymmetry detector available. Inputs:
       ``did:ECM_AF_SENSOR_V_B1``, ``did:ECM_AF_SENSOR_V_B2``.
+
+    * ``derived:CAT_EFFICIENCY_B1`` / ``derived:CAT_EFFICIENCY_B2``
+      (Task 4.4) — a bounded **0-1 heuristic index**, explicitly NOT a
+      claimed literal catalyst efficiency percentage: ``1 -
+      downstream_switch_count / upstream_switch_count`` over a trailing
+      ``CAT_EFFICIENCY_WINDOW_SECONDS`` window (the classic secondary-O2
+      switch-count cat test — a healthy cat damps the fast upstream
+      rich/lean switching before it reaches the downstream sensor; 1 =
+      downstream never switches relative to upstream, 0 = downstream
+      switches exactly as fast, i.e. no damping). Read only as a trend
+      (fingerprinted, Task 4.4), not a pass/fail number. Inputs:
+      ``obd:O2_B{1,2}S1`` (upstream, narrowband), ``obd:O2_B{1,2}S2``
+      (downstream, narrowband). Mode 06 catalyst-monitor margin
+      (``src/control/monitor_state.py``) cross-check deliberately **not**
+      wired here — that margin is a pass/fail threshold test result
+      (test value vs min/max), not a continuous trend series, so it
+      doesn't align cleanly with this rolling-window index; noted as a
+      follow-up rather than forced.
 
     * ``derived:TPS_VOLTAGE_PER_PCT`` — raw TPS voltage divided by the
       ECM-calculated throttle percent. Expected to be linear (constant
@@ -379,13 +558,20 @@ def compute_anomaly_signals(wide: pd.DataFrame) -> pd.DataFrame:
         return wide.copy()
     out = wide.copy()
 
-    # Air mass per cycle (g/cycle). Two-rev-per-cycle 4-stroke:
-    # mass_per_cycle = MAF[g/s] * 120 / RPM. The factor 120 = 60[s/min] * 2[revs/cycle].
-    maf = _series(out, "obd:MAF")
-    rpm = _series(out, "obd:RPM", "decoded:ECM_RPM")
-    if maf is not None and rpm is not None:
-        rpm_safe = rpm.where(rpm > 0)
-        out["derived:AIR_MASS_PER_CYCLE"] = (maf * 120.0 / rpm_safe).astype(float)
+    # Air mass per cycle (g/cycle) — see _air_mass_per_cycle_g.
+    air_mass_measured = _air_mass_per_cycle_g(out)
+    if air_mass_measured is not None:
+        out["derived:AIR_MASS_PER_CYCLE"] = air_mass_measured
+
+        # True VE (Task 4.1): same measured mass, normalized against the
+        # theoretical 100%-VE fill. Needs the vehicle config for
+        # displacement, so it's additionally gated on `vehicle` being
+        # supplied (see docstring).
+        if vehicle is not None:
+            theoretical = _theoretical_air_mass_per_cycle_g(out, vehicle)
+            if theoretical is not None:
+                theo_safe = theoretical.where(theoretical > 0)
+                out["derived:VE_PERCENT"] = (air_mass_measured / theo_safe * 100.0).astype(float)
 
     # Per-bank fuel trim asymmetry. Both STFT and LTFT versions, since
     # they characterize fast (closed-loop) and slow (drift) bias paths.
@@ -404,6 +590,30 @@ def compute_anomaly_signals(wide: pd.DataFrame) -> pd.DataFrame:
     ltft_b2 = _series(out, "obd:LONG_FUEL_TRIM_2")
     if ltft_b1 is not None and ltft_b2 is not None:
         out["derived:LTFT_BANK_BALANCE"] = (ltft_b1 - ltft_b2).astype(float)
+
+    # Total trim per bank (Task 4.3): LTFT + STFT, reusing the per-bank
+    # series already fetched above rather than re-resolving them.
+    if stft_b1 is not None and ltft_b1 is not None:
+        out["derived:TOTAL_TRIM_B1"] = (stft_b1 + ltft_b1).astype(float)
+    if stft_b2 is not None and ltft_b2 is not None:
+        out["derived:TOTAL_TRIM_B2"] = (stft_b2 + ltft_b2).astype(float)
+
+    # Catalyst efficiency index (Task 4.4) — see docstring for the
+    # switch-count-ratio formula and its explicit "heuristic index, not a
+    # literal efficiency" framing.
+    for bank, upstream_col, downstream_col in (
+        (1, "obd:O2_B1S1", "obd:O2_B1S2"),
+        (2, "obd:O2_B2S1", "obd:O2_B2S2"),
+    ):
+        upstream_v = _series(out, upstream_col)
+        downstream_v = _series(out, downstream_col)
+        if upstream_v is None or downstream_v is None:
+            continue
+        up_switches = _switch_count_rolling(out, upstream_v, CAT_EFFICIENCY_WINDOW_SECONDS)
+        down_switches = _switch_count_rolling(out, downstream_v, CAT_EFFICIENCY_WINDOW_SECONDS)
+        up_safe = up_switches.where(up_switches > 0)
+        ratio = (down_switches / up_safe).clip(upper=1.0)
+        out[f"derived:CAT_EFFICIENCY_B{bank}"] = (1.0 - ratio).astype(float)
 
     # Wideband AFR voltage asymmetry (DID-dependent).
     afr_b1 = _series(out, "did:ECM_AF_SENSOR_V_B1")

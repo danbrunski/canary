@@ -279,6 +279,90 @@ def test_voltage_at_crank_omitted_when_rpm_merely_lags(tmp_path: Path) -> None:
     assert stats["voltage_at_idle_v"] == pytest.approx(14.2)
 
 
+def _write_o2_session(root: Path, *, name: str = "2026-05-20T150000") -> Path:
+    """150 s of steady warm idle (rpm/speed/coolant all idle-mode-compatible
+    the whole session) with four O2 traces engineered to separate the
+    catalyst-efficiency and O2-health stats cleanly (Task 4.4/4.5):
+
+    * Bank 1 upstream/downstream: upstream toggles every sample (fast,
+      closed-loop-typical); downstream dwells 20 samples high / 5 low
+      (period 25, exactly 6 full periods over 150 samples) — a healthy,
+      damping catalyst plus a response asymmetry to pin (~20:5 dwell
+      ratio).
+    * Bank 2 upstream/downstream: downstream mirrors upstream's every-
+      sample toggle — an un-damping (degraded) catalyst.
+    * Upstream wideband lambda: alternates +/-0.02 around 1.0 (stoich) —
+      near-zero bias, nonzero noise, at steady idle.
+    """
+    session = root / name
+    records: list[TelemetryRecord] = []
+    base = 1_779_600_000.0
+    for i in range(150):
+        t = base + i
+        upstream_high = i % 2 == 0
+        downstream_b1_high = (i % 25) < 20
+        downstream_b2_high = upstream_high
+        lam = 1.02 if i % 2 == 0 else 0.98
+        records.extend(
+            [
+                TelemetryRecord.obd(t, "RPM", 800.0, "rpm"),
+                TelemetryRecord.obd(t, "SPEED", 0.0, "km/h"),
+                TelemetryRecord.obd(t, "COOLANT_TEMP", 90.0, "C"),
+                TelemetryRecord.obd(t, "O2_B1S1", 0.8 if upstream_high else 0.1, "V"),
+                TelemetryRecord.obd(t, "O2_B2S1", 0.8 if upstream_high else 0.1, "V"),
+                TelemetryRecord.obd(t, "O2_B1S2", 0.8 if downstream_b1_high else 0.1, "V"),
+                TelemetryRecord.obd(t, "O2_B2S2", 0.8 if downstream_b2_high else 0.1, "V"),
+                TelemetryRecord.obd(t, "O2_WR_LAMBDA_S1", lam, "ratio"),
+            ]
+        )
+    write_records_to_parquet(records, session, max_rows=10_000)
+    return session
+
+
+def test_cat_efficiency_stats_separate_healthy_from_degraded_bank(tmp_path: Path) -> None:
+    """Task 4.4 — bank 1's slow-dwelling downstream (damping cat) should
+    score much closer to 1 than bank 2's downstream, which mirrors the
+    fast upstream toggle (no damping at all)."""
+    session = _write_o2_session(tmp_path)
+    stats = compute_fingerprint(session, _config())
+    assert stats["cat_efficiency_mean:b1"] > 0.5
+    assert stats["cat_efficiency_mean:b2"] < 0.3
+    assert stats["cat_efficiency_mean:b1"] > stats["cat_efficiency_mean:b2"]
+
+
+def test_o2_downstream_switch_rate_and_asymmetry(tmp_path: Path) -> None:
+    """Task 4.5 — bank 1's downstream dwells 20-high/5-low per 25-sample
+    period: ~12 transitions over ~149s, and a rich:lean dwell ratio near
+    the engineered 20:5 = 4.0 (undercounted slightly by the run-duration
+    convention, see ``_o2_run_durations``)."""
+    session = _write_o2_session(tmp_path)
+    stats = compute_fingerprint(session, _config())
+    assert stats["o2_downstream_switch_rate_hz:b1"] == pytest.approx(12.0 / 149.0, rel=0.2)
+    assert stats["o2_downstream_response_asymmetry:b1"] == pytest.approx(4.75, rel=0.3)
+    # Bank 2 downstream toggles every sample (same as upstream) — a much
+    # higher switch rate than bank 1's damped trace.
+    assert stats["o2_downstream_switch_rate_hz:b2"] > stats["o2_downstream_switch_rate_hz:b1"]
+
+
+def test_o2_upstream_wideband_lambda_noise_and_bias_at_idle(tmp_path: Path) -> None:
+    """Task 4.5 — the whole session is steady idle; lambda alternates
+    +/-0.02 around stoich (1.0), so bias ~ 0 and noise ~ 0.02."""
+    session = _write_o2_session(tmp_path)
+    stats = compute_fingerprint(session, _config())
+    assert stats["o2_upstream_wideband_lambda_bias_idle"] == pytest.approx(0.0, abs=0.005)
+    assert stats["o2_upstream_wideband_lambda_noise_idle"] == pytest.approx(0.02, rel=0.2)
+
+
+def test_cat_and_o2_stats_omitted_without_o2_sensors(rich_session: Path) -> None:
+    """The rich fixture never polls any O2 PID — none of the Task 4.4/4.5
+    stats should appear (absent-input gating, not zero-filled)."""
+    stats = compute_fingerprint(rich_session, _config())
+    for key in stats:
+        assert not key.startswith("cat_efficiency_mean:")
+        assert not key.startswith("o2_downstream_")
+        assert not key.startswith("o2_upstream_wideband_lambda_")
+
+
 def test_raises_on_missing_parquet(tmp_path: Path) -> None:
     session = tmp_path / "missing"
     session.mkdir()

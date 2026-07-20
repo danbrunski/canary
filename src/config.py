@@ -42,6 +42,13 @@ class VehicleParameters(_Strict):
     thermal_efficiency: float = 0.30
     #: Rolling tire diameter in metres (optional; speed cross-checks only).
     tire_diameter_m: float | None = None
+    #: Combined gearbox × final-drive ratio per gear, lowest gear first
+    #: (Task 4.6, ``derived:GEAR_ESTIMATE``: rpm/speed ratio clustered to the
+    #: nearest entry). Empty by default — deliberately not baked in for any
+    #: particular vehicle; a profile without a captured ratio table (e.g. no
+    #: dyno/logged 1:1 gear runs yet) just never gets the gear channel, same
+    #: as any other absent-input case elsewhere in ``derived.py``.
+    gear_ratios: tuple[float, ...] = ()
 
 
 class VehicleConfig(_Strict):

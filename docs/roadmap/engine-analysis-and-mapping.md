@@ -272,35 +272,41 @@ New channels go in `compute_derived_channels` (performance) or
 `compute_anomaly_signals` (residuals); new maps are `refit.py` recipes
 (gated per `ml-correctness-hardening.md` Phase 4 publish gates).
 
-- [ ] **4.1 — True VE table.** `derived:VE_PERCENT` = measured air
-  mass per intake event ÷ theoretical fill (MAP or baro, IAT,
-  displacement from `config.py:37` block) — upgrade of the existing
-  proxy (`AIR_MASS_PER_CYCLE`, `derived.py:333-339`). Recipe:
-  `ve_vs_rpm_load` (2D). Needs MAP (Mode 01 0x0B polled today; DID
-  0x1206/07 as cross-check).
+- [x] **4.1 — True VE table.** Landed: `derived:VE_PERCENT` = measured
+  air mass/cycle ÷ theoretical 100%-VE fill (MAP-or-baro/IAT/
+  `vehicle.displacement_l`, MAP tried first, baro only as fallback when
+  MAP is genuinely absent); gated on absent MAF/RPM/vehicle/pressure.
+  Recipe `ve_vs_rpm_load` added through the existing gated recipe
+  pipeline. DID 0x1206/07 cross-check deliberately deferred — those
+  DIDs are still scale-unpinned (task 2.7) and unscheduled (task 2.4).
 - [ ] **4.2 — Injector duty cycle.** `derived:INJECTOR_DUTY_PCT` =
   PW_ms × rpm / 1200 (4-stroke). Depends on 2.5 scale pin. Alert-worthy
   above ~85% sustained; add to fingerprints.
-- [ ] **4.3 — Total fuel trim + map.** `derived:TOTAL_TRIM_B1/B2` =
-  LTFT+STFT per bank; recipe `total_trim_vs_rpm_load` (2D, per bank).
-  This is the vacuum-leak-vs-MAF-skew discriminator (high at idle only
-  → unmetered air; high everywhere → MAF/fuel pressure). Review noted
-  only STFT-B1 is mapped today (`refit.py:252`).
-- [ ] **4.4 — Catalyst efficiency.** Per bank: upstream λ activity vs
-  downstream O2 switching frequency/amplitude over a rolling window
-  (all four sensors already polled). `derived:CAT_EFFICIENCY_B1/B2`
-  (bounded 0-1 index, not a claimed literal efficiency); trend it in
-  fingerprints. Cross-check against Mode 06 catalyst monitor margin
-  (3.1).
-- [ ] **4.5 — O2/AF sensor health.** Downstream sensor switching rate
-  + response asymmetry; upstream (wideband) λ noise/bias at steady
-  idle. Session-level stats → fingerprints, not live channels.
-- [ ] **4.6 — Gear detection (manual trans).** `derived:GEAR_ESTIMATE`
-  from rpm/speed ratio clustered to the known ratios (config table in
-  the vehicle profile). Enables per-gear analysis, clutch-slip
-  detection (ratio drift within a gear), and a better `city`/`highway`
-  segmentation input. No TCM on this bus — this is the only gear
-  source.
+- [x] **4.3 — Total fuel trim + map.** Landed: `derived:TOTAL_TRIM_B1/B2`
+  = STFT+LTFT per bank (each independently gated on both inputs
+  present). Recipes `total_trim_vs_rpm_load_b1`/`_b2` added through the
+  same gated pipeline.
+- [x] **4.4 — Catalyst efficiency.** Landed: `derived:CAT_EFFICIENCY_B1/B2`
+  = `1 - clip(downstream_switches / upstream_switches, upper=1.0)` over
+  a rolling window — genuinely bounded [0,1], documented as a heuristic
+  index, not literal efficiency. Trended in fingerprint stats. Mode 06
+  catalyst-monitor-margin cross-check (3.1) deliberately deferred — that
+  margin is a pass/fail result, not a continuous series, and doesn't
+  align with a rolling trend without forcing something fragile.
+- [x] **4.5 — O2/AF sensor health.** Landed: fingerprint-only stats
+  (no new live channel, per the doc's explicit instruction) —
+  downstream switching rate + rich/lean dwell asymmetry, upstream
+  wideband λ noise/bias restricted to steady idle.
+- [x] **4.6 — Gear detection (manual trans).** Landed:
+  `derived:GEAR_ESTIMATE` via nearest-ratio clustering of rpm/speed
+  against a new `VehicleParameters.gear_ratios` config table (the
+  vehicle-profile ratio table the task asked for — `VehicleProfile.
+  parameters` already is a `VehicleParameters`), with a low-speed floor
+  masking numerically-unstable near-zero-speed ratios and a clean gate
+  on an empty/unset table. Excluded from ML training as a categorical
+  cluster label (continuous physics channels above stay trainable).
+  Clutch-slip stretch goal (ratio drift within a gear) not built —
+  doc marks it optional, deferred to a later task.
 - [ ] **4.7 — BSFC / efficiency estimate.** At steady cruise cells:
   fuel g/s ÷ estimated crank kW → `derived:BSFC_G_PER_KWH`; map vs
   rpm×load. Flag it clearly as estimate-on-estimate (both operands are

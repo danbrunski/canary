@@ -9,6 +9,7 @@ import pytest
 from src.analysis.derived import (
     FUEL_PROPERTIES,
     compute_derived_channels,
+    compute_instantaneous_channels,
     fuel_properties,
     summarize_trip,
 )
@@ -174,3 +175,49 @@ def test_empty_and_missing_inputs_are_safe() -> None:
 def test_fuel_properties_by_type() -> None:
     assert fuel_properties(VehicleParameters(fuel_type="diesel")) is FUEL_PROPERTIES["diesel"]
     assert fuel_properties(VehicleParameters()) is FUEL_PROPERTIES["gasoline"]
+
+
+# --------------------------------------------------------------------------- #
+# GEAR_ESTIMATE (Task 4.6) — rpm/speed ratio clustered to the vehicle
+# profile's gear-ratio table. No TCM on this bus; this is the only gear
+# source, so the table lives on VehicleParameters (the vehicle profile).
+# --------------------------------------------------------------------------- #
+
+
+def test_gear_estimate_clusters_to_nearest_ratio() -> None:
+    vehicle = VehicleParameters(gear_ratios=(40.0, 25.0, 15.0, 10.0))
+    df = _frame(
+        4,
+        **{
+            "obd:RPM": [2000.0, 2000.0, 2000.0, 2000.0],
+            "obd:SPEED": [50.0, 80.0, 133.333, 200.0],
+        },
+    )
+    out = compute_instantaneous_channels(df, vehicle)
+    assert out["derived:GEAR_ESTIMATE"].to_list() == [1.0, 2.0, 3.0, 4.0]
+
+
+def test_gear_estimate_skipped_without_ratio_table() -> None:
+    """Default ``gear_ratios=()`` (no vehicle profile table configured yet)
+    — the channel must be absent, not zero-filled."""
+    df = _frame(2, **{"obd:RPM": [2000.0, 2000.0], "obd:SPEED": [50.0, 80.0]})
+    out = compute_instantaneous_channels(df, GASOLINE)
+    assert "derived:GEAR_ESTIMATE" not in out.columns
+
+
+def test_gear_estimate_skipped_when_speed_or_rpm_missing() -> None:
+    vehicle = VehicleParameters(gear_ratios=(40.0, 25.0))
+    df = _frame(2, **{"obd:RPM": [2000.0, 2000.0]})  # no SPEED
+    out = compute_instantaneous_channels(df, vehicle)
+    assert "derived:GEAR_ESTIMATE" not in out.columns
+
+
+def test_gear_estimate_masks_low_speed() -> None:
+    """Below the min-speed gate the ratio is unreliable (neutral/clutch-in
+    ambiguity, speed-PID quantization) — NaN, not a fabricated gear."""
+    vehicle = VehicleParameters(gear_ratios=(40.0, 25.0))
+    df = _frame(2, **{"obd:RPM": [2000.0, 2000.0], "obd:SPEED": [0.0, 50.0]})
+    out = compute_instantaneous_channels(df, vehicle)
+    values = out["derived:GEAR_ESTIMATE"]
+    assert pd.isna(values.iloc[0])
+    assert values.iloc[1] == 1.0

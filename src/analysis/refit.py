@@ -351,6 +351,81 @@ def default_recipes() -> list[Recipe]:
                 "shift). Fed by ``compute_anomaly_signals``."
             ),
         ),
+        Surface2DRecipe(
+            name="ve_vs_rpm_load",
+            output="derived:VE_PERCENT",
+            output_unit="%",
+            x_column="obd:RPM",
+            y_column="obd:ENGINE_LOAD",
+            x_axis_name="rpm",
+            y_axis_name="engine_load",
+            x_axis_unit="rpm",
+            y_axis_unit="%",
+            min_samples=500,
+            min_rpm=ENGINE_RUNNING_MIN_RPM,  # no fill KOEO — VE is a frozen/meaningless value there
+            # sigma_floor: same MAF-LSB reasoning as air_mass_per_cycle_vs_rpm_load
+            # (0.002 g/cycle) expressed as a percent of a representative idle-cell
+            # 100%-VE fill (~0.4 g/cycle for this displacement class) — approximate,
+            # like every other LSB-derived floor in this catalog, not exact.
+            deviation=DeviationConfig(
+                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+            ),
+            notes=(
+                "True VE table (Task 4.1): measured air mass per cycle (MAF/RPM) "
+                "over the theoretical 100%-VE fill from MAP-or-baro/IAT/"
+                "displacement — the physics-normalized upgrade of "
+                "air_mass_per_cycle_vs_rpm_load above. Detects intake leak / "
+                "restriction (VE drop), MAF drift (whole-surface shift), "
+                "cam/VVT fault (localized cell shift). Fed by "
+                "``compute_anomaly_signals``."
+            ),
+        ),
+        Surface2DRecipe(
+            name="total_trim_vs_rpm_load_b1",
+            output="derived:TOTAL_TRIM_B1",
+            output_unit="%",
+            x_column="obd:RPM",
+            y_column="obd:ENGINE_LOAD",
+            x_axis_name="rpm",
+            y_axis_name="engine_load",
+            x_axis_unit="rpm",
+            y_axis_unit="%",
+            min_samples=500,
+            min_rpm=ENGINE_RUNNING_MIN_RPM,
+            # Same trim-PID LSB floor as fuel_trim_vs_rpm_load (100/128 ≈ 0.78%);
+            # TOTAL_TRIM sums two channels sharing that LSB, so this is a lower
+            # bound on the achievable resolution, not a doubled value.
+            deviation=DeviationConfig(
+                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=100.0 / 128.0
+            ),
+            notes=(
+                "Total fuel trim (LTFT+STFT), bank 1 (Task 4.3). The "
+                "vacuum-leak-vs-MAF-skew discriminator: elevated only in "
+                "low-rpm/low-load cells → unmetered air (vacuum leak); "
+                "elevated across the whole surface → MAF or fuel-pressure "
+                "bias. A human reads this map; no detection logic here."
+            ),
+        ),
+        Surface2DRecipe(
+            name="total_trim_vs_rpm_load_b2",
+            output="derived:TOTAL_TRIM_B2",
+            output_unit="%",
+            x_column="obd:RPM",
+            y_column="obd:ENGINE_LOAD",
+            x_axis_name="rpm",
+            y_axis_name="engine_load",
+            x_axis_unit="rpm",
+            y_axis_unit="%",
+            min_samples=500,
+            min_rpm=ENGINE_RUNNING_MIN_RPM,
+            deviation=DeviationConfig(
+                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=100.0 / 128.0
+            ),
+            notes=(
+                "Total fuel trim (LTFT+STFT), bank 2 — sister surface to "
+                "total_trim_vs_rpm_load_b1, same discriminator."
+            ),
+        ),
         Surface1DRecipe(
             name="stft_bank_balance_vs_rpm",
             output="derived:STFT_BANK_BALANCE",

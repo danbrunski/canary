@@ -14,6 +14,7 @@ import math
 import pandas as pd
 
 from src.analysis.derived import compute_anomaly_signals
+from src.config import VehicleParameters
 
 
 def _base(rows: int = 60) -> pd.DataFrame:
@@ -65,6 +66,62 @@ def test_air_mass_per_cycle_handles_zero_rpm_safely() -> None:
     values = out["derived:AIR_MASS_PER_CYCLE"]
     assert pd.isna(values.iloc[0])
     assert math.isclose(values.iloc[1], 1.0, rel_tol=1e-9)
+
+
+# --------------------------------------------------------------------------- #
+# VE_PERCENT (Task 4.1) — measured air mass per cycle over the theoretical
+# 100%-VE fill from MAP-or-baro/IAT/displacement.
+# --------------------------------------------------------------------------- #
+
+
+def test_ve_percent_computed_from_measured_over_theoretical() -> None:
+    vehicle = VehicleParameters(displacement_l=4.0)
+    frame = _base(3).assign(
+        **{
+            "obd:MAF": [5.0] * 3,
+            "obd:RPM": [1200.0] * 3,
+            "obd:INTAKE_PRESSURE": [101.325] * 3,
+            "obd:INTAKE_TEMP": [25.0] * 3,
+        }
+    )
+    out = compute_anomaly_signals(frame, vehicle)
+    assert "derived:VE_PERCENT" in out.columns
+    measured_g = 5.0 * 120.0 / 1200.0
+    density_kg_m3 = (101.325 * 1000.0) / (287.05 * (25.0 + 273.15))
+    theoretical_g = density_kg_m3 * (4.0 / 1000.0) * 1000.0
+    expected = measured_g / theoretical_g * 100.0
+    assert math.isclose(out["derived:VE_PERCENT"].iloc[0], expected, rel_tol=1e-6)
+
+
+def test_ve_percent_falls_back_to_baro_without_map() -> None:
+    vehicle = VehicleParameters()
+    frame = _base(2).assign(
+        **{
+            "obd:MAF": [5.0] * 2,
+            "obd:RPM": [1200.0] * 2,
+            "obd:BAROMETRIC_PRESSURE": [101.325] * 2,
+        }
+    )
+    out = compute_anomaly_signals(frame, vehicle)
+    assert "derived:VE_PERCENT" in out.columns
+
+
+def test_ve_percent_skipped_without_vehicle_param() -> None:
+    """`vehicle` defaults to None so bare-frame callers/tests keep working —
+    VE_PERCENT is gated on it same as any other absent input."""
+    frame = _base(2).assign(
+        **{"obd:MAF": [5.0] * 2, "obd:RPM": [1200.0] * 2, "obd:INTAKE_PRESSURE": [101.325] * 2}
+    )
+    out = compute_anomaly_signals(frame)
+    assert "derived:AIR_MASS_PER_CYCLE" in out.columns
+    assert "derived:VE_PERCENT" not in out.columns
+
+
+def test_ve_percent_skipped_without_pressure() -> None:
+    vehicle = VehicleParameters()
+    frame = _base(2).assign(**{"obd:MAF": [5.0] * 2, "obd:RPM": [1200.0] * 2})
+    out = compute_anomaly_signals(frame, vehicle)
+    assert "derived:VE_PERCENT" not in out.columns
 
 
 # --------------------------------------------------------------------------- #
@@ -158,6 +215,71 @@ def test_bank_balance_skipped_when_only_one_bank_present() -> None:
     frame = _base(3).assign(**{"obd:SHORT_FUEL_TRIM_1": [0.0, 1.0, 2.0]})
     out = compute_anomaly_signals(frame)
     assert "derived:STFT_BANK_BALANCE" not in out.columns
+
+
+# --------------------------------------------------------------------------- #
+# TOTAL_TRIM_B1/B2 (Task 4.3) — LTFT + STFT per bank.
+# --------------------------------------------------------------------------- #
+
+
+def test_total_trim_sums_stft_and_ltft_per_bank() -> None:
+    frame = _base(3).assign(
+        **{
+            "obd:SHORT_FUEL_TRIM_1": [2.0] * 3,
+            "obd:LONG_FUEL_TRIM_1": [5.0] * 3,
+            "obd:SHORT_FUEL_TRIM_2": [-1.0] * 3,
+            "obd:LONG_FUEL_TRIM_2": [3.0] * 3,
+        }
+    )
+    out = compute_anomaly_signals(frame)
+    assert out["derived:TOTAL_TRIM_B1"].to_list() == [7.0, 7.0, 7.0]
+    assert out["derived:TOTAL_TRIM_B2"].to_list() == [2.0, 2.0, 2.0]
+
+
+def test_total_trim_skipped_when_one_channel_missing() -> None:
+    frame = _base(3).assign(**{"obd:SHORT_FUEL_TRIM_1": [2.0] * 3})  # no LTFT_1
+    out = compute_anomaly_signals(frame)
+    assert "derived:TOTAL_TRIM_B1" not in out.columns
+    assert "derived:TOTAL_TRIM_B2" not in out.columns
+
+
+# --------------------------------------------------------------------------- #
+# CAT_EFFICIENCY_B1/B2 (Task 4.4) — upstream vs downstream O2 switch-count
+# ratio, a bounded 0-1 heuristic index (NOT a literal efficiency).
+# --------------------------------------------------------------------------- #
+
+
+def test_cat_efficiency_separates_damped_from_undamped_downstream() -> None:
+    """Bank 1's downstream dwells slowly (20-high/5-low, a damping/healthy
+    cat); bank 2's downstream mirrors the fast upstream toggle exactly (no
+    damping at all, a degraded cat) — the index must rank them accordingly
+    and stay within [0, 1]."""
+    rows = 90
+    upstream = [0.8 if i % 2 == 0 else 0.1 for i in range(rows)]
+    downstream_healthy = [0.8 if (i % 25) < 20 else 0.1 for i in range(rows)]
+    frame = _base(rows).assign(
+        **{
+            "obd:O2_B1S1": upstream,
+            "obd:O2_B2S1": upstream,
+            "obd:O2_B1S2": downstream_healthy,
+            "obd:O2_B2S2": upstream,  # mirrors upstream exactly
+        }
+    )
+    out = compute_anomaly_signals(frame)
+    b1 = out["derived:CAT_EFFICIENCY_B1"].iloc[-1]
+    b2 = out["derived:CAT_EFFICIENCY_B2"].iloc[-1]
+    assert 0.0 <= b1 <= 1.0
+    assert 0.0 <= b2 <= 1.0
+    assert b1 > 0.5
+    assert b2 < 0.3
+    assert b1 > b2
+
+
+def test_cat_efficiency_skipped_when_downstream_missing() -> None:
+    frame = _base(5).assign(**{"obd:O2_B1S1": [0.8, 0.1, 0.8, 0.1, 0.8]})
+    out = compute_anomaly_signals(frame)
+    assert "derived:CAT_EFFICIENCY_B1" not in out.columns
+    assert "derived:CAT_EFFICIENCY_B2" not in out.columns
 
 
 # --------------------------------------------------------------------------- #
