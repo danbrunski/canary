@@ -12,6 +12,9 @@ import type {
   CanCoverageResponse,
   CaptureResponse,
   CaptureTagResponse,
+  CustomPid,
+  CustomPidImportResponse,
+  CustomPidsResponse,
   DatasetHealthResponse,
   DidMapResponse,
   DtcReportResponse,
@@ -470,5 +473,41 @@ export function postFeedback(
   return controlJson("/control/feedback", token, {
     method: "POST",
     body: jsonBody({ event, label, reason }),
+  });
+}
+
+export function getCustomPids(
+  token: string,
+  signal?: AbortSignal,
+): Promise<CustomPidsResponse> {
+  return controlJson("/control/custom-pids", token, { signal });
+}
+
+export function addCustomPid(
+  token: string,
+  pid: CustomPid,
+): Promise<{ custom_pid: CustomPid }> {
+  return controlJson("/control/custom-pids", token, {
+    method: "POST",
+    body: jsonBody(pid),
+  });
+}
+
+export function deleteCustomPid(
+  token: string,
+  name: string,
+): Promise<{ name: string; deleted: boolean }> {
+  return controlJson(`/control/custom-pids/${encodeURIComponent(name)}`, token, {
+    method: "DELETE",
+  });
+}
+
+export function importCustomPidsCsv(
+  token: string,
+  csvText: string,
+): Promise<CustomPidImportResponse> {
+  return controlJson("/control/custom-pids/import", token, {
+    method: "POST",
+    body: jsonBody({ csv_text: csvText }),
   });
 }

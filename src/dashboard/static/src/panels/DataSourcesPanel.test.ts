@@ -35,6 +35,7 @@ const EMPTY_OBD: ObdCoverageResponse = {
   backed_off_count: 0,
   undecoded_supported: [],
   rows: [],
+  custom_pids: [],
 };
 const EMPTY_DIDS: DidMapResponse = {
   schema_version: 1,
@@ -92,6 +93,26 @@ describe("DataSourcesPanel", () => {
     render(createElement(DataSourcesPanel, { channels, status: null }));
     expect(await screen.findByText("Engine RPM")).toBeInTheDocument();
     expect(screen.getByText("850 rpm")).toBeInTheDocument();
+  });
+
+  it("OBD tab lists a custom PID with its live value (Task 2.8a)", async () => {
+    mocks.getObdCoverage.mockResolvedValue({
+      ...EMPTY_OBD,
+      custom_pids: [
+        {
+          name: "OIL_PRESS",
+          display_name: "Oil pressure",
+          channel: "custom:OIL_PRESS",
+          unit: "psi",
+          category: "custom",
+        },
+      ],
+    });
+    const channels = new Map([channel("obd:custom:OIL_PRESS", 42, "psi")]);
+    render(createElement(DataSourcesPanel, { channels, status: null }));
+    expect(await screen.findByText("Custom PIDs (1)")).toBeInTheDocument();
+    expect(screen.getByText("Oil pressure")).toBeInTheDocument();
+    expect(screen.getByText("42 psi")).toBeInTheDocument();
   });
 
   it("switches to the DID tab and overlays the live value", async () => {

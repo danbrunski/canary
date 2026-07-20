@@ -97,9 +97,23 @@ def read_latest_per_channel(
     return rows
 
 
-def read_obd_coverage(storage_path: Path) -> dict[str, Any]:
-    """OBD capability/coverage derived from observed telemetry."""
+def read_obd_coverage(
+    storage_path: Path,
+    *,
+    custom_pids_path: Path | None = None,
+) -> dict[str, Any]:
+    """OBD capability/coverage derived from observed telemetry.
+
+    ``build_coverage_report`` is strictly the public Mode 01 registry view
+    (Task 6.3) — a user-defined custom PID (Task 2.6/2.8) has no PID number
+    in that registry, so it can never appear as one of its rows. They're
+    listed separately here, straight off ``data/custom_pids.yaml``, so the
+    Data Sources panel's OBD tab can still show every custom PID's live
+    value without misrepresenting the honest J1979 supported/decoded counts
+    above it.
+    """
     from src.analysis.obd_coverage import build_coverage_report, channels_to_pids
+    from src.collection.custom_pids import load_custom_pids
 
     latest = _resolve_latest_session(storage_path)
     observed: set[str] = set()
@@ -112,7 +126,21 @@ def read_obd_coverage(storage_path: Path) -> dict[str, Any]:
             obd_rows = df[df["source"] == "obd"]
             observed.update(str(c) for c in obd_rows["channel"].unique())
     supported = channels_to_pids(observed)
-    return build_coverage_report(supported).to_dict()
+    report = build_coverage_report(supported).to_dict()
+    custom_pids = (
+        load_custom_pids(custom_pids_path).custom_pids if custom_pids_path is not None else []
+    )
+    report["custom_pids"] = [
+        {
+            "name": p.name,
+            "display_name": p.display_name,
+            "channel": f"custom:{p.name}",
+            "unit": p.unit,
+            "category": p.category,
+        }
+        for p in custom_pids
+    ]
+    return report
 
 
 def _normalize_telemetry_row(record: dict[str, Any]) -> dict[str, Any]:

@@ -18,6 +18,38 @@ interface Profile {
 const STORAGE_KEY = "canary.dashboard";
 const DEFAULT_PROFILE: Profile = { title: "My dashboard", tiles: [] };
 
+interface PresetGroup {
+  label: string;
+  channels: string[];
+}
+
+//: One-tap channel bundles for the picker below. AFR / fueling (Task 2.8b)
+//: is the first group: the wideband λ PIDs (0x24/0x25/0x34/0x35, Task 2.1),
+//: closed- and open-loop fuel trims, and the live fuel-rate/economy
+//: `derived:*` channels (Task 1.1) that stream over `/ws/telemetry`. A
+//: preset only adds the channels actually present in `numericKeys` below —
+//: no placeholder tiles for PIDs this vehicle/ECU doesn't answer.
+const PRESET_GROUPS: PresetGroup[] = [
+  {
+    label: "AFR / fueling",
+    channels: [
+      "obd:O2_WR_LAMBDA_S1",
+      "obd:O2_WR_LAMBDA_S2",
+      "obd:O2_WR_CURRENT_S1",
+      "obd:O2_WR_CURRENT_S2",
+      "obd:COMMANDED_EQUIV_RATIO",
+      "obd:SHORT_FUEL_TRIM_1",
+      "obd:SHORT_FUEL_TRIM_2",
+      "obd:LONG_FUEL_TRIM_1",
+      "obd:LONG_FUEL_TRIM_2",
+      "obd:ENGINE_FUEL_RATE",
+      "derived:FUEL_RATE_LPH",
+      "derived:INSTANT_ECONOMY_MPG",
+      "derived:INSTANT_ECONOMY_L_PER_100KM",
+    ],
+  },
+];
+
 /** Custom dashboard builder (Task 6.9). A user-configurable gauge page:
  *  pick channels → big digital readouts with a trend sparkline, persisted
  *  per browser and export/importable as a JSON profile. (No drag-resize —
@@ -49,6 +81,16 @@ export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
     );
   const removeTile = (key: string) =>
     setProfile((p) => ({ ...p, tiles: p.tiles.filter((k) => k !== key) }));
+
+  // Only add channels the vehicle is actually reporting — a preset never
+  // seeds a dead tile for a PID this ECU doesn't answer.
+  const addPreset = (group: PresetGroup) => {
+    const live = group.channels.filter((k) => numericKeys.includes(k));
+    setProfile((p) => ({
+      ...p,
+      tiles: [...p.tiles, ...live.filter((k) => !p.tiles.includes(k))],
+    }));
+  };
 
   const exportProfile = () => {
     const blob = new Blob([JSON.stringify(profile, null, 2)], {
@@ -190,6 +232,18 @@ export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
       )}
 
       <div className="mt-4">
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {PRESET_GROUPS.map((group) => (
+            <button
+              key={group.label}
+              type="button"
+              className={cn(buttonClass, "px-2.5 py-1 text-[0.74rem]")}
+              onClick={() => addPreset(group)}
+            >
+              + {group.label}
+            </button>
+          ))}
+        </div>
         <input
           className={cn(inputClass, "mb-2 w-full")}
           value={filter}

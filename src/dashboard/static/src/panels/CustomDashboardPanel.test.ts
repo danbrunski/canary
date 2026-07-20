@@ -46,4 +46,48 @@ describe("CustomDashboardPanel", () => {
     // The tile shows the live value.
     expect(screen.getByText("850.00")).toBeInTheDocument();
   });
+
+  it("adds only the live channels from the AFR / fueling preset (Task 2.8b)", () => {
+    const afrChannels = new Map<string, ChannelSnapshot>([
+      ...channels.entries(),
+      [
+        "obd:O2_WR_LAMBDA_S1",
+        {
+          latest: {
+            timestamp: "2026-05-17T10:00:00+00:00",
+            source: "obd",
+            channel: "O2_WR_LAMBDA_S1",
+            value: 1.0,
+            unit: "lambda",
+          },
+          history: [1.0],
+        },
+      ],
+      [
+        "derived:FUEL_RATE_LPH",
+        {
+          latest: {
+            timestamp: "2026-05-17T10:00:00+00:00",
+            source: "derived",
+            channel: "FUEL_RATE_LPH",
+            value: 2.5,
+            unit: "L/h",
+          },
+          history: [2.5],
+        },
+      ],
+    ]);
+    render(createElement(CustomDashboardPanel, { channels: afrChannels }));
+    fireEvent.click(screen.getByRole("button", { name: "+ AFR / fueling" }));
+    // Only the two present AFR channels land as tiles, not the whole preset
+    // list (e.g. obd:SHORT_FUEL_TRIM_1, never reported here).
+    expect(screen.getByText("2 tiles")).toBeInTheDocument();
+    const stored = JSON.parse(
+      window.localStorage.getItem("canary.dashboard") ?? "{}",
+    );
+    expect(stored.tiles).toEqual(
+      expect.arrayContaining(["obd:O2_WR_LAMBDA_S1", "derived:FUEL_RATE_LPH"]),
+    );
+    expect(stored.tiles).not.toContain("obd:SHORT_FUEL_TRIM_1");
+  });
 });

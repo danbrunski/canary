@@ -142,7 +142,12 @@ def register_public_routes(
     def get_obd_coverage() -> dict[str, Any]:
         # Read-only honesty surface (Task 6.3 / Risk R7): which public PIDs
         # the ECU supports, which CANary decodes, which are undecoded gaps.
-        return read_obd_coverage(config.collection.storage_path)
+        # Also lists custom PIDs (Task 2.8a) — no secrets in `custom_pids.yaml`,
+        # same public/unauthenticated posture as the DID catalog below.
+        return read_obd_coverage(
+            config.collection.storage_path,
+            custom_pids_path=config.daemon.custom_pids,
+        )
 
     @app.get("/can/coverage")
     def get_can_coverage() -> dict[str, Any]:

@@ -24,6 +24,7 @@ import { BehaviorModelsPanel } from "./BehaviorModelsPanel";
 import { ChartsPanel } from "./ChartsPanel";
 import { ControlPanel } from "./ControlPanel";
 import { CustomDashboardPanel } from "./CustomDashboardPanel";
+import { CustomPidsPanel } from "./CustomPidsPanel";
 import { DataSourcesPanel } from "./DataSourcesPanel";
 import { DatasetHealthPanel } from "./DatasetHealthPanel";
 import { DtcPanel } from "./DtcPanel";
@@ -176,6 +177,8 @@ function renderItem(
       );
     case "data-health":
       return <DatasetHealthPanel token={d.token} />;
+    case "data-custom-pids":
+      return <CustomPidsPanel token={d.token} />;
     case "data-export":
       return (
         <PlaceholderPanel

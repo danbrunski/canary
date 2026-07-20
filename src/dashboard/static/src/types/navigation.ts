@@ -26,6 +26,7 @@ export type WorkbenchItem =
   | "models-health"
   | "data-sessions"
   | "data-health"
+  | "data-custom-pids"
   | "data-export"
   | "control-main"
   | "control-test"

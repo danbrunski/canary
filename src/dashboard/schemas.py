@@ -114,6 +114,31 @@ class UpsKeepaliveRequest(_ControlRequest):
     minutes: float = Field(..., ge=0.0, le=720.0)
 
 
+class CustomPidCreateRequest(_ControlRequest):
+    """Define one new custom PID (Task 2.8c) — same fields as
+    :class:`src.collection.custom_pids.CustomPid`; validated (read-only mode,
+    safe formula) by that model at route-handling time."""
+
+    name: str
+    display_name: str
+    mode: int = Field(ge=0, le=0xFF)
+    pid: int = Field(ge=0, le=0xFFFF)
+    formula: str
+    unit: str = ""
+    category: str = "custom"
+    minimum: float | None = None
+    maximum: float | None = None
+    poll_tier: Literal["fast", "medium", "slow", "on_demand"] = "medium"
+    dashboard_hint: Literal["gauge", "graph", "text", "indicator", "list"] = "graph"
+    header: int | None = Field(default=None, ge=0, le=0x1FFFFFFF)
+
+
+class CustomPidCsvImportRequest(_ControlRequest):
+    """A Torque Pro custom-PID CSV export, pasted or uploaded as text."""
+
+    csv_text: str = Field(..., min_length=1)
+
+
 class DtcCodeEntry(BaseModel):
     """One described DTC — matches ``DtcDescription.to_dict()``."""
 
@@ -176,6 +201,8 @@ __all__ = [
     "CaptureStartRequest",
     "CaptureStopRequest",
     "CaptureTagRequest",
+    "CustomPidCreateRequest",
+    "CustomPidCsvImportRequest",
     "DtcCodeEntry",
     "DtcReportResponse",
     "FeedbackRequest",

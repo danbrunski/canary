@@ -200,7 +200,7 @@ the analysis UX.
   DIDs (0x1201, 0x1206/07, 0x1110), plan physical-action-tagged
   captures (per the binding protocol) to pin scales; track in
   `data/dids.yaml` notes.
-- [ ] **2.8 — UI: surface the new data.** (a) Verify
+- [x] **2.8 — UI: surface the new data.** (a) Verify
   `DataSourcesPanel.tsx` picks up the new PIDs/DIDs in its coverage
   tables with live values (it is registry-driven — confirm the new
   entries appear, add source grouping if the OBD tab gets crowded).
@@ -210,7 +210,18 @@ the analysis UX.
   Data group — list/add/delete custom PIDs + **Torque CSV import**
   (backend exists: `torque_csv_to_custom_pids`,
   `custom_pids.py:363`), POSTing to a new authenticated
-  `/control/custom-pids` endpoint; FE test per panel convention.
+  `/control/custom-pids` endpoint; FE test per panel convention. —
+  landed: (a) wideband PIDs needed zero backend changes (already
+  registry-driven); found and fixed a real gap where `custom:*`
+  channels were invisible (`obd_coverage.py` is deliberately scoped to
+  the J1979 registry) — surfaced as a separate subsection, not merged
+  into the main coverage ratio. (b) `CustomDashboardPanel` had no
+  preset-group mechanism at all yet — built it plus the first group,
+  channel names verified against the real decoders. (c) new
+  authenticated CRUD (`GET`/`POST`/`DELETE`/`import`) — confirmed all
+  four routes genuinely require auth, not just some; edits take effect
+  on next daemon restart only (`custom_pids.yaml` has no hot-reload
+  path, unlike `behavior_models.yaml`, confirmed by reading both).
 
 ## Phase 3 — Mode 06 / 02 / 09 (rides the DTC reader mechanism)
 

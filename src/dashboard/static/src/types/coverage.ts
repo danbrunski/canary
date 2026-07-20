@@ -23,6 +23,17 @@ export interface ObdCoverageRow {
   backed_off: boolean;
 }
 
+/** A custom PID (Task 2.6/2.8), listed separately from the Mode-01 registry
+ *  `rows` above since it has no PID number in that registry. Live value
+ *  streams at `obd:${channel}` (`channel` is already `custom:<name>`). */
+export interface CustomPidCoverageEntry {
+  name: string;
+  display_name: string;
+  channel: string;
+  unit: string;
+  category: string;
+}
+
 export interface ObdCoverageResponse {
   supported_count: number;
   decoded_count: number;
@@ -31,6 +42,7 @@ export interface ObdCoverageResponse {
   backed_off_count: number;
   undecoded_supported: string[];
   rows: ObdCoverageRow[];
+  custom_pids: CustomPidCoverageEntry[];
 }
 
 /** `GET /can/coverage` — static catalog of decodable broadcast-CAN signals
@@ -173,4 +185,35 @@ export interface DtcReportResponse {
   mil_on: boolean | null;
   dtc_count: number;
   stale: boolean;
+}
+
+/** `GET/POST/DELETE /control/custom-pids` (Task 2.8c) — mirrors
+ *  `CustomPid`/`CustomPidSet` in `src/collection/custom_pids.py`. Streams
+ *  live as `obd:custom:<name>` (the collector tags every reading `source:
+ *  "obd"`, so the request-scoped `custom:` prefix rides in the channel
+ *  field itself, not the source). */
+export interface CustomPid {
+  name: string;
+  display_name: string;
+  mode: number;
+  pid: number;
+  formula: string;
+  unit: string;
+  category: string;
+  minimum: number | null;
+  maximum: number | null;
+  poll_tier: "fast" | "medium" | "slow" | "on_demand";
+  dashboard_hint: "gauge" | "graph" | "text" | "indicator" | "list";
+  header: number | null;
+}
+
+export interface CustomPidsResponse {
+  custom_pids: CustomPid[];
+  count: number;
+}
+
+export interface CustomPidImportResponse {
+  added: CustomPid[];
+  added_count: number;
+  warnings: string[];
 }

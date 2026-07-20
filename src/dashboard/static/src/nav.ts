@@ -45,6 +45,7 @@ export const NAV: NavGroupDef[] = [
     items: [
       { id: "data-sessions", label: "Sessions", group: "data", placeholder: true },
       { id: "data-health", label: "Dataset Health", group: "data" },
+      { id: "data-custom-pids", label: "Custom PIDs", group: "data" },
       { id: "data-export", label: "Export", group: "data", placeholder: true },
     ],
   },

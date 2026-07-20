@@ -203,6 +203,18 @@ function ObdTab({
     });
   }, [data, channels, view]);
 
+  // Custom PIDs (Task 2.6/2.8a) have no PID number in the Mode-01 registry
+  // `build_coverage_report` classifies, so they're listed here rather than
+  // folded into `rows` — kept out of the "X/Y PIDs supported" summary above,
+  // which stays an honest read of the J1979 registry only.
+  const customRows = useMemo(() => {
+    if (!data) return [];
+    return arrange(data.custom_pids, view, (r) => {
+      const active = liveValue(channels, `obd:${r.channel}`).active;
+      return { available: active, active };
+    });
+  }, [data, channels, view]);
+
   if (loading) return <Loading what="probing OBD…" />;
   if (error || !data) return <Err msg={error ?? "no coverage data"} />;
 
@@ -235,6 +247,35 @@ function ObdTab({
           </tbody>
         </table>
       </div>
+
+      {data.custom_pids.length > 0 && (
+        <>
+          <h3 className="mb-1 mt-3 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
+            Custom PIDs ({data.custom_pids.length})
+          </h3>
+          <div className={SCROLL}>
+            <table className={TABLE}>
+              <thead className={THEAD}>
+                <tr>
+                  <th className={TD}>Name</th>
+                  <th className={TD}>Value</th>
+                </tr>
+              </thead>
+              <tbody className="font-num tabular-nums">
+                {customRows.map((r) => {
+                  const lv = liveValue(channels, `obd:${r.channel}`);
+                  return (
+                    <tr key={r.name} className={ROW}>
+                      <td className={TD}>{r.display_name}</td>
+                      <td className="py-1">{valueCell(lv.active, lv.text)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </>
   );
 }

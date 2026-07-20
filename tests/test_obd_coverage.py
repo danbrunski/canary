@@ -155,3 +155,46 @@ def test_obd_coverage_endpoint_empty_when_no_sessions(tmp_path: Path) -> None:
     assert body["supported_count"] == 0
     assert body["decoded_count"] == 0
     assert len(body["rows"]) > 0  # registry rows still listed (all unsupported)
+    assert body["custom_pids"] == []
+
+
+def test_obd_coverage_endpoint_lists_custom_pids(tmp_path: Path) -> None:
+    """Task 2.8a: custom PIDs (not Mode-01 registry PIDs) still surface in
+    `/obd/coverage` for the Data Sources panel, separate from the honest
+    J1979 supported/decoded counts."""
+    from src.collection.custom_pids import CustomPid, CustomPidSet, save_custom_pids
+
+    storage = tmp_path / "sessions"
+    storage.mkdir()
+    custom_pids_path = tmp_path / "custom_pids.yaml"
+    save_custom_pids(
+        CustomPidSet(
+            custom_pids=[
+                CustomPid(
+                    name="OIL_PRESS",
+                    display_name="Oil pressure",
+                    mode=0x22,
+                    pid=0x1234,
+                    formula="A * 0.5",
+                    unit="psi",
+                )
+            ]
+        ),
+        custom_pids_path,
+    )
+    cfg = tmp_path / "canary.yaml"
+    cfg.write_text(
+        _CONFIG_YAML.format(storage=storage) + f"daemon:\n  custom_pids: {custom_pids_path}\n"
+    )
+    config = CanaryConfig.from_yaml(cfg)
+    client = TestClient(create_app(config, anomalies_dir=tmp_path / "anomalies"))
+    body = client.get("/obd/coverage").json()
+    assert body["custom_pids"] == [
+        {
+            "name": "OIL_PRESS",
+            "display_name": "Oil pressure",
+            "channel": "custom:OIL_PRESS",
+            "unit": "psi",
+            "category": "custom",
+        }
+    ]
