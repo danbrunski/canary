@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
+from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.feedback import FEEDBACK_LABELS, FeedbackStore
 from src.alerts.tuning import (
     AlertTuner,
@@ -49,6 +50,7 @@ from src.control.sessions import (
     write_session_metadata,
     write_session_zip,
 )
+from src.control.trends import corpus_trend_summary
 from src.dashboard.broadcast import Broadcaster
 from src.dashboard.readers import read_anomalies_since
 from src.dashboard.schemas import (
@@ -101,6 +103,7 @@ def register_control_routes(
     sequence_detector_controller: SequenceDetectorController | None = None,
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
+    emitter: AnomalyEventEmitter | None = None,
     publish_control_event: Callable[[str, str, dict[str, Any]], None],
 ) -> None:
 
@@ -464,7 +467,7 @@ def register_control_routes(
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
         try:
-            payload = classify_one_session(config, session_id)
+            payload = classify_one_session(config, session_id, emitter=emitter)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except FileNotFoundError as exc:
@@ -481,6 +484,13 @@ def register_control_routes(
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
         return corpus_mode_summary(config.collection.storage_path)
+
+    @app.get("/control/trends")
+    def get_control_trends(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """Per-stat drift trend over the fingerprint history (Task 4.5)."""
+        return corpus_trend_summary(config)
 
     @app.get("/control/classifications/events")
     def get_corpus_events(

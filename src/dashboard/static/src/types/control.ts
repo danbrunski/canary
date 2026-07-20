@@ -174,3 +174,52 @@ export interface PowerKeepaliveResponse {
   power: PowerSnapshot;
   expiry: number;
 }
+
+/** `GET /control/trends` (Task 4.5) — mirrors
+ *  `src.analysis.trends.MannKendallResult`/`CusumResult`. */
+export interface MannKendallResult {
+  n: number;
+  s: number;
+  var_s: number;
+  z: number;
+  p_value: number;
+  tau: number;
+  trend: "increasing" | "decreasing" | "no trend";
+}
+
+export interface CusumResult {
+  n: number;
+  k: number;
+  h: number;
+  sh: number;
+  sl: number;
+  alarm: boolean;
+  direction: "upper" | "lower" | null;
+  first_alarm_index: number | null;
+}
+
+/** One session-fingerprint stat's drift picture — mirrors
+ *  `src.analysis.trends.StatTrend.to_dict()`. `session_ids`/`values` are the
+ *  full session-ordered series (small: one float per fingerprinted
+ *  session), used for the dashboard sparkline. */
+export interface StatTrend {
+  stat: string;
+  n: number;
+  session_ids: string[];
+  values: number[];
+  latest_session: string;
+  latest_value: number;
+  reference_mean: number;
+  reference_std: number;
+  reference_band: [number, number];
+  mann_kendall: MannKendallResult | null;
+  cusum: CusumResult | null;
+}
+
+export interface TrendsResponse {
+  available: boolean;
+  reason?: string;
+  frozen_at?: string;
+  reference_sessions?: number;
+  stats: Record<string, StatTrend>;
+}

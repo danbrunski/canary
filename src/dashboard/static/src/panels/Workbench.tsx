@@ -35,6 +35,7 @@ import { ProfilesPanel } from "./ProfilesPanel";
 import { SystemPanel } from "./SystemPanel";
 import { TestSessionPanel } from "./TestSessionPanel";
 import { TrainingPanel } from "./TrainingPanel";
+import { TrendsPanel } from "./TrendsPanel";
 import { TuningPanel } from "./TuningPanel";
 import { TpmsPanel } from "./TpmsPanel";
 
@@ -146,6 +147,8 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
       return <CustomDashboardPanel channels={d.channels} />;
     case "diag-dtc":
       return <DtcPanel />;
+    case "diag-trends":
+      return <TrendsPanel token={d.token} />;
     case "models-training":
       return <TrainingPanel token={d.token} companion={d.companion} />;
     case "models-tuning":

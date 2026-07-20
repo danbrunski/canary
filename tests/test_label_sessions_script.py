@@ -1,16 +1,25 @@
 """Tests for the fingerprint hook in ``scripts/label_sessions.py`` (Task 4.2,
-eval-longitudinal-and-dtc.md).
+eval-longitudinal-and-dtc.md). Also covers the Task 4.6 trend-alert hook that
+rides the same post-classify pass.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import label_sessions as label_sessions_cli  # noqa: E402
 
 from src.analysis.fingerprint import FINGERPRINT_FILENAME  # noqa: E402
+from src.analysis.reference_epoch import (  # noqa: E402
+    ReferenceEpoch,
+    StatSummary,
+    write_reference_epoch,
+)
 from src.analysis.session_classifier import CLASSIFICATION_FILENAME  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.telemetry import TelemetryRecord  # noqa: E402
@@ -96,3 +105,55 @@ def test_dry_run_does_not_write_fingerprint(tmp_path: Path) -> None:
     assert rc == 0
     assert not (session / CLASSIFICATION_FILENAME).exists()
     assert not (session / FINGERPRINT_FILENAME).exists()
+
+
+# --------------------------------------------------------------------------- #
+# Task 4.6 — trend alerting rides the same post-session pass
+# --------------------------------------------------------------------------- #
+
+
+def _config_path_with_alarm_epoch(tmp_path: Path) -> Path:
+    """Profiles-disabled config (so paths land exactly where written, not
+    under a profile subdir) with a reference epoch whose ``idle_rpm_mean``
+    is far enough from ``_write_session``'s flat 800 rpm that a single
+    session already trips the default CUSUM alarm."""
+    data = yaml.safe_load(EXAMPLE_YAML.read_text())
+    data["profiles"] = {"enabled": False}
+    # The trend-alert hook (unlike --sessions-root) walks
+    # ``config.collection.storage_path`` when no override is given — match
+    # it to where ``_write_session`` actually put the session.
+    data["collection"]["storage_path"] = str(tmp_path)
+    reference_epoch = tmp_path / "reference_epoch.json"
+    data.setdefault("daemon", {})["reference_epoch"] = str(reference_epoch)
+    data["daemon"]["anomalies_dir"] = str(tmp_path / "anomalies")
+    data["daemon"]["trend_alert_state"] = str(tmp_path / "trend_alert_state.json")
+    epoch = ReferenceEpoch(
+        frozen_at="2026-05-01T00:00:00+00:00",
+        sessions=("s0",),
+        stats={
+            "idle_rpm_mean": StatSummary(
+                mean=750.0, std=5.0, quantiles={"p10": 745.0, "p90": 755.0}, n=5
+            )
+        },
+    )
+    write_reference_epoch(reference_epoch, epoch)
+    config_path = tmp_path / "canary.yaml"
+    config_path.write_text(yaml.dump(data))
+    return config_path
+
+
+def test_main_emits_trend_alert_for_a_session_in_alarm(tmp_path: Path) -> None:
+    session = _write_session(tmp_path)
+    config_path = _config_path_with_alarm_epoch(tmp_path)
+    rc = label_sessions_cli.main(
+        ["--sessions-root", str(tmp_path), "--session", session.name, "--config", str(config_path)]
+    )
+    assert rc == 0
+
+    anomalies_dir = tmp_path / "anomalies"
+    log_files = list(anomalies_dir.glob("anomalies-*.jsonl"))
+    assert len(log_files) == 1
+    lines = [json.loads(line) for line in log_files[0].read_text().splitlines() if line]
+    assert len(lines) == 1
+    assert lines[0]["source"] == "trend"
+    assert lines[0]["detail"]["stat"] == "idle_rpm_mean"

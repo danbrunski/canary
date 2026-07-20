@@ -28,6 +28,7 @@ Read tools:
 | `get_dids` | `GET /dids` |
 | `get_obd_coverage` | `GET /obd/coverage` |
 | `get_dtc` | `GET /obd/dtc` — cached stored/pending/permanent DTC report (Mode 03/07/0A poll), MIL state, `captured_at`, `stale`. Read-only, no clear-codes tool. |
+| `get_trends` | `GET /control/trends` — per-stat session-fingerprint drift: latest value, reference band, Mann-Kendall trend verdict, CUSUM alarm state, evaluated over the full fingerprint history against the frozen reference epoch. `available: false` when nothing's been frozen yet (`scripts/fingerprint.py freeze`). |
 | `list_sessions` / `get_session` | `GET /control/sessions[/{id}]` |
 | `get_session_classification` | `GET /control/sessions/{id}/classification` — mode/event/disposition sidecar for one session |
 | `get_corpus_mode_summary` | `GET /control/classifications/summary` — per-mode seconds + event counts across the corpus |

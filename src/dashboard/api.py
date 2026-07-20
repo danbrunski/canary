@@ -208,6 +208,7 @@ def create_app(
         sequence_detector_controller=sequence_detector_controller,
         ups_status_path=ups_status_path,
         ups_keepalive_path=ups_keepalive_path,
+        emitter=emitter,
         publish_control_event=publish_control_event,
     )
     register_stream_routes(

@@ -295,6 +295,47 @@ class AnomalyEventEmitter:
         )
         return self._emit(event)
 
+    def emit_trend(
+        self,
+        *,
+        stat: str,
+        session: str,
+        timestamp: str,
+        latest_value: float,
+        reference_mean: float,
+        reference_std: float,
+        cusum_sh: float,
+        cusum_sl: float,
+        cusum_h: float,
+        direction: Literal["upper", "lower"],
+        mann_kendall_trend: str | None = None,
+        mann_kendall_p_value: float | None = None,
+    ) -> AnomalyEvent | None:
+        """Emit a sustained-CUSUM-alarm trend event (Task 4.6).
+
+        Same low-level path as every other source (tuning + dedupe via
+        ``_emit``, no persistence gate — a CUSUM alarm is already the
+        "sustained" signal, there's nothing left to debounce at the tick
+        level here since this only runs once per session). The caller
+        (``src.control.trends.evaluate_and_alert_trends``) is responsible
+        for only calling this once per session per stat in the first place.
+        """
+        event = AnomalyEvent.from_trend(
+            stat=stat,
+            session=session,
+            timestamp=timestamp,
+            latest_value=latest_value,
+            reference_mean=reference_mean,
+            reference_std=reference_std,
+            cusum_sh=cusum_sh,
+            cusum_sl=cusum_sl,
+            cusum_h=cusum_h,
+            direction=direction,
+            mann_kendall_trend=mann_kendall_trend,
+            mann_kendall_p_value=mann_kendall_p_value,
+        )
+        return self._emit(event)
+
     def _emit(self, event: AnomalyEvent) -> AnomalyEvent | None:
         # Operator tuning gate (6.25) runs before dedupe: a tuned-out event
         # should never reach the logger/dashboard at all. Suppression-only by

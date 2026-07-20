@@ -452,6 +452,14 @@ class DaemonConfig(_Strict):
     #: daemon restarts so the System page shows lifetime "miles / time driven
     #: with the unit plugged in" rather than per-process totals.
     trip_state: Path = Path("data/control/trip_odometer.json")
+    #: Task 4.6 idempotency marker — ``{stat: last_alerted_session_id}``. CUSUM
+    #: state itself is recomputed fresh from the full fingerprint history on
+    #: every evaluation (Task 4.4's design note: cheap at per-session
+    #: frequency, avoids incremental-state staleness/corruption); this tiny
+    #: file is the ONLY thing persisted, purely so a re-evaluation of the same
+    #: already-alerted session never double-emits. Profile-scoped like the
+    #: sibling ledger paths.
+    trend_alert_state: Path = Path("data/control/trend_alert_state.json")
     #: Behavior-model surfaces (hand-edited / refit-written). A config field
     #: rather than a hardcoded path so it can be scoped per vehicle profile
     #: (see ``src/profiles.py``). Cwd-relative like the sibling paths; the
@@ -464,6 +472,20 @@ class DaemonConfig(_Strict):
     retention_sweep_seconds: float = 3600.0
     broadcaster_queue_size: int = 100
     control_token_env: str = "CANARY_CONTROL_TOKEN"
+
+
+class TrendsConfig(_Strict):
+    """Task 4.4 trend-test parameters (``src.analysis.trends``). All defaulted
+    to the textbook values so configs predating this task keep loading."""
+
+    #: Tabular-CUSUM slack ``k``, in reference-std units — half the shift
+    #: size worth detecting.
+    cusum_k: float = Field(default=0.5, ge=0.0)
+    #: Tabular-CUSUM decision interval ``h``, in reference-std units — the
+    #: alarm threshold. 4-5 sigma is the usual textbook range.
+    cusum_h: float = Field(default=5.0, gt=0.0)
+    #: Mann-Kendall two-tailed significance level.
+    mann_kendall_alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
 
 
 class ProfilesConfig(_Strict):
@@ -498,6 +520,7 @@ class CanaryConfig(_Strict):
     daemon: DaemonConfig = DaemonConfig()
     alerts: AlertsConfig = AlertsConfig()
     profiles: ProfilesConfig = ProfilesConfig()
+    trends: TrendsConfig = TrendsConfig()
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:

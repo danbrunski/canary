@@ -30,6 +30,7 @@ import type {
   TelemetryLatestResponse,
   TestProfilesResponse,
   TrainingRunsResponse,
+  TrendsResponse,
   TuningConfig,
   TuningEstimate,
   TuningResponse,
@@ -414,6 +415,16 @@ export function updateProfileName(
     token,
     { method: "POST", body: jsonBody({ name }) },
   );
+}
+
+/** `/control/trends` (Task 4.5) — per-stat session-fingerprint drift over
+ *  the frozen reference epoch. Auth-gated like the other `/control/*`
+ *  read routes. */
+export function getTrends(
+  token: string,
+  signal?: AbortSignal,
+): Promise<TrendsResponse> {
+  return controlJson<TrendsResponse>("/control/trends", token, { signal });
 }
 
 export function getPowerStatus(

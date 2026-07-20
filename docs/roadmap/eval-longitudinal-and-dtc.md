@@ -357,18 +357,29 @@ never touches. Existing per-session aggregate to extend:
   n=2 stats, not zero-padded); `freeze` only pulls `ready`-classified
   sessions; confirmed the only writer of this path is the `freeze`
   command.
-- [ ] **4.4 — Trend tests.** `src/analysis/trends.py`: pure-numpy
+- [x] **4.4 — Trend tests.** `src/analysis/trends.py`: pure-numpy
   Mann-Kendall trend test + CUSUM against reference mean/std, per stat,
   over the session-ordered fingerprint series. Unit-test on synthetic
-  drifting/stationary series.
-- [ ] **4.5 — Surfacing.** MCP read tool `get_trends` (per-stat: latest
+  drifting/stationary series. — landed: standard S-statistic/tie-
+  corrected Mann-Kendall and two-sided tabular CUSUM; independently
+  cross-checked against hand computation and `scipy.stats.kendalltau`.
+- [x] **4.5 — Surfacing.** MCP read tool `get_trends` (per-stat: latest
   value, reference band, trend verdict, CUSUM state); CLI table via
   `scripts/fingerprint.py trends`. Dashboard `TrendsPanel.tsx`
   (sparkline per stat with reference band) — follows the Phase 1.9 panel
-  recipe; may land after the MCP tool.
-- [ ] **4.6 — Alerting.** A stat in sustained CUSUM alarm emits a
+  recipe; may land after the MCP tool. — landed: all three (MCP tool,
+  CLI, and the dashboard panel — not deferred, budget allowed it).
+- [x] **4.6 — Alerting.** A stat in sustained CUSUM alarm emits a
   low-frequency `AnomalyEvent` (`source="trend"`) — at most once per
-  session per stat.
+  session per stat. — landed: CUSUM recomputed fresh from the full
+  fingerprint history each evaluation (no incremental state to go
+  stale); a tiny `{stat: last_alerted_session_id}` idempotency marker
+  prevents double-emit on re-evaluation while still firing fresh for a
+  later still-alarmed session. A real cross-vehicle-profile state leak
+  (the marker path wasn't wired into `scope_config`) caught by review
+  and fixed before landing, along with a new exhaustive test that
+  guards every `DaemonConfig` path field against the same class of bug
+  in the future.
 
 ---
 

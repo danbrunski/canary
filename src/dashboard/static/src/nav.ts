@@ -22,6 +22,7 @@ export const NAV: NavGroupDef[] = [
       { id: "diag-data", label: "Data Sources", group: "diagnostics" },
       { id: "diag-anomalies", label: "Anomalies", group: "diagnostics" },
       { id: "diag-dtc", label: "Trouble Codes", group: "diagnostics" },
+      { id: "diag-trends", label: "Drift Trends", group: "diagnostics" },
       { id: "diag-system", label: "System", group: "diagnostics" },
       { id: "diag-tpms", label: "TPMS", group: "diagnostics" },
     ],

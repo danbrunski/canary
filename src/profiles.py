@@ -359,6 +359,7 @@ def scope_config(config: CanaryConfig, profile: VehicleProfile) -> CanaryConfig:
             "tuning_config": _scope_file(config.daemon.tuning_config, slug),
             "tuning_audit": _scope_file(config.daemon.tuning_audit, slug),
             "trip_state": _scope_file(config.daemon.trip_state, slug),
+            "trend_alert_state": _scope_file(config.daemon.trend_alert_state, slug),
             "behavior_models": _scope_file(config.daemon.behavior_models, slug),
         }
     )

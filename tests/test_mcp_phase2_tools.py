@@ -15,6 +15,7 @@ from src.mcp_server.tools import bindings as bindings_tool
 from src.mcp_server.tools import dtc as dtc_tool
 from src.mcp_server.tools import jobs as jobs_tool
 from src.mcp_server.tools import sessions as sessions_tool
+from src.mcp_server.tools import trends as trends_tool
 from src.mcp_server.tools import tuning as tuning_tool
 from src.mcp_server.write_tools import jobs as jobs_write_tool
 from src.mcp_server.write_tools import sessions as sessions_write_tool
@@ -89,6 +90,45 @@ async def test_get_dtc_passthrough() -> None:
     result = await dtc_tool.get_dtc(client)
     await client.aclose()
     assert result == report
+
+
+# ---------------------------------------------------------------------------
+# Trends (Task 4.5)
+# ---------------------------------------------------------------------------
+
+
+async def test_get_trends_passthrough() -> None:
+    """``get_trends`` forwards the corpus trend summary verbatim."""
+    body = {
+        "available": True,
+        "frozen_at": "2026-06-01T00:00:00+00:00",
+        "reference_sessions": 5,
+        "stats": {
+            "idle_rpm_mean": {
+                "stat": "idle_rpm_mean",
+                "n": 4,
+                "latest_session": "2026-06-01T000003",
+                "latest_value": 820.0,
+                "reference_mean": 800.0,
+                "reference_std": 10.0,
+                "reference_band": [790.0, 810.0],
+                "mann_kendall": None,
+                "cusum": {"alarm": True, "direction": "upper"},
+            }
+        },
+    }
+    client = await _fake_daemon({"GET /control/trends": body})
+    result = await trends_tool.get_trends(client)
+    await client.aclose()
+    assert result == body
+
+
+async def test_get_trends_unavailable_passthrough() -> None:
+    body = {"available": False, "reason": "no reference epoch frozen yet", "stats": {}}
+    client = await _fake_daemon({"GET /control/trends": body})
+    result = await trends_tool.get_trends(client)
+    await client.aclose()
+    assert result == body
 
 
 # ---------------------------------------------------------------------------

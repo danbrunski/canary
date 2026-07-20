@@ -70,6 +70,9 @@ from src.mcp_server.tools import (
     telemetry as telemetry_tool,
 )
 from src.mcp_server.tools import (
+    trends as trends_tool,
+)
+from src.mcp_server.tools import (
     tuning as tuning_tool,
 )
 from src.mcp_server.tools import (
@@ -256,6 +259,12 @@ def _register_read_tools(
     async def get_dtc() -> dict[str, Any]:
         """Cached stored/pending/permanent DTC report, MIL state, staleness."""
         return await dtc_tool.get_dtc(client)
+
+    @mcp.tool()
+    async def get_trends() -> dict[str, Any]:
+        """Session-fingerprint drift: per-stat latest value, reference band,
+        Mann-Kendall trend verdict, CUSUM alarm state."""
+        return await trends_tool.get_trends(client)
 
     @mcp.tool()
     async def list_sessions() -> dict[str, Any]:

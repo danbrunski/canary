@@ -13,7 +13,7 @@ import logging
 import re
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.analysis.fingerprint import compute_fingerprint, write_fingerprint
 from src.analysis.session_classifier import (
@@ -23,6 +23,10 @@ from src.analysis.session_classifier import (
     write_classification,
 )
 from src.config import CanaryConfig
+from src.control.trends import evaluate_and_alert_trends
+
+if TYPE_CHECKING:
+    from src.alerts.emitter import AnomalyEventEmitter
 
 log = logging.getLogger(__name__)
 
@@ -58,11 +62,17 @@ def get_session_classification(storage_path: Path, session_id: str) -> dict[str,
 def classify_one_session(
     config: CanaryConfig,
     session_id: str,
+    *,
+    emitter: AnomalyEventEmitter | None = None,
 ) -> dict[str, Any]:
     """Run the classifier on one session and persist the sidecar.
 
     Raises ``ValueError`` for invalid session ids or non-live names;
     ``FileNotFoundError`` when the session has no telemetry parquet.
+    ``emitter`` (Task 4.6), when given, is the live daemon's real
+    (broadcasting) emitter so a trend alert reaches the dashboard's live
+    stream, not just the persisted log; ``None`` falls back to a standalone
+    one (see ``evaluate_and_alert_trends``).
     """
     if not _SESSION_DIR_RE.match(session_id):
         raise ValueError(f"refusing to classify non-live-session id {session_id!r}")
@@ -78,6 +88,13 @@ def classify_one_session(
         write_fingerprint(session_dir, fingerprint_stats)
     except Exception:  # noqa: BLE001 — fingerprinting must not block classification
         log.exception("fingerprint failed for %s", session_id)
+    else:
+        # Trend evaluation + alerting (Task 4.4/4.6) rides the same pass, right
+        # after the fingerprint that feeds it — never blocks classification.
+        try:
+            evaluate_and_alert_trends(config, session_id, emitter=emitter)
+        except Exception:  # noqa: BLE001 — trend alerting must not block classification
+            log.exception("trend evaluation failed for %s", session_id)
     return classification.to_dict()
 
 

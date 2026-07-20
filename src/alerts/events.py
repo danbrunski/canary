@@ -27,9 +27,11 @@ if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import tim
 #: is the behavior/physics-model residual promoted to a first-class
 #: detector — one event per model with a human-readable physical cause.
 #: ``dtc`` (Task 1.6) is a new/escalated trouble code from the periodic
-#: Mode 03/07/0A poll. All are emitted alongside the per-detector events,
-#: not instead of them.
-AnomalySource = Literal["isolation_forest", "lstm_autoencoder", "fused", "behavior", "dtc"]
+#: Mode 03/07/0A poll. ``trend`` (Task 4.6) is a session-fingerprint stat in
+#: sustained CUSUM alarm against the frozen reference epoch — a low-frequency,
+#: per-session event, not a per-tick one. All are emitted alongside the
+#: per-detector events, not instead of them.
+AnomalySource = Literal["isolation_forest", "lstm_autoencoder", "fused", "behavior", "dtc", "trend"]
 
 
 class AnomalyEvent(BaseModel):
@@ -275,6 +277,60 @@ class AnomalyEvent(BaseModel):
                 "mil_on": mil_on,
             },
             dedupe_key=f"dtc:{code}:{status}",
+        )
+
+    @classmethod
+    def from_trend(
+        cls,
+        *,
+        stat: str,
+        session: str,
+        timestamp: str,
+        latest_value: float,
+        reference_mean: float,
+        reference_std: float,
+        cusum_sh: float,
+        cusum_sl: float,
+        cusum_h: float,
+        direction: Literal["upper", "lower"],
+        mann_kendall_trend: str | None = None,
+        mann_kendall_p_value: float | None = None,
+    ) -> AnomalyEvent:
+        """Build a sustained-CUSUM-alarm session-fingerprint trend event
+        (Task 4.6).
+
+        ``score`` is the alarming side's CUSUM statistic (``sh`` for an
+        ``"upper"`` excursion, ``sl`` for ``"lower"``) and ``threshold`` is
+        the configured decision interval ``h``, matching the
+        score/threshold-on-the-same-scale contract every other detector
+        uses. ``dedupe_key`` is ``"trend:<stat>"`` — independent per stat, so
+        one stat's ongoing alarm never suppresses another's — the actual
+        "at most once per session per stat" guarantee is enforced by the
+        caller (:func:`src.control.trends.evaluate_and_alert_trends`)
+        BEFORE this is even constructed, via a tiny persisted
+        already-alerted marker; this dedupe key just keeps the emitter's own
+        refractory-window behavior sane on top of that.
+        """
+        score = cusum_sh if direction == "upper" else cusum_sl
+        return cls(
+            timestamp=timestamp,
+            source="trend",
+            model_version="trend",
+            score=score,
+            threshold=cusum_h,
+            session=session,
+            detail={
+                "stat": stat,
+                "latest_value": latest_value,
+                "reference_mean": reference_mean,
+                "reference_std": reference_std,
+                "cusum_sh": cusum_sh,
+                "cusum_sl": cusum_sl,
+                "direction": direction,
+                "mann_kendall_trend": mann_kendall_trend,
+                "mann_kendall_p_value": mann_kendall_p_value,
+            },
+            dedupe_key=f"trend:{stat}",
         )
 
     @classmethod

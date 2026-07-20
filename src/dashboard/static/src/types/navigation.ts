@@ -15,6 +15,7 @@ export type WorkbenchItem =
   | "diag-anomalies"
   | "diag-data"
   | "diag-dtc"
+  | "diag-trends"
   | "diag-system"
   | "diag-tpms"
   | "models-overview"

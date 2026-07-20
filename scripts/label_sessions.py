@@ -46,6 +46,7 @@ from src.analysis.session_classifier import (
     write_classification,
 )
 from src.config import CanaryConfig
+from src.control.trends import evaluate_and_alert_trends
 from src.log import configure_logging
 
 log = logging.getLogger(__name__)
@@ -163,6 +164,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 write_fingerprint(session_dir, fingerprint_stats)
             except Exception:  # noqa: BLE001 — a fingerprint failure shouldn't block classification
                 log.exception("fingerprint failed for %s", session_dir.name)
+            else:
+                # Trend evaluation + alerting (Task 4.4/4.6) rides the same
+                # post-session pass, right after the fingerprint that feeds it.
+                try:
+                    evaluate_and_alert_trends(config, session_dir.name, sessions_root=sessions_root)
+                except Exception:  # noqa: BLE001 — trend alerting shouldn't block the batch
+                    log.exception("trend evaluation failed for %s", session_dir.name)
         summary[classification.disposition] += 1
         log.info(
             "%s: %s  duration=%ss  modes=%s  events=%s",

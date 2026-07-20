@@ -15,10 +15,16 @@ This CLI covers the two things that hook can't:
   fingerprints of the currently "ready" sessions. **Never automatic** — run
   this by hand when a ledger ``corpus_boundary`` event says what "normal"
   looks like has changed (a mod, a repair, a big retrain).
+* ``trends`` — Task 4.4/4.5's read side as a table: per-stat latest value,
+  reference band, Mann-Kendall trend verdict, CUSUM alarm state, evaluated
+  over the full fingerprint history against the frozen reference epoch.
+  Same data as the daemon's ``GET /control/trends`` / MCP ``get_trends``,
+  computed straight from disk (no running daemon required).
 
     .venv/bin/python scripts/fingerprint.py backfill
     .venv/bin/python scripts/fingerprint.py backfill --all --rebuild
     .venv/bin/python scripts/fingerprint.py freeze --notes "post cold-air-intake baseline"
+    .venv/bin/python scripts/fingerprint.py trends
 """
 
 from __future__ import annotations
@@ -44,6 +50,7 @@ from src.analysis.reference_epoch import (  # noqa: E402
 )
 from src.analysis.session_classifier import read_classification  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
+from src.control.trends import corpus_trend_summary  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
@@ -101,6 +108,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         type=Path,
         default=None,
         help="Override output path (default: daemon.reference_epoch).",
+    )
+
+    sub.add_parser(
+        "trends",
+        help="Print a per-stat trend table (latest value, band, MK verdict, CUSUM state).",
     )
 
     return parser.parse_args(argv)
@@ -204,6 +216,41 @@ def _run_freeze(args: argparse.Namespace, config: CanaryConfig, sessions_root: P
     return 0
 
 
+def _run_trends(config: CanaryConfig, sessions_root: Path) -> int:
+    summary = corpus_trend_summary(config, sessions_root=sessions_root)
+    if not summary["available"]:
+        log.error(summary["reason"])
+        return 1
+    stats = summary["stats"]
+    if not stats:
+        log.warning("reference epoch frozen but no stat has any fingerprint observations yet")
+        return 0
+    log.info(
+        "frozen_at=%s reference_sessions=%d stats=%d",
+        summary["frozen_at"],
+        summary["reference_sessions"],
+        len(stats),
+    )
+    header = f"{'stat':<40} {'n':>4} {'latest':>12} {'ref_band':>24} {'mk_trend':<12} {'cusum':<8}"
+    log.info(header)
+    for name, trend in stats.items():
+        band = f"[{trend['reference_band'][0]:.3g}, {trend['reference_band'][1]:.3g}]"
+        mk = trend["mann_kendall"]
+        mk_trend = mk["trend"] if mk else "n/a"
+        cusum = trend["cusum"]
+        cusum_state = "ALARM" if cusum and cusum["alarm"] else "ok" if cusum else "n/a"
+        log.info(
+            "%-40s %4d %12.4g %24s %-12s %-8s",
+            name,
+            trend["n"],
+            trend["latest_value"],
+            band,
+            mk_trend,
+            cusum_state,
+        )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
     configure_logging(args.log_level)
@@ -215,6 +262,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_backfill(args, config, sessions_root)
     if args.command == "freeze":
         return _run_freeze(args, config, sessions_root)
+    if args.command == "trends":
+        return _run_trends(config, sessions_root)
     return 1
 
 

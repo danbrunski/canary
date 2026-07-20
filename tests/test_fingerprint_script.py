@@ -1,14 +1,17 @@
-"""Tests for ``scripts/fingerprint.py`` (Task 4.2 backfill / Task 4.3 freeze,
-eval-longitudinal-and-dtc.md).
+"""Tests for ``scripts/fingerprint.py`` (Task 4.2 backfill / Task 4.3 freeze /
+Task 4.5 trends, eval-longitudinal-and-dtc.md).
 """
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import fingerprint as fingerprint_cli  # noqa: E402
@@ -21,7 +24,10 @@ from src.analysis.fingerprint import (  # noqa: E402
 )
 from src.analysis.reference_epoch import (  # noqa: E402
     DEFAULT_REFERENCE_EPOCH_PATH,
+    ReferenceEpoch,
+    StatSummary,
     read_reference_epoch,
+    write_reference_epoch,
 )
 from src.analysis.session_classifier import classify_session, write_classification  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
@@ -34,6 +40,26 @@ EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 def _config() -> CanaryConfig:
     return CanaryConfig.from_yaml(EXAMPLE_YAML)
+
+
+def _config_path_with_reference_epoch(tmp_path: Path, reference_epoch: Path) -> Path:
+    """A ``canary.yaml`` derived from the example config, but pointing
+    ``daemon.reference_epoch`` under ``tmp_path`` (the ``trends`` subcommand
+    has no ``--out``-style override, unlike ``freeze``). Profiles disabled so
+    ``_scoped_config`` doesn't rewrite the path under a profile slug."""
+    data = yaml.safe_load(EXAMPLE_YAML.read_text())
+    data.setdefault("daemon", {})["reference_epoch"] = str(reference_epoch)
+    data["profiles"] = {"enabled": False}
+    out = tmp_path / "canary.yaml"
+    out.write_text(yaml.dump(data))
+    return out
+
+
+def _log_messages(capsys: pytest.CaptureFixture[str]) -> list[str]:
+    """Parse the JSON-structured log lines ``configure_logging`` writes to
+    stdout back into their ``message`` strings."""
+    out = capsys.readouterr().out
+    return [json.loads(line)["message"] for line in out.splitlines() if line.strip()]
 
 
 def _write_ready_session(root: Path, name: str) -> Path:
@@ -258,3 +284,45 @@ def test_only_freeze_calls_write_reference_epoch() -> None:
 def test_default_reference_epoch_path_matches_config_default() -> None:
     config = _config()
     assert config.daemon.reference_epoch == DEFAULT_REFERENCE_EPOCH_PATH
+
+
+# --------------------------------------------------------------------------- #
+# trends (Task 4.5)
+# --------------------------------------------------------------------------- #
+
+
+def test_trends_unavailable_without_frozen_epoch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    reference_epoch = tmp_path / "reference_epoch.json"
+    config_path = _config_path_with_reference_epoch(tmp_path, reference_epoch)
+    rc = fingerprint_cli.main(
+        ["--sessions-root", str(tmp_path), "--config", str(config_path), "trends"]
+    )
+    assert rc == 1
+    assert any("no reference epoch" in msg for msg in _log_messages(capsys))
+
+
+def test_trends_prints_a_row_per_stat(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    reference_epoch = tmp_path / "reference_epoch.json"
+    epoch = ReferenceEpoch(
+        frozen_at="2026-06-01T00:00:00+00:00",
+        sessions=("s0",),
+        stats={
+            "idle_rpm_mean": StatSummary(
+                mean=800.0, std=10.0, quantiles={"p10": 790.0, "p90": 810.0}, n=5
+            )
+        },
+    )
+    write_reference_epoch(reference_epoch, epoch)
+    session = tmp_path / "2026-06-01T000000"
+    session.mkdir()
+    write_fingerprint(session, {"idle_rpm_mean": 800.0})
+
+    config_path = _config_path_with_reference_epoch(tmp_path, reference_epoch)
+    rc = fingerprint_cli.main(
+        ["--sessions-root", str(tmp_path), "--config", str(config_path), "trends"]
+    )
+    assert rc == 0
+    messages = _log_messages(capsys)
+    assert any("idle_rpm_mean" in msg for msg in messages)

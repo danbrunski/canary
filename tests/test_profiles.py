@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from src.config import CanaryConfig
+from src.config import CanaryConfig, DaemonConfig
 from src.dashboard.api import create_app
 from src.profiles import (
     VehicleProfile,
@@ -166,6 +166,10 @@ def test_scope_config_nests_every_vehicle_path(tmp_path: Path):
     assert scoped.daemon.vehicle_ledger == Path("data/control/xterra/vehicle_ledger.jsonl")
     # Reference epoch (Task 4.3) scopes the same way.
     assert scoped.daemon.reference_epoch == Path("data/control/xterra/reference_epoch.json")
+    # Trend-alert idempotency marker (Task 4.6) scopes the same way — a stat
+    # name is generic (e.g. "idle_rpm_mean"), so without scoping a session id
+    # recorded for one vehicle could suppress a legitimate alert for another.
+    assert scoped.daemon.trend_alert_state == Path("data/control/xterra/trend_alert_state.json")
     # Slug is recoverable as the storage path's final component.
     assert scoped.collection.storage_path.name == "xterra"
     # The vehicle block reflects the profile (VIN for reproducible manifests).
@@ -173,6 +177,28 @@ def test_scope_config_nests_every_vehicle_path(tmp_path: Path):
     assert scoped.vehicle.make == "Nissan"
     # The registry path itself is NOT scoped (it indexes all vehicles).
     assert scoped.profiles.registry_path == config.profiles.registry_path
+
+
+def test_scope_config_covers_every_daemon_path_field(tmp_path: Path):
+    """Every ``Path``-typed field on ``DaemonConfig`` must come out with the
+    slug inserted as a path component. Exhaustive by construction (iterates
+    ``DaemonConfig.model_fields`` rather than naming fields), so a future
+    field added to ``DaemonConfig`` but forgotten in ``scope_config`` fails
+    this test immediately instead of silently shipping unscoped (as
+    ``trend_alert_state`` did)."""
+    config = _base_config(tmp_path)
+    profile = VehicleProfile(slug="xterra", vin="VIN42", name="X")
+    scoped = scope_config(config, profile)
+
+    path_fields = [name for name, f in DaemonConfig.model_fields.items() if f.annotation is Path]
+    assert path_fields  # sanity: DaemonConfig still has Path fields to check
+    for name in path_fields:
+        original = getattr(config.daemon, name)
+        result = getattr(scoped.daemon, name)
+        assert "xterra" in result.parts, (
+            f"DaemonConfig.{name} was not profile-scoped by scope_config "
+            f"(original={original!r}, scoped={result!r})"
+        )
 
 
 # ---------------------------------------------------------------------------
