@@ -68,11 +68,13 @@ operator history (ledger backfill facts)
   blocked-overnight. — 5.1-5.3 landed (commits `23413bb`, `9636926`,
   `5b51c14`); a real 0-5km/h dead zone caught by review before landing.
   Pi config sync + deploy blocked-overnight per this entry's own note.
-- [ ] **Q6 — ml-correctness-hardening.md Phase 4** (surface publish
+- [x] **Q6 — ml-correctness-hardening.md Phase 4** (surface publish
   gates, schema sigma-floor + recipe migration, frozen 2D edges,
   bilinear serve, version-on-change, warmup per pre-made decision,
   segmenter-fallback diagnostic). Refit locally against stored
-  sessions to validate the gates.
+  sessions to validate the gates. — 4.1-4.7 landed (commit `5b68b9f`);
+  `--dry-run` refit against real sessions confirms the publish gate
+  refuses 4 genuinely-poor-fit recipes (`fcc2afb`).
 - [ ] **Q7 — ml-correctness-hardening.md Phases 6 + 7 + 9** (M-of-N
   persistence per doc; fusion per pre-made decision; benchmark rerun
   6.5 with intermittent-fault cases; replay in-memory isolation with
