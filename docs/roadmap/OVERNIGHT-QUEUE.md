@@ -120,12 +120,15 @@ operator history (ledger backfill facts)
   and 2.4's live verification blocked-overnight. — 2.1/2.3/2.6/2.8 all
   landed (commits `dfe24b4`, `aa0127d`, `bac96e4`). 2.2/2.4/2.5/2.7
   remain blocked-overnight, need the truck/real captures.
-- [ ] **Q12 — eval-longitudinal-and-dtc.md Phases 5 + 6** (notifier +
+- [x] **Q12 — eval-longitudinal-and-dtc.md Phases 5 + 6** (notifier +
   digest, shipped disabled-by-default — enabling/ntfy topic is a
   morning task; trip-end edge; session catalog + consumers incl. the
   `parquet_query` underscore-dir fix; provenance surfacing + load-time
   log; rx-overrun counter — live verify blocked-overnight; 6.6 remote
-  skew-compare code yes, remote test blocked).
+  skew-compare code yes, remote test blocked). — 5.1-5.6 + 6.1-6.8 all
+  landed (commits `5b513a6`, `5ef6212`, `5d93473`). Two real bugs
+  caught by review: a digest-endpoint auth-consistency leak (Phase 5)
+  and a digest-route catalog-wiring gap (Phase 6).
 - [ ] **Q13 — refactoring.md Phase 2 (minus 2.2) + Phase 1.2**
   (LSTM/TCN trainer unification — deliberately AFTER Q4 so the
   calibration-enforcement edits land once in the unified trainer;
