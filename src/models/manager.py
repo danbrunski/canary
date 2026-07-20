@@ -214,12 +214,19 @@ class ModelManager(Generic[T]):
                 self._current.manifest.model_version if self._current is not None else None
             )
             self._current = loaded
+            # Task 6.7: version + training window + data-hash on every load, so
+            # `tail_daemon_log` shows exactly what went live and when — no
+            # corpus-vs-hash verification here (retention legitimately deletes
+            # training sessions), just the facts a human would want in a log.
             log.info(
                 "model swapped",
                 extra={
                     "path": str(self._artifact_path),
                     "prior_version": prior_version,
                     "new_version": manifest.model_version,
+                    "training_start_timestamp": manifest.training_start_timestamp,
+                    "training_end_timestamp": manifest.training_end_timestamp,
+                    "training_data_hash": manifest.training_data_hash,
                 },
             )
             return SwapAttempt(kind="swapped", new_version=manifest.model_version)

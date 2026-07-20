@@ -552,6 +552,53 @@ def test_build_status_ignores_unreadable_manifest(config: CanaryConfig, tmp_path
     (models_dir / "broken.manifest.json").write_text("{not json")
     snap = build_status(config, models_dir=models_dir)
     assert snap.model_versions == {"broken": None}
+    assert snap.model_provenance == {"broken": None}
+
+
+# ---------------------------------------------------------------------------
+# model_provenance — Task 6.5
+# ---------------------------------------------------------------------------
+
+
+def test_build_status_surfaces_loaded_model_provenance(
+    config: CanaryConfig, tmp_path: Path
+) -> None:
+    models_dir = tmp_path / "models"
+    if_dir = models_dir / "isolation_forest"
+    if_dir.mkdir(parents=True)
+    (if_dir / "model.manifest.json").write_text(
+        json.dumps(
+            {
+                "artifact_format_version": 1,
+                "model_type": "isolation_forest",
+                "model_version": "isolation_forest_2026-07-19T000000Z",
+                "created_at": "2026-07-19T00:00:00Z",
+                "training_data_hash": "sha256:abc123",
+                "training_sessions": ["2026-07-01T120000", "2026-07-02T080000"],
+                "input_rows": 4096,
+                "hyperparams": {},
+                "schema": {},
+            }
+        )
+    )
+
+    snap = build_status(config, models_dir=models_dir)
+    assert snap.model_provenance == {
+        "isolation_forest": {
+            "model_version": "isolation_forest_2026-07-19T000000Z",
+            "created_at": "2026-07-19T00:00:00Z",
+            "training_data_hash": "sha256:abc123",
+            "training_sessions": ["2026-07-01T120000", "2026-07-02T080000"],
+            "artifact_format_version": 1,
+        }
+    }
+    # Also visible in the /status payload dict (what get_status mirrors).
+    assert snap.to_dict()["model_provenance"] == snap.model_provenance
+
+
+def test_build_status_model_provenance_none_without_models_dir(config: CanaryConfig) -> None:
+    snap = build_status(config)
+    assert snap.model_provenance is None
 
 
 # ---------------------------------------------------------------------------

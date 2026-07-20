@@ -31,12 +31,15 @@ import time
 from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "DEFAULT_CAN0_STATS_PATH",
     "HealthMonitor",
+    "can0_counters",
     "feature_drift",
     "power_status",
     "reconstruction_error_drift",
@@ -161,6 +164,40 @@ def power_status() -> dict[str, Any] | None:
             name: bool(raw & (1 << bit)) for bit, name in _THROTTLE_BITS_SINCE_BOOT.items()
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# can0 rx-overrun counter (Task 6.8) — a passive capture-health tripwire
+# ---------------------------------------------------------------------------
+
+#: SocketCAN interfaces expose the standard Linux net-device statistics under
+#: sysfs. ``rx_over_errors``/``rx_dropped`` are what actually matter for the
+#: capture-architecture question (frames the kernel couldn't hand off in
+#: time); ``rx_errors`` is the broader bucket they roll up into.
+DEFAULT_CAN0_STATS_PATH = Path("/sys/class/net/can0/statistics")
+
+_CAN0_COUNTER_NAMES: tuple[str, ...] = ("rx_over_errors", "rx_dropped", "rx_errors")
+
+
+def can0_counters(stats_path: Path = DEFAULT_CAN0_STATS_PATH) -> dict[str, int] | None:
+    """Read can0's rx overrun/drop/error counters straight from sysfs.
+
+    Passive read only — per the roadmap doc, nonzero *growth* during a drive
+    is the only intended trigger to revisit the capture architecture; this
+    function just surfaces the raw numbers for a human to notice that growth,
+    it does not alert on its own. Returns ``None`` when the interface isn't
+    present (a dev laptop, or a Pi before the CAN HAT/can0 comes up) — the
+    caller must treat that as "no data available", never a crash.
+    """
+    if not stats_path.is_dir():
+        return None
+    counters: dict[str, int] = {}
+    for name in _CAN0_COUNTER_NAMES:
+        try:
+            counters[name] = int((stats_path / name).read_text().strip())
+        except (OSError, ValueError):
+            return None
+    return counters
 
 
 def _read_throttled_raw() -> int | None:
@@ -308,7 +345,7 @@ class HealthMonitor:
     the model-manager poll, and exposes :meth:`snapshot` through ``/status``.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, can0_stats_path: Path = DEFAULT_CAN0_STATS_PATH) -> None:
         self._roll = _Rolling()
         self._last_data_ts: float | None = None
         self._swaps: dict[str, int] = {"swapped": 0, "rejected": 0, "unchanged": 0, "error": 0}
@@ -326,6 +363,11 @@ class HealthMonitor:
         #: 4.7 — latest live tick's segmenter-fallback state (edge-triggered
         #: like ``if_blind_modes``, same pattern).
         self._segmenter_fallback_active: bool = False
+        #: Task 6.8 — the counters as first observed (baseline "since this
+        #: monitor started watching"), so a delta is visible without needing
+        #: a second daemon to remember the counter's value at boot.
+        self._can0_stats_path = can0_stats_path
+        self._can0_baseline: dict[str, int] | None = None
 
     #: How long a cached power_status() reading stays fresh (seconds).
     _POWER_TTL_SECONDS = 5.0
@@ -473,6 +515,23 @@ class HealthMonitor:
             },
         )
 
+    def _can0_status(self) -> dict[str, Any] | None:
+        """`can0` counters + delta since this monitor first saw them (6.8).
+
+        `None` (the field is omitted from the snapshot) when there's no can0
+        interface — this laptop's real environment tonight, and any Pi before
+        the CAN HAT/socketcan interface is up.
+        """
+        counters = can0_counters(self._can0_stats_path)
+        if counters is None:
+            return None
+        if self._can0_baseline is None:
+            self._can0_baseline = dict(counters)
+        return {
+            **counters,
+            "since_start": {name: counters[name] - self._can0_baseline[name] for name in counters},
+        }
+
     def snapshot(
         self,
         *,
@@ -523,6 +582,9 @@ class HealthMonitor:
             snap["reconstruction_error_drift"] = reconstruction_error_drift(
                 live_mean_recon_error, lstm_thresholds
             )
+        can0 = self._can0_status()
+        if can0 is not None:
+            snap["can0"] = can0
         return snap
 
 

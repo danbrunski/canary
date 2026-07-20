@@ -101,6 +101,10 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
   const gps = status?.gps ?? null;
   const gpsFixState = gps ? gpsFix(gps) : null;
   const blindModes = status?.detectors?.isolation_forest.blind_modes ?? [];
+  const can0 = status?.health?.can0 ?? null;
+  const can0Growth = can0
+    ? can0.since_start.rx_over_errors + can0.since_start.rx_dropped
+    : 0;
 
   return (
     <Panel title="System">
@@ -169,6 +173,18 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
               <dt className={definitionTermClass}>IF blind modes</dt>
               <dd className={cn(definitionValueClass, blindModes.length > 0 && "text-warn")}>
                 {blindModes.length === 0 ? "none" : blindModes.join(", ")}
+              </dd>
+            </div>
+          )}
+          {can0 && (
+            <div className={definitionRowClass}>
+              <dt className={definitionTermClass}>can0 rx overruns</dt>
+              <dd className={cn(definitionValueClass, can0Growth > 0 && "text-warn")}>
+                {can0.rx_over_errors} overrun / {can0.rx_dropped} dropped
+                <span className="text-fg-dim">
+                  {" "}
+                  (+{can0.since_start.rx_over_errors} / +{can0.since_start.rx_dropped} since start)
+                </span>
               </dd>
             </div>
           )}

@@ -184,6 +184,12 @@ class StatusSnapshot:
     #: input columns are missing, so every mode-gated behavior surface is
     #: silently suppressed). ``None`` when no health monitor is wired.
     detectors: dict[str, Any] | None = None
+    #: Per-loaded-model provenance (Task 6.5), keyed like ``model_versions``:
+    #: ``model_version``/``created_at``/``training_data_hash``/
+    #: ``training_sessions``/``artifact_format_version`` straight off each
+    #: manifest — what exactly is being served and when it was trained,
+    #: without an operator having to `scp`/read the manifest by hand.
+    model_provenance: dict[str, dict[str, Any] | None] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -200,6 +206,7 @@ class StatusSnapshot:
             "trip": self.trip,
             "profile": self.profile,
             "detectors": self.detectors,
+            "model_provenance": self.model_provenance,
         }
 
 
@@ -229,6 +236,31 @@ def _model_version(manifest_path: Path) -> str | None:
         or data.get("training", {}).get("model_version")
     )
     return str(version) if version is not None else None
+
+
+def _model_provenance(manifest_path: Path) -> dict[str, Any] | None:
+    """Read the provenance fields off a model manifest JSON, or ``None``.
+
+    Deliberately as forgiving as :func:`_model_version` (plain ``json.loads``
+    + ``.get``, not the strict :func:`src.models.manifest.validate_manifest_common`
+    gate) — a malformed/partial manifest shouldn't take ``/status`` down, it
+    should just show up as an absent field for an operator to notice.
+    """
+    if not manifest_path.exists():
+        return None
+    try:
+        data = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {
+        "model_version": data.get("model_version"),
+        "created_at": data.get("created_at"),
+        "training_data_hash": data.get("training_data_hash"),
+        "training_sessions": data.get("training_sessions", []),
+        "artifact_format_version": data.get("artifact_format_version"),
+    }
 
 
 def _resolve_latest_session(storage_path: Path) -> Path | None:
@@ -347,6 +379,7 @@ def build_status(
     storage = config.collection.storage_path
     latest = _resolve_latest_session(storage)
     model_versions: dict[str, str | None] = {}
+    model_provenance: dict[str, dict[str, Any] | None] = {}
     if models_dir is not None:
         # Artifacts live one dir down: <models_dir>/<name>/model.manifest.json
         # (matches daemon.isolation_forest_artifact / lstm_artifact). Recurse so
@@ -360,6 +393,7 @@ def build_status(
                 else manifest.parent.name
             )
             model_versions[name] = _model_version(manifest)
+            model_provenance[name] = _model_provenance(manifest)
     detectors: dict[str, Any] | None = None
     if health_monitor is not None:
         detectors = {
@@ -391,6 +425,7 @@ def build_status(
         trip=gps_tracker.trip_status() if gps_tracker is not None else None,
         profile=_active_profile(config),
         detectors=detectors,
+        model_provenance=model_provenance if models_dir is not None else None,
     )
 
 

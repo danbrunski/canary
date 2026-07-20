@@ -349,3 +349,50 @@ def test_load_initial_does_not_warn_for_held_out_calibration(
 
     assert result.kind == "swapped"
     assert not any("in-sample" in record.message for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Task 6.7 — load-time log line carries version + training window + data-hash
+# ---------------------------------------------------------------------------
+
+
+def test_load_initial_logs_version_window_and_data_hash(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    artifact = tmp_path / "model.joblib"
+    _write_pair(artifact, version="v1")
+    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    with caplog.at_level(logging.INFO, logger="src.models.manager"):
+        result = mgr.load_initial()
+
+    assert result.kind == "swapped"
+    swapped = [r for r in caplog.records if r.message == "model swapped"]
+    assert len(swapped) == 1
+    record = swapped[0]
+    assert record.new_version == "v1"
+    assert record.prior_version is None
+    assert record.training_data_hash == "sha256:deadbeef"
+    # _write_pair doesn't set these — the field just needs to be logged when present.
+    assert record.training_start_timestamp is None
+    assert record.training_end_timestamp is None
+
+
+def test_poll_swap_logs_the_new_manifests_provenance(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    artifact = tmp_path / "model.joblib"
+    _write_pair(artifact, version="v1", mtime=1_000_000.0)
+    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr.load_initial()
+
+    _write_pair(artifact, version="v2", mtime=2_000_000.0)
+    with caplog.at_level(logging.INFO, logger="src.models.manager"):
+        result = mgr.poll()
+
+    assert result.kind == "swapped"
+    swapped = [r for r in caplog.records if r.message == "model swapped"]
+    assert len(swapped) == 1
+    record = swapped[0]
+    assert record.prior_version == "v1"
+    assert record.new_version == "v2"
+    assert record.training_data_hash == "sha256:deadbeef"

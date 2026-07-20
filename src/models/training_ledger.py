@@ -34,6 +34,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.models.artifact_hash import sha256_file
 from src.models.manifest import ManifestValidationError, validate_manifest_common
 
 log = logging.getLogger(__name__)
@@ -75,6 +76,10 @@ class TrainingRunRecord(BaseModel):
     #: ``false_positive_benchmark``, ``modes``, and the raw manifest extras.
     metrics: dict[str, Any] = Field(default_factory=dict)
     artifacts: dict[str, str] = Field(default_factory=dict)
+    #: sha256 of ``artifacts["model"]`` at train time (Task 6.6) — the
+    #: deploy-skew CLI (``scripts/verify_artifacts.py``) recomputes this on
+    #: both the local and Pi copies and compares against what shipped here.
+    artifact_sha256: str | None = None
     job_id: str | None = None
     job_log_path: str | None = None
     #: `data/analyses/benchmark-<ts>.json` produced by `scripts/detector_benchmark.py`
@@ -250,10 +255,15 @@ def build_run_record_from_manifest(
 
     artifacts: dict[str, str] = {"manifest": str(manifest_path)}
     manifest_dir = Path(manifest_path).parent
+    artifact_sha256: str | None = None
     for candidate in ("model.pt", "model.joblib"):
         artifact = manifest_dir / candidate
         if artifact.exists():
             artifacts["model"] = str(artifact)
+            try:
+                artifact_sha256 = sha256_file(artifact)
+            except OSError as exc:
+                log.warning("could not hash artifact %s: %s", artifact, exc)
             break
 
     return TrainingRunRecord(
@@ -271,6 +281,7 @@ def build_run_record_from_manifest(
         hyperparams=dict(common.hyperparams),
         metrics=metrics,
         artifacts=artifacts,
+        artifact_sha256=artifact_sha256,
         job_id=job_id,
         job_log_path=job_log_path,
         detector_benchmark_report_path=(

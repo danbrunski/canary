@@ -12,6 +12,7 @@ from src.config import CanaryConfig
 from src.dashboard.api import build_status, create_app
 from src.models.health import (
     HealthMonitor,
+    can0_counters,
     feature_drift,
     power_status,
     reconstruction_error_drift,
@@ -97,6 +98,33 @@ def test_snapshot_includes_power_behind_a_ttl_cache(monkeypatch: pytest.MonkeyPa
     assert calls["n"] == 1
 
 
+# ---------------------------------------------------------------------------
+# can0_counters — Task 6.8 (real environment tonight: no can0 interface)
+# ---------------------------------------------------------------------------
+
+
+def test_can0_counters_none_when_interface_absent(tmp_path: Path) -> None:
+    """This laptop's actual environment: no can0 sysfs directory at all."""
+    assert can0_counters(tmp_path / "no-such-can0" / "statistics") is None
+
+
+def test_can0_counters_none_when_a_counter_file_is_missing(tmp_path: Path) -> None:
+    stats = tmp_path / "statistics"
+    stats.mkdir()
+    (stats / "rx_over_errors").write_text("0\n")
+    # rx_dropped / rx_errors absent — treat as unavailable rather than partial.
+    assert can0_counters(stats) is None
+
+
+def test_can0_counters_reads_fixture_sysfs_directory(tmp_path: Path) -> None:
+    stats = tmp_path / "statistics"
+    stats.mkdir()
+    (stats / "rx_over_errors").write_text("3\n")
+    (stats / "rx_dropped").write_text("7\n")
+    (stats / "rx_errors").write_text("10\n")
+    assert can0_counters(stats) == {"rx_over_errors": 3, "rx_dropped": 7, "rx_errors": 10}
+
+
 def test_feature_drift_flags_and_schema_mismatch() -> None:
     scaler = {
         "columns": ["obd:RPM", "obd:SPEED", "obd:CONST"],
@@ -169,6 +197,43 @@ def test_empty_monitor_snapshot_is_none_safe() -> None:
     assert snap["missing_feature_rate"] is None
     assert snap["inference_latency_ms"]["mean"] is None
     assert snap["data_freshness_seconds"] is None
+
+
+# ---------------------------------------------------------------------------
+# HealthMonitor.snapshot()["can0"] — Task 6.8
+# ---------------------------------------------------------------------------
+
+
+def test_snapshot_omits_can0_when_interface_absent(tmp_path: Path) -> None:
+    """The real state of this laptop tonight: no can0 anywhere → no crash,
+    just a quietly absent field (not a null placeholder, not an exception)."""
+    mon = HealthMonitor(can0_stats_path=tmp_path / "no-such-can0")
+    snap = mon.snapshot(now_epoch=0.0)
+    assert "can0" not in snap
+
+
+def test_snapshot_reports_can0_counters_and_delta_since_start(tmp_path: Path) -> None:
+    stats = tmp_path / "statistics"
+    stats.mkdir()
+    (stats / "rx_over_errors").write_text("0")
+    (stats / "rx_dropped").write_text("0")
+    (stats / "rx_errors").write_text("0")
+
+    mon = HealthMonitor(can0_stats_path=stats)
+    first = mon.snapshot(now_epoch=0.0)
+    assert first["can0"] == {
+        "rx_over_errors": 0,
+        "rx_dropped": 0,
+        "rx_errors": 0,
+        "since_start": {"rx_over_errors": 0, "rx_dropped": 0, "rx_errors": 0},
+    }
+
+    # Simulate growth during a drive between two /status polls.
+    (stats / "rx_over_errors").write_text("3")
+    (stats / "rx_dropped").write_text("5")
+    second = mon.snapshot(now_epoch=1.0)
+    assert second["can0"]["rx_over_errors"] == 3
+    assert second["can0"]["since_start"] == {"rx_over_errors": 3, "rx_dropped": 5, "rx_errors": 0}
 
 
 def test_observe_inference_latches_if_mode_blindness_edge_triggered() -> None:

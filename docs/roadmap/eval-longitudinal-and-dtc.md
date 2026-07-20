@@ -501,30 +501,45 @@ so").
 
 ### 6B. Model artifact provenance
 
-- [ ] **6.5 — Expose loaded-model provenance.** Manifest fields already
+- [x] **6.5 — Expose loaded-model provenance.** Manifest fields already
   exist (`src/models/manifest.py:62-75`: `model_version`, `created_at`,
   `training_data_hash`, `training_sessions`, spec version) but nothing
   surfaces them at serve. Add a provenance block per loaded model to the
   status payload (`src/dashboard/status.py build_status`) + visible in
-  `get_status`.
-- [ ] **6.6 — Skew check CLI.** `scripts/verify_artifacts.py [--remote
+  `get_status`. — landed: `_model_provenance()` reads real
+  `ModelManifestCommon` fields; MCP `get_status` needed zero changes
+  (confirmed it's a genuine dumb proxy of the `/status` JSON).
+- [x] **6.6 — Skew check CLI.** `scripts/verify_artifacts.py [--remote
   canary@192.168.137.2]`: compare local vs Pi artifact file sha256 +
   manifest `training_data_hash`/`model_version`; report mismatches. This
   makes the scp deploy path self-diagnosing. Record artifact sha256 in
-  the training ledger at train time.
-- [ ] **6.7 — Load-time log line.** `ModelManager._maybe_load`
+  the training ledger at train time. — landed: real argv-list `ssh`
+  invocation (no `shell=True`, path args `shlex.quote()`-escaped, only
+  a hash crosses the wire); `--remote`/`--compare-dir` mutually
+  exclusive, no network call fires unprompted. Local-only path fully
+  tested for real; the actual remote round-trip against
+  `canary@192.168.137.2` is untested tonight (mocked-runner only) per
+  this queue entry's own "remote test blocked" framing.
+- [x] **6.7 — Load-time log line.** `ModelManager._maybe_load`
   (`src/models/manager.py:135`) logs version + training window +
   data-hash on every (re)load, so `tail_daemon_log` shows exactly what
   went live and when. (No hard corpus-vs-hash verification — retention
-  legitimately deletes training sessions; don't over-engineer.)
+  legitimately deletes training sessions; don't over-engineer.) —
+  landed: fires on both initial load and every hot-swap (one shared
+  method, confirmed both entry points route through it).
 
 ### 6C. Capture tripwire
 
-- [ ] **6.8 — rx-overrun counter in status.** Read `can0` rx
+- [x] **6.8 — rx-overrun counter in status.** Read `can0` rx
   overrun/drop counters (`/sys/class/net/can0/statistics/` or `ip -s`)
   in the status builder; expose in `get_status` + the SystemPanel row.
   Nonzero growth during drives is the (only) trigger to revisit the
-  capture architecture.
+  capture architecture. — landed: `can0_counters` returns `None`
+  gracefully (never crashes) when the interface is absent — genuinely
+  exercised for real on this laptop (no `can0` here); the "counter
+  present" path is verified only against a fixture sysfs directory,
+  not real CAN hardware, per this queue entry's own "live verify
+  blocked-overnight" framing.
 
 ---
 

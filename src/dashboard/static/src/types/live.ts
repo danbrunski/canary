@@ -83,6 +83,20 @@ export interface StatusResponse {
   /** Per-detector health beyond the aggregate `health` block (Task 2.1);
    *  null until a health monitor is wired (tests / bare app). */
   detectors?: DetectorsStatus | null;
+  /** Per-loaded-model provenance off each manifest (Task 6.5), keyed like
+   *  `model_versions`; null when no `models_dir` is configured (tests /
+   *  bare app). A given model's entry is itself null on an unreadable
+   *  manifest. */
+  model_provenance?: Record<string, ModelProvenance | null> | null;
+}
+
+/** `/status.model_provenance[name]` (Task 6.5). */
+export interface ModelProvenance {
+  model_version: string | null;
+  created_at: string | null;
+  training_data_hash: string | null;
+  training_sessions: string[];
+  artifact_format_version: number | null;
 }
 
 /** `/status.detectors` (Task 2.1). `blind_modes` are operating modes whose
@@ -153,6 +167,25 @@ export interface StatusHealth {
   feature_drift?: Record<string, unknown>;
   reconstruction_error_drift?: Record<string, unknown>;
   obd_scheduler?: Record<string, unknown>;
+  /** can0 rx overrun/drop/error sysfs counters (Task 6.8); absent when
+   *  there's no can0 interface (dev laptop, or a Pi before the CAN HAT is
+   *  up). Nonzero growth in `since_start` during a drive is the (only)
+   *  intended trigger to revisit the capture architecture — this is a
+   *  passive counter, not an alert. */
+  can0?: Can0Counters;
+}
+
+/** `/status.health.can0` (Task 6.8). Raw counters read at this poll, plus
+ *  the delta since the daemon's `HealthMonitor` first observed them. */
+export interface Can0Counters {
+  rx_over_errors: number;
+  rx_dropped: number;
+  rx_errors: number;
+  since_start: {
+    rx_over_errors: number;
+    rx_dropped: number;
+    rx_errors: number;
+  };
 }
 
 /** `/status.health.power` — decoded `vcgencmd get_throttled`. `now` is live
