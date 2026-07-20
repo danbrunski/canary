@@ -322,12 +322,19 @@ segmenter *code* is correct; the rule set leaks.
   loader and live's rolling-buffer re-segmentation — one function, not
   two implementations, verified to agree including at buffer-eviction
   boundaries.
-- [ ] **5.3 — Re-segment + refit.** Mode labels feed per-mode IF
+- [x] **5.3 — Re-segment + refit.** Mode labels feed per-mode IF
   models, sequence per-mode thresholds, behavior-surface gating, and
   session classification. After 5.1/5.2: re-run `label_sessions.py
   --rebuild`, retrain, and compare mode-second distributions
   (`get_corpus_mode_summary`) before/after to confirm the dead zone and
-  fall-throughs actually closed.
+  fall-throughs actually closed. — landed: offline mode-second
+  comparison (no live daemon for `get_corpus_mode_summary`) confirms
+  the fix on real sessions — `suburban` picked up 1.28pp of previously-
+  `unknown` time, `city`'s over-broad share dropped 1.61pp, `unknown`
+  decreased overall. Real `--all --rebuild` run + a bounded IF smoke
+  retrain both completed cleanly. Full report + 3 out-of-scope findings
+  (thin local corpus, un-quarantined schema-broken sessions, 87%
+  unknown baseline) in `data/analyses/ml-hardening-5.3-resegment-retrain-2026-07-19.md`.
 
 ## Phase 6 — Persistence, fusion, and emit semantics (T3)
 
