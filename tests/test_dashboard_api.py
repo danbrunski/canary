@@ -974,6 +974,68 @@ def test_get_session_trip_summary_404_for_missing_session(
     assert response.status_code == 404
 
 
+# ---------------------------------------------------------------------------
+# GET /control/sessions/{id}/digest (Task 5.6; authenticated per the
+# auth-consistency follow-up — the digest aggregates the vehicle ledger and
+# per-session fingerprint z-scores, both otherwise only readable via
+# authenticated /control/vehicle-ledger and /control/trends)
+# ---------------------------------------------------------------------------
+
+
+def test_get_session_digest_requires_auth(config: CanaryConfig, anomalies_dir: Path) -> None:
+    app = create_app(config, anomalies_dir=anomalies_dir, control_token="secret")
+    client = TestClient(app)
+    response = client.get("/control/sessions/2026-07-19T120000/digest")
+    assert response.status_code == 401
+
+
+def test_get_session_digest_returns_computed_shape(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    session_id = "2026-07-19T120000"
+    session = config.collection.storage_path / session_id
+    records = [
+        TelemetryRecord.obd(1_779_400_000.0 + i, "SPEED", 60.0, "km/h") for i in range(10)
+    ] + [TelemetryRecord.obd(1_779_400_000.0 + i, "RPM", 2000.0, "rpm") for i in range(10)]
+    write_records_to_parquet(records, session, max_rows=10_000)
+
+    app = create_app(config, anomalies_dir=anomalies_dir, control_token="secret")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret"}
+    response = client.get(f"/control/sessions/{session_id}/digest", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_id"] == session_id
+    assert "duration_seconds" in body
+    assert "mode_seconds" in body
+    assert "anomaly_counts_by_source" in body
+    assert "top_behavior_deviations" in body
+    assert "fingerprint_top_movers" in body
+    assert "new_dtcs" in body
+    assert "new_ledger_events" in body
+
+    # Sidecar was persisted (Task 5.5), and a second request reads it back
+    # unchanged rather than recomputing.
+    assert (session / "digest.json").exists()
+    again = client.get(f"/control/sessions/{session_id}/digest", headers=headers)
+    assert again.json() == body
+
+
+def test_get_session_digest_404_for_missing_session(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    app = create_app(config, anomalies_dir=anomalies_dir, control_token="secret")
+    client = TestClient(app)
+    response = client.get(
+        "/control/sessions/2099-01-01T000000/digest",
+        headers={"Authorization": "Bearer secret"},
+    )
+    assert response.status_code == 404
+
+
 def _event(timestamp: str, *, score: float) -> AnomalyEvent:
     return AnomalyEvent(
         timestamp=timestamp,

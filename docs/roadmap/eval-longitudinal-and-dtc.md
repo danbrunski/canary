@@ -389,30 +389,56 @@ never touches. Existing per-session aggregate to extend:
 Greenfield (grep confirms zero notification code). Keep it small: ntfy
 POST via httpx, best-effort, never blocks the pipeline.
 
-- [ ] **5.1 — Config.** `NotificationsConfig(_Strict)` in
+- [x] **5.1 — Config.** `NotificationsConfig(_Strict)` in
   `src/config.py` (+ `CanaryConfig` default at ~:404): `enabled=false`,
   `ntfy_url`, `topic`, `min_severity`, `max_pushes_per_session` (default
-  3), `digest_enabled`. Update example YAMLs.
-- [ ] **5.2 — Notifier.** `src/alerts/notifier.py`: async fire-and-forget
+  3), `digest_enabled`. Update example YAMLs. — landed: ships disabled
+  (`enabled=False`, `topic=""`); example YAML block fully commented.
+  Confirmed no real ntfy topic/URL invented — enabling is the
+  operator's morning task.
+- [x] **5.2 — Notifier.** `src/alerts/notifier.py`: async fire-and-forget
   httpx POST with short timeout; failures log once, never raise.
-  Unit-test formatting; mock transport.
-- [ ] **5.3 — Critical-alert hook.** Call from the emitter choke point
+  Unit-test formatting; mock transport. — landed: the `try/except` is
+  inside the scheduled `asyncio` task itself (not just around
+  `create_task`, which wouldn't catch async failures) — verified a
+  raised `httpx.ConnectError` inside the task never propagates to the
+  caller.
+- [x] **5.3 — Critical-alert hook.** Call from the emitter choke point
   (`src/alerts/emitter.py:240 _emit`) after dedupe/persistence gates,
   for events ≥ `min_severity`, capped per session. Replay mode never
   notifies (emitter already knows replay via logger redirect — assert
-  this in a test).
-- [ ] **5.4 — Trip-end edge.** No session-close event exists today. Add
+  this in a test). — landed: suppression flag is set/cleared by the
+  same `enter_replay_mode`/`exit_replay_mode` this session's Phase 7
+  work already uses (no second replay-detection mechanism); verified
+  no notification attempt happens at all during replay, not even a
+  swallowed one.
+- [x] **5.4 — Trip-end edge.** No session-close event exists today. Add
   a "trip ended" edge from `GpsTracker` (`src/analysis/gps_tracker.py:114
   trip_status` moving→stationary sustained N minutes) with daemon
-  shutdown (`src/daemon/runtime.py:189-199`) as fallback trigger.
-- [ ] **5.5 — Digest.** On trip end: assemble `digest.json` into the
+  shutdown (`src/daemon/runtime.py:189-199`) as fallback trigger. —
+  landed: requires genuine prior motion (no spurious fire for a
+  session that starts already parked); `handle_trip_end` is idempotent
+  so the GPS edge and the shutdown fallback can't double-fire for the
+  same trip.
+- [x] **5.5 — Digest.** On trip end: assemble `digest.json` into the
   session dir — duration, mode seconds, gated anomaly counts by source,
   top behavior-surface deviations, fingerprint deltas vs reference (top
   movers), new DTCs, new ledger events. Push a compact rendering via the
-  notifier when enabled.
-- [ ] **5.6 — Surfacing.** `GET /sessions/{id}/digest` +
+  notifier when enabled. — landed: anomaly counts + new-ledger-events
+  are correctly windowed to the session (verified with an out-of-window
+  fixture record that's correctly excluded); fingerprint top-movers
+  skip stats missing from the reference epoch rather than fabricating
+  a z-score.
+- [x] **5.6 — Surfacing.** `GET /sessions/{id}/digest` +
   `get_session_digest` MCP tool; dashboard shows the last digest (can
-  ride in an existing panel; a dedicated panel is optional).
+  ride in an existing panel; a dedicated panel is optional). — landed
+  in `TripPanel.tsx`. Review caught a real auth-consistency leak before
+  landing: the endpoint was initially public, but the digest includes
+  ledger events and fingerprint z-scores that are otherwise only
+  readable via authenticated `/control/*` routes — moved to
+  `GET /control/sessions/{id}/digest` (auth-gated), with the FE
+  gating the fetch behind a control-token prompt instead of emitting a
+  401.
 
 ---
 

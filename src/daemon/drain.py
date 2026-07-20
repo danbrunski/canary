@@ -226,8 +226,15 @@ async def run_gps_sink(
     poll_interval: float = 0.5,
     queue_warning_fraction: float = 0.8,
     health_monitor: HealthMonitor | None = None,
+    on_trip_ended: Callable[[], None] | None = None,
 ) -> None:
-    """Feed GPS trip state from its own best-effort queue."""
+    """Feed GPS trip state from its own best-effort queue.
+
+    ``on_trip_ended`` (Task 5.4) fires exactly once per drive, the tick
+    ``gps_tracker.observe`` reports the sustained moving->stationary edge —
+    best-effort like every other callback here, a broken digest/notifier
+    path must never take down the GPS sink.
+    """
     queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
     try:
         while not stop_event.is_set() or not queue.empty():
@@ -239,10 +246,16 @@ async def run_gps_sink(
                 continue
 
             try:
-                gps_tracker.observe(record)
+                trip_ended = gps_tracker.observe(record)
             except Exception as exc:  # noqa: BLE001 — odometer is best-effort
                 _note_error(health_monitor, "gps", exc)
                 log.exception("gps_tracker.observe failed; skipping record")
+            else:
+                if trip_ended and on_trip_ended is not None:
+                    try:
+                        on_trip_ended()
+                    except Exception:  # noqa: BLE001 — digest/notify is best-effort
+                        log.exception("on_trip_ended failed")
             finally:
                 queue.task_done()
                 queue_monitor.observe(queue)
@@ -314,6 +327,7 @@ async def drain_queue_with_broadcast(
     dtc_emitter: AnomalyEventEmitter | None = None,
     vehicle_ledger: VehicleLedgerStore | None = None,
     active_session_path: Callable[[], Path] | None = None,
+    on_trip_ended: Callable[[Path], None] | None = None,
     poll_interval: float = 0.5,
     storage_path: Path | None = None,
     storage_warning_mb: int | None = None,
@@ -383,6 +397,11 @@ async def drain_queue_with_broadcast(
     if gps_tracker is not None:
         gps_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
         sinks.append(TelemetrySink("gps", gps_queue, "drop_oldest"))
+
+        def _trip_ended() -> None:
+            if on_trip_ended is not None and active_session_path is not None:
+                on_trip_ended(active_session_path())
+
         sink_tasks.append(
             asyncio.create_task(
                 run_gps_sink(
@@ -392,6 +411,7 @@ async def drain_queue_with_broadcast(
                     poll_interval=poll_interval,
                     queue_warning_fraction=queue_warning_fraction,
                     health_monitor=health_monitor,
+                    on_trip_ended=_trip_ended,
                 )
             )
         )

@@ -11,6 +11,7 @@ from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
 from src.alerts.fusion import PersistenceGate
+from src.alerts.notifier import Notifier
 from src.alerts.tuning import AlertTuner, load_tuning_config
 from src.analysis.gps_tracker import GpsTracker
 from src.analysis.vehicle_ledger import VehicleLedgerStore
@@ -54,6 +55,10 @@ class DaemonComponents:
     event_logger: AnomalyEventLogger
     audit_logger: ControlAuditLogger
     emitter: AnomalyEventEmitter
+    #: ntfy pusher (Task 5.2) — ships disabled by default (see
+    #: ``NotificationsConfig``); the emitter uses this for critical alerts
+    #: (5.3) and the trip-end hook uses it for the digest push (5.5).
+    notifier: Notifier
     model_managers: dict[str, ModelManager[Any]]
     alert_tuner: AlertTuner
     health_monitor: HealthMonitor
@@ -99,11 +104,15 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
     event_logger = AnomalyEventLogger(config.daemon.anomalies_dir)
     audit_logger = ControlAuditLogger(config.daemon.audit_log)
     tuner = AlertTuner(load_tuning_config(config.daemon.tuning_config))
+    notifier = Notifier(config.notifications)
     emitter = _make_broadcasting_emitter(
         event_logger,
         anomalies_bus,
         tuner=tuner,
         min_seconds_between_events=config.alerts.min_seconds_between_events,
+        notifier=notifier,
+        notify_min_severity=config.notifications.min_severity,
+        notify_max_pushes_per_session=config.notifications.max_pushes_per_session,
     )
     model_managers = _load_model_managers(config)
     alerts_cfg = config.alerts
@@ -122,6 +131,7 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         event_logger=event_logger,
         audit_logger=audit_logger,
         emitter=emitter,
+        notifier=notifier,
         model_managers=model_managers,
         sequence_model_type=_sequence_model_type(config),
         alert_tuner=tuner,
@@ -168,6 +178,9 @@ def _make_broadcasting_emitter(
     *,
     tuner: AlertTuner | None = None,
     min_seconds_between_events: float = 1.0,
+    notifier: Notifier | None = None,
+    notify_min_severity: float = 0.8,
+    notify_max_pushes_per_session: int = 3,
 ) -> AnomalyEventEmitter:
     """Wrap ``AnomalyEventLogger`` so every persisted event is also published
     on the broadcaster — keeps the logger-as-source-of-truth + the live-push
@@ -193,6 +206,9 @@ def _make_broadcasting_emitter(
         _BroadcastingLogger(logger, anomalies_bus),  # type: ignore[arg-type]
         tuner=tuner,
         min_seconds_between_events=min_seconds_between_events,
+        notifier=notifier,
+        notify_min_severity=notify_min_severity,
+        notify_max_pushes_per_session=notify_max_pushes_per_session,
     )
 
 

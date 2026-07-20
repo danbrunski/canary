@@ -3,10 +3,10 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
-import type { StatusResponse, TripSummaryResponse } from "../types";
+import type { SessionDigestResponse, StatusResponse, TripSummaryResponse } from "../types";
 import { mockHttp } from "../test/harness";
 
-const mocks = mockHttp(["getTripSummary"]);
+const mocks = mockHttp(["getTripSummary", "getSessionDigest"]);
 
 const { TripPanel } = await import("./TripPanel");
 
@@ -41,13 +41,30 @@ const SUMMARY: TripSummaryResponse = {
   },
 };
 
+const DIGEST: SessionDigestResponse = {
+  schema_version: 1,
+  computed_at: "2026-07-19T12:00:00Z",
+  session_id: "2026-07-19T110000",
+  duration_seconds: 725,
+  mode_seconds: { highway: 700, idle: 25 },
+  anomaly_counts_by_source: { fused: 2, behavior: 1 },
+  top_behavior_deviations: [],
+  fingerprint_top_movers: [
+    { stat: "idle_rpm_mean", value: 900, reference_mean: 800, reference_std: 20, z_score: 5.0 },
+  ],
+  new_dtcs: [{ code: "P0171" }],
+  new_ledger_events: [{ id: "abc" }],
+};
+
 describe("TripPanel", () => {
   it("shows a placeholder for the current drive when no derived channels have streamed yet", () => {
     mocks.getTripSummary.mockReturnValue(new Promise(() => {}));
+    mocks.getSessionDigest.mockReturnValue(new Promise(() => {}));
     render(
       createElement(TripPanel, {
         channels: new Map(),
         status: { latest_session: null } as unknown as StatusResponse,
+        token: "secret",
       }),
     );
     expect(screen.getByText("no live drive data yet")).toBeInTheDocument();
@@ -67,6 +84,7 @@ describe("TripPanel", () => {
       createElement(TripPanel, {
         channels,
         status: { latest_session: null } as unknown as StatusResponse,
+        token: "secret",
       }),
     );
     expect(screen.getByText(/10\.0 km/)).toBeInTheDocument();
@@ -77,10 +95,12 @@ describe("TripPanel", () => {
 
   it("fetches and renders the last-drive summary keyed on status.latest_session", async () => {
     mocks.getTripSummary.mockResolvedValue(SUMMARY);
+    mocks.getSessionDigest.mockResolvedValue(DIGEST);
     render(
       createElement(TripPanel, {
         channels: new Map(),
         status: { latest_session: "2026-07-19T110000" } as unknown as StatusResponse,
+        token: "secret",
       }),
     );
     expect(await screen.findByText("2026-07-19T110000")).toBeInTheDocument();
@@ -95,12 +115,62 @@ describe("TripPanel", () => {
 
   it("shows an error state when the last-drive fetch fails", async () => {
     mocks.getTripSummary.mockRejectedValue(new Error("boom"));
+    mocks.getSessionDigest.mockResolvedValue(DIGEST);
     render(
       createElement(TripPanel, {
         channels: new Map(),
         status: { latest_session: "2026-07-19T110000" } as unknown as StatusResponse,
+        token: "secret",
       }),
     );
     expect(await screen.findByText("boom")).toBeInTheDocument();
+  });
+
+  it("renders the last-drive digest keyed on status.latest_session", async () => {
+    mocks.getTripSummary.mockReturnValue(new Promise(() => {}));
+    mocks.getSessionDigest.mockResolvedValue(DIGEST);
+    render(
+      createElement(TripPanel, {
+        channels: new Map(),
+        status: { latest_session: "2026-07-19T110000" } as unknown as StatusResponse,
+        token: "secret",
+      }),
+    );
+    expect(mocks.getSessionDigest).toHaveBeenCalledWith(
+      "secret",
+      "2026-07-19T110000",
+      expect.anything(),
+    );
+    expect(await screen.findByText(/fused=2/)).toBeInTheDocument();
+    expect(screen.getByText("P0171")).toBeInTheDocument();
+    expect(screen.getByText("idle_rpm_mean")).toBeInTheDocument();
+  });
+
+  it("shows an error state when the digest fetch fails", async () => {
+    mocks.getTripSummary.mockReturnValue(new Promise(() => {}));
+    mocks.getSessionDigest.mockRejectedValue(new Error("digest boom"));
+    render(
+      createElement(TripPanel, {
+        channels: new Map(),
+        status: { latest_session: "2026-07-19T110000" } as unknown as StatusResponse,
+        token: "secret",
+      }),
+    );
+    expect(await screen.findByText("digest boom")).toBeInTheDocument();
+  });
+
+  it("does not fetch the digest and shows a token prompt when no control token is set", () => {
+    mocks.getTripSummary.mockReturnValue(new Promise(() => {}));
+    render(
+      createElement(TripPanel, {
+        channels: new Map(),
+        status: { latest_session: "2026-07-19T110000" } as unknown as StatusResponse,
+        token: "",
+      }),
+    );
+    expect(mocks.getSessionDigest).not.toHaveBeenCalled();
+    expect(
+      screen.getByText("Enter the control token (Control panel) to view the last-drive digest."),
+    ).toBeInTheDocument();
   });
 });

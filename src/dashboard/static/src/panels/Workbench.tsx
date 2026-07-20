@@ -153,7 +153,7 @@ function renderItem(
     case "live-builder":
       return <CustomDashboardPanel channels={d.channels} />;
     case "live-trip":
-      return <TripPanel channels={d.channels} status={d.status} />;
+      return <TripPanel channels={d.channels} status={d.status} token={d.token} />;
     case "diag-dtc":
       return <DtcPanel />;
     case "diag-trends":

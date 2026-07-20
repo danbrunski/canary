@@ -281,6 +281,112 @@ def test_exit_replay_mode_restores_pre_replay_counters_and_dedupe(tmp_path: Path
     assert emitter.counters.suppressed_dedupe == 1
 
 
+class _FakeNotifier:
+    """Records ``notify`` calls without touching the network (Task 5.3)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def notify(self, title: str, message: str, *, priority: str = "default") -> None:
+        self.calls.append((title, message))
+
+
+def test_qualifying_event_pushes_a_notification(tmp_path: Path) -> None:
+    logger = AnomalyEventLogger(tmp_path)
+    notifier = _FakeNotifier()
+    emitter = AnomalyEventEmitter(
+        logger,
+        min_seconds_between_events=0,
+        notifier=notifier,
+        notify_min_severity=0.5,
+    )
+    emitter.emit_lstm(_FakeLSTMResult(global_score=5.0))  # well above 0.5
+    assert len(notifier.calls) == 1
+
+
+def test_below_min_severity_does_not_push(tmp_path: Path) -> None:
+    logger = AnomalyEventLogger(tmp_path)
+    notifier = _FakeNotifier()
+    emitter = AnomalyEventEmitter(
+        logger,
+        min_seconds_between_events=0,
+        notifier=notifier,
+        notify_min_severity=10.0,  # above the fake result's global_score=5.0
+    )
+    emitter.emit_lstm(_FakeLSTMResult(global_score=5.0))
+    assert notifier.calls == []
+
+
+def test_max_pushes_per_session_caps_pushes(tmp_path: Path) -> None:
+    logger = AnomalyEventLogger(tmp_path)
+    notifier = _FakeNotifier()
+    emitter = AnomalyEventEmitter(
+        logger,
+        min_seconds_between_events=0,
+        notifier=notifier,
+        notify_min_severity=0.5,
+        notify_max_pushes_per_session=2,
+    )
+    for i in range(5):
+        emitter.emit_lstm(
+            _FakeLSTMResult(
+                global_score=5.0,
+                timestamp=f"2026-05-13T12:00:{i:02d}+00:00",
+            )
+        )
+    assert len(notifier.calls) == 2  # capped, even though 5 events qualified
+
+
+def test_reset_notification_count_reopens_the_budget(tmp_path: Path) -> None:
+    logger = AnomalyEventLogger(tmp_path)
+    notifier = _FakeNotifier()
+    emitter = AnomalyEventEmitter(
+        logger,
+        min_seconds_between_events=0,
+        notifier=notifier,
+        notify_min_severity=0.5,
+        notify_max_pushes_per_session=1,
+    )
+    emitter.emit_lstm(_FakeLSTMResult(global_score=5.0, timestamp="2026-05-13T12:00:00+00:00"))
+    emitter.emit_lstm(_FakeLSTMResult(global_score=5.0, timestamp="2026-05-13T12:00:01+00:00"))
+    assert len(notifier.calls) == 1  # second was capped
+
+    emitter.reset_notification_count()
+    emitter.emit_lstm(_FakeLSTMResult(global_score=5.0, timestamp="2026-05-13T12:00:02+00:00"))
+    assert len(notifier.calls) == 2  # budget reopened for the new trip
+
+
+def test_replay_mode_never_pushes_notifications(tmp_path: Path) -> None:
+    """Task 5.3's hard requirement: replay must NEVER notify, even for an
+    event that would otherwise clearly qualify. Uses the real
+    enter_replay_mode/exit_replay_mode mechanism, not a fake flag."""
+    logger = AnomalyEventLogger(tmp_path)
+    notifier = _FakeNotifier()
+    emitter = AnomalyEventEmitter(
+        logger,
+        min_seconds_between_events=0,
+        notifier=notifier,
+        notify_min_severity=0.5,
+    )
+    emitter.enter_replay_mode()
+    emitter.emit_lstm(_FakeLSTMResult(global_score=5.0, timestamp="2026-05-13T12:00:00+00:00"))
+    assert emitter.counters.emitted == 1  # the event itself still logs/broadcasts
+    assert notifier.calls == []  # but no push happened during replay
+
+    emitter.exit_replay_mode()
+    emitter.emit_lstm(_FakeLSTMResult(global_score=5.0, timestamp="2026-05-13T13:00:00+00:00"))
+    assert len(notifier.calls) == 1  # live notifications resume after replay
+
+
+def test_no_notifier_configured_is_a_silent_noop(tmp_path: Path) -> None:
+    """Default construction (no ``notifier=``) must behave exactly as before
+    5.3 — never raise, never touch anything notification-related."""
+    logger = AnomalyEventLogger(tmp_path)
+    emitter = AnomalyEventEmitter(logger, min_seconds_between_events=0)
+    event = emitter.emit_lstm(_FakeLSTMResult(global_score=5.0))
+    assert event is not None
+
+
 def test_exit_replay_mode_without_enter_is_a_noop(tmp_path: Path) -> None:
     """Defensive: mirrors the writer/anomaly-logger exit_replay_mode
     best-effort contract — an unmatched exit shouldn't blow up or corrupt

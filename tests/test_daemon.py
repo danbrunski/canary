@@ -272,6 +272,41 @@ async def test_drain_with_no_broadcaster_still_writes_to_parquet(tmp_path: Path)
     assert list((tmp_path / "storage").rglob("*.parquet"))
 
 
+async def test_drain_gps_trip_end_edge_calls_on_trip_ended(tmp_path: Path) -> None:
+    """Task 5.4: the sustained moving->stationary GPS edge reaches the
+    ``on_trip_ended`` hook, called with the active session path — the
+    normal (non-fallback) trigger."""
+    from src.analysis.gps_tracker import GpsTracker
+
+    writer = ParquetTelemetryWriter(tmp_path / "storage")
+    gps_tracker = GpsTracker(trip_end_stationary_seconds=10.0)
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+    calls: list[Path] = []
+
+    async def _producer() -> None:
+        await queue.put(TelemetryRecord.gps(0.0, "speed", 40.0, "km/h"))  # start moving
+        await queue.put(TelemetryRecord.gps(1.0, "speed", 0.0, "km/h"))  # stop
+        await queue.put(TelemetryRecord.gps(15.0, "speed", 0.0, "km/h"))  # 14s stationary -> edge
+        await asyncio.sleep(0.1)
+        stop.set()
+
+    drain_task = asyncio.create_task(
+        drain_queue_with_broadcast(
+            queue,
+            writer,
+            stop,
+            gps_tracker=gps_tracker,
+            active_session_path=lambda: writer.paths.root,
+            on_trip_ended=calls.append,
+        )
+    )
+    await _producer()
+    await drain_task
+
+    assert calls == [writer.paths.root]
+
+
 async def test_drain_keeps_publishing_even_under_subscriber_backpressure(
     tmp_path: Path,
 ) -> None:
@@ -738,6 +773,48 @@ async def test_run_daemon_starts_retention_sweeper_and_protects_active_session(
 
     assert not old.exists()
     assert active.exists()
+
+
+async def test_run_daemon_fires_trip_end_fallback_on_shutdown(
+    config: CanaryConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Task 5.4's daemon-shutdown fallback trigger: run_daemon must call the
+    trip-end hook for the active session when it stops, independent of
+    whether GPS ever fired its own sustained-stop edge."""
+    from src.daemon import runtime as runtime_mod
+
+    calls: list[Path] = []
+
+    def _spy(
+        session_dir: Path,
+        cfg: CanaryConfig,
+        **kwargs: object,
+    ) -> None:
+        calls.append(session_dir)
+
+    monkeypatch.setattr(runtime_mod, "handle_trip_end", _spy)
+
+    components = build_components(config)
+    writer = ParquetTelemetryWriter(config.collection.storage_path)
+    stop = asyncio.Event()
+
+    async def _run() -> None:
+        await runtime_mod.run_daemon(
+            config,
+            stop,
+            collectors=[],
+            writer=writer,
+            components=components,
+            enable_live_inference=False,
+        )
+
+    daemon_task = asyncio.create_task(_run())
+    await asyncio.sleep(0.05)
+    stop.set()
+    await asyncio.wait_for(daemon_task, timeout=5.0)
+
+    assert calls == [writer.paths.root]
 
 
 async def test_run_daemon_propagates_collector_failure_without_hanging(

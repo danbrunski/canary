@@ -27,6 +27,7 @@ import type {
   PowerStatusResponse,
   PreflightResponse,
   SequenceDetectorStatus,
+  SessionDigestResponse,
   SessionSummary,
   SessionsResponse,
   StatusResponse,
@@ -348,6 +349,22 @@ export function getTripSummary(
   signal?: AbortSignal,
 ): Promise<TripSummaryResponse> {
   return fetchJson(`/sessions/${encodeURIComponent(sessionId)}/trip-summary`, { signal });
+}
+
+/** `/control/sessions/{id}/digest` is authenticated (auth-consistency
+ *  follow-up to Task 5.6) — it aggregates the vehicle ledger and
+ *  per-session fingerprint z-scores, both otherwise only readable via
+ *  authenticated `/control/*` routes (see getTrends below). Computed on
+ *  demand if the trip-end hook hasn't already written
+ *  `digest.json`. */
+export function getSessionDigest(
+  token: string,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SessionDigestResponse> {
+  return controlJson(`/control/sessions/${encodeURIComponent(sessionId)}/digest`, token, {
+    signal,
+  });
 }
 
 /** `/test-profiles` is read-only + unauthenticated (scanned YAML catalog);

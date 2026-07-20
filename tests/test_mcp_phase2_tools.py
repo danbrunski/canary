@@ -12,6 +12,7 @@ import pytest
 from src.mcp_server.audit import MCPAuditLogger
 from src.mcp_server.client import DaemonClient, DaemonError
 from src.mcp_server.tools import bindings as bindings_tool
+from src.mcp_server.tools import digest as digest_tool
 from src.mcp_server.tools import dtc as dtc_tool
 from src.mcp_server.tools import jobs as jobs_tool
 from src.mcp_server.tools import sessions as sessions_tool
@@ -23,7 +24,7 @@ from src.mcp_server.write_tools import sessions as sessions_write_tool
 from src.mcp_server.write_tools import tuning as tuning_write_tool
 
 
-async def _fake_daemon(routes: dict[str, Any]) -> DaemonClient:
+async def _fake_daemon(routes: dict[str, Any], *, token: str | None = None) -> DaemonClient:
     def handler(request: httpx.Request) -> httpx.Response:
         key = f"{request.method} {request.url.path}"
         if key not in routes:
@@ -34,10 +35,12 @@ async def _fake_daemon(routes: dict[str, Any]) -> DaemonClient:
             return body
         return httpx.Response(200, json=body)
 
-    client = DaemonClient("http://daemon")
+    client = DaemonClient("http://daemon", token)
     await client._client.aclose()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     client._client = httpx.AsyncClient(
         base_url="http://daemon",
+        headers=headers,
         transport=httpx.MockTransport(handler),
     )
     return client
@@ -175,6 +178,53 @@ async def test_get_trip_summary_missing_session_raises_daemon_error() -> None:
     )
     with pytest.raises(DaemonError) as exc_info:
         await trip_summary_tool.get_trip_summary(client, session_id="2099-01-01T000000")
+    await client.aclose()
+    assert exc_info.value.status == 404
+
+
+async def test_get_session_digest_passthrough() -> None:
+    """``get_session_digest`` forwards the sidecar body verbatim, over the
+    authenticated `/control/sessions/{id}/digest` route (auth-consistency
+    follow-up to Task 5.6 — the digest aggregates the vehicle ledger and
+    fingerprint z-scores, both otherwise only readable via authenticated
+    /control/* routes), with the client's bearer token attached."""
+    body = {
+        "schema_version": 1,
+        "computed_at": "2026-07-19T12:00:00Z",
+        "session_id": "2026-07-19T120000",
+        "duration_seconds": 600.0,
+        "mode_seconds": {"highway": 600.0},
+        "anomaly_counts_by_source": {"fused": 2},
+        "top_behavior_deviations": [],
+        "fingerprint_top_movers": [],
+        "new_dtcs": [],
+        "new_ledger_events": [],
+    }
+
+    def _authed(request: httpx.Request) -> httpx.Response:
+        if request.headers.get("authorization") != "Bearer secret":
+            return httpx.Response(401, json={"detail": "missing/invalid control token"})
+        return httpx.Response(200, json=body)
+
+    client = await _fake_daemon(
+        {"GET /control/sessions/2026-07-19T120000/digest": _authed}, token="secret"
+    )
+    result = await digest_tool.get_session_digest(client, session_id="2026-07-19T120000")
+    await client.aclose()
+    assert result == body
+
+
+async def test_get_session_digest_missing_session_raises_daemon_error() -> None:
+    client = await _fake_daemon(
+        {
+            "GET /control/sessions/2099-01-01T000000/digest": httpx.Response(
+                404, json={"detail": "no digest for session '2099-01-01T000000'"}
+            )
+        },
+        token="secret",
+    )
+    with pytest.raises(DaemonError) as exc_info:
+        await digest_tool.get_session_digest(client, session_id="2099-01-01T000000")
     await client.aclose()
     assert exc_info.value.status == 404
 

@@ -40,6 +40,9 @@ from src.mcp_server.tools import (
     classification as classification_tool,
 )
 from src.mcp_server.tools import (
+    digest as digest_tool,
+)
+from src.mcp_server.tools import (
     dtc as dtc_tool,
 )
 from src.mcp_server.tools import (
@@ -314,6 +317,17 @@ def _register_read_tools(
         the stored session and cached after the first request.
         """
         return await trip_summary_tool.get_trip_summary(client, session_id=session_id)
+
+    @mcp.tool()
+    async def get_session_digest(session_id: str) -> dict[str, Any]:
+        """End-of-drive digest for one session: duration, mode seconds,
+        gated anomaly counts by source, top behavior-surface deviations,
+        fingerprint deltas vs. the frozen reference epoch, new DTCs, and
+        new vehicle-ledger events. Written by the trip-end hook (sustained
+        GPS stop, or daemon shutdown as a fallback); computed on demand and
+        cached if that hook hasn't fired yet for this session.
+        """
+        return await digest_tool.get_session_digest(client, session_id=session_id)
 
     @mcp.tool()
     async def get_corpus_mode_summary() -> dict[str, Any]:

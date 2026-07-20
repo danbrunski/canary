@@ -35,6 +35,11 @@ _MOVING_THRESHOLD_KMH = 3.0
 _MAX_INTEGRATION_GAP_S = 10.0
 #: A latest fix older than this is reported as stale (no current fix).
 _FIX_STALE_SECONDS = 10.0
+#: Task 5.4 (eval-longitudinal-and-dtc.md): moving -> stationary sustained
+#: this long fires the "trip ended" edge. Long enough that a stoplight or a
+#: quick errand stop doesn't end the trip; short enough that the end-of-drive
+#: digest lands within a few minutes of actually parking.
+DEFAULT_TRIP_END_STATIONARY_SECONDS = 300.0
 
 
 @dataclass
@@ -53,42 +58,82 @@ class GpsTracker:
         *,
         state_path: Path | None = None,
         persist_interval_seconds: float = 30.0,
+        trip_end_stationary_seconds: float = DEFAULT_TRIP_END_STATIONARY_SECONDS,
     ) -> None:
         self._state_path = state_path
         self._persist_interval_s = persist_interval_seconds
+        self._trip_end_stationary_s = trip_end_stationary_seconds
         self._totals = TripTotals()
         self._latest: dict[str, float] = {}
         self._latest_ts: datetime | None = None
         self._last_speed_epoch: float | None = None
         self._last_persist_epoch: float | None = None
+        #: Task 5.4 moving/stationary tracking — separate from the odometer
+        #: totals above, which persist across trips; this is per-trip and
+        #: never saved to the state sidecar.
+        self._moving = False
+        self._trip_active = False
+        self._stationary_since_epoch: float | None = None
         if state_path is not None:
             self._load()
 
-    def observe(self, record: TelemetryRecord) -> None:
-        """Apply one telemetry record; non-GPS and non-numeric records are ignored."""
+    def observe(self, record: TelemetryRecord) -> bool:
+        """Apply one telemetry record; non-GPS and non-numeric records are ignored.
+
+        Returns ``True`` exactly on the tick the "trip ended" edge fires
+        (Task 5.4: sustained moving -> stationary) — the daemon's GPS sink
+        checks this to trigger end-of-drive digest assembly. ``False``
+        every other call.
+        """
         if record.source != GPS_SOURCE:
-            return
+            return False
         value = record.value
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return
+            return False
         self._latest[record.channel] = float(value)
         self._latest_ts = record.timestamp
         if record.channel == "speed":
-            self._accumulate(float(value), record.timestamp)
+            return self._accumulate(float(value), record.timestamp)
+        return False
 
-    def _accumulate(self, speed_kmh: float, timestamp: datetime) -> None:
+    def _accumulate(self, speed_kmh: float, timestamp: datetime) -> bool:
         epoch = timestamp.timestamp()
+        trip_ended = self._update_trip_state(speed_kmh >= _MOVING_THRESHOLD_KMH, epoch)
         last = self._last_speed_epoch
         self._last_speed_epoch = epoch
-        if last is None:
-            return
-        dt = epoch - last
-        if dt <= 0 or dt > _MAX_INTEGRATION_GAP_S:
-            return
-        if speed_kmh >= _MOVING_THRESHOLD_KMH:
-            self._totals.distance_km += speed_kmh * (dt / 3600.0)
-            self._totals.moving_time_s += dt
+        if last is not None:
+            dt = epoch - last
+            if 0 < dt <= _MAX_INTEGRATION_GAP_S and speed_kmh >= _MOVING_THRESHOLD_KMH:
+                self._totals.distance_km += speed_kmh * (dt / 3600.0)
+                self._totals.moving_time_s += dt
         self._maybe_persist(epoch)
+        return trip_ended
+
+    def _update_trip_state(self, moving_now: bool, epoch: float) -> bool:
+        """Track moving/stationary state; return ``True`` exactly on the tick
+        the trip-end edge fires.
+
+        A trip "starts" the first time we see motion, and "ends" once
+        stationary has been sustained for ``trip_end_stationary_seconds``
+        after that — one edge per trip, not one per stationary tick.
+        """
+        if moving_now:
+            self._moving = True
+            self._trip_active = True
+            self._stationary_since_epoch = None
+            return False
+        if self._moving:
+            # Just transitioned to stationary — start the sustain clock.
+            self._moving = False
+            self._stationary_since_epoch = epoch
+            return False
+        if not self._trip_active or self._stationary_since_epoch is None:
+            # Never moving this trip (or already ended) — nothing to end.
+            return False
+        if epoch - self._stationary_since_epoch >= self._trip_end_stationary_s:
+            self._trip_active = False
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # status
@@ -182,4 +227,4 @@ class GpsTracker:
             log.warning("trip odometer load failed; starting fresh", extra={"error": str(exc)})
 
 
-__all__ = ["GpsTracker", "TripTotals"]
+__all__ = ["DEFAULT_TRIP_END_STATIONARY_SECONDS", "GpsTracker", "TripTotals"]

@@ -11,6 +11,7 @@ from typing import Any
 from src.config import CanaryConfig
 from src.control.capture import CaptureController
 from src.control.replay_control import ReplayController
+from src.control.trip_end import handle_trip_end
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
@@ -32,6 +33,20 @@ __all__ = [
     "run_retention_sweeper",
     "serve_in_background",
 ]
+
+
+def _run_trip_end_hook(
+    session_dir: Path, config: CanaryConfig, components: DaemonComponents
+) -> None:
+    """``on_trip_ended`` callback shape (``Callable[[Path], None]``) around
+    :func:`handle_trip_end`, which returns the digest dict — the GPS sink
+    doesn't need it, only the fact that trip-end was handled."""
+    handle_trip_end(
+        session_dir,
+        config,
+        emitter=components.emitter,
+        notifier=components.notifier,
+    )
 
 
 async def run_daemon(
@@ -121,6 +136,7 @@ async def run_daemon(
             dtc_emitter=components.emitter,
             vehicle_ledger=components.vehicle_ledger,
             active_session_path=lambda: storage_writer.paths.root,
+            on_trip_ended=lambda session_dir: _run_trip_end_hook(session_dir, config, components),
             storage_path=config.collection.storage_path,
             storage_warning_mb=config.collection.storage_warning_mb,
             queue_warning_fraction=config.collection.queue_warning_fraction,
@@ -210,6 +226,20 @@ async def run_daemon(
                 drain_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await drain_task
+            # Task 5.4 fallback trip-end trigger: the drive can end because
+            # the daemon stopped (Pi shutdown) rather than a clean
+            # GPS-detected stop. handle_trip_end is idempotent (skips a
+            # session that already has a digest.json), so this is a no-op
+            # when the GPS edge already fired for the active session.
+            try:
+                handle_trip_end(
+                    storage_writer.paths.root,
+                    config,
+                    emitter=components.emitter,
+                    notifier=components.notifier,
+                )
+            except Exception:  # noqa: BLE001 — shutdown must never fail on this
+                log.exception("trip-end fallback (shutdown) failed")
             poll_task.cancel()
             try:
                 await poll_task

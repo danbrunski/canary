@@ -322,3 +322,15 @@ dashboard:
 #   retention_sweep_seconds: 3600.0
 #   broadcaster_queue_size: 100
 #   control_token_env: CANARY_CONTROL_TOKEN
+
+# Push notifications via ntfy (Phase 5, eval-longitudinal-and-dtc.md). Ships
+# disabled with no real topic — pick a topic on your own ntfy.sh account (or
+# self-hosted instance) and set enabled: true yourself; a made-up topic here
+# would either no-op or land on a stranger's public topic. Defaults shown.
+# notifications:
+#   enabled: false
+#   ntfy_url: https://ntfy.sh
+#   topic: ""                    # e.g. "canary-<random-slug>-alerts"
+#   min_severity: 0.8
+#   max_pushes_per_session: 3
+#   digest_enabled: false

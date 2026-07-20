@@ -1,6 +1,6 @@
 import { useCallback, useRef } from "react";
 
-import { getTripSummary } from "../api/http";
+import { getSessionDigest, getTripSummary } from "../api/http";
 import { Panel } from "../components/Panel";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { useControlResource } from "../hooks/useControlResource";
@@ -12,13 +12,14 @@ import {
   definitionValueClass,
   placeholderClass,
 } from "../styles";
-import type { StatusResponse, TripSummaryFields } from "../types";
+import type { SessionDigestResponse, StatusResponse, TripSummaryFields } from "../types";
 import { formatPercent } from "../util/format";
 import { formatDuration } from "../util/time";
 
 interface TripPanelProps {
   channels: Map<string, ChannelSnapshot>;
   status: StatusResponse | null;
+  token: string;
 }
 
 // Mirrors src/analysis/derived.py's own unit constants exactly, so a
@@ -59,7 +60,7 @@ function formatSpeed(kph: number | null): string {
  *  the exact accumulators `LiveFeatureSource` maintains, not a re-fetch or a
  *  client-side recompute of the integrals themselves. Plus the last stored
  *  drive's summary from `GET /sessions/{id}/trip-summary` (Task 1.5). */
-export function TripPanel({ channels, status }: TripPanelProps) {
+export function TripPanel({ channels, status, token }: TripPanelProps) {
   const distanceKm = channelValue(channels, "derived:TRIP_DISTANCE_KM");
   const fuelUsedL = channelValue(channels, "derived:FUEL_USED_L");
   const co2Kg = channelValue(channels, "derived:CO2_KG");
@@ -95,6 +96,22 @@ export function TripPanel({ channels, status }: TripPanelProps) {
   );
   const { data, error, loading } = useControlResource(fetcher, {
     enabled: Boolean(sessionId),
+    intervalMs: 30000,
+  });
+
+  // Digest requires a control token (auth-consistency follow-up to Task
+  // 5.6 — it aggregates the vehicle ledger + fingerprint z-scores, both
+  // otherwise only readable via authenticated /control/* routes) — don't
+  // fetch, and don't render a broken/erroring section, until one's entered.
+  const digestFetcher = useCallback(
+    (signal: AbortSignal) => {
+      if (!sessionId) return Promise.reject(new Error("no session"));
+      return getSessionDigest(token, sessionId, signal);
+    },
+    [sessionId, token],
+  );
+  const digest = useControlResource(digestFetcher, {
+    enabled: Boolean(sessionId) && Boolean(token),
     intervalMs: 30000,
   });
 
@@ -148,7 +165,73 @@ export function TripPanel({ channels, status }: TripPanelProps) {
       ) : (
         <LastDriveSummary sessionId={data.session_id} summary={data.summary} />
       )}
+
+      {sessionId && (
+        <>
+          <h3 className="mb-1 mt-4 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
+            Last drive digest
+          </h3>
+          {!token ? (
+            <p className={placeholderClass}>
+              Enter the control token (Control panel) to view the last-drive digest.
+            </p>
+          ) : digest.loading ? (
+            <p className={placeholderClass}>loading digest…</p>
+          ) : digest.error || !digest.data ? (
+            <p className={cn(placeholderClass, "text-bad")}>{digest.error ?? "no data"}</p>
+          ) : (
+            <DigestSummary digest={digest.data} />
+          )}
+        </>
+      )}
     </Panel>
+  );
+}
+
+function DigestSummary({ digest }: { digest: SessionDigestResponse }) {
+  const totalAnomalies = Object.values(digest.anomaly_counts_by_source).reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+  const bySource = Object.entries(digest.anomaly_counts_by_source)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([source, count]) => `${source}=${count}`)
+    .join(", ");
+  const topMover = digest.fingerprint_top_movers[0];
+
+  return (
+    <dl className={definitionListClass}>
+      <div className={definitionRowClass}>
+        <dt className={definitionTermClass}>gated anomalies</dt>
+        <dd className={definitionValueClass}>
+          {totalAnomalies}
+          {bySource && <span className="text-fg-dim"> ({bySource})</span>}
+        </dd>
+      </div>
+      <div className={definitionRowClass}>
+        <dt className={definitionTermClass}>new DTCs</dt>
+        <dd className={definitionValueClass}>
+          {digest.new_dtcs.length === 0
+            ? "none"
+            : digest.new_dtcs.map((entry) => String(entry.code ?? "?")).join(", ")}
+        </dd>
+      </div>
+      <div className={definitionRowClass}>
+        <dt className={definitionTermClass}>new ledger events</dt>
+        <dd className={definitionValueClass}>{digest.new_ledger_events.length}</dd>
+      </div>
+      {topMover && (
+        <div className={definitionRowClass}>
+          <dt className={definitionTermClass}>top mover</dt>
+          <dd className={definitionValueClass}>
+            {topMover.stat}
+            {topMover.z_score != null && (
+              <span className="text-fg-dim"> (z={topMover.z_score.toFixed(2)})</span>
+            )}
+          </dd>
+        </div>
+      )}
+    </dl>
   );
 }
 

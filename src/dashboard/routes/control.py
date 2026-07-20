@@ -488,6 +488,26 @@ def register_control_routes(
         )
         return {"classification": payload}
 
+    @app.get("/control/sessions/{session_id}/digest")
+    def get_session_digest_route(
+        session_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        # Task 5.6 follow-up: authenticated, not public — the digest
+        # aggregates the vehicle ledger and per-session fingerprint z-scores,
+        # both of which are otherwise only readable via authenticated
+        # /control/vehicle-ledger and /control/trends. Gating the whole
+        # endpoint (not just those fields) matches this codebase's existing
+        # public-XOR-authenticated posture per route. Computed on first
+        # request if the trip-end hook (Task 5.4) hasn't already written
+        # digest.json for this session.
+        from src.control.digest import get_session_digest
+
+        result = get_session_digest(config, session_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"no digest for session {session_id!r}")
+        return result
+
     @app.get("/control/classifications/summary")
     def get_corpus_classification_summary(
         _auth: None = Depends(require_control_auth),

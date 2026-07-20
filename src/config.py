@@ -493,6 +493,34 @@ class TrendsConfig(_Strict):
     mann_kendall_alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
 
 
+class NotificationsConfig(_Strict):
+    """Push notifications via ntfy (Phase 5, eval-longitudinal-and-dtc.md).
+
+    Ships disabled with no real topic baked in (operator-approved decision,
+    see OVERNIGHT-QUEUE.md Q12) — a made-up ``topic`` would either silently
+    no-op against ntfy.sh or, worse, land on a stranger's public topic.
+    Turning this on for the operator's actual ntfy instance is an explicit
+    morning task, not something to flip during unattended work. All fields
+    default so configs predating this section keep loading with
+    notifications off.
+    """
+
+    enabled: bool = False
+    #: Base ntfy server URL (self-hosted or the public ``ntfy.sh``).
+    ntfy_url: str = "https://ntfy.sh"
+    #: ntfy topic to POST to. Blank until the operator picks a real one.
+    topic: str = ""
+    #: Minimum ``AnomalyEvent.score`` (same larger-is-worse scale each source
+    #: already uses) that reaches a push (5.3's critical-alert hook).
+    min_severity: float = Field(default=0.8, ge=0.0)
+    #: Hard cap on pushes per recording session — a flapping detector must
+    #: never turn into a phone full of notifications.
+    max_pushes_per_session: int = Field(default=3, ge=0)
+    #: End-of-drive digest push (5.5) — independent toggle from the
+    #: per-event critical-alert hook above.
+    digest_enabled: bool = False
+
+
 class ProfilesConfig(_Strict):
     """Multi-vehicle profile resolution (see ``src/profiles.py``).
 
@@ -526,6 +554,7 @@ class CanaryConfig(_Strict):
     alerts: AlertsConfig = AlertsConfig()
     profiles: ProfilesConfig = ProfilesConfig()
     trends: TrendsConfig = TrendsConfig()
+    notifications: NotificationsConfig = NotificationsConfig()
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:

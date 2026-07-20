@@ -31,6 +31,7 @@ import pandas as pd
 
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
+from src.alerts.notifier import format_event_message
 from src.alerts.tuning import AlertTuner
 from src.models.isolation_forest import (
     CALIBRATED_ANOMALY_COLUMN,
@@ -42,6 +43,7 @@ from src.models.isolation_forest import (
 
 if TYPE_CHECKING:  # avoid importing torch-touching modules at import time
     from src.alerts.fusion import FusedResult
+    from src.alerts.notifier import Notifier
     from src.models.inference import SequenceInferenceResult
 
 log = logging.getLogger(__name__)
@@ -115,6 +117,9 @@ class AnomalyEventEmitter:
         *,
         min_seconds_between_events: float = 1.0,
         tuner: AlertTuner | None = None,
+        notifier: Notifier | None = None,
+        notify_min_severity: float = 0.8,
+        notify_max_pushes_per_session: int = 3,
     ) -> None:
         self._logger = logger
         self._min_seconds_between_events = min_seconds_between_events
@@ -125,6 +130,19 @@ class AnomalyEventEmitter:
         #: consumed by :meth:`exit_replay_mode` (Phase 7.1).
         self._pre_replay_counters: EmitterCounters | None = None
         self._pre_replay_last_emit: dict[tuple[str, str], float] | None = None
+        #: Task 5.3 critical-alert hook. ``notifier`` is best-effort/optional
+        #: (``None`` = notifications entirely off, the default); it never
+        #: gates or delays emission — it only gets a fire-and-forget push
+        #: after an event has already cleared every gate below.
+        self._notifier = notifier
+        self._notify_min_severity = notify_min_severity
+        self._notify_max_pushes_per_session = notify_max_pushes_per_session
+        self._notify_count = 0
+        #: True for the duration of a replay (Phase 7.1's enter/exit_replay_mode)
+        #: — the SAME replay-awareness the dedupe/counters snapshot uses, not a
+        #: second mechanism. Replay must never push a live-looking notification
+        #: for events that already happened.
+        self._replaying = False
 
     def emit_lstm(
         self,
@@ -354,7 +372,33 @@ class AnomalyEventEmitter:
         self._last_emit[_dedupe_identity(event)] = _seconds(event.timestamp)
         if self._tuner is not None:
             self._tuner.notify_emitted(event, now=_seconds(event.timestamp))
+        self._maybe_push_notification(event)
         return event
+
+    def _maybe_push_notification(self, event: AnomalyEvent) -> None:
+        """Task 5.3: fire-and-forget critical-alert push, AFTER dedupe/tuning
+        gates above already decided the event is worth logging.
+
+        Replay never notifies (same replay-awareness ``enter_replay_mode``/
+        ``exit_replay_mode`` already give the dedupe/counters); a qualifying
+        event must be at/above ``notify_min_severity`` and under the
+        per-session push cap. A notifier failure can't reach here at all —
+        ``Notifier.notify`` itself never raises.
+        """
+        if self._notifier is None or self._replaying:
+            return
+        if event.score < self._notify_min_severity:
+            return
+        if self._notify_count >= self._notify_max_pushes_per_session:
+            return
+        title, body = format_event_message(event)
+        self._notifier.notify(title, body)
+        self._notify_count += 1
+
+    def reset_notification_count(self) -> None:
+        """Reset the per-session push cap. Called at trip end (Task 5.4/5.5)
+        so the next drive gets its own ``max_pushes_per_session`` budget."""
+        self._notify_count = 0
 
     def _is_deduped(self, event: AnomalyEvent) -> bool:
         if self._min_seconds_between_events <= 0:
@@ -381,6 +425,7 @@ class AnomalyEventEmitter:
         self._pre_replay_last_emit = dict(self._last_emit)
         self.counters.reset()
         self._last_emit = {}
+        self._replaying = True
 
     def exit_replay_mode(self) -> None:
         """Restore the pre-replay live dedupe/counters (Phase 7.1).
@@ -395,6 +440,7 @@ class AnomalyEventEmitter:
         if self._pre_replay_last_emit is not None:
             self._last_emit = self._pre_replay_last_emit
             self._pre_replay_last_emit = None
+        self._replaying = False
 
 
 def _dedupe_identity(event: AnomalyEvent) -> tuple[str, str]:
