@@ -16,6 +16,7 @@ from src.mcp_server.tools import dtc as dtc_tool
 from src.mcp_server.tools import jobs as jobs_tool
 from src.mcp_server.tools import sessions as sessions_tool
 from src.mcp_server.tools import trends as trends_tool
+from src.mcp_server.tools import trip_summary as trip_summary_tool
 from src.mcp_server.tools import tuning as tuning_tool
 from src.mcp_server.write_tools import jobs as jobs_write_tool
 from src.mcp_server.write_tools import sessions as sessions_write_tool
@@ -129,6 +130,53 @@ async def test_get_trends_unavailable_passthrough() -> None:
     result = await trends_tool.get_trends(client)
     await client.aclose()
     assert result == body
+
+
+# ---------------------------------------------------------------------------
+# Trip summary (Task 1.5, engine-analysis-and-mapping.md)
+# ---------------------------------------------------------------------------
+
+
+async def test_get_trip_summary_passthrough() -> None:
+    """``get_trip_summary`` forwards the sidecar body verbatim."""
+    body = {
+        "schema_version": 1,
+        "computed_at": "2026-07-19T12:00:00Z",
+        "session_id": "2026-07-19T120000",
+        "summary": {
+            "duration_s": 600.0,
+            "distance_km": 12.3,
+            "fuel_used_l": 1.1,
+            "avg_economy_l_per_100km": 8.9,
+            "avg_economy_mpg": 26.4,
+            "co2_kg": 2.5,
+            "idle_time_s": 30.0,
+            "idle_fraction": 0.05,
+            "max_speed_kph": 95.0,
+            "avg_speed_kph": 60.0,
+            "zero_to_60_mph_s": None,
+            "quarter_mile_s": None,
+            "quarter_mile_trap_kph": None,
+        },
+    }
+    client = await _fake_daemon({"GET /sessions/2026-07-19T120000/trip-summary": body})
+    result = await trip_summary_tool.get_trip_summary(client, session_id="2026-07-19T120000")
+    await client.aclose()
+    assert result == body
+
+
+async def test_get_trip_summary_missing_session_raises_daemon_error() -> None:
+    client = await _fake_daemon(
+        {
+            "GET /sessions/2099-01-01T000000/trip-summary": httpx.Response(
+                404, json={"detail": "no trip summary for session '2099-01-01T000000'"}
+            )
+        }
+    )
+    with pytest.raises(DaemonError) as exc_info:
+        await trip_summary_tool.get_trip_summary(client, session_id="2099-01-01T000000")
+    await client.aclose()
+    assert exc_info.value.status == 404
 
 
 # ---------------------------------------------------------------------------

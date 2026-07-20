@@ -140,6 +140,38 @@ class DtcReportResponse(BaseModel):
     stale: bool
 
 
+class TripSummaryFields(BaseModel):
+    """Matches ``TripSummary.to_dict()`` (``src/analysis/derived.py``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_s: float
+    distance_km: float | None
+    fuel_used_l: float | None
+    avg_economy_l_per_100km: float | None
+    avg_economy_mpg: float | None
+    co2_kg: float | None
+    idle_time_s: float | None
+    idle_fraction: float | None
+    max_speed_kph: float | None
+    avg_speed_kph: float | None
+    zero_to_60_mph_s: float | None
+    quarter_mile_s: float | None
+    quarter_mile_trap_kph: float | None
+
+
+class TripSummaryResponse(BaseModel):
+    """``GET /sessions/{id}/trip-summary`` (Task 1.5) — the ``trip_summary.json``
+    sidecar (Task 1.4), computed on demand from the stored session."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int
+    computed_at: str
+    session_id: str
+    summary: TripSummaryFields
+
+
 __all__ = [
     "CaptureStartRequest",
     "CaptureStopRequest",
@@ -152,6 +184,8 @@ __all__ = [
     "ReplayStartRequest",
     "SessionMetadataRequest",
     "SessionPinRequest",
+    "TripSummaryFields",
+    "TripSummaryResponse",
     "TuningRevertRequest",
     "TuningUpdateRequest",
     "UpsKeepaliveRequest",

@@ -36,6 +36,7 @@ import { SystemPanel } from "./SystemPanel";
 import { TestSessionPanel } from "./TestSessionPanel";
 import { TrainingPanel } from "./TrainingPanel";
 import { TrendsPanel } from "./TrendsPanel";
+import { TripPanel } from "./TripPanel";
 import { TuningPanel } from "./TuningPanel";
 import { TpmsPanel } from "./TpmsPanel";
 
@@ -89,13 +90,17 @@ export function Workbench({ active, onNavigate, data }: WorkbenchProps) {
         ))}
       </nav>
       <div className={`${responsiveGridClass} grid-cols-1`}>
-        {renderItem(active, data)}
+        {renderItem(active, data, onNavigate)}
       </div>
     </div>
   );
 }
 
-function renderItem(item: WorkbenchItem, d: DashboardData) {
+function renderItem(
+  item: WorkbenchItem,
+  d: DashboardData,
+  onNavigate: (item: WorkbenchItem) => void,
+) {
   switch (item) {
     case "diag-data":
       return <DataSourcesPanel channels={d.channels} status={d.status} />;
@@ -109,6 +114,7 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
           status={d.status}
           channels={d.channels}
           statusError={d.statusError}
+          onNavigate={onNavigate}
         />
       );
     case "diag-tpms":
@@ -145,6 +151,8 @@ function renderItem(item: WorkbenchItem, d: DashboardData) {
       return <AlarmsPanel channels={d.channels} />;
     case "live-builder":
       return <CustomDashboardPanel channels={d.channels} />;
+    case "live-trip":
+      return <TripPanel channels={d.channels} status={d.status} />;
     case "diag-dtc":
       return <DtcPanel />;
     case "diag-trends":

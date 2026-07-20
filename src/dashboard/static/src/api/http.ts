@@ -31,6 +31,7 @@ import type {
   TestProfilesResponse,
   TrainingRunsResponse,
   TrendsResponse,
+  TripSummaryResponse,
   TuningConfig,
   TuningEstimate,
   TuningResponse,
@@ -335,6 +336,15 @@ export function getDids(signal?: AbortSignal): Promise<DidMapResponse> {
  *  endpoint exists; this API surface is read-only by design. */
 export function getDtc(signal?: AbortSignal): Promise<DtcReportResponse> {
   return fetchJson("/obd/dtc", { signal });
+}
+
+/** `/sessions/{id}/trip-summary` is read-only + unauthenticated, like
+ *  `/obd/dtc` (Task 1.5) — computed on demand from the stored session. */
+export function getTripSummary(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<TripSummaryResponse> {
+  return fetchJson(`/sessions/${encodeURIComponent(sessionId)}/trip-summary`, { signal });
 }
 
 /** `/test-profiles` is read-only + unauthenticated (scanned YAML catalog);

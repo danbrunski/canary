@@ -8,7 +8,7 @@ import {
   definitionValueClass,
   placeholderClass,
 } from "../styles";
-import type { GpsStatus, PowerStatus, StatusResponse, TripStats } from "../types";
+import type { GpsStatus, PowerStatus, StatusResponse, WorkbenchItem } from "../types";
 import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
 import { type Tone, toneClass } from "../util/format";
 
@@ -20,6 +20,9 @@ interface SystemPanelProps {
   status: StatusResponse | null;
   channels: Map<string, ChannelSnapshot>;
   statusError: Error | null;
+  /** Jump to another Workbench panel — used by the "Trip" pointer row
+   *  (Task 1.6) since this panel no longer renders trip stats itself. */
+  onNavigate?: (item: WorkbenchItem) => void;
 }
 
 /** Pi soft-throttles around 80 °C; warn before then. */
@@ -93,17 +96,6 @@ const formatGpsSpeed = (kmh: number | null): string =>
 const formatHeading = (deg: number | null): string =>
   deg == null ? "—" : `${deg.toFixed(0)}° ${CARDINALS[Math.round(deg / 45) % 8]}`;
 
-const formatMiles = (t: TripStats): string =>
-  `${t.distance_miles.toFixed(1)} mi`;
-
-function formatDriveTime(seconds: number): string {
-  const total = Math.floor(seconds);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m ${total % 60}s`;
-}
-
 /** System health: storage, host vitals (Pi temp/CPU/memory), latest
  *  session, vehicle line, data freshness.
  *
@@ -115,7 +107,7 @@ function formatDriveTime(seconds: number): string {
  *  channels (shared `computeFreshness`) — if it's more than 10 s old,
  *  surface "stale" so the operator knows the daemon stopped emitting
  *  (vs. just "no anomalies"). */
-export function SystemPanel({ status, channels, statusError }: SystemPanelProps) {
+export function SystemPanel({ status, channels, statusError, onNavigate }: SystemPanelProps) {
   const freshness = computeFreshness(channels);
   const stale = freshness !== null && freshness > STALE_THRESHOLD_MS;
   const system = status?.health?.system ?? null;
@@ -123,7 +115,6 @@ export function SystemPanel({ status, channels, statusError }: SystemPanelProps)
   const powerNow = currentPower(power);
   const powerEvents = pastPowerEvents(power);
   const gps = status?.gps ?? null;
-  const trip = status?.trip ?? null;
   const gpsFixState = gps ? gpsFix(gps) : null;
   const blindModes = status?.detectors?.isolation_forest.blind_modes ?? [];
 
@@ -226,23 +217,22 @@ export function SystemPanel({ status, channels, statusError }: SystemPanelProps)
               </div>
             </>
           )}
-          {trip && (
-            <>
-              <div className={definitionRowClass}>
-                <dt className={definitionTermClass}>trip distance</dt>
-                <dd className={definitionValueClass}>
-                  {formatMiles(trip)}
-                  <span className="text-fg-dim"> ({trip.distance_km.toFixed(1)} km)</span>
-                </dd>
-              </div>
-              <div className={definitionRowClass}>
-                <dt className={definitionTermClass}>drive time</dt>
-                <dd className={definitionValueClass}>
-                  {formatDriveTime(trip.moving_time_seconds)}
-                </dd>
-              </div>
-            </>
-          )}
+          <div className={definitionRowClass}>
+            <dt className={definitionTermClass}>trip</dt>
+            <dd className={definitionValueClass}>
+              {onNavigate ? (
+                <button
+                  type="button"
+                  className="text-accent underline decoration-dotted underline-offset-2 hover:no-underline"
+                  onClick={() => onNavigate("live-trip")}
+                >
+                  see Trip panel →
+                </button>
+              ) : (
+                "see Trip panel (Live ▸ Trip)"
+              )}
+            </dd>
+          </div>
           <div className={definitionRowClass}>
             <dt className={definitionTermClass}>latest session</dt>
             <dd className={definitionValueClass}>{status.latest_session ?? "none yet"}</dd>

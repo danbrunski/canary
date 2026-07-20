@@ -73,6 +73,9 @@ from src.mcp_server.tools import (
     trends as trends_tool,
 )
 from src.mcp_server.tools import (
+    trip_summary as trip_summary_tool,
+)
+from src.mcp_server.tools import (
     tuning as tuning_tool,
 )
 from src.mcp_server.tools import (
@@ -302,6 +305,15 @@ def _register_read_tools(
         ``classify_session`` or run ``scripts/label_sessions.py``.
         """
         return await classification_tool.get_session_classification(client, session_id=session_id)
+
+    @mcp.tool()
+    async def get_trip_summary(session_id: str) -> dict[str, Any]:
+        """Trip-summary sidecar for one session: duration, distance, fuel
+        used, average economy, CO2, idle time/fraction, max/avg speed, 0-60
+        and 1/4-mile if a clean launch was captured. Computed on demand from
+        the stored session and cached after the first request.
+        """
+        return await trip_summary_tool.get_trip_summary(client, session_id=session_id)
 
     @mcp.tool()
     async def get_corpus_mode_summary() -> dict[str, Any]:

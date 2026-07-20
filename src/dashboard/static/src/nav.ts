@@ -13,6 +13,7 @@ export const NAV: NavGroupDef[] = [
       { id: "live-charts", label: "Charts", group: "live" },
       { id: "live-alarms", label: "Alarms", group: "live" },
       { id: "live-builder", label: "Builder", group: "live" },
+      { id: "live-trip", label: "Trip", group: "live" },
     ],
   },
   {

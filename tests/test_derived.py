@@ -126,12 +126,23 @@ def test_summarize_trip_no_accel_event() -> None:
     assert summary.distance_km is not None
 
 
+def test_summarize_trip_avg_speed_is_distance_over_duration() -> None:
+    # Constant 36 kph for 10 s (9 s of elapsed dt) -> distance = 36 * 9/3600 km.
+    df = _frame(10, **{"obd:SPEED": [36.0] * 10})
+    summary = summarize_trip(df, GASOLINE)
+    assert summary.avg_speed_kph is not None
+    assert summary.avg_speed_kph == pytest.approx(
+        summary.distance_km / (summary.duration_s / 3600.0), rel=1e-6
+    )
+
+
 def test_empty_and_missing_inputs_are_safe() -> None:
     empty = compute_derived_channels(pd.DataFrame(), GASOLINE)
     assert empty.empty
     summary = summarize_trip(pd.DataFrame(), GASOLINE)
     assert summary.duration_s == 0.0
     assert summary.distance_km is None
+    assert summary.avg_speed_kph is None
     # Frame with only an unrelated channel: no derived columns invented.
     df = _frame(3, **{"obd:COOLANT_TEMP": [80.0] * 3})
     out = compute_derived_channels(df, GASOLINE)

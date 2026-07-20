@@ -5,3 +5,4 @@ export * from "./types/behavior";
 export * from "./types/bindings";
 export * from "./types/control";
 export * from "./types/coverage";
+export * from "./types/tripSummary";

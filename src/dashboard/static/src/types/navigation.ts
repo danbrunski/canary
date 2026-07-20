@@ -12,6 +12,7 @@ export type WorkbenchItem =
   | "live-charts"
   | "live-alarms"
   | "live-builder"
+  | "live-trip"
   | "diag-anomalies"
   | "diag-data"
   | "diag-dtc"

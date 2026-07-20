@@ -168,3 +168,18 @@ def register_public_routes(
                 "stale": True,
             }
         return dtc_state.snapshot()
+
+    @app.get("/sessions/{session_id}/trip-summary")
+    def get_session_trip_summary(session_id: str) -> dict[str, Any]:
+        # Task 1.5: public read like /obd/dtc — no session-close hook exists
+        # yet (eval-longitudinal-and-dtc.md Phase 5.4), so this computes the
+        # trip_summary.json sidecar (Task 1.4) on first request and serves
+        # the cached copy after.
+        from src.control.trip_summary import get_trip_summary
+
+        result = get_trip_summary(config, session_id)
+        if result is None:
+            raise HTTPException(
+                status_code=404, detail=f"no trip summary for session {session_id!r}"
+            )
+        return result

@@ -434,6 +434,12 @@ class TripSummary:
     idle_time_s: float | None
     idle_fraction: float | None
     max_speed_kph: float | None
+    #: Trip average speed (distance / elapsed time), not average of the speed
+    #: trace — cheap from the same totals ``summarize_trip`` already has, and
+    #: the more standard "trip computer" definition. ``None`` whenever
+    #: ``distance_km`` is ``None`` (no speed channel) or the trip has zero
+    #: duration. Noted absent in review (Task 1.6).
+    avg_speed_kph: float | None
     zero_to_60_mph_s: float | None
     quarter_mile_s: float | None
     quarter_mile_trap_kph: float | None
@@ -511,6 +517,7 @@ def summarize_trip(wide: pd.DataFrame, vehicle: VehicleParameters) -> TripSummar
             idle_time_s=None,
             idle_fraction=None,
             max_speed_kph=None,
+            avg_speed_kph=None,
             zero_to_60_mph_s=None,
             quarter_mile_s=None,
             quarter_mile_trap_kph=None,
@@ -536,6 +543,9 @@ def summarize_trip(wide: pd.DataFrame, vehicle: VehicleParameters) -> TripSummar
         avg_mpg = (distance_km * _MI_PER_KM) / (fuel_used_l * _GAL_PER_L)
     speed = _series(enriched, "obd:SPEED", "decoded:VEHICLE_SPEED")
     max_speed = float(speed.max()) if speed is not None and speed.notna().any() else None
+    avg_speed = (
+        distance_km / (duration_s / 3600.0) if distance_km is not None and duration_s > 0 else None
+    )
     zero_60: float | None = None
     qm: float | None = None
     qm_trap: float | None = None
@@ -556,6 +566,7 @@ def summarize_trip(wide: pd.DataFrame, vehicle: VehicleParameters) -> TripSummar
             idle_time_s / duration_s if idle_time_s is not None and duration_s > 0 else None
         ),
         max_speed_kph=max_speed,
+        avg_speed_kph=avg_speed,
         zero_to_60_mph_s=zero_60,
         quarter_mile_s=qm,
         quarter_mile_trap_kph=qm_trap,

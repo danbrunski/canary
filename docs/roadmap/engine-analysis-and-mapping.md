@@ -109,25 +109,38 @@ the analysis UX.
 
 ### 1B. Trip summary surfaced
 
-- [ ] **1.4 — `summarize_trip` at session close.** Call
+- [x] **1.4 — `summarize_trip` at session close.** Call
   `summarize_trip` (`derived.py:379-517`) when a session ends (the
   trip-end hook being added in `eval-longitudinal-and-dtc.md` Phase
   5.4; until that lands, compute on demand from the stored session).
   Persist `trip_summary.json` into the session dir (atomic, like
-  `control.json`).
-- [ ] **1.5 — Endpoints + MCP.** `GET /sessions/{id}/trip-summary`
+  `control.json`). — landed: `get_or_compute_trip_summary`
+  (compute-once-then-cache, atomic tmp+rename sidecar, same pattern as
+  `classification.json`/`fingerprint.json`); confirmed Phase 5.4's
+  session-close hook genuinely doesn't exist yet, so on-demand-only is
+  correct, not a shortcut.
+- [x] **1.5 — Endpoints + MCP.** `GET /sessions/{id}/trip-summary`
   (public read) + `get_trip_summary` MCP tool; include the summary in
   the Phase-5 digest payload. Document in `docs/mcp-server.md` +
-  `docs/headless-api.md`.
-- [ ] **1.6 — Dashboard trip panel.** New `TripPanel.tsx` (nav group
+  `docs/headless-api.md`. — landed: public route + MCP tool exactly as
+  specified; Phase-5 digest integration skipped since that payload
+  doesn't exist yet. Also filled a pre-existing gap: `/obd/dtc` was
+  missing from `headless-api.md`'s REST table.
+- [x] **1.6 — Dashboard trip panel.** New `TripPanel.tsx` (nav group
   `live` or `data`): current-drive economy/fuel/CO₂/idle fraction from
   the streamed cumulative channels, plus last-drive summary from 1.5.
   Replace the odometer-only rows in `SystemPanel.tsx:96,125-126` with
   a pointer. Add `avg_speed` to `TripSummary` while in there (noted
-  absent in review).
-- [ ] **1.7 — CLI.** `scripts/trip_report.py <session>` printing the
+  absent in review). — landed: reads the live `derived:*` WS channels
+  directly (no re-fetch/recompute), verified against the exact channel
+  names `LiveFeatureSource` emits; `avg_speed_kph = distance/duration`
+  (the defensible trip-computer definition); `SystemPanel.tsx`'s
+  odometer rows + dead formatting helpers cleanly removed.
+- [x] **1.7 — CLI.** `scripts/trip_report.py <session>` printing the
   summary table for any stored session (works off 1.4's on-demand
-  path) — the "drive report" CLI that doesn't exist today.
+  path) — the "drive report" CLI that doesn't exist today. — landed:
+  works end-to-end against a real stored session; `--rebuild` verified
+  to genuinely force recomputation, not silently serve cached data.
 
 ## Phase 2 — Collect what the vehicle offers (Mode 01 + DIDs)
 

@@ -931,6 +931,49 @@ def test_get_obd_dtc_returns_the_cached_report_shape(
     assert later["stale"] is True
 
 
+# ---------------------------------------------------------------------------
+# GET /sessions/{id}/trip-summary (Task 1.5)
+# ---------------------------------------------------------------------------
+
+
+def test_get_session_trip_summary_returns_computed_shape(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    session_id = "2026-07-19T120000"
+    session = config.collection.storage_path / session_id
+    records = [
+        TelemetryRecord.obd(1_779_400_000.0 + i, "SPEED", 60.0, "km/h") for i in range(10)
+    ] + [TelemetryRecord.obd(1_779_400_000.0 + i, "RPM", 2000.0, "rpm") for i in range(10)]
+    write_records_to_parquet(records, session, max_rows=10_000)
+
+    app = create_app(config, anomalies_dir=anomalies_dir)
+    client = TestClient(app)
+    response = client.get(f"/sessions/{session_id}/trip-summary")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_id"] == session_id
+    assert body["summary"]["distance_km"] > 0
+    assert body["summary"]["avg_speed_kph"] is not None
+
+    # Sidecar was persisted (Task 1.4), and a second request reads it back
+    # unchanged rather than recomputing.
+    assert (session / "trip_summary.json").exists()
+    again = client.get(f"/sessions/{session_id}/trip-summary")
+    assert again.json() == body
+
+
+def test_get_session_trip_summary_404_for_missing_session(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    app = create_app(config, anomalies_dir=anomalies_dir)
+    client = TestClient(app)
+    response = client.get("/sessions/2099-01-01T000000/trip-summary")
+    assert response.status_code == 404
+
+
 def _event(timestamp: str, *, score: float) -> AnomalyEvent:
     return AnomalyEvent(
         timestamp=timestamp,
