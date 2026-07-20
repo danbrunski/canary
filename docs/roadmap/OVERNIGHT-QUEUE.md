@@ -61,11 +61,13 @@ operator history (ledger backfill facts)
   `29e25e3`); 2.5/2.6 trialed on a fixed-seed synthetic corpus (real
   multi-session corpus retrial noted as future work) — both keep
   current defaults.
-- [ ] **Q5 — ml-correctness-hardening.md Phase 5** (mode taxonomy:
+- [x] **Q5 — ml-correctness-hardening.md Phase 5** (mode taxonomy:
   close fall-throughs + dead zone, hysteresis). Then laptop-side
   `label_sessions.py --rebuild` + retrain + before/after mode-second
   comparison logged to the overnight log. Pi config/deploy half
-  blocked-overnight.
+  blocked-overnight. — 5.1-5.3 landed (commits `23413bb`, `9636926`,
+  `5b51c14`); a real 0-5km/h dead zone caught by review before landing.
+  Pi config sync + deploy blocked-overnight per this entry's own note.
 - [ ] **Q6 — ml-correctness-hardening.md Phase 4** (surface publish
   gates, schema sigma-floor + recipe migration, frozen 2D edges,
   bilinear serve, version-on-change, warmup per pre-made decision,
