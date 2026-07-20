@@ -116,7 +116,7 @@ style issues, and go first.
 
 ## Phase 2 — Big mechanical wins
 
-- [ ] **2.1 — Unify the sequence trainers.** `scripts/train_lstm.py`
+- [x] **2.1 — Unify the sequence trainers.** `scripts/train_lstm.py`
   (542) vs `train_tcn.py` (524): ~90% identical (`_print_evaluation`
   48 lines and `_resolve_training_sessions` 17 lines byte-identical;
   `train`/`build_dataset`/`parse_args`/`main` differ only in
@@ -133,7 +133,19 @@ style issues, and go first.
   calibrated-without-scaler guard (`:496-502`). Keep
   `train_lstm.py`/`train_tcn.py` as 5-line shims (retrain.py and the
   jobs allow-list import them: `scripts/retrain.py:43-45`,
-  `src/control/jobs.py`). ~850 lines removed.
+  `src/control/jobs.py`). ~850 lines removed. — landed: net -558
+  production lines (not the doc's ~850 estimate — real number, both
+  new shared-engine/unified-CLI files counted). One of the two "named
+  divergences" turned out to be stale by the time this task started —
+  the calibrated-without-scaler guard was already byte-identical on
+  both backbones (mirrored to TCN during this session's earlier
+  ml-hardening 3.x work), confirmed via `git show HEAD` on both
+  pre-refactor files — unified as shared behavior, not forced into an
+  asymmetric hook. The one genuine remaining divergence (LSTM's
+  `strict=False` decay-key tolerance) is preserved and verified to
+  NOT leak to TCN (a TCN load with a missing key still fails strict).
+  Both shims' full pre-refactor public API confirmed preserved
+  end-to-end; `retrain.py`/`sequence_bakeoff.py` needed zero changes.
 - [ ] **2.2 — MCP tool registration table.** *(Blocked on coordination
   — active work in `server.py` from another session.)* 34 of 48
   `@mcp.tool()` closures are pure delegation with docstrings
