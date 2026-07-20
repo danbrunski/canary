@@ -87,9 +87,12 @@ operator history (ledger backfill facts)
   dedupe state) caught by review and fixed before landing.
   `ml-correctness-hardening.md` is now fully checked off except
   Pi-deploy verifies (blocked-overnight throughout).
-- [ ] **Q8 — eval-longitudinal-and-dtc.md Phase 1** (DTC reader:
+- [x] **Q8 — eval-longitudinal-and-dtc.md Phase 1** (DTC reader:
   transport, scheduler, endpoint, events, sidecar, MCP tool, DtcPanel).
-  1.10 live verify blocked-overnight.
+  1.10 live verify blocked-overnight. — 1.1-1.9 landed (commits
+  `f578cc0`, `df87965`); caught + fixed two real bugs in core OBD
+  polling infra (DID-gating starvation, identifier=0 wire corruption).
+  1.10 blocked-overnight, needs the Pi/truck.
 - [ ] **Q9 — eval-longitudinal-and-dtc.md Phases 3 + 4** (vehicle
   ledger — 3.6 backfill blocked-overnight, scaffold the file with a
   template entry instead; fingerprints + frozen reference epoch —
