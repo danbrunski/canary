@@ -147,13 +147,19 @@ operator history (ledger backfill facts)
   entry on a genuine cal-ID change (not on first-ever profile probe).
   All live-truck verification correctly left blocked-overnight; code +
   fixture/mocked tests only.
-- [ ] **Q15 — engine-analysis-and-mapping.md Phases 4 + 5, doable
-  slice** (VE table, total-trim map, catalyst-efficiency index, O2
-  health stats, gear detection with ratio table derived from stored
-  sessions; duty cycle 4.2 blocked on the PW-scale capture; 4.8
-  blocked on IMU. Then the UX tier: binned endpoint + Explore panel,
-  historical session charting, A/B comparison, chart ergonomics,
-  GPX/KML + export UI).
+- [x] **Q15 — engine-analysis-and-mapping.md Phases 4 + 5, doable
+  slice** — landed (commits `e1fcf96`, `b843a3b`): 4.1/4.3/4.4/4.5/4.6
+  (VE table, total-trim map, catalyst-efficiency index, O2 health
+  stats, gear detection via a new per-vehicle-profile ratio table);
+  4.2 and 4.8 confirmed still blocked on their stated dependencies,
+  correctly left unchecked (4.9 UI panel deferred, not part of this
+  doable slice). Phase 5 UX tier all landed: binned endpoint + Explore
+  panel, historical session charting (also fixed a real companion-app
+  gap), A/B comparison (cell-matching against the fitted surface's own
+  bin edges, verified genuinely comparable across sessions), chart
+  ergonomics (one real bug caught by review: the shared-Y-axis logic
+  shipped without a reachable UI toggle — fixed same task), GPX/KML +
+  export UI.
 - [ ] **Q16 — refactoring.md Phases 3 + 4** (Detector protocol — safe
   now that Q7 changed persistence semantics; FE god-panel splits +
   ResourceGate/TokenField; JsonlStore; isolation_forest split +
