@@ -446,9 +446,13 @@ so").
   (`src/mcp_server/parquet_query.py:93`) — **fix the standing bug**: the
   bare `rglob` sweeps `_replay-*`/`_archive` Parquet into query results;
   filter underscore-prefixed dirs and use the catalog for session/date
-  pushdown. (This supersedes item 3.5 of `mcp-and-power-hardening.md`
-  — **do not edit that doc**, another session owns it; note the
-  supersession in the commit message only.) (b) `list_sessions`
+  pushdown. **Keep an explicit-name escape hatch**: a query whose
+  session scope names an underscore-prefixed session explicitly must
+  still resolve it — `engine-tuning-support.md` Phase 2 analyzes
+  `_tuning-*` sessions through this layer; only default/unscoped
+  sweeps exclude them. (This supersedes item 3.5 of
+  `mcp-and-power-hardening.md` — **do not edit that doc**, another
+  session owns it; note the supersession in the commit message only.) (b) `list_sessions`
   control listing.
   (c) Phase 4 trend queries read fingerprints from the catalog instead
   of globbing sidecars.
