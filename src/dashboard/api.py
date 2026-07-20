@@ -46,6 +46,7 @@ from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.feedback import FeedbackStore
 from src.alerts.tuning import AlertTuner
 from src.analysis.gps_tracker import GpsTracker
+from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
@@ -115,6 +116,7 @@ def create_app(
     audit_logger: ControlAuditLogger | None = None,
     control_token: str | None = None,
     feedback_store: FeedbackStore | None = None,
+    vehicle_ledger_store: VehicleLedgerStore | None = None,
     alert_tuner: AlertTuner | None = None,
     health_monitor: HealthMonitor | None = None,
     behavior_live: BehaviorLiveState | None = None,
@@ -201,6 +203,7 @@ def create_app(
         control_bus=control_bus,
         audit_logger=audit_logger,
         feedback_store=feedback_store,
+        vehicle_ledger_store=vehicle_ledger_store,
         alert_tuner=alert_tuner,
         sequence_detector_controller=sequence_detector_controller,
         ups_status_path=ups_status_path,

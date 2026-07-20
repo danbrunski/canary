@@ -29,11 +29,12 @@ import argparse
 import logging
 import sys
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from src.analysis.refit import Recipe, default_recipes, refit_all
 from src.analysis.session_classifier import read_classification
+from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.config import CanaryConfig
 from src.decode.behavior_models import (
     dump_behavior_models,
@@ -95,6 +96,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         dest="use_all_sessions",
         action="store_true",
         help="Override --days and use every session under --sessions-root.",
+    )
+    parser.add_argument(
+        "--since-boundary",
+        action="store_true",
+        help=(
+            "Exclude sessions captured before the latest corpus_boundary event in "
+            "the vehicle ledger (Task 3.5) — e.g. don't blend pre/post-mod behavior "
+            "into one corpus. No-op if no boundary event is recorded."
+        ),
     )
     parser.add_argument(
         "--config",
@@ -169,6 +179,25 @@ def _filter_sessions_by_age(sessions: list[Path], days: int, now: datetime) -> l
     return kept
 
 
+def _filter_sessions_by_boundary(sessions: list[Path], boundary: date) -> list[Path]:
+    """Keep session dirs whose timestamped name is on/after ``boundary`` (Task 3.5).
+
+    Same ``YYYY-MM-DDTHHMMSS`` naming convention as
+    :func:`_filter_sessions_by_age`; non-conforming names are kept for the
+    same reason (over-include rather than silently drop).
+    """
+    kept: list[Path] = []
+    for session in sessions:
+        try:
+            started = datetime.strptime(session.name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
+        except ValueError:
+            kept.append(session)  # unknown format → keep
+            continue
+        if started.date() >= boundary:
+            kept.append(session)
+    return kept
+
+
 def _select_recipes(catalog: list[Recipe], names: list[str] | None) -> list[Recipe]:
     if names is None:
         return catalog
@@ -199,6 +228,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         sessions = discover_sessions(sessions_root)
         if not args.use_all_sessions:
             sessions = _filter_sessions_by_age(sessions, args.days, datetime.now(UTC))
+    if args.since_boundary:
+        boundary = VehicleLedgerStore(scoped.daemon.vehicle_ledger).latest_boundary()
+        if boundary is not None:
+            before = len(sessions)
+            sessions = _filter_sessions_by_boundary(sessions, boundary.occurred_at)
+            log.info(
+                "--since-boundary applied",
+                extra={
+                    "boundary_event": boundary.title,
+                    "boundary_occurred_at": str(boundary.occurred_at),
+                    "sessions_before": before,
+                    "sessions_after": len(sessions),
+                },
+            )
     if not sessions:
         print(
             f"error: no sessions found under {sessions_root} within --days {args.days}. "

@@ -115,6 +115,7 @@ async def run_daemon(
             gps_tracker=components.gps_tracker,
             dtc_state=components.dtc_state,
             dtc_emitter=components.emitter,
+            vehicle_ledger=components.vehicle_ledger,
             active_session_path=lambda: storage_writer.paths.root,
             storage_path=config.collection.storage_path,
             storage_warning_mb=config.collection.storage_warning_mb,

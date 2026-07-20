@@ -40,6 +40,7 @@ def companion_config(base_config: CanaryConfig, library: CanaryLibrary) -> Canar
             "jobs_dir": library.jobs_dir,
             "audit_log": control_dir / "audit.jsonl",
             "feedback_log": control_dir / "anomaly_feedback.jsonl",
+            "vehicle_ledger": control_dir / "vehicle_ledger.jsonl",
             "training_ledger": library.training_runs_dir / "training_runs.jsonl",
             "tuning_config": control_dir / "tuning.yaml",
             "tuning_audit": control_dir / "tuning_audit.jsonl",

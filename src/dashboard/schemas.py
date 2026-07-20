@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -63,6 +64,18 @@ class FeedbackRequest(_ControlRequest):
     reason: str | None = None
     driving_context: dict[str, Any] = Field(default_factory=dict)
     labeled_by: str | None = None
+
+
+class VehicleEventRequest(_ControlRequest):
+    """New vehicle maintenance/intervention ledger entry (Task 3.3)."""
+
+    occurred_at: date
+    kind: str
+    title: str
+    details: str = ""
+    odometer_km: float | None = None
+    affected_channels: list[str] = Field(default_factory=list)
+    corpus_boundary: bool = False
 
 
 class ProfileNameUpdateRequest(_ControlRequest):

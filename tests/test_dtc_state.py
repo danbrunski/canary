@@ -8,6 +8,7 @@ from pathlib import Path
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
+from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.control.dtc_state import SIDECAR_FILENAME, DtcState
 from src.telemetry import TelemetryRecord
 
@@ -285,3 +286,69 @@ def test_new_session_does_not_inherit_the_previous_sessions_seen_codes(tmp_path:
     payload_b = json.loads((session_b / SIDECAR_FILENAME).read_text())
     assert [c["code"] for c in payload_a["stored"]] == ["P0420"]
     assert [c["code"] for c in payload_b["stored"]] == ["P0420"]
+
+
+# ---------------------------------------------------------------------------
+# 3.4 — new stored DTC auto-appends a vehicle-ledger entry
+# ---------------------------------------------------------------------------
+
+
+def test_new_stored_dtc_appends_a_vehicle_ledger_event(tmp_path: Path) -> None:
+    state = DtcState()
+    ledger = VehicleLedgerStore(tmp_path / "vehicle_ledger.jsonl")
+    state.observe(
+        _reading("DTC_STORED", "P0420"),
+        session_id="s1",
+        session_dir=None,
+        vehicle_ledger=ledger,
+    )
+    records = ledger.records()
+    assert len(records) == 1
+    assert records[0].kind == "dtc"
+    assert "P0420" in records[0].title
+
+
+def test_unchanged_stored_dtc_does_not_reappend(tmp_path: Path) -> None:
+    state = DtcState()
+    ledger = VehicleLedgerStore(tmp_path / "vehicle_ledger.jsonl")
+    state.observe(
+        _reading("DTC_STORED", "P0420"), session_id="s1", session_dir=None, vehicle_ledger=ledger
+    )
+    state.observe(
+        _reading("DTC_STORED", "P0420"), session_id="s1", session_dir=None, vehicle_ledger=ledger
+    )
+    assert len(ledger.records()) == 1
+
+
+def test_pending_only_dtc_does_not_append_to_ledger(tmp_path: Path) -> None:
+    """Only a *stored* sighting writes the ledger entry (Task 3.4) — a
+    pending code that never confirms shouldn't leave a permanent trail."""
+    state = DtcState()
+    ledger = VehicleLedgerStore(tmp_path / "vehicle_ledger.jsonl")
+    state.observe(
+        _reading("DTC_PENDING", "P0420"), session_id="s1", session_dir=None, vehicle_ledger=ledger
+    )
+    assert ledger.records() == []
+
+
+def test_pending_to_stored_escalation_appends_ledger_entry(tmp_path: Path) -> None:
+    state = DtcState()
+    ledger = VehicleLedgerStore(tmp_path / "vehicle_ledger.jsonl")
+    state.observe(
+        _reading("DTC_PENDING", "P0420"), session_id="s1", session_dir=None, vehicle_ledger=ledger
+    )
+    assert ledger.records() == []
+    state.observe(
+        _reading("DTC_STORED", "P0420"), session_id="s1", session_dir=None, vehicle_ledger=ledger
+    )
+    records = ledger.records()
+    assert len(records) == 1
+    assert records[0].kind == "dtc"
+
+
+def test_no_vehicle_ledger_configured_is_a_no_op(tmp_path: Path) -> None:
+    """``vehicle_ledger=None`` (the default) doesn't raise — outcome
+    tracking is best-effort, not load-bearing for the DTC diff/emit path."""
+    state = DtcState()
+    state.observe(_reading("DTC_STORED", "P0420"), session_id="s1", session_dir=None)
+    assert state.snapshot()["stored"]

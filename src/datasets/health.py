@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -232,12 +233,24 @@ def _session_tags(session_dir: Path) -> list[str]:
     return sorted({str(t["label"]) for t in load_tags(paths.tags)})
 
 
+def _session_started_date(session_dir: Path) -> date | None:
+    """Parse the ``YYYY-MM-DDTHHMMSS`` session-dir naming convention (matches
+    ``scripts/refit_behavior_models.py``'s ``_filter_sessions_by_age``).
+    ``None`` for a non-conforming name (e.g. a manual import) — callers treat
+    that as "can't place it in time", not as before/after the boundary."""
+    try:
+        return datetime.strptime(session_dir.name, "%Y-%m-%dT%H%M%S").date()
+    except ValueError:
+        return None
+
+
 def analyze_corpus(
     session_dirs: list[Path],
     config: CanaryConfig,
     *,
     min_sessions: int = 3,
     min_total_rows: int = 1000,
+    corpus_boundary: date | None = None,
 ) -> CorpusHealth:
     """Aggregate health + a go/no-go readiness verdict.
 
@@ -245,6 +258,13 @@ def analyze_corpus(
     a model trained on a thin/biased corpus that looks fine is the exact
     failure 6.23 exists to prevent. Every blocking condition is listed in
     ``reasons`` so the operator knows what to capture next.
+
+    ``corpus_boundary`` (Task 3.5) is the latest ``corpus_boundary`` vehicle-
+    ledger event's ``occurred_at``, if any. When it's set and ``session_dirs``
+    contains sessions both before and on/after it, a note is appended to
+    ``warnings`` flagging the corpus as bisected — surfacing it rather than
+    silently filtering, since only ``--since-boundary`` opts a caller into
+    dropping the older sessions.
     """
     healths = [analyze_session(d, config) for d in session_dirs]
     usable = [h for h in healths if h.row_count > 0]
@@ -279,6 +299,19 @@ def analyze_corpus(
     warnings: list[str] = []
     if not usable:
         warnings.append("no usable sessions on disk")
+
+    if corpus_boundary is not None:
+        started = [_session_started_date(d) for d in session_dirs]
+        known = [d for d in started if d is not None]
+        older = sum(1 for d in known if d < corpus_boundary)
+        newer_or_on = sum(1 for d in known if d >= corpus_boundary)
+        if older and newer_or_on:
+            warnings.append(
+                f"corpus bisected by a vehicle-ledger boundary event on "
+                f"{corpus_boundary.isoformat()}: {older} session(s) predate it, "
+                f"{newer_or_on} don't — pass --since-boundary to train only on "
+                "post-boundary sessions"
+            )
 
     return CorpusHealth(
         sessions=healths,

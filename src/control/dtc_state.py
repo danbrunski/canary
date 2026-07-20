@@ -28,6 +28,7 @@ from src.telemetry import TelemetryRecord
 
 if TYPE_CHECKING:
     from src.alerts.emitter import AnomalyEventEmitter
+    from src.analysis.vehicle_ledger import VehicleLedgerStore
 
 SIDECAR_FILENAME = "dtc.json"
 
@@ -82,6 +83,7 @@ class DtcState:
         session_id: str | None,
         session_dir: Path | None,
         emitter: AnomalyEventEmitter | None = None,
+        vehicle_ledger: VehicleLedgerStore | None = None,
     ) -> None:
         """Feed one decoded OBD reading; a no-op for anything but the DTC channels."""
         if record.source != "obd":
@@ -96,7 +98,12 @@ class DtcState:
             self._mil_on = bool(record.value) if record.value is not None else None
         else:
             return
-        self._rebuild(session_id=session_id, session_dir=session_dir, emitter=emitter)
+        self._rebuild(
+            session_id=session_id,
+            session_dir=session_dir,
+            emitter=emitter,
+            vehicle_ledger=vehicle_ledger,
+        )
 
     def _rebuild(
         self,
@@ -104,6 +111,7 @@ class DtcState:
         session_id: str | None,
         session_dir: Path | None,
         emitter: AnomalyEventEmitter | None,
+        vehicle_ledger: VehicleLedgerStore | None = None,
     ) -> None:
         if session_id != self._session_id:
             # Task 1.6/1.7: a new drive starts with a clean "already seen"
@@ -124,7 +132,12 @@ class DtcState:
         )
         self._report = report
 
-        self._diff_and_emit(timestamp=report.captured_at, session_id=session_id, emitter=emitter)
+        self._diff_and_emit(
+            timestamp=report.captured_at,
+            session_id=session_id,
+            emitter=emitter,
+            vehicle_ledger=vehicle_ledger,
+        )
 
         signature = (
             tuple(sorted(self._stored)),
@@ -142,10 +155,16 @@ class DtcState:
         timestamp: str,
         session_id: str | None,
         emitter: AnomalyEventEmitter | None,
+        vehicle_ledger: VehicleLedgerStore | None = None,
     ) -> None:
         """Emit new/escalated codes (Task 1.6): straight to the emitter, no
         persistence gating — a DTC is already ECM-debounced by the time it
         shows up in a poll response.
+
+        A new *stored* code also auto-appends a ``kind="dtc"`` vehicle-ledger
+        entry (Task 3.4) — outcome tracking starts itself, no operator
+        action needed. Pending/permanent-only sightings don't: a pending
+        code that never confirms shouldn't leave a permanent ledger trail.
         """
         for status, codes in (
             ("pending", self._pending),
@@ -156,8 +175,8 @@ class DtcState:
                 prev = self._seen.setdefault(code, set())
                 if status not in prev:
                     kind = _classify_kind(status, prev)
+                    described = describe_dtc(code)
                     if emitter is not None:
-                        described = describe_dtc(code)
                         emitter.emit_dtc(
                             code=code,
                             description=described.description,
@@ -167,6 +186,21 @@ class DtcState:
                             timestamp=timestamp,
                             mil_on=self._mil_on,
                             session=session_id,
+                        )
+                    if status == "stored" and vehicle_ledger is not None:
+                        try:
+                            occurred_at = datetime.fromisoformat(timestamp).date()
+                        except ValueError:
+                            occurred_at = datetime.now(UTC).date()
+                        vehicle_ledger.record(
+                            occurred_at=occurred_at,
+                            kind="dtc",
+                            title=f"DTC {code} stored: {described.description}",
+                            details=(
+                                f"system={described.system} mil_on={self._mil_on} "
+                                f"session={session_id}"
+                            ),
+                            affected_channels=[_STORED_CHANNEL],
                         )
                 prev.add(status)
 

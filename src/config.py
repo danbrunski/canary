@@ -435,6 +435,10 @@ class DaemonConfig(_Strict):
     jobs_dir: Path = Path("data/control/jobs")
     audit_log: Path = Path("data/control/audit.jsonl")
     feedback_log: Path = Path("data/control/anomaly_feedback.jsonl")
+    #: Vehicle maintenance / intervention ledger (Task 3.1,
+    #: eval-longitudinal-and-dtc.md) — what physically happened to the
+    #: truck, append-only, profile-scoped like the sibling paths below.
+    vehicle_ledger: Path = Path("data/control/vehicle_ledger.jsonl")
     training_ledger: Path = Path("data/control/training_runs.jsonl")
     tuning_config: Path = Path("data/control/tuning.yaml")
     tuning_audit: Path = Path("data/control/tuning_audit.jsonl")

@@ -16,6 +16,7 @@ from src.alerts.tuning import (
     load_tuning_version,
     save_tuning_config,
 )
+from src.analysis.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
@@ -65,6 +66,7 @@ from src.dashboard.schemas import (
     TuningRevertRequest,
     TuningUpdateRequest,
     UpsKeepaliveRequest,
+    VehicleEventRequest,
 )
 from src.dashboard.security import _client_is_loopback, _require_control_auth
 from src.dashboard.status import _derive_vehicle_state, _resolve_latest_session
@@ -95,6 +97,7 @@ def register_control_routes(
     audit_logger: ControlAuditLogger | None,
     feedback_store: FeedbackStore | None,
     alert_tuner: AlertTuner | None,
+    vehicle_ledger_store: VehicleLedgerStore | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
@@ -632,6 +635,43 @@ def register_control_routes(
         publish_control_event("anomaly.feedback", "ok", fb.to_dict())
         return {"feedback": fb.to_dict()}
 
+    def _vehicle_ledger() -> VehicleLedgerStore:
+        if vehicle_ledger_store is None:
+            raise HTTPException(status_code=503, detail="vehicle ledger API is not available")
+        return vehicle_ledger_store
+
+    @app.get("/control/vehicle-ledger")
+    def get_vehicle_ledger(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """Vehicle maintenance/intervention ledger (Task 3.3), oldest-first."""
+        store = _vehicle_ledger()
+        records = [e.to_dict() for e in store.records()]
+        return {"events": records, "count": len(records)}
+
+    @app.post("/control/vehicle-ledger", status_code=201)
+    def post_vehicle_ledger(
+        request: VehicleEventRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        store = _vehicle_ledger()
+        if request.kind not in VEHICLE_EVENT_KINDS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"kind must be one of {sorted(VEHICLE_EVENT_KINDS)}",
+            )
+        event = store.record(
+            occurred_at=request.occurred_at,
+            kind=request.kind,  # type: ignore[arg-type]  # checked above
+            title=request.title,
+            details=request.details,
+            odometer_km=request.odometer_km,
+            affected_channels=request.affected_channels,
+            corpus_boundary=request.corpus_boundary,
+        )
+        publish_control_event("vehicle_ledger.record", "ok", event.to_dict())
+        return {"event": event.to_dict()}
+
     def _tuner() -> AlertTuner:
         if alert_tuner is None:
             raise HTTPException(status_code=503, detail="tuning API is not available")
@@ -664,7 +704,14 @@ def register_control_routes(
 
         storage = config.collection.storage_path
         sessions = discover_sessions(storage) if storage.exists() else []
-        return analyze_corpus(sessions, config).to_dict()
+        boundary_event = (
+            vehicle_ledger_store.latest_boundary() if vehicle_ledger_store is not None else None
+        )
+        return analyze_corpus(
+            sessions,
+            config,
+            corpus_boundary=boundary_event.occurred_at if boundary_event is not None else None,
+        ).to_dict()
 
     @app.get("/control/tuning")
     def get_tuning(

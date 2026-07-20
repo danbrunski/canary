@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -221,6 +222,55 @@ def test_retrain_sequence_model_tcn(
     assert rc == 0
     assert calls == ["tcn"]
     assert "tcn_autoencoder" in capsys.readouterr().out
+
+
+def test_retrain_since_boundary_excludes_older_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task 3.5: --since-boundary drops sessions older than the latest
+    corpus_boundary event; without the flag, nothing is filtered."""
+    import yaml
+
+    from src.analysis.vehicle_ledger import VehicleLedgerStore
+
+    ledger_path = tmp_path / "vehicle_ledger.jsonl"
+    VehicleLedgerStore(ledger_path).record(
+        occurred_at=date(2026, 6, 1), kind="mod", title="Intake swap", corpus_boundary=True
+    )
+
+    data = yaml.safe_load(EXAMPLE_YAML.read_text())
+    data["daemon"] = {"vehicle_ledger": str(ledger_path)}
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(yaml.safe_dump(data))
+
+    old_session = tmp_path / "sessions" / "2026-05-01T120000"
+    new_session = tmp_path / "sessions" / "2026-06-15T120000"
+    old_session.mkdir(parents=True)
+    new_session.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "discover_sessions", lambda _root: [old_session, new_session])
+
+    seen: dict[str, list[Path]] = {}
+
+    def _if_train(sessions_arg: list[Path], *_a: object, **_kwargs: object) -> None:
+        seen["sessions"] = list(sessions_arg)
+
+    monkeypatch.setattr(retrain.if_trainer, "train", _if_train)
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+
+    rc = retrain.main(
+        [
+            "--config",
+            str(cfg_path),
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--since-boundary",
+            "--skip-sequence",
+            "--no-feedback-policy",
+        ]
+    )
+    assert rc == 0
+    assert seen["sessions"] == [new_session]
 
 
 def test_retrain_both_skip_returns_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

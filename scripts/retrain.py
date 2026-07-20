@@ -46,9 +46,13 @@ import detector_benchmark  # noqa: E402
 import train_anomaly_model as if_trainer  # noqa: E402
 import train_lstm as lstm_trainer  # noqa: E402
 import train_tcn as tcn_trainer  # noqa: E402
-from refit_behavior_models import _filter_sessions_by_age  # noqa: E402
+from refit_behavior_models import (  # noqa: E402
+    _filter_sessions_by_age,
+    _filter_sessions_by_boundary,
+)
 
 from src.alerts.feedback import DEFAULT_FEEDBACK_PATH, FeedbackStore  # noqa: E402
+from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.models.isolation_forest import load_isolation_forest_model  # noqa: E402
@@ -196,6 +200,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         dest="use_all_sessions",
         action="store_true",
         help="Override --days; use every session under --sessions-root.",
+    )
+    parser.add_argument(
+        "--since-boundary",
+        action="store_true",
+        help=(
+            "Exclude sessions captured before the latest corpus_boundary event in "
+            "the vehicle ledger (Task 3.5) — e.g. don't blend pre/post-mod behavior "
+            "into one corpus. No-op if no boundary event is recorded."
+        ),
     )
     parser.add_argument(
         "--config",
@@ -392,6 +405,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         sessions = discover_sessions(args.sessions_root)
         if not args.use_all_sessions:
             sessions = _filter_sessions_by_age(sessions, args.days, datetime.now(UTC))
+    if args.since_boundary:
+        boundary = VehicleLedgerStore(config.daemon.vehicle_ledger).latest_boundary()
+        if boundary is not None:
+            before = len(sessions)
+            sessions = _filter_sessions_by_boundary(sessions, boundary.occurred_at)
+            log.info(
+                "--since-boundary applied",
+                extra={
+                    "boundary_event": boundary.title,
+                    "boundary_occurred_at": str(boundary.occurred_at),
+                    "sessions_before": before,
+                    "sessions_after": len(sessions),
+                },
+            )
     if not sessions:
         print(
             f"error: no sessions under {args.sessions_root} within --days {args.days}. "

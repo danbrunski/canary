@@ -1,0 +1,174 @@
+"""Vehicle maintenance / intervention ledger (Task 3.1, eval-longitudinal-and-dtc.md).
+
+An append-only, profile-scoped record of what physically happened to the
+truck — maintenance, mods, repairs, observations, and auto-appended DTC
+sightings (Task 3.4) — so anomalies can later be scored against outcomes
+("did the misfire alerts stop after the plug change?") and training
+corpora can be segmented at intervention boundaries (Task 3.5): a mod or
+repair that changes what "normal" looks like shouldn't have pre- and
+post-change sessions blended into one corpus without the operator opting
+in.
+
+Storage mirrors :class:`~src.alerts.feedback.FeedbackStore`: append-only
+JSONL under ``data/control/`` (gitignored, profile-scoped via
+``src.profiles.scope_config``). Unlike feedback verdicts (keyed on the
+anomaly they label), each ledger line is its own event — a correction is
+just another append with the same ``id``; :meth:`VehicleLedgerStore.records`
+collapses to the latest line per id while :meth:`VehicleLedgerStore.raw_records`
+preserves the full chain, matching the training ledger's provenance
+convention.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from collections.abc import Iterator
+from datetime import UTC, date, datetime
+from pathlib import Path
+from typing import Any, Literal
+from uuid import uuid4
+
+from pydantic import BaseModel, ConfigDict, Field
+
+log = logging.getLogger(__name__)
+
+__all__ = [
+    "DEFAULT_VEHICLE_LEDGER_PATH",
+    "VEHICLE_EVENT_KINDS",
+    "VehicleEvent",
+    "VehicleEventKind",
+    "VehicleLedgerStore",
+]
+
+DEFAULT_VEHICLE_LEDGER_PATH = Path("data/control/vehicle_ledger.jsonl")
+
+VehicleEventKind = Literal["maintenance", "mod", "repair", "observation", "dtc"]
+#: The valid kinds, as a set, for request validation at the API edge.
+VEHICLE_EVENT_KINDS: frozenset[str] = frozenset(
+    {"maintenance", "mod", "repair", "observation", "dtc"}
+)
+
+
+class VehicleEvent(BaseModel):
+    """One thing that physically happened to the vehicle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    recorded_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    #: Date the event actually happened (may predate ``recorded_at`` for a
+    #: late-entered record).
+    occurred_at: date
+    odometer_km: float | None = None
+    kind: VehicleEventKind
+    title: str
+    details: str = ""
+    #: Channels this event is expected to change the behavior of (e.g. a
+    #: coolant-thermostat swap → ``["obd:COOLANT_TEMP"]``). Free-form, not
+    #: validated against ``bindings.yaml`` — narrows what a later "did the
+    #: anomalies stop" review needs to look at.
+    affected_channels: list[str] = Field(default_factory=list)
+    #: Does "normal" change at this event? A mod or repair that shifts
+    #: expected sensor behavior should bisect the training corpus (Task 3.5);
+    #: routine maintenance and observations usually don't.
+    corpus_boundary: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump(mode="json")
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> VehicleEvent:
+        return cls.model_validate(data)
+
+
+class VehicleLedgerStore:
+    """Append-only JSONL store of vehicle events.
+
+    Not thread-safe on its own; callers serialize writes the same way the
+    daemon does the other ledgers. Reads tolerate a torn final line.
+    """
+
+    def __init__(self, path: Path = DEFAULT_VEHICLE_LEDGER_PATH) -> None:
+        self.path = Path(path)
+
+    def append(self, event: VehicleEvent) -> VehicleEvent:
+        """Append one event (flushed; crash loses at most the last line)."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a") as handle:
+            handle.write(json.dumps(event.to_dict(), sort_keys=True) + "\n")
+            handle.flush()
+        return event
+
+    def record(
+        self,
+        *,
+        occurred_at: date,
+        kind: VehicleEventKind,
+        title: str,
+        details: str = "",
+        odometer_km: float | None = None,
+        affected_channels: list[str] | None = None,
+        corpus_boundary: bool = False,
+        event_id: str | None = None,
+    ) -> VehicleEvent:
+        """Build and append a :class:`VehicleEvent`. Convenience wrapper
+        around :meth:`append` for the common "new event" case."""
+        kwargs: dict[str, Any] = {
+            "occurred_at": occurred_at,
+            "kind": kind,
+            "title": title,
+            "details": details,
+            "odometer_km": odometer_km,
+            "affected_channels": affected_channels or [],
+            "corpus_boundary": corpus_boundary,
+        }
+        if event_id is not None:
+            kwargs["id"] = event_id
+        return self.append(VehicleEvent(**kwargs))
+
+    def _iter_raw(self) -> Iterator[VehicleEvent]:
+        if not self.path.exists():
+            return
+        with self.path.open() as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    yield VehicleEvent.from_dict(json.loads(line))
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+    def raw_records(self) -> list[VehicleEvent]:
+        """Every appended line in write order (full correction chain)."""
+        return list(self._iter_raw())
+
+    def records(self) -> list[VehicleEvent]:
+        """Latest event per id, ordered by ``occurred_at`` (oldest first).
+
+        Collapsing the append-only log: a later line for the same id wins
+        (a correction), but the events themselves are ordered by when they
+        physically happened, not when they were recorded.
+        """
+        latest: dict[str, VehicleEvent] = {}
+        for event in self._iter_raw():
+            latest[event.id] = event
+        return sorted(latest.values(), key=lambda e: (e.occurred_at, e.recorded_at))
+
+    def get(self, event_id: str) -> VehicleEvent | None:
+        """Latest event for ``event_id``, or ``None`` if unknown."""
+        latest: VehicleEvent | None = None
+        for event in self._iter_raw():
+            if event.id == event_id:
+                latest = event
+        return latest
+
+    def latest_boundary(self) -> VehicleEvent | None:
+        """Most recent ``corpus_boundary`` event by ``occurred_at``, if any.
+
+        Feeds Task 3.5's ``--since-boundary`` corpus filter and the
+        dataset-health bisection note.
+        """
+        boundaries = [e for e in self.records() if e.corpus_boundary]
+        return boundaries[-1] if boundaries else None

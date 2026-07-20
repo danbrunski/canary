@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker
+from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.collection.queueing import QueueDepthMonitor
 from src.control.dtc_state import DtcState
 from src.dashboard.broadcast import Broadcaster
@@ -260,6 +261,7 @@ async def run_dtc_sink(
     stop_event: asyncio.Event,
     *,
     emitter: AnomalyEventEmitter | None = None,
+    vehicle_ledger: VehicleLedgerStore | None = None,
     active_session_path: Callable[[], Path] | None = None,
     poll_interval: float = 0.5,
     queue_warning_fraction: float = 0.8,
@@ -289,6 +291,7 @@ async def run_dtc_sink(
                 session_id=session_dir.name if session_dir is not None else None,
                 session_dir=session_dir,
                 emitter=emitter,
+                vehicle_ledger=vehicle_ledger,
             )
         except Exception as exc:  # noqa: BLE001 — DTC bookkeeping is best-effort
             _note_error(health_monitor, "dtc", exc)
@@ -309,6 +312,7 @@ async def drain_queue_with_broadcast(
     gps_tracker: GpsTracker | None = None,
     dtc_state: DtcState | None = None,
     dtc_emitter: AnomalyEventEmitter | None = None,
+    vehicle_ledger: VehicleLedgerStore | None = None,
     active_session_path: Callable[[], Path] | None = None,
     poll_interval: float = 0.5,
     storage_path: Path | None = None,
@@ -402,6 +406,7 @@ async def drain_queue_with_broadcast(
                     dtc_state,
                     stop_event,
                     emitter=dtc_emitter,
+                    vehicle_ledger=vehicle_ledger,
                     active_session_path=active_session_path,
                     poll_interval=poll_interval,
                     queue_warning_fraction=queue_warning_fraction,

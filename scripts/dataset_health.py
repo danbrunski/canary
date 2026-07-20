@@ -19,6 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
 from src.datasets.health import analyze_corpus  # noqa: E402
 from src.log import configure_logging  # noqa: E402
@@ -42,8 +43,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     config = CanaryConfig.from_yaml(args.config)
     root = args.sessions_root or config.collection.storage_path
     sessions = discover_sessions(root) if root.exists() else []
+    boundary_event = VehicleLedgerStore(config.daemon.vehicle_ledger).latest_boundary()
     report = analyze_corpus(
-        sessions, config, min_sessions=args.min_sessions, min_total_rows=args.min_rows
+        sessions,
+        config,
+        min_sessions=args.min_sessions,
+        min_total_rows=args.min_rows,
+        corpus_boundary=boundary_event.occurred_at if boundary_event is not None else None,
     )
 
     if args.json:
@@ -56,6 +62,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"  total rows:     {report.total_rows}")
     print(f"  total duration: {report.total_duration_seconds:.0f}s")
     print(f"  mode coverage:  {report.mode_coverage or '—'}")
+    for warning in report.warnings:
+        print(f"  ⚠ {warning}")
     print()
     for s in report.sessions:
         flag = "📌" if s.pinned else ("★" if s.training_candidate else " ")

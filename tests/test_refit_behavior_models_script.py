@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -64,6 +64,27 @@ def test_filter_disabled_by_days_zero(tmp_path: Path) -> None:
         s.mkdir()
     kept = refit_cli._filter_sessions_by_age(sessions, days=0, now=datetime.now(UTC))
     assert kept == sessions
+
+
+# ---------------------------------------------------------------------------
+# _filter_sessions_by_boundary (Task 3.5)
+# ---------------------------------------------------------------------------
+
+
+def test_filter_sessions_by_boundary_keeps_on_and_after(tmp_path: Path) -> None:
+    older = tmp_path / "2026-05-01T000000"
+    on_boundary = tmp_path / "2026-06-01T000000"
+    newer = tmp_path / "2026-06-15T000000"
+    odd = tmp_path / "manual-import"  # non-conforming name — kept
+    for p in (older, on_boundary, newer, odd):
+        p.mkdir()
+    kept = refit_cli._filter_sessions_by_boundary(
+        [older, on_boundary, newer, odd], boundary=date(2026, 6, 1)
+    )
+    assert older not in kept
+    assert on_boundary in kept
+    assert newer in kept
+    assert odd in kept
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +237,98 @@ def test_main_no_sessions_returns_error_code(
         ]
     )
     assert rc == 1
+
+
+def _write_config_with_ledger(tmp_path: Path, ledger_path: Path) -> Path:
+    import yaml
+
+    data = yaml.safe_load(Path("canary.example.yaml").read_text())
+    data["daemon"] = {"vehicle_ledger": str(ledger_path)}
+    # Disable profile scoping so `scoped.daemon.vehicle_ledger` in the CLI
+    # resolves to exactly `ledger_path` — the test writes/asserts against
+    # that path directly rather than re-deriving the profile slug.
+    data["profiles"] = {"enabled": False}
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(yaml.safe_dump(data))
+    return cfg_path
+
+
+def test_since_boundary_excludes_sessions_older_than_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task 3.5: a boundary event newer than every discovered session
+    filters everything out (the CLI's existing "no sessions" error path)."""
+    from src.analysis.vehicle_ledger import VehicleLedgerStore
+
+    session = _patch_pipeline(monkeypatch, tmp_path)  # named 2026-05-13T120000
+    VehicleLedgerStore(tmp_path / "vehicle_ledger.jsonl").record(
+        occurred_at=date(2026, 6, 1), kind="repair", title="Head gasket", corpus_boundary=True
+    )
+    cfg_path = _write_config_with_ledger(tmp_path, tmp_path / "vehicle_ledger.jsonl")
+    rc = refit_cli.main(
+        [
+            "--config",
+            str(cfg_path),
+            "--sessions-root",
+            str(session.parent),
+            "--all",
+            "--since-boundary",
+        ]
+    )
+    assert rc == 1
+
+
+def test_since_boundary_keeps_sessions_on_or_after_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.analysis.vehicle_ledger import VehicleLedgerStore
+
+    _patch_pipeline(monkeypatch, tmp_path)  # named 2026-05-13T120000
+    VehicleLedgerStore(tmp_path / "vehicle_ledger.jsonl").record(
+        occurred_at=date(2026, 1, 1), kind="mod", title="Old mod", corpus_boundary=True
+    )
+    cfg_path = _write_config_with_ledger(tmp_path, tmp_path / "vehicle_ledger.jsonl")
+    out = tmp_path / "behavior_models.yaml"
+    rc = refit_cli.main(
+        [
+            "--config",
+            str(cfg_path),
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--since-boundary",
+            "--out",
+            str(out),
+            "--recipe",
+            "coolant_warmup",
+        ]
+    )
+    assert rc == 0
+    assert out.exists()
+
+
+def test_since_boundary_is_a_no_op_without_a_boundary_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_pipeline(monkeypatch, tmp_path)
+    cfg_path = _write_config_with_ledger(tmp_path, tmp_path / "vehicle_ledger.jsonl")
+    out = tmp_path / "behavior_models.yaml"
+    rc = refit_cli.main(
+        [
+            "--config",
+            str(cfg_path),
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--since-boundary",
+            "--out",
+            str(out),
+            "--recipe",
+            "coolant_warmup",
+        ]
+    )
+    assert rc == 0
+    assert out.exists()
 
 
 def test_main_keeps_version_on_identical_second_run(

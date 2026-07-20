@@ -72,6 +72,9 @@ from src.mcp_server.tools import (
 from src.mcp_server.tools import (
     tuning as tuning_tool,
 )
+from src.mcp_server.tools import (
+    vehicle_ledger as vehicle_ledger_tool,
+)
 from src.mcp_server.write_tools import (
     captures as captures_tool,
 )
@@ -98,6 +101,9 @@ from src.mcp_server.write_tools import (
 )
 from src.mcp_server.write_tools import (
     tuning as tuning_write_tool,
+)
+from src.mcp_server.write_tools import (
+    vehicle_ledger as vehicle_ledger_write_tool,
 )
 
 logger = logging.getLogger(__name__)
@@ -270,6 +276,11 @@ def _register_read_tools(
     async def get_training_runs() -> dict[str, Any]:
         """Training-run history (the latest record per run from the ledger)."""
         return await sessions_tool.get_training_runs(client)
+
+    @mcp.tool()
+    async def list_vehicle_events() -> dict[str, Any]:
+        """Vehicle maintenance/intervention ledger, oldest-first (Task 3.3)."""
+        return await vehicle_ledger_tool.list_vehicle_events(client)
 
     @mcp.tool()
     async def get_session_classification(session_id: str) -> dict[str, Any]:
@@ -525,6 +536,44 @@ def _register_write_tools(
             anomaly_id=anomaly_id,
             label=narrowed_label,
             note=note,
+        )
+
+    @mcp.tool()
+    async def record_vehicle_event(
+        occurred_at: str,
+        kind: str,
+        title: str,
+        details: str = "",
+        odometer_km: float | None = None,
+        affected_channels: list[str] | None = None,
+        corpus_boundary: bool = False,
+    ) -> dict[str, Any]:
+        """Log a maintenance/mod/repair/observation to the vehicle ledger (3.3).
+
+        ``occurred_at`` is an ISO date (``YYYY-MM-DD``). Set
+        ``corpus_boundary=True`` when the event changes what "normal" looks
+        like (a mod or repair) so training can optionally start fresh from
+        it (``--since-boundary``).
+        """
+        if kind not in ("maintenance", "mod", "repair", "observation", "dtc"):
+            return {
+                "ok": False,
+                "error": (
+                    "kind must be one of 'maintenance', 'mod', 'repair', 'observation', 'dtc'"
+                ),
+            }
+        # Narrow once for mypy — the runtime check above already proved the value.
+        narrowed_kind: vehicle_ledger_write_tool.VehicleEventKind = kind  # type: ignore[assignment]
+        return await vehicle_ledger_write_tool.record_vehicle_event(
+            client,
+            audit,
+            occurred_at=occurred_at,
+            kind=narrowed_kind,
+            title=title,
+            details=details,
+            odometer_km=odometer_km,
+            affected_channels=affected_channels,
+            corpus_boundary=corpus_boundary,
         )
 
     @mcp.tool()

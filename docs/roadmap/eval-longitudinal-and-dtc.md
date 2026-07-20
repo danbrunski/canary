@@ -260,33 +260,53 @@ happened to the truck, so anomalies can be scored against outcomes and
 training corpora can be segmented at intervention boundaries. Pattern:
 `FeedbackStore` append-only JSONL (`src/alerts/feedback.py:93`).
 
-- [ ] **3.1 — Store.** `src/analysis/vehicle_ledger.py`:
+- [x] **3.1 — Store.** `src/analysis/vehicle_ledger.py`:
   `VehicleEvent(BaseModel)` — `id`, `recorded_at`, `occurred_at` (date),
   `odometer_km: float | None`, `kind:
   maintenance|mod|repair|observation|dtc`, `title`, `details`,
   `affected_channels: list[str]`, `corpus_boundary: bool` (does "normal"
   change at this event?). Append-only JSONL store modeled on
-  `FeedbackStore` (append, list, latest-by-id).
-- [ ] **3.2 — Config + scoping.** New `DaemonConfig.vehicle_ledger` path
+  `FeedbackStore` (append, list, latest-by-id). — landed:
+  `VehicleLedgerStore` (`.append`, `.records()` latest-by-id collapsed
+  and sorted by `occurred_at`, `.latest_boundary()`); genuine append-only
+  writes, verified `latest_boundary()` sorts by `occurred_at` not
+  append/`recorded_at` order.
+- [x] **3.2 — Config + scoping.** New `DaemonConfig.vehicle_ledger` path
   (default `data/control/vehicle_ledger.jsonl`), wired into
   `scope_config` (`src/profiles.py:349-361`) — per-vehicle, like
-  `feedback_log`. Update example YAMLs.
-- [ ] **3.3 — MCP + CLI.** Write tool `record_vehicle_event`
+  `feedback_log`. Update example YAMLs. — landed: identical
+  `_scope_file` call as `feedback_log`; confirmed genuine parity
+  (`feedback_log` itself is only explicit in `canary.sim.example.yaml`,
+  and `vehicle_ledger` was added there too).
+- [x] **3.3 — MCP + CLI.** Write tool `record_vehicle_event`
   (audit-logged, `src/mcp_server/write_tools/`) + read tool
   `list_vehicle_events`; CLI `scripts/vehicle_log.py add|list` (the name
   `ledger.py` is taken by the training ledger). Document in
-  `docs/mcp-server.md`.
-- [ ] **3.4 — DTC auto-entries.** When Phase 1.6 sees a new stored DTC,
+  `docs/mcp-server.md`. — landed: `record_vehicle_event` uses the
+  identical audit-logging call as `record_feedback`; `POST`/`GET
+  /control/vehicle-ledger` (503 unconfigured, 422 bad `kind`).
+- [x] **3.4 — DTC auto-entries.** When Phase 1.6 sees a new stored DTC,
   auto-append a `kind="dtc"` ledger event — outcome tracking starts
-  itself.
-- [ ] **3.5 — Corpus-boundary integration.** In corpus selection
+  itself. — landed: only STORED (not pending-only) codes append,
+  matching the task text exactly; a pending→stored escalation correctly
+  triggers the append (traced the loop order to confirm no missed
+  transition).
+- [x] **3.5 — Corpus-boundary integration.** In corpus selection
   (`scripts/retrain.py` age filter, `src/analysis/refit.py` recipes):
   optionally exclude sessions older than the latest `corpus_boundary`
   event (`--since-boundary` flag). Surfaces in `get_dataset_health` as a
-  note when a boundary bisects the corpus.
-- [ ] **3.6 — Backfill.** One-time entries for known history (mods
+  note when a boundary bisects the corpus. — landed: shared
+  `_filter_sessions_by_boundary` helper used by both
+  `refit_behavior_models.py` and `retrain.py`; `analyze_corpus`'s
+  bisection warning only fires when the session set is genuinely split
+  (some older, some on/after) — not vacuously present/absent.
+- [~] **3.6 — Backfill.** One-time entries for known history (mods
   analyzed in the 2026-07 drive comparisons, profile migration, etc.) so
-  the ledger is useful on day one.
+  the ledger is useful on day one. blocked-overnight (per
+  OVERNIGHT-QUEUE.md Q9): real backfill needs the operator's own
+  history. Scaffolded instead — the (gitignored) ledger has one
+  clearly-labeled placeholder entry pointing at `scripts/vehicle_log.py
+  add` for real entries.
 
 ---
 

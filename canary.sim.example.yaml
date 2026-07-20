@@ -124,6 +124,7 @@ daemon:
   jobs_dir: data/sim/control/jobs
   audit_log: data/sim/control/audit.jsonl
   feedback_log: data/sim/control/anomaly_feedback.jsonl
+  vehicle_ledger: data/sim/control/vehicle_ledger.jsonl
   training_ledger: data/sim/control/training_runs.jsonl
   tuning_config: data/sim/control/tuning.yaml
   tuning_audit: data/sim/control/tuning_audit.jsonl

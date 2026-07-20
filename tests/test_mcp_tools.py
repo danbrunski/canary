@@ -16,9 +16,11 @@ from src.mcp_server.tools import behavior as behavior_tool
 from src.mcp_server.tools import power as power_tool
 from src.mcp_server.tools import status as status_tool
 from src.mcp_server.tools import telemetry as telemetry_tool
+from src.mcp_server.tools import vehicle_ledger as vehicle_ledger_tool
 from src.mcp_server.write_tools import captures as captures_tool
 from src.mcp_server.write_tools import feedback as feedback_tool
 from src.mcp_server.write_tools import power as power_write_tool
+from src.mcp_server.write_tools import vehicle_ledger as vehicle_ledger_write_tool
 
 
 async def _fake_daemon(routes: dict[str, Any]) -> DaemonClient:
@@ -329,3 +331,51 @@ async def test_record_feedback_audit_carries_label(tmp_path: Path) -> None:
     entry = json.loads((tmp_path / "audit.jsonl").read_text().splitlines()[0])
     assert entry["payload"]["anomaly_id"] == "anom-7"
     assert entry["payload"]["label"] == "false_positive"
+
+
+async def test_list_vehicle_events_delegates_to_daemon() -> None:
+    client = await _fake_daemon(
+        {"GET /control/vehicle-ledger": {"events": [{"id": "e1"}], "count": 1}}
+    )
+    result = await vehicle_ledger_tool.list_vehicle_events(client)
+    assert result["count"] == 1
+    await client.aclose()
+
+
+async def test_record_vehicle_event_audit_carries_kind_and_title(tmp_path: Path) -> None:
+    client = await _fake_daemon({"POST /control/vehicle-ledger": {"event": {"id": "e1"}}})
+    audit = MCPAuditLogger(tmp_path / "audit.jsonl")
+    await vehicle_ledger_write_tool.record_vehicle_event(
+        client,
+        audit,
+        occurred_at="2026-07-19",
+        kind="maintenance",
+        title="Oil change",
+        corpus_boundary=False,
+    )
+    await client.aclose()
+    entry = json.loads((tmp_path / "audit.jsonl").read_text().splitlines()[0])
+    assert entry["action"] == "mcp.record_vehicle_event"
+    assert entry["result"] == "ok"
+    assert entry["payload"]["kind"] == "maintenance"
+    assert entry["payload"]["title"] == "Oil change"
+
+
+async def test_record_vehicle_event_audits_failure(tmp_path: Path) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"detail": "vehicle ledger API is not available"})
+
+    client = await _fake_daemon({"POST /control/vehicle-ledger": respond})
+    audit = MCPAuditLogger(tmp_path / "audit.jsonl")
+    with pytest.raises(DaemonError):
+        await vehicle_ledger_write_tool.record_vehicle_event(
+            client,
+            audit,
+            occurred_at="2026-07-19",
+            kind="repair",
+            title="Head gasket",
+        )
+    await client.aclose()
+    entry = json.loads((tmp_path / "audit.jsonl").read_text().splitlines()[0])
+    assert entry["action"] == "mcp.record_vehicle_event"
+    assert entry["result"] == "error"

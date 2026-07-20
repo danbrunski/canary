@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.config import CanaryConfig
 from src.dashboard.api import create_app
 from src.datasets.health import analyze_corpus, analyze_session
@@ -149,6 +150,54 @@ def test_corpus_not_ready_missing_key_channel(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# corpus_boundary bisection note (Task 3.5)
+# ---------------------------------------------------------------------------
+
+
+def test_corpus_boundary_bisecting_the_corpus_adds_a_warning(tmp_path: Path) -> None:
+    config, storage = _config(tmp_path)
+    _make_session(storage, "2026-05-01T000000", seconds=70)  # before boundary
+    _make_session(storage, "2026-06-15T000000", seconds=70)  # after boundary
+    report = analyze_corpus(discover_sessions(storage), config, corpus_boundary=date(2026, 6, 1))
+    assert any("bisected" in w for w in report.warnings)
+
+
+def test_corpus_boundary_before_every_session_is_not_a_bisection(tmp_path: Path) -> None:
+    config, storage = _config(tmp_path)
+    _make_session(storage, "2026-06-10T000000", seconds=70)
+    _make_session(storage, "2026-06-15T000000", seconds=70)
+    report = analyze_corpus(discover_sessions(storage), config, corpus_boundary=date(2026, 1, 1))
+    assert not any("bisected" in w for w in report.warnings)
+
+
+def test_no_boundary_means_no_bisection_note(tmp_path: Path) -> None:
+    config, storage = _config(tmp_path)
+    _make_session(storage, "2026-05-01T000000", seconds=70)
+    _make_session(storage, "2026-06-15T000000", seconds=70)
+    report = analyze_corpus(discover_sessions(storage), config)
+    assert not any("bisected" in w for w in report.warnings)
+
+
+def test_dataset_health_endpoint_surfaces_bisection_note(tmp_path: Path) -> None:
+    config, storage = _config(tmp_path)
+    _make_session(storage, "2026-05-01T000000", seconds=70)
+    _make_session(storage, "2026-06-15T000000", seconds=70)
+    ledger = VehicleLedgerStore(tmp_path / "vehicle_ledger.jsonl")
+    ledger.record(
+        occurred_at=date(2026, 6, 1), kind="mod", title="Intake swap", corpus_boundary=True
+    )
+    app = create_app(
+        config,
+        anomalies_dir=tmp_path / "anomalies",
+        control_token="secret",
+        vehicle_ledger_store=ledger,
+    )
+    client = TestClient(app)
+    body = client.get("/control/datasets/health", headers={"Authorization": "Bearer secret"}).json()
+    assert any("bisected" in w for w in body["warnings"])
+
+
+# ---------------------------------------------------------------------------
 # API + CLI
 # ---------------------------------------------------------------------------
 
@@ -175,3 +224,23 @@ def test_cli_text_and_json(tmp_path: Path, capsys) -> None:  # type: ignore[no-u
     assert rc == 2
     payload = json.loads(capsys.readouterr().out)
     assert payload["total_rows"] == 70
+
+
+def test_cli_surfaces_bisection_note(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    storage = tmp_path / "sessions"
+    storage.mkdir()
+    ledger_path = tmp_path / "vehicle_ledger.jsonl"
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(
+        _CONFIG_YAML.format(storage=storage) + f"daemon:\n  vehicle_ledger: {ledger_path}\n"
+    )
+    config = CanaryConfig.from_yaml(cfg_path)
+    _make_session(storage, "2026-05-01T000000", seconds=70)
+    _make_session(storage, "2026-06-15T000000", seconds=70)
+    VehicleLedgerStore(ledger_path).record(
+        occurred_at=date(2026, 6, 1), kind="mod", title="Intake swap", corpus_boundary=True
+    )
+    assert config.daemon.vehicle_ledger == ledger_path  # sanity: override took
+    rc = cli.main(["--config", str(cfg_path), "--min-sessions", "1"])
+    assert rc in (0, 2)
+    assert "bisected" in capsys.readouterr().out

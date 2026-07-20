@@ -13,6 +13,7 @@ from src.alerts.events import AnomalyEvent
 from src.alerts.fusion import PersistenceGate
 from src.alerts.tuning import AlertTuner, load_tuning_config
 from src.analysis.gps_tracker import GpsTracker
+from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
@@ -68,6 +69,9 @@ class DaemonComponents:
     behavior_live: BehaviorLiveState = field(default_factory=BehaviorLiveState)
     #: Cached latest DTC report + per-session diff/sidecar state (Task 1.4).
     dtc_state: DtcState = field(default_factory=DtcState)
+    #: Vehicle maintenance/intervention ledger (Task 3.1) — a new stored DTC
+    #: (Task 3.4) and operator/MCP writes both append here.
+    vehicle_ledger: VehicleLedgerStore = field(default_factory=VehicleLedgerStore)
     capture_controller: CaptureController | None = None
     job_controller: JobController | None = None
     replay_controller: ReplayController | None = None
@@ -123,6 +127,7 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
                 DEFAULT_DTC_STALE_AFTER_SECONDS,
             )
         ),
+        vehicle_ledger=VehicleLedgerStore(config.daemon.vehicle_ledger),
         capture_controller=None,
         job_controller=_make_job_controller(config),
         gps_tracker=(

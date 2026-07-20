@@ -50,6 +50,7 @@ async def serve_in_background(
         replay_controller=components.replay_controller,
         audit_logger=components.audit_logger,
         feedback_store=FeedbackStore(components.config.daemon.feedback_log),
+        vehicle_ledger_store=components.vehicle_ledger,
         alert_tuner=components.alert_tuner,
         health_monitor=components.health_monitor,
         behavior_live=components.behavior_live,
