@@ -55,3 +55,24 @@ export function formatAge(timestamp: string | null): string {
   if (ageMs < 1000) return "now";
   return `${Math.round(ageMs / 1000)}s`;
 }
+
+/** "Ym Zs" from a duration in seconds. `collapseZero` (PowerPanel) rounds,
+ *  drops the "0m" prefix, and reads "0s" for null/non-positive; the default
+ *  (TripPanel) floors, always shows minutes, and reads "—" for null/NaN. */
+export function formatDuration(
+  seconds: number | null,
+  { collapseZero = false }: { collapseZero?: boolean } = {},
+): string {
+  if (collapseZero) {
+    if (seconds == null || seconds <= 0) return "0s";
+    const total = Math.round(seconds);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  }
+  if (seconds == null || !Number.isFinite(seconds)) return "—";
+  const total = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}m ${s}s`;
+}

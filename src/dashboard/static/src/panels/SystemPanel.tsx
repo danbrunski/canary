@@ -10,11 +10,16 @@ import {
 } from "../styles";
 import type { GpsStatus, PowerStatus, StatusResponse, WorkbenchItem } from "../types";
 import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
-import { type Tone, toneClass } from "../util/format";
-
-const KM_PER_MILE = 1.609344;
-const M_PER_FT = 0.3048;
-const CARDINALS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+import {
+  type Tone,
+  formatAltitude,
+  formatCoords,
+  formatGpsSpeed,
+  formatHeading,
+  formatPercent,
+  formatTemp,
+  toneClass,
+} from "../util/format";
 
 interface SystemPanelProps {
   status: StatusResponse | null;
@@ -37,12 +42,6 @@ function tempTone(c: number | null | undefined): Tone | undefined {
 function loadTone(fraction: number | null | undefined): Tone | undefined {
   return fraction != null && fraction > 0.85 ? "warn" : undefined;
 }
-
-const formatTemp = (c: number | null | undefined): string =>
-  c == null ? "—" : `${c.toFixed(1)} °C`;
-
-const formatPct = (fraction: number | null | undefined): string =>
-  fraction == null ? "—" : `${(fraction * 100).toFixed(0)}%`;
 
 const POWER_EVENT_LABELS: Record<string, string> = {
   under_voltage: "under-voltage",
@@ -80,21 +79,6 @@ function gpsFix(g: GpsStatus): { label: string; tone: Tone | undefined } {
   const acquiring = g.num_satellites > 0 ? `acquiring · ${g.num_satellites} sats` : "no fix";
   return { label: acquiring, tone: "warn" };
 }
-
-const formatCoords = (g: GpsStatus): string =>
-  g.latitude == null || g.longitude == null
-    ? "—"
-    : `${g.latitude.toFixed(5)}, ${g.longitude.toFixed(5)}`;
-
-const formatAltitude = (m: number | null): string =>
-  m == null ? "—" : `${(m / M_PER_FT).toFixed(0)} ft`;
-
-/** GPS speed arrives in km/h; show mph for this US vehicle. */
-const formatGpsSpeed = (kmh: number | null): string =>
-  kmh == null ? "—" : `${(kmh / KM_PER_MILE).toFixed(0)} mph`;
-
-const formatHeading = (deg: number | null): string =>
-  deg == null ? "—" : `${deg.toFixed(0)}° ${CARDINALS[Math.round(deg / 45) % 8]}`;
 
 /** System health: storage, host vitals (Pi temp/CPU/memory), latest
  *  session, vehicle line, data freshness.
@@ -149,13 +133,13 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
           <div className={definitionRowClass}>
             <dt className={definitionTermClass}>cpu usage</dt>
             <dd className={cn(definitionValueClass, toneClass(loadTone(system?.cpu_percent)))}>
-              {formatPct(system?.cpu_percent)}
+              {formatPercent(system?.cpu_percent, 0)}
             </dd>
           </div>
           <div className={definitionRowClass}>
             <dt className={definitionTermClass}>memory</dt>
             <dd className={cn(definitionValueClass, toneClass(loadTone(system?.mem_used_fraction)))}>
-              {formatPct(system?.mem_used_fraction)}
+              {formatPercent(system?.mem_used_fraction, 0)}
               {system?.mem_total_mb != null && (
                 <span className="text-fg-dim"> of {system.mem_total_mb.toFixed(0)} MB</span>
               )}
@@ -201,7 +185,7 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
               </div>
               <div className={definitionRowClass}>
                 <dt className={definitionTermClass}>location</dt>
-                <dd className={definitionValueClass}>{formatCoords(gps)}</dd>
+                <dd className={definitionValueClass}>{formatCoords(gps.latitude, gps.longitude)}</dd>
               </div>
               <div className={definitionRowClass}>
                 <dt className={definitionTermClass}>altitude</dt>

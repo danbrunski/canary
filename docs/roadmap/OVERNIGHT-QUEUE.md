@@ -146,7 +146,11 @@ operator history (ledger backfill facts)
 - [ ] **Q16 — refactoring.md Phases 3 + 4** (Detector protocol — safe
   now that Q7 changed persistence semantics; FE god-panel splits +
   ResourceGate/TokenField; JsonlStore; isolation_forest split +
-  artifact IO; all quick sweeps not already absorbed).
+  artifact IO; all quick sweeps not already absorbed). — FE-only slice
+  landed from the `canary-fe` worktree (3.2, 3.3, 4.5, 4.6); the
+  backend-only tasks (3.1 Detector protocol, 3.4 JsonlStore, 3.5
+  isolation_forest split, 4.1-4.4/4.7 Python quick sweeps) are still
+  open for the main worktree.
 
 ## Morning-review backlog this queue generates
 

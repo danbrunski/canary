@@ -1,28 +1,13 @@
 import { createElement } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { VehicleProfilesResponse } from "../types";
+import { mockHttp } from "../test/harness";
 
-const mocks = vi.hoisted(() => ({
-  getProfiles: vi.fn(),
-  updateProfileName: vi.fn(),
-}));
-
-vi.mock("../api/http", () => ({
-  ...mocks,
-  HttpError: class extends Error {
-    status = 0;
-    body = "";
-  },
-}));
+const mocks = mockHttp(["getProfiles", "updateProfileName"]);
 
 const { ProfilesPanel } = await import("./ProfilesPanel");
-
-beforeEach(() => {
-  for (const fn of Object.values(mocks)) fn.mockReset();
-});
-afterEach(() => vi.clearAllMocks());
 
 const PROFILES: VehicleProfilesResponse = {
   active_slug: "jn8az18u1...",

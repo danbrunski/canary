@@ -40,3 +40,32 @@ export function toneClass(tone: Tone | undefined): string {
   if (tone === "bad") return "text-bad";
   return "";
 }
+
+const KM_PER_MILE = 1.609344;
+const M_PER_FT = 0.3048;
+const CARDINALS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
+/** Celsius, one decimal (host/CPU temps). */
+export function formatTemp(c: number | null | undefined): string {
+  return c == null ? "—" : `${c.toFixed(1)} °C`;
+}
+
+/** "lat, lon" at 5 decimal places, or "—" when either is missing (GPS fix). */
+export function formatCoords(lat: number | null, lon: number | null): string {
+  return lat == null || lon == null ? "—" : `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+
+/** Meters → feet (this US vehicle's display unit), whole numbers. */
+export function formatAltitude(meters: number | null): string {
+  return meters == null ? "—" : `${(meters / M_PER_FT).toFixed(0)} ft`;
+}
+
+/** GPS speed arrives in km/h; shown as mph for this US vehicle. */
+export function formatGpsSpeed(kmh: number | null): string {
+  return kmh == null ? "—" : `${(kmh / KM_PER_MILE).toFixed(0)} mph`;
+}
+
+/** Degrees + compass cardinal, e.g. "184° S". */
+export function formatHeading(deg: number | null): string {
+  return deg == null ? "—" : `${deg.toFixed(0)}° ${CARDINALS[Math.round(deg / 45) % 8]}`;
+}

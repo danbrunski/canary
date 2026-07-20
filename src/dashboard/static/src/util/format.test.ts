@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { formatNumber, formatPercent, toneClass } from "./format";
+import {
+  formatAltitude,
+  formatCoords,
+  formatGpsSpeed,
+  formatHeading,
+  formatNumber,
+  formatPercent,
+  formatTemp,
+  toneClass,
+} from "./format";
 import { numberArray, numberMap, record } from "./json";
 
 describe("formatNumber", () => {
@@ -27,6 +36,36 @@ describe("toneClass", () => {
     expect(toneClass("warn")).toBe("text-warn");
     expect(toneClass("bad")).toBe("text-bad");
     expect(toneClass(undefined)).toBe("");
+  });
+});
+
+describe("GPS/system formatters (moved from SystemPanel)", () => {
+  it("formatTemp: one decimal, em-dash for null", () => {
+    expect(formatTemp(72.34)).toBe("72.3 °C");
+    expect(formatTemp(null)).toBe("—");
+    expect(formatTemp(undefined)).toBe("—");
+  });
+
+  it("formatCoords: 5 decimals, em-dash if either is missing", () => {
+    expect(formatCoords(37.12345, -122.6789)).toBe("37.12345, -122.67890");
+    expect(formatCoords(null, -122.6789)).toBe("—");
+    expect(formatCoords(37.12345, null)).toBe("—");
+  });
+
+  it("formatAltitude: meters to whole feet", () => {
+    expect(formatAltitude(100)).toBe("328 ft");
+    expect(formatAltitude(null)).toBe("—");
+  });
+
+  it("formatGpsSpeed: km/h to whole mph", () => {
+    expect(formatGpsSpeed(100)).toBe("62 mph");
+    expect(formatGpsSpeed(null)).toBe("—");
+  });
+
+  it("formatHeading: degrees with compass cardinal", () => {
+    expect(formatHeading(0)).toBe("0° N");
+    expect(formatHeading(184)).toBe("184° S");
+    expect(formatHeading(null)).toBe("—");
   });
 });
 

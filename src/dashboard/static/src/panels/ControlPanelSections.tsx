@@ -1,8 +1,9 @@
-// The two self-contained ControlPanel cards. The capture/sessions/jobs/
-// upload sections stay inline in ControlPanel because they're wired to ~20
-// pieces of shared form state — extracting those would be prop-drilling
-// that hurts readability. These two only need read-only data, so they
-// genuinely separate.
+// Preflight + control-event log — the two ControlPanel cards that only
+// ever needed read-only data, so they were the first split out. The rest
+// (Sessions/Jobs/SequenceDetector/ModelUpload/CompanionConfig) followed in
+// Task 3.2, each owning its own local UI state so the parent only passes
+// down the polled data + the shared `run` action, not two dozen individual
+// fields — see SessionsCard.tsx etc.
 
 import {
   cn,

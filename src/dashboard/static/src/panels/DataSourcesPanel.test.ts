@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type {
@@ -9,21 +9,9 @@ import type {
   ObdCoverageResponse,
   StatusResponse,
 } from "../types";
+import { mockHttp } from "../test/harness";
 
-const mocks = vi.hoisted(() => ({
-  getObdCoverage: vi.fn(),
-  getDids: vi.fn(),
-  getCanCoverage: vi.fn(),
-}));
-vi.mock("../api/http", () => ({
-  getObdCoverage: mocks.getObdCoverage,
-  getDids: mocks.getDids,
-  getCanCoverage: mocks.getCanCoverage,
-  HttpError: class extends Error {
-    status = 0;
-    body = "";
-  },
-}));
+const mocks = mockHttp(["getObdCoverage", "getDids", "getCanCoverage"]);
 
 const { DataSourcesPanel } = await import("./DataSourcesPanel");
 
@@ -65,7 +53,6 @@ beforeEach(() => {
   mocks.getDids.mockResolvedValue(EMPTY_DIDS);
   mocks.getCanCoverage.mockResolvedValue(EMPTY_CAN);
 });
-afterEach(() => vi.clearAllMocks());
 
 describe("DataSourcesPanel", () => {
   it("OBD tab shows a supported PID with its live value", async () => {

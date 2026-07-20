@@ -9,12 +9,8 @@ import {
   placeholderClass,
 } from "../styles";
 import type { StatusHealth, StatusResponse } from "../types";
-import { formatPercent as formatPct, toneClass } from "../util/format";
+import { formatPercent, toneClass } from "../util/format";
 import { numberMap, numberOr, numberOrNull, stringArray } from "../util/json";
-
-/** Health tiles render whole-percent (no decimal). */
-const formatPercent = (value: number | null | undefined): string =>
-  formatPct(value, 0);
 
 interface ModelHealthPanelProps {
   status: StatusResponse | null;
@@ -61,7 +57,7 @@ function HealthBody({ health }: { health: StatusHealth }) {
         />
         <MetricTile
           label="missing features"
-          value={formatPercent(health.missing_feature_rate)}
+          value={formatPercent(health.missing_feature_rate, 0)}
           tone={(health.missing_feature_rate ?? 0) > 0.25 ? "warn" : "ok"}
         />
         <MetricTile
@@ -142,12 +138,12 @@ function HealthBody({ health }: { health: StatusHealth }) {
           <dl className={definitionListClass}>
             <InfoRow
               label="load"
-              value={formatPercent(health.system.load_per_cpu)}
+              value={formatPercent(health.system.load_per_cpu, 0)}
               tone={(health.system.load_per_cpu ?? 0) > 0.85 ? "warn" : "ok"}
             />
             <InfoRow
               label="memory"
-              value={formatPercent(health.system.mem_used_fraction)}
+              value={formatPercent(health.system.mem_used_fraction, 0)}
               tone={(health.system.mem_used_fraction ?? 0) > 0.85 ? "warn" : "ok"}
             />
             <InfoRow

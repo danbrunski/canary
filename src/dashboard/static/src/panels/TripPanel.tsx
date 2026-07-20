@@ -14,6 +14,7 @@ import {
 } from "../styles";
 import type { StatusResponse, TripSummaryFields } from "../types";
 import { formatPercent } from "../util/format";
+import { formatDuration } from "../util/time";
 
 interface TripPanelProps {
   channels: Map<string, ChannelSnapshot>;
@@ -47,14 +48,6 @@ function formatEconomy(l100km: number | null, mpg?: number | null): string {
 
 function formatCo2(kg: number | null): string {
   return kg == null ? "—" : `${kg.toFixed(2)} kg`;
-}
-
-function formatDuration(seconds: number | null): string {
-  if (seconds == null || !Number.isFinite(seconds)) return "—";
-  const total = Math.max(0, Math.floor(seconds));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}m ${s}s`;
 }
 
 function formatSpeed(kph: number | null): string {

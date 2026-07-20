@@ -1,20 +1,12 @@
 import { createElement } from "react";
 import { render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { StatusResponse, TripSummaryResponse } from "../types";
+import { mockHttp } from "../test/harness";
 
-const mocks = vi.hoisted(() => ({
-  getTripSummary: vi.fn(),
-}));
-vi.mock("../api/http", () => ({
-  getTripSummary: mocks.getTripSummary,
-  HttpError: class extends Error {
-    status = 0;
-    body = "";
-  },
-}));
+const mocks = mockHttp(["getTripSummary"]);
 
 const { TripPanel } = await import("./TripPanel");
 
@@ -48,11 +40,6 @@ const SUMMARY: TripSummaryResponse = {
     quarter_mile_trap_kph: 130.0,
   },
 };
-
-beforeEach(() => {
-  mocks.getTripSummary.mockReset();
-});
-afterEach(() => vi.clearAllMocks());
 
 describe("TripPanel", () => {
   it("shows a placeholder for the current drive when no derived channels have streamed yet", () => {
