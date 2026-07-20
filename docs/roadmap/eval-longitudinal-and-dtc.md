@@ -317,7 +317,7 @@ trended over months against a **frozen reference epoch** that retraining
 never touches. Existing per-session aggregate to extend:
 `SessionClassification` (`src/analysis/session_classifier.py:118`).
 
-- [ ] **4.1 — Fingerprint computation.** `src/analysis/fingerprint.py`:
+- [x] **4.1 — Fingerprint computation.** `src/analysis/fingerprint.py`:
   `compute_fingerprint(session_dir, config) -> dict[str, float]` over
   the wide/resampled frame. Initial stat set (config-extensible):
   - warm-up time constant (cold-start coolant → 80 °C seconds)
@@ -328,18 +328,35 @@ never touches. Existing per-session aggregate to extend:
   - mean bank-balance residual; committee residual means (speed OBD↔GPS)
   - per-behavior-surface mean |deviation| (from `deviation:*` columns)
   Skip stats whose preconditions are absent (no cold start → no warm-up
-  stat) rather than emitting garbage.
-- [ ] **4.2 — Sidecar + hook.** Write `fingerprint.json` into the
+  stat) rather than emitting garbage. — landed: each stat function
+  omits its key (never NaN/0) when its precondition fails; reuses the
+  existing `compute_anomaly_signals`/`append_committee_residuals`/
+  `append_deviation_columns` pipeline rather than recomputing. A real
+  bug (`voltage_at_crank_v` fabricated from round-robin-polling RPM lag
+  when no cranking actually occurred) caught by review and fixed before
+  landing.
+- [x] **4.2 — Sidecar + hook.** Write `fingerprint.json` into the
   session dir; compute it where classification already runs
   (`scripts/label_sessions.py` / `src/control/classification.py:61`) so
   there's one post-session pass. Backfill CLI flag for existing
-  sessions.
-- [ ] **4.3 — Frozen reference epoch.**
+  sessions. — landed: hooked into both the offline `label_sessions.py`
+  batch script and the daemon's on-demand `classify_one_session`;
+  fingerprint-write failures are isolated (logged, never block the
+  classification sidecar) in both. Noted inefficiency (non-blocking):
+  `compute_fingerprint` re-resamples the session frame independently of
+  `classify_session`'s own load — two passes over the parquet per
+  session, not truly shared.
+- [x] **4.3 — Frozen reference epoch.**
   `data/control/reference_epoch.json` (profile-scoped via a
   `DaemonConfig` path + `scope_config`): `{frozen_at, sessions[],
   per-stat mean/std/quantiles, notes}`. `scripts/fingerprint.py freeze`
   builds it from current healthy sessions. **Never auto-updated** — a
   ledger `corpus_boundary` event is the prompt to consciously re-freeze.
+  — landed: per-stat summaries computed only over the sessions that
+  actually carried that stat (verified: a stat in 2/5 fingerprints gets
+  n=2 stats, not zero-padded); `freeze` only pulls `ready`-classified
+  sessions; confirmed the only writer of this path is the `freeze`
+  command.
 - [ ] **4.4 — Trend tests.** `src/analysis/trends.py`: pure-numpy
   Mann-Kendall trend test + CUSUM against reference mean/std, per stat,
   over the session-ordered fingerprint series. Unit-test on synthetic

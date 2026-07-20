@@ -354,6 +354,7 @@ def scope_config(config: CanaryConfig, profile: VehicleProfile) -> CanaryConfig:
             "audit_log": _scope_file(config.daemon.audit_log, slug),
             "feedback_log": _scope_file(config.daemon.feedback_log, slug),
             "vehicle_ledger": _scope_file(config.daemon.vehicle_ledger, slug),
+            "reference_epoch": _scope_file(config.daemon.reference_epoch, slug),
             "training_ledger": _scope_file(config.daemon.training_ledger, slug),
             "tuning_config": _scope_file(config.daemon.tuning_config, slug),
             "tuning_audit": _scope_file(config.daemon.tuning_audit, slug),

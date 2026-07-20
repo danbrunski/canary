@@ -164,6 +164,8 @@ def test_scope_config_nests_every_vehicle_path(tmp_path: Path):
     assert scoped.daemon.behavior_models == Path("data/xterra/behavior_models.yaml")
     # Vehicle ledger (Task 3.2) scopes the same way as feedback_log.
     assert scoped.daemon.vehicle_ledger == Path("data/control/xterra/vehicle_ledger.jsonl")
+    # Reference epoch (Task 4.3) scopes the same way.
+    assert scoped.daemon.reference_epoch == Path("data/control/xterra/reference_epoch.json")
     # Slug is recoverable as the storage path's final component.
     assert scoped.collection.storage_path.name == "xterra"
     # The vehicle block reflects the profile (VIN for reproducible manifests).

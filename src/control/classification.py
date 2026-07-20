@@ -15,6 +15,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from src.analysis.fingerprint import compute_fingerprint, write_fingerprint
 from src.analysis.session_classifier import (
     DERIVED_TAGS_FILENAME,
     classify_session,
@@ -70,6 +71,13 @@ def classify_one_session(
         raise FileNotFoundError(f"session {session_id!r} not found under {session_dir.parent}")
     classification = classify_session(session_dir, config)
     write_classification(session_dir, classification)
+    # Fingerprint (Task 4.1/4.2) rides the same on-demand classify pass —
+    # one post-session compute, not a separate corpus walk.
+    try:
+        fingerprint_stats = compute_fingerprint(session_dir, config)
+        write_fingerprint(session_dir, fingerprint_stats)
+    except Exception:  # noqa: BLE001 — fingerprinting must not block classification
+        log.exception("fingerprint failed for %s", session_id)
     return classification.to_dict()
 
 

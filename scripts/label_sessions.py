@@ -6,7 +6,11 @@ schema-broken / CAN-only sessions to ``_archive/``. This one runs the
 mode segmenter + event-detector library over each well-formed live
 session and writes a ``classification.json`` sidecar — the input
 ``refit_behavior_models.py`` reads to filter training data by mode +
-event presence.
+event presence. It also computes the session's ``fingerprint.json``
+(Task 4.1/4.2, eval-longitudinal-and-dtc.md) right after classification —
+one post-session pass rather than a second corpus walk. Sessions that
+already have a fingerprint but predate this hook are backfilled via
+``scripts/fingerprint.py backfill``, not by this script.
 
 Idempotent: a session whose sidecar already matches the current
 ``CLASSIFIER_VERSION`` is skipped unless ``--rebuild`` forces it.
@@ -32,6 +36,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from src.analysis.fingerprint import compute_fingerprint, write_fingerprint
 from src.analysis.session_classifier import (
     CLASSIFIER_VERSION,
     SessionClassification,
@@ -153,6 +158,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             continue
         if not args.dry_run:
             write_classification(session_dir, classification)
+            try:
+                fingerprint_stats = compute_fingerprint(session_dir, config)
+                write_fingerprint(session_dir, fingerprint_stats)
+            except Exception:  # noqa: BLE001 — a fingerprint failure shouldn't block classification
+                log.exception("fingerprint failed for %s", session_dir.name)
         summary[classification.disposition] += 1
         log.info(
             "%s: %s  duration=%ss  modes=%s  events=%s",

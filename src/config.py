@@ -439,6 +439,12 @@ class DaemonConfig(_Strict):
     #: eval-longitudinal-and-dtc.md) — what physically happened to the
     #: truck, append-only, profile-scoped like the sibling paths below.
     vehicle_ledger: Path = Path("data/control/vehicle_ledger.jsonl")
+    #: Frozen reference epoch for fingerprint drift trending (Task 4.3,
+    #: eval-longitudinal-and-dtc.md) — per-stat mean/std/quantiles over a
+    #: hand-picked set of healthy sessions. Written only by
+    #: ``scripts/fingerprint.py freeze``; never auto-updated. Profile-scoped
+    #: like the sibling ledger paths.
+    reference_epoch: Path = Path("data/control/reference_epoch.json")
     training_ledger: Path = Path("data/control/training_runs.jsonl")
     tuning_config: Path = Path("data/control/tuning.yaml")
     tuning_audit: Path = Path("data/control/tuning_audit.jsonl")
