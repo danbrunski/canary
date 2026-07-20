@@ -26,7 +26,7 @@ registry can't synthesize a write.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -40,6 +40,7 @@ from src.collection.can_obd_client import (
 )
 
 __all__ = [
+    "MISFIRE_COUNT_CHANNEL_PREFIX",
     "MODE01_REGISTRY",
     "MODE09_REGISTRY",
     "SERVICE_REGISTRY",
@@ -56,6 +57,9 @@ __all__ = [
     "decode_cvn",
     "decode_vin",
     "lookup",
+    "misfire_count_channel",
+    "misfire_counts_from_results",
+    "misfire_cylinder_number",
     "mode01_support_group",
     "parse_dtc_payload",
     "parse_mode06_response",
@@ -321,6 +325,56 @@ def parse_mode06_response(payload: bytes) -> list[MonitorTestResult]:
             )
         )
     return results
+
+
+#: SAE J1979-2 (ISO 15765-4) Mode 06 reserves MIDs 0x0B..0x12 for per-cylinder
+#: misfire counters (cylinder 1 through 8); MID 0x01 carries composite/
+#: engine-wide misfire data and is deliberately excluded here.
+MISFIRE_CYLINDER_MID_BASE = 0x0B
+MISFIRE_CYLINDER_MID_COUNT = 8
+
+
+def misfire_cylinder_number(monitor_id: int) -> int | None:
+    """1-based cylinder number for a per-cylinder misfire-counter MID.
+
+    ``None`` for any MID outside the reserved per-cylinder misfire range
+    (composite data, other monitors like catalyst/EVAP/O2, etc).
+    """
+    if (
+        MISFIRE_CYLINDER_MID_BASE
+        <= monitor_id
+        < MISFIRE_CYLINDER_MID_BASE + MISFIRE_CYLINDER_MID_COUNT
+    ):
+        return monitor_id - MISFIRE_CYLINDER_MID_BASE + 1
+    return None
+
+
+#: Telemetry channel prefix for the per-cylinder numeric misfire-count
+#: readings the collector derives from a Mode 06 sweep (Task 3.1/3.2) — one
+#: reading per cylinder present, channel ``f"{MISFIRE_COUNT_CHANNEL_PREFIX}{n}"``
+#: (1-based), landing in storage as ``obd:MISFIRE_COUNT_CYLn`` so the session
+#: fingerprint (Task 3.2) can pick them up the same way it scans
+#: ``deviation:*`` columns — no hardcoded cylinder count on either end.
+MISFIRE_COUNT_CHANNEL_PREFIX = "MISFIRE_COUNT_CYL"
+
+
+def misfire_count_channel(cylinder: int) -> str:
+    """Telemetry channel name for one cylinder's misfire-count reading."""
+    return f"{MISFIRE_COUNT_CHANNEL_PREFIX}{cylinder}"
+
+
+def misfire_counts_from_results(results: Sequence[MonitorTestResult]) -> dict[int, int]:
+    """Per-cylinder misfire counts (cylinder number -> raw test value).
+
+    Non-misfire MIDs (catalyst, EVAP, O2 sensor, …) are silently dropped —
+    callers that need the full monitor list still have ``results`` itself.
+    """
+    counts: dict[int, int] = {}
+    for result in results:
+        cylinder = misfire_cylinder_number(result.monitor_id)
+        if cylinder is not None:
+            counts[cylinder] = result.test_value
+    return counts
 
 
 # ---------------------------------------------------------------------------

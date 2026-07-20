@@ -139,6 +139,11 @@ class DtcReport:
     permanent: list[dict[str, Any]]
     mil_on: bool | None
     dtc_count: int
+    #: Mode 02 freeze-frame reading (Task 3.3), read once when a *stored*
+    #: DTC first appears this session — channel name (RPM, SPEED, ...) ->
+    #: decoded value, same Mode 01 formulas. ``None`` when no freeze frame
+    #: has been read yet (no stored DTC seen, or the read hasn't landed).
+    freeze_frame: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -150,6 +155,7 @@ def build_dtc_report(
     pending: list[str] | None = None,
     permanent: list[str] | None = None,
     mil_on: bool | None = None,
+    freeze_frame: dict[str, Any] | None = None,
 ) -> DtcReport:
     """Assemble a described, timestamped snapshot from parsed code lists.
 
@@ -171,4 +177,5 @@ def build_dtc_report(
         permanent=_describe(permanent),
         mil_on=mil_on,
         dtc_count=len(stored),
+        freeze_frame=dict(freeze_frame) if freeze_frame else None,
     )

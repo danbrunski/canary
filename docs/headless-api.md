@@ -56,6 +56,7 @@ Endpoint summary:
 | `GET /can/coverage` | broadcast CAN ID coverage summary |
 | `GET /test-profiles` | available UI test profiles |
 | `GET /obd/dtc` | cached stored/pending/permanent DTC report, MIL state, staleness |
+| `GET /obd/monitors` | cached Mode 06 on-board monitor sweep — per-cylinder misfire counts, raw monitor test results (value/min/max, pass/fail), staleness |
 | `GET /sessions/{id}/trip-summary` | trip-summary sidecar (duration, distance, fuel/economy/CO2, idle time/fraction, max/avg speed, 0-60, 1/4-mile) — computed on demand from the stored session on first request, cached to `trip_summary.json` after |
 
 ## Control API

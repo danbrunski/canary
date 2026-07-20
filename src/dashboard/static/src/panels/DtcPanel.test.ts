@@ -16,6 +16,7 @@ const EMPTY: DtcReportResponse = {
   permanent: [],
   mil_on: null,
   dtc_count: 0,
+  freeze_frame: null,
   stale: true,
 };
 
@@ -58,6 +59,7 @@ describe("DtcPanel", () => {
       permanent: [],
       mil_on: true,
       dtc_count: 2,
+      freeze_frame: null,
       stale: false,
     } satisfies DtcReportResponse);
     render(createElement(DtcPanel));
@@ -71,6 +73,27 @@ describe("DtcPanel", () => {
     expect(screen.getByText("P0171")).toBeInTheDocument();
     expect(screen.getByText("2 codes")).toBeInTheDocument();
     expect(screen.queryByText(/stale/)).not.toBeInTheDocument();
+  });
+
+  it("renders the freeze frame inside the DTC panel when one was captured", async () => {
+    mocks.getDtc.mockResolvedValue({
+      ...EMPTY,
+      captured_at: "2026-07-19T12:00:00+00:00",
+      freeze_frame: { RPM: 2500, COOLANT_TEMP: 92 },
+    } satisfies DtcReportResponse);
+    render(createElement(DtcPanel));
+    expect(await screen.findByText("Freeze Frame")).toBeInTheDocument();
+    expect(screen.getByText("RPM")).toBeInTheDocument();
+    expect(screen.getByText("2500")).toBeInTheDocument();
+    expect(screen.getByText("COOLANT_TEMP")).toBeInTheDocument();
+    expect(screen.getByText("92")).toBeInTheDocument();
+  });
+
+  it("omits the freeze frame section when none was captured", async () => {
+    mocks.getDtc.mockResolvedValue(EMPTY);
+    render(createElement(DtcPanel));
+    await screen.findByText("never polled");
+    expect(screen.queryByText("Freeze Frame")).not.toBeInTheDocument();
   });
 
   it("shows a stale indicator when the report is stale", async () => {

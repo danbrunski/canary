@@ -15,12 +15,17 @@ from src.alerts.notifier import Notifier
 from src.alerts.tuning import AlertTuner, load_tuning_config
 from src.analysis.gps_tracker import GpsTracker
 from src.analysis.vehicle_ledger import VehicleLedgerStore
+from src.collection.obd_scheduler import FreezeFrameTrigger
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.dtc_state import DEFAULT_STALE_AFTER_SECONDS as DEFAULT_DTC_STALE_AFTER_SECONDS
 from src.control.dtc_state import DtcState
 from src.control.jobs import JobController
+from src.control.monitor_state import (
+    DEFAULT_STALE_AFTER_SECONDS as DEFAULT_MONITOR_STALE_AFTER_SECONDS,
+)
+from src.control.monitor_state import MonitorState
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
 from src.dashboard.behavior_live import BehaviorLiveState
@@ -75,6 +80,14 @@ class DaemonComponents:
     behavior_live: BehaviorLiveState = field(default_factory=BehaviorLiveState)
     #: Cached latest DTC report + per-session diff/sidecar state (Task 1.4).
     dtc_state: DtcState = field(default_factory=DtcState)
+    #: Cached latest Mode 06 monitor sweep + per-session misfire diff (Task 3.1).
+    monitor_state: MonitorState = field(default_factory=MonitorState)
+    #: Shared flag bridging ``dtc_state`` (asyncio DTC sink) and the OBD
+    #: collector loop (its own thread) — a new stored DTC requests a one-shot
+    #: Mode 02 freeze-frame read (Task 3.3). Same instance is threaded into
+    #: both ``dtc_state`` (constructed below) and the collector's
+    #: ``CanObdSpec`` (``_default_collectors``, via ``run_daemon``).
+    freeze_frame_trigger: FreezeFrameTrigger = field(default_factory=FreezeFrameTrigger)
     #: Vehicle maintenance/intervention ledger (Task 3.1) — a new stored DTC
     #: (Task 3.4) and operator/MCP writes both append here.
     vehicle_ledger: VehicleLedgerStore = field(default_factory=VehicleLedgerStore)
@@ -121,6 +134,7 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         window=alerts_cfg.persistence_window_ticks,
         window_seconds=alerts_cfg.persistence_window_seconds,
     )
+    freeze_frame_trigger = FreezeFrameTrigger()
 
     components = DaemonComponents(
         config=config,
@@ -144,7 +158,15 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
                 DEFAULT_DTC_STALE_AFTER_SECONDS,
             ),
             catalog_db=config.daemon.catalog_db,
+            freeze_frame_trigger=freeze_frame_trigger,
         ),
+        monitor_state=MonitorState(
+            stale_after_seconds=max(
+                config.collection.obd_monitor_poll_interval_seconds * 3,
+                DEFAULT_MONITOR_STALE_AFTER_SECONDS,
+            ),
+        ),
+        freeze_frame_trigger=freeze_frame_trigger,
         vehicle_ledger=VehicleLedgerStore(config.daemon.vehicle_ledger),
         capture_controller=None,
         job_controller=_make_job_controller(config),

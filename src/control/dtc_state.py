@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from src.collection.obd_scheduler import FREEZE_FRAME_CHANNEL_PREFIX
 from src.decode.dtc_catalog import DtcReport, build_dtc_report, describe_dtc
 from src.telemetry import TelemetryRecord
 
@@ -32,6 +33,7 @@ log = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from src.alerts.emitter import AnomalyEventEmitter
     from src.analysis.vehicle_ledger import VehicleLedgerStore
+    from src.collection.obd_scheduler import FreezeFrameTrigger
 
 SIDECAR_FILENAME = "dtc.json"
 
@@ -72,10 +74,21 @@ class DtcState:
     #: Session catalog DB path (Task 6.3) — re-indexed right after a sidecar
     #: write, best-effort. ``None`` (the default) skips the catalog entirely.
     catalog_db: Path | None = None
+    #: Shared flag this state sets when a *stored* DTC first appears this
+    #: session (Task 3.3) — ``run_can_obd_loop`` consumes it to read the Mode
+    #: 02 freeze frame once. ``None`` (the default) means no freeze-frame
+    #: read is ever requested (matches ``CanObdSpec.freeze_frame_trigger``'s
+    #: own "unset disables the feature" default).
+    freeze_frame_trigger: FreezeFrameTrigger | None = None
     _stored: list[str] = field(default_factory=list, init=False, repr=False)
     _pending: list[str] = field(default_factory=list, init=False, repr=False)
     _permanent: list[str] = field(default_factory=list, init=False, repr=False)
     _mil_on: bool | None = field(default=None, init=False, repr=False)
+    #: Latest Mode 02 freeze-frame reading (Task 3.3) — channel name (RPM,
+    #: SPEED, ...) -> decoded value. Not reset per session, mirroring
+    #: _stored/_pending/_permanent: it reflects the ECU's freeze-frame
+    #: buffer, not this process's session bookkeeping.
+    _freeze_frame: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
     _report: DtcReport | None = field(default=None, init=False, repr=False)
     _session_id: str | None = field(default=None, init=False, repr=False)
     #: code -> statuses ("stored"/"pending"/"permanent") seen this session.
@@ -91,7 +104,7 @@ class DtcState:
         emitter: AnomalyEventEmitter | None = None,
         vehicle_ledger: VehicleLedgerStore | None = None,
     ) -> None:
-        """Feed one decoded OBD reading; a no-op for anything but the DTC channels."""
+        """Feed one decoded OBD reading; a no-op for anything but the DTC/freeze-frame channels."""
         if record.source != "obd":
             return
         if record.channel == _STORED_CHANNEL:
@@ -102,6 +115,9 @@ class DtcState:
             self._permanent = _split_codes(record.value)
         elif record.channel == _MIL_CHANNEL:
             self._mil_on = bool(record.value) if record.value is not None else None
+        elif record.channel.startswith(FREEZE_FRAME_CHANNEL_PREFIX):
+            name = record.channel[len(FREEZE_FRAME_CHANNEL_PREFIX) :]
+            self._freeze_frame[name] = record.value
         else:
             return
         self._rebuild(
@@ -135,6 +151,7 @@ class DtcState:
             pending=self._pending,
             permanent=self._permanent,
             mil_on=self._mil_on,
+            freeze_frame=self._freeze_frame,
         )
         self._report = report
 
@@ -150,6 +167,7 @@ class DtcState:
             tuple(sorted(self._pending)),
             tuple(sorted(self._permanent)),
             self._mil_on,
+            tuple(sorted(self._freeze_frame.items())),
         )
         if session_dir is not None and signature != self._last_persisted_signature:
             _write_sidecar(session_dir, report)
@@ -194,6 +212,10 @@ class DtcState:
                             mil_on=self._mil_on,
                             session=session_id,
                         )
+                    if status == "stored" and self.freeze_frame_trigger is not None:
+                        # Task 3.3: a stored DTC just appeared this session —
+                        # request one Mode 02 freeze-frame read.
+                        self.freeze_frame_trigger.request()
                     if status == "stored" and vehicle_ledger is not None:
                         try:
                             occurred_at = datetime.fromisoformat(timestamp).date()
@@ -221,6 +243,7 @@ class DtcState:
                 "permanent": [],
                 "mil_on": None,
                 "dtc_count": 0,
+                "freeze_frame": None,
                 "stale": True,
             }
         payload = self._report.to_dict()

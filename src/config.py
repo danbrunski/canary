@@ -138,6 +138,10 @@ class CollectionConfig(_Strict):
     #: scale, not seconds, so this is its own knob rather than a
     #: `PollTier` scaled off `obd_poll_rate_hz`. ``<= 0`` disables it.
     obd_dtc_poll_interval_seconds: float = 300.0
+    #: Cadence (s) of the Mode 06 on-board monitor poll (Task 3.1) — misfire
+    #: counts + monitor margins, same "own knob, not a `PollTier`" cadence
+    #: model as ``obd_dtc_poll_interval_seconds`` above. ``<= 0`` disables it.
+    obd_monitor_poll_interval_seconds: float = 300.0
     storage_path: Path
     session_retention_days: int
     storage_warning_mb: int

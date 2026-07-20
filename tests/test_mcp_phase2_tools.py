@@ -15,6 +15,7 @@ from src.mcp_server.tools import bindings as bindings_tool
 from src.mcp_server.tools import digest as digest_tool
 from src.mcp_server.tools import dtc as dtc_tool
 from src.mcp_server.tools import jobs as jobs_tool
+from src.mcp_server.tools import monitors as monitors_tool
 from src.mcp_server.tools import sessions as sessions_tool
 from src.mcp_server.tools import trends as trends_tool
 from src.mcp_server.tools import trip_summary as trip_summary_tool
@@ -92,6 +93,35 @@ async def test_get_dtc_passthrough() -> None:
     }
     client = await _fake_daemon({"GET /obd/dtc": report})
     result = await dtc_tool.get_dtc(client)
+    await client.aclose()
+    assert result == report
+
+
+# ---------------------------------------------------------------------------
+# Monitors (Task 3.1)
+# ---------------------------------------------------------------------------
+
+
+async def test_get_monitors_passthrough() -> None:
+    """``get_monitors`` forwards the cached Mode 06 sweep verbatim."""
+    report = {
+        "captured_at": "2026-07-19T12:00:00+00:00",
+        "misfire_counts": {"1": 3},
+        "results": [
+            {
+                "monitor_id": 11,
+                "test_id": 1,
+                "unit_and_scaling_id": 16,
+                "test_value": 3,
+                "min_limit": 0,
+                "max_limit": 255,
+                "passed": True,
+            }
+        ],
+        "stale": False,
+    }
+    client = await _fake_daemon({"GET /obd/monitors": report})
+    result = await monitors_tool.get_monitors(client)
     await client.aclose()
     assert result == report
 

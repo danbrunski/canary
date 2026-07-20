@@ -12,6 +12,7 @@ from src.analysis.gps_tracker import GpsTracker
 from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.collection.queueing import QueueDepthMonitor
 from src.control.dtc_state import DtcState
+from src.control.monitor_state import MonitorState
 from src.dashboard.broadcast import Broadcaster
 from src.models.health import HealthMonitor
 from src.preprocessing.live import LiveFeatureSource
@@ -315,6 +316,49 @@ async def run_dtc_sink(
             _observe_queue(health_monitor, "dtc", queue)
 
 
+async def run_monitor_sink(
+    queue: asyncio.Queue[TelemetryRecord],
+    monitor_state: MonitorState,
+    stop_event: asyncio.Event,
+    *,
+    emitter: AnomalyEventEmitter | None = None,
+    active_session_path: Callable[[], Path] | None = None,
+    poll_interval: float = 0.5,
+    queue_warning_fraction: float = 0.8,
+    health_monitor: HealthMonitor | None = None,
+) -> None:
+    """Feed Mode 06 monitor-poll readings (Task 3.1) into the cached sweep.
+
+    Mirrors ``run_dtc_sink`` — ``active_session_path`` is read fresh on every
+    record so a session rotation mid-drive resets ``MonitorState``'s
+    per-session misfire baseline instead of pinning it to whatever session
+    was active at sink-startup.
+    """
+    queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
+    while not stop_event.is_set() or not queue.empty():
+        queue_monitor.observe(queue)
+        _observe_queue(health_monitor, "monitor", queue)
+        try:
+            record = await asyncio.wait_for(queue.get(), timeout=poll_interval)
+        except TimeoutError:
+            continue
+
+        try:
+            session_dir = active_session_path() if active_session_path is not None else None
+            monitor_state.observe(
+                record,
+                session_id=session_dir.name if session_dir is not None else None,
+                emitter=emitter,
+            )
+        except Exception as exc:  # noqa: BLE001 — monitor bookkeeping is best-effort
+            _note_error(health_monitor, "monitor", exc)
+            log.exception("monitor_state.observe failed; skipping record")
+        finally:
+            queue.task_done()
+            queue_monitor.observe(queue)
+            _observe_queue(health_monitor, "monitor", queue)
+
+
 async def drain_queue_with_broadcast(
     queue: asyncio.Queue[TelemetryRecord],
     writer: ParquetTelemetryWriter | AsyncParquetTelemetryWriter,
@@ -325,6 +369,8 @@ async def drain_queue_with_broadcast(
     gps_tracker: GpsTracker | None = None,
     dtc_state: DtcState | None = None,
     dtc_emitter: AnomalyEventEmitter | None = None,
+    monitor_state: MonitorState | None = None,
+    monitor_emitter: AnomalyEventEmitter | None = None,
     vehicle_ledger: VehicleLedgerStore | None = None,
     active_session_path: Callable[[], Path] | None = None,
     on_trip_ended: Callable[[Path], None] | None = None,
@@ -435,6 +481,24 @@ async def drain_queue_with_broadcast(
             )
         )
 
+    if monitor_state is not None:
+        monitor_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
+        sinks.append(TelemetrySink("monitor", monitor_queue, "drop_oldest"))
+        sink_tasks.append(
+            asyncio.create_task(
+                run_monitor_sink(
+                    monitor_queue,
+                    monitor_state,
+                    stop_event,
+                    emitter=monitor_emitter,
+                    active_session_path=active_session_path,
+                    poll_interval=poll_interval,
+                    queue_warning_fraction=queue_warning_fraction,
+                    health_monitor=health_monitor,
+                )
+            )
+        )
+
     fanout_task = asyncio.create_task(
         run_telemetry_fanout(
             queue,
@@ -519,6 +583,7 @@ __all__ = [
     "run_dtc_sink",
     "run_gps_sink",
     "run_live_source_sink",
+    "run_monitor_sink",
     "run_storage_sink",
     "run_telemetry_broadcast_sink",
     "run_telemetry_fanout",

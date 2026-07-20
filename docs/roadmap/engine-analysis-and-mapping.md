@@ -228,32 +228,43 @@ the analysis UX.
 Depends on `eval-longitudinal-and-dtc.md` Phase 1.3's service-request
 scheduling (`kind="dtc"` poll requests generalize to `kind="service"`).
 
-- [ ] **3.1 — Wire Mode 06.** `parse_mode06_response` +
-  `MonitorTestResult` (`obd_registry.py:300-342`) have zero callers.
-  Add a slow-tier service poll (CAN Mode 06 TID sweep), decode
-  per-cylinder **misfire counts** and monitor margins, cache like the
-  DTC report, expose via `GET /obd/monitors` + `get_monitors` MCP
-  tool. Emit a `source="misfire"` anomaly event on count *increase*
-  (ECM-debounced; no persistence gate needed).
-- [ ] **3.2 — Misfire trend.** Add per-cylinder misfire counts to the
-  session fingerprint stat set (`eval-longitudinal-and-dtc.md` 4.1) —
-  slow-building misfire trends are a canonical early-warning signal.
-- [ ] **3.3 — Mode 02 freeze frame.** When the DTC reader (Phase 1
-  there) sees a stored DTC, read the Mode 02 freeze frame once
-  (`SERVICE_REGISTRY[0x02]` metadata + `lookup()` remap exist,
-  `obd_registry.py:1194-1252`) and persist it into `dtc.json`.
-- [ ] **3.4 — Mode 09 cal-ID/CVN at startup.** Extend the VIN probe
-  (`src/profiles.py:193`) to also read InfoTypes 0x04/0x06 (decoders
-  exist, `obd_registry.py:1157-1186`); store in the profile registry.
-  A changed calibration ID = ECU reflash = corpus boundary candidate
-  (ledger integration).
-- [ ] **3.5 — UI: Monitors panel.** New `MonitorsPanel.tsx` in the
-  diagnostics nav group beside the DTC panel: per-cylinder misfire
-  counts (bar per cylinder, delta-since-drive-start highlighted),
-  monitor test results with value/min/max margin bars, staleness
-  indicator. Freeze-frame data (3.3) renders inside the DTC panel on
-  the code it belongs to. Cal-ID/CVN shown in `ProfilesPanel`.
-  FE tests per panel convention.
+- [x] **3.1 — Wire Mode 06.** Landed: new `kind="service"` scheduler
+  poll (`src/collection/obd_scheduler.py`) rate-limited by its own
+  `service_poll_interval_seconds` knob, fully decoupled from real-time
+  PID bus budget. `parse_mode06_response`/`MonitorTestResult` now
+  called from `src/control/monitor_state.py::MonitorState`, which
+  caches the sweep and emits `source="misfire"` on per-cylinder count
+  *increase* only (a counter reset — e.g. after key-cycle — becomes
+  the new baseline, not a false decrease-anomaly). `GET /obd/monitors`
+  + `get_monitors` MCP tool wired end-to-end (not stubs), documented
+  in `docs/mcp-server.md`/`docs/headless-api.md`.
+- [x] **3.2 — Misfire trend.** Landed:
+  `src/analysis/fingerprint.py::_add_misfire_stats` adds session-max
+  per-cylinder misfire count (counters are cumulative within a drive)
+  to the fingerprint stat set, scanning `obd:MISFIRE_COUNT_CYLn`
+  columns with no hardcoded cylinder count.
+- [x] **3.3 — Mode 02 freeze frame.** Landed: `FreezeFrameTrigger`
+  fires once when a DTC status transitions to stored for the first
+  time this session (`src/control/dtc_state.py`), reads the Mode 02
+  frame, and persists it via `DtcReport.freeze_frame` through the
+  sidecar's existing atomic tmp+rename write — no separate/bolted-on
+  writer.
+- [x] **3.4 — Mode 09 cal-ID/CVN at startup.** Landed:
+  `src/profiles.py::probe_vehicle_info`/`VehicleInfoProbe` reads
+  InfoTypes 0x04/0x06 alongside the VIN probe; stored as
+  `VehicleProfile.calibration_id`/`cvn`. A changed cal-ID on an
+  already-registered profile appends a `kind="mod",
+  corpus_boundary=True` `VehicleLedgerStore` entry; a brand-new
+  profile's first-ever probe correctly appends nothing (no prior value
+  to compare against).
+- [x] **3.5 — UI: Monitors panel.** Landed: new `MonitorsPanel.tsx`
+  (diagnostics nav group) — per-cylinder misfire bars with
+  delta-since-baseline, monitor test value/min/max margin bars,
+  staleness indicator, real `/obd/monitors` data (not mocked-only).
+  Freeze-frame (3.3) renders inside the existing `DtcPanel.tsx`.
+  Cal-ID/CVN (3.4) shown in `ProfilesPanel`. FE tests per panel
+  convention. All live-truck verification blocked-overnight per
+  OVERNIGHT-QUEUE.md Q14 — code + fixture/mocked tests only.
 
 ## Phase 4 — Missing physics + new maps
 

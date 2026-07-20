@@ -30,6 +30,7 @@ import { DatasetHealthPanel } from "./DatasetHealthPanel";
 import { DtcPanel } from "./DtcPanel";
 import { ModelHealthPanel } from "./ModelHealthPanel";
 import { ModelPanel } from "./ModelPanel";
+import { MonitorsPanel } from "./MonitorsPanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
 import { PowerPanel } from "./PowerPanel";
 import { ProfilesPanel } from "./ProfilesPanel";
@@ -156,6 +157,8 @@ function renderItem(
       return <TripPanel channels={d.channels} status={d.status} token={d.token} />;
     case "diag-dtc":
       return <DtcPanel />;
+    case "diag-monitors":
+      return <MonitorsPanel />;
     case "diag-trends":
       return <TrendsPanel token={d.token} />;
     case "models-training":

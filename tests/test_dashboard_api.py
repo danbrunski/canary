@@ -979,6 +979,49 @@ def test_get_obd_dtc_returns_the_cached_report_shape(
 
 
 # ---------------------------------------------------------------------------
+# GET /obd/monitors (Task 3.1)
+# ---------------------------------------------------------------------------
+
+
+def test_get_obd_monitors_without_a_monitor_state_returns_the_empty_stale_shape(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    app = create_app(config, anomalies_dir=anomalies_dir)
+    client = TestClient(app)
+    response = client.get("/obd/monitors")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["captured_at"] is None
+    assert body["misfire_counts"] == {}
+    assert body["results"] == []
+    assert body["stale"] is True
+
+
+def test_get_obd_monitors_returns_the_cached_sweep_shape(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    from src.control.monitor_state import MonitorState
+    from src.telemetry import TelemetryRecord
+
+    monitor_state = MonitorState()
+    payload = bytes([0x0B, 0x01, 0x10, 0x00, 0x03, 0x00, 0x00, 0x00, 0xFF])
+    monitor_state.observe(
+        TelemetryRecord.obd(1_778_000_000.0, "MONITOR_RESULTS", payload.hex(), ""),
+        session_id="s1",
+    )
+
+    app = create_app(config, anomalies_dir=anomalies_dir, monitor_state=monitor_state)
+    client = TestClient(app)
+    response = client.get("/obd/monitors")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["misfire_counts"] == {"1": 3}
+    assert len(body["results"]) == 1
+    assert body["results"][0]["monitor_id"] == 0x0B
+    assert body["stale"] is False
+
+
+# ---------------------------------------------------------------------------
 # GET /sessions/{id}/trip-summary (Task 1.5)
 # ---------------------------------------------------------------------------
 

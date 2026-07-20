@@ -39,6 +39,10 @@ export interface VehicleProfile {
   model: string;
   year: number | null;
   parameters: Record<string, unknown>;
+  /** Mode 09 InfoType 0x04/0x06 (Task 3.4) — last-seen ECU calibration ID /
+   *  verification number. Blank until the first successful probe. */
+  calibration_id: string;
+  cvn: string;
 }
 
 export interface VehicleProfilesResponse {

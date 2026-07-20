@@ -22,6 +22,7 @@ import type {
   JobLogsResponse,
   JobResponse,
   JobsResponse,
+  MonitorsResponse,
   ObdCoverageResponse,
   PowerKeepaliveResponse,
   PowerStatusResponse,
@@ -340,6 +341,13 @@ export function getDids(signal?: AbortSignal): Promise<DidMapResponse> {
  *  endpoint exists; this API surface is read-only by design. */
 export function getDtc(signal?: AbortSignal): Promise<DtcReportResponse> {
   return fetchJson("/obd/dtc", { signal });
+}
+
+/** `/obd/monitors` (Task 3.1) — cached Mode 06 on-board monitor sweep:
+ *  per-cylinder misfire counts + raw monitor test results. Read-only, like
+ *  `/obd/dtc` above. */
+export function getMonitors(signal?: AbortSignal): Promise<MonitorsResponse> {
+  return fetchJson("/obd/monitors", { signal });
 }
 
 /** `/sessions/{id}/trip-summary` is read-only + unauthenticated, like

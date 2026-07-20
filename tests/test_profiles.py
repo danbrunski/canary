@@ -7,9 +7,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import src.profiles as profiles_mod
+from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.config import CanaryConfig, DaemonConfig
 from src.dashboard.api import create_app
 from src.profiles import (
+    VehicleInfoProbe,
     VehicleProfile,
     load_registry,
     resolve_active_profile,
@@ -89,6 +92,47 @@ def test_read_vin_noop_on_virtual_bus(tmp_path: Path):
     assert read_vin(config) is None
 
 
+def test_probe_vehicle_info_noop_when_not_canable(tmp_path: Path):
+    from src.profiles import probe_vehicle_info
+
+    config = _base_config(tmp_path, obd_source="disabled")
+    probe = probe_vehicle_info(config)
+    assert probe == VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
+
+
+def test_probe_vehicle_info_reads_vin_calibration_id_and_cvn(tmp_path: Path, monkeypatch):
+    """Task 3.4 — one bus connection answers all three Mode 09 InfoTypes."""
+    from src.collection.isotp import ObdResponse
+
+    class _FakeClient:
+        def __init__(self, _bus, *, timeout_seconds: float) -> None:
+            del timeout_seconds
+
+        def query_mode_09(self, info_type: int) -> ObdResponse | None:
+            payloads = {
+                0x02: b"1" + b"5N1AN08U08C123456",  # leading count byte + 17-char VIN
+                0x04: b"CAL0001         ",
+                0x06: bytes.fromhex("DEADBEEF"),
+            }
+            payload = payloads.get(info_type)
+            return None if payload is None else ObdResponse(9, info_type, payload, 0x7E8)
+
+    class _FakeBus:
+        def shutdown(self) -> None:
+            pass
+
+    config = _base_config(tmp_path, obd_source="canable")
+    monkeypatch.setattr("src.collection.can_collector.bus_factory", lambda _can: _FakeBus())
+    monkeypatch.setattr("src.collection.can_obd_client.CanObdClient", _FakeClient)
+
+    from src.profiles import probe_vehicle_info
+
+    probe = probe_vehicle_info(config)
+    assert probe.vin == "5N1AN08U08C123456"
+    assert probe.calibration_id == "CAL0001"
+    assert probe.cvn == "DEADBEEF"
+
+
 def test_resolve_falls_back_to_default_and_registers(tmp_path: Path):
     config = _base_config(tmp_path)  # probe disabled → VIN is None
     profile = resolve_active_profile(config)
@@ -126,6 +170,95 @@ def test_resolve_disabled_does_not_write(tmp_path: Path):
     )
     resolve_active_profile(config)
     assert not config.profiles.registry_path.exists()
+
+
+def _base_config_with_ledger(tmp_path: Path) -> CanaryConfig:
+    config = _base_config(tmp_path)
+    return config.model_copy(
+        update={
+            "daemon": config.daemon.model_copy(
+                update={"vehicle_ledger": tmp_path / "vehicle_ledger.jsonl"}
+            )
+        }
+    )
+
+
+def test_resolve_persists_calibration_id_and_cvn_on_first_probe(tmp_path: Path):
+    """Task 3.4 — a registered profile's Mode 09 calibration ID/CVN land in
+    the registry alongside its VIN."""
+    config = _base_config_with_ledger(tmp_path)
+    save_registry(
+        config.profiles.registry_path,
+        [VehicleProfile(slug="work-truck", vin="VINWORK", name="Work Truck")],
+    )
+    probe = VehicleInfoProbe(vin="VINWORK", calibration_id="CAL0001", cvn="CVN0001")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(profiles_mod, "probe_vehicle_info", lambda _config: probe)
+        profile = resolve_active_profile(config)
+    assert profile.calibration_id == "CAL0001"
+    assert profile.cvn == "CVN0001"
+    reloaded = {p.slug: p for p in load_registry(config.profiles.registry_path)}
+    assert reloaded["work-truck"].calibration_id == "CAL0001"
+    # First-ever read: a baseline, not a reflash — no ledger entry.
+    assert (
+        VehicleLedgerStore(
+            profiles_mod._scope_file(config.daemon.vehicle_ledger, "work-truck")
+        ).records()
+        == []
+    )
+
+
+def test_resolve_flags_a_changed_calibration_id_as_a_corpus_boundary(tmp_path: Path):
+    """Task 3.4 — a calibration ID that changed vs. the previously-stored
+    one is an ECU reflash: a `corpus_boundary` vehicle-ledger event."""
+    config = _base_config_with_ledger(tmp_path)
+    save_registry(
+        config.profiles.registry_path,
+        [
+            VehicleProfile(
+                slug="work-truck",
+                vin="VINWORK",
+                name="Work Truck",
+                calibration_id="CAL0001",
+                cvn="CVN0001",
+            )
+        ],
+    )
+    probe = VehicleInfoProbe(vin="VINWORK", calibration_id="CAL0002", cvn="CVN0002")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(profiles_mod, "probe_vehicle_info", lambda _config: probe)
+        profile = resolve_active_profile(config)
+    assert profile.calibration_id == "CAL0002"
+
+    ledger = VehicleLedgerStore(
+        profiles_mod._scope_file(config.daemon.vehicle_ledger, "work-truck")
+    )
+    records = ledger.records()
+    assert len(records) == 1
+    assert records[0].corpus_boundary is True
+    assert records[0].kind == "mod"
+    assert "CAL0001" in records[0].title
+    assert "CAL0002" in records[0].title
+
+
+def test_resolve_unchanged_calibration_id_does_not_flag_a_boundary(tmp_path: Path):
+    config = _base_config_with_ledger(tmp_path)
+    save_registry(
+        config.profiles.registry_path,
+        [
+            VehicleProfile(
+                slug="work-truck", vin="VINWORK", name="Work Truck", calibration_id="CAL0001"
+            )
+        ],
+    )
+    probe = VehicleInfoProbe(vin="VINWORK", calibration_id="CAL0001", cvn=None)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(profiles_mod, "probe_vehicle_info", lambda _config: probe)
+        resolve_active_profile(config)
+    ledger = VehicleLedgerStore(
+        profiles_mod._scope_file(config.daemon.vehicle_ledger, "work-truck")
+    )
+    assert ledger.records() == []
 
 
 def test_resolve_for_tooling_never_probes(tmp_path: Path):

@@ -109,6 +109,14 @@ def _write_rich_session(root: Path, *, name: str = "2026-05-20T120000") -> Path:
                     TelemetryRecord.gps(t, "hdop", 1.0),
                 ]
             )
+        # Task 3.2 — a growing cylinder-1 misfire count over the drive (Mode
+        # 06 counters are cumulative within a session); no cylinder-2
+        # reading at all this session, proving the stat is per-cylinder
+        # (only cylinders actually polled get a stat key).
+        if i == 10:
+            records.append(TelemetryRecord.obd(t, "MISFIRE_COUNT_CYL1", 1.0, "count"))
+        elif i == 100:
+            records.append(TelemetryRecord.obd(t, "MISFIRE_COUNT_CYL1", 5.0, "count"))
     write_records_to_parquet(records, session, max_rows=10_000)
     return session
 
@@ -191,6 +199,15 @@ def test_bank_balance_stats(rich_session: Path) -> None:
 def test_committee_residual_stat(rich_session: Path) -> None:
     stats = compute_fingerprint(rich_session, _config())
     assert stats["committee_residual_mean:speed_source_divergence"] == pytest.approx(5.0)
+
+
+def test_misfire_count_stat_is_the_session_ending_count(rich_session: Path) -> None:
+    """Task 3.2 — the Mode 06 counter is cumulative within a drive, so the
+    fingerprint stat is the session's max observed value, per cylinder."""
+    stats = compute_fingerprint(rich_session, _config())
+    assert stats["misfire_count_cyl:1"] == pytest.approx(5.0)
+    # No MISFIRE_COUNT_CYL2 reading exists this session — no stat key either.
+    assert "misfire_count_cyl:2" not in stats
 
 
 def test_behavior_deviation_stat(tmp_path: Path, rich_session: Path) -> None:

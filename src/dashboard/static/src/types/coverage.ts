@@ -184,6 +184,32 @@ export interface DtcReportResponse {
   permanent: DtcCodeEntry[];
   mil_on: boolean | null;
   dtc_count: number;
+  /** Mode 02 freeze frame (Task 3.3) — channel name -> decoded value, read
+   *  once when a stored DTC most recently first appeared. `null` until the
+   *  first stored code triggers a read. */
+  freeze_frame: Record<string, number | string> | null;
+  stale: boolean;
+}
+
+/** `GET /obd/monitors` (Task 3.1) — cached Mode 06 on-board monitor sweep:
+ *  per-cylinder misfire counts + raw monitor test results, with staleness.
+ *  Mirrors the payload shape `src.control.monitor_state.MonitorState.snapshot`
+ *  serves. */
+export interface MonitorTestResultEntry {
+  monitor_id: number;
+  test_id: number;
+  unit_and_scaling_id: number;
+  test_value: number;
+  min_limit: number;
+  max_limit: number;
+  passed: boolean;
+}
+
+export interface MonitorsResponse {
+  captured_at: string | null;
+  /** Cylinder number (as a string key, JSON object) -> raw misfire count. */
+  misfire_counts: Record<string, number>;
+  results: MonitorTestResultEntry[];
   stale: boolean;
 }
 

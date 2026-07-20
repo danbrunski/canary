@@ -128,7 +128,9 @@ def test_known_model_types_match_anomaly_sources() -> None:
     members that are not ``KNOWN_MODEL_TYPE``\\ s. Task 1.6's ``dtc`` source
     is the same shape — a trouble code isn't a trained model. Task 4.6's
     ``trend`` source is the same shape again — a CUSUM/Mann-Kendall drift
-    verdict over the fingerprint series isn't a trained model either.
+    verdict over the fingerprint series isn't a trained model either. Task
+    3.1's ``misfire`` source is the same shape once more — a Mode 06
+    misfire-count increase isn't a trained model either.
 
     The sequence-detector slot is backbone-interchangeable
     (``lstm_autoencoder`` / ``tcn_autoencoder``, only one active at a time) but
@@ -141,7 +143,13 @@ def test_known_model_types_match_anomaly_sources() -> None:
 
     from src.alerts.events import AnomalySource
 
-    non_derived_sources = set(get_args(AnomalySource)) - {"fused", "behavior", "dtc", "trend"}
+    non_derived_sources = set(get_args(AnomalySource)) - {
+        "fused",
+        "behavior",
+        "dtc",
+        "trend",
+        "misfire",
+    }
     sequence_backbones = {"lstm_autoencoder", "tcn_autoencoder"}
 
     assert non_derived_sources <= set(KNOWN_MODEL_TYPES)

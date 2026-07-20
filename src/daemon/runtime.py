@@ -123,6 +123,7 @@ async def run_daemon(
         active_collectors = _default_collectors(
             config,
             obd_scheduler_metrics_callback=components.health_monitor.observe_obd_scheduler,
+            freeze_frame_trigger=components.freeze_frame_trigger,
         )
 
     drain_task = asyncio.create_task(
@@ -135,6 +136,8 @@ async def run_daemon(
             gps_tracker=components.gps_tracker,
             dtc_state=components.dtc_state,
             dtc_emitter=components.emitter,
+            monitor_state=components.monitor_state,
+            monitor_emitter=components.emitter,
             vehicle_ledger=components.vehicle_ledger,
             active_session_path=lambda: storage_writer.paths.root,
             on_trip_ended=lambda session_dir: _run_trip_end_hook(session_dir, config, components),

@@ -10,6 +10,7 @@ from src.alerts.feedback import FeedbackStore, annotate_events_with_feedback
 from src.analysis.gps_tracker import GpsTracker
 from src.config import CanaryConfig
 from src.control.dtc_state import DtcState
+from src.control.monitor_state import MonitorState
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
 from src.dashboard.behavior_live import BehaviorLiveState
@@ -43,6 +44,7 @@ def register_public_routes(
     health_monitor: HealthMonitor | None,
     behavior_live: BehaviorLiveState | None,
     dtc_state: DtcState | None = None,
+    monitor_state: MonitorState | None = None,
     gps_tracker: GpsTracker | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
 ) -> None:
@@ -170,9 +172,25 @@ def register_public_routes(
                 "permanent": [],
                 "mil_on": None,
                 "dtc_count": 0,
+                "freeze_frame": None,
                 "stale": True,
             }
         return dtc_state.snapshot()
+
+    @app.get("/obd/monitors")
+    def get_obd_monitors() -> dict[str, Any]:
+        # Task 3.1: the cached MonitorState (Mode 06 on-board monitor
+        # results — misfire counts + monitor value/min/max margins) the
+        # periodic Mode 06 poll keeps current. Empty-but-shaped when no poll
+        # has landed yet, same convention as /obd/dtc above.
+        if monitor_state is None:
+            return {
+                "captured_at": None,
+                "misfire_counts": {},
+                "results": [],
+                "stale": True,
+            }
+        return monitor_state.snapshot()
 
     @app.get("/sessions/{session_id}/trip-summary")
     def get_session_trip_summary(session_id: str) -> dict[str, Any]:

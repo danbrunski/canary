@@ -62,7 +62,34 @@ export function DtcPanel() {
       <CodeList title="Stored" codes={data.stored} />
       <CodeList title="Pending" codes={data.pending} />
       <CodeList title="Permanent" codes={data.permanent} />
+      <FreezeFrame freezeFrame={data.freeze_frame} />
     </Panel>
+  );
+}
+
+/** Task 3.3/3.5 — the Mode 02 snapshot read once when a stored code most
+ *  recently first appeared this session, rendered inside the DTC panel
+ *  (not a separate panel) since it belongs to the trouble-code report. */
+function FreezeFrame({
+  freezeFrame,
+}: {
+  freezeFrame: Record<string, number | string> | null;
+}) {
+  if (!freezeFrame || Object.keys(freezeFrame).length === 0) return null;
+  return (
+    <div>
+      <h3 className="mb-1 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
+        Freeze Frame
+      </h3>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[0.82rem]">
+        {Object.entries(freezeFrame).map(([channel, value]) => (
+          <div key={channel} className="flex justify-between gap-2">
+            <span className="text-fg-dim">{channel}</span>
+            <span className="font-num text-fg">{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

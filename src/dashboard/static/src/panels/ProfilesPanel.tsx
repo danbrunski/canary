@@ -87,6 +87,9 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
                           <div className={cn(placeholderClass, "truncate font-num text-[0.72rem]")}>
                             VIN {profile.vin || "—"} · {profile.slug}
                           </div>
+                          <div className={cn(placeholderClass, "truncate font-num text-[0.72rem]")}>
+                            Cal ID {profile.calibration_id || "—"} · CVN {profile.cvn || "—"}
+                          </div>
                         </div>
                         {!editing && (
                           <button

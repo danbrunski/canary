@@ -352,3 +352,58 @@ def test_no_vehicle_ledger_configured_is_a_no_op(tmp_path: Path) -> None:
     state = DtcState()
     state.observe(_reading("DTC_STORED", "P0420"), session_id="s1", session_dir=None)
     assert state.snapshot()["stored"]
+
+
+# ---------------------------------------------------------------------------
+# 3.3 — Mode 02 freeze-frame trigger + caching
+# ---------------------------------------------------------------------------
+
+
+def test_new_stored_dtc_requests_a_freeze_frame_read() -> None:
+    from src.collection.obd_scheduler import FreezeFrameTrigger
+
+    trigger = FreezeFrameTrigger()
+    state = DtcState(freeze_frame_trigger=trigger)
+    assert trigger.take() is False  # nothing pending yet
+    state.observe(_reading("DTC_STORED", "P0420"), session_id="s1", session_dir=None)
+    assert trigger.take() is True
+    # Consumed — a second check without a new stored code finds nothing.
+    assert trigger.take() is False
+
+
+def test_pending_only_code_does_not_request_a_freeze_frame() -> None:
+    from src.collection.obd_scheduler import FreezeFrameTrigger
+
+    trigger = FreezeFrameTrigger()
+    state = DtcState(freeze_frame_trigger=trigger)
+    state.observe(_reading("DTC_PENDING", "P0420"), session_id="s1", session_dir=None)
+    assert trigger.take() is False
+
+
+def test_freeze_frame_reading_lands_in_the_cached_report_and_sidecar(tmp_path: Path) -> None:
+    state = DtcState()
+    session_dir = tmp_path / "2026-05-13T120000"
+    session_dir.mkdir()
+    state.observe(
+        _reading("DTC_STORED", "P0420"),
+        session_id=session_dir.name,
+        session_dir=session_dir,
+    )
+    state.observe(
+        _reading("FREEZE_FRAME_RPM", 2500.0),
+        session_id=session_dir.name,
+        session_dir=session_dir,
+    )
+    snapshot = state.snapshot()
+    assert snapshot["freeze_frame"] == {"RPM": 2500.0}
+
+    sidecar = json.loads((session_dir / SIDECAR_FILENAME).read_text())
+    assert sidecar["freeze_frame"] == {"RPM": 2500.0}
+
+
+def test_no_freeze_frame_trigger_configured_is_a_no_op() -> None:
+    """``freeze_frame_trigger=None`` (the default) doesn't raise — Task 3.3's
+    Mode 02 read is opt-in, gated on the collector actually wiring one."""
+    state = DtcState()
+    state.observe(_reading("DTC_STORED", "P0420"), session_id="s1", session_dir=None)
+    assert state.snapshot()["stored"]

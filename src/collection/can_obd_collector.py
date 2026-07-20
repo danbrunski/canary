@@ -52,6 +52,11 @@ from src.collection.isotp import (
     build_request_payload,
 )
 from src.collection.obd_collector import JsonlReadingWriter, ObdReading, reading_to_record
+from src.collection.obd_registry import (
+    misfire_count_channel,
+    misfire_counts_from_results,
+    parse_mode06_response,
+)
 from src.collection.obd_scheduler import (
     AUTO_MISS_BACKOFF_SECONDS,
     AUTO_PIDS,
@@ -129,6 +134,9 @@ def run_can_obd_loop(
     requests = build_poll_requests(client, spec)
     budget_rps = _bus_budget_requests_per_second(spec)
     did_indices = [index for index, request in enumerate(requests) if request.kind == "did"]
+    freeze_frame_indices = [
+        index for index, request in enumerate(requests) if request.kind == "freeze_frame"
+    ]
     controller: DidWindowController | None = None
     if spec.did_session is not None and did_indices:
         controller = DidWindowController(spec.did_session, did_indices, now=time.monotonic())
@@ -139,6 +147,8 @@ def run_can_obd_loop(
                 "pids": [r.channel for r in requests if r.kind == "pid"],
                 "dids": [r.channel for r in requests if r.kind == "did"],
                 "dtc_channels": [r.channel for r in requests if r.kind == "dtc"],
+                "service_channels": [r.channel for r in requests if r.kind == "service"],
+                "freeze_frame_channels": [r.channel for r in requests if r.kind == "freeze_frame"],
                 "custom_pid_channels": [r.channel for r in requests if r.kind == "custom"],
                 "poll_tiers": {r.channel: r.poll_tier for r in requests},
                 "bus_budget_requests_per_second": budget_rps,
@@ -156,6 +166,18 @@ def run_can_obd_loop(
     next_metrics_at = time.monotonic()
     while not _should_stop(stop_event, deadline_monotonic):
         now = time.monotonic()
+        if (
+            freeze_frame_indices
+            and spec.freeze_frame_trigger is not None
+            and spec.freeze_frame_trigger.take()
+        ):
+            # Task 3.3: a stored DTC just appeared — un-suppress every
+            # freeze-frame request for exactly this one shot. They go back
+            # to "on_demand" dormancy on their own once each has fired once
+            # (`_request_rate_hz` returns 0 for them, see `build_poll_requests`).
+            for index in freeze_frame_indices:
+                request_states[index].suppressed_until = 0.0
+                request_states[index].next_due_at = now
         if on_scheduler_metrics is not None and now >= next_metrics_at:
             on_scheduler_metrics(
                 _scheduler_metrics(
@@ -563,6 +585,10 @@ def record_can_obd(
 #: count channel and (Task 1.4) the MIL bit `decode_monitor_status` drops.
 _MONITOR_STATUS_PID = 0x01
 _MIL_STATUS_CHANNEL = "MIL_STATUS"
+#: Service whose "service" kind response carries per-cylinder misfire data
+#: (Task 3.1/3.2) in addition to the raw sweep — see the `service` branch
+#: below.
+_MODE06_SERVICE = 0x06
 
 
 def _response_to_reading(
@@ -588,6 +614,42 @@ def _response_to_reading(
         # TelemetryValue contract as every other reading.
         codes = parse_dtc_payload(response.payload)
         return [ObdReading(timestamp, request.channel, ",".join(codes), "")]
+
+    if request.kind == "service":
+        # Mode 06 (Task 3.1) — a whole monitor-test-result sweep is a list
+        # of 9-byte records, which doesn't fit the scalar TelemetryValue
+        # contract. Ship the raw payload as hex (matching the `did` branch
+        # above); `src.control.monitor_state.MonitorState` parses it back
+        # with `parse_mode06_response`. Always emit, even empty, so "polled,
+        # nothing reported" is distinguishable from "not polled yet".
+        readings = [ObdReading(timestamp, request.channel, response.payload.hex(), "")]
+        if request.service == _MODE06_SERVICE:
+            # Task 3.2: also land per-cylinder misfire counts as ordinary
+            # numeric channels (mirrors the MIL_STATUS derived-reading
+            # pattern below) so they flow through storage into the wide
+            # telemetry frame the session fingerprint scans — the hex sweep
+            # reading above can't be aggregated numerically.
+            counts = misfire_counts_from_results(parse_mode06_response(response.payload))
+            for cylinder, count in sorted(counts.items()):
+                readings.append(
+                    ObdReading(timestamp, misfire_count_channel(cylinder), float(count), "count")
+                )
+        return readings
+
+    if request.kind == "freeze_frame":
+        # Mode 02 (Task 3.3) — same wire formula as Mode 01 for this PID
+        # (`obd_registry.lookup(0x02, pid)`'s Mode-01 remap), but the
+        # response carries one extra leading frame-number byte ahead of the
+        # formula bytes that Mode 01 doesn't have; strip it before decoding.
+        entry = PID_DECODERS.get(request.identifier)
+        if entry is None or len(response.payload) < 2:
+            return []
+        _name, decoder = entry
+        decoded = decoder(response.payload[1:])
+        if decoded is None:
+            return []
+        value, unit = decoded
+        return [ObdReading(timestamp, request.channel, value, unit)]
 
     if request.kind == "custom":
         # Task 2.6 — decode through the definition's sandboxed formula
@@ -665,12 +727,12 @@ def _query_with_tap(
     stats: CanObdLoopStats,
     deadline_monotonic: float | None,
 ) -> ObdResponse | None:
-    # Mode 03/07/0A (Task 1.3) take no parameter byte at all — same shape as
-    # `CanObdClient.query_mode_03`'s `pid=None`/`expect_pid_echo=False`, so
-    # `_PollRequest.identifier` (a placeholder ``0``, the field isn't
-    # optional) must not leak into either the request bytes or the
-    # response's pid-echo match.
-    identifier = None if request.kind == "dtc" else request.identifier
+    # Mode 03/07/0A (Task 1.3) and Mode 06 (Task 3.1) take no parameter byte
+    # at all — same shape as `CanObdClient.query_mode_03`'s
+    # `pid=None`/`expect_pid_echo=False`, so `_PollRequest.identifier` (a
+    # placeholder ``0``, the field isn't optional) must not leak into either
+    # the request bytes or the response's pid-echo match.
+    identifier = None if request.kind in ("dtc", "service") else request.identifier
     message = can.Message(
         arbitration_id=request.request_id,
         data=build_request_payload(request.service, identifier),

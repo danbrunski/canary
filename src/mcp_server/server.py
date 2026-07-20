@@ -52,6 +52,9 @@ from src.mcp_server.tools import (
     logs as logs_tool,
 )
 from src.mcp_server.tools import (
+    monitors as monitors_tool,
+)
+from src.mcp_server.tools import (
     power as power_tool,
 )
 from src.mcp_server.tools import (
@@ -278,6 +281,12 @@ def _register_read_tools(
     async def get_dtc() -> dict[str, Any]:
         """Cached stored/pending/permanent DTC report, MIL state, staleness."""
         return await dtc_tool.get_dtc(client)
+
+    @mcp.tool()
+    async def get_monitors() -> dict[str, Any]:
+        """Cached Mode 06 on-board monitor sweep: per-cylinder misfire
+        counts + raw monitor test results (value/min/max, pass/fail)."""
+        return await monitors_tool.get_monitors(client)
 
     @mcp.tool()
     async def get_trends() -> dict[str, Any]:

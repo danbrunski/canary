@@ -34,6 +34,7 @@ import logging
 import re
 from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,12 @@ class VehicleProfile:
     model: str = ""
     year: int | None = None
     parameters: VehicleParameters = field(default_factory=VehicleParameters)
+    #: Mode 09 InfoType 0x04/0x06 (Task 3.4) — last-seen ECU calibration ID /
+    #: verification number for this profile. Blank until the first successful
+    #: probe; a *changed* calibration ID for an already-registered profile is
+    #: an ECU reflash (see ``resolve_active_profile``'s corpus-boundary hook).
+    calibration_id: str = ""
+    cvn: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,6 +86,8 @@ class VehicleProfile:
             "model": self.model,
             "year": self.year,
             "parameters": self.parameters.model_dump(),
+            "calibration_id": self.calibration_id,
+            "cvn": self.cvn,
         }
 
     @classmethod
@@ -92,6 +101,8 @@ class VehicleProfile:
             model=str(data.get("model", "")),
             year=data.get("year"),
             parameters=VehicleParameters(**params),
+            calibration_id=str(data.get("calibration_id", "")),
+            cvn=str(data.get("cvn", "")),
         )
 
 
@@ -164,49 +175,85 @@ def _normalize_vin(vin: str) -> str | None:
     return None
 
 
-def read_vin(config: CanaryConfig) -> str | None:
-    """One-shot VIN read at startup. ``None`` on any failure — never raises.
+@dataclass(frozen=True)
+class VehicleInfoProbe:
+    """Result of the startup Mode 09 probe (Task 3.4 extends the VIN-only read)."""
 
-    No-op (returns ``None``) when OBD is disabled, the bus is ``virtual``, or
-    the source is not the CAN-native path. ELM327 VIN is out of scope for v1;
-    those configs fall back to the default profile. Opens its own short-lived
-    bus and closes it before the main collectors start.
+    vin: str | None
+    calibration_id: str | None
+    cvn: str | None
+
+
+def probe_vehicle_info(config: CanaryConfig) -> VehicleInfoProbe:
+    """One-shot Mode 09 read at startup: VIN (InfoType 0x02), calibration ID
+    (0x04), and CVN (0x06) over the same bus connection (Task 3.4).
+
+    Same no-op/failure posture as the VIN-only probe this generalizes:
+    ``None`` fields (never raises) when OBD is disabled, the bus is
+    ``virtual``, the source isn't the CAN-native path, or the read fails.
+    Opens its own short-lived bus and closes it before the main collectors
+    start. A missing/failed calibration ID or CVN read doesn't invalidate a
+    successful VIN read (or vice versa) — each InfoType is independent.
     """
     coll = config.collection
     if coll.obd_source != "canable" or config.hardware.can.interface == "virtual":
-        return None
+        return VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
 
     # Imported lazily so this module (and config) stay importable without the
     # python-can collector deps present.
     from src.collection.can_collector import bus_factory
     from src.collection.can_obd_client import CanObdClient
-    from src.collection.obd_registry import decode_vin
+    from src.collection.obd_registry import decode_calibration_ids, decode_cvn, decode_vin
 
     try:
         bus = bus_factory(config.hardware.can)
     except Exception:
-        log.warning("VIN probe: failed to open CAN bus", exc_info=True)
-        return None
+        log.warning("vehicle info probe: failed to open CAN bus", exc_info=True)
+        return VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
 
+    vin: str | None = None
+    calibration_id: str | None = None
+    cvn: str | None = None
     try:
         client = CanObdClient(bus, timeout_seconds=config.profiles.vin_probe_timeout_seconds)
+
         response = client.query_mode_09(0x02)
         if response is None:
             log.info("VIN probe: no Mode 09 response")
-            return None
-        decoded = decode_vin(response.payload)
-        if decoded is None:
-            return None
-        vin = _normalize_vin(decoded[0])
-        if vin is None:
-            log.warning("VIN probe: implausible VIN payload %r", decoded[0])
-        return vin
+        else:
+            decoded = decode_vin(response.payload)
+            if decoded is not None:
+                vin = _normalize_vin(decoded[0])
+                if vin is None:
+                    log.warning("VIN probe: implausible VIN payload %r", decoded[0])
+
+        response = client.query_mode_09(0x04)
+        if response is not None:
+            decoded = decode_calibration_ids(response.payload)
+            if decoded is not None and decoded[0]:
+                calibration_id = str(decoded[0])
+
+        response = client.query_mode_09(0x06)
+        if response is not None:
+            decoded = decode_cvn(response.payload)
+            if decoded is not None and decoded[0]:
+                cvn = str(decoded[0])
     except Exception:
-        log.warning("VIN probe failed", exc_info=True)
-        return None
+        log.warning("vehicle info probe failed", exc_info=True)
     finally:
         with suppress(Exception):
             bus.shutdown()
+
+    return VehicleInfoProbe(vin=vin, calibration_id=calibration_id, cvn=cvn)
+
+
+def read_vin(config: CanaryConfig) -> str | None:
+    """One-shot VIN read at startup. ``None`` on any failure — never raises.
+
+    Thin wrapper around :func:`probe_vehicle_info` (Task 3.4 generalized this
+    to also read calibration ID/CVN) kept for callers that only need the VIN.
+    """
+    return probe_vehicle_info(config).vin
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +306,71 @@ def _maybe_persist(
     )
 
 
+def _apply_calibration_probe(
+    config: CanaryConfig,
+    profiles: list[VehicleProfile],
+    profile: VehicleProfile,
+    probe: VehicleInfoProbe,
+) -> None:
+    """Update ``profile``'s stored calibration ID/CVN from a fresh Mode 09
+    probe (Task 3.4), persisting the registry when either changed.
+
+    A changed calibration ID for an *already-registered* profile (i.e. one
+    that had a non-blank stored value already) is an ECU reflash — logged as
+    a ``corpus_boundary`` vehicle-ledger event, the same mechanism
+    ``eval-longitudinal-and-dtc.md``'s Task 3.5 corpus-boundary integration
+    already reads (``VehicleLedgerStore.latest_boundary`` / the
+    ``--since-boundary`` corpus filter). A brand-new profile's first
+    calibration read is just a baseline, not a boundary.
+    """
+    if not probe.calibration_id and not probe.cvn:
+        return  # nothing read this probe; keep whatever was last stored
+    previous_calibration_id = profile.calibration_id
+    reflashed = bool(
+        previous_calibration_id
+        and probe.calibration_id
+        and probe.calibration_id != previous_calibration_id
+    )
+    if probe.calibration_id:
+        profile.calibration_id = probe.calibration_id
+    if probe.cvn:
+        profile.cvn = probe.cvn
+    save_registry(config.profiles.registry_path, profiles)
+    if reflashed:
+        _record_calibration_boundary(config, profile, previous_calibration_id)
+
+
+def _record_calibration_boundary(
+    config: CanaryConfig,
+    profile: VehicleProfile,
+    previous_calibration_id: str,
+) -> None:
+    """Append a ``corpus_boundary`` vehicle-ledger event for an ECU reflash
+    (Task 3.4). Scoped straight to this profile's ledger path via
+    ``_scope_file`` rather than a full ``scope_config`` call — this runs
+    from inside ``resolve_active_profile``, before its caller has scoped
+    ``config`` (the profile isn't resolved yet at that point).
+    """
+    from src.analysis.vehicle_ledger import VehicleLedgerStore
+
+    ledger = VehicleLedgerStore(_scope_file(config.daemon.vehicle_ledger, profile.slug))
+    ledger.record(
+        occurred_at=datetime.now(UTC).date(),
+        kind="mod",
+        title=f"ECU calibration changed: {previous_calibration_id} -> {profile.calibration_id}",
+        details=f"cvn={profile.cvn or 'unknown'}",
+        corpus_boundary=True,
+    )
+    log.warning(
+        "ECU calibration ID changed (reflash detected) — corpus-boundary ledger entry appended",
+        extra={
+            "slug": profile.slug,
+            "previous_calibration_id": previous_calibration_id,
+            "calibration_id": profile.calibration_id,
+        },
+    )
+
+
 def resolve_active_profile(
     config: CanaryConfig,
     *,
@@ -274,6 +386,8 @@ def resolve_active_profile(
 
     The resolved profile is persisted to the registry (when ``auto_register``)
     if not already present, so the dashboard can always show and rename it.
+    A registered profile's calibration ID/CVN (Task 3.4) is refreshed from the
+    same probe; a changed calibration ID is logged as a corpus-boundary event.
     """
     profiles = load_registry(config.profiles.registry_path)
     by_slug = {p.slug: p for p in profiles}
@@ -289,17 +403,25 @@ def resolve_active_profile(
     if not config.profiles.enabled:
         return _default_profile(config)
 
-    vin = read_vin(config)
+    vin_probe = probe_vehicle_info(config)
+    vin = vin_probe.vin
     if vin is None:
         profile = _default_profile(config)
         _maybe_persist(config, profiles, profile)
         return profile
 
     if vin in by_vin:
-        return by_vin[vin]
+        profile = by_vin[vin]
+    else:
+        profile = _new_profile_for_vin(vin, taken=set(by_slug))
+        _maybe_persist(config, profiles, profile)
 
-    profile = _new_profile_for_vin(vin, taken=set(by_slug))
-    _maybe_persist(config, profiles, profile)
+    # Only touch calibration bookkeeping for a profile that's actually in the
+    # persisted registry — `_maybe_persist` above is a no-op when
+    # `auto_register` is off, and an unregistered profile has no registry row
+    # to update (mirrors that gate rather than silently rewriting the file).
+    if any(p.slug == profile.slug for p in profiles):
+        _apply_calibration_probe(config, profiles, profile, vin_probe)
     return profile
 
 

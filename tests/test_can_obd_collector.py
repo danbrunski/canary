@@ -18,6 +18,8 @@ from src.collection.can_obd_collector import (
     CanObdSpec,
     DidSessionSpec,
     ObdSchedulerMetrics,
+    _PollRequest,
+    _response_to_reading,
     build_poll_requests,
     parse_can_id,
     parse_did_token,
@@ -27,8 +29,10 @@ from src.collection.can_obd_collector import (
     run_can_obd_loop,
 )
 from src.collection.custom_pids import CustomPid
+from src.collection.isotp import DEFAULT_REQUEST_ID, ObdResponse
 from src.collection.obd_collector import JsonlReadingWriter
 from src.collection.obd_registry import MODE01_REGISTRY
+from src.collection.obd_scheduler import FreezeFrameTrigger
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanBusConfig
 
@@ -159,6 +163,46 @@ class _DtcCapableBus:
             payload = bytes([0x02, 0x4A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
         else:
             return
+        self._responses.append(
+            can.Message(arbitration_id=0x7E8, data=payload, is_extended_id=False)
+        )
+
+    def recv(self, timeout: float = 0.0) -> can.Message | None:
+        if self._responses:
+            return self._responses.pop(0)
+        if timeout:
+            time.sleep(min(timeout, 0.005))
+        return None
+
+
+class _FreezeFrameCapableBus:
+    """Answers Mode 02 (Task 3.3) for the five freeze-frame PIDs, frame #0."""
+
+    #: pid -> (length_byte, formula_bytes) for a `43 <pid> 00 <formula...>` reply.
+    _RESPONSES: dict[int, bytes] = {
+        0x0C: bytes([0x0A, 0xF0]),  # RPM: (0x0AF0)/4 = 700.0
+        0x0D: bytes([0x50]),  # SPEED: 80 km/h
+        0x05: bytes([0x5A]),  # COOLANT_TEMP: 90 - 40 = 50 C
+        0x04: bytes([0x80]),  # ENGINE_LOAD: 128*100/255
+        0x11: bytes([0x40]),  # THROTTLE_POS: 64*100/255
+    }
+
+    def __init__(self) -> None:
+        self.sent: list[can.Message] = []
+        self._responses: list[can.Message] = []
+
+    def send(self, msg: can.Message) -> None:
+        self.sent.append(msg)
+        data = bytes(msg.data)
+        if msg.arbitration_id != 0x7DF or data[:2] != bytes([0x02, 0x02]):
+            return
+        pid = data[2]
+        formula = self._RESPONSES.get(pid)
+        if formula is None:
+            return
+        body = bytes([0x42, pid, 0x00]) + formula
+        payload = bytes([len(body)]) + body
+        payload = payload + bytes(8 - len(payload))
         self._responses.append(
             can.Message(arbitration_id=0x7E8, data=payload, is_extended_id=False)
         )
@@ -342,6 +386,137 @@ def test_dtc_poll_reads_codes_and_mil_with_engine_off_koeo() -> None:
     assert by_channel["DTC_PERMANENT"].value == ""
     assert by_channel["MIL_STATUS"].value is True
     assert by_channel["MONITOR_STATUS"].value == 3.0
+
+
+def test_build_poll_requests_adds_service_kind_for_mode06() -> None:
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=(),
+        service_poll_interval_seconds=300.0,
+    )
+    service_requests = [
+        r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "service"
+    ]
+    assert {(r.service, r.channel) for r in service_requests} == {(0x06, "MONITOR_RESULTS")}
+    assert service_requests[0].poll_tier == "dtc"
+
+
+def test_build_poll_requests_service_poll_disabled_when_interval_non_positive() -> None:
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=(),
+        service_poll_interval_seconds=0.0,
+    )
+    assert not [r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "service"]
+
+
+def test_response_to_reading_service_kind_emits_hex_payload_and_misfire_counts() -> None:
+    """Task 3.1 — Mode 06 is a multi-record sweep, doesn't fit the scalar
+    TelemetryValue contract, so it's shipped as hex (like the `did` kind)
+    for MonitorState to decode downstream. Task 3.2 — a per-cylinder
+    misfire-count MID also lands as its own numeric reading so it flows
+    through storage into the fingerprint-visible wide frame."""
+    request = _PollRequest(
+        kind="service",
+        service=0x06,
+        identifier=0,
+        request_id=DEFAULT_REQUEST_ID,
+        channel="MONITOR_RESULTS",
+        poll_tier="dtc",
+    )
+    payload = bytes([0x0B, 0x01, 0x10, 0x00, 0x03, 0x00, 0x00, 0x00, 0xFF])
+    response = ObdResponse(service=0x06, pid=None, payload=payload, responder_id=0x7E8)
+    readings = _response_to_reading(request, response)
+    assert len(readings) == 2
+    by_channel = {r.pid: r for r in readings}
+    assert by_channel["MONITOR_RESULTS"].value == payload.hex()
+    assert by_channel["MISFIRE_COUNT_CYL1"].value == 3.0
+
+
+def test_build_poll_requests_freeze_frame_disabled_without_a_trigger() -> None:
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=(),
+    )
+    assert not [
+        r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "freeze_frame"
+    ]
+
+
+def test_build_poll_requests_adds_freeze_frame_kind_when_triggered() -> None:
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=(),
+        freeze_frame_trigger=FreezeFrameTrigger(),
+    )
+    ff_requests = [
+        r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "freeze_frame"
+    ]
+    assert {r.channel for r in ff_requests} == {
+        "FREEZE_FRAME_RPM",
+        "FREEZE_FRAME_SPEED",
+        "FREEZE_FRAME_COOLANT_TEMP",
+        "FREEZE_FRAME_ENGINE_LOAD",
+        "FREEZE_FRAME_THROTTLE_POS",
+    }
+    assert all(r.service == 0x02 and r.poll_tier == "on_demand" for r in ff_requests)
+
+
+def test_response_to_reading_freeze_frame_strips_the_frame_number_byte() -> None:
+    """Task 3.3 — Mode 02's response has a leading frame-number byte the
+    Mode 01 formula bytes don't; the decoder must see only the formula."""
+    request = _PollRequest(
+        kind="freeze_frame",
+        service=0x02,
+        identifier=0x0C,  # RPM
+        request_id=DEFAULT_REQUEST_ID,
+        channel="FREEZE_FRAME_RPM",
+        poll_tier="on_demand",
+    )
+    # frame#=0x00, then the RPM formula bytes (0x0A, 0xF0 -> 700.0 rpm).
+    payload = bytes([0x00, 0x0A, 0xF0])
+    response = ObdResponse(service=0x02, pid=0x0C, payload=payload, responder_id=0x7E8)
+    readings = _response_to_reading(request, response)
+    assert len(readings) == 1
+    assert readings[0].pid == "FREEZE_FRAME_RPM"
+    assert readings[0].value == pytest.approx(700.0)
+
+
+def test_freeze_frame_trigger_is_consumed_once_then_reads_go_dormant() -> None:
+    """Task 3.3 — the trigger fires exactly one Mode 02 sweep; it doesn't
+    re-poll every tick afterward (on_demand rate is 0)."""
+    bus = _FreezeFrameCapableBus()
+    stop = threading.Event()
+    readings: list[Any] = []
+    trigger = FreezeFrameTrigger()
+    trigger.request()
+
+    def on_reading(reading: Any) -> None:
+        readings.append(reading)
+
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        poll_rate_hz=20.0,
+        pids=("RPM",),
+        request_timeout_seconds=0.1,
+        freeze_frame_trigger=trigger,
+    )
+
+    run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        spec,
+        on_frame=lambda _msg: None,
+        on_reading=on_reading,
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 1.0,
+    )
+
+    ff_readings = [r for r in readings if r.pid.startswith("FREEZE_FRAME_")]
+    channels = [r.pid for r in ff_readings]
+    # Exactly one reading per freeze-frame PID — no repeats even though the
+    # loop ran for a full second at 20 Hz.
+    assert sorted(channels) == sorted(set(channels))
+    assert "FREEZE_FRAME_RPM" in channels
 
 
 def test_dtc_poll_skips_cleanly_when_bus_never_answers() -> None:

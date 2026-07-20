@@ -313,6 +313,31 @@ class AnomalyEventEmitter:
         )
         return self._emit(event)
 
+    def emit_misfire(
+        self,
+        *,
+        cylinder: int,
+        count: int,
+        previous_count: int,
+        timestamp: str,
+        session: str | None = None,
+    ) -> AnomalyEvent | None:
+        """Emit a per-cylinder misfire-count-increase event (Task 3.1).
+
+        Deliberately skips the persistence gate, same reasoning as
+        ``emit_dtc``: the ECM has already debounced the Mode 06 counter by
+        the time it shows up in a poll response, so a genuine increase goes
+        straight to ``_emit`` (tuning + dedupe only).
+        """
+        event = AnomalyEvent.from_misfire(
+            cylinder=cylinder,
+            count=count,
+            previous_count=previous_count,
+            timestamp=timestamp,
+            session=session,
+        )
+        return self._emit(event)
+
     def emit_trend(
         self,
         *,

@@ -29,9 +29,12 @@ if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import tim
 #: ``dtc`` (Task 1.6) is a new/escalated trouble code from the periodic
 #: Mode 03/07/0A poll. ``trend`` (Task 4.6) is a session-fingerprint stat in
 #: sustained CUSUM alarm against the frozen reference epoch — a low-frequency,
-#: per-session event, not a per-tick one. All are emitted alongside the
-#: per-detector events, not instead of them.
-AnomalySource = Literal["isolation_forest", "lstm_autoencoder", "fused", "behavior", "dtc", "trend"]
+#: per-session event, not a per-tick one. ``misfire`` (Task 3.1) is a
+#: per-cylinder misfire count *increase* from the periodic Mode 06 poll. All
+#: are emitted alongside the per-detector events, not instead of them.
+AnomalySource = Literal[
+    "isolation_forest", "lstm_autoencoder", "fused", "behavior", "dtc", "trend", "misfire"
+]
 
 
 class AnomalyEvent(BaseModel):
@@ -331,6 +334,42 @@ class AnomalyEvent(BaseModel):
                 "mann_kendall_p_value": mann_kendall_p_value,
             },
             dedupe_key=f"trend:{stat}",
+        )
+
+    @classmethod
+    def from_misfire(
+        cls,
+        *,
+        cylinder: int,
+        count: int,
+        previous_count: int,
+        timestamp: str,
+        session: str | None = None,
+    ) -> AnomalyEvent:
+        """Build a per-cylinder misfire-count-increase event (Task 3.1).
+
+        Same "no fixed score/threshold" contract as ``from_dtc`` — a Mode 06
+        misfire counter either increased or didn't. ``score`` is the raw
+        count so the dashboard/tuner can at least rank severity across
+        events without a synthetic normalization; ``dedupe_key`` includes
+        the cylinder + count so a second cylinder incrementing (or the same
+        cylinder incrementing again later) isn't suppressed by the emitter's
+        refractory window.
+        """
+        return cls(
+            timestamp=timestamp,
+            source="misfire",
+            model_version="misfire",
+            score=float(count),
+            threshold=None,
+            session=session,
+            affected_channels=(f"CYLINDER_{cylinder}",),
+            detail={
+                "cylinder": cylinder,
+                "count": count,
+                "previous_count": previous_count,
+            },
+            dedupe_key=f"misfire:{cylinder}:{count}",
         )
 
     @classmethod

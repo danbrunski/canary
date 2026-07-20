@@ -55,6 +55,7 @@ async def serve_in_background(
         health_monitor=components.health_monitor,
         behavior_live=components.behavior_live,
         dtc_state=components.dtc_state,
+        monitor_state=components.monitor_state,
         gps_tracker=components.gps_tracker,
         sequence_detector_controller=components.sequence_detector_controller,
     )

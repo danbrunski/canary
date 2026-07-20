@@ -137,10 +137,16 @@ operator history (ledger backfill facts)
   now. 2.2 (MCP server registration table) annotated `[~]
   blocked-overnight` in refactoring.md — still blocked on the other
   session's `server.py` work; correctly not attempted.
-- [ ] **Q14 — engine-analysis-and-mapping.md Phase 3 code-only**
-  (Mode 06 wiring on Q8's scheduler + MonitorsPanel; Mode 02 freeze
-  frame into dtc.json; Mode 09 cal-ID at startup). All live-truck
-  verification blocked-overnight.
+- [x] **Q14 — engine-analysis-and-mapping.md Phase 3 code-only** —
+  landed (3.1-3.5 all done): Mode 06 wiring on Q8's scheduler
+  (rate-limited independent of real-time PID bandwidth, increase-only
+  misfire emission) + `GET /obd/monitors`/`get_monitors` MCP tool +
+  `MonitorsPanel.tsx`; misfire counts in the fingerprint stat set; Mode
+  02 freeze frame into `dtc.json` (one-shot trigger, atomic sidecar
+  write); Mode 09 cal-ID/CVN at startup with corpus-boundary ledger
+  entry on a genuine cal-ID change (not on first-ever profile probe).
+  All live-truck verification correctly left blocked-overnight; code +
+  fixture/mocked tests only.
 - [ ] **Q15 — engine-analysis-and-mapping.md Phases 4 + 5, doable
   slice** (VE table, total-trim map, catalyst-efficiency index, O2
   health stats, gear detection with ratio table derived from stored

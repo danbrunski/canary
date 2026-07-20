@@ -162,6 +162,9 @@ class DtcReportResponse(BaseModel):
     permanent: list[DtcCodeEntry]
     mil_on: bool | None
     dtc_count: int
+    #: Mode 02 freeze-frame reading (Task 3.3) — channel name -> decoded
+    #: value, or ``None`` when no stored DTC has triggered a read yet.
+    freeze_frame: dict[str, Any] | None = None
     stale: bool
 
 

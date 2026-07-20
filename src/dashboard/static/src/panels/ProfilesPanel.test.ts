@@ -21,6 +21,8 @@ const PROFILES: VehicleProfilesResponse = {
       model: "",
       year: null,
       parameters: {},
+      calibration_id: "",
+      cvn: "",
     },
     {
       slug: "nissan-xterra-2008",
@@ -30,6 +32,8 @@ const PROFILES: VehicleProfilesResponse = {
       model: "Xterra",
       year: 2008,
       parameters: {},
+      calibration_id: "CAL123456789ABCD",
+      cvn: "1A2B3C4D",
     },
   ],
 };
@@ -48,6 +52,14 @@ describe("ProfilesPanel", () => {
     expect(screen.getByText("(unnamed)")).toBeInTheDocument();
     // The active profile (the freshly-seen, unnamed one) carries the badge.
     expect(screen.getByText("active")).toBeInTheDocument();
+  });
+
+  it("shows the calibration ID / CVN for a profile that has one, and a placeholder otherwise", async () => {
+    mocks.getProfiles.mockResolvedValue(PROFILES);
+    render(createElement(ProfilesPanel, { token: "secret" }));
+    expect(await screen.findByText(/Cal ID CAL123456789ABCD/)).toBeInTheDocument();
+    expect(screen.getByText(/CVN 1A2B3C4D/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Cal ID — · CVN —/).length).toBeGreaterThan(0);
   });
 
   it("saves a new display name for an unnamed profile", async () => {

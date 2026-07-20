@@ -39,6 +39,7 @@ import pandas as pd
 
 from src.analysis.committees import COMMITTEES, append_committee_residuals
 from src.analysis.derived import compute_anomaly_signals
+from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import DEVIATION_COLUMN_PREFIX, append_deviation_columns
 from src.decode.behavior_models import load_behavior_models
@@ -156,6 +157,7 @@ def compute_fingerprint(session_dir: Path, config: CanaryConfig) -> dict[str, fl
     _add_bank_balance_stats(frame, stats)
     _add_committee_stats(frame, stats)
     _add_behavior_deviation_stats(frame, stats)
+    _add_misfire_stats(frame, stats)
     return stats
 
 
@@ -378,6 +380,27 @@ def _add_behavior_deviation_stats(frame: pd.DataFrame, stats: dict[str, float]) 
             continue
         name = str(column)[len(DEVIATION_COLUMN_PREFIX) :]
         stats[f"behavior_deviation_abs_mean:{name}"] = float(values.abs().mean())
+
+
+def _add_misfire_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
+    """Task 3.2 — per-cylinder misfire count, end of session.
+
+    Mode 06 misfire counters are cumulative within a drive cycle (never
+    reset mid-session), so the session's max observed value is its ending
+    count — the natural session-over-session trend stat (Task 3.1's poll
+    lands one ``obd:MISFIRE_COUNT_CYLn`` numeric column per cylinder
+    present; no cylinder count is hardcoded here, mirrors
+    ``_add_behavior_deviation_stats``'s column-prefix scan above).
+    """
+    prefix = f"obd:{MISFIRE_COUNT_CHANNEL_PREFIX}"
+    for column in frame.columns:
+        if not str(column).startswith(prefix):
+            continue
+        values = _numeric(frame, str(column)).dropna()
+        if values.empty:
+            continue
+        cylinder = str(column)[len(prefix) :]
+        stats[f"misfire_count_cyl:{cylinder}"] = float(values.max())
 
 
 __all__ = [

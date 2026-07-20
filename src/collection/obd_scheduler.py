@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -32,6 +33,53 @@ DTC_POLL_CHANNELS: dict[int, str] = {
     0x07: "DTC_PENDING",
     0x0A: "DTC_PERMANENT",
 }
+#: Cadence for the Mode 06 on-board monitor poll (Task 3.1) — its own knob,
+#: same "occasional service poll, not a real-time PID" cadence model as the
+#: DTC poll above (misfire counts/monitor margins change on a minutes scale,
+#: not seconds), deliberately not folded into ``dtc_poll_interval_seconds``
+#: so the two service polls can be tuned/disabled independently.
+DEFAULT_SERVICE_POLL_INTERVAL_SECONDS = DEFAULT_DTC_POLL_INTERVAL_SECONDS
+#: Service (mode) -> channel name for the periodic Mode 06 poll.
+SERVICE_POLL_CHANNELS: dict[int, str] = {
+    0x06: "MONITOR_RESULTS",
+}
+#: Mode 01 PIDs read via Mode 02 (freeze frame, Task 3.3) when a *stored*
+#: DTC first appears — reuses the identical Mode 01 formula per
+#: ``obd_registry.lookup(0x02, pid)``'s Mode-01 remap. A small, curated set
+#: (not "every configured PID") since a freeze-frame read is triggered by a
+#: rare event (a new stored code), not a cadence: RPM, speed, coolant temp,
+#: calculated load, throttle position — the classic "what was the engine
+#: doing" snapshot.
+FREEZE_FRAME_PIDS: tuple[int, ...] = (0x0C, 0x0D, 0x05, 0x04, 0x11)
+#: Channel prefix for one freeze-frame PID reading, e.g. ``FREEZE_FRAME_RPM``.
+FREEZE_FRAME_CHANNEL_PREFIX = "FREEZE_FRAME_"
+
+
+class FreezeFrameTrigger:
+    """Thread-safe one-shot flag bridging the DTC sink (asyncio) and the
+    collector loop (its own thread / ``asyncio.to_thread``) (Task 3.3).
+
+    ``DtcState`` calls :meth:`request` when a *stored* DTC first appears;
+    ``run_can_obd_loop`` calls :meth:`take` once per tick and, on a hit,
+    un-suppresses every ``kind="freeze_frame"`` request so the normal
+    round-robin scheduler reads them once (they go back to ``on_demand``
+    dormancy immediately after — see ``_request_rate_hz``).
+    """
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+
+    def request(self) -> None:
+        self._event.set()
+
+    def take(self) -> bool:
+        """Atomically consume a pending request; ``False`` if none pending."""
+        if self._event.is_set():
+            self._event.clear()
+            return True
+        return False
+
+
 TIER_RATE_FACTORS: dict[PollTier, float] = {
     "fast": 1.0,
     "medium": 1.0 / 3.0,
@@ -162,6 +210,16 @@ class CanObdSpec:
     #: change on the order of minutes, not seconds. ``<= 0`` disables the
     #: DTC poll entirely (no requests added, nothing to skip at runtime).
     dtc_poll_interval_seconds: float = DEFAULT_DTC_POLL_INTERVAL_SECONDS
+    #: Cadence for the Mode 06 on-board monitor poll (Task 3.1) — same
+    #: cadence model as ``dtc_poll_interval_seconds`` above (own knob, not
+    #: `poll_rate_hz`/tier scaled). ``<= 0`` disables the Mode 06 poll.
+    service_poll_interval_seconds: float = DEFAULT_SERVICE_POLL_INTERVAL_SECONDS
+    #: Shared flag a ``DtcState`` sets when a stored DTC first appears (Task
+    #: 3.3); ``None`` (the default) disables the Mode 02 freeze-frame read
+    #: entirely — no ``freeze_frame`` requests are built at all.
+    freeze_frame_trigger: FreezeFrameTrigger | None = None
+    #: PIDs read once via Mode 02 when ``freeze_frame_trigger`` fires.
+    freeze_frame_pids: tuple[int, ...] = FREEZE_FRAME_PIDS
     #: User-defined custom PIDs (Task 2.6) loaded once at daemon startup via
     #: ``custom_pids.load_custom_pids`` and threaded straight through — the
     #: scheduler never re-reads the YAML itself. Empty by default (no
@@ -183,7 +241,7 @@ class CanObdLoopStats:
 
 @dataclass(frozen=True)
 class _PollRequest:
-    kind: Literal["pid", "did", "session", "dtc", "custom"]
+    kind: Literal["pid", "did", "session", "dtc", "custom", "service", "freeze_frame"]
     service: int
     identifier: int
     request_id: int
@@ -313,15 +371,16 @@ class DidWindowController:
             return request.kind == "did" and index in self._pending
         if self.phase == "lapse":
             return False
-        # Mode 03/07/0A (Task 1.3) are standard, non-Mode-22 requests just
-        # like Mode 01 — the ECM answers them in the default session, so
-        # they share Mode 01's eligibility rather than being starved for
-        # the DID controller's whole lifetime. Custom PIDs (Task 2.6) get
-        # the same treatment: most use Mode 01/09, which is correct here; a
-        # custom PID declared on Mode 22 for a session-gated ECU would need
-        # the same windowed treatment as `did` (not implemented — no such
-        # custom PID exists yet, see custom_pids.example.yaml).
-        return request.kind in ("pid", "dtc", "custom")
+        # Mode 03/07/0A (Task 1.3), Mode 06 (Task 3.1), and Mode 02 freeze
+        # frame (Task 3.3) are standard, non-Mode-22 requests just like Mode
+        # 01 — the ECM answers them in the default session, so they share
+        # Mode 01's eligibility rather than being starved for the DID
+        # controller's whole lifetime. Custom PIDs (Task 2.6) get the same
+        # treatment: most use Mode 01/09, which is correct here; a custom PID
+        # declared on Mode 22 for a session-gated ECU would need the same
+        # windowed treatment as `did` (not implemented — no such custom PID
+        # exists yet, see custom_pids.example.yaml).
+        return request.kind in ("pid", "dtc", "custom", "service", "freeze_frame")
 
     def on_request_attempted(self, index: int) -> None:
         self._pending.discard(index)
@@ -526,6 +585,38 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
                     poll_tier="dtc",
                 )
             )
+    if spec.service_poll_interval_seconds > 0:
+        # Task 3.1: Mode 06 on-board monitor results (misfire counts, margins)
+        # on the same "occasional service poll" cadence model as the DTC poll
+        # above — no vehicle_state gating, the round-robin scheduler already
+        # backs off an ECU that stops answering.
+        for service, channel in SERVICE_POLL_CHANNELS.items():
+            requests.append(
+                _PollRequest(
+                    kind="service",
+                    service=service,
+                    identifier=0,
+                    request_id=DEFAULT_REQUEST_ID,
+                    channel=channel,
+                    poll_tier="dtc",
+                )
+            )
+    if spec.freeze_frame_trigger is not None:
+        # Task 3.3: dormant ("on_demand" -> rate 0) until FreezeFrameTrigger
+        # fires; run_can_obd_loop un-suppresses these for one shot each time.
+        for pid in spec.freeze_frame_pids:
+            if pid not in PID_DECODERS:
+                continue
+            requests.append(
+                _PollRequest(
+                    kind="freeze_frame",
+                    service=0x02,
+                    identifier=pid,
+                    request_id=DEFAULT_REQUEST_ID,
+                    channel=f"{FREEZE_FRAME_CHANNEL_PREFIX}{PID_DECODERS[pid][0]}",
+                    poll_tier="on_demand",
+                )
+            )
     return requests
 
 
@@ -589,6 +680,10 @@ def _request_rate_hz(request: _PollRequest, spec: CanObdSpec) -> float:
         # scaling — the DTC poll doesn't get faster just because the fast
         # telemetry tier does.
         interval = spec.dtc_poll_interval_seconds
+        return 0.0 if interval <= 0 else 1.0 / interval
+    if request.kind == "service":
+        # Same fixed-cadence model as `dtc` above (Task 3.1), own knob.
+        interval = spec.service_poll_interval_seconds
         return 0.0 if interval <= 0 else 1.0 / interval
     base = max(float(spec.poll_rate_hz), 0.001)
     return base * TIER_RATE_FACTORS.get(request.poll_tier, TIER_RATE_FACTORS["medium"])
@@ -779,6 +874,7 @@ __all__ = [
     "CanObdSpec",
     "DidSessionSpec",
     "DidWindowController",
+    "FreezeFrameTrigger",
     "ObdSchedulerMetrics",
     "build_poll_requests",
     "did_access",
