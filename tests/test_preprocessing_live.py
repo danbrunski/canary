@@ -581,3 +581,137 @@ def test_reset_is_reusable_source_observes_normally_afterward(config: CanaryConf
     row = src.tick(later)
     assert row is not None
     assert row["obd:RPM"].iloc[0] == 800.0
+
+
+# ---------------------------------------------------------------------------
+# Task 1.1/1.3 — performance channels on the live tick
+# ---------------------------------------------------------------------------
+
+
+def test_derived_instantaneous_channels_appear_on_live_tick(config: CanaryConfig) -> None:
+    """Task 1.1 — fuel rate / boost-vacuum / estimated power stream on every
+    tick's operating point (ready for the daemon to publish + persist),
+    while the cumulative trip integrals are NOT part of this row (Task
+    1.3 handles those via the session-scoped accumulator instead)."""
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    src.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 2000.0, "rpm"))
+    src.observe(TelemetryRecord.obd(now.timestamp(), "SPEED", 60.0, "km/h"))
+    src.observe(TelemetryRecord.obd(now.timestamp(), "MAF", 12.0, "g/s"))
+    src.observe(TelemetryRecord.obd(now.timestamp(), "INTAKE_PRESSURE", 95.0, "kPa"))
+    row = src.tick(now)
+    assert row is not None
+
+    point = src.latest_operating_point
+    assert point is not None
+    assert point["derived:FUEL_RATE_LPH"] > 0
+    assert point["derived:BOOST_VACUUM_KPA"] == pytest.approx(95.0 - 101.325)
+    assert point["derived:ESTIMATED_POWER_HP"] > 0
+    assert "derived:TRIP_DISTANCE_KM" not in point
+
+    # The instantaneous channels also ride the model-feature row, same as
+    # every other decoded channel.
+    assert "derived:FUEL_RATE_LPH" in row.columns
+
+
+def test_latest_derived_channels_accumulates_session_scoped_trip_integrals(
+    config: CanaryConfig,
+) -> None:
+    """Task 1.3 — the cumulative integrals grow tick over tick even though
+    each ``tick()`` only sees a ring-buffer window, not the whole session."""
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    for i in range(5):
+        t = now + timedelta(seconds=i)
+        src.observe(TelemetryRecord.obd(t.timestamp(), "RPM", 2500.0, "rpm"))
+        src.observe(TelemetryRecord.obd(t.timestamp(), "SPEED", 50.0, "km/h"))
+        src.observe(TelemetryRecord.obd(t.timestamp(), "MAF", 10.0, "g/s"))
+        src.tick(t)
+
+    derived = src.latest_derived_channels
+    assert derived is not None
+    # 4 whole seconds of dt have accrued (first tick's dt is 0, matching
+    # compute_derived_channels' own first-row convention).
+    assert derived["derived:TRIP_DISTANCE_KM"] == pytest.approx(50.0 / 3600.0 * 4)
+    assert derived["derived:FUEL_USED_L"] > 0
+    assert derived["derived:CO2_KG"] > 0
+    assert derived["derived:IDLE_TIME_S"] == 0.0  # never stopped
+    assert derived["derived:AVG_ECONOMY_L_PER_100KM"] > 0
+
+
+def test_reset_clears_trip_integral_accumulators(config: CanaryConfig) -> None:
+    """Task 1.3 — a session boundary (the same ``reset()`` Phase 7.1 uses for
+    replay isolation) must zero the trip integrals, not carry a stale total
+    into the next session."""
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    for i in range(3):
+        t = now + timedelta(seconds=i)
+        src.observe(TelemetryRecord.obd(t.timestamp(), "SPEED", 80.0, "km/h"))
+        src.observe(TelemetryRecord.obd(t.timestamp(), "MAF", 8.0, "g/s"))
+        src.tick(t)
+    assert src.latest_derived_channels is not None
+    assert src.latest_derived_channels["derived:TRIP_DISTANCE_KM"] > 0
+
+    src.reset()
+    assert src.latest_derived_channels is None
+
+    later = now + timedelta(minutes=10)
+    src.observe(TelemetryRecord.obd(later.timestamp(), "SPEED", 80.0, "km/h"))
+    src.observe(TelemetryRecord.obd(later.timestamp(), "MAF", 8.0, "g/s"))
+    src.tick(later)
+    # First tick of the new session: dt=0 against the just-reset
+    # accumulator state, so distance/fuel start over from zero, not from
+    # wherever the previous session left off.
+    assert src.latest_derived_channels is not None
+    assert src.latest_derived_channels["derived:TRIP_DISTANCE_KM"] == 0.0
+    assert src.latest_derived_channels["derived:FUEL_USED_L"] == 0.0
+
+
+def test_live_trip_integrals_match_batch_compute_derived_channels(
+    config: CanaryConfig,
+) -> None:
+    """Task 1.3's load-bearing parity check: the same input data through the
+    batch ``compute_derived_channels`` (a full-session cumsum) and the live
+    session-scoped accumulator must land on the same final cumulative
+    values — not just "both increase", but numerically equal."""
+    from src.analysis.derived import compute_derived_channels
+
+    n = 8
+    start = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    timestamps = [start + timedelta(seconds=i) for i in range(n)]
+    # First two rows idle (RPM up, stopped); rest is a steady-ish drive —
+    # exercises every cumulative channel (distance, fuel, CO2, idle, avg
+    # economy) in one pass.
+    rpm_values = [800.0, 800.0, 1500.0, 1800.0, 2000.0, 2200.0, 2400.0, 2500.0]
+    speed_values = [0.0, 0.0, 20.0, 35.0, 50.0, 60.0, 70.0, 80.0]
+    maf_values = [3.0, 3.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0]
+
+    wide = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime([t.isoformat() for t in timestamps], utc=True),
+            "obd:RPM": rpm_values,
+            "obd:SPEED": speed_values,
+            "obd:MAF": maf_values,
+        }
+    )
+    batch = compute_derived_channels(wide, config.vehicle.parameters)
+    batch_last = batch.iloc[-1]
+
+    src = LiveFeatureSource(config=config)
+    for t, rpm, speed, maf in zip(timestamps, rpm_values, speed_values, maf_values, strict=True):
+        src.observe(TelemetryRecord.obd(t.timestamp(), "RPM", rpm, "rpm"))
+        src.observe(TelemetryRecord.obd(t.timestamp(), "SPEED", speed, "km/h"))
+        src.observe(TelemetryRecord.obd(t.timestamp(), "MAF", maf, "g/s"))
+        src.tick(t)
+
+    live = src.latest_derived_channels
+    assert live is not None
+    for channel in (
+        "derived:TRIP_DISTANCE_KM",
+        "derived:FUEL_USED_L",
+        "derived:CO2_KG",
+        "derived:IDLE_TIME_S",
+        "derived:AVG_ECONOMY_L_PER_100KM",
+    ):
+        assert live[channel] == pytest.approx(batch_last[channel]), channel

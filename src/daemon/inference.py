@@ -41,7 +41,8 @@ from src.preprocessing.feature_pipeline import (
 )
 from src.preprocessing.live import LiveFeatureSource
 from src.preprocessing.segmenter import MODE_COLUMN
-from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
+from src.storage.async_writer import AsyncParquetTelemetryWriter
+from src.telemetry import DECODED_SOURCE, SOURCE_SEP, TelemetryRecord, channel_key, channel_of
 
 from .components import DaemonComponents
 
@@ -107,6 +108,84 @@ def _persistence_sustained(
     if firing is not None and tuner is not None and tuner.has_debounce_override(source, mode):
         return firing
     return persistence.observe(key, firing, now=now)
+
+
+#: Instantaneous performance channels (Task 1.1) — the row-local subset
+#: ``compute_instantaneous_channels`` appends inside ``featurize_wide_frame``,
+#: so they land on ``source.latest_operating_point`` for free every tick.
+_DERIVED_INSTANTANEOUS_CHANNELS: tuple[str, ...] = (
+    "derived:FUEL_RATE_LPH",
+    "derived:INSTANT_ECONOMY_L_PER_100KM",
+    "derived:INSTANT_ECONOMY_MPG",
+    "derived:BOOST_VACUUM_KPA",
+    "derived:ESTIMATED_POWER_HP",
+    "derived:ESTIMATED_TORQUE_NM",
+)
+
+
+async def _publish_derived_channels(
+    broadcaster: Broadcaster,
+    source: LiveFeatureSource,
+    now: datetime,
+    storage_writer: AsyncParquetTelemetryWriter | None,
+) -> None:
+    """Stream Task 1.1's performance channels over ``/ws/telemetry`` **and**
+    persist them to Parquet through the daemon's one storage writer.
+
+    Instantaneous channels (fuel rate, instant economy, boost/vacuum,
+    estimated power/torque) come off ``latest_operating_point`` — the raw
+    operating-frame row ``compute_instantaneous_channels`` already appended
+    inside ``featurize_wide_frame``, identical for a live window or a full
+    session since none of them need history. The session-scoped trip
+    integrals (distance/fuel/CO2/idle/avg-economy) come off
+    ``latest_derived_channels`` — Task 1.3's accumulator, not a windowed
+    cumsum (the ring buffer evicts rows continuously; cumsum-ing it would
+    reset the integrals far more often than a session boundary).
+
+    Both are reconstructable from raw signals offline, but ``query_telemetry``
+    (the documented DuckDB view over stored Parquet, see docs/mcp-server.md)
+    has no such reconstruction fallback — an operator querying trip/fuel/boost
+    history through it must find the values already in the file. So every
+    value built here also becomes a ``derived:*`` ``TelemetryRecord`` and goes
+    through ``storage_writer.write_many`` — the same ``ParquetTelemetryWriter``
+    instance ``run_storage_sink`` writes raw records through (Task 1.1
+    follow-up), not a second Parquet-writing path. ``storage_writer`` is
+    ``None`` in tests that never wire storage, in which case persistence is
+    skipped and only the broadcast happens.
+
+    Best-effort and silent on nothing-to-publish, matching every other
+    broadcast call in this loop — a stalled dashboard socket, or a storage
+    write failure, must never interrupt scoring.
+    """
+    point = source.latest_operating_point or {}
+    values: dict[str, Any] = {
+        name: point[name] for name in _DERIVED_INSTANTANEOUS_CHANNELS if name in point
+    }
+    values.update(source.latest_derived_channels or {})
+    if not values:
+        return
+    timestamp = now.isoformat()
+    records: list[TelemetryRecord] = []
+    for name, value in values.items():
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            continue
+        numeric = float(value)
+        channel = channel_of(name)
+        broadcaster.publish(
+            {
+                "timestamp": timestamp,
+                "source": "derived",
+                "channel": channel,
+                "value": numeric,
+                "unit": "",
+            }
+        )
+        records.append(TelemetryRecord.derived(now, channel, numeric))
+    if storage_writer is not None and records:
+        try:
+            await storage_writer.write_many(records)
+        except Exception:  # noqa: BLE001 — storage is best-effort, must not kill the tick
+            log.exception("failed to persist derived channels to storage")
 
 
 async def run_live_inference(
@@ -183,6 +262,9 @@ async def run_live_inference(
                 timestamp_str = str(row["timestamp"].iloc[0])
                 mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
                 operating_mode = None if mode_val is None or pd.isna(mode_val) else str(mode_val)
+                await _publish_derived_channels(
+                    components.telemetry_broadcaster, source, now, components.storage_writer
+                )
 
             # 4.7 — the segmenter falling back to constant "all" mode means
             # every mode-gated behavior surface silently never fires; make

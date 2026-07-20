@@ -67,6 +67,10 @@ async def run_daemon(
         ParquetTelemetryWriter(config.collection.storage_path) if writer is None else writer
     )
     components.capture_controller = CaptureController(lambda: storage_writer.paths.root)
+    # Task 1.1 follow-up: give run_live_inference the same writer instance
+    # drain_queue_with_broadcast wires into run_storage_sink below, so derived
+    # channels land in the same Parquet session as everything else.
+    components.storage_writer = storage_writer
 
     # Build the live source (no-op if bindings/behavior_models are absent on
     # disk — observe still works, just without decoded:* / deviation:* columns).

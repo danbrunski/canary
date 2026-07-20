@@ -72,7 +72,7 @@ the analysis UX.
 
 ### 1A. Derived channels into the live stream
 
-- [ ] **1.1 — Stream `compute_derived_channels` live.** The live path
+- [x] **1.1 — Stream `compute_derived_channels` live.** The live path
   imports only `compute_anomaly_signals`
   (`src/preprocessing/feature_pipeline.py:26,461`). Add the
   performance channels (`derived.py:216-282`: fuel rate, instant/avg
@@ -80,17 +80,32 @@ the analysis UX.
   `ESTIMATED_POWER_HP`/`TORQUE_NM`) to the live tick so they stream
   over `/ws/telemetry` and land in Parquet. Cumulative channels stay
   excluded from model features (`NON_TRAINABLE_COUNTER_CHANNELS`,
-  `derived.py`).
-- [ ] **1.2 — Chart them.** Verify ChartsPanel + CustomDashboardPanel
+  `derived.py`). — landed: `compute_instantaneous_channels` split out
+  and wired into `featurize_wide_frame` (shared by batch + live);
+  streams over `/ws/telemetry` via `_publish_derived_channels` and
+  lands in Parquet via `AsyncParquetTelemetryWriter.write_many`
+  (best-effort, same writer object replay-mode redirection already
+  covers). Initial pass shipped WS-only; review caught the missing
+  Parquet persistence against the task's explicit wording before this
+  was checked off, fixed with real end-to-end coverage (read-back from
+  a written Parquet file, not a mock).
+- [x] **1.2 — Chart them.** Verify ChartsPanel + CustomDashboardPanel
   pick up the new `derived:` channels automatically (they chart any
   streaming numeric channel); add them to the channel-picker grouping
   if sources are grouped. Boost/vacuum, MPG, and estimated HP become
-  live gauges for free.
-- [ ] **1.3 — Session-persist the integrals.** Confirm trip integrals
+  live gauges for free. — verified, zero code changes needed: both
+  panels build their channel picker generically off the live channel
+  map with no source allow-list or grouping to extend.
+- [x] **1.3 — Session-persist the integrals.** Confirm trip integrals
   reset per session (they are cumsum over the frame — verify behavior
   across the live ring buffer vs batch; integrals may need daemon-side
   accumulators rather than window cumsum). Unit-test parity between
-  batch `compute_derived_channels` and the live accumulation.
+  batch `compute_derived_channels` and the live accumulation. — landed:
+  `LiveFeatureSource` gained real wall-clock-`dt` session-scoped
+  accumulators (not a windowed cumsum, which would have reset on every
+  ring-buffer eviction); zeroed by the same Phase-7.1 `reset()` used for
+  replay-boundary isolation. Parity test confirms non-degenerate,
+  matching final values against the batch path.
 
 ### 1B. Trip summary surfaced
 

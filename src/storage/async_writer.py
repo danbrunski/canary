@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TypeVar
 
@@ -42,6 +42,11 @@ class AsyncParquetTelemetryWriter:
 
     async def write(self, record: TelemetryRecord) -> Path | None:
         return await self._call(self._writer.write, record)
+
+    async def write_many(self, records: Iterable[TelemetryRecord]) -> list[Path]:
+        """Persist several records under one lock/thread hop (one tick's worth
+        of derived channels, e.g.) instead of one ``write`` call each."""
+        return await self._call(self._writer.write_many, list(records))
 
     async def flush(self) -> Path | None:
         return await self._call(self._writer.flush)

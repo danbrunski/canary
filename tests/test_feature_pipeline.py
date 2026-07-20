@@ -19,9 +19,11 @@ from src.config import CanaryConfig
 from src.decode.behavior_models import BehaviorModels
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,
+    NON_TRAINABLE_COUNTER_CHANNELS,
     FeaturizedFrame,
     _drop_fully_stale_rows,
     align_features_to_schema,
+    candidate_feature_columns,
     featurize_wide_frame,
     restrict_isolation_forest_expansion,
     sequence_feature_columns,
@@ -186,6 +188,88 @@ def test_featurize_wide_frame_skips_deviation_without_models(
 
     assert not [c for c in result.features.columns if str(c).startswith("deviation:")]
     assert not [c for c in result.operating_frame.columns if str(c).startswith("deviation:")]
+
+
+def test_featurize_wide_frame_appends_instantaneous_derived_channels(
+    config: CanaryConfig,
+) -> None:
+    """Task 1.1 — performance channels (fuel rate, boost/vacuum, estimated
+    power/torque) ride the same shared builder as ``compute_anomaly_signals``,
+    so both the batch and live paths get them for free."""
+    n = 5
+    wide = pd.DataFrame(
+        {
+            "session": ["s"] * n,
+            "timestamp": pd.date_range("2026-05-13T12:00:00Z", periods=n, freq="1s"),
+            "obd:RPM": [2000.0] * n,
+            "obd:MAF": [12.0] * n,
+            "obd:SPEED": [60.0] * n,
+            "obd:INTAKE_PRESSURE": [95.0] * n,
+        }
+    )
+    result = featurize_wide_frame(wide, config)
+    op = result.operating_frame
+    assert "derived:FUEL_RATE_LPH" in op.columns
+    assert (op["derived:FUEL_RATE_LPH"] > 0).all()
+    assert "derived:BOOST_VACUUM_KPA" in op.columns
+    assert op["derived:BOOST_VACUUM_KPA"].iloc[0] == pytest.approx(95.0 - 101.325)
+    assert "derived:ESTIMATED_POWER_HP" in op.columns
+    # The cumulative trip integrals are NOT part of this shared builder —
+    # this frame is a live ring-buffer *window* on the streaming path, and a
+    # cumsum over a window would reset every eviction, not just a session
+    # boundary (Task 1.3 handles those separately, in LiveFeatureSource).
+    assert "derived:TRIP_DISTANCE_KM" not in op.columns
+    assert "derived:FUEL_USED_L" not in op.columns
+    # And it does show up in the rolling-feature output too, same as any
+    # other channel — this is what makes it a model-feature candidate.
+    assert "derived:FUEL_RATE_LPH" in result.features.columns
+    assert "derived:FUEL_RATE_LPH__mean" in result.features.columns
+
+
+def test_candidate_feature_columns_keeps_instantaneous_derived_channels() -> None:
+    frame = pd.DataFrame(
+        {
+            "session": ["s", "s"],
+            "timestamp": pd.to_datetime(["2026-05-24T00:00:00Z", "2026-05-24T00:00:01Z"]),
+            "operating_mode": ["city", "city"],
+            "obd:RPM": [800.0, 810.0],
+            "derived:FUEL_RATE_LPH": [1.0, 1.1],
+            "derived:BOOST_VACUUM_KPA": [-30.0, -29.0],
+        }
+    )
+    cols = candidate_feature_columns(frame)
+    assert "derived:FUEL_RATE_LPH" in cols
+    assert "derived:BOOST_VACUUM_KPA" in cols
+
+
+def test_candidate_feature_columns_excludes_derived_trip_integrals() -> None:
+    """Task 1.1/1.3 — cumulative trip integrals are monotonic by construction
+    (same failure mode as ``obd:RUN_TIME``) and must stay out of the trained
+    feature set, same mechanism as the OBD counters."""
+    frame = pd.DataFrame(
+        {
+            "session": ["s", "s"],
+            "timestamp": pd.to_datetime(["2026-05-24T00:00:00Z", "2026-05-24T00:00:01Z"]),
+            "operating_mode": ["city", "city"],
+            "obd:RPM": [800.0, 810.0],
+            "derived:TRIP_DISTANCE_KM": [0.0, 0.02],
+            "derived:FUEL_USED_L": [0.0, 0.001],
+            "derived:CO2_KG": [0.0, 0.002],
+            "derived:IDLE_TIME_S": [0.0, 0.0],
+            "derived:AVG_ECONOMY_L_PER_100KM": [float("nan"), 5.0],
+        }
+    )
+    cols = candidate_feature_columns(frame)
+    assert "obd:RPM" in cols
+    for excluded in (
+        "derived:TRIP_DISTANCE_KM",
+        "derived:FUEL_USED_L",
+        "derived:CO2_KG",
+        "derived:IDLE_TIME_S",
+        "derived:AVG_ECONOMY_L_PER_100KM",
+    ):
+        assert excluded in NON_TRAINABLE_COUNTER_CHANNELS
+        assert excluded not in cols
 
 
 def test_align_features_to_schema_adds_absent_columns_as_nan() -> None:

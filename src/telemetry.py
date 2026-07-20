@@ -30,8 +30,15 @@ GPS_SOURCE: Final = "gps"
 #: a ``TelemetryRecord`` (``decode_can_rows_dbc`` writes ``source_channel``
 #: directly), so ``DBC_SOURCE`` is deliberately *not* a ``TelemetrySource``.
 DBC_SOURCE: Final = "dbc"
+#: Computed performance channels (fuel rate, economy, trip integrals,
+#: boost/vacuum, estimated power/torque — Task 1.1). Unlike ``DBC_SOURCE``/
+#: ``did`` (pseudo-sources that only ever exist as wide-column prefixes),
+#: derived channels have no raw record to decode from later — the live tick
+#: that computes them is the only place the value ever exists — so, like
+#: ``DECODED_SOURCE``, they ride a real ``TelemetryRecord`` and get persisted.
+DERIVED_SOURCE: Final = "derived"
 
-TelemetrySource = Literal["obd", "can", "decoded", "gps"]
+TelemetrySource = Literal["obd", "can", "decoded", "gps", "derived"]
 # PEP 586 forbids spelling a Literal from variables, so the line above is the
 # one unavoidable duplication. Guard it against silently drifting from the
 # constants it must mirror.
@@ -40,6 +47,7 @@ assert set(get_args(TelemetrySource)) == {
     CAN_SOURCE,
     DECODED_SOURCE,
     GPS_SOURCE,
+    DERIVED_SOURCE,
 }
 
 TelemetryValue = bool | int | float | str | None
@@ -158,6 +166,26 @@ class TelemetryRecord:
         return cls(
             timestamp=timestamp,
             source="decoded",
+            channel=channel,
+            value=value,
+            unit=unit,
+            metadata={} if metadata is None else metadata,
+        )
+
+    @classmethod
+    def derived(
+        cls,
+        timestamp: datetime,
+        channel: str,
+        value: TelemetryValue,
+        unit: str = "",
+        *,
+        metadata: dict[str, MetadataValue] | None = None,
+    ) -> TelemetryRecord:
+        """A computed performance channel (fuel rate, trip integrals, ...)."""
+        return cls(
+            timestamp=timestamp,
+            source="derived",
             channel=channel,
             value=value,
             unit=unit,

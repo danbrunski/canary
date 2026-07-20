@@ -1660,6 +1660,54 @@ async def test_run_live_inference_emits_event_when_outlier(config: CanaryConfig)
     assert IsolationForestInferenceEngine.__name__ == "IsolationForestInferenceEngine"
 
 
+async def test_run_live_inference_persists_derived_channels_to_storage(
+    config: CanaryConfig, tmp_path: Path
+) -> None:
+    """Task 1.1 follow-up — the derived performance channels (fuel rate,
+    boost/vacuum, estimated power, and the session-scoped trip integrals)
+    must reach Parquet, not just ``/ws/telemetry``: ``query_telemetry``'s
+    documented DuckDB view (docs/mcp-server.md) only sees what's on disk,
+    with no on-demand reconstruction fallback."""
+    from src.daemon import build_live_feature_source, run_live_inference
+    from src.storage.async_writer import AsyncParquetTelemetryWriter
+
+    components = build_components(config)
+    storage_writer = AsyncParquetTelemetryWriter(ParquetTelemetryWriter(tmp_path / "storage"))
+    components.storage_writer = storage_writer
+
+    source = build_live_feature_source(components)
+    now = datetime.now(UTC).timestamp()
+    for channel, value, unit in (
+        ("RPM", 2000.0, "rpm"),
+        ("SPEED", 50.0, "km/h"),
+        ("MAF", 12.0, "g/s"),
+        ("INTAKE_PRESSURE", 95.0, "kPa"),
+    ):
+        source.observe(TelemetryRecord.obd(now, channel, value, unit))
+
+    stop = asyncio.Event()
+    task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
+    try:
+        await asyncio.sleep(0.2)
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+    # flush_interval_seconds defaults to 5s — force the buffer to disk rather
+    # than waiting for it, same as every other drain-shutdown path.
+    await storage_writer.close()
+
+    import pandas as pd
+
+    parquet_files = list((tmp_path / "storage").rglob("*.parquet"))
+    assert parquet_files, "expected at least one Parquet chunk written"
+    written = pd.concat([pd.read_parquet(p) for p in parquet_files], ignore_index=True)
+    derived_channels = set(written.loc[written["source"] == "derived", "channel"])
+    # Instantaneous (row-local, Task 1.1) and cumulative (session-scoped
+    # accumulator, Task 1.3) channels both made it to storage.
+    assert "FUEL_RATE_LPH" in derived_channels
+    assert "TRIP_DISTANCE_KM" in derived_channels
+
+
 async def test_run_live_inference_flags_segmenter_fallback_on_status(
     config: CanaryConfig,
 ) -> None:

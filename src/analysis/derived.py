@@ -34,10 +34,14 @@ from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 __all__ = [
     "FUEL_PROPERTIES",
+    "IDLE_RPM_FLOOR",
+    "IDLE_SPEED_CEIL_KPH",
+    "MAX_INTEGRATION_DT_S",
     "FuelProperties",
     "TripSummary",
     "compute_anomaly_signals",
     "compute_derived_channels",
+    "compute_instantaneous_channels",
     "fuel_properties",
     "summarize_trip",
 ]
@@ -55,6 +59,14 @@ _IDLE_SPEED_CEIL_KPH = 3.0
 _LAUNCH_SPEED_KPH = 2.0 * _KPH_PER_MPH
 #: Cap per-row dt so a capture gap can't inflate integrated totals.
 _MAX_DT_S = 5.0
+#: Public aliases of the tuning constants above (Task 1.3) — the live
+#: session-scoped trip-integral accumulator (``LiveFeatureSource``) needs the
+#: exact same cap/idle thresholds as this module's batch ``cumsum`` so the
+#: two integration paths share one definition instead of two numbers that
+#: could silently drift apart.
+MAX_INTEGRATION_DT_S = _MAX_DT_S
+IDLE_RPM_FLOOR = _IDLE_RPM_FLOOR
+IDLE_SPEED_CEIL_KPH = _IDLE_SPEED_CEIL_KPH
 #: STFT is the *fast* closed-loop fuel-trim channel: ``STFT_B1`` and
 #: ``STFT_B2`` are polled at different points in the OBD round-robin, so during
 #: a transient (tip-in/out, shift) the per-bank samples catch different phases
@@ -213,21 +225,26 @@ def _estimated_power_kw(
     return None
 
 
-def compute_derived_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> pd.DataFrame:
-    """Append ``derived:<NAME>`` columns. Returns a copy; input untouched.
+def compute_instantaneous_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> pd.DataFrame:
+    """Append the row-local (non-integrated) ``derived:<NAME>`` channels.
+
+    Unlike the cumulative trip integrals in :func:`compute_derived_channels`,
+    every column here is a pure function of its *own row* — no ``dt``, no
+    ``cumsum``, no dependence on how many rows precede it in ``wide``. That
+    makes it safe to call on a live ring-buffer window (Task 1.1): the last
+    row's value is identical whether the buffer holds one row or a thousand,
+    unlike the trip integrals which need a session-scoped accumulator (Task
+    1.3) rather than a windowed cumsum.
 
     Added when their inputs exist (else skipped, not zero-filled):
     ``FUEL_RATE_LPH``, ``INSTANT_ECONOMY_L_PER_100KM``,
     ``INSTANT_ECONOMY_MPG``, ``BOOST_VACUUM_KPA``, ``ESTIMATED_POWER_HP``,
-    ``ESTIMATED_TORQUE_NM``, and the time-integrated ``TRIP_DISTANCE_KM``,
-    ``FUEL_USED_L``, ``CO2_KG``, ``IDLE_TIME_S``,
-    ``AVG_ECONOMY_L_PER_100KM``.
+    ``ESTIMATED_TORQUE_NM``.
     """
     if wide.empty or "timestamp" not in wide.columns:
         return wide.copy()
     out = wide.copy()
     fuel = fuel_properties(vehicle)
-    dt = _dt_seconds(out)
 
     speed = _series(out, "obd:SPEED", "decoded:VEHICLE_SPEED")
     rpm = _series(out, "obd:RPM", "decoded:ECM_RPM")
@@ -236,9 +253,6 @@ def compute_derived_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> 
     if fuel_g_s is not None:
         fuel_lph = fuel_g_s / (fuel.density_kg_per_l * 1000.0) * 3600.0
         out["derived:FUEL_RATE_LPH"] = fuel_lph
-        fuel_used_l = (fuel_lph / 3600.0 * dt).cumsum()
-        out["derived:FUEL_USED_L"] = fuel_used_l
-        out["derived:CO2_KG"] = fuel_used_l * fuel.co2_kg_per_l
         if speed is not None:
             moving = speed > 0
             l_per_100km = pd.Series(np.nan, index=out.index, dtype=float)
@@ -250,19 +264,6 @@ def compute_derived_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> 
             ok = moving & (gal_h > 0)
             mpg[ok] = mph[ok] / gal_h[ok]
             out["derived:INSTANT_ECONOMY_MPG"] = mpg
-
-    if speed is not None:
-        dist_km = (speed / 3600.0 * dt).cumsum()
-        out["derived:TRIP_DISTANCE_KM"] = dist_km
-        if "derived:FUEL_USED_L" in out.columns:
-            avg = pd.Series(np.nan, index=out.index, dtype=float)
-            nonzero = dist_km > 0
-            avg[nonzero] = out["derived:FUEL_USED_L"][nonzero] / dist_km[nonzero] * 100.0
-            out["derived:AVG_ECONOMY_L_PER_100KM"] = avg
-
-    if rpm is not None and speed is not None:
-        idling = (rpm > _IDLE_RPM_FLOOR) & (speed < _IDLE_SPEED_CEIL_KPH)
-        out["derived:IDLE_TIME_S"] = (dt.where(idling, 0.0)).cumsum()
 
     mapp = _series(out, "obd:INTAKE_PRESSURE", "decoded:MAP")
     if mapp is not None:
@@ -279,6 +280,50 @@ def compute_derived_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> 
             spinning = omega > 0
             torque[spinning] = power_kw[spinning] * 1000.0 / omega[spinning]
             out["derived:ESTIMATED_TORQUE_NM"] = torque
+    return out
+
+
+def compute_derived_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> pd.DataFrame:
+    """Append ``derived:<NAME>`` columns. Returns a copy; input untouched.
+
+    Runs :func:`compute_instantaneous_channels` (``FUEL_RATE_LPH``,
+    ``INSTANT_ECONOMY_L_PER_100KM``, ``INSTANT_ECONOMY_MPG``,
+    ``BOOST_VACUUM_KPA``, ``ESTIMATED_POWER_HP``, ``ESTIMATED_TORQUE_NM``)
+    then appends the time-integrated ``TRIP_DISTANCE_KM``, ``FUEL_USED_L``,
+    ``CO2_KG``, ``IDLE_TIME_S``, ``AVG_ECONOMY_L_PER_100KM`` — a ``cumsum``
+    over every row of ``wide``, which is only correct when ``wide`` is a
+    *complete* session frame (the offline batch path). A live ring-buffer
+    window must not cumsum through this function; see
+    ``LiveFeatureSource``'s session-scoped accumulators (Task 1.3) instead.
+    """
+    if wide.empty or "timestamp" not in wide.columns:
+        return wide.copy()
+    out = compute_instantaneous_channels(wide, vehicle)
+    dt = _dt_seconds(out)
+
+    speed = _series(out, "obd:SPEED", "decoded:VEHICLE_SPEED")
+    rpm = _series(out, "obd:RPM", "decoded:ECM_RPM")
+
+    if "derived:FUEL_RATE_LPH" in out.columns:
+        fuel_lph = out["derived:FUEL_RATE_LPH"]
+        fuel_used_l = (fuel_lph / 3600.0 * dt).cumsum()
+        out["derived:FUEL_USED_L"] = fuel_used_l
+        fuel = fuel_properties(vehicle)
+        out["derived:CO2_KG"] = fuel_used_l * fuel.co2_kg_per_l
+
+    if speed is not None:
+        dist_km = (speed / 3600.0 * dt).cumsum()
+        out["derived:TRIP_DISTANCE_KM"] = dist_km
+        if "derived:FUEL_USED_L" in out.columns:
+            avg = pd.Series(np.nan, index=out.index, dtype=float)
+            nonzero = dist_km > 0
+            avg[nonzero] = out["derived:FUEL_USED_L"][nonzero] / dist_km[nonzero] * 100.0
+            out["derived:AVG_ECONOMY_L_PER_100KM"] = avg
+
+    if rpm is not None and speed is not None:
+        idling = (rpm > _IDLE_RPM_FLOOR) & (speed < _IDLE_SPEED_CEIL_KPH)
+        out["derived:IDLE_TIME_S"] = (dt.where(idling, 0.0)).cumsum()
+
     return out
 
 

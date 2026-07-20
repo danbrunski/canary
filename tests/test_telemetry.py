@@ -10,6 +10,7 @@ from src.telemetry import (
     CAN_SOURCE,
     DBC_SOURCE,
     DECODED_SOURCE,
+    DERIVED_SOURCE,
     GPS_SOURCE,
     OBD_SOURCE,
     TelemetryRecord,
@@ -77,4 +78,5 @@ def test_telemetry_source_literal_stays_in_sync_with_constants() -> None:
         CAN_SOURCE,
         DECODED_SOURCE,
         GPS_SOURCE,
+        DERIVED_SOURCE,
     }

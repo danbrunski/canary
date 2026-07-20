@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.committees import append_committee_residuals, non_trainable_committee_outputs
-from src.analysis.derived import compute_anomaly_signals
+from src.analysis.derived import compute_anomaly_signals, compute_instantaneous_channels
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import append_deviation_columns
 from src.decode.behavior_models import (
@@ -113,6 +113,25 @@ NON_TRAINABLE_GPS_CHANNELS: frozenset[str] = frozenset(
 #: the IF. Excluded from trained features but kept in the frame so behavior
 #: models can still read them (e.g. ``obd:RUN_TIME`` is the coolant_warmup
 #: time-since-start axis). Same mechanism as NON_TRAINABLE_GPS_CHANNELS.
+#: ``derived:*`` trip integrals (Task 1.1/1.3) — cumulative sums over the
+#: session (fuel used, distance, CO2, idle time, running average economy)
+#: are monotonic-by-construction the same way ``obd:RUN_TIME`` is: real
+#: anomaly information, zero, and the LSTM can't reconstruct an ever-rising
+#: ramp. Excluded here for the same reason and by the same mechanism as the
+#: OBD counters below, in case a future feature frame ever includes
+#: ``compute_derived_channels``'s cumulative output (today only
+#: ``compute_instantaneous_channels``'s row-local subset feeds
+#: ``featurize_wide_frame`` — see there).
+_NON_TRAINABLE_DERIVED_INTEGRALS: frozenset[str] = frozenset(
+    {
+        "derived:TRIP_DISTANCE_KM",
+        "derived:FUEL_USED_L",
+        "derived:CO2_KG",
+        "derived:IDLE_TIME_S",
+        "derived:AVG_ECONOMY_L_PER_100KM",
+    }
+)
+
 NON_TRAINABLE_COUNTER_CHANNELS: frozenset[str] = frozenset(
     {
         "obd:RUN_TIME",
@@ -122,6 +141,7 @@ NON_TRAINABLE_COUNTER_CHANNELS: frozenset[str] = frozenset(
         "decoded:ODOMETER_ACCUMULATOR_385",
         "dbc:ODOMETER_ACCUMULATOR_385",
     }
+    | _NON_TRAINABLE_DERIVED_INTEGRALS
 )
 
 FEATURE_SPEC_VERSION = 1
@@ -469,6 +489,15 @@ def featurize_wide_frame(
     # extraction so recipes can target them as outputs and the rolling
     # feature builder picks up their derivatives.
     framed = compute_anomaly_signals(framed)
+    # Performance channels (Task 1.1): fuel rate, instant economy,
+    # boost/vacuum, estimated power/torque. Row-local only — the cumulative
+    # trip integrals (FUEL_USED_L, TRIP_DISTANCE_KM, ...) are deliberately
+    # NOT computed here, because this frame is a live ring-buffer *window*
+    # on the streaming path, not a full session; a cumsum over it would
+    # reset every time the window evicts old rows. See
+    # ``compute_instantaneous_channels`` and ``LiveFeatureSource``'s
+    # session-scoped accumulators (Task 1.3) for the integrated versions.
+    framed = compute_instantaneous_channels(framed, config.vehicle.parameters)
     # Sensor-committee divergence residuals (redundant sensors of one quantity,
     # e.g. OBD↔GPS speed). Distinct from the physical residuals above; gated on
     # input quality. Non-trainable committees are emitted here but excluded from

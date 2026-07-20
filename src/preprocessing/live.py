@@ -39,6 +39,7 @@ scaler normalizes anyway and many bindings have no pinned scale yet.
 from __future__ import annotations
 
 import logging
+import math
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -46,6 +47,12 @@ from typing import Any
 
 import pandas as pd
 
+from src.analysis.derived import (
+    IDLE_RPM_FLOOR,
+    IDLE_SPEED_CEIL_KPH,
+    MAX_INTEGRATION_DT_S,
+    fuel_properties,
+)
 from src.can_ids import parse_can_channel
 from src.config import CanaryConfig
 from src.decode.behavior_models import BehaviorModels
@@ -128,6 +135,30 @@ class LiveFeatureSource:
     #: Retains its last value on a tick with nothing to emit (no new
     #: information that tick), same as ``latest_operating_point``.
     last_segmenter_fallback: bool = field(init=False, default=False)
+
+    #: Session-scoped trip-integral accumulators (Task 1.3). A live tick's
+    #: ring-buffer window (``_buffer``) evicts old rows continuously, so a
+    #: ``cumsum`` over that window (what ``compute_derived_channels`` does
+    #: for a *complete* offline session) would reset every time the buffer
+    #: slides, not just at a session boundary. These instead accumulate
+    #: incrementally across ticks, using each tick's real wall-clock ``dt``
+    #: (mirroring ``compute_derived_channels``'s own ``_MAX_DT_S``-capped
+    #: per-row dt) — reset only by :meth:`reset` (the same replay-isolation
+    #: boundary Phase 7.1 already uses), so they read "since this session
+    #: started" the way the batch cumsum reads "since the recording started".
+    _trip_distance_km: float = field(init=False, default=0.0)
+    _fuel_used_l: float = field(init=False, default=0.0)
+    _co2_kg: float = field(init=False, default=0.0)
+    _idle_time_s: float = field(init=False, default=0.0)
+    #: Wall-clock time of the last integral accumulation, so ``dt`` is real
+    #: elapsed time between ticks rather than the buffer's row spacing.
+    _integral_last_tick_at: datetime | None = field(init=False, default=None)
+    #: Last tick's session-scoped trip integrals (Task 1.3), keyed the same
+    #: as ``compute_derived_channels``'s cumulative columns
+    #: (``derived:TRIP_DISTANCE_KM`` etc.) so a downstream consumer can merge
+    #: this dict directly onto a feature row. ``None`` until the first tick
+    #: that has both a fresh observation and enough inputs to accumulate.
+    latest_derived_channels: dict[str, float] | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         hz = max(self.config.preprocessing.resample_hz, 1.0)
@@ -378,11 +409,74 @@ class LiveFeatureSource:
         self.latest_operating_point = {
             str(k): v for k, v in result.operating_frame.iloc[-1].to_dict().items()
         }
+        # Session-scoped trip integrals (Task 1.3) — accumulated here, not
+        # via a cumsum over ``framed``/``featured`` (those are windows of the
+        # ring buffer, not the whole session; see the docstring on
+        # ``_trip_distance_km`` above).
+        self.latest_derived_channels = self._accumulate_derived_integrals(
+            now_utc, self.latest_operating_point
+        )
 
         featured = result.features
         if featured.empty:
             return None
         return featured.iloc[[-1]].reset_index(drop=True)
+
+    def _accumulate_derived_integrals(
+        self, now: datetime, point: dict[str, Any]
+    ) -> dict[str, float]:
+        """Update the session-scoped trip integrals from one tick's operating row.
+
+        Mirrors ``compute_derived_channels``'s cumulative math (same
+        ``MAX_INTEGRATION_DT_S``-capped dt, same idle gate) but accumulates
+        incrementally across ticks instead of ``cumsum``-ing a frame, so
+        ring-buffer eviction never resets a running total mid-session. ``dt``
+        is real wall-clock time since the last tick that reached here (ticks
+        that returned ``None`` before this point — no observations yet, or
+        fully stale — don't advance it, matching ``compute_derived_channels``
+        never accumulating a dropped/fully-gap-filled row either).
+        """
+        now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        if self._integral_last_tick_at is None:
+            dt = 0.0
+        else:
+            elapsed = (now_utc - self._integral_last_tick_at).total_seconds()
+            dt = min(max(elapsed, 0.0), MAX_INTEGRATION_DT_S)
+        self._integral_last_tick_at = now_utc
+
+        speed = _first_finite(
+            point, channel_key(OBD_SOURCE, "SPEED"), channel_key(DECODED_SOURCE, "VEHICLE_SPEED")
+        )
+        rpm = _first_finite(
+            point, channel_key(OBD_SOURCE, "RPM"), channel_key(DECODED_SOURCE, "ECM_RPM")
+        )
+        fuel_lph = _first_finite(point, "derived:FUEL_RATE_LPH")
+
+        if fuel_lph is not None:
+            self._fuel_used_l += fuel_lph / 3600.0 * dt
+            fuel = fuel_properties(self.config.vehicle.parameters)
+            self._co2_kg = self._fuel_used_l * fuel.co2_kg_per_l
+        if speed is not None:
+            self._trip_distance_km += speed / 3600.0 * dt
+        if (
+            rpm is not None
+            and speed is not None
+            and rpm > IDLE_RPM_FLOOR
+            and speed < IDLE_SPEED_CEIL_KPH
+        ):
+            self._idle_time_s += dt
+
+        avg_economy = float("nan")
+        if self._trip_distance_km > 0:
+            avg_economy = self._fuel_used_l / self._trip_distance_km * 100.0
+
+        return {
+            "derived:TRIP_DISTANCE_KM": self._trip_distance_km,
+            "derived:FUEL_USED_L": self._fuel_used_l,
+            "derived:CO2_KG": self._co2_kg,
+            "derived:IDLE_TIME_S": self._idle_time_s,
+            "derived:AVG_ECONOMY_L_PER_100KM": avg_economy,
+        }
 
     def _gap_flags(self, now: datetime) -> dict[str, bool]:
         """Per-channel ``<channel>__gap`` flags for the current tick.
@@ -484,6 +578,15 @@ class LiveFeatureSource:
         self._buffer = deque(maxlen=self._max_rows)
         self.latest_operating_point = None
         self.last_segmenter_fallback = False
+        # Trip integrals are session-scoped (Task 1.3) — zero them on the
+        # same boundary as everything else so a new session (or a replay
+        # run) never inherits the previous session's running totals.
+        self._trip_distance_km = 0.0
+        self._fuel_used_l = 0.0
+        self._co2_kg = 0.0
+        self._idle_time_s = 0.0
+        self._integral_last_tick_at = None
+        self.latest_derived_channels = None
 
     # ------------------------------------------------------------------
     # Introspection
@@ -511,6 +614,22 @@ def _to_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _first_finite(point: dict[str, Any], *keys: str) -> float | None:
+    """First present, non-NaN value among ``keys`` in a tick's operating row.
+
+    Mirrors ``derived._series``'s "prefer OBD, fall back to decoded" lookup,
+    but over a single-row dict (``LiveFeatureSource.latest_operating_point``)
+    rather than a DataFrame column.
+    """
+    for key in keys:
+        if key not in point:
+            continue
+        value = _to_float(point[key])
+        if value is not None and not math.isnan(value):
+            return value
+    return None
 
 
 def _decode_signal_raw(signal: Signal, payload: bytes) -> int | None:

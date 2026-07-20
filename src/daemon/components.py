@@ -27,6 +27,7 @@ from src.dashboard.broadcast import Broadcaster
 from src.models.health import HealthMonitor
 from src.models.manager import ModelManager, manager_for_artifact
 from src.models.sequence_registry import resolve_sequence_backend
+from src.storage.async_writer import AsyncParquetTelemetryWriter
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +81,12 @@ class DaemonComponents:
     #: Live read/swap of the active sequence-detector backbone (set in
     #: ``build_components`` once the component record exists).
     sequence_detector_controller: SequenceDetectorController | None = None
+    #: The daemon's one durable Parquet writer (set by ``run_daemon`` after it
+    #: builds ``storage_writer`` — ``None`` in tests that never wire storage).
+    #: Task 1.1 follow-up: lets ``run_live_inference`` persist derived
+    #: performance channels through the *same* writer ``run_storage_sink``
+    #: uses, instead of a second Parquet-writing path.
+    storage_writer: AsyncParquetTelemetryWriter | None = None
 
 
 def build_components(config: CanaryConfig) -> DaemonComponents:
