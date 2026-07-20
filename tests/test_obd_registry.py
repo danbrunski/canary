@@ -108,6 +108,23 @@ def test_poll_tiers_are_valid() -> None:
         assert MODE01_REGISTRY[pid].poll_tier == "fast"
 
 
+def test_wideband_lambda_pids_polled_at_fast_tier() -> None:
+    """Task 2.1: 0x24/0x25/0x34/0x35 are now polled (via PID_DECODERS) at the
+    fast tier, and decode via the shared ``decode_wide_lambda`` formula."""
+    for pid in (0x24, 0x25, 0x34, 0x35):
+        assert pid in PID_DECODERS, f"PID 0x{pid:02X} should be in PID_DECODERS"
+        entry = MODE01_REGISTRY[pid]
+        assert entry.poll_tier == "fast"
+        assert entry.decoder is decode_wide_lambda
+        # AB=0xA000 → 40960/32768 = 1.25 λ (lean); CD (voltage/current) ignored.
+        assert entry.decoder(bytes([0xA0, 0x00, 0x00, 0x00])) == pytest.approx((1.25, "ratio"))
+    # The remaining 0x26-0x2B / 0x36-0x3B wideband PIDs stay medium-tier
+    # (documented but not actively polled — Task 2.2 probes the rest).
+    for pid in (0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B):
+        assert pid not in PID_DECODERS
+        assert MODE01_REGISTRY[pid].poll_tier == "medium"
+
+
 def test_monitor_status_pid_is_slow_tier_and_decoded() -> None:
     """Task 1.2: PID 0x01 (MIL/DTC count) rides the slow telemetry tier."""
     entry = MODE01_REGISTRY[0x01]

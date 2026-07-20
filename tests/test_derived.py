@@ -42,6 +42,28 @@ def test_engine_fuel_rate_pid_preferred_over_maf() -> None:
     assert out["derived:FUEL_RATE_LPH"].iloc[0] == pytest.approx(6.0, rel=1e-6)
 
 
+def test_fuel_rate_prefers_measured_wideband_lambda_over_commanded() -> None:
+    """Task 2.1: once wideband λ (0x24/0x25) is polled, method-2 fuel calc
+    should use the *measured* λ instead of the *commanded* one (0x44) —
+    confirmed here with mismatched values so the result proves which won."""
+    # Commanded λ says stoich (1.0); measured wideband λ says lean (1.25).
+    # MAF 7.35 g/s ÷ (14.7 * 1.25) ≈ 0.4 g/s fuel → smaller than the
+    # commanded-λ (stoich) 0.5 g/s case in test_fuel_rate_from_maf_and_economy.
+    df = _frame(
+        3,
+        **{
+            "obd:MAF": [7.35] * 3,
+            "obd:O2_WR_LAMBDA_S1": [1.25] * 3,
+            "obd:COMMANDED_EQUIV_RATIO": [1.0] * 3,
+        },
+    )
+    out = compute_derived_channels(df, GASOLINE)
+    expected_fuel_g_s = 7.35 / (14.7 * 1.25)
+    fuel = fuel_properties(GASOLINE)
+    expected_lph = expected_fuel_g_s * 3600.0 / (fuel.density_kg_per_l * 1000.0)
+    assert out["derived:FUEL_RATE_LPH"].iloc[0] == pytest.approx(expected_lph, rel=1e-6)
+
+
 def test_speed_density_fallback() -> None:
     df = _frame(
         2,

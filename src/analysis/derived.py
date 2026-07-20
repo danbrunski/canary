@@ -172,8 +172,10 @@ def _instant_fuel_g_s(
     """Instantaneous fuel mass flow (g/s), best available method.
 
     1. ``ENGINE_FUEL_RATE`` PID (L/h) — most direct.
-    2. MAF ÷ actual AFR, where actual AFR = stoich × commanded λ (PID 0x44);
-       λ defaults to 1.0 when not reported.
+    2. MAF ÷ actual AFR, where actual AFR = stoich × λ. λ prefers the
+       *measured* wideband O2 PIDs (0x24/0x25 — Task 2.1) over the
+       *commanded* λ (PID 0x44), falling back to it when wideband isn't
+       polled; λ defaults to 1.0 when neither is reported.
     3. Speed-density: ideal-gas air mass from MAP/IAT/RPM/displacement/VE,
        then ÷ stoich AFR — the last resort when only MAP-style data exists.
     """
@@ -183,7 +185,9 @@ def _instant_fuel_g_s(
 
     maf = _series(wide, "obd:MAF", "decoded:MAF")
     if maf is not None:
-        lam = _series(wide, "obd:COMMANDED_EQUIV_RATIO")
+        lam = _series(
+            wide, "obd:O2_WR_LAMBDA_S1", "obd:O2_WR_LAMBDA_S2", "obd:COMMANDED_EQUIV_RATIO"
+        )
         afr_actual = fuel.afr_stoich * (lam if lam is not None else 1.0)
         return maf / afr_actual
 

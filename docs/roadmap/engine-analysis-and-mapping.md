@@ -144,12 +144,19 @@ the analysis UX.
 
 ## Phase 2 — Collect what the vehicle offers (Mode 01 + DIDs)
 
-- [ ] **2.1 — Poll wideband λ.** Add `0x24`/`0x25` (and `0x34`/`0x35`
+- [x] **2.1 — Poll wideband λ.** Add `0x24`/`0x25` (and `0x34`/`0x35`
   variants — probe which the ECM answers) to `PID_DECODERS`
   (`src/collection/can_obd_client.py:517-556`) using the existing
   `decode_wide_lambda` (`obd_registry.py:186-195`). Tier: fast. This
   makes upstream AFR *measured*; `_instant_fuel_g_s` method 2
-  (`derived.py:172-176`) and the AFR surfaces upgrade automatically.
+  (`derived.py:172-176`) and the AFR surfaces upgrade automatically. —
+  landed: all four documented variants added at fast tier (real probe
+  of which the ECM answers is 2.2, still blocked-overnight). Review
+  found this doc's own "upgrades automatically" claim was actually
+  FALSE in code — `_instant_fuel_g_s` method 2 only ever read
+  `obd:COMMANDED_EQUIV_RATIO`, no wideband lookup existed — fixed by
+  widening the column preference to measured λ first, commanded as
+  fallback.
 - [ ] **2.2 — One-time PID probe capture.** KOEO + engine-running
   capture requesting each registry-decoded-but-unpolled PID once:
   `0x5E` fuel rate, `0x5D` injection timing, `0x61-0x63` torque,
@@ -158,10 +165,12 @@ the analysis UX.
   from registry — add specs first). Add every PID the ECM answers to
   `PID_DECODERS` at an appropriate tier; record the outcome in
   `data/nissan-xterra-2008/` notes.
-- [ ] **2.3 — Fix `0x43` ABSOLUTE_LOAD decode.** Registry says 2-byte
+- [x] **2.3 — Fix `0x43` ABSOLUTE_LOAD decode.** Registry says 2-byte
   (`obd_registry.py`), collector decodes single-byte percent
   (`can_obd_client.py:551`) — wrong above 100%. Use
-  `(A*256+B)*100/255`.
+  `(A*256+B)*100/255`. — landed: `decode_absolute_load`; regression
+  test confirms a real above-100% value (raw 0x0190 ≈ 156.9%) that the
+  old single-byte decode would have wrapped to ≤100%.
 - [ ] **2.4 — Schedule the identified DIDs.** Add the unscheduled
   identified DIDs to the Pi window config
   (`canary.pi.example.yaml:33-37` currently polls 4 of 13):

@@ -13,6 +13,7 @@ from src.collection.can_obd_client import (
     DEFAULT_RESPONSE_ID_MIN,
     PID_DECODERS,
     CanObdClient,
+    decode_absolute_load,
     decode_baro,
     decode_catalyst_temp,
     decode_commanded_lambda,
@@ -29,6 +30,7 @@ from src.collection.can_obd_client import (
     decode_speed,
     decode_temp_minus_40,
     decode_timing_advance,
+    decode_wide_lambda,
     parse_dtc_payload,
     read_pid,
     read_pids,
@@ -116,6 +118,23 @@ def test_decode_catalyst_temp() -> None:
     assert decode_catalyst_temp(bytes([0x2E, 0xE0])) == (1160.0, "degC")
 
 
+def test_decode_wide_lambda() -> None:
+    # AB=0x8000 → 32768/32768 = 1.0 stoich; CD bytes (voltage/current) unused
+    assert decode_wide_lambda(bytes([0x80, 0x00, 0x12, 0x34])) == (1.0, "ratio")
+    # AB=0x6000 → 24576/32768 = 0.75 (rich)
+    assert decode_wide_lambda(bytes([0x60, 0x00])) == pytest.approx((0.75, "ratio"))
+
+
+def test_decode_absolute_load() -> None:
+    """Task 2.3: 2-byte percent, ``(A*256+B)*100/255`` — can exceed 100%
+    (single-byte ``decode_percent_a_over_255`` cannot, the bug this fixes)."""
+    assert decode_absolute_load(bytes([0x00, 0xFF])) == pytest.approx((100.0, "%"))
+    assert decode_absolute_load(bytes([0x00, 0x00])) == (0.0, "%")
+    # raw 0x0190 (400) * 100/255 ≈ 156.9% — above 100%, a real boosted-engine
+    # value the old single-byte decode (max 255 → 100%) would have wrapped.
+    assert decode_absolute_load(bytes([0x01, 0x90])) == pytest.approx((156.86, "%"), abs=0.01)
+
+
 def test_pid_decoders_matches_pre_refactor_golden_shape() -> None:
     """Task 1.1: MODE01_REGISTRY's channel names are now generated from
     PID_DECODERS (not independently hand-typed) — pin PID_DECODERS's exact
@@ -143,6 +162,8 @@ def test_pid_decoders_matches_pre_refactor_golden_shape() -> None:
         0x19: ("O2_B2S2", decode_o2_voltage),
         0x1F: ("RUN_TIME", decode_run_time),
         0x21: "DISTANCE_W_MIL",
+        0x24: ("O2_WR_LAMBDA_S1", decode_wide_lambda),
+        0x25: ("O2_WR_LAMBDA_S2", decode_wide_lambda),
         0x2C: "COMMANDED_EGR",
         0x2D: "EGR_ERROR",
         0x2E: "EVAPORATIVE_PURGE",
@@ -151,12 +172,14 @@ def test_pid_decoders_matches_pre_refactor_golden_shape() -> None:
         0x31: "DISTANCE_SINCE_DTC_CLEAR",
         0x32: ("EVAP_VAPOR_PRESSURE", decode_evap_vapor_pressure_signed),
         0x33: ("BAROMETRIC_PRESSURE", decode_baro),
+        0x34: ("O2_WR_CURRENT_S1", decode_wide_lambda),
+        0x35: ("O2_WR_CURRENT_S2", decode_wide_lambda),
         0x3C: ("CATALYST_TEMP_B1S1", decode_catalyst_temp),
         0x3D: ("CATALYST_TEMP_B2S1", decode_catalyst_temp),
         0x3E: ("CATALYST_TEMP_B1S2", decode_catalyst_temp),
         0x3F: ("CATALYST_TEMP_B2S2", decode_catalyst_temp),
         0x42: ("CONTROL_MODULE_VOLTAGE", decode_control_module_voltage),
-        0x43: "ABSOLUTE_LOAD",
+        0x43: ("ABSOLUTE_LOAD", decode_absolute_load),
         0x44: ("COMMANDED_EQUIV_RATIO", decode_commanded_lambda),
         0x45: "RELATIVE_THROTTLE_POS",
         0x46: "AMBIANT_AIR_TEMP",
@@ -183,7 +206,14 @@ def test_decoders_handle_short_payloads_gracefully() -> None:
         assert decoder(b"") is None, f"{name} should reject empty payload"
         # A single byte is enough for some single-byte decoders; only fail
         # the multi-byte ones on len=1.
-        if decoder in (decode_rpm, decode_maf, decode_run_time, decode_commanded_lambda):
+        if decoder in (
+            decode_rpm,
+            decode_maf,
+            decode_run_time,
+            decode_commanded_lambda,
+            decode_wide_lambda,
+            decode_absolute_load,
+        ):
             assert decoder(b"\x01") is None, f"{name} should require 2 bytes"
 
 

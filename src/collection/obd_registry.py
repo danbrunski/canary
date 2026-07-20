@@ -35,6 +35,7 @@ from src.collection.can_obd_client import (
     decode_o2_voltage,
     decode_percent_a_over_255,
     decode_percent_b_minus_128,
+    decode_wide_lambda,
     parse_dtc_payload,
 )
 
@@ -173,18 +174,6 @@ def decode_fuel_rail_gauge_pressure(data: bytes) -> tuple[float, str] | None:
     if not _need(data, 2):
         return None
     return (float((data[0] * 256 + data[1]) * 10), "kPa")
-
-
-def decode_wide_lambda(data: bytes) -> tuple[float, str] | None:
-    """PIDs 0x24-0x2B / 0x34-0x3B: wide-range O2.
-
-    Four bytes: ``AB`` = equivalence ratio λ ``(A*256+B)/32768``, ``CD`` =
-    sensor voltage or current. λ is the model-relevant channel; the raw
-    voltage/current goes unused.
-    """
-    if not _need(data, 2):
-        return None
-    return ((data[0] * 256 + data[1]) / 32768.0, "ratio")
 
 
 def decode_minutes(data: bytes) -> tuple[float, str] | None:
@@ -540,25 +529,25 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x24,
-        "O2_WR_LAMBDA_S1",
+        _pd_name(0x24),
         "Wide-Range O2 λ S1",
         "o2",
         "ratio",
         4,
-        "medium",
+        "fast",
         "graph",
-        decode_wide_lambda,
+        _pd(0x24),
     ),  # noqa: E501
     (
         0x25,
-        "O2_WR_LAMBDA_S2",
+        _pd_name(0x25),
         "Wide-Range O2 λ S2",
         "o2",
         "ratio",
         4,
-        "medium",
+        "fast",
         "graph",
-        decode_wide_lambda,
+        _pd(0x25),
     ),  # noqa: E501
     (
         0x26,
@@ -686,25 +675,25 @@ _MODE01_SPEC: tuple[
     ),  # noqa: E501
     (
         0x34,
-        "O2_WR_CURRENT_S1",
+        _pd_name(0x34),
         "Wide-Range O2 λ (current) S1",
         "o2",
         "ratio",
         4,
-        "medium",
+        "fast",
         "graph",
-        decode_wide_lambda,
+        _pd(0x34),
     ),  # noqa: E501
     (
         0x35,
-        "O2_WR_CURRENT_S2",
+        _pd_name(0x35),
         "Wide-Range O2 λ (current) S2",
         "o2",
         "ratio",
         4,
-        "medium",
+        "fast",
         "graph",
-        decode_wide_lambda,
+        _pd(0x35),
     ),  # noqa: E501
     (
         0x36,

@@ -508,6 +508,21 @@ def decode_commanded_lambda(data: bytes) -> tuple[float, str] | None:
     return ((data[0] * 256 + data[1]) / 32768.0, "ratio")
 
 
+def decode_wide_lambda(data: bytes) -> tuple[float, str] | None:
+    """PIDs 0x24-0x2B / 0x34-0x3B: wide-range O2 (Task 2.1).
+
+    Four bytes: ``AB`` = equivalence ratio λ ``(A*256+B)/32768``, ``CD`` =
+    sensor voltage or current. λ is the model-relevant channel; the raw
+    voltage/current goes unused. Single-sourced here (not ``obd_registry.py``)
+    because bank-1 sensor 1/2 (0x24/0x25/0x34/0x35) are now polled directly
+    via ``PID_DECODERS``; the remaining wide-lambda PIDs still import this
+    from here for their unpolled-but-decodable registry entries.
+    """
+    if not _need(data, 2):
+        return None
+    return ((data[0] * 256 + data[1]) / 32768.0, "ratio")
+
+
 def decode_fuel_status(data: bytes) -> tuple[float, str] | None:
     """PID 0x03 fuel-system status.
 
@@ -551,6 +566,19 @@ def decode_catalyst_temp(data: bytes) -> tuple[float, str] | None:
     return ((data[0] * 256 + data[1]) / 10.0 - 40.0, "degC")
 
 
+def decode_absolute_load(data: bytes) -> tuple[float, str] | None:
+    """ABSOLUTE_LOAD (PID 0x43): 2-byte percent, ``(A*256+B) * 100/255``.
+
+    Task 2.3: SAE J1979 defines this PID as 2-byte (unlike the 1-byte
+    ``decode_percent_a_over_255`` family) so it can read past 100% — real
+    under boost/load on many engines. The old 1-byte decode silently
+    truncated/wrapped above that.
+    """
+    if not _need(data, 2):
+        return None
+    return ((data[0] * 256 + data[1]) * 100.0 / 255.0, "%")
+
+
 #: Registry: PID number → (name, decoder). Drives both the
 #: ``read_supported`` flow and any caller that wants to translate a numeric
 #: PID into a named telemetry channel.
@@ -576,6 +604,13 @@ PID_DECODERS: dict[int, tuple[str, Callable[[bytes], tuple[float, str] | None]]]
     0x19: ("O2_B2S2", decode_o2_voltage),
     0x1F: ("RUN_TIME", decode_run_time),
     0x21: ("DISTANCE_W_MIL", decode_distance_km),
+    # Wide-range O2 λ, bank-1 sensor 1/2 (Task 2.1): 0x24/0x25 are the
+    # "equivalence ratio" variant, 0x34/0x35 the "current" variant — probe
+    # which the ECM answers; the ECM claiming support for one over the
+    # other is normal, so both are decoded identically (decode_wide_lambda
+    # ignores the raw voltage/current bytes either way).
+    0x24: ("O2_WR_LAMBDA_S1", decode_wide_lambda),
+    0x25: ("O2_WR_LAMBDA_S2", decode_wide_lambda),
     0x2C: ("COMMANDED_EGR", decode_egr_percent),
     0x2D: ("EGR_ERROR", decode_egr_error),
     0x2E: ("EVAPORATIVE_PURGE", decode_evap_purge),
@@ -584,12 +619,14 @@ PID_DECODERS: dict[int, tuple[str, Callable[[bytes], tuple[float, str] | None]]]
     0x31: ("DISTANCE_SINCE_DTC_CLEAR", decode_distance_km),
     0x32: ("EVAP_VAPOR_PRESSURE", decode_evap_vapor_pressure_signed),
     0x33: ("BAROMETRIC_PRESSURE", decode_baro),
+    0x34: ("O2_WR_CURRENT_S1", decode_wide_lambda),
+    0x35: ("O2_WR_CURRENT_S2", decode_wide_lambda),
     0x3C: ("CATALYST_TEMP_B1S1", decode_catalyst_temp),
     0x3D: ("CATALYST_TEMP_B2S1", decode_catalyst_temp),
     0x3E: ("CATALYST_TEMP_B1S2", decode_catalyst_temp),
     0x3F: ("CATALYST_TEMP_B2S2", decode_catalyst_temp),
     0x42: ("CONTROL_MODULE_VOLTAGE", decode_control_module_voltage),
-    0x43: ("ABSOLUTE_LOAD", decode_percent_a_over_255),
+    0x43: ("ABSOLUTE_LOAD", decode_absolute_load),
     0x44: ("COMMANDED_EQUIV_RATIO", decode_commanded_lambda),
     0x45: ("RELATIVE_THROTTLE_POS", decode_percent_a_over_255),
     0x46: ("AMBIANT_AIR_TEMP", decode_temp_minus_40),
@@ -683,6 +720,7 @@ __all__ = [
     "CanObdClient",
     "DecodedPid",
     "ObdResponse",
+    "decode_absolute_load",
     "decode_baro",
     "decode_catalyst_temp",
     "decode_commanded_lambda",
@@ -706,6 +744,7 @@ __all__ = [
     "decode_temp_minus_40",
     "decode_timing_advance",
     "decode_warmups",
+    "decode_wide_lambda",
     "parse_dtc_payload",
     "read_pid",
     "read_pids",
