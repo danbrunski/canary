@@ -103,10 +103,17 @@ operator history (ledger backfill facts)
   (`7e27b2b`). Two real bugs (fabricated `voltage_at_crank_v`, an
   unscoped cross-vehicle-profile alert-state leak) caught by review and
   fixed before landing.
-- [ ] **Q10 — engine-analysis-and-mapping.md Phase 1 + refactoring 1.1**
+- [x] **Q10 — engine-analysis-and-mapping.md Phase 1 + refactoring 1.1**
   (wire derived channels live + TripSummary surface/panel/CLI; pair
   the PID-table single-sourcing with this since Q11 touches the same
-  files next).
+  files next). — 1.1-1.7 + refactoring 1.1 all landed (commits
+  `7cd9542`, `3530e2b`, `777fecc`). Two real bugs caught by review
+  before landing: the initial derived-channel pass shipped WS-only,
+  missing the task's explicit "and land in Parquet" clause (fixed);
+  and refactoring 1.1's originally-offered direction (derive
+  `PID_DECODERS` from the registry) turned out to be a genuine circular
+  import, independently reproduced, so the reverse direction was used
+  instead.
 - [ ] **Q11 — engine-analysis-and-mapping.md Phase 2, code-only slice**
   (2.1 wideband λ into `PID_DECODERS`; 2.3 absolute-load fix; 2.6
   custom-PID wiring + example file; 2.8 UI). 2.2/2.5/2.7 (captures)
