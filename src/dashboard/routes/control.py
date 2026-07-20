@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -25,6 +24,22 @@ from src.collection.custom_pids import (
     save_custom_pids,
     torque_csv_to_custom_pids,
 )
+from src.companion.services import (
+    cancel_job_response,
+    dataset_health_response,
+    delete_session_response,
+    export_session_response,
+    get_job_response,
+    get_session_response,
+    job_logs_response,
+    list_jobs_response,
+    pin_session_response,
+    sessions_list_response,
+    submit_job_response,
+    training_runs_response,
+    unpin_session_response,
+    update_session_metadata_response,
+)
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
@@ -48,14 +63,9 @@ from src.control.sequence_detector import (
     SequenceDetectorUnavailableError,
 )
 from src.control.sessions import (
-    delete_session,
     list_sessions,
-    pin_session,
     resolve_session,
     summarize_session,
-    unpin_session,
-    write_session_metadata,
-    write_session_zip,
 )
 from src.control.trends import corpus_trend_summary
 from src.dashboard.broadcast import Broadcaster
@@ -90,7 +100,6 @@ from src.dashboard.ups import (
     write_keepalive,
 )
 from src.dashboard.version import _canary_version, _git_sha
-from src.models.training_ledger import TrainingLedger
 from src.preprocessing.loader import discover_sessions
 from src.profiles import load_registry, update_profile_name
 
@@ -116,9 +125,6 @@ def register_control_routes(
     publish_control_event: Callable[[str, str, dict[str, Any]], None],
 ) -> None:
 
-    def _unlink_path(path: Path) -> None:
-        path.unlink(missing_ok=True)
-
     def require_control_auth(
         request: Request,
         authorization: str | None = Header(default=None),
@@ -138,6 +144,17 @@ def register_control_routes(
         if job_controller is None:
             raise HTTPException(status_code=503, detail="job API is not available")
         return job_controller
+
+    def _resolve_session(session_id: str) -> Path:
+        try:
+            return resolve_session(config.collection.storage_path, session_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    def _guard_active_capture(session_id: str) -> None:
+        active = capture_controller.current_capture() if capture_controller is not None else None
+        if active is not None and active.session_id == session_id:
+            raise HTTPException(status_code=409, detail="cannot delete the active capture session")
 
     def _sequence_detector() -> SequenceDetectorController:
         if sequence_detector_controller is None:
@@ -295,18 +312,17 @@ def register_control_routes(
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
         sessions = [session.to_dict() for session in list_sessions(config.collection.storage_path)]
-        return {"sessions": sessions, "count": len(sessions)}
+        return sessions_list_response(sessions)
 
     @app.get("/control/sessions/{session_id}")
     def get_control_session(
         session_id: str,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
-        try:
-            session = resolve_session(config.collection.storage_path, session_id)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {"session": summarize_session(session).to_dict()}
+        return get_session_response(
+            session_id,
+            resolve_and_serialize=lambda sid: summarize_session(_resolve_session(sid)).to_dict(),
+        )
 
     @app.get("/control/profiles")
     def get_control_profiles(
@@ -371,12 +387,12 @@ def register_control_routes(
         request: SessionMetadataRequest,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
-        try:
-            session = resolve_session(config.collection.storage_path, session_id)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        metadata = write_session_metadata(session, request.metadata, merge=request.merge)
-        payload = {"session_id": session_id, "metadata": metadata}
+        payload = update_session_metadata_response(
+            session_id,
+            request.metadata,
+            merge=request.merge,
+            resolve=_resolve_session,
+        )
         publish_control_event("session.metadata", "ok", payload)
         return payload
 
@@ -386,14 +402,14 @@ def register_control_routes(
         request: SessionPinRequest,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
-        try:
-            session = resolve_session(config.collection.storage_path, session_id)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        metadata = pin_session(session, reason=request.reason, catalog_db=config.daemon.catalog_db)
-        if request.metadata:
-            metadata = write_session_metadata(session, request.metadata)
-        payload = {"session": summarize_session(session).to_dict(), "metadata": metadata}
+        payload = pin_session_response(
+            session_id,
+            reason=request.reason,
+            extra_metadata=request.metadata,
+            resolve=_resolve_session,
+            serialize=lambda session: summarize_session(session).to_dict(),
+            catalog_db=config.daemon.catalog_db,
+        )
         publish_control_event("session.pin", "ok", payload)
         return payload
 
@@ -402,12 +418,12 @@ def register_control_routes(
         session_id: str,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
-        try:
-            session = resolve_session(config.collection.storage_path, session_id)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        metadata = unpin_session(session, catalog_db=config.daemon.catalog_db)
-        payload = {"session": summarize_session(session).to_dict(), "metadata": metadata}
+        payload = unpin_session_response(
+            session_id,
+            resolve=_resolve_session,
+            serialize=lambda session: summarize_session(session).to_dict(),
+            catalog_db=config.daemon.catalog_db,
+        )
         publish_control_event("session.unpin", "ok", payload)
         return payload
 
@@ -417,18 +433,12 @@ def register_control_routes(
         force: bool = Query(default=False),
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
-        try:
-            session = resolve_session(config.collection.storage_path, session_id)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        active = capture_controller.current_capture() if capture_controller is not None else None
-        if active is not None and active.session_id == session_id:
-            raise HTTPException(status_code=409, detail="cannot delete the active capture session")
-        try:
-            delete_session(session, force=force)
-        except PermissionError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        payload = {"session_id": session_id, "deleted": True, "force": force}
+        payload = delete_session_response(
+            session_id,
+            force=force,
+            resolve=_resolve_session,
+            guard=_guard_active_capture,
+        )
         publish_control_event("session.delete", "ok", payload)
         return payload
 
@@ -438,23 +448,11 @@ def register_control_routes(
         background_tasks: BackgroundTasks,
         _auth: None = Depends(require_control_auth),
     ) -> FileResponse:
-        try:
-            session = resolve_session(config.collection.storage_path, session_id)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        tmp = tempfile.NamedTemporaryFile(
-            prefix=f"canary-{session_id}-",
-            suffix=".zip",
-            delete=False,
-        )
-        tmp_path = Path(tmp.name)
-        tmp.close()
-        write_session_zip(session, tmp_path)
-        background_tasks.add_task(_unlink_path, tmp_path)
-        return FileResponse(
-            tmp_path,
-            media_type="application/zip",
-            filename=f"{session_id}.zip",
+        return export_session_response(
+            session_id,
+            background_tasks,
+            resolve=_resolve_session,
+            tmp_prefix="canary-",
         )
 
     @app.get("/control/sessions/{session_id}/classification")
@@ -540,50 +538,43 @@ def register_control_routes(
         request: JobSubmitRequest,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
-        try:
-            job = _jobs().submit(request.kind, request.params)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        publish_control_event("job.submit", "ok", job.to_dict())
-        return {"job": job.to_dict()}
+        return submit_job_response(
+            _jobs(),
+            request.kind,
+            request.params,
+            on_submit=lambda record: publish_control_event("job.submit", "ok", record),
+        )
 
     @app.get("/control/jobs")
     def get_control_jobs(
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
-        jobs = [job.to_dict() for job in _jobs().list_jobs()]
-        return {"jobs": jobs, "count": len(jobs)}
+        return list_jobs_response(_jobs())
 
     @app.get("/control/jobs/{job_id}/logs")
     def get_control_job_logs(
         job_id: str,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
-        logs = _jobs().logs(job_id)
-        if logs is None:
-            raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
-        return {"job_id": job_id, "log": logs}
+        return job_logs_response(_jobs(), job_id)
 
     @app.get("/control/jobs/{job_id}")
     def get_control_job(
         job_id: str,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
-        job = _jobs().get(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
-        return {"job": job.to_dict()}
+        return get_job_response(_jobs(), job_id)
 
     @app.post("/control/jobs/{job_id}/cancel")
     def post_control_job_cancel(
         job_id: str,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
-        job = _jobs().cancel(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
-        publish_control_event("job.cancel", "ok", job.to_dict())
-        return {"job": job.to_dict()}
+        return cancel_job_response(
+            _jobs(),
+            job_id,
+            on_cancel=lambda record: publish_control_event("job.cancel", "ok", record),
+        )
 
     @app.get("/control/preflight")
     def get_control_preflight(
@@ -651,9 +642,7 @@ def register_control_routes(
         Latest record per run (the append-only chain is collapsed); read
         per request so a fresh ``retrain.py`` run shows up without a daemon
         restart. Empty list when nothing's been recorded yet."""
-        ledger = TrainingLedger(config.daemon.training_ledger)
-        runs = [r.to_dict() for r in ledger.records()]
-        return {"runs": runs, "count": len(runs)}
+        return training_runs_response(config.daemon.training_ledger)
 
     @app.post("/control/feedback", status_code=201)
     def post_feedback(
@@ -741,18 +730,16 @@ def register_control_routes(
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
         """Corpus readiness + per-session coverage (Task 6.23)."""
-        from src.datasets.health import analyze_corpus
-
         storage = config.collection.storage_path
         sessions = discover_sessions(storage) if storage.exists() else []
         boundary_event = (
             vehicle_ledger_store.latest_boundary() if vehicle_ledger_store is not None else None
         )
-        return analyze_corpus(
+        return dataset_health_response(
             sessions,
             config,
             corpus_boundary=boundary_event.occurred_at if boundary_event is not None else None,
-        ).to_dict()
+        )
 
     @app.get("/control/tuning")
     def get_tuning(

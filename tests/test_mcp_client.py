@@ -70,6 +70,20 @@ async def test_post_json_sends_body() -> None:
     assert result == {"id": "abc"}
 
 
+async def test_get_bytes_returns_raw_body() -> None:
+    """`get_bytes` skips JSON parsing (used for session export zips)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/control/sessions/x/export"
+        return httpx.Response(200, content=b"zip-bytes")
+
+    client = await _make_client(httpx.MockTransport(handler))
+    payload = await client.get_bytes("/control/sessions/x/export")
+    await client.aclose()
+    assert payload == b"zip-bytes"
+
+
 async def test_error_response_raises_daemon_error_with_detail() -> None:
     """4xx/5xx responses raise :class:`DaemonError` with the JSON detail attached."""
 

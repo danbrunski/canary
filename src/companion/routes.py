@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-import tempfile
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
@@ -35,24 +34,29 @@ from src.companion.services import (
     _manifest_version,
     _model_id,
     _require_optional_bearer,
-    _unlink_path,
+    cancel_job_response,
+    dataset_health_response,
+    delete_session_response,
+    export_session_response,
+    get_job_response,
+    get_session_response,
+    job_logs_response,
+    list_jobs_response,
+    pin_session_response,
+    sessions_list_response,
+    submit_job_response,
+    training_runs_response,
+    unpin_session_response,
+    update_session_metadata_response,
 )
 from src.config import CanaryConfig
 from src.control.jobs import JobController
 from src.control.models import MODEL_TYPES, publish_model_artifact
-from src.control.sessions import (
-    delete_session,
-    pin_session,
-    unpin_session,
-    write_session_metadata,
-    write_session_zip,
-)
 from src.dashboard.readers import (
     read_anomalies_since,
     read_latest_per_channel,
     read_latest_telemetry_rows,
 )
-from src.models.training_ledger import TrainingLedger
 
 
 def register_companion_routes(
@@ -144,10 +148,18 @@ def register_companion_routes(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"session": _library_session_to_control_dict(session)}
 
+    def _refresh_and_serialize(path: Path) -> dict[str, Any]:
+        # Companion's "library index refresh": re-import re-reads the just
+        # written pin/metadata state off disk into the sqlite-backed index
+        # before serializing, which control's stateless summarize doesn't do.
+        refreshed = lib.import_session(path, config=local_config, copy=False)
+        return _library_session_to_control_dict(refreshed)
+
     @app.get("/control/sessions")
     def list_local_sessions(_auth: None = Depends(require_local_auth)) -> dict[str, Any]:
-        sessions = [_library_session_to_control_dict(s) for s in lib.list_sessions()]
-        return {"sessions": sessions, "count": len(sessions)}
+        return sessions_list_response(
+            [_library_session_to_control_dict(s) for s in lib.list_sessions()]
+        )
 
     @app.get("/control/sessions/{session_id}/export")
     def export_local_session(
@@ -155,25 +167,24 @@ def register_companion_routes(
         background_tasks: BackgroundTasks,
         _auth: None = Depends(require_local_auth),
     ) -> FileResponse:
-        path = _library_session_path(lib, session_id)
-        tmp = tempfile.NamedTemporaryFile(
-            prefix=f"canary-local-{session_id}-",
-            suffix=".zip",
-            delete=False,
+        return export_session_response(
+            session_id,
+            background_tasks,
+            resolve=lambda sid: _library_session_path(lib, sid),
+            tmp_prefix="canary-local-",
         )
-        tmp_path = Path(tmp.name)
-        tmp.close()
-        write_session_zip(path, tmp_path)
-        background_tasks.add_task(_unlink_path, tmp_path)
-        return FileResponse(tmp_path, media_type="application/zip", filename=f"{session_id}.zip")
 
     @app.get("/control/sessions/{session_id}")
     def get_local_session(
         session_id: str,
         _auth: None = Depends(require_local_auth),
     ) -> dict[str, Any]:
-        session = _library_session(lib, session_id)
-        return {"session": _library_session_to_control_dict(session)}
+        return get_session_response(
+            session_id,
+            resolve_and_serialize=lambda sid: _library_session_to_control_dict(
+                _library_session(lib, sid)
+            ),
+        )
 
     @app.post("/control/sessions/{session_id}/metadata")
     def update_local_session_metadata(
@@ -181,14 +192,13 @@ def register_companion_routes(
         request: SessionMetadataRequest,
         _auth: None = Depends(require_local_auth),
     ) -> dict[str, Any]:
-        path = _library_session_path(lib, session_id)
-        metadata = write_session_metadata(path, request.metadata, merge=request.merge)
-        refreshed = lib.import_session(path, config=local_config, copy=False)
-        return {
-            "session_id": session_id,
-            "metadata": metadata,
-            "session": _library_session_to_control_dict(refreshed),
-        }
+        return update_session_metadata_response(
+            session_id,
+            request.metadata,
+            merge=request.merge,
+            resolve=lambda sid: _library_session_path(lib, sid),
+            finalize=_refresh_and_serialize,
+        )
 
     @app.post("/control/sessions/{session_id}/pin")
     def pin_local_session(
@@ -196,22 +206,24 @@ def register_companion_routes(
         request: SessionPinRequest,
         _auth: None = Depends(require_local_auth),
     ) -> dict[str, Any]:
-        path = _library_session_path(lib, session_id)
-        metadata = pin_session(path, reason=request.reason)
-        if request.metadata:
-            metadata = write_session_metadata(path, request.metadata)
-        refreshed = lib.import_session(path, config=local_config, copy=False)
-        return {"session": _library_session_to_control_dict(refreshed), "metadata": metadata}
+        return pin_session_response(
+            session_id,
+            reason=request.reason,
+            extra_metadata=request.metadata,
+            resolve=lambda sid: _library_session_path(lib, sid),
+            serialize=_refresh_and_serialize,
+        )
 
     @app.post("/control/sessions/{session_id}/unpin")
     def unpin_local_session(
         session_id: str,
         _auth: None = Depends(require_local_auth),
     ) -> dict[str, Any]:
-        path = _library_session_path(lib, session_id)
-        metadata = unpin_session(path)
-        refreshed = lib.import_session(path, config=local_config, copy=False)
-        return {"session": _library_session_to_control_dict(refreshed), "metadata": metadata}
+        return unpin_session_response(
+            session_id,
+            resolve=lambda sid: _library_session_path(lib, sid),
+            serialize=_refresh_and_serialize,
+        )
 
     @app.delete("/control/sessions/{session_id}")
     def delete_local_session(
@@ -219,13 +231,12 @@ def register_companion_routes(
         force: bool = Query(default=False),
         _auth: None = Depends(require_local_auth),
     ) -> dict[str, Any]:
-        path = _library_session_path(lib, session_id)
-        try:
-            delete_session(path, force=force)
-        except PermissionError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        lib.remove_session(session_id, delete_files=False)
-        return {"session_id": session_id, "deleted": True, "force": force}
+        return delete_session_response(
+            session_id,
+            force=force,
+            resolve=lambda sid: _library_session_path(lib, sid),
+            after_delete=lambda sid: lib.remove_session(sid, delete_files=False),
+        )
 
     @app.get("/telemetry/latest")
     def get_local_telemetry_latest(
@@ -256,54 +267,39 @@ def register_companion_routes(
         request: JobSubmitRequest,
         _auth: None = Depends(require_local_auth),
     ) -> dict[str, Any]:
-        try:
-            job = jobs.submit(request.kind, request.params)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"job": job.to_dict()}
+        return submit_job_response(jobs, request.kind, request.params)
 
     @app.get("/control/jobs")
     def list_local_jobs(_auth: None = Depends(require_local_auth)) -> dict[str, Any]:
-        records = [job.to_dict() for job in jobs.list_jobs()]
-        return {"jobs": records, "count": len(records)}
+        return list_jobs_response(jobs)
 
     @app.get("/control/jobs/{job_id}/logs")
     def local_job_logs(
         job_id: str,
         _auth: None = Depends(require_local_auth),
     ) -> dict[str, Any]:
-        logs = jobs.logs(job_id)
-        if logs is None:
-            raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
-        return {"job_id": job_id, "log": logs}
+        return job_logs_response(jobs, job_id)
 
     @app.get("/control/jobs/{job_id}")
     def get_local_job(
         job_id: str,
         _auth: None = Depends(require_local_auth),
     ) -> dict[str, Any]:
-        job = jobs.get(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
-        return {"job": job.to_dict()}
+        return get_job_response(jobs, job_id)
 
     @app.post("/control/jobs/{job_id}/cancel")
     def cancel_local_job(
         job_id: str,
         _auth: None = Depends(require_local_auth),
     ) -> dict[str, Any]:
-        job = jobs.cancel(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
-        return {"job": job.to_dict()}
+        return cancel_job_response(jobs, job_id)
 
     @app.get("/control/training-runs")
     def local_training_runs(_auth: None = Depends(require_local_auth)) -> dict[str, Any]:
-        ledger = TrainingLedger(local_config.daemon.training_ledger)
-        runs = [r.to_dict() for r in ledger.records()]
-        for run in runs:
-            lib.record_training_run(run, compute_target="laptop")
-        return {"runs": runs, "count": len(runs)}
+        return training_runs_response(
+            local_config.daemon.training_ledger,
+            on_run=lambda run: lib.record_training_run(run, compute_target="laptop"),
+        )
 
     @app.get("/control/datasets")
     def local_datasets(_auth: None = Depends(require_local_auth)) -> dict[str, Any]:
@@ -312,12 +308,10 @@ def register_companion_routes(
 
     @app.get("/control/datasets/health")
     def local_dataset_health(_auth: None = Depends(require_local_auth)) -> dict[str, Any]:
-        from src.datasets.health import analyze_corpus
-
         sessions = [
             Path(session.path) for session in lib.list_sessions() if Path(session.path).is_dir()
         ]
-        return analyze_corpus(sessions, local_config).to_dict()
+        return dataset_health_response(sessions, local_config)
 
     @app.get("/companion/models")
     def companion_models(_auth: None = Depends(require_local_auth)) -> dict[str, Any]:

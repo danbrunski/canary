@@ -169,6 +169,57 @@ def test_local_dashboard_read_endpoints_use_library_files(tmp_path: Path) -> Non
     assert sync_state["publish_history"][0]["status"] == "uploaded"
 
 
+def test_local_session_metadata_and_pin_refresh_the_library_index(tmp_path: Path) -> None:
+    """refactoring.md 1.2: companion's shared-handler callers must keep their
+    library-index-refresh divergence from control's — control's equivalent
+    routes (see `test_session_metadata_pin_unpin_and_delete` in
+    test_control_api.py) never re-import and never return a "session" key
+    from the metadata endpoint. If the shared `finalize`/`serialize` hooks
+    were ever dropped in favor of control's plain summarize, this would
+    start failing: no "session" key on the metadata response, and a stale
+    (never advancing) `imported_at` on the pin/unpin responses."""
+    lib = CanaryLibrary(tmp_path / "library")
+    initial = lib.import_session(
+        _make_telemetry_session(tmp_path / "remote"), source_host="pi.local"
+    )
+    app = companion_api.create_app(_config(tmp_path), library=lib, static_dir=None)
+    client = TestClient(app)
+    session_id = "2026-05-17T120000"
+
+    metadata_response = client.post(
+        f"/control/sessions/{session_id}/metadata",
+        json={"metadata": {"route": "mesa"}},
+    )
+    assert metadata_response.status_code == 200
+    body = metadata_response.json()
+    # Control's own metadata endpoint never returns a "session" key at all
+    # (test_control_api.test_session_metadata_pin_unpin_and_delete only
+    # asserts on `metadata`) -- companion's does, because its handler passes
+    # a `finalize` hook that reimports the session into the library index.
+    assert body["metadata"]["route"] == "mesa"
+    assert body["session"]["session_id"] == session_id
+    # `imported_at` only exists on a `LibrarySession` re-import (never on
+    # control's bare `SessionSummary.to_dict()`), and only *advances* if the
+    # reimport actually ran rather than reusing the stale index entry.
+    assert body["session"]["imported_at"] > initial.imported_at
+
+    pin_response = client.post(
+        f"/control/sessions/{session_id}/pin",
+        json={"reason": "good drive", "metadata": {"terrain": "city"}},
+    )
+    assert pin_response.status_code == 200
+    pin_body = pin_response.json()
+    assert pin_body["metadata"]["terrain"] == "city"
+    assert pin_body["session"]["pinned"] is True
+    assert pin_body["session"]["imported_at"] > body["session"]["imported_at"]
+
+    unpin_response = client.post(f"/control/sessions/{session_id}/unpin")
+    assert unpin_response.status_code == 200
+    unpin_body = unpin_response.json()
+    assert unpin_body["session"]["pinned"] is False
+    assert unpin_body["session"]["imported_at"] > pin_body["session"]["imported_at"]
+
+
 def test_sync_session_from_pi_uses_control_export_and_optional_pin(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -76,6 +76,10 @@ class DaemonClient:
         """``POST path`` with a JSON body → parsed JSON or :class:`DaemonError`."""
         return cast(dict[str, Any], await self._request("POST", path, json_body=body))
 
+    async def get_bytes(self, path: str, params: dict[str, Any] | None = None) -> bytes:
+        """``GET path`` → raw response body (e.g. a session export zip)."""
+        return cast(bytes, await self._request("GET", path, params=params, parse_json=False))
+
     async def _request(
         self,
         method: str,
@@ -83,6 +87,7 @@ class DaemonClient:
         *,
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
+        parse_json: bool = True,
     ) -> Any:
         try:
             response = await self._client.request(method, path, params=params, json=json_body)
@@ -100,6 +105,8 @@ class DaemonClient:
                 status=response.status_code,
                 detail=detail,
             )
+        if not parse_json:
+            return response.content
         if not response.content:
             return None
         return response.json()

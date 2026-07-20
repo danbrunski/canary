@@ -57,7 +57,7 @@ style issues, and go first.
   columns deliberately NOT derived (a decoder's unit is only produced
   at call time with sample bytes, not statically available) — disclosed
   scope gap, not silently dropped.
-- [ ] **1.2 — De-duplicate companion ↔ control routes.**
+- [x] **1.2 — De-duplicate companion ↔ control routes.**
   `src/companion/routes.py` re-registers ~15 `/control/*` endpoints
   from `src/dashboard/routes/control.py` (sessions list/get/export/
   metadata/pin/unpin/delete `:147-216` vs `:262-413`; jobs `:254-298`
@@ -69,7 +69,21 @@ style issues, and go first.
   both registrars. Also: replace the hand-rolled urllib client
   (`services.py:188-231`) with the existing `DaemonClient`
   (`src/mcp_server/client.py`) or a shared HTTP-client module — two
-  daemon-client implementations exist today.
+  daemon-client implementations exist today. — landed: shared handlers
+  in `services.py` parameterized by hooks (`serialize`/`finalize`/
+  `guard`/`after_delete`/`on_submit`/`on_cancel`); companion's
+  library-index refresh and control's audit/catalog/active-capture-
+  guard divergences all preserved via those hooks, verified genuinely
+  distinguishable (not silently unified) with a test proven to fail
+  when the hook is stripped. The "`metadata: {}`" note turned out to be
+  a different code path (`sync_session_from_pi`'s remote-pin
+  forwarding) than the duplicated local handlers being deduped here —
+  untouched, not part of this extraction. Disclosed (not fixed, a
+  pre-existing quirk predating this refactor, confirmed via `git show
+  HEAD`): companion's pin/unpin/metadata writes don't preserve
+  `source_host` on the library-index refresh. `services.py`'s urllib
+  client replaced with `DaemonClient` (new `get_bytes()` added for the
+  non-JSON export-zip path).
 - [x] **1.3 — One `_numeric_value_columns` + shared resample/segment
   prefix.** The helper is defined twice with drifted bodies
   (`src/analysis/session_classifier.py:316` lacks the `GAP_SUFFIX`

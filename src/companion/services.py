@@ -1,28 +1,48 @@
-"""Service helpers for the companion API."""
+"""Service helpers for the companion API.
+
+Also home to the backend-agnostic ``/control/*`` handlers shared with
+``src/dashboard/routes/control.py`` (refactoring.md 1.2): each takes the bits
+that differ between the companion (local library-backed) and control
+(live-daemon, filesystem-backed) callers as parameters — a path resolver, a
+session serializer, and a handful of optional hooks for the one caller's
+extra side effect (companion's library-index refresh on write, control's
+audit-event publish, control's active-capture delete guard). Callers keep
+their own request-schema classes and unpack them to primitives before
+calling in, so this module never depends on either schema module.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 import shutil
 import sys
 import tempfile
 import zipfile
-from collections.abc import Mapping
-from datetime import UTC, datetime
+from collections.abc import Callable, Mapping
+from datetime import UTC, date, datetime
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 import yaml
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
+from fastapi.responses import FileResponse
 
 from src.companion.library import CanaryLibrary, LibrarySession
 from src.config import CanaryConfig
 from src.control.jobs import JobController
-from src.control.sessions import summarize_session
+from src.control.sessions import (
+    delete_session,
+    pin_session,
+    summarize_session,
+    unpin_session,
+    write_session_metadata,
+    write_session_zip,
+)
+from src.mcp_server.client import DaemonClient, DaemonError
+from src.models.training_ledger import TrainingLedger
 
 
 def companion_config(base_config: CanaryConfig, library: CanaryLibrary) -> CanaryConfig:
@@ -194,42 +214,48 @@ def _request_json(
     token: str | None,
     body: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    data = None if body is None else json.dumps(body).encode("utf-8")
-    headers = {"Accept": "application/json"}
-    if data is not None:
-        headers["Content-Type"] = "application/json"
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    req = Request(f"{host}{path}", data=data, headers=headers, method=method)
+    """``method path`` on the remote Pi's control API, via `DaemonClient`.
+
+    Kept synchronous (wraps its own event loop) rather than turned into an
+    ``async def`` — every caller is a plain (non-async) FastAPI route handler
+    that Starlette already runs off the event loop in a worker thread, so
+    ``asyncio.run`` here is safe and avoids rippling ``async``/``await``
+    through routes.py, api.py, and their tests for a two-call-site client
+    swap.
+    """
+
+    async def _call() -> Any:
+        async with DaemonClient(host, token, timeout=120.0) as client:
+            if method == "GET":
+                return await client.get_json(path)
+            if method == "POST":
+                return await client.post_json(path, dict(body) if body is not None else None)
+            raise RuntimeError(f"{method} {path} failed: unsupported method")
+
     try:
-        with urlopen(req, timeout=120) as response:  # noqa: S310 - operator-provided LAN URL
-            raw = response.read()
-    except HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")
-        raise RuntimeError(f"{method} {path} failed: HTTP {exc.code}: {detail}") from exc
-    except URLError as exc:
-        raise RuntimeError(f"{method} {path} failed: {exc.reason}") from exc
-    if not raw:
+        result = asyncio.run(_call())
+    except DaemonError as exc:
+        raise RuntimeError(f"{method} {path} failed: {exc}") from exc
+    if result is None:
         return {}
-    parsed = json.loads(raw.decode("utf-8"))
-    if not isinstance(parsed, dict):
+    if not isinstance(result, dict):
         raise RuntimeError(f"{method} {path} returned non-object JSON")
-    return parsed
+    return result
 
 
 def _request_bytes(host: str, method: str, path: str, *, token: str | None) -> bytes:
-    headers = {"Accept": "application/octet-stream"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    req = Request(f"{host}{path}", headers=headers, method=method)
+    """``method path`` on the remote Pi's control API, raw bytes (see `_request_json`)."""
+
+    async def _call() -> bytes:
+        if method != "GET":
+            raise RuntimeError(f"{method} {path} failed: unsupported method")
+        async with DaemonClient(host, token, timeout=300.0) as client:
+            return await client.get_bytes(path)
+
     try:
-        with urlopen(req, timeout=300) as response:  # noqa: S310 - operator-provided LAN URL
-            return bytes(response.read())
-    except HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")
-        raise RuntimeError(f"{method} {path} failed: HTTP {exc.code}: {detail}") from exc
-    except URLError as exc:
-        raise RuntimeError(f"{method} {path} failed: {exc.reason}") from exc
+        return asyncio.run(_call())
+    except DaemonError as exc:
+        raise RuntimeError(f"{method} {path} failed: {exc}") from exc
 
 
 def _artifact_path(config: CanaryConfig, model_type: str) -> Path:
@@ -263,6 +289,205 @@ def _unlink_path(path: Path) -> None:
     path.unlink(missing_ok=True)
 
 
+# -- shared `/control/*` handlers (refactoring.md 1.2) -----------------------
+#
+# Both the companion app and the dashboard's control API register the same
+# ~15 session/job/training-run/dataset-health routes against different
+# backing stores (companion: `CanaryLibrary`'s sqlite index; control: the
+# live daemon's session directory + `SessionCatalog`). Each handler below
+# takes that difference as a parameter (a path resolver, a session
+# serializer, or a small optional hook) instead of being written twice.
+
+
+def sessions_list_response(sessions: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+def get_session_response(
+    session_id: str, *, resolve_and_serialize: Callable[[str], dict[str, Any]]
+) -> dict[str, Any]:
+    return {"session": resolve_and_serialize(session_id)}
+
+
+def export_session_response(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    *,
+    resolve: Callable[[str], Path],
+    tmp_prefix: str,
+) -> FileResponse:
+    path = resolve(session_id)
+    tmp = tempfile.NamedTemporaryFile(
+        prefix=f"{tmp_prefix}{session_id}-", suffix=".zip", delete=False
+    )
+    tmp_path = Path(tmp.name)
+    tmp.close()
+    write_session_zip(path, tmp_path)
+    background_tasks.add_task(_unlink_path, tmp_path)
+    return FileResponse(tmp_path, media_type="application/zip", filename=f"{session_id}.zip")
+
+
+def update_session_metadata_response(
+    session_id: str,
+    metadata: dict[str, Any],
+    *,
+    merge: bool,
+    resolve: Callable[[str], Path],
+    finalize: Callable[[Path], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Shared body of the `/control/sessions/{id}/metadata` handlers.
+
+    ``finalize`` is companion's seam for its library-index refresh: passing
+    one makes the response include a freshly-reindexed ``"session"`` key
+    (companion's behavior today); leaving it unset reproduces control's
+    current response, which has no ``"session"`` key at all.
+    """
+    path = resolve(session_id)
+    written = write_session_metadata(path, metadata, merge=merge)
+    payload: dict[str, Any] = {"session_id": session_id, "metadata": written}
+    if finalize is not None:
+        payload["session"] = finalize(path)
+    return payload
+
+
+def pin_session_response(
+    session_id: str,
+    *,
+    reason: str | None,
+    extra_metadata: dict[str, Any],
+    resolve: Callable[[str], Path],
+    serialize: Callable[[Path], dict[str, Any]],
+    catalog_db: Path | None = None,
+) -> dict[str, Any]:
+    """Shared body of the `/control/sessions/{id}/pin` handlers.
+
+    ``serialize`` is companion's seam for its library-index refresh: its
+    caller supplies a serializer that re-imports the session into the
+    library (picking up the just-written pin/metadata state) before
+    converting it, where control's serializer just re-reads the session
+    directory it already resolved.
+    """
+    path = resolve(session_id)
+    metadata = pin_session(path, reason=reason, catalog_db=catalog_db)
+    if extra_metadata:
+        metadata = write_session_metadata(path, extra_metadata)
+    return {"session": serialize(path), "metadata": metadata}
+
+
+def unpin_session_response(
+    session_id: str,
+    *,
+    resolve: Callable[[str], Path],
+    serialize: Callable[[Path], dict[str, Any]],
+    catalog_db: Path | None = None,
+) -> dict[str, Any]:
+    path = resolve(session_id)
+    metadata = unpin_session(path, catalog_db=catalog_db)
+    return {"session": serialize(path), "metadata": metadata}
+
+
+def delete_session_response(
+    session_id: str,
+    *,
+    force: bool,
+    resolve: Callable[[str], Path],
+    guard: Callable[[str], None] | None = None,
+    after_delete: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """Shared body of the `DELETE /control/sessions/{id}` handlers.
+
+    ``guard`` is control's seam for its active-capture conflict check
+    (companion has no capture concept, so it passes none); ``after_delete``
+    is companion's seam for dropping the session from its library index
+    without re-deleting the (already-deleted) files.
+    """
+    path = resolve(session_id)
+    if guard is not None:
+        guard(session_id)
+    try:
+        delete_session(path, force=force)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if after_delete is not None:
+        after_delete(session_id)
+    return {"session_id": session_id, "deleted": True, "force": force}
+
+
+def submit_job_response(
+    jobs: JobController,
+    kind: str,
+    params: dict[str, Any],
+    *,
+    on_submit: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    try:
+        job = jobs.submit(kind, params)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record = job.to_dict()
+    if on_submit is not None:
+        on_submit(record)
+    return {"job": record}
+
+
+def list_jobs_response(jobs: JobController) -> dict[str, Any]:
+    records = [job.to_dict() for job in jobs.list_jobs()]
+    return {"jobs": records, "count": len(records)}
+
+
+def job_logs_response(jobs: JobController, job_id: str) -> dict[str, Any]:
+    logs = jobs.logs(job_id)
+    if logs is None:
+        raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
+    return {"job_id": job_id, "log": logs}
+
+
+def get_job_response(jobs: JobController, job_id: str) -> dict[str, Any]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
+    return {"job": job.to_dict()}
+
+
+def cancel_job_response(
+    jobs: JobController,
+    job_id: str,
+    *,
+    on_cancel: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    job = jobs.cancel(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
+    record = job.to_dict()
+    if on_cancel is not None:
+        on_cancel(record)
+    return {"job": record}
+
+
+def training_runs_response(
+    training_ledger_path: Path,
+    *,
+    on_run: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    ledger = TrainingLedger(training_ledger_path)
+    runs = [r.to_dict() for r in ledger.records()]
+    if on_run is not None:
+        for run in runs:
+            on_run(run)
+    return {"runs": runs, "count": len(runs)}
+
+
+def dataset_health_response(
+    sessions: list[Path],
+    config: CanaryConfig,
+    *,
+    corpus_boundary: date | None = None,
+) -> dict[str, Any]:
+    from src.datasets.health import analyze_corpus
+
+    return analyze_corpus(sessions, config, corpus_boundary=corpus_boundary).to_dict()
+
+
 __all__ = [
     "companion_config",
     "import_session_archive",
@@ -280,4 +505,18 @@ __all__ = [
     "_request_json",
     "_require_optional_bearer",
     "_unlink_path",
+    "cancel_job_response",
+    "dataset_health_response",
+    "delete_session_response",
+    "export_session_response",
+    "get_job_response",
+    "get_session_response",
+    "job_logs_response",
+    "list_jobs_response",
+    "pin_session_response",
+    "sessions_list_response",
+    "submit_job_response",
+    "training_runs_response",
+    "unpin_session_response",
+    "update_session_metadata_response",
 ]
