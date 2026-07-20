@@ -75,12 +75,18 @@ operator history (ledger backfill facts)
   sessions to validate the gates. — 4.1-4.7 landed (commit `5b68b9f`);
   `--dry-run` refit against real sessions confirms the publish gate
   refuses 4 genuinely-poor-fit recipes (`fcc2afb`).
-- [ ] **Q7 — ml-correctness-hardening.md Phases 6 + 7 + 9** (M-of-N
+- [x] **Q7 — ml-correctness-hardening.md Phases 6 + 7 + 9** (M-of-N
   persistence per doc; fusion per pre-made decision; benchmark rerun
   6.5 with intermittent-fault cases; replay in-memory isolation with
   the refuse-while-driving rule; portfolio tasks 9.1/9.3/9.4 per
   pre-made decisions; 9.2 DAMP spike only if time allows). This
-  completes ml-correctness-hardening.md except Pi-deploy verifies.
+  completes ml-correctness-hardening.md except Pi-deploy verifies. —
+  6.1-6.5, 7.1-7.3, 9.1/9.3/9.4 all landed (commits `eb6f3f8`,
+  `ac11f39`, `de126c4`, `c1efc75`); 9.2 skipped (optional, time). A real
+  bug (7.1's unmatched-`exit_replay_mode()` silently wiping live
+  dedupe state) caught by review and fixed before landing.
+  `ml-correctness-hardening.md` is now fully checked off except
+  Pi-deploy verifies (blocked-overnight throughout).
 - [ ] **Q8 — eval-longitudinal-and-dtc.md Phase 1** (DTC reader:
   transport, scheduler, endpoint, events, sidecar, MCP tool, DtcPanel).
   1.10 live verify blocked-overnight.
