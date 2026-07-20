@@ -36,3 +36,4 @@ eval-longitudinal-and-dtc.md 1.8-1.9 — done — get_dtc MCP tool + DtcPanel.ts
 eval-longitudinal-and-dtc.md 1.10 — blocked-overnight — needs Pi/truck for live KOEO/engine-running verify; 1.1-1.9 all landed and ready for morning deploy
 OVERNIGHT-QUEUE.md Q8 — done — eval-longitudinal-and-dtc.md Phase 1 (1.1-1.9) complete; 1.10 blocked-overnight per this entry's own note
 eval-longitudinal-and-dtc.md 3.1-3.5 — done — vehicle ledger store/config/MCP/CLI/DTC-auto-entries/corpus-boundary integration; 3.6 blocked-overnight (needs operator history), scaffolded with one clearly-labeled placeholder entry (commit b18fc48)
+eval-longitudinal-and-dtc.md 4.1-4.3 — done — session fingerprint computation (skip-not-zero contract), sidecar hooked into both offline and daemon classification paths, frozen reference epoch with per-stat sample-scoped summaries; a real fabricated-voltage-at-crank bug caught by review and fixed before landing (commit 966b55a)
