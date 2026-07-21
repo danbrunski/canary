@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.feedback import FeedbackStore, annotate_events_with_feedback
 from src.analysis.gps_tracker import GpsTracker
+from src.analysis.llm_assist import LlmAssistCardStore, card_to_dict
 from src.config import CanaryConfig
 from src.control.dtc_state import DtcState
 from src.control.monitor_state import MonitorState
@@ -235,6 +236,18 @@ def register_public_routes(
             since=since,
             until=until,
         )
+
+    @app.get("/analysis/llm-assist/cards")
+    def get_llm_assist_cards() -> dict[str, Any]:
+        # Task S.2: public/read-only like the routes above — the dashboard
+        # card renderer's feature-flagged endpoint. Disabled (the default;
+        # no producer exists yet, Task S.1) is an explicit, expected state,
+        # not an error: the response just omits `cards` so the renderer's
+        # absent-state branch is a plain `enabled` check, no error handling.
+        if not config.llm_assist.enabled:
+            return {"enabled": False}
+        store = LlmAssistCardStore(config.llm_assist.cards_path)
+        return {"enabled": True, "cards": [card_to_dict(card) for card in store.cards()]}
 
     @app.get("/sessions/{session_id}/trip-summary")
     def get_session_trip_summary(session_id: str) -> dict[str, Any]:

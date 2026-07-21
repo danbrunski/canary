@@ -6,7 +6,7 @@ import { Sparkline } from "../components/Sparkline";
 import { useControlResource } from "../hooks/useControlResource";
 import { scoreView, windowReference, type AnomalyLevel } from "../anomalyScore";
 import type { ScoresBySource } from "../hooks/useScoreStream";
-import { badgeClass, cn, placeholderClass, selectClass } from "../styles";
+import { badgeClass, cn, inputClass, placeholderClass, selectClass } from "../styles";
 import type { AnomalyEvent } from "../types";
 import { formatTimestamp } from "../util/time";
 import { LiveModelScores } from "./LiveModelScores";
@@ -57,6 +57,18 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
   // whatever the server already has.
   const [localLabels, setLocalLabels] = useState<Record<string, string>>({});
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Task S.3 (llm-assist-and-compute-roadmap.md): the operator's working
+  // theory + an optional clarifying question/answer pair, attached to
+  // whichever event the label buttons are next clicked for. Cleared after
+  // a successful submit.
+  const [hypothesis, setHypothesis] = useState("");
+  const [clarifyingQuestion, setClarifyingQuestion] = useState("");
+  const [clarifyingAnswer, setClarifyingAnswer] = useState("");
+  // Backend pairing rule (AnomalyFeedback._clarifying_pair_is_complete):
+  // both set or both empty — never just one half of the pair.
+  const hasQuestion = clarifyingQuestion.trim() !== "";
+  const hasAnswer = clarifyingAnswer.trim() !== "";
+  const clarifyingPairIncomplete = hasQuestion !== hasAnswer;
 
   const feedbackFetcher = useCallback(
     (signal: AbortSignal) => getFeedback(token ?? "", signal),
@@ -74,12 +86,24 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
   }, [feedback.data]);
 
   const labelEvent = async (e: AnomalyEvent, label: string) => {
-    if (!token) return;
+    if (!token || clarifyingPairIncomplete) return;
     const key = eventKey(e);
     setLocalLabels((prev) => ({ ...prev, [key]: label }));
     try {
-      await postFeedback(token, e as unknown as Record<string, unknown>, label, null);
+      await postFeedback(
+        token,
+        e as unknown as Record<string, unknown>,
+        label,
+        null,
+        hypothesis.trim() || null,
+        hasQuestion ? clarifyingQuestion.trim() : null,
+        hasAnswer ? clarifyingAnswer.trim() : null,
+      );
       feedback.refresh();
+      // Enrichment is per-verdict, not per-draft — clear it once it's landed.
+      setHypothesis("");
+      setClarifyingQuestion("");
+      setClarifyingAnswer("");
     } catch {
       // Roll back the optimistic mark on failure.
       setLocalLabels((prev) => {
@@ -229,6 +253,37 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                 event={selectedEvent}
                 relatedEvents={relatedEvents}
               />
+              {token && (
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  <input
+                    className={cn(inputClass, "min-h-0 flex-1 basis-40 py-0.5 text-[0.78rem]")}
+                    value={hypothesis}
+                    onChange={(e) => setHypothesis(e.target.value)}
+                    placeholder="hypothesis (optional) — attaches to the next verdict"
+                    aria-label="hypothesis"
+                  />
+                  <input
+                    className={cn(inputClass, "min-h-0 flex-1 basis-32 py-0.5 text-[0.78rem]")}
+                    value={clarifyingQuestion}
+                    onChange={(e) => setClarifyingQuestion(e.target.value)}
+                    placeholder="clarifying question (optional)"
+                    aria-label="clarifying question"
+                  />
+                  <input
+                    className={cn(inputClass, "min-h-0 flex-1 basis-32 py-0.5 text-[0.78rem]")}
+                    value={clarifyingAnswer}
+                    onChange={(e) => setClarifyingAnswer(e.target.value)}
+                    placeholder="clarifying answer (optional)"
+                    aria-label="clarifying answer"
+                  />
+                  {clarifyingPairIncomplete && (
+                    <span className="basis-full text-[0.72rem] text-bad">
+                      clarifying question and answer must both be filled (or both left empty)
+                      before marking a verdict.
+                    </span>
+                  )}
+                </div>
+              )}
               <ol className="m-0 max-h-[22rem] list-none overflow-y-auto p-0">
                 {shown.slice(0, 50).map(({ e, view }) => (
               <li
@@ -309,8 +364,9 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                             <button
                               key={fb.id}
                               type="button"
+                              disabled={clarifyingPairIncomplete}
                               className={cn(
-                                "rounded border border-border-soft px-1.5 py-0.5 text-[0.66rem] uppercase tracking-[0.04em] hover:border-border",
+                                "rounded border border-border-soft px-1.5 py-0.5 text-[0.66rem] uppercase tracking-[0.04em] hover:border-border disabled:cursor-default disabled:opacity-50",
                                 fb.tone,
                               )}
                               title={`mark ${fb.id.replace("_", " ")}`}

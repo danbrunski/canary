@@ -1018,7 +1018,8 @@ def _print_report(
             "  feedback policy  →  "
             f"{feedback_report.clean_baseline_labels} clean labels, "
             f"{feedback_report.excluded_labels} excluded labels, "
-            f"{feedback_report.excluded_rows} rows removed"
+            f"{feedback_report.excluded_rows} rows removed, "
+            f"{feedback_report.enriched_labels} enriched (hypothesis/Q&A)"
         )
     out_dirs = {"isolation_forest": args.if_out, args.seq_model_type: args.sequence_out}
     for name, out_dir in out_dirs.items():

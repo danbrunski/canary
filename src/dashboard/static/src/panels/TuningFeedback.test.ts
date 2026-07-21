@@ -88,6 +88,9 @@ describe("AnomalyPanel feedback labelling", () => {
       expect.objectContaining({ model_version: "lstm_v1" }),
       "false_positive",
       null,
+      null,
+      null,
+      null,
     );
   });
 
@@ -97,5 +100,47 @@ describe("AnomalyPanel feedback labelling", () => {
       screen.queryByRole("button", { name: "mark false positive" }),
     ).not.toBeInTheDocument();
     expect(mocks.getFeedback).not.toHaveBeenCalled();
+  });
+
+  it("includes a filled-in hypothesis in the feedback payload", async () => {
+    mocks.getFeedback.mockResolvedValue({ feedback: [], count: 0, summary: {} });
+    mocks.postFeedback.mockResolvedValue({ feedback: {} });
+    render(createElement(AnomalyPanel, { events: [EVENT], token: "secret" }));
+    fireEvent.change(await screen.findByLabelText("hypothesis"), {
+      target: { value: "possible MAF sensor drift" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "mark false positive" }));
+    await waitFor(() => expect(mocks.postFeedback).toHaveBeenCalledOnce());
+    expect(mocks.postFeedback).toHaveBeenCalledWith(
+      "secret",
+      expect.objectContaining({ model_version: "lstm_v1" }),
+      "false_positive",
+      null,
+      "possible MAF sensor drift",
+      null,
+      null,
+    );
+  });
+
+  it("blocks the verdict and shows a validation message when only one of the clarifying question/answer pair is filled", async () => {
+    mocks.getFeedback.mockResolvedValue({ feedback: [], count: 0, summary: {} });
+    render(createElement(AnomalyPanel, { events: [EVENT], token: "secret" }));
+    fireEvent.change(await screen.findByLabelText("clarifying question"), {
+      target: { value: "dirt road or heavy rain?" },
+    });
+    expect(
+      await screen.findByText(/must both be filled/),
+    ).toBeInTheDocument();
+    const fp = screen.getByRole("button", { name: "mark false positive" });
+    expect(fp).toBeDisabled();
+    fireEvent.click(fp);
+    expect(mocks.postFeedback).not.toHaveBeenCalled();
+
+    // Filling in the answer too clears the validation state and re-enables submit.
+    fireEvent.change(screen.getByLabelText("clarifying answer"), {
+      target: { value: "dirt road" },
+    });
+    expect(screen.queryByText(/must both be filled/)).not.toBeInTheDocument();
+    expect(fp).not.toBeDisabled();
   });
 });

@@ -36,6 +36,11 @@ class RetrainingFeedbackWindow:
     source: str | None
     model_version: str | None
     reason: str | None
+    #: Task S.3 — the operator's (or future LLM's) hypothesis, when the
+    #: excluded feedback carried one; carried through so the ledger's
+    #: provenance shows *why* an excluded window was excluded, not just that
+    #: it was.
+    hypothesis: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -48,18 +53,30 @@ class RetrainingFeedbackWindow:
             "source": self.source,
             "model_version": self.model_version,
             "reason": self.reason,
+            "hypothesis": self.hypothesis,
         }
 
 
 @dataclass(frozen=True)
 class RetrainingFeedbackReport:
-    """JSON-safe summary persisted into the training ledger."""
+    """JSON-safe summary persisted into the training ledger.
+
+    ``enriched_labels`` (Task S.3, llm-assist-and-compute-roadmap.md, case
+    5) counts feedback that carries a hypothesis and/or a completed
+    clarifying question/answer pair, regardless of verdict label — this is
+    how the enriched-label capture loop "flows into the retraining ledger
+    like existing verdicts": ``scripts/retrain.py`` already embeds this
+    report verbatim as ``TrainingRunRecord.metrics["feedback_policy"]``, so
+    a training run's provenance shows how much of its input feedback was
+    LLM/operator-enriched with no further plumbing needed.
+    """
 
     total_labels: int
     clean_baseline_labels: int
     excluded_labels: int
     invalid_labels: int
     excluded_rows: int
+    enriched_labels: int
     windows: tuple[RetrainingFeedbackWindow, ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -69,6 +86,7 @@ class RetrainingFeedbackReport:
             "excluded_labels": self.excluded_labels,
             "invalid_labels": self.invalid_labels,
             "excluded_rows": self.excluded_rows,
+            "enriched_labels": self.enriched_labels,
             "windows": [window.to_dict() for window in self.windows],
         }
 
@@ -127,8 +145,13 @@ def build_retraining_feedback_report(
     clean = 0
     excluded = 0
     invalid = 0
+    enriched = 0
     windows: list[RetrainingFeedbackWindow] = []
     for item in feedback.values():
+        # Task S.3: enrichment is orthogonal to the clean/excluded verdict
+        # split below — a false positive can carry a hypothesis too.
+        if item.hypothesis is not None or item.clarifying_answer is not None:
+            enriched += 1
         if item.label in CLEAN_BASELINE_LABELS:
             clean += 1
             continue
@@ -151,6 +174,7 @@ def build_retraining_feedback_report(
         excluded_labels=excluded,
         invalid_labels=invalid,
         excluded_rows=0,
+        enriched_labels=enriched,
         windows=tuple(windows),
     )
 
@@ -184,6 +208,7 @@ def _window_from_feedback(
         source=_optional_str(event.get("source")),
         model_version=_optional_str(event.get("model_version")),
         reason=feedback.reason,
+        hypothesis=feedback.hypothesis,
     )
 
 

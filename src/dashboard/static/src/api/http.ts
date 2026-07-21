@@ -25,6 +25,7 @@ import type {
   JobLogsResponse,
   JobResponse,
   JobsResponse,
+  LlmAssistCardsResponse,
   MonitorsResponse,
   ObdCoverageResponse,
   PowerKeepaliveResponse,
@@ -398,6 +399,13 @@ export function getMonitors(signal?: AbortSignal): Promise<MonitorsResponse> {
   return fetchJson("/obd/monitors", { signal });
 }
 
+/** `/analysis/llm-assist/cards` (Task S.2) — public/read-only like
+ *  `/obd/monitors` above. `enabled: false` (the default; no producer
+ *  exists yet) is the expected response, not an error. */
+export function getLlmAssistCards(signal?: AbortSignal): Promise<LlmAssistCardsResponse> {
+  return fetchJson("/analysis/llm-assist/cards", { signal });
+}
+
 /** `/sessions/{id}/trip-summary` is read-only + unauthenticated, like
  *  `/obd/dtc` (Task 1.5) — computed on demand from the stored session. */
 export function getTripSummary(
@@ -609,10 +617,23 @@ export function postFeedback(
   event: Record<string, unknown>,
   label: string,
   reason: string | null,
+  // Task S.3 (llm-assist-and-compute-roadmap.md): the operator's working
+  // theory + an optional clarifying question/answer pair, attached
+  // alongside the verdict. All optional — omitted callers are unaffected.
+  hypothesis?: string | null,
+  clarifyingQuestion?: string | null,
+  clarifyingAnswer?: string | null,
 ): Promise<{ feedback: Record<string, unknown> }> {
   return controlJson("/control/feedback", token, {
     method: "POST",
-    body: jsonBody({ event, label, reason }),
+    body: jsonBody({
+      event,
+      label,
+      reason,
+      hypothesis: hypothesis ?? null,
+      clarifying_question: clarifyingQuestion ?? null,
+      clarifying_answer: clarifyingAnswer ?? null,
+    }),
   });
 }
 

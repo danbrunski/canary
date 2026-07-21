@@ -211,24 +211,40 @@ No model hosting. Everything here must satisfy the Status discipline:
 import-isolated, feature-flagged, no daemon dependency when disabled,
 dashboard cards degrade cleanly when the tier is absent.
 
-- [ ] **S.1 — Structured-card contract.** Define the JSON schema for
-  LLM-assist outputs (differential card: ranked hypotheses, each with
-  supporting/refuting evidence references and the mandatory
-  "hypotheses-not-verdicts" framing; narrative card: sectioned text +
-  source-session references). Pydantic models + JSON-schema doc; the
-  producer is absent for now, the contract is the seam.
-- [ ] **S.2 — Dashboard card renderer.** A panel/card component that
-  renders S.1 documents from a feature-flagged endpoint, with an
-  explicit empty/absent state when the tier is disabled (the default).
-  FE tests over a fixture card.
-- [ ] **S.3 — Enriched-label capture loop (case 5, model-free core).**
-  Extend the anomaly-review flow so a review can attach a hypothesis
-  string + one clarifying question/answer pair to the feedback record
-  (`src/alerts/feedback.py` schema + `anomaly_feedback.jsonl`), flowing
-  into the retraining ledger like existing verdicts. Works today with
-  operator-authored text; an LLM later fills the same fields. Tests for
-  schema round-trip + retrain consumption.
-- [ ] **S.4 — Analysis module boundary.** Ensure any future LLM code
-  has an import-isolated home (`src/analysis/llm_assist/` or similar)
-  with a feature flag in config (default off) and a test asserting the
-  capture path imports no torch/LLM modules when disabled.
+- [x] **S.1 — Structured-card contract.** Landed: Pydantic models
+  (`src/analysis/llm_assist/cards.py`) for a differential card (ranked
+  hypotheses + evidence refs) and a narrative card (sectioned text +
+  source-session refs). The "hypotheses-not-verdicts" framing is
+  schema-LOCKED, not just documented — a validator unconditionally
+  overwrites any input framing value with the canonical string, so a
+  card literally cannot be constructed without it. JSON-schema doc
+  generated from the real Pydantic `TypeAdapter`, not hand-written. No
+  producer exists — the contract is the seam, per scope.
+- [x] **S.2 — Dashboard card renderer.** Landed: feature-flagged
+  `GET /analysis/llm-assist/cards` (disabled by real config default,
+  not just example YAML), new `LlmAssistPanel.tsx` whose explicit
+  absent-state is genuinely the default render path given that
+  default. FE tests over fixture cards.
+- [x] **S.3 — Enriched-label capture loop.** Landed: `AnomalyFeedback`
+  gains `hypothesis`/`clarifying_question`/`clarifying_answer` with a
+  real both-or-neither validator (not just documented intent) —
+  verified rejecting a lone question or lone answer. `AnomalyPanel.tsx`
+  gained the actual input fields (the doc's "operator-authored text"
+  requires a real UI surface, which the first pass missed and a
+  follow-up added), with client-side pairing validation mirroring the
+  backend rule so a malformed submission is caught before the network
+  round-trip, not just bounced off a 422. `RetrainingFeedbackReport.
+  enriched_labels` genuinely reaches `scripts/retrain.py`'s ledger
+  record, not a computed-but-unused field.
+- [x] **S.4 — Analysis module boundary.** Landed:
+  `src/analysis/llm_assist/` as the import-isolated home. Import-no-
+  torch verified via a real fresh-subprocess check (avoids the
+  false-negative risk of an in-process check where torch might already
+  be loaded by something else). One real gap caught by review and
+  fixed before landing: the capture-path guard originally checked only
+  a hardcoded 6-file allowlist that missed the actual daemon entrypoint
+  (`runtime.py`/`inference.py`) and most of `src/collection/` — a
+  future accidental import in the real hot loop wouldn't have been
+  caught. Fixed to a genuine recursive walk of `src/daemon/` +
+  `src/collection/` (all ~30 files, file-count parity independently
+  confirmed), re-verified.

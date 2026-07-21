@@ -28,6 +28,7 @@ export const NAV: NavGroupDef[] = [
       { id: "diag-explore", label: "Explore", group: "diagnostics" },
       { id: "diag-system", label: "System", group: "diagnostics" },
       { id: "diag-tpms", label: "TPMS", group: "diagnostics" },
+      { id: "diag-llm-assist", label: "LLM Assist", group: "diagnostics" },
     ],
   },
   {

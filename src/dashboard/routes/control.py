@@ -6,6 +6,7 @@ from typing import Any, TypeVar
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
+from pydantic import ValidationError as PydanticValidationError
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.feedback import FEEDBACK_LABELS, FeedbackStore
@@ -760,13 +761,22 @@ def register_control_routes(
                 status_code=422,
                 detail=f"label must be one of {sorted(FEEDBACK_LABELS)}",
             )
-        fb = store.record(
-            event=request.event,
-            label=request.label,  # type: ignore[arg-type]  # checked above
-            reason=request.reason,
-            driving_context=request.driving_context,
-            labeled_by=request.labeled_by,
-        )
+        try:
+            fb = store.record(
+                event=request.event,
+                label=request.label,  # type: ignore[arg-type]  # checked above
+                reason=request.reason,
+                driving_context=request.driving_context,
+                labeled_by=request.labeled_by,
+                hypothesis=request.hypothesis,
+                clarifying_question=request.clarifying_question,
+                clarifying_answer=request.clarifying_answer,
+            )
+        except PydanticValidationError as exc:
+            # Task S.3: an incomplete clarifying question/answer pair (see
+            # `AnomalyFeedback._clarifying_pair_is_complete`) — a 422, same
+            # as the label check above, not a 500.
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         publish_control_event("anomaly.feedback", "ok", fb.to_dict())
         return {"feedback": fb.to_dict()}
 

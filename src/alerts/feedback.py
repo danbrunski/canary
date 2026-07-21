@@ -30,7 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.jsonl_store import JsonlStore, latest_by_key
 
@@ -83,6 +83,26 @@ class AnomalyFeedback(BaseModel):
     event: dict[str, Any] = Field(default_factory=dict)
     labeled_by: str | None = None
     labeled_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    #: Task S.3 (llm-assist-and-compute-roadmap.md, case 5 "active labeling
+    #: partner", model-free core): the operator's free-text guess at what's
+    #: actually going on ("possible MAF fault"), same shape a future LLM
+    #: producer would fill in — operator-authored today, works with no
+    #: model. ``None`` for an ordinary verdict that skips the enrichment.
+    hypothesis: str | None = None
+    #: One clarifying question the review flow asked ("were you on a dirt
+    #: road or in heavy rain?") and the operator's answer, together — half a
+    #: pair with no other half isn't a completed enrichment, so both are set
+    #: together or both left ``None`` (not independently optional).
+    clarifying_question: str | None = None
+    clarifying_answer: str | None = None
+
+    @model_validator(mode="after")
+    def _clarifying_pair_is_complete(self) -> AnomalyFeedback:
+        has_question = self.clarifying_question is not None
+        has_answer = self.clarifying_answer is not None
+        if has_question != has_answer:
+            raise ValueError("clarifying_question and clarifying_answer must be set together")
+        return self
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
@@ -112,8 +132,16 @@ class FeedbackStore(JsonlStore[AnomalyFeedback]):
         reason: str | None = None,
         driving_context: dict[str, Any] | None = None,
         labeled_by: str | None = None,
+        hypothesis: str | None = None,
+        clarifying_question: str | None = None,
+        clarifying_answer: str | None = None,
     ) -> AnomalyFeedback:
-        """Append a verdict for ``event``. A relabel is just another append."""
+        """Append a verdict for ``event``. A relabel is just another append.
+
+        ``hypothesis``/``clarifying_question``/``clarifying_answer`` are the
+        Task S.3 enrichment (case 5, model-free today): optional on every
+        call, so existing callers recording a plain verdict are unaffected.
+        """
         fb = AnomalyFeedback(
             anomaly_key=anomaly_key(event),
             label=label,
@@ -121,6 +149,9 @@ class FeedbackStore(JsonlStore[AnomalyFeedback]):
             driving_context=driving_context or {},
             event=event,
             labeled_by=labeled_by,
+            hypothesis=hypothesis,
+            clarifying_question=clarifying_question,
+            clarifying_answer=clarifying_answer,
         )
         return self._append_record(fb, to_dict=AnomalyFeedback.to_dict)
 
@@ -178,6 +209,9 @@ def feedback_to_csv(records: Iterable[AnomalyFeedback]) -> str:
             "score",
             "operating_mode",
             "driving_context",
+            "hypothesis",
+            "clarifying_question",
+            "clarifying_answer",
         ]
     )
     for fb in records:
@@ -195,6 +229,9 @@ def feedback_to_csv(records: Iterable[AnomalyFeedback]) -> str:
                 ev.get("score", ""),
                 ev.get("operating_mode", ""),
                 json.dumps(fb.driving_context, sort_keys=True),
+                fb.hypothesis or "",
+                fb.clarifying_question or "",
+                fb.clarifying_answer or "",
             ]
         )
     return buf.getvalue()

@@ -30,6 +30,7 @@ import { DatasetHealthPanel } from "./DatasetHealthPanel";
 import { DtcPanel } from "./DtcPanel";
 import { ExplorePanel } from "./ExplorePanel";
 import { ExportPanel } from "./ExportPanel";
+import { LlmAssistPanel } from "./LlmAssistPanel";
 import { ModelHealthPanel } from "./ModelHealthPanel";
 import { ModelPanel } from "./ModelPanel";
 import { MonitorsPanel } from "./MonitorsPanel";
@@ -165,6 +166,8 @@ function renderItem(
       return <TrendsPanel token={d.token} />;
     case "diag-explore":
       return <ExplorePanel />;
+    case "diag-llm-assist":
+      return <LlmAssistPanel />;
     case "models-training":
       return <TrainingPanel token={d.token} companion={d.companion} />;
     case "models-tuning":

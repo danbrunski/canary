@@ -64,6 +64,14 @@ class FeedbackRequest(_ControlRequest):
     reason: str | None = None
     driving_context: dict[str, Any] = Field(default_factory=dict)
     labeled_by: str | None = None
+    #: Task S.3 (llm-assist-and-compute-roadmap.md, case 5): the enriched
+    #: label — a hypothesis string and/or one clarifying question/answer
+    #: pair — attached from the review flow alongside the verdict.
+    #: Operator-authored today; a future LLM producer would fill the same
+    #: fields. See ``AnomalyFeedback`` for the question/answer pairing rule.
+    hypothesis: str | None = None
+    clarifying_question: str | None = None
+    clarifying_answer: str | None = None
 
 
 class VehicleEventRequest(_ControlRequest):

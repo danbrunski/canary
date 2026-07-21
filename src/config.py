@@ -705,6 +705,21 @@ class AutoTagConfig(_Strict):
     highway_max_accel_variance_g2: float = 0.02
 
 
+class LLMAssistConfig(_Strict):
+    """Feature flag for the optional LLM-assist tier (Task S.4,
+    docs/roadmap/llm-assist-and-compute-roadmap.md). Default ``False``: no
+    producer exists yet (the roadmap's Sequencing step 1 is seams-only), and
+    nothing on the capture path reads this block — it's read only by the
+    dashboard's read-only analysis routes deciding whether to surface
+    ``src.analysis.llm_assist`` cards or the disabled/absent state.
+    """
+
+    enabled: bool = False
+    #: Where a future producer appends cards and the dashboard endpoint
+    #: reads them from (``src.analysis.llm_assist.store.LlmAssistCardStore``).
+    cards_path: Path = Path("data/analyses/llm_assist_cards.jsonl")
+
+
 class CanaryConfig(_Strict):
     vehicle: VehicleConfig
     hardware: HardwareConfig
@@ -719,6 +734,7 @@ class CanaryConfig(_Strict):
     notifications: NotificationsConfig = NotificationsConfig()
     online_training: OnlineTrainingConfig = OnlineTrainingConfig()
     autotag: AutoTagConfig = AutoTagConfig()
+    llm_assist: LLMAssistConfig = LLMAssistConfig()
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:
