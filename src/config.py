@@ -108,10 +108,46 @@ class GpsConfig(_Strict):
     gpsd_port: int = 2947
 
 
+class ImuConfig(_Strict):
+    """3-axis IMU (accel + gyro) for motion-aware auto-tagging.
+
+    Phase 2a/2b (``docs/roadmap/imu-gps-integration.md``). Optional and
+    defaulted-disabled, same "configs without it keep loading and behave
+    exactly as before" contract as ``GpsConfig``. Unlike ``GpsConfig`` there
+    is no separate ``enabled`` bool: the doc's config sketch folds "no
+    hardware" into the same ``source`` Literal that names which chip is
+    wired, since which-chip and whether-any-chip are the same decision here.
+    ``.enabled`` is provided as a property so call sites can gate the same
+    way as ``gps.enabled`` without a Literal-vs-bool special case.
+    """
+
+    #: bno055 does gravity removal + orientation fusion on-chip (see
+    #: ``src.preprocessing.imu_frame``'s module docstring); mpu6050/icm20948
+    #: are raw accel+gyro requiring this codebase's own gravity low-pass.
+    #: ``disabled`` (default) — no IMU wired, daemon startup skips it exactly
+    #: like ``gps.enabled=False`` skips the GPS collector.
+    source: Literal["bno055", "mpu6050", "icm20948", "disabled"] = "disabled"
+    i2c_bus: int = 1
+    sample_rate_hz: float = 100.0
+    #: ``auto`` resolves mount tilt dynamically via the gravity low-pass in
+    #: ``imu_frame.py`` (the only correct option per the doc's physics
+    #: section — a one-shot calibration is permanently biased by wherever
+    #: the mount happened to sit at cal time). A fixed-quaternion string is
+    #: accepted for a rigidly pre-surveyed mount but isn't consumed by any
+    #: code yet. The BNO055 does this on-chip either way.
+    mount_orientation: str = "auto"
+
+    @property
+    def enabled(self) -> bool:
+        """Mirrors ``GpsConfig.enabled`` — ``False`` only when ``source == "disabled"``."""
+        return self.source != "disabled"
+
+
 class HardwareConfig(_Strict):
     elm327_port: str
     can: CanBusConfig
     gps: GpsConfig = GpsConfig()
+    imu: ImuConfig = ImuConfig()
 
 
 class RecordArmingConfig(_Strict):
@@ -225,6 +261,17 @@ class OperatingModeSpec(_Strict):
     #: sessions, and is ephemeral — it gates segmentation only, never a feature.
     recent_speed_min: float | None = None
     recent_speed_max: float | None = None
+    #: Longitudinal/lateral accel gates (g) on the decimated
+    #: ``imu:ACCEL_LON_MAX``/``imu:ACCEL_LAT_MAX`` channels (Phase 2a.3/2a.7,
+    #: docs/roadmap/imu-gps-integration.md) — lets ``launch``/``hard_brake``/
+    #: ``cornering`` modes gate on a transient IMU peak the same way other
+    #: modes gate on RPM/speed/throttle. Inert (never required, never
+    #: matched) until a real session actually has these columns — no IMU
+    #: hardware exists yet, so every stock mode spec leaves these ``None``.
+    accel_lon_min: float | None = None
+    accel_lon_max: float | None = None
+    accel_lat_min: float | None = None
+    accel_lat_max: float | None = None
 
 
 class PreprocessingConfig(_Strict):
@@ -617,6 +664,47 @@ class ProfilesConfig(_Strict):
     vin_probe_timeout_seconds: float = 2.0
 
 
+class AutoTagConfig(_Strict):
+    """Thresholds for the motion-aware auto-tagger (Phase 2a.5/2a.6,
+    docs/roadmap/imu-gps-integration.md). One taxonomy, one config block:
+    both the offline pass (``scripts/autotag.py``) and the live daemon hook
+    evaluate the exact same thresholds, so tuning them (as real drives
+    accumulate) never needs a redeploy — same philosophy as the behavior
+    models' deviation bands.
+
+    ``live_enabled`` is a **hard pre-made decision** (Round-2
+    OVERNIGHT-QUEUE): ships ``False`` until Phase 2b hardware validation,
+    independent of whether the offline pass is useful today (it is, for the
+    GPS-only ``stopped``/``highway_cruise`` tags against existing sessions).
+    """
+
+    live_enabled: bool = False
+    #: g — decimated ``imu:ACCEL_LON_MAX`` threshold, disambiguated into
+    #: accel vs. brake by ``d(obd:SPEED)/dt``'s sign (IMU + OBD, no GPS).
+    hard_accel_g: float = 0.35
+    hard_brake_g: float = 0.40
+    #: g — decimated ``imu:ACCEL_LAT_MAX`` threshold for ``cornering``.
+    cornering_g: float = 0.30
+    #: km/h — a launch's starting speed must be at/below this ("near-stop").
+    launch_speed_max_kph: float = 5.0
+    #: seconds a qualifying hard_accel must sustain from near-stop to count
+    #: as ``launch`` rather than an ordinary hard_accel.
+    launch_sustain_seconds: float = 1.5
+    #: km/h — ``gps:speed`` at/below this counts as ``stopped`` (GPS-only,
+    #: bus-independent — works even with no OBD/CAN fix at all).
+    stopped_speed_max_kph: float = 3.0
+    #: km/h — ``gps:speed`` at/above this, sustained, is a highway_cruise
+    #: candidate.
+    highway_speed_min_kph: float = 90.0
+    #: seconds ``gps:speed`` must hold >= ``highway_speed_min_kph`` before
+    #: ``highway_cruise`` tags.
+    highway_sustain_seconds: float = 20.0
+    #: g² — max variance of lon/lat accel allowed during the sustained-speed
+    #: window (keeps a fast, bumpy/swervy stretch from reading as "cruise").
+    #: Only applied when IMU accel columns are present; ignored otherwise.
+    highway_max_accel_variance_g2: float = 0.02
+
+
 class CanaryConfig(_Strict):
     vehicle: VehicleConfig
     hardware: HardwareConfig
@@ -630,6 +718,7 @@ class CanaryConfig(_Strict):
     trends: TrendsConfig = TrendsConfig()
     notifications: NotificationsConfig = NotificationsConfig()
     online_training: OnlineTrainingConfig = OnlineTrainingConfig()
+    autotag: AutoTagConfig = AutoTagConfig()
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:

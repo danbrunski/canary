@@ -47,6 +47,12 @@ DEFAULT_SIGNAL_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "speed": ("obd:SPEED", "obd:speed", "gps:speed"),
     "throttle": ("obd:THROTTLE_POS", "obd:throttle_pos"),
     "coolant_temp": ("obd:COOLANT_TEMP", "obd:coolant_temp"),
+    # Phase 2a.7 — decimated IMU peaks (src.preprocessing.imu_decimation).
+    # Absent from every frame recorded before Phase 2b hardware, so any mode
+    # gating on these is simply skipped (same "missing candidate columns"
+    # path every other signal already falls back to).
+    "accel_lon": ("imu:ACCEL_LON_MAX",),
+    "accel_lat": ("imu:ACCEL_LAT_MAX",),
 }
 
 
@@ -214,6 +220,10 @@ def _required_signals(spec: OperatingModeSpec) -> list[str]:
         signals.append("coolant_temp")
     if spec.recent_speed_min is not None or spec.recent_speed_max is not None:
         signals.append(RECENT_SPEED_SIGNAL)
+    if spec.accel_lon_min is not None or spec.accel_lon_max is not None:
+        signals.append("accel_lon")
+    if spec.accel_lat_min is not None or spec.accel_lat_max is not None:
+        signals.append("accel_lat")
     return signals
 
 
@@ -309,6 +319,10 @@ def _bounds(spec: OperatingModeSpec, signal: str) -> tuple[float | None, float |
         return spec.coolant_temp_min, spec.coolant_temp_max
     if signal == RECENT_SPEED_SIGNAL:
         return spec.recent_speed_min, spec.recent_speed_max
+    if signal == "accel_lon":
+        return spec.accel_lon_min, spec.accel_lon_max
+    if signal == "accel_lat":
+        return spec.accel_lat_min, spec.accel_lat_max
     raise ValueError(f"unknown operating-mode signal {signal!r}")
 
 

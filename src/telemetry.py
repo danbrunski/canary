@@ -26,6 +26,12 @@ DECODED_SOURCE: Final = "decoded"
 #: mode segmenter's speed signal; position/quality channels are logged but
 #: excluded from model features.
 GPS_SOURCE: Final = "gps"
+#: 3-axis IMU readings (imu:ACCEL_X/Y/Z, imu:GYRO_X/Y/Z, and — post
+#: ``src.preprocessing.imu_frame`` gravity/heading resolution —
+#: imu:ACCEL_LON/LAT). Phase 2a (docs/roadmap/imu-gps-integration.md): a
+#: first-class source like GPS/OBD, no hardware required to exist in the
+#: Literal — ``ImuConfig.source: disabled`` is the default until Phase 2b.
+IMU_SOURCE: Final = "imu"
 #: DBC-decoded values share the wide-column namespace contract but never ride
 #: a ``TelemetryRecord`` (``decode_can_rows_dbc`` writes ``source_channel``
 #: directly), so ``DBC_SOURCE`` is deliberately *not* a ``TelemetrySource``.
@@ -38,7 +44,7 @@ DBC_SOURCE: Final = "dbc"
 #: ``DECODED_SOURCE``, they ride a real ``TelemetryRecord`` and get persisted.
 DERIVED_SOURCE: Final = "derived"
 
-TelemetrySource = Literal["obd", "can", "decoded", "gps", "derived"]
+TelemetrySource = Literal["obd", "can", "decoded", "gps", "derived", "imu"]
 # PEP 586 forbids spelling a Literal from variables, so the line above is the
 # one unavoidable duplication. Guard it against silently drifting from the
 # constants it must mirror.
@@ -48,6 +54,7 @@ assert set(get_args(TelemetrySource)) == {
     DECODED_SOURCE,
     GPS_SOURCE,
     DERIVED_SOURCE,
+    IMU_SOURCE,
 }
 
 TelemetryValue = bool | int | float | str | None
@@ -206,6 +213,26 @@ class TelemetryRecord:
         return cls.from_epoch(
             timestamp,
             source="gps",
+            channel=channel,
+            value=value,
+            unit=unit,
+            metadata=metadata,
+        )
+
+    @classmethod
+    def imu(
+        cls,
+        timestamp: float,
+        channel: str,
+        value: TelemetryValue,
+        unit: str = "",
+        *,
+        metadata: dict[str, MetadataValue] | None = None,
+    ) -> TelemetryRecord:
+        """An IMU reading (``channel`` like ``ACCEL_X``/``GYRO_Z``) at an epoch ts."""
+        return cls.from_epoch(
+            timestamp,
+            source="imu",
             channel=channel,
             value=value,
             unit=unit,

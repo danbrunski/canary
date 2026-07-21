@@ -72,6 +72,8 @@ from src.preprocessing.resampler import ResampleConfig, gap_column, is_slow_chan
 from src.telemetry import (
     DBC_SOURCE,
     DECODED_SOURCE,
+    GPS_SOURCE,
+    IMU_SOURCE,
     OBD_SOURCE,
     SOURCE_SEP,
     TelemetryRecord,
@@ -263,8 +265,25 @@ class LiveFeatureSource:
         if record.source == "can":
             self._apply_can_decode(record)
             return
-        # Anything else (e.g. a future "decoded" source pushed directly) gets
-        # stored as-is; the pipeline will surface it as a new column.
+        if record.source == "gps":
+            value = _to_float(record.value)
+            if value is not None:
+                self._set_value(channel_key(GPS_SOURCE, record.channel), value, record.timestamp)
+            return
+        if record.source == "imu":
+            # No decimation here (2a.3 is a batch/pre-pivot concern — see
+            # src.preprocessing.imu_decimation): live serve just tracks the
+            # latest raw/frame-resolved value like every other source, same
+            # as the "anything else" catch-all did before this source got
+            # its own arm. Phase 2b's collector is what actually starts
+            # emitting these records; ``ImuConfig.source: disabled`` (2a.2)
+            # means none arrive today.
+            value = _to_float(record.value)
+            if value is not None:
+                self._set_value(channel_key(IMU_SOURCE, record.channel), value, record.timestamp)
+            return
+        # Anything else (e.g. a future source pushed directly) gets stored
+        # as-is; the pipeline will surface it as a new column.
         value = _to_float(record.value)
         if value is not None:
             self._set_value(channel_key(record.source, record.channel), value, record.timestamp)

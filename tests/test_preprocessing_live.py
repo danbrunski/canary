@@ -60,6 +60,26 @@ def test_latest_value_wins_per_channel(config: CanaryConfig) -> None:
     assert row["obd:RPM"].iloc[0] == 1500.0
 
 
+def test_gps_observation_appears_in_emitted_row(config: CanaryConfig) -> None:
+    """2a.1 — gps has its own explicit routing arm, not the generic catch-all."""
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    src.observe(TelemetryRecord.gps(now.timestamp(), "speed", 42.0, "km/h"))
+    row = src.tick(now)
+    assert row is not None
+    assert row["gps:speed"].iloc[0] == 42.0
+
+
+def test_imu_observation_appears_in_emitted_row(config: CanaryConfig) -> None:
+    """2a.1 — imu has its own explicit routing arm, not the generic catch-all."""
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    src.observe(TelemetryRecord.imu(now.timestamp(), "ACCEL_X", 0.02, "g"))
+    row = src.tick(now)
+    assert row is not None
+    assert row["imu:ACCEL_X"].iloc[0] == pytest.approx(0.02)
+
+
 def test_multiple_channels_coexist(config: CanaryConfig) -> None:
     src = LiveFeatureSource(config=config)
     now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)

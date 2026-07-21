@@ -45,6 +45,7 @@ from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, TelemetryRecord, channel_key, channel_of
 
+from .autotag_hook import LiveAutoTagHook
 from .components import DaemonComponents
 
 log = logging.getLogger(__name__)
@@ -506,6 +507,17 @@ async def run_live_inference(
     sequence_detector = SequenceDetector(components)
     behavior_detector = BehaviorDetector(components, fusion, source)
     detectors: tuple[Detector, ...] = (if_detector, sequence_detector, behavior_detector)
+    # Phase 2a.6 — ships config-gated off (AutoTagConfig.live_enabled
+    # defaults False); LiveAutoTagHook.tick is itself a no-op while
+    # disabled, so constructing it unconditionally costs nothing and keeps
+    # a config hot-reload flipping it on mid-session picked up next tick.
+    autotag_hook = LiveAutoTagHook(
+        config=components.config.autotag,
+        session_dir=lambda: (
+            components.storage_writer.paths.root if components.storage_writer is not None else None
+        ),
+        _tick_seconds=interval,
+    )
 
     while not stop_event.is_set():
         try:
@@ -520,6 +532,10 @@ async def run_live_inference(
                 await _publish_derived_channels(
                     components.telemetry_broadcaster, source, now, components.storage_writer
                 )
+                # 2a.6 — no-op while AutoTagConfig.live_enabled is False (the
+                # shipped default); reads the same raw operating point the
+                # behavior overlay reads, not the engineered feature row.
+                autotag_hook.tick(source.latest_operating_point, now)
 
             # 4.7 — the segmenter falling back to constant "all" mode means
             # every mode-gated behavior surface silently never fires; make

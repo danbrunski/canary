@@ -43,6 +43,15 @@ hardware:
     enabled: false
     device: /dev/ttyUSB0
     baudrate: 9600
+  # Optional 3-axis IMU (accel + gyro). Phase 2a software slice only — no
+  # collector reads this yet (Phase 2b, docs/roadmap/imu-gps-integration.md).
+  # `disabled` (default) is a hard requirement: the daemon runs normally
+  # without it, same as gps.enabled=false above.
+  imu:
+    source: disabled  # bno055 | mpu6050 | icm20948 | disabled
+    i2c_bus: 1
+    sample_rate_hz: 100
+    mount_orientation: auto
 
 collection:
   # canable = one Canable does broadcast CAN + read-only OBD ISO-TP.
@@ -175,6 +184,31 @@ preprocessing:
       speed_max: 80
     highway:
       speed_min: 80
+    # Phase 2a.7 (docs/roadmap/imu-gps-integration.md) — IMU-gated modes.
+    # INERT today: imu:ACCEL_LON_MAX/ACCEL_LAT_MAX (Phase 2a.3 decimation
+    # output) don't exist in any real session — no IMU hardware yet (Phase
+    # 2b) — so the segmenter finds these candidate columns entirely absent
+    # and skips these specs outright (the same "required signal missing"
+    # path any mode's absent column already takes), the same way every
+    # other mode here would if its OBD PID had never been polled. Thresholds
+    # are placeholders; real tuning is a Phase 2b.4 exercise once IMU data
+    # exists.
+    launch:
+      speed_max: 5
+      accel_lon_min: 0.35
+    # accel_lon gates on the decimated |ACCEL_LON_MAX| magnitude (see
+    # imu_decimation.decimate_imu_wide) — it never carries a sign, and
+    # OperatingModeSpec has no separate sign-of-motion field. hard_brake is
+    # distinguished from launch not by sign but by mapping order + the
+    # launch spec's own speed_max: 5 gate above (modes are evaluated in
+    # mapping order, first full match wins) — a near-stop, high-accel_lon
+    # row is claimed by launch first, so hard_brake's accel_lon_min only
+    # ever matches a hard accel_lon spike while already moving. Magnitude
+    # matches AutoTagConfig.hard_brake_g's 0.40 convention (src/config.py).
+    hard_brake:
+      accel_lon_min: 0.4
+    cornering:
+      accel_lat_min: 0.3
     # Wide-open-throttle is a transient *event* (see ``wot_run`` in
     # ``src/analysis/events/``) not an operating mode. As a mode it
     # would steal hundreds of rows from city/highway into a per-mode

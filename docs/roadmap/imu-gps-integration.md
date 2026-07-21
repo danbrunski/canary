@@ -321,46 +321,58 @@ blocked on purchasing/wiring the IMU + baro + 10 Hz GPS.
 
 ### Phase 2a — software slice (no hardware required)
 
-- [ ] **2a.1 — `imu` source plumbing.** Extend the `TelemetrySource`
-  Literal in `src/telemetry.py` with `"imu"` + an `.imu()` factory
-  mirroring `.obd()`; explicit `imu`/`gps` arms in the
-  `src/preprocessing/live.py:102` router instead of the catch-all.
-- [ ] **2a.2 — `ImuConfig`.** `src/config.py` block per the config
-  sketch (`source: bno055|mpu6050|icm20948|disabled`, default
-  `disabled`; i2c/sample-rate/mount fields), same `_Strict` pattern as
-  `GpsConfig`. Daemon startup degrades cleanly when disabled.
-- [ ] **2a.3 — Decimation step.** Pre-pivot per-resample-tick
-  aggregation for high-rate sources: `imu:ACCEL_LON_MAX/RMS`,
-  `imu:JERK_MAX`, `imu:ACCEL_LAT_MAX`. Raw rows still land in Parquet;
-  only the wide frame is decimated. Synthetic 100 Hz fixture tests.
-- [ ] **2a.4 — `imu_frame.py`.** Gravity low-pass gated on quiescent
-  windows, GPS-course heading resolution with persisted per-session yaw
-  offset, longitudinal sign from the OBD speed derivative. Synthetic
-  trajectory tests (known tilt + known maneuvers → recovered frame).
-  BNO055 path bypasses steps 1–2 (hardware fusion) but shares sign +
-  heading handling.
-- [ ] **2a.5 — Offline auto-tagger.** `scripts/autotag.py --session ...`
-  writing standard `tags.jsonl` records via
-  `src/collection/tags.py::write_tag`, idempotent/re-runnable,
-  thresholds in config with the triggering peak in tag fields. The
-  GPS-only tags (`stopped`, `highway_cruise`) must work against
-  existing stored sessions **now**; IMU-dependent tags
-  (`hard_accel`/`hard_brake`/`cornering`/`launch`) are implemented and
-  unit-tested against synthetic data, dormant until channels exist.
-- [ ] **2a.6 — Live auto-tagger hook.** Same taxonomy evaluated in the
-  daemon as thresholds trip, config-gated, off by default until 2b
-  validation.
-- [ ] **2a.7 — Segmenter accel modes.** `OperatingModeSpec` gains
-  `accel_lon_min/max`, `accel_lat_min/max`; `DEFAULT_SIGNAL_COLUMNS` +
-  `_required_signals`/`_bounds` arms; example `launch`/`hard_brake`/
-  `cornering` mode specs in the sample YAML (inert without IMU columns).
-- [ ] **2a.8 — Committee declarations.** Append the future committees
-  from `docs/sensor-committees.md` §Roadmap (longitudinal accel,
-  heading/yaw, stationary-confirm, altitude, baro-pressure,
-  vertical/grade) to `COMMITTEES` in `src/analysis/committees.py` as
-  `trainable=False` compute-but-exclude declarations gated on member
-  availability, with synthetic-data tests. They activate as hardware
-  channels appear, no code change.
+- [x] **2a.1 — `imu` source plumbing.** Landed: `TelemetrySource`
+  Literal gains `"imu"` + `.imu()` factory mirroring `.obd()`; explicit
+  `gps`/`imu` arms added to `LiveFeatureSource.observe()`'s router,
+  verified to route identically to the prior catch-all for every
+  existing source kind — no blast radius.
+- [x] **2a.2 — `ImuConfig`.** Landed: mirrors `GpsConfig`'s `_Strict`
+  pattern exactly, `source` defaults `disabled` (verified a real
+  dataclass default, not just example YAML), `.enabled` property. No
+  collector reads it yet (Phase 2b), so disabled-by-default degrades
+  trivially.
+- [x] **2a.3 — Decimation step.** Landed: `decimate_imu_wide`
+  (MAX/RMS/JERK_MAX) wired between `to_wide` and `resample_wide` —
+  verified it operates on the wide frame only, raw Parquet rows
+  untouched. Genuine no-op when `imu:*` columns are absent.
+- [x] **2a.4 — `imu_frame.py`.** Landed: gravity low-pass gated on a
+  quiescent-window mask, GPS-course yaw-offset resolution (persisted
+  via this repo's atomic tmp+rename sidecar convention), longitudinal
+  sign correction from the OBD speed derivative, BNO055
+  `gravity_removed=True` bypass sharing heading+sign code with the
+  other two chip paths. Synthetic known-tilt/known-maneuver test
+  recovers yaw within 2° and lon/lat within 0.05g.
+- [x] **2a.5 — Offline auto-tagger.** Landed: `scripts/autotag.py` +
+  `src/analysis/autotag.py::detect_tags`, idempotent (verified a
+  second run writes zero new tags). Run against a real stored session
+  (scratch-copied, real corpus untouched) — produced 4 `stopped` + 2
+  `highway_cruise` tags that line up with that session's own
+  classification-derived stop events. IMU-dependent tags
+  structurally guard on `imu:*` column presence — genuinely dormant
+  against all current real data, not just untriggered by chance.
+- [x] **2a.6 — Live auto-tagger hook.** Landed: `LiveAutoTagHook`
+  wired into `run_live_inference`'s per-tick loop, constructed
+  unconditionally but `.tick()` itself is the no-op gate — verified
+  silent by default via a real end-to-end daemon-loop test (no
+  `tags.jsonl` created when `live_enabled=False`).
+- [x] **2a.7 — Segmenter accel modes.** Landed: `OperatingModeSpec`
+  gains `accel_lon_min/max`/`accel_lat_min/max`, wired into the
+  segmenter's missing-signal gating (structurally inert without real
+  IMU columns, not just untriggered by test luck). One real bug caught
+  by adversarial review and fixed before landing: the example
+  `hard_brake` spec used a negative threshold against an always
+  non-negative (abs-valued) column, making it permanently unreachable
+  even with real Phase 2b hardware — fixed to a positive threshold
+  consistent with the column's magnitude convention, re-verified
+  reachable via a real decimation+segmentation repro.
+- [x] **2a.8 — Committee declarations.** Landed: 6 future committees
+  (longitudinal accel, heading/yaw, stationary-confirm, altitude,
+  baro-pressure, vertical/grade) appended, all `trainable=False`,
+  gated on member availability. Empirically verified all 6 are true
+  no-ops against a real stored session today. `stationary-confirm`
+  deliberately requires 3 members (not 2) so it only ever activates as
+  a genuine third-way confirmation, never silently degrading to the
+  existing 2-way speed committee.
 
 ### Phase 2b — hardware + validation (blocked until parts arrive)
 

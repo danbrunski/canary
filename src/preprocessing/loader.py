@@ -10,6 +10,7 @@ from typing import Literal
 import pandas as pd
 
 from src.config import CanaryConfig
+from src.preprocessing.imu_decimation import decimate_imu_wide
 from src.preprocessing.resampler import (
     GAP_SUFFIX,
     SESSION_COLUMN,
@@ -202,6 +203,11 @@ def resample_and_segment(
     sessions = [Path(path) for path in session_dirs]
     long = read_sessions(sessions)
     wide = to_wide(long, value=value)
+    # 2a.3 — collapse any raw-rate imu:ACCEL_LON/LAT into per-resample-tick
+    # MAX/RMS/JERK_MAX aggregates before the resampler's own .last() would
+    # otherwise pick one arbitrary raw sample per tick. No-op when neither
+    # column is present (every session recorded before Phase 2b hardware).
+    wide = decimate_imu_wide(wide, hz=config.preprocessing.resample_hz)
     value_columns = numeric_value_columns(wide)
     if value_columns:
         resampled = resample_wide(

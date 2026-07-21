@@ -465,3 +465,72 @@ def test_high_rpm_standing_still_does_not_fall_through_to_city() -> None:
     segmented = segment_operating_modes(frame, config.preprocessing.operating_modes)
 
     assert segmented.loc[0, MODE_COLUMN] != "city"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2a.7 — accel_lon/accel_lat mode gates
+# ---------------------------------------------------------------------------
+
+
+def test_accel_lon_and_accel_lat_gates_match_when_columns_present() -> None:
+    # imu:ACCEL_LON_MAX/ACCEL_LAT_MAX are decimated as ``.abs().max()``
+    # (imu_decimation.decimate_imu_wide) and so are always non-negative;
+    # hard_brake gates on a positive accel_lon_min, matching the shipped
+    # canary.example.yaml spec and AutoTagConfig.hard_brake_g's sign
+    # convention.
+    modes = {
+        "hard_brake": OperatingModeSpec(accel_lon_min=0.4),
+        "cornering": OperatingModeSpec(accel_lat_min=0.3),
+    }
+    frame = pd.DataFrame(
+        [
+            {"imu:ACCEL_LON_MAX": 0.6, "imu:ACCEL_LAT_MAX": 0.1},
+            {"imu:ACCEL_LON_MAX": 0.1, "imu:ACCEL_LAT_MAX": 0.5},
+            {"imu:ACCEL_LON_MAX": 0.1, "imu:ACCEL_LAT_MAX": 0.1},
+        ]
+    )
+
+    segmented = segment_operating_modes(frame, modes)
+
+    assert list(segmented[MODE_COLUMN]) == ["hard_brake", "cornering", UNKNOWN_MODE]
+
+
+def test_launch_hard_brake_cornering_specs_are_inert_without_imu_columns() -> None:
+    """2a.7 acceptance: the shipped example specs must never fire on a
+    real, IMU-less session — the accel_lon/accel_lat candidate columns are
+    entirely absent, so segment_operating_modes treats them the same as any
+    other mode's missing required signal and skips the spec outright."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    frame = pd.DataFrame(
+        [
+            # Rows deliberately shaped to "look like" a launch/hard-brake/
+            # cornering row on every OBD-visible axis — proves the IMU
+            # gate, not some other threshold, is what's silent.
+            {
+                "obd:RPM": 4500.0,
+                "obd:SPEED": 2.0,
+                "obd:THROTTLE_POS": 95.0,
+                "obd:COOLANT_TEMP": 90.0,
+            },
+            {
+                "obd:RPM": 2000.0,
+                "obd:SPEED": 40.0,
+                "obd:THROTTLE_POS": 0.0,
+                "obd:COOLANT_TEMP": 90.0,
+            },
+        ]
+    )
+
+    segmented = segment_operating_modes(frame, config.preprocessing.operating_modes)
+
+    assert "launch" not in set(segmented[MODE_COLUMN])
+    assert "hard_brake" not in set(segmented[MODE_COLUMN])
+    assert "cornering" not in set(segmented[MODE_COLUMN])
+
+
+def test_required_signals_include_accel_axes_when_spec_gates_on_them() -> None:
+    from src.preprocessing.segmenter import _required_signals
+
+    spec = OperatingModeSpec(accel_lon_min=0.3, accel_lat_max=0.5)
+    assert "accel_lon" in _required_signals(spec)
+    assert "accel_lat" in _required_signals(spec)

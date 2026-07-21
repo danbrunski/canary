@@ -98,9 +98,95 @@ SPEED_COMMITTEE = SensorCommittee(
     trainable=False,
 )
 
+#: Future committees (docs/sensor-committees.md §Roadmap) — declared now so
+#: they activate automatically as IMU/baro hardware channels appear (Phase
+#: 2b), no code change needed then. Every member column is either IMU/baro
+#: (no hardware yet) or a derived rate/rate-of-climb channel nothing computes
+#: yet, so ``append_committee_residuals``'s "fewer than min_members present"
+#: skip makes each of these a true no-op today — the same gating the landed
+#: SPEED_COMMITTEE already relies on, just with zero members present instead
+#: of one. All ``trainable=False`` (2a.8 pre-made decision): compute-but-
+#: exclude until real, quality-gated data accumulates, same reasoning as
+#: SPEED_COMMITTEE's own ``trainable=False``.
+
+#: IMU aₓ vs. the OBD/GPS speed derivatives — the doc's headline payoff
+#: (clean transient longitudinal events) triple-checked against two
+#: independent ground truths.
+LONGITUDINAL_ACCEL_COMMITTEE = SensorCommittee(
+    name="LON_ACCEL_SOURCE_DIVERGENCE",
+    quantity="longitudinal acceleration (g)",
+    members=("imu:ACCEL_LON", "derived:OBD_SPEED_ACCEL_G", "derived:GPS_SPEED_ACCEL_G"),
+    trainable=False,
+)
+
+#: GPS course-rate vs. IMU gyro-Z — corners out of the horizontal plane
+#: (the one component OBD alone can never see).
+HEADING_YAW_COMMITTEE = SensorCommittee(
+    name="HEADING_RATE_DIVERGENCE",
+    quantity="yaw rate (deg/s)",
+    members=("derived:GPS_COURSE_RATE", "imu:GYRO_Z"),
+    trainable=False,
+)
+
+#: OBD≈0 & GPS≈0 & IMU-still — a bus-independent "actually stopped" check
+#: that also hardens ``idle_transient`` (a VSS fault reading a false 0
+#: wouldn't fool GPS+IMU too).
+#: min_members=3 (not the usual 2) is deliberate: OBD↔GPS alone is already
+#: SPEED_COMMITTEE's job. This one only means anything as a genuine
+#: three-way stationary confirmation, so it must stay a true no-op (not
+#: silently start scoring on OBD+GPS alone) until the IMU stillness member
+#: exists too.
+STATIONARY_CONFIRM_COMMITTEE = SensorCommittee(
+    name="STATIONARY_CONFIRM_DIVERGENCE",
+    quantity="stationary confidence (speed proxy, km/h)",
+    members=("obd:SPEED", "gps:speed", "derived:IMU_STILLNESS_SPEED_PROXY"),
+    min_members=3,
+    trainable=False,
+)
+
+#: GPS altitude vs. barometric altitude — GPS alone is ±10-30 m and noisy;
+#: the baro backstop is what makes a usable ``derived:GRADE`` possible.
+ALTITUDE_COMMITTEE = SensorCommittee(
+    name="ALTITUDE_SOURCE_DIVERGENCE",
+    quantity="altitude (m)",
+    members=("gps:altitude", "baro:altitude"),
+    trainable=False,
+)
+
+#: Barometric pressure vs. the OBD baro PID (0x33) vs. MAP-at-idle — cross
+#: checks the pressure channel the grade payoff and load-vs-MAP models
+#: both lean on.
+BARO_PRESSURE_COMMITTEE = SensorCommittee(
+    name="BARO_PRESSURE_DIVERGENCE",
+    quantity="barometric pressure (kPa)",
+    members=("baro:pressure", "obd:BAROMETRIC_PRESSURE", "derived:MAP_AT_IDLE_KPA"),
+    trainable=False,
+)
+
+#: Baro altitude-rate vs. GPS vertical speed vs. IMU's integrated vertical
+#: accel — the direct ``derived:GRADE`` de-confounding channel (payoff #2).
+GRADE_COMMITTEE = SensorCommittee(
+    name="VERTICAL_SPEED_DIVERGENCE",
+    quantity="vertical speed (m/s)",
+    members=(
+        "derived:BARO_ALT_RATE",
+        "derived:GPS_VERTICAL_SPEED",
+        "derived:IMU_VERTICAL_ACCEL_INTEGRAL",
+    ),
+    trainable=False,
+)
+
 #: Active committees. Append baro/IMU committees here as that hardware lands —
 #: each is one declaration (altitude, yaw-rate, longitudinal accel, ...).
-COMMITTEES: tuple[SensorCommittee, ...] = (SPEED_COMMITTEE,)
+COMMITTEES: tuple[SensorCommittee, ...] = (
+    SPEED_COMMITTEE,
+    LONGITUDINAL_ACCEL_COMMITTEE,
+    HEADING_YAW_COMMITTEE,
+    STATIONARY_CONFIRM_COMMITTEE,
+    ALTITUDE_COMMITTEE,
+    BARO_PRESSURE_COMMITTEE,
+    GRADE_COMMITTEE,
+)
 
 
 def append_committee_residuals(

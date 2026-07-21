@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from src.analysis.committees import (
+    ALTITUDE_COMMITTEE,
+    BARO_PRESSURE_COMMITTEE,
+    COMMITTEES,
+    GRADE_COMMITTEE,
+    HEADING_YAW_COMMITTEE,
+    LONGITUDINAL_ACCEL_COMMITTEE,
     SPEED_COMMITTEE,
+    STATIONARY_CONFIRM_COMMITTEE,
     MemberGate,
     SensorCommittee,
     append_committee_residuals,
@@ -88,3 +96,73 @@ def test_member_gate_mask_bounds() -> None:
     gate = MemberGate("gps:hdop", max_value=2.0)
     frame = pd.DataFrame({"gps:hdop": [0.8, 2.0, 3.0, float("nan")]})
     assert list(gate.mask(frame)) == [True, True, False, False]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2a.8 — future committees (docs/sensor-committees.md §Roadmap)
+# ---------------------------------------------------------------------------
+
+
+_FUTURE_COMMITTEES = (
+    LONGITUDINAL_ACCEL_COMMITTEE,
+    HEADING_YAW_COMMITTEE,
+    STATIONARY_CONFIRM_COMMITTEE,
+    ALTITUDE_COMMITTEE,
+    BARO_PRESSURE_COMMITTEE,
+    GRADE_COMMITTEE,
+)
+
+
+def test_future_committees_are_registered_in_committees_tuple() -> None:
+    for committee in _FUTURE_COMMITTEES:
+        assert committee in COMMITTEES
+
+
+def test_future_committees_are_non_trainable() -> None:
+    non_trainable = non_trainable_committee_outputs()
+    for committee in _FUTURE_COMMITTEES:
+        assert committee.output in non_trainable
+
+
+def test_future_committees_are_no_ops_on_todays_imu_less_frame() -> None:
+    """No hardware exists yet — a real stored session's wide frame has none
+    of these member columns, so every future committee must be silently
+    skipped (no output column at all), same as SPEED_COMMITTEE would be
+    without a gps:speed column."""
+    frame = pd.DataFrame([{"obd:SPEED": 40.0, "obd:RPM": 1500.0, "gps:speed": 41.0}])
+    out = append_committee_residuals(frame, committees=COMMITTEES)
+    for committee in _FUTURE_COMMITTEES:
+        assert committee.output not in out.columns
+
+
+def test_longitudinal_accel_committee_activates_once_members_appear() -> None:
+    """Synthetic-data proof that these declarations are real, working
+    committees, not just inert placeholders — once the named columns exist
+    (however they get there — Phase 2b hardware, later code), the same
+    generic append_committee_residuals path scores them with zero further
+    changes."""
+    frame = pd.DataFrame(
+        [
+            {
+                "imu:ACCEL_LON": 0.30,
+                "derived:OBD_SPEED_ACCEL_G": 0.28,
+                "derived:GPS_SPEED_ACCEL_G": 0.05,
+            }
+        ]
+    )
+    out = append_committee_residuals(frame, committees=COMMITTEES)
+    assert out[LONGITUDINAL_ACCEL_COMMITTEE.output].iloc[0] == pytest.approx(0.25, abs=1e-9)
+
+
+def test_grade_committee_three_member_spread() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "derived:BARO_ALT_RATE": 1.0,
+                "derived:GPS_VERTICAL_SPEED": 1.2,
+                "derived:IMU_VERTICAL_ACCEL_INTEGRAL": 0.9,
+            }
+        ]
+    )
+    out = append_committee_residuals(frame, committees=COMMITTEES)
+    assert out[GRADE_COMMITTEE.output].iloc[0] == pytest.approx(0.3, abs=1e-9)

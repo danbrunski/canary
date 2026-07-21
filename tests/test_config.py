@@ -77,6 +77,25 @@ def test_pi_example_yaml_loads():
     assert config.daemon.control_token_env == "CANARY_CONTROL_TOKEN"
 
 
+def test_imu_config_defaults_disabled():
+    """2a.2 (hard pre-made decision): ``ImuConfig.source`` defaults
+    ``disabled`` — no hardware exists yet, so a config that never mentions
+    ``hardware.imu`` must still load and behave exactly as before."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    assert config.hardware.imu.source == "disabled"
+    assert config.hardware.imu.enabled is False
+    assert config.hardware.imu.sample_rate_hz == 100
+
+
+def test_imu_config_enabled_mirrors_source():
+    from src.config import ImuConfig
+
+    assert ImuConfig(source="bno055").enabled is True
+    assert ImuConfig(source="mpu6050").enabled is True
+    assert ImuConfig(source="icm20948").enabled is True
+    assert ImuConfig().enabled is False
+
+
 def test_unknown_top_level_key_rejected(tmp_path: Path):
     bad = tmp_path / "bad.yaml"
     bad.write_text(EXAMPLE_YAML.read_text() + "\nbogus_section: 1\n")
