@@ -1,0 +1,10 @@
+{
+  // Standalone type-check for the Playwright suite (run via `typecheck:e2e`,
+  // not part of the app's `tsc -b` reference graph). Inherits the app's DOM
+  // libs + strictness; adds Node types for `process.env` in the config.
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["e2e", "playwright.config.ts"]
+}

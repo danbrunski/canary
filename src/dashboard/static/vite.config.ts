@@ -41,6 +41,10 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Unit/component tests live under src/. The Playwright e2e specs
+    // (e2e/*.spec.ts) use @playwright/test, not vitest — keep them out of
+    // this runner or it tries to execute them and fails on the foreign API.
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
     setupFiles: ["./src/test-setup.ts"],
     // Don't load assets / css through the test harness — they're not
     // exercised in unit tests and pulling them in slows the suite.
