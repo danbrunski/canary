@@ -253,12 +253,15 @@ backend features), plus the unchecked tail of
   broken offline — with the session-library search/browse panel itself
   still a pre-existing placeholder, unchanged. 6.39 (full Pi round-trip
   proof) correctly left blocked-overnight.
-- [ ] **Q21 — corpus + capture hygiene: implementation-tasks 6.19
-  (proprietary-protocol regression corpus from stored Mode 22/DTC
-  exchanges) + data-collection-plan §4 Canable-native broad DID sweep
-  CLI (bench verify blocked) + implementation-tasks 8.6 record-arming
-  gate (design doc + config-gated implementation, default off, live
-  verify blocked).**
+- [x] **Q21 — corpus + capture hygiene** — landed (commit `7f4cd9f`):
+  6.19 protocol regression corpus built from real captured bytes
+  (independently byte-verified against stored sessions, not
+  fabricated); the Canable-native DID sweep CLI turned out already
+  landed weeks ago — checked off a stale checkbox rather than
+  duplicating work; 8.6 record-arming gate, config-gated and default
+  off, design doc answering its open questions. No live/bench/truck
+  verification attempted for any of the three, per their explicit
+  blocked-overnight annotations.
 - [ ] **Q22 — imu-gps-integration.md Phase 2a** (imu source plumbing,
   ImuConfig, decimation, imu_frame math, offline autotagger — GPS-only
   tags must work on existing sessions now — live tag hook, segmenter
