@@ -281,9 +281,12 @@ as separate stages; a row must pass both.
   it is an operator assertion, and the system should record it as one.
 * **Slow drift vs slow fault are the same shape.** A gradually widening
   band could be benign wear or an incipient fault. The override's
-  `review_by` and the golden-baseline divergence signal are the only
-  defenses; neither is automatic. This is inherent to unsupervised
-  detection, not a fixable bug.
+  `review_by` and the golden-baseline divergence signal are the main
+  defenses; golden-anchored disposition baselines (Task 3.7) add a
+  third, automatic one — a persistent shift quarantines against the
+  frozen reference instead of redefining the window-local median. But
+  *deciding* whether the shift is wear or fault remains an operator
+  call. This is inherent to unsupervised detection, not a fixable bug.
 * **Disposition is per-channel but faults are multivariate.** The override
   is authored on the obvious channel; the multivariate detector carries
   the rest by training on the recentered data. Whether that is sufficient
@@ -354,6 +357,66 @@ is added against the post-rename scheme and obeys the 4.2 σ-floor schema
 rule; ECOD (2.6), if adopted, is batch-fit like IF, so the
 rolling-window-rebuild mechanism covers it unchanged.
 
+## Robustness amendments (2026-07-20 review)
+
+A review pass over the landed Phases 1–2 and the in-flight Phase 3
+surfaced five weaknesses. None undermine the core design; each is
+encoded as a checklist task below (1.6, 3.6, 3.7) or an amendment to an
+existing task (3.5).
+
+1. **The disposition baseline is self-referential — it cannot catch the
+   slow fault it was designed for.** `classify_dispositions` computes
+   median ± scaled-MAD *from the same window being screened*. Robust
+   statistics resist outliers, not persistent shifts: a slowly-worsening
+   fault present in most of a sliding window moves the median with it
+   and classifies **Accept** — exactly the central-danger scenario. As
+   landed, the screen catches transient excursions only. Fix: once a
+   golden run exists (3.4), anchor the per-`(channel, mode)` baseline
+   statistics to the golden run's input sessions — frozen with the
+   golden declaration — instead of the candidate window (Task 3.7).
+   Until then, treat disposition output as a transient-excursion screen,
+   not a slow-drift guard.
+
+2. **Quarantine "train: No" is not yet enforced, and the promotion
+   gate's power is bounded by the synthetic fault suite.** `retrain.py`
+   currently *records* the disposition summary but still trains on
+   Quarantine rows. Until row exclusion lands (3.6), the promotion gate
+   carries the entire guard load — and its recall check runs on
+   *injected* faults, so a novel real fault outside the suite's fault
+   families can be learned and still pass. Two consequences: (a) wire
+   the exclusion the table already specs; (b) give the gate a direct
+   contamination signal the Reject-dominance proxy does not cover — the
+   **quarantine-fraction trend** across consecutive scheduled runs (a
+   sustained rise = the window's health is shifting under the model).
+   Both in Task 3.6.
+
+3. **The gate's "FP/hr" is really alert-rate/hr on an unlabeled
+   holdout.** If the window genuinely contains a developing fault, the
+   holdout does too, and *correct* alerts count against the FP budget —
+   the gate can block a challenger precisely for detecting the fault.
+   Keep the check (the symmetric collapse-vs-flood framing is right),
+   but name it honestly and treat a budget breach as "operator inspects
+   the alerts", not an automatic quality verdict (3.5 amendment).
+
+4. **Golden re-declaration is a routine lifecycle event, not an anomaly
+   response.** Legitimate seasonal drift (winter intake temps, fuel
+   blends) will eventually push any honest challenger outside
+   agreement-with-golden tolerance. The runbook (3.5) must document
+   periodic golden re-declaration as expected maintenance — otherwise
+   the gate quietly becomes a ratchet against the very adaptation online
+   training exists to provide.
+
+5. **Median/MAD is meaningless for discrete/bitmask channels.** The 1.5
+   corpus run showed the Quarantine tier dominated by engine-state bytes
+   and steering bitmasks whose band collapses to a point. The screen
+   needs channel-type awareness before its Quarantine output is
+   actionable (Task 1.6).
+
+Minor, noted without a task: the scheduler's real cadence is
+`interval_seconds + job duration` (it awaits the job before sleeping) —
+harmless at hour-scale intervals, but don't read `interval_seconds` as a
+wall-clock period when tuning.
+
 ## Implementation checklist
 
 Task-level truth for the overnight queue lives here. Phases map 1:1 to
@@ -411,6 +474,16 @@ verified against, as amended by the validity check above.
   (engine-state bytes, steering signals) whose median/MAD band
   collapses to a point — flagged for operator review rather than
   treated as uniformly actionable.
+- [ ] **1.6 — Channel-type-aware disposition screen.** (Amendment 5.)
+  Handle discrete/bitmask channels (engine-state bytes, steering
+  signals) categorically in `classify_dispositions` instead of via
+  median/MAD — a point-collapsed band manufactures Quarantine floods
+  that bury the continuous-channel signal. A discrete channel's
+  baseline is its observed value *set*: membership → Accept, an
+  unseen value may still Quarantine. Detection of "discrete" should be
+  data-driven (small unique-value count / integer-only), not a
+  hand-listed channel roster. Re-run the 1.5 corpus report after; the
+  Quarantine total should collapse to the continuous-channel residue.
 
 ### Phase 2 — directional overrides surfaced
 
@@ -479,4 +552,31 @@ verified against, as amended by the validity check above.
   metric is computed and surfaced ("normal has drifted — why?").
   Declaring the actual golden run is an operator morning task.
 - [ ] **3.5 — Docs + runbook.** Online-training runbook: enable,
-  observe, promote, roll back, re-declare golden.
+  observe, promote, roll back, re-declare golden. Amendments: document
+  periodic golden re-declaration as *routine seasonal maintenance*, not
+  an anomaly response (amendment 4), and document the gate's held-out
+  FP/hr check as an **alert-rate** budget on unlabeled data — a breach
+  means "inspect the alerts; some may be true positives on a genuinely
+  degrading window", not automatically "the challenger is worse"
+  (amendment 3).
+- [ ] **3.6 — Enforce Quarantine exclusion + quarantine-fraction trend.**
+  (Amendment 2.) Make the disposition table's "Quarantine → train: No"
+  real: mask Quarantine-tier cells out of the training matrix in
+  `retrain.py` (cell-level, through the same gap machinery as the
+  Reject tier — never row drops), with per-channel excluded counts in
+  `TrainingRunRecord.dispositions`. Add a quarantine-fraction trend
+  check to the promotion gate: compare the candidate run's quarantine
+  fraction against recent scheduled runs' (from the ledger); a
+  sustained rise blocks promotion and surfaces "window health is
+  shifting" rather than letting the gate rely solely on
+  injected-fault recall. Tests: a fault-bearing synthetic window shows
+  rows excluded and the trend check trips.
+- [ ] **3.7 — Golden-anchored disposition baselines.** (Amendment 1;
+  after 3.4.) When a golden run is declared, freeze its per-`(channel,
+  operating_mode)` baseline statistics (median/MAD, and the 1.6
+  value-sets) alongside the declaration, and make `classify_dispositions`
+  screen candidate windows against *those* rather than window-local
+  statistics — a persistent shift then lands in Quarantine instead of
+  redefining the median. Window-local remains the documented fallback
+  when no golden exists. Re-declaring golden re-freezes the baselines;
+  the runbook (3.5) notes this is part of the same operator action.
