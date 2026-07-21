@@ -8,7 +8,11 @@ import {
   statusStripClass,
   statusValueClass,
 } from "../styles";
-import type { AnomalyEvent, StatusResponse } from "../types";
+import type {
+  AcceptedBaselineOverrideSummary,
+  AnomalyEvent,
+  StatusResponse,
+} from "../types";
 import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
 
 interface StatusStripProps {
@@ -37,9 +41,11 @@ export function StatusStrip({ status, channels, events }: StatusStripProps) {
   const recent = mostRecentEvent(events, now);
   const health = status?.health ?? null;
   const counters = status?.emitter_counters ?? null;
+  const overrides = status?.accepted_baseline_overrides ?? null;
+  const [overridesOpen, setOverridesOpen] = useState(false);
 
   return (
-    <div className={statusStripClass} aria-label="System status">
+    <div className={cn(statusStripClass, "relative")} aria-label="System status">
       <StatusItem label="data">
         <span className={cn(statusValueClass, stale && "text-bad")}>
           {freshnessMs === null
@@ -114,9 +120,90 @@ export function StatusStrip({ status, channels, events }: StatusStripProps) {
           {modelSummary(status)}
         </span>
       </StatusItem>
+
+      {overrides && (
+        <StatusItem label="overrides">
+          <button
+            type="button"
+            className={cn(statusValueClass, "underline decoration-dotted")}
+            aria-expanded={overridesOpen}
+            onClick={() => setOverridesOpen((open) => !open)}
+          >
+            {overrides.active} active
+            {overrides.overrides.some((o) => o.expired) && (
+              <span className="text-warn"> · expired</span>
+            )}
+          </button>
+          {overridesOpen && (
+            <OverridesDropdown overrides={overrides.overrides} />
+          )}
+        </StatusItem>
+      )}
     </div>
   );
 }
+
+/** Expandable per-override provenance (2.3) — "N accepted-baseline
+ *  overrides active" is always visible above; this is the detail behind
+ *  it, anchored under the strip so it never displaces the always-visible
+ *  spine layout. Expired overrides are flagged rather than hidden — the
+ *  doc is explicit that a lapsed override needs re-confirmation, not
+ *  silent continuation. */
+function OverridesDropdown({
+  overrides,
+}: {
+  overrides: AcceptedBaselineOverrideSummary[];
+}) {
+  if (overrides.length === 0) {
+    return (
+      <div className={overridesDropdownClass}>
+        <p className="m-0 text-fg-faint">No accepted-baseline overrides declared.</p>
+      </div>
+    );
+  }
+  return (
+    <div className={overridesDropdownClass}>
+      {overrides.map((o) => (
+        <div
+          key={`${o.target}:${o.operating_mode ?? ""}`}
+          className="flex flex-col gap-0.5 border-b border-border-soft py-1.5 last:border-b-0 last:pb-0"
+        >
+          <div className="flex items-center gap-2">
+            <span className="font-num text-fg">{o.target}</span>
+            {o.operating_mode && (
+              <span className="text-fg-faint">({o.operating_mode})</span>
+            )}
+            {o.expired && (
+              <span className="text-warn">needs re-confirmation</span>
+            )}
+          </div>
+          <p className="m-0 text-fg-dim">{o.reason}</p>
+          <p className="m-0 text-fg-faint">
+            {o.declared_by} · declared {o.declared_at} · review by {o.review_by}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const overridesDropdownClass = [
+  "absolute",
+  "left-0",
+  "top-full",
+  "z-10",
+  "mt-1",
+  "w-full",
+  "max-w-[28rem]",
+  "rounded-[8px]",
+  "border",
+  "border-border-soft",
+  "bg-elev",
+  "px-3",
+  "py-2",
+  "text-[0.78rem]",
+  "shadow-lg",
+].join(" ");
 
 function StatusItem({
   label,

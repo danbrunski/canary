@@ -199,6 +199,7 @@ class AnomalyEvent(BaseModel):
         expected: float | None,
         deviation: float | None,
         operating_mode: str | None = None,
+        override_reason: str | None = None,
     ) -> AnomalyEvent:
         """Build a behavior/physics residual event (Phase 7.4).
 
@@ -209,7 +210,39 @@ class AnomalyEvent(BaseModel):
         + band). ``score``/``threshold`` use the same normalized-severity
         contract as the fused/per-source events so the tuner and dashboard
         treat it uniformly.
+
+        ``override_reason`` (2.2, online-training-strategy.md Phase 2) is
+        the active accepted-baseline override's ``provenance.reason`` when
+        this tick's band came from a recentered/one-sided override rather
+        than the model's own static config — surfaced in ``detail`` (not a
+        new event shape) so a silenced-then-worsening channel always reads
+        back *why* it has a sharpened, one-sided expectation instead of a
+        symmetric one.
         """
+        detail: dict[str, Any] = {
+            "cause": behavior_cause(
+                model=model,
+                channel=channel,
+                severity_band=severity_band,
+                actual=actual,
+                expected=expected,
+                deviation=deviation,
+            ),
+            "model": model,
+            "kind": kind,
+            "behavior_residuals": [
+                {
+                    "name": model,
+                    "channel": channel,
+                    "severity": severity_band,
+                    "actual": actual,
+                    "expected": expected,
+                    "deviation": deviation,
+                }
+            ],
+        }
+        if override_reason is not None:
+            detail["override_reason"] = override_reason
         return cls(
             timestamp=timestamp,
             source="behavior",
@@ -218,28 +251,7 @@ class AnomalyEvent(BaseModel):
             threshold=threshold,
             affected_channels=(channel,),
             operating_mode=operating_mode,
-            detail={
-                "cause": behavior_cause(
-                    model=model,
-                    channel=channel,
-                    severity_band=severity_band,
-                    actual=actual,
-                    expected=expected,
-                    deviation=deviation,
-                ),
-                "model": model,
-                "kind": kind,
-                "behavior_residuals": [
-                    {
-                        "name": model,
-                        "channel": channel,
-                        "severity": severity_band,
-                        "actual": actual,
-                        "expected": expected,
-                        "deviation": deviation,
-                    }
-                ],
-            },
+            detail=detail,
         )
 
     @classmethod

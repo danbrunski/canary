@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import math
+from datetime import date
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from src.decode.accepted_baselines import (
+    AcceptedBaselineOverride,
+    DirectionalBand,
+    Provenance,
+)
 from src.decode.behavior_decoder import (
     DEVIATION_COLUMN_PREFIX,
     append_deviation_columns,
     deviation,
+    deviation_for_override,
     expected_value,
     expected_value_column,
 )
@@ -398,3 +405,173 @@ def test_sigma_floor_does_not_revive_off_map_points() -> None:
     )
     res = deviation(model, 99.0, {"obd:RPM": 2000.0, "obd:MAF": 20.0})  # count=0 cell
     assert res is not None and res.severity == "ok" and res.expected is None
+
+
+# ---------------------------------------------------------------------------
+# 2.1 — directional deviation kind
+# ---------------------------------------------------------------------------
+
+
+def test_directional_grades_worse_side_and_ignores_better_side() -> None:
+    # expected(t=100) = 40.0 (coolant_warmup fixture: 25 + 0.15*t)
+    model = _make_coolant_model(
+        DeviationConfig(
+            kind="directional",
+            tolerance=2.0,
+            worse_direction="positive",
+            warning_band=5.0,
+            critical_band=10.0,
+        )
+    )
+    point = {"obd:RUN_TIME": 100.0}
+    # within tolerance (delta=1) → ok
+    assert deviation(model, 41.0, point).severity == "ok"
+    # worse side, past warning (delta=8) → warning
+    assert deviation(model, 48.0, point).severity == "warning"
+    # worse side, past critical (delta=15) → critical
+    assert deviation(model, 55.0, point).severity == "critical"
+    # better side (delta=-20) — better_direction: ignore never alerts,
+    # no matter how far
+    assert deviation(model, 20.0, point).severity == "ok"
+
+
+def test_directional_worse_direction_negative() -> None:
+    model = _make_coolant_model(
+        DeviationConfig(
+            kind="directional",
+            tolerance=2.0,
+            worse_direction="negative",
+            warning_band=5.0,
+            critical_band=10.0,
+        )
+    )
+    point = {"obd:RUN_TIME": 100.0}
+    # worsening is now actual < expected: delta=-8 → warning
+    assert deviation(model, 32.0, point).severity == "warning"
+    # improving is now actual > expected — ignored regardless of magnitude
+    assert deviation(model, 60.0, point).severity == "ok"
+
+
+def test_directional_std_scaled_uses_local_std_and_floor() -> None:
+    model = _make_coolant_model(
+        DeviationConfig(
+            kind="directional",
+            tolerance=1.0,
+            worse_direction="positive",
+            warning_band=3.0,
+            critical_band=6.0,
+            std_scaled=True,
+            sigma_floor=0.5,
+            reference_std=0.5,
+        )
+    )
+    point = {"obd:RUN_TIME": 100.0}
+    # delta=8 / std(0.5) = 16σ → critical
+    assert deviation(model, 48.0, point).severity == "critical"
+
+
+# ---------------------------------------------------------------------------
+# 2.2 — override → alert path
+# ---------------------------------------------------------------------------
+
+
+def _override(**overrides: object) -> AcceptedBaselineOverride:
+    band = DirectionalBand(
+        tolerance=3.0, worse_direction="positive", worse_warning=3.0, worse_critical=6.0
+    )
+    provenance = Provenance(
+        declared_by="dan",
+        declared_at=date(2026, 5, 17),
+        review_by=date(2026, 11, 17),
+        reason="~190k mi, known weak #3 injector; owner not replacing",
+    )
+    defaults: dict[str, object] = {
+        "channel": None,
+        "behavior_model": "coolant_warmup",
+        "accepted_center": None,
+        "band": band,
+        "provenance": provenance,
+    }
+    defaults.update(overrides)
+    return AcceptedBaselineOverride.model_validate(defaults)
+
+
+def test_behavior_model_override_recenters_band_not_center() -> None:
+    # No static deviation config at all — the override supplies the entire
+    # (one-sided) band; the center still comes from the model's own fitted
+    # expected_value (40.0 at t=100), never from the override.
+    model = _make_coolant_model(None)
+    point = {"obd:RUN_TIME": 100.0}
+    override = _override()
+
+    assert deviation(model, 41.0, point, override=override).severity == "ok"  # within tolerance
+    res = deviation(model, 43.5, point, override=override)  # delta=3.5 → warning
+    assert res.severity == "warning"
+    assert res.expected == pytest.approx(40.0)  # center unchanged by the override
+    assert deviation(model, 47.0, point, override=override).severity == "critical"  # delta=7
+    # improving direction (delta=-10) — never alerts
+    assert deviation(model, 30.0, point, override=override).severity == "ok"
+
+
+def test_behavior_model_override_ignores_accepted_center_if_set() -> None:
+    # accepted_center only applies to raw-channel overrides (doc, 2.1); a
+    # behavior_model-targeted override's to_deviation_config() must drop it
+    # even if a caller somehow set one, so the center always stays the
+    # model's own surface fit.
+    model = _make_coolant_model(None)
+    point = {"obd:RUN_TIME": 100.0}
+    override = _override(accepted_center=999.0)
+    res = deviation(model, 43.5, point, override=override)
+    assert res.expected == pytest.approx(40.0)
+    assert res.severity == "warning"
+
+
+def test_no_override_falls_back_to_symmetric_config_unchanged() -> None:
+    # Symmetric configs stay unchanged when no override is passed.
+    model = _make_coolant_model(
+        DeviationConfig(kind="absolute", warning_band=5.0, critical_band=15.0)
+    )
+    point = {"obd:RUN_TIME": 100.0}
+    assert deviation(model, 47.0, point).severity == "warning"
+    assert deviation(model, 47.0, point, override=None).severity == "warning"
+
+
+def test_channel_override_grades_directly_against_accepted_center() -> None:
+    # The doc's own worked example: STFT B1 accepted at +12%, ±3 wander,
+    # positive worsening, warning at +3/critical at +6 past center.
+    override = _override(channel="obd:SHORT_FUEL_TRIM_1", behavior_model=None, accepted_center=12.0)
+    assert deviation_for_override(override, 13.0).severity == "ok"  # within tolerance
+    res = deviation_for_override(override, 16.0)  # delta=4 → warning
+    assert res.severity == "warning"
+    assert res.expected == pytest.approx(12.0)
+    assert res.deviation == pytest.approx(4.0)
+    assert deviation_for_override(override, 19.0).severity == "critical"  # delta=7
+    # improving toward 0% — never alerts, however far
+    assert deviation_for_override(override, 5.0).severity == "ok"
+
+
+def test_channel_override_missing_actual_is_ok_with_no_deviation() -> None:
+    override = _override(channel="obd:SHORT_FUEL_TRIM_1", behavior_model=None, accepted_center=12.0)
+    res = deviation_for_override(override, None)
+    assert res.deviation is None
+    assert res.severity == "ok"
+
+
+def test_expired_override_is_inert_via_active_override_for() -> None:
+    """An override past review_by is inert (2.2) — active_override_for
+    already returns None for it, so the caller falls back to the model's
+    own (here: no) deviation config, never applying a stale recentering."""
+    from src.decode.accepted_baselines import AcceptedBaselines
+
+    model = _make_coolant_model(None)
+    point = {"obd:RUN_TIME": 100.0}
+    baselines = AcceptedBaselines(schema_version=1, overrides=[_override()])
+    live_override = baselines.active_override_for(
+        "coolant_warmup",
+        None,
+        today=date(2026, 12, 1),  # past review_by
+    )
+    assert live_override is None
+    # delta=15 would be critical under the override's band; with no active
+    # override and no static deviation config, it's "ok" (model is silent).
+    assert deviation(model, 55.0, point, override=live_override).severity == "ok"

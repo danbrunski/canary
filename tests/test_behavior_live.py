@@ -7,6 +7,7 @@ deviation/severity/mode-gating math, and ``GET /models/behavior/live``.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,6 +22,12 @@ from src.dashboard.behavior_live import (
     TRAIL_MAXLEN,
     BehaviorLiveState,
     BehaviorObservation,
+)
+from src.decode.accepted_baselines import (
+    AcceptedBaselineOverride,
+    AcceptedBaselines,
+    DirectionalBand,
+    Provenance,
 )
 from src.decode.behavior_models import (
     Axis1D,
@@ -161,6 +168,7 @@ def _source(model: BehaviorModel1D, point: dict[str, object]) -> SimpleNamespace
     return SimpleNamespace(
         behavior_models=BehaviorModels(schema_version=1, models=[model]),
         latest_operating_point=point,
+        accepted_baselines=None,
     )
 
 
@@ -202,15 +210,212 @@ def test_observe_behavior_mode_gated_does_not_speak() -> None:
 
 def test_observe_behavior_noop_without_models_or_point() -> None:
     state = BehaviorLiveState()
-    _observe_behavior(SimpleNamespace(behavior_models=None, latest_operating_point={}), state)
+    _observe_behavior(
+        SimpleNamespace(behavior_models=None, latest_operating_point={}, accepted_baselines=None),
+        state,
+    )
     _observe_behavior(
         SimpleNamespace(
             behavior_models=BehaviorModels(schema_version=1, models=[_poly_model()]),
             latest_operating_point=None,
+            accepted_baselines=None,
         ),
         state,
     )
     assert state.snapshot()["observed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 2.2 — accepted-baseline override consulted in the live overlay
+# ---------------------------------------------------------------------------
+
+
+def _behavior_model_override(**overrides: object) -> AcceptedBaselineOverride:
+    defaults: dict[str, object] = {
+        "channel": None,
+        "behavior_model": "coolant_warmup",
+        "accepted_center": None,
+        "band": DirectionalBand(
+            tolerance=3.0, worse_direction="positive", worse_warning=3.0, worse_critical=6.0
+        ),
+        "provenance": Provenance(
+            declared_by="dan",
+            declared_at=date(2026, 5, 17),
+            review_by=date(2026, 11, 17),
+            reason="known thermostat lag; owner not replacing",
+        ),
+    }
+    defaults.update(overrides)
+    return AcceptedBaselineOverride.model_validate(defaults)
+
+
+def test_observe_behavior_consults_active_override() -> None:
+    """An active override recenters the *band* (not the center) and grades
+    directionally — Δ +10 at t=100 is "critical" under the model's own
+    symmetric absolute config (5/15... actually within it, "warning"), but
+    the override's one-sided band (tolerance 3, warning past +3, critical
+    past +6) grades the same Δ +10 as "critical"."""
+    state = BehaviorLiveState()
+    point = {
+        "timestamp": pd.Timestamp("2026-05-17T00:00:00Z"),
+        "operating_mode": "idle",
+        "obd:RUN_TIME": 100.0,
+        "obd:COOLANT_TEMP": 50.0,  # expected 40 → Δ +10
+    }
+    baselines = AcceptedBaselines(schema_version=1, overrides=[_behavior_model_override()])
+    source = _source(_poly_model(), point)
+    source.accepted_baselines = baselines
+
+    residuals = _observe_behavior(source, state)
+
+    assert len(residuals) == 1
+    assert residuals[0].severity == "critical"  # Δ 10 >= worse_critical 6
+    assert residuals[0].override_reason == "known thermostat lag; owner not replacing"
+
+
+def _channel_override(**overrides: object) -> AcceptedBaselineOverride:
+    # The doc's own flagship worked example (online-training-strategy.md,
+    # "Directional overrides — the schema gap"): a raw-channel target, no
+    # behavior_model in the loop.
+    defaults: dict[str, object] = {
+        "channel": "obd:SHORT_FUEL_TRIM_1",
+        "behavior_model": None,
+        "operating_mode": "idle",
+        "accepted_center": 12.0,
+        "band": DirectionalBand(
+            tolerance=3.0, worse_direction="positive", worse_warning=3.0, worse_critical=6.0
+        ),
+        "provenance": Provenance(
+            declared_by="dan",
+            declared_at=date(2026, 5, 17),
+            review_by=date(2026, 11, 17),
+            reason="~190k mi, known weak #3 injector; owner not replacing",
+        ),
+    }
+    defaults.update(overrides)
+    return AcceptedBaselineOverride.model_validate(defaults)
+
+
+def test_observe_behavior_consults_active_channel_override() -> None:
+    """A ``channel``-targeted override (no behavior_model/surface in the
+    loop) is graded directly off `deviation_for_override` — the worsening
+    side (past center + worse_warning/critical) trips a residual carrying
+    the override's `reason`, mirroring the `behavior_model` branch."""
+    state = BehaviorLiveState()
+    point = {
+        "timestamp": pd.Timestamp("2026-05-17T00:00:00Z"),
+        "operating_mode": "idle",
+        "obd:SHORT_FUEL_TRIM_1": 19.0,  # center 12 → Δ +7 ≥ worse_critical 6
+    }
+    baselines = AcceptedBaselines(schema_version=1, overrides=[_channel_override()])
+    source = SimpleNamespace(
+        behavior_models=None,
+        latest_operating_point=point,
+        accepted_baselines=baselines,
+    )
+
+    residuals = _observe_behavior(source, state)
+
+    assert len(residuals) == 1
+    r = residuals[0]
+    assert r.channel == "obd:SHORT_FUEL_TRIM_1"
+    assert r.severity == "critical"
+    assert r.mode_match is True
+    assert r.override_reason == "~190k mi, known weak #3 injector; owner not replacing"
+    # No behavior_model/surface backs a raw channel — the "you are here"
+    # overlay stays surface-model-shaped and doesn't grow a phantom entry.
+    assert state.snapshot()["models"] == {}
+
+
+def test_observe_behavior_channel_override_within_tolerance_is_ok() -> None:
+    """A value inside the tolerance band grades ``"ok"`` — same override,
+    same channel, no alert-worthy deviation."""
+    state = BehaviorLiveState()
+    point = {
+        "timestamp": pd.Timestamp("2026-05-17T00:00:00Z"),
+        "operating_mode": "idle",
+        "obd:SHORT_FUEL_TRIM_1": 14.0,  # center 12 → Δ +2 < tolerance 3
+    }
+    baselines = AcceptedBaselines(schema_version=1, overrides=[_channel_override()])
+    source = SimpleNamespace(
+        behavior_models=None,
+        latest_operating_point=point,
+        accepted_baselines=baselines,
+    )
+
+    residuals = _observe_behavior(source, state)
+
+    assert len(residuals) == 1
+    assert residuals[0].severity == "ok"
+    assert residuals[0].override_reason == "~190k mi, known weak #3 injector; owner not replacing"
+
+
+def test_observe_behavior_channel_override_skips_wrong_mode() -> None:
+    """The override is scoped to ``idle``; a ``cruise`` tick has no active
+    override for this channel (`active_override_for` returns ``None``) —
+    skip cleanly rather than grading against nothing."""
+    state = BehaviorLiveState()
+    point = {
+        "timestamp": pd.Timestamp("2026-05-17T00:00:00Z"),
+        "operating_mode": "cruise",
+        "obd:SHORT_FUEL_TRIM_1": 19.0,
+    }
+    baselines = AcceptedBaselines(schema_version=1, overrides=[_channel_override()])
+    source = SimpleNamespace(
+        behavior_models=None,
+        latest_operating_point=point,
+        accepted_baselines=baselines,
+    )
+
+    assert _observe_behavior(source, state) == []
+
+
+def test_observe_behavior_channel_override_missing_channel_skips_cleanly() -> None:
+    """The overridden channel isn't in this tick's row (not currently
+    polled/decoded) — skip, don't crash or emit garbage."""
+    state = BehaviorLiveState()
+    point = {
+        "timestamp": pd.Timestamp("2026-05-17T00:00:00Z"),
+        "operating_mode": "idle",
+        # obd:SHORT_FUEL_TRIM_1 absent this tick.
+    }
+    baselines = AcceptedBaselines(schema_version=1, overrides=[_channel_override()])
+    source = SimpleNamespace(
+        behavior_models=None,
+        latest_operating_point=point,
+        accepted_baselines=baselines,
+    )
+
+    assert _observe_behavior(source, state) == []
+
+
+def test_observe_behavior_ignores_expired_override() -> None:
+    """Past review_by, active_override_for already returns None — the model
+    grades against its own static config as if the override never existed,
+    and override_reason is None (nothing to surface)."""
+    state = BehaviorLiveState()
+    point = {
+        "timestamp": pd.Timestamp("2026-05-17T00:00:00Z"),
+        "operating_mode": "idle",
+        "obd:RUN_TIME": 100.0,
+        "obd:COOLANT_TEMP": 50.0,  # expected 40 → Δ +10 → "warning" (absolute 5/15)
+    }
+    expired = _behavior_model_override(
+        provenance=Provenance(
+            declared_by="dan",
+            declared_at=date(2020, 1, 1),
+            review_by=date(2020, 6, 1),
+            reason="long-expired",
+        )
+    )
+    baselines = AcceptedBaselines(schema_version=1, overrides=[expired])
+    source = _source(_poly_model(), point)
+    source.accepted_baselines = baselines
+
+    residuals = _observe_behavior(source, state)
+
+    assert residuals[0].severity == "warning"  # falls back to the static absolute config
+    assert residuals[0].override_reason is None
 
 
 # ---------------------------------------------------------------------------

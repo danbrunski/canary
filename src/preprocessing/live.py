@@ -55,6 +55,7 @@ from src.analysis.derived import (
 )
 from src.can_ids import parse_can_channel
 from src.config import CanaryConfig
+from src.decode.accepted_baselines import AcceptedBaselines
 from src.decode.behavior_models import BehaviorModels
 from src.decode.bindings import Bindings, Signal
 from src.decode.dids import (
@@ -94,6 +95,12 @@ class LiveFeatureSource:
     config: CanaryConfig
     bindings: Bindings | None = None
     behavior_models: BehaviorModels | None = None
+    #: Active accepted-baseline overrides (2.2, online-training-strategy.md
+    #: Phase 2) — ``None`` means "no accepted_baselines.yaml for this
+    #: profile", identical in effect to an empty document (no override
+    #: ever applies). The daemon's behavior-detector loop consults this via
+    #: ``AcceptedBaselines.active_override_for`` once per model per tick.
+    accepted_baselines: AcceptedBaselines | None = None
     dbc_database: Any | None = None
     did_map: DidMap | None = None
     session: str = "live"

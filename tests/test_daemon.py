@@ -2084,6 +2084,42 @@ async def test_build_live_feature_source_loads_bindings_when_present(
     # And a CAN frame on a known ID decodes.
     source.observe(TelemetryRecord.can(1.0, 0x551, bytes([0x69, 0, 0, 0, 0, 0, 0, 0])))
     assert "decoded:ECM_COOLANT_TEMP" in source.known_channels
+    # 2.2 — accepted_baselines is always populated (a missing file loads as
+    # an empty document, never None), so the behavior detector can always
+    # call `active_override_for` without a null check on the document itself.
+    assert source.accepted_baselines is not None
+
+
+async def test_build_live_feature_source_loads_accepted_baselines_when_present(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    """2.2 — a real accepted_baselines.yaml at the configured path is loaded
+    and its overrides are reachable off the constructed source."""
+    from src.daemon import build_live_feature_source
+
+    baselines_path = tmp_path / "accepted_baselines.yaml"
+    baselines_path.write_text(
+        "schema_version: 1\n"
+        "overrides:\n"
+        "  - behavior_model: coolant_warmup\n"
+        "    band:\n"
+        "      kind: directional\n"
+        "      tolerance: 3.0\n"
+        "      worse_direction: positive\n"
+        "      worse_warning: 3.0\n"
+        "      worse_critical: 6.0\n"
+        "    provenance:\n"
+        "      declared_by: dan\n"
+        "      declared_at: '2026-05-17'\n"
+        "      review_by: '2026-11-17'\n"
+        "      reason: test override\n"
+    )
+    components = build_components(config)
+    source = build_live_feature_source(components, accepted_baselines_path=baselines_path)
+    assert source.accepted_baselines is not None
+    override = source.accepted_baselines.active_override_for("coolant_warmup", None)
+    assert override is not None
+    assert override.provenance.reason == "test override"
 
 
 async def test_drain_feeds_live_source_when_passed(tmp_path: Path) -> None:

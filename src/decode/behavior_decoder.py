@@ -33,6 +33,7 @@ import pandas as pd
 
 from src.analysis.surface_1d import evaluate_1d
 from src.analysis.surface_2d import evaluate_2d
+from src.decode.accepted_baselines import AcceptedBaselineOverride
 from src.decode.behavior_models import (
     BehaviorModel1D,
     BehaviorModel2D,
@@ -107,6 +108,8 @@ def deviation(
     model: BehaviorModel1D | BehaviorModel2D,
     actual: float | None,
     operating_point: Mapping[str, float],
+    *,
+    override: AcceptedBaselineOverride | None = None,
 ) -> DeviationResult:
     """Compute ``actual − expected`` and grade it against the deviation bands.
 
@@ -114,12 +117,54 @@ def deviation(
     ``"critical"`` per the model's ``DeviationConfig``. With no
     ``DeviationConfig`` set, severity is always ``"ok"`` (we still return the
     deviation number for logging).
+
+    ``override`` (2.2, online-training-strategy.md Phase 2) is an active,
+    non-expired ``behavior_model``-targeted ``AcceptedBaselineOverride`` —
+    the caller resolves it via ``AcceptedBaselines.active_override_for``
+    (already ``None`` past ``review_by``, so an expired override is
+    silently inert here exactly as the doc requires). The center is still
+    the model's own fitted ``expected_value`` — an override never
+    recenters a behavior_model target, it only contributes the one-sided
+    band (``override.to_deviation_config()`` replaces the model's own
+    ``deviation`` config for this call only; the persisted model is
+    untouched). ``None`` (no override, or the caller didn't resolve one)
+    grades against the model's own static ``deviation`` config unchanged —
+    the symmetric path's behavior is exactly as before.
     """
     expected = expected_value(model, operating_point)
     if expected is None or actual is None or _scalar(actual) is None:
         return DeviationResult(expected=expected, actual=actual, deviation=None, severity="ok")
     delta = float(actual) - expected
-    severity = _grade_severity(model, operating_point, delta)
+    if override is not None:
+        dev_cfg = override.to_deviation_config()
+        local_std = _local_std(model, operating_point, dev_cfg) if dev_cfg.std_scaled else None
+        severity = _grade_directional(dev_cfg, delta, local_std)
+    else:
+        severity = _grade_severity(model, operating_point, delta)
+    return DeviationResult(expected=expected, actual=actual, deviation=delta, severity=severity)
+
+
+def deviation_for_override(
+    override: AcceptedBaselineOverride,
+    actual: float | None,
+) -> DeviationResult:
+    """Grade a raw-channel override directly against ``accepted_center``
+    (2.2) — there is no fitted surface for a raw channel, so this bypasses
+    ``expected_value``/``BehaviorModel`` entirely; ``accepted_center`` (the
+    schema requires it for a ``channel`` target) stands in as ``expected``.
+
+    Caller resolves ``override`` via ``AcceptedBaselines.active_override_for``
+    first (already ``None`` past ``review_by``) — there's nothing to grade
+    against once it's expired, same as the ``deviation()`` behavior_model
+    path.
+    """
+    expected = override.accepted_center
+    a = _scalar(actual)
+    if expected is None or a is None:
+        return DeviationResult(expected=expected, actual=actual, deviation=None, severity="ok")
+    delta = a - expected
+    dev_cfg = override.to_deviation_config()
+    severity = _grade_directional(dev_cfg, delta, local_std=None)
     return DeviationResult(expected=expected, actual=actual, deviation=delta, severity=severity)
 
 
@@ -262,6 +307,9 @@ def _grade_severity(
     dev_cfg = model.deviation
     if dev_cfg is None:
         return "ok"
+    if dev_cfg.kind == "directional":
+        local_std = _local_std(model, operating_point, dev_cfg) if dev_cfg.std_scaled else None
+        return _grade_directional(dev_cfg, delta, local_std)
 
     score = _deviation_score(model, operating_point, delta, dev_cfg)
     if score is None:
@@ -269,6 +317,49 @@ def _grade_severity(
     # Bands are inclusive lower-bounds: ``score >= band`` → that severity.
     # "score exactly at the warning_band" should already be a warning; the
     # alternative (>) makes the threshold semantics fiddly to reason about.
+    if dev_cfg.critical_band is not None and score >= dev_cfg.critical_band:
+        return "critical"
+    if dev_cfg.warning_band is not None and score >= dev_cfg.warning_band:
+        return "warning"
+    return "ok"
+
+
+def _grade_directional(
+    dev_cfg: DeviationConfig,
+    delta: float,
+    local_std: float | None,
+) -> Severity:
+    """Grade a signed, already-centered ``delta`` against a directional band
+    (2.1/2.2). ``delta`` must already be ``actual − center`` — the model's
+    own ``expected_value`` for a behavior_model target, or
+    ``accepted_center`` for a raw-channel one; this function doesn't care
+    which, it only needs the sign.
+
+    ``worse_direction`` picks the sign that counts as "worsening"; anything
+    within ``tolerance`` of center, in *either* direction, is ``"ok"`` — and
+    so is anything past tolerance in the *improving* direction
+    (``better_direction: ignore`` is the only value today, and this is what
+    implements it: a negative worsening-signed score is always ``<=
+    tolerance`` since ``tolerance >= 0``). Past tolerance on the worse side,
+    grades ``warning``/``critical`` directly off ``warning_band``/
+    ``critical_band`` — the same "score >= band" convention every other
+    kind uses, measured straight from center (matching the doc's own
+    "> center + 3 → warning" phrasing), not from the tolerance edge.
+    """
+    sign = 1.0 if dev_cfg.worse_direction == "positive" else -1.0
+    score = delta * sign
+    if dev_cfg.std_scaled:
+        # Same degenerate-std handling as sigma: no std → no grading;
+        # sigma_floor bounds a present-but-tiny std from below.
+        if local_std is None:
+            return "ok"
+        local_std = max(local_std, dev_cfg.sigma_floor or 0.0)
+        if local_std <= 0:
+            return "ok"
+        score = score / local_std
+    tolerance = dev_cfg.tolerance or 0.0
+    if score <= tolerance:
+        return "ok"
     if dev_cfg.critical_band is not None and score >= dev_cfg.critical_band:
         return "critical"
     if dev_cfg.warning_band is not None and score >= dev_cfg.warning_band:
@@ -329,6 +420,7 @@ __all__ = [
     "Severity",
     "append_deviation_columns",
     "deviation",
+    "deviation_for_override",
     "expected_value",
     "expected_value_column",
     # Re-exported for convenience so callers don't need a second import.

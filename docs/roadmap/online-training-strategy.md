@@ -414,30 +414,42 @@ verified against, as amended by the validity check above.
 
 ### Phase 2 — directional overrides surfaced
 
-- [ ] **2.1 — Directional `DeviationConfig`.** Add a
-  `kind: directional` variant to `DeviationConfig`
-  (`src/decode/behavior_models.py:201`), against the post-9.4 naming
-  (`relative`→`sigma` rename lands in queue Q7 before this): recenter
-  on `accepted_center`, `tolerance` wander band, `worse_direction`
-  warning/critical thresholds, `better_direction: ignore`, and the same
-  σ-floor schema rule ml-hardening 4.2 enforces for `sigma` when the
-  band is std-scaled. For `behavior_model`-targeted overrides the
-  *center* comes from the surface refit on accepted data — the override
-  contributes only the one-sided band; `accepted_center` applies to
-  raw-channel overrides. Runtime deviation evaluation honors the
-  one-sided band; symmetric configs unchanged. Tests for both
-  directions and the ignore side.
-- [ ] **2.2 — Override → alert path.** Deviation/alert evaluation
-  consults active overrides: recentered band applied, worsening side
-  trips, improving side never alerts. An override past `review_by` is
-  **inert** (stops recentering/suppressing) and is surfaced as
-  needs-re-confirmation rather than silently continuing. Events
-  suppressed or recentered by an override carry the override's `reason`.
-- [ ] **2.3 — Dashboard surfacing.** "N accepted-baseline overrides
-  active" always visible (StatusStrip or Alerts context), expandable to
-  per-override provenance + review_by, expired ones flagged. FE tests.
-- [ ] **2.4 — Docs.** Update `docs/behavior-model-inference.md` +
-  runbook entry for authoring/reviewing overrides.
+- [x] **2.1 — Directional `DeviationConfig`.** Landed: `kind:
+  "directional"` variant on `DeviationConfig` (built against the
+  already-landed post-9.4 `sigma` naming) — `accepted_center`,
+  `tolerance`, `worse_direction`/`better_direction` (default
+  `"ignore"`), `std_scaled` with the same σ-floor rule ml-hardening 4.2
+  enforces for `sigma`. For `behavior_model` targets the center comes
+  from the surface's own fit (override contributes only the one-sided
+  band); `accepted_center` applies to raw-channel overrides. Verified:
+  the improving side never alerts regardless of magnitude, `tolerance`
+  is a genuine two-sided dead-zone, bands are measured from center.
+  Symmetric `absolute`/`sigma` paths untouched.
+- [x] **2.2 — Override → alert path.** Landed: deviation evaluation
+  consults `active_override_for` for both `behavior_model`-targeted
+  overrides (existing per-model branch) and raw-`channel`-targeted
+  overrides (a second loop in `_observe_behavior`, added after
+  adversarial review caught that `deviation_for_override` existed and
+  was unit-tested but had zero live callers — the doc's own flagship
+  `obd:SHORT_FUEL_TRIM_1` example was silently inert). Expired
+  overrides (`review_by` past) are confirmed inert — filtered out by
+  `active_override_for` before either branch ever sees them, falling
+  back cleanly to the static config. Events carry `override_reason`
+  through the existing emit path, present only when an override was
+  genuinely active for that tick.
+- [x] **2.3 — Dashboard surfacing.** Landed: `read_accepted_baselines()`
+  returns active count + every override (with an `expired` flag),
+  threaded through `GET /status`. New StatusStrip item "overrides: N
+  active", expandable to per-override provenance/reason/`review_by`,
+  expired ones flagged "needs re-confirmation" rather than hidden —
+  consistent with 2.2's backend semantics. FE tests cover expand-on-click
+  and expired-flagging.
+- [x] **2.4 — Docs.** Landed: `docs/behavior-model-inference.md` gains
+  a "Directional deviation and accepted-baseline overrides" section;
+  `docs/runbooks.md` gains an "Author or review an accepted-baseline
+  override" entry, corrected after review to accurately describe
+  `deviation_for_override` as consulted by `_observe_behavior`'s
+  channel-override branch (not an aspirational, uncalled entry point).
 
 ### Phase 3 — closing the loop (only after 1–2 are proven)
 

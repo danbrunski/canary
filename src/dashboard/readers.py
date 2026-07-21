@@ -11,6 +11,10 @@ from src.alerts.event_logger import read_events_dir
 from src.config import CanaryConfig
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.dashboard.status import _resolve_latest_session
+from src.decode.accepted_baselines import (
+    DEFAULT_ACCEPTED_BASELINES_PATH,
+    load_accepted_baselines,
+)
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
     load_behavior_models,
@@ -284,8 +288,41 @@ def read_behavior_models(path: Path = DEFAULT_BEHAVIOR_MODELS_PATH) -> dict[str,
     return load_behavior_models(path).model_dump(mode="json")
 
 
+def read_accepted_baselines(path: Path = DEFAULT_ACCEPTED_BASELINES_PATH) -> dict[str, Any]:
+    """Return ``accepted_baselines.yaml`` as a JSON-safe payload for the
+    dashboard (2.3, online-training-strategy.md Phase 2).
+
+    ``active`` counts non-expired overrides — what the StatusStrip's
+    "N accepted-baseline overrides active" reads. Every override (active
+    or expired) is listed under ``overrides`` with its provenance and an
+    ``expired`` flag, so the dashboard can flag a lapsed one as
+    needs-re-confirmation instead of just dropping it from view. A missing
+    file (most profiles never author one) is zero overrides, not an error.
+    """
+    baselines = load_accepted_baselines(path)
+    overrides = [
+        {
+            "target": override.target,
+            "channel": override.channel,
+            "behavior_model": override.behavior_model,
+            "operating_mode": override.operating_mode,
+            "accepted_center": override.accepted_center,
+            "band": override.band.model_dump(mode="json"),
+            "declared_by": override.provenance.declared_by,
+            "declared_at": override.provenance.declared_at.isoformat(),
+            "review_by": override.provenance.review_by.isoformat(),
+            "reason": override.provenance.reason,
+            "expired": override.is_expired(),
+        }
+        for override in baselines.overrides
+    ]
+    active = sum(1 for o in overrides if not o["expired"])
+    return {"active": active, "overrides": overrides}
+
+
 __all__ = [
     "echo_config",
+    "read_accepted_baselines",
     "read_anomalies_since",
     "read_behavior_models",
     "read_bindings_for_display",

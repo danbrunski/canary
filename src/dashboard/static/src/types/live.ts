@@ -88,6 +88,41 @@ export interface StatusResponse {
    *  bare app). A given model's entry is itself null on an unreadable
    *  manifest. */
   model_provenance?: Record<string, ModelProvenance | null> | null;
+  /** Accepted-baseline overrides (2.3, online-training-strategy.md
+   *  Phase 2) — always present (an empty document reads as zero). */
+  accepted_baseline_overrides?: AcceptedBaselineOverridesStatus;
+}
+
+/** `/status.accepted_baseline_overrides` (2.3). */
+export interface AcceptedBaselineOverridesStatus {
+  /** Non-expired override count — what the StatusStrip's "N active" reads. */
+  active: number;
+  /** Every override, active or expired, for the expandable detail view. */
+  overrides: AcceptedBaselineOverrideSummary[];
+}
+
+/** One entry in `/status.accepted_baseline_overrides.overrides`. */
+export interface AcceptedBaselineOverrideSummary {
+  target: string;
+  channel: string | null;
+  behavior_model: string | null;
+  operating_mode: string | null;
+  accepted_center: number | null;
+  band: {
+    kind: "directional";
+    tolerance: number;
+    worse_direction: "positive" | "negative";
+    worse_warning: number;
+    worse_critical: number;
+    better_direction: "ignore";
+  };
+  declared_by: string;
+  declared_at: string;
+  review_by: string;
+  reason: string;
+  /** Past `review_by` — inert (no longer recenters/suppresses) and needs
+   *  re-confirmation rather than being silently dropped from view. */
+  expired: boolean;
 }
 
 /** `/status.model_provenance[name]` (Task 6.5). */

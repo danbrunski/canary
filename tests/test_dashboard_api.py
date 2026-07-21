@@ -466,6 +466,91 @@ def test_behavior_models_endpoint_returns_yaml_content(
     assert body["models"][0]["name"] == "coolant_warmup"
 
 
+# ---------------------------------------------------------------------------
+# 2.3 — accepted-baseline overrides surfaced on /status
+# ---------------------------------------------------------------------------
+
+
+def _write_accepted_baselines(
+    path: Path, *, review_by: str = "2026-11-17", reason: str = "known weak #3 injector"
+) -> None:
+    from src.decode.accepted_baselines import (
+        AcceptedBaselineOverride,
+        AcceptedBaselines,
+        DirectionalBand,
+        Provenance,
+        dump_accepted_baselines,
+    )
+
+    override = AcceptedBaselineOverride(
+        channel="obd:SHORT_FUEL_TRIM_1",
+        operating_mode="idle",
+        accepted_center=12.0,
+        band=DirectionalBand(
+            tolerance=3.0, worse_direction="positive", worse_warning=3.0, worse_critical=6.0
+        ),
+        provenance=Provenance(
+            declared_by="dan",
+            declared_at="2019-01-01",  # type: ignore[arg-type]  # earlier than every review_by used in tests
+            review_by=review_by,  # type: ignore[arg-type]
+            reason=reason,
+        ),
+    )
+    dump_accepted_baselines(AcceptedBaselines(schema_version=1, overrides=[override]), path)
+
+
+def test_read_accepted_baselines_returns_zero_when_file_missing(tmp_path: Path) -> None:
+    from src.dashboard.api import read_accepted_baselines
+
+    payload = read_accepted_baselines(tmp_path / "missing.yaml")
+    assert payload == {"active": 0, "overrides": []}
+
+
+def test_read_accepted_baselines_flags_expired(tmp_path: Path) -> None:
+    from datetime import date
+
+    from src.dashboard.api import read_accepted_baselines
+
+    path = tmp_path / "accepted_baselines.yaml"
+    _write_accepted_baselines(path, review_by="2020-01-01")
+    payload = read_accepted_baselines(path)
+    assert payload["active"] == 0
+    [override] = payload["overrides"]
+    assert override["expired"] is True
+    assert override["reason"] == "known weak #3 injector"
+    assert override["target"] == "obd:SHORT_FUEL_TRIM_1"
+
+    _write_accepted_baselines(path, review_by=date(2099, 1, 1).isoformat())
+    payload = read_accepted_baselines(path)
+    assert payload["active"] == 1
+    assert payload["overrides"][0]["expired"] is False
+
+
+def test_status_endpoint_carries_accepted_baseline_overrides(
+    config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
+) -> None:
+    from datetime import date
+
+    path = tmp_path / "accepted_baselines.yaml"
+    _write_accepted_baselines(path, review_by=date(2099, 1, 1).isoformat())
+    app = create_app(config, anomalies_dir=anomalies_dir, accepted_baselines_path=path)
+    response = TestClient(app).get("/status")
+    assert response.status_code == 200
+    body = response.json()["accepted_baseline_overrides"]
+    assert body["active"] == 1
+    assert body["overrides"][0]["channel"] == "obd:SHORT_FUEL_TRIM_1"
+
+
+def test_status_endpoint_accepted_baseline_overrides_empty_when_missing(
+    config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
+) -> None:
+    app = create_app(
+        config, anomalies_dir=anomalies_dir, accepted_baselines_path=tmp_path / "absent.yaml"
+    )
+    response = TestClient(app).get("/status")
+    assert response.json()["accepted_baseline_overrides"] == {"active": 0, "overrides": []}
+
+
 def test_create_app_mounts_static_when_dist_exists(
     config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
 ) -> None:

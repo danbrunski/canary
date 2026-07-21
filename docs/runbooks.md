@@ -107,6 +107,54 @@ Mark an anomaly's verdict so tuning/retraining can use it.
 - Suppression counts surface in `GET /status` →
   `emitter_counters.suppressed_tuning`.
 
+## Author or review an accepted-baseline override
+
+`accepted_baselines.yaml` (`docs/roadmap/online-training-strategy.md`
+Phase 2) declares "this engine state is known and accepted going
+forward" — a *recentering with a one-sided band*, not a mute. Use this
+instead of a tuning suppression when the channel has a genuine,
+diagnosed, ongoing fault you're not fixing (a weak injector, a lazy
+thermostat) and you want to keep watching it get *worse* while ignoring
+the already-known offset. A tuning suppression is the right tool for
+noise (A/C compressor cycling); an override is the right tool for a
+named, provenanced fault.
+
+- **Author one (operator-only — never an unattended/overnight task):**
+  edit the profile-scoped `<data>/<vehicle-slug>/accepted_baselines.yaml`
+  (schema + a commented worked example in
+  `src/decode/accepted_baselines.py`). Required fields: target (`channel`
+  **or** `behavior_model`, never both), `band` (`tolerance`,
+  `worse_direction`, `worse_warning`/`worse_critical`,
+  `better_direction: ignore` — the only value today), and `provenance`
+  (`declared_by`, `declared_at`, `review_by`, `reason`). A `channel`
+  target also needs `accepted_center` (there's no fitted surface to read
+  a center from); a `behavior_model` target's center is always the
+  surface's own fit — never set `accepted_center` there.
+  `scripts/disposition_report.py`'s Quarantine tier is where a channel
+  persistently outside the this-engine baseline shows up as an override
+  candidate in the first place.
+- **Where it applies:** the live behavior detector consults
+  `AcceptedBaselines.active_override_for` every tick
+  (`src.daemon.inference._observe_behavior`) — the worsening side still
+  trips warning/critical, the improving side never alerts, and the fired
+  event's `detail.override_reason` echoes the declared `reason` so a
+  recentered/suppressed channel always reads back *why*.
+  `src.decode.behavior_decoder.deviation_for_override` is consulted
+  directly by `_observe_behavior`'s channel-override branch for a
+  raw-channel target evaluated on its own (no behavior model/surface in
+  the loop) — the same per-tick call graded against `accepted_center`
+  instead of a fitted expectation.
+- **Review before it lapses:** `review_by` is non-negotiable — past that
+  date the override goes inert (stops recentering/suppressing) rather
+  than silently masking a *second*, newly-failing fault. `GET
+  /status` → `accepted_baseline_overrides` is always present
+  (`{"active": N, "overrides": [...]}`); the dashboard's StatusStrip
+  shows "N accepted-baseline overrides active" at all times, expandable
+  to each override's provenance + `review_by`, with an expired one
+  flagged "needs re-confirmation" instead of dropped from view. Re-review
+  and either bump `review_by` (still accepted) or delete the entry
+  (fixed, or no longer acceptable) once flagged.
+
 ## Check whether the corpus is ready to retrain
 
 - **CLI:** `scripts/dataset_health.py` (text) or `--json` (exit 2 = not

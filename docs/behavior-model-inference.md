@@ -214,6 +214,48 @@ Equation-backed expectations use the same idea but come from physical
 relationships rather than fitted behavior surfaces. Those features and their
 limits are documented in `docs/physics-informed-anomaly-features.md`.
 
+### Directional deviation and accepted-baseline overrides
+
+`DeviationConfig.kind` (`src/decode/behavior_models.py`) has a third variant
+alongside `absolute` and `sigma`: `directional` — a one-sided band around a
+center, for a known, *accepted* fault that shouldn't be muted, only
+recentered (see `docs/roadmap/online-training-strategy.md`, "Directional
+overrides — the schema gap"). `tolerance` is the ± wander that never
+alerts; past that, `worse_direction` picks the sign of `actual − center`
+that means "worsening" and grades it against `warning_band`/
+`critical_band` (in output units, or std-scaled via `std_scaled` +
+`sigma_floor` — same degenerate-std guard ml-hardening 4.2 enforces for
+`sigma`); the other direction (`better_direction: ignore`, the only value
+today) never alerts no matter how far it drifts, which is what stops
+improvement/measurement noise from generating false alarms.
+
+A model's own `deviation:` can be authored `directional` directly, but the
+common path is `data/<vehicle-slug>/accepted_baselines.yaml`
+(`src/decode/accepted_baselines.py`) — an operator-authored, provenanced
+override (who/when/why/`review_by`), never an unattended one. Each
+override targets either a raw `channel` (needs `accepted_center` — there's
+no fitted surface to read a center from) or a `behavior_model` by name (the
+center is always that surface's own fit; the override contributes only the
+band).
+`AcceptedBaselineOverride.to_deviation_config()` converts an override into
+the runtime `DeviationConfig` shape so one severity-grading implementation
+(`src.decode.behavior_decoder`) serves both statically-authored directional
+models and dynamically-applied overrides.
+
+The live behavior detector (`src.daemon.inference._observe_behavior`)
+consults `AcceptedBaselines.active_override_for` every tick: the worsening
+side still trips warning/critical (with a fired event's
+`detail.override_reason` echoing the declared `reason`), the improving
+side never alerts, and an override past its `review_by` is inert —
+`active_override_for` already excludes it, so the model falls back to
+grading against its own static config (if any) exactly as if the override
+never existed, rather than silently continuing to mask a fault.
+`GET /status` → `accepted_baseline_overrides` (`{"active": N, "overrides":
+[...]}`) is always present so the dashboard can show "N accepted-baseline
+overrides active" and flag an expired one as needing re-confirmation
+instead of dropping it from view — see `docs/runbooks.md`, "Author or
+review an accepted-baseline override".
+
 ## Integration with the dashboard
 
 The performance panel (Phase 5 task 5.12) renders this data directly:
@@ -275,6 +317,12 @@ These correspond to Phase 4.E in `docs/implementation-tasks.md`.
 - [x] **4.E.8 — Refit CLI.** Implemented in `scripts/refit_behavior_models.py`.
 - [x] **4.E.9 — Performance panel data feed.** Implemented via
   `GET /models/behavior` and the React behavior-model panel.
+- [x] **Directional overrides (online-training-strategy.md Phase 2).**
+  `DeviationConfig.kind="directional"` + `AcceptedBaselineOverride.
+  to_deviation_config()` (schema + runtime grading), the live behavior
+  detector consulting active overrides with `detail.override_reason` on
+  fired events, and `GET /status` → `accepted_baseline_overrides` +
+  StatusStrip surfacing ("N active", expandable, expired flagged).
 
 The order assumes Phase 2 (IsolationForest baseline) lands first — behavior
 models are most valuable as *additional* features feeding an existing

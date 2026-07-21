@@ -253,6 +253,7 @@ class AnomalyEventEmitter:
         expected: float | None,
         deviation: float | None,
         operating_mode: str | None = None,
+        override_reason: str | None = None,
     ) -> AnomalyEvent | None:
         """Emit a behavior/physics residual event (Phase 7.4).
 
@@ -261,6 +262,17 @@ class AnomalyEventEmitter:
         ``suppressed_not_anomaly``); dedupe keys on
         ``(source="behavior", "behavior/<model>")`` so each physical model
         debounces independently and never cross-suppresses another.
+
+        ``override_reason`` (2.2) — set when an active accepted-baseline
+        override recentered/graded this tick — passes straight through to
+        ``AnomalyEvent.from_behavior``'s ``detail.override_reason``. An
+        override whose ``better_direction: ignore`` side suppresses what
+        would otherwise have been a symmetric-band alert never reaches this
+        method at all (its severity is graded ``"ok"`` by
+        ``behavior_decoder.deviation`` before the caller ever calls
+        ``emit_behavior``) — there's no event to attach a reason to, so
+        that suppression is logged instead, same convention as tuning
+        suppression (see ``AlertTuner`` debug logging).
         """
         if severity_band not in ("warning", "critical"):
             self.counters.suppressed_not_anomaly += 1
@@ -277,6 +289,7 @@ class AnomalyEventEmitter:
             expected=expected,
             deviation=deviation,
             operating_mode=operating_mode,
+            override_reason=override_reason,
         )
         return self._emit(event)
 

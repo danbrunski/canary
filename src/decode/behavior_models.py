@@ -217,19 +217,56 @@ class DeviationConfig(_Strict):
     so shipped configs/refit artifacts using the old name keep working
     unchanged; write new ones as ``sigma``.
 
-    ``sigma_floor`` (sigma kind only) is a lower bound on the local std,
-    in output units. A cell fit on a quantization-flat stretch of data can
-    carry a std below the sensor's LSB (the May 2026 IAT surface shipped a
-    0.13° cell against a 0.5°/LSB PID — one LSB flicker fired warning) or
-    exactly 0.0 (which silently disabled alerting in that cell). Set it to
-    roughly the output's quantization step; both failure modes go away.
+    ``sigma_floor`` (sigma kind, and directional kind when ``std_scaled``)
+    is a lower bound on the local std, in output units. A cell fit on a
+    quantization-flat stretch of data can carry a std below the sensor's
+    LSB (the May 2026 IAT surface shipped a 0.13° cell against a 0.5°/LSB
+    PID — one LSB flicker fired warning) or exactly 0.0 (which silently
+    disabled alerting in that cell). Set it to roughly the output's
+    quantization step; both failure modes go away.
+
+    ``directional`` (2.1, online-training-strategy.md Phase 2) — a known,
+    *accepted* fault is not a mute, it's a recentering with a one-sided
+    band (see the doc's "Directional overrides — the schema gap" section).
+    ``tolerance`` is the ± wander around the center that never alerts
+    regardless of direction; past that, only ``worse_direction`` (the sign
+    of ``actual − center`` that means "the fault is worsening") is graded
+    against ``warning_band``/``critical_band`` (read directly off the
+    center, same ``score >= band`` convention as absolute/sigma); the
+    opposite direction is ``better_direction: ignore`` — the only value
+    today — and never alerts no matter how far it goes, which is what stops
+    improvement/measurement noise from generating false alarms. The
+    center is ``accepted_center`` when set; when it's ``None`` (the usual
+    case for a ``behavior_model``-targeted override, whose center is the
+    surface's own fitted expectation, not a fixed number) the caller
+    supplies the delta already recentered by the model's ``expected_value``
+    — see ``src.decode.behavior_decoder``. ``std_scaled`` opts a directional
+    band into the same local-std scaling ``sigma`` uses (and then requires
+    the same positive ``sigma_floor``); the default (``False``) grades in
+    plain output units, matching ``accepted_baselines.yaml``'s
+    ``DirectionalBand`` (which has no std concept at all).
     """
 
-    kind: Literal["absolute", "sigma"]
+    kind: Literal["absolute", "sigma", "directional"]
     warning_band: float | None = Field(default=None, ge=0)
     critical_band: float | None = Field(default=None, ge=0)
     reference_std: float | None = None  # for kind=sigma on 1D fits (auto-filled at fit time)
     sigma_floor: float | None = Field(default=None, ge=0)
+    #: directional kind only (2.1) — recenter point; ``None`` means "use the
+    #: model's own fitted expected value" (behavior_model-targeted override);
+    #: a fixed number is a raw-channel override, which has no fitted surface
+    #: to read a center from.
+    accepted_center: float | None = None
+    #: directional kind only — ± wander around the center that never alerts.
+    tolerance: float | None = Field(default=None, ge=0)
+    #: directional kind only — which sign of (actual − center) is "worsening".
+    worse_direction: Literal["positive", "negative"] | None = None
+    #: directional kind only — the other direction; "ignore" (the only value
+    #: today) is what stops improvement/noise from ever alerting.
+    better_direction: Literal["ignore"] = "ignore"
+    #: directional kind only — scale the band by the local std like ``sigma``
+    #: does, instead of grading in plain output units.
+    std_scaled: bool = False
 
     @field_validator("kind", mode="before")
     @classmethod
@@ -264,12 +301,36 @@ class DeviationConfig(_Strict):
         # hair-trigger: a cell/fit fit on quantization-flat data can carry a
         # std below the sensor's LSB (or exactly 0.0), and the May 2026 IAT
         # surface shipped exactly that. Schema-enforce it instead of relying
-        # on every recipe author remembering the convention.
-        if self.kind == "sigma" and not (self.sigma_floor is not None and self.sigma_floor > 0):
+        # on every recipe author remembering the convention. 2.1 — a
+        # directional band opted into the same std scaling
+        # (``std_scaled=True``) is exactly as exposed to the same
+        # degenerate-std failure, so mirror the rule for it too.
+        needs_floor = self.kind == "sigma" or (self.kind == "directional" and self.std_scaled)
+        if needs_floor and not (self.sigma_floor is not None and self.sigma_floor > 0):
             raise ValueError(
-                "kind='sigma' requires a positive sigma_floor — a cell/fit std can "
-                "collapse to (near) zero on quantization-flat data and hair-trigger "
-                "without one; set it to roughly the output's sensor LSB"
+                "kind='sigma' (or a std_scaled directional band) requires a positive "
+                "sigma_floor — a cell/fit std can collapse to (near) zero on "
+                "quantization-flat data and hair-trigger without one; set it to "
+                "roughly the output's sensor LSB"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_directional_fields(self) -> DeviationConfig:
+        # 2.1 — the directional fields are meaningless without tolerance +
+        # worse_direction; require both explicitly rather than silently
+        # grading against a `None` that would compare unequal to everything.
+        if self.kind != "directional":
+            return self
+        if self.tolerance is None:
+            raise ValueError("kind='directional' requires tolerance")
+        if self.worse_direction is None:
+            raise ValueError("kind='directional' requires worse_direction")
+        bands = [b for b in (self.warning_band, self.critical_band) if b is not None]
+        if bands and self.tolerance > min(bands):
+            raise ValueError(
+                "tolerance must not exceed the smallest configured band — a wider "
+                "wander zone would swallow the band it's supposed to sit inside"
             )
         return self
 
@@ -295,12 +356,16 @@ class BehaviorModel1D(_Strict):
 
     @model_validator(mode="after")
     def _check_deviation(self) -> BehaviorModel1D:
-        if (
-            self.deviation is not None
-            and self.deviation.kind == "sigma"
-            and self.deviation.reference_std is None
-        ):
-            raise ValueError(f"{self.name}: sigma deviation on a 1D surface needs reference_std")
+        if self.deviation is None:
+            return self
+        needs_reference_std = self.deviation.kind == "sigma" or (
+            self.deviation.kind == "directional" and self.deviation.std_scaled
+        )
+        if needs_reference_std and self.deviation.reference_std is None:
+            raise ValueError(
+                f"{self.name}: sigma (or std_scaled directional) deviation on a 1D "
+                "surface needs reference_std"
+            )
         return self
 
 

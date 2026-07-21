@@ -81,6 +81,42 @@ def test_from_behavior_event_shape_and_residual_detail() -> None:
     assert AnomalyEvent.from_dict(ev.to_dict()).source == "behavior"
 
 
+def test_from_behavior_carries_override_reason_when_set() -> None:
+    """2.2 — a tick graded against an active accepted-baseline override
+    surfaces the override's provenance reason in detail, not a new event
+    shape."""
+    ev = AnomalyEvent.from_behavior(
+        model="fuel_trim_vs_rpm_load",
+        kind="surface_2d",
+        channel="obd:SHORT_FUEL_TRIM_1",
+        timestamp="2026-05-13T12:00:00+00:00",
+        severity_band="critical",
+        score=1.0,
+        threshold=0.5,
+        actual=19.0,
+        expected=12.0,
+        deviation=7.0,
+        override_reason="~190k mi, known weak #3 injector; owner not replacing",
+    )
+    assert ev.detail["override_reason"] == "~190k mi, known weak #3 injector; owner not replacing"
+
+
+def test_from_behavior_omits_override_reason_when_none() -> None:
+    ev = AnomalyEvent.from_behavior(
+        model="coolant_warmup",
+        kind="surface_1d",
+        channel="obd:COOLANT",
+        timestamp="2026-05-13T12:00:00+00:00",
+        severity_band="warning",
+        score=0.5,
+        threshold=0.5,
+        actual=55.0,
+        expected=88.0,
+        deviation=-33.0,
+    )
+    assert "override_reason" not in ev.detail
+
+
 # ---------------------------------------------------------------------------
 # AnomalyEventEmitter.emit_behavior
 # ---------------------------------------------------------------------------
@@ -123,6 +159,26 @@ def test_emit_behavior_emits_warning_and_critical(tmp_path: Path) -> None:
     assert crit is not None
     assert emitter.counters.emitted == 2
     assert len(read_events_dir(tmp_path)) == 2
+
+
+def test_emit_behavior_passes_override_reason_through(tmp_path: Path) -> None:
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=0)
+    ev = emitter.emit_behavior(
+        model="coolant_warmup",
+        kind="surface_1d",
+        channel="obd:COOLANT",
+        timestamp="2026-05-13T12:00:00+00:00",
+        severity_band="critical",
+        score=1.0,
+        threshold=0.5,
+        actual=55.0,
+        expected=88.0,
+        deviation=-33.0,
+        operating_mode="idle",
+        override_reason="known thermostat lag; owner not replacing",
+    )
+    assert ev is not None
+    assert ev.detail["override_reason"] == "known thermostat lag; owner not replacing"
 
 
 def test_emit_behavior_dedupes_per_model_independently(tmp_path: Path) -> None:

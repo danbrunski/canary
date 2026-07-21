@@ -23,7 +23,8 @@ from src.dashboard.behavior_live import BehaviorLiveState, BehaviorObservation
 from src.dashboard.broadcast import Broadcaster
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.dashboard.status import VehicleState, classify_vehicle_state
-from src.decode.behavior_decoder import deviation
+from src.decode.accepted_baselines import load_accepted_baselines
+from src.decode.behavior_decoder import deviation, deviation_for_override
 from src.decode.behavior_models import (
     BehaviorModel1D,
     load_behavior_models,
@@ -444,6 +445,7 @@ class BehaviorDetector:
                 expected=residual.expected,
                 deviation=residual.deviation,
                 operating_mode=residual.operating_mode,
+                override_reason=residual.override_reason,
             )
         return sources
 
@@ -787,6 +789,10 @@ class _BehaviorResidual:
     mode_match: bool
     operating_mode: str | None
     timestamp: str | None
+    #: 2.2 — the active accepted-baseline override's provenance reason when
+    #: this tick's severity was graded against a recentered one-sided band
+    #: instead of the model's own static config; ``None`` otherwise.
+    override_reason: str | None = None
 
 
 def _record_if_health(
@@ -1046,12 +1052,20 @@ def _observe_behavior(
     domain-clamped, empty-cell aware — not a client-side re-derivation that
     could silently drift from what the IF/LSTM actually see.
 
+    Also grades any ``channel``-targeted accepted-baseline override (2.2) —
+    unlike a ``behavior_model``-targeted one, there is no surface backing a
+    raw channel, so these never appear in ``source.behavior_models`` and
+    need their own residual straight off ``deviation_for_override``; see
+    the loop below. Doesn't touch ``observations``/the live overlay — that
+    panel is surface-model-shaped (x/y axis position) and a raw channel
+    has no axis to place a "you are here" marker at.
+
     Best-effort: the caller wraps this in the live-inference try/except, so
     one malformed row can't kill the inference stream.
     """
     models = source.behavior_models
     point = source.latest_operating_point
-    if models is None or not models.models or point is None:
+    if point is None:
         return []
     residuals: list[_BehaviorResidual] = []
     raw_mode = point.get(MODE_COLUMN)
@@ -1064,7 +1078,7 @@ def _observe_behavior(
     else:
         timestamp = str(ts)
     observations: list[BehaviorObservation] = []
-    for model in models.models:
+    for model in models.models if models is not None else []:
         # Same actual-column resolution as append_deviation_columns: a
         # qualified source:channel output is verbatim; a bare CAN signal
         # name falls back to the legacy decoded:<NAME>.
@@ -1074,7 +1088,18 @@ def _observe_behavior(
             else channel_key(DECODED_SOURCE, model.output)
         )
         actual = _num(point.get(actual_col))
-        result = deviation(model, actual, point)
+        # 2.2 — an active, non-expired override for this model recenters
+        # the band (worse side trips, better side never alerts, per
+        # `behavior_decoder._grade_directional`); `active_override_for`
+        # already returns `None` past `review_by`, so an expired override
+        # is silently inert here — the model grades against its own static
+        # config (if any) exactly as if no override existed.
+        override = (
+            source.accepted_baselines.active_override_for(model.name, mode)
+            if source.accepted_baselines is not None
+            else None
+        )
+        result = deviation(model, actual, point, override=override)
         if isinstance(model, BehaviorModel1D):
             x = _num(point.get(model.axis.channel))
             y = None
@@ -1107,9 +1132,60 @@ def _observe_behavior(
                 mode_match=mode_match,
                 operating_mode=mode,
                 timestamp=timestamp,
+                override_reason=None if override is None else override.provenance.reason,
             )
         )
-    behavior_live.observe(timestamp, mode, observations)
+    # 2.2 — raw-channel overrides (e.g. `obd:SHORT_FUEL_TRIM_1`) have no
+    # behavior_model/surface behind them, so they're never covered by the
+    # loop above; grade each distinct channel target directly against
+    # `deviation_for_override` instead of `deviation()`. Skips cleanly (no
+    # residual) when no override is active for this tick's mode (expired,
+    # or scoped to a different mode — `active_override_for` already
+    # encodes both) or the channel isn't present/decoded this tick — same
+    # "missing signal ⇒ no residual" posture as the behavior_model branch.
+    baselines = source.accepted_baselines
+    if baselines is not None:
+        seen_channels: set[str] = set()
+        for candidate in baselines.overrides:
+            if candidate.channel is None or candidate.channel in seen_channels:
+                continue
+            seen_channels.add(candidate.channel)
+            channel_override = baselines.active_override_for(candidate.channel, mode)
+            if channel_override is None:
+                continue
+            actual_col = (
+                candidate.channel
+                if SOURCE_SEP in candidate.channel
+                else channel_key(DECODED_SOURCE, candidate.channel)
+            )
+            actual = _num(point.get(actual_col))
+            if actual is None:
+                continue
+            result = deviation_for_override(channel_override, actual)
+            residuals.append(
+                _BehaviorResidual(
+                    name=f"override:{candidate.channel}",
+                    kind="channel_override",
+                    channel=actual_col,
+                    actual=actual,
+                    expected=result.expected,
+                    deviation=result.deviation,
+                    severity=result.severity,
+                    # `active_override_for` already matched this tick's mode
+                    # (or the override is unscoped) to get here, so this
+                    # residual always speaks for the current tick.
+                    mode_match=True,
+                    operating_mode=mode,
+                    timestamp=timestamp,
+                    override_reason=channel_override.provenance.reason,
+                )
+            )
+    # Only touch the overlay when there were surface models to report on —
+    # a channel-override-only tick (no behavior_models.yaml models at all)
+    # has nothing overlay-shaped to add, same no-op posture as before 2.2's
+    # channel-override branch existed.
+    if models is not None and models.models:
+        behavior_live.observe(timestamp, mode, observations)
     return residuals
 
 
@@ -1118,13 +1194,16 @@ def build_live_feature_source(
     *,
     bindings_path: Path | None = None,
     behavior_models_path: Path | None = None,
+    accepted_baselines_path: Path | None = None,
 ) -> LiveFeatureSource:
     """Construct a ``LiveFeatureSource`` from the daemon's config + sidecars.
 
-    Convenience for the daemon entry: loads ``bindings.yaml`` and
-    ``behavior_models.yaml`` if present at the given paths (defaults are
-    the canonical locations), and wires them into the source so CAN
-    payloads decode and deviation columns appear automatically.
+    Convenience for the daemon entry: loads ``bindings.yaml``,
+    ``behavior_models.yaml``, and ``accepted_baselines.yaml`` if present at
+    the given paths (defaults are the canonical, profile-scoped locations),
+    and wires them into the source so CAN payloads decode, deviation
+    columns appear automatically, and the behavior detector (2.2) can
+    consult active overrides.
     """
     # Repo-root-anchored (see api.DEFAULT_BINDINGS_PATH) so live CAN decode
     # finds bindings.yaml regardless of the daemon's launch cwd.
@@ -1132,6 +1211,10 @@ def build_live_feature_source(
     # Scoped per vehicle profile (config.daemon.behavior_models is rewritten to
     # <base>/<slug>/behavior_models.yaml by src.profiles.scope_config).
     behavior_models_path = behavior_models_path or components.config.daemon.behavior_models
+    # Likewise profile-scoped (config.daemon.accepted_baselines); a missing
+    # file is a valid, empty document (load_accepted_baselines handles that),
+    # so this is always safe to load unconditionally.
+    accepted_baselines_path = accepted_baselines_path or components.config.daemon.accepted_baselines
     bindings = load_bindings(bindings_path) if bindings_path.exists() else None
     behavior_models = (
         load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
@@ -1148,6 +1231,7 @@ def build_live_feature_source(
                 "preprocessing.operating_modes",
                 extra={"models": mismatched},
             )
+    accepted_baselines = load_accepted_baselines(accepted_baselines_path)
     # The training feature pipeline decodes CAN twice — bindings.yaml
     # (decoded:*) AND the DBC files (dbc:*). The live source must mirror both
     # or every inference tick fails on the model's required dbc:* columns.
@@ -1160,6 +1244,7 @@ def build_live_feature_source(
         config=components.config,
         bindings=bindings,
         behavior_models=behavior_models,
+        accepted_baselines=accepted_baselines,
         dbc_database=dbc_database,
         did_map=did_map,
     )

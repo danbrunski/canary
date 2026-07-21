@@ -15,16 +15,20 @@ Xterra's weak-injector override), so the path is resolved through
 ``src.profiles.scope_config`` under the active vehicle's data tree, never a
 flat ``data/`` path. See ``DaemonConfig.accepted_baselines``.
 
-Phase 1 (this task) ships the schema + loader only, with the shipped
+Phase 1 shipped the schema + loader only, with the shipped
 ``data/nissan-xterra-2008/accepted_baselines.yaml`` carrying **zero active
 overrides** — a commented worked example, nothing more. Authoring a real
 override is an explicit operator (morning) task, never an unattended one:
 declaring "this fault is accepted" is exactly the kind of judgment call this
-repo's standing rules reserve for the operator. Phase 2 adds the runtime
-directional ``DeviationConfig`` variant that actually evaluates the band
-against live deviations; this module only parses/validates the declaration
-and answers "is there an active override for this (channel, mode)?" for the
-Phase 1 disposition classifier (``src.analysis.disposition``).
+repo's standing rules reserve for the operator. This module answers "is
+there an active override for this (channel, mode)?" for the Phase 1
+disposition classifier (``src.analysis.training_disposition``) and, as of
+Phase 2 (:meth:`AcceptedBaselineOverride.to_deviation_config`), converts an
+override into the runtime directional ``DeviationConfig`` variant
+(``src.decode.behavior_models``) that ``src.decode.behavior_decoder``
+actually grades live deviations against — one severity-grading
+implementation shared by statically-authored directional models and
+dynamically-applied overrides alike.
 """
 
 from __future__ import annotations
@@ -35,6 +39,8 @@ from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.decode.behavior_models import DeviationConfig
 
 #: Default (unscoped) location — always resolve the real path through
 #: ``src.profiles.scope_config`` (``DaemonConfig.accepted_baselines``); this
@@ -57,9 +63,9 @@ class DirectionalBand(_Strict):
     ``worse_warning`` / ``worse_critical`` (in output units, past center)
     trips a warning/critical; drifting the *other* way (``better_direction:
     ignore``, the only value today) never alerts — that's what stops
-    improvement/measurement noise from generating false alarms. Phase 2 wires
-    this into ``DeviationConfig``'s runtime evaluation; here it's parsed and
-    validated only.
+    improvement/measurement noise from generating false alarms. Parsed and
+    validated here; :meth:`AcceptedBaselineOverride.to_deviation_config`
+    (Phase 2) is what actually wires it into runtime grading.
     """
 
     kind: Literal["directional"] = "directional"
@@ -143,6 +149,30 @@ class AcceptedBaselineOverride(_Strict):
         if self.target != target:
             return False
         return self.operating_mode is None or self.operating_mode == operating_mode
+
+    def to_deviation_config(self) -> DeviationConfig:
+        """Convert this override's directional band into a runtime
+        ``DeviationConfig`` (2.2, online-training-strategy.md Phase 2).
+
+        For a ``behavior_model`` target, ``accepted_center`` is omitted
+        (``None``) even if a caller somehow set it — the doc is explicit
+        that the center for a behavior-model override comes from the
+        surface's own refit, not a fixed number; the override contributes
+        only the one-sided band. A ``channel`` target always carries
+        ``accepted_center`` (schema-enforced at construction) and it is
+        included here — there's no fitted surface to read a center from,
+        so the caller (``src.decode.behavior_decoder``) grades directly
+        against this fixed number.
+        """
+        return DeviationConfig(
+            kind="directional",
+            warning_band=self.band.worse_warning,
+            critical_band=self.band.worse_critical,
+            accepted_center=self.accepted_center if self.channel is not None else None,
+            tolerance=self.band.tolerance,
+            worse_direction=self.band.worse_direction,
+            better_direction=self.band.better_direction,
+        )
 
 
 class AcceptedBaselines(_Strict):

@@ -65,6 +65,7 @@ from src.dashboard.paths import (
 )
 from src.dashboard.readers import (
     echo_config,
+    read_accepted_baselines,
     read_anomalies_since,
     read_behavior_models,
     read_bindings_for_display,
@@ -82,6 +83,7 @@ from src.dashboard.status import StatusSnapshot, build_status
 from src.dashboard.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
 from src.dashboard.version import _canary_version
 from src.dashboard.websockets import _publish_on_app_loop
+from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
 )
@@ -105,6 +107,7 @@ def create_app(
     scores_broadcaster: Broadcaster | None = None,
     emitter: AnomalyEventEmitter | None = None,
     behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
+    accepted_baselines_path: Path = DEFAULT_ACCEPTED_BASELINES_PATH,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
     dids_path: Path = DEFAULT_DIDS_PATH,
     test_profiles_dir: Path = DEFAULT_TEST_PROFILES_DIR,
@@ -184,6 +187,7 @@ def create_app(
         emitter=emitter,
         feedback_store=feedback_store,
         behavior_models_path=behavior_models_path,
+        accepted_baselines_path=accepted_baselines_path,
         bindings_path=bindings_path,
         dids_path=dids_path,
         test_profiles_dir=test_profiles_dir,
@@ -251,6 +255,7 @@ __all__ = [
     "echo_config",
     "_client_is_loopback",
     "_require_control_auth",
+    "read_accepted_baselines",
     "read_anomalies_since",
     "read_behavior_models",
     "read_bindings_for_display",

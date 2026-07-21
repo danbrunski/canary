@@ -217,6 +217,71 @@ def test_deviation_config_sigma_and_legacy_relative_alias_load_identically(
 
 
 # ---------------------------------------------------------------------------
+# 2.1 — directional deviation kind
+# ---------------------------------------------------------------------------
+
+
+def _directional(**overrides: object) -> DeviationConfig:
+    defaults: dict[str, object] = {
+        "kind": "directional",
+        "tolerance": 3.0,
+        "worse_direction": "positive",
+        "warning_band": 3.0,
+        "critical_band": 6.0,
+    }
+    defaults.update(overrides)
+    return DeviationConfig(**defaults)  # type: ignore[arg-type]
+
+
+def test_directional_requires_tolerance() -> None:
+    with pytest.raises(ValidationError, match="tolerance"):
+        DeviationConfig(
+            kind="directional", worse_direction="positive", warning_band=3.0, critical_band=6.0
+        )
+
+
+def test_directional_requires_worse_direction() -> None:
+    with pytest.raises(ValidationError, match="worse_direction"):
+        DeviationConfig(kind="directional", tolerance=3.0, warning_band=3.0, critical_band=6.0)
+
+
+def test_directional_tolerance_cannot_exceed_smallest_band() -> None:
+    with pytest.raises(ValidationError, match="tolerance"):
+        _directional(tolerance=10.0, warning_band=3.0, critical_band=6.0)
+
+
+def test_directional_better_direction_defaults_to_ignore() -> None:
+    cfg = _directional()
+    assert cfg.better_direction == "ignore"
+
+
+def test_directional_std_scaled_requires_positive_sigma_floor() -> None:
+    with pytest.raises(ValidationError, match="sigma_floor"):
+        _directional(std_scaled=True)
+    _directional(std_scaled=True, sigma_floor=0.1)  # ok with a floor
+
+
+def test_directional_std_scaled_on_1d_needs_reference_std() -> None:
+    with pytest.raises(ValidationError, match="reference_std"):
+        BehaviorModel1D(
+            name="x",
+            kind="surface_1d",
+            output="y",
+            axis=Axis1D(name="t", channel="obd:RUN_TIME", domain=(0.0, 600.0)),
+            fit=_poly_fit(),
+            deviation=_directional(std_scaled=True, sigma_floor=0.1),
+        )
+    BehaviorModel1D(
+        name="x",
+        kind="surface_1d",
+        output="y",
+        axis=Axis1D(name="t", channel="obd:RUN_TIME", domain=(0.0, 600.0)),
+        fit=_poly_fit(),
+        deviation=_directional(std_scaled=True, sigma_floor=0.1, reference_std=1.0),
+    )
+
+
+# ---------------------------------------------------------------------------
 # 2D cell-count enforcement
 # ---------------------------------------------------------------------------
 

@@ -16,6 +16,7 @@ from src.control.sequence_detector import SequenceDetectorController
 from src.dashboard.behavior_live import BehaviorLiveState
 from src.dashboard.readers import (
     echo_config,
+    read_accepted_baselines,
     read_anomalies_since,
     read_behavior_models,
     read_bindings_for_display,
@@ -25,6 +26,7 @@ from src.dashboard.readers import (
     read_obd_coverage,
 )
 from src.dashboard.status import build_status
+from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.models.health import HealthMonitor
 
 
@@ -47,6 +49,7 @@ def register_public_routes(
     monitor_state: MonitorState | None = None,
     gps_tracker: GpsTracker | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
+    accepted_baselines_path: Path = DEFAULT_ACCEPTED_BASELINES_PATH,
 ) -> None:
     @app.get("/status")
     def get_status() -> dict[str, Any]:
@@ -62,6 +65,13 @@ def register_public_routes(
             payload["replay"] = replay_controller.status().to_dict()
         if sequence_detector_controller is not None:
             payload["sequence_detector"] = sequence_detector_controller.status().to_dict()
+        # 2.3 — "N accepted-baseline overrides active", always visible; the
+        # StatusStrip reads `.active`, the expandable detail reads
+        # `.overrides` (each with provenance + `review_by` + `expired`).
+        # Re-read every request, same posture as /models/behavior — the
+        # file is tiny and an operator's edit should show up without a
+        # daemon restart.
+        payload["accepted_baseline_overrides"] = read_accepted_baselines(accepted_baselines_path)
         return payload
 
     @app.get("/config")
