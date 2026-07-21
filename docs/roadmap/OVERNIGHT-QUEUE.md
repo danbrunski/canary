@@ -294,13 +294,15 @@ backend features), plus the unchecked tail of
   ResourceGate/TokenField (no duplicate mechanism, no gating
   regression); DiagnosticsPanel deletion (verified orphaned first) +
   README refresh. Pi live verify correctly left as a morning task.
-- [ ] **Q25 — reconciliation sweep.** Audit `docs/implementation-tasks.md`
-  checkboxes against everything rounds 1–2 landed and close the loops:
-  6.4's live-DTC remainder vs the Q8 reader, 6.7's GPX/KML vs Q15,
-  3.5's remaining note, 9.7's default-backbone decision vs Q7, 1.16 /
-  4.E.4 status notes pointing at the capture backlog. Update
-  cross-references and `docs/CANary-overview.md` checkmarks. Pure doc
-  work, no code.
+- [x] **Q25 — reconciliation sweep** — landed (commit `44ad807`):
+  6.4 and 6.7 updated to point at the real landed Q8/Q14/Q15 work
+  (commit hashes independently spot-checked); a bonus stale entry
+  found in the same audit pass (6.10's cursor-readout/window-export
+  deferred items, also closed by Q15); 9.7 updated to reflect Q7's
+  actual settled backbone decision. 3.5 and 1.16/4.E.4 investigated and
+  correctly left unchanged — genuinely still hardware/real-drive-gated,
+  untouched by anything landed tonight. `docs/CANary-overview.md`
+  checked, no stale claims found.
 
 ## Round-2 morning backlog
 
