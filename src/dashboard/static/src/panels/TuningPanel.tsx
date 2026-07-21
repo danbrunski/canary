@@ -101,11 +101,15 @@ export function TuningPanel({ token }: TuningPanelProps) {
             />
 
             <div className="mt-2 flex flex-wrap gap-2">
+              {/* Also gated on a non-empty draft: the editor is seeded by an
+                  effect one tick after the config renders, and an empty draft
+                  can never be valid JSON — without this, a click in that gap
+                  surfaces a bare "Unexpected end of JSON input". */}
               <button
                 type="button"
                 className={buttonClass}
                 onClick={onEstimate}
-                disabled={Boolean(busy)}
+                disabled={Boolean(busy) || !draft.trim()}
               >
                 Estimate
               </button>
@@ -113,7 +117,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
                 type="button"
                 className={cn(buttonClass, "border-accent text-accent")}
                 onClick={onApply}
-                disabled={Boolean(busy)}
+                disabled={Boolean(busy) || !draft.trim()}
                 title="Auto-versioned + audited server-side"
               >
                 Apply

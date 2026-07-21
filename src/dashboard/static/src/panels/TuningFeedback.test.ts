@@ -42,6 +42,13 @@ describe("TuningPanel", () => {
     });
     render(createElement(TuningPanel, { token: "secret" }));
     expect(await screen.findByText(/v3 ·/)).toBeInTheDocument();
+    // The editor is seeded by an effect *after* the config renders — clicking
+    // before it flushes used to parse "" and flake the suite under load
+    // (Estimate is also disabled until the draft is non-empty now, so an
+    // early click would silently no-op instead of erroring).
+    await waitFor(() =>
+      expect(screen.getByLabelText("Tuning config JSON")).not.toHaveValue(""),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Estimate" }));
     expect(await screen.findByText(/Before \/ after estimate/)).toBeInTheDocument();
     expect(screen.getByText(/\+2 newly muted/)).toBeInTheDocument();
