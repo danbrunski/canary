@@ -160,13 +160,16 @@ operator history (ledger backfill facts)
   ergonomics (one real bug caught by review: the shared-Y-axis logic
   shipped without a reachable UI toggle — fixed same task), GPX/KML +
   export UI.
-- [ ] **Q16 — refactoring.md Phases 3 + 4** (Detector protocol — safe
-  now that Q7 changed persistence semantics; FE god-panel splits +
-  ResourceGate/TokenField; JsonlStore; isolation_forest split +
-  artifact IO; all quick sweeps not already absorbed). — FE-only slice
-  landed from the `canary-fe` worktree (3.2, 3.3, 4.5, 4.6); the
-  backend-only tasks (3.1 Detector protocol, 3.4 JsonlStore, 3.5
-  isolation_forest split, 4.1-4.4/4.7 Python quick sweeps) are still
+- [x] **Q16 — refactoring.md Phases 3 + 4** — landed (commit
+  `e9bb206`, plus earlier `1d55739`/`85ecf40` for the FE-only slice):
+  3.1 Detector protocol (replay-verified; one real bug caught by
+  review — `SequenceDetector.model_version` not resetting on a gated
+  tick — fixed and re-verified before landing), 3.4 JsonlStore, 3.5
+  shared artifact IO (isolation_forest.py's literal file-split
+  deliberately skipped, ~30 callers, artifact-IO duplication itself
+  resolved), 4.1-4.4/4.7 quick sweeps. FE-only slice (3.2, 3.3, 4.5,
+  4.6) landed earlier from the `canary-fe` worktree. This closes out
+  refactoring.md entirely except 2.2, which stays
   open for the main worktree.
 
 ## Morning-review backlog this queue generates
