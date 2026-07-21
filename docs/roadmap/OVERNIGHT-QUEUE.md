@@ -262,11 +262,16 @@ backend features), plus the unchecked tail of
   off, design doc answering its open questions. No live/bench/truck
   verification attempted for any of the three, per their explicit
   blocked-overnight annotations.
-- [ ] **Q22 — imu-gps-integration.md Phase 2a** (imu source plumbing,
-  ImuConfig, decimation, imu_frame math, offline autotagger — GPS-only
-  tags must work on existing sessions now — live tag hook, segmenter
-  accel modes, committee declarations). Phase 2b entirely
-  blocked-overnight (hardware).
+- [x] **Q22 — imu-gps-integration.md Phase 2a** — landed (commit
+  `85cdc5e`): imu source plumbing, `ImuConfig` (disabled by default),
+  decimation, `imu_frame.py` math, offline auto-tagger (GPS-only tags
+  verified against a real stored session now, IMU-dependent tags
+  structurally dormant), live tag hook (silent by default, verified),
+  segmenter accel modes, committee declarations (all `trainable=False`,
+  verified true no-ops on real data). One real bug caught by review and
+  fixed: an example mode spec was permanently unreachable due to a
+  sign mismatch against an abs-valued column, not just inert-for-now.
+  Phase 2b stays entirely blocked-overnight (needs real hardware).
 - [ ] **Q23 — llm-assist-and-compute-roadmap.md seams checklist**
   (structured-card contract, card renderer with absent-state, enriched
   anomaly-review labels into feedback + retrain, import-isolation
