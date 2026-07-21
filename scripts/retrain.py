@@ -39,10 +39,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 # Reuse the trainer modules as importable libraries — same pattern
 # refit_behavior_models.py uses.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import detector_benchmark  # noqa: E402
+import disposition_report  # noqa: E402
 import train_anomaly_model as if_trainer  # noqa: E402
 import train_lstm as lstm_trainer  # noqa: E402
 import train_tcn as tcn_trainer  # noqa: E402
@@ -50,17 +53,26 @@ from _cli import (  # noqa: E402
     add_common_args,
     add_profile_arg,
     load_config,
+    parse_since_argument,
     resolve_sessions,
     scoped_models_dir,
 )
 from refit_behavior_models import _filter_sessions_by_boundary  # noqa: E402
 
 from src.alerts.feedback import DEFAULT_FEEDBACK_PATH, FeedbackStore  # noqa: E402
+from src.analysis.training_disposition import (  # noqa: E402
+    GoldenBaselines,
+    classify_dispositions,
+    compute_quarantine_mask,
+)
 from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
+from src.decode.accepted_baselines import AcceptedBaselines, load_accepted_baselines  # noqa: E402
 from src.log import configure_logging  # noqa: E402
+from src.models.golden_baselines import golden_baselines_path, read_golden_baselines  # noqa: E402
 from src.models.isolation_forest import load_isolation_forest_model  # noqa: E402
 from src.models.manifest import ManifestValidationError  # noqa: E402
+from src.models.retrain_exit_codes import WINDOW_TOO_SMALL_FOR_HOLDOUT  # noqa: E402
 from src.models.retraining_policy import (  # noqa: E402
     RetrainingFeedbackReport,
     apply_retraining_feedback_policy,
@@ -77,7 +89,9 @@ from src.models.training_ledger import (  # noqa: E402
 from src.preprocessing.feature_pipeline import (  # noqa: E402
     DEFAULT_FEATURE_CACHE_DIR,
     build_feature_frame,
+    candidate_feature_columns,
 )
+from src.preprocessing.quality_gate import apply_quarantine_gate  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -203,6 +217,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         dest="use_all_sessions",
         action="store_true",
         help="Override --days; use every session under --sessions-root.",
+    )
+    parser.add_argument(
+        "--since",
+        type=parse_since_argument,
+        default=None,
+        help=(
+            "Sliding-window session selection (Task 3.1): only sessions captured "
+            "at/after this date (YYYY-MM-DD or full ISO-8601), instead of --days's "
+            "relative lookback. Wins over --days/--all when given. The window "
+            "always reserves a calibration holdout (--no-calibration-holdout still "
+            "opts out explicitly); a window too small to spare one refuses the run "
+            f"(exit {WINDOW_TOO_SMALL_FOR_HOLDOUT}) rather than silently falling "
+            "back to in-sample calibration — the posture a scheduled retrain needs."
+        ),
     )
     parser.add_argument(
         "--since-boundary",
@@ -346,6 +374,29 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Skip the post-retrain detector-benchmark regression gate (Task 2.6).",
     )
     parser.add_argument(
+        "--skip-disposition-summary",
+        action="store_true",
+        help=(
+            "Skip computing the Phase-1 disposition summary (regime gate -> "
+            "quality gate -> four-tier classify, `scripts/disposition_report.py`'s "
+            "screen) over this run's training sessions. On by default so a real "
+            "retrain finally populates `TrainingRunRecord.dispositions` (Task 1.4) "
+            "for the champion/challenger promotion gate's contamination sanity "
+            "check (Task 3.3); best-effort either way, never fails the retrain."
+        ),
+    )
+    parser.add_argument(
+        "--skip-quarantine-exclusion",
+        action="store_true",
+        help=(
+            "Skip masking Quarantine-tier cells out of the training matrix (Task 3.6, "
+            "online-training-strategy.md). On by default so the disposition table's "
+            "'Quarantine -> train: No' is real, not just reported; cell-level NaN "
+            "through the same gap machinery the Reject tier already uses "
+            "(`quality_gate.apply_quarantine_gate`), never a row drop."
+        ),
+    )
+    parser.add_argument(
         "--analyses-dir",
         type=Path,
         default=Path("data/analyses"),
@@ -461,6 +512,29 @@ def main(argv: Sequence[str] | None = None) -> int:
                 extra={"session_count": len(sessions)},
             )
 
+    # Task 3.1: a --since window is explicitly the scheduled-retrain shape (a
+    # rolling window, not a fixed corpus) — the calibration-holdout fallback
+    # above (warn + train in-sample) is the right posture for an ad hoc manual
+    # --days run with a thin corpus, but a *scheduled* run must never silently
+    # degrade to in-sample calibration (that's exactly the FPR≈1.0 flood the
+    # ml-hardening review traced to in-sample calibration). Refuse instead —
+    # a distinct exit code so a caller (the online-training scheduler, 3.2)
+    # can log this as a routine skip rather than a hard failure.
+    if (
+        args.since is not None
+        and not args.skip_sequence
+        and not args.no_calibration_holdout
+        and not calibration_sessions
+    ):
+        print(
+            f"error: --since window ({len(sessions)} session(s)) is too small to "
+            "reserve a calibration holdout; a scheduled retrain never calibrates "
+            "in-sample. Widen --since, pass explicit --calibration-sessions, or "
+            "(manual runs only) --no-calibration-holdout.",
+            file=sys.stderr,
+        )
+        return WINDOW_TOO_SMALL_FOR_HOLDOUT
+
     log.info(
         "starting retrain",
         extra={
@@ -512,6 +586,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_report(sessions, results, args)
             return 1
 
+    quarantine_excluded: dict[str, int] | None = None
+    if shared_feature_frame is not None and not args.skip_quarantine_exclusion:
+        shared_feature_frame, quarantine_excluded = _apply_quarantine_exclusion(
+            shared_feature_frame, config, ledger_path=args.ledger
+        )
+
     if shared_feature_frame is not None and feedback_labels:
         try:
             shared_feature_frame, feedback_report = apply_retraining_feedback_policy(
@@ -543,6 +623,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             "rebuild_feature_cache": args.rebuild_feature_cache,
         }
     )
+
+    disposition_summary: dict[str, Any] | None = None
+    if not args.skip_disposition_summary and any_trainer_requested:
+        disposition_summary = _compute_disposition_summary(
+            sessions, config, bindings_path=args.bindings
+        )
+    if quarantine_excluded is not None and disposition_summary is not None:
+        # Task 3.6: per-channel counts of cells actually masked out of the
+        # training matrix, alongside the informational screen above (the
+        # two are computed from different frame representations — see
+        # `_apply_quarantine_exclusion`'s docstring — so this is reported
+        # as its own key rather than folded into `totals`).
+        disposition_summary["excluded"] = quarantine_excluded
 
     # out_dirs of trainers that produced a fresh artifact this run — ledger
     # ingestion is deferred until after the benchmark gate (below) so each
@@ -597,6 +690,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.job_id,
             feedback_report=feedback_report,
             detector_benchmark_report_path=benchmark_report_path,
+            dispositions=disposition_summary,
         )
 
     _print_report(
@@ -643,6 +737,107 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def _apply_quarantine_exclusion(
+    feature_frame: pd.DataFrame,
+    config: CanaryConfig,
+    *,
+    ledger_path: Path,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Mask Quarantine-tier cells out of the actual training matrix (Task 3.6,
+    online-training-strategy.md).
+
+    The disposition report has screened this corpus since Phase 1 (1.4/1.5)
+    without ever acting on what it found — the table's "Quarantine ->
+    train: No" was aspirational until now. This screens ``feature_frame``
+    directly (the frame the trainers are about to fit on, not a second,
+    separately-decoded representation of the same sessions — no
+    cross-pipeline cell alignment to get wrong) and excludes matching cells
+    the same cell-level way the Reject tier already does
+    (``quality_gate.apply_quarantine_gate``): NaN, never a row drop.
+
+    Golden-anchored (Task 3.7): when the isolation-forest model type has a
+    declared golden run with frozen baselines on disk, screens against
+    those instead of this window's own statistics — the fix for the
+    self-referential blind spot the 2026-07-20 review identified. Falls
+    back to window-local screening (Phase 1 behavior) when no golden
+    baselines are on disk, exactly like ``classify_dispositions`` always
+    has.
+
+    Best-effort: any failure (schema surprise, empty frame) returns
+    ``feature_frame`` unchanged with empty counts rather than blocking the
+    retrain — masking bad cells is a quality improvement, not something the
+    retrain can't proceed without.
+    """
+    try:
+        overrides: AcceptedBaselines | None = None
+        if config.daemon.accepted_baselines.exists():
+            overrides = load_accepted_baselines(config.daemon.accepted_baselines)
+
+        golden_baselines: GoldenBaselines | None = None
+        sidecar = golden_baselines_path(ledger_path, "isolation_forest")
+        golden_baselines = read_golden_baselines(sidecar)
+
+        channels = candidate_feature_columns(feature_frame)
+        mask = compute_quarantine_mask(
+            feature_frame,
+            channels=channels,
+            overrides=overrides,
+            golden_baselines=golden_baselines,
+        )
+        masked_frame, result = apply_quarantine_gate(feature_frame, mask)
+        if result.reject_counts:
+            log.info(
+                "quarantine exclusion applied to training matrix",
+                extra={"excluded_counts": result.reject_counts},
+            )
+        return masked_frame, dict(result.reject_counts)
+    except Exception as exc:  # noqa: BLE001 — best-effort, see docstring
+        log.warning("quarantine exclusion skipped: %s", exc)
+        return feature_frame, {}
+
+
+def _compute_disposition_summary(
+    sessions: Sequence[Path],
+    config: CanaryConfig,
+    *,
+    bindings_path: Path,
+) -> dict[str, Any] | None:
+    """Best-effort disposition summary for this run's training sessions.
+
+    The same regime-gate -> data-quality-gate -> four-tier classify screen
+    `scripts/disposition_report.py` runs standalone (reused via its
+    `_scan_sessions`, not reimplemented), applied here so a real retrain run
+    finally populates `TrainingRunRecord.dispositions` (Task 1.4 added the
+    schema field with the note "populated in Phase 3"; this is that wiring).
+    Feeds the champion/challenger promotion gate's contamination sanity check
+    (Task 3.3).
+
+    Never raises: a screen failure (e.g. an unreadable session, a decode
+    error) must not block the retrain itself — it just means this run's
+    ledger record carries `dispositions=None` (unverifiable, not itself a red
+    flag; `build_run_record_from_manifest`'s docstring already documents that
+    absence).
+    """
+    try:
+        overrides = None
+        if config.daemon.accepted_baselines.exists():
+            overrides = load_accepted_baselines(config.daemon.accepted_baselines)
+        framed_parts, reject_counts = disposition_report._scan_sessions(
+            list(sessions), config, bindings_path=bindings_path
+        )
+        if not framed_parts:
+            return None
+        combined = pd.concat(framed_parts, ignore_index=True)
+        channels = candidate_feature_columns(combined)
+        summary = classify_dispositions(
+            combined, reject_counts=reject_counts, channels=channels, overrides=overrides
+        )
+        return summary.to_dict()
+    except Exception as exc:  # noqa: BLE001 — best-effort, see docstring
+        log.warning("disposition summary skipped: %s", exc)
+        return None
+
+
 def _ingest_ledger(
     ledger: TrainingLedger | None,
     out_dir: Path,
@@ -651,6 +846,7 @@ def _ingest_ledger(
     *,
     feedback_report: RetrainingFeedbackReport | None = None,
     detector_benchmark_report_path: Path | None = None,
+    dispositions: dict[str, Any] | None = None,
 ) -> None:
     """Best-effort: record the trainer's manifest in the training ledger.
 
@@ -670,6 +866,7 @@ def _ingest_ledger(
             status="succeeded" if status == "succeeded" else "failed",
             job_id=job_id,
             detector_benchmark_report_path=detector_benchmark_report_path,
+            dispositions=dispositions,
         )
         if feedback_report is not None:
             record = record.model_copy(

@@ -274,6 +274,125 @@ def test_retrain_since_boundary_excludes_older_sessions(
     assert seen["sessions"] == [new_session]
 
 
+# ---------------------------------------------------------------------------
+# --since rolling-window selection (Task 3.1, online-training-strategy.md)
+# ---------------------------------------------------------------------------
+
+
+def test_retrain_since_selects_only_sessions_at_or_after_cutoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--since is a sliding window (an absolute cutoff), not a --days lookback."""
+    root = tmp_path / "sessions"
+    sessions = [
+        root / "2026-05-01T120000",
+        root / "2026-06-01T120000",
+        root / "2026-06-15T120000",
+        root / "2026-07-01T120000",
+    ]
+    for s in sessions:
+        s.mkdir(parents=True)
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        retrain.if_trainer,
+        "train",
+        lambda positional, *_a, **_k: seen.__setitem__("if_sessions", list(positional)),
+    )
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(root),
+            "--since",
+            "2026-06-01",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--sequence-out",
+            str(tmp_path / "lstm"),
+            "--no-feedback-policy",
+            "--skip-disposition-summary",
+        ]
+    )
+    assert rc == 0
+    # 2026-05-01 dropped by --since; of the remaining three, the auto
+    # calibration-holdout carves the most recent one out for calibration
+    # (3 sessions → 1 holdout, 2 left for training).
+    assert seen["if_sessions"] == sessions[1:-1]
+
+
+def test_retrain_since_window_too_small_for_holdout_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Task 3.1: a --since window that can't spare a calibration holdout
+    refuses the run (a distinct exit code) rather than silently falling back
+    to in-sample calibration — the posture a scheduled retrain needs (3.2
+    treats this as a routine skip, not a hard failure)."""
+    root = tmp_path / "sessions"
+    sessions = [root / "2026-06-01T120000", root / "2026-06-02T120000"]
+    for s in sessions:
+        s.mkdir(parents=True)
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(root),
+            "--since",
+            "2026-01-01",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--sequence-out",
+            str(tmp_path / "lstm"),
+        ]
+    )
+    assert rc == retrain.WINDOW_TOO_SMALL_FOR_HOLDOUT
+    assert "too small to reserve a calibration holdout" in capsys.readouterr().err
+
+
+def test_retrain_since_with_no_calibration_holdout_does_not_refuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--no-calibration-holdout is still a valid, explicit manual opt-out even
+    under --since — only a *scheduled* run (which never passes that flag,
+    Task 3.2) is forced through the refusal path."""
+    root = tmp_path / "sessions"
+    sessions = [root / "2026-06-01T120000", root / "2026-06-02T120000"]
+    for s in sessions:
+        s.mkdir(parents=True)
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(root),
+            "--since",
+            "2026-01-01",
+            "--no-calibration-holdout",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--sequence-out",
+            str(tmp_path / "lstm"),
+            "--no-feedback-policy",
+            "--skip-disposition-summary",
+        ]
+    )
+    assert rc == 0
+
+
 def test_retrain_both_skip_returns_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [tmp_path])
     rc = retrain.main(

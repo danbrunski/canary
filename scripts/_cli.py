@@ -90,6 +90,46 @@ def filter_sessions_by_age(sessions: list[Path], days: int, now: datetime) -> li
     return kept
 
 
+def parse_since_argument(value: str) -> datetime:
+    """Parse ``--since``'s value (Task 3.1, online-training-strategy.md).
+
+    Accepts a bare date (``YYYY-MM-DD``) or a full ISO-8601 timestamp; a
+    timestamp with no timezone is treated as UTC (matching every other
+    timestamp convention in this repo — session dir names, manifests,
+    ledger records). Raises ``argparse.ArgumentTypeError`` on anything else
+    so a typo fails fast at the CLI boundary, not deep inside session
+    filtering.
+    """
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"invalid --since value {value!r}: expected YYYY-MM-DD or ISO-8601"
+        ) from exc
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def filter_sessions_since(sessions: list[Path], since: datetime) -> list[Path]:
+    """Keep session dirs timestamped at/after ``since`` (Task 3.1).
+
+    The sliding-window counterpart to ``filter_sessions_by_age``'s
+    relative ``--days``: ``since`` is an absolute cutoff (typically
+    "now - window_days", recomputed fresh each scheduled tick, hence
+    "rolling"), not a fixed lookback from whenever this function happens to
+    run. Same non-conforming-name-is-kept posture as ``filter_sessions_by_age``.
+    """
+    kept: list[Path] = []
+    for session in sessions:
+        try:
+            started = datetime.strptime(session.name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
+        except ValueError:
+            kept.append(session)  # unknown format → keep
+            continue
+        if started >= since:
+            kept.append(session)
+    return kept
+
+
 #: Live-session directory naming convention (matches `make_session_dir`).
 #: `_replay-*` / `_archive` are deliberately excluded — used by scripts that
 #: post-process real captures only (labeling, fingerprinting).
@@ -118,11 +158,19 @@ def resolve_sessions(args: argparse.Namespace, sessions_root: Path) -> list[Path
     passed — the `retrain.py`/`refit_behavior_models.py` session-resolution
     preamble (both take a `sessions` positional + `--sessions-root` +
     `--days` + `--all`, byte-identical resolution logic).
+
+    `--since` (Task 3.1, `retrain.py` only) is a third, mutually-exclusive
+    selection mode: when `args.since` is set (and truthy), it wins over both
+    `--days` and `--all` — a genuine sliding window anchored to an absolute
+    cutoff rather than a lookback from "now".
     """
     sessions: list[Path] = list(args.sessions)
     if not sessions:
         sessions = discover_sessions(sessions_root)
-        if not args.use_all_sessions:
+        since = getattr(args, "since", None)
+        if since is not None:
+            sessions = filter_sessions_since(sessions, since)
+        elif not args.use_all_sessions:
             sessions = filter_sessions_by_age(sessions, args.days, datetime.now(UTC))
     return sessions
 
@@ -134,5 +182,7 @@ __all__ = [
     "load_config",
     "discover_live_session_dirs",
     "filter_sessions_by_age",
+    "filter_sessions_since",
+    "parse_since_argument",
     "resolve_sessions",
 ]

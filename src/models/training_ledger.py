@@ -95,6 +95,14 @@ class TrainingRunRecord(BaseModel):
     #: absence is not itself a red flag.
     dispositions: dict[str, Any] | None = None
     publish_status: PublishStatus = "unpublished"
+    #: Task 3.4 (online-training-strategy.md) — the operator's frozen
+    #: reference run for this ``model_type`` (within this profile's ledger
+    #: file, which is already profile-scoped — see ``src/profiles.py``'s
+    #: ``training_ledger`` path scoping). Only ``TrainingLedger.set_golden``
+    #: ever sets this; no retrain/scheduler/promotion code path may. At most
+    #: one run per ``model_type`` is golden at a time (same demote-on-append
+    #: pattern as ``publish_status``'s ``active``).
+    golden: bool = False
     notes: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -169,6 +177,41 @@ class TrainingLedger(JsonlStore[TrainingRunRecord]):
         )
         return self.append(updated)
 
+    def set_golden(self, run_id: str, *, notes: str | None = None) -> TrainingRunRecord | None:
+        """Declare ``run_id`` the frozen golden baseline for its ``model_type``
+        (Task 3.4) — an explicit operator assertion, recorded as one (never
+        called from a retrain/scheduler/promotion code path). Demotes any
+        other run of the same ``model_type`` currently golden, appended as
+        its own line (same provenance-preserving pattern as
+        ``set_publish_status``'s ``active`` demotion).
+
+        Returns ``None`` for an unknown run without appending anything.
+        """
+        current = self.get(run_id)
+        if current is None:
+            return None
+        for other in self.records():
+            if other.model_type == current.model_type and other.run_id != run_id and other.golden:
+                self.append(
+                    other.model_copy(
+                        update={
+                            "golden": False,
+                            "notes": f"demoted: {run_id} declared golden",
+                        }
+                    )
+                )
+        updated = current.model_copy(update={"golden": True, "notes": notes or current.notes})
+        return self.append(updated)
+
+    def golden_run(self, model_type: str) -> TrainingRunRecord | None:
+        """The current golden run for ``model_type``, or ``None`` if the
+        operator hasn't declared one yet (the default posture — Task 3.4 is
+        explicit that no code path may auto-declare one)."""
+        return next(
+            (r for r in self.records() if r.model_type == model_type and r.golden),
+            None,
+        )
+
 
 def _as_str_list(value: Any) -> list[str]:
     if isinstance(value, list):
@@ -184,6 +227,7 @@ def build_run_record_from_manifest(
     job_log_path: str | None = None,
     false_positive_benchmark_path: Path | None = None,
     detector_benchmark_report_path: Path | None = None,
+    dispositions: dict[str, Any] | None = None,
     notes: str | None = None,
 ) -> TrainingRunRecord:
     """Build a :class:`TrainingRunRecord` from a trainer's manifest JSON.
@@ -273,5 +317,6 @@ def build_run_record_from_manifest(
             if detector_benchmark_report_path is not None
             else None
         ),
+        dispositions=dispositions,
         notes=notes,
     )

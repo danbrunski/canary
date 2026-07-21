@@ -419,6 +419,34 @@ def test_retrain_job_command_passes_job_id_to_ledger(tmp_path: Path) -> None:
     assert command[command.index("--job-id") + 1] == "job-123"
 
 
+def test_retrain_all_job_command_since_param_builds_since_flag(tmp_path: Path) -> None:
+    """Task 3.1/3.2: the online-training scheduler's `since` param becomes
+    `retrain.py --since <date>` — and there is no params-level path to
+    `--no-calibration-holdout` anywhere in the command builder, so a
+    scheduled retrain structurally cannot disable the calibration holdout."""
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(tmp_path / "storage"))
+    config = CanaryConfig.from_yaml(cfg_path)
+    controller = JobController(
+        config=config,
+        repo_root=tmp_path,
+        config_path=cfg_path,
+        jobs_dir=tmp_path / "jobs",
+        python=Path(sys.executable),
+    )
+
+    command = controller._build_command(  # noqa: SLF001 - command shape is the contract here
+        "retrain_all",
+        {"since": "2026-06-01"},
+    )
+
+    assert "--since" in command
+    assert command[command.index("--since") + 1] == "2026-06-01"
+    assert "--no-calibration-holdout" not in command
+    assert "--days" not in command
+    assert "--all" not in command
+
+
 def test_export_dataset_job_command_shape(tmp_path: Path) -> None:
     """Task 5.6b: the Export panel's job kind builds the exact
     ``scripts/export_dataset.py`` invocation an operator would type by hand."""

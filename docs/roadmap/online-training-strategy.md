@@ -474,16 +474,20 @@ verified against, as amended by the validity check above.
   (engine-state bytes, steering signals) whose median/MAD band
   collapses to a point — flagged for operator review rather than
   treated as uniformly actionable.
-- [ ] **1.6 — Channel-type-aware disposition screen.** (Amendment 5.)
-  Handle discrete/bitmask channels (engine-state bytes, steering
-  signals) categorically in `classify_dispositions` instead of via
-  median/MAD — a point-collapsed band manufactures Quarantine floods
-  that bury the continuous-channel signal. A discrete channel's
-  baseline is its observed value *set*: membership → Accept, an
-  unseen value may still Quarantine. Detection of "discrete" should be
-  data-driven (small unique-value count / integer-only), not a
-  hand-listed channel roster. Re-run the 1.5 corpus report after; the
-  Quarantine total should collapse to the continuous-channel residue.
+- [x] **1.6 — Channel-type-aware disposition screen.** (Amendment 5.)
+  Landed: data-driven `_is_discrete` (small unique-value count, or
+  integer-valued with a low unique-fraction — no hand-listed roster).
+  A discrete channel's baseline is its observed value set. Re-ran the
+  1.5 corpus report: Quarantine collapsed 40,865 → 11,947 (~71% drop);
+  traced the residue against `data/bindings.yaml`'s own documented
+  evidence trails (e.g. `ECM_ENGINE_STATE_*`'s low-nibble counter bits
+  in active-driving modes, steering/motion channels' real
+  parked-vs-driving cardinality jump) — genuine continuous-channel
+  signal, not a detector miss. Superseded disposition report committed
+  in place of the stale one. One disclosed, non-fatal risk: the
+  absolute unique-value cap can misclassify a genuinely continuous but
+  low-cardinality signal (exactly the heuristic's stated trade-off;
+  no real corpus channel currently triggers it).
 
 ### Phase 2 — directional overrides surfaced
 
@@ -526,57 +530,69 @@ verified against, as amended by the validity check above.
 
 ### Phase 3 — closing the loop (only after 1–2 are proven)
 
-- [ ] **3.1 — Rolling-window selection.** `scripts/retrain.py --since` /
-  sliding-window session selection beside `--days`, disposition
-  pipeline applied to the selected window. The window selection must
-  always reserve held-out calibration sessions (the existing
-  `_pick_calibration_holdouts` path); refuse to schedule-retrain a
-  window too small to spare one.
-- [ ] **3.2 — Scheduler.** Config-gated daemon `asyncio` task
-  (`online_training:` block, **default disabled**) that fires the
-  retrain flow on cadence; a systemd-timer alternative documented, not
-  installed. No training on the capture hot path. The scheduler never
-  passes `--no-calibration-holdout` — a scheduled retrain that can't
-  calibrate out-of-sample skips and logs rather than degrading.
-- [ ] **3.3 — Champion/challenger gate.** `ModelManager` + ledger:
-  a scheduled retrain lands `unpublished`; promotion to `active`
-  requires the validation gate — **recall non-regression vs golden on
-  the fault-injection benchmark** (queue Q3), held-out FP/hr within
-  budget, holdout score agreement with golden within tolerance,
-  contamination sanity — never auto-`active`. An artifact whose
-  manifest is stamped `calibration: in_sample` (ml-hardening 3.1) is
-  categorically ineligible. Tests for gate pass/fail/rollback.
-- [ ] **3.4 — Frozen golden baseline.** Ledger support for declaring one
-  run `golden` **per vehicle profile** (an operator assertion, recorded
-  as such); golden is never auto-updated; a live-vs-golden divergence
-  metric is computed and surfaced ("normal has drifted — why?").
-  Declaring the actual golden run is an operator morning task.
-- [ ] **3.5 — Docs + runbook.** Online-training runbook: enable,
-  observe, promote, roll back, re-declare golden. Amendments: document
-  periodic golden re-declaration as *routine seasonal maintenance*, not
-  an anomaly response (amendment 4), and document the gate's held-out
-  FP/hr check as an **alert-rate** budget on unlabeled data — a breach
-  means "inspect the alerts; some may be true positives on a genuinely
-  degrading window", not automatically "the challenger is worse"
-  (amendment 3).
-- [ ] **3.6 — Enforce Quarantine exclusion + quarantine-fraction trend.**
-  (Amendment 2.) Make the disposition table's "Quarantine → train: No"
-  real: mask Quarantine-tier cells out of the training matrix in
-  `retrain.py` (cell-level, through the same gap machinery as the
-  Reject tier — never row drops), with per-channel excluded counts in
-  `TrainingRunRecord.dispositions`. Add a quarantine-fraction trend
-  check to the promotion gate: compare the candidate run's quarantine
-  fraction against recent scheduled runs' (from the ledger); a
-  sustained rise blocks promotion and surfaces "window health is
-  shifting" rather than letting the gate rely solely on
-  injected-fault recall. Tests: a fault-bearing synthetic window shows
-  rows excluded and the trend check trips.
-- [ ] **3.7 — Golden-anchored disposition baselines.** (Amendment 1;
-  after 3.4.) When a golden run is declared, freeze its per-`(channel,
-  operating_mode)` baseline statistics (median/MAD, and the 1.6
-  value-sets) alongside the declaration, and make `classify_dispositions`
-  screen candidate windows against *those* rather than window-local
-  statistics — a persistent shift then lands in Quarantine instead of
-  redefining the median. Window-local remains the documented fallback
-  when no golden exists. Re-declaring golden re-freezes the baselines;
-  the runbook (3.5) notes this is part of the same operator action.
+- [x] **3.1 — Rolling-window selection.** Landed: `scripts/retrain.py
+  --since` sliding-window selection beside `--days`, reusing the
+  existing `_pick_calibration_holdouts` path. Refuses
+  (`WINDOW_TOO_SMALL_FOR_HOLDOUT` exit code) rather than degrading to
+  in-sample calibration when the window can't spare a real holdout.
+  Disclosed, pre-existing, out-of-scope inconsistency: the `--days`
+  path's thin-corpus behavior (warn+fallback) is unchanged and doesn't
+  get this hard refusal — not worsened by this task, but not unified
+  either.
+- [x] **3.2 — Scheduler.** Landed: `OnlineTrainingConfig.enabled:
+  bool = False` (hard default, verified). New
+  `src/daemon/online_training.py::run_online_training_scheduler`
+  mirrors the retention sweeper's asyncio-cadence shape, submits a
+  windowed `retrain_all` job through the existing `JobController` —
+  never trains inline on the event loop. Verified structurally
+  incapable of passing `--no-calibration-holdout`: no parameter or
+  code path in the job-command builder accepts or forwards that flag.
+  systemd-timer alternative documented in the runbook, not installed.
+- [x] **3.3 — Champion/challenger gate.** Landed: new
+  `src/models/promotion_gate.py::evaluate_promotion_gate` — calibration-
+  stamp hard reject (unconditional, first-checked, can't be offset by
+  other passing checks), contamination sanity, recall non-regression
+  vs golden on the real fault-injection benchmark (`detector_benchmark.py`
+  report schema, verified field-for-field, not a stub), held-out FP/hr
+  budget, holdout score agreement. `promote_challenger` verified as the
+  ONLY path to `active` besides the pre-existing manual `publish` CLI —
+  never called from `retrain.py` or the scheduler. Tests cover gate
+  pass/fail/rollback.
+- [x] **3.4 — Frozen golden baseline.** Landed: `TrainingLedger.
+  set_golden`/`golden_run`, demote-on-append scoped strictly per
+  `model_type` (no cross-type contamination), profile-scoped for free
+  via ledger co-location. `compute_golden_divergence` for the
+  live-vs-golden drift signal — a real per-detector computation, not a
+  placeholder. Golden verified never auto-updated by any code path
+  other than the explicit `ledger.py golden` CLI action. The real
+  vehicle profile has no golden run declared, per the pre-made
+  decision.
+- [x] **3.5 — Docs + runbook.** Landed: `docs/runbooks.md` "Online
+  training" entry — enable, observe, promote, roll back, re-declare
+  golden. Amendments landed: FP/hr (and 3.6's quarantine-trend check)
+  reframed as an alert-rate budget whose breach means "inspect the
+  alerts," not an automatic verdict; golden re-declaration documented
+  as routine seasonal maintenance, tied to the actual re-freeze
+  mechanism 3.7 added.
+- [x] **3.6 — Enforce Quarantine exclusion + quarantine-fraction
+  trend.** (Amendment 2.) Landed: new `apply_quarantine_gate` in
+  `quality_gate.py` — the identical cell-level NaN mechanism the
+  Reject tier already uses, never a row drop. `retrain.py` masks
+  Quarantine cells out of the real training matrix by default
+  (`--skip-quarantine-exclusion` opt-out), excluded counts recorded in
+  `TrainingRunRecord.dispositions`. Promotion gate gained a
+  quarantine-fraction-trend check (sustained rise vs. recent
+  same-model-type ledger runs blocks promotion) feeding the same
+  shared eligibility mechanism as every other check — not a separate,
+  bypassable path. Graceful no-check with fewer than 2 historical runs.
+- [x] **3.7 — Golden-anchored disposition baselines.** (Amendment 1;
+  after 3.4.) Landed: new `src/models/golden_baselines.py` sidecar,
+  co-located with the profile-scoped ledger. `compute_golden_baselines`
+  freezes per-`(channel, operating_mode)` median/MAD or discrete
+  value-sets at golden declaration; `classify_dispositions` screens a
+  covered group against the FROZEN reference, never recomputing from
+  the candidate window — verified with a real, non-tautological test
+  proving the exact self-referential-baseline blind spot: identical
+  drifted data scores zero quarantine window-local vs. real quarantine
+  golden-anchored. Falls back cleanly to window-local for an uncovered
+  group. Re-declaring golden re-freezes the baselines.

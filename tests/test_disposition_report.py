@@ -85,8 +85,12 @@ def _write_session(
     for i in range(rows):
         t = start_epoch + i
         # A clear, persistent fuel-trim outlier band for the first
-        # `fuel_trim_outliers` rows — everything else sits near 0.
-        fuel_trim = 30.0 if i < fuel_trim_outliers else (i % 3) * 0.1
+        # `fuel_trim_outliers` rows — everything else wanders continuously
+        # near 0 with high cardinality (a real ECU never repeats a decimal
+        # fuel-trim reading), so Task 1.6's data-driven discrete detector
+        # correctly reads this channel as continuous rather than mistaking
+        # a coarse test fixture for a bitmask.
+        fuel_trim = 30.0 if i < fuel_trim_outliers else -3.0 + (i % 61) * 0.1
         records.extend(
             [
                 TelemetryRecord.obd(t, "RPM", 900.0 + (i % 20), "rpm"),

@@ -9,7 +9,11 @@ import pandas as pd
 
 from src.analysis.training_disposition import (
     MIN_BASELINE_SAMPLES,
+    ChannelBaseline,
+    GoldenBaselines,
     classify_dispositions,
+    compute_golden_baselines,
+    compute_quarantine_mask,
 )
 from src.decode.accepted_baselines import (
     AcceptedBaselineOverride,
@@ -212,3 +216,182 @@ def test_classify_dispositions_without_mode_column_is_one_ungrouped_group() -> N
     summary = classify_dispositions(frame, reject_counts={}, channels=["obd:RPM"])
     assert len(summary.groups) == 1
     assert summary.groups[0].operating_mode is None
+
+
+# ---------------------------------------------------------------------------
+# Task 1.6 — channel-type-aware (discrete/bitmask) disposition screen
+# ---------------------------------------------------------------------------
+
+
+def _discrete_frame(n: int = 200, *, states: tuple[int, ...] = (0, 1, 2, 3)) -> pd.DataFrame:
+    """An engine-state-byte-like channel: a handful of legitimate states,
+    every value observed in this same window."""
+    return pd.DataFrame(
+        {
+            "operating_mode": ["idle"] * n,
+            "can:ENGINE_STATE": [states[i % len(states)] for i in range(n)],
+        }
+    )
+
+
+def test_discrete_channel_every_observed_value_is_accepted_window_local() -> None:
+    """Window-local discrete screening is self-referential by construction —
+    every value in the window is, by definition, a member of its own
+    observed set. This is exactly the Quarantine-flood fix (Task 1.6): a
+    median/MAD band on a 4-state byte would collapse to a point and flag
+    most of it; the value-set baseline doesn't."""
+    frame = _discrete_frame()
+    summary = classify_dispositions(frame, reject_counts={}, channels=["can:ENGINE_STATE"])
+    group = summary.groups[0]
+    assert group.is_discrete is True
+    assert group.quarantine == 0
+    assert group.accept == len(frame)
+    assert group.baseline_values == (0, 1, 2, 3)
+
+
+def test_continuous_channel_is_not_misclassified_discrete() -> None:
+    """A genuinely continuous channel (many distinct float values) must stay
+    on the median/MAD path — Task 1.6 must not swallow the continuous
+    residue the review explicitly wants preserved."""
+    frame = _baseline_frame(outlier_count=5)
+    summary = classify_dispositions(frame, reject_counts={}, channels=["obd:SHORT_FUEL_TRIM_1"])
+    group = summary.groups[0]
+    assert group.is_discrete is False
+    assert group.quarantine == 5  # unchanged continuous-path behavior
+
+
+def test_wide_integer_state_channel_with_low_cardinality_fraction_is_discrete() -> None:
+    """Above the absolute cap, integer-valued + low unique-fraction is still
+    discrete (e.g. a gear number sampled for hours) — not a hand-listed
+    channel, purely from the data's own shape."""
+    n = 2000
+    frame = pd.DataFrame(
+        {
+            "operating_mode": ["highway"] * n,
+            "obd:GEAR": [(i % 20) for i in range(n)],  # 20 states, 1% of 2000 rows
+        }
+    )
+    summary = classify_dispositions(frame, reject_counts={}, channels=["obd:GEAR"])
+    assert summary.groups[0].is_discrete is True
+
+
+def test_discrete_channel_screened_via_quarantine_mask() -> None:
+    frame = _discrete_frame()
+    mask = compute_quarantine_mask(frame, channels=["can:ENGINE_STATE"])
+    assert not mask["can:ENGINE_STATE"].any()  # every value is in its own observed set
+
+
+# ---------------------------------------------------------------------------
+# Task 3.7 — golden-anchored baselines
+# ---------------------------------------------------------------------------
+
+
+def test_compute_golden_baselines_freezes_continuous_and_discrete_groups() -> None:
+    continuous = _baseline_frame(outlier_count=0)
+    discrete = _discrete_frame()
+    frame = pd.concat([continuous.drop(columns=["session"]), discrete], axis=0, ignore_index=True)
+    baselines = compute_golden_baselines(
+        frame, channels=["obd:SHORT_FUEL_TRIM_1", "can:ENGINE_STATE"]
+    )
+    fuel_trim = baselines.get("obd:SHORT_FUEL_TRIM_1", "idle")
+    assert fuel_trim is not None
+    assert fuel_trim.is_discrete is False
+    assert fuel_trim.median is not None
+
+    engine_state = baselines.get("can:ENGINE_STATE", "idle")
+    assert engine_state is not None
+    assert engine_state.is_discrete is True
+    assert engine_state.baseline_values == (0, 1, 2, 3)
+
+
+def test_golden_anchored_screen_catches_drift_a_window_local_screen_misses() -> None:
+    """The central self-referential-baseline blind spot the review
+    identified: a slow drift dominating a window redefines the window-local
+    median as "normal". Anchoring to a frozen golden baseline instead still
+    catches it."""
+    rng_values = [0.0] * 150  # golden: tightly clustered at 0
+    golden_frame = pd.DataFrame(
+        {"operating_mode": ["idle"] * 150, "obd:SHORT_FUEL_TRIM_1": rng_values}
+    )
+    golden_baselines = compute_golden_baselines(
+        golden_frame, channels=["obd:SHORT_FUEL_TRIM_1"], min_baseline_samples=20
+    )
+
+    # A later candidate window has drifted almost entirely to 20 — window-
+    # local statistics would call 20 the new median and flag nothing.
+    drifted = pd.DataFrame(
+        {
+            "operating_mode": ["idle"] * 150,
+            "obd:SHORT_FUEL_TRIM_1": [20.0] * 148 + [0.0, 0.0],
+        }
+    )
+
+    window_local = classify_dispositions(
+        drifted, reject_counts={}, channels=["obd:SHORT_FUEL_TRIM_1"]
+    )
+    assert window_local.groups[0].quarantine == 0  # the blind spot, unfixed
+
+    golden_anchored = classify_dispositions(
+        drifted,
+        reject_counts={},
+        channels=["obd:SHORT_FUEL_TRIM_1"],
+        golden_baselines=golden_baselines,
+    )
+    assert golden_anchored.groups[0].quarantine == 148  # anchored to golden's frozen median
+
+
+def test_golden_baselines_missing_channel_falls_back_to_window_local() -> None:
+    """A channel golden never covered (e.g. added to the corpus later) must
+    fall back to window-local screening, not silently pass everything."""
+    empty_golden = GoldenBaselines(baselines=())
+    frame = _baseline_frame(outlier_count=5)
+    summary = classify_dispositions(
+        frame,
+        reject_counts={},
+        channels=["obd:SHORT_FUEL_TRIM_1"],
+        golden_baselines=empty_golden,
+    )
+    assert summary.groups[0].quarantine == 5  # same as no golden_baselines at all
+
+
+def test_golden_baselines_round_trip_to_dict() -> None:
+    baselines = GoldenBaselines(
+        baselines=(
+            ChannelBaseline(
+                channel="obd:RPM",
+                operating_mode="idle",
+                is_discrete=False,
+                median=900.0,
+                scaled_mad=12.0,
+            ),
+            ChannelBaseline(
+                channel="can:ENGINE_STATE",
+                operating_mode="idle",
+                is_discrete=True,
+                baseline_values=(0, 1, 2, 3),
+            ),
+        )
+    )
+    restored = GoldenBaselines.from_dict(baselines.to_dict())
+    assert restored.get("obd:RPM", "idle") == baselines.get("obd:RPM", "idle")
+    assert restored.get("can:ENGINE_STATE", "idle") == baselines.get("can:ENGINE_STATE", "idle")
+
+
+# ---------------------------------------------------------------------------
+# Task 3.6 — compute_quarantine_mask (cell-level companion to classify_dispositions)
+# ---------------------------------------------------------------------------
+
+
+def test_quarantine_mask_flags_exactly_the_quarantine_cells() -> None:
+    frame = _baseline_frame(outlier_count=5)
+    mask = compute_quarantine_mask(frame, channels=["obd:SHORT_FUEL_TRIM_1"])
+    assert mask["obd:SHORT_FUEL_TRIM_1"].sum() == 5
+    # The flagged rows are exactly the first 5 (see _baseline_frame).
+    assert list(mask.index[mask["obd:SHORT_FUEL_TRIM_1"]]) == [0, 1, 2, 3, 4]
+
+
+def test_quarantine_mask_respects_active_override() -> None:
+    frame = _baseline_frame(outlier_count=5)
+    overrides = AcceptedBaselines(schema_version=1, overrides=[_override()])
+    mask = compute_quarantine_mask(frame, channels=["obd:SHORT_FUEL_TRIM_1"], overrides=overrides)
+    assert not mask["obd:SHORT_FUEL_TRIM_1"].any()  # covered -> Accept-recenter, not Quarantine

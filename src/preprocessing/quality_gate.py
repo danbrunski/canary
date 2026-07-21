@@ -43,7 +43,12 @@ from src.analysis.fsm import PHYSICAL_LIMITS, PhysicalLimit
 
 log = logging.getLogger(__name__)
 
-__all__ = ["QualityGateResult", "apply_quality_gate", "is_physically_valid"]
+__all__ = [
+    "QualityGateResult",
+    "apply_quality_gate",
+    "apply_quarantine_gate",
+    "is_physically_valid",
+]
 
 
 @dataclass(frozen=True)
@@ -113,5 +118,43 @@ def apply_quality_gate(
         log.info(
             "quality gate rejected physically-impossible cells",
             extra={"reject_counts": counts, "total_rejected": sum(counts.values())},
+        )
+    return out, QualityGateResult(reject_counts=counts)
+
+
+def apply_quarantine_gate(
+    frame: pd.DataFrame,
+    quarantine_mask: pd.DataFrame,
+) -> tuple[pd.DataFrame, QualityGateResult]:
+    """NaN out Quarantine-tier cells (Task 3.6, online-training-strategy.md),
+    the same cell-level mechanism :func:`apply_quality_gate` uses for the
+    Reject tier — never a row drop, no parallel missingness code path.
+
+    ``quarantine_mask`` is ``src.analysis.training_disposition.compute_quarantine_mask``'s
+    output: a boolean frame, ``True`` where that cell is Quarantine. Only
+    columns present in *both* ``frame`` and ``quarantine_mask`` are touched;
+    everything else passes through untouched. Returns a copy when anything
+    was excluded — the input is never mutated in place — else the original
+    frame, mirroring :func:`apply_quality_gate`'s no-op contract.
+    """
+    out = frame
+    counts: dict[str, int] = {}
+    shared_index = frame.index.intersection(quarantine_mask.index)
+    for channel in quarantine_mask.columns:
+        if channel not in frame.columns:
+            continue
+        bad = quarantine_mask.loc[shared_index, channel].reindex(frame.index, fill_value=False)
+        bad = bad.fillna(False).astype(bool)
+        n = int(bad.sum())
+        if n == 0:
+            continue
+        if out is frame:
+            out = frame.copy()
+        out.loc[bad, channel] = np.nan
+        counts[channel] = n
+    if counts:
+        log.info(
+            "quarantine gate excluded cells from the training matrix",
+            extra={"excluded_counts": counts, "total_excluded": sum(counts.values())},
         )
     return out, QualityGateResult(reject_counts=counts)

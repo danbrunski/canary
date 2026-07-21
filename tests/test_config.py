@@ -36,6 +36,22 @@ def test_example_yaml_loads():
     assert config.alerts.min_consecutive_ticks == 3
     assert config.alerts.persistence_window_ticks == 5
     assert config.models.fusion.min_agreement == 2
+    # Task 3.2 (online-training-strategy.md): hard pre-made decision,
+    # scheduled retrain ships disabled.
+    assert config.online_training.enabled is False
+
+
+def test_online_training_config_defaults():
+    """Task 3.2: `online_training.enabled` defaults false — enabling the
+    scheduler against the real corpus is an explicit operator action, never
+    an unattended default."""
+    from src.config import OnlineTrainingConfig
+
+    cfg = OnlineTrainingConfig()
+    assert cfg.enabled is False
+    assert cfg.interval_seconds > 0
+    assert cfg.window_days > 0
+    assert cfg.poll_interval_seconds > 0
 
 
 def test_sequence_detector_default_is_lstm():

@@ -543,6 +543,36 @@ class NotificationsConfig(_Strict):
     digest_enabled: bool = False
 
 
+class OnlineTrainingConfig(_Strict):
+    """Config-gated scheduled retrain (Task 3.2, online-training-strategy.md).
+
+    **Ships disabled** — a hard pre-made decision (queue Round-2): enabling
+    unattended scheduled retrains against the real corpus is an explicit
+    operator action, never an unattended default. When enabled, the daemon's
+    ``run_online_training_scheduler`` background task (mirrors
+    ``run_retention_sweeper``'s asyncio-task-on-a-cadence shape) submits a
+    ``retrain_all`` job through the existing ``JobController`` every
+    ``interval_seconds`` — the same subprocess-isolated mechanism the
+    dashboard's manual "Retrain" button already uses, so a scheduled retrain
+    never runs on the daemon's own event loop or blocks real-time capture.
+    The job is windowed to the trailing ``window_days`` of sessions
+    (``--since``, Task 3.1) — a genuine sliding window, not a fixed corpus —
+    and the scheduler never adds ``--no-calibration-holdout``: a window too
+    small to spare a calibration holdout is refused by ``retrain.py`` itself
+    (Task 3.1) and logged as a skip, never degraded to in-sample calibration.
+    """
+
+    enabled: bool = False
+    #: Seconds between scheduled-retrain attempts.
+    interval_seconds: float = Field(default=86400.0, gt=0.0)
+    #: Rolling-window length in days passed to ``retrain.py --since``.
+    window_days: int = Field(default=30, gt=0)
+    #: How often the scheduler re-checks a submitted job's status while
+    #: waiting for it to finish (a cheap in-memory dict lookup — this is not
+    #: additional training, just how promptly the loop notices completion).
+    poll_interval_seconds: float = Field(default=5.0, gt=0.0)
+
+
 class ProfilesConfig(_Strict):
     """Multi-vehicle profile resolution (see ``src/profiles.py``).
 
@@ -577,6 +607,7 @@ class CanaryConfig(_Strict):
     profiles: ProfilesConfig = ProfilesConfig()
     trends: TrendsConfig = TrendsConfig()
     notifications: NotificationsConfig = NotificationsConfig()
+    online_training: OnlineTrainingConfig = OnlineTrainingConfig()
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:

@@ -19,6 +19,7 @@ from src.telemetry import TelemetryRecord
 from .components import DaemonComponents, build_components
 from .drain import drain_queue_with_broadcast
 from .inference import build_live_feature_source, run_live_inference
+from .online_training import run_online_training_scheduler
 from .polling import poll_behavior_models, poll_config, poll_model_managers
 from .retention import _active_replay_dir, run_retention_sweeper
 from .server import serve_in_background
@@ -72,6 +73,9 @@ async def run_daemon(
         model artifact is loaded)
       * ``poll_model_managers`` → hot-swap loop
       * ``run_retention_sweeper`` → age + byte-cap + low-space retention
+      * ``run_online_training_scheduler`` (Task 3.2) → config-gated, default
+        disabled; scheduled retrain via the existing subprocess-isolated
+        ``JobController``, never on this event loop
       * the dashboard via ``serve_in_background``
 
     Returns the components so a caller can inspect counters / model
@@ -172,6 +176,20 @@ async def run_daemon(
             catalog_db=config.daemon.catalog_db,
         )
     )
+    online_training_task: asyncio.Task[Any] | None = None
+    if config.online_training.enabled and components.job_controller is not None:
+        # Task 3.2: config-gated, defaults off (see OnlineTrainingConfig). Only
+        # created when explicitly enabled — an unconfigured/disabled daemon
+        # behaves exactly as before, no new background task at all.
+        online_training_task = asyncio.create_task(
+            run_online_training_scheduler(
+                components.job_controller,
+                stop_event,
+                interval_seconds=config.online_training.interval_seconds,
+                window_days=config.online_training.window_days,
+                poll_interval_seconds=config.online_training.poll_interval_seconds,
+            )
+        )
     behavior_models_task: asyncio.Task[Any] | None = None
     if live_source is not None:
         # Hot-reload the behavior-models YAML so refit deployments don't
@@ -257,6 +275,12 @@ async def run_daemon(
                 await retention_task
             except asyncio.CancelledError:
                 pass
+            if online_training_task is not None:
+                online_training_task.cancel()
+                try:
+                    await online_training_task
+                except asyncio.CancelledError:
+                    pass
             if behavior_models_task is not None:
                 behavior_models_task.cancel()
                 try:

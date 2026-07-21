@@ -52,6 +52,8 @@ from src.decode.bindings import load_bindings  # noqa: E402
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir  # noqa: E402
 from src.decode.dids import load_did_map  # noqa: E402
 from src.log import configure_logging  # noqa: E402
+from src.models.golden_baselines import golden_baselines_path, read_golden_baselines  # noqa: E402
+from src.models.training_ledger import DEFAULT_TRAINING_LEDGER_PATH  # noqa: E402
 from src.preprocessing.feature_pipeline import (  # noqa: E402
     DEFAULT_BINDINGS_PATH,
     DEFAULT_DIDS_PATH,
@@ -118,6 +120,23 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--timestamp",
         default=None,
         help="Filesystem-safe timestamp for the default --out name (default: now, UTC).",
+    )
+    parser.add_argument(
+        "--golden-model-type",
+        default=None,
+        help=(
+            "Screen against this model_type's frozen golden baselines (Task 3.7), when "
+            "declared and re-frozen (see `scripts/ledger.py golden`), instead of "
+            "recomputing window-local statistics from this scan. Omitted by default -- "
+            "window-local is the Phase 1 baseline and the documented fallback anyway "
+            "when no golden run exists yet."
+        ),
+    )
+    parser.add_argument(
+        "--ledger",
+        type=Path,
+        default=DEFAULT_TRAINING_LEDGER_PATH,
+        help="Training ledger path -- where --golden-model-type's frozen baselines sidecar lives.",
     )
     parser.add_argument(
         "--log-level",
@@ -238,16 +257,27 @@ def build_report_markdown(
 
 
 def _group_row(group: ChannelDisposition) -> str:
-    band = (
-        f"[{group.baseline_low:.3g}, {group.baseline_high:.3g}]"
-        if group.baseline_low is not None and group.baseline_high is not None
-        else "n/a (too few samples)"
-    )
+    band = _band_cell(group)
     mode = group.operating_mode or "(all)"
     return (
         f"| `{group.channel}` | {mode} | {group.accept_recenter:,} | "
         f"{group.quarantine:,} | {group.accept:,} | {band} |"
     )
+
+
+def _band_cell(group: ChannelDisposition) -> str:
+    """Render the "Baseline band" column — a discrete channel's (Task 1.6)
+    observed value *set*, or a continuous channel's median/MAD band."""
+    if group.is_discrete and group.baseline_values is not None:
+        values = ", ".join(_format_number(v) for v in group.baseline_values)
+        return f"{{{values}}} (discrete)"
+    if group.baseline_low is not None and group.baseline_high is not None:
+        return f"[{group.baseline_low:.3g}, {group.baseline_high:.3g}]"
+    return "n/a (too few samples)"
+
+
+def _format_number(value: float) -> str:
+    return f"{value:g}" if value != int(value) else str(int(value))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -288,8 +318,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     # counters, so the report doesn't double-flag one physical channel
     # under two names or spend rows on channels no model ever trains on.
     channels = candidate_feature_columns(combined)
+    golden_baselines = None
+    if args.golden_model_type:
+        golden_baselines = read_golden_baselines(
+            golden_baselines_path(args.ledger, args.golden_model_type)
+        )
+        if golden_baselines is None:
+            print(
+                f"note: no frozen golden baselines for {args.golden_model_type!r} -- "
+                "falling back to window-local screening (see `scripts/ledger.py golden`)",
+                file=sys.stderr,
+            )
     summary = classify_dispositions(
-        combined, reject_counts=reject_counts, channels=channels, overrides=overrides
+        combined,
+        reject_counts=reject_counts,
+        channels=channels,
+        overrides=overrides,
+        golden_baselines=golden_baselines,
     )
 
     timestamp = args.timestamp or datetime.now(UTC).strftime("%Y%m%d-%H%M%S")

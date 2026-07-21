@@ -394,6 +394,20 @@ class JobController:
             ]
         if bool(params.get("all", False)):
             return ["--sessions-root", str(self._config.collection.storage_path), "--all"]
+        since = params.get("since")
+        if since is not None:
+            # Task 3.1/3.2: the online-training scheduler's rolling window —
+            # `retrain.py --since` (sliding window, calibration holdout always
+            # reserved) rather than `--days`'s relative lookback. Only ever
+            # reached via `since` in `params`, never `--no-calibration-holdout`
+            # — that flag has no params-level path into this builder at all,
+            # so a scheduled retrain structurally cannot disable the holdout.
+            return [
+                "--sessions-root",
+                str(self._config.collection.storage_path),
+                "--since",
+                str(since),
+            ]
         days = int(params.get("days", 30))
         return ["--sessions-root", str(self._config.collection.storage_path), "--days", str(days)]
 

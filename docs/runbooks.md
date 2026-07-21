@@ -194,6 +194,113 @@ named, provenanced fault.
 - Companion / offline: artifacts + history live in the local library
   (`~/.canary/library`, Task 6.32); the publish queue is Task 6.37.
 
+## Online training: enable the scheduler, promote, roll back, re-declare golden
+
+Phase 3 of `docs/roadmap/online-training-strategy.md` ("closing the loop") —
+a config-gated daemon task that runs `retrain.py` on a cadence, a
+champion/challenger promotion gate, and a frozen golden baseline to measure
+drift against. Every step below is an *explicit operator action*; nothing in
+this runbook happens automatically except the scheduled retrain call itself
+(and even that always lands `unpublished`, never `active`).
+
+- **Enable the scheduler (`online_training:` block, ships `enabled: false`
+  — a hard pre-made decision, not a bug):**
+  ```yaml
+  online_training:
+    enabled: true
+    interval_seconds: 86400      # daily
+    window_days: 30              # rolling --since window, not a fixed corpus
+    poll_interval_seconds: 5
+  ```
+  Requires a daemon restart to pick up (like any other structural config
+  change — see `poll_config`'s hot-reload limits). Once enabled,
+  `run_online_training_scheduler` (`src/daemon/online_training.py`) submits
+  a `retrain_all` job through the existing `JobController` every
+  `interval_seconds` — the same subprocess-isolated mechanism the
+  dashboard's manual "Retrain" button already uses, so a scheduled retrain
+  never runs on the daemon's event loop or blocks live capture.
+  - **systemd-timer alternative** (documented here, not installed by any
+    script in this repo — this repo doesn't install systemd units from
+    code): a `canary-retrain.timer` firing `scripts/retrain.py --since
+    $(date -d '30 days ago' +%Y-%m-%d)` on the same cadence is equally
+    valid if you'd rather keep the daemon itself simpler and drive retrains
+    from cron/systemd instead. Either path must always reserve a
+    calibration holdout — never add `--no-calibration-holdout` to a
+    unit/timer meant to run unattended.
+- **Observe a scheduled run:**
+  ```
+  scripts/ledger.py list                    # unpublished runs show up here
+  tail -f data/control/jobs/<job_id>.log     # or canaryctl jobs logs <job_id>
+  ```
+  A window too small to spare a calibration holdout (Task 3.1's guard)
+  makes `retrain.py` exit with a distinct code rather than degrading to
+  in-sample calibration — the scheduler logs that as a routine skip
+  (`online-training: scheduled retrain skipped`), not an error. A genuine
+  trainer failure logs at `ERROR` instead — check the job log for the
+  underlying exception.
+- **Promote a challenger** (never automatic — this is the explicit action
+  the gate requires):
+  ```
+  scripts/ledger.py promote <run_id>
+  ```
+  Prints the full gate verdict (calibration stamp, contamination sanity,
+  a quarantine-fraction trend check against recent scheduled runs, recall
+  non-regression vs golden on the fault-injection benchmark, held-out FP/hr
+  budget, holdout score agreement) and only sets the run `active` if every
+  check passes. An artifact whose manifest is stamped `calibration:
+  in_sample` is categorically rejected — no override flag. No golden run
+  declared yet means promotion always fails closed (see below).
+  - **The held-out FP/hr check is an alert-rate budget, not a verdict on
+    its own** (2026-07-20 review amendment): it runs on *unlabeled* held-out
+    data, so a breach doesn't mean "the challenger is worse" — it can just
+    as easily mean the held-out window contains a genuinely developing
+    fault the challenger is (correctly) alerting on more than golden did.
+    Treat a breach as "go read the alerts the held-out window produced";
+    only block/roll back once you've actually looked, not on the number
+    alone. Same posture, independently, for a **sustained rise** in the
+    quarantine-fraction trend check — it flags "this window's health may be
+    shifting," a prompt to inspect the disposition report over the
+    candidate's input sessions, not an automatic contamination verdict
+    (that's what the flat `contamination_sanity` reject-fraction ceiling
+    is for).
+- **Roll back:** promotion doesn't add a new mechanism here — the
+  pre-existing ungated escape hatch still applies:
+  ```
+  scripts/ledger.py publish <run_id> --status rolled_back
+  ```
+- **Declare (or re-declare) the golden baseline** (an explicit,
+  per-vehicle-profile operator assertion — **never** auto-set by any code
+  path, including a scheduled retrain or a promotion):
+  ```
+  scripts/ledger.py golden <run_id>
+  scripts/ledger.py golden-status <model_type>   # live-vs-golden divergence
+  ```
+  `golden-status` surfaces "normal has drifted a lot — why?": the current
+  active run's held-out clean-data alert rate vs the frozen golden run's,
+  per detector. A large divergence is a prompt to go look, not itself an
+  alert. Declaring the *actual* golden run for the real vehicle profile is
+  an operator morning task (Round-2 pre-made decision) — nothing overnight
+  declares one, and none is declared on this corpus yet.
+  - `ledger.py golden <run_id>` also re-freezes that model_type's
+    disposition baselines (Task 3.7) from the run's recorded input
+    sessions — median/MAD per `(channel, operating_mode)` for continuous
+    channels, the observed value set for discrete/bitmask ones (Task 1.6).
+    `classify_dispositions` then screens future candidate windows against
+    *those* frozen numbers instead of recomputing from each window (which
+    can't see a slow drift that's dominating the very window being
+    screened — it just becomes the new "normal"). Best-effort: an
+    unreadable/archived input session just means the freeze is skipped
+    this time, falling back to window-local screening for that model_type.
+  - **Re-declaring golden periodically is routine seasonal maintenance,
+    not an anomaly response** (2026-07-20 review amendment): winter intake
+    temps, a fuel-blend change, and similar legitimate drift will
+    eventually push any honest challenger outside agreement-with-golden
+    tolerance — that's expected adaptation, not a sign golden itself is
+    stale from decay. Re-declare on a seasonal cadence (or after a known
+    vehicle-state change — see the vehicle ledger's `corpus_boundary`
+    events) the same deliberate way you'd re-baseline any calibrated
+    instrument, not only when something looks wrong.
+
 ---
 
 See also: `docs/headless-api.md` (endpoint reference + SSH-tunnel dev),

@@ -965,6 +965,113 @@ async def test_run_daemon_wires_retention_sweeper_task(
 
 
 # ---------------------------------------------------------------------------
+# Online-training scheduler task (Task 3.2, online-training-strategy.md)
+# ---------------------------------------------------------------------------
+
+
+async def test_run_daemon_does_not_start_online_training_scheduler_by_default(
+    config: CanaryConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`online_training.enabled` defaults false (hard pre-made decision) — an
+    unconfigured daemon must not spin up the scheduler task at all."""
+    import src.daemon.runtime as runtime_mod
+
+    called = False
+
+    async def _spy(*_a: object, **_k: object) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(runtime_mod, "run_online_training_scheduler", _spy)
+    assert config.online_training.enabled is False
+
+    components = build_components(config)
+    writer = ParquetTelemetryWriter(config.collection.storage_path)
+    stop = asyncio.Event()
+
+    async def _run() -> None:
+        await runtime_mod.run_daemon(
+            config,
+            stop,
+            collectors=[],
+            writer=writer,
+            components=components,
+            enable_live_inference=False,
+        )
+
+    daemon_task = asyncio.create_task(_run())
+    try:
+        await asyncio.sleep(0.1)
+    finally:
+        stop.set()
+        await asyncio.wait_for(daemon_task, timeout=5.0)
+    assert called is False
+
+
+async def test_run_daemon_wires_online_training_scheduler_when_enabled(
+    config: CanaryConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import src.daemon.runtime as runtime_mod
+
+    config.online_training.enabled = True
+    config.online_training.interval_seconds = 42.0
+    config.online_training.window_days = 14
+    config.online_training.poll_interval_seconds = 3.0
+
+    captured: dict[str, Any] = {}
+
+    async def _spy(
+        job_controller: object,
+        stop_event: asyncio.Event,
+        *,
+        interval_seconds: float,
+        window_days: int,
+        poll_interval_seconds: float = 5.0,
+    ) -> None:
+        captured.update(
+            job_controller=job_controller,
+            interval_seconds=interval_seconds,
+            window_days=window_days,
+            poll_interval_seconds=poll_interval_seconds,
+        )
+        await stop_event.wait()
+
+    monkeypatch.setattr(runtime_mod, "run_online_training_scheduler", _spy)
+
+    components = build_components(config)
+    writer = ParquetTelemetryWriter(config.collection.storage_path)
+    stop = asyncio.Event()
+
+    async def _run() -> None:
+        await runtime_mod.run_daemon(
+            config,
+            stop,
+            collectors=[],
+            writer=writer,
+            components=components,
+            enable_live_inference=False,
+        )
+
+    daemon_task = asyncio.create_task(_run())
+    try:
+        for _ in range(60):
+            if captured:
+                break
+            await asyncio.sleep(0.02)
+        assert captured, "run_daemon did not start the online-training scheduler task"
+    finally:
+        stop.set()
+        await asyncio.wait_for(daemon_task, timeout=5.0)
+
+    assert captured["job_controller"] is components.job_controller
+    assert captured["interval_seconds"] == 42.0
+    assert captured["window_days"] == 14
+    assert captured["poll_interval_seconds"] == 3.0
+
+
+# ---------------------------------------------------------------------------
 # Live inference task
 # ---------------------------------------------------------------------------
 
