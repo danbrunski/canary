@@ -214,10 +214,15 @@ backend features), plus the unchecked tail of
 
 ## Queue — round 2
 
-- [ ] **Q17 — online-training-strategy.md Phase 1** (FSM physical
-  limits, reject gate at train+score, `accepted_baselines.yaml`
-  schema/loader, disposition classifier + ledger summary, disposition
-  report CLI run over the stored corpus with the report committed).
+- [x] **Q17 — online-training-strategy.md Phase 1** — landed (commit
+  `8357da1`): FSM physical limits table traced to real decode formulas,
+  per-cell reject gate at both train and score time flowing through
+  existing missingness machinery, profile-scoped `accepted_baselines.yaml`
+  schema/loader (zero active overrides, per pre-made decision),
+  disposition classifier + ledger summary field, disposition report CLI
+  run over the stored corpus and committed. Also fixed a pre-existing
+  test-isolation bug (`test_log.py` leaking root-logger state) that had
+  caused an intermittent CI failure, in its own commit (`0b7781f`).
 - [ ] **Q18 — online-training-strategy.md Phase 2** (directional
   `DeviationConfig`, override→alert path incl. `review_by` expiry
   behavior, dashboard overrides card, docs).
