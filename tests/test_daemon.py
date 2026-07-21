@@ -969,30 +969,20 @@ async def test_run_daemon_wires_retention_sweeper_task(
 # ---------------------------------------------------------------------------
 
 
-async def test_run_live_inference_lstm_skips_when_no_manager(config: CanaryConfig) -> None:
-    """Without an LSTM manager, the task waits for stop and returns."""
-    from src.daemon import build_live_feature_source, run_live_inference_lstm
-
-    components = build_components(config)
-    assert "lstm_autoencoder" not in components.model_managers
-    source = build_live_feature_source(components)
-    stop = asyncio.Event()
-    task = asyncio.create_task(run_live_inference_lstm(source, components, stop, tick_seconds=0.05))
-    await asyncio.sleep(0.1)
-    stop.set()
-    await asyncio.wait_for(task, timeout=1.0)
-
-
-async def test_run_live_inference_lstm_emits_on_full_window(config: CanaryConfig) -> None:
+async def test_run_live_inference_sequence_detector_emits_on_full_window(
+    config: CanaryConfig,
+) -> None:
     """Stub LSTM that always reports is_anomaly=True after a full window.
 
-    Verifies the schema-alignment path: the live source has all needed
-    columns → buffer fills → engine.observe returns a result → emitter
-    fires → anomalies broadcaster sees the event.
+    Verifies the schema-alignment path through ``run_live_inference``'s
+    ``SequenceDetector`` (Task 3.1 — this used to be the standalone
+    ``run_live_inference_lstm`` task, deleted as production-dead in 4.1):
+    the live source has all needed columns → buffer fills → engine.observe
+    returns a result → emitter fires → anomalies broadcaster sees the event.
     """
     from collections import namedtuple
 
-    from src.daemon import build_live_feature_source, run_live_inference_lstm
+    from src.daemon import build_live_feature_source, run_live_inference
     from src.models.manager import LoadedModel, SwapAttempt
     from src.models.manifest import ModelManifestCommon
 
@@ -1065,6 +1055,11 @@ async def test_run_live_inference_lstm_emits_on_full_window(config: CanaryConfig
             return SwapAttempt(kind="no_change")
 
     components.model_managers["lstm_autoencoder"] = _StubLSTMManager()  # type: ignore[assignment]
+    # The base fixture config ships lstm_autoencoder.enabled=false (bring-up
+    # default), so `sequence_model_type` came back `None` from
+    # `build_components` above — `SequenceDetector` looks its manager up by
+    # this key, so it needs to actually point at the stub we just installed.
+    components.sequence_model_type = "lstm_autoencoder"
     # Patch the lazy-imported SequenceInferenceEngine inside daemon.
     import src.daemon as daemon_mod
     import src.models.inference as inf_mod
@@ -1077,9 +1072,7 @@ async def test_run_live_inference_lstm_emits_on_full_window(config: CanaryConfig
 
         sub = components.anomalies_broadcaster.subscribe()
         stop = asyncio.Event()
-        task = asyncio.create_task(
-            run_live_inference_lstm(source, components, stop, tick_seconds=0.05)
-        )
+        task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
         try:
             msg = await asyncio.wait_for(sub.get(), timeout=2.0)
         finally:
@@ -1094,6 +1087,76 @@ async def test_run_live_inference_lstm_emits_on_full_window(config: CanaryConfig
 
     assert msg["source"] == "lstm_autoencoder"
     assert msg["model_version"] == "fake_lstm_v1"
+
+
+def test_sequence_detector_model_version_resets_when_gated(config: CanaryConfig) -> None:
+    """`SequenceDetector.model_version` must reflect *this* tick's actual
+    state, not the last tick that scored — a review-caught regression from
+    Task 3.1's ``Detector`` protocol extraction (the pre-refactor code
+    recomputed a local ``sequence_version`` fresh every tick; the refactor
+    turned it into an instance attribute only assigned past the early-return
+    guard, so a gated tick kept reporting a stale version and corrupted the
+    fused event's provenance tag). Mirrors ``IsolationForestDetector.tick``,
+    which already assigns ``self.model_version`` before its own guard.
+    """
+    from src.daemon.inference import SequenceDetector, TickContext
+    from src.models.manager import LoadedModel, SwapAttempt
+    from src.models.manifest import ModelManifestCommon
+
+    class _StubLSTMManager:
+        #: Flip to simulate the manager reporting no artifact loaded (the
+        #: docstring's "while no artifact is loaded" case) on a later tick.
+        loaded = True
+
+        @property
+        def current(self) -> Any:
+            if not self.loaded:
+                return None
+            return LoadedModel(
+                artifact=object(),  # a bad artifact is fine — engine build is caught/retried
+                manifest=ModelManifestCommon(
+                    artifact_format_version=1,
+                    model_type="lstm_autoencoder",
+                    model_version="fake_lstm_v1",
+                    created_at="now",
+                    training_data_hash="h",
+                    input_rows=1,
+                ),
+                artifact_path=Path("/tmp/x"),
+                manifest_path=Path("/tmp/x.manifest.json"),
+                manifest_mtime=0.0,
+            )
+
+        def poll(self) -> SwapAttempt:
+            return SwapAttempt(kind="no_change")
+
+    stub_manager = _StubLSTMManager()
+    components = build_components(config)
+    components.model_managers["lstm_autoencoder"] = stub_manager  # type: ignore[assignment]
+    components.sequence_model_type = "lstm_autoencoder"
+
+    detector = SequenceDetector(components)
+    assert detector.model_version is None  # before the first tick
+
+    now = datetime.now(UTC)
+    row = {"obd:RPM": 700.0}
+
+    detector.tick(
+        row,
+        TickContext(now=now, operating_mode="driving", timestamp_str=None, scoring_allowed=True),
+    )
+    assert detector.model_version == "fake_lstm_v1"
+
+    # A later gated tick (vehicle-state gate closed, artifact unloaded) must
+    # reset, not keep reporting the last-loaded model as if it had just
+    # scored — the pre-fix code never reached the assignment on this path
+    # because it sat past the early-return guard.
+    stub_manager.loaded = False
+    detector.tick(
+        row,
+        TickContext(now=now, operating_mode="driving", timestamp_str=None, scoring_allowed=False),
+    )
+    assert detector.model_version is None
 
 
 async def test_sequence_observe_helper_fills_missing_columns_with_nan() -> None:

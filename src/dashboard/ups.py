@@ -22,6 +22,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from src.atomic_write import atomic_write_text
+
 DEFAULT_UPS_STATUS_PATH = Path("/run/canary/ups_status")
 DEFAULT_UPS_KEEPALIVE_PATH = Path("/run/canary/ups_keepalive")
 
@@ -80,9 +82,7 @@ def write_keepalive(
     """
     now = time.time() if now is None else now
     expiry = 0.0 if minutes <= 0 else now + minutes * 60.0
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(str(expiry))
-    tmp.replace(path)
+    atomic_write_text(path, str(expiry))
     return expiry
 
 

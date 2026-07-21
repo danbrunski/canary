@@ -22,8 +22,9 @@ safety-bounded equivalent:
 Daemon polling integration — scheduling these alongside the J1979 tiers via
 ``obd_scheduler.build_poll_requests`` (``kind="custom"`` requests) and
 decoding responses into ``custom:<name>`` telemetry channels — is wired in
-by Task 2.6 (``src.main._default_collectors`` loads ``data/custom_pids.yaml``
-once at startup via ``load_custom_pids``, or leaves it empty if absent).
+by Task 2.6 (``src.collection.collectors.default_collectors`` loads
+``data/custom_pids.yaml`` once at startup via ``load_custom_pids``, or
+leaves it empty if absent).
 """
 
 from __future__ import annotations
@@ -39,6 +40,8 @@ from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from src.atomic_write import atomic_write_text
 
 __all__ = [
     "DEFAULT_CUSTOM_PIDS_PATH",
@@ -311,10 +314,9 @@ def load_custom_pids(path: Path = DEFAULT_CUSTOM_PIDS_PATH) -> CustomPidSet:
 def save_custom_pids(pid_set: CustomPidSet, path: Path = DEFAULT_CUSTOM_PIDS_PATH) -> None:
     """Atomically write the custom PID file (temp + rename)."""
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(yaml.safe_dump(pid_set.model_dump(mode="json"), sort_keys=False))
-    tmp.replace(path)
+    atomic_write_text(
+        path, yaml.safe_dump(pid_set.model_dump(mode="json"), sort_keys=False), mkdir=True
+    )
 
 
 # ---------------------------------------------------------------------------

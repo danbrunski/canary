@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.models.manager import manager_for_artifact
+from src.models.manifest import manifest_path_for
 from src.models.sequence_registry import SEQUENCE_BACKENDS
 
 if TYPE_CHECKING:
@@ -125,7 +126,7 @@ class SequenceDetectorController:
 
 
 def _manifest_version(artifact_path: Path) -> str | None:
-    manifest_path = artifact_path.with_suffix(".manifest.json")
+    manifest_path = manifest_path_for(artifact_path)
     if not manifest_path.exists():
         return None
     try:

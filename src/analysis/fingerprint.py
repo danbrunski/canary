@@ -39,6 +39,7 @@ import pandas as pd
 
 from src.analysis.committees import COMMITTEES, append_committee_residuals
 from src.analysis.derived import compute_anomaly_signals
+from src.atomic_write import atomic_write_text
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import DEVIATION_COLUMN_PREFIX, append_deviation_columns
@@ -178,9 +179,7 @@ def write_fingerprint(
         stats=stats,
     )
     path = session_dir / FINGERPRINT_FILENAME
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(fingerprint.to_dict(), indent=2, sort_keys=True) + "\n")
-    tmp.replace(path)
+    atomic_write_text(path, json.dumps(fingerprint.to_dict(), indent=2, sort_keys=True) + "\n")
     return path
 
 

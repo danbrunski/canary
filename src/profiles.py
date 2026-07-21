@@ -40,6 +40,7 @@ from typing import Any
 
 import yaml
 
+from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig, VehicleParameters
 
 log = logging.getLogger(__name__)
@@ -138,14 +139,11 @@ def load_registry(path: Path) -> list[VehicleProfile]:
 
 def save_registry(path: Path, profiles: list[VehicleProfile]) -> None:
     """Persist the registry (atomic temp-file + replace)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": REGISTRY_SCHEMA_VERSION,
         "profiles": [p.to_dict() for p in profiles],
     }
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(yaml.safe_dump(payload, sort_keys=False))
-    tmp.replace(path)
+    atomic_write_text(path, yaml.safe_dump(payload, sort_keys=False), mkdir=True)
 
 
 def update_profile_name(path: Path, slug: str, name: str) -> VehicleProfile:

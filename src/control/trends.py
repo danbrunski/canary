@@ -37,6 +37,7 @@ from src.alerts.events import AnomalyEvent
 from src.analysis.fingerprint import read_fingerprint
 from src.analysis.reference_epoch import read_reference_epoch
 from src.analysis.trends import evaluate_trends
+from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig
 from src.timefmt import format_timestamp as _format_timestamp
 
@@ -139,10 +140,7 @@ def _read_alert_state(path: Path) -> dict[str, str]:
 
 
 def _write_alert_state(path: Path, state: Mapping[str, str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(dict(state), indent=2, sort_keys=True) + "\n")
-    tmp.replace(path)
+    atomic_write_text(path, json.dumps(dict(state), indent=2, sort_keys=True) + "\n", mkdir=True)
 
 
 def evaluate_and_alert_trends(

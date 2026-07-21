@@ -25,7 +25,7 @@ from typing import Any
 
 import can
 
-from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
+from src.collection.queueing import QueueDropCounter, log_dropped_can_frame, put_nowait_or_drop
 from src.collection.reconnect import (
     BusReconnector,
     RebuildOutcome,
@@ -105,14 +105,7 @@ async def collect_can(
             msg = bus.recv(timeout=poll_interval)
         except ValueError as exc:
             parse_errors += 1
-            if parse_errors == 1 or parse_errors % 100 == 0:
-                log.warning(
-                    "dropped malformed CAN frame",
-                    extra={
-                        "error": f"{type(exc).__name__}: {exc}",
-                        "parse_errors_total": parse_errors,
-                    },
-                )
+            log_dropped_can_frame(parse_errors, exc)
             await asyncio.sleep(0)
             continue
         if msg is None:
@@ -288,14 +281,7 @@ def record(
                     # zero reconnects, frames stopped 5 min in. A small sleep
                     # keeps even legit storms of parse errors from burning CPU.
                     parse_errors += 1
-                    if parse_errors == 1 or parse_errors % 100 == 0:
-                        log.warning(
-                            "dropped malformed CAN frame",
-                            extra={
-                                "error": f"{type(exc).__name__}: {exc}",
-                                "parse_errors_total": parse_errors,
-                            },
-                        )
+                    log_dropped_can_frame(parse_errors, exc)
                     time.sleep(0.001)
                     continue
                 except Exception as exc:

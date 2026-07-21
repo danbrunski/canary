@@ -57,6 +57,7 @@ from src.dashboard.readers import (
     read_latest_per_channel,
     read_latest_telemetry_rows,
 )
+from src.models.manifest import manifest_path_for
 
 
 def register_companion_routes(
@@ -427,7 +428,7 @@ def register_companion_routes(
         manifest_path = (
             Path(request.manifest_path)
             if request.manifest_path
-            else artifact_path.with_suffix(".manifest.json")
+            else manifest_path_for(artifact_path)
         )
         try:
             manifest = json.loads(manifest_path.read_text())

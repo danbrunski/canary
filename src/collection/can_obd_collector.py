@@ -82,7 +82,7 @@ from src.collection.obd_scheduler import (
     parse_pid_token,
     resolve_did_session_spec,
 )
-from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
+from src.collection.queueing import QueueDropCounter, log_dropped_can_frame, threadsafe_enqueue
 from src.collection.reconnect import (
     BusReconnector,
     RebuildOutcome,
@@ -343,17 +343,13 @@ async def collect_can_obd_from_config(
             bus = factory(spec.can)
             capture(bus)
 
+            enqueue = threadsafe_enqueue(loop, queue, on_drop=drop_counter)
+
             def on_frame(msg: can.Message) -> None:
-                record = frame_to_record(msg)
-                loop.call_soon_threadsafe(
-                    partial(put_nowait_or_drop, queue, record, on_drop=drop_counter)
-                )
+                enqueue(frame_to_record(msg))
 
             def on_reading(reading: ObdReading) -> None:
-                record = reading_to_record(reading)
-                loop.call_soon_threadsafe(
-                    partial(put_nowait_or_drop, queue, record, on_drop=drop_counter)
-                )
+                enqueue(reading_to_record(reading))
 
             metrics_callback = None
             if on_scheduler_metrics is not None:
@@ -785,14 +781,7 @@ def _recv_and_tap(
         msg = bus.recv(timeout=timeout)
     except (ValueError, IndexError) as exc:
         stats.parse_errors += 1
-        if stats.parse_errors == 1 or stats.parse_errors % 100 == 0:
-            log.warning(
-                "dropped malformed CAN frame",
-                extra={
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "parse_errors_total": stats.parse_errors,
-                },
-            )
+        log_dropped_can_frame(stats.parse_errors, exc)
         return None
     if msg is None:
         return None

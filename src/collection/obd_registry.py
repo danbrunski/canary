@@ -32,6 +32,7 @@ from typing import Literal
 
 from src.collection.can_obd_client import (
     PID_DECODERS,
+    _need,
     decode_o2_voltage,
     decode_percent_a_over_255,
     decode_percent_b_minus_128,
@@ -139,10 +140,6 @@ class ServiceDefinition:
 # Single-source rule: numeric decoders already in can_obd_client are imported,
 # never duplicated. These cover formula-stable PIDs it doesn't.
 # ---------------------------------------------------------------------------
-
-
-def _need(data: bytes, n: int) -> bool:
-    return len(data) >= n
 
 
 def decode_fuel_pressure(data: bytes) -> tuple[float, str] | None:

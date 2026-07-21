@@ -29,6 +29,7 @@ from src.models.isolation_forest import (
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
+from src.timefmt import parse_iso_utc
 
 #: Per-row score caps so a 30-minute window doesn't return a 100k-row JSON
 #: blob. Adjustable from the CLI via ``--max-rows`` / ``--max-windows``.
@@ -480,10 +481,9 @@ def _parse_event_ts(raw: Any) -> datetime | None:
     if not isinstance(raw, str):
         return None
     try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return parse_iso_utc(raw)
     except ValueError:
         return None
-    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 def _ts(row: dict[str, Any]) -> str | None:

@@ -43,15 +43,10 @@ async def list_events_by_kind(
     ``cruise``, etc.); ``None`` returns all kinds. Results are newest-first
     and capped at ``limit``.
     """
-    params = []
+    params: dict[str, Any] = {"limit": limit}
     if kind is not None:
-        params.append(("kind", kind))
-    params.append(("limit", str(limit)))
-    query = "&".join(f"{key}={value}" for key, value in params)
-    path = "/control/classifications/events"
-    if query:
-        path = f"{path}?{query}"
-    return await client.get_json(path)
+        params["kind"] = kind
+    return await client.get_json("/control/classifications/events", params=params)
 
 
 __all__ = [

@@ -40,6 +40,7 @@ from src.models.manifest import (
     ManifestValidationError,
     ModelManifestCommon,
     load_manifest_common,
+    manifest_path_for,
     schema_serviceable,
     validate_model_feature_spec,
 )
@@ -83,7 +84,7 @@ future trainer uses a different convention.
 
 
 def default_manifest_sidecar(artifact_path: Path) -> Path:
-    return artifact_path.with_suffix(".manifest.json")
+    return manifest_path_for(artifact_path)
 
 
 class ModelManager(Generic[T]):

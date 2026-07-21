@@ -122,7 +122,9 @@ async def test_default_collectors_use_canable_obd_by_default(
         captured["reconnect_policy"] = reconnect_policy
         stop_event.set()
 
-    monkeypatch.setattr("src.main.collect_can_obd_from_config", fake_collect_can_obd)
+    monkeypatch.setattr(
+        "src.collection.collectors.collect_can_obd_from_config", fake_collect_can_obd
+    )
 
     collectors = _default_collectors(config)
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
@@ -177,7 +179,9 @@ async def test_default_collectors_loads_custom_pids_when_present(
         captured["spec"] = spec
         stop_event.set()
 
-    monkeypatch.setattr("src.main.collect_can_obd_from_config", fake_collect_can_obd)
+    monkeypatch.setattr(
+        "src.collection.collectors.collect_can_obd_from_config", fake_collect_can_obd
+    )
 
     collectors = _default_collectors(config)
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()

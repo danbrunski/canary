@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -34,6 +33,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.jsonl_store import JsonlStore, latest_by_key
 from src.models.artifact_hash import sha256_file
 from src.models.manifest import ManifestValidationError, validate_manifest_common
 
@@ -97,40 +97,21 @@ class TrainingRunRecord(BaseModel):
         return cls.model_validate(data)
 
 
-class TrainingLedger:
+class TrainingLedger(JsonlStore[TrainingRunRecord]):
     """Append-only JSONL training-run ledger.
 
     Not thread-safe on its own; the daemon serializes ledger writes the same
-    way it does the anomaly/job ledgers. Reads tolerate a torn final line.
+    way it does the anomaly/job ledgers. Reads tolerate a torn final line
+    (Task 3.4: both behaviors now live on the shared
+    :class:`~src.jsonl_store.JsonlStore` base).
     """
 
     def __init__(self, path: Path = DEFAULT_TRAINING_LEDGER_PATH) -> None:
-        self.path = Path(path)
+        super().__init__(path, from_dict=TrainingRunRecord.from_dict)
 
     def append(self, record: TrainingRunRecord) -> TrainingRunRecord:
         """Append one record (flushed; crash loses at most the last line)."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a") as handle:
-            handle.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
-            handle.flush()
-        return record
-
-    def _iter_raw(self) -> Iterator[TrainingRunRecord]:
-        if not self.path.exists():
-            return
-        with self.path.open() as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    yield TrainingRunRecord.from_dict(json.loads(line))
-                except (json.JSONDecodeError, ValueError):
-                    continue
-
-    def raw_records(self) -> list[TrainingRunRecord]:
-        """Every appended line in write order (full provenance chain)."""
-        return list(self._iter_raw())
+        return self._append_record(record, to_dict=TrainingRunRecord.to_dict)
 
     def records(self) -> list[TrainingRunRecord]:
         """Latest record per ``run_id``, oldest-created first.
@@ -139,13 +120,8 @@ class TrainingLedger:
         (that's how a publish-status change is recorded), but ``created_at``
         ordering is preserved so the dashboard's run history is stable.
         """
-        latest: dict[str, TrainingRunRecord] = {}
-        order: list[str] = []
-        for rec in self._iter_raw():
-            if rec.run_id not in latest:
-                order.append(rec.run_id)
-            latest[rec.run_id] = rec
-        out = [latest[rid] for rid in order]
+        by_id = latest_by_key(self._iter_raw(), key=lambda r: r.run_id)
+        out = list(by_id.values())
         out.sort(key=lambda r: r.created_at)
         return out
 

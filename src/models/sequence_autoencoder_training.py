@@ -22,7 +22,6 @@ backbone-bound façades over this module.
 
 from __future__ import annotations
 
-import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -32,7 +31,12 @@ from typing import Any, Protocol
 
 import pandas as pd
 
-from src.models.manifest import validate_model_feature_spec
+from src.models.manifest import (
+    manifest_path_for,
+    read_artifact,
+    validate_model_feature_spec,
+    write_artifact,
+)
 from src.models.sequence_dataset import SequenceWindowDataset
 from src.models.sequence_registry import (
     SequenceAutoencoderManifest,
@@ -338,21 +342,19 @@ def save_sequence_autoencoder_model(
     """Persist a trained checkpoint and manifest (either backbone)."""
     backend = sequence_training_backend_for_model_type(trained.manifest.model_type)
     torch = _torch_module(backend)
-    artifact_path.parent.mkdir(parents=True, exist_ok=True)
     manifest = trained.manifest.to_dict()
-    torch.save(
-        {
-            "artifact_format_version": ARTIFACT_FORMAT_VERSION,
-            "model_type": trained.manifest.model_type,
-            "state_dict": cpu_state_dict(trained.model),
-            "manifest": manifest,
-        },
+    payload = {
+        "artifact_format_version": ARTIFACT_FORMAT_VERSION,
+        "model_type": trained.manifest.model_type,
+        "state_dict": cpu_state_dict(trained.model),
+        "manifest": manifest,
+    }
+    write_artifact(
         artifact_path,
+        lambda path: torch.save(payload, path),
+        manifest,
+        manifest_path=manifest_path,
     )
-
-    path = manifest_path or default_sequence_manifest_path(artifact_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
 
 def load_sequence_autoencoder_model(
@@ -364,14 +366,12 @@ def load_sequence_autoencoder_model(
 ) -> TrainedSequenceAutoencoder:
     """Load a checkpoint written by ``save_sequence_autoencoder_model``."""
     torch = _torch_module(backend)
-    payload = torch.load(artifact_path, map_location=device, weights_only=False)
-    if int(payload["artifact_format_version"]) != ARTIFACT_FORMAT_VERSION:
-        raise ValueError(
-            f"unsupported {backend.model_type} artifact format "
-            f"{payload['artifact_format_version']!r}"
-        )
-    if str(payload["model_type"]) != backend.model_type:
-        raise ValueError(f"unexpected model type {payload['model_type']!r}")
+    payload = read_artifact(
+        artifact_path,
+        lambda path: torch.load(path, map_location=device, weights_only=False),
+        model_type=backend.model_type,
+        expected_format_version=ARTIFACT_FORMAT_VERSION,
+    )
 
     manifest = SequenceAutoencoderManifest.from_dict(payload["manifest"])
     feature_columns = validate_model_feature_spec(
@@ -402,7 +402,7 @@ def load_sequence_autoencoder_model(
 
 def default_sequence_manifest_path(artifact_path: Path) -> Path:
     """Return the conventional JSON manifest path for a checkpoint."""
-    return artifact_path.with_suffix(".manifest.json")
+    return manifest_path_for(artifact_path)
 
 
 def _validate_loaded_manifest(

@@ -37,6 +37,7 @@ from typing import Any, Literal
 
 import pandas as pd
 
+from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig
 from src.preprocessing.loader import numeric_value_columns, resample_and_segment
 from src.preprocessing.resampler import (
@@ -244,9 +245,7 @@ def classify_session(
 def write_classification(session_dir: Path, classification: SessionClassification) -> Path:
     """Write the sidecar JSON and return its path. Idempotent."""
     path = session_dir / CLASSIFICATION_FILENAME
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(classification.to_dict(), indent=2, sort_keys=True) + "\n")
-    tmp.replace(path)
+    atomic_write_text(path, json.dumps(classification.to_dict(), indent=2, sort_keys=True) + "\n")
     _write_derived_tags(session_dir, classification)
     return path
 

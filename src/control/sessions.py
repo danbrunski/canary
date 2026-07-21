@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from src.atomic_write import atomic_write_text
 from src.preprocessing.loader import PARQUET_PATTERN
 from src.session import MANIFEST_FILENAME, TAGS_FILENAME
 
@@ -128,9 +129,7 @@ def write_session_metadata(
     existing = read_session_metadata(session) if merge else {}
     updated = {**existing, **metadata, "updated_at": datetime.now(UTC).isoformat()}
     path = session / METADATA_FILENAME
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(updated, indent=2, sort_keys=True, default=str) + "\n")
-    tmp.replace(path)
+    atomic_write_text(path, json.dumps(updated, indent=2, sort_keys=True, default=str) + "\n")
     return updated
 
 

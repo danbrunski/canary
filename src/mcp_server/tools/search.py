@@ -22,6 +22,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from src.timefmt import parse_iso_utc
+
 _ANOMALY_FILE_RE = re.compile(r"anomalies-(\d{4}-\d{2}-\d{2})\.jsonl$")
 #: Default lookback window for anomaly searches without an explicit ``since``.
 #: Long enough for "what's been going wrong this week?", short enough not to
@@ -33,12 +35,10 @@ def _parse_iso(value: str | None) -> datetime | None:
     """Parse an ISO-8601 timestamp; tolerate trailing ``Z``. ``None`` → ``None``."""
     if value is None:
         return None
-    text = value.replace("Z", "+00:00")
     try:
-        parsed = datetime.fromisoformat(text)
+        return parse_iso_utc(value)
     except ValueError as exc:
         raise ValueError(f"invalid ISO-8601 timestamp: {value!r}") from exc
-    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 def _record_timestamp(record: dict[str, Any]) -> datetime | None:

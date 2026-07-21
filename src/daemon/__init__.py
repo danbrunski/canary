@@ -38,7 +38,6 @@ from .inference import (
     _sequence_observe,
     build_live_feature_source,
     run_live_inference,
-    run_live_inference_lstm,
 )
 from .polling import poll_behavior_models, poll_config, poll_model_managers
 from .retention import run_retention_sweeper
@@ -102,7 +101,6 @@ __all__ = [
     "run_gps_sink",
     "run_live_source_sink",
     "run_live_inference",
-    "run_live_inference_lstm",
     "run_retention_sweeper",
     "run_storage_sink",
     "run_telemetry_broadcast_sink",

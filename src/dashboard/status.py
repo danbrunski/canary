@@ -15,6 +15,7 @@ from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
 from src.models.health import HealthMonitor
 from src.preprocessing.loader import discover_sessions
+from src.timefmt import parse_iso_utc
 
 VehicleStateName = Literal[
     "engine_running",
@@ -312,7 +313,7 @@ def _derive_vehicle_state(
         ts: datetime | None = None
         if isinstance(ts_raw, str):
             try:
-                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                ts = parse_iso_utc(ts_raw)
             except ValueError:
                 ts = None
         elif isinstance(ts_raw, datetime):

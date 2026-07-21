@@ -104,8 +104,11 @@ async def run_daemon(
     )
 
     # Lazy import — keeps daemon module importable without the collector deps
-    # at module-load time.
-    from src.main import _default_collectors
+    # at module-load time. Task 4.7: this used to reach into `src.main`
+    # (a daemon → main import inversion — `main.py` is the CLI entry point,
+    # it should depend on the daemon package, not the other way around);
+    # `default_collectors` now lives in `src.collection` instead.
+    from src.collection.collectors import default_collectors as _default_collectors
 
     if collectors is not None:
         active_collectors = list(collectors)
@@ -198,9 +201,8 @@ async def run_daemon(
     inference_tasks: list[asyncio.Task[Any]] = []
     if live_source is not None:
         # One unified task scores IF + LSTM + behavior per tick and fuses
-        # them (7.2). It owns the LSTM engine/hot-swap internally, so the
-        # separate LSTM task is no longer spawned (the standalone
-        # ``run_live_inference_lstm`` stays for its direct tests).
+        # them (7.2). It owns the LSTM engine/hot-swap internally — the old
+        # standalone LSTM-only task was production-dead and deleted (4.1).
         inference_tasks.append(
             asyncio.create_task(run_live_inference(live_source, components, stop_event))
         )

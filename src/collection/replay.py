@@ -20,20 +20,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
 import pandas as pd
 
+from src.collection.collectors import CollectorStarter
 from src.config import CanaryConfig
 from src.preprocessing.loader import PARQUET_PATTERN
 from src.telemetry import TelemetryRecord, TelemetrySource, TelemetryValue
 
 log = logging.getLogger(__name__)
-
-CollectorStarter = Callable[["asyncio.Queue[TelemetryRecord]", asyncio.Event], Awaitable[None]]
 
 #: Don't sleep longer than this between rows even if the recording paused
 #: (USB drop, ignition-off gap) — keeps the replayed dashboard moving.

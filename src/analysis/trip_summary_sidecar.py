@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from src.analysis.derived import TripSummary, summarize_trip
+from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig
 from src.preprocessing.loader import resample_and_segment
 from src.timefmt import format_timestamp as _format_timestamp
@@ -86,9 +87,7 @@ def write_trip_summary(
         summary=summary,
     )
     path = session_dir / TRIP_SUMMARY_FILENAME
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(sidecar.to_dict(), indent=2, sort_keys=True) + "\n")
-    tmp.replace(path)
+    atomic_write_text(path, json.dumps(sidecar.to_dict(), indent=2, sort_keys=True) + "\n")
     return path
 
 

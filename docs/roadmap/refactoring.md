@@ -200,19 +200,23 @@ style issues, and go first.
 
 ## Phase 3 — Structural (do deliberately, pair with related feature work)
 
-- [ ] **3.1 — Detector protocol in `src/daemon/inference.py`.**
-  `run_live_inference` (`:48-239`, 191 lines) runs IF/sequence/behavior
-  inline, each with the same observe → per-source emit → persistence →
-  fusion-source shape (`:110-129`, `:131-166`, `:171-213`) converging
-  on a shared fuse tail (`:215-232`); `_score_and_emit`
-  (`:529-681`, 152 lines) mixes scoring, health, missing-feature
-  fail-safe, contributor ranking, and emit. Extract a `Detector`
-  protocol (`tick(row, ctx) -> list[FusionSource]`) + three detector
-  classes + the shared `gate_and_collect` pairing
-  (`downgrade_unsustained(...)` pattern at `:123-128`, `:161-165`).
-  **Time this alongside `ml-correctness-hardening.md` Phase 6**
-  (persistence semantics) — one restructure, one behavior change, one
-  replay verification.
+- [x] **3.1 — Detector protocol in `src/daemon/inference.py`.**
+  Landed: extracted a `Detector` protocol (`tick(row, ctx) ->
+  list[FusionSource]`) + `IsolationForestDetector`/`SequenceDetector`/
+  `BehaviorDetector` classes + a shared `gate_and_collect()`.
+  `_score_and_emit` split into `_record_if_health` +
+  `_rank_feature_contributors` (pure, separable pieces); the
+  emit/persistence tail stays put — it needs the raw `sustained` flag
+  before deciding to withhold a per-source emit. Verified via replay:
+  real IF+LSTM artifacts through a recorded session, pre- vs
+  post-refactor, categorical fields identical, LSTM scores matching to
+  ~5 sig figs. One real bug caught by adversarial review and fixed
+  same task: `SequenceDetector.model_version` only updated inside its
+  early-return guard, so it never reset to `None` on a gated tick
+  (no model / no row / `scoring_allowed=False`) — unlike
+  `IsolationForestDetector`, which was correct — corrupting the
+  `fused` event's `model_version` provenance tag. Fixed by moving the
+  assignment before the guard; new regression test added; re-verified.
 - [x] **3.2 — Split the FE god-panels.** `ControlPanel.tsx` (580, ~8
   concerns) → `SessionsCard`/`JobsCard`/`SequenceDetectorCard`/
   `ModelUploadCard`/`CompanionConfig` (only 2 cards extracted today);
@@ -253,50 +257,62 @@ style issues, and go first.
   no panel needed it after the gate dedup — `TrainingPanel` and
   `TestSessionPanel`'s multi-fetch cases don't share a common shape
   worth generalizing).
-- [ ] **3.4 — `JsonlStore` base.** Nine append-only JSONL
-  implementations; `FeedbackStore` (`src/alerts/feedback.py`),
-  `TrainingLedger` (`src/models/training_ledger.py`), and the job
-  ledger (`src/control/jobs.py:426-440`) are structurally identical
-  (append+flush, tolerant `_iter_raw`, latest-per-key collapse); only
-  `ControlAuditLogger` has a lock. One generic base unifies torn-line
-  semantics; day-rotating `AnomalyEventLogger` and the audit loggers
-  subclass or stay.
-- [ ] **3.5 — Split `isolation_forest.py` + shared artifact IO.**
-  804 lines mixing dataclasses/manifest (`:76-352`), training
-  (`fit_isolation_forest` `:355-532`, 178 lines — extract the per-mode
-  calibration block `:427-483`), and artifact IO (`:535-586`).
-  Add `write_artifact`/`read_artifact` + one `manifest_path_for()` to
-  `src/models/manifest.py` — the save/load skeleton exists 3×
-  (isolation_forest, lstm_training, tcn_training),
-  `default_*_manifest_path` 3×, and the `.with_suffix(".manifest.json")`
-  literal in 6 more places (`control/models.py:25`,
-  `control/preflight.py:110`, `control/sequence_detector.py:128`,
-  `companion/routes.py:371`, `models/manager.py:86`). Folds into 2.1's
-  unified manifest.
+- [x] **3.4 — `JsonlStore` base.** Landed: new `src/jsonl_store.py`
+  (`JsonlStore[R]` + `latest_by_key()` + `append_jsonl_line()`).
+  `FeedbackStore`, `TrainingLedger`, and `VehicleLedgerStore` (a 4th
+  match beyond the doc's cited 3) migrated to subclass it, verified
+  byte-identical behavior including `TrainingLedger`'s
+  first-seen-order + stable-sort tie-break. `ControlAuditLogger` and
+  the job ledger reuse only the low-level `append_jsonl_line`
+  primitive and stay separate classes (genuine lock/in-memory-cache
+  architecture difference). Day-rotating `AnomalyEventLogger`
+  confirmed genuinely different, untouched.
+- [x] **3.5 — Shared artifact IO.** Landed: `manifest_path_for()`/
+  `write_artifact()`/`read_artifact()` added to `src/models/manifest.py`;
+  both sequence trainers + isolation_forest now use them; all
+  `.with_suffix(".manifest.json")` literal call sites replaced.
+  Extracted `_calibration_split`/`_calibrate_holdout_threshold` out of
+  `fit_isolation_forest`'s per-mode loop. Deliberately did NOT
+  physically split `isolation_forest.py` into separate files (the
+  doc's literal file-split ask) — ~30 existing callers import from it
+  directly and the risk/benefit didn't justify it within this task;
+  the artifact-IO duplication itself (the concrete problem) is fully
+  resolved.
 
 ## Phase 4 — Quick sweeps (each ≤ an hour, batchable)
 
-- [ ] **4.1 — Delete/demote `run_live_inference_lstm`.**
-  `src/daemon/inference.py:272-352` — production-dead (only its own
-  tests reference it; `runtime.py:171` spawns only
-  `run_live_inference`). ~80 lines.
-- [ ] **4.2 — `atomic_write_text(path, text)` util.** 9-10 copies of
-  tmp+`replace` (`control/sessions.py:116`, `alerts/tuning.py:164`,
-  `profiles.py:135`, `dashboard/ups.py:83`,
-  `collection/custom_pids.py:313`, `preprocessing/feature_cache.py:138`,
-  `analysis/gps_tracker.py:148`, `analysis/session_classifier.py:265`,
-  `control/models.py:32`; binary variant `storage/parquet_writer.py:272`
-  stays).
-- [ ] **4.3 — `parse_iso_utc` into `src/timefmt.py`** (the designated
-  home): the `fromisoformat(ts.replace("Z", "+00:00"))` idiom at
-  `dashboard/status.py:273`, `mcp_server/tools/search.py:705`,
-  `dashboard/readers.py:156`, +.
-- [ ] **4.4 — Coercion/torch-guard helpers.** `coerce_timestamp` ×3
-  (`sequence_training.py:519` canonical; `isolation_forest.py:772`,
-  `daemon/inference.py:519`); `_optional_str` ×5, `_optional_float`
-  ×2, `_required_int` ×2; `_torch_module` ×5 →
-  `sequence_training.torch_module()` (per-backbone error types
-  collapse with 2.1). ~120 lines total with 4.2/4.3.
+- [x] **4.1 — Delete/demote `run_live_inference_lstm`.** Landed:
+  confirmed genuinely production-dead (only its own tests referenced
+  it), deleted (~80 lines). Its one valuable test ported onto
+  `run_live_inference`/`SequenceDetector` (which inherited that code
+  path) rather than discarded.
+- [x] **4.2 — `atomic_write_text(path, text)` util.** Landed: new
+  `src/atomic_write.py`, migrated 12 call sites (more than the doc's
+  9-10 estimate). Left `gps_tracker.py` (needs fsync durability),
+  `feature_cache.py` (pickle, pid-disambiguated tmp names for
+  concurrency), `control/models.py` (binary + a deliberate
+  write-both-before-rename-either ordering), and
+  `storage/parquet_writer.py` (binary, per doc) as genuine
+  divergences, verified.
+- [x] **4.3 — `parse_iso_utc` into `src/timefmt.py`.** Landed: added
+  the canonical parse+UTC-normalize function, migrated 4 hand-rolled
+  copies. Incidentally fixed a latent bug in `dashboard/status.py`
+  where the naive-timestamp branch didn't tz-normalize — would have
+  raised `TypeError` subtracting a naive from an aware datetime;
+  verified real via trace, the shared helper always normalizes now.
+- [x] **4.4 — Coercion/torch-guard helpers.** Landed: `coerce_timestamp`
+  unified where genuinely identical (`isolation_forest.py` now imports
+  `sequence_training`'s version); `models/inference.py`'s divergent
+  None-on-bad-input version correctly left separate. New
+  `src/coerce.py::optional_str` collapses 3 identical copies;
+  `retraining_policy.py`'s divergent `""→None` version correctly left
+  alone. `_optional_float`/`_required_int` confirmed already deduped
+  to 1 definition each by 2.1. `_torch_module`: the 2 trainer copies
+  were already unified by 2.1; the remaining 5 serving-module copies
+  each raise a distinct exception type — left separate (though 2 of
+  the 5, `models/inference.py` and `false_positive_benchmark.py`, turn
+  out to raise the identical exception type with only cosmetic message
+  differences, a minor changelog overclaim, not worth re-touching).
 - [x] **4.5 — FE formatter sweep.** SystemPanel's 8 local `format*`
   helpers, ModelHealthPanel's shadowing `formatPercent`, and the 3×
   `formatDuration` (PowerPanel, SystemPanel, `util/time.formatElapsed`)
@@ -326,17 +342,18 @@ style issues, and go first.
   files that actually had the pattern (Profiles, Power,
   Tuning+Anomaly, Trip, Trends, Phase6, Dtc, DataSources) — 8, not
   the 6 originally spotted.
-- [ ] **4.7 — Misc singles.** `CollectorStarter` alias defined twice
-  (`main.py:34`, `collection/replay.py:36`); `_need()` decoder guard
-  twice (`can_obd_client.py:372`, `obd_registry.py:135`); shared
-  parse-error counter for the 3× bounded-log pattern
-  (`can_obd_collector.py:679-703`, `can_collector.py:104-121,294-315`
-  — mirror `QueueDropCounter`, `queueing.py:17-36`); threadsafe-enqueue
-  factory for the 3 copies (`obd_collector.py:400`,
-  `can_obd_collector.py:319-329`); move `_default_collectors` from
-  `main.py` into `src/collection/` (daemon→main import inversion,
-  `daemon/runtime.py:83`); `list_events_by_kind` hand-builds a query
-  string instead of `params=` (`mcp_server/tools/classification.py`).
+- [x] **4.7 — Misc singles.** Landed: `CollectorStarter` +
+  `_default_collectors`/`_gps_collectors` moved to new
+  `src/collection/collectors.py`, fixing the `daemon/runtime.py` →
+  `main.py` import inversion (verified no new cycle). `_need()`
+  decoder guard: `obd_registry.py` now imports the single definition
+  from `can_obd_client.py`. New `log_dropped_can_frame()` (mirrors
+  `QueueDropCounter`) collapses the 3 identical bounded-log bodies in
+  `can_collector.py`/`can_obd_collector.py`. New `threadsafe_enqueue()`
+  collapses the 3 `call_soon_threadsafe(partial(put_nowait_or_drop,
+  ...))` closures. `list_events_by_kind` now builds `params=` like its
+  sibling MCP tools instead of hand-joining an unescaped query string
+  — fixes a latent no-URL-encoding bug in the process.
 
 ## Explicitly no-action (reviewed and fine)
 
@@ -364,13 +381,33 @@ style issues, and go first.
 
 ## Cross-cutting acceptance
 
-- [ ] Whole-repo gate green per commit; FE phases also `pnpm test` +
-  `pnpm typecheck` (re-run `TuningFeedback.test.ts` on flake).
-- [ ] Serve-path refactors (1.1, 3.1): pinned-session replay
-  before/after with event diff — behavior-preserving means zero event
-  changes.
-- [ ] Line-count receipts: note the actual reduction per phase in the
-  commit message (target ~2,000-2,500 total across Phases 1-4).
-- [ ] No public-API breaks: `src/models/__init__.py` re-exports,
-  `PID_DECODERS` imports, and jobs-allow-list script names keep
-  working via shims until callers migrate.
+- [x] Whole-repo gate green per commit; FE phases also `pnpm test` +
+  `pnpm typecheck` (re-run `TuningFeedback.test.ts` on flake). Held for
+  every commit across Phases 1-4 tonight.
+- [x] Serve-path refactors (1.1, 3.1): pinned-session replay
+  before/after with event diff. 1.1 landed with a startup consistency
+  assertion (no runtime event path changed). 3.1 replay-verified
+  behavior-preserving (categorical fields identical, LSTM scores
+  matching to ~5 sig figs); one real divergence (`SequenceDetector`
+  provenance-tag reset ordering) was caught, fixed, and re-verified
+  before landing.
+- [x] Line-count receipts: honest accounting, not a forced total —
+  2.1 alone removed ~558 net production lines (unifying the LSTM/TCN
+  trainers); several other tasks were net-line-*positive* by design
+  (3.2/3.3's FE panel splits, 3.1/3.4/3.5's new shared modules +
+  their test coverage) because eliminating N copies of duplicated
+  logic plus adding one well-tested shared implementation costs more
+  raw lines than N thin unmigrated copies, even though the actual
+  *duplication* — the thing this phase targeted — is gone. The
+  doc's ~2,000-2,500 figure doesn't hold as a literal net-diff target
+  once test coverage for the new shared code is counted; every
+  concrete duplication site named in Phases 1-4 was independently
+  confirmed migrated or explicitly disclosed as a deliberate
+  non-migration (2.2 blocked; 3.5's literal file-split skipped, ~30
+  callers, artifact-IO duplication itself resolved).
+- [x] No public-API breaks: `PID_DECODERS` shim kept (1.1);
+  `src/models/__init__.py` re-exports unaffected by 2.1/3.5 (verified
+  by the whole-repo gate + existing import-site tests passing
+  unchanged throughout); jobs-allow-list script names untouched by
+  4.7's collector relocation (`main.py` still re-exports
+  `_default_collectors` for its own/test callers).

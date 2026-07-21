@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from src.coerce import optional_str as _optional_str
 from src.models.sequence_training import EpochLoss
 
 if TYPE_CHECKING:
@@ -236,12 +237,6 @@ class SequenceAutoencoderManifest:
             scaler=None if data.get("scaler") is None else dict(data["scaler"]),
             calibration=_optional_str(data.get("calibration")),
         )
-
-
-def _optional_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    return str(value)
 
 
 def _optional_float(value: Any) -> float | None:

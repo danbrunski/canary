@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 
 from src.config import CanaryConfig
+from src.models.manifest import manifest_path_for
 from src.preprocessing.loader import PARQUET_PATTERN, discover_sessions
 from src.storage.monitor import free_space_mb
 
@@ -107,7 +108,7 @@ def _check_models(config: CanaryConfig) -> dict[str, Any]:
     missing = [
         name
         for name, artifact in expected.items()
-        if not artifact.exists() or not artifact.with_suffix(".manifest.json").exists()
+        if not artifact.exists() or not manifest_path_for(artifact).exists()
     ]
     return _check(
         "model_artifacts",

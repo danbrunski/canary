@@ -24,7 +24,7 @@ an artifact whose on-disk format the running daemon can't speak.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -227,6 +227,71 @@ def schema_serviceable(
     return set(candidate_cols) <= set(running_cols)
 
 
+def manifest_path_for(artifact_path: Path) -> Path:
+    """The conventional JSON manifest sidecar path for a binary model
+    artifact (Task 3.5): one ``.with_suffix(".manifest.json")``, replacing
+    the literal duplicated across every trainer's own
+    ``default_*_manifest_path`` plus half a dozen more call sites
+    (``control/models.py``, ``control/preflight.py``,
+    ``control/sequence_detector.py``, ``companion/routes.py``,
+    ``models/manager.py``).
+    """
+    return Path(artifact_path).with_suffix(".manifest.json")
+
+
+def write_artifact(
+    artifact_path: Path,
+    dump_binary: Callable[[Path], None],
+    manifest: Mapping[str, Any],
+    *,
+    manifest_path: Path | None = None,
+) -> Path:
+    """Persist a binary model artifact + its JSON manifest sidecar (Task 3.5).
+
+    The shared tail of every trainer's ``save_*_model``: mkdir, write the
+    binary artifact via the caller's own ``dump_binary`` (``joblib.dump`` for
+    Isolation Forest, ``torch.save`` for the sequence backbones — the binary
+    *format* genuinely differs per backbone, so it stays a callback rather
+    than forced into one shape here), then write ``manifest`` (already
+    ``.to_dict()``'d) as the pretty-printed JSON sidecar. Returns the
+    manifest path actually written to.
+    """
+    artifact_path = Path(artifact_path)
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    dump_binary(artifact_path)
+    path = manifest_path or manifest_path_for(artifact_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(dict(manifest), indent=2, sort_keys=True) + "\n")
+    return path
+
+
+def read_artifact(
+    artifact_path: Path,
+    load_binary: Callable[[Path], Any],
+    *,
+    model_type: str,
+    expected_format_version: int,
+) -> Any:
+    """Load a binary artifact and validate its shared header (Task 3.5).
+
+    The shared head of every trainer's ``load_*_model``: load the binary
+    payload via the caller's own ``load_binary`` (again a callback — the
+    binary format differs per backbone), then check the
+    ``artifact_format_version``/``model_type`` pair every payload carries.
+    Returns the raw payload dict; the caller still builds its own
+    ``Trained*`` dataclass from it (manifest parsing, detector-specific
+    validation) since that part is not generic.
+    """
+    payload = load_binary(Path(artifact_path))
+    if int(payload["artifact_format_version"]) != expected_format_version:
+        raise ValueError(
+            f"unsupported {model_type} artifact format {payload['artifact_format_version']!r}"
+        )
+    if str(payload["model_type"]) != model_type:
+        raise ValueError(f"unexpected model type {payload['model_type']!r}")
+    return payload
+
+
 def _validate_feature_columns(schema: Mapping[str, Any], *, context: str) -> tuple[str, ...]:
     raw_columns = schema.get("feature_columns")
     if not isinstance(raw_columns, list | tuple):
@@ -305,10 +370,13 @@ __all__ = [
     "ManifestValidationError",
     "ModelManifestCommon",
     "load_manifest_common",
+    "manifest_path_for",
+    "read_artifact",
     "schemas_compatible",
     "schema_serviceable",
     "validate_model_feature_spec",
     "validate_manifest_common",
+    "write_artifact",
 ]
 
 

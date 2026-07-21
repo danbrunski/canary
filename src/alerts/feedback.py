@@ -25,12 +25,14 @@ import csv
 import io
 import json
 import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from src.jsonl_store import JsonlStore, latest_by_key
 
 log = logging.getLogger(__name__)
 
@@ -90,15 +92,17 @@ class AnomalyFeedback(BaseModel):
         return cls.model_validate(data)
 
 
-class FeedbackStore:
+class FeedbackStore(JsonlStore[AnomalyFeedback]):
     """Append-only JSONL store of anomaly verdicts.
 
     Not thread-safe on its own; the daemon serializes writes the same way it
-    does the other ledgers. Reads tolerate a torn final line.
+    does the other ledgers. Reads tolerate a torn final line (Task 3.4:
+    both behaviors now live on the shared :class:`~src.jsonl_store.JsonlStore`
+    base).
     """
 
     def __init__(self, path: Path = DEFAULT_FEEDBACK_PATH) -> None:
-        self.path = Path(path)
+        super().__init__(path, from_dict=AnomalyFeedback.from_dict)
 
     def record(
         self,
@@ -118,35 +122,11 @@ class FeedbackStore:
             event=event,
             labeled_by=labeled_by,
         )
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a") as handle:
-            handle.write(json.dumps(fb.to_dict(), sort_keys=True) + "\n")
-            handle.flush()
-        return fb
-
-    def _iter_raw(self) -> Iterator[AnomalyFeedback]:
-        if not self.path.exists():
-            return
-        with self.path.open() as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    yield AnomalyFeedback.from_dict(json.loads(line))
-                except (json.JSONDecodeError, ValueError):
-                    continue
-
-    def raw_records(self) -> list[AnomalyFeedback]:
-        """Every appended verdict in write order (full relabel history)."""
-        return list(self._iter_raw())
+        return self._append_record(fb, to_dict=AnomalyFeedback.to_dict)
 
     def labels(self) -> dict[str, AnomalyFeedback]:
         """Latest verdict per anomaly key (a relabel supersedes)."""
-        latest: dict[str, AnomalyFeedback] = {}
-        for fb in self._iter_raw():
-            latest[fb.anomaly_key] = fb
-        return latest
+        return latest_by_key(self._iter_raw(), key=lambda fb: fb.anomaly_key)
 
     def get(self, key: str) -> AnomalyFeedback | None:
         return self.labels().get(key)

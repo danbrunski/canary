@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import Any, Literal, cast
 from uuid import uuid4
 
+from src.coerce import optional_str as _optional_str
 from src.config import CanaryConfig
 from src.control.sessions import resolve_session
+from src.jsonl_store import append_jsonl_line
 
 JobKind = Literal[
     "retrain_if",
@@ -464,10 +466,12 @@ class JobController:
                 pass
 
     def _persist_locked(self, record: JobRecord) -> None:
-        self._ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._ledger_path.open("a") as handle:
-            handle.write(json.dumps(record.to_dict(), default=str) + "\n")
-            handle.flush()
+        # Task 3.4: this ledger keeps an in-memory `dict[str, JobRecord]`
+        # cache mutated incrementally under `self._lock` (concurrent job
+        # execution needs that, unlike the re-scan-on-every-read stores), so
+        # it doesn't fit `JsonlStore` itself — but the append body is the
+        # same primitive.
+        append_jsonl_line(self._ledger_path, record.to_dict(), sort_keys=False)
 
 
 def _default_python(repo_root: Path) -> Path:
@@ -490,10 +494,6 @@ def _load_jobs(path: Path) -> dict[str, JobRecord]:
             record = _recover_interrupted_job(record)
             jobs[record.job_id] = record
     return jobs
-
-
-def _optional_str(value: Any) -> str | None:
-    return None if value is None else str(value)
 
 
 def _optional_int(value: Any) -> int | None:

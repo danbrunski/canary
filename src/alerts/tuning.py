@@ -36,6 +36,8 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.atomic_write import atomic_write_text
+
 log = logging.getLogger(__name__)
 
 __all__ = [
@@ -160,10 +162,7 @@ def save_tuning_config(
     that's what makes a tuning change reversible without a separate backup.
     """
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(yaml.safe_dump(config.to_dict(), sort_keys=False))
-    tmp.replace(path)
+    atomic_write_text(path, yaml.safe_dump(config.to_dict(), sort_keys=False), mkdir=True)
 
     audit_path = Path(audit_path)
     audit_path.parent.mkdir(parents=True, exist_ok=True)

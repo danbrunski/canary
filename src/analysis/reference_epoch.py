@@ -27,6 +27,7 @@ from typing import Any
 
 import numpy as np
 
+from src.atomic_write import atomic_write_text
 from src.timefmt import format_timestamp as _format_timestamp
 
 DEFAULT_REFERENCE_EPOCH_PATH = Path("data/control/reference_epoch.json")
@@ -135,10 +136,9 @@ def build_reference_epoch(
 def write_reference_epoch(path: Path, epoch: ReferenceEpoch) -> Path:
     """Overwrite the reference-epoch file. The only writer of this path — see
     module docstring; nothing else in the codebase calls this."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(epoch.to_dict(), indent=2, sort_keys=True) + "\n")
-    tmp.replace(path)
+    atomic_write_text(
+        path, json.dumps(epoch.to_dict(), indent=2, sort_keys=True) + "\n", mkdir=True
+    )
     return path
 
 

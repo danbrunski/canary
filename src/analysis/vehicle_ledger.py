@@ -21,15 +21,15 @@ convention.
 
 from __future__ import annotations
 
-import json
 import logging
-from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from src.jsonl_store import JsonlStore, latest_by_key
 
 log = logging.getLogger(__name__)
 
@@ -82,23 +82,21 @@ class VehicleEvent(BaseModel):
         return cls.model_validate(data)
 
 
-class VehicleLedgerStore:
+class VehicleLedgerStore(JsonlStore[VehicleEvent]):
     """Append-only JSONL store of vehicle events.
 
     Not thread-safe on its own; callers serialize writes the same way the
-    daemon does the other ledgers. Reads tolerate a torn final line.
+    daemon does the other ledgers. Reads tolerate a torn final line (Task
+    3.4: both behaviors now live on the shared
+    :class:`~src.jsonl_store.JsonlStore` base).
     """
 
     def __init__(self, path: Path = DEFAULT_VEHICLE_LEDGER_PATH) -> None:
-        self.path = Path(path)
+        super().__init__(path, from_dict=VehicleEvent.from_dict)
 
     def append(self, event: VehicleEvent) -> VehicleEvent:
         """Append one event (flushed; crash loses at most the last line)."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a") as handle:
-            handle.write(json.dumps(event.to_dict(), sort_keys=True) + "\n")
-            handle.flush()
-        return event
+        return self._append_record(event, to_dict=VehicleEvent.to_dict)
 
     def record(
         self,
@@ -127,23 +125,6 @@ class VehicleLedgerStore:
             kwargs["id"] = event_id
         return self.append(VehicleEvent(**kwargs))
 
-    def _iter_raw(self) -> Iterator[VehicleEvent]:
-        if not self.path.exists():
-            return
-        with self.path.open() as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    yield VehicleEvent.from_dict(json.loads(line))
-                except (json.JSONDecodeError, ValueError):
-                    continue
-
-    def raw_records(self) -> list[VehicleEvent]:
-        """Every appended line in write order (full correction chain)."""
-        return list(self._iter_raw())
-
     def records(self) -> list[VehicleEvent]:
         """Latest event per id, ordered by ``occurred_at`` (oldest first).
 
@@ -151,10 +132,8 @@ class VehicleLedgerStore:
         (a correction), but the events themselves are ordered by when they
         physically happened, not when they were recorded.
         """
-        latest: dict[str, VehicleEvent] = {}
-        for event in self._iter_raw():
-            latest[event.id] = event
-        return sorted(latest.values(), key=lambda e: (e.occurred_at, e.recorded_at))
+        by_id = latest_by_key(self._iter_raw(), key=lambda e: e.id)
+        return sorted(by_id.values(), key=lambda e: (e.occurred_at, e.recorded_at))
 
     def get(self, event_id: str) -> VehicleEvent | None:
         """Latest event for ``event_id``, or ``None`` if unknown."""

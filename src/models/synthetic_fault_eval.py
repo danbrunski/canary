@@ -185,7 +185,8 @@ def _fused_anomalous(
 def _sequence_anomalous(engine: SequenceInferenceEngine, featurized: pd.DataFrame) -> pd.Series:
     """Boolean per-row sequence-detector verdict from the real windowed
     ``observe`` contract (2.3) — ticks ``featurized`` row-by-row through
-    ``engine`` exactly as the live daemon's ``run_live_inference_lstm`` does.
+    ``engine`` exactly as the live daemon's ``SequenceDetector`` (Task 3.1)
+    does.
 
     ``engine``'s buffer is cleared first so a previous run's tail sequence
     never leaks into this one (fresh state per injection run, same reason

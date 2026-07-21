@@ -38,9 +38,11 @@ from src.analysis.fingerprint import compute_fingerprint
 from src.analysis.reference_epoch import read_reference_epoch
 from src.analysis.session_classifier import classify_session
 from src.analysis.vehicle_ledger import VehicleLedgerStore
+from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig
 from src.control.dtc_state import SIDECAR_FILENAME as DTC_SIDECAR_FILENAME
 from src.timefmt import format_timestamp as _format_timestamp
+from src.timefmt import parse_iso_utc
 
 log = logging.getLogger(__name__)
 
@@ -117,11 +119,9 @@ def _anomaly_counts_by_source(
         if path.exists():
             for event in read_events(path):
                 try:
-                    ts = datetime.fromisoformat(event.timestamp.replace("Z", "+00:00"))
+                    ts = parse_iso_utc(event.timestamp)
                 except ValueError:
                     continue
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=UTC)
                 if start <= ts <= end:
                     counts[event.source] = counts.get(event.source, 0) + 1
         day += _ONE_DAY
@@ -267,11 +267,10 @@ def write_digest(session_dir: Path, digest: SessionDigest) -> Path:
     """Atomic tmp+rename write, matching ``classification.json`` /
     ``fingerprint.json`` / ``dtc.json`` / ``trip_summary.json``."""
     path = session_dir / DIGEST_FILENAME
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps(digest.to_dict(), indent=2, sort_keys=True, default=_json_default) + "\n"
+    atomic_write_text(
+        path,
+        json.dumps(digest.to_dict(), indent=2, sort_keys=True, default=_json_default) + "\n",
     )
-    tmp.replace(path)
     return path
 
 

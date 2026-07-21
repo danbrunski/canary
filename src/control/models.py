@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config import CanaryConfig
+from src.models.manifest import manifest_path_for
 
 MODEL_TYPES = {"isolation_forest", "lstm_autoencoder"}
 
@@ -22,7 +23,7 @@ def publish_model_artifact(
 ) -> dict[str, Any]:
     """Write a model artifact + manifest to the daemon's watched path."""
     artifact_path = _artifact_path(config, model_type)
-    manifest_path = artifact_path.with_suffix(".manifest.json")
+    manifest_path = manifest_path_for(artifact_path)
     try:
         artifact_bytes = base64.b64decode(artifact_b64, validate=True)
     except binascii.Error as exc:

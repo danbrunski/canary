@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from src.atomic_write import atomic_write_text
 from src.collection.obd_scheduler import FREEZE_FRAME_CHANNEL_PREFIX
 from src.decode.dtc_catalog import DtcReport, build_dtc_report, describe_dtc
 from src.telemetry import TelemetryRecord
@@ -262,9 +263,9 @@ def _write_sidecar(session_dir: Path, report: DtcReport) -> None:
     """Atomic tmp+rename write, matching ``control.json``
     (``src.control.sessions.write_session_metadata``, Task 1.7)."""
     path = session_dir / SIDECAR_FILENAME
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str) + "\n")
-    tmp.replace(path)
+    atomic_write_text(
+        path, json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str) + "\n"
+    )
 
 
 def _update_catalog(catalog_db: Path | None, session_dir: Path) -> None:

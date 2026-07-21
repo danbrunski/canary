@@ -16,15 +16,22 @@ import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
 import pandas as pd
 
+from src.coerce import optional_str as _optional_str
 from src.dataframe_utils import require_columns as _require_columns
-from src.models.manifest import validate_model_feature_spec
+from src.models.manifest import (
+    manifest_path_for,
+    read_artifact,
+    validate_model_feature_spec,
+    write_artifact,
+)
+from src.models.sequence_training import coerce_timestamp
 from src.preprocessing.feature_pipeline import build_feature_spec
 from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
@@ -403,6 +410,60 @@ class _ModeFitPlan:
     calibrate: bool
 
 
+def _calibration_split(
+    frame: pd.DataFrame,
+    complete_index: pd.Index,
+    *,
+    timestamp_column: str,
+    holdout_fraction: float,
+) -> tuple[pd.Index, pd.Index, int, bool]:
+    """Task 3.5: the per-mode calibration split, extracted out of
+    ``fit_isolation_forest``'s per-mode loop (Phase 7.2).
+
+    Time-orders one mode's complete rows and reserves the tail as a
+    held-out calibration set the model never trains on, so the per-mode
+    score threshold is set on genuinely unseen nominal data rather than the
+    training distribution. Falls back to fitting on all rows (legacy
+    contamination label, no calibration) when there isn't enough holdout.
+    Returns ``(fit_index, holdout_index, n_holdout, calibrate)``.
+    """
+    ordered_index = (
+        pd.to_datetime(frame.loc[complete_index, timestamp_column], utc=True)
+        .sort_values(kind="stable")
+        .index
+    )
+    n = len(ordered_index)
+    n_holdout = int(np.floor(n * holdout_fraction)) if holdout_fraction > 0 else 0
+    calibrate = (n - n_holdout) >= 1 and n_holdout >= _MIN_CALIBRATION_SAMPLES
+    if calibrate:
+        return ordered_index[: n - n_holdout], ordered_index[n - n_holdout :], n_holdout, True
+    return ordered_index, ordered_index[:0], 0, False
+
+
+def _calibrate_holdout_threshold(
+    model: Any,
+    holdout_features: pd.DataFrame,
+    *,
+    target_flag_rate: float,
+) -> tuple[float, float | None, float]:
+    """Task 3.5: the per-mode holdout-threshold calibration, extracted out
+    of ``fit_isolation_forest``'s per-mode loop (Phase 7.2).
+
+    Scores the (never-trained-on) holdout rows with the freshly-fit model
+    and picks the ``1 - target_flag_rate`` quantile as the calibrated
+    decision boundary. Returns ``(score_threshold, score_scale,
+    achieved_flag_rate)`` — ``score_scale`` is the holdout score spread
+    (``None`` when degenerate, i.e. every holdout row scored identically).
+    """
+    hx = holdout_features.to_numpy(dtype=np.float32)
+    holdout_scores = -model.decision_function(hx)
+    score_threshold = float(np.quantile(holdout_scores, 1.0 - target_flag_rate))
+    achieved_flag_rate = float(np.mean(holdout_scores >= score_threshold))
+    spread = float(np.std(holdout_scores))
+    score_scale = spread if spread > 0.0 else None
+    return score_threshold, score_scale, achieved_flag_rate
+
+
 def fit_isolation_forest(
     frame: pd.DataFrame,
     config: IsolationForestConfigLike,
@@ -473,24 +534,12 @@ def fit_isolation_forest(
         if mode_complete.empty:
             continue
 
-        # Phase 7.2: time-order the mode's rows and reserve the tail as a
-        # held-out calibration set the model never sees, so the per-mode
-        # score threshold is set on genuinely unseen nominal data rather
-        # than on the training distribution. Fall back to fitting on all
-        # rows (legacy contamination label) when there isn't enough holdout.
-        ordered_index = (
-            pd.to_datetime(frame.loc[mode_complete.index, timestamp_column], utc=True)
-            .sort_values(kind="stable")
-            .index
+        fit_index, holdout_index, n_holdout, calibrate = _calibration_split(
+            frame,
+            mode_complete.index,
+            timestamp_column=timestamp_column,
+            holdout_fraction=holdout_fraction,
         )
-        n = len(ordered_index)
-        n_holdout = int(np.floor(n * holdout_fraction)) if holdout_fraction > 0 else 0
-        calibrate = (n - n_holdout) >= 1 and n_holdout >= _MIN_CALIBRATION_SAMPLES
-        if calibrate:
-            fit_index = ordered_index[: n - n_holdout]
-            holdout_index = ordered_index[n - n_holdout :]
-        else:
-            fit_index, holdout_index, n_holdout = ordered_index, ordered_index[:0], 0
 
         if len(fit_index) == 0:
             continue
@@ -573,16 +622,15 @@ def fit_isolation_forest(
         mode_feature_columns[mode] = plan.feats
         used_index.extend(plan.complete_index.tolist())
 
-        score_threshold: float | None = None
-        score_scale: float | None = None
-        achieved_flag_rate: float | None = None
-        if plan.calibrate:
-            hx = scaled.loc[plan.holdout_index, plan.feats].to_numpy(dtype=np.float32)
-            holdout_scores = -model.decision_function(hx)
-            score_threshold = float(np.quantile(holdout_scores, 1.0 - target_flag_rate))
-            achieved_flag_rate = float(np.mean(holdout_scores >= score_threshold))
-            spread = float(np.std(holdout_scores))
-            score_scale = spread if spread > 0.0 else None
+        score_threshold, score_scale, achieved_flag_rate = (
+            _calibrate_holdout_threshold(
+                model,
+                scaled.loc[plan.holdout_index, plan.feats],
+                target_flag_rate=target_flag_rate,
+            )
+            if plan.calibrate
+            else (None, None, None)
+        )
 
         modes.append(
             _mode_summary(
@@ -603,7 +651,7 @@ def fit_isolation_forest(
     # for the manifest's data hash, span, sessions, and complete-row count.
     complete = frame.loc[sorted(set(used_index))]
 
-    created_at = _format_timestamp(_coerce_timestamp(fitted_at))
+    created_at = _format_timestamp(coerce_timestamp(fitted_at))
     version = model_version or f"isolation_forest_{created_at.replace(':', '')}"
     manifest = IsolationForestManifest(
         artifact_format_version=ARTIFACT_FORMAT_VERSION,
@@ -656,7 +704,6 @@ def save_isolation_forest_model(
 ) -> None:
     """Persist a trained model bundle with joblib and a JSON manifest."""
     joblib = _joblib_module()
-    artifact_path.parent.mkdir(parents=True, exist_ok=True)
     manifest = trained.manifest.to_dict()
     payload = {
         "artifact_format_version": ARTIFACT_FORMAT_VERSION,
@@ -665,23 +712,23 @@ def save_isolation_forest_model(
         "scaler": trained.scaler.to_dict(),
         "manifest": manifest,
     }
-    joblib.dump(payload, artifact_path)
-
-    path = manifest_path or artifact_path.with_suffix(".manifest.json")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    write_artifact(
+        artifact_path,
+        lambda path: joblib.dump(payload, path),
+        manifest,
+        manifest_path=manifest_path,
+    )
 
 
 def load_isolation_forest_model(artifact_path: Path) -> TrainedIsolationForest:
     """Load a model previously written by ``save_isolation_forest_model``."""
     joblib = _joblib_module()
-    payload = joblib.load(artifact_path)
-    if int(payload["artifact_format_version"]) != ARTIFACT_FORMAT_VERSION:
-        raise ValueError(
-            f"unsupported IsolationForest artifact format {payload['artifact_format_version']!r}"
-        )
-    if str(payload["model_type"]) != MODEL_TYPE:
-        raise ValueError(f"unexpected model type {payload['model_type']!r}")
+    payload = read_artifact(
+        artifact_path,
+        joblib.load,
+        model_type=MODEL_TYPE,
+        expected_format_version=ARTIFACT_FORMAT_VERSION,
+    )
 
     manifest = IsolationForestManifest.from_dict(payload["manifest"])
     scaler = ZScoreScaler.from_dict(payload["scaler"])
@@ -704,7 +751,7 @@ def load_isolation_forest_model(artifact_path: Path) -> TrainedIsolationForest:
 
 def default_manifest_path(artifact_path: Path) -> Path:
     """Return the conventional JSON manifest path for an artifact."""
-    return artifact_path.with_suffix(".manifest.json")
+    return manifest_path_for(artifact_path)
 
 
 def _validate_config(config: IsolationForestConfigLike) -> None:
@@ -895,21 +942,6 @@ def _max_timestamp(series: pd.Series) -> str | None:
     if timestamps.empty:
         return None
     return _format_timestamp(timestamps.max())
-
-
-def _coerce_timestamp(value: datetime | pd.Timestamp | str | None) -> pd.Timestamp:
-    if value is None:
-        return pd.Timestamp(datetime.now(tz=UTC))
-    timestamp = pd.Timestamp(value)
-    if timestamp.tzinfo is None:
-        return timestamp.tz_localize("UTC")
-    return timestamp.tz_convert("UTC")
-
-
-def _optional_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    return str(value)
 
 
 def _isolation_forest_cls() -> Any:

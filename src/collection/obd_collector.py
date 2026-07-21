@@ -32,13 +32,12 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import Any, Protocol
 
 import obd
 
-from src.collection.queueing import DropCallback, QueueDropCounter, put_nowait_or_drop
+from src.collection.queueing import DropCallback, QueueDropCounter, threadsafe_enqueue
 from src.collection.reconnect import ReconnectPolicy, run_with_reconnect
 from src.telemetry import TelemetryRecord
 
@@ -396,10 +395,10 @@ def queue_reading_callback(
     on_drop: DropCallback | None = None,
 ) -> Callable[[ObdReading], None]:
     """Thread-safe callback that pushes OBD readings onto an asyncio queue."""
+    enqueue = threadsafe_enqueue(loop, queue, on_drop=on_drop)
 
     def on_reading(reading: ObdReading) -> None:
-        record = reading_to_record(reading)
-        loop.call_soon_threadsafe(partial(put_nowait_or_drop, queue, record, on_drop=on_drop))
+        enqueue(reading_to_record(reading))
 
     return on_reading
 
