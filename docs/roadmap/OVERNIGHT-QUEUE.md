@@ -243,12 +243,16 @@ backend features), plus the unchecked tail of
   re-verified after the amendments landed. Enabling on the Pi +
   declaring golden remain operator morning tasks, per the pre-made
   decision — correctly left undone.
-- [ ] **Q20 — companion offline workflow: implementation-tasks 6.34
-  (remaining: resumable/chunked sync, checksums, retry) + 6.35 offline
-  dashboard/library mode + 6.36 training target selector + 6.37
-  (remaining: queue/retry semantics, compatibility report). Test
-  against the local companion API with fixture sessions; 6.39 (full
-  Pi round-trip proof) blocked-overnight.**
+- [x] **Q20 — companion offline workflow** — landed (commit `db62064`):
+  6.34 (resumable/chunked sync — real HTTP Range resume, sha256
+  verification, retryable failed-action state), 6.36 (training target
+  selector, shared ledger), 6.37 (publish queue — real
+  accepted/active confirmation, compatibility report reuse, retry).
+  6.35 (offline dashboard/library mode) landed partially — connectivity
+  indicator + a real fix for false-positive labeling being silently
+  broken offline — with the session-library search/browse panel itself
+  still a pre-existing placeholder, unchanged. 6.39 (full Pi round-trip
+  proof) correctly left blocked-overnight.
 - [ ] **Q21 — corpus + capture hygiene: implementation-tasks 6.19
   (proprietary-protocol regression corpus from stored Mode 22/DTC
   exchanges) + data-collection-plan §4 Canable-native broad DID sweep
