@@ -476,6 +476,12 @@ class DaemonConfig(_Strict):
     #: (see ``src/profiles.py``). Cwd-relative like the sibling paths; the
     #: systemd unit ``cd``s to the clone so the default resolves there.
     behavior_models: Path = Path("data/behavior_models.yaml")
+    #: Directional, provenanced accepted-fault overrides (Task 1.3,
+    #: online-training-strategy.md) — sibling to ``behavior_models`` above,
+    #: same profile-scoping rationale (a second vehicle must never inherit
+    #: this one's overrides). Optional: absent file ⇒ zero overrides
+    #: (``load_accepted_baselines`` handles that gracefully).
+    accepted_baselines: Path = Path("data/accepted_baselines.yaml")
     #: User-defined custom-PID formulas (Task 6.8, wired in by Task 2.6) —
     #: schema documented in ``custom_pids.example.yaml``. Optional: absent
     #: file ⇒ zero custom PIDs polled (``load_custom_pids`` handles that

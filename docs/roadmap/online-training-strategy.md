@@ -362,49 +362,55 @@ verified against, as amended by the validity check above.
 
 ### Phase 1 — data-quality gate + disposition report (no auto-retrain)
 
-- [ ] **1.1 — FSM physical limits.** Extend `src/analysis/fsm.py` to
-  extract absolute physical min/max per channel alongside nominal
-  ranges, where the FSM data actually carries them. **Fallback if it
-  doesn't** (likely — sensor-open/-short and decode-rollover values are
-  decode-level knowledge, not FSM spec): curate an explicit
-  physical-limits table in code (typed dict beside the FSM loader),
-  seeded with the doc's examples (coolant −40 °C = sensor open, RPM
-  16383 = decode rollover, negative MAF, IAT ≥ 250 °C) plus obvious
-  bounds for the other polled channels; leave channels you're unsure
-  about out of the table entirely rather than guessing tight bounds —
-  an absent limit means "no reject", which is safe. Emit in the same
-  structure `range_match.py` consumes. Tests over the table.
-- [ ] **1.2 — Reject gate (train *and* score).** New module (e.g.
-  `src/preprocessing/quality_gate.py`) that NaNs
-  physical-impossibility values **per cell** before the scaler in
-  training *and* before scoring live — the NaN then flows through the
-  existing missingness machinery (`__gap` flags, GRU-D mask, IF
-  missing-channel policy) so garbage is a data-quality failure, never an
-  anomaly alert and never a whole-row drop. Per-channel reject counts
-  are logged and returned, never silently swallowed. Wire into the
-  training loaders and the live feature path; tests for both.
-- [ ] **1.3 — `accepted_baselines.yaml` schema + loader.** Strict-Pydantic
-  loader beside `src/decode/behavior_models.py` implementing the schema
-  in "Directional overrides" (channel/behavior_model target, optional
-  `operating_mode` scope, `accepted_center`, directional band,
-  provenance with `declared_by/declared_at/review_by/reason`). The file
-  is **profile-scoped** — resolved through `scope_config` under the
-  active vehicle's data tree, not a flat `data/` path. Ship it with
-  `schema_version: 1` and **zero active overrides** (commented worked
-  example only — authoring real overrides is an operator task).
-  Round-trip + validation-failure tests.
-- [ ] **1.4 — Disposition classifier.** Implement the four-tier table
-  (Reject / Accept-recenter / Quarantine / Accept) as a pure function
-  over a wide frame + limits + overrides; record a per-run `dispositions`
-  summary in the training-ledger record
-  (`src/models/training_ledger.py`). Tests cover each tier and the
-  regime-gate-then-disposition ordering.
-- [ ] **1.5 — Disposition report CLI.** `scripts/disposition_report.py`
-  (or a `scripts/retrain.py --disposition-report` mode) that runs the
-  screen over stored sessions and writes a per-channel
-  persistently-outside-nominal report to `data/analyses/` — the
-  artifact the operator disposes from. Run it over the current corpus
-  and commit the report.
+- [x] **1.1 — FSM physical limits.** Landed: curated `PHYSICAL_LIMITS`
+  table in `src/analysis/fsm.py`, each bound traced to the actual
+  decode formula (`src/collection/can_obd_client.py`) — e.g. RPM's
+  16383.75 ceiling at raw 0xFFFF, coolant's -40°C sensor-open value at
+  raw 0. FSM-text extraction fallback confirmed empty on the real
+  corpus, as the doc predicted; the curated table is the real source
+  of truth. Uncertain channels left out (absent limit = no reject,
+  safe default).
+- [x] **1.2 — Reject gate (train and score).** Landed:
+  `src/preprocessing/quality_gate.py::apply_quality_gate` NaNs
+  physical-impossibility values per cell (never a row drop), wired
+  into both training (`feature_pipeline.py`, between `to_wide` and
+  `resample_wide` — a rejected cell is indistinguishable from any
+  other gap to the resampler's existing `__gap`/ffill machinery) and
+  live scoring (`preprocessing/live.py`'s `LiveFeatureSource._set_value`,
+  the single choke point every observed value passes through — a
+  rejected value ages out via the existing staleness path). Per-channel
+  reject counts logged and returned, never swallowed. Verified both
+  paths converge to identical gap semantics, not parallel plumbing.
+- [x] **1.3 — `accepted_baselines.yaml` schema + loader.** Landed:
+  strict-Pydantic schema in `src/decode/accepted_baselines.py` matching
+  the doc's directional-override fields exactly. Profile-scoped via a
+  new `DaemonConfig.accepted_baselines` path threaded through
+  `scope_config` (verified against the exhaustive
+  `test_scope_config_covers_every_daemon_path_field`). Shipped with
+  `schema_version: 1` and zero active overrides — commented worked
+  example only. No real override was authored (operator-only task).
+- [x] **1.4 — Disposition classifier.** Landed:
+  `src/analysis/training_disposition.py::classify_dispositions` — pure
+  function, four mutually-exclusive/exhaustive tiers computed per
+  `(channel, operating_mode)` group via median ± scaled-MAD (robust to
+  the very outliers being screened for, unlike a quantile band). Sparse
+  groups default to all-Accept rather than manufacturing false
+  quarantines. Regime-gate-then-disposition ordering verified: baselines
+  are computed strictly within each already-mode-gated group, never
+  pooled across modes. `TrainingRunRecord.dispositions` field added
+  (schema-ready; a real retrain run populates it in Phase 3).
+- [x] **1.5 — Disposition report CLI.** Landed:
+  `scripts/disposition_report.py` reuses the same decode/segment/
+  feature-column functions training itself uses — screens exactly what
+  training would consume, no parallel decode logic. Run over the real
+  corpus (14/35 session dirs passed the discovery quality gate) and
+  committed: 0 Reject, 0 Accept-recenter (expected — zero overrides
+  exist to recenter against; the Accept-recenter code path itself is
+  real and covered by a synthetic-override test), 40,865 Quarantine,
+  418,341 Accept. Quarantine is dominated by discrete/bitmask channels
+  (engine-state bytes, steering signals) whose median/MAD band
+  collapses to a point — flagged for operator review rather than
+  treated as uniformly actionable.
 
 ### Phase 2 — directional overrides surfaced
 

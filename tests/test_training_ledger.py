@@ -172,6 +172,47 @@ def test_record_json_round_trip() -> None:
     assert TrainingRunRecord.from_dict(rec.to_dict()) == rec
 
 
+def test_record_dispositions_defaults_to_none() -> None:
+    rec = TrainingRunRecord(
+        run_id="x",
+        model_type="isolation_forest",
+        created_at="2026-05-16T00:00:00Z",
+        status="succeeded",
+    )
+    assert rec.dispositions is None
+
+
+def test_record_dispositions_round_trip() -> None:
+    """Task 1.4: a run's disposition summary (from
+    ``src.analysis.training_disposition.classify_dispositions``) survives a
+    JSONL round trip on the ledger record."""
+    summary = {
+        "groups": [
+            {
+                "channel": "obd:SHORT_FUEL_TRIM_1",
+                "operating_mode": "idle",
+                "accept_recenter": 0,
+                "quarantine": 3,
+                "accept": 97,
+                "total": 100,
+                "baseline_low": -5.0,
+                "baseline_high": 5.0,
+            }
+        ],
+        "reject_counts": {"obd:RPM": 2},
+        "totals": {"reject": 2, "accept_recenter": 0, "quarantine": 3, "accept": 97},
+    }
+    rec = TrainingRunRecord(
+        run_id="x",
+        model_type="isolation_forest",
+        created_at="2026-05-16T00:00:00Z",
+        status="succeeded",
+        dispositions=summary,
+    )
+    assert TrainingRunRecord.from_dict(rec.to_dict()) == rec
+    assert rec.dispositions == summary
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------

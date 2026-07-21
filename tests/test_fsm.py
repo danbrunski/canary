@@ -10,8 +10,11 @@ from __future__ import annotations
 import pytest
 
 from src.analysis.fsm import (
+    PHYSICAL_LIMITS,
+    PhysicalLimit,
     classify_spec,
     clean_param_name,
+    extract_physical_limits_from_fsm,
     looks_like_param_name,
     parse_ranges,
 )
@@ -237,3 +240,75 @@ def test_real_signals_kinds_consistent() -> None:
                 f"{p['name']}: spec_kind={p['spec_kind']} but "
                 f"expected_ranges={'present' if has_ranges else 'empty'}"
             )
+
+
+# --- PHYSICAL_LIMITS table (Task 1.1, online-training-strategy.md) ---
+
+
+def test_physical_limits_table_shape() -> None:
+    """Every curated entry is a well-formed, non-degenerate PhysicalLimit."""
+    assert PHYSICAL_LIMITS  # sanity: the table isn't empty
+    for channel, limit in PHYSICAL_LIMITS.items():
+        assert ":" in channel, f"{channel}: expected a source-prefixed channel name"
+        assert isinstance(limit, PhysicalLimit)
+        assert limit.min < limit.max
+        assert limit.reason  # every bound must cite why it's safe to reject on
+
+
+@pytest.mark.parametrize(
+    ("channel", "value", "expected_valid"),
+    [
+        ("obd:RPM", 2500.0, True),
+        ("obd:RPM", 16383.0, False),  # decode-rollover artifact
+        ("obd:RPM", -1.0, False),
+        ("obd:COOLANT_TEMP", 90.0, True),
+        ("obd:COOLANT_TEMP", -40.0, False),  # sensor-open floor
+        ("obd:INTAKE_TEMP", -30.0, True),  # legitimately cold intake air
+        ("obd:INTAKE_TEMP", 260.0, False),
+        ("obd:MAF", -5.0, False),  # negative MAF is impossible
+        ("obd:MAF", 12.0, True),
+        ("obd:SHORT_FUEL_TRIM_1", 200.0, False),
+    ],
+)
+def test_physical_limits_reject_examples(channel: str, value: float, expected_valid: bool) -> None:
+    limit = PHYSICAL_LIMITS[channel]
+    is_valid = limit.min <= value <= limit.max
+    assert is_valid is expected_valid
+
+
+def test_physical_limits_absent_channel_means_no_reject() -> None:
+    # A channel with no curated entry must never be silently guessed at —
+    # callers (quality_gate.py) treat "absent" as "always valid".
+    assert "obd:CONTROL_MODULE_VOLTAGE" not in PHYSICAL_LIMITS
+
+
+def test_extract_physical_limits_from_fsm_finds_fault_vocabulary() -> None:
+    entries = [
+        {"name": "COOLANT TEMP/S", "spec_text": "Sensor open: -40°C | normal operation 70-100°C"},
+        {"name": "BATTERY VOLT", "spec_text": "Circuit short: 16V"},
+        {"name": "ENG SPEED", "spec_text": "2,000 - 3,000 rpm at idle"},  # no fault vocabulary
+    ]
+    limits = extract_physical_limits_from_fsm(entries)
+    coolant = limits["COOLANT TEMP/S"]
+    assert not (coolant.min <= -40.0 <= coolant.max)  # the fault value itself is excluded
+    assert coolant.min <= -30.0 <= coolant.max  # a real cold reading is not
+    battery = limits["BATTERY VOLT"]
+    assert not (battery.min <= 16.0 <= battery.max)
+    assert battery.min <= 13.5 <= battery.max
+    assert "ENG SPEED" not in limits
+
+
+def test_extract_physical_limits_from_fsm_empty_on_real_corpus() -> None:
+    """Confirms the doc's prediction: the real FSM extraction (spec_text
+    describing operating conditions, never decode-fault codes) yields
+    nothing — PHYSICAL_LIMITS is the actual source of truth, not a fallback
+    for a mechanism that silently never fires."""
+    import json
+    from pathlib import Path
+
+    sig = Path("data/fsm/signals.json")
+    if not sig.exists():
+        pytest.skip("data/fsm/signals.json not present")
+    doc = json.loads(sig.read_text())
+    entries = [p for m in doc["modules"] for p in m["params"]]
+    assert extract_physical_limits_from_fsm(entries) == {}

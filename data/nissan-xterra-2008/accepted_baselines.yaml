@@ -1,0 +1,34 @@
+# Directional, provenanced accepted-fault overrides for this vehicle profile
+# (Task 1.3, docs/roadmap/online-training-strategy.md — see that doc's
+# "Directional overrides — the schema gap" section for the full rationale).
+#
+# Profile-scoped: this file lives under this vehicle's data tree
+# (`data/nissan-xterra-2008/`, resolved via `src.profiles.scope_config`) —
+# a second vehicle profile must never inherit these declarations.
+#
+# ZERO ACTIVE OVERRIDES SHIP HERE. Declaring "this engine state is known and
+# accepted" is an operator judgment call, not something an unattended
+# overnight run may author — see this repo's standing rules and the Phase 1
+# acceptance for this task. The example below is commented out; uncomment
+# and edit it (or add a new entry) only as a deliberate, reviewed operator
+# action, with a real `review_by` date.
+schema_version: 1
+overrides: []
+
+# --- worked example (data/roadmap/online-training-strategy.md) -------------
+# overrides:
+#   - channel: obd:SHORT_FUEL_TRIM_1   # or: behavior_model: fuel_trim_vs_rpm_load
+#     operating_mode: idle             # optional scope, same vocab as the segmenter
+#     accepted_center: 12.0            # this engine's recentered normal
+#     band:
+#       kind: directional
+#       tolerance: 3.0                 # +/- wander around accepted_center: no alert
+#       worse_direction: positive      # which way is the fault worsening
+#       worse_warning: 3.0             # > center + 3 -> warning
+#       worse_critical: 6.0            # > center + 6 -> critical
+#       better_direction: ignore       # toward 0: never alert
+#     provenance:
+#       declared_by: dan
+#       declared_at: "2026-05-17"
+#       review_by: "2026-11-17"        # expires -> forces re-confirmation
+#       reason: "~190k mi, known weak #3 injector; owner not replacing"

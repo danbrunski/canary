@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -344,6 +345,225 @@ def parse_ranges(text: str) -> list[dict[str, float | str]]:
         slack = abs(val) * 0.1 or 0.1
         out.append({"min": val - slack, "max": val + slack, "unit": unit})
 
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Physical (decode-level) limits — online-training-strategy.md Task 1.1
+# ---------------------------------------------------------------------------
+#
+# "Physical limits" are a different axis than the "expected ranges" above.
+# An expected range is *spec normal* (what a healthy engine reads); a
+# physical limit is *decode-level impossibility* (sensor-open, sensor-short,
+# a 16-bit rollover) — garbage, not an unhealthy reading. Mixing the two
+# is exactly the trap online-training-strategy.md warns about: filtering
+# training data to "expected" ranges throws away legitimate but abnormal
+# engine states, whereas physical limits only ever discard decode noise.
+#
+# Primary source would be the FSM itself, if its CONSULT-III data-monitor
+# tables spelled out sensor-fault codes in the spec text (e.g. "Sensor
+# open: -40°C"). ``extract_physical_limits_from_fsm`` below looks for that
+# vocabulary and is exercised by its own tests, but a scan of the real
+# ``data/fsm/signals.json`` corpus turns up nothing — the Nissan tables only
+# ever describe nominal operating conditions, never decode-fault codes, so
+# it always returns an empty dict on real data. ``PHYSICAL_LIMITS`` is
+# therefore the actual source of truth: a hand-curated table keyed by the
+# same channel names the preprocessing pipeline uses (``obd:RPM``, etc.),
+# seeded from the OBD-II decode formulas in
+# ``src/collection/can_obd_client.py`` — a bound is *only* added when the
+# decode formula (or basic physics) makes a value outside it impossible,
+# never a guess at a "typical" range. A channel absent from this table has
+# no physical-limit reject — that is the safe default, not an oversight.
+
+
+@dataclass(frozen=True)
+class PhysicalLimit:
+    """One channel's absolute physical min/max — decode-level "impossible"
+    bounds, not the FSM spec's nominal operating range.
+
+    Same ``{min, max, unit}`` shape as :class:`~src.analysis.signal_lookup.
+    ExpectedRange` (``float("-inf")``/``float("inf")`` for a one-sided bound)
+    so ``quality_gate.py`` and ``range_match.py`` share one schema. ``reason``
+    is why the bound is safe to reject on (cites the decode formula or the
+    physical fact), surfaced in the disposition report so a reject is never
+    an unexplained number.
+    """
+
+    min: float
+    max: float
+    unit: str
+    reason: str
+
+
+#: Curated physical-impossibility bounds, keyed by the wide-frame channel
+#: name (``<source>:<CHANNEL>``, matching ``src.telemetry.channel_key``).
+#: Every bound below traces to a decode formula in
+#: ``src/collection/can_obd_client.py`` (or basic physics) — see each entry's
+#: ``reason``. Channels not listed here are deliberately left out: either the
+#: decode formula alone can't produce an out-of-range value (most single-byte
+#: percent PIDs), or the "physically impossible" bound would require
+#: vehicle-specific knowledge (electrical system voltage, redline) this
+#: module has no principled way to guess — an absent entry means "no
+#: reject", which is the safe default.
+PHYSICAL_LIMITS: dict[str, PhysicalLimit] = {
+    "obd:RPM": PhysicalLimit(
+        min=0.0,
+        max=10_000.0,
+        unit="rpm",
+        reason=(
+            "PID 0x0C decodes (A*256+B)/4, ceiling 16383.75 at raw 0xFFFF — a "
+            "classic all-ones sensor-fault code, not a real engine speed; no "
+            "production gasoline engine sustains anywhere near this either"
+        ),
+    ),
+    "obd:COOLANT_TEMP": PhysicalLimit(
+        min=-39.0,
+        max=150.0,
+        unit="degC",
+        reason=(
+            "PID 0x05 decodes A-40; raw A=0 -> exactly -40degC is the sensor-"
+            "open floor, not a real coolant reading. >150degC is beyond "
+            "boiling/failure, still short of the 215degC encoding ceiling"
+        ),
+    ),
+    "obd:INTAKE_TEMP": PhysicalLimit(
+        min=float("-inf"),
+        max=250.0,
+        unit="degC",
+        reason=(
+            "intake air can legitimately read very cold (cold-climate "
+            "startup), so no lower bound; >=250degC is decode/sensor-fault "
+            "territory for intake air on any port/direct-injection engine"
+        ),
+    ),
+    "obd:MAF": PhysicalLimit(
+        min=0.0,
+        max=float("inf"),
+        unit="g/s",
+        reason="PID 0x10 decodes (A*256+B)/100, a magnitude — negative is impossible",
+    ),
+    "obd:THROTTLE_POS": PhysicalLimit(
+        min=0.0,
+        max=100.0,
+        unit="%",
+        reason="PID 0x11 decodes A*100/255 (single byte); formula cannot exceed 0-100%",
+    ),
+    "obd:RELATIVE_THROTTLE_POS": PhysicalLimit(
+        min=0.0,
+        max=100.0,
+        unit="%",
+        reason="PID 0x45, same A*100/255 single-byte formula as THROTTLE_POS",
+    ),
+    "obd:ENGINE_LOAD": PhysicalLimit(
+        min=0.0,
+        max=100.0,
+        unit="%",
+        reason="PID 0x04, same A*100/255 single-byte formula as THROTTLE_POS",
+    ),
+    "obd:FUEL_LEVEL": PhysicalLimit(
+        min=0.0,
+        max=100.0,
+        unit="%",
+        reason="PID 0x2F, same A*100/255 single-byte formula as THROTTLE_POS",
+    ),
+    "obd:SHORT_FUEL_TRIM_1": PhysicalLimit(
+        min=-100.0,
+        max=100.0,
+        unit="%",
+        reason="PID 0x06 decodes (A-128)*100/128; formula bounds -100%..+99.2%",
+    ),
+    "obd:SHORT_FUEL_TRIM_2": PhysicalLimit(
+        min=-100.0,
+        max=100.0,
+        unit="%",
+        reason="PID 0x08, same signed-byte formula as SHORT_FUEL_TRIM_1",
+    ),
+    "obd:LONG_FUEL_TRIM_1": PhysicalLimit(
+        min=-100.0,
+        max=100.0,
+        unit="%",
+        reason="PID 0x07, same signed-byte formula as SHORT_FUEL_TRIM_1",
+    ),
+    "obd:LONG_FUEL_TRIM_2": PhysicalLimit(
+        min=-100.0,
+        max=100.0,
+        unit="%",
+        reason="PID 0x09, same signed-byte formula as SHORT_FUEL_TRIM_1",
+    ),
+    "obd:BAROMETRIC_PRESSURE": PhysicalLimit(
+        min=50.0,
+        max=110.0,
+        unit="kPa",
+        reason=(
+            "PID 0x33 decodes the raw byte directly (0-255 kPa possible), but "
+            "Earth's terrestrial atmospheric pressure never leaves roughly "
+            "30-108 kPa; loose margin kept either side of that"
+        ),
+    ),
+}
+
+# Fault-vocabulary the FSM *would* use if a data-monitor spec ever encoded a
+# decode-level physical limit instead of a nominal operating range (see
+# module docstring above — this never matches the real corpus, only kept so
+# a future FSM revision that does carry this language is picked up for free).
+_PHYSICAL_FAULT_RE = re.compile(
+    r"(?:sensor|circuit)\s+(?:open|short(?:ed)?)\s*:?\s*"
+    r"(?P<val>[+-−]?\d+(?:\.\d+)?)\s*(?P<unit>°?[A-Za-z%·/]*)",
+    re.IGNORECASE,
+)
+
+
+def extract_physical_limits_from_fsm(
+    entries: list[dict[str, Any]],
+) -> dict[str, PhysicalLimit]:
+    """Best-effort scan of parsed FSM entries for decode-fault vocabulary.
+
+    ``entries`` is :func:`extract_pdf_section_with_specs`'s output (each with
+    a ``spec_text``). Looks for phrasing like "Sensor open: -40°C" or
+    "Circuit short: 5V" — a fault *value*, not an operating range — and
+    turns each hit into a one-sided :class:`PhysicalLimit` (the fault value
+    becomes the excluded bound; which side is excluded is inferred from the
+    fault value's sign relative to zero, since the FSM text doesn't say).
+    Real Nissan CONSULT-III data-monitor tables don't use this vocabulary
+    (checked against the full ``data/fsm/signals.json`` corpus — zero
+    matches), so this returns an empty dict there; ``PHYSICAL_LIMITS`` is the
+    actual source of truth. Kept so a future FSM revision (or another
+    vehicle's service manual) that *does* spell out fault codes is picked up
+    without code changes beyond wiring this dict in alongside the curated one.
+    """
+    out: dict[str, PhysicalLimit] = {}
+    for entry in entries:
+        match = _PHYSICAL_FAULT_RE.search(str(entry.get("spec_text", "")))
+        if match is None:
+            continue
+        try:
+            val = float(match.group("val").replace("−", "-"))
+        except ValueError:
+            continue
+        unit = match.group("unit").strip()
+        name = str(entry["name"])
+        # The fault value itself must be excluded, not just approached — a
+        # tiny margin (scaled to the value's own magnitude, floored so a
+        # fault value of exactly 0 still gets one) nudges the bound past it.
+        margin = max(abs(val) * 1e-3, 1e-3)
+        if val >= 0:
+            # A high fault reading (e.g. "Circuit short: 16V") — valid
+            # values sit strictly below it.
+            out[name] = PhysicalLimit(
+                min=float("-inf"),
+                max=val - margin,
+                unit=unit,
+                reason=f"FSM-declared fault value: {val}{unit}",
+            )
+        else:
+            # A low/floor fault reading (e.g. "Sensor open: -40°C") — valid
+            # values sit strictly above it.
+            out[name] = PhysicalLimit(
+                min=val + margin,
+                max=float("inf"),
+                unit=unit,
+                reason=f"FSM-declared fault value: {val}{unit}",
+            )
     return out
 
 

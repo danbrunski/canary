@@ -47,6 +47,7 @@ from src.preprocessing.feature_cache import (
 )
 from src.preprocessing.features import FeatureConfig, compute_features
 from src.preprocessing.loader import read_session, to_wide
+from src.preprocessing.quality_gate import apply_quality_gate
 from src.preprocessing.resampler import GAP_SUFFIX, ResampleConfig, resample_wide
 from src.preprocessing.segmenter import (
     MODE_COLUMN,
@@ -182,18 +183,16 @@ def _init_feature_worker(
     _FEATURE_WORKER_STATE["resample"] = resample_config
 
 
-def _decode_session_to_resampled(
+def _decode_session_to_wide(
     session_dir: Path,
     bindings: Any,
     dbc_database: Any,
     did_map: Any,
-    resample_config: ResampleConfig,
 ) -> pd.DataFrame:
-    """The per-session pipeline: parquet → decode → wide → resample.
-
-    Top-level (not nested) so :class:`ProcessPoolExecutor` can pickle it. The
-    serial path also calls it directly, so there's exactly one implementation
-    of the per-session work.
+    """parquet → decode → wide pivot, split out of
+    :func:`_decode_session_to_resampled` (Task 1.2) so the quality gate's
+    reject counts stay inspectable per-session (``scripts/disposition_report.py``)
+    without duplicating the decode steps.
     """
     long = read_session(session_dir)
     if bindings is not None:
@@ -213,8 +212,35 @@ def _decode_session_to_resampled(
     # ``trainable_feature_columns`` anyway. Dropping them here collapses the
     # ``to_wide`` pivot's row volume ~50× — the actual OOM cause.
     long = long[long["source"] != "can"]
-    wide = to_wide(long, coerce_numeric=True)
-    return resample_wide(wide, config=resample_config)
+    return to_wide(long, coerce_numeric=True)
+
+
+def _decode_session_to_resampled(
+    session_dir: Path,
+    bindings: Any,
+    dbc_database: Any,
+    did_map: Any,
+    resample_config: ResampleConfig,
+) -> pd.DataFrame:
+    """The per-session pipeline: parquet → decode → wide → reject gate → resample.
+
+    Top-level (not nested) so :class:`ProcessPoolExecutor` can pickle it. The
+    serial path also calls it directly, so there's exactly one implementation
+    of the per-session work.
+
+    The quality gate (Task 1.2) runs on the wide frame, before
+    ``resample_wide`` — a physically-impossible cell must be NaN'd before the
+    resampler's ffill/``__gap`` bookkeeping ever sees it, so a reject is
+    indistinguishable from any other gap to every downstream consumer.
+    """
+    wide = _decode_session_to_wide(session_dir, bindings, dbc_database, did_map)
+    gated, quality = apply_quality_gate(wide)
+    if quality.total_rejected:
+        log.info(
+            "quality gate rejected cells in session",
+            extra={"session": session_dir.name, "reject_counts": quality.reject_counts},
+        )
+    return resample_wide(gated, config=resample_config)
 
 
 def _worker_process_session(

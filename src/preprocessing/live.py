@@ -66,6 +66,7 @@ from src.decode.dids import (
 )
 from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.features import FeatureConfig
+from src.preprocessing.quality_gate import is_physically_valid
 from src.preprocessing.resampler import ResampleConfig, gap_column, is_slow_channel
 from src.telemetry import (
     DBC_SOURCE,
@@ -102,6 +103,10 @@ class LiveFeatureSource:
     #: serve derives each channel's mask (``age ≤ max_gap``) and Δt (``age``)
     #: from this, mirroring the resampler's ``__gap`` rule with no resampler.
     _last_observed_at: dict[str, datetime] = field(default_factory=dict)
+    #: Per-channel count of values rejected by the quality gate (Task 1.2) —
+    #: never silently swallowed, surfaced via :attr:`reject_counts`. Cleared
+    #: on :meth:`reset` like every other observation-derived state.
+    _reject_counts: dict[str, int] = field(default_factory=dict)
     _buffer: deque[dict[str, Any]] = field(init=False)
     _bindings_by_id: dict[int, list[Signal]] = field(init=False)
     _dbc_message_by_id: dict[int, Any] = field(init=False)
@@ -212,7 +217,20 @@ class LiveFeatureSource:
         channel is fresh iff ``now − observed_at ≤ max_gap``. ``observed_at`` is
         normalized to tz-aware UTC so age arithmetic against the tick's ``now``
         never mixes naive/aware datetimes.
+
+        Task 1.2 quality gate: a physically-impossible value (see
+        ``src.analysis.fsm.PHYSICAL_LIMITS``) is never stored — the channel
+        simply doesn't get a fresh observation this tick, so it ages out via
+        the exact same staleness path (``_last_observed_at`` / ``_gap_flags``)
+        a channel that stopped transmitting would. Counted, never swallowed.
         """
+        if not is_physically_valid(channel, value):
+            self._reject_counts[channel] = self._reject_counts.get(channel, 0) + 1
+            log.debug(
+                "quality gate rejected live value",
+                extra={"channel": channel, "value": value},
+            )
+            return
         self._current_values[channel] = value
         ts = observed_at if observed_at.tzinfo is not None else observed_at.replace(tzinfo=UTC)
         self._last_observed_at[channel] = ts
@@ -575,6 +593,7 @@ class LiveFeatureSource:
         """
         self._current_values = {}
         self._last_observed_at = {}
+        self._reject_counts = {}
         self._buffer = deque(maxlen=self._max_rows)
         self.latest_operating_point = None
         self.last_segmenter_fallback = False
@@ -600,6 +619,12 @@ class LiveFeatureSource:
     def known_channels(self) -> tuple[str, ...]:
         """Channels we've observed at least once. Stable enough for telemetry."""
         return tuple(sorted(self._current_values))
+
+    @property
+    def reject_counts(self) -> dict[str, int]:
+        """Per-channel quality-gate reject counts (Task 1.2) since the last
+        :meth:`reset`. A copy — callers can't mutate the running tally."""
+        return dict(self._reject_counts)
 
 
 # ---------------------------------------------------------------------------

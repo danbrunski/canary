@@ -352,6 +352,31 @@ def test_build_feature_frame_skips_parallel_under_threshold(tmp_path: Path) -> N
     pd.testing.assert_frame_equal(serial, auto)
 
 
+def test_build_feature_frame_quality_gate_rejects_impossible_cell(tmp_path: Path) -> None:
+    """Task 1.2: a physically-impossible RPM reading (the 0x0C decode-
+    rollover value) never survives into the trained feature frame — it's
+    NaN'd before the resampler, so it ffills from the last good reading
+    exactly like any other gap, rather than poisoning the corpus with a
+    16383 rpm "reading"."""
+    from src.preprocessing.feature_pipeline import build_feature_frame
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    session = tmp_path / "s0"
+    start = 1_780_000_000.0
+    records = [
+        TelemetryRecord.obd(start, "RPM", 900.0, "rpm"),
+        TelemetryRecord.obd(start + 1, "RPM", 16383.0, "rpm"),  # decode-rollover garbage
+        TelemetryRecord.obd(start + 2, "RPM", 950.0, "rpm"),
+    ]
+    write_records_to_parquet(records, session, max_rows=10_000)
+
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    frame = build_feature_frame([session], config, max_workers=1)
+
+    assert 16383.0 not in frame["obd:RPM"].to_numpy()
+
+
 def test_build_feature_frame_tail_matches_standalone_featurize_wide_frame(
     tmp_path: Path,
 ) -> None:

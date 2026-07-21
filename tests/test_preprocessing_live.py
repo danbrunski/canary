@@ -328,6 +328,38 @@ def test_known_channels_lists_observed_columns(config: CanaryConfig) -> None:
 
 
 # ---------------------------------------------------------------------------
+# quality gate (Task 1.2) — physically-impossible values never land
+# ---------------------------------------------------------------------------
+
+
+def test_observe_rejects_physically_impossible_value(config: CanaryConfig) -> None:
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    # RPM 16383 is the PID 0x0C decode-rollover artifact — see PHYSICAL_LIMITS.
+    src.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 16383.0, "rpm"))
+    assert "obd:RPM" not in src.known_channels
+    assert src.reject_counts == {"obd:RPM": 1}
+
+
+def test_observe_accepts_physically_plausible_value(config: CanaryConfig) -> None:
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    src.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 750.0, "rpm"))
+    assert "obd:RPM" in src.known_channels
+    assert src.reject_counts == {}
+
+
+def test_reject_counts_accumulate_and_reset_clears_them(config: CanaryConfig) -> None:
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    src.observe(TelemetryRecord.obd(now.timestamp(), "COOLANT_TEMP", -40.0, "C"))
+    src.observe(TelemetryRecord.obd(now.timestamp(), "COOLANT_TEMP", -40.0, "C"))
+    assert src.reject_counts == {"obd:COOLANT_TEMP": 2}
+    src.reset()
+    assert src.reject_counts == {}
+
+
+# ---------------------------------------------------------------------------
 # operating_mode segmentation lands when inputs are present
 # ---------------------------------------------------------------------------
 

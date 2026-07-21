@@ -86,6 +86,14 @@ class TrainingRunRecord(BaseModel):
     #: against this run's artifact (the Task 2.6 pre-deploy regression gate), when
     #: the retrain flow ran one — the report itself carries the baseline diff.
     detector_benchmark_report_path: str | None = None
+    #: Task 1.4 (online-training-strategy.md) — the disposition screen's
+    #: per-run summary (``training_disposition.DispositionSummary.to_dict()``:
+    #: per-``(channel, operating_mode)`` Reject/Accept-recenter/Quarantine/
+    #: Accept counts + corpus-wide totals), when this run's input was passed
+    #: through the disposition pipeline. ``None`` for runs that predate the
+    #: guard model or ran without it (e.g. a schema-only trainer test) —
+    #: absence is not itself a red flag.
+    dispositions: dict[str, Any] | None = None
     publish_status: PublishStatus = "unpublished"
     notes: str | None = None
 
