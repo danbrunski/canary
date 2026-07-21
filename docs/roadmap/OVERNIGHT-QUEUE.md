@@ -223,9 +223,12 @@ backend features), plus the unchecked tail of
   run over the stored corpus and committed. Also fixed a pre-existing
   test-isolation bug (`test_log.py` leaking root-logger state) that had
   caused an intermittent CI failure, in its own commit (`0b7781f`).
-- [ ] **Q18 — online-training-strategy.md Phase 2** (directional
-  `DeviationConfig`, override→alert path incl. `review_by` expiry
-  behavior, dashboard overrides card, docs).
+- [x] **Q18 — online-training-strategy.md Phase 2** — landed (commit
+  `c580cea`): directional `DeviationConfig`, override→alert path
+  (`review_by` expiry verified inert), dashboard overrides card, docs.
+  One real gap caught by adversarial review and fixed before landing:
+  raw-channel-targeted overrides were parsed/counted but never
+  evaluated live — wired into `_observe_behavior`, re-verified.
 - [ ] **Q19 — online-training-strategy.md Phase 3** (rolling-window
   retrain, disabled-by-default scheduler, champion/challenger promotion
   gate, golden-baseline mechanics + divergence signal, runbook).
