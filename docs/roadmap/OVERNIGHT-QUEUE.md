@@ -229,10 +229,20 @@ backend features), plus the unchecked tail of
   One real gap caught by adversarial review and fixed before landing:
   raw-channel-targeted overrides were parsed/counted but never
   evaluated live — wired into `_observe_behavior`, re-verified.
-- [ ] **Q19 — online-training-strategy.md Phase 3** (rolling-window
-  retrain, disabled-by-default scheduler, champion/challenger promotion
-  gate, golden-baseline mechanics + divergence signal, runbook).
-  Enabling on the Pi + declaring golden are morning tasks.
+- [x] **Q19 — online-training-strategy.md Phase 3** — landed (commit
+  `44119e9`): rolling-window retrain, disabled-by-default scheduler,
+  champion/challenger promotion gate (never auto-promotes; `in_sample`
+  calibration stamp is a hard reject), golden-baseline mechanics +
+  divergence signal. Also includes an operator-authored "robustness
+  amendments" pass (1.6, 3.6, 3.7) landed same commit: discrete-channel-
+  aware disposition screening, real Quarantine exclusion from training
+  + a quarantine-fraction-trend gate check, and golden-anchored
+  disposition baselines fixing a self-referential-baseline blind spot
+  (median/MAD computed from the same window it screens can't catch a
+  fault dominating that window). All six hard safety invariants
+  re-verified after the amendments landed. Enabling on the Pi +
+  declaring golden remain operator morning tasks, per the pre-made
+  decision — correctly left undone.
 - [ ] **Q20 — companion offline workflow: implementation-tasks 6.34
   (remaining: resumable/chunked sync, checksums, retry) + 6.35 offline
   dashboard/library mode + 6.36 training target selector + 6.37
