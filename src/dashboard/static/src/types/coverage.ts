@@ -103,6 +103,13 @@ export interface TrainingRun {
   metrics: Record<string, unknown>;
   artifacts: Record<string, string>;
   publish_status: "unpublished" | "published" | "active" | "rolled_back";
+  /** Task 6.36 — which machine ran the job ("laptop" | "pi"); `null` for
+   *  runs recorded before this field existed. */
+  compute_target: string | null;
+  /** Task 6.36 — the operator's explicit approve/unapprove decision,
+   *  distinct from `publish_status` (the Pi-side upload/activation state). */
+  approved: boolean;
+  approved_at: string | null;
   notes: string | null;
 }
 

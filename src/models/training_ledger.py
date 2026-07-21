@@ -103,6 +103,19 @@ class TrainingRunRecord(BaseModel):
     #: one run per ``model_type`` is golden at a time (same demote-on-append
     #: pattern as ``publish_status``'s ``active``).
     golden: bool = False
+    #: Task 6.36 — which machine actually ran the training job: ``"laptop"``
+    #: (companion, against synced sessions) or ``"pi"`` (the live daemon's
+    #: own `JobController`). ``None`` for runs ingested before this field
+    #: existed. Threaded through from `scripts/retrain.py --compute-target`,
+    #: itself set by whichever `JobController` built the command
+    #: (`src/control/jobs.py`'s `compute_target` constructor arg).
+    compute_target: str | None = None
+    #: Task 6.36 — the operator's explicit "this run is good, queue it for
+    #: publish" decision, distinct from `publish_status` (which tracks the
+    #: *Pi-side* upload/activation lifecycle once a publish is attempted).
+    #: Only `TrainingLedger.set_approved` ever sets these.
+    approved: bool = False
+    approved_at: str | None = None
     notes: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -203,6 +216,29 @@ class TrainingLedger(JsonlStore[TrainingRunRecord]):
         updated = current.model_copy(update={"golden": True, "notes": notes or current.notes})
         return self.append(updated)
 
+    def set_approved(
+        self, run_id: str, approved: bool, *, notes: str | None = None
+    ) -> TrainingRunRecord | None:
+        """Record the operator's approve/unapprove decision for ``run_id`` (6.36).
+
+        Appended like every other status change here (`set_publish_status`,
+        `set_golden`) — no demotion needed since approval isn't exclusive per
+        ``model_type`` (multiple runs can be approved; only one gets
+        published `active` at a time, which `set_publish_status` already
+        guards). Returns ``None`` for an unknown run.
+        """
+        current = self.get(run_id)
+        if current is None:
+            return None
+        updated = current.model_copy(
+            update={
+                "approved": approved,
+                "approved_at": datetime.now(UTC).isoformat() if approved else None,
+                "notes": notes or current.notes,
+            }
+        )
+        return self.append(updated)
+
     def golden_run(self, model_type: str) -> TrainingRunRecord | None:
         """The current golden run for ``model_type``, or ``None`` if the
         operator hasn't declared one yet (the default posture — Task 3.4 is
@@ -228,6 +264,7 @@ def build_run_record_from_manifest(
     false_positive_benchmark_path: Path | None = None,
     detector_benchmark_report_path: Path | None = None,
     dispositions: dict[str, Any] | None = None,
+    compute_target: str | None = None,
     notes: str | None = None,
 ) -> TrainingRunRecord:
     """Build a :class:`TrainingRunRecord` from a trainer's manifest JSON.
@@ -318,5 +355,6 @@ def build_run_record_from_manifest(
             else None
         ),
         dispositions=dispositions,
+        compute_target=compute_target,
         notes=notes,
     )

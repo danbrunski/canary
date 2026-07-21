@@ -540,30 +540,49 @@ training/model-health visualization, and Torque Pro parity.
   Done: `src/companion/api.py` serves the local library with dashboard-shaped
   sessions, `/telemetry/latest`, `/anomalies`, dataset list/health, training
   jobs/runs, model artifacts, publish, queued actions, and sync-state endpoints.
-- [~] **6.34 — Pi session sync.** *Primitives shipped:*
-  `POST /companion/sync/sessions/{id}` + `/companion/sessions/import`
-  (`src/companion/routes.py`) into the SQLite library. *Remaining:*
-  resumable/chunked downloads, checksum validation, retry-after-interrupt.
-  Original scope: Build resumable sync from the Pi control API:
-  session inventory, selected session/capture downloads, checksum validation,
-  duplicate detection, pin-on-Pi, retry after interruption, and import into the
-  local library.
-- [ ] **6.35 — Offline dashboard/library mode.** Add a dashboard mode that runs
-  without the Pi: session library search, historical telemetry charts, anomaly
-  review, false-positive labeling, dataset builder, exports, training metrics,
-  and model comparison. It must share the Pi dashboard's visual system,
-  navigation, charts, gauges, channel naming, and terminology. The UI must
-  clearly show `Live Pi`, `Local Library`, or `Queued Offline` state.
-- [ ] **6.36 — Training target selector.** From the same training UI, let the
-  user run IF, LSTM, combined retrain, and behavior-model refit jobs either on
-  the laptop against synced sessions or on the Pi via `/control/jobs` when the
-  Pi is reachable. Persist logs, metrics, manifests, plots, artifacts,
-  false-positive benchmark output, compute target, and approval state in a
-  shared training-run ledger.
-- [~] **6.37 — Model publish queue.** *Core path shipped:*
-  `publish_model_to_pi` + `upload_local_model_artifact`
-  (`src/companion/routes.py`/`services.py`). *Remaining:* queue/retry
-  semantics, compatibility report, accepted/active confirmation.
+- [x] **6.34 — Pi session sync.** Landed the remaining scope:
+  `DaemonClient.download_file()` (`src/mcp_server/client.py`) does a
+  real HTTP Range-based resume to a `.part` file — verified it
+  overwrites cleanly (not append-corrupt) when a server ignores Range
+  and returns 200, and does one clean restart on 416. Atomic rename
+  only happens once the stream completes without error; any transport
+  failure leaves the `.part` file in place. `_download_session_export`
+  verifies a real sha256 (server-reported via new `GET
+  /control/sessions/{id}/export/checksum`) against the downloaded
+  bytes, with a genuine mismatch-raises path; duplicate-avoidance
+  re-hashes the local file before skipping, not just a filename match.
+  Runs under new `run_queued_action()` (shared with 6.37) — a failure
+  leaves a `failed` queued-action row for retry, not silent state.
+- [~] **6.35 — Offline dashboard/library mode.** Landed: a real
+  `useConnectivityMode` hook derives `Live Pi`/`Local Library`/`Queued
+  Offline` (Live Pi wins deterministically if both the daemon and
+  companion happen to be reachable — not ambiguous), wired into the
+  dashboard header badge. Closed a genuine gap this task surfaced:
+  companion had zero `/control/feedback` route before this change —
+  false-positive labeling silently didn't work offline even though
+  `AnomalyPanel` already posted there — now backed by a real
+  `FeedbackStore`. Charts/DTC/dataset-health/exports/training-metrics
+  panels already work unmodified against companion's mirrored
+  `/control/*` paths. **Remaining**: a dedicated session-library
+  search/browse panel — `Workbench.tsx`'s `data-sessions` case is
+  still a placeholder (pre-existing, not touched by this task).
+- [x] **6.36 — Training target selector.** Landed:
+  `TrainingRunRecord.compute_target`/`approved`/`approved_at` added to
+  the SAME shared ledger (verified no parallel ledger file
+  introduced). `retrain.py --compute-target {laptop,pi}`;
+  `JobController` defaults `compute_target="pi"`, companion's job
+  controller passes `"laptop"` — both genuinely reach the `retrain.py`
+  command line. New `POST /control/training-runs/{id}/approve` wired
+  to a real `TrainingPanel.tsx` approve action.
+- [x] **6.37 — Model publish queue.** Landed the remaining scope:
+  `compatibility_report()` reuses the existing
+  `schemas_compatible`/`schema_serviceable` checks (verified, not
+  reimplemented). `publish_model_to_pi` now confirms BOTH accepted
+  (re-read manifest matches) and active
+  (`/status.health.active_model_version` matches) before declaring
+  success — verified it doesn't declare success merely on a 200
+  upload response. New `POST /companion/actions/{id}/retry` proven via
+  a real failed→retry→succeed round-trip test.
   Original scope: Package approved model artifacts with
   manifest, training-run record, checksums, and compatibility report; upload
   them to the Pi when reachable; confirm accepted/active status; and preserve

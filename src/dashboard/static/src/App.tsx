@@ -3,6 +3,7 @@ import { useBehaviorLive } from "./hooks/useBehaviorLive";
 import { useBehaviorModels } from "./hooks/useBehaviorModels";
 import { useCompanionSettings } from "./hooks/useCompanionSettings";
 import { useBindings } from "./hooks/useBindings";
+import { useConnectivityMode } from "./hooks/useConnectivityMode";
 import { useControlToken } from "./hooks/useControlToken";
 import { useHashRoute } from "./hooks/useHashRoute";
 import { useScoreStream } from "./hooks/useScoreStream";
@@ -24,6 +25,7 @@ export default function App() {
   const anomalies = useAnomalyStream();
   const liveScores = useScoreStream();
   const { status, error: statusError } = useStatus();
+  const connectivity = useConnectivityMode(status !== null && statusError === null);
   const behaviorModels = useBehaviorModels();
   const behaviorLive = useBehaviorLive();
   const bindings = useBindings();
@@ -56,7 +58,7 @@ export default function App() {
       anomalyState={anomalies.connection}
       controlState={controlToken.hasToken ? "open" : "closed"}
       controlReady={controlToken.hasToken}
-      sourceLabel={companion.baseUrl ? "live pi + laptop" : "live pi"}
+      connectivity={connectivity}
       events={anomalies.events}
       liveMode={behaviorLive?.operating_mode ?? null}
       status={status}

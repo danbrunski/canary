@@ -123,6 +123,47 @@ def test_import_session_archive_endpoint_indexes_local_session(tmp_path: Path) -
     assert listed.json()["sessions"][0]["telemetry_chunks"] == 1
 
 
+def test_local_session_export_checksum_matches_export_bytes(tmp_path: Path) -> None:
+    import hashlib
+
+    lib = CanaryLibrary(tmp_path / "library")
+    lib.import_session(_make_telemetry_session(tmp_path / "remote"))
+    app = companion_api.create_app(_config(tmp_path), library=lib, static_dir=None)
+    client = TestClient(app)
+
+    checksum = client.get("/control/sessions/2026-05-17T120000/export/checksum")
+    assert checksum.status_code == 200
+    body = checksum.json()
+    assert body["session_id"] == "2026-05-17T120000"
+
+    export = client.get("/control/sessions/2026-05-17T120000/export")
+    assert export.status_code == 200
+    assert hashlib.sha256(export.content).hexdigest() == body["sha256"]
+    assert body["size_bytes"] == len(export.content)
+
+
+def test_local_model_manifest_endpoint_round_trips_uploaded_manifest(tmp_path: Path) -> None:
+    lib = CanaryLibrary(tmp_path / "library")
+    app = companion_api.create_app(_config(tmp_path), library=lib, static_dir=None)
+    client = TestClient(app)
+
+    missing = client.get("/control/models/isolation_forest/manifest")
+    assert missing.status_code == 404
+
+    upload = client.post(
+        "/control/models/isolation_forest/artifact",
+        json={
+            "artifact_b64": base64.b64encode(b"model bytes").decode("ascii"),
+            "manifest": {"model_version": "if_v1"},
+        },
+    )
+    assert upload.status_code == 200
+
+    found = client.get("/control/models/isolation_forest/manifest")
+    assert found.status_code == 200
+    assert found.json()["manifest"]["model_version"] == "if_v1"
+
+
 def test_local_dashboard_read_endpoints_use_library_files(tmp_path: Path) -> None:
     lib = CanaryLibrary(tmp_path / "library")
     lib.import_session(_make_telemetry_session(tmp_path / "remote"), source_host="pi.local")
@@ -167,6 +208,36 @@ def test_local_dashboard_read_endpoints_use_library_files(tmp_path: Path) -> Non
     assert sync_state["source_hosts"] == ["pi.local"]
     assert len(sync_state["queued_actions"]) == 1
     assert sync_state["publish_history"][0]["status"] == "uploaded"
+
+
+def test_local_feedback_endpoints_support_offline_labeling(tmp_path: Path) -> None:
+    """Task 6.35 — false-positive labeling works without the Pi: the same
+    verdict flow the live dashboard's AnomalyPanel posts, answered by the
+    companion's own feedback log."""
+    lib = CanaryLibrary(tmp_path / "library")
+    app = companion_api.create_app(_config(tmp_path), library=lib, static_dir=None)
+    client = TestClient(app)
+    event = {
+        "timestamp": "2026-05-17T12:00:02Z",
+        "source": "isolation_forest",
+        "model_version": "if_v1",
+        "score": 1.0,
+        "session": "2026-05-17T120000",
+    }
+
+    submitted = client.post(
+        "/control/feedback",
+        json={"event": event, "label": "false_positive", "reason": "known bump"},
+    )
+    assert submitted.status_code == 201
+    assert submitted.json()["feedback"]["label"] == "false_positive"
+
+    listed = client.get("/control/feedback").json()
+    assert listed["count"] == 1
+    assert listed["summary"]["false_positive"] == 1
+
+    rejected = client.post("/control/feedback", json={"event": event, "label": "not-a-real-label"})
+    assert rejected.status_code == 422
 
 
 def test_local_session_chart_endpoint(tmp_path: Path) -> None:
@@ -269,14 +340,25 @@ def test_sync_session_from_pi_uses_control_export_and_optional_pin(
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         calls.append((host, method, path, token, body))
+        if path.endswith("/export/checksum"):
+            return {"session_id": "2026-05-17T130000", "sha256": "expected-digest"}
         return {"ok": True}
 
-    def fake_bytes(host: str, method: str, path: str, *, token: str | None) -> bytes:
-        calls.append((host, method, path, token, None))
-        return _session_zip("2026-05-17T130000")
+    download_calls: list[tuple[str, str, str | None, Path, str | None]] = []
+
+    def fake_download(
+        host: str,
+        session_id: str,
+        *,
+        token: str | None,
+        dest_dir: Path,
+        expected_sha256: str | None = None,
+    ) -> bytes:
+        download_calls.append((host, session_id, token, dest_dir, expected_sha256))
+        return _session_zip(session_id)
 
     monkeypatch.setattr(companion_api, "_request_json", fake_json)
-    monkeypatch.setattr(companion_api, "_request_bytes", fake_bytes)
+    monkeypatch.setattr(companion_api, "_download_session_export", fake_download)
     lib = CanaryLibrary(tmp_path / "library")
     app = companion_api.create_app(
         _config(tmp_path),
@@ -293,7 +375,10 @@ def test_sync_session_from_pi_uses_control_export_and_optional_pin(
     )
 
     assert response.status_code == 201
-    assert response.json()["session"]["session_id"] == "2026-05-17T130000"
+    body = response.json()
+    assert body["session"]["session_id"] == "2026-05-17T130000"
+    assert body["sha256"] == "expected-digest"
+    assert "action_id" in body
     assert calls[0] == (
         "http://pi.local:8000",
         "POST",
@@ -304,9 +389,51 @@ def test_sync_session_from_pi_uses_control_export_and_optional_pin(
     assert calls[1][:4] == (
         "http://pi.local:8000",
         "GET",
-        "/control/sessions/2026-05-17T130000/export",
+        "/control/sessions/2026-05-17T130000/export/checksum",
         "secret",
     )
+    assert download_calls == [
+        ("http://pi.local:8000", "2026-05-17T130000", "secret", lib.sync_dir, "expected-digest")
+    ]
+    # 6.34: the sync round-trip is recorded as a `done` queued action, so a
+    # future interrupted sync would be visible/retryable via the same table.
+    actions = lib.list_actions()
+    assert actions[-1]["kind"] == "sync_session"
+    assert actions[-1]["status"] == "done"
+
+
+def test_sync_session_from_pi_marks_action_failed_on_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_json(*_a: Any, **_k: Any) -> dict[str, Any]:
+        return {"sha256": "does-not-matter"}
+
+    def fake_download(*_a: Any, **_k: Any) -> bytes:
+        raise RuntimeError("connection dropped mid-transfer")
+
+    monkeypatch.setattr(companion_api, "_request_json", fake_json)
+    monkeypatch.setattr(companion_api, "_download_session_export", fake_download)
+    lib = CanaryLibrary(tmp_path / "library")
+    app = companion_api.create_app(
+        _config(tmp_path),
+        library=lib,
+        pi_host="pi.local:8000",
+        pi_token="secret",
+        static_dir=None,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/companion/sync/sessions/2026-05-17T130000",
+        json={},
+    )
+
+    assert response.status_code == 502
+    actions = lib.list_actions()
+    assert actions[-1]["kind"] == "sync_session"
+    assert actions[-1]["status"] == "failed"
+    assert "connection dropped" in actions[-1]["detail"]
 
 
 def test_local_control_jobs_run_against_companion_controller(tmp_path: Path) -> None:
@@ -352,11 +479,27 @@ def test_local_control_jobs_run_against_companion_controller(tmp_path: Path) -> 
     assert "local job ok" in logs.json()["log"]
 
 
+def _local_manifest(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "artifact_format_version": 1,
+        "model_type": "isolation_forest",
+        "model_version": "if_v1",
+        "created_at": "2026-05-13T12:00:00+00:00",
+        "training_data_hash": "sha256:deadbeef",
+        "training_sessions": ["2026-05-13T120000"],
+        "input_rows": 1000,
+        "hyperparams": {"n_estimators": 100, "contamination": 0.01},
+        "schema": {"feature_columns": ["obd:RPM", "obd:SPEED"]},
+    }
+    base.update(overrides)
+    return base
+
+
 def test_publish_model_to_pi_posts_existing_local_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, Any] = {}
+    calls: list[dict[str, Any]] = []
 
     def fake_request(
         host: str,
@@ -366,7 +509,11 @@ def test_publish_model_to_pi_posts_existing_local_artifact(
         token: str | None,
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        captured.update(host=host, method=method, path=path, token=token, body=body)
+        calls.append({"host": host, "method": method, "path": path, "token": token, "body": body})
+        if path.endswith("/manifest"):
+            return {"model_type": "isolation_forest", "manifest": _local_manifest()}
+        if path == "/status":
+            return {"health": {"active_model_version": "if_v1"}}
         return {"model": {"artifact_bytes": 11}}
 
     monkeypatch.setattr(companion_api, "_request_json", fake_request)
@@ -383,19 +530,134 @@ def test_publish_model_to_pi_posts_existing_local_artifact(
     manifest = artifact.with_suffix(".manifest.json")
     artifact.parent.mkdir(parents=True)
     artifact.write_bytes(b"model bytes")
-    manifest.write_text(json.dumps({"model_version": "if_v1"}))
+    manifest.write_text(json.dumps(_local_manifest()))
     client = TestClient(app)
 
     response = client.post("/companion/models/isolation_forest/publish", json={})
 
     assert response.status_code == 200
-    assert captured["host"] == "http://canary.local:8000"
-    assert captured["method"] == "POST"
-    assert captured["path"] == "/control/models/isolation_forest/artifact"
-    assert captured["token"] == "pi-token"
-    assert captured["body"]["artifact_b64"] == base64.b64encode(b"model bytes").decode("ascii")
-    assert captured["body"]["manifest"] == {"model_version": "if_v1"}
-    assert lib.publish_history("if_v1")[0]["status"] == "uploaded"
+    publish = response.json()["publish"]
+    assert publish["target"] == "http://canary.local:8000"
+    # 6.37: accepted/active confirmation reads back the Pi's manifest +
+    # /status active_model_version once the upload lands.
+    assert publish["status"] == "active"
+    assert publish["compatibility"]["compatible"] is True
+    assert "action_id" in publish
+
+    upload_call = next(c for c in calls if c["path"] == "/control/models/isolation_forest/artifact")
+    assert upload_call["token"] == "pi-token"
+    assert upload_call["body"]["artifact_b64"] == base64.b64encode(b"model bytes").decode("ascii")
+    assert upload_call["body"]["manifest"] == _local_manifest()
+    assert lib.publish_history("if_v1")[0]["status"] == "active"
+
+
+def test_publish_model_to_pi_reports_schema_incompatibility(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_request(
+        host: str,
+        method: str,
+        path: str,
+        *,
+        token: str | None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if path.endswith("/manifest"):
+            # Running model expects a narrower feature set than the
+            # candidate - an expansion, so not hot-swappable.
+            return {
+                "model_type": "isolation_forest",
+                "manifest": _local_manifest(schema={"feature_columns": ["obd:RPM"]}),
+            }
+        if path == "/status":
+            return {"health": {"active_model_version": "if_v0"}}
+        return {"model": {"artifact_bytes": 11}}
+
+    monkeypatch.setattr(companion_api, "_request_json", fake_request)
+    lib = CanaryLibrary(tmp_path / "library")
+    app = companion_api.create_app(
+        _config(tmp_path),
+        library=lib,
+        pi_host="http://canary.local:8000",
+        pi_token="pi-token",
+        static_dir=None,
+    )
+    local_config = app.state.config
+    artifact = local_config.daemon.models_dir / "isolation_forest" / "model.joblib"
+    manifest = artifact.with_suffix(".manifest.json")
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"model bytes")
+    manifest.write_text(json.dumps(_local_manifest()))
+    client = TestClient(app)
+
+    response = client.post("/companion/models/isolation_forest/publish", json={})
+
+    assert response.status_code == 200
+    publish = response.json()["publish"]
+    assert publish["compatibility"]["compatible"] is False
+    assert publish["compatibility"]["hot_swappable"] is False
+    # Upload still proceeds - the report is informational, not a gate.
+    assert publish["status"] in {"accepted", "active", "uploaded"}
+
+
+def test_publish_model_retryable_action_survives_a_failed_upload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A single closure whose behavior flips after the first (failing) call -
+    # the route's `_request_json` reference is captured once at `create_app`
+    # time, so the test can't swap it out for a second monkeypatch call the
+    # way other tests swap fakes *before* `create_app` runs.
+    state = {"fail": True}
+
+    def flaky_request(
+        host: str,
+        method: str,
+        path: str,
+        *,
+        token: str | None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if path.endswith("/manifest"):
+            return {"model_type": "isolation_forest", "manifest": None}
+        if path == "/status":
+            return {"health": {}}
+        if state["fail"]:
+            raise RuntimeError("POST /control/models/isolation_forest/artifact failed: offline")
+        return {"model": {"artifact_bytes": 11}}
+
+    monkeypatch.setattr(companion_api, "_request_json", flaky_request)
+    lib = CanaryLibrary(tmp_path / "library")
+    app = companion_api.create_app(
+        _config(tmp_path),
+        library=lib,
+        pi_host="http://canary.local:8000",
+        pi_token="pi-token",
+        static_dir=None,
+    )
+    local_config = app.state.config
+    artifact = local_config.daemon.models_dir / "isolation_forest" / "model.joblib"
+    manifest = artifact.with_suffix(".manifest.json")
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"model bytes")
+    manifest.write_text(json.dumps(_local_manifest()))
+    client = TestClient(app)
+
+    response = client.post("/companion/models/isolation_forest/publish", json={})
+
+    assert response.status_code == 400
+    actions = lib.list_actions()
+    assert actions[-1]["kind"] == "publish_model"
+    assert actions[-1]["status"] == "failed"
+
+    # Retrying re-dispatches the same publish request against the same
+    # (still-on-disk) artifact - this time the upload succeeds.
+    state["fail"] = False
+    retry = client.post(f"/companion/actions/{actions[-1]['id']}/retry")
+    assert retry.status_code == 200
+    assert retry.json()["publish"]["status"] == "uploaded"
+    assert lib.list_actions()[-1]["status"] == "done"
 
 
 def test_companion_auth_is_optional_but_enforced_when_configured(tmp_path: Path) -> None:

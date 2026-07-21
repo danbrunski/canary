@@ -49,6 +49,9 @@ from src.companion.services import (
     _dataset_row_to_dict as _dataset_row_to_dict,
 )
 from src.companion.services import (
+    _download_session_export as _download_session_export,
+)
+from src.companion.services import (
     _library_session as _library_session,
 )
 from src.companion.services import (
@@ -148,6 +151,7 @@ def create_app(
         import_session_archive=import_session_archive,
         _request_json=_request_json,
         _request_bytes=_request_bytes,
+        _download_session_export=_download_session_export,
     )
 
     if static_dir is not None and (static_dir / "index.html").exists():

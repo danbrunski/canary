@@ -12,6 +12,7 @@ const BASE = {
   anomalyState: "open" as const,
   controlState: "closed" as const,
   controlReady: false,
+  connectivity: "live-pi" as const,
   events: [],
   status: null,
   channels: new Map<string, ChannelSnapshot>(),
@@ -58,5 +59,37 @@ describe("DashboardShell", () => {
     expect(screen.getByLabelText("System status")).toBeInTheDocument();
     expect(screen.getByText("nominal")).toBeInTheDocument();
     expect(screen.getByTestId("body")).toBeInTheDocument();
+  });
+
+  it("shows the 6.35 connectivity badge for each mode", () => {
+    const { rerender } = render(
+      createElement(DashboardShell, {
+        ...BASE,
+        appMode: "parked",
+        onToggleMode: () => {},
+        connectivity: "live-pi",
+      }),
+    );
+    expect(screen.getByText("live pi")).toBeInTheDocument();
+
+    rerender(
+      createElement(DashboardShell, {
+        ...BASE,
+        appMode: "parked",
+        onToggleMode: () => {},
+        connectivity: "local-library",
+      }),
+    );
+    expect(screen.getByText("local library")).toBeInTheDocument();
+
+    rerender(
+      createElement(DashboardShell, {
+        ...BASE,
+        appMode: "parked",
+        onToggleMode: () => {},
+        connectivity: "queued-offline",
+      }),
+    );
+    expect(screen.getByText("queued offline")).toBeInTheDocument();
   });
 });

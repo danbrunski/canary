@@ -227,6 +227,77 @@ def schema_serviceable(
     return set(candidate_cols) <= set(running_cols)
 
 
+def compatibility_report(
+    candidate: Mapping[str, Any],
+    running: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Compare a candidate manifest to the Pi's currently-active one (6.37).
+
+    Used by the model publish queue before uploading: the operator gets a
+    verdict *before* pushing bytes to the truck instead of discovering a
+    schema mismatch from a live rejection. Reuses the same
+    ``schemas_compatible``/``schema_serviceable`` checks the daemon's own
+    hot-swap path (5.16) applies, so "compatible" here means the same thing
+    it means at swap time. ``running=None`` (no artifact on the Pi yet, or
+    the manifest couldn't be read) is reported as compatible — a first
+    install has nothing to conflict with.
+    """
+    try:
+        candidate_manifest = validate_manifest_common(candidate, allowed_model_types=None)
+    except ManifestValidationError as exc:
+        return {
+            "compatible": False,
+            "hot_swappable": False,
+            "reason": f"candidate manifest invalid: {exc}",
+            "running_model_version": None,
+            "candidate_model_version": None,
+        }
+    if running is None:
+        return {
+            "compatible": True,
+            "hot_swappable": True,
+            "reason": "no active model on the target to compare against",
+            "running_model_version": None,
+            "candidate_model_version": candidate_manifest.model_version,
+        }
+    try:
+        running_manifest = validate_manifest_common(running, allowed_model_types=None)
+    except ManifestValidationError as exc:
+        return {
+            "compatible": False,
+            "hot_swappable": False,
+            "reason": f"running manifest invalid: {exc}",
+            "running_model_version": None,
+            "candidate_model_version": candidate_manifest.model_version,
+        }
+    if running_manifest.model_type != candidate_manifest.model_type:
+        return {
+            "compatible": False,
+            "hot_swappable": False,
+            "reason": (
+                f"model_type mismatch: running {running_manifest.model_type!r} vs "
+                f"candidate {candidate_manifest.model_type!r}"
+            ),
+            "running_model_version": running_manifest.model_version,
+            "candidate_model_version": candidate_manifest.model_version,
+        }
+    identical = schemas_compatible(running_manifest, candidate_manifest)
+    serviceable = identical or schema_serviceable(running_manifest, candidate_manifest)
+    return {
+        "compatible": serviceable,
+        "hot_swappable": serviceable,
+        "reason": (
+            "feature schema identical"
+            if identical
+            else "candidate columns are a subset of the running model's (safe hot-swap)"
+            if serviceable
+            else "candidate schema expands beyond the running model's (needs a restart)"
+        ),
+        "running_model_version": running_manifest.model_version,
+        "candidate_model_version": candidate_manifest.model_version,
+    }
+
+
 def manifest_path_for(artifact_path: Path) -> Path:
     """The conventional JSON manifest sidecar path for a binary model
     artifact (Task 3.5): one ``.with_suffix(".manifest.json")``, replacing
@@ -369,6 +440,7 @@ __all__ = [
     "KNOWN_MODEL_TYPES",
     "ManifestValidationError",
     "ModelManifestCommon",
+    "compatibility_report",
     "load_manifest_common",
     "manifest_path_for",
     "read_artifact",

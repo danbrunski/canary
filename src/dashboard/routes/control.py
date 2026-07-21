@@ -24,17 +24,22 @@ from src.collection.custom_pids import (
     save_custom_pids,
     torque_csv_to_custom_pids,
 )
+from src.companion.schemas import TrainingRunApprovalRequest
 from src.companion.services import (
+    _artifact_path,
     cancel_job_response,
     dataset_health_response,
     delete_session_response,
+    export_session_checksum_response,
     export_session_response,
     get_job_response,
+    get_model_manifest_response,
     get_session_response,
     job_logs_response,
     list_jobs_response,
     pin_session_response,
     sessions_list_response,
+    set_training_run_approval_response,
     submit_job_response,
     training_runs_response,
     unpin_session_response,
@@ -100,6 +105,7 @@ from src.dashboard.ups import (
     write_keepalive,
 )
 from src.dashboard.version import _canary_version, _git_sha
+from src.models.manifest import manifest_path_for
 from src.preprocessing.loader import discover_sessions
 from src.profiles import load_registry, update_profile_name
 
@@ -464,6 +470,16 @@ def register_control_routes(
             tmp_prefix="canary-",
         )
 
+    @app.get("/control/sessions/{session_id}/export/checksum")
+    def export_control_session_checksum(
+        session_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """6.34: sha256 of what `/export` would produce right now, so the
+        companion's sync can verify a downloaded archive without trusting
+        the transport."""
+        return export_session_checksum_response(session_id, resolve=_resolve_session)
+
     @app.get("/control/sessions/{session_id}/classification")
     def get_session_classification_endpoint(
         session_id: str,
@@ -684,6 +700,19 @@ def register_control_routes(
         publish_control_event("model.upload", "ok", published)
         return {"model": published}
 
+    @app.get("/control/models/{model_type}/manifest")
+    def get_control_model_manifest(
+        model_type: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """6.37: the manifest for the artifact currently on this daemon's
+        watched model path, so a publisher can build a compatibility report
+        before uploading a candidate."""
+        return get_model_manifest_response(
+            model_type,
+            resolve_manifest_path=lambda mt: manifest_path_for(_artifact_path(config, mt)),
+        )
+
     def _feedback() -> FeedbackStore:
         return _require(feedback_store, "feedback")
 
@@ -705,6 +734,20 @@ def register_control_routes(
         per request so a fresh ``retrain.py`` run shows up without a daemon
         restart. Empty list when nothing's been recorded yet."""
         return training_runs_response(config.daemon.training_ledger)
+
+    @app.post("/control/training-runs/{run_id}/approve")
+    def approve_training_run(
+        run_id: str,
+        request: TrainingRunApprovalRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """6.36 — persist the operator's approve/unapprove decision for a run."""
+        return set_training_run_approval_response(
+            config.daemon.training_ledger,
+            run_id,
+            approved=request.approved,
+            notes=request.notes,
+        )
 
     @app.post("/control/feedback", status_code=201)
     def post_feedback(

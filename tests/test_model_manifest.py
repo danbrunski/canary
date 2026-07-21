@@ -13,6 +13,7 @@ from src.models.manifest import (
     FeatureSpecValidationError,
     ManifestValidationError,
     ModelManifestCommon,
+    compatibility_report,
     load_manifest_common,
     schema_serviceable,
     schemas_compatible,
@@ -238,6 +239,58 @@ def test_schema_serviceable_false_when_key_missing() -> None:
     running = validate_manifest_common(_good_payload())
     candidate = validate_manifest_common(_good_payload(schema={}))
     assert not schema_serviceable(running, candidate)
+
+
+# ---------------------------------------------------------------------------
+# Compatibility report (6.37 — model publish queue)
+# ---------------------------------------------------------------------------
+
+
+def test_compatibility_report_no_running_model_is_compatible() -> None:
+    report = compatibility_report(_good_payload(), None)
+    assert report["compatible"] is True
+    assert report["hot_swappable"] is True
+    assert report["running_model_version"] is None
+    assert report["candidate_model_version"] == _good_payload()["model_version"]
+
+
+def test_compatibility_report_identical_schema() -> None:
+    report = compatibility_report(_good_payload(model_version="b"), _good_payload())
+    assert report["compatible"] is True
+    assert report["hot_swappable"] is True
+    assert report["running_model_version"] == _good_payload()["model_version"]
+
+
+def test_compatibility_report_subset_is_hot_swappable() -> None:
+    running = _good_payload(schema={"feature_columns": ["a", "b", "c"]})
+    candidate = _good_payload(model_version="b", schema={"feature_columns": ["a", "c"]})
+    report = compatibility_report(candidate, running)
+    assert report["compatible"] is True
+    assert report["hot_swappable"] is True
+
+
+def test_compatibility_report_expansion_needs_restart() -> None:
+    running = _good_payload(schema={"feature_columns": ["a", "b"]})
+    candidate = _good_payload(model_version="b", schema={"feature_columns": ["a", "b", "new"]})
+    report = compatibility_report(candidate, running)
+    assert report["compatible"] is False
+    assert report["hot_swappable"] is False
+    assert "restart" in report["reason"]
+
+
+def test_compatibility_report_model_type_mismatch() -> None:
+    running = _good_payload(model_type="lstm_autoencoder", model_version="lstm_x")
+    candidate = _good_payload(model_type="isolation_forest")
+    report = compatibility_report(candidate, running)
+    assert report["compatible"] is False
+    assert "model_type mismatch" in report["reason"]
+
+
+def test_compatibility_report_invalid_candidate_manifest() -> None:
+    report = compatibility_report({"model_type": "isolation_forest"}, None)
+    assert report["compatible"] is False
+    assert report["hot_swappable"] is False
+    assert "candidate manifest invalid" in report["reason"]
 
 
 # ---------------------------------------------------------------------------

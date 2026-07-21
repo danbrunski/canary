@@ -369,6 +369,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Correlate ledger records with this control-plane job id.",
     )
     parser.add_argument(
+        "--compute-target",
+        default=None,
+        choices=("laptop", "pi"),
+        help=(
+            "Which machine is running this job (Task 6.36) — the companion's "
+            "JobController passes 'laptop', the Pi daemon's passes 'pi'. "
+            "Recorded on the ledger record so the training UI can show/filter "
+            "by where a model was actually trained."
+        ),
+    )
+    parser.add_argument(
         "--skip-benchmark",
         action="store_true",
         help="Skip the post-retrain detector-benchmark regression gate (Task 2.6).",
@@ -691,6 +702,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             feedback_report=feedback_report,
             detector_benchmark_report_path=benchmark_report_path,
             dispositions=disposition_summary,
+            compute_target=args.compute_target,
         )
 
     _print_report(
@@ -847,6 +859,7 @@ def _ingest_ledger(
     feedback_report: RetrainingFeedbackReport | None = None,
     detector_benchmark_report_path: Path | None = None,
     dispositions: dict[str, Any] | None = None,
+    compute_target: str | None = None,
 ) -> None:
     """Best-effort: record the trainer's manifest in the training ledger.
 
@@ -867,6 +880,7 @@ def _ingest_ledger(
             job_id=job_id,
             detector_benchmark_report_path=detector_benchmark_report_path,
             dispositions=dispositions,
+            compute_target=compute_target,
         )
         if feedback_report is not None:
             record = record.model_copy(

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 
-import { getTrainingRuns, submitJob } from "../api/http";
+import { approveTrainingRun, getTrainingRuns, submitJob } from "../api/http";
 import { Notice } from "../components/Notice";
 import { MetricTile } from "../components/MetricTile";
 import { Panel } from "../components/Panel";
@@ -219,6 +219,9 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
                   key={run.run_id}
                   run={run}
                   comparison={comparisons.get(run.run_id) ?? null}
+                  token={historyToken}
+                  baseUrl={historyBase}
+                  onApproved={refresh}
                 />
               ))}
             </div>
@@ -232,31 +235,64 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
 function RunCard({
   run,
   comparison,
+  token,
+  baseUrl,
+  onApproved,
 }: {
   run: TrainingRun;
   comparison: RunComparison | null;
+  token: string;
+  baseUrl: string | undefined;
+  onApproved: () => void;
 }) {
+  const [approving, setApproving] = useState(false);
   const loss = numberArray(run.metrics.loss_curve);
+  const toggleApproval = async () => {
+    setApproving(true);
+    try {
+      await approveTrainingRun(token, run.run_id, !run.approved, baseUrl);
+      onApproved();
+    } finally {
+      setApproving(false);
+    }
+  };
   const quality = runQuality(run);
 
   return (
     <div className="rounded-[8px] border border-border-soft bg-[linear-gradient(180deg,var(--color-elev-2),var(--color-elev))] p-2.5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <b className="font-num text-[0.85rem]">{run.run_id}</b>
-        <span
-          className={cn(
-            "text-[0.7rem] uppercase tracking-[0.08em]",
-            PUBLISH_STYLE[run.publish_status] ?? "text-fg-dim",
-          )}
-        >
-          {run.publish_status}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className={cn(
+              "rounded-full border px-2 py-0.5 text-[0.66rem] uppercase tracking-[0.08em]",
+              run.approved
+                ? "border-ok/40 text-ok"
+                : "border-border-soft text-fg-faint hover:text-fg-dim",
+            )}
+            onClick={toggleApproval}
+            disabled={approving}
+            title="Task 6.36 — the operator's publish-worthiness decision"
+          >
+            {run.approved ? "approved" : "approve"}
+          </button>
+          <span
+            className={cn(
+              "text-[0.7rem] uppercase tracking-[0.08em]",
+              PUBLISH_STYLE[run.publish_status] ?? "text-fg-dim",
+            )}
+          >
+            {run.publish_status}
+          </span>
+        </div>
       </div>
       <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[0.76rem] text-fg-dim">
         <span>{run.model_type}</span>
         <span className={run.status === "failed" ? "text-bad" : "text-ok"}>
           {run.status}
         </span>
+        {run.compute_target && <span title="compute target">{run.compute_target}</span>}
         <span>{run.input_sessions.length} sessions</span>
         <span>{run.feature_schema.length} features</span>
         {quality.fpRate !== null && (

@@ -57,6 +57,20 @@ export interface AnomaliesResponse {
   count: number;
 }
 
+/** Response from `GET /companion/status` — only served by the companion
+ *  app (`src/companion/routes.py`), never the Pi daemon. Its mere presence
+ *  is the 6.35 connectivity signal: reachable means this dashboard instance
+ *  is backed by the local library, not a live Pi. */
+export interface CompanionStatusResponse {
+  mode: string;
+  library_root: string;
+  sessions: number;
+  models: number;
+  datasets: number;
+  queued_actions: number;
+  config_path: string;
+}
+
 /** Response from `GET /status`. Mirrors `StatusSnapshot.to_dict()`. */
 export interface StatusResponse {
   storage_path: string;

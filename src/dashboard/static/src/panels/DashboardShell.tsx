@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import type { ConnectivityMode } from "../hooks/useConnectivityMode";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { buttonClass, cn, headerClass, mainClass, shellClass } from "../styles";
 import type { Theme } from "../hooks/useTheme";
@@ -22,13 +23,26 @@ interface DashboardShellProps {
   anomalyState: ConnectionState;
   controlState: ConnectionState;
   controlReady: boolean;
-  sourceLabel?: string;
+  /** Task 6.35 — `Live Pi` / `Local Library` / `Queued Offline`. */
+  connectivity: ConnectivityMode;
   events: AnomalyEvent[];
   liveMode?: string | null;
   status: StatusResponse | null;
   channels: Map<string, ChannelSnapshot>;
   children: ReactNode;
 }
+
+const CONNECTIVITY_LABEL: Record<ConnectivityMode, string> = {
+  "live-pi": "live pi",
+  "local-library": "local library",
+  "queued-offline": "queued offline",
+};
+
+const CONNECTIVITY_CLASS: Record<ConnectivityMode, string> = {
+  "live-pi": "border-ok/40 text-ok",
+  "local-library": "border-accent-2/40 text-accent-2",
+  "queued-offline": "border-warn/40 text-warn",
+};
 
 /** Page chrome: header (brand, operating mode, connection state, the
  *  Drive↔Workbench toggle) + the always-visible StatusStrip + the active
@@ -45,7 +59,7 @@ export function DashboardShell({
   anomalyState,
   controlState,
   controlReady,
-  sourceLabel = "live pi",
+  connectivity,
   events,
   liveMode,
   status,
@@ -66,8 +80,14 @@ export function DashboardShell({
         </div>
         <OperatingModeIndicator events={events} liveMode={liveMode} />
         <div className="ml-auto flex gap-2 text-[0.78rem] text-fg-dim">
-          <span className="inline-flex min-h-6 items-center rounded-full border border-border-soft bg-black/25 px-2 text-[0.68rem] uppercase tracking-[0.06em] text-fg-faint">
-            {sourceLabel}
+          <span
+            className={cn(
+              "inline-flex min-h-6 items-center rounded-full border bg-black/25 px-2 text-[0.68rem] uppercase tracking-[0.06em]",
+              CONNECTIVITY_CLASS[connectivity],
+            )}
+            title="Task 6.35 — Live Pi / Local Library / Queued Offline"
+          >
+            {CONNECTIVITY_LABEL[connectivity]}
           </span>
           <ConnectionIndicator label="tel" state={telemetryState} />
           <ConnectionIndicator label="anom" state={anomalyState} />

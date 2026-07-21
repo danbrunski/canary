@@ -419,6 +419,27 @@ def test_retrain_job_command_passes_job_id_to_ledger(tmp_path: Path) -> None:
     assert command[command.index("--job-id") + 1] == "job-123"
 
 
+def test_retrain_job_command_defaults_compute_target_to_pi(tmp_path: Path) -> None:
+    """Task 6.36: the Pi daemon's own JobController (no override) records
+    'pi'; the companion's (`_make_job_controller`) passes 'laptop' instead
+    (covered by `test_companion_services`/`test_companion_api`)."""
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(tmp_path / "storage"))
+    config = CanaryConfig.from_yaml(cfg_path)
+    controller = JobController(
+        config=config,
+        repo_root=tmp_path,
+        config_path=cfg_path,
+        jobs_dir=tmp_path / "jobs",
+        python=Path(sys.executable),
+    )
+
+    for kind in ("retrain_if", "retrain_lstm", "retrain_tcn", "retrain_all"):
+        command = controller._build_command(kind, {}, job_id="job-1")  # noqa: SLF001
+        assert "--compute-target" in command, kind
+        assert command[command.index("--compute-target") + 1] == "pi", kind
+
+
 def test_retrain_all_job_command_since_param_builds_since_flag(tmp_path: Path) -> None:
     """Task 3.1/3.2: the online-training scheduler's `since` param becomes
     `retrain.py --since <date>` — and there is no params-level path to

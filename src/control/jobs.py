@@ -104,6 +104,7 @@ class JobController:
         python: Path | None = None,
         command_builder: CommandBuilder | None = None,
         event_callback: EventCallback | None = None,
+        compute_target: str = "pi",
     ) -> None:
         self._config = config
         self._repo_root = repo_root
@@ -112,6 +113,13 @@ class JobController:
         self._python = python or _default_python(repo_root)
         self._command_builder = command_builder
         self._event_callback = event_callback
+        #: Task 6.36 — threaded into `scripts/retrain.py --compute-target` by
+        #: the default command builder below so the shared training-run
+        #: ledger records where a job actually ran. The Pi daemon's own
+        #: `JobController` (created without an override) is "pi"; the
+        #: companion's (`_make_job_controller`) passes "laptop". Ignored by
+        #: a custom `command_builder`, if one is supplied.
+        self._compute_target = compute_target
         self._ledger_path = jobs_dir / "jobs.jsonl"
         self._jobs: dict[str, JobRecord] = _load_jobs(self._ledger_path)
         self._processes: dict[str, subprocess.Popen[str]] = {}
@@ -205,6 +213,8 @@ class JobController:
         bindings_arg = ["--bindings", "data/bindings.yaml"]
         ledger_arg = ["--ledger", str(self._config.daemon.training_ledger)]
         job_arg = ["--job-id", job_id] if job_id is not None else []
+        # Task 6.36 — every retrain.py invocation records where it ran.
+        compute_target_arg = ["--compute-target", self._compute_target]
         if kind == "retrain_if":
             return [
                 str(self._python),
@@ -214,6 +224,7 @@ class JobController:
                 *bindings_arg,
                 *ledger_arg,
                 *job_arg,
+                *compute_target_arg,
                 "--if-out",
                 str(self._config.daemon.models_dir / "isolation_forest"),
                 "--skip-sequence",
@@ -230,6 +241,7 @@ class JobController:
                 *bindings_arg,
                 *ledger_arg,
                 *job_arg,
+                *compute_target_arg,
                 "--sequence-model",
                 sequence_model,
                 "--sequence-out",
@@ -253,6 +265,7 @@ class JobController:
                 *bindings_arg,
                 *ledger_arg,
                 *job_arg,
+                *compute_target_arg,
                 "--if-out",
                 str(self._config.daemon.models_dir / "isolation_forest"),
                 "--sequence-model",

@@ -247,6 +247,41 @@ def test_golden_run_none_when_undeclared(tmp_path: Path) -> None:
     assert led.golden_run("lstm_autoencoder") is None
 
 
+def test_build_run_record_records_compute_target(tmp_path: Path) -> None:
+    """Task 6.36 — `scripts/retrain.py --compute-target` threads through."""
+    record = build_run_record_from_manifest(_if_manifest(tmp_path / "if"), compute_target="laptop")
+    assert record.compute_target == "laptop"
+
+
+def test_build_run_record_compute_target_defaults_to_none(tmp_path: Path) -> None:
+    record = build_run_record_from_manifest(_if_manifest(tmp_path / "if"))
+    assert record.compute_target is None
+
+
+def test_set_approved_records_operator_decision(tmp_path: Path) -> None:
+    """Task 6.36 — approval is orthogonal to publish_status/golden: an
+    approved run need not be published or declared golden."""
+    led = TrainingLedger(tmp_path / "runs.jsonl")
+    led.append(build_run_record_from_manifest(_if_manifest(tmp_path / "if", "if_v1")))
+
+    approved = led.set_approved("if_v1", True, notes="looks good")
+    assert approved is not None
+    assert approved.approved is True
+    assert approved.approved_at is not None
+    assert approved.notes == "looks good"
+    assert approved.publish_status == "unpublished"
+
+    unapproved = led.set_approved("if_v1", False)
+    assert unapproved is not None
+    assert unapproved.approved is False
+    assert unapproved.approved_at is None
+
+
+def test_set_approved_unknown_run_returns_none(tmp_path: Path) -> None:
+    led = TrainingLedger(tmp_path / "runs.jsonl")
+    assert led.set_approved("does-not-exist", True) is None
+
+
 def test_golden_is_independent_of_publish_status(tmp_path: Path) -> None:
     """Golden and active are orthogonal — a golden run need not be the one
     currently serving live traffic (the whole point is comparing them)."""
@@ -560,11 +595,16 @@ def test_retrain_ingests_ledger_when_manifest_present(
             "--no-feedback-policy",
             "--ledger",
             str(ledger_path),
+            "--compute-target",
+            "laptop",
         ]
     )
     assert rc == 0
-    runs = {r.run_id for r in TrainingLedger(ledger_path).records()}
-    assert runs == {"if_run", "lstm_run"}
+    records = {r.run_id: r for r in TrainingLedger(ledger_path).records()}
+    assert set(records) == {"if_run", "lstm_run"}
+    # Task 6.36 — `--compute-target` reaches every run ingested this call.
+    assert records["if_run"].compute_target == "laptop"
+    assert records["lstm_run"].compute_target == "laptop"
 
 
 def test_retrain_ledger_records_detector_benchmark_report_path(

@@ -14,6 +14,7 @@ import type {
   CanCoverageResponse,
   CaptureResponse,
   CaptureTagResponse,
+  CompanionStatusResponse,
   CustomPid,
   CustomPidImportResponse,
   CustomPidsResponse,
@@ -37,6 +38,7 @@ import type {
   StatusResponse,
   TelemetryLatestResponse,
   TestProfilesResponse,
+  TrainingRun,
   TrainingRunsResponse,
   TrendsResponse,
   TripSummaryResponse,
@@ -53,6 +55,15 @@ export { HttpError } from "./core";
 
 export function getStatus(signal?: AbortSignal): Promise<StatusResponse> {
   return fetchJson<StatusResponse>("/status", { signal });
+}
+
+/** Task 6.35 — only the companion app answers this (same-origin, no
+ *  `baseUrl`/token): its reachability is the "am I running as the local
+ *  library, not the live Pi dashboard" signal `useConnectivityMode` reads. */
+export function getCompanionStatus(
+  signal?: AbortSignal,
+): Promise<CompanionStatusResponse> {
+  return fetchJson<CompanionStatusResponse>("/companion/status", { signal });
 }
 
 export function getConfig(signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -484,6 +495,22 @@ export function getTrainingRuns(
   baseUrl?: string,
 ): Promise<TrainingRunsResponse> {
   return controlJson("/control/training-runs", token, { signal }, baseUrl);
+}
+
+/** Task 6.36 — persist the operator's approve/unapprove decision for a
+ *  training run in the shared ledger (companion or Pi, per `baseUrl`). */
+export function approveTrainingRun(
+  token: string,
+  runId: string,
+  approved: boolean,
+  baseUrl?: string,
+): Promise<{ run: TrainingRun }> {
+  return controlJson(
+    `/control/training-runs/${encodeURIComponent(runId)}/approve`,
+    token,
+    { method: "POST", body: jsonBody({ approved }) },
+    baseUrl,
+  );
 }
 
 export function getTuning(

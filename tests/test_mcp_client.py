@@ -84,6 +84,85 @@ async def test_get_bytes_returns_raw_body() -> None:
     assert payload == b"zip-bytes"
 
 
+async def test_download_file_writes_full_body(tmp_path: Any) -> None:
+    """A clean download (no pre-existing `.part`) writes the whole body."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "Range" not in request.headers
+        return httpx.Response(200, content=b"0123456789")
+
+    client = await _make_client(httpx.MockTransport(handler))
+    dest = tmp_path / "session.zip"
+    result = await client.download_file("/control/sessions/x/export", dest)
+    await client.aclose()
+
+    assert result == dest
+    assert dest.read_bytes() == b"0123456789"
+    assert not dest.with_name(dest.name + ".part").exists()
+
+
+async def test_download_file_resumes_from_partial_file(tmp_path: Any) -> None:
+    """An existing `.part` file sends a `Range` request and appends the rest."""
+    captured: dict[str, str | None] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["range"] = request.headers.get("Range")
+        return httpx.Response(
+            206,
+            content=b"56789",
+            headers={"Content-Range": "bytes 5-9/10"},
+        )
+
+    dest = tmp_path / "session.zip"
+    part = dest.with_name(dest.name + ".part")
+    part.write_bytes(b"01234")
+
+    client = await _make_client(httpx.MockTransport(handler))
+    result = await client.download_file("/control/sessions/x/export", dest)
+    await client.aclose()
+
+    assert captured["range"] == "bytes=5-"
+    assert result == dest
+    assert dest.read_bytes() == b"0123456789"
+    assert not part.exists()
+
+
+async def test_download_file_restarts_when_range_not_satisfiable(tmp_path: Any) -> None:
+    """A stale, too-large `.part` (server returns 416) is discarded and refetched."""
+    calls: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.headers.get("Range"))
+        if request.headers.get("Range"):
+            return httpx.Response(416)
+        return httpx.Response(200, content=b"fresh-copy")
+
+    dest = tmp_path / "session.zip"
+    part = dest.with_name(dest.name + ".part")
+    part.write_bytes(b"stale-partial-data-longer-than-the-real-file")
+
+    client = await _make_client(httpx.MockTransport(handler))
+    result = await client.download_file("/control/sessions/x/export", dest)
+    await client.aclose()
+
+    assert calls == ["bytes=44-", None]
+    assert result == dest
+    assert dest.read_bytes() == b"fresh-copy"
+
+
+async def test_download_file_raises_daemon_error_on_http_failure(tmp_path: Any) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, content=b"boom")
+
+    client = await _make_client(httpx.MockTransport(handler))
+    dest = tmp_path / "session.zip"
+    with pytest.raises(DaemonError):
+        await client.download_file("/control/sessions/x/export", dest)
+    await client.aclose()
+    # The failed attempt leaves no completed file behind.
+    assert not dest.exists()
+
+
 async def test_error_response_raises_daemon_error_with_detail() -> None:
     """4xx/5xx responses raise :class:`DaemonError` with the JSON detail attached."""
 

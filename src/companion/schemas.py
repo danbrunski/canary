@@ -23,11 +23,17 @@ class SyncSessionRequest(_ApiRequest):
     pin: bool = False
     pin_reason: str | None = "synced to companion library"
     index_with_config: bool = True
+    verify_checksum: bool = True
 
 
 class JobSubmitRequest(_ApiRequest):
     kind: str
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+class TrainingRunApprovalRequest(_ApiRequest):
+    approved: bool = True
+    notes: str | None = None
 
 
 class SessionMetadataRequest(_ApiRequest):
@@ -61,4 +67,5 @@ __all__ = [
     "SessionMetadataRequest",
     "SessionPinRequest",
     "SyncSessionRequest",
+    "TrainingRunApprovalRequest",
 ]

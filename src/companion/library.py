@@ -519,6 +519,13 @@ class CanaryLibrary:
                 (status, detail, _now(), action_id),
             )
 
+    def get_action(self, action_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM queued_actions WHERE id = ?", (action_id,)
+            ).fetchone()
+            return dict(row) if row is not None else None
+
     def list_actions(self, *, status: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             if status is None:
