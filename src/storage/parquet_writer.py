@@ -21,6 +21,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from src.collection.record_arming import RecordArmingGate
 from src.session import SessionPaths, make_session_dir
 from src.storage.retention import (
     EmptySessionSweep as EmptySessionSweep,
@@ -76,6 +77,7 @@ class ParquetTelemetryWriter:
         flush_interval_seconds: float = 5.0,
         engine_run_time_reset_threshold_seconds: float = 5.0,
         clock: Callable[[], datetime] | None = None,
+        arming_gate: RecordArmingGate | None = None,
     ):
         self._clock: Callable[[], datetime] = (
             (lambda: datetime.now(UTC)) if clock is None else clock
@@ -86,6 +88,9 @@ class ParquetTelemetryWriter:
         self.max_rows = max_rows
         self.flush_interval_seconds = flush_interval_seconds
         self.engine_run_time_reset_threshold_seconds = engine_run_time_reset_threshold_seconds
+        #: Optional operator-intent gate (Task 8.6). ``None`` (the default)
+        #: preserves the always-on behavior byte-for-byte.
+        self.arming_gate = arming_gate
         self._buffer: list[TelemetryRecord] = []
         self._chunk_index = 0
         self._last_flush = self._clock()
@@ -96,6 +101,8 @@ class ParquetTelemetryWriter:
     def write(self, record: TelemetryRecord) -> Path | None:
         """Append one record, flushing when row count or time threshold is reached."""
         self._rotate_if_engine_run_time_reset(record)
+        if self.arming_gate is not None and not self.arming_gate.observe(record):
+            return None
         self._buffer.append(record)
         if len(self._buffer) >= self.max_rows or self.flush_due():
             return self.flush()
@@ -143,6 +150,10 @@ class ParquetTelemetryWriter:
         self.session_paths.append(self.paths)
         self._chunk_index = 0
         self._last_flush = self._clock()
+        if self.arming_gate is not None:
+            # New key cycle: gate again until this session sees its own
+            # vehicle-active signal (Task 8.6).
+            self.arming_gate.reset_for_new_session()
         return flushed
 
     def enter_replay_mode(self, replay_id: str) -> Path | None:

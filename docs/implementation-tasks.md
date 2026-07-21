@@ -477,10 +477,19 @@ training/model-health visualization, and Torque Pro parity.
   service, payload, expected response, preconditions, countdown, audit log,
   timeout, post-test restore, and post-test rescan. Do not expose an arbitrary
   raw CAN/UDS send endpoint in the dashboard or API.
-- [ ] **6.19 — Proprietary protocol regression corpus.** Store known-good
-  Nissan diagnostic exchanges and expected parses for ECM/ABS/BCM. Add replay
-  tests so DID decoding, session handling, IO-control identification, and
-  parked diagnostic command metadata cannot regress as the maps evolve.
+- [x] **6.19 — Proprietary protocol regression corpus.** Landed:
+  `tests/test_protocol_regression_corpus.py` built entirely from real
+  captured bytes in `data/sessions/*/frames.log` (per-fixture
+  provenance cited by file:line, independently verified byte-for-byte
+  against 6 fixtures). Covers session handling (real refusal/gate/
+  session-entry-ack exchanges), DID decoding (verified against the
+  real decode formulas by hand — coolant/AF-sensor math checks out),
+  multi-frame ISO-TP reassembly, and a scope guard confirming the DID
+  map is ECM-only (independently grepped: no ABS/BCM diagnostic
+  exchange exists anywhere in the corpus — manual trans, no TCM
+  responses). IO-control identification uses a constructed fixture,
+  verified as the only option — no real Mode 0x2F exchange exists
+  anywhere in this repo's captured data (read-only collection layer).
 
 ### 6D. Data export, training operations, and anomaly tuning
 
@@ -957,17 +966,23 @@ be read each tick, not snapshotted at startup.
   Remaining: byte-cap wording in `docs/CANary-overview.md` (config-drift
   rule) and the `docs/daemon-architecture.md:98` "sweeps on shutdown" fix.
 
-- [ ] **8.6 — Operator-intent / idle-gating for auto-started sessions
-  (P2).** `run_daemon` opens a session and records whenever it runs;
-  KOEO body/chassis CAN keeps the bus chattering so full-rate low-value
-  data accumulates with no operator intent. Continuous logging is partly
-  by design (Done-Definition v1 #2), so the fix is intent-gating, not
-  disabling capture: an optional record-arming gate that defers a
-  full-rate session until a "vehicle active" predicate (engine RPM > 0,
-  vehicle speed, or configurable) is seen. Carries open questions
-  (arm/disarm semantics, pre-arm buffer handling) — design + document,
-  not necessarily all implemented in v1. Secondary; no truck action
-  needed now. (Effort: M)
+- [x] **8.6 — Operator-intent / idle-gating for auto-started sessions
+  (P2).** Landed: new `src/collection/record_arming.py::RecordArmingGate`
+  — arms on first RPM/speed over a configurable threshold, drops
+  everything pre-arm (not buffered — design doc's rationale: don't
+  build runtime tolerance for data quality, quarantine/drop instead,
+  per this project's own fix-at-source convention), never re-disarms
+  mid-session, resets only at session rotation (verified: the reset
+  hook has exactly one caller). Config-gated via new
+  `RecordArmingConfig.enabled: bool = False` — a real default, not
+  just example YAML; `run_daemon` only builds the gate when enabled,
+  and only for its own writer (caller-supplied writers untouched).
+  `ParquetTelemetryWriter`'s `arming_gate=None` default path verified
+  byte-identical to pre-existing behavior. Design doc appended to
+  `docs/storage-lifecycle-fix.md` answering both open questions
+  (arm/disarm semantics, pre-arm buffer handling) with rationale. No
+  live-daemon/truck verification attempted, per the blocked-overnight
+  annotation — fixture-only tests.
 
 Suggested sequence: 8.1 → 8.2 → 8.4 → (8.3 ∥ 8.5) → 8.6.
 

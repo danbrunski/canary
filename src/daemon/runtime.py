@@ -8,6 +8,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from src.collection.record_arming import RecordArmingGate
 from src.config import CanaryConfig
 from src.control.capture import CaptureController
 from src.control.replay_control import ReplayController
@@ -83,8 +84,23 @@ async def run_daemon(
     """
     components = components or build_components(config)
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=config.collection.queue_max_size)
+    arming_config = config.collection.record_arming
+    # Task 8.6: config-gated, defaults off (RecordArmingConfig.enabled=False)
+    # — an unconfigured/disabled daemon opens its writer exactly as before,
+    # no gate object at all. Only applies to the writer this call builds
+    # itself; a caller-supplied ``writer`` (tests, replay) is used as-is.
+    arming_gate = (
+        RecordArmingGate(
+            arm_channels=arming_config.arm_channels,
+            arm_threshold=arming_config.arm_threshold,
+        )
+        if arming_config.enabled
+        else None
+    )
     storage_writer = ensure_async_writer(
-        ParquetTelemetryWriter(config.collection.storage_path) if writer is None else writer
+        ParquetTelemetryWriter(config.collection.storage_path, arming_gate=arming_gate)
+        if writer is None
+        else writer
     )
     components.capture_controller = CaptureController(lambda: storage_writer.paths.root)
     # Task 1.1 follow-up: give run_live_inference the same writer instance

@@ -114,6 +114,26 @@ class HardwareConfig(_Strict):
     gps: GpsConfig = GpsConfig()
 
 
+class RecordArmingConfig(_Strict):
+    """Operator-intent gate deferring full-rate recording until the vehicle
+    looks active (Task 8.6, R14 in ``docs/implementation-tasks.md``).
+
+    **Ships disabled** — a hard default, matching the other config-gated
+    background features in this file: current continuous-logging behavior
+    (Done-Definition v1 #2) is unchanged byte-for-byte until an operator
+    opts in. See ``docs/storage-lifecycle-fix.md`` for the arm/disarm
+    design (why disarm only happens at a session-rotation boundary, and why
+    pre-arm data is dropped rather than buffered).
+    """
+
+    enabled: bool = False
+    #: ``TelemetryRecord.channel`` names (unprefixed — e.g. ``"RPM"``) that
+    #: can arm the gate.
+    arm_channels: tuple[str, ...] = ("RPM", "SPEED")
+    #: A configured channel's numeric value must exceed this to arm.
+    arm_threshold: float = 0.0
+
+
 class CollectionConfig(_Strict):
     obd_source: Literal["canable", "elm327", "disabled"] = "canable"
     obd_pids: tuple[str, ...] = ("auto",)
@@ -176,6 +196,8 @@ class CollectionConfig(_Strict):
     #: replays around indefinitely; the ``_`` prefix already excludes them
     #: from training discovery and from the live-session listing.
     replay_retention_days: int = 7
+    #: Operator-intent recording gate (Task 8.6). Defaults off.
+    record_arming: RecordArmingConfig = RecordArmingConfig()
 
 
 class OperatingModeSpec(_Strict):

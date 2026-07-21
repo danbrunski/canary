@@ -159,8 +159,14 @@ cross-reference → more decoded signals become ML features), so it compounds.
 - [x] Config/daemon/recorder wiring: `collection.obd_source: canable` is the
   default, and `scripts/record.py --obd-source canable` writes
   `frames.log` + `pids.jsonl` without an ELM327.
-- [ ] Add a Canable-native broad DID sweep CLI to replace the legacy
+- [x] Add a Canable-native broad DID sweep CLI to replace the legacy
   `tools/scan_constant_dids.py --port ...` ELM transport for exploratory scans.
+  Already landed (commits `15fd8d5`/`eb90d1b`, 2026-05-16) — this box
+  was simply left unchecked by the later doc-reorg pass (`b46a759`).
+  `--canable` builds `CanObdClient` + `CanableMode22Transport`
+  directly over the CAN bus, not routed through ELM327; independently
+  confirmed exercised by `tests/test_did_scan.py`/
+  `tests/test_scan_constant_dids.py`'s Canable-specific cases.
 
 ### Capture-readiness hardening (done 2026-05-16)
 
