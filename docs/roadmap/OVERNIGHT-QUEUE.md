@@ -272,10 +272,16 @@ backend features), plus the unchecked tail of
   fixed: an example mode spec was permanently unreachable due to a
   sign mismatch against an abs-valued column, not just inert-for-now.
   Phase 2b stays entirely blocked-overnight (needs real hardware).
-- [ ] **Q23 — llm-assist-and-compute-roadmap.md seams checklist**
-  (structured-card contract, card renderer with absent-state, enriched
-  anomaly-review labels into feedback + retrain, import-isolation
-  guard test). No model hosting.
+- [x] **Q23 — llm-assist-and-compute-roadmap.md seams checklist** —
+  landed (commit `7188c4f`): schema-locked differential/narrative card
+  contract, feature-flagged card renderer whose absent-state is the
+  real default, enriched anomaly-review labels (hypothesis + Q/A pair)
+  with a real UI surface and both-or-neither validation on both ends,
+  flowing into the retrain ledger. Import-isolation guard verified via
+  a real subprocess check; one real gap caught by review and fixed —
+  the capture-path guard's file coverage was a stale hardcoded
+  allowlist missing the actual daemon entrypoint, now a genuine
+  recursive walk. No model hosting anywhere in the diff.
 - [ ] **Q24 — dashboard-ux.md, all phases** (vehicle_state badge +
   replay banner; replay control card; Sessions panel extraction from
   ControlPanel — coordinate with Q16's god-panel splits, which land
