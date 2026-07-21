@@ -387,16 +387,28 @@ training/model-health visualization, and Torque Pro parity.
 - [x] **6.2 — Adaptive real-time OBD polling scheduler.**
 - [x] **6.3 — OBD capability and coverage endpoint.**
 - [~] **6.4 — DTC, freeze-frame, monitor, and VIN workflow.** Decode/lookup/
-  report core done: `src/decode/dtc_catalog.py` — `describe_dtc` (curated
+  report core: `src/decode/dtc_catalog.py` — `describe_dtc` (curated
   generic-powertrain table + a *structural* fallback so an unknown/
   manufacturer code is still explained: system, SAE-vs-OEM bit, subsystem
   group) and `build_dtc_report` (described, timestamped, JSON-exportable
   stored/pending/permanent snapshot with MIL + SAE dtc_count). Mode 02
   freeze-frame reuses the Mode 01 formulas via `obd_registry.lookup(0x02,
   pid)`; Mode 06 parsing is `parse_mode06_response`; VIN/cal/CVN decoders are
-  in the 6.1 registry. The live Mode 03/07/0A/02/09 reads + `canaryctl`/
-  dashboard flows that drive these (needs the truck) are the remaining piece.
-  Covered by `tests/test_obd_coverage.py`. (FR-08)
+  in the 6.1 registry. The live Mode 03/07/0A reads + scheduler/endpoint/
+  dashboard flow that used to be this task's "remaining piece" landed via
+  `docs/roadmap/eval-longitudinal-and-dtc.md` Phase 1 (commits `f578cc0`,
+  `df87965`): periodic Mode 03/07/0A poll on a configurable very-slow
+  interval, Mode 01 PID 0x01 MIL/count in the default poll set, a cached
+  `DtcReport` in daemon state, the public `GET /obd/dtc` route, new-code
+  anomaly events, a per-session `dtc.json` sidecar, the `get_dtc` MCP tool,
+  and `DtcPanel.tsx` replacing the dashboard placeholder. Mode 02
+  freeze-frame-on-DTC and Mode 09 cal-ID landed separately via
+  `engine-analysis-and-mapping.md` Phase 3 (Q14). *Remaining:* only the
+  live/Pi verify (`eval-longitudinal-and-dtc.md` 1.10 — pull, restart,
+  confirm KOEO + engine-running reads, confirm `_replay` sessions don't
+  poll) is still blocked-overnight on the truck/Pi; everything else that
+  used to gate this checkbox is done. Covered by `tests/test_obd_coverage.py`
+  plus the new DTC-reader tests in Q8/Q14. (FR-08)
 - [ ] **6.5 — Parked-only clear-DTC action.** Implement optional Mode 04 behind
   the authenticated control plane, a parked interlock, explicit browser/CLI
   confirmation, audit logging, and an automatic post-clear rescan. This is a
@@ -407,8 +419,15 @@ training/model-health visualization, and Torque Pro parity.
   `src/collection/gps_collector.py` + `gps_nmea.py`, `GpsConfig`,
   `gps:*` telemetry rows, satellite/HDOP speed gate, trip odometer
   (`src/analysis/gps_tracker.py`), and the OBD↔GPS speed committee.
-  *Remaining:* dashboard route/map display, GPX/KML export. Original
-  scope: Support at least one GPS source for the
+  GPX/KML export landed via `engine-analysis-and-mapping.md` Phase 5.6
+  (commit `b843a3b`): `src/analysis/gps_export.py`, a hand-written XML
+  writer (no new dependency) producing correct GPX lat/lon-attribute vs.
+  KML lon,lat,alt-comma coordinate order, plus CSV/Parquet export via the
+  same commit's `ExportPanel.tsx` wired to the existing
+  `scripts/export_dataset.py`/`src/datasets/export.py` backend through a
+  new `export_dataset` job kind. *Remaining:* dashboard live route/map
+  display (a rendered map/track view, distinct from the export path) is
+  still not built. Original scope: Support at least one GPS source for the
   Pi/truck workflow: browser Geolocation from the dashboard, USB GNSS through
   `gpsd`, or both. Store `source="gps"` telemetry rows, display route/speed on
   the dashboard, cross-check GPS speed against OBD speed, and export GPX/KML
@@ -430,9 +449,14 @@ training/model-health visualization, and Torque Pro parity.
   normalized canvas trend, pause/resume (freezes a snapshot), time-window
   selector, min/max/avg + last value in the legend; charts any numeric
   channel uniformly (raw OBD / decoded CAN / derived — they're all ring
-  buffers on the telemetry hook). Zoom, cursor readout, window export, and
-  GPS series are deferred (mouse-interaction / GPS-source dependent).
-  Covered by `tests/.../ChartsAlarms.test.ts`.
+  buffers on the telemetry hook). Cursor readout and window export — this
+  task's own deferred items — landed via `engine-analysis-and-mapping.md`
+  Task 5.5 (commit `b843a3b`): `MultiSeriesChart` gained a hover crosshair
+  and a PNG/CSV export toolbar on one shared component/call-site used by
+  both live and session mode (only the timestamp label in the hover/CSV
+  is session-only, since the live ring buffers carry no timestamps). Zoom
+  and GPS series remain deferred (mouse-interaction / GPS-source
+  dependent). Covered by `tests/.../ChartsAlarms.test.ts`.
 - [x] **6.11 — User alarms and dashboard alerts.** `AlarmsPanel`
 - [~] **6.12 — HUD, themes, PWA offline, and reconnect behavior.** Done:
   the Drive context is the low-distraction glanceable view; `useTheme`
@@ -1094,9 +1118,18 @@ parallel alert stream.
 
 - [~] **9.7 — Parity evaluation + Pi/FP proof (P1).** *Status: bake-off
   harness (`scripts/sequence_bakeoff.py`) built and rerun with held-out
-  (out-of-sample) calibration — both backbones ≈0 FP on unseen drives;
-  the default-backbone decision is still open pending a broader
-  real-data corpus.* Original scope: Before the live and
+  (out-of-sample) calibration — both backbones ≈0 FP on unseen drives.
+  The default-backbone decision this task's gate exists to inform is no
+  longer open: `ml-correctness-hardening.md` 9.1 (commit `eb6f3f8`)
+  records an operator-approved decision (see
+  `docs/roadmap/OVERNIGHT-QUEUE.md`) made ahead of a broader real-data
+  bake-off — GRU-D LSTM stays the default `sequence_detector`, TCN is
+  documented as an NPU-export fallback rather than an equal — and
+  `src/config.py` already defaults to `"lstm"`, now pinned by a config
+  test asserting it can't silently drift. What remains open is only the
+  Pi/FP proof half of this task's title: a live, on-hardware ≤1 FP/hr
+  measurement, which needs the truck/Pi and stays blocked-overnight.*
+  Original scope: Before the live and
   retrain integration, run an offline spike: train the TCN-AE on recorded
   sessions and compare it head-to-head with the LSTM-AE on the same
   nominal/anomaly splits — per-fault recall, alert rate, detection latency,
