@@ -30,16 +30,30 @@ src/dashboard/static/
       useAnomalyStream.ts     # /ws/anomalies + recent-events list
     components/
       Sparkline.tsx           # canvas, no chart-lib dep
+      TokenField.tsx          # the token password input, shared by TokenGate
+      ResourceGate.tsx        # token/loading/error 3-state every polled panel needs
+      TokenGate.tsx           # the ONE control-token entry point (Task 5.1)
     panels/
-      DashboardShell.tsx      # header, mode toggle, layout
-      ConnectionIndicator.tsx # the colored dots
-      OperatingModeIndicator  # current operating-mode badge (Task 5.11)
-      TelemetryPanel.tsx      # live PIDs + sparklines (Task 5.9)
-      AnomalyPanel.tsx        # score chart + event list (Task 5.10)
-      ModelPanel.tsx          # loaded versions + emitter counters (Task 5.12)
-      SystemPanel.tsx         # storage, freshness, vehicle
-      TpmsPanel.tsx           # placeholder until bindings land (Task 5.13)
-      DiagnosticsPanel.tsx    # parked-mode only (Task 5.14)
+      DashboardShell.tsx      # header, Drive/Workbench toggle, ReplayBanner + StatusStrip
+      ConnectionIndicator.tsx # the colored dots (telemetry/anomaly/control streams)
+      OperatingModeIndicator  # current ML operating-mode badge (Task 5.11)
+      VehicleStateBadge.tsx   # status.vehicle_state badge (Task 1.1) — read this first
+      ReplayBanner.tsx        # full-width "you're looking at replayed data" banner (Task 1.2)
+      StatusStrip.tsx         # always-visible spine: source (live/replay), freshness, alerts, model health
+      Workbench.tsx           # grouped sidebar nav (see nav.ts) + the active panel
+      DriveScreen.tsx         # the locked, glanceable Drive-mode view
+      AnomalyPanel.tsx        # score chart + event list + evidence + re-score (Tasks 5.10, 4.1)
+      ModelEvidencePanel.tsx  # per-detector evidence for an inspected anomaly
+      RescoreControl.tsx      # "re-score this window" replay_window job (Task 4.1)
+      SessionsPanel.tsx       # session list/metadata/pin/export/delete + ReplayCard (Tasks 3.1/3.2)
+      ReplayCard.tsx          # start/stop/inspect runtime replay from the UI (Task 2.2)
+      ControlPanel.tsx        # capture, jobs, detector switch, artifact upload, preflight, companion
+      TestSessionPanel.tsx    # in-vehicle "tap an event as it happens" screen
+      ... one file per `nav.ts` entry — MonitorsPanel, ExplorePanel, ExportPanel,
+          LlmAssistPanel, DtcPanel, TrendsPanel, TripPanel, DatasetHealthPanel,
+          CustomPidsPanel, BehaviorModelsPanel, TrainingPanel, TuningPanel,
+          ModelHealthPanel, ProfilesPanel, PowerPanel, TpmsPanel, SystemPanel,
+          DataSourcesPanel, CustomDashboardPanel, ChartsPanel, AlarmsPanel
 ```
 
 ## Styling — Tailwind CSS v4
@@ -148,19 +162,59 @@ If a richer chart is ever needed (zoom, brushing, multi-series with
 legends), `uPlot` is the recommended choice — also canvas-based, MIT,
 no React dependency.
 
-## Driving / parked mode
+## Drive / Workbench modes and the Workbench nav
 
-The mode toggle in the header gates the parked-only `DiagnosticsPanel`.
-Driving mode hides the panel entirely (not "shows disabled") so a
-mis-tap can't accidentally land on a diagnostic control. The backend
-will enforce the same gate when controls are added — the frontend gate
-is an ergonomics layer, not the security boundary
-(`docs/dashboard-display-strategy.md`).
+The header toggle switches the *whole* context, not a single panel:
+
+* **Drive** (`DriveScreen.tsx`) — a locked, glanceable live-gauge view for
+  while the truck is moving. No controls, no navigation chrome, so a
+  mis-tap can't land on a mutating action.
+* **Workbench** (`Workbench.tsx`) — the parked diagnostic workbench: a
+  grouped sidebar (Live / Diagnostics / Models / Data / Control, see
+  `nav.ts` — the single source of truth for "where does a panel live")
+  plus the active panel. Every panel has exactly one home there; a new
+  panel registers in `nav.ts` and nothing else changes.
+
+Both modes share the same header and the `StatusStrip` pinned beneath it
+(`panels/StatusStrip.tsx`) — the always-visible "is everything OK" spine:
+live-vs-replay source, telemetry freshness, current anomaly state, model
+health, accepted-baseline overrides.
+
+The header itself always shows, regardless of mode:
+
+* `OperatingModeIndicator` — the ML operating mode (idle/city/highway/koeo).
+* `VehicleStateBadge` (Task 1.1) — the derived `status.vehicle_state`
+  classification (`engine_running` / `ignition_only` / `engine_off` /
+  `no_data` / `replay` / `unknown`). This is the field to read *first*
+  before concluding anything about detector behavior from silence —
+  distinct from the ML operating mode above. `no_data`/`unknown` render
+  with alert styling.
+* `TokenGate` (Task 5.1) — the **one** control-token entry point (lock
+  icon → popover entry → unlocked), backed by `useControlToken` so every
+  gated panel shares the same stored token. Replaces the per-panel
+  `TokenField` instances `ControlPanel` and `TestSessionPanel` used to
+  render independently; the four-state vocabulary ("not needed" /
+  "required" / "rejected" / "unlocked") originated in `TestSessionPanel`
+  and is now the one place that logic lives.
+
+Whenever a runtime replay (`/control/replay`) is active, a full-width
+`ReplayBanner` (Task 1.2) renders above `StatusStrip` in *both* modes —
+"REPLAY — session `<id>`" plus elapsed/speed — so re-emitted session data
+is never mistaken for the live truck. `ReplayCard` (Task 2.2), hosted in
+the Sessions panel beside the session it replays (Task 3.2), starts/stops
+replay from the UI and surfaces the daemon's refuse-while-driving 409
+verbatim (replay is a bench/desk tool, not something to run while
+actually driving).
+
+`AnomalyPanel` → inspect an event → `ModelEvidencePanel` closes the
+triage loop with a token-gated "re-score this window" button
+(`RescoreControl.tsx`, Task 4.1): submits the same `replay_window` job
+the MCP tool wraps, polls it through the existing jobs plumbing, and
+renders the per-detector fired/score-vs-threshold report inline.
 
 ## What's not built yet
 
 * Tire-pressure panel: stub until `decoded:TPMS_*_PRESSURE` are confirmed bindings.
-* Diagnostic controls: surfaces will land in `DiagnosticsPanel` as the proprietary protocol tools come online.
 * Behavior-model deviation heatmaps (Task 4.E.9): waiting on the backend feed.
 * PWA offline cache + service worker: not needed yet — the Pi is the only origin and it's local.
 

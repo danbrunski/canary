@@ -42,6 +42,42 @@ const OVERRIDE: AcceptedBaselineOverrideSummary = {
   expired: false,
 };
 
+describe("StatusStrip — replay source label (Task 1.2)", () => {
+  it("reads 'live' with no replay running", () => {
+    render(
+      createElement(StatusStrip, {
+        status: status({ active: 0, overrides: [] }),
+        channels: new Map(),
+        events: [],
+      }),
+    );
+    expect(screen.getByText("live")).toBeInTheDocument();
+  });
+
+  it("switches to 'replay' while a replay is active", () => {
+    render(
+      createElement(StatusStrip, {
+        status: {
+          ...status({ active: 0, overrides: [] }),
+          replay: {
+            running: true,
+            replay_id: "r1",
+            source_session_id: "2026-05-17T120000",
+            started_at: null,
+            speed: 1,
+            loop: false,
+            output_session_dir: null,
+            output_anomalies_path: null,
+          },
+        },
+        channels: new Map(),
+        events: [],
+      }),
+    );
+    expect(screen.getByText("replay")).toBeInTheDocument();
+  });
+});
+
 describe("StatusStrip — accepted-baseline overrides (2.3)", () => {
   it("is not shown when the daemon hasn't wired the field", () => {
     render(

@@ -37,6 +37,7 @@ from src.companion.services import (
     get_model_manifest_response,
     get_session_response,
     job_logs_response,
+    job_result_response,
     list_jobs_response,
     pin_session_response,
     sessions_list_response,
@@ -638,6 +639,13 @@ def register_control_routes(
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
         return job_logs_response(_jobs(), job_id)
+
+    @app.get("/control/jobs/{job_id}/result")
+    def get_control_job_result(
+        job_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        return job_result_response(_jobs(), job_id)
 
     @app.get("/control/jobs/{job_id}")
     def get_control_job(

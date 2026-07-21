@@ -24,6 +24,7 @@ import type {
   FeedbackResponse,
   JobLogsResponse,
   JobResponse,
+  JobResultResponse,
   JobsResponse,
   LlmAssistCardsResponse,
   MonitorsResponse,
@@ -31,6 +32,7 @@ import type {
   PowerKeepaliveResponse,
   PowerStatusResponse,
   PreflightResponse,
+  ReplayStatusResponse,
   SequenceDetectorStatus,
   SessionChartResponse,
   SessionDigestResponse,
@@ -202,6 +204,38 @@ export function stopCapture(
   });
 }
 
+/** `GET /control/replay` (Task 2.1) — current runtime-replay state; also
+ *  mirrored at `/status.replay` for the unauthenticated banner (Task 1.2),
+ *  but `ReplayCard` uses this authenticated route so its own poll doesn't
+ *  depend on the public status payload staying in sync. */
+export function getReplay(
+  token: string,
+  signal?: AbortSignal,
+): Promise<ReplayStatusResponse> {
+  return controlJson<ReplayStatusResponse>("/control/replay", token, { signal });
+}
+
+/** `POST /control/replay` — refused with 409 while `vehicle_state ==
+ *  "engine_running"` (7.2, operator-approved: replay is a bench/desk tool).
+ *  The 409 `detail` is rendered verbatim by the caller — no client-side
+ *  second-guessing of the daemon's refusal text. */
+export function startReplay(
+  token: string,
+  body: { session_id: string; speed?: number; loop?: boolean },
+): Promise<ReplayStatusResponse> {
+  return controlJson<ReplayStatusResponse>("/control/replay", token, {
+    method: "POST",
+    body: jsonBody(body),
+  });
+}
+
+export function stopReplay(token: string): Promise<ReplayStatusResponse> {
+  return controlJson<ReplayStatusResponse>("/control/replay/stop", token, {
+    method: "POST",
+    body: jsonBody({}),
+  });
+}
+
 export function listSessions(
   token: string,
   signal?: AbortSignal,
@@ -325,8 +359,20 @@ export function cancelJob(token: string, jobId: string): Promise<JobResponse> {
   });
 }
 
+export function getJob(token: string, jobId: string): Promise<JobResponse> {
+  return controlJson<JobResponse>(`/control/jobs/${encodeURIComponent(jobId)}`, token);
+}
+
 export function getJobLogs(token: string, jobId: string): Promise<JobLogsResponse> {
   return controlJson<JobLogsResponse>(`/control/jobs/${encodeURIComponent(jobId)}/logs`, token);
+}
+
+/** `GET /control/jobs/{id}/result` (Task 4.1) — the structured report a
+ *  `replay_window` job writes on success; `result` reads `null` until the
+ *  job's report file lands (still running/queued). 404s for any other job
+ *  kind, same as `describeError` already renders. */
+export function getJobResult(token: string, jobId: string): Promise<JobResultResponse> {
+  return controlJson<JobResultResponse>(`/control/jobs/${encodeURIComponent(jobId)}/result`, token);
 }
 
 export function uploadModelArtifact(

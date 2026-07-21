@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { TokenGate } from "../components/TokenGate";
 import type { ConnectivityMode } from "../hooks/useConnectivityMode";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { buttonClass, cn, headerClass, mainClass, shellClass } from "../styles";
@@ -12,7 +13,9 @@ import type {
 } from "../types";
 import { ConnectionIndicator } from "./ConnectionIndicator";
 import { OperatingModeIndicator } from "./OperatingModeIndicator";
+import { ReplayBanner } from "./ReplayBanner";
 import { StatusStrip } from "./StatusStrip";
+import { VehicleStateBadge } from "./VehicleStateBadge";
 
 interface DashboardShellProps {
   appMode: AppMode;
@@ -29,6 +32,10 @@ interface DashboardShellProps {
   liveMode?: string | null;
   status: StatusResponse | null;
   channels: Map<string, ChannelSnapshot>;
+  /** Task 5.1 — the one control-token entry point, rendered here instead of
+   *  per-panel. */
+  token: string;
+  onTokenChange: (token: string) => void;
   children: ReactNode;
 }
 
@@ -64,6 +71,8 @@ export function DashboardShell({
   liveMode,
   status,
   channels,
+  token,
+  onTokenChange,
   children,
 }: DashboardShellProps) {
   const driving = appMode === "driving";
@@ -79,6 +88,8 @@ export function DashboardShell({
           </div>
         </div>
         <OperatingModeIndicator events={events} liveMode={liveMode} />
+        <VehicleStateBadge vehicleState={status?.vehicle_state} />
+        <TokenGate token={token} onTokenChange={onTokenChange} />
         <div className="ml-auto flex gap-2 text-[0.78rem] text-fg-dim">
           <span
             className={cn(
@@ -130,6 +141,7 @@ export function DashboardShell({
           {driving ? "→ workbench" : "→ drive"}
         </button>
       </header>
+      <ReplayBanner replay={status?.replay} />
       <StatusStrip status={status} channels={channels} events={events} />
       <main className={mainClass}>{children}</main>
     </div>

@@ -17,18 +17,16 @@ import { describeError, useControlResource } from "../hooks/useControlResource";
 import { useTagQueue } from "../hooks/useTagQueue";
 import type { TestEvent, TestProfile, TestProfileError } from "../types";
 import { Notice } from "../components/Notice";
-import { TokenField } from "../components/TokenField";
-import { cn, noticeClass, panelClass, panelHeaderClass, panelTitleClass } from "../styles";
+import { noticeClass } from "../styles";
 import { TestSessionRecordingScreen, TestSessionSetupScreen } from "./TestSessionScreens";
 
 interface TestSessionPanelProps {
   token: string;
-  onTokenChange: (token: string) => void;
 }
 
 const PROFILE_KEY = "canary.testProfile.v1";
 
-export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps) {
+export function TestSessionPanel({ token }: TestSessionPanelProps) {
   const [profiles, setProfiles] = useState<TestProfile[]>([]);
   const [profileLoadErrors, setProfileLoadErrors] = useState<TestProfileError[]>([]);
   const [profilesLoaded, setProfilesLoaded] = useState(false);
@@ -208,48 +206,12 @@ export function TestSessionPanel({ token, onTokenChange }: TestSessionPanelProps
     );
   };
 
-  // Control reachable without a token (server open on loopback for dev/sim):
-  // we got a preflight back despite sending no token and weren't 401'd.
-  const openNoToken = !token && !authRejected && preflight !== null;
-  const tokenLabel = token
-    ? authRejected
-      ? "rejected"
-      : "unlocked"
-    : authRejected
-      ? "required"
-      : openNoToken
-        ? "not needed"
-        : "checking…";
-  const tokenLabelClass = cn(
-    "text-[0.78rem] font-bold",
-    (token && authRejected) || (!token && authRejected)
-      ? "text-bad"
-      : token || openNoToken
-        ? "text-ok"
-        : "text-fg-dim",
-  );
-  const tokenHelp = token
-    ? authRejected
-      ? "The server rejected this token (401) — wrong or stale value. Re-enter it or Clear and try again."
-      : "Stored on this device; also unlocks the Control Plane panel."
-    : authRejected
-      ? "This server requires a token. Paste the one it was started with (Pi: /etc/canary/control.token)."
-      : openNoToken
-        ? "No token needed here — this server allows control from loopback (dev/sim). You'd only paste one if you point this browser at the Pi."
-        : "Pick a profile; checking whether this server needs a token…";
-
   // --- render -------------------------------------------------------------
+  // Task 5.1: token entry itself now lives in the shell header (TokenGate);
+  // `authRejected` (above) still drives the Preflight header's "token
+  // required" reading and gates Start below.
   return (
     <section className="flex flex-col gap-3">
-      <section className={panelClass}>
-        <header className={panelHeaderClass}>
-          <h2 className={panelTitleClass}>Control token</h2>
-          <span className={tokenLabelClass}>{tokenLabel}</span>
-        </header>
-        <p className="mb-2 text-[0.82rem] text-fg-dim">{tokenHelp}</p>
-        <TokenField value={token} onChange={onTokenChange} className="w-full" />
-      </section>
-
       <Notice notice={notice} />
 
       {profileLoadErrors.length > 0 && (

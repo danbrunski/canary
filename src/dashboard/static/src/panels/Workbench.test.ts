@@ -18,7 +18,6 @@ const DATA: DashboardData = {
   behaviorModelsError: null,
   behaviorLive: null,
   token: "",
-  onTokenChange: () => {},
   companion: {
     baseUrl: "http://127.0.0.1:8765",
     token: "",
@@ -59,11 +58,10 @@ describe("Workbench navigation", () => {
     expect(screen.getByRole("heading", { name: "System" })).toBeInTheDocument();
   });
 
-  it("placeholder items explain the backend that's ready", () => {
-    // data-sessions is still a labeled placeholder (6.13 UI pending).
+  it("data-sessions renders the real Sessions panel (Task 3.1 — no longer a placeholder)", () => {
     renderAt("data-sessions");
     expect(screen.getByRole("heading", { name: "Sessions" })).toBeInTheDocument();
-    expect(screen.getByText("6.13")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Replay" })).toBeInTheDocument();
   });
 
   it("data-export renders the real Export panel (Task 5.6b)", () => {
@@ -71,8 +69,8 @@ describe("Workbench navigation", () => {
     expect(screen.getByRole("heading", { name: "Export" })).toBeInTheDocument();
   });
 
-  it("marks not-yet-built items with a 'soon' hint", () => {
+  it("no nav item is left marked 'soon' — data-sessions (6.13) was the last placeholder", () => {
     renderAt("live-charts");
-    expect(screen.getAllByText("soon").length).toBeGreaterThan(0);
+    expect(screen.queryByText("soon")).not.toBeInTheDocument();
   });
 });

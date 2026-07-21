@@ -69,87 +69,74 @@ it. Phase 6 is independent cleanup, last because it's cheap.
 
 **Goal.** The shell always answers "what am I actually looking at?"
 
-- [ ] **1.1 — `vehicle_state` badge.** Read `status.vehicle_state` from
-  the existing 5 s `useStatus` poll and render a badge in the header
-  beside `OperatingModeIndicator` (states: `engine_running`,
-  `ignition_only`, `engine_off`, `no_data`, `replay`, `unknown`;
-  distinct alert styling for `no_data`/`unknown`). Add the field to the
-  status types in `api/http.ts`. FE tests over fixture payloads for
-  each state.
-- [ ] **1.2 — Replay banner.** Whenever `status.replay` reports an
-  active replay, show a prominent full-width banner in **both** drive
-  and workbench modes ("REPLAY — session <id>", elapsed/progress if the
-  payload carries it) and switch the StatusStrip source label. The
-  operator must never mistake re-emitted data for the live truck. FE
-  tests: active, inactive, and replay-block-absent payloads.
+- [x] **1.1 — `vehicle_state` badge.** Landed: new
+  `VehicleStateBadge.tsx` beside `OperatingModeIndicator`, distinct
+  alert styling (real CSS class, not just text) for
+  `no_data`/`unknown`/absent, all 6 states + absent covered by tests.
+- [x] **1.2 — Replay banner.** Landed: new `ReplayBanner.tsx` mounted
+  once in `DashboardShell` above `<main>` — verified genuinely shared
+  by both drive and workbench modes (a single shell instance swaps
+  only `children`, not the banner's mount point), so this holds the
+  doc's own explicit safety property: the operator cannot land in a
+  mode where an active replay goes unbannered. StatusStrip source
+  label switches too. Tests cover active/inactive/absent.
 
 ## Phase 2 — Replay control from the UI
 
 **Goal.** Start/stop/inspect runtime replay without an MCP session.
 
-- [ ] **2.1 — API wrappers.** `getReplay` / `startReplay` /
-  `stopReplay` in `api/http.ts` over `/control/replay` (+ types).
-  Token-gated like the other control calls.
-- [ ] **2.2 — `ReplayCard`.** Session picker (reuse the session-list
-  fetch ControlPanel already does), start/stop buttons, live status
-  incl. the isolated `_replay-*` output path, and the 409
-  refuse-while-driving reason rendered verbatim. Lives in the Sessions
-  panel (Phase 3); if 3.1 hasn't landed yet, mount it temporarily in
-  ControlPanel and move it in 3.1. FE tests incl. the 409 path.
+- [x] **2.1 — API wrappers.** Landed: `getReplay`/`startReplay`/
+  `stopReplay` in `api/http.ts` over `/control/replay`, token-gated
+  like the other control calls.
+- [x] **2.2 — `ReplayCard`.** Landed: session picker, start/stop,
+  `_replay-*` output path, the 409 refuse-while-driving reason
+  rendered verbatim (bypasses the generic error bucket specifically so
+  the exact reason text reaches the operator, verified against a real
+  409 payload shape). Lives directly in the Sessions panel.
 
 ## Phase 3 — Sessions panel (make placeholder 6.13 real)
 
 **Goal.** Session/trip work gets its own home instead of hiding in the
 control hub.
 
-- [ ] **3.1 — Extract `SessionsPanel.tsx`.** Move the session
-  operations out of `ControlPanel.tsx` — list, metadata edit, pin/unpin
-  (+reason), export zip, delete (confirm), companion sync — into a new
-  panel; ControlPanel keeps capture, jobs, detector switch, artifact
-  upload, preflight, companion config. Drop `placeholder: true` at
-  `nav.ts` `data-sessions` and replace the `PlaceholderPanel` mapping in
-  `Workbench.tsx`. Coordinate with refactoring 3.2 (god-panel splits) —
-  if that has landed first, this is a move of already-extracted
-  components. FE tests move with the code.
-- [ ] **3.2 — Host `ReplayCard` here.** Replay is a per-session action;
-  the card (2.2) renders beside the session list, prefilled from the
-  selected session.
+- [x] **3.1 — Extract `SessionsPanel.tsx`.** Landed: promoted the
+  already-extracted `SessionsCard` (refactoring 3.2, landed earlier
+  tonight) to its own top-level panel; `ControlPanel.tsx` no longer
+  references it (verified zero duplicate rendering). `nav.ts`'s
+  `data-sessions` `placeholder: true` dropped, `Workbench.tsx` wired to
+  the real panel.
+- [x] **3.2 — Host `ReplayCard` here.** Landed: mounted inside
+  `SessionsPanel`, prefilled from the shared session-selection state.
 
 ## Phase 4 — Close the anomaly-triage loop
 
 **Goal.** "Why did this fire?" answered inside the dashboard.
 
-- [ ] **4.1 — Re-score button.** On `ModelEvidencePanel` (reached from
-  `AnomalyPanel` inspect), add a token-gated "re-score this window"
-  action: submit `/control/jobs` with `kind="replay_window"` and the
-  event's window params (mirror the param mapping in
-  `src/mcp_server/tools/replay.py:87`), poll the job via the existing
-  jobs plumbing, and render the returned report (per-detector
-  fired/score vs threshold) inline with honest running/failed states.
-  FE tests over fixture job lifecycles.
+- [x] **4.1 — Re-score button.** Landed: new `RescoreControl.tsx` on
+  `ModelEvidencePanel`, submits `replay_window` with params verified to
+  match `src/mcp_server/tools/replay.py`'s mapping exactly, polls via
+  the existing jobs plumbing, renders per-detector fired/score-vs-
+  threshold. New `GET /control/jobs/{id}/result` (both dashboard and
+  companion, verified reading the identical `<job_id>.replay.json`
+  artifact the pre-existing MCP tool already resolves — genuine
+  parity, not a divergent result schema).
 
 ## Phase 5 — One token entry, not five
 
 **Goal.** Enter the control token once, in the shell.
 
-- [ ] **5.1 — Shell-level token.** Lift token entry out of the
-  individual panels into the shell header (lock icon → entry →
-  unlocked), backed by the existing `useControlToken` storage so all
-  gated panels share state. Adopt TestSessionPanel's four-state
-  messaging (not needed / required / rejected / unlocked) as the single
-  vocabulary. **Merge with, don't duplicate,** refactoring Phase 3's
-  `ResourceGate`/`TokenField` task — if that shipped first, this is
-  "mount TokenField in the header and delete the per-panel entries."
-  FE tests for the four states.
+- [x] **5.1 — Shell-level token.** Landed: new `TokenGate.tsx` mounted
+  in the shell header, four-state vocabulary (not needed/required/
+  rejected/unlocked). Per-panel `TokenField` removed from
+  `ControlPanel.tsx`/`TestSessionPanel.tsx` — verified both still read
+  the SAME shared `useControlToken()` instance passed down from
+  `App.tsx`, no gating regression.
 
 ## Phase 6 — Cleanup
 
-- [ ] **6.1 — Delete orphaned `DiagnosticsPanel.tsx`.** It takes a
-  `mode` prop and is imported nowhere (`Workbench.tsx` maps all
-  `diag-*` nav ids to other panels). Delete it and its test if any;
-  git history keeps it if a diagnostics summary panel is ever wanted.
-- [ ] **6.2 — README dashboard-section refresh.** The README still
-  describes the pre-Workbench flat-tab layout and documents
-  DiagnosticsPanel as the parked-only panel. Rewrite that section to
-  match the shipped shell (drive/workbench modes, grouped sidebar per
-  `nav.ts`, StatusStrip) and the panels added by this roadmap.
+- [x] **6.1 — Delete orphaned `DiagnosticsPanel.tsx`.** Landed:
+  confirmed zero references anywhere in `src/dashboard/static/src`
+  before deleting (no test file existed).
+- [x] **6.2 — README dashboard-section refresh.** Landed: rewritten to
+  describe the actual shipped shell and panel set, spot-checked
+  against the real `panels/` directory contents.

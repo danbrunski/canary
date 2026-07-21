@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   deleteSession,
@@ -29,25 +29,30 @@ interface SessionsCardProps {
   run: RunAction;
   sessions: SessionSummary[];
   companion: CompanionSettings;
+  /** Selection is controlled by the parent (`SessionsPanel`, Task 3.1) so
+   *  `ReplayCard` (3.2) can prefill from the same session — it used to be
+   *  this card's own private `useState`, keeping the list valid as the
+   *  polled data changed; that "keep valid / default to latest" behavior
+   *  now lives in the parent alongside the state itself. */
+  selectedSessionId: string;
+  onSelectSessionId: (sessionId: string) => void;
 }
 
 /** Sessions list + per-session actions, extracted from ControlPanel's
- *  ~8-concerns god-panel (Task 3.2). Owns its own selection/edit state —
- *  the parent only feeds it the polled session list. */
-export function SessionsCard({ token, run, sessions, companion }: SessionsCardProps) {
-  const [selectedSessionId, setSelectedSessionId] = useState("");
+ *  ~8-concerns god-panel (Task 3.2) and promoted to `SessionsPanel` (3.1).
+ *  Owns its own edit-form state; the parent feeds it the polled session
+ *  list and the shared selection. */
+export function SessionsCard({
+  token,
+  run,
+  sessions,
+  companion,
+  selectedSessionId,
+  onSelectSessionId,
+}: SessionsCardProps) {
   const [metadataText, setMetadataText] = useState("{}");
   const [pinReason, setPinReason] = useState("");
   const [syncPin, setSyncPin] = useState(true);
-
-  // Keep the selection valid as the polled list changes; default to the
-  // latest session once one becomes available.
-  useEffect(() => {
-    setSelectedSessionId((current) => {
-      if (current && sessions.some((s) => s.session_id === current)) return current;
-      return sessions.at(-1)?.session_id ?? "";
-    });
-  }, [sessions]);
 
   const selectedSession = sessions.find((s) => s.session_id === selectedSessionId) ?? null;
 
@@ -115,7 +120,7 @@ export function SessionsCard({ token, run, sessions, companion }: SessionsCardPr
               "grid w-full grid-cols-[1fr_auto] gap-2 rounded-[8px] border border-border bg-elev-2 px-2.5 py-2 text-left text-fg transition-colors hover:border-border-soft max-[1100px]:grid-cols-1",
               session.session_id === selectedSessionId && "border-accent",
             )}
-            onClick={() => setSelectedSessionId(session.session_id)}
+            onClick={() => onSelectSessionId(session.session_id)}
           >
             <span>{session.session_id}</span>
             <small className="text-fg-dim">

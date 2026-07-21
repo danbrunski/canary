@@ -396,6 +396,79 @@ def test_control_jobs_run_restricted_background_commands(tmp_path: Path) -> None
     )
     assert ledger_controller.get(job_id) is not None
 
+    # 4.1 — a non-`replay_window` job kind has no result to read.
+    no_result = client.get(f"/control/jobs/{job_id}/result", headers=_auth())
+    assert no_result.status_code == 404
+
+
+def test_control_job_result_reads_replay_report(tmp_path: Path) -> None:
+    """dashboard-ux.md Task 4.1: `GET /control/jobs/{id}/result` reads the
+    `<job_id>.replay.json` report a `replay_window` job writes — the same
+    file the MCP `replay_window` tool resolves."""
+    storage = tmp_path / "storage"
+    session = storage / "2026-05-17T120000"
+    session.mkdir(parents=True)
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(storage))
+    config = CanaryConfig.from_yaml(cfg_path)
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+
+    def _command_builder(_kind: str, _params: dict[str, Any]) -> list[str]:
+        return [sys.executable, "-c", "print('job ok')"]
+
+    app = create_app(
+        config,
+        anomalies_dir=tmp_path / "anomalies",
+        capture_controller=CaptureController(lambda: session),
+        job_controller=JobController(
+            config=config,
+            repo_root=tmp_path,
+            config_path=cfg_path,
+            jobs_dir=jobs_dir,
+            python=Path(sys.executable),
+            command_builder=_command_builder,
+        ),
+        control_token="secret",
+    )
+    client = TestClient(app)
+
+    created = client.post(
+        "/control/jobs",
+        headers=_auth(),
+        json={"kind": "replay_window", "params": {"session_id": "2026-05-17T120000"}},
+    )
+    assert created.status_code == 201
+    job_id = created.json()["job"]["job_id"]
+
+    # Before the job's report has landed on disk, `result` reads null
+    # rather than 404ing — the job's own status is the "not ready" signal.
+    pending = client.get(f"/control/jobs/{job_id}/result", headers=_auth())
+    assert pending.status_code == 200
+    assert pending.json()["result"] is None
+
+    for _ in range(40):
+        status = client.get(f"/control/jobs/{job_id}", headers=_auth()).json()["job"]
+        if status["status"] in {"succeeded", "failed"}:
+            break
+        time.sleep(0.05)
+    assert status["status"] == "succeeded"
+
+    # `tools/replay_window.py` writes its report at exactly this path
+    # (`_replay_window_command`'s `--out`); simulate it directly rather
+    # than paying for a real replay in this test.
+    report_path = jobs_dir / f"{job_id}.replay.json"
+    report_path.write_text(
+        json.dumps({"session_id": "2026-05-17T120000", "summary": {"rows_scored": 0}})
+    )
+
+    result = client.get(f"/control/jobs/{job_id}/result", headers=_auth())
+    assert result.status_code == 200
+    assert result.json()["result"]["session_id"] == "2026-05-17T120000"
+
+    missing = client.get("/control/jobs/does-not-exist/result", headers=_auth())
+    assert missing.status_code == 404
+
 
 def test_retrain_job_command_passes_job_id_to_ledger(tmp_path: Path) -> None:
     cfg_path = tmp_path / "canary.yaml"

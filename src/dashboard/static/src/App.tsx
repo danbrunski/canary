@@ -44,7 +44,6 @@ export default function App() {
     behaviorModelsError: behaviorModels.error,
     behaviorLive,
     token: controlToken.token,
-    onTokenChange: controlToken.setToken,
     companion,
   };
 
@@ -63,6 +62,8 @@ export default function App() {
       liveMode={behaviorLive?.operating_mode ?? null}
       status={status}
       channels={telemetry.channels}
+      token={controlToken.token}
+      onTokenChange={controlToken.setToken}
     >
       {mode === "driving" ? (
         <DriveScreen channels={telemetry.channels} bindings={bindings} />

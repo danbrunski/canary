@@ -19,6 +19,7 @@ import { badgeClass, cn, placeholderClass } from "../styles";
 import type { AnomalyEvent } from "../types";
 import { formatNumber as formatNum } from "../util/format";
 import { formatTimestamp } from "../util/time";
+import { RescoreControl } from "./RescoreControl";
 
 /** Evidence cards show three decimals on sub-10 scores/residuals. */
 const formatNumber = (value: number): string => formatNum(value, 3);
@@ -26,11 +27,16 @@ const formatNumber = (value: number): string => formatNum(value, 3);
 interface ModelEvidencePanelProps {
   event: AnomalyEvent | null;
   relatedEvents: AnomalyEvent[];
+  /** Token-gated "re-score this window" (Task 4.1); omitted/empty hides
+   *  the control entirely, same convention as `AnomalyPanel`'s feedback
+   *  buttons. */
+  token?: string;
 }
 
 export function ModelEvidencePanel({
   event,
   relatedEvents,
+  token,
 }: ModelEvidencePanelProps) {
   if (!event) return null;
 
@@ -79,6 +85,8 @@ export function ModelEvidencePanel({
           {agreement.length > 0 ? agreement.join(" + ") : "single source"}
         </span>
       </div>
+
+      <RescoreControl token={token} event={event} />
 
       <div className="grid grid-cols-3 gap-2 max-[1200px]:grid-cols-1">
         {SOURCES.map((source) => (

@@ -6,13 +6,11 @@ import {
   getPreflight,
   getSequenceDetector,
   listJobs,
-  listSessions,
   startCapture,
   stopCapture,
   tagCapture,
 } from "../api/http";
 import { Notice } from "../components/Notice";
-import { TokenField } from "../components/TokenField";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import { useControlStream } from "../hooks/useControlStream";
@@ -22,7 +20,6 @@ import type {
   JobRecord,
   PreflightResponse,
   SequenceDetectorStatus,
-  SessionSummary,
   VersionResponse,
 } from "../types";
 import { buttonClass, cn, inputClass, panelClass, panelHeaderClass, panelTitleClass } from "../styles";
@@ -32,22 +29,23 @@ import { ControlEventsCard, PreflightCard } from "./ControlPanelSections";
 import { JobsCard } from "./JobsCard";
 import { ModelUploadCard } from "./ModelUploadCard";
 import { SequenceDetectorCard } from "./SequenceDetectorCard";
-import { SessionsCard } from "./SessionsCard";
 
 const TOKEN_GATE = "Enter the control token first.";
 
 interface ControlPanelProps {
   token: string;
-  onTokenChange: (token: string) => void;
   companion: CompanionSettings;
 }
 
-export function ControlPanel({ token, onTokenChange, companion }: ControlPanelProps) {
+/** Capture, jobs, detector switch, artifact upload, preflight, companion
+ *  config (Task 3.1 — session operations moved to `SessionsPanel`). Token
+ *  entry itself now lives in the shell header (Task 5.1); this panel only
+ *  reads `token` to gate its own actions. */
+export function ControlPanel({ token, companion }: ControlPanelProps) {
   const controlStream = useControlStream(token);
   const [preflight, setPreflight] = useState<PreflightResponse | null>(null);
   const [version, setVersion] = useState<VersionResponse | null>(null);
   const [capture, setCapture] = useState<CaptureState | null>(null);
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [sequenceDetector, setSequenceDetector] = useState<SequenceDetectorStatus | null>(null);
   const { notice, setNotice, busy, run: runAction } = useAsyncAction();
@@ -59,19 +57,17 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
 
   const refreshControl = useCallback(async () => {
     if (!token) return;
-    const [nextPreflight, nextVersion, nextCapture, nextSessions, nextJobs, nextSequence] =
+    const [nextPreflight, nextVersion, nextCapture, nextJobs, nextSequence] =
       await Promise.all([
         getPreflight(token),
         getControlVersion(token),
         getCurrentCapture(token),
-        listSessions(token),
         listJobs(token),
         getSequenceDetector(token),
       ]);
     setPreflight(nextPreflight);
     setVersion(nextVersion);
     setCapture(nextCapture.capture);
-    setSessions(nextSessions.sessions);
     setJobs(nextJobs.jobs.slice().reverse());
     setSequenceDetector(nextSequence.sequence_detector);
   }, [token]);
@@ -81,7 +77,6 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
       setPreflight(null);
       setVersion(null);
       setCapture(null);
-      setSessions([]);
       setJobs([]);
       setSequenceDetector(null);
       return;
@@ -140,11 +135,7 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
 
   return (
     <section className="flex flex-col gap-3">
-      <div className="grid grid-cols-[minmax(18rem,1fr)_auto_auto] items-end gap-3 rounded-[8px] border border-border bg-elev p-3 max-[1100px]:grid-cols-1">
-        <label className="flex flex-col gap-1 text-[0.75rem] text-fg-dim">
-          Control token
-          <TokenField value={token} onChange={onTokenChange} />
-        </label>
+      <div className="flex flex-wrap items-center gap-3 rounded-[8px] border border-border bg-elev p-3">
         <button className={buttonClass} type="button" onClick={() => refreshControl()} disabled={!token || !!busy}>
           Refresh
         </button>
@@ -153,6 +144,11 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
             API v{version.api_version}
             {version.git_sha ? ` / ${version.git_sha}` : ""}
           </div>
+        )}
+        {!token && (
+          <span className="text-[0.78rem] text-fg-dim">
+            Control token: use the lock icon in the header.
+          </span>
         )}
       </div>
 
@@ -217,7 +213,6 @@ export function ControlPanel({ token, onTokenChange, companion }: ControlPanelPr
           </div>
         </section>
 
-        <SessionsCard token={token} run={run} sessions={sessions} companion={companion} />
         <JobsCard token={token} busy={busy} run={run} jobs={jobs} />
         <SequenceDetectorCard token={token} busy={busy} run={run} sequenceDetector={sequenceDetector} />
         <ModelUploadCard token={token} busy={busy} run={run} />

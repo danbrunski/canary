@@ -37,6 +37,7 @@ import { MonitorsPanel } from "./MonitorsPanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
 import { PowerPanel } from "./PowerPanel";
 import { ProfilesPanel } from "./ProfilesPanel";
+import { SessionsPanel } from "./SessionsPanel";
 import { SystemPanel } from "./SystemPanel";
 import { TestSessionPanel } from "./TestSessionPanel";
 import { TrainingPanel } from "./TrainingPanel";
@@ -56,8 +57,8 @@ export interface DashboardData {
   behaviorModels: BehaviorModelsResponse | null;
   behaviorModelsError: Error | null;
   behaviorLive: BehaviorLiveResponse | null;
+  /** Read-only here — entry itself lives in the shell header (Task 5.1). */
   token: string;
-  onTokenChange: (token: string) => void;
   companion: CompanionSettings;
 }
 
@@ -135,17 +136,9 @@ function renderItem(
         />
       );
     case "control-main":
-      return (
-        <ControlPanel
-          token={d.token}
-          onTokenChange={d.onTokenChange}
-          companion={d.companion}
-        />
-      );
+      return <ControlPanel token={d.token} companion={d.companion} />;
     case "control-test":
-      return (
-        <TestSessionPanel token={d.token} onTokenChange={d.onTokenChange} />
-      );
+      return <TestSessionPanel token={d.token} />;
     case "control-profiles":
       return <ProfilesPanel token={d.token} />;
     case "control-power":
@@ -177,14 +170,7 @@ function renderItem(
         <ModelHealthPanel status={d.status} statusError={d.statusError} />
       );
     case "data-sessions":
-      return (
-        <PlaceholderPanel
-          title="Sessions"
-          task="6.13"
-          endpoint="GET /control/sessions"
-          summary="Browse / pin / export / delete captured sessions. The Control Plane panel can already drive these via the authenticated API."
-        />
-      );
+      return <SessionsPanel token={d.token} companion={d.companion} />;
     case "data-health":
       return <DatasetHealthPanel token={d.token} />;
     case "data-custom-pids":

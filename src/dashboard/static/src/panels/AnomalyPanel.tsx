@@ -252,6 +252,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
               <ModelEvidencePanel
                 event={selectedEvent}
                 relatedEvents={relatedEvents}
+                token={token}
               />
               {token && (
                 <div className="mb-2 flex flex-wrap items-center gap-1.5">

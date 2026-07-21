@@ -46,6 +46,7 @@ from src.companion.services import (
     get_model_manifest_response,
     get_session_response,
     job_logs_response,
+    job_result_response,
     list_jobs_response,
     pin_session_response,
     run_queued_action,
@@ -415,6 +416,13 @@ def register_companion_routes(
         _auth: None = Depends(require_local_auth),
     ) -> dict[str, Any]:
         return job_logs_response(jobs, job_id)
+
+    @app.get("/control/jobs/{job_id}/result")
+    def local_job_result(
+        job_id: str,
+        _auth: None = Depends(require_local_auth),
+    ) -> dict[str, Any]:
+        return job_result_response(jobs, job_id)
 
     @app.get("/control/jobs/{job_id}")
     def get_local_job(

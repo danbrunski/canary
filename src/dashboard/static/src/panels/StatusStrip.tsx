@@ -43,9 +43,19 @@ export function StatusStrip({ status, channels, events }: StatusStripProps) {
   const counters = status?.emitter_counters ?? null;
   const overrides = status?.accepted_baseline_overrides ?? null;
   const [overridesOpen, setOverridesOpen] = useState(false);
+  // Task 1.2 — the strip's own "what am I looking at" tell, independent of
+  // the full-width ReplayBanner (which can be dismissed from view by
+  // scrolling); this one line stays pinned under the header in both modes.
+  const replaying = status?.replay?.running === true;
 
   return (
     <div className={cn(statusStripClass, "relative")} aria-label="System status">
+      <StatusItem label="source">
+        <span className={cn(statusValueClass, replaying && "text-warn")}>
+          {replaying ? "replay" : "live"}
+        </span>
+      </StatusItem>
+
       <StatusItem label="data">
         <span className={cn(statusValueClass, stale && "text-bad")}>
           {freshnessMs === null

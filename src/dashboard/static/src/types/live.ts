@@ -6,6 +6,8 @@
 // (not `?`) to mirror the JSON Pydantic produces, where absent fields land as
 // explicit nulls when they have a None default.
 
+import type { ReplayStatus } from "./control";
+
 /** One row from `/telemetry/latest` or one message on `/ws/telemetry`. */
 export interface TelemetryRow {
   timestamp: string | null;
@@ -105,6 +107,34 @@ export interface StatusResponse {
   /** Accepted-baseline overrides (2.3, online-training-strategy.md
    *  Phase 2) — always present (an empty document reads as zero). */
   accepted_baseline_overrides?: AcceptedBaselineOverridesStatus;
+  /** Derived "what's the truck actually doing" classification (Task 1.1,
+   *  `classify_vehicle_state`) — read this before concluding anything about
+   *  detector behavior from silence. Null only on a bare/test daemon that
+   *  never calls `build_status`'s vehicle-state branch. */
+  vehicle_state?: VehicleState | null;
+  /** Runtime replay state (Task 1.2), mirrored here so the shell can render
+   *  the "you're looking at replayed data" banner off the same poll that
+   *  already drives everything else — no separate authenticated call. Null
+   *  when the daemon has no replay controller wired (tests / bare app). */
+  replay?: ReplayStatus | null;
+}
+
+/** `/status.vehicle_state` — mirrors
+ *  `src.dashboard.status.VehicleState.to_dict()`. */
+export interface VehicleState {
+  state:
+    | "engine_running"
+    | "ignition_only"
+    | "engine_off"
+    | "no_data"
+    | "replay"
+    | "unknown";
+  rpm: number | null;
+  coolant_temp: number | null;
+  run_time: number | null;
+  obd_freshness_seconds: number | null;
+  can_freshness_seconds: number | null;
+  replay_id: string | null;
 }
 
 /** `/status.accepted_baseline_overrides` (2.3). */

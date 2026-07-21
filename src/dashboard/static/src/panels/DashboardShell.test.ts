@@ -16,6 +16,8 @@ const BASE = {
   events: [],
   status: null,
   channels: new Map<string, ChannelSnapshot>(),
+  token: "",
+  onTokenChange: () => {},
   children: createElement("div", { "data-testid": "body" }, "body"),
 };
 

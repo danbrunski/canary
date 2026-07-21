@@ -227,3 +227,98 @@ export interface TrendsResponse {
   reference_sessions?: number;
   stats: Record<string, StatTrend>;
 }
+
+/** `GET/POST /control/replay` (+ `/control/replay/stop`) — mirrors
+ *  `src.control.replay_control.ReplayStatus.to_dict()`. Also embedded at
+ *  `/status.replay` (Task 1.2) so the shell can show the banner without a
+ *  separate authenticated poll. */
+export interface ReplayStatus {
+  running: boolean;
+  replay_id: string | null;
+  source_session_id: string | null;
+  started_at: string | null;
+  speed: number | null;
+  loop: boolean | null;
+  output_session_dir: string | null;
+  output_anomalies_path: string | null;
+}
+
+export interface ReplayStatusResponse {
+  replay: ReplayStatus;
+}
+
+/** One IF-scored row from a `replay_window` report (Task 4.1) — mirrors
+ *  `src.analysis.replay_window._build_if_block`'s per-row records. */
+export interface ReplayIfScoreRow {
+  timestamp: string | null;
+  operating_mode: string | null;
+  score: number | null;
+  label: number | null;
+}
+
+export interface ReplayIfBlock {
+  loaded: boolean;
+  model_version: string | null;
+  rows_scored: number;
+  scores: ReplayIfScoreRow[];
+  anomalies: ReplayIfScoreRow[];
+}
+
+/** One scored LSTM window from a `replay_window` report — mirrors
+ *  `src.analysis.replay_window._build_lstm_block`'s per-window records. */
+export interface ReplayLstmWindow {
+  timestamp: string;
+  window_start_timestamp: string | null;
+  window_end_timestamp: string | null;
+  global_score: number;
+  global_threshold: number | null;
+  anomalous_channels: string[];
+  channel_scores: Record<string, number>;
+  channel_thresholds: Record<string, number>;
+  is_anomaly: boolean;
+  latency_ms: number | null;
+}
+
+export interface ReplayLstmBlock {
+  loaded: boolean;
+  model_version: string | null;
+  windows_scored: number;
+  windows: ReplayLstmWindow[];
+  anomalies: ReplayLstmWindow[];
+}
+
+/** `replay_window` job report (Task 4.1) — mirrors
+ *  `src.analysis.replay_window.ReplayWindowReport.to_dict()`. Fetched via
+ *  `GET /control/jobs/{id}/result` once the submitted job succeeds. */
+export interface ReplayWindowReport {
+  session_id: string;
+  window: {
+    start: string | null;
+    end: string | null;
+    actual_start: string | null;
+    actual_end: string | null;
+  };
+  summary: {
+    rows_scored: number;
+    if_anomalies_replayed: number;
+    lstm_windows_scored: number;
+    lstm_anomalies_replayed: number;
+    historical_events: number;
+    matched: number;
+    replayed_only: number;
+    historical_only: number;
+  };
+  isolation_forest: ReplayIfBlock;
+  lstm_autoencoder: ReplayLstmBlock;
+  historical_events: Record<string, unknown>[];
+  diff: Record<string, unknown>;
+  warnings: string[];
+}
+
+/** `GET /control/jobs/{id}/result` — `result` is `null` until the job's
+ *  report file has landed (e.g. still running) or the job kind has no
+ *  associated result (404 instead, this shape only covers the 200 case). */
+export interface JobResultResponse {
+  job: JobRecord;
+  result: ReplayWindowReport | null;
+}
