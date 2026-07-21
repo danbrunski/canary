@@ -282,14 +282,18 @@ backend features), plus the unchecked tail of
   the capture-path guard's file coverage was a stale hardcoded
   allowlist missing the actual daemon entrypoint, now a genuine
   recursive walk. No model hosting anywhere in the diff.
-- [ ] **Q24 — dashboard-ux.md, all phases** (vehicle_state badge +
-  replay banner; replay control card; Sessions panel extraction from
-  ControlPanel — coordinate with Q16's god-panel splits, which land
-  first; replay_window re-score button on ModelEvidencePanel;
-  shell-level token entry — merge with Q16's ResourceGate/TokenField,
-  don't duplicate; DiagnosticsPanel deletion + README dashboard-section
-  refresh). Everything testable against fixtures/local daemon; Pi live
-  verify is a morning task.
+- [x] **Q24 — dashboard-ux.md, all phases** — landed (commit
+  `a308280`): vehicle_state badge + replay banner (verified genuinely
+  visible in both drive and workbench modes — the doc's own explicit
+  safety property, an operator must never mistake replay for live);
+  replay control card with the 409 refuse-while-driving reason
+  rendered verbatim; Sessions panel promoted from Q16's
+  already-extracted SessionsCard; replay_window re-score button
+  verified matching the existing MCP tool's param mapping and result
+  format exactly; shell-level token entry merged with Q16's
+  ResourceGate/TokenField (no duplicate mechanism, no gating
+  regression); DiagnosticsPanel deletion (verified orphaned first) +
+  README refresh. Pi live verify correctly left as a morning task.
 - [ ] **Q25 — reconciliation sweep.** Audit `docs/implementation-tasks.md`
   checkboxes against everything rounds 1–2 landed and close the loops:
   6.4's live-DTC remainder vs the Q8 reader, 6.7's GPX/KML vs Q15,
