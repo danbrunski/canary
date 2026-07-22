@@ -129,6 +129,34 @@ describe("DataSourcesPanel", () => {
     expect(screen.getByText("2.5 ms")).toBeInTheDocument();
   });
 
+  it("labels an unscaled DID `raw` instead of its target unit", async () => {
+    // ECM_INJECTOR_PW_B1's scale constant is still outstanding, so the
+    // daemon ships the raw count. Printing the catalog unit beside it would
+    // read as a 28-second injector pulse.
+    mocks.getDids.mockResolvedValue({
+      ...EMPTY_DIDS,
+      polled: ["INJECTOR_PW"],
+      dids: [
+        {
+          did: 0x1208,
+          name: "INJECTOR_PW",
+          unit: "ms",
+          confidence: "high",
+          scale: null,
+          offset: null,
+          plausible_min: null,
+          plausible_max: null,
+          notes: null,
+        },
+      ],
+    });
+    const channels = new Map([channel("did:INJECTOR_PW", 28364, "raw")]);
+    render(createElement(DataSourcesPanel, { channels, status: null }));
+    fireEvent.click(screen.getByRole("button", { name: "Nissan DIDs" }));
+    expect(await screen.findByText("28364 raw")).toBeInTheDocument();
+    expect(screen.queryByText("ms")).not.toBeInTheDocument();
+  });
+
   it("separates catalogued-but-unpolled DIDs from silent ones", async () => {
     // Only `collection.obd_dids` is ever requested. Counting the rest of the
     // catalog as "not responding" reported a fault where there is none.

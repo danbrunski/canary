@@ -278,6 +278,25 @@ function ObdTab({
 // Nissan DIDs
 // ---------------------------------------------------------------------------
 
+/** The catalog unit is what the DID *would* read once its scale constant is
+ *  pinned; until then the daemon ships the raw count (unit `raw`). Printing
+ *  the catalog unit next to an unscaled count says 28364 ms, so say `raw`
+ *  and keep the target unit in the tooltip. */
+function unitCell(channels: Map<string, ChannelSnapshot>, d: DidEntry) {
+  const liveUnit = channels.get(`did:${d.name}`)?.latest.unit;
+  if (liveUnit === "raw") {
+    return (
+      <span
+        className="italic"
+        title={`scale constant not pinned in dids.yaml — raw count, not ${d.unit || "engineering units"}`}
+      >
+        raw
+      </span>
+    );
+  }
+  return d.unit || "—";
+}
+
 function DidTab({
   channels,
   view,
@@ -357,7 +376,9 @@ function DidTab({
                               </span>
                             )}
                           </td>
-                          <td className={cn(TD, "text-fg-dim")}>{d.unit || "—"}</td>
+                          <td className={cn(TD, "text-fg-dim")}>
+                            {unitCell(channels, d)}
+                          </td>
                           <td className={cn(TD, "text-fg-faint")}>{d.confidence}</td>
                         </tr>
                       );
