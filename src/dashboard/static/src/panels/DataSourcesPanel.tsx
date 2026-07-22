@@ -5,6 +5,7 @@ import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { useControlResource } from "../hooks/useControlResource";
+import { renderChannel } from "../lib/telemetryDisplay";
 import { cn, placeholderClass } from "../styles";
 import type {
   CanCoverageResponse,
@@ -405,6 +406,10 @@ interface CanRow {
   source: string;
   channel: string | null;
   undecoded: boolean;
+  scale: number | null;
+  offset: number | null;
+  plausible_min: number | null;
+  plausible_max: number | null;
 }
 
 function CanTab({
@@ -428,6 +433,10 @@ function CanTab({
       source: s.source,
       channel: s.channel,
       undecoded: false,
+      scale: s.scale,
+      offset: s.offset,
+      plausible_min: s.plausible_min,
+      plausible_max: s.plausible_max,
     }));
     // Undecoded IDs: raw CAN frames seen on the bus with no decoder.
     const decoded = new Set(data.decoded_ids_hex.map((h) => h.toUpperCase()));
@@ -444,6 +453,10 @@ function CanTab({
         source: "raw",
         channel: key,
         undecoded: true,
+        scale: null,
+        offset: null,
+        plausible_min: null,
+        plausible_max: null,
       });
     }
     const base = out.sort((a, b) => a.canId - b.canId || a.signal.localeCompare(b.signal));
@@ -472,6 +485,20 @@ function CanTab({
               <tbody className="font-num tabular-nums">
                 {rows.map((r) => {
                   const lv = liveValue(channels, r.channel);
+                  const snap = r.channel ? channels.get(r.channel) : undefined;
+                  const scaled =
+                    !r.undecoded && snap
+                      ? renderChannel(snap, {
+                          name: r.signal,
+                          scale: r.scale,
+                          offset: r.offset,
+                          unit: "",
+                          confidence: "medium",
+                          plausible_min: r.plausible_min,
+                          plausible_max: r.plausible_max,
+                        })
+                      : null;
+                  const valueText = scaled ? `${scaled.text}${scaled.unit ? ` ${scaled.unit}` : ""}` : lv.text;
                   return (
                     <tr key={`${r.canIdHex}-${r.signal}-${r.source}`} className={ROW}>
                       <td className={cn(TD, "text-fg-dim")}>{r.canIdHex}</td>
@@ -480,7 +507,7 @@ function CanTab({
                         {r.undecoded ? (
                           <span className="text-fg-faint">{lv.active ? "active" : "—"}</span>
                         ) : (
-                          valueCell(lv.active, lv.text)
+                          valueCell(lv.active, valueText)
                         )}
                       </td>
                       <td className={cn(TD, "text-fg-faint")}>{r.undecoded ? "raw" : r.source}</td>

@@ -27,7 +27,7 @@ export function renderChannel(
     return { text: "—", unit: "", bandClass: "", raw: false };
   }
 
-  const isDecoded = snapshot.latest.source === "decoded";
+  const isDecoded = snapshot.latest.source === "decoded" || snapshot.latest.source === "dbc";
   let value = raw;
   if (binding && binding.scale !== null && isDecoded) {
     value = raw * binding.scale + (binding.offset ?? 0);
@@ -63,7 +63,8 @@ export function sparkSeries(
   snapshot: ChannelSnapshot,
   binding: BindingDisplay | undefined,
 ): number[] {
-  if (!binding || binding.scale === null || snapshot.latest.source !== "decoded") {
+  const isDecoded = snapshot.latest.source === "decoded" || snapshot.latest.source === "dbc";
+  if (!binding || binding.scale === null || !isDecoded) {
     return snapshot.history;
   }
   const offset = binding.offset ?? 0;

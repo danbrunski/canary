@@ -56,6 +56,10 @@ export interface CanSignal {
   source: "decoded" | "dbc";
   /** Telemetry-stream key for the live value, e.g. `decoded:ECM_RPM`. */
   channel: string;
+  scale: number | null;
+  offset: number | null;
+  plausible_min: number | null;
+  plausible_max: number | null;
 }
 
 export interface CanCoverageResponse {

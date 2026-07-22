@@ -249,6 +249,10 @@ def read_can_coverage(
                     "unit": "" if signal.unit == "unknown" else signal.unit,
                     "source": "decoded",
                     "channel": decoded_channel(signal.name),
+                    "scale": signal.scale,
+                    "offset": signal.offset,
+                    "plausible_min": signal.plausible_min,
+                    "plausible_max": signal.plausible_max,
                 }
             )
 
@@ -268,6 +272,10 @@ def read_can_coverage(
                         "unit": getattr(signal, "unit", "") or "",
                         "source": "dbc",
                         "channel": dbc_channel(signal.name),
+                        "scale": signal.scale,
+                        "offset": signal.offset,
+                        "plausible_min": signal.minimum,
+                        "plausible_max": signal.maximum,
                     }
                 )
 
