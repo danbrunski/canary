@@ -31,11 +31,11 @@ describe("DtcPanel", () => {
     mocks.getDtc.mockResolvedValue(EMPTY);
     render(createElement(DtcPanel));
     expect(await screen.findByText("never polled")).toBeInTheDocument();
-    expect(screen.getByText("MIL state unknown")).toBeInTheDocument();
+    expect(screen.getByText("MIL / CEL state unknown")).toBeInTheDocument();
     expect(screen.getAllByText("none")).toHaveLength(3);
   });
 
-  it("renders the MIL-on banner and the three code lists with description/system", async () => {
+  it("renders the MIL/CEL-on banner and the three code lists with description/system", async () => {
     mocks.getDtc.mockResolvedValue({
       captured_at: "2026-07-19T12:00:00+00:00",
       stored: [
@@ -64,7 +64,7 @@ describe("DtcPanel", () => {
     } satisfies DtcReportResponse);
     render(createElement(DtcPanel));
 
-    expect(await screen.findByText("MIL ON")).toBeInTheDocument();
+    expect(await screen.findByText("MIL / CEL ON")).toBeInTheDocument();
     expect(screen.getByText("P0300")).toBeInTheDocument();
     expect(
       screen.getByText("Random/Multiple Cylinder Misfire Detected"),
@@ -104,7 +104,7 @@ describe("DtcPanel", () => {
       stale: true,
     } satisfies DtcReportResponse);
     render(createElement(DtcPanel));
-    expect(await screen.findByText("MIL off")).toBeInTheDocument();
+    expect(await screen.findByText("MIL / CEL off")).toBeInTheDocument();
     expect(screen.getByText(/stale/)).toBeInTheDocument();
   });
 

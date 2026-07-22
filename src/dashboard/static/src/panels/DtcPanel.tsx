@@ -8,9 +8,14 @@ import type { DtcCodeEntry } from "../types";
 import { formatTimestamp } from "../util/time";
 
 /** Trouble codes (Task 1.9): stored/pending/permanent DTCs from the daemon's
- *  periodic Mode 03/07/0A poll (Task 1.3), with MIL state and a staleness
+ *  periodic Mode 03/07/0A poll (Task 1.3), with lamp state and a staleness
  *  indicator. Read-only — there is no clear-codes control here or anywhere
- *  in the dashboard; that's an intentional design decision, not a gap. */
+ *  in the dashboard; that's an intentional design decision, not a gap.
+ *
+ *  The lamp banner reads "MIL / CEL": MIL is the OBD-II spec name (and what
+ *  the wire format, `mil_on`, and the `MIL_STATUS` channel are called), CEL
+ *  is what it's called everywhere else. Both, so neither reader has to
+ *  translate. */
 export function DtcPanel() {
   const fetcher = useCallback((signal: AbortSignal) => getDtc(signal), []);
   const { data, error, loading } = useControlResource(fetcher, {
@@ -40,6 +45,7 @@ export function DtcPanel() {
       count={`${data.dtc_count} code${data.dtc_count === 1 ? "" : "s"}`}
     >
       <div
+        title="Malfunction Indicator Lamp — the check-engine light (Mode 01 PID 01, bit 7)"
         className={cn(
           "mb-3 rounded-[8px] border px-3 py-2 text-[0.9rem] font-semibold",
           milOn
@@ -47,7 +53,11 @@ export function DtcPanel() {
             : "border-ok/45 bg-ok/10 text-ok",
         )}
       >
-        {milOn == null ? "MIL state unknown" : milOn ? "MIL ON" : "MIL off"}
+        {milOn == null
+          ? "MIL / CEL state unknown"
+          : milOn
+            ? "MIL / CEL ON"
+            : "MIL / CEL off"}
       </div>
 
       <p className="mb-3 text-[0.78rem] text-fg-dim">
