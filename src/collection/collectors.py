@@ -72,6 +72,7 @@ def default_collectors(
             service_poll_interval_seconds=config.collection.obd_monitor_poll_interval_seconds,
             freeze_frame_trigger=freeze_frame_trigger,
             custom_pids=tuple(custom_pids),
+            priority_channels=config.collection.obd_priority_channels,
         )
 
         async def canable_obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:

@@ -33,7 +33,15 @@ from src.collection.custom_pids import CustomPid
 from src.collection.isotp import DEFAULT_REQUEST_ID, ObdResponse
 from src.collection.obd_collector import JsonlReadingWriter
 from src.collection.obd_registry import MODE01_REGISTRY
-from src.collection.obd_scheduler import CanObdLoopStats, FreezeFrameTrigger
+from src.collection.obd_scheduler import (
+    AUTO_MISS_BACKOFF_SECONDS,
+    MAX_MISS_BACKOFF_SECONDS,
+    CanObdLoopStats,
+    FreezeFrameTrigger,
+    _PollRequestState,
+    _select_next_due_request,
+    _update_response_state,
+)
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanBusConfig
 
@@ -375,6 +383,136 @@ def test_monitor_status_pid_is_in_the_default_auto_poll_set() -> None:
     )
     requests = {r.channel: r for r in build_poll_requests(_StaticDiscovery(), spec)}
     assert requests["MONITOR_STATUS"].poll_tier == "slow"
+
+
+# ---------------------------------------------------------------------------
+# Priority lane + never-answered backoff
+# ---------------------------------------------------------------------------
+
+
+def test_build_poll_requests_marks_mode_critical_channels_priority() -> None:
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=("RPM", "SPEED", "COOLANT_TEMP"),
+    )
+
+    priority = {r.channel: r.priority for r in build_poll_requests(_StaticDiscovery(), spec)}
+
+    assert priority["RPM"] is True
+    assert priority["SPEED"] is True
+    assert priority["COOLANT_TEMP"] is False
+
+
+def test_build_poll_requests_priority_channels_are_configurable() -> None:
+    can_config = CanBusConfig(interface="virtual", channel="test", bitrate=500000)
+    pids = ("RPM", "COOLANT_TEMP")
+
+    opted_out = build_poll_requests(
+        _StaticDiscovery(),
+        CanObdSpec(can=can_config, pids=pids, priority_channels=()),
+    )
+    reassigned = build_poll_requests(
+        _StaticDiscovery(),
+        CanObdSpec(can=can_config, pids=pids, priority_channels=("coolant_temp",)),
+    )
+
+    assert not any(r.priority for r in opted_out)
+    assert {r.channel for r in reassigned if r.priority} == {"COOLANT_TEMP"}
+
+
+def test_priority_request_wins_a_contended_slot_over_a_more_overdue_one() -> None:
+    """The fix for operating-mode flapping: when the plan asks for more than
+    the bus can serve every request is permanently overdue, so plain
+    most-overdue-first degrades RPM along with everything else and the
+    segmenter loses the signal every mode gates on."""
+    now = 1_000.0
+    requests = [
+        _PollRequest(
+            kind="pid",
+            service=0x01,
+            identifier=0x2F,
+            request_id=DEFAULT_REQUEST_ID,
+            channel="FUEL_LEVEL",
+            poll_tier="slow",
+        ),
+        _PollRequest(
+            kind="pid",
+            service=0x01,
+            identifier=0x0C,
+            request_id=DEFAULT_REQUEST_ID,
+            channel="RPM",
+            poll_tier="fast",
+            priority=True,
+        ),
+    ]
+    states = [
+        _PollRequestState(next_due_at=now - 60.0),  # far more overdue
+        _PollRequestState(next_due_at=now - 0.5),
+    ]
+
+    selection = _select_next_due_request(requests, states, now)
+
+    assert selection is not None
+    assert selection[1].channel == "RPM"
+
+
+def test_priority_request_does_not_starve_others_before_it_is_due() -> None:
+    now = 1_000.0
+    requests = [
+        _PollRequest(
+            kind="pid",
+            service=0x01,
+            identifier=0x2F,
+            request_id=DEFAULT_REQUEST_ID,
+            channel="FUEL_LEVEL",
+            poll_tier="slow",
+        ),
+        _PollRequest(
+            kind="pid",
+            service=0x01,
+            identifier=0x0C,
+            request_id=DEFAULT_REQUEST_ID,
+            channel="RPM",
+            poll_tier="fast",
+            priority=True,
+        ),
+    ]
+    states = [
+        _PollRequestState(next_due_at=now - 1.0),
+        _PollRequestState(next_due_at=now + 0.5),  # not due yet
+    ]
+
+    selection = _select_next_due_request(requests, states, now)
+
+    assert selection is not None
+    assert selection[1].channel == "FUEL_LEVEL"
+
+
+def test_miss_backoff_escalates_only_for_requests_that_never_answered() -> None:
+    """Unsupported PIDs from the ``auto`` catalog probe are permanent, so a
+    flat 30 s retry spends bus time forever on channels that will never
+    answer. A channel that *has* answered keeps the flat backoff so a bus
+    dropout still recovers promptly."""
+    never_answered = _PollRequestState()
+    for _ in range(3):
+        _update_response_state(never_answered, emitted=False, now=0.0)
+    assert never_answered.suppressed_until == AUTO_MISS_BACKOFF_SECONDS * 4
+
+    answered_before = _PollRequestState(last_response_at=5.0)
+    for _ in range(3):
+        _update_response_state(answered_before, emitted=False, now=0.0)
+    assert answered_before.suppressed_until == AUTO_MISS_BACKOFF_SECONDS
+
+
+def test_miss_backoff_is_capped_and_resets_on_a_response() -> None:
+    state = _PollRequestState()
+    for _ in range(40):
+        _update_response_state(state, emitted=False, now=0.0)
+    assert state.suppressed_until == MAX_MISS_BACKOFF_SECONDS
+
+    _update_response_state(state, emitted=True, now=0.0)
+    assert state.suppressed_until == 0.0
+    assert state.missed_responses == 0
 
 
 # ---------------------------------------------------------------------------

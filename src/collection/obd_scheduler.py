@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 from src.collection.can_obd_client import DEFAULT_REQUEST_ID, PID_DECODERS
 from src.collection.isotp import nrc_name
 from src.collection.obd_registry import PollTier, lookup
-from src.config import CanBusConfig, CollectionConfig
+from src.config import DEFAULT_PRIORITY_CHANNELS, CanBusConfig, CollectionConfig
 
 if TYPE_CHECKING:
     from src.collection.custom_pids import CustomPid
@@ -22,8 +22,27 @@ if TYPE_CHECKING:
 AUTO_PIDS = "auto"
 DEFAULT_DID_REQUEST_ID = 0x7E0
 AUTO_MISS_BACKOFF_SECONDS = 30.0
+#: Ceiling for the escalating backoff applied to a request the ECU has *never*
+#: answered (see ``_miss_backoff_seconds``). The ``auto`` PID set probes every
+#: decoder in the catalog, so a dozen-odd PIDs this ECU simply doesn't support
+#: is normal — at the flat 30 s backoff they each re-probe twice a minute
+#: forever, and every probe costs a full request slot plus its timeout. That
+#: is bus time stolen from PIDs that do answer.
+MAX_MISS_BACKOFF_SECONDS = 900.0
 BUS_BUDGET_MULTIPLIER = 8.0
 MIN_BUS_BUDGET_REQUESTS_PER_SECOND = 2.0
+# ``DEFAULT_PRIORITY_CHANNELS`` (imported from src.config, re-exported below):
+# the channels that get first refusal on a due request slot, see
+# ``_select_next_due_request``. They are the signals every entry in
+# ``preprocessing.operating_modes`` gates on, and the resampler holds them to
+# the *fast*-channel staleness ceiling (``interval x max_gap_factor``, 2 s on a
+# 1 Hz grid) rather than the generous slow-channel one — so when the bus is
+# oversubscribed and they degrade along with everything else, they go NaN on
+# most rows, every rpm/speed-gated mode stops matching, and the label falls
+# through to whichever mode happens not to constrain the missing signal.
+# Reserving their configured rate costs the other tiers a share of a contended
+# bus; mislabeling every operating mode costs more. Vehicle-agnostic: these are
+# standard Mode 01 PIDs, not Xterra-isms.
 #: Default cadence for the Mode 03/07/0A DTC poll (Task 1.3). DTCs are a
 #: minutes-scale signal (nothing polls faster than the ECM's own confirm
 #: window), so ~5 min keeps it off the fast bus budget entirely.
@@ -226,6 +245,10 @@ class CanObdSpec:
     #: scheduler never re-reads the YAML itself. Empty by default (no
     #: ``data/custom_pids.yaml`` is the common case).
     custom_pids: tuple[CustomPid, ...] = ()
+    #: Channels that win a contended request slot while due, so they hold
+    #: their tier rate instead of degrading with the rest of the plan. See
+    #: ``DEFAULT_PRIORITY_CHANNELS``; empty disables the priority lane.
+    priority_channels: tuple[str, ...] = DEFAULT_PRIORITY_CHANNELS
 
 
 @dataclass
@@ -255,6 +278,8 @@ class _PollRequest:
     poll_tier: PollTier = "medium"
     auto_probe: bool = False
     fast_probe: bool = False
+    #: First refusal on a due request slot (``CanObdSpec.priority_channels``).
+    priority: bool = False
     #: Set only for ``kind="custom"`` — the definition ``_response_to_reading``
     #: decodes the response through (formula, unit). ``None`` for every other
     #: kind, which all decode via the static PID_DECODERS/DTC tables instead.
@@ -535,6 +560,8 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
     for pid in explicit_pids:
         add_pid(pid, auto_probe=False, fast_probe=False)
 
+    priority_channels = {channel.strip().upper() for channel in spec.priority_channels}
+
     requests = []
     for pid in pids:
         channel, poll_tier = _pid_channel_and_tier(pid)
@@ -548,6 +575,7 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
                 poll_tier=poll_tier,
                 auto_probe=auto_probe_by_pid[pid],
                 fast_probe=fast_probe_by_pid[pid],
+                priority=channel.upper() in priority_channels,
             )
         )
     for did in [parse_did_token(d) for d in spec.dids]:
@@ -575,6 +603,10 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
                 channel=f"custom:{custom.name}",
                 poll_tier=custom.poll_tier,
                 custom_pid=custom,
+                # Matched on the bare name, not the ``custom:`` channel prefix,
+                # so a vehicle that sources rpm/speed from a custom PID gets the
+                # same lane as the standard Mode 01 one.
+                priority=custom.name.strip().upper() in priority_channels,
             )
         )
     if spec.dtc_poll_interval_seconds > 0:
@@ -660,8 +692,32 @@ def _update_response_state(
         state.suppressed_until = 0.0
         return
     state.missed_responses += 1
-    state.suppressed_until = now + AUTO_MISS_BACKOFF_SECONDS
+    state.suppressed_until = now + _miss_backoff_seconds(state)
     state.backoffs += 1
+
+
+def _miss_backoff_seconds(state: _PollRequestState) -> float:
+    """Backoff to apply after a missed response.
+
+    A request that has answered at least once keeps the flat
+    ``AUTO_MISS_BACKOFF_SECONDS`` — it's a live channel that dropped a
+    response (bus dropout, DID window, momentary ECU silence) and must come
+    back promptly once the bus recovers, so this path is deliberately not
+    escalated.
+
+    A request that has *never* answered is a different thing: on the ``auto``
+    PID set the catalog is probed wholesale, so unsupported PIDs are expected
+    and permanent. Doubling their backoff up to ``MAX_MISS_BACKOFF_SECONDS``
+    stops them re-probing twice a minute forever and hands the reclaimed
+    request slots (and their timeout stalls) back to channels that answer.
+    They are never retired outright — a PID gated behind a warm engine or an
+    ECU that only answers in a particular state still gets a periodic probe.
+    """
+    if state.last_response_at is not None:
+        return AUTO_MISS_BACKOFF_SECONDS
+    # Clamped before the exponentiation: float ** big raises OverflowError.
+    exponent = min(max(state.missed_responses - 1, 0), 20)
+    return min(AUTO_MISS_BACKOFF_SECONDS * (2.0**exponent), MAX_MISS_BACKOFF_SECONDS)
 
 
 def _initial_request_states(
@@ -752,7 +808,16 @@ def _select_next_due_request(
     ]
     if not candidates:
         return None
-    _due_at, index, request, state = min(candidates, key=lambda item: (item[0], item[1]))
+    # Priority requests (``CanObdSpec.priority_channels``) win over any other
+    # due request, however overdue that one is. Without this the plan degrades
+    # *uniformly* when demand exceeds what the bus can actually serve — every
+    # request, mode-critical or not, ends up at the same fraction of its
+    # configured rate. Starvation isn't a risk in the other direction: the
+    # priority set is small and each member still only becomes due at its own
+    # tier rate, so it can never claim more than that slice of the budget.
+    _due_at, index, request, state = min(
+        candidates, key=lambda item: (not item[2].priority, item[0], item[1])
+    )
     return index, request, state
 
 
@@ -840,6 +905,7 @@ def _scheduler_metrics(
                 else f"0x{request.identifier:02X}",
                 "channel": request.channel,
                 "poll_tier": request.poll_tier,
+                "priority": request.priority,
                 "configured_rate_hz": round(_request_rate_hz(request, spec), 4),
                 "requests_sent": state.requests_sent,
                 "responses": state.responses,
@@ -891,6 +957,8 @@ __all__ = [
     "AUTO_MISS_BACKOFF_SECONDS",
     "AUTO_PIDS",
     "DEFAULT_DID_REQUEST_ID",
+    "DEFAULT_PRIORITY_CHANNELS",
+    "MAX_MISS_BACKOFF_SECONDS",
     "CanObdLoopStats",
     "CanObdSpec",
     "DidSessionSpec",

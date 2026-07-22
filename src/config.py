@@ -17,6 +17,15 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+#: Default ``CollectionConfig.obd_priority_channels`` — the OBD channels that
+#: keep their configured poll rate when the request plan oversubscribes the
+#: bus. Lives here rather than in ``collection.obd_scheduler`` (which imports
+#: it) only to keep the config default and the scheduler constant from
+#: drifting apart. See the scheduler's ``DEFAULT_PRIORITY_CHANNELS`` re-export
+#: for why these two channels specifically.
+DEFAULT_PRIORITY_CHANNELS: tuple[str, ...] = ("RPM", "SPEED")
+
+
 class VehicleParameters(_Strict):
     """Physical parameters needed for derived trip/fuel/performance channels
     (Task 6.6). All optional with defaults so existing ``canary.yaml`` files
@@ -196,6 +205,12 @@ class CollectionConfig(_Strict):
     obd_did_session_lapse_seconds: float = 5.0
     obd_request_timeout_seconds: float = 1.0
     obd_poll_rate_hz: float
+    #: Channels that hold their tier rate when the request plan asks for more
+    #: than the bus can serve; everything else degrades around them. Defaults
+    #: to the signals ``preprocessing.operating_modes`` gates on — starve
+    #: those and the segmenter can't classify a row at all. Empty disables the
+    #: priority lane (uniform degradation, the pre-1.11 behavior).
+    obd_priority_channels: tuple[str, ...] = DEFAULT_PRIORITY_CHANNELS
     #: Cadence (s) of the Mode 03/07/0A stored/pending/permanent DTC poll
     #: (Task 1.3) on the Canable-native path. DTCs change on a minutes
     #: scale, not seconds, so this is its own knob rather than a
