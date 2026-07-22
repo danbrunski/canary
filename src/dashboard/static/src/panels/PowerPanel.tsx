@@ -44,12 +44,14 @@ function watchdogLabel(p: PowerSnapshot): string {
   return "armed";
 }
 
-/** Bench vs. key-off vs. unknown, mirroring the watchdog's own three-way
- *  on_battery (see ups_shutdown_watch.on_battery). */
+/** Mirrors the watchdog's own three-way on_battery (see
+ *  ups_shutdown_watch.on_battery) — "external" covers both bench PSU and
+ *  vehicle 12V alike, since the gauge can't tell those apart (only whether
+ *  the battery is discharging). */
 function powerSourceLabel(p: PowerSnapshot): string {
   if (!p.watchdog_running) return "—";
   if (p.on_battery === true) return "battery (input lost)";
-  if (p.on_battery === false) return "external / bench power";
+  if (p.on_battery === false) return "external";
   return "unknown (no gauge data yet)";
 }
 
