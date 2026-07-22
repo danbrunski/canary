@@ -19,6 +19,7 @@ from src.collection.can_obd_collector import (
     DidSessionSpec,
     ObdSchedulerMetrics,
     _PollRequest,
+    _query_with_tap,
     _response_to_reading,
     build_poll_requests,
     parse_can_id,
@@ -32,7 +33,7 @@ from src.collection.custom_pids import CustomPid
 from src.collection.isotp import DEFAULT_REQUEST_ID, ObdResponse
 from src.collection.obd_collector import JsonlReadingWriter
 from src.collection.obd_registry import MODE01_REGISTRY
-from src.collection.obd_scheduler import FreezeFrameTrigger
+from src.collection.obd_scheduler import CanObdLoopStats, FreezeFrameTrigger
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanBusConfig
 
@@ -228,6 +229,61 @@ class _SilentBus:
         if timeout:
             time.sleep(min(timeout, 0.005))
         return None
+
+
+class _AlwaysNegativeBus:
+    """Always answers with a formal `7F 01 31` refusal — never silent."""
+
+    def __init__(self) -> None:
+        self.sent: list[can.Message] = []
+
+    def send(self, msg: can.Message) -> None:
+        self.sent.append(msg)
+
+    def recv(self, timeout: float = 0.0) -> can.Message | None:
+        return can.Message(
+            arbitration_id=0x7E8,
+            data=bytes([0x03, 0x7F, 0x01, 0x31, 0x00, 0x00, 0x00, 0x00]),
+            is_extended_id=False,
+        )
+
+
+def test_query_with_tap_negative_response_is_distinct_from_timeout() -> None:
+    """A formal 7F refusal must be visible to the caller, not just `None` —
+    the exact conflation `_query_with_tap` used to have with a true timeout."""
+    request = _PollRequest(
+        kind="pid", service=0x01, identifier=0x0C, request_id=DEFAULT_REQUEST_ID, channel="RPM"
+    )
+    stats = CanObdLoopStats()
+    result = _query_with_tap(
+        _AlwaysNegativeBus(),  # type: ignore[arg-type]
+        request,
+        timeout_seconds=0.2,
+        on_frame=lambda _msg: None,
+        stop_event=threading.Event(),
+        stats=stats,
+        deadline_monotonic=time.monotonic() + 0.5,
+    )
+    assert result.response is None
+    assert result.negative_response_code == 0x31
+
+
+def test_query_with_tap_true_timeout_has_no_negative_response_code() -> None:
+    request = _PollRequest(
+        kind="pid", service=0x01, identifier=0x0C, request_id=DEFAULT_REQUEST_ID, channel="RPM"
+    )
+    stats = CanObdLoopStats()
+    result = _query_with_tap(
+        _SilentBus(),  # type: ignore[arg-type]
+        request,
+        timeout_seconds=0.05,
+        on_frame=lambda _msg: None,
+        stop_event=threading.Event(),
+        stats=stats,
+        deadline_monotonic=time.monotonic() + 0.5,
+    )
+    assert result.response is None
+    assert result.negative_response_code is None
 
 
 def test_parse_pid_token_accepts_auto_names_and_hex() -> None:
@@ -544,6 +600,8 @@ def test_dtc_poll_skips_cleanly_when_bus_never_answers() -> None:
 
     assert stats.readings_emitted == 0
     assert stats.request_timeouts > 0
+    # True bus silence (no frame at all), not a formal ECU refusal.
+    assert stats.negative_responses == 0
     dtc_service_bytes = {bytes(msg.data)[:2] for msg in bus.sent}
     assert bytes([0x01, 0x03]) in dtc_service_bytes
 
@@ -675,13 +733,22 @@ def test_scheduler_metrics_report_rates_and_backoff_state() -> None:
     )
 
     assert stats.scheduler_snapshots >= 1
+    assert stats.negative_responses >= 1
     latest = snapshots[-1].to_dict()
     assert latest["bus_budget_requests_per_second"] > spec.poll_rate_hz
     assert latest["response_rate"] is not None
     by_channel = {row["channel"]: row for row in latest["requests"]}
+    # ENGINE_LOAD always gets a formal 7F 01 12 refusal from
+    # `_NegativeThenPositiveBus`, never a true timeout — that must land in
+    # `negative_responses`, not `timeouts` (the bug this counter fixes).
     assert by_channel["ENGINE_LOAD"]["backed_off"] is True
-    assert by_channel["ENGINE_LOAD"]["timeouts"] >= 1
+    assert by_channel["ENGINE_LOAD"]["negative_responses"] >= 1
+    assert by_channel["ENGINE_LOAD"]["timeouts"] == 0
+    assert (
+        by_channel["ENGINE_LOAD"]["last_negative_response_code"] == "0x12 (subFunctionNotSupported)"
+    )
     assert by_channel["RPM"]["responses"] >= 1
+    assert latest["negative_responses"] >= 1
 
 
 # --- Custom PIDs (Task 2.6) --------------------------------------------------

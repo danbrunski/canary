@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from src.collection.can_obd_client import DEFAULT_REQUEST_ID, PID_DECODERS
+from src.collection.isotp import nrc_name
 from src.collection.obd_registry import PollTier, lookup
 from src.config import CanBusConfig, CollectionConfig
 
@@ -234,6 +235,11 @@ class CanObdLoopStats:
     requests_sent: int = 0
     readings_emitted: int = 0
     request_timeouts: int = 0
+    #: Formal ECU refusals (0x7F <service> <NRC>) — distinct from
+    #: `request_timeouts` (no frame at all). Folding these together made a
+    #: silent ECU indistinguishable from one promptly saying "no" with a
+    #: reason (found investigating Mode 0A/06 on the Xterra).
+    negative_responses: int = 0
     bus_errors: int = 0
     scheduler_snapshots: int = 0
     session_controls_sent: int = 0
@@ -265,6 +271,9 @@ class _PollRequestState:
     requests_sent: int = 0
     responses: int = 0
     timeouts: int = 0
+    #: Formal ECU refusals for this request — see `CanObdLoopStats.negative_responses`.
+    negative_responses: int = 0
+    last_negative_response_code: int | None = None
     backoffs: int = 0
     bus_errors: int = 0
 
@@ -431,6 +440,7 @@ class ObdSchedulerMetrics:
     requests_sent: int
     readings_emitted: int
     request_timeouts: int
+    negative_responses: int
     bus_errors: int
     response_rate: float | None
     by_tier: dict[str, dict[str, float | int | None]]
@@ -447,6 +457,7 @@ class ObdSchedulerMetrics:
             "requests_sent": self.requests_sent,
             "readings_emitted": self.readings_emitted,
             "request_timeouts": self.request_timeouts,
+            "negative_responses": self.negative_responses,
             "bus_errors": self.bus_errors,
             "response_rate": self.response_rate,
             "by_tier": self.by_tier,
@@ -793,6 +804,7 @@ def _scheduler_metrics(
         sent = sum(state.requests_sent for _request, state in tier_requests)
         responses = sum(state.responses for _request, state in tier_requests)
         timeouts = sum(state.timeouts for _request, state in tier_requests)
+        negative_responses = sum(state.negative_responses for _request, state in tier_requests)
         tier_active = sum(
             1 for _request, state in tier_requests if not _is_request_suppressed(state, now)
         )
@@ -812,6 +824,7 @@ def _scheduler_metrics(
             "requests_sent": sent,
             "responses": responses,
             "timeouts": timeouts,
+            "negative_responses": negative_responses,
             "response_rate": round(responses / sent, 4) if sent else None,
         }
 
@@ -831,6 +844,13 @@ def _scheduler_metrics(
                 "requests_sent": state.requests_sent,
                 "responses": state.responses,
                 "timeouts": state.timeouts,
+                "negative_responses": state.negative_responses,
+                "last_negative_response_code": (
+                    f"0x{state.last_negative_response_code:02X} "
+                    f"({nrc_name(state.last_negative_response_code)})"
+                    if state.last_negative_response_code is not None
+                    else None
+                ),
                 "response_rate": (
                     round(state.responses / state.requests_sent, 4) if state.requests_sent else None
                 ),
@@ -856,6 +876,7 @@ def _scheduler_metrics(
         requests_sent=stats.requests_sent,
         readings_emitted=stats.readings_emitted,
         request_timeouts=stats.request_timeouts,
+        negative_responses=stats.negative_responses,
         bus_errors=stats.bus_errors,
         response_rate=(
             round(stats.readings_emitted / stats.requests_sent, 4) if stats.requests_sent else None

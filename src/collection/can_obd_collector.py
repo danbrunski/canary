@@ -24,6 +24,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
 
@@ -266,7 +267,7 @@ def run_can_obd_loop(
         request_state.last_requested_at = request_started
         request_state.requests_sent += 1
         try:
-            response = _query_with_tap(
+            result = _query_with_tap(
                 bus,
                 request,
                 timeout_seconds=timeout_seconds,
@@ -280,8 +281,8 @@ def run_can_obd_loop(
             stats.bus_errors += 1
             raise
         emitted = False
-        if response is not None:
-            readings = _response_to_reading(request, response)
+        if result.response is not None:
+            readings = _response_to_reading(request, result.response)
             if readings:
                 emitted = True
                 stats.readings_emitted += len(readings)
@@ -290,6 +291,12 @@ def run_can_obd_loop(
         if emitted:
             request_state.responses += 1
             request_state.last_response_at = time.monotonic()
+        elif result.negative_response_code is not None:
+            # Formal ECU refusal, not a true timeout — counted separately
+            # (see `QueryResult`) so it doesn't masquerade as bus silence.
+            request_state.negative_responses += 1
+            request_state.last_negative_response_code = result.negative_response_code
+            stats.negative_responses += 1
         else:
             request_state.timeouts += 1
             stats.request_timeouts += 1
@@ -701,7 +708,7 @@ def _send_session_control(
         channel="UDS_SESSION_CONTROL",
     )
     stats.session_controls_sent += 1
-    response = _query_with_tap(
+    result = _query_with_tap(
         bus,
         request,
         timeout_seconds=timeout_seconds,
@@ -710,7 +717,22 @@ def _send_session_control(
         stats=stats,
         deadline_monotonic=deadline_monotonic,
     )
-    return response is not None
+    return result.response is not None
+
+
+@dataclass(frozen=True)
+class QueryResult:
+    """Outcome of one `_query_with_tap` request/response cycle.
+
+    Distinguishes a formal negative response (ECU replied with a reason,
+    `0x7F <service> <NRC>`) from a true timeout (no frame at all) so
+    callers can count them separately instead of folding both into
+    "no response" — the gap that hid whether the Xterra's ECU is silent
+    on Mode 0A/06 or promptly refusing them.
+    """
+
+    response: ObdResponse | None = None
+    negative_response_code: int | None = None
 
 
 def _query_with_tap(
@@ -722,7 +744,7 @@ def _query_with_tap(
     stop_event: threading.Event,
     stats: CanObdLoopStats,
     deadline_monotonic: float | None,
-) -> ObdResponse | None:
+) -> QueryResult:
     # Mode 03/07/0A (Task 1.3) and Mode 06 (Task 3.1) take no parameter byte
     # at all — same shape as `CanObdClient.query_mode_03`'s
     # `pid=None`/`expect_pid_echo=False`, so `_PollRequest.identifier` (a
@@ -755,7 +777,7 @@ def _query_with_tap(
         responder = int(msg.arbitration_id)
         result = assembler.accept(responder, data)
         if result.negative_response:
-            return None
+            return QueryResult(negative_response_code=result.negative_response_code)
         if result.flow_control_id is not None:
             bus.send(
                 can.Message(
@@ -766,8 +788,8 @@ def _query_with_tap(
             )
             continue
         if result.response is not None:
-            return result.response
-    return None
+            return QueryResult(response=result.response)
+    return QueryResult()
 
 
 def _recv_and_tap(

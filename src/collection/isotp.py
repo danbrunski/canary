@@ -38,6 +38,10 @@ class IsoTpFrameResult:
     response: ObdResponse | None = None
     flow_control_id: int | None = None
     negative_response: bool = False
+    #: The NRC byte (e.g. 0x31 requestOutOfRange) when `negative_response`
+    #: is True; `None` otherwise, or if the frame is malformed (missing the
+    #: third body byte) despite matching the 0x7F <service> prefix.
+    negative_response_code: int | None = None
 
 
 def positive_response_service(service: int) -> int:
@@ -73,6 +77,36 @@ def single_frame_body(data: bytes) -> bytes:
 def is_negative_response(data: bytes, service: int) -> bool:
     body = single_frame_body(data)
     return len(body) >= 3 and body[0] == 0x7F and body[1] == service
+
+
+def negative_response_code(data: bytes, service: int) -> int | None:
+    """The NRC byte of a ``0x7F <service> <NRC>`` frame, or `None` if it isn't one."""
+    body = single_frame_body(data)
+    if len(body) >= 3 and body[0] == 0x7F and body[1] == service:
+        return body[2]
+    return None
+
+
+#: ISO 14229-1 Annex A negative response codes actually seen on Mode
+#: 01/03/06/07/0A/22 traffic. Not exhaustive by design (AGENTS.md: no
+#: premature abstraction) — `nrc_name` falls back to raw hex for anything
+#: not listed here.
+NRC_NAMES: dict[int, str] = {
+    0x10: "generalReject",
+    0x11: "serviceNotSupported",
+    0x12: "subFunctionNotSupported",
+    0x13: "incorrectMessageLengthOrInvalidFormat",
+    0x22: "conditionsNotCorrect",
+    0x31: "requestOutOfRange",
+    0x33: "securityAccessDenied",
+    0x78: "requestCorrectlyReceived-ResponsePending",
+}
+
+
+def nrc_name(code: int) -> str:
+    """Human-readable NRC label, e.g. for surfacing in `/status`."""
+    known = NRC_NAMES.get(code)
+    return known if known is not None else f"unknown (0x{code:02X})"
 
 
 def handle_single_frame(
@@ -130,7 +164,10 @@ class IsoTpResponseAssembler:
         frame_type = pci_type(data)
         if frame_type == PCI_SINGLE_FRAME:
             if is_negative_response(data, self.request_service):
-                return IsoTpFrameResult(negative_response=True)
+                return IsoTpFrameResult(
+                    negative_response=True,
+                    negative_response_code=negative_response_code(data, self.request_service),
+                )
             payload = handle_single_frame(data, self.expected_service, self.identifier)
             if payload is None:
                 return IsoTpFrameResult()
@@ -190,12 +227,15 @@ __all__ = [
     "DEFAULT_RESPONSE_ID_MAX",
     "DEFAULT_RESPONSE_ID_MIN",
     "FLOW_CONTROL_CTS",
+    "NRC_NAMES",
     "ObdResponse",
     "IsoTpResponseAssembler",
     "build_request_payload",
     "extract_service_payload",
     "handle_single_frame",
     "is_negative_response",
+    "negative_response_code",
+    "nrc_name",
     "parse_first_frame",
     "pci_type",
     "positive_response_service",
