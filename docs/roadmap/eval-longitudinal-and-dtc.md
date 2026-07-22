@@ -160,7 +160,16 @@ FE placeholder (`nav.ts:24` `diag-dtc`, `Workbench.tsx:143-150`).
   supporting those services (plausible for a 2008 vehicle) or a
   framing gap, since the request-building code path is identical to
   the working Mode 03/07 case; flagged as a follow-up, not blocking
-  this checkbox. `_replay` sessions confirmed structurally incapable
+  this checkbox. **Follow-up resolved (code side) same day**: root
+  cause found — a negative ISO-TP response (`0x7F <service> <NRC>`,
+  the ECU's explicit "request rejected") was being silently discarded
+  as if it were a true no-frame timeout, both landing in the same
+  `timeouts` counter with the actual NRC byte thrown away before it
+  ever reached the counting logic (fixed, commit `2f2dc6b`: NRC now
+  threaded through to a distinct `negative_responses` counter,
+  surfaced in `/status`). Still needs one more live re-check against
+  the real ECU to see which of the two explanations it actually is —
+  a morning task, not blocking this checkbox. `_replay` sessions confirmed structurally incapable
   of polling — `obd_scheduler`/`can_obd_collector` have zero
   replay-mode awareness, so replay cannot influence the live bus
   regardless of timing.
