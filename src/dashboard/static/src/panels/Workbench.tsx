@@ -1,13 +1,17 @@
+import { useEffect, useRef } from "react";
+
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import type { ScoresBySource } from "../hooks/useScoreStream";
 import { DEFAULT_ITEM, NAV, defaultItemForGroup } from "../nav";
 import {
+  cn,
   navGroupLabelClass,
   navItemClass,
   responsiveGridClass,
   sidebarClass,
   workbenchClass,
+  workbenchContentClass,
 } from "../styles";
 import type {
   AnomalyEvent,
@@ -72,6 +76,12 @@ interface WorkbenchProps {
  *  panel — current and Phase-6 — has exactly one home here (see `nav.ts`),
  *  so adding the next panel never reignites the "which tab?" question. */
 export function Workbench({ active, onNavigate, data }: WorkbenchProps) {
+  const content = useRef<HTMLDivElement>(null);
+  // The panel column keeps its own scroll offset, so a new panel would open
+  // mid-scroll at wherever the previous one was left.
+  useEffect(() => {
+    if (content.current) content.current.scrollTop = 0;
+  }, [active]);
   return (
     <div className={workbenchClass}>
       <nav className={sidebarClass} aria-label="Workbench sections">
@@ -95,7 +105,10 @@ export function Workbench({ active, onNavigate, data }: WorkbenchProps) {
           </div>
         ))}
       </nav>
-      <div className={`${responsiveGridClass} grid-cols-1`}>
+      <div
+        ref={content}
+        className={cn(responsiveGridClass, "grid-cols-1", workbenchContentClass)}
+      >
         {renderItem(active, data, onNavigate)}
       </div>
     </div>

@@ -1,5 +1,5 @@
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
-import { responsiveGridClass } from "../styles";
+import { cn, responsiveGridClass, scrollPaneClass } from "../styles";
 import type { BindingsByChannel } from "../types";
 import { TelemetryPanel } from "./TelemetryPanel";
 
@@ -15,7 +15,7 @@ interface DriveScreenProps {
  *  workbench is one tap away via the header mode toggle. */
 export function DriveScreen({ channels, bindings }: DriveScreenProps) {
   return (
-    <div className={`${responsiveGridClass} grid-cols-1`}>
+    <div className={cn(responsiveGridClass, "grid-cols-1", scrollPaneClass)}>
       <TelemetryPanel channels={channels} bindings={bindings} compact />
     </div>
   );

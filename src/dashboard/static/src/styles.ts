@@ -2,8 +2,11 @@ export function cn(...classes: Array<string | false | null | undefined>): string
   return classes.filter(Boolean).join(" ");
 }
 
+/** The shell owns the viewport: it never scrolls itself, so the header and
+ *  status strip stay put and the panes below scroll independently. */
 export const shellClass = [
-  "min-h-screen",
+  "h-dvh",
+  "overflow-hidden",
   "flex",
   "flex-col",
   "bg-bg",
@@ -15,7 +18,12 @@ export const shellClass = [
   "bg-fixed",
 ].join(" ");
 
-export const mainClass = "flex-1 p-[1.15rem]";
+/** Body region between the status strip and the viewport floor. It only
+ *  distributes height — its children own the scrolling and the padding. */
+export const mainClass = "flex min-h-0 flex-1 flex-col";
+
+/** Single scroll pane for a context that has no sidebar (Drive). */
+export const scrollPaneClass = "min-h-0 flex-1 overflow-y-auto p-[1.15rem]";
 
 export const responsiveGridClass = "grid gap-[1.15rem] max-[900px]:grid-cols-1";
 
@@ -173,13 +181,23 @@ export const statusLabelClass =
   "text-[0.6rem] uppercase tracking-[0.16em] text-fg-faint";
 export const statusValueClass = "font-num tabular-nums text-fg";
 
-/** Workbench: sidebar on wide screens, horizontal scroller on phones. */
+/** Workbench: sidebar on wide screens, horizontal scroller on phones.
+ *  Wide: the grid fills the shell's remaining height and each column
+ *  scrolls on its own, so a long panel never pushes the nav out of reach.
+ *  Below 900px it collapses to one column and the grid itself scrolls —
+ *  nested scroll regions on a phone are worse than a single one. */
 export const workbenchClass =
-  "grid gap-[1.15rem] grid-cols-[13rem_1fr] max-[900px]:grid-cols-1";
+  "grid min-h-0 flex-1 grid-cols-[13rem_1fr] max-[900px]:grid-cols-1 " +
+  "max-[900px]:overflow-y-auto";
 
 export const sidebarClass =
-  "flex flex-col gap-4 max-[900px]:flex-row max-[900px]:gap-2 max-[900px]:overflow-x-auto " +
-  "max-[900px]:border-b max-[900px]:border-border-soft max-[900px]:pb-2";
+  "flex flex-col gap-4 overflow-y-auto overscroll-contain border-r border-border-soft px-3 py-[1.15rem] " +
+  "max-[900px]:flex-row max-[900px]:gap-2 max-[900px]:overflow-x-auto max-[900px]:overflow-y-visible " +
+  "max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-[1.15rem] max-[900px]:py-2";
+
+/** The panel column beside the sidebar — the other independent scroll pane. */
+export const workbenchContentClass =
+  "min-w-0 overflow-y-auto overscroll-contain p-[1.15rem] max-[900px]:overflow-y-visible";
 
 export const navGroupLabelClass =
   "px-2 text-[0.6rem] font-bold uppercase tracking-[0.16em] text-fg-faint max-[900px]:hidden";
