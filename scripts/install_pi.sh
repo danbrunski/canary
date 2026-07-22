@@ -159,15 +159,57 @@ if [[ "${CANARY_INSTALL_GPS_STACK}" == "1" ]] && command -v apt-get >/dev/null 2
     # -n is load-bearing: without it gpsd won't open the receiver until a
     # client connects, so chrony would have no time source during early boot —
     # exactly when the clock is wrong and canary is deciding whether to record.
+    #
+    # USBAUTO stays false: it's a global "grab every matching USB serial
+    # device" switch, and /dev/ttyUSB* is shared with the OBD adapter here.
+    # Hotplug is handled precisely instead, by the udev rule below.
+    #
+    # DEVICES is deliberately EMPTY, and the udev rule is the only thing that
+    # ever hands the receiver to gpsd. Listing it here as well raced: gpsd
+    # tracks devices by the *string* it was given, so the static by-id entry
+    # and the hotplug entry (/dev/ttyUSBn) are two identities for one port,
+    # and whichever open()s second dies with EBUSY —
+    #   SER: device open of /dev/ttyUSB0 failed: Device or resource busy(16)
+    #   /dev/ttyUSB0: device activation failed, freeing device.
+    # Which side lost varied per plug event, so GPS came up intermittently.
+    # One device, one owner.
     cat >/etc/default/gpsd <<EOF
 # Managed by canary scripts/install_pi.sh
+# DEVICES intentionally empty — 70-canary-gps.rules owns device attachment.
 START_DAEMON="true"
 USBAUTO="false"
-DEVICES="${CANARY_GPS_DEVICE}"
+DEVICES=""
 GPSD_OPTIONS="-n"
 EOF
+
+    # Hotplug: gpsd opens its device list once at startup and, if a node isn't
+    # there yet, logs "device activation failed, freeing device" and never
+    # retries. So a receiver plugged in after boot stayed dark until someone
+    # restarted gpsd by hand. This rule matches that one receiver and pulls in
+    # canary-gpsd@.service, which attaches it via gpsdctl — so plug order stops
+    # mattering. At boot, systemd-udev-trigger replays add events for
+    # already-present devices, so the plugged-in-at-boot case runs through the
+    # same single path.
+    #
+    # Matching on SYMLINK (rather than ID_SERIAL) keeps CANARY_GPS_DEVICE the
+    # single source of truth and needs no parsing, and — the reason it matters
+    # here — works even when the receiver is absent at install time, which is
+    # precisely the case this rule exists to cover. 70- runs after 60-serial's
+    # by-id symlink is in place.
+    install -m 0644 "${CANARY_HOME}/systemd/canary-gpsd@.service" \
+      "$(dirname "${CANARY_SERVICE}")/canary-gpsd@.service"
+    cat >/etc/udev/rules.d/70-canary-gps.rules <<EOF
+# Managed by canary scripts/install_pi.sh — see systemd/canary-gpsd@.service
+ACTION=="add", SUBSYSTEM=="tty", SYMLINK=="${CANARY_GPS_DEVICE#/dev/}", TAG+="systemd", ENV{SYSTEMD_WANTS}+="canary-gpsd@%k.service"
+EOF
+    systemctl daemon-reload
+    udevadm control --reload || true
+
     systemctl enable gpsd.socket gpsd.service >/dev/null 2>&1 || true
     systemctl restart gpsd.socket gpsd.service || true
+    # Catch the already-plugged-in case: replay the add event so the rule runs
+    # for a receiver that was attached before the rule existed.
+    udevadm trigger --subsystem-match=tty --action=add || true
   fi
 
   # chrony config goes in a drop-in, never by rewriting chrony.conf — that file

@@ -1,0 +1,40 @@
+[Unit]
+Description=Attach %I to gpsd for CANary GPS + time sync
+Documentation=man:gpsd(8) man:gpsdctl(8)
+# Why this exists when Debian already ships gpsdctl@.service: that unit gates
+# both ExecStart and ExecStop on USBAUTO=true, and USBAUTO is a *global* switch
+# — it tells gpsd to grab every USB serial device that the stock 60-gpsd.rules
+# matches. On this rig /dev/ttyUSB* is shared with the OBD adapter, so turning
+# it on risks gpsd claiming the wrong device. (Debian also comments out the
+# CP210x match in 60-gpsd.rules for exactly that reason — "matches too many
+# other devices" — so the stock rule wouldn't fire for our receiver anyway.)
+# Instead, 70-canary-gps.rules matches the one configured receiver by its
+# by-id path and pulls in this ungated unit.
+#
+# This is the ONLY path that attaches the receiver to gpsd — /etc/default/gpsd
+# lists no DEVICES. Two identities for one port (a static by-id entry plus a
+# hotplug /dev/ttyUSBn entry) race on open() and one loses with EBUSY.
+Requires=gpsd.socket
+After=gpsd.socket
+# Re-attach whenever gpsd restarts. gpsd's device list is in-memory and
+# /etc/default/gpsd carries no DEVICES (see install_pi.sh for why), so a
+# restart leaves it with nothing attached. RemainAfterExit below means a
+# udev re-trigger won't re-run ExecStart for an already-active instance, so
+# without this propagation a plain `systemctl restart gpsd` would silently
+# kill GPS until the next physical unplug.
+PartOf=gpsd.service
+After=gpsd.service
+# Bind the attachment to the device's lifetime. On unplug systemd stops this
+# unit, which tells gpsd to release the device — so a stale /dev/ttyUSBn entry
+# can't linger and have gpsd read whatever re-enumerates onto that name next
+# (the OBD adapter, for instance). On re-plug the udev rule fires again and
+# hands gpsd the new kernel name.
+BindsTo=dev-%i.device
+After=dev-%i.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment="GPSD_SOCKET=/run/gpsd.sock"
+ExecStart=/usr/sbin/gpsdctl add /dev/%I
+ExecStop=/usr/sbin/gpsdctl remove /dev/%I

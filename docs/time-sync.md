@@ -121,10 +121,47 @@ the safer choice.
 won't open the receiver until a client connects, so chrony would have no time
 source during early boot — precisely when the clock is wrong.
 
+## Plug order doesn't matter (and why `DEVICES` is empty)
+
+gpsd opens its device list once at startup. If the receiver isn't plugged in
+yet it logs `device activation failed, freeing device` and *never retries* — so
+a receiver attached after boot used to stay dark until someone restarted gpsd
+by hand, with the dashboard reporting "no GPS configured."
+
+Attachment is therefore driven by udev, not by static config:
+
+- `/etc/udev/rules.d/70-canary-gps.rules` matches this one receiver (by its
+  by-id symlink) and pulls in `canary-gpsd@<kernel-name>.service`.
+- `systemd/canary-gpsd@.service` runs `gpsdctl add` on start and
+  `gpsdctl remove` on stop, and is `BindsTo` the device — so unplug releases it
+  and re-plug re-attaches under the new kernel name.
+- At boot, `systemd-udev-trigger` replays add events for already-present
+  devices, so the plugged-in-at-boot case takes the same path.
+
+**`DEVICES=""` is deliberate — do not "fix" it by listing the receiver there.**
+gpsd tracks devices by the literal string it was handed, so a static by-id
+entry plus a hotplug `/dev/ttyUSBn` entry are two identities for one port. Both
+try to `open()` it and the loser dies with `EBUSY`:
+
+```
+SER: device open of /dev/ttyUSB0 failed: Device or resource busy(16)
+/dev/ttyUSB0: device activation failed, freeing device.
+```
+
+Which side lost varied per plug event, so GPS came up intermittently. One
+device, one owner. (`USBAUTO` stays `false` for a related reason: it's a global
+"grab every matching USB serial device" switch, and `/dev/ttyUSB*` is shared
+with the OBD adapter here. Debian also comments the CP210x match out of its
+stock `60-gpsd.rules` — "matches too many other devices" — so the stock rule
+wouldn't fire for this receiver anyway, and Debian's `gpsdctl@.service` gates
+itself on `USBAUTO=true`, which is why canary ships its own ungated copy.)
+
 ## Verifying
 
 ```bash
 gpspipe -w -n 5                 # gpsd is talking to the receiver
+gpspipe -w -n 2 | grep DEVICES  # expect exactly ONE entry (see above)
+systemctl list-units 'canary-gpsd@*'   # the attachment unit for the live node
 chronyc sources                 # a 'GPS' refclock should appear and reach sync
 chronyc tracking                # check Reference ID / Leap status
 timedatectl                     # System clock synchronized: yes
