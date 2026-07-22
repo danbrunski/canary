@@ -105,11 +105,10 @@ export function Workbench({ active, onNavigate, data }: WorkbenchProps) {
           </div>
         ))}
       </nav>
-      <div
-        ref={content}
-        className={cn(responsiveGridClass, "grid-cols-1", workbenchContentClass)}
-      >
-        {renderItem(active, data, onNavigate)}
+      <div ref={content} className={workbenchContentClass}>
+        <div className={cn(responsiveGridClass, "grid-cols-1")}>
+          {renderItem(active, data, onNavigate)}
+        </div>
       </div>
     </div>
   );

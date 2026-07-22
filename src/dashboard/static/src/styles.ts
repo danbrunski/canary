@@ -22,7 +22,15 @@ export const shellClass = [
  *  distributes height — its children own the scrolling and the padding. */
 export const mainClass = "flex min-h-0 flex-1 flex-col";
 
-/** Single scroll pane for a context that has no sidebar (Drive). */
+/** Single scroll pane for a context that has no sidebar (Drive).
+ *
+ *  This is a plain block, and the panel grid goes *inside* it. Do not merge
+ *  the two: a grid that is itself the scroll container has a definite
+ *  height, which sizes its auto row to the pane instead of to the content.
+ *  Panels are `overflow-hidden` (panelClass), so an under-sized row makes a
+ *  tall panel clip its own content while the scroll container still reports
+ *  no overflow — content disappears past the fold with no scrollbar and no
+ *  way to reach it. An indefinite-height inner grid overflows honestly. */
 export const scrollPaneClass = "min-h-0 flex-1 overflow-y-auto p-[1.15rem]";
 
 export const responsiveGridClass = "grid gap-[1.15rem] max-[900px]:grid-cols-1";
@@ -195,9 +203,12 @@ export const sidebarClass =
   "max-[900px]:flex-row max-[900px]:gap-2 max-[900px]:overflow-x-auto max-[900px]:overflow-y-visible " +
   "max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-[1.15rem] max-[900px]:py-2";
 
-/** The panel column beside the sidebar — the other independent scroll pane. */
+/** The panel column beside the sidebar — the other independent scroll pane.
+ *  A plain block wrapping the panel grid, for the reason in
+ *  `scrollPaneClass` above. */
 export const workbenchContentClass =
-  "min-w-0 overflow-y-auto overscroll-contain p-[1.15rem] max-[900px]:overflow-y-visible";
+  "min-w-0 overflow-y-auto overscroll-contain p-[1.15rem] " +
+  "max-[900px]:overflow-y-visible";
 
 export const navGroupLabelClass =
   "px-2 text-[0.6rem] font-bold uppercase tracking-[0.16em] text-fg-faint max-[900px]:hidden";

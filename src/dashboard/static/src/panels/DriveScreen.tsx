@@ -15,8 +15,10 @@ interface DriveScreenProps {
  *  workbench is one tap away via the header mode toggle. */
 export function DriveScreen({ channels, bindings }: DriveScreenProps) {
   return (
-    <div className={cn(responsiveGridClass, "grid-cols-1", scrollPaneClass)}>
-      <TelemetryPanel channels={channels} bindings={bindings} compact />
+    <div className={scrollPaneClass}>
+      <div className={cn(responsiveGridClass, "grid-cols-1")}>
+        <TelemetryPanel channels={channels} bindings={bindings} compact />
+      </div>
     </div>
   );
 }

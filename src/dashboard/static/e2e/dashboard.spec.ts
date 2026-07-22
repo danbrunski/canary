@@ -79,3 +79,32 @@ test("switches theme from the header toggle", async ({ page }) => {
     await expect(toDay).toBeVisible();
   }
 });
+
+test("overflowing panel content makes the workbench pane scroll, not clip", async ({
+  page,
+}) => {
+  // Regression: the scroll pane must not itself be the panel grid. A grid
+  // that is the scroll container has a definite height, which sizes its auto
+  // row to the pane rather than to the content; panels are `overflow-hidden`
+  // (panelClass), so the under-sized row makes a tall panel clip its own
+  // content while the pane still reports no overflow — content past the fold
+  // with no scrollbar and no way to reach it. jsdom has no layout, so only a
+  // real browser catches this.
+  await page.setViewportSize({ width: 1280, height: 360 });
+  await page.goto("/#wb/diag-anomalies");
+
+  const nav = page.getByRole("navigation", { name: "Workbench sections" });
+  await expect(nav).toBeVisible();
+
+  const pane = await nav.evaluate((el) => {
+    const p = el.nextElementSibling as HTMLElement;
+    const panel = p.querySelector("section, article, div > div") as HTMLElement;
+    return {
+      scrolls: p.scrollHeight > p.clientHeight,
+      panelClips: panel.scrollHeight > panel.clientHeight + 1,
+    };
+  });
+
+  expect(pane.scrolls).toBe(true);
+  expect(pane.panelClips).toBe(false);
+});
