@@ -14,6 +14,7 @@ from src.collection.queueing import QueueDepthMonitor
 from src.control.dtc_state import DtcState
 from src.control.monitor_state import MonitorState
 from src.dashboard.broadcast import Broadcaster
+from src.decode.dids import DID_SOURCE, DecodedDid
 from src.models.health import HealthMonitor
 from src.preprocessing.live import LiveFeatureSource
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
@@ -180,6 +181,9 @@ async def run_telemetry_broadcast_sink(
             if live_source is not None:
                 for decoded in live_source.decode_for_telemetry(record):
                     broadcaster.publish(_record_to_dict(decoded))
+                did = live_source.decode_did_for_telemetry(record)
+                if did is not None:
+                    broadcaster.publish(_did_to_dict(record, did))
         except Exception as exc:  # noqa: BLE001 — dashboard stream is best-effort
             _note_error(health_monitor, "broadcast", exc)
             log.exception("telemetry broadcast failed; skipping record")
@@ -538,6 +542,26 @@ def _record_to_dict(record: TelemetryRecord) -> dict[str, Any]:
         "channel": record.channel,
         "value": record.value,
         "unit": record.unit,
+    }
+
+
+def _did_to_dict(record: TelemetryRecord, decoded: DecodedDid) -> dict[str, Any]:
+    """Live-stream row for a decoded Mode-22 DID: ``did:<NAME>`` in
+    engineering units, carrying the raw poll's timestamp.
+
+    Built by hand rather than via ``_record_to_dict`` because ``did`` is a
+    pseudo-source that never rides a ``TelemetryRecord`` (see
+    :data:`src.decode.dids.DID_SOURCE`) — the raw ``obd:DID_<hex>`` poll is
+    what gets persisted, and preprocessing re-decodes it into the wide
+    frame. This row exists only on the live stream, so the dashboard can
+    show a gauge instead of a hex string.
+    """
+    return {
+        "timestamp": record.timestamp.isoformat(),
+        "source": DID_SOURCE,
+        "channel": decoded.entry.name,
+        "value": decoded.value,
+        "unit": decoded.unit,
     }
 
 

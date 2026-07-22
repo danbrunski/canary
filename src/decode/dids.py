@@ -17,6 +17,8 @@ Strict pydantic schema so typos in the YAML fail loudly, not silently.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -144,6 +146,58 @@ def is_plausible(entry: DidEntry, decoded: float) -> bool | None:
     return True
 
 
+@dataclass(frozen=True)
+class DecodedDid:
+    """One raw ``DID_<hex>`` reading decoded against the catalog."""
+
+    entry: DidEntry
+    #: Scaled value, or the raw integer when ``scale`` isn't pinned yet.
+    value: float
+    #: ``entry.unit``, or ``"raw"`` when the value is an unscaled count.
+    unit: str
+
+
+def did_entries_by_hex(did_map: DidMap) -> dict[str, DidEntry]:
+    """Index a catalog by uppercase 4-char hex id — the raw channel suffix."""
+    return {f"{entry.did:04X}": entry for entry in did_map.dids}
+
+
+def decode_raw_did_reading(
+    by_hex: Mapping[str, DidEntry], channel: str, payload_hex: object
+) -> DecodedDid | None:
+    """Decode one raw ``DID_<hex>`` reading, or ``None`` if it isn't one.
+
+    The single home for the raw-reading decode policy, shared by the offline
+    frame path (:func:`decode_did_rows`), the live feature source, and the
+    dashboard's live/REST telemetry paths — so a DID reads the same number
+    everywhere. ``None`` covers every "not decodable" case: a non-DID
+    channel, an id absent from the catalog, a missing/malformed hex payload,
+    and a payload too short for the entry's byte range.
+
+    When ``scale`` isn't pinned in ``dids.yaml`` the **raw integer** is
+    returned with unit ``"raw"`` — see :func:`decode_did_rows` for why that
+    is useful rather than a failure.
+    """
+    if not channel.startswith(_RAW_DID_CHANNEL_PREFIX):
+        return None
+    entry = by_hex.get(channel[len(_RAW_DID_CHANNEL_PREFIX) :].upper())
+    if entry is None:
+        return None
+    if not isinstance(payload_hex, str) or not payload_hex:
+        return None
+    try:
+        payload = bytes.fromhex(payload_hex)
+    except ValueError:
+        return None
+    raw_int = decode_did_raw(entry, payload)
+    if raw_int is None:
+        return None
+    scaled = apply_scaling(entry, raw_int)
+    if scaled is None:
+        return DecodedDid(entry=entry, value=float(raw_int), unit="raw")
+    return DecodedDid(entry=entry, value=float(scaled), unit=entry.unit)
+
+
 def decode_did_rows(long_frame: pd.DataFrame, did_map: DidMap) -> pd.DataFrame:
     """Append ``did:<NAME>`` rows decoded from raw ``DID_<hex>`` poll readings.
 
@@ -174,31 +228,17 @@ def decode_did_rows(long_frame: pd.DataFrame, did_map: DidMap) -> pd.DataFrame:
     if raw.empty:
         return long_frame
 
-    by_hex = {f"{entry.did:04X}": entry for entry in did_map.dids}
+    by_hex = did_entries_by_hex(did_map)
     if not by_hex:
         return long_frame
 
     has_session_path = "session_path" in long_frame.columns
     records: list[dict[str, Any]] = []
     for _, row in raw.iterrows():
-        channel = str(row["channel"])
-        hex_id = channel[len(_RAW_DID_CHANNEL_PREFIX) :].upper()
-        entry = by_hex.get(hex_id)
-        if entry is None:
+        hit = decode_raw_did_reading(by_hex, str(row["channel"]), row.get("value_text"))
+        if hit is None:
             continue
-        payload_hex = row.get("value_text")
-        if not isinstance(payload_hex, str) or not payload_hex:
-            continue
-        try:
-            payload = bytes.fromhex(payload_hex)
-        except ValueError:
-            continue
-        raw_int = decode_did_raw(entry, payload)
-        if raw_int is None:
-            continue
-        scaled = apply_scaling(entry, raw_int)
-        # Fall back to the raw count when the scale constant isn't pinned.
-        numeric = float(scaled) if scaled is not None else float(raw_int)
+        entry, numeric = hit.entry, hit.value
         records.append(
             {
                 "timestamp": row["timestamp"],
@@ -207,7 +247,7 @@ def decode_did_rows(long_frame: pd.DataFrame, did_map: DidMap) -> pd.DataFrame:
                 "value_number": numeric,
                 "value_text": None,
                 "value_bool": None,
-                "unit": entry.unit if scaled is not None else "raw",
+                "unit": hit.unit,
                 "payload": None,
                 "metadata_json": None,
                 "session": row.get("session"),

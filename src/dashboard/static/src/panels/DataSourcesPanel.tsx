@@ -290,23 +290,35 @@ function DidTab({
     intervalMs: 30000,
   });
 
+  // Only the DIDs in `collection.obd_dids` are ever requested; the rest of
+  // the catalog is RE record-keeping. Counting those as "not responding"
+  // reads as a fault when nothing is wrong.
+  const polled = useMemo(() => new Set(data?.polled ?? []), [data]);
+
   const rows = useMemo(() => {
     if (!data) return [];
     return arrange(data.dids, view, (d) => {
       const active = liveValue(channels, `did:${d.name}`).active;
-      return { available: active, active };
+      return { available: polled.has(d.name), active };
     });
-  }, [data, channels, view]);
+  }, [data, channels, view, polled]);
 
   return (
     <ResourceGate loading={loading} loadingMessage="loading DID catalog…" error={error} data={data}>
       {(data) => {
         const responding = data.dids.filter(
-          (d) => liveValue(channels, `did:${d.name}`).active,
+          (d) => polled.has(d.name) && liveValue(channels, `did:${d.name}`).active,
         ).length;
         return (
           <>
-            <Summary text={`${responding}/${data.dids.length} DIDs responding`} />
+            <Summary
+              text={
+                polled.size === 0
+                  ? `no DIDs polled (${data.dids.length} catalogued)`
+                  : `${responding}/${polled.size} polled DIDs responding` +
+                    ` (${data.dids.length} catalogued)`
+              }
+            />
             {data.dids.length === 0 ? (
               <p className={placeholderClass}>
                 no DIDs catalogued — pin findings into <code>data/dids.yaml</code>.
@@ -326,13 +338,25 @@ function DidTab({
                   <tbody className="font-num tabular-nums">
                     {rows.map((d: DidEntry) => {
                       const lv = liveValue(channels, `did:${d.name}`);
+                      const isPolled = polled.has(d.name);
                       return (
                         <tr key={d.did} className={ROW}>
                           <td className={cn(TD, "text-fg-dim")}>
                             0x{d.did.toString(16).toUpperCase().padStart(4, "0")}
                           </td>
-                          <td className={TD}>{d.name}</td>
-                          <td className={TD}>{valueCell(lv.active, lv.text)}</td>
+                          <td className={cn(TD, !isPolled && "text-fg-dim")}>{d.name}</td>
+                          <td className={TD}>
+                            {isPolled ? (
+                              valueCell(lv.active, lv.text)
+                            ) : (
+                              <span
+                                className="text-fg-faint italic"
+                                title="characterized but not in collection.obd_dids — never requested"
+                              >
+                                not polled
+                              </span>
+                            )}
+                          </td>
                           <td className={cn(TD, "text-fg-dim")}>{d.unit || "—"}</td>
                           <td className={cn(TD, "text-fg-faint")}>{d.confidence}</td>
                         </tr>

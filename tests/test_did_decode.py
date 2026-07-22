@@ -8,6 +8,7 @@ the column they target never exists.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -180,3 +181,104 @@ def test_live_source_unpinned_scale_raw_fallback() -> None:
     row = source.tick(now)
     assert row is not None
     assert float(row["did:ECM_INJECTOR_PW_B1"].iloc[0]) == 4962.0
+
+
+# --------------------------------------------------------------------------- #
+# Live-stream publishing (dashboard path)
+# --------------------------------------------------------------------------- #
+
+
+def test_decode_did_for_telemetry_returns_engineering_units() -> None:
+    source = LiveFeatureSource(config=_config(), did_map=_did_map())
+    now = datetime(2026, 5, 21, 12, 0, tzinfo=UTC)
+    decoded = source.decode_did_for_telemetry(
+        TelemetryRecord.obd(now.timestamp(), "DID_1225", "01ae", "")
+    )
+    assert decoded is not None
+    assert decoded.entry.name == "ECM_AF_SENSOR_V_B1"
+    assert abs(decoded.value - 2.15) < 1e-9
+    assert decoded.unit == "V"
+
+
+def test_decode_did_for_telemetry_declines_non_did_records() -> None:
+    """Only raw DID polls decode — ordinary PIDs and unknown ids pass."""
+    source = LiveFeatureSource(config=_config(), did_map=_did_map())
+    now = datetime(2026, 5, 21, 12, 0, tzinfo=UTC)
+    assert (
+        source.decode_did_for_telemetry(TelemetryRecord.obd(now.timestamp(), "RPM", 800.0, "rpm"))
+        is None
+    )
+    assert (
+        source.decode_did_for_telemetry(
+            TelemetryRecord.obd(now.timestamp(), "DID_9999", "01ae", "")
+        )
+        is None
+    )
+    # Too short for the declared 2-byte range.
+    assert (
+        source.decode_did_for_telemetry(TelemetryRecord.obd(now.timestamp(), "DID_1225", "01", ""))
+        is None
+    )
+
+
+async def test_broadcast_sink_publishes_decoded_did_rows() -> None:
+    """The dashboard keys channels by ``<source>:<channel>``, so a raw
+    ``obd:DID_1225`` poll is useless to it — the decoded ``did:<NAME>`` row
+    published alongside is what renders a gauge."""
+    from src.daemon.drain import run_telemetry_broadcast_sink
+    from src.dashboard.broadcast import Broadcaster
+
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+    bus = Broadcaster()
+    sub = bus.subscribe()
+    source = LiveFeatureSource(config=_config(), did_map=_did_map())
+
+    await queue.put(TelemetryRecord.obd(1_778_000_000.0, "DID_1225", "01ae", ""))
+    task = asyncio.create_task(
+        run_telemetry_broadcast_sink(queue, bus, stop, live_source=source, poll_interval=0.01)
+    )
+    await asyncio.sleep(0.1)
+    stop.set()
+    await task
+
+    published = []
+    while not sub.queue.empty():
+        published.append(sub.queue.get_nowait())
+
+    # The raw poll still goes out unchanged — storage and the RE tooling
+    # both speak it, and dropping it would be a silent format change.
+    raw = [r for r in published if r["channel"] == "DID_1225"]
+    assert raw and raw[0]["source"] == "obd" and raw[0]["value"] == "01ae"
+
+    decoded = [r for r in published if r["source"] == DID_SOURCE]
+    assert len(decoded) == 1
+    assert decoded[0]["channel"] == "ECM_AF_SENSOR_V_B1"
+    assert abs(decoded[0]["value"] - 2.15) < 1e-9
+    assert decoded[0]["unit"] == "V"
+    assert decoded[0]["timestamp"] == raw[0]["timestamp"]
+
+
+async def test_broadcast_sink_without_did_map_publishes_raw_only() -> None:
+    from src.daemon.drain import run_telemetry_broadcast_sink
+    from src.dashboard.broadcast import Broadcaster
+
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+    bus = Broadcaster()
+    sub = bus.subscribe()
+    source = LiveFeatureSource(config=_config(), did_map=None)
+
+    await queue.put(TelemetryRecord.obd(1_778_000_000.0, "DID_1225", "01ae", ""))
+    task = asyncio.create_task(
+        run_telemetry_broadcast_sink(queue, bus, stop, live_source=source, poll_interval=0.01)
+    )
+    await asyncio.sleep(0.1)
+    stop.set()
+    await task
+
+    published = []
+    while not sub.queue.empty():
+        published.append(sub.queue.get_nowait())
+    assert len(published) == 1
+    assert published[0]["source"] == "obd"

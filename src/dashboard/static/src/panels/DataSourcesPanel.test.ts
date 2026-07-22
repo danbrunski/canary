@@ -30,6 +30,7 @@ const EMPTY_DIDS: DidMapResponse = {
   vehicle: {},
   access: {},
   dids: [],
+  polled: [],
 };
 const EMPTY_CAN: CanCoverageResponse = {
   signals: [],
@@ -105,6 +106,7 @@ describe("DataSourcesPanel", () => {
   it("switches to the DID tab and overlays the live value", async () => {
     mocks.getDids.mockResolvedValue({
       ...EMPTY_DIDS,
+      polled: ["INJECTOR_PW"],
       dids: [
         {
           did: 0x1208,
@@ -125,6 +127,54 @@ describe("DataSourcesPanel", () => {
     expect(await screen.findByText("INJECTOR_PW")).toBeInTheDocument();
     expect(screen.getByText("0x1208")).toBeInTheDocument();
     expect(screen.getByText("2.5 ms")).toBeInTheDocument();
+  });
+
+  it("separates catalogued-but-unpolled DIDs from silent ones", async () => {
+    // Only `collection.obd_dids` is ever requested. Counting the rest of the
+    // catalog as "not responding" reported a fault where there is none.
+    mocks.getDids.mockResolvedValue({
+      ...EMPTY_DIDS,
+      polled: ["INJECTOR_PW"],
+      dids: [
+        {
+          did: 0x1208,
+          name: "INJECTOR_PW",
+          unit: "ms",
+          confidence: "high",
+          scale: null,
+          offset: null,
+          plausible_min: null,
+          plausible_max: null,
+          notes: null,
+        },
+        {
+          did: 0x1101,
+          name: "COOLANT",
+          unit: "degC",
+          confidence: "confirmed",
+          scale: 1,
+          offset: -40,
+          plausible_min: null,
+          plausible_max: null,
+          notes: null,
+        },
+      ],
+    });
+    const channels = new Map([channel("did:INJECTOR_PW", 2.5, "ms")]);
+    render(createElement(DataSourcesPanel, { channels, status: null }));
+    fireEvent.click(screen.getByRole("button", { name: "Nissan DIDs" }));
+
+    expect(
+      await screen.findByText("1/1 polled DIDs responding (2 catalogued)"),
+    ).toBeInTheDocument();
+    // An unpolled DID can never have a value, so it counts as unavailable
+    // and the default filter hides it.
+    expect(screen.queryByText("COOLANT")).not.toBeInTheDocument();
+
+    // Unfiltered, it says why it is blank instead of reading as silent.
+    fireEvent.click(screen.getByRole("button", { name: /hide unavailable/ }));
+    expect(screen.getByText("COOLANT")).toBeInTheDocument();
+    expect(screen.getByText("not polled")).toBeInTheDocument();
   });
 
   it("GPS tab renders fix state from status", () => {

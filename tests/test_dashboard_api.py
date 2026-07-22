@@ -1259,3 +1259,126 @@ def _event(timestamp: str, *, score: float) -> AnomalyEvent:
         operating_mode="idle",
         session="2026-05-13T120000",
     )
+
+
+# ---------------------------------------------------------------------------
+# DID surfacing — decoded live rows + which DIDs are actually polled
+# ---------------------------------------------------------------------------
+
+_DIDS_YAML = """
+schema_version: 1
+vehicle: {make: Nissan, model: Xterra, year: 2008}
+access:
+  ecu_request_id: 0x7E0
+  ecu_response_id: 0x7E8
+  session: 0xC0
+dids:
+  - did: 0x1225
+    name: ECM_AF_SENSOR_V_B1
+    byte_start: 0
+    byte_length: 2
+    scale: 0.005
+    offset: 0.0
+    unit: V
+    confidence: high
+  - did: 0x1208
+    name: ECM_INJECTOR_PW_B1
+    byte_start: 0
+    byte_length: 2
+    confidence: high
+"""
+
+
+def _config_with_dids(tmp_path: Path, storage: Path, dids: str) -> CanaryConfig:
+    cfg_path = tmp_path / "canary-dids.yaml"
+    cfg_path.write_text(
+        _config_yaml(storage).replace(
+            "  obd_poll_rate_hz: 1", f"  obd_poll_rate_hz: 1\n  obd_dids: [{dids}]"
+        )
+    )
+    return CanaryConfig.from_yaml(cfg_path)
+
+
+def test_dids_endpoint_reports_which_dids_are_polled(anomalies_dir: Path, tmp_path: Path) -> None:
+    """The catalog is the whole RE record; `polled` is the subset the daemon
+    asks for, so the dashboard can tell "never requested" from "no answer".
+    Config tokens take either form — a catalog name or a bare hex id."""
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    path = tmp_path / "dids.yaml"
+    path.write_text(_DIDS_YAML)
+    config = _config_with_dids(tmp_path, storage, 'ECM_AF_SENSOR_V_B1, "1208"')
+
+    body = (
+        TestClient(create_app(config, anomalies_dir=anomalies_dir, dids_path=path))
+        .get("/dids")
+        .json()
+    )
+    assert body["polled"] == ["ECM_AF_SENSOR_V_B1", "ECM_INJECTOR_PW_B1"]
+    assert len(body["dids"]) == 2
+
+
+def test_dids_endpoint_polled_empty_when_none_configured(
+    config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
+) -> None:
+    path = tmp_path / "dids.yaml"
+    path.write_text(_DIDS_YAML)
+    body = (
+        TestClient(create_app(config, anomalies_dir=anomalies_dir, dids_path=path))
+        .get("/dids")
+        .json()
+    )
+    assert body["polled"] == []
+
+
+def test_telemetry_latest_seeds_decoded_did_rows(
+    config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
+) -> None:
+    """Mode-22 polls are stored raw as ``obd:DID_<hex>`` + a hex payload.
+    The REST seed decodes them so a page load renders gauges immediately
+    instead of waiting out a poll window (up to a minute)."""
+    session = config.collection.storage_path / "2026-07-22T120000"
+    session.mkdir(parents=True)
+    table = pa.Table.from_pylist(
+        [
+            {
+                "timestamp": pa.scalar(
+                    1_778_000_000_000_000, type=pa.timestamp("us", tz="UTC")
+                ).as_py(),
+                "source": "obd",
+                "channel": "DID_1225",
+                "value_number": None,
+                "value_text": "01ae",
+                "value_bool": None,
+                "unit": "",
+                "payload": None,
+                "metadata_json": None,
+            }
+        ],
+        schema=TELEMETRY_SCHEMA,
+    )
+    pq.write_table(table, session / "telemetry-00000.parquet")
+
+    dids_path = tmp_path / "dids.yaml"
+    dids_path.write_text(_DIDS_YAML)
+    client = TestClient(create_app(config, anomalies_dir=anomalies_dir, dids_path=dids_path))
+    rows = client.get("/telemetry/latest", params={"per_channel": True}).json()["rows"]
+
+    raw = [r for r in rows if r["channel"] == "DID_1225"]
+    assert raw and raw[0]["value"] == "01ae"  # raw poll still served verbatim
+    decoded = [r for r in rows if r["source"] == "did"]
+    assert len(decoded) == 1
+    assert decoded[0]["channel"] == "ECM_AF_SENSOR_V_B1"
+    assert abs(decoded[0]["value"] - 2.15) < 1e-9
+    assert decoded[0]["unit"] == "V"
+
+
+def test_telemetry_latest_without_did_catalog_is_unchanged(
+    config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
+) -> None:
+    _make_session_with_parquet(config.collection.storage_path, "2026-07-22T120000")
+    client = TestClient(
+        create_app(config, anomalies_dir=anomalies_dir, dids_path=tmp_path / "absent.yaml")
+    )
+    rows = client.get("/telemetry/latest", params={"per_channel": True}).json()["rows"]
+    assert rows and all(r["source"] == "obd" for r in rows)

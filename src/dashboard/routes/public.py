@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import FastAPI, HTTPException, Query
 
@@ -29,6 +29,9 @@ from src.dashboard.readers import (
 from src.dashboard.status import build_status
 from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.models.health import HealthMonitor
+
+if TYPE_CHECKING:  # decode.dids is imported lazily inside the route bodies
+    from src.decode.dids import DidMap
 
 
 def register_public_routes(
@@ -101,6 +104,13 @@ def register_public_routes(
             if per_channel
             else read_latest_telemetry_rows(config.collection.storage_path, n=n)
         )
+        # Mode-22 polls are stored raw (``obd:DID_<hex>`` + a hex payload);
+        # decode them here so this seed carries the same ``did:<NAME>`` rows
+        # the live stream publishes. Without it a page load shows no DIDs
+        # until the next poll window — up to a minute of blank gauges,
+        # since the DID session is mutually exclusive with Mode 01 and so
+        # runs in windows rather than continuously.
+        rows = rows + _decoded_did_rows(rows)
         return {"rows": rows, "count": len(rows)}
 
     @app.get("/models/behavior")
@@ -130,6 +140,54 @@ def register_public_routes(
         # surfaces in the dashboard immediately. The file is small.
         return read_bindings_for_display(bindings_path)
 
+    def _polled_did_names(did_map: DidMap) -> list[str]:
+        """Catalog names for the configured `obd_dids`, which may be tokens
+        of either form (a name or a bare 4-char hex id)."""
+        names = {entry.name for entry in did_map.dids}
+        by_id = {entry.did: entry.name for entry in did_map.dids}
+        polled: list[str] = []
+        for token in config.collection.obd_dids:
+            stripped = token.strip()
+            if stripped in names:
+                polled.append(stripped)
+                continue
+            try:
+                resolved = by_id.get(int(stripped, 16))
+            except ValueError:
+                continue
+            if resolved is not None:
+                polled.append(resolved)
+        return polled
+
+    def _decoded_did_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """``did:<NAME>`` rows decoded from the raw ``DID_<hex>`` rows in `rows`."""
+        from src.decode.dids import (
+            DID_SOURCE,
+            decode_raw_did_reading,
+            did_entries_by_hex,
+            load_did_map,
+        )
+
+        raw = [r for r in rows if str(r.get("channel", "")).startswith("DID_")]
+        if not raw or not dids_path.exists():
+            return []
+        by_hex = did_entries_by_hex(load_did_map(dids_path))
+        decoded: list[dict[str, Any]] = []
+        for row in raw:
+            hit = decode_raw_did_reading(by_hex, str(row["channel"]), row.get("value"))
+            if hit is None:
+                continue
+            decoded.append(
+                {
+                    "timestamp": row.get("timestamp"),
+                    "source": DID_SOURCE,
+                    "channel": hit.entry.name,
+                    "value": hit.value,
+                    "unit": hit.unit,
+                }
+            )
+        return decoded
+
     @app.get("/dids")
     def get_dids() -> dict[str, Any]:
         # Read-only Nissan Mode-22 DID catalog for the 6.16 workbench.
@@ -138,8 +196,16 @@ def register_public_routes(
         from src.decode.dids import load_did_map
 
         if not dids_path.exists():
-            return {"schema_version": None, "vehicle": {}, "access": None, "dids": []}
-        return load_did_map(dids_path).model_dump(mode="json")
+            return {"schema_version": None, "vehicle": {}, "access": None, "dids": [], "polled": []}
+        did_map = load_did_map(dids_path)
+        payload = did_map.model_dump(mode="json")
+        # Which catalogued DIDs the daemon actually polls (`obd_dids`). The
+        # catalog is the whole RE record, so most entries are characterized
+        # but not polled — without this the dashboard can't tell "not asked
+        # for" from "asked for, no answer", and reads every unpolled entry
+        # as a failure.
+        payload["polled"] = _polled_did_names(did_map)
+        return payload
 
     @app.get("/test-profiles")
     def get_test_profiles() -> dict[str, Any]:

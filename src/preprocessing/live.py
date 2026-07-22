@@ -60,10 +60,10 @@ from src.decode.behavior_models import BehaviorModels
 from src.decode.bindings import Bindings, Signal
 from src.decode.dids import (
     DID_SOURCE,
+    DecodedDid,
     DidEntry,
     DidMap,
-    apply_scaling,
-    decode_did_raw,
+    decode_raw_did_reading,
 )
 from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.features import FeatureConfig
@@ -364,31 +364,30 @@ class LiveFeatureSource:
                 continue  # named choice / enum signals — skip in numeric path
             self._set_value(channel_key(DBC_SOURCE, signal_name), numeric, record.timestamp)
 
+    def decode_did_for_telemetry(self, record: TelemetryRecord) -> DecodedDid | None:
+        """Decode a raw ``DID_<hex>`` reading, or ``None`` if it isn't one.
+
+        The DID counterpart of :meth:`decode_for_telemetry`: raw Mode-22
+        polls ride the bus as ``obd:DID_<hex>`` rows carrying the response
+        payload as a hex string, but every consumer — dashboard gauges,
+        behavior recipes, the wide frame — speaks ``did:<NAME>`` in
+        engineering units. Callers publishing to the live stream turn this
+        into that row; ``did`` is a pseudo-source (see
+        :data:`src.decode.dids.DID_SOURCE`), so it deliberately never
+        becomes a ``TelemetryRecord`` that could reach storage — the raw
+        poll stays the persisted truth and preprocessing re-decodes it.
+        """
+        return decode_raw_did_reading(self._did_by_hex, record.channel, record.value)
+
     def _apply_did_decode(self, record: TelemetryRecord) -> None:
         """Mirror ``decode_did_rows``: decode a raw ``DID_<hex>`` reading into
-        a ``did:<NAME>`` current value.
-
-        The reading's value is the Mode-22 response payload as a hex string.
-        Decode it against the DID map, apply scale/offset (or fall back to
-        the raw integer when the scale isn't pinned — same policy as the
-        offline path), and store under ``did:<NAME>``.
-        """
-        hex_id = record.channel[len("DID_") :].upper()
-        entry = self._did_by_hex.get(hex_id)
-        if entry is None:
+        a ``did:<NAME>`` current value."""
+        decoded = self.decode_did_for_telemetry(record)
+        if decoded is None:
             return
-        if not isinstance(record.value, str) or not record.value:
-            return
-        try:
-            payload = bytes.fromhex(record.value)
-        except ValueError:
-            return
-        raw_int = decode_did_raw(entry, payload)
-        if raw_int is None:
-            return
-        scaled = apply_scaling(entry, raw_int)
-        numeric = float(scaled) if scaled is not None else float(raw_int)
-        self._set_value(channel_key(DID_SOURCE, entry.name), numeric, record.timestamp)
+        self._set_value(
+            channel_key(DID_SOURCE, decoded.entry.name), decoded.value, record.timestamp
+        )
 
     # ------------------------------------------------------------------
     # tick — emit one feature row

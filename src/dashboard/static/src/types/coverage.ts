@@ -171,6 +171,11 @@ export interface DidMapResponse {
   vehicle: Record<string, unknown>;
   access: Record<string, unknown> | null;
   dids: DidEntry[];
+  /** Catalog names the daemon actually polls (`collection.obd_dids`). The
+   *  catalog is the whole RE record, so most entries are characterized but
+   *  never requested — without this an unpolled DID is indistinguishable
+   *  from one that stopped answering. */
+  polled: string[];
 }
 
 /** `GET /obd/dtc` (Task 1.5) — the cached `DtcReport` plus staleness.
