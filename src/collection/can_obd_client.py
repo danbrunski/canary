@@ -630,6 +630,13 @@ PID_DECODERS: dict[int, tuple[str, Callable[[bytes], tuple[float, str] | None]]]
     0x44: ("COMMANDED_EQUIV_RATIO", decode_commanded_lambda),
     0x45: ("RELATIVE_THROTTLE_POS", decode_percent_a_over_255),
     0x46: ("AMBIANT_AIR_TEMP", decode_temp_minus_40),
+    # Throttle/pedal family (Task 2.2): one-time probe on the Xterra's real
+    # ECM (both KOEO and engine-running) confirmed it answers these four but
+    # not 0x48/0x4B — see data/nissan-xterra-2008/pid-probe-2026-07-22.md.
+    0x47: ("ABS_THROTTLE_POS_B", decode_percent_a_over_255),
+    0x49: ("ACCEL_PEDAL_POS_D", decode_percent_a_over_255),
+    0x4A: ("ACCEL_PEDAL_POS_E", decode_percent_a_over_255),
+    0x4C: ("COMMANDED_THROTTLE_ACTUATOR", decode_percent_a_over_255),
     0x5C: ("OIL_TEMP", decode_temp_minus_40),
 }
 

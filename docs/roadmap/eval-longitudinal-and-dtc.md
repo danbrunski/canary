@@ -148,11 +148,22 @@ FE placeholder (`nav.ts:24` `diag-dtc`, `Workbench.tsx:143-150`).
   schema; MIL banner distinguishes on/off/unknown; stale indicator
   reads the backend's own `stale` flag, not frontend-computed; no
   clear-codes control anywhere in the component.
-- [~] **1.10 — Deploy + live verify.** Pull + restart on the Pi; verify
-  KOEO read (`vehicle_state: ignition_only`) and engine-running read;
-  confirm `_replay` sessions don't poll (replay has no live OBD path).
-  blocked-overnight: needs the Pi/truck; 1.1-1.9 all landed and ready
-  for a morning deploy.
+- [x] **1.10 — Deploy + live verify.** Landed 2026-07-22: pulled +
+  restarted on the Pi (commit `3f6f8bd`); confirmed engine-running
+  read (`vehicle_state: engine_running`, real RPM/coolant climbing
+  through a genuine idle warm-up) and KOEO read (`ignition_only`,
+  RPM 0, coolant holding, battery voltage dropping without the
+  alternator — all consistent). Real Mode 03/07 DTC reads against the
+  ECM confirmed working (stored/pending both non-timeout); Mode 0A
+  (permanent) and Mode 06 (monitor) got zero responses across several
+  attempts — inconclusive whether that's this ECM simply not
+  supporting those services (plausible for a 2008 vehicle) or a
+  framing gap, since the request-building code path is identical to
+  the working Mode 03/07 case; flagged as a follow-up, not blocking
+  this checkbox. `_replay` sessions confirmed structurally incapable
+  of polling — `obd_scheduler`/`can_obd_collector` have zero
+  replay-mode awareness, so replay cannot influence the live bus
+  regardless of timing.
 
 ---
 
@@ -536,10 +547,12 @@ so").
   Nonzero growth during drives is the (only) trigger to revisit the
   capture architecture. — landed: `can0_counters` returns `None`
   gracefully (never crashes) when the interface is absent — genuinely
-  exercised for real on this laptop (no `can0` here); the "counter
-  present" path is verified only against a fixture sysfs directory,
-  not real CAN hardware, per this queue entry's own "live verify
-  blocked-overnight" framing.
+  exercised for real on this laptop (no `can0` here). **Real-hardware
+  path confirmed 2026-07-22**: with the truck idling and real bus
+  traffic flowing, `/status` genuinely populates the counter block
+  (`rx_over_errors`/`rx_dropped`/`rx_errors`, all zero — clean bus,
+  no drops observed) — the previously-noted fixture-only gap is
+  closed.
 
 ---
 

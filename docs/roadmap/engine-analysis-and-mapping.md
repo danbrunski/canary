@@ -157,14 +157,18 @@ the analysis UX.
   `obd:COMMANDED_EQUIV_RATIO`, no wideband lookup existed — fixed by
   widening the column preference to measured λ first, commanded as
   fallback.
-- [ ] **2.2 — One-time PID probe capture.** KOEO + engine-running
-  capture requesting each registry-decoded-but-unpolled PID once:
-  `0x5E` fuel rate, `0x5D` injection timing, `0x61-0x63` torque,
-  `0x55-0x58` secondary O2 trims, `0x22/0x23/0x59` rail pressure,
-  `0x45/0x47-0x4C/0x5A` throttle/pedal family, `0x66-0x68` (absent
-  from registry — add specs first). Add every PID the ECM answers to
-  `PID_DECODERS` at an appropriate tier; record the outcome in
-  `data/nissan-xterra-2008/` notes.
+- [x] **2.2 — One-time PID probe capture.** Landed 2026-07-22: real
+  KOEO + engine-running probe via `tools/can_obd_probe.py`
+  (`data/nissan-xterra-2008/pid-probe-2026-07-22.md`) — identical
+  41-PID supported set in both states. None of the fuel-rate/
+  injection-timing/torque/rail-pressure/secondary-O2 targets are
+  supported (expected — all DI/diesel-oriented on a port-injected V6);
+  the ECM's bitmask tops out at `0x4E`, below `0x55` onward entirely.
+  Of the throttle/pedal family, `0x47`/`0x49`/`0x4A`/`0x4C` ARE
+  answered (`0x48`/`0x4B` confirmed not) — decoders already existed in
+  `MODE01_REGISTRY` but weren't in the active poll set; added to
+  `can_obd_client.PID_DECODERS` (tiers flow automatically from the
+  registry via `_pid_channel_and_tier`'s `lookup()`).
 - [x] **2.3 — Fix `0x43` ABSOLUTE_LOAD decode.** Registry says 2-byte
   (`obd_registry.py`), collector decodes single-byte percent
   (`can_obd_client.py:551`) — wrong above 100%. Use

@@ -183,6 +183,10 @@ def test_pid_decoders_matches_pre_refactor_golden_shape() -> None:
         0x44: ("COMMANDED_EQUIV_RATIO", decode_commanded_lambda),
         0x45: "RELATIVE_THROTTLE_POS",
         0x46: "AMBIANT_AIR_TEMP",
+        0x47: "ABS_THROTTLE_POS_B",
+        0x49: "ACCEL_PEDAL_POS_D",
+        0x4A: "ACCEL_PEDAL_POS_E",
+        0x4C: "COMMANDED_THROTTLE_ACTUATOR",
         0x5C: "OIL_TEMP",
     }
     golden_names = {
