@@ -386,6 +386,13 @@ def _resolve_worker_count(session_dirs: Sequence[Path], max_workers: int | None)
     actually going to hold, and log the arithmetic so a surprising choice is
     inspectable rather than mysterious.
     """
+    if max_workers is None:
+        configured = os.environ.get("CANARY_FEATURE_WORKERS")
+        if configured:
+            try:
+                max_workers = int(configured)
+            except ValueError:
+                log.warning("ignoring invalid CANARY_FEATURE_WORKERS=%r", configured)
     if max_workers is not None:
         return max(1, int(max_workers))
 

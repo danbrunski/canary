@@ -31,6 +31,7 @@ log + continue.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import logging
 import sys
@@ -667,6 +668,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001 — surface + continue to the next trainer
             log.exception("isolation forest trainer failed", extra={"error": str(exc)})
             results["isolation_forest"] = f"failed: {exc}"
+
+        # The sequence trainer needs the shared feature frame, but none of the
+        # IF mode matrices. Reclaim cyclic/joblib temporaries before allocating
+        # the LSTM dataset's values/mask/delta arrays.
+        gc.collect()
 
     if not args.skip_sequence:
         try:

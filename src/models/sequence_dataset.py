@@ -116,11 +116,12 @@ class SequenceWindowDataset:
         self.sequence_length = sequence_length
         self.stride = stride
         self.dtype = dtype
+        self._training_data_hash: str | None = None
         # Values are imputed to 0 wherever unobserved (leading NaN before a
         # channel's first observation); the mask records the imputation so the
         # loss never scores a fill. See ``_window_value_mask_delta``.
         raw = self.frame.loc[:, list(self.feature_columns)].to_numpy(dtype="float64")
-        self._mask = build.mask
+        self._mask = build.mask.astype(dtype, copy=False)
         self._values = np.where(np.isfinite(raw), raw, 0.0).astype(dtype)
         self._delta = build.delta.astype(dtype)
 
@@ -161,7 +162,7 @@ class SequenceWindowDataset:
         rows = slice(window.start_row, window.end_row)
         dtype = getattr(torch, self.dtype)
         value = torch.as_tensor(self._values[rows], dtype=dtype)
-        mask = torch.as_tensor(self._mask[rows].astype(self.dtype), dtype=dtype)
+        mask = torch.as_tensor(self._mask[rows], dtype=dtype)
         delta = torch.as_tensor(self._delta[rows], dtype=dtype)
         return value, mask, delta
 

@@ -105,6 +105,7 @@ def test_fit_trains_one_model_per_operating_mode_and_emits_manifest() -> None:
     assert manifest["hyperparams"]["contamination"] == 0.1
     assert manifest["hyperparams"]["per_mode_contamination"] == {}
     assert manifest["hyperparams"]["random_state"] == 42
+    assert manifest["hyperparams"]["n_jobs"] == 1
     assert manifest["scaler"]["columns"] == ["obd:RPM", "obd:SPEED", "obd:LOAD"]
     assert manifest["schema"]["feature_columns"] == ["obd:RPM", "obd:SPEED", "obd:LOAD"]
     assert manifest["schema"]["feature_spec_version"] == 1

@@ -169,7 +169,9 @@ def train_sequence_autoencoder(
         validation_fraction=config.validation_fraction,
         random_state=config.random_state,
     )
-    loader_kwargs = dataloader_kwargs_for_device(device)
+    loader_kwargs = dataloader_kwargs_for_device(
+        device, num_workers=getattr(config, "dataloader_workers", None)
+    )
     train_loader = data.DataLoader(
         train_subset,
         batch_size=config.batch_size,
@@ -189,6 +191,15 @@ def train_sequence_autoencoder(
     )
 
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
+    amp_dtype = None
+    grad_scaler = None
+    if str(device_obj).startswith("cuda") and getattr(config, "mixed_precision", False):
+        amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        if amp_dtype == torch.float16:
+            grad_scaler = torch.amp.GradScaler("cuda")
+    execution_model = model
+    if getattr(config, "compile_model", False) and hasattr(torch, "compile"):
+        execution_model = torch.compile(model)
 
     best_epoch = 0
     best_train_loss = float("inf")
@@ -201,15 +212,19 @@ def train_sequence_autoencoder(
 
     for epoch in range(1, config.max_epochs + 1):
         train_loss = train_one_epoch(
-            model,
+            execution_model,
             train_loader,
             optimizer=optimizer,
             device=device_obj,
+            amp_dtype=amp_dtype,
+            grad_scaler=grad_scaler,
         )
         validation_loss = (
             None
             if validation_loader is None
-            else evaluate_loss(model, validation_loader, device=device_obj)
+            else evaluate_loss(
+                execution_model, validation_loader, device=device_obj, amp_dtype=amp_dtype
+            )
         )
         history.append(
             _EpochLoss(epoch=epoch, train_loss=train_loss, validation_loss=validation_loss)
@@ -282,6 +297,9 @@ def train_sequence_autoencoder(
             "optimizer": "adam",
             "device": str(device_obj),
             "dtype": dtype,
+            "mixed_precision": amp_dtype is not None,
+            "compiled": execution_model is not model,
+            "dataloader_workers": loader_kwargs["num_workers"],
         },
         schema=schema,
         history=tuple(history),

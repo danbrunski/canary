@@ -75,6 +75,8 @@ from src.preprocessing.feature_pipeline import (
     sequence_feature_columns,
 )
 from src.preprocessing.normalization import ZScoreScaler
+from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.preprocessing.segmenter import MODE_COLUMN
 
 log = logging.getLogger(__name__)
 
@@ -145,7 +147,25 @@ def build_dataset(
     if feature_columns is not None:
         features = align_features_to_schema(features, columns)
     if scaler is not None:
-        features = scaler.transform(features)
+        # Keep only columns sequence construction/metadata needs and scale the
+        # numeric matrix as float32. ZScoreScaler.transform copies the entire
+        # wide feature frame and commonly doubles multi-GB corpus RSS.
+        structural = [
+            column
+            for column in (SESSION_COLUMN, TIMESTAMP_COLUMN, MODE_COLUMN)
+            if column in features.columns
+        ]
+        gaps = [column for column in features.columns if str(column).endswith(GAP_SUFFIX)]
+        keep = list(dict.fromkeys([*structural, *columns, *gaps]))
+        compact = features.loc[:, keep].copy()
+        values = compact.loc[:, columns].to_numpy(dtype="float32", copy=True)
+        for index, column in enumerate(columns):
+            denom = scaler.stds[column]
+            if denom < scaler.std_floor:
+                denom = 1.0
+            values[:, index] = (values[:, index] - scaler.means[column]) / denom
+        compact.loc[:, columns] = values
+        features = compact
     return SequenceWindowDataset(
         features,
         sequence_length=length,
@@ -165,7 +185,7 @@ def train(
     feature_cache_dir: Path | None = None,
     rebuild_feature_cache: bool = False,
     sequence_length: int | None = None,
-    stride: int = DEFAULT_SEQUENCE_STRIDE,
+    stride: int | None = None,
     device: str = "cpu",
     model_version: str | None = None,
     calibration_sessions: Sequence[Path] | None = None,
@@ -203,6 +223,11 @@ def train(
             f"{bindings_path} present so CAN payloads get decoded?"
         )
     config_block = _config_block(config, backend)
+    training_stride = (
+        int(getattr(config_block, "training_stride", DEFAULT_SEQUENCE_STRIDE))
+        if stride is None
+        else stride
+    )
     # Exclude config-suppressed channels (and their rolling-derivative siblings)
     # at train time so the manifest's ``feature_columns`` reflects what the
     # model actually scores on. The serve path also masks these at runtime —
@@ -239,7 +264,7 @@ def train(
         feature_cache_dir=feature_cache_dir,
         rebuild_feature_cache=rebuild_feature_cache,
         sequence_length=sequence_length,
-        stride=stride,
+        stride=training_stride,
         feature_columns=columns,
         scaler=scaler,
     )
@@ -259,7 +284,7 @@ def train(
             feature_cache_dir=feature_cache_dir,
             rebuild_feature_cache=rebuild_feature_cache,
             sequence_length=sequence_length,
-            stride=stride,
+            stride=int(getattr(config_block, "calibration_stride", DEFAULT_SEQUENCE_STRIDE)),
             feature_columns=columns,
             scaler=scaler,
         )
@@ -451,8 +476,8 @@ def _build_arg_parser(backend: SequenceTrainingBackend, *, prog: str) -> argpars
     parser.add_argument(
         "--stride",
         type=int,
-        default=DEFAULT_SEQUENCE_STRIDE,
-        help=f"Sliding-window stride (default: {DEFAULT_SEQUENCE_STRIDE}).",
+        default=None,
+        help="Override the configured training-window stride.",
     )
     parser.add_argument(
         "--device",
@@ -580,7 +605,17 @@ def _run(backend: SequenceTrainingBackend, args: argparse.Namespace) -> int:
                 args.evaluate,
                 config,
                 bindings_path=args.bindings,
-                stride=args.stride,
+                stride=(
+                    args.stride
+                    if args.stride is not None
+                    else int(
+                        getattr(
+                            _config_block(config, backend),
+                            "calibration_stride",
+                            DEFAULT_SEQUENCE_STRIDE,
+                        )
+                    )
+                ),
                 device=args.device,
                 k_grid=args.evaluate_k,
             )

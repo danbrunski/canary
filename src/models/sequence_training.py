@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -203,33 +204,53 @@ def masked_mse_loss(reconstruction: Any, value: Any, mask: Any) -> Any:
     return squared.sum() / denominator
 
 
-def train_one_epoch(model: Any, loader: Any, *, optimizer: Any, device: Any) -> float:
+def train_one_epoch(
+    model: Any,
+    loader: Any,
+    *,
+    optimizer: Any,
+    device: Any,
+    amp_dtype: Any | None = None,
+    grad_scaler: Any | None = None,
+) -> float:
+    torch = torch_module()
     model.train()
     losses: list[float] = []
     for value, mask, delta in loader:
-        value = value.to(device)
-        mask = mask.to(device)
-        delta = delta.to(device)
+        value = value.to(device, non_blocking=True)
+        mask = mask.to(device, non_blocking=True)
+        delta = delta.to(device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
-        reconstruction = model(value, mask, delta)
-        loss = masked_mse_loss(reconstruction, value, mask)
-        loss.backward()
-        optimizer.step()
+        with torch.autocast(
+            device_type=device.type, dtype=amp_dtype, enabled=amp_dtype is not None
+        ):
+            reconstruction = model(value, mask, delta)
+            loss = masked_mse_loss(reconstruction, value, mask)
+        if grad_scaler is not None:
+            grad_scaler.scale(loss).backward()
+            grad_scaler.step(optimizer)
+            grad_scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
         losses.append(float(loss.detach().cpu().item()))
     return float(np.mean(losses))
 
 
-def evaluate_loss(model: Any, loader: Any, *, device: Any) -> float:
+def evaluate_loss(model: Any, loader: Any, *, device: Any, amp_dtype: Any | None = None) -> float:
     torch = torch_module()
     model.eval()
     losses: list[float] = []
     with torch.no_grad():
         for value, mask, delta in loader:
-            value = value.to(device)
-            mask = mask.to(device)
-            delta = delta.to(device)
-            reconstruction = model(value, mask, delta)
-            loss = masked_mse_loss(reconstruction, value, mask)
+            value = value.to(device, non_blocking=True)
+            mask = mask.to(device, non_blocking=True)
+            delta = delta.to(device, non_blocking=True)
+            with torch.autocast(
+                device_type=device.type, dtype=amp_dtype, enabled=amp_dtype is not None
+            ):
+                reconstruction = model(value, mask, delta)
+                loss = masked_mse_loss(reconstruction, value, mask)
             losses.append(float(loss.detach().cpu().item()))
     return float(np.mean(losses))
 
@@ -357,9 +378,9 @@ def calibrate_sequence_thresholds(
     channel_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
     with torch.no_grad():
         for value, mask, delta in loader:
-            value = value.to(device_obj)
-            mask = mask.to(device_obj)
-            delta = delta.to(device_obj)
+            value = value.to(device_obj, non_blocking=True)
+            mask = mask.to(device_obj, non_blocking=True)
+            delta = delta.to(device_obj, non_blocking=True)
             global_errors = model.reconstruction_error(value, mask, delta, reduction="sample")
             channel_errors = model.reconstruction_error(value, mask, delta, reduction="channel")
             global_chunks.append(global_errors.detach().cpu().numpy().astype(np.float64))
@@ -479,6 +500,9 @@ def error_distribution(
 
 
 def training_data_hash(dataset: SequenceWindowDataset) -> str:
+    cached = getattr(dataset, "_training_data_hash", None)
+    if cached is not None:
+        return str(cached)
     digest = hashlib.sha256()
     digest.update(
         json.dumps(
@@ -486,16 +510,18 @@ def training_data_hash(dataset: SequenceWindowDataset) -> str:
                 "feature_columns": list(dataset.feature_columns),
                 "sequence_length": dataset.sequence_length,
                 "windows": [window.to_dict() for window in dataset.windows],
+                "hash_layout": "contiguous-frame-v2",
             },
             sort_keys=True,
         ).encode("utf-8")
     )
-    for window in dataset.windows:
-        values = dataset.frame.iloc[window.start_row : window.end_row][
-            list(dataset.feature_columns)
-        ].to_numpy(dtype=np.float64)
-        digest.update(np.ascontiguousarray(values).tobytes())
-    return f"sha256:{digest.hexdigest()}"
+    # Windows heavily overlap. Hash the model-ready frame once instead of
+    # materializing and hashing the same row sequence_length times.
+    values = dataset.frame.loc[:, list(dataset.feature_columns)].to_numpy(dtype=np.float64)
+    digest.update(np.ascontiguousarray(values).tobytes())
+    result = f"sha256:{digest.hexdigest()}"
+    dataset._training_data_hash = result
+    return result
 
 
 def training_sessions(dataset: SequenceWindowDataset) -> tuple[str, ...]:
@@ -568,17 +594,21 @@ def default_training_device() -> str:
         return "cpu"
 
 
-def dataloader_kwargs_for_device(device: str) -> dict[str, Any]:
+def dataloader_kwargs_for_device(device: str, *, num_workers: int | None = None) -> dict[str, Any]:
     """``num_workers`` + ``pin_memory`` tuned to the training device.
 
-    On CUDA we ask for two prefetch workers and page-locked host memory so the
-    host→device copy overlaps the kernel; on CPU there's no copy to overlap and
-    the extra worker processes just add IPC noise, so we stay single-process
-    (matching the conservative Pi-friendly defaults). Picked off ``device`` so
-    callers don't need to know the rule.
+    CUDA uses page-locked host memory so host→device copies can overlap kernels.
+    Worker count remains conservative because this dataset owns a full frame
+    plus dense arrays; WSL defaults to zero and other CUDA hosts to one. CPU
+    stays single-process. An explicit config value always wins.
     """
+    if num_workers is None:
+        # WSL process workers frequently duplicate this dataset's full pandas
+        # frame and dense arrays. Zero is also the safe 16-GB default elsewhere.
+        is_wsl = "microsoft" in platform.release().lower()
+        num_workers = 0 if is_wsl else (1 if str(device).startswith("cuda") else 0)
     if str(device).startswith("cuda"):
-        return {"num_workers": 2, "pin_memory": True}
+        return {"num_workers": num_workers, "pin_memory": True}
     return {"num_workers": 0, "pin_memory": False}
 
 

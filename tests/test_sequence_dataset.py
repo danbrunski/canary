@@ -214,6 +214,7 @@ def test_sequence_window_dataset_returns_value_mask_delta_tuple() -> None:
     )
 
     value, mask, delta = dataset[0]
+    assert dataset._mask.dtype == np.float32
 
     assert isinstance(value, torch.Tensor)
     assert isinstance(mask, torch.Tensor)

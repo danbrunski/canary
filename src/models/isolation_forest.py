@@ -75,6 +75,7 @@ class IsolationForestConfigLike(Protocol):
     calibration_holdout_fraction: float
     target_flag_rate: float
     min_samples_per_mode: int
+    n_jobs: int
 
 
 class MissingModelDependencyError(ImportError):
@@ -601,8 +602,6 @@ def fit_isolation_forest(
             columns=tuple(selected_features),
             std_floor=scaler.std_floor,
         )
-    scaled = scaler.transform(frame)
-
     isolation_forest_cls = _isolation_forest_cls()
     models: dict[str, Any] = {}
     mode_feature_columns: dict[str, list[str]] = {}
@@ -611,11 +610,12 @@ def fit_isolation_forest(
 
     for mode, plan in mode_plans.items():
         contamination = _contamination_for_mode(config, mode)
-        x = scaled.loc[plan.fit_index, plan.feats].to_numpy(dtype=np.float32)
+        x = _scaled_array(frame.loc[plan.fit_index, plan.feats], scaler, plan.feats)
         model = isolation_forest_cls(
             n_estimators=config.n_estimators,
             contamination=contamination,
             random_state=seed,
+            n_jobs=int(getattr(config, "n_jobs", 1)),
         )
         model.fit(x)
         models[mode] = model
@@ -625,7 +625,10 @@ def fit_isolation_forest(
         score_threshold, score_scale, achieved_flag_rate = (
             _calibrate_holdout_threshold(
                 model,
-                scaled.loc[plan.holdout_index, plan.feats],
+                pd.DataFrame(
+                    _scaled_array(frame.loc[plan.holdout_index, plan.feats], scaler, plan.feats),
+                    columns=plan.feats,
+                ),
                 target_flag_rate=target_flag_rate,
             )
             if plan.calibrate
@@ -679,6 +682,7 @@ def fit_isolation_forest(
             "calibration_holdout_fraction": holdout_fraction,
             "target_flag_rate": target_flag_rate,
             "min_samples_per_mode": min_samples_per_mode,
+            "n_jobs": int(getattr(config, "n_jobs", 1)),
         },
         scaler=scaler.to_dict(),
         schema={
@@ -694,6 +698,24 @@ def fit_isolation_forest(
         skipped_modes=tuple(skipped_modes),
     )
     return TrainedIsolationForest(models=models, scaler=scaler, manifest=manifest)
+
+
+def _scaled_array(
+    frame: pd.DataFrame, scaler: ZScoreScaler, columns: Sequence[str]
+) -> np.ndarray[Any, np.dtype[np.float32]]:
+    """Scale only the matrix a mode consumes, avoiding a full-frame copy."""
+    values = frame.loc[:, list(columns)].to_numpy(dtype=np.float32, copy=True)
+    means = np.asarray([scaler.means[column] for column in columns], dtype=np.float32)
+    denoms = np.asarray(
+        [
+            scaler.stds[column] if scaler.stds[column] >= scaler.std_floor else 1.0
+            for column in columns
+        ],
+        dtype=np.float32,
+    )
+    values -= means
+    values /= denoms
+    return values
 
 
 def save_isolation_forest_model(

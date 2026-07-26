@@ -48,9 +48,20 @@ def test_dataloader_kwargs_for_device_cuda_opts_in_pin_memory_and_workers() -> N
     """CUDA training overlaps host→device copies with kernel time; that needs
     pinned host memory and at least one prefetch worker, so the helper opts in."""
     kwargs = dataloader_kwargs_for_device("cuda")
-    assert kwargs == {"num_workers": 2, "pin_memory": True}
-    # ``cuda:0`` (explicit index) is still CUDA.
-    assert dataloader_kwargs_for_device("cuda:0") == {"num_workers": 2, "pin_memory": True}
+    assert kwargs["pin_memory"] is True
+    assert kwargs["num_workers"] in {0, 1}
+
+
+def test_dataloader_workers_can_be_forced_off_for_memory_constrained_wsl() -> None:
+    assert dataloader_kwargs_for_device("cuda", num_workers=0) == {
+        "num_workers": 0,
+        "pin_memory": True,
+    }
+    # ``cuda:0`` (explicit index) is still CUDA and honors an explicit override.
+    assert dataloader_kwargs_for_device("cuda:0", num_workers=0) == {
+        "num_workers": 0,
+        "pin_memory": True,
+    }
 
 
 def test_dataloader_kwargs_for_device_cpu_stays_conservative() -> None:

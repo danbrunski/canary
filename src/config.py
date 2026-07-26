@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal, Self
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class _Strict(BaseModel):
@@ -359,6 +359,16 @@ class IsolationForestConfig(_Strict):
     #: handful of rows: no model persisted, listed in the manifest's
     #: ``skipped_modes`` instead.
     min_samples_per_mode: int = Field(default=100, ge=0)
+    #: Parallel tree builders. A small fixed default avoids both the historical
+    #: single-core fit and ``-1`` oversubscription on memory-constrained WSL.
+    n_jobs: int = 4
+
+    @field_validator("n_jobs")
+    @classmethod
+    def _nonzero_n_jobs(cls, value: int) -> int:
+        if value == 0:
+            raise ValueError("n_jobs must not be zero")
+        return value
 
 
 class AlertsConfig(_Strict):
@@ -443,6 +453,15 @@ class LSTMAutoencoderConfig(_Strict):
     latent_dim: int
     dropout: float = 0.0
     batch_size: int = 64
+    #: Overlapping training windows are highly redundant. Calibration remains
+    #: dense by default so deployed thresholds retain one-tick resolution.
+    training_stride: int = Field(default=5, ge=1)
+    calibration_stride: int = Field(default=1, ge=1)
+    #: ``None`` chooses a conservative platform default (zero on WSL). Worker
+    #: processes can duplicate the full pandas-backed dataset.
+    dataloader_workers: int | None = Field(default=None, ge=0)
+    mixed_precision: bool = True
+    compile_model: bool = False
     learning_rate: float = 0.001
     max_epochs: int = 100
     validation_fraction: float = 0.2
@@ -491,6 +510,11 @@ class TCNAutoencoderConfig(_Strict):
     #: GRU-D freshness gate). When false the TCN sees value+mask only.
     use_delta_decay: bool = True
     batch_size: int = 64
+    training_stride: int = Field(default=5, ge=1)
+    calibration_stride: int = Field(default=1, ge=1)
+    dataloader_workers: int | None = Field(default=None, ge=0)
+    mixed_precision: bool = True
+    compile_model: bool = False
     learning_rate: float = 0.001
     max_epochs: int = 100
     validation_fraction: float = 0.2
