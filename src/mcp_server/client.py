@@ -28,6 +28,15 @@ class DaemonError(RuntimeError):
         self.detail = detail
 
 
+def _describe(exc: Exception) -> str:
+    """Human-readable cause for a transport error.
+
+    ``str()`` of several httpx exceptions (notably ``ReadTimeout``) is empty,
+    which produced errors like ``"GET /sessions/x/trip-summary: "`` — a
+    failure with no visible reason. Fall back to the exception class name."""
+    return str(exc) or type(exc).__name__
+
+
 class DaemonClient:
     """Async HTTP client bound to a single daemon base URL.
 
@@ -63,19 +72,39 @@ class DaemonClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def get_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def get_json(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         """``GET path`` → parsed JSON, or raise :class:`DaemonError`.
 
         The CANary daemon returns JSON objects from every documented endpoint
         (the dashboard wraps lists in ``{"events": [...], "count": N}`` and so
         on). If we ever surface a bare-array endpoint, this will need a
         sibling ``get_json_list``.
-        """
-        return cast(dict[str, Any], await self._request("GET", path, params=params))
 
-    async def post_json(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        ``timeout`` overrides the client default (5 s) for compute-on-demand
+        endpoints — the first digest/trip-summary hit after a drive resamples
+        the whole stored session on the Pi, which takes tens of seconds.
+        """
+        return cast(
+            dict[str, Any], await self._request("GET", path, params=params, timeout=timeout)
+        )
+
+    async def post_json(
+        self,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         """``POST path`` with a JSON body → parsed JSON or :class:`DaemonError`."""
-        return cast(dict[str, Any], await self._request("POST", path, json_body=body))
+        return cast(
+            dict[str, Any], await self._request("POST", path, json_body=body, timeout=timeout)
+        )
 
     async def get_bytes(self, path: str, params: dict[str, Any] | None = None) -> bytes:
         """``GET path`` → raw response body (e.g. a session export zip)."""
@@ -134,7 +163,7 @@ class DaemonClient:
                             async for chunk in response.aiter_bytes(chunk_size):
                                 fh.write(chunk)
             except httpx.HTTPError as exc:
-                raise DaemonError(f"GET {path}: {exc}") from exc
+                raise DaemonError(f"GET {path}: {_describe(exc)}") from exc
             if not restart:
                 break
         part.replace(dest)
@@ -148,11 +177,18 @@ class DaemonClient:
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
         parse_json: bool = True,
+        timeout: float | None = None,
     ) -> Any:
         try:
-            response = await self._client.request(method, path, params=params, json=json_body)
+            response = await self._client.request(
+                method,
+                path,
+                params=params,
+                json=json_body,
+                timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
+            )
         except httpx.HTTPError as exc:
-            raise DaemonError(f"{method} {path}: {exc}") from exc
+            raise DaemonError(f"{method} {path}: {_describe(exc)}") from exc
 
         if response.status_code >= 400:
             detail: Any

@@ -189,6 +189,35 @@ async def test_network_failure_raises_daemon_error() -> None:
     await client.aclose()
 
 
+async def test_empty_transport_error_names_the_exception_class() -> None:
+    """``str(httpx.ReadTimeout(""))`` is empty — the DaemonError message must
+    still say *why* (seen live: ``"GET /sessions/x/trip-summary: "`` with no
+    cause when the compute-on-demand endpoint outran the 5 s default)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("")
+
+    client = await _make_client(httpx.MockTransport(handler))
+    with pytest.raises(DaemonError, match="ReadTimeout"):
+        await client.get_json("/sessions/x/trip-summary")
+    await client.aclose()
+
+
+async def test_per_request_timeout_reaches_the_transport() -> None:
+    """``get_json(..., timeout=...)`` overrides the client default so slow
+    compute-on-demand endpoints (digest / trip-summary) get their own budget."""
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["timeout"] = request.extensions.get("timeout")
+        return httpx.Response(200, json={})
+
+    client = await _make_client(httpx.MockTransport(handler))
+    await client.get_json("/control/sessions/x/digest", timeout=120.0)
+    await client.aclose()
+    assert seen["timeout"]["read"] == 120.0
+
+
 async def test_async_context_manager_closes() -> None:
     """``async with`` form closes the underlying client cleanly."""
 

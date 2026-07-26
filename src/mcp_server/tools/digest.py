@@ -25,7 +25,10 @@ async def get_session_digest(client: DaemonClient, *, session_id: str) -> dict[s
     (``list_vehicle_events`` / ``get_trends``) — ``client`` must carry the
     control token, same as those tools.
     """
-    return await client.get_json(f"/control/sessions/{session_id}/digest")
+    # First hit after a drive computes the digest from the stored session on
+    # the Pi (resample + fingerprint + ledger scan) — far beyond the client's
+    # 5 s default; cached hits return instantly.
+    return await client.get_json(f"/control/sessions/{session_id}/digest", timeout=120.0)
 
 
 __all__ = ["get_session_digest"]
