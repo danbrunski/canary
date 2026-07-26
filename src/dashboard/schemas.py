@@ -122,6 +122,16 @@ class UpsKeepaliveRequest(_ControlRequest):
     minutes: float = Field(..., ge=0.0, le=720.0)
 
 
+class PassiveModeRequest(_ControlRequest):
+    """Arm/disarm the CAN transmit gate (passive, receive-only mode).
+
+    Used when another tool owns a diagnostic session with a module — an ECU
+    reprogramming run being the motivating case — and CANary's OBD polling
+    must not put frames on the bus. See src/collection/tx_gate.py."""
+
+    enabled: bool
+
+
 class CustomPidCreateRequest(_ControlRequest):
     """Define one new custom PID (Task 2.8c) — same fields as
     :class:`src.collection.custom_pids.CustomPid`; validated (read-only mode,

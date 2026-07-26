@@ -31,6 +31,7 @@ from functools import partial
 import can
 
 from src.can_ids import parse_standard_can_id
+from src.collection import tx_gate
 from src.collection.can_collector import (
     DEFAULT_RECONNECT_POLICY,
     RecordingResult,
@@ -192,6 +193,19 @@ def run_can_obd_loop(
             )
             stats.scheduler_snapshots += 1
             next_metrics_at = now + max(0.1, scheduler_metrics_interval_seconds)
+
+        if tx_gate.is_passive():
+            # Pure-monitoring mode. Keep receiving and tapping frames so
+            # broadcast CAN logging, the anomaly pipeline and the status
+            # snapshot all stay live — we simply issue nothing.
+            #
+            # The pause belongs HERE rather than at the send: blocking only
+            # the transmit would leave every request waiting out its full
+            # timeout, and `_update_response_state` would escalate each one
+            # into the miss-backoff. Passive mode would then hand back a
+            # scheduler with every PID suppressed once it lifted.
+            _recv_and_tap(bus, on_frame, stats, timeout=0.2)
+            continue
 
         if not requests:
             _recv_and_tap(bus, on_frame, stats, timeout=0.2)
@@ -756,7 +770,13 @@ def _query_with_tap(
         data=build_request_payload(request.service, identifier),
         is_extended_id=False,
     )
-    bus.send(message)
+    if not tx_gate.send(bus, message, what=f"poll {request.channel}"):
+        # Passive mode: no frame went out, so no response is coming. Return an
+        # empty result WITHOUT counting a request or a timeout — the poll loop
+        # normally skips issuing entirely when passive, so reaching here means
+        # some other path called through; it must still not pollute the
+        # scheduler's backoff state.
+        return QueryResult()
     stats.requests_sent += 1
 
     request_deadline = time.monotonic() + timeout_seconds
@@ -779,12 +799,14 @@ def _query_with_tap(
         if result.negative_response:
             return QueryResult(negative_response_code=result.negative_response_code)
         if result.flow_control_id is not None:
-            bus.send(
+            tx_gate.send(
+                bus,
                 can.Message(
                     arbitration_id=result.flow_control_id,
                     data=FLOW_CONTROL_CTS,
                     is_extended_id=False,
-                )
+                ),
+                what="flow-control",
             )
             continue
         if result.response is not None:

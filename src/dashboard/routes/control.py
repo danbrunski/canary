@@ -18,6 +18,7 @@ from src.alerts.tuning import (
     save_tuning_config,
 )
 from src.analysis.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore
+from src.collection import tx_gate
 from src.collection.custom_pids import (
     CustomPid,
     CustomPidSet,
@@ -86,6 +87,7 @@ from src.dashboard.schemas import (
     FeedbackRequest,
     JobSubmitRequest,
     ModelUploadRequest,
+    PassiveModeRequest,
     ProfileNameUpdateRequest,
     ReplayStartRequest,
     SequenceDetectorRequest,
@@ -396,6 +398,22 @@ def register_control_routes(
             "expiry": expiry,
         }
         publish_control_event("power.keepalive", "ok", payload)
+        return payload
+
+    @app.get("/control/passive")
+    def get_control_passive(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        return {"passive": tx_gate.snapshot()}
+
+    @app.post("/control/passive")
+    def post_control_passive(
+        request: PassiveModeRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        previous = tx_gate.set_passive(request.enabled, source="control")
+        payload = {"passive": tx_gate.snapshot(), "previous_enabled": previous}
+        publish_control_event("passive", "ok", payload)
         return payload
 
     @app.post("/control/sessions/{session_id}/metadata")

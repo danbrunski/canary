@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker
+from src.collection import tx_gate
 from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
 from src.models.health import HealthMonitor
@@ -191,6 +192,13 @@ class StatusSnapshot:
     #: manifest — what exactly is being served and when it was trained,
     #: without an operator having to `scp`/read the manifest by hand.
     model_provenance: dict[str, dict[str, Any] | None] | None = None
+    #: CAN transmit gate: ``{enabled, source, suppressed_frames}``. When
+    #: ``enabled`` the daemon is receive-only — it still logs broadcast CAN,
+    #: stores telemetry and scores anomalies, but issues no OBD polls and
+    #: sends no ISO-TP flow control. Surfaced because passive mode looks
+    #: exactly like a dead OBD link from every other panel, and an operator
+    #: who forgot they armed it would otherwise debug a phantom fault.
+    passive: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -208,6 +216,7 @@ class StatusSnapshot:
             "profile": self.profile,
             "detectors": self.detectors,
             "model_provenance": self.model_provenance,
+            "passive": self.passive,
         }
 
 
@@ -427,6 +436,7 @@ def build_status(
         profile=_active_profile(config),
         detectors=detectors,
         model_provenance=model_provenance if models_dir is not None else None,
+        passive=tx_gate.snapshot(),
     )
 
 

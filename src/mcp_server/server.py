@@ -106,6 +106,9 @@ from src.mcp_server.write_tools import (
     models as models_write_tool,
 )
 from src.mcp_server.write_tools import (
+    passive as passive_write_tool,
+)
+from src.mcp_server.write_tools import (
     power as power_write_tool,
 )
 from src.mcp_server.write_tools import (
@@ -739,6 +742,17 @@ def _register_write_tools(
     async def set_ups_keepalive(minutes: float) -> dict[str, Any]:
         """Set (minutes>0) or cancel (minutes=0) the UPS watchdog keep-alive hold."""
         return await power_write_tool.set_ups_keepalive(client, audit, minutes=minutes)
+
+    @mcp.tool()
+    async def set_passive_mode(enabled: bool) -> dict[str, Any]:
+        """Arm/disarm receive-only mode: daemon keeps logging but transmits no CAN.
+
+        Use while another tool owns a diagnostic session (ECU reflash, actuator
+        test). OBD channels go stale while armed — that is expected, and
+        `get_status` reports `passive.enabled` so it is distinguishable from a
+        real fault.
+        """
+        return await passive_write_tool.set_passive_mode(client, audit, enabled=enabled)
 
     @mcp.tool()
     async def replay_window(

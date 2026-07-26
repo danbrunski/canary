@@ -48,6 +48,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from src.collection import tx_gate
 from src.telemetry import TelemetryRecord
 
 #: Sources whose mere presence proves the vehicle bus is connected and
@@ -101,10 +102,21 @@ class RecordArmingGate:
                 and self._last_active_at is not None
                 and (record.timestamp - self._last_active_at).total_seconds()
                 > self.disarm_after_seconds
+                and not tx_gate.is_passive()
             ):
                 # Vehicle went quiet (key out / adapter unplugged) but the Pi
                 # is still powered and other sources (GPS…) keep chattering.
                 # Rotation can't save us — it needs the *next* key-on.
+                #
+                # Suppressed while passive mode is armed (`tx_gate.is_passive`):
+                # this branch infers "vehicle is parked" from an absence of
+                # arm-source records, and during an operator-armed passive
+                # window that inference is invalid. We stopped polling
+                # ourselves, and the event being observed may itself quiet the
+                # bus — reprogramming tools routinely issue CommunicationControl
+                # / ControlDTCSetting to stop normal message transmission during
+                # erase/write. Disarming there would drop recording for exactly
+                # the window passive mode was armed to capture.
                 self.armed = False
                 self.dropped_count += 1
                 return False

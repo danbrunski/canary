@@ -169,6 +169,7 @@ Control endpoints:
 | `POST /control/replay` / `POST /control/replay/stop` / `GET /control/replay` | run a stored session through the live pipeline with isolated `_replay-*` outputs |
 | `GET /control/profiles` / `POST /control/profiles/{slug}/name` | list vehicle profiles / set a profile display name |
 | `GET /control/power` / `POST /control/power/keepalive` | UPS watchdog status / set or cancel the keep-alive hold |
+| `GET /control/passive` / `POST /control/passive` | inspect / arm the CAN transmit gate (receive-only mode) — see [Passive mode](#passive-mode) |
 | `GET /control/feedback` / `POST /control/feedback` | read / record anomaly-feedback verdicts |
 | `GET /control/training-runs` | training-run ledger |
 | `GET /control/datasets/health` | corpus readiness + per-mode counts |
@@ -232,3 +233,71 @@ pnpm dev
 
 Vite proxies `/status`, `/config`, `/telemetry`, `/anomalies`, and `/ws/*` to
 `127.0.0.1:8000`, so the laptop browser talks to the Pi through the SSH tunnel.
+
+## Passive mode
+
+CANary's broadcast capture is listen-only by design (FR-02 / NFR-06), but the
+OBD side is not: the scheduler transmits tester requests (Mode 01/03/06/07/09/
+0A polls, Mode 22 DID reads, diagnostic session control) and ISO-TP flow
+control. That is normally harmless — an ECU answers diagnostic requests all
+day.
+
+It stops being harmless when another tool owns a diagnostic session with a
+module: an ECU reprogramming run holding a programming session, a
+bidirectional actuator test, a scan tool mid-routine. Passive mode is the
+switch for those windows. The daemon keeps running — broadcast CAN logging,
+storage, GPS, anomaly scoring, dashboard — but transmits nothing.
+
+```bash
+# arm before the other tool connects
+curl -sX POST http://canary.local:8000/control/passive \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"enabled": true}'
+
+# confirm (also visible as `passive` in GET /status)
+curl -s http://canary.local:8000/control/passive \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN"
+
+# disarm when the other tool is done
+curl -sX POST http://canary.local:8000/control/passive \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"enabled": false}'
+```
+
+MCP equivalent: `set_passive_mode(enabled=true|false)`. To boot the daemon
+already passive, set `CANARY_PASSIVE=1` in its environment.
+
+**Expect OBD to go stale while armed.** `vehicle_state` will read
+`engine_off`/`no_data` and behavior models stop scoring, because nothing is
+polling. That is the mode working, not a fault — `GET /status` reports
+`passive.enabled` plus a `suppressed_frames` counter so it is distinguishable
+from a real bus problem.
+
+Two interactions worth knowing:
+
+* **Scheduler hygiene.** The pause happens where requests are *issued*, not at
+  the send, so no request accrues a timeout and nothing enters the miss-backoff.
+  Passive mode hands back an undegraded scheduler when it lifts.
+* **Record arming.** The `disarm_after_seconds` silence timer is suspended
+  while passive. That timer infers "vehicle is parked" from an absence of
+  `can`/`obd` records, and during a passive window the inference is invalid —
+  we stopped polling ourselves, and reprogramming tools routinely issue
+  `CommunicationControl`/`ControlDTCSetting` to quiet normal bus traffic during
+  erase/write. Without the suspension, recording would disarm during exactly
+  the window passive mode was armed to capture.
+
+### Hardware-level listen-only
+
+For a guarantee no software path can defeat, put the controller itself in
+listen-only mode on the Pi — it then cannot drive the bus at all, not even ACK
+bits:
+
+```bash
+sudo ip link set can0 down
+sudo ip link set can0 type can bitrate 500000 listen-only on
+sudo ip link set can0 up
+```
+
+Reverse with `listen-only off`. This needs an interface cycle, so it is a
+deliberate pre-procedure step rather than a runtime toggle; use it *in
+addition to* passive mode when the stakes justify it (an ECU reflash does).

@@ -62,6 +62,7 @@ Write tools (audit-logged with `actor="mcp"` via
 | `start_job` / `cancel_job` | `POST /control/jobs[...]` |
 | `set_tuning` / `estimate_tuning` / `revert_tuning` | `POST /control/tuning[...]` |
 | `set_ups_keepalive` | `POST /control/power/keepalive` — set (minutes>0) or cancel (minutes=0) the UPS watchdog keep-alive hold, for a bench transition longer than the watchdog's grace window |
+| `set_passive_mode` | `POST /control/passive` — arm/disarm receive-only mode. Daemon keeps logging CAN and scoring anomalies but transmits nothing. Arm whenever another tool owns a diagnostic session (ECU reflash, actuator test). OBD channels go stale while armed — expected, not a fault; `get_status` reports `passive.enabled` |
 | `upload_model_artifact` | base64-encodes a local artifact + `POST /control/models/{type}/artifact` |
 | `replay_window` | submits a `replay_window` daemon job, polls until done, returns the inference report |
 | `start_replay` / `stop_replay` / `get_replay_status` | `POST /control/replay[...]` — runtime replay-into-collector with isolated outputs (see "End-to-end session replay" below) |

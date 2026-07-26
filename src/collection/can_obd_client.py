@@ -49,6 +49,7 @@ from typing import Any
 
 import can
 
+from src.collection import tx_gate
 from src.collection.isotp import (
     DEFAULT_REQUEST_ID,
     DEFAULT_RESPONSE_ID_MAX,
@@ -230,7 +231,8 @@ class CanObdClient:
             is_extended_id=False,
         )
         try:
-            self._bus.send(message)
+            if not tx_gate.send(self._bus, message, what=f"request service=0x{service:02X}"):
+                return None
         except can.CanError:
             log.warning("CAN send failed", extra={"service": service, "pid": pid})
             return None
@@ -263,7 +265,8 @@ class CanObdClient:
             is_extended_id=False,
         )
         try:
-            self._bus.send(message)
+            if not tx_gate.send(self._bus, message, what=f"probe service=0x{service:02X}"):
+                return []
         except can.CanError:
             log.warning("CAN send failed", extra={"service": service, "pid": pid})
             return []
@@ -347,12 +350,14 @@ class CanObdClient:
                 # responder_id - 8 (e.g. 0x7E8 → 0x7E0). The Xterra's engine
                 # ECU expects 0x7E0.
                 try:
-                    self._bus.send(
+                    tx_gate.send(
+                        self._bus,
                         can.Message(
                             arbitration_id=result.flow_control_id,
                             data=FLOW_CONTROL_CTS,
                             is_extended_id=False,
-                        )
+                        ),
+                        what="flow-control",
                     )
                 except can.CanError:
                     log.warning("CAN flow-control send failed", extra={"responder": responder})
