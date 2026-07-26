@@ -17,6 +17,7 @@ import pytest
 
 from src.config import CanaryConfig
 from src.decode.behavior_models import BehaviorModels
+from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,
     NON_TRAINABLE_COUNTER_CHANNELS,
@@ -608,3 +609,115 @@ def test_available_memory_bytes_is_plausible_or_none() -> None:
 
     available = fp._available_memory_bytes()
     assert available is None or available > 0
+
+
+# ---------------------------------------------------------------------------
+# Chunked CAN decode (2026-07-26 OOM). Decoding 4.5M raw CAN rows in one pass
+# held every raw row AND every decoded row at once (~14.6M object-dtype rows,
+# ~7.6 GB RSS) and got feature-build workers OOM-killed. `_decode_long_frame`
+# chunks it; these lock the equivalence that makes that safe.
+# ---------------------------------------------------------------------------
+
+
+def _synth_can_long(n: int, can_id: int = 0x551) -> pd.DataFrame:
+    """Long-format CAN rows shaped like ``read_session`` output."""
+    import json
+
+    return pd.DataFrame(
+        [
+            {
+                "timestamp": pd.Timestamp(float(i), unit="s", tz="UTC"),
+                "source": "can",
+                "channel": f"0x{can_id:X}",
+                "value_number": float("nan"),
+                "value_text": None,
+                "value_bool": None,
+                "unit": "",
+                "payload": bytes([i % 256, (i * 7) % 256, 0]),
+                "metadata_json": json.dumps({"can_id": can_id, "dlc": 3}),
+                "session": "synth",
+                "session_path": "/tmp/synth",
+                "source_channel": f"can:0x{can_id:X}",
+                "value": float("nan"),
+            }
+            for i in range(n)
+        ]
+    )
+
+
+def _single_pass_decode(long: pd.DataFrame, bindings) -> pd.DataFrame:
+    """The pre-chunking implementation, kept here as the parity reference."""
+    from src.preprocessing.feature_pipeline import _LONG_SORT_COLUMNS
+
+    out = decode_can_rows(long, bindings)
+    out = out[out["source"] != "can"]
+    return out.sort_values(_LONG_SORT_COLUMNS, kind="stable").reset_index(drop=True)
+
+
+def test_chunked_can_decode_matches_single_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chunk boundaries must not change a single decoded value or row."""
+    from src.decode.bindings import Bindings, Signal
+    from src.preprocessing import feature_pipeline as fp
+
+    bindings = Bindings(
+        schema_version=1,
+        signals=[
+            Signal(
+                name="A", module="ECM", can_id=0x551, byte_start=0, byte_length=1, confidence="high"
+            ),
+            Signal(
+                name="B", module="ECM", can_id=0x551, byte_start=1, byte_length=1, confidence="high"
+            ),
+        ],
+    )
+    long = _synth_can_long(50)
+    expected = _single_pass_decode(long, bindings)
+
+    # Chunk size that does NOT divide the row count, so a chunk boundary lands
+    # mid-frame and the last chunk is short.
+    monkeypatch.setattr(fp, "_CAN_DECODE_CHUNK_ROWS", 7)
+    got = fp._decode_long_frame(long, bindings, None, None).reset_index(drop=True)
+
+    assert len(got) == 100  # 50 frames x 2 signals
+    pd.testing.assert_frame_equal(got, expected)
+
+
+def test_chunked_decode_drops_raw_can_rows() -> None:
+    from src.decode.bindings import Bindings, Signal
+    from src.preprocessing import feature_pipeline as fp
+
+    bindings = Bindings(
+        schema_version=1,
+        signals=[
+            Signal(
+                name="A", module="ECM", can_id=0x551, byte_start=0, byte_length=1, confidence="high"
+            )
+        ],
+    )
+    out = fp._decode_long_frame(_synth_can_long(10), bindings, None, None)
+    assert (out["source"] != "can").all()
+    assert len(out) == 10
+
+
+def test_decode_long_frame_without_decoders_keeps_non_can_rows() -> None:
+    """No bindings and no DBC: the CAN rows still go (nothing can decode them)
+    and the non-CAN rows survive untouched."""
+    from src.preprocessing import feature_pipeline as fp
+
+    can = _synth_can_long(4)
+    obd = can.iloc[:2].copy()
+    obd["source"] = "obd"
+    obd["channel"] = "RPM"
+    obd["source_channel"] = "obd:RPM"
+    obd["value"] = [800.0, 900.0]
+    out = fp._decode_long_frame(pd.concat([can, obd], ignore_index=True), None, None, None)
+    assert out["source"].unique().tolist() == ["obd"]
+    assert sorted(out["value"].tolist()) == [800.0, 900.0]
+
+
+def test_decode_long_frame_handles_empty_and_missing_source() -> None:
+    from src.preprocessing import feature_pipeline as fp
+
+    assert fp._decode_long_frame(pd.DataFrame(), None, None, None).empty
+    bare = pd.DataFrame({"timestamp": pd.to_datetime(["2026-05-13T12:00:00Z"])})
+    pd.testing.assert_frame_equal(fp._decode_long_frame(bare, None, None, None), bare)

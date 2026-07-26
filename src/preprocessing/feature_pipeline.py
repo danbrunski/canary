@@ -183,6 +183,72 @@ def _init_feature_worker(
     _FEATURE_WORKER_STATE["resample"] = resample_config
 
 
+#: Raw CAN rows fed through the decoders per chunk. Decoding is row-local (each
+#: CAN row yields its own decoded rows; no cross-row state), so chunking is
+#: exactly equivalent to decoding the frame in one pass — it only bounds peak
+#: memory. Sized so one chunk plus its decoded output stays in the low hundreds
+#: of MB at the ~2.2 signals/frame this vehicle's bindings+DBC produce.
+_CAN_DECODE_CHUNK_ROWS = 250_000
+
+#: Canonical long-frame ordering, matching ``read_session``'s own sort. The
+#: chunked decode reassembles rows out of order, and ``to_wide``'s
+#: ``aggfunc="last"`` is order-sensitive, so the pieces are re-sorted on this
+#: key before the pivot.
+_LONG_SORT_COLUMNS = ["session", "timestamp", "source", "channel"]
+
+
+def _decode_long_frame(
+    long: pd.DataFrame,
+    bindings: Any,
+    dbc_database: Any,
+    did_map: Any,
+) -> pd.DataFrame:
+    """Decode one session's long frame, chunking the CAN decode.
+
+    Raw CAN frames are ~99% of the rows and carry no numeric value (their bytes
+    live in ``payload``); they exist only to be decoded into ``decoded:*`` /
+    ``dbc:*`` rows. Decoding them in a single pass holds every raw row *and*
+    every decoded row at once — on one dense 45-minute drive that is ~4.5M raw
+    plus ~10M decoded object-dtype rows, which OOM-killed feature-build workers
+    at ~7.6 GB RSS (2026-07-26, both the 4-worker and the 2-worker attempt).
+    Decoding in chunks and keeping only each chunk's decoded output bounds peak
+    memory by the chunk instead of the session.
+
+    Equivalent to the old single-pass decode, not an approximation: both
+    decoders emit one row per (CAN row × matching signal) with no dependence on
+    neighbouring rows, and the result is re-sorted on ``_LONG_SORT_COLUMNS``
+    before it reaches the order-sensitive pivot.
+    """
+    if long.empty or "source" not in long.columns:
+        return long
+    is_can = long["source"] == "can"
+    # DID decoding reads Mode-22 ``DID_<hex>`` OBD rows, never CAN rows, so it
+    # runs once on the non-CAN side rather than per chunk.
+    rest = long.loc[~is_can]
+    if did_map is not None:
+        rest = decode_did_rows(rest, did_map)
+    if bindings is None and dbc_database is None:
+        return rest.sort_values(_LONG_SORT_COLUMNS, kind="stable")
+
+    can_rows = long.loc[is_can]
+    pieces: list[pd.DataFrame] = [rest]
+    for start in range(0, len(can_rows), _CAN_DECODE_CHUNK_ROWS):
+        chunk = can_rows.iloc[start : start + _CAN_DECODE_CHUNK_ROWS]
+        if bindings is not None:
+            chunk = decode_can_rows(chunk, bindings)
+        if dbc_database is not None:
+            chunk = decode_can_rows_dbc(chunk, dbc_database)
+        # Keep only what the decode produced; the raw CAN rows that seeded it
+        # are dead weight downstream (all-NaN pivot columns) and dropping them
+        # here is what keeps the accumulated pieces small.
+        decoded = chunk.loc[chunk["source"] != "can"]
+        if not decoded.empty:
+            pieces.append(decoded)
+        del chunk, decoded
+    combined = pd.concat(pieces, ignore_index=True) if len(pieces) > 1 else pieces[0]
+    return combined.sort_values(_LONG_SORT_COLUMNS, kind="stable")
+
+
 def _decode_session_to_wide(
     session_dir: Path,
     bindings: Any,
@@ -194,24 +260,7 @@ def _decode_session_to_wide(
     reject counts stay inspectable per-session (``scripts/disposition_report.py``)
     without duplicating the decode steps.
     """
-    long = read_session(session_dir)
-    if bindings is not None:
-        long = decode_can_rows(long, bindings)
-    if dbc_database is not None:
-        long = decode_can_rows_dbc(long, dbc_database)
-    if did_map is not None:
-        # Decode raw Mode-22 ``DID_<hex>`` poll rows into named, scaled
-        # ``did:<NAME>`` signals so the fuel/air recipes + IF/LSTM see them
-        # (otherwise the raw hex-string readings are non-numeric and dropped
-        # by to_wide).
-        long = decode_did_rows(long, did_map)
-    # Raw CAN frames are ~98% of the rows and carry no numeric value
-    # (the bytes live in `payload`); they exist only to be decoded into the
-    # decoded:* / dbc:* rows appended above. Once decoded they're dead weight
-    # — their pivot columns are all-NaN and dropped by
-    # ``trainable_feature_columns`` anyway. Dropping them here collapses the
-    # ``to_wide`` pivot's row volume ~50× — the actual OOM cause.
-    long = long[long["source"] != "can"]
+    long = _decode_long_frame(read_session(session_dir), bindings, dbc_database, did_map)
     return to_wide(long, coerce_numeric=True)
 
 
