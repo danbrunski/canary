@@ -4,10 +4,18 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from src.preprocessing.resampler import ResampleConfig, gap_column, resample_wide
+from src.preprocessing.resampler import (
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
+    ResampleConfig,
+    gap_column,
+    is_slow_channel,
+    resample_wide,
+)
 
 
 def _ts(seconds: int) -> datetime:
@@ -188,3 +196,31 @@ def test_resample_wide_tolerates_duplicate_observation_timestamps() -> None:
 
     assert result[gap_column("obd:RPM")].tolist() == [False, False]
     assert result["obd:RPM"].tolist() == [705.0, 710.0]
+
+
+def test_run_time_is_treated_as_a_slow_channel() -> None:
+    """``obd:RUN_TIME`` is a monotonic engine-run clock polled on the medium
+    tier (~8 s observed), so the fast 2 s ceiling flagged it stale on 82.5% of
+    rows. ``require_contiguous_runtime`` vetoes a session when RUN_TIME__gap is
+    true anywhere, which silently discarded two genuine cold starts (first
+    coolant 27 °C / 34 °C, run-time monotonic). Classify it by its cadence."""
+    assert is_slow_channel("obd:RUN_TIME")
+    # Genuinely fast channels must not be swept along.
+    assert not is_slow_channel("obd:RPM")
+    assert not is_slow_channel("obd:SPEED")
+
+
+def test_slow_classification_keeps_run_time_ungapped_at_real_cadence() -> None:
+    """An 8 s poll cadence on a 1 Hz grid: fast rules would gap-flag the
+    in-between rows; the slow ceiling carries them."""
+    ts = pd.date_range("2026-07-22T14:00:00Z", periods=30, freq="1s")
+    wide = pd.DataFrame(
+        {
+            SESSION_COLUMN: ["s"] * 30,
+            TIMESTAMP_COLUMN: ts,
+            # observed every 8th second, like the real medium-tier cadence
+            "obd:RUN_TIME": [float(i) if i % 8 == 0 else np.nan for i in range(30)],
+        }
+    )
+    out = resample_wide(wide, config=ResampleConfig(hz=1.0))
+    assert not out[gap_column("obd:RUN_TIME")].astype(bool).any()

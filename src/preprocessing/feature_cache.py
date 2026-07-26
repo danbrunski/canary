@@ -29,7 +29,11 @@ DEFAULT_DIDS_PATH = Path("data/dids.yaml")
 #: 2 — resampler tz fix: sessions whose trailing-only channels used to raise
 #:     "Cannot subtract tz-naive and tz-aware" were dropped from the corpus
 #:     entirely, so cached frames are missing them.
-FEATURE_FRAME_CACHE_VERSION = 2
+#: 3 — ``RUN_TIME`` reclassified slow (``DEFAULT_SLOW_CHANNEL_HINTS``): its
+#:     ``__gap`` flag was set on 82.5% of rows under the fast 2 s ceiling, which
+#:     vetoed every cold-start warmup recipe. Cached frames carry the old flags,
+#:     so reusing them would silently keep the veto in place.
+FEATURE_FRAME_CACHE_VERSION = 3
 
 
 def build_feature_frame_cache_key(

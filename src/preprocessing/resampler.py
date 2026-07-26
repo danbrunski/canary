@@ -20,6 +20,22 @@ GAP_SUFFIX = "__gap"
 #: gone dead, not normal slow-poll cadence.
 DEFAULT_SLOW_CHANNEL_MAX_GAP_SECONDS = 120.0
 
+#: Channels whose *physics* updates far slower than the resample grid, so the
+#: fast-channel ``max_gap`` would flag ordinary poll cadence as a dead sensor.
+#: The test is "does this quantity change meaningfully within one grid
+#: interval?" — not "is it convenient to ffill".
+#:
+#: ``RUN_TIME`` is the engine-run clock: monotonic, perfectly predictable
+#: between samples, and polled on the medium tier (~8 s observed, 17.5%
+#: coverage on the 2026-07-26 corpus). Classifying it fast set its ``__gap``
+#: flag on 82.5% of rows, which silently vetoed every cold-start warmup recipe
+#: — ``require_contiguous_runtime`` rejects a session if ``RUN_TIME__gap`` is
+#: true anywhere, so two genuine cold starts (first coolant 27 °C and 34 °C,
+#: both with monotonic run-time) were discarded for a staleness artifact rather
+#: than any real discontinuity. Its siblings ``DISTANCE_SINCE_DTC_CLEAR`` /
+#: ``WARMUPS_SINCE_DTC_CLEAR`` / ``DISTANCE_W_MIL`` are the same shape of
+#: slow-polled counter and are candidates for the same treatment; left out here
+#: to keep this change to the one channel with a demonstrated consequence.
 DEFAULT_SLOW_CHANNEL_HINTS = frozenset(
     {
         "BARO",
@@ -27,6 +43,7 @@ DEFAULT_SLOW_CHANNEL_HINTS = frozenset(
         "COOLANT",
         "INTAKE_TEMP",
         "IAT",
+        "RUN_TIME",
     }
 )
 
