@@ -266,11 +266,27 @@ def decode_calibration_ids(data: bytes) -> tuple[str, str] | None:
 
 
 def decode_cvn(data: bytes) -> tuple[str, str] | None:
-    """Mode 09 InfoType 0x06 — calibration verification numbers (4-byte hex)."""
+    """Mode 09 InfoType 0x06 — calibration verification numbers (4-byte hex).
+
+    Like InfoType 0x02/0x04 the reassembled payload carries a leading
+    message-count byte (how many 4-byte CVNs follow). The ASCII infotypes shed
+    it incidentally when `_strip_padding` drops the non-printable byte; CVNs
+    are binary, so nothing removes it and every group shifts one byte left.
+
+    Observed on the Xterra 2026-07-26: the ECU returned ``01 0B4B7C60`` — one
+    CVN of ``0B4B7C60`` — and this rendered it as ``010B4B7C``, inventing a
+    leading ``01`` and silently dropping the trailing ``60``. A CVN is a
+    calibration checksum whose whole purpose is exact comparison, so a
+    plausible-looking wrong value is worse than none.
+
+    Only stripped when the length actually implies a count byte
+    (``len % 4 == 1``), so a bare 4-byte CVN still decodes unchanged.
+    """
     if not data:
         return None
+    body = data[1:] if len(data) % 4 == 1 else data
     # CVNs are not ASCII — render as space-separated 4-byte hex groups.
-    groups = [data[i : i + 4].hex().upper() for i in range(0, len(data) - len(data) % 4, 4)]
+    groups = [body[i : i + 4].hex().upper() for i in range(0, len(body) - len(body) % 4, 4)]
     return (" ".join(groups), "hex") if groups else None
 
 

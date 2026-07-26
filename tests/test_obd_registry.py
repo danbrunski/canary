@@ -273,3 +273,20 @@ def test_classify_pid_four_outcomes() -> None:
     unknown = classify_pid(0x01, 0xFE, supported=True)
     assert unknown.status == "unknown_pid"
     assert unknown.channel is None
+
+
+def test_decode_cvn_strips_leading_message_count_byte() -> None:
+    """Regression: the Xterra returned `01 0B4B7C60` (one CVN) on 2026-07-26 and
+    this decoded as "010B4B7C" — a leading 01 invented, the trailing 60 dropped.
+    A CVN exists to be compared exactly, so a wrong-but-plausible value is worse
+    than no value."""
+    assert decode_cvn(bytes.fromhex("010b4b7c60")) == ("0B4B7C60", "hex")
+
+
+def test_decode_cvn_multiple_cvns_with_count_byte() -> None:
+    assert decode_cvn(bytes.fromhex("020b4b7c60aabbccdd")) == ("0B4B7C60 AABBCCDD", "hex")
+
+
+def test_decode_cvn_bare_four_bytes_unchanged() -> None:
+    """No count byte (len % 4 == 0) must decode exactly as before the fix."""
+    assert decode_cvn(bytes([0xAB, 0xCD, 0xEF, 0x01])) == ("ABCDEF01", "hex")
