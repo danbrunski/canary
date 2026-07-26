@@ -45,6 +45,29 @@ MODEL_MODE_COLUMN = "isolation_forest_model_mode"
 SCORE_COLUMN = "isolation_forest_score"
 LABEL_COLUMN = "isolation_forest_label"
 MISSING_FEATURES_COLUMN = "isolation_forest_missing_features"
+#: Fraction of the chosen model's trained features that were NaN on this row.
+#: Recorded for every scored row (not just withheld ones) so partial
+#: degradation is observable instead of collapsing to a single bool.
+MISSING_FEATURE_FRACTION_COLUMN = "isolation_forest_missing_feature_fraction"
+#: How much per-row missingness ``score`` will impute through rather than
+#: withhold. Above this the row is withheld (flagged, score=inf) and the
+#: daemon's fail-safe suppresses the emit.
+#:
+#: Requiring a *fully* populated row — the original rule — is unsatisfiable on
+#: real telemetry: OBD PIDs arrive round-robin at 0.1-0.5 Hz against a 1 Hz
+#: resample grid, so on the 2026-07-26 corpus (26,843 rows) exactly 0 rows had
+#: every trained feature present. The IF therefore self-suppressed on 100% of
+#: ticks, which is the ``missing_feature_rate: 1.0`` observed on the Pi.
+#:
+#: Missing cells are imputed to the training mean, which is 0 in the scaler's
+#: z-space — the least-informative value available, so an imputed feature
+#: pushes the verdict toward "normal" rather than fabricating an excursion.
+#: That is only honest for a small minority of the vector, hence a low ceiling:
+#: measured against the coverage-filtered feature set, 14.5% of rows need no
+#: imputation at all and 48.4% fall within 5%. Raising this much further would
+#: start scoring rows that are mostly imputed mean, i.e. blind in the opposite
+#: direction (always "normal") — the failure mode this ceiling exists to avoid.
+MAX_MISSING_FEATURE_FRACTION = 0.05
 #: Phase 7.2 — per-mode calibrated decision boundary + verdict. ``score``
 #: stays the raw larger-is-worse value; these add the held-out-calibrated
 #: threshold and the boolean it produces. ``threshold`` is ``NaN`` and
@@ -326,6 +349,7 @@ class TrainedIsolationForest:
         out[LABEL_COLUMN] = pd.Series(pd.NA, index=out.index, dtype="Int64")
         out[MODEL_MODE_COLUMN] = pd.Series(pd.NA, index=out.index, dtype="object")
         out[MISSING_FEATURES_COLUMN] = False
+        out[MISSING_FEATURE_FRACTION_COLUMN] = np.nan
 
         for mode, group in scaled.groupby(self.mode_column, sort=True, dropna=False):
             mode_key = str(mode)
@@ -340,16 +364,27 @@ class TrainedIsolationForest:
                 if model_key is not None
                 else list(self.feature_columns)
             )
-            missing_features = group[feats].isna().any(axis=1)
+            # Tolerate a *little* missingness instead of demanding a fully
+            # populated row. Requiring zero NaN made the detector unable to
+            # score at all on real telemetry: OBD arrives round-robin at
+            # 0.1-0.5 Hz against a 1 Hz grid, so on the 2026-07-26 corpus
+            # 0 of 26,843 rows had every trained feature present, which is
+            # exactly the ``missing_feature_rate: 1.0`` the Pi reported. With
+            # the coverage-filtered feature set, 14.5% of rows are already
+            # complete and 48.4% are within this tolerance — the difference
+            # between a detector that never fires and one that works.
+            missing_fraction = group[feats].isna().mean(axis=1)
+            withheld = missing_fraction > MAX_MISSING_FEATURE_FRACTION
+            out.loc[indexes, MISSING_FEATURE_FRACTION_COLUMN] = missing_fraction
 
-            if missing_features.any():
-                missing_indexes = missing_features[missing_features].index
+            if withheld.any():
+                missing_indexes = withheld[withheld].index
                 out.loc[missing_indexes, SCORE_COLUMN] = np.inf
                 out.loc[missing_indexes, LABEL_COLUMN] = -1
                 out.loc[missing_indexes, MODEL_MODE_COLUMN] = mode_key
                 out.loc[missing_indexes, MISSING_FEATURES_COLUMN] = True
 
-            complete_indexes = indexes.difference(missing_features[missing_features].index)
+            complete_indexes = indexes.difference(withheld[withheld].index)
             if complete_indexes.empty:
                 continue
 
@@ -363,7 +398,11 @@ class TrainedIsolationForest:
                 out.loc[complete_indexes, MISSING_FEATURES_COLUMN] = True
                 continue
 
-            x = scaled.loc[complete_indexes, feats].to_numpy(dtype=np.float32)
+            # Impute the tolerated NaNs to 0.0 — the training mean in the
+            # scaler's z-space (see MAX_MISSING_FEATURE_FRACTION). sklearn
+            # cannot consume NaN at all, so without this the "tolerated" rows
+            # would raise instead of scoring.
+            x = scaled.loc[complete_indexes, feats].fillna(0.0).to_numpy(dtype=np.float32)
             model = self.models[model_key]
             # sklearn's decision_function is positive for inliers and
             # negative for outliers. Negating gives a more natural

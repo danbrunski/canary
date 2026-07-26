@@ -17,6 +17,7 @@ from src.models.isolation_forest import (  # noqa: E402
     CALIBRATED_ANOMALY_COLUMN,
     CALIBRATED_THRESHOLD_COLUMN,
     LABEL_COLUMN,
+    MISSING_FEATURE_FRACTION_COLUMN,
     MISSING_FEATURES_COLUMN,
     MODEL_MODE_COLUMN,
     SCORE_COLUMN,
@@ -715,3 +716,74 @@ def test_scaler_skips_column_exclusive_to_a_floor_skipped_mode() -> None:
     idle_rows = frame[frame[MODE_COLUMN] == "idle"].sort_values(TIMESTAMP_COLUMN)
     idle_fit_mean = idle_rows.iloc[: -int(len(idle_rows) * 0.2)]["obd:RPM"].mean()
     assert trained.scaler.means["obd:RPM"] == pytest.approx(idle_fit_mean, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Partial-missingness tolerance (2026-07-26). Requiring a fully populated row
+# was unsatisfiable on real telemetry — OBD arrives round-robin at 0.1-0.5 Hz
+# against a 1 Hz grid, so 0 of 26,843 corpus rows had every trained feature
+# present and the IF self-suppressed on 100% of ticks (Pi: missing_feature_rate
+# 1.0). Small gaps are now imputed to the training mean; large ones still
+# withhold.
+# ---------------------------------------------------------------------------
+
+
+def _wide_feature_frame(n_features: int = 40, n_rows: int = 200) -> pd.DataFrame:
+    """Enough features that one NaN is a small *fraction* of the vector."""
+    rng = np.random.default_rng(7)
+    data: dict[str, object] = {
+        SESSION_COLUMN: ["s"] * n_rows,
+        TIMESTAMP_COLUMN: pd.date_range("2026-07-22T14:00:00Z", periods=n_rows, freq="1s"),
+        MODE_COLUMN: ["city"] * n_rows,
+    }
+    for i in range(n_features):
+        data[f"obd:CH{i:02d}"] = rng.normal(loc=100.0 + i, scale=5.0, size=n_rows)
+    return pd.DataFrame(data)
+
+
+def test_score_imputes_small_gaps_instead_of_withholding() -> None:
+    """One NaN in a 40-feature row is 2.5% missing — under the ceiling, so the
+    row must produce a real finite score rather than self-suppressing."""
+    frame = _wide_feature_frame()
+    trained = fit_isolation_forest(
+        frame,
+        _IFConfig(n_estimators=25, contamination=0.05),
+        fitted_at="2026-07-26T21:00:00Z",
+    )
+    row = frame.iloc[[0]].copy()
+    row["obd:CH00"] = [np.nan]  # 1 of 40 == 2.5%
+    scored = trained.score(row)
+    assert bool(scored.loc[0, MISSING_FEATURES_COLUMN]) is False
+    assert np.isfinite(scored.loc[0, SCORE_COLUMN])
+    assert scored.loc[0, MISSING_FEATURE_FRACTION_COLUMN] == pytest.approx(1 / 40)
+
+
+def test_score_still_withholds_when_too_much_is_missing() -> None:
+    """Half the vector missing is not a small gap — imputing that far would
+    score a row that is mostly training-mean, i.e. blind toward 'normal'."""
+    frame = _wide_feature_frame()
+    trained = fit_isolation_forest(
+        frame,
+        _IFConfig(n_estimators=25, contamination=0.05),
+        fitted_at="2026-07-26T21:00:00Z",
+    )
+    row = frame.iloc[[0]].copy()
+    for i in range(20):  # 20 of 40 == 50%
+        row[f"obd:CH{i:02d}"] = [np.nan]
+    scored = trained.score(row)
+    assert bool(scored.loc[0, MISSING_FEATURES_COLUMN]) is True
+    assert scored.loc[0, SCORE_COLUMN] == np.inf
+    assert scored.loc[0, MISSING_FEATURE_FRACTION_COLUMN] == pytest.approx(0.5)
+
+
+def test_missing_feature_fraction_recorded_for_complete_rows_too() -> None:
+    """Recorded on every scored row, so partial degradation is observable
+    rather than collapsing into one boolean."""
+    frame = _wide_feature_frame()
+    trained = fit_isolation_forest(
+        frame,
+        _IFConfig(n_estimators=25, contamination=0.05),
+        fitted_at="2026-07-26T21:00:00Z",
+    )
+    scored = trained.score(frame.iloc[[5]])  # keeps index 5, so read positionally
+    assert scored.iloc[0][MISSING_FEATURE_FRACTION_COLUMN] == pytest.approx(0.0)
