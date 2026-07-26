@@ -38,6 +38,7 @@ from src.decode.behavior_models import (
     DeviationConfig,
     LookupTableFit,
     PolynomialFit,
+    RobustBaselineFit,
 )
 
 log = logging.getLogger(__name__)
@@ -61,6 +62,8 @@ def fit_polynomial(
     version: int = 1,
     notes: str | None = None,
     fitted_at: str | None = None,
+    diagnostic_capabilities: Sequence[str] = (),
+    diagnostic_limitations: Sequence[str] = (),
 ) -> BehaviorModel1D:
     """Fit ``y_column = poly(x_column, degree)`` and wrap as a ``BehaviorModel1D``.
 
@@ -111,6 +114,8 @@ def fit_polynomial(
         fit=fit,
         deviation=deviation,
         notes=notes,
+        diagnostic_capabilities=list(diagnostic_capabilities),
+        diagnostic_limitations=list(diagnostic_limitations),
     )
 
 
@@ -132,6 +137,8 @@ def fit_binned_lookup(
     version: int = 1,
     notes: str | None = None,
     fitted_at: str | None = None,
+    diagnostic_capabilities: Sequence[str] = (),
+    diagnostic_limitations: Sequence[str] = (),
 ) -> BehaviorModel1D:
     """Bin x into ``n_knots`` quantile bins, take mean y per bin → lookup table.
 
@@ -205,6 +212,72 @@ def fit_binned_lookup(
         fit=fit,
         deviation=deviation,
         notes=notes,
+        diagnostic_capabilities=list(diagnostic_capabilities),
+        diagnostic_limitations=list(diagnostic_limitations),
+    )
+
+
+def fit_robust_baseline(
+    frame: pd.DataFrame,
+    *,
+    y_column: str,
+    name: str,
+    output: str,
+    output_unit: str = "unknown",
+    sessions: Sequence[str] = (),
+    operating_mode: str | None = None,
+    deviation: DeviationConfig | None = None,
+    version: int = 1,
+    notes: str | None = None,
+    fitted_at: str | None = None,
+    diagnostic_capabilities: Sequence[str] = (),
+    diagnostic_limitations: Sequence[str] = (),
+    **_ignored: object,
+) -> BehaviorModel1D:
+    """Fit a median/MAD baseline; the output channel is a presence-only axis."""
+    values = pd.to_numeric(frame[y_column], errors="coerce").dropna().to_numpy(dtype=float)
+    if len(values) < 2:
+        raise ValueError(f"{name}: need at least 2 clean rows, got {len(values)}")
+    median = float(np.median(values))
+    mad = float(np.median(np.abs(values - median)))
+    sigma_floor = (
+        deviation.sigma_floor
+        if deviation is not None and deviation.sigma_floor is not None
+        else 0.0
+    )
+    robust_sigma = max(1.4826 * mad, sigma_floor)
+    if deviation is not None and deviation.kind == "sigma":
+        deviation = deviation.model_copy(update={"reference_std": robust_sigma})
+    fit = RobustBaselineFit(
+        kind="robust_baseline",
+        median=median,
+        mad=mad,
+        p01=float(np.quantile(values, 0.01)),
+        p99=float(np.quantile(values, 0.99)),
+        sample_count=len(values),
+        r_squared=None,
+        sessions=list(sessions),
+        fitted_at=_now_iso() if fitted_at is None else fitted_at,
+        training_data_hash=_hash_xy(np.arange(len(values), dtype=float), values),
+    )
+    return BehaviorModel1D(
+        name=name,
+        kind="surface_1d",
+        output=output,
+        output_unit=output_unit,
+        axis=Axis1D(
+            name="observation",
+            channel=y_column,
+            unit=output_unit,
+            domain=(float(np.min(values)), float(np.max(values))),
+        ),
+        operating_mode=operating_mode,
+        version=version,
+        fit=fit,
+        deviation=deviation,
+        notes=notes,
+        diagnostic_capabilities=list(diagnostic_capabilities),
+        diagnostic_limitations=list(diagnostic_limitations),
     )
 
 
@@ -222,10 +295,12 @@ def evaluate_1d(model: BehaviorModel1D, x: float) -> float | None:
     looking nonsense (especially for warmup curves that look monotonic
     until you fall off the fitted region and the cubic term explodes).
     """
+    fit = model.fit
+    if isinstance(fit, RobustBaselineFit):
+        return fit.median
     lo, hi = model.axis.domain
     if not lo <= x <= hi:
         return None
-    fit = model.fit
     if isinstance(fit, PolynomialFit):
         return float(np.polynomial.polynomial.polyval(x, fit.coefficients))
     # LookupTableFit

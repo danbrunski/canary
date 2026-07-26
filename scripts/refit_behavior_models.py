@@ -26,6 +26,7 @@ the previous version.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from collections.abc import Sequence
@@ -143,6 +144,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Print what would refit (recipe → fitted / skipped) but don't write --out.",
+    )
+    parser.add_argument(
+        "--report-json",
+        type=Path,
+        default=None,
+        help="Machine-readable bake-off report (default: <out>.report.json).",
     )
     parser.add_argument(
         "--log-level",
@@ -289,6 +296,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         log.info("dry-run; not writing")
         return 0
 
+    report_path = args.report_json or out.with_suffix(out.suffix + ".report.json")
+    _write_bakeoff_report(report_path, results, frame_rows=len(frame))
+
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(out.suffix + ".tmp")
     dump_behavior_models(models, tmp)
@@ -310,12 +320,62 @@ def _print_report(results: Sequence, frame_rows: int) -> None:
             assert res.model is not None
             fit = res.model.fit
             r2 = f"r²={fit.r_squared:.3f}" if fit.r_squared is not None else "r²=N/A"
-            print(f"    ✓ {res.name:35s}  n={fit.sample_count:>6d}  {r2}  v{res.model.version}")
+            validation = (
+                f"  heldout={fit.validation_sample_count} "
+                f"coverage={fit.validation_coverage:.1%} "
+                f"warn={fit.validation_warning_rate:.1%}"
+                if fit.validation_coverage is not None and fit.validation_warning_rate is not None
+                else ""
+            )
+            print(
+                f"    ✓ {res.name:35s}  n={fit.sample_count:>6d}  {r2}  "
+                f"v{res.model.version}{validation}"
+            )
     if skipped:
         print(f"\n  skipped ({len(skipped)}):")
         for res in skipped:
             print(f"    ✗ {res.name:35s}  {res.reason}")
     print()
+
+
+def _write_bakeoff_report(path: Path, results: Sequence, *, frame_rows: int) -> None:
+    payload: dict[str, object] = {"frame_rows": frame_rows, "recipes": []}
+    recipes: list[dict[str, object]] = []
+    for result in results:
+        model = result.model or getattr(result, "candidate", None)
+        entry: dict[str, object] = {
+            "name": result.name,
+            "published": bool(result.fitted),
+            "reason": result.reason,
+        }
+        if model is not None:
+            fit = model.fit
+            entry.update(
+                {
+                    "kind": model.kind,
+                    "training_samples": fit.sample_count,
+                    "training_sessions": fit.sessions,
+                    "calibration_sessions": fit.calibration_sessions,
+                    "r_squared": fit.r_squared,
+                    "validation_samples": fit.validation_sample_count,
+                    "validation_coverage": fit.validation_coverage,
+                    "validation_warning_rate": fit.validation_warning_rate,
+                    "validation_critical_rate": fit.validation_critical_rate,
+                    "validation_residual_median": fit.validation_residual_median,
+                    "validation_residual_mad": fit.validation_residual_mad,
+                    "validation_r_squared": fit.validation_r_squared,
+                    "diagnostic_capabilities": model.diagnostic_capabilities,
+                    "diagnostic_limitations": model.diagnostic_limitations,
+                }
+            )
+            if model.kind == "surface_2d":
+                entry["cells"] = [cell.model_dump() for cell in model.fit.cells]
+        recipes.append(entry)
+    payload["recipes"] = recipes
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    tmp.replace(path)
 
 
 if __name__ == "__main__":

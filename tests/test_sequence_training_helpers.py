@@ -85,7 +85,7 @@ def test_sequence_calibration_rejects_effectively_empty_windows() -> None:
     frame["rpm__gap"] = True
     frame["speed__gap"] = True
     dataset = SequenceWindowDataset(frame, sequence_length=4, feature_columns=("rpm", "speed"))
-    with pytest.raises(ValueError, match="usable sequence windows"):
+    with pytest.raises(ValueError, match="coverage is unusable"):
         validate_dataset_observations(
             dataset,
             minimum_window_fraction=0.01,

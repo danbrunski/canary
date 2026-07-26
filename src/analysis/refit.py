@@ -26,13 +26,15 @@ from __future__ import annotations
 import logging
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
 import pandas as pd
 
-from src.analysis.surface_1d import fit_binned_lookup, fit_polynomial
+from src.analysis.surface_1d import fit_binned_lookup, fit_polynomial, fit_robust_baseline
 from src.analysis.surface_2d import fit_grid_binned_mean
+from src.decode.behavior_decoder import deviation as evaluate_deviation
+from src.decode.behavior_decoder import expected_value
 from src.decode.behavior_models import (
     BehaviorModel1D,
     BehaviorModel2D,
@@ -118,6 +120,14 @@ class _RecipeBase:
     min_sessions: int = 1
     #: Rows a session must contribute before it counts toward ``min_sessions``.
     min_session_samples: int = 30
+    min_validation_coverage: float = 0.5
+    max_validation_warning_rate: float = 0.10
+    max_validation_critical_rate: float = 0.02
+    diagnostic_capabilities: tuple[str, ...] = ()
+    diagnostic_limitations: tuple[str, ...] = ()
+    max_initial_coolant_c: float | None = None
+    require_contiguous_runtime: bool = False
+    closed_loop_only: bool = False
     notes: str | None = None
     #: Auto-detected events (see ``src.analysis.events``) the *source session*
     #: must contain for any of its rows to feed this recipe. Use to gate
@@ -146,7 +156,7 @@ class Surface1DRecipe(_RecipeBase):
     x_axis_name: str = "x"
     x_axis_unit: str = "unknown"
     domain: tuple[float, float] | None = None  # None → derived from x.min()/x.max()
-    fit_method: Literal["poly", "binned_lookup"] = "poly"
+    fit_method: Literal["poly", "binned_lookup", "robust_baseline"] = "poly"
     degree: int = 3
     n_knots: int = 10
 
@@ -178,6 +188,8 @@ class Surface2DRecipe(_RecipeBase):
     #: populate most of the operating envelope; R² isn't meaningful for a
     #: grid-binned-mean fit so coverage is this recipe family's quality gate.
     min_populated_cell_fraction: float = 0.3
+    min_cell_sessions: int = 1
+    min_cell_dwell_seconds: float = 0.0
 
 
 Recipe = Surface1DRecipe | Surface2DRecipe
@@ -215,6 +227,8 @@ def default_recipes() -> list[Recipe]:
             # flooded the dashboard with warmup-storm anomalies.
             operating_mode="warmup",
             require_session_events=("cold_start",),
+            max_initial_coolant_c=40.0,
+            require_contiguous_runtime=True,
             min_rpm=ENGINE_RUNNING_MIN_RPM,  # KOEO rows have RUN_TIME=0 — not warmup data
             fit_method="binned_lookup",  # warmup is sigmoid-ish, polys overshoot
             n_knots=12,
@@ -230,19 +244,40 @@ def default_recipes() -> list[Recipe]:
             ),
         ),
         Surface1DRecipe(
-            name="idle_rpm_vs_coolant",
+            name="warm_idle_rpm_baseline",
+            output="obd:RPM",
+            output_unit="rpm",
+            x_column="obd:RPM",
+            operating_mode="idle",
+            min_rpm=ENGINE_RUNNING_MIN_RPM,  # keep KOEO rows (rpm=0) out of the idle curve
+            fit_method="robust_baseline",
+            min_r_squared=None,
+            min_samples=200,
+            deviation=DeviationConfig(
+                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=25.0
+            ),
+            notes=(
+                "Warm stabilized idle baseline. Accessory-load state is not available, "
+                "so robust bands absorb ordinary A/C/electrical-load steps."
+            ),
+        ),
+        Surface1DRecipe(
+            name="cold_start_idle_rpm_vs_coolant",
             output="obd:RPM",
             output_unit="rpm",
             x_column="obd:COOLANT_TEMP",
             x_axis_name="coolant_temp",
             x_axis_unit="degC",
-            operating_mode="idle",
-            min_rpm=ENGINE_RUNNING_MIN_RPM,  # keep KOEO rows (rpm=0) out of the idle curve
+            operating_mode="warmup",
+            require_session_events=("cold_start",),
+            max_initial_coolant_c=40.0,
+            require_contiguous_runtime=True,
+            min_rpm=ENGINE_RUNNING_MIN_RPM,
             fit_method="binned_lookup",
             n_knots=8,
-            min_samples=200,
-            deviation=DeviationConfig(kind="absolute", warning_band=100.0, critical_band=250.0),
-            notes=("Cold-idle RPM target curve. Vacuum leaks / IACV faults show as elevated idle."),
+            min_samples=120,
+            deviation=DeviationConfig(kind="absolute", warning_band=150.0, critical_band=300.0),
+            notes="Cold-start fast-idle curve, isolated from warm accessory-loaded idle.",
         ),
         # NOTE: the 1D ``timing_advance_vs_rpm`` rollup was removed — timing
         # advance is heavily load-dependent, so an RPM-only surface fit on an
@@ -308,6 +343,11 @@ def default_recipes() -> list[Recipe]:
                 "Complementary to ``timing_advance_vs_rpm_load`` (load-axis "
                 "compensation) — both feed the same timing output through "
                 "different physical axes."
+            ),
+            diagnostic_capabilities=("timing-map drift", "sustained knock-control retard"),
+            diagnostic_limitations=(
+                "cannot identify an IAT bias also consumed by the ECU "
+                "without an independent reference",
             ),
         ),
         Surface2DRecipe(
@@ -383,6 +423,10 @@ def default_recipes() -> list[Recipe]:
                 "cam/VVT fault (localized cell shift). Fed by "
                 "``compute_anomaly_signals``."
             ),
+            diagnostic_capabilities=("air-model relationship drift",),
+            diagnostic_limitations=(
+                "cannot distinguish MAF, MAP, IAT, or mechanical airflow causes by itself",
+            ),
         ),
         Surface2DRecipe(
             name="total_trim_vs_rpm_load_b1",
@@ -396,6 +440,7 @@ def default_recipes() -> list[Recipe]:
             y_axis_unit="%",
             min_samples=500,
             min_rpm=ENGINE_RUNNING_MIN_RPM,
+            closed_loop_only=True,
             # Same trim-PID LSB floor as fuel_trim_vs_rpm_load (100/128 ≈ 0.78%);
             # TOTAL_TRIM sums two channels sharing that LSB, so this is a lower
             # bound on the achievable resolution, not a doubled value.
@@ -422,6 +467,7 @@ def default_recipes() -> list[Recipe]:
             y_axis_unit="%",
             min_samples=500,
             min_rpm=ENGINE_RUNNING_MIN_RPM,
+            closed_loop_only=True,
             deviation=DeviationConfig(
                 kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=100.0 / 128.0
             ),
@@ -430,46 +476,47 @@ def default_recipes() -> list[Recipe]:
                 "total_trim_vs_rpm_load_b1, same discriminator."
             ),
         ),
-        Surface1DRecipe(
-            name="stft_bank_balance_vs_rpm",
-            output="derived:STFT_BANK_BALANCE",
-            output_unit="%",
-            x_column="obd:RPM",
-            x_axis_name="rpm",
-            x_axis_unit="rpm",
-            fit_method="poly",
-            degree=1,  # Expected ~constant zero across RPM; linear fit highlights slope drift
-            min_samples=300,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,
-            deviation=DeviationConfig(kind="absolute", warning_band=3.0, critical_band=6.0),
-            notes=(
-                "STFT delta between banks, time-smoothed over "
-                "STFT_BANK_BALANCE_SMOOTHING_SECONDS so routine transients "
-                "(round-robin sampling skew) don't trip it — only sustained "
-                "imbalance does. Expected ~0 everywhere; a non-zero intercept "
-                "means bank-specific fuel bias. Fed by "
-                "``compute_anomaly_signals`` from STFT_B1 - STFT_B2."
-            ),
-        ),
-        Surface1DRecipe(
-            name="ltft_bank_balance_vs_rpm",
-            output="derived:LTFT_BANK_BALANCE",
-            output_unit="%",
-            x_column="obd:RPM",
-            x_axis_name="rpm",
-            x_axis_unit="rpm",
-            fit_method="poly",
-            degree=1,
-            min_samples=300,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,
-            deviation=DeviationConfig(kind="absolute", warning_band=4.0, critical_band=8.0),
-            notes=(
-                "LTFT delta between banks — the slow / drift channel "
-                "(STFT is the fast one). Persistent non-zero indicates "
-                "long-term bank asymmetry: gradual injector wear, "
-                "exhaust leak, vacuum leak."
-            ),
-        ),
+        *[
+            Surface1DRecipe(
+                name=f"stft_bank_balance_{mode}",
+                output="derived:STFT_BANK_BALANCE",
+                output_unit="%",
+                x_column="derived:STFT_BANK_BALANCE",
+                operating_mode=mode,
+                fit_method="robust_baseline",
+                min_samples=150,
+                min_r_squared=None,
+                min_rpm=ENGINE_RUNNING_MIN_RPM,
+                closed_loop_only=True,
+                deviation=DeviationConfig(
+                    kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.8
+                ),
+                notes=(
+                    "Mode-conditioned robust median/MAD bank-balance baseline. "
+                    "A flat healthy signal is valuable and is not gated on R²."
+                ),
+            )
+            for mode in ("idle", "city", "highway")
+        ],
+        *[
+            Surface1DRecipe(
+                name=f"ltft_bank_balance_{mode}",
+                output="derived:LTFT_BANK_BALANCE",
+                output_unit="%",
+                x_column="derived:LTFT_BANK_BALANCE",
+                operating_mode=mode,
+                fit_method="robust_baseline",
+                min_samples=150,
+                min_r_squared=None,
+                min_rpm=ENGINE_RUNNING_MIN_RPM,
+                closed_loop_only=True,
+                deviation=DeviationConfig(
+                    kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.8
+                ),
+                notes="Mode-conditioned robust median/MAD long-term bank-balance baseline.",
+            )
+            for mode in ("idle", "city", "highway")
+        ],
         Surface1DRecipe(
             name="cat_warmup",
             output="obd:CATALYST_TEMP_B1S1",
@@ -482,6 +529,8 @@ def default_recipes() -> list[Recipe]:
             # transients; warm-restart and steady-state shouldn't fit it).
             operating_mode="warmup",
             require_session_events=("cold_start",),
+            max_initial_coolant_c=40.0,
+            require_contiguous_runtime=True,
             min_rpm=ENGINE_RUNNING_MIN_RPM,
             fit_method="binned_lookup",
             n_knots=12,
@@ -517,16 +566,19 @@ def default_recipes() -> list[Recipe]:
                 "distinguish injector/fuel-pressure faults from ECU compensation, "
                 "and does not claim MAF drift by itself."
             ),
+            diagnostic_capabilities=("commanded fueling-map drift",),
+            diagnostic_limitations=(
+                "cannot uniquely identify injector wear, fuel pressure, "
+                "MAF bias, or ECU compensation",
+            ),
         ),
         Surface1DRecipe(
-            name="afr_bank_balance_vs_throttle_did",
+            name="afr_bank_balance_robust",
             output="derived:AFR_BANK_BALANCE",
             output_unit="V",
-            x_column="did:ECM_THROTTLE_POS_SENSOR_1",
-            x_axis_name="throttle_sensor_voltage",
-            x_axis_unit="V",
-            fit_method="poly",
-            degree=1,
+            x_column="derived:AFR_BANK_BALANCE",
+            fit_method="robust_baseline",
+            min_r_squared=None,
             min_samples=300,
             deviation=DeviationConfig(kind="absolute", warning_band=0.05, critical_band=0.15),
             notes=(
@@ -585,7 +637,20 @@ def default_recipes() -> list[Recipe]:
             ),
         ),
     ]
-    return [replace(recipe, min_sessions=3) for recipe in recipes]
+    catalog: list[Recipe] = []
+    for recipe in recipes:
+        if isinstance(recipe, Surface2DRecipe):
+            catalog.append(
+                replace(
+                    recipe,
+                    min_sessions=3,
+                    min_cell_sessions=2,
+                    min_cell_dwell_seconds=10.0,
+                )
+            )
+        else:
+            catalog.append(replace(recipe, min_sessions=3))
+    return catalog
 
 
 # ---------------------------------------------------------------------------
@@ -663,6 +728,7 @@ class RecipeResult:
     model: BehaviorModel1D | BehaviorModel2D | None
     skipped: bool = False
     reason: str = ""
+    candidate: BehaviorModel1D | BehaviorModel2D | None = None
 
     @property
     def fitted(self) -> bool:
@@ -779,14 +845,77 @@ def fit_recipe(
                 ),
             )
 
+    if recipe.closed_loop_only:
+        status_column = "obd:FUEL_STATUS"
+        if status_column not in sub.columns:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason=f"no {status_column} column; can't enforce closed-loop-only fit",
+            )
+        status = pd.to_numeric(sub[status_column], errors="coerce").fillna(0).astype(int)
+        sub = sub[((status & 0x02) != 0) | ((status & 0x10) != 0)]
+        if sub.empty:
+            return RecipeResult(
+                recipe.name, None, skipped=True, reason="no closed-loop fuel-system rows"
+            )
+
     # 2. required columns present?
     required = _recipe_columns(recipe)
     missing = [c for c in required if c not in sub.columns]
     if missing:
         return RecipeResult(recipe.name, None, skipped=True, reason=f"missing columns {missing}")
 
+    if recipe.max_initial_coolant_c is not None or recipe.require_contiguous_runtime:
+        eligible: list[str] = []
+        if SESSION_COLUMN not in sub.columns:
+            return RecipeResult(
+                recipe.name, None, skipped=True, reason="warmup eligibility requires session ids"
+            )
+        for session_id, rows in sub.groupby(SESSION_COLUMN, sort=False):
+            ordered = rows.sort_values("timestamp") if "timestamp" in rows else rows
+            if recipe.max_initial_coolant_c is not None:
+                if "obd:COOLANT_TEMP" not in ordered:
+                    continue
+                coolant = pd.to_numeric(ordered["obd:COOLANT_TEMP"], errors="coerce").dropna()
+                if coolant.empty or float(coolant.iloc[0]) > recipe.max_initial_coolant_c:
+                    continue
+            if recipe.require_contiguous_runtime:
+                if "obd:RUN_TIME" not in ordered:
+                    continue
+                runtime = pd.to_numeric(ordered["obd:RUN_TIME"], errors="coerce").dropna()
+                if len(runtime) < 2 or bool((runtime.diff().dropna() < 0).any()):
+                    continue
+                if "obd:RUN_TIME__gap" in ordered and bool(
+                    ordered["obd:RUN_TIME__gap"].astype(bool).any()
+                ):
+                    continue
+            eligible.append(str(session_id))
+        sub = sub[sub[SESSION_COLUMN].astype(str).isin(eligible)]
+        if sub.empty:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason="no session satisfies cold-start temperature/runtime continuity gates",
+            )
+
     # 3. enough clean samples?
     clean = sub.dropna(subset=required)
+    freshness_columns = [f"{column}__gap" for column in required]
+    available_freshness = [column for column in freshness_columns if column in clean.columns]
+    if available_freshness:
+        clean = clean.loc[~clean[available_freshness].astype(bool).any(axis=1)]
+    if any(column.startswith("did:") for column in required):
+        gap_columns = [f"{column}__gap" for column in required if column.startswith("did:")]
+        if any(column not in clean.columns for column in gap_columns):
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason="DID surface lacks per-channel freshness flags for synchronous fitting",
+            )
     if len(clean) < recipe.min_samples:
         return RecipeResult(
             recipe.name,
@@ -795,6 +924,7 @@ def fit_recipe(
             reason=f"{len(clean)} clean samples < min_samples={recipe.min_samples}",
         )
     clean_sessions: tuple[str, ...] = tuple(sessions)
+    calibration = clean.iloc[0:0]
     if SESSION_COLUMN in clean.columns:
         counts = clean[SESSION_COLUMN].astype(str).value_counts()
         clean_sessions = tuple(
@@ -814,6 +944,21 @@ def fit_recipe(
                     f"{recipe.min_session_samples} samples < min_sessions={recipe.min_sessions}"
                 ),
             )
+        if recipe.min_sessions > 1:
+            calibration_session = clean_sessions[-1]
+            calibration = clean[clean[SESSION_COLUMN].astype(str) == calibration_session]
+            clean = clean[clean[SESSION_COLUMN].astype(str) != calibration_session]
+            clean_sessions = clean_sessions[:-1]
+            if len(clean) < recipe.min_samples:
+                return RecipeResult(
+                    recipe.name,
+                    None,
+                    skipped=True,
+                    reason=(
+                        f"{len(clean)} training samples after holding out "
+                        f"session {calibration_session!r} < min_samples={recipe.min_samples}"
+                    ),
+                )
 
     # 4. dispatch
     try:
@@ -831,6 +976,17 @@ def fit_recipe(
             extra={"recipe": recipe.name, "error": f"{type(exc).__name__}: {exc}"},
         )
         return RecipeResult(recipe.name, None, skipped=True, reason=str(exc))
+
+    if not calibration.empty:
+        validation_reason, model = _validate_held_out(recipe, model, calibration)
+        if validation_reason is not None:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason=validation_reason,
+                candidate=model,
+            )
 
     # 5. publish gate (4.1) — a fit that succeeded numerically but is too
     # poor / too sparse to trust is refused the same way a missing-column or
@@ -868,21 +1024,32 @@ def _check_publish_gate(recipe: Recipe, model: BehaviorModel1D | BehaviorModel2D
     this is what actually catches the silent all-empty-grid case, since an
     empty grid's R² would be undefined either way.
     """
-    if recipe.min_sessions > 1 and len(model.fit.sessions) < recipe.min_sessions:
+    evidence_sessions = len(model.fit.sessions) + len(model.fit.calibration_sessions)
+    if recipe.min_sessions > 1 and evidence_sessions < recipe.min_sessions:
         return (
-            f"training session count {len(model.fit.sessions)} below "
+            f"independent evidence session count {evidence_sessions} below "
             f"min_sessions={recipe.min_sessions}"
         )
     if isinstance(recipe, Surface1DRecipe):
         floor = recipe.min_r_squared
-        r2 = model.fit.r_squared
+        r2 = (
+            model.fit.validation_r_squared
+            if model.fit.validation_r_squared is not None
+            else model.fit.r_squared
+        )
         if floor is not None and r2 is not None and r2 < floor:
             return f"r_squared={r2:.3f} below min_r_squared={floor}"
         return None
     assert isinstance(recipe, Surface2DRecipe)
     assert isinstance(model, BehaviorModel2D)
     cells = model.fit.cells
-    populated = sum(1 for c in cells if c.count >= model.min_cell_count)
+    populated = sum(
+        1
+        for cell in cells
+        if cell.count >= model.min_cell_count
+        and cell.session_count >= recipe.min_cell_sessions
+        and cell.dwell_seconds >= recipe.min_cell_dwell_seconds
+    )
     fraction = populated / len(cells) if cells else 0.0
     if fraction < recipe.min_populated_cell_fraction:
         return (
@@ -1019,10 +1186,92 @@ def _fit_1d(
         deviation=recipe.deviation,
         version=version,
         notes=recipe.notes,
+        diagnostic_capabilities=recipe.diagnostic_capabilities,
+        diagnostic_limitations=recipe.diagnostic_limitations,
     )
     if recipe.fit_method == "poly":
         return fit_polynomial(frame, degree=recipe.degree, **kwargs)  # type: ignore[arg-type]
+    if recipe.fit_method == "robust_baseline":
+        return fit_robust_baseline(frame, **kwargs)  # type: ignore[arg-type]
     return fit_binned_lookup(frame, n_knots=recipe.n_knots, **kwargs)  # type: ignore[arg-type]
+
+
+def _validate_held_out(
+    recipe: Recipe,
+    model: BehaviorModel1D | BehaviorModel2D,
+    calibration: pd.DataFrame,
+) -> tuple[str | None, BehaviorModel1D | BehaviorModel2D]:
+    residuals: list[float] = []
+    actual_values: list[float] = []
+    expected_values: list[float] = []
+    warnings = 0
+    critical = 0
+    for row in calibration.to_dict(orient="records"):
+        point = cast(Mapping[str, float], {str(key): value for key, value in row.items()})
+        expected = expected_value(model, point)
+        actual_raw = row.get(recipe.output)
+        actual = None if actual_raw is None or pd.isna(actual_raw) else float(actual_raw)
+        if expected is None or actual is None:
+            continue
+        result = evaluate_deviation(model, actual, point)
+        residuals.append(actual - expected)
+        actual_values.append(actual)
+        expected_values.append(expected)
+        warnings += result.severity == "warning"
+        critical += result.severity == "critical"
+    total = len(calibration)
+    covered = len(residuals)
+    coverage = covered / total if total else 0.0
+    warning_rate = warnings / covered if covered else 1.0
+    critical_rate = critical / covered if covered else 1.0
+    sessions = sorted(calibration[SESSION_COLUMN].astype(str).unique().tolist())
+    fit = model.fit.model_copy(
+        update={
+            "calibration_sessions": sessions,
+            "validation_sample_count": covered,
+            "validation_coverage": coverage,
+            "validation_warning_rate": warning_rate,
+            "validation_critical_rate": critical_rate,
+            "validation_residual_median": (float(np.median(residuals)) if residuals else None),
+            "validation_residual_mad": (
+                float(np.median(np.abs(np.asarray(residuals) - np.median(residuals))))
+                if residuals
+                else None
+            ),
+            "validation_r_squared": _validation_r_squared(actual_values, expected_values),
+        }
+    )
+    model = model.model_copy(update={"fit": fit})
+    if coverage < recipe.min_validation_coverage:
+        return (
+            f"held-out coverage {coverage:.1%} below "
+            f"min_validation_coverage={recipe.min_validation_coverage:.1%}",
+            model,
+        )
+    if critical_rate > recipe.max_validation_critical_rate:
+        return (
+            f"held-out critical rate {critical_rate:.1%} above "
+            f"max_validation_critical_rate={recipe.max_validation_critical_rate:.1%}",
+            model,
+        )
+    if warning_rate > recipe.max_validation_warning_rate:
+        return (
+            f"held-out warning rate {warning_rate:.1%} above "
+            f"max_validation_warning_rate={recipe.max_validation_warning_rate:.1%}",
+            model,
+        )
+    return None, model
+
+
+def _validation_r_squared(actual: list[float], expected: list[float]) -> float | None:
+    if len(actual) < 2:
+        return None
+    actual_array = np.asarray(actual, dtype=float)
+    denominator = float(np.sum((actual_array - actual_array.mean()) ** 2))
+    if denominator <= 0:
+        return None
+    residual = actual_array - np.asarray(expected, dtype=float)
+    return float(1.0 - np.sum(residual**2) / denominator)
 
 
 def _fit_2d(
@@ -1041,18 +1290,25 @@ def _fit_2d(
     # recipe edges are a constant, not something that "drifts" between
     # refits, so there's nothing to bump.
     prior_2d = prior_model if isinstance(prior_model, BehaviorModel2D) else None
+    adaptive_bin_count = max(
+        2,
+        min(
+            recipe.auto_bin_count,
+            int(np.sqrt(max(1, len(frame)) / max(1, recipe.min_cell_count))),
+        ),
+    )
     x_edges = _resolve_axis_edges(
         frame[recipe.x_column],
         recipe.x_edges,
         prior_2d.axes[0].bin_edges if prior_2d is not None else None,
-        recipe.auto_bin_count,
+        adaptive_bin_count,
         regrid,
     )
     y_edges = _resolve_axis_edges(
         frame[recipe.y_column],
         recipe.y_edges,
         prior_2d.axes[1].bin_edges if prior_2d is not None else None,
-        recipe.auto_bin_count,
+        adaptive_bin_count,
         regrid,
     )
     if prior_2d is None:
@@ -1080,7 +1336,11 @@ def _fit_2d(
         deviation=recipe.deviation,
         version=version,
         notes=recipe.notes,
+        diagnostic_capabilities=recipe.diagnostic_capabilities,
+        diagnostic_limitations=recipe.diagnostic_limitations,
         min_cell_count=recipe.min_cell_count,
+        min_cell_sessions=recipe.min_cell_sessions,
+        min_cell_dwell_seconds=recipe.min_cell_dwell_seconds,
         grid_version=grid_version,
     )
 

@@ -11,8 +11,9 @@ from src.analysis.surface_1d import (
     evaluate_1d,
     fit_binned_lookup,
     fit_polynomial,
+    fit_robust_baseline,
 )
-from src.decode.behavior_models import LookupTableFit, PolynomialFit
+from src.decode.behavior_models import LookupTableFit, PolynomialFit, RobustBaselineFit
 
 
 def _warmup_frame(noise: float = 0.5, n: int = 200, seed: int = 0) -> pd.DataFrame:
@@ -21,6 +22,20 @@ def _warmup_frame(noise: float = 0.5, n: int = 200, seed: int = 0) -> pd.DataFra
     t = np.linspace(0, 600, n)
     y = 25 + 60 * (1 - np.exp(-t / 120)) + rng.normal(0, noise, n)
     return pd.DataFrame({"t": t, "coolant": y})
+
+
+def test_robust_baseline_ignores_outlier_and_has_no_r_squared_claim() -> None:
+    frame = pd.DataFrame({"balance": [0.0] * 99 + [100.0]})
+    model = fit_robust_baseline(
+        frame,
+        y_column="balance",
+        name="balance",
+        output="balance",
+    )
+    assert isinstance(model.fit, RobustBaselineFit)
+    assert model.fit.median == 0.0
+    assert model.fit.r_squared is None
+    assert evaluate_1d(model, 1000.0) == 0.0
 
 
 # ---------------------------------------------------------------------------

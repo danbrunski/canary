@@ -957,14 +957,18 @@ def _run_benchmark_gate(
     # the pre-profile-migration location, miss, and silently skip the sequence
     # detector — so the 2026-07-26 retrain produced a benchmark report with no
     # LSTM coverage at all. Pass the path we actually just wrote.
+    sequence_model_type = getattr(args, "seq_model_type", config.models.sequence_detector)
     sequence_artifact_name = Path(
         config.daemon.tcn_artifact
-        if args.seq_model_type == "tcn_autoencoder"
+        if sequence_model_type == "tcn_autoencoder"
         else config.daemon.lstm_artifact
     ).name
+    sequence_artifact_path = (
+        None if args.sequence_out is None else args.sequence_out / sequence_artifact_name
+    )
     try:
         trained_sequence = detector_benchmark._load_trained_sequence(
-            config, args.sequence_out / sequence_artifact_name, skip=False
+            config, sequence_artifact_path, skip=False
         )
 
         sessions_loaded: list[tuple[str, Any]] = []

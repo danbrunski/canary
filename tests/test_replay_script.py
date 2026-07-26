@@ -66,7 +66,9 @@ def _write_obd_session(root: Path, name: str = "2026-05-11T120000", n: int = 80)
 def test_replay_sessions_builds_preprocessing_report(tmp_path: Path) -> None:
     session = _write_obd_session(tmp_path)
 
-    result = replay_sessions([session], _config())
+    result = replay_sessions(
+        [session], _config(), behavior_models_path=tmp_path / "missing-behavior-models.yaml"
+    )
     report = result.report
 
     # 4 OBD channels × 80 ticks each (RPM/SPEED/THROTTLE_POS/COOLANT_TEMP).
@@ -98,7 +100,8 @@ def test_replay_sessions_builds_preprocessing_report(tmp_path: Path) -> None:
 def test_replay_sessions_can_score_with_isolation_forest_artifact(tmp_path: Path) -> None:
     session = _write_obd_session(tmp_path)
     config = _config()
-    initial = replay_sessions([session], config)
+    missing_behavior = tmp_path / "missing-behavior-models.yaml"
+    initial = replay_sessions([session], config, behavior_models_path=missing_behavior)
     trained = fit_isolation_forest(
         initial.frames.features,
         _IFConfig(),
@@ -108,7 +111,9 @@ def test_replay_sessions_can_score_with_isolation_forest_artifact(tmp_path: Path
     artifact = tmp_path / "iforest.joblib"
     trained.save(artifact)
 
-    result = replay_sessions([session], config, model_path=artifact)
+    result = replay_sessions(
+        [session], config, model_path=artifact, behavior_models_path=missing_behavior
+    )
 
     assert result.frames.scored is not None
     scoring = result.report["scoring"]
@@ -160,7 +165,9 @@ def test_replay_sessions_includes_derived_anomaly_signal_columns(tmp_path: Path)
         )
     write_records_to_parquet(records, session, max_rows=10_000)
 
-    result = replay_sessions([session], _config())
+    result = replay_sessions(
+        [session], _config(), behavior_models_path=tmp_path / "missing-behavior-models.yaml"
+    )
 
     assert "derived:AIR_MASS_PER_CYCLE" in result.frames.segmented.columns
     assert "derived:AIR_MASS_PER_CYCLE" in result.frames.features.columns
@@ -176,7 +183,9 @@ def test_replay_reports_can_only_payload_sessions_as_unusable_numeric_features(
     ]
     write_records_to_parquet(records, session)
 
-    result = replay_sessions([session], _config())
+    result = replay_sessions(
+        [session], _config(), behavior_models_path=tmp_path / "missing-behavior-models.yaml"
+    )
     report = result.report
 
     assert report["sources"] == {"can": 2}

@@ -128,6 +128,14 @@ class _BaseFit(_Strict):
     sessions: list[str] = Field(default_factory=list)
     fitted_at: str  # ISO-8601 UTC; kept as str so the YAML round-trip is verbatim
     training_data_hash: str = ""
+    calibration_sessions: list[str] = Field(default_factory=list)
+    validation_sample_count: int = Field(default=0, ge=0)
+    validation_coverage: float | None = Field(default=None, ge=0, le=1)
+    validation_warning_rate: float | None = Field(default=None, ge=0, le=1)
+    validation_critical_rate: float | None = Field(default=None, ge=0, le=1)
+    validation_residual_median: float | None = None
+    validation_residual_mad: float | None = Field(default=None, ge=0)
+    validation_r_squared: float | None = None
 
 
 class PolynomialFit(_BaseFit):
@@ -164,7 +172,17 @@ class LookupTableFit(_BaseFit):
         return self
 
 
-Fit1D = Annotated[PolynomialFit | LookupTableFit, Field(discriminator="kind")]
+class RobustBaselineFit(_BaseFit):
+    """Mode-conditioned robust location/spread without a claimed x relationship."""
+
+    kind: Literal["robust_baseline"]
+    median: float
+    mad: float = Field(ge=0)
+    p01: float
+    p99: float
+
+
+Fit1D = Annotated[PolynomialFit | LookupTableFit | RobustBaselineFit, Field(discriminator="kind")]
 
 
 class GridCell(_Strict):
@@ -179,6 +197,8 @@ class GridCell(_Strict):
     mean: float
     std: float = Field(ge=0)
     count: int = Field(ge=0)
+    session_count: int = Field(default=1, ge=0)
+    dwell_seconds: float = Field(default=0.0, ge=0)
 
 
 class GridBinnedMeanFit(_BaseFit):
@@ -353,6 +373,8 @@ class BehaviorModel1D(_Strict):
     fit: Fit1D
     deviation: DeviationConfig | None = None
     notes: str | None = None
+    diagnostic_capabilities: list[str] = Field(default_factory=list)
+    diagnostic_limitations: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_deviation(self) -> BehaviorModel1D:
@@ -382,11 +404,15 @@ class BehaviorModel2D(_Strict):
     fit: Fit2D
     deviation: DeviationConfig | None = None
     notes: str | None = None
+    diagnostic_capabilities: list[str] = Field(default_factory=list)
+    diagnostic_limitations: list[str] = Field(default_factory=list)
     #: Cells with fewer fit samples than this evaluate to ``None`` (off-map)
     #: instead of grading against a near-meaningless mean/std. Default 1
     #: keeps pre-existing YAML artifacts (which only excluded count==0)
     #: loading with unchanged behavior.
     min_cell_count: int = Field(default=1, ge=1)
+    min_cell_sessions: int = Field(default=1, ge=1)
+    min_cell_dwell_seconds: float = Field(default=0.0, ge=0)
     #: 4.3 — bumped only when the grid geometry (bin edges) actually
     #: changes, distinct from ``version`` which bumps on every successful
     #: refit. The refit driver persists edges across refits by default so

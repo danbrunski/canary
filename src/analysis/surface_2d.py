@@ -34,6 +34,7 @@ from src.decode.behavior_models import (
     GridBinnedMeanFit,
     GridCell,
 )
+from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +61,11 @@ def fit_grid_binned_mean(
     notes: str | None = None,
     fitted_at: str | None = None,
     min_cell_count: int = 1,
+    min_cell_sessions: int = 1,
+    min_cell_dwell_seconds: float = 0.0,
     grid_version: int = 1,
+    diagnostic_capabilities: Sequence[str] = (),
+    diagnostic_limitations: Sequence[str] = (),
 ) -> BehaviorModel2D:
     """Bin ``(x, y)`` into the configured grid and compute per-cell stats.
 
@@ -77,7 +82,16 @@ def fit_grid_binned_mean(
     _validate_edges(x_edges_arr, "x_edges")
     _validate_edges(y_edges_arr, "y_edges")
 
-    x, y, z = _clean_xyz(frame, x_column, y_column, output_column)
+    required = [x_column, y_column, output_column]
+    clean = frame.loc[
+        :, [*required, *[c for c in (SESSION_COLUMN, TIMESTAMP_COLUMN) if c in frame]]
+    ].copy()
+    for column in required:
+        clean[column] = pd.to_numeric(clean[column], errors="coerce")
+    clean = clean.dropna(subset=required)
+    x = clean[x_column].to_numpy(dtype=float)
+    y = clean[y_column].to_numpy(dtype=float)
+    z = clean[output_column].to_numpy(dtype=float)
 
     # in-range mask: closed-right on the final bin so the top edge isn't lost
     in_range = (
@@ -87,6 +101,7 @@ def fit_grid_binned_mean(
         & (y <= y_edges_arr[-1])
     )
     x, y, z = x[in_range], y[in_range], z[in_range]
+    clean = clean.loc[in_range].reset_index(drop=True)
     if len(x) == 0:
         log.warning(
             "no in-range samples for 2D fit",
@@ -106,11 +121,20 @@ def fit_grid_binned_mean(
                 cells.append(GridCell(mean=0.0, std=0.0, count=0))
                 continue
             z_cell = z[mask]
+            evidence = clean.loc[mask]
+            session_count = (
+                int(evidence[SESSION_COLUMN].astype(str).nunique())
+                if SESSION_COLUMN in evidence
+                else 1
+            )
+            dwell_seconds = _effective_dwell_seconds(evidence)
             cells.append(
                 GridCell(
                     mean=float(z_cell.mean()),
                     std=float(z_cell.std(ddof=0)),
                     count=int(z_cell.size),
+                    session_count=session_count,
+                    dwell_seconds=dwell_seconds,
                 )
             )
 
@@ -148,8 +172,33 @@ def fit_grid_binned_mean(
         deviation=deviation,
         notes=notes,
         min_cell_count=min_cell_count,
+        min_cell_sessions=min_cell_sessions,
+        min_cell_dwell_seconds=min_cell_dwell_seconds,
         grid_version=grid_version,
+        diagnostic_capabilities=list(diagnostic_capabilities),
+        diagnostic_limitations=list(diagnostic_limitations),
     )
+
+
+def _effective_dwell_seconds(frame: pd.DataFrame) -> float:
+    if TIMESTAMP_COLUMN not in frame.columns:
+        return float(len(frame))
+    timestamps = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True, errors="coerce")
+    if SESSION_COLUMN not in frame.columns:
+        groups = [("", timestamps)]
+    else:
+        groups = [
+            (str(session), timestamps.loc[index])
+            for session, index in frame.groupby(SESSION_COLUMN, sort=False).groups.items()
+        ]
+    dwell = 0.0
+    for _session, values in groups:
+        ordered = values.dropna().sort_values()
+        if len(ordered) < 2:
+            continue
+        deltas = ordered.diff().dt.total_seconds().dropna().clip(lower=0.0, upper=5.0)
+        dwell += float(deltas.sum())
+    return dwell
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +241,7 @@ def evaluate_2d(model: BehaviorModel2D, x: float, y: float) -> GridCell | None:
         return interpolated
 
     cell = model.fit.cells[i * y_axis.bin_count + j]
-    if cell.count < min_count:
+    if not _cell_eligible(model, cell):
         return None
     return cell
 
@@ -227,7 +276,7 @@ def _bilinear_cell(
 
     c00, c10 = cell_at(i0, j0), cell_at(i0 + 1, j0)
     c01, c11 = cell_at(i0, j0 + 1), cell_at(i0 + 1, j0 + 1)
-    if any(c.count < min_count for c in (c00, c10, c01, c11)):
+    if any(not _cell_eligible(model, c) for c in (c00, c10, c01, c11)):
         return None
 
     wx = min(max((x - x_centers[i0]) / (x_centers[i0 + 1] - x_centers[i0]), 0.0), 1.0)
@@ -251,6 +300,14 @@ def _bilinear_cell(
             )
         ),
         count=min(c00.count, c10.count, c01.count, c11.count),
+    )
+
+
+def _cell_eligible(model: BehaviorModel2D, cell: GridCell) -> bool:
+    return (
+        cell.count >= model.min_cell_count
+        and cell.session_count >= model.min_cell_sessions
+        and cell.dwell_seconds >= model.min_cell_dwell_seconds
     )
 
 

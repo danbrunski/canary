@@ -762,3 +762,34 @@ def test_choose_warmup_confounding_strategy_branches_at_floor() -> None:
     assert choose_warmup_confounding_strategy(7) == "widen_bands"
     assert choose_warmup_confounding_strategy(8) == "context_axis"
     assert choose_warmup_confounding_strategy(20) == "context_axis"
+
+
+def test_robust_recipe_calibrates_on_a_whole_held_out_session() -> None:
+    rows = []
+    for session, center in (("s1", 0.0), ("s2", 0.1), ("s3", 0.05)):
+        rows.extend(
+            {
+                SESSION_COLUMN: session,
+                "balance": center + (index % 3 - 1) * 0.01,
+            }
+            for index in range(60)
+        )
+    recipe = Surface1DRecipe(
+        name="balance",
+        output="balance",
+        x_column="balance",
+        fit_method="robust_baseline",
+        min_r_squared=None,
+        min_samples=50,
+        min_sessions=3,
+        min_session_samples=30,
+        deviation=DeviationConfig(
+            kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.1
+        ),
+    )
+    result = fit_recipe(recipe, pd.DataFrame(rows))
+    assert result.fitted, result.reason
+    assert result.model is not None
+    assert result.model.fit.sessions == ["s1", "s2"]
+    assert result.model.fit.calibration_sessions == ["s3"]
+    assert result.model.fit.validation_coverage == 1.0

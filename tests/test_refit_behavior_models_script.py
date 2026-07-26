@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -102,8 +103,8 @@ def test_select_recipes_default_returns_full_catalog() -> None:
 
 def test_select_recipes_filters_by_name() -> None:
     catalog = refit_cli.default_recipes()
-    selected = refit_cli._select_recipes(catalog, ["coolant_warmup", "idle_rpm_vs_coolant"])
-    assert [r.name for r in selected] == ["coolant_warmup", "idle_rpm_vs_coolant"]
+    selected = refit_cli._select_recipes(catalog, ["coolant_warmup", "warm_idle_rpm_baseline"])
+    assert [r.name for r in selected] == ["coolant_warmup", "warm_idle_rpm_baseline"]
 
 
 def test_select_recipes_rejects_unknown_name() -> None:
@@ -208,6 +209,9 @@ def test_main_writes_output_yaml(
     )
     assert rc == 0
     assert out.exists()
+    report = json.loads(out.with_suffix(out.suffix + ".report.json").read_text())
+    assert report["frame_rows"] == 1200
+    assert report["recipes"][0]["calibration_sessions"]
     # YAML loads cleanly and contains the model
     from src.decode.behavior_models import load_behavior_models
 
