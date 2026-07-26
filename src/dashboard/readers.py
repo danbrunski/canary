@@ -23,6 +23,7 @@ from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, dbc_channel, load_dbc_dir
 from src.preprocessing.decode import decoded_channel
 from src.preprocessing.loader import PARQUET_PATTERN
+from src.timefmt import parse_iso_utc
 
 
 def read_latest_telemetry_rows(
@@ -177,16 +178,39 @@ def read_anomalies_since(
     anomalies_dir: Path,
     *,
     since: str | None = None,
+    source: str | None = None,
+    mode: str | None = None,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Read anomalies from ``anomalies_dir`` with optional ISO timestamp filter."""
+    """Read anomalies from ``anomalies_dir`` with optional filters.
+
+    ``since`` compares *parsed* timestamps, not strings — the log holds a mix
+    of ``T``/``Z`` and space-separated ISO forms (older daemons stringified
+    ``pd.Timestamp`` for behavior/fused/IF events), and a lexicographic
+    compare silently dropped every space-separated event for any ``since``
+    containing a ``T``. ``limit`` keeps the newest N (events stay
+    oldest-first in the response).
+    """
     if not anomalies_dir.exists():
         return []
     events = read_events_dir(anomalies_dir)
     if since is not None:
-        # Validate by parse-roundtrip; we don't need the result, just to fail
-        # loudly on garbage.
-        pd.Timestamp(since)
-        events = [e for e in events if e.timestamp >= since]
+        since_ts = parse_iso_utc(since)  # fail loudly on garbage (400 upstream)
+        kept = []
+        for event in events:
+            try:
+                ts = parse_iso_utc(event.timestamp)
+            except ValueError:
+                continue
+            if ts >= since_ts:
+                kept.append(event)
+        events = kept
+    if source is not None:
+        events = [e for e in events if e.source == source]
+    if mode is not None:
+        events = [e for e in events if e.operating_mode == mode]
+    if limit is not None and limit > 0:
+        events = events[-limit:]
     return [e.to_dict() for e in events]
 
 

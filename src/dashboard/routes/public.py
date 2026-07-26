@@ -83,9 +83,16 @@ def register_public_routes(
         return echo_config(config)
 
     @app.get("/anomalies")
-    def get_anomalies(since: str | None = Query(default=None)) -> dict[str, Any]:
+    def get_anomalies(
+        since: str | None = Query(default=None),
+        source: str | None = Query(default=None),
+        mode: str | None = Query(default=None),
+        limit: int | None = Query(default=None, ge=1),
+    ) -> dict[str, Any]:
         try:
-            events = read_anomalies_since(anomalies_dir, since=since)
+            events = read_anomalies_since(
+                anomalies_dir, since=since, source=source, mode=mode, limit=limit
+            )
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=400, detail=f"bad `since`: {exc}") from exc
         # Join the operator's verdict onto each event so the timeline can

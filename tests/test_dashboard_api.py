@@ -722,6 +722,41 @@ def test_read_anomalies_raises_on_bad_since(anomalies_dir: Path) -> None:
         read_anomalies_since(anomalies_dir, since="not-a-date")
 
 
+def test_read_anomalies_since_parses_mixed_timestamp_formats(anomalies_dir: Path) -> None:
+    """The on-disk log mixes ``T``/``Z`` (lstm) with space-separated ISO
+    (older daemons' behavior/fused/IF events). ``since`` must compare parsed
+    instants — a lexicographic compare sorted every ``'2026… …'`` line before
+    any ``'2026…T…'`` bound and silently hid those sources (seen live
+    2026-07-26: /anomalies showed 37 lstm events, digest counted 9 behavior
+    + 9 fused in the same window)."""
+    with AnomalyEventLogger(anomalies_dir) as logger:
+        logger.log(_event("2026-05-13T12:00:00Z", score=1.0))
+        # Same day, later instant, space-separated (str(pd.Timestamp) form).
+        logger.log(_event("2026-05-13 12:02:00+00:00", score=2.0))
+
+    after = read_anomalies_since(anomalies_dir, since="2026-05-13T12:00:30Z")
+    assert [e["score"] for e in after] == [2.0]
+
+
+def test_read_anomalies_filters_by_source_mode_and_limit(anomalies_dir: Path) -> None:
+    with AnomalyEventLogger(anomalies_dir) as logger:
+        logger.log(_event("2026-05-13T12:00:00Z", score=1.0))
+        logger.log(_event("2026-05-13T12:01:00Z", score=2.0))
+        logger.log(
+            _event("2026-05-13T12:02:00Z", score=3.0).model_copy(
+                update={"source": "behavior", "operating_mode": "city"}
+            )
+        )
+
+    behavior = read_anomalies_since(anomalies_dir, source="behavior")
+    assert [e["score"] for e in behavior] == [3.0]
+    city = read_anomalies_since(anomalies_dir, mode="city")
+    assert [e["score"] for e in city] == [3.0]
+    # limit keeps the newest N, still oldest-first.
+    newest = read_anomalies_since(anomalies_dir, limit=2)
+    assert [e["score"] for e in newest] == [2.0, 3.0]
+
+
 # ---------------------------------------------------------------------------
 # read_latest_telemetry_rows — unit
 # ---------------------------------------------------------------------------
