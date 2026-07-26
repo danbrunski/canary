@@ -172,9 +172,15 @@ class RecordArmingConfig(_Strict):
     """
 
     enabled: bool = False
+    #: Sources whose mere presence proves the vehicle bus is connected and
+    #: talking — the deciding factor for recording. GPS/IMU/derived chatter
+    #: whenever the Pi has power, so they never count. Set ``[]`` to gate on
+    #: ``arm_channels`` values alone (e.g. a vehicle whose bus stays awake
+    #: while parked).
+    arm_sources: tuple[str, ...] = ("can", "obd")
     #: ``TelemetryRecord.channel`` names (unprefixed — e.g. ``"RPM"``) that
-    #: can arm the gate.
-    arm_channels: tuple[str, ...] = ("RPM", "SPEED")
+    #: can arm the gate when ``arm_sources`` doesn't already cover it.
+    arm_channels: tuple[str, ...] = ("RPM",)
     #: A configured channel's numeric value must exceed this to arm.
     arm_threshold: float = 0.0
     #: Disarm after this many seconds of records with no arm-channel evidence

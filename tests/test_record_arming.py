@@ -27,7 +27,7 @@ def test_gate_starts_disarmed() -> None:
 
 
 def test_gate_drops_until_arm_channel_clears_threshold() -> None:
-    gate = RecordArmingGate(arm_channels=("RPM",), arm_threshold=0.0)
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",), arm_threshold=0.0)
     assert gate.observe(_record("COOLANT_TEMP", 90.0)) is False
     assert gate.observe(_record("RPM", 0.0)) is False  # at threshold, not over
     assert gate.dropped_count == 2
@@ -36,26 +36,26 @@ def test_gate_drops_until_arm_channel_clears_threshold() -> None:
 
 
 def test_gate_stays_armed_for_subsequent_records_once_tripped() -> None:
-    gate = RecordArmingGate(arm_channels=("RPM",))
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",))
     gate.observe(_record("RPM", 700.0))
     assert gate.observe(_record("RPM", 0.0)) is True  # armed now covers everything
     assert gate.observe(_record("COOLANT_TEMP", 20.0)) is True
 
 
 def test_gate_checks_any_configured_channel() -> None:
-    gate = RecordArmingGate(arm_channels=("RPM", "SPEED"))
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM", "SPEED"))
     assert gate.observe(_record("SPEED", 12.0)) is True
 
 
 def test_gate_ignores_non_numeric_and_bool_values() -> None:
-    gate = RecordArmingGate(arm_channels=("RPM",))
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",))
     assert gate.observe(_record("RPM", "not a number")) is False
     assert gate.observe(_record("RPM", True)) is False  # bool is an int subclass — excluded
     assert gate.armed is False
 
 
 def test_gate_reset_for_new_session_disarms() -> None:
-    gate = RecordArmingGate(arm_channels=("RPM",))
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",))
     gate.observe(_record("RPM", 700.0))
     assert gate.armed is True
     gate.reset_for_new_session()
@@ -65,7 +65,7 @@ def test_gate_reset_for_new_session_disarms() -> None:
 def test_gate_negative_threshold_arms_on_zero() -> None:
     """``arm_threshold < 0`` is a valid way to arm on any reading (incl. 0),
     e.g. for a channel that's only ever emitted while the ECU is awake."""
-    gate = RecordArmingGate(arm_channels=("RPM",), arm_threshold=-1.0)
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",), arm_threshold=-1.0)
     assert gate.observe(_record("RPM", 0.0)) is True
 
 
@@ -87,7 +87,7 @@ def test_writer_without_gate_records_everything(tmp_path) -> None:
 
 
 def test_writer_with_gate_drops_records_until_armed(tmp_path) -> None:
-    gate = RecordArmingGate(arm_channels=("RPM",))
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",))
     writer = ParquetTelemetryWriter(
         tmp_path,
         session_started_at=datetime(2026, 5, 11, 12, 0, tzinfo=UTC),
@@ -100,7 +100,7 @@ def test_writer_with_gate_drops_records_until_armed(tmp_path) -> None:
 
 
 def test_writer_with_gate_records_normally_once_armed(tmp_path) -> None:
-    gate = RecordArmingGate(arm_channels=("RPM",))
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",))
     writer = ParquetTelemetryWriter(
         tmp_path,
         session_started_at=datetime(2026, 5, 11, 12, 0, tzinfo=UTC),
@@ -119,7 +119,7 @@ def test_writer_rearms_gate_on_session_rotation(tmp_path) -> None:
     — a later idle period between drives is gated again, not left armed."""
     first_started = datetime(2026, 5, 11, 12, 0, tzinfo=UTC)
     second_started = datetime(2026, 5, 11, 12, 10, tzinfo=UTC)
-    gate = RecordArmingGate(arm_channels=("RPM",))
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",))
     writer = ParquetTelemetryWriter(
         tmp_path,
         session_started_at=first_started,
@@ -155,7 +155,7 @@ def test_writer_rearms_gate_on_session_rotation(tmp_path) -> None:
 
 @pytest.mark.parametrize("value", [0.0, -5.0])
 def test_gate_default_threshold_requires_strictly_positive_value(value: float) -> None:
-    gate = RecordArmingGate(arm_channels=("RPM",))
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",))
     assert gate.observe(_record("RPM", value)) is False
 
 
@@ -169,7 +169,7 @@ def test_gate_disarms_after_sustained_silence() -> None:
     the UPS, GPS keeps chattering. Rotation-only disarm never fires (it needs
     the *next* key-on), so v1 recorded all of it. With the timeout, the gate
     drops the chatter once the arm channels have been silent long enough."""
-    gate = RecordArmingGate(arm_channels=("RPM",), disarm_after_seconds=300.0)
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",), disarm_after_seconds=300.0)
     t0 = 1_778_000_000.0
     assert gate.observe(_record("RPM", 800.0, t0)) is True
 
@@ -187,7 +187,7 @@ def test_gate_disarms_after_sustained_silence() -> None:
 def test_gate_rearms_after_silence_disarm() -> None:
     """Next morning's key-on re-arms exactly like the first: the first
     RPM record over threshold passes and everything after it records."""
-    gate = RecordArmingGate(arm_channels=("RPM",), disarm_after_seconds=300.0)
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",), disarm_after_seconds=300.0)
     t0 = 1_778_000_000.0
     gate.observe(_record("RPM", 800.0, t0))
     assert gate.observe(_record("COOLANT_TEMP", 60.0, t0 + 400.0)) is False  # disarmed
@@ -200,7 +200,7 @@ def test_gate_rearms_after_silence_disarm() -> None:
 def test_gate_active_evidence_refreshes_the_silence_window() -> None:
     """An idling engine keeps emitting RPM > 0, so a long light (or an
     hour-long idle) never trips the timeout — evidence never goes stale."""
-    gate = RecordArmingGate(arm_channels=("RPM",), disarm_after_seconds=300.0)
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",), disarm_after_seconds=300.0)
     t0 = 1_778_000_000.0
     gate.observe(_record("RPM", 800.0, t0))
     for i in range(1, 20):  # 19 minutes of idle, refreshed every 60 s
@@ -212,7 +212,7 @@ def test_gate_active_evidence_refreshes_the_silence_window() -> None:
 def test_gate_without_timeout_keeps_v1_rotation_only_disarm() -> None:
     """``disarm_after_seconds=None`` (the dataclass default) is byte-for-byte
     the v1 behavior: armed stays armed however long the silence."""
-    gate = RecordArmingGate(arm_channels=("RPM",))
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",))
     t0 = 1_778_000_000.0
     gate.observe(_record("RPM", 800.0, t0))
     assert gate.observe(_record("COOLANT_TEMP", 90.0, t0 + 1_000_000.0)) is True
@@ -222,7 +222,7 @@ def test_gate_without_timeout_keeps_v1_rotation_only_disarm() -> None:
 def test_gate_out_of_order_records_do_not_roll_evidence_backwards() -> None:
     """Sources drain slightly out of order; a late-arriving old GPS row must
     not shrink the evidence window and cause a premature disarm."""
-    gate = RecordArmingGate(arm_channels=("RPM",), disarm_after_seconds=300.0)
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",), disarm_after_seconds=300.0)
     t0 = 1_778_000_000.0
     gate.observe(_record("RPM", 800.0, t0 + 100.0))
     gate.observe(_record("RPM", 750.0, t0 + 50.0))  # late arrival, older ts
@@ -232,9 +232,74 @@ def test_gate_out_of_order_records_do_not_roll_evidence_backwards() -> None:
 
 
 def test_gate_silence_disarm_counts_drops() -> None:
-    gate = RecordArmingGate(arm_channels=("RPM",), disarm_after_seconds=300.0)
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",), disarm_after_seconds=300.0)
     t0 = 1_778_000_000.0
     gate.observe(_record("RPM", 800.0, t0))
     gate.observe(_record("COOLANT_TEMP", 90.0, t0 + 400.0))  # disarming drop
     gate.observe(_record("COOLANT_TEMP", 89.0, t0 + 500.0))  # ordinary disarmed drop
     assert gate.dropped_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Source-based evidence (v3) — bus connectivity is the deciding factor
+# ---------------------------------------------------------------------------
+
+
+def test_gate_arms_on_raw_can_frame_by_default() -> None:
+    """A raw CAN frame (no numeric value at all) proves the bus is talking —
+    that alone should open recording, KOEO included."""
+    gate = RecordArmingGate()
+    frame = TelemetryRecord.can(1_778_000_000.0, 0x180, b"\x01\x02")
+    assert gate.observe(frame) is True
+    assert gate.armed is True
+
+
+def test_gate_arms_on_any_obd_record_by_default() -> None:
+    """KOEO: ECU responds with RPM=0. The bus is connected, so record —
+    channel thresholds only matter when arm_sources is narrowed."""
+    gate = RecordArmingGate()
+    assert gate.observe(_record("RPM", 0.0)) is True
+    assert gate.armed is True
+
+
+def test_gate_never_arms_on_pi_side_chatter() -> None:
+    """The 23 h failure, exactly: bench or key-out, GPS and derived keep
+    chattering because the Pi has power. None of it is bus evidence."""
+    gate = RecordArmingGate(disarm_after_seconds=300.0)
+    t0 = 1_778_000_000.0
+    assert gate.observe(TelemetryRecord.gps(t0, "speed", 0.0, "km/h")) is False
+    derived = TelemetryRecord.derived(datetime.fromtimestamp(t0 + 1.0, UTC), "GRADE", 0.0, "%")
+    assert gate.observe(derived) is False
+    assert gate.armed is False
+    assert gate.dropped_count == 2
+
+
+def test_gate_disarms_when_bus_goes_silent_but_gps_keeps_flowing() -> None:
+    """Post-drive key-out with the Pi on the UPS: CAN/OBD stop, GPS keeps
+    emitting fixes. The GPS rows themselves must not refresh the evidence —
+    the gate closes disarm_after_seconds after the last bus record."""
+    gate = RecordArmingGate(disarm_after_seconds=300.0)
+    t0 = 1_778_000_000.0
+    gate.observe(TelemetryRecord.can(t0, 0x180, b"\x01"))
+    assert gate.observe(TelemetryRecord.gps(t0 + 299.0, "speed", 0.0, "km/h")) is True
+    assert gate.observe(TelemetryRecord.gps(t0 + 301.0, "speed", 0.0, "km/h")) is False
+    assert gate.armed is False
+
+
+def test_gate_koeo_keeps_bus_evidence_fresh() -> None:
+    """A long KOEO diagnostic session (RPM=0, bus chattering) stays recorded:
+    connectivity, not engine speed, is the criterion."""
+    gate = RecordArmingGate(disarm_after_seconds=300.0)
+    t0 = 1_778_000_000.0
+    for i in range(20):  # 20 min of KOEO, a bus record every 60 s
+        assert gate.observe(_record("RPM", 0.0, t0 + i * 60.0)) is True
+    assert gate.armed is True
+
+
+def test_gate_empty_arm_sources_falls_back_to_channel_thresholds() -> None:
+    """arm_sources=[] restores value-gated arming for vehicles whose bus
+    stays awake while parked (keyless-entry polling and the like)."""
+    gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",))
+    assert gate.observe(TelemetryRecord.can(1_778_000_000.0, 0x180, b"\x01")) is False
+    assert gate.observe(_record("RPM", 0.0)) is False
+    assert gate.observe(_record("RPM", 700.0)) is True

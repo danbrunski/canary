@@ -45,15 +45,16 @@ collection:
   obd_request_timeout_seconds: 1.0
   obd_poll_rate_hz: 1
   storage_path: /data/canary/sessions
-  # Don't record until the vehicle looks active (RPM/SPEED > 0), and stop
-  # once it's been quiet for disarm_after_seconds (key out, adapter
-  # unplugged). Without this the daemon logs whatever chatters while the
-  # Pi is powered — a parked day on the UPS produced a 23 h GPS-only
-  # session (2 M rows of stationary fixes) that dominated training
-  # memory. An idling engine keeps emitting RPM > 0 so a long light never
-  # trips the timeout, and cranking RPM re-arms instantly after a stall.
-  # Caveat: a deliberate GPS-only capture (CAN adapter unplugged) records
-  # nothing while armed channels stay silent — disable for that.
+  # Record only while the vehicle bus is connected and talking (any
+  # can/obd record counts — engine running, idling, or KOEO alike), and
+  # stop once it's been silent for disarm_after_seconds (key out, bench,
+  # adapter unplugged). Without this the daemon logs whatever chatters
+  # while the Pi is powered — a parked day on the UPS produced a 23 h
+  # GPS-only session (2 M rows of stationary fixes) that dominated
+  # training memory. GPS/IMU/derived never count as evidence. Caveat: a
+  # deliberate GPS-only capture (no CAN adapter) records nothing —
+  # disable for that. On a vehicle whose bus stays awake while parked,
+  # set arm_sources: [] to gate on RPM > 0 instead.
   record_arming:
     enabled: true
     disarm_after_seconds: 300

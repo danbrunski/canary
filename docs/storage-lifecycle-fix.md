@@ -36,12 +36,19 @@ no gate object is even constructed). When enabled, an optional
 
 Task 8.6 flagged two open questions; v1's answers:
 
-1. **Arm/disarm semantics.** Arm: the first record on a configured channel
-   (`RPM`/`SPEED` by default — the same signal family
-   `classify_vehicle_state` uses to call a vehicle "running", not the same
-   code path — see the module docstring) whose value clears
-   `arm_threshold` (default `0.0`, i.e. any nonzero reading) arms the gate
-   for the rest of the current session. Disarm: at a session-rotation
+1. **Arm/disarm semantics.** Vehicle-active evidence (v3, 2026-07-26):
+   any record from an `arm_sources` source (`can`/`obd` by default) — i.e.
+   the vehicle bus is connected and talking at all — or a record on an
+   `arm_channels` channel (`RPM` by default) whose value clears
+   `arm_threshold` (default `0.0`). The operator's deciding factor is bus
+   connectivity: plugged in with the bus alive → record, KOEO diagnostics
+   included; bench / key-out / unplugged → the bus is silent, and Pi-side
+   sources that still chatter (GPS, IMU, derived) never count as evidence.
+   `SPEED` was dropped from the channel defaults at the same time — it
+   isn't engine evidence (towing, coasting engine-off). Installs on
+   vehicles whose bus stays awake while parked can set `arm_sources: []`
+   to gate on channel values alone. Arm: the first record carrying
+   evidence arms the gate. Disarm: at a session-rotation
    boundary — the *existing* `rotate_session()` call already triggered by
    `_rotate_if_engine_run_time_reset` every key cycle (a RUN_TIME reset) —
    or (v2, 2026-07-26) after `disarm_after_seconds` (default 300 s) of
@@ -71,8 +78,9 @@ Task 8.6 flagged two open questions; v1's answers:
    one.
 
 Config knobs: `collection.record_arming.enabled` (bool, default `false`),
-`arm_channels` (default `("RPM", "SPEED")`), `arm_threshold` (default
-`0.0`), `disarm_after_seconds` (default `300.0`; `null` = rotation-only). `RecordArmingGate.dropped_count` is tracked in-process for
+`arm_sources` (default `("can", "obd")`; `[]` = channel gating only),
+`arm_channels` (default `("RPM",)`), `arm_threshold` (default `0.0`),
+`disarm_after_seconds` (default `300.0`; `null` = rotation-only). `RecordArmingGate.dropped_count` is tracked in-process for
 diagnosability but is not yet surfaced on the dashboard/status endpoint —
 a reasonable v2 addition once the gate has real drive-cycle mileage on it.
 

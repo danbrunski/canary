@@ -91,6 +91,7 @@ async def run_daemon(
     # itself; a caller-supplied ``writer`` (tests, replay) is used as-is.
     arming_gate = (
         RecordArmingGate(
+            arm_sources=arming_config.arm_sources,
             arm_channels=arming_config.arm_channels,
             arm_threshold=arming_config.arm_threshold,
             disarm_after_seconds=arming_config.disarm_after_seconds,

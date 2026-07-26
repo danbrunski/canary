@@ -15,23 +15,30 @@ arm/disarm semantics and pre-arm-buffer open questions Task 8.6 raised, and
 why each v1 answer below was chosen over the alternatives).
 
 Semantics, in brief:
-  * Arm: the first record on a configured channel (RPM/SPEED by default)
-    whose value clears ``arm_threshold`` arms the gate for the rest of the
-    current session.
+  * Vehicle-active evidence (v3): any record from an ``arm_sources`` source
+    (``can``/``obd`` by default — i.e. the vehicle bus is talking at all),
+    or a record on an ``arm_channels`` channel whose value clears
+    ``arm_threshold``. The operator's deciding factor is *bus
+    connectivity*: plugged in with the bus alive → record (including KOEO
+    diagnostics); bench / key-out / unplugged → the bus is silent and
+    nothing that still chatters (GPS, derived) counts as evidence.
+    Installs on vehicles whose bus stays awake while parked (keyless-entry
+    polling etc.) can set ``arm_sources: []`` to fall back to
+    channel-threshold evidence alone.
+  * Arm: the first record carrying evidence arms the gate.
   * Disarm: at a session-rotation boundary (already triggered by
     ``ParquetTelemetryWriter._rotate_if_engine_run_time_reset`` on every key
     cycle), or — v2 — after ``disarm_after_seconds`` of records with no
-    vehicle-active evidence. v1 was rotation-only, on the argument that a
-    brief RPM dip (e.g. a stall) must not silently start dropping data right
-    when a fault might be happening; field data showed the gap that leaves:
-    key-off with the Pi still powered never rotates (rotation needs the
-    *next* key-on), so a post-drive parked night stayed armed and recorded
-    23 h of stationary GPS chatter. The sustained-silence timeout closes
-    that without re-introducing the stall concern — the window is minutes,
-    a stall's cranking RPM re-arms instantly, and an idling engine keeps
-    emitting RPM > 0 so its evidence never goes stale. Ages are computed
-    from record timestamps, not wall clock, so replayed sessions gate
-    identically to live ones.
+    evidence. v1 was rotation-only, on the argument that a brief RPM dip
+    (e.g. a stall) must not silently start dropping data right when a fault
+    might be happening; field data showed the gap that leaves: key-off with
+    the Pi still powered never rotates (rotation needs the *next* key-on),
+    so a post-drive parked night stayed armed and recorded 23 h of
+    stationary GPS chatter. The sustained-silence timeout closes that
+    without re-introducing the stall concern — the window is minutes, and
+    the bus keeps chattering through a stall so its evidence never goes
+    stale. Ages are computed from record timestamps, not wall clock, so
+    replayed sessions gate identically to live ones.
   * Pre-arm data: dropped, not buffered. No ring buffer — see the design
     doc for why buffering was rejected.
 """
@@ -43,13 +50,19 @@ from datetime import datetime
 
 from src.telemetry import TelemetryRecord
 
-#: Channels checked by default — engine RPM and ground speed, the same
-#: signal family ``src.dashboard.status.classify_vehicle_state`` uses to
+#: Sources whose mere presence proves the vehicle bus is connected and
+#: talking. GPS/IMU/derived are deliberately absent — they chatter whenever
+#: the Pi has power, which is exactly the parked/bench data this gate exists
+#: to drop.
+DEFAULT_ARM_SOURCES: tuple[str, ...] = ("can", "obd")
+
+#: Channel fallback for installs that narrow ``arm_sources`` — engine RPM,
+#: the same signal ``src.dashboard.status.classify_vehicle_state`` uses to
 #: call a vehicle "running". Not reused directly: that classifier does
 #: freshness bookkeeping against wall-clock reads, awkward to fit inline
 #: per-record in the storage write path — this is the same *signal*, just
 #: not shared code.
-DEFAULT_ARM_CHANNELS: tuple[str, ...] = ("RPM", "SPEED")
+DEFAULT_ARM_CHANNELS: tuple[str, ...] = ("RPM",)
 
 
 @dataclass
@@ -62,11 +75,12 @@ class RecordArmingGate:
     stop capture outright, only skip it.
     """
 
+    arm_sources: tuple[str, ...] = DEFAULT_ARM_SOURCES
     arm_channels: tuple[str, ...] = DEFAULT_ARM_CHANNELS
     arm_threshold: float = 0.0
     #: Disarm after this many seconds of records with no vehicle-active
-    #: evidence (an arm channel clearing ``arm_threshold``). ``None`` keeps
-    #: the v1 rotation-only disarm.
+    #: evidence (an ``arm_sources`` record, or an arm channel clearing
+    #: ``arm_threshold``). ``None`` keeps the v1 rotation-only disarm.
     disarm_after_seconds: float | None = None
     armed: bool = field(default=False, init=False)
     dropped_count: int = field(default=0, init=False)
@@ -99,6 +113,8 @@ class RecordArmingGate:
         return False
 
     def _is_active_evidence(self, record: TelemetryRecord) -> bool:
+        if record.source in self.arm_sources:
+            return True
         value = record.value
         return (
             record.channel in self.arm_channels
