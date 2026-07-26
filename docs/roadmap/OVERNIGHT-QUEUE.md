@@ -68,6 +68,14 @@ operator history (ledger backfill facts)
   blocked-overnight. — 5.1-5.3 landed (commits `23413bb`, `9636926`,
   `5b51c14`); a real 0-5km/h dead zone caught by review before landing.
   Pi config sync + deploy blocked-overnight per this entry's own note.
+  **SUPERSEDED 2026-07-26 (operator):** Phase 5.1 added a separate
+  `suburban` (50-80 km/h) mode; operator reviewed the drive data and
+  folded it back into `city` (now `speed_min:1, speed_max:80`). On real
+  drives 50-80 reads as "city moving faster" — engine load/airflow break
+  at ~80, not 50, and splitting only starved each surface of data. The
+  `suburban` mode is removed from all configs + `fingerprint.py` cruise
+  set; the deployed IF/LSTM never had a suburban surface, so folding also
+  restores scoring to the 50-80 band that would otherwise go dark.
 - [x] **Q6 — ml-correctness-hardening.md Phase 4** (surface publish
   gates, schema sigma-floor + recipe migration, frozen 2D edges,
   bilinear serve, version-on-change, warmup per pre-made decision,

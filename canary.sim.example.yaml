@@ -67,12 +67,10 @@ preprocessing:
       rpm_min: 900
       rpm_max: 1200
       speed_max: 0
+    # city spans all sub-highway moving speed (1-80 km/h); 50-80 folds in
+    # rather than being its own `suburban` mode (see canary.example.yaml).
     city:
       speed_min: 1
-      speed_max: 50
-    # Closes the 50-80 km/h dead zone between city and highway.
-    suburban:
-      speed_min: 50
       speed_max: 80
     highway:
       speed_min: 80

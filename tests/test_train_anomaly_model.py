@@ -368,7 +368,6 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
                 "idle_transient",
                 "koeo",
                 "launch",
-                "suburban",
                 "warmup",
             ],
         },

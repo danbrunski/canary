@@ -91,12 +91,12 @@ preprocessing:
       rpm_max: 1200
       speed_max: 0
       coolant_temp_min: 70
+    # city spans all sub-highway moving speed (1-80 km/h). 50-80 was briefly a
+    # separate `suburban` mode but reads as "city moving faster" on real drives
+    # (load/airflow break at ~80, not 50); folding keeps it scored by the city
+    # model instead of splitting the data across two thin surfaces.
     city:
       speed_min: 1
-      speed_max: 50
-    # Closes the 50-80 km/h dead zone between city and highway.
-    suburban:
-      speed_min: 50
       speed_max: 80
     highway:
       speed_min: 80

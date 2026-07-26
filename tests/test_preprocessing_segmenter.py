@@ -425,17 +425,18 @@ def test_warm_fast_idle_no_longer_falls_through_to_city() -> None:
     assert segmented.loc[0, MODE_COLUMN] == "idle_high"
 
 
-def test_50_to_80_kmh_dead_zone_now_classified() -> None:
-    """Regression: 50-80 km/h matched neither ``city`` (capped at 50) nor
-    ``highway`` (floored at 80) and fell through to ``unknown``. The new
-    ``suburban`` band closes the gap."""
+def test_50_to_80_kmh_band_classified_as_city() -> None:
+    """Regression: 50-80 km/h once fell through to ``unknown`` (city capped at
+    50, highway floored at 80). It briefly had its own ``suburban`` band, but
+    50-80 reads as "city moving faster" on real drives, so ``city`` now spans
+    1-80 and scores the band with the existing city model."""
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     frame = pd.DataFrame([{"obd:RPM": 1800.0, "obd:SPEED": 65.0, "obd:COOLANT_TEMP": 90.0}])
 
     segmented = segment_operating_modes(frame, config.preprocessing.operating_modes)
 
-    assert segmented.loc[0, MODE_COLUMN] not in {UNKNOWN_MODE, "city", "highway"}
-    assert segmented.loc[0, MODE_COLUMN] == "suburban"
+    assert segmented.loc[0, MODE_COLUMN] not in {UNKNOWN_MODE, "highway"}
+    assert segmented.loc[0, MODE_COLUMN] == "city"
 
 
 def test_low_speed_creep_no_longer_falls_through_to_unknown() -> None:

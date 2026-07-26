@@ -77,9 +77,11 @@ _RUNNING_RPM = 400.0
 
 _IDLE_MODE = "idle"
 #: Steady-speed driving modes used as the "cruise" fuel-trim sample.
-#: canary.example.yaml has no dedicated "cruise" mode; highway/suburban are
-#: the closest analogue (sustained speed, not stop-and-go like "city").
-_CRUISE_MODES = frozenset({"highway", "suburban"})
+#: canary.example.yaml has no dedicated "cruise" mode; ``highway`` is the
+#: closest analogue (sustained speed, not stop-and-go like "city"). The old
+#: 50-80 km/h ``suburban`` band folded into ``city``, so it's no longer a
+#: clean cruise sample — highway alone keeps the sample stop-and-go-free.
+_CRUISE_MODES = frozenset({"highway"})
 
 _RPM_COLUMN = "obd:RPM"
 _COOLANT_COLUMN = "obd:COOLANT_TEMP"

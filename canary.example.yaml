@@ -171,16 +171,14 @@ preprocessing:
     # running engine matching no mode at all. 1 is the OBD SPEED PID's
     # finest resolution (whole km/h), so it's the practical noise floor:
     # exactly-stopped (0) still misses city and falls to the idle bands.
+    # city spans all sub-highway moving speed (1-80 km/h). The 50-80 band was
+    # briefly its own `suburban` mode (Phase 5.1), but on real drives it reads
+    # as "city moving faster", not a distinct regime: engine load/airflow break
+    # at ~80 km/h, not 50, and a manual truck already runs cruise-band rpm at
+    # city speeds (climbing through gears). Splitting it only starved each
+    # surface of data; folding keeps 50-80 scored by the existing city model.
     city:
       speed_min: 1
-      speed_max: 50
-    # Phase 5.1 — 50-80 km/h was previously an unclassified dead zone
-    # (city capped at 50, highway floored at 80); this closes it with its
-    # own band rather than widening city/highway, matching the taxonomy's
-    # existing fine-grained-band shape (koeo/warmup/idle_transient/idle/
-    # idle_high are all narrow bands, not a couple of wide ones).
-    suburban:
-      speed_min: 50
       speed_max: 80
     highway:
       speed_min: 80
