@@ -14,10 +14,15 @@ Sequence-number gaps are reported, not silently healed — on an MCP2515 HAT a
 saturated TransferData burst can genuinely drop frames, and a firmware image
 reconstructed across a gap would be quietly wrong.
 
-Status: exercised against synthetic candump logs only (session/security-access
-/download/transfer/NRC paths, plus induced sequence gaps). It has not yet seen
-a real reprogramming capture, so treat the first real run's output as something
-to sanity-check rather than trust outright.
+Status: exercised against synthetic candump logs (session/security-access/
+download/transfer/NRC paths, plus induced sequence gaps) and against one real
+capture — the 2026-07-26 Xterra ZS04C->ZS44A reflash, 410k frames. That capture
+is what motivated `ISOTP_PCI_THRESHOLD`; see the note there.
+
+Known limitation: for platforms like this one, which move the firmware over a
+raw non-ISO-TP channel, this script tells you the shape and size of the
+transfer but cannot decode its contents. There is no `RequestDownload` to
+give you an address/length, and no image to extract.
 """
 
 from __future__ import annotations
@@ -104,6 +109,23 @@ class Message:
     gap: bool = False  # reassembled across a detected frame loss
 
 
+#: Fraction of a channel's frames whose PCI nibble must be a valid ISO-TP type
+#: (0=single 1=first 2=consecutive 3=flow-control) before we believe the
+#: channel is ISO-TP at all.
+#:
+#: Without this gate the reassembler happily runs over raw bulk-data channels
+#: and the UDS layer then reads arbitrary payload bytes as service IDs. That is
+#: not hypothetical: on the 2026-07-26 Xterra reflash, UpRev streamed 576 KiB
+#: of firmware as raw 8-byte frames on 0x743, and this script reported 23
+#: fabricated SecurityAccess seed/key pairs decoded out of firmware bytes.
+#: Invented security material is far worse than no output, so channels that
+#: don't look like ISO-TP are reported as opaque bulk streams instead.
+#:
+#: Real ISO-TP sits near 1.0 (0x7E0 in that capture: 1.00). Raw data lands near
+#: 4/16 = 0.25 by chance (0x743: 0.28).
+ISOTP_PCI_THRESHOLD = 0.85
+
+
 @dataclass
 class Channel:
     can_id: int
@@ -119,6 +141,18 @@ class Channel:
     _gap: bool = False
     flow_control: list[tuple[float, int, int, int]] = field(default_factory=list)
     sn_gaps: int = 0
+    #: frames whose PCI nibble is a valid ISO-TP type, and frames with any data
+    pci_valid: int = 0
+    pci_total: int = 0
+
+    @property
+    def isotp_ratio(self) -> float:
+        return self.pci_valid / self.pci_total if self.pci_total else 0.0
+
+    @property
+    def looks_isotp(self) -> bool:
+        # A handful of frames can hit the ratio by luck; require both.
+        return self.pci_total >= 8 and self.isotp_ratio >= ISOTP_PCI_THRESHOLD
 
 
 def parse(path: Path) -> tuple[dict[int, Channel], int, list[str]]:
@@ -151,6 +185,9 @@ def parse(path: Path) -> tuple[dict[int, Channel], int, list[str]]:
             continue
 
         pci = data[0] >> 4
+        ch.pci_total += 1
+        if pci <= 0x3:
+            ch.pci_valid += 1
         if pci == 0x0:  # single frame
             n = data[0] & 0x0F
             if n and n <= len(data) - 1:
@@ -272,7 +309,8 @@ def main() -> int:
     diag = {
         cid: ch
         for cid, ch in channels.items()
-        if any(
+        if ch.looks_isotp
+        and any(
             m.payload
             and (
                 m.payload[0] in UDS_SERVICES
@@ -282,6 +320,26 @@ def main() -> int:
             for m in ch.messages
         )
     }
+
+    bulk = sorted(
+        (ch for ch in channels.values() if not ch.looks_isotp and ch.frames >= 500),
+        key=lambda c: -c.frames,
+    )
+    if bulk:
+        print("=== bulk / non-ISO-TP channels ===")
+        print("These carry raw framed data, not a request/response protocol, so no")
+        print("service decoding is attempted on them. On this platform the firmware")
+        print("payload itself travels this way.")
+        for ch in bulk:
+            if ch.first_ts is None or ch.last_ts is None:
+                continue
+            dur = ch.last_ts - ch.first_ts
+            rate = ch.frames / dur if dur > 0 else 0.0
+            print(
+                f"  {ch.can_id:03X}  {ch.frames} frames  ~{ch.frames * 8 / 1024:.1f} KiB  "
+                f"{dur:.1f}s  {rate:.0f} f/s  isotp_ratio={ch.isotp_ratio:.2f}"
+            )
+        print()
 
     if not diag:
         print("=== NO UDS/KWP TRAFFIC ON CAN ===")
@@ -366,7 +424,10 @@ def main() -> int:
     else:
         print("  no TransferData payload seen")
 
-    total_gaps = sum(c.sn_gaps for c in channels.values())
+    # Only ISO-TP channels have meaningful sequence numbers. Counting "gaps"
+    # from a raw bulk stream reports adapter frame loss that may not have
+    # happened — on the Xterra capture 0x743 alone contributed 131 phantom gaps.
+    total_gaps = sum(c.sn_gaps for c in channels.values() if c.looks_isotp)
     if total_gaps:
         print()
         print(f"!! {total_gaps} ISO-TP sequence gaps — the adapter dropped frames.")
