@@ -117,15 +117,28 @@ def _resample_one_session(
     # update far less often) use their own generous ceiling. Beyond the limit
     # the ffilled cell is NaN'd back out rather than carried forever, so a
     # dead sensor stops silently masquerading as a live reading.
+    #
+    # Both the masked values and the gap flags are collected up front and
+    # attached in a single concat — assigning them column-by-column fragments
+    # the frame (one block per channel) on wide corpora.
     fast = set(_fast_channels(value_columns, config))
+    masked: dict[str, np.ndarray] = {}
+    gaps: dict[str, np.ndarray] = {}
     for column in value_columns:
         max_gap = config.max_gap if column in fast else config.slow_channel_max_gap
         stale = _gap_flags(indexed[column], sampled[TIMESTAMP_COLUMN], max_gap)
         stale_mask = stale.to_numpy()
-        sampled[gap_column(column)] = stale_mask
-        sampled[column] = sampled[column].where(~stale_mask, np.nan)
+        gaps[gap_column(column)] = stale_mask
+        masked[column] = sampled[column].where(~stale_mask, np.nan).to_numpy()
 
-    return sampled
+    return pd.concat(
+        [
+            sampled[[SESSION_COLUMN, TIMESTAMP_COLUMN]],
+            pd.DataFrame(masked, index=sampled.index),
+            pd.DataFrame(gaps, index=sampled.index),
+        ],
+        axis=1,
+    )
 
 
 def _gap_flags(
