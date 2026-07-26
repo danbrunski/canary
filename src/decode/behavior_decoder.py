@@ -41,6 +41,7 @@ from src.decode.behavior_models import (
     DeviationConfig,
     GridBinnedMeanFit,
 )
+from src.preprocessing.resampler import gap_column
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
 
@@ -259,6 +260,21 @@ def append_deviation_columns(
             )
             delta = pd.Series(np.nan, index=out.index, dtype=float)
         out[f"{DEVIATION_COLUMN_PREFIX}{model.name}"] = delta
+        dependencies = [actual_col]
+        if isinstance(model, BehaviorModel1D):
+            dependencies.append(model.axis.channel)
+        else:
+            dependencies.extend(axis.channel for axis in model.axes)
+        stale = delta.isna()
+        for dependency in dependencies:
+            if dependency not in out.columns:
+                stale |= True
+                continue
+            stale |= pd.to_numeric(out[dependency], errors="coerce").isna()
+            dependency_gap = gap_column(dependency)
+            if dependency_gap in out.columns:
+                stale |= out[dependency_gap].fillna(True).astype(bool)
+        out[gap_column(f"{DEVIATION_COLUMN_PREFIX}{model.name}")] = stale.astype(bool)
     return out
 
 

@@ -180,6 +180,8 @@ class SequenceAutoencoderManifest:
     #: the model uncalibrated. Load-time (``ModelManager``) logs a warning
     #: when serving an ``"in_sample"``-stamped artifact.
     calibration: str | None = None
+    calibration_sessions: tuple[str, ...] = ()
+    calibration_health: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -207,6 +209,10 @@ class SequenceAutoencoderManifest:
             "thresholds": None if self.thresholds is None else dict(self.thresholds),
             "scaler": None if self.scaler is None else dict(self.scaler),
             "calibration": self.calibration,
+            "calibration_sessions": list(self.calibration_sessions),
+            "calibration_health": (
+                None if self.calibration_health is None else dict(self.calibration_health)
+            ),
         }
 
     @classmethod
@@ -236,6 +242,10 @@ class SequenceAutoencoderManifest:
             thresholds=None if data.get("thresholds") is None else dict(data["thresholds"]),
             scaler=None if data.get("scaler") is None else dict(data["scaler"]),
             calibration=_optional_str(data.get("calibration")),
+            calibration_sessions=tuple(str(x) for x in data.get("calibration_sessions", [])),
+            calibration_health=(
+                None if data.get("calibration_health") is None else dict(data["calibration_health"])
+            ),
         )
 
 

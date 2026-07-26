@@ -68,6 +68,19 @@ def test_air_mass_per_cycle_handles_zero_rpm_safely() -> None:
     assert math.isclose(values.iloc[1], 1.0, rel_tol=1e-9)
 
 
+def test_air_mass_per_cycle_propagates_source_freshness() -> None:
+    frame = _base(2).assign(
+        **{
+            "obd:MAF": [5.0, 5.0],
+            "obd:RPM": [600.0, 600.0],
+            "obd:MAF__gap": [False, True],
+            "obd:RPM__gap": [False, False],
+        }
+    )
+    out = compute_anomaly_signals(frame)
+    assert out["derived:AIR_MASS_PER_CYCLE__gap"].tolist() == [False, True]
+
+
 # --------------------------------------------------------------------------- #
 # VE_PERCENT (Task 4.1) — measured air mass per cycle over the theoretical
 # 100%-VE fill from MAP-or-baro/IAT/displacement.

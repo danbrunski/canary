@@ -501,6 +501,7 @@ def build_feature_frame(
     # and the Pi cold-start fall-back, where multiprocessing overhead would lose.
     resample_config = ResampleConfig(
         hz=config.preprocessing.resample_hz,
+        max_gap_factor=config.preprocessing.max_gap_factor,
         slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
     )
     resampled_parts: list[pd.DataFrame] = []
@@ -764,6 +765,69 @@ def trainable_feature_columns(features: pd.DataFrame) -> list[str]:
             continue
         cols.append(col)
     return cols
+
+
+#: Minimum fraction of rows a feature must be observed on to be trainable by
+#: the **Isolation Forest**. Unlike the sequence detector — which is handed
+#: missingness explicitly via GRU-D mask/Δt channels and is expected to see
+#: sparse round-robin PIDs — the IF scores one row at a time and
+#: ``TrainedIsolationForest.score`` refuses any row with a NaN in ANY trained
+#: feature (``group[feats].isna().any(axis=1)`` → score=inf, missing flag set,
+#: and the daemon's fail-safe then suppresses the emit). So every sparse column
+#: in the IF's schema multiplies the chance that a row is unscoreable, and a
+#: single structurally-absent column makes the detector permanently blind.
+#:
+#: Measured on the 2026-07-26 corpus: the IF trained 273 features of which NONE
+#: reached 75% coverage, so it could not score a single row — matching the Pi's
+#: observed ``missing_feature_rate: 1.0``. Offenders split in two:
+#: genuinely-absent channels (``derived:TPS_VOLTAGE_PER_PCT`` at 0.21%,
+#: ``did:*`` at ~1.5% — polled only inside periodic Mode-22 windows) and
+#: channels NaN'd as stale because the resampler's ceiling assumed a poll rate
+#: the contended bus never achieves. This threshold removes the former; the
+#: staleness ceiling (``preprocessing.max_gap_factor``) governs the latter.
+MIN_ISOLATION_FOREST_COVERAGE = 0.5
+
+
+def isolation_forest_feature_columns(
+    features: pd.DataFrame,
+    *,
+    min_coverage: float = MIN_ISOLATION_FOREST_COVERAGE,
+) -> list[str]:
+    """Trainable columns restricted to those the IF can actually score on.
+
+    :func:`trainable_feature_columns` plus a per-column coverage floor — see
+    :data:`MIN_ISOLATION_FOREST_COVERAGE` for why the IF needs one and the
+    sequence detector does not. ``min_coverage=0`` recovers the old behaviour.
+    """
+    columns = trainable_feature_columns(features)
+    if min_coverage <= 0 or features.empty:
+        return columns
+    rows = len(features)
+    return [c for c in columns if float(features[c].notna().sum()) / rows >= min_coverage]
+
+
+def low_coverage_columns(
+    features: pd.DataFrame,
+    columns: Sequence[str],
+    *,
+    min_coverage: float = MIN_ISOLATION_FOREST_COVERAGE,
+) -> dict[str, float]:
+    """``{column: coverage}`` for ``columns`` below the coverage floor.
+
+    Reported in the manifest so a blind-IF diagnosis doesn't require
+    re-deriving coverage from the corpus by hand.
+    """
+    if features.empty:
+        return {}
+    rows = len(features)
+    out: dict[str, float] = {}
+    for column in columns:
+        if column not in features.columns:
+            continue
+        coverage = float(features[column].notna().sum()) / rows
+        if coverage < min_coverage:
+            out[str(column)] = round(coverage, 6)
+    return out
 
 
 def _is_constant_column(series: pd.Series) -> bool:
@@ -1044,6 +1108,19 @@ def summarize_feature_health(
         and bool(features[column].notna().any())
         and _is_constant_column(features[column])
     ]
+    # Per-column coverage for everything that IS selected, plus the sub-floor
+    # coverage of what the IF's filter excluded. A blind detector
+    # (missing_feature_rate 1.0) is diagnosed straight from here: if any
+    # selected column's coverage is well under 1.0, per-row scoring will
+    # frequently hit a NaN and self-suppress.
+    coverage = {
+        column: round(float(features[column].notna().sum()) / len(features), 6)
+        for column in columns
+        if len(features)
+    }
+    dropped_low_coverage_columns = low_coverage_columns(
+        features, [c for c in candidates if c not in selected]
+    )
 
     return {
         "row_count": int(len(features)),
@@ -1051,6 +1128,8 @@ def summarize_feature_health(
         "selected_feature_count": len(columns),
         "dropped_all_nan_columns": dropped_all_nan_columns,
         "dropped_constant_columns": dropped_constant_columns,
+        "dropped_low_coverage_columns": dropped_low_coverage_columns,
+        "min_selected_coverage": (min(coverage.values()) if coverage else None),
         "all_nan_columns": all_nan_columns,
         "constant_columns": constant_columns,
         "non_finite_columns": non_finite_columns,

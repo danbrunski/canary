@@ -67,7 +67,7 @@ from src.preprocessing.feature_pipeline import (
     featurize_wide_frame,
 )
 from src.preprocessing.feature_pipeline import (
-    trainable_feature_columns as _trainable_feature_columns,
+    isolation_forest_feature_columns as _if_feature_columns,
 )
 from src.preprocessing.resampler import is_slow_channel
 from src.telemetry import DECODED_SOURCE, source_of
@@ -84,6 +84,7 @@ def train(
     feature_frame: pd.DataFrame | None = None,
     feature_cache_dir: Path | None = None,
     rebuild_feature_cache: bool = False,
+    calibration_sessions: Sequence[Path] | None = None,
 ) -> TrainedIsolationForest:
     """Build features, fit the per-mode IF + scaler, write artifact + manifest."""
     features = (
@@ -97,7 +98,11 @@ def train(
             force_rebuild=rebuild_feature_cache,
         )
     )
-    feature_columns = _trainable_feature_columns(features)
+    # IF-specific selection: additionally drops columns too sparse for a
+    # per-row detector to score on (see MIN_ISOLATION_FOREST_COVERAGE). The
+    # sequence trainer deliberately does NOT apply this — GRU-D consumes
+    # missingness as signal.
+    feature_columns = _if_feature_columns(features)
     if not feature_columns:
         raise ValueError(
             "no trainable feature columns — the sessions produced no numeric "
@@ -111,6 +116,17 @@ def train(
         feature_columns=feature_columns,
         feature_spec=build_feature_spec(features, feature_columns, config=config),
         fitted_at=datetime.now(UTC),
+        calibration_frame=(
+            None
+            if not calibration_sessions
+            else build_feature_frame(
+                calibration_sessions,
+                config,
+                bindings_path=bindings_path,
+                cache_dir=feature_cache_dir,
+                force_rebuild=rebuild_feature_cache,
+            )
+        ),
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)

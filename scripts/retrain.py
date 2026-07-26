@@ -661,6 +661,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 config,
                 args.if_out,
                 bindings_path=args.bindings,
+                calibration_sessions=calibration_sessions or None,
                 **feature_kwargs,
             )
             results["isolation_forest"] = "ok"
@@ -950,8 +951,21 @@ def _run_benchmark_gate(
         log.warning("no isolation forest artifact at %s; skipping benchmark gate", if_model_path)
         return None, None
 
+    # The benchmark's default artifact path is UNSCOPED
+    # (``models_dir/<type>/model.pt``), but retrain writes to the
+    # profile-scoped ``args.sequence_out``. Passing ``None`` here let it look in
+    # the pre-profile-migration location, miss, and silently skip the sequence
+    # detector — so the 2026-07-26 retrain produced a benchmark report with no
+    # LSTM coverage at all. Pass the path we actually just wrote.
+    sequence_artifact_name = Path(
+        config.daemon.tcn_artifact
+        if args.seq_model_type == "tcn_autoencoder"
+        else config.daemon.lstm_artifact
+    ).name
     try:
-        trained_sequence = detector_benchmark._load_trained_sequence(config, None, skip=False)
+        trained_sequence = detector_benchmark._load_trained_sequence(
+            config, args.sequence_out / sequence_artifact_name, skip=False
+        )
 
         sessions_loaded: list[tuple[str, Any]] = []
         for session_dir in calibration_sessions:

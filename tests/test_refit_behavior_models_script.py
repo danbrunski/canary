@@ -124,39 +124,47 @@ def _patch_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     ``cold_start`` event so the post-Phase-C event-gated ``coolant_warmup``
     recipe finds the session eligible.
     """
-    session = tmp_path / "sessions" / "2026-05-13T120000"
-    session.mkdir(parents=True)
+    sessions = [tmp_path / "sessions" / f"2026-05-13T12{minute:02d}00" for minute in range(3)]
     # Mirror what ``label_sessions.py`` would write — minimal but valid.
     import json
 
-    (session / "classification.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "classifier_version": "0.1.0",
-                "classified_at": "2026-05-13T12:00:00Z",
-                "session_id": session.name,
-                "duration_seconds": 600.0,
-                "summary": {
-                    "mode_seconds": {"warmup": 600.0},
-                    "event_counts": {"cold_start": 1},
-                },
-                "mode_segments": [],
-                "events": [
-                    {
-                        "timestamp": "2026-05-13T12:00:00Z",
-                        "kind": "cold_start",
-                        "fields": {},
-                    }
-                ],
-                "quality": {},
-                "disposition": "ready",
-            }
+    for session in sessions:
+        session.mkdir(parents=True)
+        (session / "classification.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "classifier_version": "0.1.0",
+                    "classified_at": "2026-05-13T12:00:00Z",
+                    "session_id": session.name,
+                    "duration_seconds": 600.0,
+                    "summary": {
+                        "mode_seconds": {"warmup": 600.0},
+                        "event_counts": {"cold_start": 1},
+                    },
+                    "mode_segments": [],
+                    "events": [
+                        {
+                            "timestamp": "2026-05-13T12:00:00Z",
+                            "kind": "cold_start",
+                            "fields": {},
+                        }
+                    ],
+                    "quality": {},
+                    "disposition": "ready",
+                }
+            )
         )
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: sessions)
+    monkeypatch.setattr(
+        refit_cli,
+        "build_feature_frame",
+        lambda *_a, **_k: pd.concat(
+            [_frame(session.name, seed=index) for index, session in enumerate(sessions)],
+            ignore_index=True,
+        ),
     )
-    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
-    monkeypatch.setattr(refit_cli, "build_feature_frame", lambda *_a, **_k: _frame(session.name))
-    return session
+    return sessions[0]
 
 
 def test_main_dry_run_does_not_write_output(
@@ -366,7 +374,7 @@ def test_main_bumps_version_when_underlying_data_changes(
 ) -> None:
     """4.5 — a second run against genuinely different training rows (here:
     a different RNG seed) still bumps the version."""
-    session = _patch_pipeline(monkeypatch, tmp_path)
+    _patch_pipeline(monkeypatch, tmp_path)
     out = tmp_path / "behavior_models.yaml"
     args = [
         "--config",
@@ -382,7 +390,12 @@ def test_main_bumps_version_when_underlying_data_changes(
     refit_cli.main(args)
 
     monkeypatch.setattr(
-        refit_cli, "build_feature_frame", lambda *_a, **_k: _frame(session.name, seed=1)
+        refit_cli,
+        "build_feature_frame",
+        lambda *_a, **_k: pd.concat(
+            [_frame(f"2026-05-13T12{minute:02d}00", seed=10 + minute) for minute in range(3)],
+            ignore_index=True,
+        ),
     )
     refit_cli.main(args)
 

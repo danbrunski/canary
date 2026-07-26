@@ -13,6 +13,7 @@ from src.models.sequence_training import (
     default_training_device,
     error_distribution,
     split_dataset,
+    validate_dataset_observations,
 )
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
@@ -77,6 +78,20 @@ def test_default_training_device_returns_cpu_or_cuda() -> None:
     invariant is that it returns one of the two strings, never raises, and
     never silently picks something unknown."""
     assert default_training_device() in {"cpu", "cuda"}
+
+
+def test_sequence_calibration_rejects_effectively_empty_windows() -> None:
+    frame = _single_session_frame(rows=12)
+    frame["rpm__gap"] = True
+    frame["speed__gap"] = True
+    dataset = SequenceWindowDataset(frame, sequence_length=4, feature_columns=("rpm", "speed"))
+    with pytest.raises(ValueError, match="usable sequence windows"):
+        validate_dataset_observations(
+            dataset,
+            minimum_window_fraction=0.01,
+            minimum_usable_fraction=0.9,
+            context="calibration",
+        )
 
 
 def test_split_dataset_holds_out_whole_sessions() -> None:

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 import numpy as np
@@ -113,6 +113,11 @@ class _RecipeBase:
     operating_mode: str | None = None  # restrict the input frame to this mode before fitting
     deviation: DeviationConfig | None = None
     min_samples: int = 50  # below this, skip the recipe rather than fit a brittle surface
+    #: Independent drives required after all row/event/mode filters. A long
+    #: single drive is not independent evidence of a stable vehicle behavior.
+    min_sessions: int = 1
+    #: Rows a session must contribute before it counts toward ``min_sessions``.
+    min_session_samples: int = 30
     notes: str | None = None
     #: Auto-detected events (see ``src.analysis.events``) the *source session*
     #: must contain for any of its rows to feed this recipe. Use to gate
@@ -195,7 +200,7 @@ def default_recipes() -> list[Recipe]:
     Naming convention: ``<output>_vs_<axes>``. The dashboard's performance
     panel (5.12) will key off these names — keep them stable.
     """
-    return [
+    recipes: list[Recipe] = [
         Surface1DRecipe(
             name="coolant_warmup",
             output="obd:COOLANT_TEMP",
@@ -296,10 +301,9 @@ def default_recipes() -> list[Recipe]:
                 "* Sustained knock-retard activity (negative residuals "
                 "  clustered at the hot-IAT side of the surface — detonation "
                 "  triggers spark pull-back).\n"
-                "* IAT sensor lying to the ECU — timing tracks the *reported* "
-                "  IAT, so a stuck or biased sensor leaves the surface's "
-                "  predicted timing matching the wrong cell, and actual "
-                "  timing drifts off the learned map.\n"
+                "* Thermal-compensation or knock-control drift. A biased IAT "
+                "  that the ECU itself uses for timing is a common-mode fault "
+                "  and is not identifiable from this surface alone.\n"
                 "* Firmware / calibration drift after an ECU re-flash.\n\n"
                 "Complementary to ``timing_advance_vs_rpm_load`` (load-axis "
                 "compensation) — both feed the same timing output through "
@@ -375,7 +379,7 @@ def default_recipes() -> list[Recipe]:
                 "over the theoretical 100%-VE fill from MAP-or-baro/IAT/"
                 "displacement — the physics-normalized upgrade of "
                 "air_mass_per_cycle_vs_rpm_load above. Detects intake leak / "
-                "restriction (VE drop), MAF drift (whole-surface shift), "
+                "metering/pressure/IAT drift (whole-surface shift), "
                 "cam/VVT fault (localized cell shift). Fed by "
                 "``compute_anomaly_signals``."
             ),
@@ -493,68 +497,37 @@ def default_recipes() -> list[Recipe]:
         ),
         # ----- Phase 2: DID-dependent surfaces (skip until DIDs are polled) --
         Surface2DRecipe(
-            name="injector_pw_vs_rpm_load",
+            name="injector_pw_vs_rpm_throttle_did",
             output="did:ECM_INJECTOR_PW_B1",
             output_unit="raw",  # scale not yet locked; raw counts are stable for anomaly detection
-            x_column="obd:RPM",
-            y_column="obd:ENGINE_LOAD",
+            x_column="did:ECM_RPM",
+            y_column="did:ECM_THROTTLE_POS_SENSOR_1",
             x_axis_name="rpm",
-            y_axis_name="engine_load",
+            y_axis_name="throttle_sensor_voltage",
             x_axis_unit="rpm",
-            y_axis_unit="%",
+            y_axis_unit="V",
             min_samples=500,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,  # injectors don't fire KOEO — PW is a frozen zero
             # sigma_floor = 1 raw count (scale constant not yet pinned).
             deviation=DeviationConfig(
                 kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=1.0
             ),
             notes=(
-                "Direct fuel-delivery surface. Detects injector wear (PW "
-                "creeps up over months for same load), fuel pressure drop "
-                "(same signature), MAF drift (PW shifts because ECM thinks "
-                "less air than reality). Needs ``ECM_INJECTOR_PW_B1`` in "
-                "``obd_dids``."
+                "Mode-22-synchronous fuel-delivery surface. Detects a change in "
+                "commanded PW at the same DID RPM and throttle position. It cannot "
+                "distinguish injector/fuel-pressure faults from ECU compensation, "
+                "and does not claim MAF drift by itself."
             ),
         ),
         Surface1DRecipe(
-            name="injector_pw_warmup",
-            output="did:ECM_INJECTOR_PW_B1",
-            output_unit="raw",
-            x_column="obd:RUN_TIME",
-            x_axis_name="time_since_start",
-            x_axis_unit="s",
-            operating_mode="warmup",
-            require_session_events=("cold_start",),
-            min_rpm=ENGINE_RUNNING_MIN_RPM,
-            fit_method="binned_lookup",
-            n_knots=12,
-            min_samples=120,
-            # reference_std is auto-filled from the fit residuals (raw-count
-            # scaling isn't pinned, so it can't be declared upfront);
-            # sigma_floor = 1 raw count bounds it from below. 4.6: widened
-            # from (10.0, 25.0) — same corpus/rationale as coolant_warmup
-            # (WARMUP_CONTEXT_SESSION_FLOOR).
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=15.0, critical_band=38.0, sigma_floor=1.0
-            ),
-            notes=(
-                "Cold-start enrichment curve. PW is elevated during warmup "
-                "(typically 2-3× nominal) and decays smoothly as coolant "
-                "rises. Detects CTS sensor drift (wrong enrichment), "
-                "stuck-open injector, prime-pulse failure."
-            ),
-        ),
-        Surface1DRecipe(
-            name="afr_bank_balance_vs_rpm",
+            name="afr_bank_balance_vs_throttle_did",
             output="derived:AFR_BANK_BALANCE",
             output_unit="V",
-            x_column="obd:RPM",
-            x_axis_name="rpm",
-            x_axis_unit="rpm",
+            x_column="did:ECM_THROTTLE_POS_SENSOR_1",
+            x_axis_name="throttle_sensor_voltage",
+            x_axis_unit="V",
             fit_method="poly",
             degree=1,
             min_samples=300,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,  # unheated/idle-off AF sensors read garbage KOEO
             deviation=DeviationConfig(kind="absolute", warning_band=0.05, critical_band=0.15),
             notes=(
                 "Wideband AFR sensor voltage delta between banks. Expected "
@@ -565,17 +538,16 @@ def default_recipes() -> list[Recipe]:
             ),
         ),
         Surface2DRecipe(
-            name="afr_voltage_vs_rpm_load",
+            name="afr_voltage_vs_rpm_throttle_did",
             output="did:ECM_AF_SENSOR_V_B1",
             output_unit="V",
-            x_column="obd:RPM",
-            y_column="obd:ENGINE_LOAD",
+            x_column="did:ECM_RPM",
+            y_column="did:ECM_THROTTLE_POS_SENSOR_1",
             x_axis_name="rpm",
-            y_axis_name="engine_load",
+            y_axis_name="throttle_sensor_voltage",
             x_axis_unit="rpm",
-            y_axis_unit="%",
+            y_axis_unit="V",
             min_samples=500,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,
             deviation=DeviationConfig(kind="absolute", warning_band=0.10, critical_band=0.25),
             notes=(
                 "Wideband AFR sensor voltage map. ~2.15V at stoich (closed "
@@ -586,12 +558,12 @@ def default_recipes() -> list[Recipe]:
             ),
         ),
         Surface1DRecipe(
-            name="tps_voltage_per_pct",
-            output="derived:TPS_VOLTAGE_PER_PCT",
-            output_unit="V/%",
-            x_column="obd:THROTTLE_POS",
-            x_axis_name="throttle_pct",
-            x_axis_unit="%",
+            name="tps_sensor_1_vs_sensor_2_did",
+            output="did:ECM_THROTTLE_POS_SENSOR_1",
+            output_unit="V",
+            x_column="did:ECM_THROTTLE_POS_SENSOR_2",
+            x_axis_name="throttle_sensor_2_voltage",
+            x_axis_unit="V",
             fit_method="poly",
             degree=1,
             min_samples=300,
@@ -608,12 +580,12 @@ def default_recipes() -> list[Recipe]:
                 kind="sigma", warning_band=5.0, critical_band=12.0, sigma_floor=0.005
             ),
             notes=(
-                "Raw TPS voltage vs ECM-calculated throttle percent. "
-                "Expected to be near-linear / constant ratio. Drift detects "
-                "TPS calibration shift before any DTC fires."
+                "Synchronous redundant TPS-voltage relationship. Drift between "
+                "the two independent tracks can reveal calibration or sensor wear."
             ),
         ),
     ]
+    return [replace(recipe, min_sessions=3) for recipe in recipes]
 
 
 # ---------------------------------------------------------------------------
@@ -822,14 +794,36 @@ def fit_recipe(
             skipped=True,
             reason=f"{len(clean)} clean samples < min_samples={recipe.min_samples}",
         )
+    clean_sessions: tuple[str, ...] = tuple(sessions)
+    if SESSION_COLUMN in clean.columns:
+        counts = clean[SESSION_COLUMN].astype(str).value_counts()
+        clean_sessions = tuple(
+            sorted(
+                str(session)
+                for session, count in counts.items()
+                if count >= recipe.min_session_samples
+            )
+        )
+        if len(clean_sessions) < recipe.min_sessions:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason=(
+                    f"{len(clean_sessions)} independent sessions with >= "
+                    f"{recipe.min_session_samples} samples < min_sessions={recipe.min_sessions}"
+                ),
+            )
 
     # 4. dispatch
     try:
         if isinstance(recipe, Surface1DRecipe):
-            model: BehaviorModel1D | BehaviorModel2D = _fit_1d(recipe, clean, sessions, version)
+            model: BehaviorModel1D | BehaviorModel2D = _fit_1d(
+                recipe, clean, clean_sessions, version
+            )
         else:
             model = _fit_2d(
-                recipe, clean, sessions, version, prior_model=prior_model, regrid=regrid
+                recipe, clean, clean_sessions, version, prior_model=prior_model, regrid=regrid
             )
     except Exception as exc:  # noqa: BLE001 — log + skip; one bad recipe shouldn't kill a batch
         log.warning(
@@ -874,6 +868,11 @@ def _check_publish_gate(recipe: Recipe, model: BehaviorModel1D | BehaviorModel2D
     this is what actually catches the silent all-empty-grid case, since an
     empty grid's R² would be undefined either way.
     """
+    if recipe.min_sessions > 1 and len(model.fit.sessions) < recipe.min_sessions:
+        return (
+            f"training session count {len(model.fit.sessions)} below "
+            f"min_sessions={recipe.min_sessions}"
+        )
     if isinstance(recipe, Surface1DRecipe):
         floor = recipe.min_r_squared
         r2 = model.fit.r_squared
@@ -927,10 +926,17 @@ def refit_all(
     next_version_for: dict[str, int] = {}
     carry_over: dict[str, BehaviorModel1D | BehaviorModel2D] = {}
     if existing is not None:
+        catalog_by_name = {
+            recipe.name: recipe for recipe in (catalog if catalog is not None else recipes)
+        }
         for prior_model in existing.models:
             name = prior_model.name
             if name not in catalog_names:
                 continue  # retired
+            gate_reason = _check_publish_gate(catalog_by_name[name], prior_model)
+            if gate_reason is not None:
+                log.warning("retiring prior behavior model %s: %s", name, gate_reason)
+                continue
             carry_over[name] = prior_model
             if name in refit_names:
                 next_version_for[name] = prior_model.version + 1

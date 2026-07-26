@@ -513,12 +513,12 @@ _MODE01_SPEC: tuple[
         "indicator",
         decode_bitmask_a,
     ),  # noqa: E501
-    (0x14, _pd_name(0x14), "O2 Sensor B1S1", "o2", "V", 2, "medium", "graph", _pd(0x14)),
-    (0x15, _pd_name(0x15), "O2 Sensor B1S2", "o2", "V", 2, "medium", "graph", _pd(0x15)),
+    (0x14, _pd_name(0x14), "O2 Sensor B1S1", "o2", "V", 2, "fast", "graph", _pd(0x14)),
+    (0x15, _pd_name(0x15), "O2 Sensor B1S2", "o2", "V", 2, "fast", "graph", _pd(0x15)),
     (0x16, "O2_B1S3", "O2 Sensor B1S3", "o2", "V", 2, "medium", "graph", decode_o2_voltage),
     (0x17, "O2_B1S4", "O2 Sensor B1S4", "o2", "V", 2, "medium", "graph", decode_o2_voltage),
-    (0x18, _pd_name(0x18), "O2 Sensor B2S1", "o2", "V", 2, "medium", "graph", _pd(0x18)),
-    (0x19, _pd_name(0x19), "O2 Sensor B2S2", "o2", "V", 2, "medium", "graph", _pd(0x19)),
+    (0x18, _pd_name(0x18), "O2 Sensor B2S1", "o2", "V", 2, "fast", "graph", _pd(0x18)),
+    (0x19, _pd_name(0x19), "O2 Sensor B2S2", "o2", "V", 2, "fast", "graph", _pd(0x19)),
     (0x1A, "O2_B2S3", "O2 Sensor B2S3", "o2", "V", 2, "medium", "graph", decode_o2_voltage),
     (0x1B, "O2_B2S4", "O2 Sensor B2S4", "o2", "V", 2, "medium", "graph", decode_o2_voltage),
     (

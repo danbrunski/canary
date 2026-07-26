@@ -24,6 +24,7 @@ an artifact whose on-disk format the running daemon can't speak.
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal
@@ -329,10 +330,21 @@ def write_artifact(
     """
     artifact_path = Path(artifact_path)
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
-    dump_binary(artifact_path)
     path = manifest_path or manifest_path_for(artifact_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(dict(manifest), indent=2, sort_keys=True) + "\n")
+    token = uuid.uuid4().hex
+    artifact_tmp = artifact_path.with_name(f".{artifact_path.name}.{token}.tmp")
+    manifest_tmp = path.with_name(f".{path.name}.{token}.tmp")
+    try:
+        dump_binary(artifact_tmp)
+        manifest_tmp.write_text(json.dumps(dict(manifest), indent=2, sort_keys=True) + "\n")
+        # Binary first, sidecar last: a watcher that lands between replaces
+        # sees a mismatch and retries when the sidecar mtime advances.
+        artifact_tmp.replace(artifact_path)
+        manifest_tmp.replace(path)
+    finally:
+        artifact_tmp.unlink(missing_ok=True)
+        manifest_tmp.unlink(missing_ok=True)
     return path
 
 

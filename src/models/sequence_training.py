@@ -144,6 +144,11 @@ class SequenceThresholdCalibration:
     #: distribution instead of ``mean + k·σ`` (recorded for provenance —
     #: the threshold values themselves are already baked in).
     threshold_quantile: float | None = None
+    #: Errors aggregated by physical signal family (raw + rolling siblings).
+    #: ``family_max_score`` calibrates the maximum normalized family error,
+    #: preserving localized faults without an uncorrected many-channel OR.
+    family_errors: Mapping[str, ReconstructionErrorDistribution] | None = None
+    family_max_score: ReconstructionErrorDistribution | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -163,6 +168,13 @@ class SequenceThresholdCalibration:
             }
         if self.threshold_quantile is not None:
             out["threshold_quantile"] = self.threshold_quantile
+        if self.family_errors is not None:
+            out["family_errors"] = {
+                family: distribution.to_dict()
+                for family, distribution in self.family_errors.items()
+            }
+        if self.family_max_score is not None:
+            out["family_max_score"] = self.family_max_score.to_dict()
         return out
 
     @classmethod
@@ -177,6 +189,8 @@ class SequenceThresholdCalibration:
             }
         )
         raw_quantile = data.get("threshold_quantile")
+        raw_family_errors = data.get("family_errors")
+        raw_family_max = data.get("family_max_score")
         return cls(
             threshold_k=float(data["threshold_k"]),
             calibrated_at=str(data["calibrated_at"]),
@@ -189,6 +203,19 @@ class SequenceThresholdCalibration:
             },
             per_mode_errors=per_mode,
             threshold_quantile=None if raw_quantile is None else float(raw_quantile),
+            family_errors=(
+                None
+                if raw_family_errors is None
+                else {
+                    str(family): ReconstructionErrorDistribution.from_dict(distribution)
+                    for family, distribution in dict(raw_family_errors).items()
+                }
+            ),
+            family_max_score=(
+                None
+                if raw_family_max is None
+                else ReconstructionErrorDistribution.from_dict(raw_family_max)
+            ),
         )
 
 
@@ -399,6 +426,30 @@ def calibrate_sequence_thresholds(
         )
         for index, column in enumerate(dataset.feature_columns)
     }
+    family_indexes: dict[str, list[int]] = {}
+    for index, column in enumerate(dataset.feature_columns):
+        family_indexes.setdefault(_feature_family(column), []).append(index)
+    family_values = {
+        family: np.max(channel_matrix[:, indexes], axis=1)
+        for family, indexes in family_indexes.items()
+    }
+    family_distributions = {
+        family: error_distribution(
+            values, threshold_k=threshold_k, threshold_quantile=threshold_quantile
+        )
+        for family, values in family_values.items()
+    }
+    normalized_family_matrix = np.column_stack(
+        [
+            values / max(family_distributions[family].threshold, np.finfo(np.float64).eps)
+            for family, values in family_values.items()
+        ]
+    )
+    family_max_distribution = error_distribution(
+        np.max(normalized_family_matrix, axis=1),
+        threshold_k=threshold_k,
+        threshold_quantile=threshold_quantile,
+    )
 
     # Per-operating-mode global thresholds. The mode for a window is its last
     # row's mode (the row the score is attributed to); ``shuffle=False`` keeps
@@ -438,7 +489,16 @@ def calibrate_sequence_thresholds(
         channel_errors=channel_distributions,
         per_mode_errors=per_mode_distributions if per_mode_distributions else None,
         threshold_quantile=threshold_quantile,
+        family_errors=family_distributions,
+        family_max_score=family_max_distribution,
     )
+
+
+def _feature_family(column: str) -> str:
+    for suffix in ("__mean", "__std", "__roc"):
+        if column.endswith(suffix):
+            return column[: -len(suffix)]
+    return column
 
 
 def _non_overlapping_window_count(start_rows: list[int], sequence_length: int) -> int:
@@ -526,6 +586,55 @@ def training_data_hash(dataset: SequenceWindowDataset) -> str:
 
 def training_sessions(dataset: SequenceWindowDataset) -> tuple[str, ...]:
     return tuple(sorted({window.session for window in dataset.windows}))
+
+
+def _window_observed_fractions(dataset: SequenceWindowDataset) -> np.ndarray:
+    cells_per_window = dataset.sequence_length * len(dataset.feature_columns)
+    row_observed = dataset._mask.sum(axis=1, dtype=np.float64)
+    prefix = np.concatenate(([0.0], np.cumsum(row_observed)))
+    return np.asarray(
+        [
+            (prefix[window.end_row] - prefix[window.start_row]) / cells_per_window
+            for window in dataset.windows
+        ],
+        dtype=np.float64,
+    )
+
+
+def dataset_observation_health(dataset: SequenceWindowDataset) -> dict[str, Any]:
+    """Summarize real observed-cell coverage across overlapping windows."""
+    fractions = _window_observed_fractions(dataset)
+    if fractions.size == 0:
+        return {"window_count": 0, "minimum": 0.0, "p10": 0.0, "p50": 0.0, "mean": 0.0}
+    return {
+        "window_count": int(fractions.size),
+        "minimum": float(fractions.min()),
+        "p10": float(np.quantile(fractions, 0.1)),
+        "p50": float(np.quantile(fractions, 0.5)),
+        "mean": float(fractions.mean()),
+        "zero_observation_windows": int(np.count_nonzero(fractions == 0.0)),
+    }
+
+
+def validate_dataset_observations(
+    dataset: SequenceWindowDataset,
+    *,
+    minimum_window_fraction: float,
+    minimum_usable_fraction: float,
+    context: str,
+) -> dict[str, Any]:
+    health = dataset_observation_health(dataset)
+    fractions = _window_observed_fractions(dataset)
+    usable_fraction = float(np.mean(fractions >= minimum_window_fraction))
+    health["minimum_window_observed_fraction"] = minimum_window_fraction
+    health["usable_window_fraction"] = usable_fraction
+    if usable_fraction < minimum_usable_fraction:
+        raise ValueError(
+            f"{context} observation coverage is unusable: {usable_fraction:.1%} of windows "
+            f"meet the {minimum_window_fraction:.1%} observed-cell floor; require "
+            f"{minimum_usable_fraction:.1%}"
+        )
+    return health
 
 
 def min_window_timestamp(dataset: SequenceWindowDataset) -> str | None:
@@ -655,4 +764,6 @@ __all__ = [
     "train_one_epoch",
     "training_data_hash",
     "training_sessions",
+    "dataset_observation_health",
+    "validate_dataset_observations",
 ]

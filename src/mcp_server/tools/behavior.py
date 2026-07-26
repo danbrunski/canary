@@ -8,7 +8,7 @@ from typing import Any
 from src.analysis.session_deviations import analyze_session, compare_sessions
 from src.config import CanaryConfig
 from src.control.sessions import resolve_session
-from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH, load_behavior_models
+from src.decode.behavior_models import load_behavior_models
 from src.mcp_server.client import DaemonClient
 from src.profiles import resolve_profile_for_tooling, scope_config
 
@@ -91,8 +91,6 @@ def get_behavior_deviations(
         return {"ok": False, "error": str(exc)}
 
     behavior_models_path = scoped.daemon.behavior_models
-    if not behavior_models_path.exists():
-        behavior_models_path = DEFAULT_BEHAVIOR_MODELS_PATH
     if not behavior_models_path.exists():
         return {"ok": False, "error": f"no behavior_models.yaml found ({behavior_models_path})"}
     models = load_behavior_models(behavior_models_path)

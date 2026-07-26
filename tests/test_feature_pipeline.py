@@ -26,6 +26,7 @@ from src.preprocessing.feature_pipeline import (
     align_features_to_schema,
     candidate_feature_columns,
     featurize_wide_frame,
+    isolation_forest_feature_columns,
     restrict_isolation_forest_expansion,
     sequence_feature_columns,
     summarize_feature_health,
@@ -434,13 +435,20 @@ def test_build_feature_frame_tail_matches_standalone_featurize_wide_frame(
 
     resample_config = ResampleConfig(
         hz=config.preprocessing.resample_hz,
+        max_gap_factor=config.preprocessing.max_gap_factor,
         slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
     )
     resampled = _decode_session_to_resampled(session, None, None, None, resample_config)
     resampled = _drop_fully_stale_rows(resampled)
     standalone = featurize_wide_frame(resampled, config).features
 
-    combined = build_feature_frame([session], config)
+    combined = build_feature_frame(
+        [session],
+        config,
+        bindings_path=tmp_path / "missing-bindings.yaml",
+        behavior_models_path=tmp_path / "missing-behavior-models.yaml",
+        dbc_dir=tmp_path / "missing-dbc",
+    )
 
     pd.testing.assert_frame_equal(standalone, combined)
 
@@ -721,3 +729,89 @@ def test_decode_long_frame_handles_empty_and_missing_source() -> None:
     assert fp._decode_long_frame(pd.DataFrame(), None, None, None).empty
     bare = pd.DataFrame({"timestamp": pd.to_datetime(["2026-05-13T12:00:00Z"])})
     pd.testing.assert_frame_equal(fp._decode_long_frame(bare, None, None, None), bare)
+
+
+# ---------------------------------------------------------------------------
+# IF coverage floor (2026-07-26). TrainedIsolationForest.score refuses any row
+# with a NaN in ANY trained feature, so a sparse column makes the detector
+# self-suppress. The 07-26 IF trained 273 features, none above 75% coverage,
+# and could not score a single row (Pi: missing_feature_rate 1.0).
+# ---------------------------------------------------------------------------
+
+
+def _coverage_frame(n: int = 100) -> pd.DataFrame:
+    """Dense RPM, half-covered SPEED, and a DID present on 2% of rows."""
+    return pd.DataFrame(
+        {
+            "session": ["s1"] * n,
+            "timestamp": pd.date_range("2026-07-22T14:00:00Z", periods=n, freq="1s"),
+            MODE_COLUMN: ["city"] * n,
+            "obd:RPM": [float(800 + i) for i in range(n)],
+            "obd:SPEED": [float(i) if i % 2 == 0 else float("nan") for i in range(n)],
+            "did:ECM_AF_SENSOR_V_B1": [float(i) if i % 50 == 0 else float("nan") for i in range(n)],
+        }
+    )
+
+
+def test_if_feature_columns_drops_below_coverage_floor() -> None:
+    frame = _coverage_frame()
+    cols = isolation_forest_feature_columns(frame, min_coverage=0.5)
+    assert "obd:RPM" in cols  # 100%
+    assert "obd:SPEED" in cols  # exactly 50% -> at the floor, kept
+    assert "did:ECM_AF_SENSOR_V_B1" not in cols  # 2% -> the blind-IF offender
+
+
+def test_if_coverage_floor_is_opt_out() -> None:
+    """min_coverage=0 recovers the pre-fix selection, so the change is auditable."""
+    frame = _coverage_frame()
+    assert isolation_forest_feature_columns(frame, min_coverage=0) == trainable_feature_columns(
+        frame
+    )
+
+
+def test_sequence_features_keep_sparse_columns_the_if_drops() -> None:
+    """The load-bearing asymmetry: GRU-D is handed missingness as signal via
+    mask/delta-t channels, so the sparse DID it keeps is exactly the one the
+    per-row IF must drop. Applying one filter to both would silently blind the
+    sequence detector to the DID channels it is meant to watch."""
+    frame = _coverage_frame()
+    seq = sequence_feature_columns(frame)
+    if_cols = isolation_forest_feature_columns(frame, min_coverage=0.5)
+    assert "did:ECM_AF_SENSOR_V_B1" in seq
+    assert "did:ECM_AF_SENSOR_V_B1" not in if_cols
+
+
+def test_feature_health_reports_coverage_and_low_coverage_drops() -> None:
+    frame = _coverage_frame()
+    cols = isolation_forest_feature_columns(frame, min_coverage=0.5)
+    health = summarize_feature_health(
+        frame, cols, candidate_columns=candidate_feature_columns(frame)
+    )
+    # The dropped DID is reported with its actual coverage, so a blind-detector
+    # diagnosis reads off the manifest instead of re-deriving from the corpus.
+    assert "did:ECM_AF_SENSOR_V_B1" in health["dropped_low_coverage_columns"]
+    assert health["dropped_low_coverage_columns"]["did:ECM_AF_SENSOR_V_B1"] == pytest.approx(0.02)
+    # min_selected_coverage is the one number that says "can this IF score?"
+    assert health["min_selected_coverage"] == pytest.approx(0.5)
+
+
+def test_max_gap_factor_is_config_driven_for_train_and_serve() -> None:
+    """max_gap_factor must reach the resampler from config, or the offline
+    ceiling and LiveFeatureSource's serve-time staleness rule diverge — the
+    preprocessing-parity failure the manifest's max_gap_seconds exists to
+    catch."""
+    from src.config import CanaryConfig
+    from src.preprocessing.resampler import ResampleConfig
+
+    cfg = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    rc = ResampleConfig(
+        hz=cfg.preprocessing.resample_hz,
+        max_gap_factor=cfg.preprocessing.max_gap_factor,
+    )
+    assert rc.max_gap.total_seconds() == pytest.approx(
+        cfg.preprocessing.max_gap_factor / cfg.preprocessing.resample_hz
+    )
+    # A non-default value must reach the resampler rather than being ignored —
+    # that (not the specific default) is what keeps train and serve aligned.
+    loosened = ResampleConfig(hz=cfg.preprocessing.resample_hz, max_gap_factor=10.0)
+    assert loosened.max_gap.total_seconds() == pytest.approx(10.0)

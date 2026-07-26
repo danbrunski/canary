@@ -11,7 +11,6 @@ import pyarrow.parquet as pq
 import pytest
 
 from scripts.train_anomaly_model import (
-    _trainable_feature_columns,
     build_feature_frame,
     main,
     train,
@@ -25,6 +24,9 @@ from src.preprocessing.feature_pipeline import (
 )
 from src.preprocessing.feature_pipeline import (
     segment_or_constant as _segment_or_constant,
+)
+from src.preprocessing.feature_pipeline import (
+    trainable_feature_columns as _trainable_feature_columns,
 )
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
 
@@ -338,6 +340,13 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
             "selected_feature_count": 1,
             "dropped_all_nan_columns": ["deviation:coolant_warmup"],
             "dropped_constant_columns": ["obd:RPM"],
+            # deviation:coolant_warmup is all-NaN here, so its coverage is 0.0
+            # — reported so a blind-IF diagnosis reads off the manifest.
+            # obd:RPM is absent: it was dropped for zero variance, not sparsity
+            # (its coverage is 1.0, above the floor).
+            "dropped_low_coverage_columns": {"deviation:coolant_warmup": 0.0},
+            # The one number that answers "can this IF score a row at all?"
+            "min_selected_coverage": 1.0,
             "all_nan_columns": [],
             "constant_columns": [],
             "non_finite_columns": [],

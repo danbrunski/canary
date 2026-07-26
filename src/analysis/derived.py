@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import VehicleParameters
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 
 __all__ = [
     "FUEL_PROPERTIES",
@@ -92,6 +92,38 @@ IDLE_SPEED_CEIL_KPH = _IDLE_SPEED_CEIL_KPH
 #: under the live ring buffer's span (``idle_transient_lookback_seconds``, 180 s
 #: by default) so the serve-side smoothing window is always fully populated.
 STFT_BANK_BALANCE_SMOOTHING_SECONDS = 30.0
+
+
+def _append_dependency_gap(
+    frame: pd.DataFrame,
+    output: str,
+    *dependency_groups: tuple[str, ...],
+) -> None:
+    """Attach ``output__gap`` as the OR of the selected inputs' freshness.
+
+    Each dependency group is an ordered fallback list matching ``_series``.
+    A derived value must never become a fresh GRU-D observation when any
+    physical input used to compute it is stale or absent.
+    """
+    stale = pd.Series(False, index=frame.index, dtype=bool)
+    for candidates in dependency_groups:
+        selected = next(
+            (
+                name
+                for name in candidates
+                if name in frame.columns
+                and pd.to_numeric(frame[name], errors="coerce").notna().any()
+            ),
+            None,
+        )
+        if selected is None:
+            stale |= True
+            continue
+        stale |= pd.to_numeric(frame[selected], errors="coerce").isna()
+        source_gap = gap_column(selected)
+        if source_gap in frame.columns:
+            stale |= frame[source_gap].fillna(True).astype(bool)
+    frame[gap_column(output)] = stale
 
 
 @dataclass(frozen=True)
@@ -531,8 +563,10 @@ def compute_anomaly_signals(
       see ``_theoretical_air_mass_per_cycle_g``). Where AIR_MASS_PER_CYCLE
       is a stable-but-uncalibrated proxy, VE_PERCENT is physics-normalized
       and directly interpretable (~85-95% naturally-aspirated at part
-      throttle; collapsing VE = intake leak/restriction, spiking VE = MAF
-      under-reporting). Inputs: ``obd:MAF``, ``obd:RPM``, MAP-or-baro,
+      throttle; collapsing VE can mean unmetered air or MAF under-reporting,
+      while spiking VE can mean MAF over-reporting or a pressure/IAT bias).
+      A restriction changes both measured flow and manifold pressure, so this
+      ratio alone does not identify it. Inputs: ``obd:MAF``, ``obd:RPM``, MAP-or-baro,
       ``vehicle.displacement_l``. Optional DID cross-check
       (``did:ECM_INTAKE_PRESSURE`` pair, 0x1206/07) deliberately **not**
       wired here — those DIDs are still raw/scale-unpinned (Task 2.7) and
@@ -599,6 +633,12 @@ def compute_anomaly_signals(
     air_mass_measured = _air_mass_per_cycle_g(out)
     if air_mass_measured is not None:
         out["derived:AIR_MASS_PER_CYCLE"] = air_mass_measured
+        _append_dependency_gap(
+            out,
+            "derived:AIR_MASS_PER_CYCLE",
+            ("obd:MAF",),
+            ("obd:RPM", "decoded:ECM_RPM"),
+        )
 
         # True VE (Task 4.1): same measured mass, normalized against the
         # theoretical 100%-VE fill. Needs the vehicle config for
@@ -609,6 +649,13 @@ def compute_anomaly_signals(
             if theoretical is not None:
                 theo_safe = theoretical.where(theoretical > 0)
                 out["derived:VE_PERCENT"] = (air_mass_measured / theo_safe * 100.0).astype(float)
+                _append_dependency_gap(
+                    out,
+                    "derived:VE_PERCENT",
+                    ("derived:AIR_MASS_PER_CYCLE",),
+                    ("obd:INTAKE_PRESSURE", "decoded:MAP", "obd:BAROMETRIC_PRESSURE"),
+                    ("obd:INTAKE_TEMP", "decoded:IAT"),
+                )
 
     # Per-bank fuel trim asymmetry. Both STFT and LTFT versions, since
     # they characterize fast (closed-loop) and slow (drift) bias paths.
@@ -623,17 +670,41 @@ def compute_anomaly_signals(
         out["derived:STFT_BANK_BALANCE"] = _session_time_smooth(
             out, stft_b1 - stft_b2, STFT_BANK_BALANCE_SMOOTHING_SECONDS
         ).astype(float)
+        _append_dependency_gap(
+            out,
+            "derived:STFT_BANK_BALANCE",
+            ("obd:SHORT_FUEL_TRIM_1",),
+            ("obd:SHORT_FUEL_TRIM_2",),
+        )
     ltft_b1 = _series(out, "obd:LONG_FUEL_TRIM_1")
     ltft_b2 = _series(out, "obd:LONG_FUEL_TRIM_2")
     if ltft_b1 is not None and ltft_b2 is not None:
         out["derived:LTFT_BANK_BALANCE"] = (ltft_b1 - ltft_b2).astype(float)
+        _append_dependency_gap(
+            out,
+            "derived:LTFT_BANK_BALANCE",
+            ("obd:LONG_FUEL_TRIM_1",),
+            ("obd:LONG_FUEL_TRIM_2",),
+        )
 
     # Total trim per bank (Task 4.3): LTFT + STFT, reusing the per-bank
     # series already fetched above rather than re-resolving them.
     if stft_b1 is not None and ltft_b1 is not None:
         out["derived:TOTAL_TRIM_B1"] = (stft_b1 + ltft_b1).astype(float)
+        _append_dependency_gap(
+            out,
+            "derived:TOTAL_TRIM_B1",
+            ("obd:SHORT_FUEL_TRIM_1",),
+            ("obd:LONG_FUEL_TRIM_1",),
+        )
     if stft_b2 is not None and ltft_b2 is not None:
         out["derived:TOTAL_TRIM_B2"] = (stft_b2 + ltft_b2).astype(float)
+        _append_dependency_gap(
+            out,
+            "derived:TOTAL_TRIM_B2",
+            ("obd:SHORT_FUEL_TRIM_2",),
+            ("obd:LONG_FUEL_TRIM_2",),
+        )
 
     # Catalyst efficiency index (Task 4.4) — see docstring for the
     # switch-count-ratio formula and its explicit "heuristic index, not a
@@ -651,12 +722,24 @@ def compute_anomaly_signals(
         up_safe = up_switches.where(up_switches > 0)
         ratio = (down_switches / up_safe).clip(upper=1.0)
         out[f"derived:CAT_EFFICIENCY_B{bank}"] = (1.0 - ratio).astype(float)
+        _append_dependency_gap(
+            out,
+            f"derived:CAT_EFFICIENCY_B{bank}",
+            (upstream_col,),
+            (downstream_col,),
+        )
 
     # Wideband AFR voltage asymmetry (DID-dependent).
     afr_b1 = _series(out, "did:ECM_AF_SENSOR_V_B1")
     afr_b2 = _series(out, "did:ECM_AF_SENSOR_V_B2")
     if afr_b1 is not None and afr_b2 is not None:
         out["derived:AFR_BANK_BALANCE"] = (afr_b1 - afr_b2).astype(float)
+        _append_dependency_gap(
+            out,
+            "derived:AFR_BANK_BALANCE",
+            ("did:ECM_AF_SENSOR_V_B1",),
+            ("did:ECM_AF_SENSOR_V_B2",),
+        )
 
     # TPS voltage vs calculated throttle %. Inputs span different units
     # (V vs %) so the ratio is the useful invariant — a TPS that's drifted
@@ -668,6 +751,12 @@ def compute_anomaly_signals(
         # is meaningful only when the pedal is being pressed.
         pct_safe = tps_pct.where(tps_pct > 1.0)
         out["derived:TPS_VOLTAGE_PER_PCT"] = (tps_v / pct_safe).astype(float)
+        _append_dependency_gap(
+            out,
+            "derived:TPS_VOLTAGE_PER_PCT",
+            ("did:ECM_THROTTLE_POS_SENSOR_1",),
+            ("obd:THROTTLE_POS",),
+        )
 
     return out
 

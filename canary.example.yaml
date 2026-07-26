@@ -76,10 +76,12 @@ collection:
   # for obd_did_session_lapse_seconds so the session expires and Mode 01
   # resumes. /status.obd_scheduler.did_profile shows the live window state.
   obd_dids:
+    - ECM_RPM                    # synchronous axis for Mode-22 surfaces
     - ECM_INJECTOR_PW_B1       # fuel-delivery commanded per intake stroke
     - ECM_AF_SENSOR_V_B1       # wideband AFR sensor V, bank 1 (pre-cat)
     - ECM_AF_SENSOR_V_B2       # wideband AFR sensor V, bank 2 (pre-cat)
     - ECM_THROTTLE_POS_SENSOR_1  # raw TPS voltage, for sensor-drift detection
+    - ECM_THROTTLE_POS_SENSOR_2  # redundant TPS track for cross-checking
   obd_did_request_id: 0x7E0
   # auto = take the gating session (0xC0) + keep-alive cadence from
   # data/dids.yaml's access block; null = force bare polling; int = override.
@@ -244,6 +246,10 @@ models:
     # are skipped entirely — no model persisted — rather than fitting a
     # 200-tree forest on a handful of rows.
     min_samples_per_mode: 100
+    # Refuse artifacts whose selected schema makes most rows unscoreable, or
+    # whose segmentation collapsed to only the fallback "unknown" mode.
+    max_dropped_row_fraction: 0.75
+    allow_unknown_only: false
   lstm_autoencoder:
     enabled: true
     sequence_length: 30
@@ -268,6 +274,10 @@ models:
     # (mean + k·σ) above only applies when threshold_quantile is null. Errors
     # are right-skewed, so a quantile targets the alert budget directly.
     threshold_quantile: 0.995
+    # Artifact-health gate: calibration/training windows must contain at
+    # least this observed-cell fraction, on at least this fraction of windows.
+    min_window_observed_fraction: 0.01
+    min_usable_window_fraction: 0.9
     # Behavior signals that drift naturally over a drive (fuel level, HVAC
     # controls, intake-air temperature) but aren't vehicle-health signals
     # for *this* detector — they're better handled by the behavior surfaces
@@ -304,6 +314,8 @@ models:
     threshold_k: 3.0
     # Task 3.2: same contract as lstm_autoencoder.threshold_quantile above.
     threshold_quantile: 0.995
+    min_window_observed_fraction: 0.01
+    min_usable_window_fraction: 0.9
   # Phase 7.2: fuse IF + LSTM + behavior residuals into one
   # agreement-aware calibrated severity (a "fused" AnomalyEvent). The
   # per-source events still fire alongside it, independently — fusion never

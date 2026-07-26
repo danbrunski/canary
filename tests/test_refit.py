@@ -60,9 +60,8 @@ def test_default_recipes_have_unique_names() -> None:
     assert len(names) == len(set(names)), f"duplicate recipe names: {names}"
 
 
-def test_default_recipe_axes_are_obd_columns() -> None:
-    """Recipe AXES must be obd:* — RPM / ENGINE_LOAD / RUN_TIME / THROTTLE_POS
-    are the stable mode inputs always present when OBD is polling.
+def test_default_recipe_axes_use_one_synchronous_service() -> None:
+    """A behavior surface must not mix mutually-exclusive Mode 01/22 samples.
 
     OUTPUTS may be obd:* (original surfaces), derived:* (computed by
     ``compute_anomaly_signals`` — air mass per cycle, bank balances, TPS
@@ -78,8 +77,14 @@ def test_default_recipe_axes_are_obd_columns() -> None:
             if isinstance(recipe, Surface1DRecipe)
             else [recipe.x_column, recipe.y_column]
         )
-        for axis in axes:
-            assert axis.startswith("obd:"), f"{recipe.name} axis {axis} must be obd:*"
+        output_service = recipe.output.split(":", 1)[0]
+        axis_services = {axis.split(":", 1)[0] for axis in axes}
+        if output_service == "did":
+            assert axis_services == {"did"}, (
+                f"{recipe.name} mixes Mode 22 output with non-DID axes: {axes}"
+            )
+        else:
+            assert len(axis_services) == 1
         assert recipe.output.startswith(allowed_output_prefixes), (
             f"{recipe.name} output {recipe.output} has an unexpected prefix"
         )

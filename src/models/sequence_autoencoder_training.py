@@ -57,6 +57,7 @@ from src.models.sequence_training import (
     train_one_epoch,
     training_data_hash,
     training_sessions,
+    validate_dataset_observations,
 )
 from src.preprocessing.feature_pipeline import build_feature_spec
 from src.preprocessing.normalization import ZScoreScaler
@@ -153,6 +154,26 @@ def train_sequence_autoencoder(
         calibration_provenance = "held_out"
     else:
         calibration_provenance = "in_sample"
+
+    minimum_window_fraction = float(getattr(config, "min_window_observed_fraction", 0.01))
+    minimum_usable_fraction = float(getattr(config, "min_usable_window_fraction", 0.9))
+    validate_dataset_observations(
+        dataset,
+        minimum_window_fraction=minimum_window_fraction,
+        minimum_usable_fraction=minimum_usable_fraction,
+        context="training dataset",
+    )
+    calibration_source = calibration_dataset if calibration_dataset is not None else dataset
+    calibration_health = (
+        validate_dataset_observations(
+            calibration_source,
+            minimum_window_fraction=minimum_window_fraction,
+            minimum_usable_fraction=minimum_usable_fraction,
+            context="calibration dataset",
+        )
+        if calibrate_thresholds
+        else None
+    )
 
     torch, _nn, optim, data = _torch_training_modules(backend)
     torch.manual_seed(config.random_state)
@@ -317,7 +338,12 @@ def train_sequence_autoencoder(
         calibrated_at=created_at,
         threshold_quantile=getattr(config, "threshold_quantile", None),
     )
-    stamped = replace(calibrated.manifest, calibration=calibration_provenance)
+    stamped = replace(
+        calibrated.manifest,
+        calibration=calibration_provenance,
+        calibration_sessions=training_sessions(calibration_source),
+        calibration_health=calibration_health,
+    )
     return TrainedSequenceAutoencoder(model=calibrated.model, manifest=stamped)
 
 

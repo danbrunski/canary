@@ -200,6 +200,7 @@ class LiveFeatureSource:
         # ``__gap`` flag would have been set offline.
         resample_config = ResampleConfig(
             hz=self.config.preprocessing.resample_hz,
+            max_gap_factor=self.config.preprocessing.max_gap_factor,
             slow_channel_max_gap_seconds=self.config.preprocessing.slow_channel_max_gap_seconds,
         )
         self._max_gap_seconds = float(resample_config.max_gap.total_seconds())

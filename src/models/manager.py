@@ -41,7 +41,6 @@ from src.models.manifest import (
     ModelManifestCommon,
     load_manifest_common,
     manifest_path_for,
-    schema_serviceable,
     validate_model_feature_spec,
 )
 
@@ -64,6 +63,7 @@ class LoadedModel(Generic[T]):
     artifact_path: Path
     manifest_path: Path
     manifest_mtime: float
+    artifact_mtime: float = 0.0
     #: The artifact's own embedded manifest version, when the bundle carries
     #: one (both trainers embed a manifest inside the binary). ``None`` when
     #: the artifact doesn't expose it. When this differs from
@@ -167,11 +167,17 @@ class ModelManager(Generic[T]):
             )
         try:
             mtime = manifest_path.stat().st_mtime
+            artifact_mtime = self._artifact_path.stat().st_mtime
         except OSError as exc:
             return SwapAttempt(kind="missing", detail=f"stat failed: {exc}")
 
         with self._lock:
-            if not _force and self._current is not None and mtime <= self._current.manifest_mtime:
+            if (
+                not _force
+                and self._current is not None
+                and mtime <= self._current.manifest_mtime
+                and artifact_mtime <= self._current.artifact_mtime
+            ):
                 return SwapAttempt(kind="no_change")
 
             try:
@@ -187,25 +193,6 @@ class ModelManager(Generic[T]):
                     "rejecting new manifest", extra={"path": str(manifest_path), "error": str(exc)}
                 )
                 return SwapAttempt(kind="rejected", detail=str(exc))
-
-            if self._current is not None and not schema_serviceable(
-                self._current.manifest, manifest
-            ):
-                log.warning(
-                    "rejecting new manifest: feature columns not serviceable by the "
-                    "running pipeline (schema expansion needs a restart)",
-                    extra={
-                        "path": str(manifest_path),
-                        "running_version": self._current.manifest.model_version,
-                        "new_version": manifest.model_version,
-                    },
-                )
-                return SwapAttempt(
-                    kind="rejected",
-                    detail="feature_columns add columns the running pipeline may not "
-                    "produce — restart to load a new schema",
-                    new_version=manifest.model_version,
-                )
 
             # Task 3.1: an in-sample-calibrated artifact underestimates
             # cross-session error and can flood alerts on unseen drives — not
@@ -246,12 +233,26 @@ class ModelManager(Generic[T]):
                         "artifact_version": embedded_version,
                     },
                 )
+                if self._current is not None:
+                    # Sidecar and binary are deployed separately. Do not bind
+                    # the running artifact to a manifest describing different
+                    # weights; polling both mtimes ensures the later half of
+                    # the pair is retried even when the sidecar is unchanged.
+                    return SwapAttempt(
+                        kind="rejected",
+                        detail=(
+                            "artifact/manifest version mismatch: "
+                            f"artifact={embedded_version}, manifest={manifest.model_version}"
+                        ),
+                        new_version=manifest.model_version,
+                    )
             loaded = LoadedModel(
                 artifact=artifact,
                 manifest=manifest,
                 artifact_path=self._artifact_path,
                 manifest_path=manifest_path,
                 manifest_mtime=mtime,
+                artifact_mtime=artifact_mtime,
                 embedded_version=embedded_version,
             )
             prior_version = (

@@ -61,6 +61,8 @@ class SequenceInferenceResult:
     reconstruction_overlays: Mapping[str, Mapping[str, tuple[float, ...]]] = field(
         default_factory=dict
     )
+    family_scores: Mapping[str, float] = field(default_factory=dict)
+    family_threshold: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +80,8 @@ class SequenceInferenceResult:
             "latency_ms": self.latency_ms,
             "top_channels": list(self.top_channels),
             "reconstruction_series": {k: list(v) for k, v in self.reconstruction_series.items()},
+            "family_scores": dict(self.family_scores),
+            "family_threshold": self.family_threshold,
             "reconstruction_overlays": {
                 k: {sub: list(seq) for sub, seq in overlay.items()}
                 for k, overlay in self.reconstruction_overlays.items()
@@ -494,6 +498,21 @@ class SequenceInferenceEngine:
             if mode_distribution is not None
             else self.calibration.global_error.threshold
         )
+        family_scores: dict[str, float] = {}
+        family_threshold: float | None = None
+        if self.calibration.family_errors and self.calibration.family_max_score:
+            family_channels: dict[str, list[str]] = {}
+            for column in self.feature_columns:
+                family_channels.setdefault(_base_channel(column), []).append(column)
+            for family, columns in family_channels.items():
+                distribution = self.calibration.family_errors.get(family)
+                if distribution is None:
+                    continue
+                raw_score = max(channel_scores[column] for column in columns)
+                family_scores[family] = raw_score / max(
+                    distribution.threshold, np.finfo(np.float64).eps
+                )
+            family_threshold = self.calibration.family_max_score.threshold
         # Gate the emit on the *global* reconstruction error only. The
         # per-channel thresholds are calibrated from training data and run far
         # too tight live: with ~90 channels at idle/warmup at least one is
@@ -502,7 +521,10 @@ class SequenceInferenceEngine:
         # normal "anomalies". `anomalous_channels` / `channel_scores` /
         # `channel_thresholds` are still computed and carried in the event
         # detail so a genuine (global) anomaly stays fully drillable.
-        is_anomaly = global_score > global_threshold
+        family_anomaly = bool(family_scores) and max(family_scores.values()) > (
+            family_threshold if family_threshold is not None else float("inf")
+        )
+        is_anomaly = global_score > global_threshold or family_anomaly
         return SequenceInferenceResult(
             model_version=trained_version(self.trained),
             timestamp=timestamp,
@@ -519,6 +541,8 @@ class SequenceInferenceEngine:
             top_channels=top_channels,
             reconstruction_series=reconstruction_series,
             reconstruction_overlays=reconstruction_overlays,
+            family_scores=family_scores,
+            family_threshold=family_threshold,
         )
 
 

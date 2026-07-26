@@ -86,6 +86,7 @@ def _write_pair(
     manifest_path.write_text(json.dumps(payload))
     if mtime is not None:
         os.utime(manifest_path, (mtime, mtime))
+        os.utime(artifact_path, (mtime, mtime))
     return manifest_path
 
 
@@ -208,7 +209,7 @@ def test_poll_swaps_when_manifest_is_newer(tmp_path: Path) -> None:
     assert mgr.current.manifest.model_version == "v2"
 
 
-def test_poll_rejects_when_feature_columns_differ(tmp_path: Path) -> None:
+def test_poll_accepts_feature_schema_expansion(tmp_path: Path) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1", feature_columns=["a", "b"], mtime=1_000_000.0)
     mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
@@ -221,12 +222,51 @@ def test_poll_rejects_when_feature_columns_differ(tmp_path: Path) -> None:
         mtime=2_000_000.0,
     )
     result = mgr.poll()
-    assert result.kind == "rejected"
-    assert "feature_columns" in result.detail
+    assert result.kind == "swapped"
     assert result.new_version == "v2"
-    # Running model is unchanged
+    assert mgr.current is not None
+    assert mgr.current.manifest.model_version == "v2"
+
+
+def test_poll_retries_when_only_artifact_mtime_changes(tmp_path: Path) -> None:
+    artifact = tmp_path / "model.joblib"
+    _write_pair(artifact, version="v1", mtime=1_000_000.0)
+    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr.load_initial()
+
+    artifact.write_text("artifact:v2")
+    os.utime(artifact, (2_000_000.0, 2_000_000.0))
+    result = mgr.poll()
+    assert result.kind == "swapped"
+    assert mgr.current is not None
+    assert mgr.current.artifact["contents"] == "artifact:v2"
+
+
+def test_poll_rejects_partial_pair_then_loads_when_binary_lands(tmp_path: Path) -> None:
+    artifact = tmp_path / "model.joblib"
+    manifest = _write_pair(artifact, version="v1", mtime=1_000_000.0)
+    embedded_version = "v1"
+    mgr: ModelManager[_EmbeddedArtifact] = ModelManager(
+        artifact, loader=lambda _p: _EmbeddedArtifact(embedded_version)
+    )
+    mgr.load_initial()
+
+    payload = json.loads(manifest.read_text())
+    payload["model_version"] = "v2"
+    manifest.write_text(json.dumps(payload))
+    os.utime(manifest, (2_000_000.0, 2_000_000.0))
+    rejected = mgr.poll()
+    assert rejected.kind == "rejected"
     assert mgr.current is not None
     assert mgr.current.manifest.model_version == "v1"
+
+    embedded_version = "v2"
+    artifact.write_text("artifact:v2")
+    os.utime(artifact, (3_000_000.0, 3_000_000.0))
+    swapped = mgr.poll()
+    assert swapped.kind == "swapped"
+    assert mgr.current is not None
+    assert mgr.current.serving_version == "v2"
 
 
 def test_poll_rejects_unhealthy_feature_spec(tmp_path: Path) -> None:

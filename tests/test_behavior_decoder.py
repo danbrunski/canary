@@ -303,6 +303,20 @@ def test_append_deviation_columns_writes_one_column_per_model() -> None:
     assert out["deviation:fuel_idle"].iloc[0] == pytest.approx(0.1)
 
 
+def test_append_deviation_columns_propagates_axis_and_output_freshness() -> None:
+    models = BehaviorModels(schema_version=1, models=[_make_coolant_model()])
+    frame = pd.DataFrame(
+        {
+            "obd:RUN_TIME": [100.0, 100.0],
+            "obd:RUN_TIME__gap": [False, True],
+            "decoded:ECM_COOLANT_TEMP": [42.0, 42.0],
+            "decoded:ECM_COOLANT_TEMP__gap": [False, False],
+        }
+    )
+    out = append_deviation_columns(frame, models)
+    assert out["deviation:coolant_warmup__gap"].tolist() == [False, True]
+
+
 def test_append_deviation_columns_writes_nan_when_actual_missing() -> None:
     coolant = _make_coolant_model()
     models = BehaviorModels(schema_version=1, models=[coolant])

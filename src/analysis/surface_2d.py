@@ -240,7 +240,16 @@ def _bilinear_cell(
 
     return GridCell(
         mean=blend(c00.mean, c10.mean, c01.mean, c11.mean),
-        std=blend(c00.std, c10.std, c01.std, c11.std),
+        # Variances combine linearly under a weighted mixture; interpolating
+        # standard deviations directly systematically understates uncertainty.
+        std=float(
+            np.sqrt(
+                max(
+                    0.0,
+                    blend(c00.std**2, c10.std**2, c01.std**2, c11.std**2),
+                )
+            )
+        ),
         count=min(c00.count, c10.count, c01.count, c11.count),
     )
 

@@ -195,6 +195,7 @@ class IsolationForestManifest:
     #: trained forest (Task 2.2) — no model was persisted for them. Empty
     #: for manifests written before 2.2, or when every mode cleared the floor.
     skipped_modes: tuple[SkippedModeSummary, ...] = ()
+    calibration_sessions: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -214,6 +215,7 @@ class IsolationForestManifest:
             "schema": dict(self.schema),
             "modes": [mode.to_dict() for mode in self.modes],
             "skipped_modes": [mode.to_dict() for mode in self.skipped_modes],
+            "calibration_sessions": list(self.calibration_sessions),
         }
 
     @classmethod
@@ -237,6 +239,7 @@ class IsolationForestManifest:
             skipped_modes=tuple(
                 SkippedModeSummary.from_dict(mode) for mode in data.get("skipped_modes", [])
             ),
+            calibration_sessions=tuple(str(x) for x in data.get("calibration_sessions", [])),
         )
 
 
@@ -477,6 +480,7 @@ def fit_isolation_forest(
     model_version: str | None = None,
     fitted_at: datetime | pd.Timestamp | str | None = None,
     random_state: int | None = None,
+    calibration_frame: pd.DataFrame | None = None,
 ) -> TrainedIsolationForest:
     """Fit one Isolation Forest per operating mode.
 
@@ -539,7 +543,7 @@ def fit_isolation_forest(
             frame,
             mode_complete.index,
             timestamp_column=timestamp_column,
-            holdout_fraction=holdout_fraction,
+            holdout_fraction=0.0 if calibration_frame is not None else holdout_fraction,
         )
 
         if len(fit_index) == 0:
@@ -569,6 +573,11 @@ def fit_isolation_forest(
 
     if not mode_plans:
         raise ValueError("no per-mode IsolationForest models were trained")
+    if set(mode_plans) == {"unknown"} and getattr(config, "allow_unknown_only", None) is False:
+        raise ValueError(
+            "IsolationForest would train only operating_mode='unknown'; fix segmentation "
+            "coverage or explicitly set allow_unknown_only=true"
+        )
 
     # 2.4: fit the scaler on exactly the rows the forests below train on —
     # every kept mode's fit rows, none of their calibration-holdout rows, and
@@ -622,17 +631,40 @@ def fit_isolation_forest(
         mode_feature_columns[mode] = plan.feats
         used_index.extend(plan.complete_index.tolist())
 
+        external_holdout = None
+        if calibration_frame is not None and mode_column in calibration_frame.columns:
+            candidate = calibration_frame[calibration_frame[mode_column].astype(str) == mode]
+            external_holdout = candidate.dropna(subset=plan.feats)
+        use_external = (
+            external_holdout is not None and len(external_holdout) >= _MIN_CALIBRATION_SAMPLES
+        )
+        if calibration_frame is not None and not use_external:
+            count = 0 if external_holdout is None else len(external_holdout)
+            raise ValueError(
+                f"held-out calibration session has only {count} complete rows for mode "
+                f"{mode!r}; need at least {_MIN_CALIBRATION_SAMPLES}"
+            )
+        calibration_rows = external_holdout if use_external else None
         score_threshold, score_scale, achieved_flag_rate = (
             _calibrate_holdout_threshold(
                 model,
                 pd.DataFrame(
-                    _scaled_array(frame.loc[plan.holdout_index, plan.feats], scaler, plan.feats),
+                    _scaled_array(
+                        calibration_rows.loc[:, plan.feats]
+                        if calibration_rows is not None
+                        else frame.loc[plan.holdout_index, plan.feats],
+                        scaler,
+                        plan.feats,
+                    ),
                     columns=plan.feats,
                 ),
                 target_flag_rate=target_flag_rate,
             )
-            if plan.calibrate
+            if use_external or plan.calibrate
             else (None, None, None)
+        )
+        calibration_count = (
+            len(calibration_rows) if calibration_rows is not None else plan.n_holdout
         )
 
         modes.append(
@@ -644,8 +676,8 @@ def fit_isolation_forest(
                 timestamp_column=timestamp_column,
                 score_threshold=score_threshold,
                 score_scale=score_scale,
-                holdout_samples=plan.n_holdout,
-                target_flag_rate=target_flag_rate if plan.calibrate else None,
+                holdout_samples=calibration_count,
+                target_flag_rate=target_flag_rate if use_external or plan.calibrate else None,
                 achieved_flag_rate=achieved_flag_rate,
             )
         )
@@ -653,6 +685,13 @@ def fit_isolation_forest(
     # The rows actually used across all per-mode models (disjoint by mode) —
     # for the manifest's data hash, span, sessions, and complete-row count.
     complete = frame.loc[sorted(set(used_index))]
+    dropped_fraction = (len(frame) - len(complete)) / len(frame) if len(frame) else 1.0
+    maximum_dropped = float(getattr(config, "max_dropped_row_fraction", 1.0))
+    if dropped_fraction > maximum_dropped:
+        raise ValueError(
+            f"IsolationForest dropped {dropped_fraction:.1%} of input rows; maximum is "
+            f"{maximum_dropped:.1%}"
+        )
 
     created_at = _format_timestamp(coerce_timestamp(fitted_at))
     version = model_version or f"isolation_forest_{created_at.replace(':', '')}"
@@ -696,6 +735,11 @@ def fit_isolation_forest(
         },
         modes=tuple(modes),
         skipped_modes=tuple(skipped_modes),
+        calibration_sessions=(
+            ()
+            if calibration_frame is None or session_column not in calibration_frame.columns
+            else _unique_strings(calibration_frame[session_column])
+        ),
     )
     return TrainedIsolationForest(models=models, scaler=scaler, manifest=manifest)
 

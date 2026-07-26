@@ -328,6 +328,34 @@ class PreprocessingConfig(_Strict):
     #: Beyond the limit the resampled cell goes NaN and its ``__gap`` flag
     #: sets, same treatment fast channels already got.
     slow_channel_max_gap_seconds: float = 120.0
+    #: Multiple of the resample interval a *fast* channel may go unobserved
+    #: before its ffilled cell is NaN'd and its ``__gap`` flag sets.
+    #:
+    #: This is a claim about the achievable poll cadence, not the configured
+    #: one. The default 2.0 (a 2 s ceiling at 1 Hz) assumes fast-tier PIDs
+    #: really arrive at ~1 Hz; on a contended bus they do not — the 2026-07-26
+    #: drive measured SPEED at 2.13 s and MAF at 4.46 s mean spacing against an
+    #: 8 req/s budget carrying ~25 req/s of demand. Every cell past the ceiling
+    #: becomes NaN, and because ``TrainedIsolationForest.score`` refuses any row
+    #: with a NaN in any trained feature, that made the IF unable to score a
+    #: single row (0 of 273 features reached 75% coverage; the Pi reported
+    #: ``missing_feature_rate: 1.0``).
+    #:
+    #: Exposed as config (it was previously a hardcoded ``ResampleConfig``
+    #: default) because it is preprocessing-parity-critical: it is recorded in
+    #: the model manifest as ``max_gap_seconds`` and read by BOTH the offline
+    #: resampler and ``LiveFeatureSource``, so train and serve move together.
+    #: Changing it requires a retrain to take effect.
+    #:
+    #: The default stays at the historical 2.0 deliberately. Raising it was
+    #: measured on 2026-07-26T164436 and does NOT rescue the IF: over 40 OBD
+    #: channels, mean coverage went 11.7% (factor 2) → 20.9% (5) → 25.7% (10)
+    #: → 30.0% (20), with **zero** channels reaching 50% at any setting. The
+    #: shortfall is real poll cadence and Mode-01 suspension during DID
+    #: windows, not an over-tight ceiling, so a looser ceiling only relabels
+    #: stale data as fresh without making per-row scoring viable. Left tunable
+    #: because it is a legitimate knob, not because raising it is the fix.
+    max_gap_factor: float = 2.0
     #: Phase 5.2 — consecutive rows a candidate operating-mode label must hold
     #: before segmentation actually switches to it. ``1`` (default) is the
     #: legacy immediate-switch behavior. Without dwell, 1 Hz flapping at a
@@ -362,6 +390,8 @@ class IsolationForestConfig(_Strict):
     #: Parallel tree builders. A small fixed default avoids both the historical
     #: single-core fit and ``-1`` oversubscription on memory-constrained WSL.
     n_jobs: int = 4
+    max_dropped_row_fraction: float = Field(default=0.75, ge=0.0, lt=1.0)
+    allow_unknown_only: bool = False
 
     @field_validator("n_jobs")
     @classmethod
@@ -462,6 +492,8 @@ class LSTMAutoencoderConfig(_Strict):
     dataloader_workers: int | None = Field(default=None, ge=0)
     mixed_precision: bool = True
     compile_model: bool = False
+    min_window_observed_fraction: float = Field(default=0.01, gt=0.0, le=1.0)
+    min_usable_window_fraction: float = Field(default=0.9, gt=0.0, le=1.0)
     learning_rate: float = 0.001
     max_epochs: int = 100
     validation_fraction: float = 0.2
@@ -515,6 +547,8 @@ class TCNAutoencoderConfig(_Strict):
     dataloader_workers: int | None = Field(default=None, ge=0)
     mixed_precision: bool = True
     compile_model: bool = False
+    min_window_observed_fraction: float = Field(default=0.01, gt=0.0, le=1.0)
+    min_usable_window_fraction: float = Field(default=0.9, gt=0.0, le=1.0)
     learning_rate: float = 0.001
     max_epochs: int = 100
     validation_fraction: float = 0.2
