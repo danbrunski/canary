@@ -21,7 +21,15 @@ log = logging.getLogger(__name__)
 
 DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
 DEFAULT_DIDS_PATH = Path("data/dids.yaml")
-FEATURE_FRAME_CACHE_VERSION = 1
+#: Bump whenever a *code* change alters the feature frame for unchanged inputs.
+#: The rest of the cache key hashes inputs only (session file stats, config,
+#: bindings/dbc/dids), so without this a preprocessing fix would silently serve
+#: pre-fix frames forever.
+#:
+#: 2 — resampler tz fix: sessions whose trailing-only channels used to raise
+#:     "Cannot subtract tz-naive and tz-aware" were dropped from the corpus
+#:     entirely, so cached frames are missing them.
+FEATURE_FRAME_CACHE_VERSION = 2
 
 
 def build_feature_frame_cache_key(
