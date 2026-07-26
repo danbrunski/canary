@@ -170,13 +170,25 @@ do_push() {
   resolve_out_dirs
   check_ssh
   step "push artifacts -> ${REMOTE}:${PI_REPO}"
-  rsync "${RSYNC_OPTS[@]}" -e "ssh ${SSH_OPTS[*]}" \
-    "${IF_OUT}/"   "${REMOTE}:${PI_REPO}/${IF_OUT}/"
+  # Two passes per artifact dir: binaries FIRST, manifests second. rsync
+  # transfers alphabetically (model.manifest.json before model.pt), and the
+  # Pi's ModelManager swaps on manifest mtime — a poll landing in that gap
+  # pairs the new manifest with the old binary, and a later binary arrival
+  # never re-triggers the swap (2026-07-26: exactly this stale-binary/fresh-
+  # manifest state left the IF blind for a week). Manifest-last makes the
+  # swap trigger fire only once the binary it describes is already in place.
+  push_artifact_dir() {
+    local out_dir="$1"
+    rsync "${RSYNC_OPTS[@]}" --exclude '*.manifest.json' -e "ssh ${SSH_OPTS[*]}" \
+      "${out_dir}/" "${REMOTE}:${PI_REPO}/${out_dir}/"
+    rsync "${RSYNC_OPTS[@]}" -e "ssh ${SSH_OPTS[*]}" \
+      "${out_dir}/" "${REMOTE}:${PI_REPO}/${out_dir}/"
+  }
+  push_artifact_dir "${IF_OUT}"
   # Push whichever sequence backbone(s) were trained — only one is active, but
   # syncing both when present means a backbone switch needs no push-side change.
   for seq_out in "${LSTM_OUT}" "${TCN_OUT}"; do
-    [[ -d "${seq_out}" ]] && rsync "${RSYNC_OPTS[@]}" -e "ssh ${SSH_OPTS[*]}" \
-      "${seq_out}/" "${REMOTE}:${PI_REPO}/${seq_out}/"
+    [[ -d "${seq_out}" ]] && push_artifact_dir "${seq_out}"
   done
   rsync "${RSYNC_OPTS[@]}" -e "ssh ${SSH_OPTS[*]}" \
     "${BEHAVIOR_OUT}" "${REMOTE}:${PI_REPO}/${BEHAVIOR_OUT}"
