@@ -22,7 +22,8 @@ set -euo pipefail
 #
 # Everything is env-overridable:
 #   PI_USER PI_HOST PI_SESSIONS PI_CONFIG PI_REPO
-#   SESSIONS_ROOT LAPTOP_CONFIG BINDINGS IF_OUT LSTM_OUT TCN_OUT BEHAVIOR_OUT
+#   SESSIONS_ROOT TRAIN_SESSIONS_ROOT LAPTOP_CONFIG BINDINGS IF_OUT LSTM_OUT
+#   TCN_OUT BEHAVIOR_OUT
 #   DEVICE SEQUENCE_MODEL EXPECT_RESAMPLE_HZ EXPECT_ROLLING_WINDOW_SECONDS RSYNC_DELETE
 #
 # SEQUENCE_MODEL (lstm|tcn) overrides which sequence backbone retrains; default
@@ -125,6 +126,43 @@ PY
   echo "artifact dirs: ${IF_OUT}  ${LSTM_OUT}  ${TCN_OUT}"
 }
 
+# The sessions root the TRAINERS read, which is not always SESSIONS_ROOT: we
+# rsync the Pi's whole sessions tree (its parent of the per-VIN dirs), so
+# post-profile-migration the drives land under <SESSIONS_ROOT>/<slug>/ while
+# `discover_sessions` only looks ONE level deep for telemetry-*.parquet. Left
+# unscoped, every trainer would resolve zero sessions after a pull. Echoes the
+# scoping resolve_out_dirs already does for the models dir.
+resolve_train_sessions_root() {
+  [[ -n "${TRAIN_SESSIONS_ROOT:-}" ]] && return 0
+  [[ -s "${LAPTOP_CONFIG}" ]] || die "${LAPTOP_CONFIG} missing/empty — run 'pull' first."
+  local slug
+  slug="$("${PY}" - "${LAPTOP_CONFIG}" <<'PY'
+import sys
+from pathlib import Path
+from src.config import CanaryConfig
+from src.profiles import resolve_profile_for_tooling
+cfg = CanaryConfig.from_yaml(Path(sys.argv[1]))
+print(resolve_profile_for_tooling(cfg, None).slug if cfg.profiles.enabled else "")
+PY
+)" || die "could not resolve the vehicle profile slug from ${LAPTOP_CONFIG}"
+  if [[ -n "${slug}" && -d "${SESSIONS_ROOT}/${slug}" ]]; then
+    TRAIN_SESSIONS_ROOT="${SESSIONS_ROOT}/${slug}"
+  else
+    # Profiles off, or a pre-migration flat tree — train where we pulled.
+    TRAIN_SESSIONS_ROOT="${SESSIONS_ROOT}"
+  fi
+  local found
+  found="$("${PY}" -c "
+from pathlib import Path
+from src.preprocessing.loader import discover_sessions
+print(len(discover_sessions(Path('${TRAIN_SESSIONS_ROOT}'))))
+" 2>/dev/null || echo 0)"
+  echo "train sessions root: ${TRAIN_SESSIONS_ROOT} (${found} discoverable)"
+  [[ "${found}" -gt 0 ]] || die \
+    "no discoverable sessions under ${TRAIN_SESSIONS_ROOT}. Run 'pull' first, or set \
+TRAIN_SESSIONS_ROOT. (Dirs starting with '_' are quarantined and never discovered.)"
+}
+
 do_pull() {
   check_ssh
   step "pull sessions  ${REMOTE}:${PI_SESSIONS} -> ${SESSIONS_ROOT}/"
@@ -139,6 +177,7 @@ do_pull() {
 do_train() {
   assert_preprocessing
   resolve_out_dirs
+  resolve_train_sessions_root
   local rc_retrain=0 rc_refit=0
   step "retrain Isolation Forest + sequence detector (device=${DEVICE})"
   # `|| rc=$?` keeps `set -e` from aborting here: retrain exits non-zero only
@@ -150,13 +189,13 @@ do_train() {
   local seq_args=()
   [[ -n "${SEQUENCE_MODEL}" ]] && seq_args=(--sequence-model "${SEQUENCE_MODEL}")
   "${PY}" scripts/retrain.py \
-    --sessions-root "${SESSIONS_ROOT}" --all \
+    --sessions-root "${TRAIN_SESSIONS_ROOT}" --all \
     --config "${LAPTOP_CONFIG}" --bindings "${BINDINGS}" \
     --if-out "${IF_OUT}" "${seq_args[@]}" \
     --device "${DEVICE}" || rc_retrain=$?
   step "refit behavior models"
   "${PY}" scripts/refit_behavior_models.py \
-    --sessions-root "${SESSIONS_ROOT}" --all \
+    --sessions-root "${TRAIN_SESSIONS_ROOT}" --all \
     --config "${LAPTOP_CONFIG}" --bindings "${BINDINGS}" \
     --out "${BEHAVIOR_OUT}" || rc_refit=$?
   if [[ ${rc_retrain} -ne 0 || ${rc_refit} -ne 0 ]]; then
