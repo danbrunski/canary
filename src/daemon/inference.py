@@ -44,6 +44,7 @@ from src.preprocessing.live import LiveFeatureSource
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, TelemetryRecord, channel_key, channel_of
+from src.timefmt import format_timestamp
 
 from .autotag_hook import LiveAutoTagHook
 from .components import DaemonComponents
@@ -271,7 +272,10 @@ class IsolationForestDetector:
 
     def tick(self, row: Any, ctx: TickContext) -> list[FusionSource]:
         loaded = self._manager.current if self._manager is not None else None
-        self.model_version = loaded.manifest.model_version if loaded is not None else None
+        # serving_version, not the sidecar manifest's claim — on a partial
+        # deploy (stale binary + fresh manifest) the fused event's version
+        # tag must name the model actually scoring.
+        self.model_version = loaded.serving_version if loaded is not None else None
         if loaded is None or row is None or not ctx.scoring_allowed:
             return []
         if_input = _score_and_emit(
@@ -318,7 +322,8 @@ class SequenceDetector:
 
     def tick(self, row: Any, ctx: TickContext) -> list[FusionSource]:
         loaded = self._manager.current if self._manager is not None else None
-        self.model_version = loaded.manifest.model_version if loaded is not None else None
+        # serving_version — see IsolationForestDetector.tick.
+        self.model_version = loaded.serving_version if loaded is not None else None
         if loaded is None or row is None or not ctx.scoring_allowed:
             return []
         if self._engine_version != self.model_version:
@@ -526,7 +531,11 @@ async def run_live_inference(
             timestamp_str: str | None = None
             operating_mode: str | None = None
             if row is not None:
-                timestamp_str = str(row["timestamp"].iloc[0])
+                # Canonical T-separated/Z-suffixed ISO-8601 — a bare
+                # ``str(pd.Timestamp)`` is space-separated, which broke the
+                # dashboard's lexicographic ``since`` filter for every
+                # behavior/fused event (they sorted before any 'T…' bound).
+                timestamp_str = format_timestamp(row["timestamp"].iloc[0])
                 mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
                 operating_mode = None if mode_val is None or pd.isna(mode_val) else str(mode_val)
                 await _publish_derived_channels(
@@ -756,6 +765,13 @@ def _publish_score(
     """
     if scores is None:
         return
+    if isinstance(timestamp, str):
+        ts_str = timestamp
+    else:
+        try:
+            ts_str = format_timestamp(timestamp)
+        except (ValueError, TypeError):
+            ts_str = str(timestamp)
     scores.publish(
         {
             "type": "score",
@@ -764,7 +780,7 @@ def _publish_score(
             "threshold": _finite_or_none(threshold),
             "operating_mode": operating_mode,
             "model_version": model_version,
-            "timestamp": str(timestamp),
+            "timestamp": ts_str,
             "missing_features": bool(missing_features),
         }
     )
@@ -1022,7 +1038,7 @@ def _score_and_emit(
         emitter.emit_isolation_forest_row(
             scored,
             model_version=engine.model_version,
-            timestamp=str(timestamp),
+            timestamp=format_timestamp(timestamp),
             affected_channels=affected_channels,
             feature_contributors=feature_contributors or None,
         )
@@ -1089,10 +1105,11 @@ def _observe_behavior(
     ts = point.get("timestamp")
     if ts is None:
         timestamp = None
-    elif hasattr(ts, "isoformat"):
-        timestamp = ts.isoformat()
     else:
-        timestamp = str(ts)
+        try:
+            timestamp = format_timestamp(ts)
+        except (ValueError, TypeError):
+            timestamp = str(ts)
     observations: list[BehaviorObservation] = []
     for model in models.models if models is not None else []:
         # Same actual-column resolution as append_deviation_columns: a

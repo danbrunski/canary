@@ -350,6 +350,7 @@ class HealthMonitor:
         self._last_data_ts: float | None = None
         self._swaps: dict[str, int] = {"swapped": 0, "rejected": 0, "unchanged": 0, "error": 0}
         self._last_swap_version: str | None = None
+        self._model_version_mismatches: dict[str, dict[str, str]] = {}
         self._obd_scheduler: dict[str, Any] | None = None
         self._telemetry_sinks: dict[str, dict[str, Any]] = {}
         self._cpu_prev: tuple[float, float] | None = None
@@ -479,6 +480,20 @@ class HealthMonitor:
         if kind == "swapped" and version is not None:
             self._last_swap_version = version
 
+    def observe_model_version_mismatch(
+        self, name: str, *, serving: str | None, manifest: str | None
+    ) -> None:
+        """Track a served-binary vs manifest-sidecar version disagreement.
+
+        Recorded per model manager each poll; clears itself once the pair
+        agrees again (i.e. after the missing binary finally lands). Surfaced
+        in the snapshot so a partial deploy is visible on ``/status`` instead
+        of only in a startup log line."""
+        if serving is None or manifest is None or serving == manifest:
+            self._model_version_mismatches.pop(name, None)
+        else:
+            self._model_version_mismatches[name] = {"serving": serving, "manifest": manifest}
+
     def observe_obd_scheduler(self, metrics: Any) -> None:
         """Record the latest adaptive OBD scheduler snapshot for ``/status``."""
         if hasattr(metrics, "to_dict"):
@@ -566,6 +581,16 @@ class HealthMonitor:
             ),
             "model_swaps": dict(self._swaps),
             "active_model_version": self._last_swap_version,
+            **(
+                {
+                    "model_version_mismatches": {
+                        name: dict(pair)
+                        for name, pair in sorted(self._model_version_mismatches.items())
+                    }
+                }
+                if self._model_version_mismatches
+                else {}
+            ),
             "system": system_metrics(),
             "power": self._power_status_cached(),
         }

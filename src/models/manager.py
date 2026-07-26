@@ -64,6 +64,20 @@ class LoadedModel(Generic[T]):
     artifact_path: Path
     manifest_path: Path
     manifest_mtime: float
+    #: The artifact's own embedded manifest version, when the bundle carries
+    #: one (both trainers embed a manifest inside the binary). ``None`` when
+    #: the artifact doesn't expose it. When this differs from
+    #: ``manifest.model_version`` the on-disk pair is inconsistent — a
+    #: partial deploy (binaries travel by scp, manifests by git) — and
+    #: *this* value is what inference actually serves.
+    embedded_version: str | None = None
+
+    @property
+    def serving_version(self) -> str:
+        """The version actually being served: the artifact's embedded version
+        when known (that's the model doing the scoring), else the sidecar
+        manifest's claim."""
+        return self.embedded_version or self.manifest.model_version
 
 
 @dataclass(frozen=True)
@@ -85,6 +99,17 @@ future trainer uses a different convention.
 
 def default_manifest_sidecar(artifact_path: Path) -> Path:
     return manifest_path_for(artifact_path)
+
+
+def _embedded_artifact_version(artifact: Any) -> str | None:
+    """The version string embedded in the artifact bundle itself, if any.
+
+    Both trainers store a manifest inside the binary
+    (``TrainedIsolationForest.manifest`` / ``TrainedSequenceModel.manifest``);
+    duck-typed so a test's ``lambda p: object()`` loader simply yields
+    ``None``."""
+    version = getattr(getattr(artifact, "manifest", None), "model_version", None)
+    return str(version) if version is not None else None
 
 
 class ModelManager(Generic[T]):
@@ -204,12 +229,30 @@ class ModelManager(Generic[T]):
                 )
                 return SwapAttempt(kind="rejected", detail=f"loader failed: {exc}")
 
+            embedded_version = _embedded_artifact_version(artifact)
+            if embedded_version is not None and embedded_version != manifest.model_version:
+                # Seen live 2026-07-26: manifests landed on the Pi via git
+                # while the gitignored binaries didn't, so /status claimed the
+                # new version while inference served the old one. Serve anyway
+                # (an old model beats no model), but say so loudly — and
+                # ``serving_version`` reports the truth.
+                log.error(
+                    "artifact/manifest version mismatch — the manifest sidecar claims a "
+                    "version the binary doesn't contain (partial deploy? binaries move "
+                    "by scp, not git). Serving the artifact's own version.",
+                    extra={
+                        "artifact_path": str(self._artifact_path),
+                        "manifest_version": manifest.model_version,
+                        "artifact_version": embedded_version,
+                    },
+                )
             loaded = LoadedModel(
                 artifact=artifact,
                 manifest=manifest,
                 artifact_path=self._artifact_path,
                 manifest_path=manifest_path,
                 manifest_mtime=mtime,
+                embedded_version=embedded_version,
             )
             prior_version = (
                 self._current.manifest.model_version if self._current is not None else None

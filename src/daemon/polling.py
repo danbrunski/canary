@@ -41,6 +41,17 @@ async def poll_model_managers(
                 continue
             if health is not None:
                 health.note_swap(attempt.kind, version=attempt.new_version)
+                # Partial-deploy detector: a stale binary next to a fresh
+                # manifest means /status's manifest-derived versions lie
+                # about what's scoring. Checked every poll (not just on
+                # swap) so it also clears once the binary lands.
+                current = manager.current
+                if current is not None:
+                    health.observe_model_version_mismatch(
+                        name,
+                        serving=current.serving_version,
+                        manifest=current.manifest.model_version,
+                    )
             if attempt.kind == "swapped":
                 log.info(
                     "model swapped",

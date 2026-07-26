@@ -199,6 +199,24 @@ def test_empty_monitor_snapshot_is_none_safe() -> None:
     assert snap["data_freshness_seconds"] is None
 
 
+def test_model_version_mismatch_surfaces_and_clears() -> None:
+    """Partial-deploy detector (2026-07-26): a stale binary next to a fresh
+    manifest shows up on the snapshot until the versions agree again."""
+    mon = HealthMonitor()
+    # Consistent pair → nothing recorded.
+    mon.observe_model_version_mismatch("isolation_forest", serving="v1", manifest="v1")
+    assert "model_version_mismatches" not in mon.snapshot(now_epoch=0.0)
+    # Stale binary vs fresh manifest → surfaced.
+    mon.observe_model_version_mismatch("lstm_autoencoder", serving="v1", manifest="v2")
+    snap = mon.snapshot(now_epoch=0.0)
+    assert snap["model_version_mismatches"] == {
+        "lstm_autoencoder": {"serving": "v1", "manifest": "v2"}
+    }
+    # Binary lands → clears on the next poll.
+    mon.observe_model_version_mismatch("lstm_autoencoder", serving="v2", manifest="v2")
+    assert "model_version_mismatches" not in mon.snapshot(now_epoch=0.0)
+
+
 # ---------------------------------------------------------------------------
 # HealthMonitor.snapshot()["can0"] — Task 6.8
 # ---------------------------------------------------------------------------

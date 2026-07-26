@@ -117,6 +117,66 @@ def test_load_initial_missing_files_returns_missing(tmp_path: Path) -> None:
     assert mgr.current is None
 
 
+class _EmbeddedManifest:
+    def __init__(self, model_version: str) -> None:
+        self.model_version = model_version
+
+
+class _EmbeddedArtifact:
+    """Artifact bundle carrying its own manifest, like both real trainers'."""
+
+    def __init__(self, model_version: str) -> None:
+        self.manifest = _EmbeddedManifest(model_version)
+
+
+def test_load_detects_artifact_manifest_version_mismatch(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A fresh manifest sidecar next to a stale binary (partial deploy —
+    binaries move by scp, not git) must load, report the *binary's* version
+    as ``serving_version``, and log an error naming both."""
+    artifact = tmp_path / "model.joblib"
+    _write_pair(artifact, version="v2-manifest-only")
+    mgr: ModelManager[_EmbeddedArtifact] = ModelManager(
+        artifact, loader=lambda _p: _EmbeddedArtifact("v1-in-binary")
+    )
+    with caplog.at_level(logging.ERROR, logger="src.models.manager"):
+        result = mgr.load_initial()
+    assert result.kind == "swapped"  # still serves — old model beats no model
+    assert mgr.current is not None
+    assert mgr.current.embedded_version == "v1-in-binary"
+    assert mgr.current.serving_version == "v1-in-binary"
+    assert mgr.current.manifest.model_version == "v2-manifest-only"
+    assert any("version mismatch" in record.message for record in caplog.records)
+
+
+def test_load_matching_embedded_version_is_quiet(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    artifact = tmp_path / "model.joblib"
+    _write_pair(artifact, version="v1")
+    mgr: ModelManager[_EmbeddedArtifact] = ModelManager(
+        artifact, loader=lambda _p: _EmbeddedArtifact("v1")
+    )
+    with caplog.at_level(logging.ERROR, logger="src.models.manager"):
+        mgr.load_initial()
+    assert mgr.current is not None
+    assert mgr.current.serving_version == "v1"
+    assert not [r for r in caplog.records if "version mismatch" in r.message]
+
+
+def test_serving_version_falls_back_to_manifest_without_embedded(tmp_path: Path) -> None:
+    """Loaders that don't expose an embedded manifest (tests, future model
+    kinds) keep the old manifest-derived behavior."""
+    artifact = tmp_path / "model.joblib"
+    _write_pair(artifact, version="v1")
+    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr.load_initial()
+    assert mgr.current is not None
+    assert mgr.current.embedded_version is None
+    assert mgr.current.serving_version == "v1"
+
+
 # ---------------------------------------------------------------------------
 # poll: swap, no-change, rejection
 # ---------------------------------------------------------------------------
