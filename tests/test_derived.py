@@ -124,6 +124,57 @@ def test_idle_time_accumulates_when_stopped() -> None:
     assert out["derived:IDLE_TIME_S"].iloc[-1] == pytest.approx(9.0, rel=1e-6)
 
 
+def test_sparse_channel_integrates_over_its_own_sample_spacing() -> None:
+    """A gap-masked (sparse) channel on a dense grid must not lose the time
+    between its samples — the 2026-07-26 trip summary halved distance and
+    quartered fuel exactly this way (contended bus → poll spacing wider
+    than the resampler's ffill ceiling → NaN rows → cumsum accrues 0)."""
+    # SPEED valid on every 3rd row only: 10 valid samples spanning 27 s at a
+    # steady 36 kph ⇒ 0.27 km, NOT 9 × 1 s ⇒ 0.09 km.
+    speed = [36.0 if i % 3 == 0 else np.nan for i in range(30)]
+    df = _frame(30, **{"obd:SPEED": speed})
+    out = compute_derived_channels(df, GASOLINE)
+    assert out["derived:TRIP_DISTANCE_KM"].iloc[-1] == pytest.approx(0.27, rel=1e-6)
+    # NaN rows carry the running total, they don't hold NaN.
+    assert not out["derived:TRIP_DISTANCE_KM"].isna().any()
+
+
+def test_integration_dt_capped_over_true_outage() -> None:
+    """A genuine capture outage (minutes) is still bounded to one capped
+    increment, not credited at cruise speed for its whole span."""
+    ts = pd.to_datetime(["2026-05-16T00:00:00Z", "2026-05-16T00:10:00Z"], utc=True)
+    df = pd.DataFrame({"session": "s", "timestamp": ts, "obd:SPEED": [36.0, 36.0]})
+    out = compute_derived_channels(df, GASOLINE)
+    # 600 s elapsed, capped at 60 s ⇒ 36 kph × 60 s = 0.6 km.
+    assert out["derived:TRIP_DISTANCE_KM"].iloc[-1] == pytest.approx(0.6, rel=1e-6)
+
+
+def test_integration_never_accrues_across_session_seam() -> None:
+    """With the generous outage cap, a session seam must contribute exactly
+    zero — the seam row restarts the trapezoid, not a capped increment."""
+    ts = pd.to_datetime(
+        ["2026-05-16T00:00:00Z", "2026-05-16T00:00:01Z"]
+        + ["2026-05-16T00:00:20Z", "2026-05-16T00:00:21Z"],
+        utc=True,
+    )
+    df = pd.DataFrame({"session": ["a", "a", "b", "b"], "timestamp": ts, "obd:SPEED": [36.0] * 4})
+    out = compute_derived_channels(df, GASOLINE)
+    # 1 s in session a + 1 s in session b; the 19 s seam accrues nothing.
+    assert out["derived:TRIP_DISTANCE_KM"].iloc[-1] == pytest.approx(0.02, rel=1e-6)
+
+
+def test_idle_time_bridges_unsampled_rows() -> None:
+    """Idle accrual is an indicator integral over the rows where RPM and
+    SPEED are both sampled — unsampled rows in a steady idle bridge instead
+    of dropping the elapsed time."""
+    rpm = [800.0 if i % 2 == 0 else np.nan for i in range(11)]
+    speed = [0.0 if i % 2 == 0 else np.nan for i in range(11)]
+    df = _frame(11, **{"obd:SPEED": speed, "obd:RPM": rpm})
+    out = compute_derived_channels(df, GASOLINE)
+    # Valid pairs every 2 s spanning 10 s, idling throughout.
+    assert out["derived:IDLE_TIME_S"].iloc[-1] == pytest.approx(10.0, rel=1e-6)
+
+
 def test_summarize_trip_accel_metrics() -> None:
     # Constant 8 kph/s ramp from a standstill for 30 s → crosses both
     # 60 mph (~96.6 kph) and a 1/4 mile.

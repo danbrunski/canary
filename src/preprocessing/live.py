@@ -164,9 +164,17 @@ class LiveFeatureSource:
     _fuel_used_l: float = field(init=False, default=0.0)
     _co2_kg: float = field(init=False, default=0.0)
     _idle_time_s: float = field(init=False, default=0.0)
-    #: Wall-clock time of the last integral accumulation, so ``dt`` is real
-    #: elapsed time between ticks rather than the buffer's row spacing.
-    _integral_last_tick_at: datetime | None = field(init=False, default=None)
+    #: Per-quantity last-accrual markers: wall-clock time and value of the
+    #: last tick on which each integrand was actually observed. A tick where
+    #: the input is stale/absent must NOT advance the marker — the elapsed
+    #: time is bridged (``MAX_INTEGRATION_DT_S``-capped) at the next fresh
+    #: sample instead of being dropped, mirroring the batch integral's
+    #: valid-sample dt (``_cumulative_time_integral``). A single shared
+    #: last-tick timestamp discarded every stale tick's dt and halved the
+    #: live trip odometer on a contended bus.
+    _speed_marker: tuple[datetime, float] | None = field(init=False, default=None)
+    _fuel_marker: tuple[datetime, float] | None = field(init=False, default=None)
+    _idle_marker: tuple[datetime, float] | None = field(init=False, default=None)
     #: Last tick's session-scoped trip integrals (Task 1.3), keyed the same
     #: as ``compute_derived_channels``'s cumulative columns
     #: (``derived:TRIP_DISTANCE_KM`` etc.) so a downstream consumer can merge
@@ -471,21 +479,26 @@ class LiveFeatureSource:
         """Update the session-scoped trip integrals from one tick's operating row.
 
         Mirrors ``compute_derived_channels``'s cumulative math (same
-        ``MAX_INTEGRATION_DT_S``-capped dt, same idle gate) but accumulates
-        incrementally across ticks instead of ``cumsum``-ing a frame, so
-        ring-buffer eviction never resets a running total mid-session. ``dt``
-        is real wall-clock time since the last tick that reached here (ticks
-        that returned ``None`` before this point — no observations yet, or
-        fully stale — don't advance it, matching ``compute_derived_channels``
-        never accumulating a dropped/fully-gap-filled row either).
+        ``MAX_INTEGRATION_DT_S`` cap, same idle gate, same trapezoid between
+        consecutive *observed* samples) but accumulates incrementally across
+        ticks instead of ``cumsum``-ing a frame, so ring-buffer eviction never
+        resets a running total mid-session. Each integrand keeps its own
+        last-observed marker: a tick where that input is stale/absent leaves
+        the marker alone, so the elapsed time is bridged (capped) at the next
+        fresh sample instead of being silently dropped — matching the batch
+        integral's valid-sample dt.
         """
         now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-        if self._integral_last_tick_at is None:
-            dt = 0.0
-        else:
-            elapsed = (now_utc - self._integral_last_tick_at).total_seconds()
-            dt = min(max(elapsed, 0.0), MAX_INTEGRATION_DT_S)
-        self._integral_last_tick_at = now_utc
+
+        def _accrue(
+            marker: tuple[datetime, float] | None, value: float
+        ) -> tuple[float, tuple[datetime, float]]:
+            """Trapezoid increment from the marker to ``(now, value)``."""
+            if marker is None:
+                return 0.0, (now_utc, value)
+            seen_at, seen_value = marker
+            dt = min(max((now_utc - seen_at).total_seconds(), 0.0), MAX_INTEGRATION_DT_S)
+            return (value + seen_value) / 2.0 * dt, (now_utc, value)
 
         speed = _first_finite(
             point, channel_key(OBD_SOURCE, "SPEED"), channel_key(DECODED_SOURCE, "VEHICLE_SPEED")
@@ -496,18 +509,17 @@ class LiveFeatureSource:
         fuel_lph = _first_finite(point, "derived:FUEL_RATE_LPH")
 
         if fuel_lph is not None:
-            self._fuel_used_l += fuel_lph / 3600.0 * dt
+            increment, self._fuel_marker = _accrue(self._fuel_marker, fuel_lph / 3600.0)
+            self._fuel_used_l += increment
             fuel = fuel_properties(self.config.vehicle.parameters)
             self._co2_kg = self._fuel_used_l * fuel.co2_kg_per_l
         if speed is not None:
-            self._trip_distance_km += speed / 3600.0 * dt
-        if (
-            rpm is not None
-            and speed is not None
-            and rpm > IDLE_RPM_FLOOR
-            and speed < IDLE_SPEED_CEIL_KPH
-        ):
-            self._idle_time_s += dt
+            increment, self._speed_marker = _accrue(self._speed_marker, speed / 3600.0)
+            self._trip_distance_km += increment
+        if rpm is not None and speed is not None:
+            idling = 1.0 if (rpm > IDLE_RPM_FLOOR and speed < IDLE_SPEED_CEIL_KPH) else 0.0
+            increment, self._idle_marker = _accrue(self._idle_marker, idling)
+            self._idle_time_s += increment
 
         avg_economy = float("nan")
         if self._trip_distance_km > 0:
@@ -629,7 +641,9 @@ class LiveFeatureSource:
         self._fuel_used_l = 0.0
         self._co2_kg = 0.0
         self._idle_time_s = 0.0
-        self._integral_last_tick_at = None
+        self._speed_marker = None
+        self._fuel_marker = None
+        self._idle_marker = None
         self.latest_derived_channels = None
 
     # ------------------------------------------------------------------

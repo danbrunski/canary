@@ -32,11 +32,13 @@ from src.timefmt import format_timestamp as _format_timestamp
 
 TRIP_SUMMARY_FILENAME = "trip_summary.json"
 
-#: Bump when the sidecar shape changes so a stale on-disk copy can be
-#: detected (mirrors ``session_classifier.CLASSIFIER_VERSION`` /
-#: ``fingerprint.FINGERPRINT_VERSION``). Nothing recomputes on a version
-#: bump automatically yet — ``force=True`` is the escape hatch.
-SCHEMA_VERSION = 1
+#: Bump when the sidecar shape OR the underlying math changes so a stale
+#: on-disk copy can be detected (mirrors ``session_classifier.CLASSIFIER_VERSION``
+#: / ``fingerprint.FINGERPRINT_VERSION``). :func:`get_or_compute_trip_summary`
+#: treats a cached sidecar with a different version as absent and recomputes.
+#: v2: valid-sample trapezoid integration (``_cumulative_time_integral``) —
+#: v1 sidecars undercounted distance/fuel ~2-4× on a contended OBD bus.
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -121,7 +123,7 @@ def get_or_compute_trip_summary(
         return None
     if not force:
         cached = read_trip_summary(session_dir)
-        if cached is not None:
+        if cached is not None and cached.get("schema_version") == SCHEMA_VERSION:
             return cached
     try:
         summary = compute_trip_summary(session_dir, config)

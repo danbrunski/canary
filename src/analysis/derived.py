@@ -57,8 +57,20 @@ _IDLE_RPM_FLOOR = 200.0
 _IDLE_SPEED_CEIL_KPH = 3.0
 #: A launch starts at ≤ ~2 mph; a clean accel run never drops back to that.
 _LAUNCH_SPEED_KPH = 2.0 * _KPH_PER_MPH
-#: Cap per-row dt so a capture gap can't inflate integrated totals.
-_MAX_DT_S = 5.0
+#: Cap per-sample dt so a capture *outage* can't inflate integrated totals.
+#: Generous on purpose: integration runs over each channel's own valid
+#: samples, and on a contended OBD bus a fast channel's real poll spacing
+#: routinely stretches to tens of seconds (2026-07-26 drive: SPEED p99
+#: spacing 32 s) — a tight cap silently discards genuinely-driven time and
+#: halved the trip odometer. 60 s comfortably exceeds worst-case healthy
+#: poll spacing while still bounding a true dropout (USB drop, daemon
+#: restart) to one capped increment.
+_MAX_DT_S = 60.0
+#: An accel run (0-60, 1/4-mile) is only trustworthy on a *dense* speed
+#: trace; a gap longer than this breaks the run rather than interpolating
+#: through it. Deliberately much tighter than the trip-integral cap above —
+#: mis-timing a launch matters, mis-crediting 30 s of cruise does not.
+_ACCEL_MAX_SEGMENT_DT_S = 5.0
 #: Public aliases of the tuning constants above (Task 1.3) — the live
 #: session-scoped trip-integral accumulator (``LiveFeatureSource``) needs the
 #: exact same cap/idle thresholds as this module's batch ``cumsum`` so the
@@ -161,17 +173,37 @@ def _session_time_smooth(wide: pd.DataFrame, values: pd.Series, seconds: float) 
     return _session_time_rolling(wide, values, seconds, how="mean")
 
 
-def _dt_seconds(wide: pd.DataFrame) -> pd.Series:
-    """Per-row elapsed seconds from the ``timestamp`` column, gap-capped.
+def _cumulative_time_integral(wide: pd.DataFrame, values: pd.Series) -> pd.Series:
+    """Session-aware cumulative time integral of ``values`` (per-second units).
 
-    The first row gets dt=0 (nothing accrues before the trip starts); a long
-    gap (USB drop, session seam) is clamped to ``_MAX_DT_S`` so integrated
-    totals track wall-clock driving, not the gap.
+    Integrates over the channel's **own valid (non-NaN) samples**, not the
+    frame's row grid. The resampler NaN-masks a fast channel's cells once
+    they age past its ``max_gap`` (2 s at the 1 Hz grid), but on a contended
+    OBD bus the channel's healthy poll spacing is routinely wider than that
+    — a per-*row* dt × value cumsum then silently accrues nothing for most
+    of the drive (the 2026-07-26 trip summary reported half the GPS-truth
+    distance and a quarter of the MAF-integrated fuel this way). Trapezoid
+    between consecutive valid samples of the same session, dt capped at
+    ``_MAX_DT_S`` so a true capture outage still can't inflate the total.
+    Rows between/after valid samples carry the running total forward; rows
+    before the first valid sample are 0.
     """
-    ts = pd.to_datetime(wide["timestamp"], utc=True)
-    dt = ts.diff().dt.total_seconds()
-    dt = dt.fillna(0.0).clip(lower=0.0, upper=_MAX_DT_S)
-    return dt.astype(float)
+    ts = pd.to_datetime(wide[TIMESTAMP_COLUMN], utc=True)
+    valid = values.notna() & ts.notna()
+    out = pd.Series(np.nan, index=wide.index, dtype=float)
+    if not valid.any():
+        return out.fillna(0.0)
+    v = values[valid].astype(float)
+    dt = ts[valid].diff().dt.total_seconds().fillna(0.0).clip(lower=0.0, upper=_MAX_DT_S)
+    if SESSION_COLUMN in wide.columns:
+        # Never accrue across a session seam — dt=0 restarts the trapezoid
+        # at each session's first valid sample (the cumsum itself stays
+        # continuous, matching the frame-wide cumulative contract).
+        session = wide[SESSION_COLUMN][valid]
+        dt = dt.where(session.eq(session.shift()), 0.0)
+    increment = ((v + v.shift()) / 2.0 * dt).where(dt > 0, 0.0)
+    out[valid] = increment.cumsum()
+    return out.ffill().fillna(0.0)
 
 
 def _instant_fuel_g_s(
@@ -358,20 +390,18 @@ def compute_derived_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> 
     if wide.empty or "timestamp" not in wide.columns:
         return wide.copy()
     out = compute_instantaneous_channels(wide, vehicle)
-    dt = _dt_seconds(out)
 
     speed = _series(out, "obd:SPEED", "decoded:VEHICLE_SPEED")
     rpm = _series(out, "obd:RPM", "decoded:ECM_RPM")
 
     if "derived:FUEL_RATE_LPH" in out.columns:
-        fuel_lph = out["derived:FUEL_RATE_LPH"]
-        fuel_used_l = (fuel_lph / 3600.0 * dt).cumsum()
+        fuel_used_l = _cumulative_time_integral(out, out["derived:FUEL_RATE_LPH"] / 3600.0)
         out["derived:FUEL_USED_L"] = fuel_used_l
         fuel = fuel_properties(vehicle)
         out["derived:CO2_KG"] = fuel_used_l * fuel.co2_kg_per_l
 
     if speed is not None:
-        dist_km = (speed / 3600.0 * dt).cumsum()
+        dist_km = _cumulative_time_integral(out, speed / 3600.0)
         out["derived:TRIP_DISTANCE_KM"] = dist_km
         if "derived:FUEL_USED_L" in out.columns:
             avg = pd.Series(np.nan, index=out.index, dtype=float)
@@ -380,8 +410,15 @@ def compute_derived_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> 
             out["derived:AVG_ECONOMY_L_PER_100KM"] = avg
 
     if rpm is not None and speed is not None:
-        idling = (rpm > _IDLE_RPM_FLOOR) & (speed < _IDLE_SPEED_CEIL_KPH)
-        out["derived:IDLE_TIME_S"] = (dt.where(idling, 0.0)).cumsum()
+        # Idle is an *indicator* integral: 1.0 where idling, 0.0 where
+        # driving, NaN where either input is unsampled — so unsampled
+        # stretches bridge (capped) instead of silently dropping the time.
+        both = rpm.notna() & speed.notna()
+        idling = pd.Series(np.nan, index=out.index, dtype=float)
+        idling[both] = (
+            (rpm[both] > _IDLE_RPM_FLOOR) & (speed[both] < _IDLE_SPEED_CEIL_KPH)
+        ).astype(float)
+        out["derived:IDLE_TIME_S"] = _cumulative_time_integral(out, idling)
 
     return out
 
@@ -691,7 +728,7 @@ def _accel_metrics(
             if not np.isfinite(speed[j]):
                 break
             seg_dt = t[j] - t[j - 1]
-            if seg_dt <= 0 or seg_dt > _MAX_DT_S:
+            if seg_dt <= 0 or seg_dt > _ACCEL_MAX_SEGMENT_DT_S:
                 break
             # bogged back down to a stop — abandon this run
             if speed[j] <= _LAUNCH_SPEED_KPH and dist_m > 0:

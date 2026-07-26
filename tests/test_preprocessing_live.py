@@ -691,6 +691,33 @@ def test_latest_derived_channels_accumulates_session_scoped_trip_integrals(
     assert derived["derived:AVG_ECONOMY_L_PER_100KM"] > 0
 
 
+def test_trip_integrals_bridge_stale_ticks(config: CanaryConfig) -> None:
+    """A tick where SPEED is stale/absent must not drop the elapsed time —
+    the next fresh sample bridges the gap (capped). The old shared last-tick
+    timestamp advanced on stale ticks too, so a contended bus (SPEED fresh
+    on only every ~2nd tick) halved the live trip odometer."""
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    # SPEED observed at t=0, then nothing until t=10 — well past the fast
+    # channel's ffill ceiling, so intermediate ticks see SPEED as stale.
+    src.observe(TelemetryRecord.obd(now.timestamp(), "SPEED", 72.0, "km/h"))
+    src.tick(now)
+    for i in range(1, 10):
+        # Keep the tick loop alive with an unrelated fresh channel.
+        t = now + timedelta(seconds=i)
+        src.observe(TelemetryRecord.obd(t.timestamp(), "COOLANT_TEMP", 90.0, "degC"))
+        src.tick(t)
+    late = now + timedelta(seconds=10)
+    src.observe(TelemetryRecord.obd(late.timestamp(), "SPEED", 72.0, "km/h"))
+    src.tick(late)
+
+    derived = src.latest_derived_channels
+    assert derived is not None
+    # The full 10 s at 72 kph accrues (0.2 km), not just the ticks where
+    # SPEED happened to be fresh.
+    assert derived["derived:TRIP_DISTANCE_KM"] == pytest.approx(72.0 / 3600.0 * 10.0)
+
+
 def test_reset_clears_trip_integral_accumulators(config: CanaryConfig) -> None:
     """Task 1.3 — a session boundary (the same ``reset()`` Phase 7.1 uses for
     replay isolation) must zero the trip integrals, not carry a stale total
