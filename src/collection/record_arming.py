@@ -14,22 +14,32 @@ See ``docs/storage-lifecycle-fix.md`` for the full design writeup (the
 arm/disarm semantics and pre-arm-buffer open questions Task 8.6 raised, and
 why each v1 answer below was chosen over the alternatives).
 
-v1 semantics, in brief:
+Semantics, in brief:
   * Arm: the first record on a configured channel (RPM/SPEED by default)
     whose value clears ``arm_threshold`` arms the gate for the rest of the
     current session.
-  * Disarm: only at a session-rotation boundary (already triggered by
+  * Disarm: at a session-rotation boundary (already triggered by
     ``ParquetTelemetryWriter._rotate_if_engine_run_time_reset`` on every key
-    cycle) — never mid-session. A brief RPM dip (e.g. a stall) must not
-    silently start dropping data again right when a fault might be
-    happening.
-  * Pre-arm data: dropped, not buffered. No ring buffer for v1 — see the
-    design doc for why buffering was rejected.
+    cycle), or — v2 — after ``disarm_after_seconds`` of records with no
+    vehicle-active evidence. v1 was rotation-only, on the argument that a
+    brief RPM dip (e.g. a stall) must not silently start dropping data right
+    when a fault might be happening; field data showed the gap that leaves:
+    key-off with the Pi still powered never rotates (rotation needs the
+    *next* key-on), so a post-drive parked night stayed armed and recorded
+    23 h of stationary GPS chatter. The sustained-silence timeout closes
+    that without re-introducing the stall concern — the window is minutes,
+    a stall's cranking RPM re-arms instantly, and an idling engine keeps
+    emitting RPM > 0 so its evidence never goes stale. Ages are computed
+    from record timestamps, not wall clock, so replayed sessions gate
+    identically to live ones.
+  * Pre-arm data: dropped, not buffered. No ring buffer — see the design
+    doc for why buffering was rejected.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from src.telemetry import TelemetryRecord
 
@@ -54,26 +64,51 @@ class RecordArmingGate:
 
     arm_channels: tuple[str, ...] = DEFAULT_ARM_CHANNELS
     arm_threshold: float = 0.0
+    #: Disarm after this many seconds of records with no vehicle-active
+    #: evidence (an arm channel clearing ``arm_threshold``). ``None`` keeps
+    #: the v1 rotation-only disarm.
+    disarm_after_seconds: float | None = None
     armed: bool = field(default=False, init=False)
     dropped_count: int = field(default=0, init=False)
+    _last_active_at: datetime | None = field(default=None, init=False)
 
     def observe(self, record: TelemetryRecord) -> bool:
         """Update state from ``record``; return ``True`` if it should be recorded."""
-        if self.armed:
+        if self._is_active_evidence(record):
+            # max() because sources drain slightly out of order — an older
+            # GPS row must not roll the evidence clock backwards.
+            if self._last_active_at is None or record.timestamp > self._last_active_at:
+                self._last_active_at = record.timestamp
+            self.armed = True
             return True
+        if self.armed:
+            if (
+                self.disarm_after_seconds is not None
+                and self._last_active_at is not None
+                and (record.timestamp - self._last_active_at).total_seconds()
+                > self.disarm_after_seconds
+            ):
+                # Vehicle went quiet (key out / adapter unplugged) but the Pi
+                # is still powered and other sources (GPS…) keep chattering.
+                # Rotation can't save us — it needs the *next* key-on.
+                self.armed = False
+                self.dropped_count += 1
+                return False
+            return True
+        self.dropped_count += 1
+        return False
+
+    def _is_active_evidence(self, record: TelemetryRecord) -> bool:
         value = record.value
-        if (
+        return (
             record.channel in self.arm_channels
             and isinstance(value, (int, float))
             and not isinstance(value, bool)
             and value > self.arm_threshold
-        ):
-            self.armed = True
-            return True
-        self.dropped_count += 1
-        return False
+        )
 
     def reset_for_new_session(self) -> None:
         """Disarm. Called on session rotation (new key cycle) so a later
         idle period is gated again rather than left permanently armed."""
         self.armed = False
+        self._last_active_at = None

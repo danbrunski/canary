@@ -93,6 +93,7 @@ async def run_daemon(
         RecordArmingGate(
             arm_channels=arming_config.arm_channels,
             arm_threshold=arming_config.arm_threshold,
+            disarm_after_seconds=arming_config.disarm_after_seconds,
         )
         if arming_config.enabled
         else None

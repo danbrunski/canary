@@ -41,17 +41,26 @@ Task 8.6 flagged two open questions; v1's answers:
    `classify_vehicle_state` uses to call a vehicle "running", not the same
    code path — see the module docstring) whose value clears
    `arm_threshold` (default `0.0`, i.e. any nonzero reading) arms the gate
-   for the rest of the current session. Disarm: only at a session-rotation
+   for the rest of the current session. Disarm: at a session-rotation
    boundary — the *existing* `rotate_session()` call already triggered by
-   `_rotate_if_engine_run_time_reset` every key cycle (a RUN_TIME reset).
-   The gate **never re-disarms mid-session**. A continuous
-   disarm-on-idle-tick design was considered and rejected: a brief RPM dip
-   mid-drive (e.g. a stall, or idling at a light) would start silently
-   dropping data again right when a fault might be happening, and avoiding
-   that would need the pre-arm-buffer machinery from #2 anyway — unwarranted
-   complexity for a "KOEO produces hours of low-value idle data" problem,
-   which "wait for the vehicle to move, once, per key cycle" already
-   solves without it.
+   `_rotate_if_engine_run_time_reset` every key cycle (a RUN_TIME reset) —
+   or (v2, 2026-07-26) after `disarm_after_seconds` (default 300 s) of
+   records carrying no arm-channel evidence.
+
+   v1 was rotation-only: a continuous disarm-on-idle-tick design was
+   rejected because a brief RPM dip mid-drive (e.g. a stall, or idling at
+   a light) would start silently dropping data right when a fault might be
+   happening. Field data then exposed the gap rotation-only leaves: disarm
+   needs the *next* key-on, so key-off with the Pi still powered (UPS,
+   bench) never disarms — a post-drive parked night recorded 23 h of
+   stationary GPS chatter (2 M rows) that went on to dominate training
+   memory. The sustained-silence timeout closes that without
+   re-introducing the stall concern: the window is minutes rather than
+   ticks, an idling engine keeps emitting RPM > 0 so its evidence never
+   goes stale, and a restart's cranking RPM re-arms instantly. Ages are
+   computed from record timestamps (not wall clock), so replay gates
+   identically to live. `disarm_after_seconds: null` restores the v1
+   rotation-only behavior.
 2. **Pre-arm buffer handling.** Dropped, not buffered — no ring buffer in
    v1. This follows the same "fix at source, quarantine bad data" project
    convention the rest of the pipeline uses: KOEO chatter is a data-*volume*
@@ -63,7 +72,7 @@ Task 8.6 flagged two open questions; v1's answers:
 
 Config knobs: `collection.record_arming.enabled` (bool, default `false`),
 `arm_channels` (default `("RPM", "SPEED")`), `arm_threshold` (default
-`0.0`). `RecordArmingGate.dropped_count` is tracked in-process for
+`0.0`), `disarm_after_seconds` (default `300.0`; `null` = rotation-only). `RecordArmingGate.dropped_count` is tracked in-process for
 diagnosability but is not yet surfaced on the dashboard/status endpoint —
 a reasonable v2 addition once the gate has real drive-cycle mileage on it.
 

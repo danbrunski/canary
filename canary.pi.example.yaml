@@ -45,15 +45,18 @@ collection:
   obd_request_timeout_seconds: 1.0
   obd_poll_rate_hz: 1
   storage_path: /data/canary/sessions
-  # Don't record until the vehicle looks active (RPM/SPEED > 0). Without
-  # this the daemon logs whatever chatters while the Pi is powered — a
-  # parked day on the UPS produced a 23 h GPS-only session (2 M rows of
-  # stationary fixes) that dominated training memory. Disarm happens at
-  # the next session rotation, never mid-drive. Caveat: a deliberate
-  # GPS-only capture (CAN adapter unplugged) records nothing while armed
-  # channels stay silent — disable for that.
+  # Don't record until the vehicle looks active (RPM/SPEED > 0), and stop
+  # once it's been quiet for disarm_after_seconds (key out, adapter
+  # unplugged). Without this the daemon logs whatever chatters while the
+  # Pi is powered — a parked day on the UPS produced a 23 h GPS-only
+  # session (2 M rows of stationary fixes) that dominated training
+  # memory. An idling engine keeps emitting RPM > 0 so a long light never
+  # trips the timeout, and cranking RPM re-arms instantly after a stall.
+  # Caveat: a deliberate GPS-only capture (CAN adapter unplugged) records
+  # nothing while armed channels stay silent — disable for that.
   record_arming:
     enabled: true
+    disarm_after_seconds: 300
   session_retention_days: 30
   storage_warning_mb: 500
   # Byte-cap ring buffer, sized below the SD card's free space with

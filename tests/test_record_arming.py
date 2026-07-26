@@ -157,3 +157,84 @@ def test_writer_rearms_gate_on_session_rotation(tmp_path) -> None:
 def test_gate_default_threshold_requires_strictly_positive_value(value: float) -> None:
     gate = RecordArmingGate(arm_channels=("RPM",))
     assert gate.observe(_record("RPM", value)) is False
+
+
+# ---------------------------------------------------------------------------
+# Sustained-silence disarm (v2) — key out / adapter unplugged, Pi still up
+# ---------------------------------------------------------------------------
+
+
+def test_gate_disarms_after_sustained_silence() -> None:
+    """The 23 h parked-GPS failure: drive ends, key out, Pi stays powered on
+    the UPS, GPS keeps chattering. Rotation-only disarm never fires (it needs
+    the *next* key-on), so v1 recorded all of it. With the timeout, the gate
+    drops the chatter once the arm channels have been silent long enough."""
+    gate = RecordArmingGate(arm_channels=("RPM",), disarm_after_seconds=300.0)
+    t0 = 1_778_000_000.0
+    assert gate.observe(_record("RPM", 800.0, t0)) is True
+
+    # Within the window: still armed, non-arm records pass (this is what
+    # keeps a stall from dropping the fault data around it).
+    assert gate.observe(_record("COOLANT_TEMP", 90.0, t0 + 299.0)) is True
+    assert gate.armed is True
+
+    # Past the window: disarmed, chatter dropped from here on.
+    assert gate.observe(_record("COOLANT_TEMP", 88.0, t0 + 301.0)) is False
+    assert gate.armed is False
+    assert gate.observe(_record("COOLANT_TEMP", 87.0, t0 + 3600.0)) is False
+
+
+def test_gate_rearms_after_silence_disarm() -> None:
+    """Next morning's key-on re-arms exactly like the first: the first
+    RPM record over threshold passes and everything after it records."""
+    gate = RecordArmingGate(arm_channels=("RPM",), disarm_after_seconds=300.0)
+    t0 = 1_778_000_000.0
+    gate.observe(_record("RPM", 800.0, t0))
+    assert gate.observe(_record("COOLANT_TEMP", 60.0, t0 + 400.0)) is False  # disarmed
+
+    assert gate.observe(_record("RPM", 250.0, t0 + 40_000.0)) is True  # cranking re-arms
+    assert gate.armed is True
+    assert gate.observe(_record("COOLANT_TEMP", 20.0, t0 + 40_001.0)) is True
+
+
+def test_gate_active_evidence_refreshes_the_silence_window() -> None:
+    """An idling engine keeps emitting RPM > 0, so a long light (or an
+    hour-long idle) never trips the timeout — evidence never goes stale."""
+    gate = RecordArmingGate(arm_channels=("RPM",), disarm_after_seconds=300.0)
+    t0 = 1_778_000_000.0
+    gate.observe(_record("RPM", 800.0, t0))
+    for i in range(1, 20):  # 19 minutes of idle, refreshed every 60 s
+        assert gate.observe(_record("RPM", 700.0, t0 + i * 60.0)) is True
+    assert gate.observe(_record("COOLANT_TEMP", 90.0, t0 + 19 * 60.0 + 30.0)) is True
+    assert gate.armed is True
+
+
+def test_gate_without_timeout_keeps_v1_rotation_only_disarm() -> None:
+    """``disarm_after_seconds=None`` (the dataclass default) is byte-for-byte
+    the v1 behavior: armed stays armed however long the silence."""
+    gate = RecordArmingGate(arm_channels=("RPM",))
+    t0 = 1_778_000_000.0
+    gate.observe(_record("RPM", 800.0, t0))
+    assert gate.observe(_record("COOLANT_TEMP", 90.0, t0 + 1_000_000.0)) is True
+    assert gate.armed is True
+
+
+def test_gate_out_of_order_records_do_not_roll_evidence_backwards() -> None:
+    """Sources drain slightly out of order; a late-arriving old GPS row must
+    not shrink the evidence window and cause a premature disarm."""
+    gate = RecordArmingGate(arm_channels=("RPM",), disarm_after_seconds=300.0)
+    t0 = 1_778_000_000.0
+    gate.observe(_record("RPM", 800.0, t0 + 100.0))
+    gate.observe(_record("RPM", 750.0, t0 + 50.0))  # late arrival, older ts
+    # Age is measured from t0+100, not t0+50.
+    assert gate.observe(_record("COOLANT_TEMP", 90.0, t0 + 380.0)) is True
+    assert gate.armed is True
+
+
+def test_gate_silence_disarm_counts_drops() -> None:
+    gate = RecordArmingGate(arm_channels=("RPM",), disarm_after_seconds=300.0)
+    t0 = 1_778_000_000.0
+    gate.observe(_record("RPM", 800.0, t0))
+    gate.observe(_record("COOLANT_TEMP", 90.0, t0 + 400.0))  # disarming drop
+    gate.observe(_record("COOLANT_TEMP", 89.0, t0 + 500.0))  # ordinary disarmed drop
+    assert gate.dropped_count == 2

@@ -177,6 +177,14 @@ class RecordArmingConfig(_Strict):
     arm_channels: tuple[str, ...] = ("RPM", "SPEED")
     #: A configured channel's numeric value must exceed this to arm.
     arm_threshold: float = 0.0
+    #: Disarm after this many seconds of records with no arm-channel evidence
+    #: (key out, adapter unplugged) — otherwise a post-drive parked night with
+    #: the Pi on the UPS stays armed and records GPS chatter until the *next*
+    #: key-on rotates the session. Generous enough that a stall or a long
+    #: light never trips it (an idling engine keeps emitting RPM > 0), and
+    #: cranking RPM re-arms instantly regardless. ``null`` restores the v1
+    #: rotation-only disarm.
+    disarm_after_seconds: float | None = 300.0
 
 
 class CollectionConfig(_Strict):
