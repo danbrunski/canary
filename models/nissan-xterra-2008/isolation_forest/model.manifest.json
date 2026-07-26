@@ -1,8 +1,8 @@
 {
   "artifact_format_version": 1,
-  "complete_rows": 146911,
-  "created_at": "2026-07-26T19:05:04.714813Z",
-  "dropped_missing_feature_rows": 30472,
+  "complete_rows": 11866,
+  "created_at": "2026-07-26T20:18:30.562018Z",
+  "dropped_missing_feature_rows": 14977,
   "hyperparams": {
     "calibration_holdout_fraction": 0.2,
     "contamination": 0.01,
@@ -12,31 +12,25 @@
     "random_state": 42,
     "target_flag_rate": 0.02
   },
-  "input_rows": 177383,
+  "input_rows": 26843,
   "model_type": "isolation_forest",
-  "model_version": "isolation_forest_2026-07-26T190504.714813Z",
+  "model_version": "isolation_forest_2026-07-26T201830.562018Z",
   "modes": [
     {
       "achieved_flag_rate": 1.0,
       "contamination": 0.01,
       "end_timestamp": "2026-07-22T17:15:46Z",
-      "holdout_samples": 29382,
+      "holdout_samples": 2373,
       "mode": "unknown",
-      "n_samples": 146911,
+      "n_samples": 11866,
       "score_scale": null,
-      "score_threshold": 0.0,
+      "score_threshold": -0.0,
       "sessions": [
         "2026-07-18T215941",
         "2026-07-18T222019",
-        "2026-07-18T235004",
         "2026-07-19T000112",
         "2026-07-19T003124",
-        "2026-07-19T030024",
-        "2026-07-19T030829",
-        "2026-07-19T035500",
-        "2026-07-19T200729",
         "2026-07-19T202721",
-        "2026-07-19T223325",
         "2026-07-22T154954",
         "2026-07-22T161632",
         "2026-07-22T163011",
@@ -1434,26 +1428,26 @@
         "decoded:AC_COMPRESSOR_STATE": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14522,
-          "nan_count": 162861,
+          "finite_count": 14529,
+          "nan_count": 12314,
           "non_finite_count": 0,
-          "non_null_count": 14522,
+          "non_null_count": 14529,
           "unique_finite_count": 6
         },
         "decoded:AC_COMPRESSOR_STATE__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11947,
-          "nan_count": 165436,
+          "finite_count": 11950,
+          "nan_count": 14893,
           "non_finite_count": 0,
-          "non_null_count": 11947,
+          "non_null_count": 11950,
           "unique_finite_count": 65
         },
         "decoded:AC_COMPRESSOR_STATE__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13336,
-          "nan_count": 164047,
+          "nan_count": 13507,
           "non_finite_count": 0,
           "non_null_count": 13336,
           "unique_finite_count": 3
@@ -1461,35 +1455,35 @@
         "decoded:AC_COMPRESSOR_STATE__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12879,
-          "nan_count": 164504,
+          "finite_count": 12884,
+          "nan_count": 13959,
           "non_finite_count": 0,
-          "non_null_count": 12879,
+          "non_null_count": 12884,
           "unique_finite_count": 58
         },
         "decoded:BRAKE_ACTIVITY_29E_7": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14282,
-          "nan_count": 163101,
+          "finite_count": 14296,
+          "nan_count": 12547,
           "non_finite_count": 0,
-          "non_null_count": 14282,
+          "non_null_count": 14296,
           "unique_finite_count": 172
         },
         "decoded:BRAKE_ACTIVITY_29E_7__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11409,
-          "nan_count": 165974,
+          "finite_count": 11456,
+          "nan_count": 15387,
           "non_finite_count": 0,
-          "non_null_count": 11409,
-          "unique_finite_count": 2654
+          "non_null_count": 11456,
+          "unique_finite_count": 2667
         },
         "decoded:BRAKE_ACTIVITY_29E_7__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 12456,
-          "nan_count": 164927,
+          "nan_count": 14387,
           "non_finite_count": 0,
           "non_null_count": 12456,
           "unique_finite_count": 299
@@ -1497,26 +1491,26 @@
         "decoded:BRAKE_ACTIVITY_29E_7__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13379,
-          "nan_count": 164004,
+          "finite_count": 13388,
+          "nan_count": 13455,
           "non_finite_count": 0,
-          "non_null_count": 13379,
+          "non_null_count": 13388,
           "unique_finite_count": 4680
         },
         "decoded:BRAKE_PRESSURE_29E_3": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14367,
-          "nan_count": 163016,
+          "finite_count": 14381,
+          "nan_count": 12462,
           "non_finite_count": 0,
-          "non_null_count": 14367,
+          "non_null_count": 14381,
           "unique_finite_count": 3
         },
         "decoded:BRAKE_PRESSURE_29E_3__mean": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13433,
-          "nan_count": 163950,
+          "nan_count": 13410,
           "non_finite_count": 0,
           "non_null_count": 13433,
           "unique_finite_count": 81
@@ -1525,7 +1519,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 13862,
-          "nan_count": 163521,
+          "nan_count": 12981,
           "non_finite_count": 0,
           "non_null_count": 13862,
           "unique_finite_count": 5
@@ -1533,35 +1527,35 @@
         "decoded:BRAKE_PRESSURE_29E_3__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13703,
-          "nan_count": 163680,
+          "finite_count": 13742,
+          "nan_count": 13101,
           "non_finite_count": 0,
-          "non_null_count": 13703,
+          "non_null_count": 13742,
           "unique_finite_count": 68
         },
         "decoded:COOLING_FAN_1F9_0": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14416,
-          "nan_count": 162967,
+          "finite_count": 14430,
+          "nan_count": 12413,
           "non_finite_count": 0,
-          "non_null_count": 14416,
+          "non_null_count": 14430,
           "unique_finite_count": 10
         },
         "decoded:COOLING_FAN_1F9_0__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13026,
-          "nan_count": 164357,
+          "finite_count": 13068,
+          "nan_count": 13775,
           "non_finite_count": 0,
-          "non_null_count": 13026,
+          "non_null_count": 13068,
           "unique_finite_count": 468
         },
         "decoded:COOLING_FAN_1F9_0__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 12344,
-          "nan_count": 165039,
+          "nan_count": 14499,
           "non_finite_count": 0,
           "non_null_count": 12344,
           "unique_finite_count": 20
@@ -1569,35 +1563,35 @@
         "decoded:COOLING_FAN_1F9_0__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11300,
-          "nan_count": 166083,
+          "finite_count": 11339,
+          "nan_count": 15504,
           "non_finite_count": 0,
-          "non_null_count": 11300,
+          "non_null_count": 11339,
           "unique_finite_count": 54
         },
         "decoded:ECM_AIRFLOW_PROXY_23D": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14327,
-          "nan_count": 163056,
+          "finite_count": 14341,
+          "nan_count": 12502,
           "non_finite_count": 0,
-          "non_null_count": 14327,
+          "non_null_count": 14341,
           "unique_finite_count": 733
         },
         "decoded:ECM_AIRFLOW_PROXY_23D__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13947,
-          "nan_count": 163436,
+          "finite_count": 13990,
+          "nan_count": 12853,
           "non_finite_count": 0,
-          "non_null_count": 13947,
+          "non_null_count": 13990,
           "unique_finite_count": 3407
         },
         "decoded:ECM_AIRFLOW_PROXY_23D__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13533,
-          "nan_count": 163850,
+          "nan_count": 13310,
           "non_finite_count": 0,
           "non_null_count": 13533,
           "unique_finite_count": 1665
@@ -1605,35 +1599,35 @@
         "decoded:ECM_AIRFLOW_PROXY_23D__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13833,
-          "nan_count": 163550,
+          "finite_count": 13872,
+          "nan_count": 12971,
           "non_finite_count": 0,
-          "non_null_count": 13833,
+          "non_null_count": 13872,
           "unique_finite_count": 3451
         },
         "decoded:ECM_CALC_LOAD_A": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14156,
-          "nan_count": 163227,
+          "finite_count": 14170,
+          "nan_count": 12673,
           "non_finite_count": 0,
-          "non_null_count": 14156,
+          "non_null_count": 14170,
           "unique_finite_count": 256
         },
         "decoded:ECM_CALC_LOAD_A__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14260,
-          "nan_count": 163123,
+          "finite_count": 14303,
+          "nan_count": 12540,
           "non_finite_count": 0,
-          "non_null_count": 14260,
-          "unique_finite_count": 4146
+          "non_null_count": 14303,
+          "unique_finite_count": 4148
         },
         "decoded:ECM_CALC_LOAD_A__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 12424,
-          "nan_count": 164959,
+          "nan_count": 14419,
           "non_finite_count": 0,
           "non_null_count": 12424,
           "unique_finite_count": 494
@@ -1641,35 +1635,35 @@
         "decoded:ECM_CALC_LOAD_A__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12145,
-          "nan_count": 165238,
+          "finite_count": 12184,
+          "nan_count": 14659,
           "non_finite_count": 0,
-          "non_null_count": 12145,
-          "unique_finite_count": 5536
+          "non_null_count": 12184,
+          "unique_finite_count": 5540
         },
         "decoded:ECM_CALC_LOAD_B": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14155,
-          "nan_count": 163228,
+          "finite_count": 14169,
+          "nan_count": 12674,
           "non_finite_count": 0,
-          "non_null_count": 14155,
+          "non_null_count": 14169,
           "unique_finite_count": 256
         },
         "decoded:ECM_CALC_LOAD_B__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14260,
-          "nan_count": 163123,
+          "finite_count": 14303,
+          "nan_count": 12540,
           "non_finite_count": 0,
-          "non_null_count": 14260,
-          "unique_finite_count": 4161
+          "non_null_count": 14303,
+          "unique_finite_count": 4163
         },
         "decoded:ECM_CALC_LOAD_B__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 12421,
-          "nan_count": 164962,
+          "nan_count": 14422,
           "non_finite_count": 0,
           "non_null_count": 12421,
           "unique_finite_count": 495
@@ -1677,71 +1671,71 @@
         "decoded:ECM_CALC_LOAD_B__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12313,
-          "nan_count": 165070,
+          "finite_count": 12352,
+          "nan_count": 14491,
           "non_finite_count": 0,
-          "non_null_count": 12313,
-          "unique_finite_count": 5542
+          "non_null_count": 12352,
+          "unique_finite_count": 5546
         },
         "decoded:ECM_COOLANT_TEMP": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 15305,
-          "nan_count": 162078,
+          "finite_count": 15437,
+          "nan_count": 11406,
           "non_finite_count": 0,
-          "non_null_count": 15305,
+          "non_null_count": 15437,
           "unique_finite_count": 77
         },
         "decoded:ECM_COOLANT_TEMP__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14785,
-          "nan_count": 162598,
+          "finite_count": 14967,
+          "nan_count": 11876,
           "non_finite_count": 0,
-          "non_null_count": 14785,
-          "unique_finite_count": 1666
+          "non_null_count": 14967,
+          "unique_finite_count": 1703
         },
         "decoded:ECM_COOLANT_TEMP__roc": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14833,
-          "nan_count": 162550,
+          "finite_count": 14931,
+          "nan_count": 11912,
           "non_finite_count": 0,
-          "non_null_count": 14833,
-          "unique_finite_count": 14
+          "non_null_count": 14931,
+          "unique_finite_count": 15
         },
         "decoded:ECM_COOLANT_TEMP__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10556,
-          "nan_count": 166827,
+          "finite_count": 10681,
+          "nan_count": 16162,
           "non_finite_count": 0,
-          "non_null_count": 10556,
+          "non_null_count": 10681,
           "unique_finite_count": 523
         },
         "decoded:ECM_ENGINE_STATE_A": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14374,
-          "nan_count": 163009,
+          "finite_count": 14388,
+          "nan_count": 12455,
           "non_finite_count": 0,
-          "non_null_count": 14374,
+          "non_null_count": 14388,
           "unique_finite_count": 127
         },
         "decoded:ECM_ENGINE_STATE_A__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11004,
-          "nan_count": 166379,
+          "finite_count": 11047,
+          "nan_count": 15796,
           "non_finite_count": 0,
-          "non_null_count": 11004,
+          "non_null_count": 11047,
           "unique_finite_count": 2593
         },
         "decoded:ECM_ENGINE_STATE_A__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 12825,
-          "nan_count": 164558,
+          "nan_count": 14018,
           "non_finite_count": 0,
           "non_null_count": 12825,
           "unique_finite_count": 344
@@ -1749,35 +1743,35 @@
         "decoded:ECM_ENGINE_STATE_A__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11938,
-          "nan_count": 165445,
+          "finite_count": 11527,
+          "nan_count": 15316,
           "non_finite_count": 0,
-          "non_null_count": 11938,
+          "non_null_count": 11527,
           "unique_finite_count": 3760
         },
         "decoded:ECM_ENGINE_STATE_B": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14374,
-          "nan_count": 163009,
+          "finite_count": 14388,
+          "nan_count": 12455,
           "non_finite_count": 0,
-          "non_null_count": 14374,
+          "non_null_count": 14388,
           "unique_finite_count": 127
         },
         "decoded:ECM_ENGINE_STATE_B__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11005,
-          "nan_count": 166378,
+          "finite_count": 11048,
+          "nan_count": 15795,
           "non_finite_count": 0,
-          "non_null_count": 11005,
+          "non_null_count": 11048,
           "unique_finite_count": 2559
         },
         "decoded:ECM_ENGINE_STATE_B__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 12839,
-          "nan_count": 164544,
+          "nan_count": 14004,
           "non_finite_count": 0,
           "non_null_count": 12839,
           "unique_finite_count": 350
@@ -1785,35 +1779,35 @@
         "decoded:ECM_ENGINE_STATE_B__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11502,
-          "nan_count": 165881,
+          "finite_count": 11541,
+          "nan_count": 15302,
           "non_finite_count": 0,
-          "non_null_count": 11502,
+          "non_null_count": 11541,
           "unique_finite_count": 3759
         },
         "decoded:ECM_ENGINE_STATE_C": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14327,
-          "nan_count": 163056,
+          "finite_count": 14341,
+          "nan_count": 12502,
           "non_finite_count": 0,
-          "non_null_count": 14327,
+          "non_null_count": 14341,
           "unique_finite_count": 127
         },
         "decoded:ECM_ENGINE_STATE_C__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11087,
-          "nan_count": 166296,
+          "finite_count": 11130,
+          "nan_count": 15713,
           "non_finite_count": 0,
-          "non_null_count": 11087,
+          "non_null_count": 11130,
           "unique_finite_count": 2616
         },
         "decoded:ECM_ENGINE_STATE_C__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 12812,
-          "nan_count": 164571,
+          "nan_count": 14031,
           "non_finite_count": 0,
           "non_null_count": 12812,
           "unique_finite_count": 345
@@ -1821,35 +1815,35 @@
         "decoded:ECM_ENGINE_STATE_C__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11511,
-          "nan_count": 165872,
+          "finite_count": 11550,
+          "nan_count": 15293,
           "non_finite_count": 0,
-          "non_null_count": 11511,
+          "non_null_count": 11550,
           "unique_finite_count": 3761
         },
         "decoded:ECM_INTAKE_VACUUM_OR_IAC": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14388,
-          "nan_count": 162995,
+          "finite_count": 14402,
+          "nan_count": 12441,
           "non_finite_count": 0,
-          "non_null_count": 14388,
+          "non_null_count": 14402,
           "unique_finite_count": 256
         },
         "decoded:ECM_INTAKE_VACUUM_OR_IAC__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14596,
-          "nan_count": 162787,
+          "finite_count": 14639,
+          "nan_count": 12204,
           "non_finite_count": 0,
-          "non_null_count": 14596,
-          "unique_finite_count": 3136
+          "non_null_count": 14639,
+          "unique_finite_count": 3139
         },
         "decoded:ECM_INTAKE_VACUUM_OR_IAC__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 12283,
-          "nan_count": 165100,
+          "nan_count": 14560,
           "non_finite_count": 0,
           "non_null_count": 12283,
           "unique_finite_count": 499
@@ -1857,35 +1851,35 @@
         "decoded:ECM_INTAKE_VACUUM_OR_IAC__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12255,
-          "nan_count": 165128,
+          "finite_count": 12293,
+          "nan_count": 14550,
           "non_finite_count": 0,
-          "non_null_count": 12255,
-          "unique_finite_count": 5248
+          "non_null_count": 12293,
+          "unique_finite_count": 5252
         },
         "decoded:ECM_RPM": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14242,
-          "nan_count": 163141,
+          "finite_count": 14256,
+          "nan_count": 12587,
           "non_finite_count": 0,
-          "non_null_count": 14242,
+          "non_null_count": 14256,
           "unique_finite_count": 930
         },
         "decoded:ECM_RPM__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11460,
-          "nan_count": 165923,
+          "finite_count": 11498,
+          "nan_count": 15345,
           "non_finite_count": 0,
-          "non_null_count": 11460,
-          "unique_finite_count": 4524
+          "non_null_count": 11498,
+          "unique_finite_count": 4521
         },
         "decoded:ECM_RPM__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 12616,
-          "nan_count": 164767,
+          "nan_count": 14227,
           "non_finite_count": 0,
           "non_null_count": 12616,
           "unique_finite_count": 1274
@@ -1893,35 +1887,35 @@
         "decoded:ECM_RPM__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13245,
-          "nan_count": 164138,
+          "finite_count": 13284,
+          "nan_count": 13559,
           "non_finite_count": 0,
-          "non_null_count": 13245,
-          "unique_finite_count": 6241
+          "non_null_count": 13284,
+          "unique_finite_count": 6245
         },
         "decoded:ECM_THROTTLE_TRANSIENT": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14408,
-          "nan_count": 162975,
+          "finite_count": 14422,
+          "nan_count": 12421,
           "non_finite_count": 0,
-          "non_null_count": 14408,
+          "non_null_count": 14422,
           "unique_finite_count": 16
         },
         "decoded:ECM_THROTTLE_TRANSIENT__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10755,
-          "nan_count": 166628,
+          "finite_count": 10798,
+          "nan_count": 16045,
           "non_finite_count": 0,
-          "non_null_count": 10755,
+          "non_null_count": 10798,
           "unique_finite_count": 2045
         },
         "decoded:ECM_THROTTLE_TRANSIENT__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 11652,
-          "nan_count": 165731,
+          "nan_count": 15191,
           "non_finite_count": 0,
           "non_null_count": 11652,
           "unique_finite_count": 25
@@ -1929,35 +1923,35 @@
         "decoded:ECM_THROTTLE_TRANSIENT__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12392,
-          "nan_count": 164991,
+          "finite_count": 12431,
+          "nan_count": 14412,
           "non_finite_count": 0,
-          "non_null_count": 12392,
+          "non_null_count": 12431,
           "unique_finite_count": 3166
         },
         "decoded:HVAC_BLOWER_LIGHTING_358_1": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14530,
-          "nan_count": 162853,
+          "finite_count": 14536,
+          "nan_count": 12307,
           "non_finite_count": 0,
-          "non_null_count": 14530,
+          "non_null_count": 14536,
           "unique_finite_count": 3
         },
         "decoded:HVAC_BLOWER_LIGHTING_358_1__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11807,
-          "nan_count": 165576,
+          "finite_count": 11809,
+          "nan_count": 15034,
           "non_finite_count": 0,
-          "non_null_count": 11807,
+          "non_null_count": 11809,
           "unique_finite_count": 3
         },
         "decoded:HVAC_BLOWER_LIGHTING_358_1__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13954,
-          "nan_count": 163429,
+          "nan_count": 12889,
           "non_finite_count": 0,
           "non_null_count": 13954,
           "unique_finite_count": 7
@@ -1965,35 +1959,35 @@
         "decoded:HVAC_BLOWER_LIGHTING_358_1__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14386,
-          "nan_count": 162997,
+          "finite_count": 14390,
+          "nan_count": 12453,
           "non_finite_count": 0,
-          "non_null_count": 14386,
+          "non_null_count": 14390,
           "unique_finite_count": 2
         },
         "decoded:MOTION_29E_5": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14232,
-          "nan_count": 163151,
+          "finite_count": 14246,
+          "nan_count": 12597,
           "non_finite_count": 0,
-          "non_null_count": 14232,
+          "non_null_count": 14246,
           "unique_finite_count": 70
         },
         "decoded:MOTION_29E_5__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13407,
-          "nan_count": 163976,
+          "finite_count": 13449,
+          "nan_count": 13394,
           "non_finite_count": 0,
-          "non_null_count": 13407,
+          "non_null_count": 13449,
           "unique_finite_count": 2849
         },
         "decoded:MOTION_29E_5__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 8005,
-          "nan_count": 169378,
+          "nan_count": 18838,
           "non_finite_count": 0,
           "non_null_count": 8005,
           "unique_finite_count": 68
@@ -2001,35 +1995,35 @@
         "decoded:MOTION_29E_5__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13754,
-          "nan_count": 163629,
+          "finite_count": 13759,
+          "nan_count": 13084,
           "non_finite_count": 0,
-          "non_null_count": 13754,
+          "non_null_count": 13759,
           "unique_finite_count": 4157
         },
         "decoded:MOTION_SIGNAL_280_5": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14497,
-          "nan_count": 162886,
+          "finite_count": 14504,
+          "nan_count": 12339,
           "non_finite_count": 0,
-          "non_null_count": 14497,
+          "non_null_count": 14504,
           "unique_finite_count": 256
         },
         "decoded:MOTION_SIGNAL_280_5__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14288,
-          "nan_count": 163095,
+          "finite_count": 14295,
+          "nan_count": 12548,
           "non_finite_count": 0,
-          "non_null_count": 14288,
+          "non_null_count": 14295,
           "unique_finite_count": 2007
         },
         "decoded:MOTION_SIGNAL_280_5__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13456,
-          "nan_count": 163927,
+          "nan_count": 13387,
           "non_finite_count": 0,
           "non_null_count": 13456,
           "unique_finite_count": 495
@@ -2037,35 +2031,35 @@
         "decoded:MOTION_SIGNAL_280_5__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14342,
-          "nan_count": 163041,
+          "finite_count": 14347,
+          "nan_count": 12496,
           "non_finite_count": 0,
-          "non_null_count": 14342,
+          "non_null_count": 14347,
           "unique_finite_count": 4046
         },
         "decoded:MOTION_SIGNAL_2D1_1": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14491,
-          "nan_count": 162892,
+          "finite_count": 14498,
+          "nan_count": 12345,
           "non_finite_count": 0,
-          "non_null_count": 14491,
+          "non_null_count": 14498,
           "unique_finite_count": 256
         },
         "decoded:MOTION_SIGNAL_2D1_1__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14302,
-          "nan_count": 163081,
+          "finite_count": 14309,
+          "nan_count": 12534,
           "non_finite_count": 0,
-          "non_null_count": 14302,
+          "non_null_count": 14309,
           "unique_finite_count": 2820
         },
         "decoded:MOTION_SIGNAL_2D1_1__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13447,
-          "nan_count": 163936,
+          "nan_count": 13396,
           "non_finite_count": 0,
           "non_null_count": 13447,
           "unique_finite_count": 494
@@ -2073,35 +2067,35 @@
         "decoded:MOTION_SIGNAL_2D1_1__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14228,
-          "nan_count": 163155,
+          "finite_count": 14233,
+          "nan_count": 12610,
           "non_finite_count": 0,
-          "non_null_count": 14228,
+          "non_null_count": 14233,
           "unique_finite_count": 3957
         },
         "decoded:MOTION_SIGNAL_354_1": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14335,
-          "nan_count": 163048,
+          "finite_count": 14349,
+          "nan_count": 12494,
           "non_finite_count": 0,
-          "non_null_count": 14335,
+          "non_null_count": 14349,
           "unique_finite_count": 256
         },
         "decoded:MOTION_SIGNAL_354_1__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13980,
-          "nan_count": 163403,
+          "finite_count": 14023,
+          "nan_count": 12820,
           "non_finite_count": 0,
-          "non_null_count": 13980,
+          "non_null_count": 14023,
           "unique_finite_count": 1979
         },
         "decoded:MOTION_SIGNAL_354_1__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13325,
-          "nan_count": 164058,
+          "nan_count": 13518,
           "non_finite_count": 0,
           "non_null_count": 13325,
           "unique_finite_count": 495
@@ -2109,35 +2103,35 @@
         "decoded:MOTION_SIGNAL_354_1__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14039,
-          "nan_count": 163344,
+          "finite_count": 14078,
+          "nan_count": 12765,
           "non_finite_count": 0,
-          "non_null_count": 14039,
+          "non_null_count": 14078,
           "unique_finite_count": 4049
         },
         "decoded:MOTION_SIGNAL_590_2": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14338,
-          "nan_count": 163045,
+          "finite_count": 14352,
+          "nan_count": 12491,
           "non_finite_count": 0,
-          "non_null_count": 14338,
+          "non_null_count": 14352,
           "unique_finite_count": 256
         },
         "decoded:MOTION_SIGNAL_590_2__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13984,
-          "nan_count": 163399,
+          "finite_count": 14027,
+          "nan_count": 12816,
           "non_finite_count": 0,
-          "non_null_count": 13984,
+          "non_null_count": 14027,
           "unique_finite_count": 1932
         },
         "decoded:MOTION_SIGNAL_590_2__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13314,
-          "nan_count": 164069,
+          "nan_count": 13529,
           "non_finite_count": 0,
           "non_null_count": 13314,
           "unique_finite_count": 494
@@ -2145,35 +2139,35 @@
         "decoded:MOTION_SIGNAL_590_2__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14021,
-          "nan_count": 163362,
+          "finite_count": 14060,
+          "nan_count": 12783,
           "non_finite_count": 0,
-          "non_null_count": 14021,
+          "non_null_count": 14060,
           "unique_finite_count": 4046
         },
         "decoded:MOTION_SIGNAL_590_5": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14338,
-          "nan_count": 163045,
+          "finite_count": 14352,
+          "nan_count": 12491,
           "non_finite_count": 0,
-          "non_null_count": 14338,
+          "non_null_count": 14352,
           "unique_finite_count": 256
         },
         "decoded:MOTION_SIGNAL_590_5__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13995,
-          "nan_count": 163388,
+          "finite_count": 14038,
+          "nan_count": 12805,
           "non_finite_count": 0,
-          "non_null_count": 13995,
+          "non_null_count": 14038,
           "unique_finite_count": 1866
         },
         "decoded:MOTION_SIGNAL_590_5__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13327,
-          "nan_count": 164056,
+          "nan_count": 13516,
           "non_finite_count": 0,
           "non_null_count": 13327,
           "unique_finite_count": 472
@@ -2181,35 +2175,35 @@
         "decoded:MOTION_SIGNAL_590_5__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13921,
-          "nan_count": 163462,
+          "finite_count": 13930,
+          "nan_count": 12913,
           "non_finite_count": 0,
-          "non_null_count": 13921,
-          "unique_finite_count": 4731
+          "non_null_count": 13930,
+          "unique_finite_count": 4732
         },
         "decoded:POWER_STATE_625_3": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14522,
-          "nan_count": 162861,
+          "finite_count": 14529,
+          "nan_count": 12314,
           "non_finite_count": 0,
-          "non_null_count": 14522,
+          "non_null_count": 14529,
           "unique_finite_count": 4
         },
         "decoded:POWER_STATE_625_3__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12039,
-          "nan_count": 165344,
+          "finite_count": 12082,
+          "nan_count": 14761,
           "non_finite_count": 0,
-          "non_null_count": 12039,
+          "non_null_count": 12082,
           "unique_finite_count": 8
         },
         "decoded:POWER_STATE_625_3__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13822,
-          "nan_count": 163561,
+          "nan_count": 13021,
           "non_finite_count": 0,
           "non_null_count": 13822,
           "unique_finite_count": 8
@@ -2217,35 +2211,35 @@
         "decoded:POWER_STATE_625_3__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14249,
-          "nan_count": 163134,
+          "finite_count": 14283,
+          "nan_count": 12560,
           "non_finite_count": 0,
-          "non_null_count": 14249,
+          "non_null_count": 14283,
           "unique_finite_count": 7
         },
         "decoded:STEERING_002_LOW": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14333,
-          "nan_count": 163050,
+          "finite_count": 14347,
+          "nan_count": 12496,
           "non_finite_count": 0,
-          "non_null_count": 14333,
+          "non_null_count": 14347,
           "unique_finite_count": 256
         },
         "decoded:STEERING_002_LOW__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13669,
-          "nan_count": 163714,
+          "finite_count": 13714,
+          "nan_count": 13129,
           "non_finite_count": 0,
-          "non_null_count": 13669,
-          "unique_finite_count": 3799
+          "non_null_count": 13714,
+          "unique_finite_count": 3803
         },
         "decoded:STEERING_002_LOW__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 10410,
-          "nan_count": 166973,
+          "nan_count": 16433,
           "non_finite_count": 0,
           "non_null_count": 10410,
           "unique_finite_count": 498
@@ -2253,35 +2247,35 @@
         "decoded:STEERING_002_LOW__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13007,
-          "nan_count": 164376,
+          "finite_count": 13036,
+          "nan_count": 13807,
           "non_finite_count": 0,
-          "non_null_count": 13007,
-          "unique_finite_count": 4544
+          "non_null_count": 13036,
+          "unique_finite_count": 4534
         },
         "decoded:STEERING_ANGLE_002": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14414,
-          "nan_count": 162969,
+          "finite_count": 14428,
+          "nan_count": 12415,
           "non_finite_count": 0,
-          "non_null_count": 14414,
+          "non_null_count": 14428,
           "unique_finite_count": 48
         },
         "decoded:STEERING_ANGLE_002__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12835,
-          "nan_count": 164548,
+          "finite_count": 12878,
+          "nan_count": 13965,
           "non_finite_count": 0,
-          "non_null_count": 12835,
+          "non_null_count": 12878,
           "unique_finite_count": 1017
         },
         "decoded:STEERING_ANGLE_002__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 12000,
-          "nan_count": 165383,
+          "nan_count": 14843,
           "non_finite_count": 0,
           "non_null_count": 12000,
           "unique_finite_count": 25
@@ -2289,35 +2283,35 @@
         "decoded:STEERING_ANGLE_002__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13528,
-          "nan_count": 163855,
+          "finite_count": 13567,
+          "nan_count": 13276,
           "non_finite_count": 0,
-          "non_null_count": 13528,
+          "non_null_count": 13567,
           "unique_finite_count": 1410
         },
         "decoded:STEERING_RATE_002": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14414,
-          "nan_count": 162969,
+          "finite_count": 14428,
+          "nan_count": 12415,
           "non_finite_count": 0,
-          "non_null_count": 14414,
+          "non_null_count": 14428,
           "unique_finite_count": 101
         },
         "decoded:STEERING_RATE_002__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11064,
-          "nan_count": 166319,
+          "finite_count": 11107,
+          "nan_count": 15736,
           "non_finite_count": 0,
-          "non_null_count": 11064,
+          "non_null_count": 11107,
           "unique_finite_count": 338
         },
         "decoded:STEERING_RATE_002__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 12418,
-          "nan_count": 164965,
+          "nan_count": 14425,
           "non_finite_count": 0,
           "non_null_count": 12418,
           "unique_finite_count": 19
@@ -2325,35 +2319,35 @@
         "decoded:STEERING_RATE_002__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10779,
-          "nan_count": 166604,
+          "finite_count": 10818,
+          "nan_count": 16025,
           "non_finite_count": 0,
-          "non_null_count": 10779,
+          "non_null_count": 10818,
           "unique_finite_count": 1451
         },
         "decoded:WHEEL_SPEED_PAIR_A": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14354,
-          "nan_count": 163029,
+          "finite_count": 14368,
+          "nan_count": 12475,
           "non_finite_count": 0,
-          "non_null_count": 14354,
+          "non_null_count": 14368,
           "unique_finite_count": 2762
         },
         "decoded:WHEEL_SPEED_PAIR_A__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13963,
-          "nan_count": 163420,
+          "finite_count": 14006,
+          "nan_count": 12837,
           "non_finite_count": 0,
-          "non_null_count": 13963,
+          "non_null_count": 14006,
           "unique_finite_count": 3962
         },
         "decoded:WHEEL_SPEED_PAIR_A__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13336,
-          "nan_count": 164047,
+          "nan_count": 13507,
           "non_finite_count": 0,
           "non_null_count": 13336,
           "unique_finite_count": 3226
@@ -2361,35 +2355,35 @@
         "decoded:WHEEL_SPEED_PAIR_A__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14024,
-          "nan_count": 163359,
+          "finite_count": 14063,
+          "nan_count": 12780,
           "non_finite_count": 0,
-          "non_null_count": 14024,
+          "non_null_count": 14063,
           "unique_finite_count": 4077
         },
         "decoded:WHEEL_SPEED_PAIR_B": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14344,
-          "nan_count": 163039,
+          "finite_count": 14358,
+          "nan_count": 12485,
           "non_finite_count": 0,
-          "non_null_count": 14344,
+          "non_null_count": 14358,
           "unique_finite_count": 2739
         },
         "decoded:WHEEL_SPEED_PAIR_B__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13970,
-          "nan_count": 163413,
+          "finite_count": 14013,
+          "nan_count": 12830,
           "non_finite_count": 0,
-          "non_null_count": 13970,
+          "non_null_count": 14013,
           "unique_finite_count": 3976
         },
         "decoded:WHEEL_SPEED_PAIR_B__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13356,
-          "nan_count": 164027,
+          "nan_count": 13487,
           "non_finite_count": 0,
           "non_null_count": 13356,
           "unique_finite_count": 3217
@@ -2397,17 +2391,17 @@
         "decoded:WHEEL_SPEED_PAIR_B__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14039,
-          "nan_count": 163344,
+          "finite_count": 14078,
+          "nan_count": 12765,
           "non_finite_count": 0,
-          "non_null_count": 14039,
+          "non_null_count": 14078,
           "unique_finite_count": 4080
         },
         "derived:AFR_BANK_BALANCE": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 388,
-          "nan_count": 176995,
+          "nan_count": 26455,
           "non_finite_count": 0,
           "non_null_count": 388,
           "unique_finite_count": 69
@@ -2416,7 +2410,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 6253,
-          "nan_count": 171130,
+          "nan_count": 20590,
           "non_finite_count": 0,
           "non_null_count": 6253,
           "unique_finite_count": 68
@@ -2424,26 +2418,26 @@
         "derived:AIR_MASS_PER_CYCLE": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 3399,
-          "nan_count": 173984,
+          "finite_count": 3402,
+          "nan_count": 23441,
           "non_finite_count": 0,
-          "non_null_count": 3399,
-          "unique_finite_count": 1611
+          "non_null_count": 3402,
+          "unique_finite_count": 1612
         },
         "derived:AIR_MASS_PER_CYCLE__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 9276,
-          "nan_count": 168107,
+          "finite_count": 9283,
+          "nan_count": 17560,
           "non_finite_count": 0,
-          "non_null_count": 9276,
-          "unique_finite_count": 5308
+          "non_null_count": 9283,
+          "unique_finite_count": 5309
         },
         "derived:AIR_MASS_PER_CYCLE__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 987,
-          "nan_count": 176396,
+          "nan_count": 25856,
           "non_finite_count": 0,
           "non_null_count": 987,
           "unique_finite_count": 785
@@ -2451,17 +2445,17 @@
         "derived:AIR_MASS_PER_CYCLE__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 7733,
-          "nan_count": 169650,
+          "finite_count": 7738,
+          "nan_count": 19105,
           "non_finite_count": 0,
-          "non_null_count": 7733,
+          "non_null_count": 7738,
           "unique_finite_count": 4435
         },
         "derived:ESTIMATED_POWER_HP": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1844,
-          "nan_count": 175539,
+          "nan_count": 24999,
           "non_finite_count": 0,
           "non_null_count": 1844,
           "unique_finite_count": 251
@@ -2470,7 +2464,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 5129,
-          "nan_count": 172254,
+          "nan_count": 21714,
           "non_finite_count": 0,
           "non_null_count": 5129,
           "unique_finite_count": 879
@@ -2479,7 +2473,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 715,
-          "nan_count": 176668,
+          "nan_count": 26128,
           "non_finite_count": 0,
           "non_null_count": 715,
           "unique_finite_count": 89
@@ -2488,7 +2482,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 4968,
-          "nan_count": 172415,
+          "nan_count": 21875,
           "non_finite_count": 0,
           "non_null_count": 4968,
           "unique_finite_count": 826
@@ -2497,7 +2491,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 617,
-          "nan_count": 176766,
+          "nan_count": 26226,
           "non_finite_count": 0,
           "non_null_count": 617,
           "unique_finite_count": 436
@@ -2506,7 +2500,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 3343,
-          "nan_count": 174040,
+          "nan_count": 23500,
           "non_finite_count": 0,
           "non_null_count": 3343,
           "unique_finite_count": 1093
@@ -2515,7 +2509,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 97,
-          "nan_count": 177286,
+          "nan_count": 26746,
           "non_finite_count": 0,
           "non_null_count": 97,
           "unique_finite_count": 90
@@ -2524,7 +2518,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 2255,
-          "nan_count": 175128,
+          "nan_count": 24588,
           "non_finite_count": 0,
           "non_null_count": 2255,
           "unique_finite_count": 823
@@ -2533,7 +2527,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 1844,
-          "nan_count": 175539,
+          "nan_count": 24999,
           "non_finite_count": 0,
           "non_null_count": 1844,
           "unique_finite_count": 251
@@ -2542,7 +2536,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 5129,
-          "nan_count": 172254,
+          "nan_count": 21714,
           "non_finite_count": 0,
           "non_null_count": 5129,
           "unique_finite_count": 879
@@ -2551,7 +2545,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 715,
-          "nan_count": 176668,
+          "nan_count": 26128,
           "non_finite_count": 0,
           "non_null_count": 715,
           "unique_finite_count": 89
@@ -2560,7 +2554,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 4968,
-          "nan_count": 172415,
+          "nan_count": 21875,
           "non_finite_count": 0,
           "non_null_count": 4968,
           "unique_finite_count": 820
@@ -2569,7 +2563,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 114,
-          "nan_count": 177269,
+          "nan_count": 26729,
           "non_finite_count": 0,
           "non_null_count": 114,
           "unique_finite_count": 102
@@ -2578,7 +2572,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 782,
-          "nan_count": 176601,
+          "nan_count": 26061,
           "non_finite_count": 0,
           "non_null_count": 782,
           "unique_finite_count": 202
@@ -2587,7 +2581,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 8,
-          "nan_count": 177375,
+          "nan_count": 26835,
           "non_finite_count": 0,
           "non_null_count": 8,
           "unique_finite_count": 8
@@ -2596,7 +2590,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 593,
-          "nan_count": 176790,
+          "nan_count": 26250,
           "non_finite_count": 0,
           "non_null_count": 593,
           "unique_finite_count": 171
@@ -2605,7 +2599,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 106,
-          "nan_count": 177277,
+          "nan_count": 26737,
           "non_finite_count": 0,
           "non_null_count": 106,
           "unique_finite_count": 95
@@ -2614,7 +2608,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 729,
-          "nan_count": 176654,
+          "nan_count": 26114,
           "non_finite_count": 0,
           "non_null_count": 729,
           "unique_finite_count": 189
@@ -2623,7 +2617,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 8,
-          "nan_count": 177375,
+          "nan_count": 26835,
           "non_finite_count": 0,
           "non_null_count": 8,
           "unique_finite_count": 8
@@ -2632,7 +2626,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 623,
-          "nan_count": 176760,
+          "nan_count": 26220,
           "non_finite_count": 0,
           "non_null_count": 623,
           "unique_finite_count": 181
@@ -2640,44 +2634,44 @@
         "derived:STFT_BANK_BALANCE": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11077,
-          "nan_count": 166306,
+          "finite_count": 11112,
+          "nan_count": 15731,
           "non_finite_count": 0,
-          "non_null_count": 11077,
+          "non_null_count": 11112,
           "unique_finite_count": 350
         },
         "derived:STFT_BANK_BALANCE__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13152,
-          "nan_count": 164231,
+          "finite_count": 13230,
+          "nan_count": 13613,
           "non_finite_count": 0,
-          "non_null_count": 13152,
-          "unique_finite_count": 6809
+          "non_null_count": 13230,
+          "unique_finite_count": 6816
         },
         "derived:STFT_BANK_BALANCE__roc": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 8496,
-          "nan_count": 168887,
+          "finite_count": 8497,
+          "nan_count": 18346,
           "non_finite_count": 0,
-          "non_null_count": 8496,
+          "non_null_count": 8497,
           "unique_finite_count": 793
         },
         "derived:STFT_BANK_BALANCE__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12521,
-          "nan_count": 164862,
+          "finite_count": 12553,
+          "nan_count": 14290,
           "non_finite_count": 0,
-          "non_null_count": 12521,
-          "unique_finite_count": 6924
+          "non_null_count": 12553,
+          "unique_finite_count": 6896
         },
         "derived:TOTAL_TRIM_B1": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1957,
-          "nan_count": 175426,
+          "nan_count": 24886,
           "non_finite_count": 0,
           "non_null_count": 1957,
           "unique_finite_count": 52
@@ -2685,17 +2679,17 @@
         "derived:TOTAL_TRIM_B1__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11805,
-          "nan_count": 165578,
+          "finite_count": 11904,
+          "nan_count": 14939,
           "non_finite_count": 0,
-          "non_null_count": 11805,
-          "unique_finite_count": 715
+          "non_null_count": 11904,
+          "unique_finite_count": 716
         },
         "derived:TOTAL_TRIM_B1__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 347,
-          "nan_count": 177036,
+          "nan_count": 26496,
           "non_finite_count": 0,
           "non_null_count": 347,
           "unique_finite_count": 46
@@ -2703,17 +2697,17 @@
         "derived:TOTAL_TRIM_B1__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 8168,
-          "nan_count": 169215,
+          "finite_count": 8199,
+          "nan_count": 18644,
           "non_finite_count": 0,
-          "non_null_count": 8168,
+          "non_null_count": 8199,
           "unique_finite_count": 1060
         },
         "derived:TOTAL_TRIM_B2": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1939,
-          "nan_count": 175444,
+          "nan_count": 24904,
           "non_finite_count": 0,
           "non_null_count": 1939,
           "unique_finite_count": 50
@@ -2721,17 +2715,17 @@
         "derived:TOTAL_TRIM_B2__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12181,
-          "nan_count": 165202,
+          "finite_count": 12184,
+          "nan_count": 14659,
           "non_finite_count": 0,
-          "non_null_count": 12181,
+          "non_null_count": 12184,
           "unique_finite_count": 741
         },
         "derived:TOTAL_TRIM_B2__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 330,
-          "nan_count": 177053,
+          "nan_count": 26513,
           "non_finite_count": 0,
           "non_null_count": 330,
           "unique_finite_count": 42
@@ -2739,17 +2733,17 @@
         "derived:TOTAL_TRIM_B2__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 8780,
-          "nan_count": 168603,
+          "finite_count": 8782,
+          "nan_count": 18061,
           "non_finite_count": 0,
-          "non_null_count": 8780,
+          "non_null_count": 8782,
           "unique_finite_count": 1141
         },
         "derived:TPS_VOLTAGE_PER_PCT": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 56,
-          "nan_count": 177327,
+          "nan_count": 26787,
           "non_finite_count": 0,
           "non_null_count": 56,
           "unique_finite_count": 29
@@ -2758,7 +2752,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 1576,
-          "nan_count": 175807,
+          "nan_count": 25267,
           "non_finite_count": 0,
           "non_null_count": 1576,
           "unique_finite_count": 29
@@ -2767,7 +2761,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 3377,
-          "nan_count": 174006,
+          "nan_count": 23466,
           "non_finite_count": 0,
           "non_null_count": 3377,
           "unique_finite_count": 2003
@@ -2776,7 +2770,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 9194,
-          "nan_count": 168189,
+          "nan_count": 17649,
           "non_finite_count": 0,
           "non_null_count": 9194,
           "unique_finite_count": 5350
@@ -2785,7 +2779,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 983,
-          "nan_count": 176400,
+          "nan_count": 25860,
           "non_finite_count": 0,
           "non_null_count": 983,
           "unique_finite_count": 860
@@ -2794,7 +2788,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 7646,
-          "nan_count": 169737,
+          "nan_count": 19197,
           "non_finite_count": 0,
           "non_null_count": 7646,
           "unique_finite_count": 4488
@@ -2803,7 +2797,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 405,
-          "nan_count": 176978,
+          "nan_count": 26438,
           "non_finite_count": 0,
           "non_null_count": 405,
           "unique_finite_count": 55
@@ -2812,7 +2806,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 6111,
-          "nan_count": 171272,
+          "nan_count": 20732,
           "non_finite_count": 0,
           "non_null_count": 6111,
           "unique_finite_count": 56
@@ -2821,7 +2815,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 413,
-          "nan_count": 176970,
+          "nan_count": 26430,
           "non_finite_count": 0,
           "non_null_count": 413,
           "unique_finite_count": 66
@@ -2830,7 +2824,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 6270,
-          "nan_count": 171113,
+          "nan_count": 20573,
           "non_finite_count": 0,
           "non_null_count": 6270,
           "unique_finite_count": 67
@@ -2839,7 +2833,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 366,
-          "nan_count": 177017,
+          "nan_count": 26477,
           "non_finite_count": 0,
           "non_null_count": 366,
           "unique_finite_count": 172
@@ -2848,7 +2842,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 6654,
-          "nan_count": 170729,
+          "nan_count": 20189,
           "non_finite_count": 0,
           "non_null_count": 6654,
           "unique_finite_count": 181
@@ -2857,7 +2851,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 432,
-          "nan_count": 176951,
+          "nan_count": 26411,
           "non_finite_count": 0,
           "non_null_count": 432,
           "unique_finite_count": 64
@@ -2866,7 +2860,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 6650,
-          "nan_count": 170733,
+          "nan_count": 20193,
           "non_finite_count": 0,
           "non_null_count": 6650,
           "unique_finite_count": 65
@@ -2874,62 +2868,62 @@
         "gps:speed": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 158473,
-          "nan_count": 18910,
+          "finite_count": 18798,
+          "nan_count": 8045,
           "non_finite_count": 0,
-          "non_null_count": 158473,
-          "unique_finite_count": 2391
+          "non_null_count": 18798,
+          "unique_finite_count": 2385
         },
         "gps:speed__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 161728,
-          "nan_count": 15655,
+          "finite_count": 18397,
+          "nan_count": 8446,
           "non_finite_count": 0,
-          "non_null_count": 161728,
-          "unique_finite_count": 3807
+          "non_null_count": 18397,
+          "unique_finite_count": 3776
         },
         "gps:speed__roc": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 153067,
-          "nan_count": 24316,
+          "finite_count": 17284,
+          "nan_count": 9559,
           "non_finite_count": 0,
-          "non_null_count": 153067,
-          "unique_finite_count": 2993
+          "non_null_count": 17284,
+          "unique_finite_count": 2984
         },
         "gps:speed__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 161366,
-          "nan_count": 16017,
+          "finite_count": 18144,
+          "nan_count": 8699,
           "non_finite_count": 0,
-          "non_null_count": 161366,
-          "unique_finite_count": 3818
+          "non_null_count": 18144,
+          "unique_finite_count": 3787
         },
         "obd:ABSOLUTE_LOAD": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 6072,
-          "nan_count": 171311,
+          "finite_count": 6074,
+          "nan_count": 20769,
           "non_finite_count": 0,
-          "non_null_count": 6072,
+          "non_null_count": 6074,
           "unique_finite_count": 13
         },
         "obd:ABSOLUTE_LOAD__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10299,
-          "nan_count": 167084,
+          "finite_count": 10301,
+          "nan_count": 16542,
           "non_finite_count": 0,
-          "non_null_count": 10299,
+          "non_null_count": 10301,
           "unique_finite_count": 160
         },
         "obd:ABSOLUTE_LOAD__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 3435,
-          "nan_count": 173948,
+          "nan_count": 23408,
           "non_finite_count": 0,
           "non_null_count": 3435,
           "unique_finite_count": 31
@@ -2937,17 +2931,17 @@
         "obd:ABSOLUTE_LOAD__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10937,
-          "nan_count": 166446,
+          "finite_count": 10938,
+          "nan_count": 15905,
           "non_finite_count": 0,
-          "non_null_count": 10937,
+          "non_null_count": 10938,
           "unique_finite_count": 4
         },
         "obd:ABS_THROTTLE_POS_B": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1269,
-          "nan_count": 176114,
+          "nan_count": 25574,
           "non_finite_count": 0,
           "non_null_count": 1269,
           "unique_finite_count": 45
@@ -2956,7 +2950,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 4186,
-          "nan_count": 173197,
+          "nan_count": 22657,
           "non_finite_count": 0,
           "non_null_count": 4186,
           "unique_finite_count": 421
@@ -2965,7 +2959,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 323,
-          "nan_count": 177060,
+          "nan_count": 26520,
           "non_finite_count": 0,
           "non_null_count": 323,
           "unique_finite_count": 52
@@ -2974,7 +2968,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 2703,
-          "nan_count": 174680,
+          "nan_count": 24140,
           "non_finite_count": 0,
           "non_null_count": 2703,
           "unique_finite_count": 368
@@ -2983,7 +2977,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 1924,
-          "nan_count": 175459,
+          "nan_count": 24919,
           "non_finite_count": 0,
           "non_null_count": 1924,
           "unique_finite_count": 59
@@ -2992,7 +2986,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 4073,
-          "nan_count": 173310,
+          "nan_count": 22770,
           "non_finite_count": 0,
           "non_null_count": 4073,
           "unique_finite_count": 415
@@ -3001,7 +2995,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 773,
-          "nan_count": 176610,
+          "nan_count": 26070,
           "non_finite_count": 0,
           "non_null_count": 773,
           "unique_finite_count": 63
@@ -3010,7 +3004,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 4043,
-          "nan_count": 173340,
+          "nan_count": 22800,
           "non_finite_count": 0,
           "non_null_count": 4043,
           "unique_finite_count": 431
@@ -3019,7 +3013,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 1738,
-          "nan_count": 175645,
+          "nan_count": 25105,
           "non_finite_count": 0,
           "non_null_count": 1738,
           "unique_finite_count": 26
@@ -3028,7 +3022,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 4025,
-          "nan_count": 173358,
+          "nan_count": 22818,
           "non_finite_count": 0,
           "non_null_count": 4025,
           "unique_finite_count": 295
@@ -3037,7 +3031,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 730,
-          "nan_count": 176653,
+          "nan_count": 26113,
           "non_finite_count": 0,
           "non_null_count": 730,
           "unique_finite_count": 44
@@ -3046,7 +3040,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 3953,
-          "nan_count": 173430,
+          "nan_count": 22890,
           "non_finite_count": 0,
           "non_null_count": 3953,
           "unique_finite_count": 321
@@ -3054,26 +3048,26 @@
         "obd:BAROMETRIC_PRESSURE": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 15064,
-          "nan_count": 162319,
+          "finite_count": 15068,
+          "nan_count": 11775,
           "non_finite_count": 0,
-          "non_null_count": 15064,
+          "non_null_count": 15068,
           "unique_finite_count": 4
         },
         "obd:BAROMETRIC_PRESSURE__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14420,
-          "nan_count": 162963,
+          "finite_count": 14424,
+          "nan_count": 12419,
           "non_finite_count": 0,
-          "non_null_count": 14420,
+          "non_null_count": 14424,
           "unique_finite_count": 91
         },
         "obd:BAROMETRIC_PRESSURE__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 14612,
-          "nan_count": 162771,
+          "nan_count": 12231,
           "non_finite_count": 0,
           "non_null_count": 14612,
           "unique_finite_count": 5
@@ -3082,7 +3076,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 1211,
-          "nan_count": 176172,
+          "nan_count": 25632,
           "non_finite_count": 0,
           "non_null_count": 1211,
           "unique_finite_count": 134
@@ -3091,7 +3085,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 10587,
-          "nan_count": 166796,
+          "nan_count": 16256,
           "non_finite_count": 0,
           "non_null_count": 10587,
           "unique_finite_count": 470
@@ -3100,7 +3094,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 12,
-          "nan_count": 177371,
+          "nan_count": 26831,
           "non_finite_count": 0,
           "non_null_count": 12,
           "unique_finite_count": 4
@@ -3108,17 +3102,17 @@
         "obd:CATALYST_TEMP_B1S1__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13577,
-          "nan_count": 163806,
+          "finite_count": 13580,
+          "nan_count": 13263,
           "non_finite_count": 0,
-          "non_null_count": 13577,
+          "non_null_count": 13580,
           "unique_finite_count": 20
         },
         "obd:CATALYST_TEMP_B2S1": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1153,
-          "nan_count": 176230,
+          "nan_count": 25690,
           "non_finite_count": 0,
           "non_null_count": 1153,
           "unique_finite_count": 131
@@ -3127,7 +3121,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 10490,
-          "nan_count": 166893,
+          "nan_count": 16353,
           "non_finite_count": 0,
           "non_null_count": 10490,
           "unique_finite_count": 466
@@ -3136,7 +3130,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 3,
-          "nan_count": 177380,
+          "nan_count": 26840,
           "non_finite_count": 0,
           "non_null_count": 3,
           "unique_finite_count": 3
@@ -3144,17 +3138,17 @@
         "obd:CATALYST_TEMP_B2S1__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12948,
-          "nan_count": 164435,
+          "finite_count": 12950,
+          "nan_count": 13893,
           "non_finite_count": 0,
-          "non_null_count": 12948,
+          "non_null_count": 12950,
           "unique_finite_count": 23
         },
         "obd:COMMANDED_EQUIV_RATIO": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 3942,
-          "nan_count": 173441,
+          "nan_count": 22901,
           "non_finite_count": 0,
           "non_null_count": 3942,
           "unique_finite_count": 174
@@ -3163,7 +3157,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 9919,
-          "nan_count": 167464,
+          "nan_count": 16924,
           "non_finite_count": 0,
           "non_null_count": 9919,
           "unique_finite_count": 1401
@@ -3172,7 +3166,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 1234,
-          "nan_count": 176149,
+          "nan_count": 25609,
           "non_finite_count": 0,
           "non_null_count": 1234,
           "unique_finite_count": 186
@@ -3180,17 +3174,17 @@
         "obd:COMMANDED_EQUIV_RATIO__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10735,
-          "nan_count": 166648,
+          "finite_count": 10736,
+          "nan_count": 16107,
           "non_finite_count": 0,
-          "non_null_count": 10735,
+          "non_null_count": 10736,
           "unique_finite_count": 1306
         },
         "obd:COMMANDED_THROTTLE_ACTUATOR": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1382,
-          "nan_count": 176001,
+          "nan_count": 25461,
           "non_finite_count": 0,
           "non_null_count": 1382,
           "unique_finite_count": 49
@@ -3199,7 +3193,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 4207,
-          "nan_count": 173176,
+          "nan_count": 22636,
           "non_finite_count": 0,
           "non_null_count": 4207,
           "unique_finite_count": 637
@@ -3208,7 +3202,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 765,
-          "nan_count": 176618,
+          "nan_count": 26078,
           "non_finite_count": 0,
           "non_null_count": 765,
           "unique_finite_count": 81
@@ -3217,7 +3211,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 3631,
-          "nan_count": 173752,
+          "nan_count": 23212,
           "non_finite_count": 0,
           "non_null_count": 3631,
           "unique_finite_count": 546
@@ -3225,26 +3219,26 @@
         "obd:CONTROL_MODULE_VOLTAGE": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 7498,
-          "nan_count": 169885,
+          "finite_count": 7500,
+          "nan_count": 19343,
           "non_finite_count": 0,
-          "non_null_count": 7498,
+          "non_null_count": 7500,
           "unique_finite_count": 33
         },
         "obd:CONTROL_MODULE_VOLTAGE__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13675,
-          "nan_count": 163708,
+          "finite_count": 13677,
+          "nan_count": 13166,
           "non_finite_count": 0,
-          "non_null_count": 13675,
+          "non_null_count": 13677,
           "unique_finite_count": 2048
         },
         "obd:CONTROL_MODULE_VOLTAGE__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 3135,
-          "nan_count": 174248,
+          "nan_count": 23708,
           "non_finite_count": 0,
           "non_null_count": 3135,
           "unique_finite_count": 27
@@ -3252,71 +3246,71 @@
         "obd:CONTROL_MODULE_VOLTAGE__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13134,
-          "nan_count": 164249,
+          "finite_count": 13135,
+          "nan_count": 13708,
           "non_finite_count": 0,
-          "non_null_count": 13134,
+          "non_null_count": 13135,
           "unique_finite_count": 4307
         },
         "obd:COOLANT_TEMP": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 15195,
-          "nan_count": 162188,
+          "finite_count": 15321,
+          "nan_count": 11522,
           "non_finite_count": 0,
-          "non_null_count": 15195,
+          "non_null_count": 15321,
           "unique_finite_count": 75
         },
         "obd:COOLANT_TEMP__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 14687,
-          "nan_count": 162696,
+          "finite_count": 14890,
+          "nan_count": 11953,
           "non_finite_count": 0,
-          "non_null_count": 14687,
-          "unique_finite_count": 1621
+          "non_null_count": 14890,
+          "unique_finite_count": 1660
         },
         "obd:COOLANT_TEMP__roc": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12375,
-          "nan_count": 165008,
+          "finite_count": 12465,
+          "nan_count": 14378,
           "non_finite_count": 0,
-          "non_null_count": 12375,
+          "non_null_count": 12465,
           "unique_finite_count": 15
         },
         "obd:COOLANT_TEMP__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11423,
-          "nan_count": 165960,
+          "finite_count": 10608,
+          "nan_count": 16235,
           "non_finite_count": 0,
-          "non_null_count": 11423,
-          "unique_finite_count": 633
+          "non_null_count": 10608,
+          "unique_finite_count": 563
         },
         "obd:ENGINE_LOAD": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 7377,
-          "nan_count": 170006,
+          "finite_count": 7387,
+          "nan_count": 19456,
           "non_finite_count": 0,
-          "non_null_count": 7377,
+          "non_null_count": 7387,
           "unique_finite_count": 200
         },
         "obd:ENGINE_LOAD__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13639,
-          "nan_count": 163744,
+          "finite_count": 13681,
+          "nan_count": 13162,
           "non_finite_count": 0,
-          "non_null_count": 13639,
+          "non_null_count": 13681,
           "unique_finite_count": 4336
         },
         "obd:ENGINE_LOAD__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 3197,
-          "nan_count": 174186,
+          "nan_count": 23646,
           "non_finite_count": 0,
           "non_null_count": 3197,
           "unique_finite_count": 481
@@ -3324,35 +3318,35 @@
         "obd:ENGINE_LOAD__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10335,
-          "nan_count": 167048,
+          "finite_count": 10373,
+          "nan_count": 16470,
           "non_finite_count": 0,
-          "non_null_count": 10335,
+          "non_null_count": 10373,
           "unique_finite_count": 3563
         },
         "obd:EVAPORATIVE_PURGE": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 4204,
-          "nan_count": 173179,
+          "finite_count": 4206,
+          "nan_count": 22637,
           "non_finite_count": 0,
-          "non_null_count": 4204,
+          "non_null_count": 4206,
           "unique_finite_count": 80
         },
         "obd:EVAPORATIVE_PURGE__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13472,
-          "nan_count": 163911,
+          "finite_count": 13477,
+          "nan_count": 13366,
           "non_finite_count": 0,
-          "non_null_count": 13472,
+          "non_null_count": 13477,
           "unique_finite_count": 1423
         },
         "obd:EVAPORATIVE_PURGE__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1234,
-          "nan_count": 176149,
+          "nan_count": 25609,
           "non_finite_count": 0,
           "non_null_count": 1234,
           "unique_finite_count": 150
@@ -3360,26 +3354,26 @@
         "obd:EVAPORATIVE_PURGE__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13370,
-          "nan_count": 164013,
+          "finite_count": 13374,
+          "nan_count": 13469,
           "non_finite_count": 0,
-          "non_null_count": 13370,
+          "non_null_count": 13374,
           "unique_finite_count": 1603
         },
         "obd:EVAP_VAPOR_PRESSURE": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 4680,
-          "nan_count": 172703,
+          "finite_count": 4682,
+          "nan_count": 22161,
           "non_finite_count": 0,
-          "non_null_count": 4680,
+          "non_null_count": 4682,
           "unique_finite_count": 10
         },
         "obd:EVAP_VAPOR_PRESSURE__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1430,
-          "nan_count": 175953,
+          "nan_count": 25413,
           "non_finite_count": 0,
           "non_null_count": 1430,
           "unique_finite_count": 12
@@ -3388,7 +3382,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 1289,
-          "nan_count": 176094,
+          "nan_count": 25554,
           "non_finite_count": 0,
           "non_null_count": 1289,
           "unique_finite_count": 37
@@ -3397,7 +3391,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 10927,
-          "nan_count": 166456,
+          "nan_count": 15916,
           "non_finite_count": 0,
           "non_null_count": 10927,
           "unique_finite_count": 137
@@ -3406,7 +3400,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 7,
-          "nan_count": 177376,
+          "nan_count": 26836,
           "non_finite_count": 0,
           "non_null_count": 7,
           "unique_finite_count": 3
@@ -3414,35 +3408,35 @@
         "obd:FUEL_LEVEL__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13638,
-          "nan_count": 163745,
+          "finite_count": 13642,
+          "nan_count": 13201,
           "non_finite_count": 0,
-          "non_null_count": 13638,
+          "non_null_count": 13642,
           "unique_finite_count": 16
         },
         "obd:FUEL_STATUS": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 4687,
-          "nan_count": 172696,
+          "finite_count": 4693,
+          "nan_count": 22150,
           "non_finite_count": 0,
-          "non_null_count": 4687,
+          "non_null_count": 4693,
           "unique_finite_count": 3
         },
         "obd:FUEL_STATUS__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10861,
-          "nan_count": 166522,
+          "finite_count": 10898,
+          "nan_count": 15945,
           "non_finite_count": 0,
-          "non_null_count": 10861,
+          "non_null_count": 10898,
           "unique_finite_count": 61
         },
         "obd:FUEL_STATUS__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1431,
-          "nan_count": 175952,
+          "nan_count": 25412,
           "non_finite_count": 0,
           "non_null_count": 1431,
           "unique_finite_count": 5
@@ -3450,35 +3444,35 @@
         "obd:FUEL_STATUS__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13016,
-          "nan_count": 164367,
+          "finite_count": 13049,
+          "nan_count": 13794,
           "non_finite_count": 0,
-          "non_null_count": 13016,
+          "non_null_count": 13049,
           "unique_finite_count": 40
         },
         "obd:INTAKE_TEMP": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 15114,
-          "nan_count": 162269,
+          "finite_count": 15120,
+          "nan_count": 11723,
           "non_finite_count": 0,
-          "non_null_count": 15114,
+          "non_null_count": 15120,
           "unique_finite_count": 46
         },
         "obd:INTAKE_TEMP__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 15159,
-          "nan_count": 162224,
+          "finite_count": 15165,
+          "nan_count": 11678,
           "non_finite_count": 0,
-          "non_null_count": 15159,
+          "non_null_count": 15165,
           "unique_finite_count": 1402
         },
         "obd:INTAKE_TEMP__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 13001,
-          "nan_count": 164382,
+          "nan_count": 13842,
           "non_finite_count": 0,
           "non_null_count": 13001,
           "unique_finite_count": 19
@@ -3486,35 +3480,35 @@
         "obd:INTAKE_TEMP__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11566,
-          "nan_count": 165817,
+          "finite_count": 11571,
+          "nan_count": 15272,
           "non_finite_count": 0,
-          "non_null_count": 11566,
+          "non_null_count": 11571,
           "unique_finite_count": 462
         },
         "obd:MAF": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 7355,
-          "nan_count": 170028,
+          "finite_count": 7360,
+          "nan_count": 19483,
           "non_finite_count": 0,
-          "non_null_count": 7355,
+          "non_null_count": 7360,
           "unique_finite_count": 1039
         },
         "obd:MAF__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13569,
-          "nan_count": 163814,
+          "finite_count": 13576,
+          "nan_count": 13267,
           "non_finite_count": 0,
-          "non_null_count": 13569,
+          "non_null_count": 13576,
           "unique_finite_count": 6494
         },
         "obd:MAF__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 3092,
-          "nan_count": 174291,
+          "nan_count": 23751,
           "non_finite_count": 0,
           "non_null_count": 3092,
           "unique_finite_count": 989
@@ -3522,35 +3516,35 @@
         "obd:MAF__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11872,
-          "nan_count": 165511,
+          "finite_count": 11877,
+          "nan_count": 14966,
           "non_finite_count": 0,
-          "non_null_count": 11872,
+          "non_null_count": 11877,
           "unique_finite_count": 5454
         },
         "obd:O2_B1S2": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 3685,
-          "nan_count": 173698,
+          "finite_count": 3688,
+          "nan_count": 23155,
           "non_finite_count": 0,
-          "non_null_count": 3685,
+          "non_null_count": 3688,
           "unique_finite_count": 87
         },
         "obd:O2_B1S2__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12928,
-          "nan_count": 164455,
+          "finite_count": 12934,
+          "nan_count": 13909,
           "non_finite_count": 0,
-          "non_null_count": 12928,
+          "non_null_count": 12934,
           "unique_finite_count": 1495
         },
         "obd:O2_B1S2__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1238,
-          "nan_count": 176145,
+          "nan_count": 25605,
           "non_finite_count": 0,
           "non_null_count": 1238,
           "unique_finite_count": 178
@@ -3558,35 +3552,35 @@
         "obd:O2_B1S2__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12790,
-          "nan_count": 164593,
+          "finite_count": 12795,
+          "nan_count": 14048,
           "non_finite_count": 0,
-          "non_null_count": 12790,
+          "non_null_count": 12795,
           "unique_finite_count": 2252
         },
         "obd:O2_B2S2": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 3699,
-          "nan_count": 173684,
+          "finite_count": 3702,
+          "nan_count": 23141,
           "non_finite_count": 0,
-          "non_null_count": 3699,
+          "non_null_count": 3702,
           "unique_finite_count": 89
         },
         "obd:O2_B2S2__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 12572,
-          "nan_count": 164811,
+          "finite_count": 12578,
+          "nan_count": 14265,
           "non_finite_count": 0,
-          "non_null_count": 12572,
+          "non_null_count": 12578,
           "unique_finite_count": 1454
         },
         "obd:O2_B2S2__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1164,
-          "nan_count": 176219,
+          "nan_count": 25679,
           "non_finite_count": 0,
           "non_null_count": 1164,
           "unique_finite_count": 189
@@ -3594,17 +3588,17 @@
         "obd:O2_B2S2__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 9484,
-          "nan_count": 167899,
+          "finite_count": 9489,
+          "nan_count": 17354,
           "non_finite_count": 0,
-          "non_null_count": 9484,
+          "non_null_count": 9489,
           "unique_finite_count": 1972
         },
         "obd:O2_WR_LAMBDA_S1": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 3112,
-          "nan_count": 174271,
+          "nan_count": 23731,
           "non_finite_count": 0,
           "non_null_count": 3112,
           "unique_finite_count": 197
@@ -3613,7 +3607,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 7397,
-          "nan_count": 169986,
+          "nan_count": 19446,
           "non_finite_count": 0,
           "non_null_count": 7397,
           "unique_finite_count": 2506
@@ -3622,7 +3616,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 1793,
-          "nan_count": 175590,
+          "nan_count": 25050,
           "non_finite_count": 0,
           "non_null_count": 1793,
           "unique_finite_count": 165
@@ -3631,7 +3625,7 @@
           "constant": false,
           "dtype": "float32",
           "finite_count": 6494,
-          "nan_count": 170889,
+          "nan_count": 20349,
           "non_finite_count": 0,
           "non_null_count": 6494,
           "unique_finite_count": 2171
@@ -3639,26 +3633,26 @@
         "obd:RELATIVE_THROTTLE_POS": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 7222,
-          "nan_count": 170161,
+          "finite_count": 7224,
+          "nan_count": 19619,
           "non_finite_count": 0,
-          "non_null_count": 7222,
+          "non_null_count": 7224,
           "unique_finite_count": 100
         },
         "obd:RELATIVE_THROTTLE_POS__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13381,
-          "nan_count": 164002,
+          "finite_count": 13383,
+          "nan_count": 13460,
           "non_finite_count": 0,
-          "non_null_count": 13381,
+          "non_null_count": 13383,
           "unique_finite_count": 2895
         },
         "obd:RELATIVE_THROTTLE_POS__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 3287,
-          "nan_count": 174096,
+          "nan_count": 23556,
           "non_finite_count": 0,
           "non_null_count": 3287,
           "unique_finite_count": 272
@@ -3666,35 +3660,35 @@
         "obd:RELATIVE_THROTTLE_POS__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10110,
-          "nan_count": 167273,
+          "finite_count": 10111,
+          "nan_count": 16732,
           "non_finite_count": 0,
-          "non_null_count": 10110,
+          "non_null_count": 10111,
           "unique_finite_count": 2862
         },
         "obd:RPM": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 7580,
-          "nan_count": 169803,
+          "finite_count": 7579,
+          "nan_count": 19264,
           "non_finite_count": 0,
-          "non_null_count": 7580,
+          "non_null_count": 7579,
           "unique_finite_count": 248
         },
         "obd:RPM__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10893,
-          "nan_count": 166490,
+          "finite_count": 10903,
+          "nan_count": 15940,
           "non_finite_count": 0,
-          "non_null_count": 10893,
+          "non_null_count": 10903,
           "unique_finite_count": 3756
         },
         "obd:RPM__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 3481,
-          "nan_count": 173902,
+          "nan_count": 23362,
           "non_finite_count": 0,
           "non_null_count": 3481,
           "unique_finite_count": 333
@@ -3702,17 +3696,17 @@
         "obd:RPM__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10298,
-          "nan_count": 167085,
+          "finite_count": 10305,
+          "nan_count": 16538,
           "non_finite_count": 0,
-          "non_null_count": 10298,
+          "non_null_count": 10305,
           "unique_finite_count": 3894
         },
         "obd:SHORT_FUEL_TRIM_1": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 4172,
-          "nan_count": 173211,
+          "nan_count": 22671,
           "non_finite_count": 0,
           "non_null_count": 4172,
           "unique_finite_count": 54
@@ -3720,17 +3714,17 @@
         "obd:SHORT_FUEL_TRIM_1__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13582,
-          "nan_count": 163801,
+          "finite_count": 13655,
+          "nan_count": 13188,
           "non_finite_count": 0,
-          "non_null_count": 13582,
-          "unique_finite_count": 1068
+          "non_null_count": 13655,
+          "unique_finite_count": 1072
         },
         "obd:SHORT_FUEL_TRIM_1__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1062,
-          "nan_count": 176321,
+          "nan_count": 25781,
           "non_finite_count": 0,
           "non_null_count": 1062,
           "unique_finite_count": 57
@@ -3738,35 +3732,35 @@
         "obd:SHORT_FUEL_TRIM_1__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10498,
-          "nan_count": 166885,
+          "finite_count": 10530,
+          "nan_count": 16313,
           "non_finite_count": 0,
-          "non_null_count": 10498,
+          "non_null_count": 10530,
           "unique_finite_count": 1899
         },
         "obd:SHORT_FUEL_TRIM_2": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 4596,
-          "nan_count": 172787,
+          "finite_count": 4601,
+          "nan_count": 22242,
           "non_finite_count": 0,
-          "non_null_count": 4596,
+          "non_null_count": 4601,
           "unique_finite_count": 52
         },
         "obd:SHORT_FUEL_TRIM_2__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13793,
-          "nan_count": 163590,
+          "finite_count": 13828,
+          "nan_count": 13015,
           "non_finite_count": 0,
-          "non_null_count": 13793,
+          "non_null_count": 13828,
           "unique_finite_count": 1040
         },
         "obd:SHORT_FUEL_TRIM_2__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 1117,
-          "nan_count": 176266,
+          "nan_count": 25726,
           "non_finite_count": 0,
           "non_null_count": 1117,
           "unique_finite_count": 55
@@ -3774,35 +3768,35 @@
         "obd:SHORT_FUEL_TRIM_2__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13100,
-          "nan_count": 164283,
+          "finite_count": 13109,
+          "nan_count": 13734,
           "non_finite_count": 0,
-          "non_null_count": 13100,
-          "unique_finite_count": 2089
+          "non_null_count": 13109,
+          "unique_finite_count": 2083
         },
         "obd:SPEED": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 8136,
-          "nan_count": 169247,
+          "finite_count": 8142,
+          "nan_count": 18701,
           "non_finite_count": 0,
-          "non_null_count": 8136,
+          "non_null_count": 8142,
           "unique_finite_count": 54
         },
         "obd:SPEED__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13418,
-          "nan_count": 163965,
+          "finite_count": 13428,
+          "nan_count": 13415,
           "non_finite_count": 0,
-          "non_null_count": 13418,
+          "non_null_count": 13428,
           "unique_finite_count": 2210
         },
         "obd:SPEED__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 4330,
-          "nan_count": 173053,
+          "nan_count": 22513,
           "non_finite_count": 0,
           "non_null_count": 4330,
           "unique_finite_count": 77
@@ -3810,35 +3804,35 @@
         "obd:SPEED__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13280,
-          "nan_count": 164103,
+          "finite_count": 13288,
+          "nan_count": 13555,
           "non_finite_count": 0,
-          "non_null_count": 13280,
+          "non_null_count": 13288,
           "unique_finite_count": 2607
         },
         "obd:THROTTLE_POS": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 7421,
-          "nan_count": 169962,
+          "finite_count": 7424,
+          "nan_count": 19419,
           "non_finite_count": 0,
-          "non_null_count": 7421,
+          "non_null_count": 7424,
           "unique_finite_count": 107
         },
         "obd:THROTTLE_POS__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 13389,
-          "nan_count": 163994,
+          "finite_count": 13396,
+          "nan_count": 13447,
           "non_finite_count": 0,
-          "non_null_count": 13389,
+          "non_null_count": 13396,
           "unique_finite_count": 3274
         },
         "obd:THROTTLE_POS__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 3397,
-          "nan_count": 173986,
+          "nan_count": 23446,
           "non_finite_count": 0,
           "non_null_count": 3397,
           "unique_finite_count": 348
@@ -3846,35 +3840,35 @@
         "obd:THROTTLE_POS__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10897,
-          "nan_count": 166486,
+          "finite_count": 10902,
+          "nan_count": 15941,
           "non_finite_count": 0,
-          "non_null_count": 10897,
+          "non_null_count": 10902,
           "unique_finite_count": 3163
         },
         "obd:TIMING_ADVANCE": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 6346,
-          "nan_count": 171037,
+          "finite_count": 6352,
+          "nan_count": 20491,
           "non_finite_count": 0,
-          "non_null_count": 6346,
+          "non_null_count": 6352,
           "unique_finite_count": 46
         },
         "obd:TIMING_ADVANCE__mean": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 10800,
-          "nan_count": 166583,
+          "finite_count": 10810,
+          "nan_count": 16033,
           "non_finite_count": 0,
-          "non_null_count": 10800,
+          "non_null_count": 10810,
           "unique_finite_count": 2182
         },
         "obd:TIMING_ADVANCE__roc": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 3519,
-          "nan_count": 173864,
+          "nan_count": 23324,
           "non_finite_count": 0,
           "non_null_count": 3519,
           "unique_finite_count": 90
@@ -3882,10 +3876,10 @@
         "obd:TIMING_ADVANCE__std": {
           "constant": false,
           "dtype": "float32",
-          "finite_count": 11568,
-          "nan_count": 165815,
+          "finite_count": 11576,
+          "nan_count": 15267,
           "non_finite_count": 0,
-          "non_null_count": 11568,
+          "non_null_count": 11576,
           "unique_finite_count": 2990
         }
       },
@@ -3930,7 +3924,7 @@
         "derived:LTFT_BANK_BALANCE__roc"
       ],
       "non_finite_columns": [],
-      "row_count": 177383,
+      "row_count": 26843,
       "selected_feature_count": 273
     },
     "feature_spec_version": 1,
@@ -3997,20 +3991,14 @@
       "mode": "warmup"
     }
   ],
-  "training_data_hash": "sha256:05990b9b15dcb5f1236ab798030369eabf260a346c7fadd337f4acd9458f4ea6",
+  "training_data_hash": "sha256:328074d6b2abf727944d611a10d7d71b6690a80162716aae65605900b7ff62e4",
   "training_end_timestamp": "2026-07-22T17:15:46Z",
   "training_sessions": [
     "2026-07-18T215941",
     "2026-07-18T222019",
-    "2026-07-18T235004",
     "2026-07-19T000112",
     "2026-07-19T003124",
-    "2026-07-19T030024",
-    "2026-07-19T030829",
-    "2026-07-19T035500",
-    "2026-07-19T200729",
     "2026-07-19T202721",
-    "2026-07-19T223325",
     "2026-07-22T154954",
     "2026-07-22T161632",
     "2026-07-22T163011",
