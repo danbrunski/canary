@@ -23,7 +23,7 @@ set -euo pipefail
 # Everything is env-overridable:
 #   PI_USER PI_HOST PI_SESSIONS PI_CONFIG PI_REPO
 #   SESSIONS_ROOT TRAIN_SESSIONS_ROOT LAPTOP_CONFIG BINDINGS IF_OUT LSTM_OUT
-#   TCN_OUT BEHAVIOR_OUT
+#   TCN_OUT BEHAVIOR_OUT_OVERRIDE
 #   DEVICE SEQUENCE_MODEL EXPECT_RESAMPLE_HZ EXPECT_ROLLING_WINDOW_SECONDS RSYNC_DELETE
 #
 # SEQUENCE_MODEL (lstm|tcn) overrides which sequence backbone retrains; default
@@ -53,7 +53,10 @@ IF_OUT="${IF_OUT:-}"
 LSTM_OUT="${LSTM_OUT:-}"
 TCN_OUT="${TCN_OUT:-}"
 SEQUENCE_MODEL="${SEQUENCE_MODEL:-}"   # empty = follow config; or lstm|tcn
-BEHAVIOR_OUT="${BEHAVIOR_OUT:-data/behavior_models.yaml}"
+# Resolved from the scoped config in resolve_out_dirs (the daemon reads
+# data/<slug>/behavior_models.yaml); set BEHAVIOR_OUT_OVERRIDE to force a path.
+BEHAVIOR_OUT_OVERRIDE="${BEHAVIOR_OUT_OVERRIDE:-${BEHAVIOR_OUT:-}}"
+BEHAVIOR_OUT=""
 DEVICE="${DEVICE:-cuda}"          # cuda=NVIDIA, cpu=fallback; mps is macOS-only
 EXPECT_RESAMPLE_HZ="${EXPECT_RESAMPLE_HZ:-1}"
 EXPECT_ROLLING_WINDOW_SECONDS="${EXPECT_ROLLING_WINDOW_SECONDS:-30}"
@@ -108,8 +111,14 @@ PY
 resolve_out_dirs() {
   [[ -n "${IF_OUT}" && -n "${LSTM_OUT}" && -n "${TCN_OUT}" ]] && return 0
   [[ -s "${LAPTOP_CONFIG}" ]] || die "${LAPTOP_CONFIG} missing/empty — run 'pull' first."
-  local models_dir
-  models_dir="$("${PY}" - "${LAPTOP_CONFIG}" <<'PY'
+  local resolved models_dir behavior_path
+  # Both paths come from the SAME scoped config. BEHAVIOR_OUT used to be a
+  # hardcoded unscoped `data/behavior_models.yaml`, but scope_config maps
+  # daemon.behavior_models to data/<slug>/behavior_models.yaml — which is what
+  # the daemon actually loads. Every refit since the 2026-07-18 profile
+  # migration therefore wrote to a path nothing reads, and the Pi kept
+  # serving its pre-migration surface set.
+  resolved="$("${PY}" - "${LAPTOP_CONFIG}" <<'PYEOF'
 import sys
 from pathlib import Path
 from src.config import CanaryConfig
@@ -118,12 +127,17 @@ cfg = CanaryConfig.from_yaml(Path(sys.argv[1]))
 if cfg.profiles.enabled:
     cfg = scope_config(cfg, resolve_profile_for_tooling(cfg, None))
 print(cfg.daemon.models_dir)
-PY
-)" || die "could not resolve the profile-scoped models dir from ${LAPTOP_CONFIG}"
+print(cfg.daemon.behavior_models)
+PYEOF
+)" || die "could not resolve profile-scoped output paths from ${LAPTOP_CONFIG}"
+  models_dir="$(printf '%s\n' "${resolved}" | sed -n 1p)"
+  behavior_path="$(printf '%s\n' "${resolved}" | sed -n 2p)"
   IF_OUT="${IF_OUT:-${models_dir}/isolation_forest}"
   LSTM_OUT="${LSTM_OUT:-${models_dir}/lstm_autoencoder}"
   TCN_OUT="${TCN_OUT:-${models_dir}/tcn_autoencoder}"
+  BEHAVIOR_OUT="${BEHAVIOR_OUT_OVERRIDE:-${behavior_path}}"
   echo "artifact dirs: ${IF_OUT}  ${LSTM_OUT}  ${TCN_OUT}"
+  echo "behavior models: ${BEHAVIOR_OUT}"
 }
 
 # The sessions root the TRAINERS read, which is not always SESSIONS_ROOT: we

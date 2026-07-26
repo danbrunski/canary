@@ -1,0 +1,78 @@
+{
+  "cells": [],
+  "channels": [],
+  "fault_kinds": [],
+  "generated_at": "20260726-202750",
+  "grid_cells": 0,
+  "n_injections": 5,
+  "nominal_fp": {},
+  "regressions": {
+    "cells": [
+      {
+        "detector": "fused",
+        "fault_kind": "drift",
+        "metrics": {},
+        "status": "removed"
+      },
+      {
+        "detector": "fused",
+        "fault_kind": "dropout",
+        "metrics": {},
+        "status": "removed"
+      },
+      {
+        "detector": "fused",
+        "fault_kind": "scale",
+        "metrics": {},
+        "status": "removed"
+      },
+      {
+        "detector": "fused",
+        "fault_kind": "spike",
+        "metrics": {},
+        "status": "removed"
+      },
+      {
+        "detector": "fused",
+        "fault_kind": "stuck",
+        "metrics": {},
+        "status": "removed"
+      },
+      {
+        "detector": "isolation_forest",
+        "fault_kind": "drift",
+        "metrics": {},
+        "status": "removed"
+      },
+      {
+        "detector": "isolation_forest",
+        "fault_kind": "dropout",
+        "metrics": {},
+        "status": "removed"
+      },
+      {
+        "detector": "isolation_forest",
+        "fault_kind": "scale",
+        "metrics": {},
+        "status": "removed"
+      },
+      {
+        "detector": "isolation_forest",
+        "fault_kind": "spike",
+        "metrics": {},
+        "status": "removed"
+      },
+      {
+        "detector": "isolation_forest",
+        "fault_kind": "stuck",
+        "metrics": {},
+        "status": "removed"
+      }
+    ],
+    "regressed": false,
+    "tolerance": 0.15
+  },
+  "seed": 42,
+  "sessions": [],
+  "table": []
+}
