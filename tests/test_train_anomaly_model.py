@@ -296,12 +296,16 @@ def test_feature_spec_records_health_and_dropped_columns():
     spec = build_feature_spec(df, feature_columns, config=_config())
 
     assert spec["feature_spec_version"] == 1
-    assert spec["feature_columns"] == ["obd:RPM", "obd:SPEED"]
-    assert spec["feature_dtypes"]["obd:RPM"] == "float64"
+    # obd:RPM is corpus-constant in this fixture → dropped as zero-variance
+    # (a dead-poll channel that later comes alive floods attribution — the
+    # obd:ABSOLUTE_LOAD lesson) and documented in dropped_constant_columns.
+    assert spec["feature_columns"] == ["obd:SPEED"]
+    assert spec["feature_dtypes"]["obd:SPEED"] == "float64"
     assert spec["source_prefixes"] == ["obd"]
     assert spec["preprocessing"]["resample_hz"] == _config().preprocessing.resample_hz
     health = spec["feature_health"]
-    assert health["constant_columns"] == ["obd:RPM"]
+    assert health["constant_columns"] == []  # no constants survive selection
+    assert health["dropped_constant_columns"] == ["obd:RPM"]
     assert health["dropped_all_nan_columns"] == ["deviation:coolant_warmup"]
     assert health["columns"]["obd:SPEED"]["unique_finite_count"] == 3
 
@@ -322,28 +326,22 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
 
     assert build_feature_spec(df, _trainable_feature_columns(df), config=_config()) == {
         "feature_spec_version": 1,
-        "feature_columns": ["obd:RPM", "obd:SPEED"],
-        "feature_dtypes": {"obd:RPM": "float64", "obd:SPEED": "float64"},
+        # obd:RPM is corpus-constant here → excluded from the trained set
+        # (zero-variance drop) and recorded in dropped_constant_columns.
+        "feature_columns": ["obd:SPEED"],
+        "feature_dtypes": {"obd:SPEED": "float64"},
         "source_prefixes": ["obd"],
         "behavior_model_columns": [],
         "feature_health": {
             "row_count": 3,
             "candidate_feature_count": 3,
-            "selected_feature_count": 2,
+            "selected_feature_count": 1,
             "dropped_all_nan_columns": ["deviation:coolant_warmup"],
+            "dropped_constant_columns": ["obd:RPM"],
             "all_nan_columns": [],
-            "constant_columns": ["obd:RPM"],
+            "constant_columns": [],
             "non_finite_columns": [],
             "columns": {
-                "obd:RPM": {
-                    "dtype": "float64",
-                    "non_null_count": 3,
-                    "finite_count": 3,
-                    "nan_count": 0,
-                    "non_finite_count": 0,
-                    "unique_finite_count": 1,
-                    "constant": True,
-                },
                 "obd:SPEED": {
                     "dtype": "float64",
                     "non_null_count": 3,

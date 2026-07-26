@@ -595,20 +595,39 @@ def segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> tuple[
 
 
 def trainable_feature_columns(features: pd.DataFrame) -> list[str]:
-    """Numeric feature columns with at least one non-NaN value.
+    """Numeric feature columns with informative variation in the corpus.
 
     Excludes structural columns (``session``, ``timestamp``, the mode column)
     and gap flags; keeps ``decoded:*`` and OBD channels plus their
     ``__mean``/``__std``/``__roc`` derivatives. Drops all-NaN columns (signals
     whose CAN ID never appeared this session) so the z-score scaler and the
-    sequence-window builder don't choke.
+    sequence-window builder don't choke, and drops columns *constant across
+    the entire corpus*: a channel with zero training variance teaches the
+    detectors nothing, and the moment the sensor comes alive after training
+    it dominates every event's attribution (the May/June models trained while
+    ``obd:ABSOLUTE_LOAD`` polling was dead-constant; when the PID started
+    reporting in July, its family appeared in 37/37 LSTM events). Constancy
+    is judged over the whole multi-session frame, so a channel that is merely
+    steady *within* one session (coolant at temperature) survives as long as
+    the corpus saw it move. ``summarize_feature_health`` documents the drops
+    in the manifest (``dropped_constant_columns``).
     """
     cols: list[str] = []
     for col in candidate_feature_columns(features):
         if not bool(features[col].notna().any()):
             continue
+        if _is_constant_column(features[col]):
+            continue
         cols.append(col)
     return cols
+
+
+def _is_constant_column(series: pd.Series) -> bool:
+    """True when every finite value in ``series`` is identical (or none exist).
+
+    Same definition as ``_column_health``'s ``constant`` flag so selection and
+    the manifest's health report can never disagree."""
+    return bool(_column_health(series)["constant"])
 
 
 def restrict_isolation_forest_expansion(
@@ -704,8 +723,9 @@ def sequence_feature_columns(features: pd.DataFrame) -> list[str]:
     The previous density / every-session pruning is **gone**: GRU-D feeds
     missingness to the model via the mask/Δt channels, so a round-robin OBD PID
     (stale most ticks) or a channel absent from some drives is kept at its native
-    rate rather than dropped. The only remaining drop is all-NaN-everywhere
-    columns, inherited from :func:`trainable_feature_columns`.
+    rate rather than dropped. The remaining drops — all-NaN-everywhere and
+    corpus-constant (zero-variance) columns — are inherited from
+    :func:`trainable_feature_columns`.
     """
     return [
         col for col in trainable_feature_columns(features) if not col.startswith(DEVIATION_PREFIX)
@@ -867,12 +887,26 @@ def summarize_feature_health(
         and pd.api.types.is_numeric_dtype(features[column])
         and not bool(features[column].notna().any())
     ]
+    # Candidates excluded by trainable_feature_columns' zero-variance drop —
+    # observed but never moving across the whole corpus (usually a dead poll,
+    # e.g. ABSOLUTE_LOAD before its PID worked). Documented here so a manifest
+    # answers "why isn't channel X in the model?" without re-running training.
+    dropped_constant_columns = [
+        column
+        for column in candidates
+        if column not in selected
+        and column in features.columns
+        and pd.api.types.is_numeric_dtype(features[column])
+        and bool(features[column].notna().any())
+        and _is_constant_column(features[column])
+    ]
 
     return {
         "row_count": int(len(features)),
         "candidate_feature_count": len(candidates),
         "selected_feature_count": len(columns),
         "dropped_all_nan_columns": dropped_all_nan_columns,
+        "dropped_constant_columns": dropped_constant_columns,
         "all_nan_columns": all_nan_columns,
         "constant_columns": constant_columns,
         "non_finite_columns": non_finite_columns,

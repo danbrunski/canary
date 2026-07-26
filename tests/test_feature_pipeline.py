@@ -27,6 +27,8 @@ from src.preprocessing.feature_pipeline import (
     featurize_wide_frame,
     restrict_isolation_forest_expansion,
     sequence_feature_columns,
+    summarize_feature_health,
+    trainable_feature_columns,
 )
 from src.preprocessing.features import MEAN_SUFFIX, ROC_SUFFIX, STD_SUFFIX, FeatureConfig
 from src.preprocessing.resampler import GAP_SUFFIX
@@ -67,7 +69,10 @@ def test_sequence_feature_columns_keeps_sparse_channels() -> None:
             "timestamp": pd.date_range("2026-05-24T19:00:00Z", periods=n, freq="1s"),
             MODE_COLUMN: ["city"] * n,
             "dbc:ECM_RPM": [float(800 + i) for i in range(n)],
-            "obd:FUEL_LEVEL": [50.0] * n,
+            # Varies slightly (a real fuel level drains) — corpus-constant
+            # channels are now dropped as zero-variance, which is not what
+            # this test is about (sparse ≠ constant).
+            "obd:FUEL_LEVEL": [50.0 - 0.1 * i for i in range(n)],
             f"dbc:ECM_RPM{GAP_SUFFIX}": [False] * n,
             f"obd:FUEL_LEVEL{GAP_SUFFIX}": [i % 5 != 0 for i in range(n)],  # stale 80%
         }
@@ -97,6 +102,36 @@ def test_sequence_feature_columns_drops_all_nan_and_deviations() -> None:
     assert "dbc:ECM_RPM" in bases
     assert "deviation:coolant_warmup" not in bases  # deviation family dropped
     assert "obd:NEVER_SEEN" not in bases  # all-NaN dropped
+
+
+def test_trainable_feature_columns_drops_corpus_constant_channels() -> None:
+    """A channel constant across the ENTIRE corpus (a dead poll — the May/June
+    models trained while obd:ABSOLUTE_LOAD read a constant) teaches nothing
+    and floods attribution once the sensor comes alive; it must be dropped.
+    A channel that merely holds steady within one session but moved in
+    another stays trainable — constancy is corpus-wide."""
+    n = 6
+    frame = pd.DataFrame(
+        {
+            "session": ["s1"] * (n // 2) + ["s2"] * (n // 2),
+            "timestamp": pd.date_range("2026-05-24T19:00:00Z", periods=n, freq="1s"),
+            MODE_COLUMN: ["city"] * n,
+            "obd:RPM": [float(800 + i) for i in range(n)],
+            "obd:DEAD_POLL": [0.0] * n,  # constant everywhere
+            # steady in s1 (90.0), moved in s2 — corpus-varying, kept
+            "obd:COOLANT_TEMP": [90.0, 90.0, 90.0, 60.0, 75.0, 90.0],
+        }
+    )
+    cols = trainable_feature_columns(frame)
+    assert "obd:RPM" in cols
+    assert "obd:COOLANT_TEMP" in cols
+    assert "obd:DEAD_POLL" not in cols
+    # The manifest documents the drop.
+    health = summarize_feature_health(
+        frame, cols, candidate_columns=candidate_feature_columns(frame)
+    )
+    assert health["dropped_constant_columns"] == ["obd:DEAD_POLL"]
+    assert "obd:DEAD_POLL" not in health["dropped_all_nan_columns"]
 
 
 @pytest.fixture
