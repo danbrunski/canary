@@ -249,7 +249,10 @@ def test_record_stops_on_event_before_deadline(tmp_path: Path):
         bus.shutdown()
 
     assert result.stopped_by == "signal"
-    assert (result.ended_at - result.started_at).total_seconds() < 1.0
+    # Generous bound: it only needs to prove the 0.2 s stop event won over
+    # the 10 s deadline. A tight (< 1.0 s) bound flaked under `-n auto` when
+    # the parallel torch-training tests starved this worker of CPU.
+    assert (result.ended_at - result.started_at).total_seconds() < 5.0
 
     manifest = json.loads(paths.manifest.read_text())
     assert manifest["stopped_by"] == "signal"
