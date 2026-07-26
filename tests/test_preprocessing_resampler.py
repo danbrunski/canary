@@ -146,3 +146,45 @@ def test_resample_wide_supports_explicit_fast_channels() -> None:
 def test_resample_config_rejects_invalid_hz() -> None:
     with pytest.raises(ValueError, match="hz"):
         ResampleConfig(hz=0)
+
+
+def test_resample_wide_handles_channel_first_seen_after_final_grid_point() -> None:
+    """A channel whose only observation lands past the last grid point used to
+    kill the whole session: every ``last_seen`` entry is NaT, the tz-aware dtype
+    was lost round-tripping through numpy, and the age subtraction raised
+    "Cannot subtract tz-naive and tz-aware datetime-like objects". Real
+    sessions hit this via a single trailing gps:altitude sample."""
+    wide = pd.DataFrame(
+        [
+            {"session": "s1", "timestamp": _ts(0), "obd:RPM": 700.0, "gps:altitude": None},
+            {
+                "session": "s1",
+                "timestamp": _ts(1) + timedelta(milliseconds=800),
+                "obd:RPM": 710.0,
+                "gps:altitude": 141.0,
+            },
+        ]
+    )
+
+    result = resample_wide(wide, config=ResampleConfig(hz=1.0))
+
+    # Never observed at or before any grid point ⇒ all-gap, no value carried.
+    assert result[gap_column("gps:altitude")].tolist() == [True, True]
+    assert result["gps:altitude"].isna().all()
+    assert result[gap_column("obd:RPM")].tolist() == [False, False]
+
+
+def test_resample_wide_tolerates_duplicate_observation_timestamps() -> None:
+    """Two readings sharing a timestamp must not blow up the ffill reindex."""
+    wide = pd.DataFrame(
+        [
+            {"session": "s1", "timestamp": _ts(0), "obd:RPM": 700.0},
+            {"session": "s1", "timestamp": _ts(0), "obd:RPM": 705.0},
+            {"session": "s1", "timestamp": _ts(1), "obd:RPM": 710.0},
+        ]
+    )
+
+    result = resample_wide(wide, config=ResampleConfig(hz=1.0))
+
+    assert result[gap_column("obd:RPM")].tolist() == [False, False]
+    assert result["obd:RPM"].tolist() == [705.0, 710.0]

@@ -146,17 +146,29 @@ def _gap_flags(
     sampled_index: pd.Series,
     max_gap: pd.Timedelta,
 ) -> pd.Series:
-    observed_at = pd.Series(original.dropna().index, index=original.dropna().index)
-    if observed_at.empty:
-        return pd.Series([True] * len(sampled_index), index=sampled_index.index)
-
+    """True at each grid point where the channel's newest observation at or
+    before it is missing or older than ``max_gap``."""
     sampled_times = pd.DatetimeIndex(pd.to_datetime(sampled_index, utc=True))
-    last_seen = observed_at.reindex(sampled_times, method="ffill")
-    ages = sampled_times.to_series(index=sampled_index.index) - pd.Series(
-        last_seen.to_numpy(),
-        index=sampled_index.index,
+    observed = original.dropna()
+    if observed.empty:
+        return pd.Series(True, index=sampled_index.index)
+
+    # ``unique()`` because ``reindex`` rejects a duplicated source index, and a
+    # channel can legitimately report twice at the same timestamp. The rows are
+    # already sorted, so the result stays monotonic for the ffill below.
+    observed_at = pd.DatetimeIndex(pd.to_datetime(observed.index, utc=True)).unique()
+    # Stay on tz-aware DatetimeIndex the whole way. Round-tripping the ffilled
+    # Series through ``.to_numpy()`` silently drops the UTC offset when every
+    # entry is NaT — the case where a channel's first observation lands after
+    # the final grid point (e.g. one gps:altitude sample in the last
+    # sub-second) — and the age subtraction then raised "Cannot subtract
+    # tz-naive and tz-aware", killing the whole session.
+    last_seen = pd.DatetimeIndex(
+        pd.Series(observed_at, index=observed_at).reindex(sampled_times, method="ffill")
     )
-    return last_seen.isna().reset_index(drop=True) | (ages > max_gap)
+    never_seen = last_seen.isna()
+    stale = never_seen | ((sampled_times - last_seen) > max_gap)
+    return pd.Series(np.asarray(stale), index=sampled_index.index)
 
 
 def _fast_channels(value_columns: list[str], config: ResampleConfig) -> list[str]:

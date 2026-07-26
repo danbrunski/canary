@@ -267,14 +267,104 @@ def _worker_process_session(
 #: the pool consistently beats serial wall time on our corpus.
 _PARALLEL_SESSION_THRESHOLD = 3
 
-#: Default per-process worker cap when ``max_workers`` is auto-resolved. A
-#: spawn-mode worker re-imports pandas/pyarrow (~200 MB) and then loads one
-#: session's parquet → long → wide pivot in memory — big drives (e.g. 484
-#: chunks ≈ 37 MB on disk) peak at 1–3 GB per worker. 10 workers on the 11 GB
-#: dev laptop OOM-killed the retrain at first cut, so the auto-cap stays
-#: conservative; callers with more RAM (or smaller sessions) can pass an
-#: explicit ``max_workers`` to raise it.
+#: Hard ceiling on auto-resolved workers, before the memory budget below trims
+#: it further. Callers can pass an explicit ``max_workers`` to override both.
 _PARALLEL_WORKER_CAP = 4
+
+#: Share of ``MemAvailable`` the pool may claim. Deliberately well under half:
+#: the parent process is concurrently accumulating every returned session frame
+#: in ``resampled_parts`` (a full-corpus retrain parent has been observed at
+#: 8 GB RSS), and it, not the workers, holds the final concatenated frame.
+_PARALLEL_MEMORY_FRACTION = 0.35
+
+#: Resident floor for one ``spawn`` worker before it touches data: a fresh
+#: interpreter re-importing pandas/pyarrow/torch-free decode stack measures
+#: ~130-200 MB on the dev laptop.
+_WORKER_BASELINE_BYTES = 250 * 1024 * 1024
+
+#: Peak working set per byte of session parquet, for the decode → long →
+#: wide-pivot → resample chain. Measured on this corpus (2026-07-26,
+#: ``resample_hz: 1``): 28.5 MB on disk → 487 MB peak (17×), 45.6 MB → 1360 MB
+#: (30×). Rounded up to 40× because the expansion scales with a session's
+#: *channel count and wall-clock span*, not just its byte count, and an
+#: underestimate is what gets a worker OOM-killed.
+_WORKER_BYTES_PER_DISK_BYTE = 40
+
+
+def _available_memory_bytes() -> int | None:
+    """Best-effort ``MemAvailable``, or ``None`` if the platform won't say.
+
+    ``MemAvailable`` (not ``MemFree``) is the right number: it accounts for
+    reclaimable page cache, which is most of what a just-finished parquet read
+    leaves behind.
+    """
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    try:  # non-Linux fallback: free pages only, no reclaimable cache
+        return int(os.sysconf("SC_AVPHYS_PAGES")) * int(os.sysconf("SC_PAGE_SIZE"))
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _largest_session_bytes(session_dirs: Sequence[Path]) -> int:
+    """On-disk parquet bytes of the biggest session in the batch.
+
+    Sizing off the max rather than the mean because ``pool.map`` hands sessions
+    out in order: several of the largest drives can be in flight simultaneously,
+    and it only takes one worker over the line to get the pool OOM-killed.
+    """
+    largest = 0
+    for session_dir in session_dirs:
+        try:
+            total = sum(path.stat().st_size for path in session_dir.glob("*.parquet"))
+        except OSError:
+            continue
+        largest = max(largest, total)
+    return largest
+
+
+def _resolve_worker_count(session_dirs: Sequence[Path], max_workers: int | None) -> int:
+    """Pick a worker count that fits in RAM.
+
+    A fixed cap is wrong on both ends: it OOM-kills a wide corpus on a loaded
+    box (4 workers × multi-GB frames on a 15 GB laptop) and leaves cores idle on
+    a small one. Derive it from what's actually free and what one worker is
+    actually going to hold, and log the arithmetic so a surprising choice is
+    inspectable rather than mysterious.
+    """
+    if max_workers is not None:
+        return max(1, int(max_workers))
+
+    ceiling = min(len(session_dirs), os.cpu_count() or 1, _PARALLEL_WORKER_CAP)
+    if ceiling <= 1:
+        return max(1, ceiling)
+
+    available = _available_memory_bytes()
+    if available is None:
+        return ceiling
+
+    per_worker = _WORKER_BASELINE_BYTES + _largest_session_bytes(session_dirs) * (
+        _WORKER_BYTES_PER_DISK_BYTE
+    )
+    budget = int(available * _PARALLEL_MEMORY_FRACTION)
+    affordable = max(1, budget // per_worker)
+    workers = min(ceiling, affordable)
+    log.info(
+        "sized parallel feature build to available memory",
+        extra={
+            "workers": workers,
+            "cpu_ceiling": ceiling,
+            "available_mb": round(available / 1024 / 1024),
+            "budget_mb": round(budget / 1024 / 1024),
+            "per_worker_mb": round(per_worker / 1024 / 1024),
+        },
+    )
+    return workers
 
 
 def build_feature_frame(
@@ -349,7 +439,8 @@ def build_feature_frame(
     #
     # Sessions are independent, so for >= _PARALLEL_SESSION_THRESHOLD inputs we
     # fan the per-session pipeline out across a ProcessPoolExecutor (one process
-    # per session, capped at the CPU count). Caller can pin ``max_workers=1`` to
+    # per session, capped by CPU count and by the memory budget in
+    # ``_resolve_worker_count``). Caller can pin ``max_workers=1`` to
     # force the serial path — kept exactly as it was for back-compat with tests
     # and the Pi cold-start fall-back, where multiprocessing overhead would lose.
     resample_config = ResampleConfig(
@@ -359,10 +450,7 @@ def build_feature_frame(
     resampled_parts: list[pd.DataFrame] = []
     skipped: list[str] = []
 
-    if max_workers is None:
-        effective_workers = min(len(session_dirs), os.cpu_count() or 1, _PARALLEL_WORKER_CAP)
-    else:
-        effective_workers = max(1, int(max_workers))
+    effective_workers = _resolve_worker_count(session_dirs, max_workers)
     parallel = effective_workers > 1 and len(session_dirs) >= _PARALLEL_SESSION_THRESHOLD
 
     def _build_serial() -> None:
