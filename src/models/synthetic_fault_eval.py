@@ -135,13 +135,17 @@ class _DetectorMetrics:
 
 def _if_anomalous(scored: pd.DataFrame) -> pd.Series:
     """Boolean per-row IF verdict mirroring ``emitter.emit_isolation_forest_row``:
-    calibrated when present, legacy ``-1`` label fallback otherwise, with
-    missing-features rows always anomalous (they aren't scoreable)."""
+    calibrated when present and legacy ``-1`` fallback otherwise. Missing-
+    feature rows are ``None`` (no trustworthy verdict), matching the daemon's
+    fail-safe suppression rather than manufacturing a dropout anomaly."""
     missing = scored[MISSING_FEATURES_COLUMN].astype(bool)
     calib = scored[CALIBRATED_ANOMALY_COLUMN]
     if calib.notna().any():
-        return missing | calib.fillna(False).astype(bool)
-    return missing | (scored[LABEL_COLUMN].fillna(1).astype(int) == -1)
+        verdict = calib.fillna(False).astype(bool).astype(object)
+    else:
+        verdict = (scored[LABEL_COLUMN].fillna(1).astype(int) == -1).astype(object)
+    verdict.loc[missing] = None
+    return verdict
 
 
 def _fused_anomalous(
@@ -160,11 +164,10 @@ def _fused_anomalous(
     not a bug in this harness; the regression guard checks the code path
     runs cleanly (and that the FP floor is genuinely zero), not that it
     matches IF's own verdict any more."""
-    out = np.zeros(len(scored), dtype=bool)
+    out = np.full(len(scored), None, dtype=object)
     for i in range(len(scored)):
         row = scored.iloc[i]
         if bool(row.get(MISSING_FEATURES_COLUMN, False)):
-            out[i] = True
             continue
         mode = row.get(MODEL_MODE_COLUMN)
         threshold = row.get(CALIBRATED_THRESHOLD_COLUMN)
@@ -194,11 +197,11 @@ def _sequence_anomalous(engine: SequenceInferenceEngine, featurized: pd.DataFram
     (``observe`` returns ``None``, no verdict yet) reads as not-anomalous —
     the live daemon simply doesn't emit anything for it either."""
     engine.buffer.clear()
-    out = np.zeros(len(featurized), dtype=bool)
+    out = np.full(len(featurized), None, dtype=object)
     for i in range(len(featurized)):
         result = engine.observe(featurized.iloc[i])
         if result is not None:
-            out[i] = result.is_anomaly
+            out[i] = bool(result.is_anomaly)
     return pd.Series(out, index=featurized.index)
 
 
@@ -246,10 +249,33 @@ def _first_sustained_detection(
         # row landing within milliseconds of real wall-clock time.
         now = ts.timestamp()
         for name, fired in zip(names, fired_values, strict=True):
-            sustained = persistence.observe(name, bool(fired), now=now)
-            if detected[name] is None and sustained and in_match:
+            verdict = None if fired is None or pd.isna(fired) else bool(fired)
+            sustained = persistence.observe(name, verdict, now=now)
+            if detected[name] is None and verdict is True and sustained and in_match:
                 detected[name] = (ts, ts >= match_end)
     return detected
+
+
+def _persistence_gated_nominal(
+    signals: Mapping[str, pd.Series],
+    timestamps: pd.Series,
+    config: CanaryConfig,
+) -> dict[str, pd.Series]:
+    """Run nominal per-tick verdicts through the production M-of-N gate."""
+    persistence = PersistenceGate(
+        config.alerts.min_consecutive_ticks,
+        window=config.alerts.persistence_window_ticks,
+        window_seconds=config.alerts.persistence_window_seconds,
+    )
+    gated = {name: np.zeros(len(timestamps), dtype=bool) for name in signals}
+    for index, row in enumerate(zip(timestamps, *(signals[name] for name in signals), strict=True)):
+        timestamp, verdicts = row[0], row[1:]
+        now = pd.Timestamp(timestamp).timestamp()
+        for name, verdict in zip(signals, verdicts, strict=True):
+            firing = None if verdict is None or pd.isna(verdict) else bool(verdict)
+            sustained = persistence.observe(name, firing, now=now)
+            gated[name][index] = firing is True and sustained
+    return {name: pd.Series(values, index=timestamps.index) for name, values in gated.items()}
 
 
 def _hours_covered(frame: pd.DataFrame) -> float:
@@ -378,6 +404,11 @@ def evaluate_detectors(
     }
     if sequence_engine is not None:
         nominal_signals["sequence"] = _sequence_anomalous(sequence_engine, nominal_features)
+    nominal_signals = _persistence_gated_nominal(
+        nominal_signals,
+        pd.to_datetime(nominal_features[TIMESTAMP_COLUMN], utc=True),
+        config,
+    )
     hours = _hours_covered(nominal_features)
     nominal_fp = {
         name: {

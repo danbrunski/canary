@@ -386,7 +386,7 @@ class IsolationForestConfig(_Strict):
     #: allowed to flag — the calibrated decision boundary is the
     #: ``1 - target_flag_rate`` quantile of held-out scores. This replaces the
     #: assumption that exactly ``contamination`` of nominal driving is anomalous.
-    target_flag_rate: float = Field(default=0.02, gt=0.0, le=0.5)
+    target_flag_rate: float = Field(default=0.001, gt=0.0, le=0.5)
     #: Task 2.2 — a mode with fewer than this many *fit* rows (post-holdout
     #: split) is skipped entirely rather than fitting a full forest on a
     #: handful of rows: no model persisted, listed in the manifest's
@@ -511,11 +511,11 @@ class LSTMAutoencoderConfig(_Strict):
     #: Reconstruction errors are right-skewed and stride-1 windows heavily
     #: autocorrelated, so σ is a poor tail proxy; a quantile targets the
     #: alert budget directly (like the IF's ``target_flag_rate``). Task 3.2:
-    #: defaults to 0.995 (the calibrated-FPR path) rather than ``None`` — the
+    #: defaults to 0.999 (the calibrated-FPR path) rather than ``None`` — the
     #: old ``None`` default silently meant ``mean + k·σ`` was every deploy's
     #: real threshold. Set explicitly to ``null`` in config to opt back into
     #: k·σ.
-    threshold_quantile: float | None = Field(default=0.995, gt=0.0, lt=1.0)
+    threshold_quantile: float | None = Field(default=0.999, gt=0.0, lt=1.0)
     #: Feature columns to exclude from anomaly scoring. Each entry matches
     #: itself plus its rolling-derivative siblings (``__mean``, ``__std``,
     #: ``__roc``), so listing ``obd:FUEL_LEVEL`` silences all four. Applied
@@ -562,8 +562,8 @@ class TCNAutoencoderConfig(_Strict):
     random_state: int = 42
     threshold_k: float = 3.0
     #: Same contract as ``LSTMAutoencoderConfig.threshold_quantile``
-    #: (Task 3.2: defaults to 0.995).
-    threshold_quantile: float | None = Field(default=0.995, gt=0.0, lt=1.0)
+    #: (Task 3.2: defaults to 0.999).
+    threshold_quantile: float | None = Field(default=0.999, gt=0.0, lt=1.0)
     #: Feature columns to exclude from anomaly scoring (same contract as
     #: ``LSTMAutoencoderConfig.suppress_channels`` — each entry expands to
     #: its rolling-derivative siblings). Applied at train + serve.

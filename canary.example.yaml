@@ -243,7 +243,7 @@ models:
     # fraction reserved (not fit on); target_flag_rate = allowed nominal
     # flag fraction (threshold = 1-target_flag_rate quantile of holdout).
     calibration_holdout_fraction: 0.2
-    target_flag_rate: 0.02
+    target_flag_rate: 0.001
     # Task 2.2: modes with fewer than this many fit rows (post-holdout split)
     # are skipped entirely — no model persisted — rather than fitting a
     # 200-tree forest on a handful of rows.
@@ -275,7 +275,7 @@ models:
     # Task 3.2: calibrated-quantile threshold is the default path; threshold_k
     # (mean + k·σ) above only applies when threshold_quantile is null. Errors
     # are right-skewed, so a quantile targets the alert budget directly.
-    threshold_quantile: 0.995
+    threshold_quantile: 0.999
     # Artifact-health gate: calibration/training windows must contain at
     # least this observed-cell fraction, on at least this fraction of windows.
     min_window_observed_fraction: 0.01
@@ -315,7 +315,7 @@ models:
     random_state: 42
     threshold_k: 3.0
     # Task 3.2: same contract as lstm_autoencoder.threshold_quantile above.
-    threshold_quantile: 0.995
+    threshold_quantile: 0.999
     min_window_observed_fraction: 0.01
     min_usable_window_fraction: 0.9
   # Phase 7.2: fuse IF + LSTM + behavior residuals into one

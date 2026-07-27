@@ -740,14 +740,19 @@ def fit_isolation_forest(
         external_holdout = None
         if calibration_frame is not None and mode_column in calibration_frame.columns:
             candidate = calibration_frame[calibration_frame[mode_column].astype(str) == mode]
-            external_holdout = candidate.dropna(subset=plan.feats)
+            # Calibration must mirror serve-time scoring. Production tolerates
+            # a small missing-feature fraction and imputes those cells to the
+            # scaler mean; calibrating only on fully complete rows made the
+            # threshold too optimistic for the majority round-robin OBD rows.
+            missing_fraction = candidate[plan.feats].isna().mean(axis=1)
+            external_holdout = candidate.loc[missing_fraction <= MAX_MISSING_FEATURE_FRACTION]
         use_external = (
             external_holdout is not None and len(external_holdout) >= _MIN_CALIBRATION_SAMPLES
         )
         if calibration_frame is not None and not use_external:
             count = 0 if external_holdout is None else len(external_holdout)
             raise ValueError(
-                f"held-out calibration session has only {count} complete rows for mode "
+                f"held-out calibration session has only {count} scoreable rows for mode "
                 f"{mode!r}; need at least {_MIN_CALIBRATION_SAMPLES}"
             )
         calibration_rows = external_holdout if use_external else None
@@ -755,12 +760,15 @@ def fit_isolation_forest(
             _calibrate_holdout_threshold(
                 model,
                 pd.DataFrame(
-                    _scaled_array(
-                        calibration_rows.loc[:, plan.feats]
-                        if calibration_rows is not None
-                        else frame.loc[plan.holdout_index, plan.feats],
-                        scaler,
-                        plan.feats,
+                    np.nan_to_num(
+                        _scaled_array(
+                            calibration_rows.loc[:, plan.feats]
+                            if calibration_rows is not None
+                            else frame.loc[plan.holdout_index, plan.feats],
+                            scaler,
+                            plan.feats,
+                        ),
+                        nan=0.0,
                     ),
                     columns=plan.feats,
                 ),
@@ -964,7 +972,7 @@ def _calibration_params(config: IsolationForestConfigLike) -> tuple[float, float
     ``0.0``), which preserves the exact legacy fit-on-all behavior.
     """
     holdout_fraction = float(getattr(config, "calibration_holdout_fraction", 0.0))
-    target_flag_rate = float(getattr(config, "target_flag_rate", 0.02))
+    target_flag_rate = float(getattr(config, "target_flag_rate", 0.001))
     return holdout_fraction, target_flag_rate
 
 
