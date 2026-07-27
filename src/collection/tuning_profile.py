@@ -18,10 +18,18 @@ churn, visible in `/status`, reversible without a restart. Tuning mode is
 something you switch on for a specific capture and off again, not a deployment
 posture.
 
-Known ceiling, so nobody chases it: this does NOT reach UpRev's 16–24 Hz.
-That tool logs over K-line, a transport CANary has no hardware for. See
-`docs/data-architecture.md` §5. What this buys is the difference between
-"0.06 Hz, unusable" and "enough samples per cell to draw a conclusion".
+How much this buys depends on the bus budget, which is the real constraint and
+is far more conservative than the ECU requires. Measured on the Xterra
+2026-07-26, engine running, bus dedicated: 85 single-PID requests/sec, and
+67.7 batched requests/sec each returning 6 PIDs — 33.9 Hz per channel across a
+12-channel set, zero failures. Both are floors; the probe loop spent ~10 ms of
+each ~12 ms cycle in its own drain.
+
+So CAN is NOT inherently slower than UpRev's K-line logger here. An earlier
+version of this docstring said otherwise and was wrong. The 8 req/s default
+(``BUS_BUDGET_MULTIPLIER`` × ``poll_rate_hz``) is a conservative heuristic,
+not a measured limit. Narrowing the channel set is one lever; raising the
+budget for a bounded capture is another; multi-PID batching multiplies both.
 """
 
 from __future__ import annotations
