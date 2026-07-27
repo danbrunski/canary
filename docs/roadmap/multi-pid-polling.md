@@ -20,14 +20,22 @@ minutes, roughly 10 per rpm × load cell.
 The cost is the **round trip, not the bytes**. Measured on the Xterra ECM
 with the engine running and the bus dedicated:
 
-| approach | requests/s | per-channel (12 channels) |
+| approach | channel-reads/s | speedup |
 |---|---|---|
-| single PID per request | 85.1 | 7.09 Hz |
-| **multi-PID, 6 per request** | **67.7** | **33.85 Hz** |
-| CANary today | 8 | 0.06–0.5 Hz |
+| single PID per request | 667 | — |
+| **multi-PID, 6 per request** | **1387** | **2.1x** |
+| CANary today | ~8 | — |
 
-80 batched requests, zero failures, 1.18 s. Both figures are **floors** —
-the probe blocked ~10 ms per cycle in its own drain.
+Measured 2026-07-27 through `CanObdClient`, KOEO, daemon passive, 180
+channel-reads each way; batched values matched single-PID exactly (0/6
+mismatches). **Revised down from an earlier ~5x estimate**, which came from a
+probe loop whose own 10 ms drain throttled both paths. A 6-PID response is
+15 bytes — multi-frame ISO-TP, costing a flow-control round trip and five
+frames against two for a single-PID read, so batching trades frames for round
+trips and the multi-frame response eats over half the gain.
+
+Both figures are two orders of magnitude above the 8 req/s the daemon uses:
+**the budget is the dominant constraint, not the protocol.**
 
 Two independent levers, and they multiply:
 

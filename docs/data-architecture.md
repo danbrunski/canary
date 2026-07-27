@@ -99,18 +99,31 @@ service of RE / diagnostics, not the live data path.
 
 #### How fast Mode 01 can actually go
 
-Measured on the Xterra ECM, 2026-07-26, engine running at warm idle, with
-CANary in passive mode so the bus was dedicated to the probe:
-
-| approach | requests/s | per-channel rate (12 channels) |
+| approach | channel-reads/s | speedup |
 |---|---|---|
-| single PID per request | 85.1 | 7.09 Hz |
-| **multi-PID, 6 per request** | **67.7** | **33.85 Hz** |
-| (for reference) CANary today | 8 | 0.06–0.5 Hz |
+| single PID per request | 667 | — |
+| **multi-PID, 6 per request** | **1387** | **2.1x** |
+| (for reference) CANary today | ~8 | — |
 
-80 batched requests, zero failures, in 1.18 s. Both measured figures are
-**floors** — the probe loop blocked ~10 ms in its own drain before each
-request, so most of each ~12 ms cycle was self-inflicted overhead.
+Measured 2026-07-27 through `CanObdClient` itself (not a probe harness), KOEO,
+daemon in passive mode, 180 channel-reads each way. Batched values matched
+single-PID values exactly, 0/6 mismatches.
+
+**Revised down from an earlier estimate of ~5x.** That figure came from a probe
+loop that blocked ~10 ms in its own drain before every request, which throttled
+both paths and flattered the batched one. The real difference is smaller
+because a 6-PID response is 15 bytes — multi-frame ISO-TP, so it costs a
+flow-control round trip and five frames, against two frames for a single-PID
+read. **Batching trades frames for round trips, and the multi-frame response
+eats over half the gain.**
+
+The more important number is that *both* are two orders of magnitude above the
+8 req/s the daemon actually uses. **The dominant constraint is the self-imposed
+budget, not the protocol** — raising it is a bigger lever than batching, and
+batching then multiplies whatever it is set to by ~2x. Note the 667 req/s
+figure is back-to-back synchronous requests with no pacing on an otherwise
+idle bus; sustained operation there is a different proposition, and the budget
+exists partly to be a good citizen.
 
 **Multi-PID Mode 01 is standard SAE J1979**: a request may carry up to six
 PIDs and the response returns each as a `41 <pid> <data…>` triple. Verified
@@ -135,8 +148,10 @@ spend time on them):
 | `2C` DynamicallyDefineDataIdentifier | `subFunctionNotSupported` |
 | `22` with multiple DIDs | `subFunctionNotSupported` — Mode 22 stays one-at-a-time |
 
-So the round trip, not the byte count, is the cost — and batching is the
-lever that attacks it. Implementation is tracked in
+So the cost is the round trip rather than the byte count — but the binding
+constraint today is the request budget, and batching is a ~2x multiplier on
+top of whatever that is set to, not a substitute for raising it.
+Implementation is tracked in
 [`docs/roadmap/multi-pid-polling.md`](./roadmap/multi-pid-polling.md).
 
 ### 3. Mode 22 DIDs (Canable-native selected polling; broad sweep pending) — *manufacturer-extension diagnostic data*
