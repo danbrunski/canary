@@ -55,6 +55,22 @@ DEFAULT_TUNING_CHANNELS: frozenset[str] = frozenset(
         "LONG_FUEL_TRIM_1",
         "LONG_FUEL_TRIM_2",
         "COMMANDED_EQUIV_RATIO",
+        # Validity gates for every trim-based conclusion, not luxuries.
+        #
+        # EVAPORATIVE_PURGE: purge vapour is unmetered fuel, so the ECU backs
+        # off injection and short-term trim reads low. Measured on session
+        # 2026-07-26T225058: STFT averaged +5.49% with purge closed and
+        # +1.34% with it open, a 4.15-point shift, and purge was active in 48
+        # of 140 samples reaching 91% duty. A MAF correction derived without
+        # separating those two populations is wrong by roughly half the
+        # effect being corrected. UpRev's logger has no purge channel at all,
+        # which is a concrete reason to prefer CANary for fuel work.
+        #
+        # FUEL_STATUS: open vs closed loop. Trim-based correction is only
+        # meaningful in closed loop; open-loop (WOT enrichment, cold start)
+        # samples must be excluded rather than averaged in.
+        "EVAPORATIVE_PURGE",
+        "FUEL_STATUS",
     }
 )
 
