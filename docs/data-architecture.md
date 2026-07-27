@@ -150,17 +150,27 @@ functions use **different transports**, and conflating them wastes time:
   not one arbitration ID that wasn't already present as normal vehicle
   broadcast.** The logger is on the K-line.
 
-**Consequence:** CANary cannot observe, replicate, or sniff UpRev's
-datalogging over CAN. There is no protocol on our wire to copy. Matching
-its rate would require K-line hardware — an ISO-9141 transceiver
-(L9637D class) on a Pi UART. `docs/skunkworks/ecu-rw-bench-research.md`
-already contemplates a K-line breakout on the bench harness.
+**Consequence:** CANary cannot observe or sniff UpRev's datalogging over
+CAN — there is no protocol on our wire to copy.
+
+It *can*, however, match and exceed the rate. An earlier revision of this
+section claimed otherwise; that was wrong, and the correction matters
+because it changes whether K-line hardware is worth building. Measured on
+the ECM 2026-07-26, engine running, dedicated bus: **85 single-PID
+requests/sec**, and **67.7 multi-PID requests/sec each returning 6 PIDs —
+33.9 Hz per channel over a 12-channel set, zero failures**. Both figures
+are floors (the probe spent ~10 ms of each ~12 ms cycle in its own drain).
+
+The bottleneck was never the bus or the ECU. It is the default request
+budget: `BUS_BUDGET_MULTIPLIER` (8.0) x `poll_rate_hz` (1) = 8 req/s
+spread across ~42 requests. That is a conservative heuristic, not a
+measured limit.
 
 **What K-line would actually buy** — less than it first appears:
 
 | | |
 |---|---|
-| Rate | 16–24 Hz vs CANary's 0.1–0.5 Hz Mode 01 polling |
+| ~~Rate~~ | **Not a K-line advantage.** CAN reaches 33.9 Hz/channel batched — see the correction above |
 | MAF **sensor voltage** (`MAS A/F SE-B1`) | no known DID; distinct from the A/F sensor voltage at `0x1225` |
 | Throttle X/Y **map traces** | the ETC map's live axes (throttle % × RPM) |
 | `A/F ADJ` (long-term trim) | see below |
