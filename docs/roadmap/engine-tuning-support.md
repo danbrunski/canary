@@ -133,6 +133,95 @@ a few Hz per channel, too slow to resolve a ~5 s WOT pull per cell.
   slice by maneuver. Predefine the tag vocabulary in config; tags are
   data, not code.
 
+## G.3 — Separate VE gain from an exhaust leak before rescaling the MAF
+
+**Gates the MAF half of Phase 3.3.** Not a software task; it decides whether
+the correction we are about to apply is real.
+
+### What was measured
+
+Short-term fuel trim, filtered to purge-closed, closed-loop, coolant > 70 °C
+(the filters matter — EVAP purge alone shifts trim 4.15 points, and UpRev's
+logger has no purge parameter at all, so its logs cannot be filtered this way):
+
+| era | sessions | mean | median | range |
+|---|---|---|---|---|
+| pre-mod (May) | 5 | **2.80 %** | 2.41 % | 0.10 – 6.29 |
+| post-mod (July) | 15 | **5.90 %** | 5.25 % | 1.25 – 10.63 |
+
+Roughly +3 points on the mean; the ceiling more than doubles. Bank 2 tracks
+bank 1. The step aligns with the 2026-06-28 shorty-header and plenum-spacer
+install (ledger `45f52a69`, `corpus_boundary=true`), **not** with the ECU
+reflash — an earlier reading of this data blamed the flash and was wrong,
+having compared a single pre-flash idle session against a single post-flash
+one.
+
+Two things the numbers do *not* say. The session-to-session swing is not new
+(pre-mod already ranged 0.1–6.3), so the mods raised the level rather than
+introducing the variability. And IAT was 32–40 °C in May against 37–64 °C in
+July, so some of the gap is plausibly heat rather than hardware.
+
+### The three candidates
+
+1. **Genuine VE gain.** The engine really does flow more and the stock MAF
+   curve under-reports at the new operating points. Benign, and a MAF rescale
+   is exactly the right fix.
+2. **Exhaust leak at the header flanges or collectors**, upstream of the O2
+   sensors. Fresh air past the sensor reads lean and the ECU adds fuel the
+   engine never needed. A carb-cleaner test around the *plenum* does not test
+   for this — wrong end of the engine. That test was run and came back clean.
+3. **Plenum spacer leak** — unmetered air downstream of the MAF. This *was*
+   the right target for the carb-cleaner test, so the clean result is real
+   evidence against it. Weakest of the three, though a leak that only opens
+   once hot can survive a cold spray.
+
+**Why this gates the tune:** if it is VE gain, the ~+9 % correction is real
+airflow and rescaling the MAF is correct. If it is an exhaust leak, rescaling
+adds fuel the engine does not need, and the truck goes genuinely rich the
+moment the leak is repaired.
+
+### The discriminating signal: trim versus load
+
+- A **leak** (exhaust or intake) admits a roughly fixed amount of unmetered
+  air. As a *fraction* of total flow that is large at idle and shrinks as load
+  rises → **trim starts high and falls steeply with load**.
+- **VE gain / MAF scaling** error is proportional to airflow → **trim stays
+  roughly flat across load**.
+
+Note that exhaust and intake leaks share this shape; they are separated by
+*location* (the carb-cleaner test), not by the load curve. Since the intake
+was tested clean, a falling curve now points at the exhaust.
+
+One existing data point, weakly in favour of VE gain: binning A/F CORR by MAF
+voltage came out flat (slope −2.16 %/V, spread 4–6 points across 1.0–2.6 V).
+But that came from purge-contaminated UpRev data, so it should be redone
+before anyone leans on it.
+
+### Collection plan
+
+- [ ] **G.3a — Cold-start warm-up log.** Cold start through to full warm at
+  idle, logging trim, coolant, and `CATALYST_TEMP_B1S1`/`B2S1` as an exhaust
+  temperature proxy. An exhaust leak commonly seals as the metal expands, so
+  trim trending *down* as exhaust temp rises is a leak tell. VE gain is
+  temperature-stable apart from IAT density effects.
+- [ ] **G.3b — Steady-state load sweep.** Hold several load points at a fixed
+  rpm, 15–20 s each, purge-closed. This is the flat-versus-falling test and
+  the single most decisive measurement. Blips are useless here — the whole
+  point is holding one operating point long enough to fit it.
+- [ ] **G.3c — Bank asymmetry check.** Shorty headers are per-bank, so a
+  single leaking flange should show as one bank's trim running higher. Bank 1
+  already runs 1–2 points above bank 2 *pre-mod*, so the baseline asymmetry is
+  pre-existing; what matters is whether the **gap widened** (it looks larger
+  post-mod, 2.8–3.5 points, but on few sessions).
+- [ ] **G.3d — Physical check, cold.** Header flanges and collector joints
+  with soapy water, or listen for a tick that fades as the engine warms. The
+  earlier carb-cleaner test covered the plenum only.
+- [ ] **G.3e — Re-run the MAF-voltage binning on clean data**, purge-closed
+  and closed-loop, to confirm or overturn the flat result above.
+
+All of G.3a–c are satisfied by tuning-mode captures once
+`EVAPORATIVE_PURGE` and `FUEL_STATUS` are in the channel set (they are).
+
 ## Phase 2 — Correction-surface analysis (software; needs G.2 for the trim half)
 
 The deliverable UpRev workflow needs: for each cell, how far off is
