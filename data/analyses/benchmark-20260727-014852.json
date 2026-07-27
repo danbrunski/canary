@@ -1,0 +1,17 @@
+{
+  "cells": [],
+  "channels": [],
+  "fault_kinds": [],
+  "generated_at": "20260727-014852",
+  "grid_cells": 0,
+  "n_injections": 5,
+  "nominal_fp": {},
+  "regressions": {
+    "cells": [],
+    "regressed": false,
+    "tolerance": 0.15
+  },
+  "seed": 42,
+  "sessions": [],
+  "table": []
+}

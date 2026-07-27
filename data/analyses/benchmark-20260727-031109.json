@@ -1,0 +1,1979 @@
+{
+  "cells": [
+    {
+      "channel": "obd:RPM",
+      "report": {
+        "fault_kinds": [
+          "spike",
+          "drift",
+          "dropout",
+          "stuck",
+          "scale"
+        ],
+        "n_injections": 5,
+        "nominal_fp": {
+          "fused": {
+            "alerts": 49,
+            "hours": 0.4802777777777778,
+            "per_hour": 102.0243,
+            "rows": 1730
+          },
+          "isolation_forest": {
+            "alerts": 103,
+            "hours": 0.4802777777777778,
+            "per_hour": 214.4592,
+            "rows": 1730
+          },
+          "sequence": {
+            "alerts": 16,
+            "hours": 0.4802777777777778,
+            "per_hour": 33.3141,
+            "rows": 1730
+          }
+        },
+        "per_fault": [
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "isolation_forest",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              58.0,
+              63.0,
+              160.0,
+              56.0
+            ],
+            "median_time_to_detect_seconds": 60.5,
+            "runs": 5
+          },
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "fused",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              58.0,
+              63.0,
+              160.0,
+              56.0
+            ],
+            "median_time_to_detect_seconds": 60.5,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              18.0,
+              5.0,
+              6.0,
+              6.0,
+              7.0
+            ],
+            "median_time_to_detect_seconds": 6.0,
+            "runs": 5
+          },
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "isolation_forest",
+            "fault_kind": "drift",
+            "late_flags": [
+              true,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              180.0,
+              5.0,
+              79.0,
+              0.0
+            ],
+            "median_time_to_detect_seconds": 42.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "fused",
+            "fault_kind": "drift",
+            "late_flags": [
+              true,
+              false,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              180.0,
+              5.0,
+              79.0
+            ],
+            "median_time_to_detect_seconds": 79.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "drift",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              50.0,
+              111.0,
+              120.0,
+              155.0,
+              118.0
+            ],
+            "median_time_to_detect_seconds": 118.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "isolation_forest",
+            "fault_kind": "dropout",
+            "late_flags": [
+              true,
+              false,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              193.0,
+              69.0,
+              36.0
+            ],
+            "median_time_to_detect_seconds": 69.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "fused",
+            "fault_kind": "dropout",
+            "late_flags": [
+              true,
+              false,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              193.0,
+              69.0,
+              36.0
+            ],
+            "median_time_to_detect_seconds": 69.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "sequence",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              55.0,
+              91.0,
+              133.0
+            ],
+            "median_time_to_detect_seconds": 91.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "isolation_forest",
+            "fault_kind": "stuck",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              0.0,
+              127.0,
+              129.0
+            ],
+            "median_time_to_detect_seconds": 127.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "fused",
+            "fault_kind": "stuck",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              0.0,
+              127.0,
+              129.0
+            ],
+            "median_time_to_detect_seconds": 127.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "sequence",
+            "fault_kind": "stuck",
+            "late_flags": [
+              true,
+              false,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              194.0,
+              0.0,
+              1.0
+            ],
+            "median_time_to_detect_seconds": 1.0,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "isolation_forest",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              51.0,
+              158.0
+            ],
+            "median_time_to_detect_seconds": 104.5,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "fused",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              51.0,
+              158.0
+            ],
+            "median_time_to_detect_seconds": 104.5,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              10.0,
+              10.0,
+              26.0,
+              6.0,
+              7.0
+            ],
+            "median_time_to_detect_seconds": 10.0,
+            "runs": 5
+          }
+        ],
+        "seed": 808325556
+      },
+      "seed": 808325556,
+      "session": "2026-05-24T193045"
+    },
+    {
+      "channel": "obd:SPEED",
+      "report": {
+        "fault_kinds": [
+          "spike",
+          "drift",
+          "dropout",
+          "stuck",
+          "scale"
+        ],
+        "n_injections": 5,
+        "nominal_fp": {
+          "fused": {
+            "alerts": 49,
+            "hours": 0.4802777777777778,
+            "per_hour": 102.0243,
+            "rows": 1730
+          },
+          "isolation_forest": {
+            "alerts": 103,
+            "hours": 0.4802777777777778,
+            "per_hour": 214.4592,
+            "rows": 1730
+          },
+          "sequence": {
+            "alerts": 16,
+            "hours": 0.4802777777777778,
+            "per_hour": 33.3141,
+            "rows": 1730
+          }
+        },
+        "per_fault": [
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "isolation_forest",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              20.0,
+              148.0
+            ],
+            "median_time_to_detect_seconds": 84.0,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "fused",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              20.0,
+              148.0
+            ],
+            "median_time_to_detect_seconds": 84.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              3.0,
+              3.0,
+              6.0,
+              4.0,
+              2.0
+            ],
+            "median_time_to_detect_seconds": 3.0,
+            "runs": 5
+          },
+          {
+            "detected": 1,
+            "detection_rate": 0.2,
+            "detector": "isolation_forest",
+            "fault_kind": "drift",
+            "late_flags": [
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              0.0
+            ],
+            "median_time_to_detect_seconds": 0.0,
+            "runs": 5
+          },
+          {
+            "detected": 0,
+            "detection_rate": 0.0,
+            "detector": "fused",
+            "fault_kind": "drift",
+            "late_flags": [],
+            "late_hits": 0,
+            "latencies_seconds": [],
+            "median_time_to_detect_seconds": null,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "drift",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              55.0,
+              62.0,
+              54.0,
+              74.0,
+              81.0
+            ],
+            "median_time_to_detect_seconds": 62.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "isolation_forest",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              false,
+              false,
+              true,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              95.0,
+              108.0,
+              137.0,
+              191.0,
+              0.0
+            ],
+            "median_time_to_detect_seconds": 108.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "fused",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              false,
+              false,
+              true,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              95.0,
+              108.0,
+              137.0,
+              191.0,
+              0.0
+            ],
+            "median_time_to_detect_seconds": 108.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "sequence",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              11.0,
+              24.0,
+              41.0
+            ],
+            "median_time_to_detect_seconds": 24.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "isolation_forest",
+            "fault_kind": "stuck",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              136.0,
+              121.0,
+              1.0
+            ],
+            "median_time_to_detect_seconds": 121.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "fused",
+            "fault_kind": "stuck",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              136.0,
+              121.0,
+              1.0
+            ],
+            "median_time_to_detect_seconds": 121.0,
+            "runs": 5
+          },
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "sequence",
+            "fault_kind": "stuck",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              102.0,
+              9.0,
+              137.0,
+              96.0
+            ],
+            "median_time_to_detect_seconds": 99.0,
+            "runs": 5
+          },
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "isolation_forest",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              true,
+              false,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              67.0,
+              192.0,
+              135.0,
+              7.0
+            ],
+            "median_time_to_detect_seconds": 101.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "fused",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              true,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              67.0,
+              192.0,
+              135.0
+            ],
+            "median_time_to_detect_seconds": 135.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              8.0,
+              12.0,
+              9.0,
+              14.0,
+              3.0
+            ],
+            "median_time_to_detect_seconds": 9.0,
+            "runs": 5
+          }
+        ],
+        "seed": 911120986
+      },
+      "seed": 911120986,
+      "session": "2026-05-24T193045"
+    },
+    {
+      "channel": "obd:COOLANT_TEMP",
+      "report": {
+        "fault_kinds": [
+          "spike",
+          "drift",
+          "dropout",
+          "stuck",
+          "scale"
+        ],
+        "n_injections": 5,
+        "nominal_fp": {
+          "fused": {
+            "alerts": 49,
+            "hours": 0.4802777777777778,
+            "per_hour": 102.0243,
+            "rows": 1730
+          },
+          "isolation_forest": {
+            "alerts": 103,
+            "hours": 0.4802777777777778,
+            "per_hour": 214.4592,
+            "rows": 1730
+          },
+          "sequence": {
+            "alerts": 16,
+            "hours": 0.4802777777777778,
+            "per_hour": 33.3141,
+            "rows": 1730
+          }
+        },
+        "per_fault": [
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "isolation_forest",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              161.0,
+              137.0,
+              68.0
+            ],
+            "median_time_to_detect_seconds": 137.0,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "fused",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              161.0,
+              137.0
+            ],
+            "median_time_to_detect_seconds": 149.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0
+            ],
+            "median_time_to_detect_seconds": 2.0,
+            "runs": 5
+          },
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "isolation_forest",
+            "fault_kind": "drift",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              114.0,
+              19.0,
+              109.0,
+              151.0
+            ],
+            "median_time_to_detect_seconds": 111.5,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "fused",
+            "fault_kind": "drift",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              114.0,
+              109.0,
+              151.0
+            ],
+            "median_time_to_detect_seconds": 114.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "drift",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              22.0,
+              22.0,
+              22.0,
+              22.0,
+              21.0
+            ],
+            "median_time_to_detect_seconds": 22.0,
+            "runs": 5
+          },
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "isolation_forest",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              107.0,
+              141.0,
+              36.0,
+              107.0
+            ],
+            "median_time_to_detect_seconds": 107.0,
+            "runs": 5
+          },
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "fused",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              107.0,
+              141.0,
+              36.0,
+              107.0
+            ],
+            "median_time_to_detect_seconds": 107.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "sequence",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              15.0,
+              129.0,
+              159.0
+            ],
+            "median_time_to_detect_seconds": 129.0,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "isolation_forest",
+            "fault_kind": "stuck",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              42.0,
+              79.0
+            ],
+            "median_time_to_detect_seconds": 60.5,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "fused",
+            "fault_kind": "stuck",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              42.0,
+              79.0
+            ],
+            "median_time_to_detect_seconds": 60.5,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "sequence",
+            "fault_kind": "stuck",
+            "late_flags": [
+              true,
+              false,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              192.0,
+              127.0,
+              160.0
+            ],
+            "median_time_to_detect_seconds": 160.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "isolation_forest",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              16.0,
+              16.0,
+              82.0,
+              162.0,
+              76.0
+            ],
+            "median_time_to_detect_seconds": 76.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "fused",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              16.0,
+              16.0,
+              82.0,
+              162.0,
+              76.0
+            ],
+            "median_time_to_detect_seconds": 76.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0
+            ],
+            "median_time_to_detect_seconds": 2.0,
+            "runs": 5
+          }
+        ],
+        "seed": 2310287885
+      },
+      "seed": 2310287885,
+      "session": "2026-05-24T193045"
+    },
+    {
+      "channel": "obd:THROTTLE_POS",
+      "report": {
+        "fault_kinds": [
+          "spike",
+          "drift",
+          "dropout",
+          "stuck",
+          "scale"
+        ],
+        "n_injections": 5,
+        "nominal_fp": {
+          "fused": {
+            "alerts": 49,
+            "hours": 0.4802777777777778,
+            "per_hour": 102.0243,
+            "rows": 1730
+          },
+          "isolation_forest": {
+            "alerts": 103,
+            "hours": 0.4802777777777778,
+            "per_hour": 214.4592,
+            "rows": 1730
+          },
+          "sequence": {
+            "alerts": 16,
+            "hours": 0.4802777777777778,
+            "per_hour": 33.3141,
+            "rows": 1730
+          }
+        },
+        "per_fault": [
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "isolation_forest",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              91.0,
+              30.0,
+              114.0
+            ],
+            "median_time_to_detect_seconds": 91.0,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "fused",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              91.0,
+              114.0
+            ],
+            "median_time_to_detect_seconds": 102.5,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              3.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0
+            ],
+            "median_time_to_detect_seconds": 2.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "isolation_forest",
+            "fault_kind": "drift",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              13.0,
+              69.0,
+              70.0
+            ],
+            "median_time_to_detect_seconds": 69.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "fused",
+            "fault_kind": "drift",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              13.0,
+              69.0,
+              70.0
+            ],
+            "median_time_to_detect_seconds": 69.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "drift",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              33.0,
+              42.0,
+              44.0,
+              36.0,
+              35.0
+            ],
+            "median_time_to_detect_seconds": 36.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "isolation_forest",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              true,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              108.0,
+              178.0,
+              19.0
+            ],
+            "median_time_to_detect_seconds": 108.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "fused",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              true,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              108.0,
+              178.0,
+              54.0
+            ],
+            "median_time_to_detect_seconds": 108.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "sequence",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              72.0,
+              48.0,
+              86.0
+            ],
+            "median_time_to_detect_seconds": 72.0,
+            "runs": 5
+          },
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "isolation_forest",
+            "fault_kind": "stuck",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              156.0,
+              145.0,
+              16.0,
+              146.0
+            ],
+            "median_time_to_detect_seconds": 145.5,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "fused",
+            "fault_kind": "stuck",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              156.0,
+              145.0,
+              146.0
+            ],
+            "median_time_to_detect_seconds": 146.0,
+            "runs": 5
+          },
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "sequence",
+            "fault_kind": "stuck",
+            "late_flags": [
+              true,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              195.0,
+              29.0,
+              17.0,
+              18.0
+            ],
+            "median_time_to_detect_seconds": 23.5,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "isolation_forest",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              77.0,
+              19.0,
+              48.0,
+              29.0,
+              13.0
+            ],
+            "median_time_to_detect_seconds": 29.0,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "fused",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              77.0,
+              29.0
+            ],
+            "median_time_to_detect_seconds": 53.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              29.0,
+              6.0,
+              33.0,
+              11.0,
+              19.0
+            ],
+            "median_time_to_detect_seconds": 19.0,
+            "runs": 5
+          }
+        ],
+        "seed": 2385719942
+      },
+      "seed": 2385719942,
+      "session": "2026-05-24T193045"
+    },
+    {
+      "channel": "obd:ENGINE_LOAD",
+      "report": {
+        "fault_kinds": [
+          "spike",
+          "drift",
+          "dropout",
+          "stuck",
+          "scale"
+        ],
+        "n_injections": 5,
+        "nominal_fp": {
+          "fused": {
+            "alerts": 49,
+            "hours": 0.4802777777777778,
+            "per_hour": 102.0243,
+            "rows": 1730
+          },
+          "isolation_forest": {
+            "alerts": 103,
+            "hours": 0.4802777777777778,
+            "per_hour": 214.4592,
+            "rows": 1730
+          },
+          "sequence": {
+            "alerts": 16,
+            "hours": 0.4802777777777778,
+            "per_hour": 33.3141,
+            "rows": 1730
+          }
+        },
+        "per_fault": [
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "isolation_forest",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              132.0,
+              2.0,
+              11.0,
+              23.0
+            ],
+            "median_time_to_detect_seconds": 17.0,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "fused",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              132.0,
+              11.0
+            ],
+            "median_time_to_detect_seconds": 71.5,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "spike",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              2.0,
+              2.0,
+              4.0,
+              4.0,
+              3.0
+            ],
+            "median_time_to_detect_seconds": 3.0,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "isolation_forest",
+            "fault_kind": "drift",
+            "late_flags": [
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              65.0,
+              30.0,
+              119.0
+            ],
+            "median_time_to_detect_seconds": 65.0,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "fused",
+            "fault_kind": "drift",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              30.0,
+              119.0
+            ],
+            "median_time_to_detect_seconds": 74.5,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "drift",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              46.0,
+              57.0,
+              67.0,
+              63.0,
+              64.0
+            ],
+            "median_time_to_detect_seconds": 63.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "isolation_forest",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              0.0,
+              159.0,
+              94.0,
+              28.0,
+              157.0
+            ],
+            "median_time_to_detect_seconds": 94.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "fused",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              0.0,
+              159.0,
+              94.0,
+              28.0,
+              157.0
+            ],
+            "median_time_to_detect_seconds": 94.0,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "sequence",
+            "fault_kind": "dropout",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              31.0,
+              29.0
+            ],
+            "median_time_to_detect_seconds": 30.0,
+            "runs": 5
+          },
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "isolation_forest",
+            "fault_kind": "stuck",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              134.0,
+              0.0,
+              85.0,
+              155.0
+            ],
+            "median_time_to_detect_seconds": 109.5,
+            "runs": 5
+          },
+          {
+            "detected": 4,
+            "detection_rate": 0.8,
+            "detector": "fused",
+            "fault_kind": "stuck",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              134.0,
+              0.0,
+              85.0,
+              155.0
+            ],
+            "median_time_to_detect_seconds": 109.5,
+            "runs": 5
+          },
+          {
+            "detected": 3,
+            "detection_rate": 0.6,
+            "detector": "sequence",
+            "fault_kind": "stuck",
+            "late_flags": [
+              false,
+              false,
+              true
+            ],
+            "late_hits": 1,
+            "latencies_seconds": [
+              6.0,
+              28.0,
+              181.0
+            ],
+            "median_time_to_detect_seconds": 28.0,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "isolation_forest",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              0.0,
+              0.0
+            ],
+            "median_time_to_detect_seconds": 0.0,
+            "runs": 5
+          },
+          {
+            "detected": 2,
+            "detection_rate": 0.4,
+            "detector": "fused",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              0.0,
+              0.0
+            ],
+            "median_time_to_detect_seconds": 0.0,
+            "runs": 5
+          },
+          {
+            "detected": 5,
+            "detection_rate": 1.0,
+            "detector": "sequence",
+            "fault_kind": "scale",
+            "late_flags": [
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "late_hits": 0,
+            "latencies_seconds": [
+              7.0,
+              20.0,
+              6.0,
+              6.0,
+              5.0
+            ],
+            "median_time_to_detect_seconds": 6.0,
+            "runs": 5
+          }
+        ],
+        "seed": 2066129038
+      },
+      "seed": 2066129038,
+      "session": "2026-05-24T193045"
+    }
+  ],
+  "channels": [
+    "obd:COOLANT_TEMP",
+    "obd:ENGINE_LOAD",
+    "obd:RPM",
+    "obd:SPEED",
+    "obd:THROTTLE_POS"
+  ],
+  "fault_kinds": [
+    "drift",
+    "dropout",
+    "scale",
+    "spike",
+    "stuck"
+  ],
+  "generated_at": "20260727-031109",
+  "grid_cells": 5,
+  "n_injections": 5,
+  "nominal_fp": {
+    "fused": {
+      "alerts": 49.0,
+      "hours": 0.4802777777777778,
+      "per_hour": 102.0242914979757
+    },
+    "isolation_forest": {
+      "alerts": 103.0,
+      "hours": 0.4802777777777778,
+      "per_hour": 214.45922498554077
+    },
+    "sequence": {
+      "alerts": 16.0,
+      "hours": 0.4802777777777778,
+      "per_hour": 33.314054366685944
+    }
+  },
+  "regressions": {
+    "cells": [
+      {
+        "detector": "fused",
+        "fault_kind": "drift",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "fused",
+        "fault_kind": "dropout",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "fused",
+        "fault_kind": "scale",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "fused",
+        "fault_kind": "spike",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "fused",
+        "fault_kind": "stuck",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "isolation_forest",
+        "fault_kind": "drift",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "isolation_forest",
+        "fault_kind": "dropout",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "isolation_forest",
+        "fault_kind": "scale",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "isolation_forest",
+        "fault_kind": "spike",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "isolation_forest",
+        "fault_kind": "stuck",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "sequence",
+        "fault_kind": "drift",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "sequence",
+        "fault_kind": "dropout",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "sequence",
+        "fault_kind": "scale",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "sequence",
+        "fault_kind": "spike",
+        "metrics": {},
+        "status": "added"
+      },
+      {
+        "detector": "sequence",
+        "fault_kind": "stuck",
+        "metrics": {},
+        "status": "added"
+      }
+    ],
+    "regressed": false,
+    "tolerance": 0.15
+  },
+  "seed": 42,
+  "sessions": [
+    "2026-05-24T193045"
+  ],
+  "table": [
+    {
+      "alerts_per_hour_clean": 102.0242914979757,
+      "detected": 11,
+      "detector": "fused",
+      "fault_kind": "drift",
+      "median_time_to_detect_seconds": 79.0,
+      "precision": 0.008899676375404533,
+      "recall": 0.44,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 102.0242914979757,
+      "detected": 20,
+      "detector": "fused",
+      "fault_kind": "dropout",
+      "median_time_to_detect_seconds": 107.0,
+      "precision": 0.016064257028112452,
+      "recall": 0.8,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 102.0242914979757,
+      "detected": 14,
+      "detector": "fused",
+      "fault_kind": "scale",
+      "median_time_to_detect_seconds": 71.5,
+      "precision": 0.01129943502824859,
+      "recall": 0.56,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 102.0242914979757,
+      "detected": 12,
+      "detector": "fused",
+      "fault_kind": "spike",
+      "median_time_to_detect_seconds": 102.5,
+      "precision": 0.009700889248181086,
+      "recall": 0.48,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 102.0242914979757,
+      "detected": 15,
+      "detector": "fused",
+      "fault_kind": "stuck",
+      "median_time_to_detect_seconds": 127.0,
+      "precision": 0.012096774193548388,
+      "recall": 0.6,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 214.45922498554077,
+      "detected": 15,
+      "detector": "isolation_forest",
+      "fault_kind": "drift",
+      "median_time_to_detect_seconds": 69.0,
+      "precision": 0.005791505791505791,
+      "recall": 0.6,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 214.45922498554077,
+      "detected": 20,
+      "detector": "isolation_forest",
+      "fault_kind": "dropout",
+      "median_time_to_detect_seconds": 107.0,
+      "precision": 0.007707129094412331,
+      "recall": 0.8,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 214.45922498554077,
+      "detected": 18,
+      "detector": "isolation_forest",
+      "fault_kind": "scale",
+      "median_time_to_detect_seconds": 49.5,
+      "precision": 0.006941766293868106,
+      "recall": 0.72,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 214.45922498554077,
+      "detected": 16,
+      "detector": "isolation_forest",
+      "fault_kind": "spike",
+      "median_time_to_detect_seconds": 65.5,
+      "precision": 0.0061752219220378235,
+      "recall": 0.64,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 214.45922498554077,
+      "detected": 16,
+      "detector": "isolation_forest",
+      "fault_kind": "stuck",
+      "median_time_to_detect_seconds": 124.0,
+      "precision": 0.0061752219220378235,
+      "recall": 0.64,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 33.314054366685944,
+      "detected": 25,
+      "detector": "sequence",
+      "fault_kind": "drift",
+      "median_time_to_detect_seconds": 54.0,
+      "precision": 0.058823529411764705,
+      "recall": 1.0,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 33.314054366685944,
+      "detected": 14,
+      "detector": "sequence",
+      "fault_kind": "dropout",
+      "median_time_to_detect_seconds": 51.5,
+      "precision": 0.033816425120772944,
+      "recall": 0.56,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 33.314054366685944,
+      "detected": 25,
+      "detector": "sequence",
+      "fault_kind": "scale",
+      "median_time_to_detect_seconds": 7.0,
+      "precision": 0.058823529411764705,
+      "recall": 1.0,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 33.314054366685944,
+      "detected": 25,
+      "detector": "sequence",
+      "fault_kind": "spike",
+      "median_time_to_detect_seconds": 3.0,
+      "precision": 0.058823529411764705,
+      "recall": 1.0,
+      "runs": 25
+    },
+    {
+      "alerts_per_hour_clean": 33.314054366685944,
+      "detected": 17,
+      "detector": "sequence",
+      "fault_kind": "stuck",
+      "median_time_to_detect_seconds": 96.0,
+      "precision": 0.0407673860911271,
+      "recall": 0.68,
+      "runs": 25
+    }
+  ]
+}
