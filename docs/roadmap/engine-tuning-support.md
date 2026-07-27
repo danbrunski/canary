@@ -8,24 +8,26 @@ Blocked until both are true (operator confirms):
 - [x] **G.1 — UpRev Tuner cable + license delivered** (Z1 Offroad
   order; license locks to this ECU). Done — first flash 2026-07-26,
   stock `ZS04C` → Osiris `ZS44A`, CAL_ID `1ZS04C` → `1ZS44A`.
-- [~] **G.2 — LTFT is not going to relearn. Gate restated.**
-  Original wording assumed `LONG_FUEL_TRIM`'s flat 0.0 % was a
-  pending relearn ("needs warm steady-state drive cycles"). That is
-  now disproven:
+- [~] **G.2 — LTFT was cleared and has not relearned. Gate restated.**
+  The battery disconnect for the 2026-06-28 header/spacer work cleared the
+  learned trim. LTFT was active before that event: across the May corpus,
+  bank 1 averaged **+1.88 %** and bank 2 **+2.98 %**, with the later May 24
+  drives sitting around **+4.1–4.5 % B1 / +5.8–6.3 % B2** and both banks
+  reaching **+9.375 %**. STFT was near zero in those drives because LTFT was
+  carrying the persistent correction.
 
-  * It survived a **full ECU reflash** — about as hard an adaptive
-    reset as exists — still 0.00 across 96/98 samples at 80 °C.
-  * UpRev's `A/F ADJ-B1`/`-B2` read **0.000 / −0.002 constant** over
-    518 samples. That is a *completely independent transport
-    (K-line) and decoder* reaching the same answer, which rules out
-    a CANary decode bug.
+  Since the disconnect, `LONG_FUEL_TRIM` has remained flat at 0.0 %. A full
+  ECU reflash reset it again and did not make it resume learning: it was still
+  0.00 across 96/98 samples at 80 °C. UpRev's `A/F ADJ-B1`/`-B2` likewise read
+  **0.000 / −0.002 constant** over 518 samples, an independent K-line
+  confirmation that CANary is decoding the post-reset state correctly.
 
-  So the ECU genuinely does not learn long-term fuel trim on this
-  calibration. **Phase 2 must not wait for LTFT.** Restated gate:
-  trim-based analysis uses **short-term trim alone**, and every
-  correction surface must be labelled as such — with LTFT pinned at
-  zero, STFT carries the entire correction permanently rather than
-  the residual it normally represents.
+  Do **not** generalize this to "the ECU never learns LTFT" or "this
+  calibration cannot learn." The May records prove that it did learn before
+  the battery disconnect. The supported statement is narrower: it **has not
+  relearned yet** after being cleared, despite substantial warm driving.
+  **Phase 2 must not wait for it.** Until it changes, trim-based analysis uses
+  STFT alone and labels that limitation explicitly.
 
   Cross-check that validates the approach: UpRev `A/F CORR` read
   +9.1 % / +7.9 % while CANary `SHORT_FUEL_TRIM_1/2` read
@@ -39,12 +41,12 @@ Blocked until both are true (operator confirms):
   Across ~4 600 samples: UpRev `A/F ADJ-B1/B2` = 0.000 / −0.002,
   CANary `LONG_FUEL_TRIM_1/2` = 0.0 exactly. The ECU had a large,
   persistent correction sitting in short-term trim and migrated none of
-  it. It has now survived a full reflash *and* a warm drive with active
-  correction — this is behaviour, not a pending relearn.
+  it. Operationally LTFT remains pinned, but its pre-disconnect history means
+  a future relearn is not ruled out.
 
-  This is also why 3.2 matters: with nothing absorbing the base-model
-  error, short-term re-derives it every start and open-loop WOT never
-  gets it at all.
+  This is also why 3.2 matters: while LTFT remains zero, short-term re-derives
+  the base-model error every start and open-loop WOT does not receive that
+  closed-loop correction.
 
 Software phases (1–2) don't need the cable and are overnight-eligible;
 the campaign itself (Phase 3) needs the truck, the cable, and the
@@ -178,10 +180,10 @@ variation exists to defeat a scalar. Two further caveats now apply here:
 
 - The temperature dependence this section rests on is **itself in question** —
   see the stagnation subsection below. It may be an idle-fraction effect.
-- If the +8 % base-model shortfall is real and flat, it is also present in
-  closed loop, where trim absorbs it. The temperature story and the scalar
-  story are not competing explanations; the scalar is the floor and the
-  temperature term (if it survives) rides on top of it.
+- A comparable base-model correction predates the modifications: May LTFT
+  commonly carried 5–7 % total correction while STFT sat near zero. The
+  temperature story and the scalar story are not competing explanations; the
+  scalar is the floor and the temperature term (if it survives) rides on top.
 
 ### What was measured
 
@@ -269,12 +271,14 @@ rescale: heat shielding, intake-tract isolation, or a colder air source.
 
 ### Candidates that remain
 
-Separate the two things being explained. The **level** (trim sitting well above
-zero at all times) is now best explained by the flat ~8 % fuel-delivery
-shortfall in 3.3 — a K/injector mismatch or low fuel pressure — which needs no
-temperature term at all. What follows are candidates for the **variability**
-only, and all of them are conditional on that variability surviving the
-stagnation confound below.
+Separate the two things being explained. The **level** is a longstanding
+base-fuel correction: before the battery disconnect LTFT carried much of it;
+afterward STFT carries it in closed loop and it appears raw at WOT. Plausible
+causes include loaded fuel-pressure loss (pump, in-tank filter/regulator, or
+pump voltage), uniform injector-flow loss, or MAF absolute calibration. It
+needs no temperature term. What follows are candidates for the **variability**
+only, and all are conditional on that variability surviving the stagnation
+confound below.
 
 All must be **temperature-dependent and common to both banks**:
 
@@ -500,11 +504,17 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   consistent across every rpm bin and both banks.
 
   **This unifies the closed-loop and open-loop pictures into one root cause.**
-  Closed-loop short-term trim adds 8–9 % to hold stoich; at WOT there is no
-  feedback, so the same base-model shortfall appears raw as an AFR miss. One
-  under-delivering fuel model, two symptoms. And because LTFT never learns
-  (G.2), nothing ever absorbs it — short-term re-derives it every start and
-  open loop never gets it at all.
+  Before the battery disconnect, May LTFT carried roughly 5–7 % (occasionally
+  9.375 %) while STFT sat near zero. After the reset, LTFT remained zero and
+  closed-loop STFT had to carry the correction. At WOT there is no closed-loop
+  feedback, so the same base-model shortfall appears raw as an AFR miss.
+
+  The chronology also argues that UpRev did **not** create the shortfall. Two
+  sparse post-modification but **pre-flash** CANary enrichment events on
+  2026-07-26 imply approximately **6.5 % and 7.1 % lean of commanded**. Their
+  asynchronous samples make them supporting evidence rather than the dense
+  UpRev log's ground truth, but the pre-modification LTFT independently shows
+  that a substantial correction existed even before the headers and spacers.
 
   **Safety reading:** 13.6 AFR at ~90 % load, with timing already pulled to
   9–10° and no knock visibility (see below), is the strongest argument for
@@ -532,11 +542,12 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   **537**. Until the budget rises (multi-pid-polling.md), WOT work belongs on
   the synchronously-sampled log.
 
-  **3.2a — WOT and high IAT do not co-occur, so the 8 % needs no temperature
-  term.** A natural worry is that the 8 % was measured cool and would worsen
-  when heat-soaked. It cannot, because going WOT is what makes the intake
-  cool (G.3, stagnation subsection). CANary's session 2026-07-27T152444, split
-  by IAT:
+  **3.2a — WOT flushes the IAT sensor, and later heat-soaked pulls did not
+  worsen.** Instantaneous high IAT and WOT do not co-occur because opening the
+  throttle rapidly replaces stagnant hot air. That does not mean a pull cannot
+  begin with a thermally soaked engine bay and intake tract; classifying pulls
+  by their *in-pull* IAT erases that prior thermal state. CANary's session
+  2026-07-27T152444, split by instantaneous IAT:
 
   | IAT band | n | peak throttle | peak load | samples ≥ 60 % load |
   |---|---|---|---|---|
@@ -544,13 +555,12 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   | warm 38–43 °C | 65 | 9.4 % | 27.1 % | **0** |
   | soaked 44 °C+ | 79 | 9.4 % | 26.3 % | **0** |
 
-  Every heavy-throttle sample in the drive sat below 38 °C; above 38 °C the
-  throttle never exceeded 9.4 %. UpRev's two logs agree from the other
-  direction — their *whole-log* IAT spans are only 35.0–37.8 °C and
-  32.8–36.1 °C, so the K-line logs cannot address the temperature question at
-  all, while being the only source dense enough for WOT. **A flat scalar WOT
-  correction is therefore valid**; an IAT-dependent term is neither needed nor
-  measurable there.
+  Every heavy-throttle sample sat below 38 °C; above 38 °C the throttle never
+  exceeded 9.4 %. Chronology supplies the missing thermal-state comparison:
+  earlier pulls needed approximately **+8.3–9.0 %**, while later pulls after the
+  engine bay and intake tract were fully heat soaked needed **+6.7–7.3 %**.
+  The error did not worsen with soak; if anything it decreased slightly. A flat
+  scalar is therefore the supported first correction, with no added IAT term.
 
 - [ ] **3.3 — K + MAF calibration loop.** UpRev flat AFR-test table
   (open loop) → drive with tuning capture → Phase 2 report → adjust
@@ -576,7 +586,8 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   - **The MAF curve *shape* is correct.** R varies only **3.2 %** across a 2×
     airflow range (59 → 120 g/s) with no trend. There is no region where the
     sensor diverges from what fuel delivery implies, so **no reshape is
-    warranted — the error is a single scalar** (13.62/12.61 = **+8.0 %**).
+    warranted — the error is a single scalar** (13.62/12.61 = **+8.0 %** in
+    the pooled sample; individual pull estimates span roughly 6.7–9.0 %).
   - **The MAF's absolute reading is physically credible.** Implied VE rises
     smoothly to 92 % at 4290 rpm — a textbook NA V6 curve for an engine with
     headers and spacers. If the MAF under-read by 8 %, true VE would be
@@ -585,23 +596,37 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
     fuel-delivery side.
 
   **Adjust injector/K scaling, not MAF scaling.** For *fuel* the two are
-  mathematically degenerate — both multiply delivered fuel by 1.08 — but MAF
-  scaling also moves the ECU's load calculation, which indexes timing, cam
-  phasing and every other load-referenced table. Correcting K fixes fuelling
+  mathematically degenerate — both multiply delivered fuel by the same
+  scalar — but MAF scaling also moves the ECU's load calculation, which
+  indexes timing, cam phasing and every other load-referenced table. Correcting K fixes fuelling
   without silently shifting the operating point everywhere else. This supersedes
   the task's original "adjust K, **then** MAF curve" ordering for the current
   error: the MAF curve needs nothing.
 
-  **Check fuel pressure before compensating.** An 8 % shortfall is equally
-  consistent with a weak pump, failing regulator or clogged filter. Scaling K
-  around a mechanical fault masks it and the tune drifts wrong as the fault
-  worsens. If pressure is to spec, K genuinely does not match the injectors and
-  correcting it in the ROM is right.
+  **Check fuel pressure under load before compensating.** The VQ40DE returnless
+  system specifies approximately **350 kPa / 51 psi at idle** and needs an
+  inline adapter at the engine-side quick connector (there is no convenient
+  rail Schrader). Observe it during the same loaded pull with an electronic
+  transducer, a chassis dyno, or a mechanical gauge secured outside the cabin.
+  Injector flow scales with the square root of pressure, so an 8 % mass-flow
+  deficit corresponds to roughly `51 × 0.92² = 43 psi`; a fall toward the low
+  40s could explain nearly the entire miss. Correct pressure at idle but sag
+  under load points to pump/filter/regulator capacity or pump voltage. Normal
+  pressure throughout moves uniform injector-flow loss and MAF absolute
+  calibration higher on the list.
 
-  **Validation:** measured WOT AFR should move 13.6 → ~12.6, and closed-loop
-  short-term trim should fall toward zero at the same time — that convergence is
-  the confirmation both symptoms shared one cause. With LTFT pinned at zero
-  (G.2) nothing adapts around an over-correction, so step small and re-measure.
+  This check matters because the correction predates both the 2026-06-28 mods
+  and the UpRev flash: May LTFT commonly carried 5–7 %, and the sparse July 26
+  pre-flash WOT events already show a 6–7 % miss. Scaling K around a weakening
+  mechanical component would mask it. If pressure remains near specification,
+  K is the least disruptive calibration correction.
+
+  **First correction and validation:** if loaded pressure is sound, start with
+  `K_new = K_current × 1.07`, not a full pooled +8 % in one jump. Measured WOT
+  AFR should move from about 13.6 toward 12.7 against the commanded ~12.6, and
+  closed-loop STFT should move toward zero. Change fuel first, re-log, and only
+  then touch timing. While LTFT remains zero, it will not hide an
+  over-correction, so re-measure before taking a second step.
 - [ ] **3.4 — AFR targets.** With the model true: stoich (closed
   loop) where the factory ran stoich; WOT/high-load targets per
   operator choice (~12.8–13.2:1 NA power mixture). Verify delivery
@@ -611,6 +636,23 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   before/after comparison of timing-advance behavior and pull-vs-pull
   performance deltas (estimated HP/torque channels) at matched
   conditions. No aggressive advance without dedicated knock hardware.
+
+  **Three-era observation, freshness-bounded 2026-07-27.** The flash boundary
+  is pinned by capture metadata: stock `ZS04C/1ZS04C` through 16:21 MDT on
+  2026-07-26; Osiris `ZS44A/1ZS44A` begins with the 16:31 session. Re-running
+  the comparison with a 3 s RPM/load/timing freshness limit discarded 3,103 of
+  8,491 timing records. In cells with usable post-flash coverage, idle was
+  effectively unchanged (16.8° stock-after-mods → 15.9° UpRev), while several
+  loaded cells were retarded: 2,000–2,500 rpm / 55–65 % load **25.3° → 18.0°**;
+  2,500–3,000 / 35–45 % **32.5° → 27.9°**; and 3,000–3,500 / 85–100 %
+  **24.6° → 13.7°**. The last cell is well axis-matched but still sparse (5
+  stock samples across 3 sessions; 6 UpRev samples across 2 sessions).
+
+  Treat the old observed timing as a reference ceiling, not a table to restore
+  wholesale. After AFR is corrected, add only **1–2° per iteration** in the
+  affected loaded cells and re-measure. Do not add the full observed 7–11° in
+  one flash: the ECM's knock state is not observable through the available
+  UpRev/CANary parameters.
 - [ ] **3.6 — Throttle/ETC and drivability passes.** WOT-at-all-speeds
   fix and any map-switching setup; CANary just documents before/after.
 
