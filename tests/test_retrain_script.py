@@ -840,6 +840,25 @@ def test_retrain_skips_tiny_sessions_when_picking_calibration_holdout(
     assert seen["sessions"] == [real_a, tiny]
 
 
+def test_calibration_picker_rejects_quarantine_and_narrow_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready = tmp_path / "ready"
+    narrow = tmp_path / "narrow"
+    quarantined = tmp_path / "quarantined"
+    sessions = [ready, narrow, quarantined]
+    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
+    monkeypatch.setattr(retrain, "_session_mode_coverage", lambda _p: {"city"})
+    health = {
+        ready: ("ready", 100),
+        narrow: ("ready", 50),
+        quarantined: ("quarantine", 100),
+    }
+    monkeypatch.setattr(retrain, "_session_holdout_health", health.__getitem__)
+
+    assert retrain._pick_calibration_holdouts(sessions) == [ready]
+
+
 def test_retrain_no_calibration_holdout_keeps_full_training_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

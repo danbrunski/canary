@@ -216,6 +216,7 @@ def resample_and_segment(
                 hz=config.preprocessing.resample_hz,
                 max_gap_factor=config.preprocessing.max_gap_factor,
                 slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+                session_gap_seconds=config.preprocessing.session_gap_seconds,
             ),
             value_columns=value_columns,
         )

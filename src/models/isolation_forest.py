@@ -507,6 +507,60 @@ def _calibrate_holdout_threshold(
     return score_threshold, score_scale, achieved_flag_rate
 
 
+def _jointly_complete_feature_set(
+    training_group: pd.DataFrame,
+    candidates: Sequence[str],
+    *,
+    minimum_complete_fraction: float,
+    calibration_group: pd.DataFrame | None,
+    minimum_calibration_rows: int,
+) -> list[str]:
+    """Largest useful greedy subset that remains jointly scoreable.
+
+    Per-column coverage is not enough for a row-wise estimator: ten columns
+    that are each 80% populated can have almost no rows where all ten coexist.
+    Add the densest columns first and retain a candidate only while the joint
+    complete-row floor remains satisfied.  When an external holdout exists,
+    apply the same check there so training cannot manufacture a schema that
+    its own calibration sessions cannot score.
+    """
+    if not candidates:
+        return []
+    calibration = calibration_group
+
+    def _coverage(column: str) -> float:
+        training = float(training_group[column].notna().mean())
+        if calibration is None:
+            return training
+        held_out = (
+            float(calibration[column].notna().mean())
+            if column in calibration.columns and len(calibration)
+            else 0.0
+        )
+        return min(training, held_out)
+
+    # Python's sort is stable: equal-coverage columns retain the caller's
+    # schema order, preserving deterministic sklearn results for dense data.
+    ordered = sorted(candidates, key=_coverage, reverse=True)
+    selected: list[str] = []
+    for column in ordered:
+        proposed = [*selected, column]
+        train_complete = int(training_group[proposed].notna().all(axis=1).sum())
+        if train_complete / len(training_group) < minimum_complete_fraction:
+            continue
+        if calibration is not None:
+            if column not in calibration.columns:
+                continue
+            available = [name for name in proposed if name in calibration.columns]
+            if len(available) != len(proposed):
+                continue
+            calibration_complete = int(calibration[proposed].notna().all(axis=1).sum())
+            if calibration_complete < minimum_calibration_rows:
+                continue
+        selected.append(column)
+    return selected
+
+
 def fit_isolation_forest(
     frame: pd.DataFrame,
     config: IsolationForestConfigLike,
@@ -551,6 +605,7 @@ def fit_isolation_forest(
     # holdout tail (the previous leak) and not modes 2.2 goes on to skip.
     mode_plans: dict[str, _ModeFitPlan] = {}
     skipped_modes: list[SkippedModeSummary] = []
+    minimum_complete_fraction = 1.0 - float(getattr(config, "max_dropped_row_fraction", 1.0))
     for raw_mode, group in frame.groupby(mode_column, sort=True, dropna=False):
         mode = str(raw_mode)
         if len(group) == 0:
@@ -567,11 +622,23 @@ def fit_isolation_forest(
         # ``dropna`` below emptied the whole mode on it (e.g. warmup deviations,
         # ~3 % populated in idle, zeroed the idle model entirely). Require a real
         # coverage fraction so only genuinely-present features count.
-        mode_feats = [
+        eligible_feats = [
             c
             for c in selected_features
             if float(group[c].notna().mean()) >= _MIN_MODE_FEATURE_COVERAGE
         ]
+        calibration_group = None
+        if calibration_frame is not None and mode_column in calibration_frame.columns:
+            calibration_group = calibration_frame[
+                calibration_frame[mode_column].astype(str) == mode
+            ]
+        mode_feats = _jointly_complete_feature_set(
+            group,
+            eligible_feats,
+            minimum_complete_fraction=minimum_complete_fraction,
+            calibration_group=calibration_group,
+            minimum_calibration_rows=_MIN_CALIBRATION_SAMPLES,
+        )
         if not mode_feats:
             continue
         mode_complete = group.dropna(subset=mode_feats)
@@ -724,7 +791,15 @@ def fit_isolation_forest(
     # The rows actually used across all per-mode models (disjoint by mode) —
     # for the manifest's data hash, span, sessions, and complete-row count.
     complete = frame.loc[sorted(set(used_index))]
-    dropped_fraction = (len(frame) - len(complete)) / len(frame) if len(frame) else 1.0
+    # Missing-row safety is evaluated only within modes that earned a model.
+    # Rows belonging to a mode below ``min_samples_per_mode`` are deliberately
+    # represented by ``skipped_modes``; counting them again as feature-
+    # missing rows conflates evidence coverage with joint schema completeness.
+    modeled_rows = frame[mode_column].astype(str).isin(mode_plans)
+    modeled_row_count = int(modeled_rows.sum())
+    dropped_fraction = (
+        (modeled_row_count - len(complete)) / modeled_row_count if modeled_row_count else 1.0
+    )
     maximum_dropped = float(getattr(config, "max_dropped_row_fraction", 1.0))
     if dropped_fraction > maximum_dropped:
         raise ValueError(

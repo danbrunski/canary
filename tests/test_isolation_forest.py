@@ -43,6 +43,7 @@ class _IFConfig:
     # ``calibration_holdout_fraction=0`` to opt out.
     calibration_holdout_fraction: float = 0.2
     target_flag_rate: float = 0.02
+    max_dropped_row_fraction: float = 0.75
 
 
 def _two_mode_frame() -> pd.DataFrame:
@@ -80,6 +81,26 @@ def _two_mode_frame() -> pd.DataFrame:
             "notes": ["clean"] * n_per_mode * 2,
         }
     )
+
+
+def test_fit_limits_features_by_joint_complete_row_coverage() -> None:
+    frame = _two_mode_frame().iloc[:60].copy()
+    frame[MODE_COLUMN] = "idle"
+    frame["sparse:a"] = np.nan
+    frame["sparse:b"] = np.nan
+    frame.loc[frame.index[:36], "sparse:a"] = np.arange(36, dtype=float)
+    frame.loc[frame.index[24:], "sparse:b"] = np.arange(36, dtype=float)
+
+    trained = fit_isolation_forest(
+        frame,
+        _IFConfig(calibration_holdout_fraction=0.0, max_dropped_row_fraction=0.5),
+        feature_columns=["obd:RPM", "sparse:a", "sparse:b"],
+    )
+
+    selected = trained.mode_feature_columns["idle"]
+    assert "obd:RPM" in selected
+    assert len({"sparse:a", "sparse:b"} & set(selected)) == 1
+    assert trained.manifest.complete_rows >= 30
 
 
 def test_fit_trains_one_model_per_operating_mode_and_emits_manifest() -> None:

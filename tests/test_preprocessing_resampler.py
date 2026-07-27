@@ -62,6 +62,22 @@ def test_resample_wide_preserves_session_boundaries() -> None:
     assert list(s2["obd:RPM"]) == [900.0]
 
 
+def test_resample_wide_splits_large_gap_inside_session() -> None:
+    wide = pd.DataFrame(
+        [
+            {"session": "s1", "timestamp": _ts(0), "obd:RPM": 700.0},
+            {"session": "s1", "timestamp": _ts(1), "obd:RPM": 710.0},
+            {"session": "s1", "timestamp": _ts(601), "obd:RPM": 900.0},
+        ]
+    )
+
+    result = resample_wide(wide, config=ResampleConfig(session_gap_seconds=300.0))
+
+    assert len(result) == 3
+    assert list(result["session"]) == ["s1#segment-001"] * 2 + ["s1#segment-002"]
+    assert list(result["obd:RPM"]) == [700.0, 710.0, 900.0]
+
+
 def test_resample_wide_marks_leading_fast_nulls_as_gaps() -> None:
     wide = pd.DataFrame(
         [

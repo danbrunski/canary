@@ -24,6 +24,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from src.dataframe_utils import require_columns as _require_columns
@@ -85,7 +86,7 @@ class ZScoreScaler:
             # float32, and these scalars are persisted in the model manifest
             # and divide every transformed value. The upcast is a transient
             # per-column copy, freed each iteration.
-            series = df[col].astype("float64")
+            series = df[col].astype("float64").replace([np.inf, -np.inf], np.nan)
             mean_val = float(series.mean(skipna=True))
             # ddof=0 (population std). The classic z-score assumes the
             # training set represents the full distribution; ddof=1 would

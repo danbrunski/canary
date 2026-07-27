@@ -328,6 +328,11 @@ class PreprocessingConfig(_Strict):
     #: Beyond the limit the resampled cell goes NaN and its ``__gap`` flag
     #: sets, same treatment fast channels already got.
     slow_channel_max_gap_seconds: float = 120.0
+    #: A larger wall-clock discontinuity starts a new logical capture segment,
+    #: even if both sides were accidentally written beneath one directory.
+    #: Resampling across suspend/disconnect gaps manufactures thousands of
+    #: all-stale rows and lets rolling features bridge unrelated drives.
+    session_gap_seconds: float = Field(default=300.0, gt=0.0)
     #: Multiple of the resample interval a *fast* channel may go unobserved
     #: before its ffilled cell is NaN'd and its ``__gap`` flag sets.
     #:

@@ -143,6 +143,19 @@ def _session_mode_coverage(session: Path) -> set[str] | None:
     }
 
 
+def _session_holdout_health(session: Path) -> tuple[str, int] | None:
+    """Classifier disposition and observed feature width for holdout screening."""
+    from src.analysis.session_classifier import read_classification
+
+    classification = read_classification(session)
+    if classification is None:
+        return None
+    return (
+        classification.disposition,
+        int(classification.quality.get("feature_columns", 0)),
+    )
+
+
 def _pick_calibration_holdouts(
     sessions: Sequence[Path],
     *,
@@ -162,6 +175,14 @@ def _pick_calibration_holdouts(
     covered or ``max_holdouts`` is reached.
     """
     corpus_modes: set[str] = set()
+    classified_widths = [
+        health[1]
+        for session in sessions
+        if (health := _session_holdout_health(session)) is not None
+        and health[0] == "ready"
+        and health[1] > 0
+    ]
+    minimum_compatible_width = 0.9 * max(classified_widths, default=0)
     for session in sessions:
         modes = _session_mode_coverage(session)
         if modes:
@@ -173,6 +194,18 @@ def _pick_calibration_holdouts(
         if len(selected) >= max_holdouts:
             break
         if _session_parquet_bytes(session) < _MIN_CALIBRATION_HOLDOUT_BYTES:
+            continue
+        health = _session_holdout_health(session)
+        if health is not None and (health[0] != "ready" or health[1] < minimum_compatible_width):
+            log.info(
+                "skipping unhealthy calibration holdout",
+                extra={
+                    "session": session.name,
+                    "disposition": health[0],
+                    "feature_columns": health[1],
+                    "minimum_compatible_feature_columns": minimum_compatible_width,
+                },
+            )
             continue
         modes = _session_mode_coverage(session)
         if not selected:
@@ -488,8 +521,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
-    # Pick the calibration holdout for the sequence detector. Out-of-sample
-    # threshold calibration is the default — in-sample mean+k·σ underestimates
+    # Pick calibration holdouts shared by every enabled detector. Out-of-sample
+    # threshold calibration is the default — in-sample calibration underestimates
     # cross-session error and floods false positives on unseen drives. Explicit
     # --calibration-sessions wins; otherwise auto-hold-out the most-recent
     # *substantial* discovered session — abandoned in-progress captures (single
@@ -498,31 +531,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     # everything to the global threshold. With fewer than 3 sessions we can't
     # afford to hold one out, so we log and fall back to in-sample.
     calibration_sessions: list[Path] = []
-    if not args.skip_sequence:
-        if args.calibration_sessions:
-            requested = {Path(p).resolve() for p in args.calibration_sessions}
-            calibration_sessions = [s for s in sessions if Path(s).resolve() in requested]
-            sessions = [s for s in sessions if Path(s).resolve() not in requested]
-        elif not args.no_calibration_holdout and len(sessions) >= 3:
-            # Hold out up to 3 sessions for mode coverage, but always keep
-            # at least 2 for training.
-            holdouts = _pick_calibration_holdouts(sessions, max_holdouts=min(3, len(sessions) - 2))
-            if holdouts:
-                calibration_sessions = holdouts
-                held = set(holdouts)
-                sessions = [s for s in sessions if s not in held]
-            else:
-                log.warning(
-                    "no substantial session available for out-of-sample "
-                    "calibration; falling back to in-sample",
-                    extra={"session_count": len(sessions)},
-                )
-        elif not args.no_calibration_holdout:
+    if args.calibration_sessions:
+        requested = {Path(p).resolve() for p in args.calibration_sessions}
+        calibration_sessions = [s for s in sessions if Path(s).resolve() in requested]
+        sessions = [s for s in sessions if Path(s).resolve() not in requested]
+    elif not args.no_calibration_holdout and len(sessions) >= 3:
+        # Hold out up to 3 sessions for mode coverage, but always keep
+        # at least 2 for training.
+        holdouts = _pick_calibration_holdouts(sessions, max_holdouts=min(3, len(sessions) - 2))
+        if holdouts:
+            calibration_sessions = holdouts
+            held = set(holdouts)
+            sessions = [s for s in sessions if s not in held]
+        else:
             log.warning(
-                "too few sessions for an out-of-sample calibration holdout; "
-                "falling back to in-sample (cross-session FPR likely inflated)",
+                "no substantial session available for out-of-sample "
+                "calibration; falling back to in-sample",
                 extra={"session_count": len(sessions)},
             )
+    elif not args.no_calibration_holdout:
+        log.warning(
+            "too few sessions for an out-of-sample calibration holdout; "
+            "falling back to in-sample (cross-session FPR likely inflated)",
+            extra={"session_count": len(sessions)},
+        )
 
     # Task 3.1: a --since window is explicitly the scheduled-retrain shape (a
     # rolling window, not a fixed corpus) — the calibration-holdout fallback

@@ -62,6 +62,7 @@ class ResampleConfig:
     #: ffilled cell goes NaN and its ``__gap`` flag sets, same as a fast
     #: channel past ``max_gap``.
     slow_channel_max_gap_seconds: float = DEFAULT_SLOW_CHANNEL_MAX_GAP_SECONDS
+    session_gap_seconds: float = 300.0
 
     def __post_init__(self) -> None:
         if self.hz <= 0:
@@ -70,6 +71,8 @@ class ResampleConfig:
             raise ValueError("max_gap_factor must be positive")
         if self.slow_channel_max_gap_seconds <= 0:
             raise ValueError("slow_channel_max_gap_seconds must be positive")
+        if self.session_gap_seconds <= 0:
+            raise ValueError("session_gap_seconds must be positive")
 
     @property
     def interval(self) -> pd.Timedelta:
@@ -99,7 +102,15 @@ def resample_wide(
 
     frames: list[pd.DataFrame] = []
     for session, group in wide.groupby(SESSION_COLUMN, sort=True, dropna=False):
-        frames.append(_resample_one_session(str(session), group, columns, cfg))
+        ordered = group.sort_values(TIMESTAMP_COLUMN, kind="stable").copy()
+        timestamps = pd.to_datetime(ordered[TIMESTAMP_COLUMN], utc=True)
+        segment_ids = timestamps.diff().gt(pd.Timedelta(seconds=cfg.session_gap_seconds)).cumsum()
+        segment_count = int(segment_ids.max()) + 1 if len(segment_ids) else 0
+        for segment_id, segment in ordered.groupby(segment_ids, sort=True):
+            logical_session = str(session)
+            if segment_count > 1:
+                logical_session = f"{session}#segment-{int(segment_id) + 1:03d}"
+            frames.append(_resample_one_session(logical_session, segment, columns, cfg))
     return pd.concat(frames, ignore_index=True)
 
 

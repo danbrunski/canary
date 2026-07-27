@@ -76,6 +76,7 @@ class ParquetTelemetryWriter:
         max_rows: int = 10_000,
         flush_interval_seconds: float = 5.0,
         engine_run_time_reset_threshold_seconds: float = 5.0,
+        session_gap_seconds: float = 300.0,
         clock: Callable[[], datetime] | None = None,
         arming_gate: RecordArmingGate | None = None,
     ):
@@ -88,6 +89,9 @@ class ParquetTelemetryWriter:
         self.max_rows = max_rows
         self.flush_interval_seconds = flush_interval_seconds
         self.engine_run_time_reset_threshold_seconds = engine_run_time_reset_threshold_seconds
+        if session_gap_seconds <= 0:
+            raise ValueError("session_gap_seconds must be positive")
+        self.session_gap_seconds = session_gap_seconds
         #: Optional operator-intent gate (Task 8.6). ``None`` (the default)
         #: preserves the always-on behavior byte-for-byte.
         self.arming_gate = arming_gate
@@ -95,11 +99,13 @@ class ParquetTelemetryWriter:
         self._chunk_index = 0
         self._last_flush = self._clock()
         self._last_engine_run_time: float | None = None
+        self._last_record_timestamp: datetime | None = None
         self.files_written: list[Path] = []
         self.session_paths: list[SessionPaths] = [self.paths]
 
     def write(self, record: TelemetryRecord) -> Path | None:
         """Append one record, flushing when row count or time threshold is reached."""
+        self._rotate_if_record_gap(record)
         self._rotate_if_engine_run_time_reset(record)
         if self.arming_gate is not None and not self.arming_gate.observe(record):
             return None
@@ -150,11 +156,25 @@ class ParquetTelemetryWriter:
         self.session_paths.append(self.paths)
         self._chunk_index = 0
         self._last_flush = self._clock()
+        self._last_engine_run_time = None
+        self._last_record_timestamp = None
         if self.arming_gate is not None:
             # New key cycle: gate again until this session sees its own
             # vehicle-active signal (Task 8.6).
             self.arming_gate.reset_for_new_session()
         return flushed
+
+    def _rotate_if_record_gap(self, record: TelemetryRecord) -> None:
+        timestamp = record.timestamp
+        previous = self._last_record_timestamp
+        if (
+            previous is not None
+            and (timestamp - previous).total_seconds() > self.session_gap_seconds
+        ):
+            self.rotate_session(started_at=timestamp)
+        # Small cross-source reordering must not move the watermark backwards.
+        if previous is None or timestamp > previous:
+            self._last_record_timestamp = timestamp
 
     def enter_replay_mode(self, replay_id: str) -> Path | None:
         """Flush + redirect writes to ``<out_root>/_replay-<replay_id>/``.
@@ -174,6 +194,7 @@ class ParquetTelemetryWriter:
         self.session_paths.append(self.paths)
         self._chunk_index = 0
         self._last_flush = self._clock()
+        self._last_record_timestamp = None
         return flushed
 
     def exit_replay_mode(self, *, started_at: datetime | None = None) -> Path | None:
@@ -198,6 +219,7 @@ class ParquetTelemetryWriter:
         self.session_paths.append(self.paths)
         self._chunk_index = 0
         self._last_flush = self._clock()
+        self._last_record_timestamp = None
         return flushed
 
     def _rotate_if_engine_run_time_reset(self, record: TelemetryRecord) -> None:

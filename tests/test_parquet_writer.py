@@ -63,6 +63,33 @@ def test_close_flushes_partial_buffer(tmp_path: Path) -> None:
     assert path.exists()
 
 
+def test_writer_rotates_session_after_large_record_gap(tmp_path: Path) -> None:
+    started = datetime(2026, 5, 11, 12, 0, tzinfo=UTC)
+    writer = ParquetTelemetryWriter(
+        tmp_path,
+        session_started_at=started,
+        max_rows=10,
+        session_gap_seconds=300.0,
+    )
+    writer.write(TelemetryRecord(timestamp=started, source="obd", channel="RPM", value=700.0))
+    writer.write(
+        TelemetryRecord(
+            timestamp=started + timedelta(seconds=301),
+            source="obd",
+            channel="RPM",
+            value=710.0,
+        )
+    )
+    writer.close()
+
+    assert [paths.root.name for paths in writer.session_paths] == [
+        "2026-05-11T120000",
+        "2026-05-11T120501",
+    ]
+    assert len(list(writer.session_paths[0].root.glob("telemetry-*.parquet"))) == 1
+    assert len(list(writer.session_paths[1].root.glob("telemetry-*.parquet"))) == 1
+
+
 def test_time_based_flush(tmp_path: Path) -> None:
     now = datetime(2026, 5, 11, 12, 2, tzinfo=UTC)
 

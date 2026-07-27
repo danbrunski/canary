@@ -503,6 +503,7 @@ def build_feature_frame(
         hz=config.preprocessing.resample_hz,
         max_gap_factor=config.preprocessing.max_gap_factor,
         slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+        session_gap_seconds=config.preprocessing.session_gap_seconds,
     )
     resampled_parts: list[pd.DataFrame] = []
     skipped: list[str] = []
@@ -759,9 +760,10 @@ def trainable_feature_columns(features: pd.DataFrame) -> list[str]:
     """
     cols: list[str] = []
     for col in candidate_feature_columns(features):
-        if not bool(features[col].notna().any()):
+        health = _column_health(features[col])
+        if health["finite_count"] == 0:
             continue
-        if _is_constant_column(features[col]):
+        if health["constant"]:
             continue
         cols.append(col)
     return cols

@@ -107,6 +107,8 @@ collection:
 
 preprocessing:
   resample_hz: 1
+  # Split accidental suspend/disconnect gaps before creating the 1 Hz grid.
+  session_gap_seconds: 300
   rolling_window_seconds: 30
   # Trailing window for the segmenter's derived recent_speed signal (the
   # trailing max ground speed), which separates a transient stop from steady
