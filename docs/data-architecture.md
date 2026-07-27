@@ -130,6 +130,52 @@ hands-busy-in-vehicle tag generation.
 
 **Role:** RE only. Never in production.
 
+### 5. UpRev Osiris datalogger over K-line — *external tool; not reachable from CANary*
+
+The UpRev tuning cable is the operator's tuning toolchain. Two of its
+functions use **different transports**, and conflating them wastes time:
+
+* **Reflashing runs over CAN.** Captured end-to-end on 2026-07-26
+  (`ZS04C` → `ZS44A`, 410 547 frames / 239 s). Control chatter on
+  `7E0`/`7E8` is session control plus KWP reads; the firmware payload
+  streams as **raw 8-byte frames on Nissan-specific `0x743`** with no
+  ISO-TP framing — 73 728 frames, 576 KiB, 31.8 s, ~59 % bus load.
+  Notably **no standard UDS reprogramming services at all**: no
+  `0x27` SecurityAccess, no `0x34` RequestDownload, no `0x36`
+  TransferData. See `scripts/decode_flash.py`.
+* **Datalogging does not touch CAN.** Proven the same evening: with the
+  daemon in passive mode (bus verified silent — zero tester frames in a
+  4 s pre-check), a 76 s `candump` recorded 124 086 frames while UpRev
+  logged 518 rows at 16.2 Hz. **Zero frames on `7E0`/`7DF`/`0x743`, and
+  not one arbitration ID that wasn't already present as normal vehicle
+  broadcast.** The logger is on the K-line.
+
+**Consequence:** CANary cannot observe, replicate, or sniff UpRev's
+datalogging over CAN. There is no protocol on our wire to copy. Matching
+its rate would require K-line hardware — an ISO-9141 transceiver
+(L9637D class) on a Pi UART. `docs/skunkworks/ecu-rw-bench-research.md`
+already contemplates a K-line breakout on the bench harness.
+
+**What K-line would actually buy** — less than it first appears:
+
+| | |
+|---|---|
+| Rate | 16–24 Hz vs CANary's 0.1–0.5 Hz Mode 01 polling |
+| MAF **sensor voltage** (`MAS A/F SE-B1`) | no known DID; distinct from the A/F sensor voltage at `0x1225` |
+| Throttle X/Y **map traces** | the ETC map's live axes (throttle % × RPM) |
+| `A/F ADJ` (long-term trim) | see below |
+
+**What it would *not* buy: knock.** `HI DET` and `KNOCK STRENGTH` read
+constant (`1` and `0x500`) across two K-line sessions including a
+4575 rpm pull. The ECM does not report knock on *either* transport, so
+K-line hardware would not unblock timing work. This is not a failed
+sensor — the pre-flash DTC baseline was clean on the stock calibration,
+including no P0325/P0330.
+
+**Role:** external operator tool. CANary's job is to cover what CAN can
+reach (see the gap analysis in `docs/roadmap/engine-tuning-support.md`)
+and to treat UpRev logs as an importable reference, not a live source.
+
 ## The mapping
 
 | Need | Primary path | Fallback / supplement |
@@ -142,6 +188,9 @@ hands-busy-in-vehicle tag generation.
 | Reverse-engineering a new broadcast byte | Canable sniff + Mode 01 ground-truth cross-reference | NT510 stimulus to get a clean signal |
 | Manufacturer-specific live data (injector PW, etc.) | **Canable-native Mode 22 selected DID polling** | Broad sweep CLI pending |
 | RE stimulus (force the engine into a known state) | **NT510 actuator tests** | Drive the vehicle yourself |
+| High-rate tuning parameters (MAF sensor V, throttle map traces, A/F ADJ) | **UpRev logger over K-line** — external tool, import its CSV | No CAN path exists; optional future K-line hardware |
+| Knock / detonation | **Nothing.** ECM reports it on no transport | — (do not plan around K-line solving this) |
+| Watching another tool own a diagnostic session | **Passive mode** (`tx_gate`) + `candump`, decoded by `scripts/decode_flash.py` | — |
 
 ## The production daemon's actual dependencies
 

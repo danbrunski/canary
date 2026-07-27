@@ -5,13 +5,32 @@ Status: **planned, gated on hardware** (2026-07-20). Straight to
 
 Blocked until both are true (operator confirms):
 
-- [ ] **G.1 — UpRev Tuner cable + license delivered** (Z1 Offroad
-  order; license locks to this ECU).
-- [ ] **G.2 — LTFT relearned.** LONG_FUEL_TRIM currently reads a flat
-  0.0% — ECU-side (returns 0x80), needs warm steady-state drive
-  cycles, not a code fix. Gate: LTFT reporting nonzero values across
-  a full warm drive. Trim-based analysis (Phase 2) is meaningless
-  before this.
+- [x] **G.1 — UpRev Tuner cable + license delivered** (Z1 Offroad
+  order; license locks to this ECU). Done — first flash 2026-07-26,
+  stock `ZS04C` → Osiris `ZS44A`, CAL_ID `1ZS04C` → `1ZS44A`.
+- [~] **G.2 — LTFT is not going to relearn. Gate restated.**
+  Original wording assumed `LONG_FUEL_TRIM`'s flat 0.0 % was a
+  pending relearn ("needs warm steady-state drive cycles"). That is
+  now disproven:
+
+  * It survived a **full ECU reflash** — about as hard an adaptive
+    reset as exists — still 0.00 across 96/98 samples at 80 °C.
+  * UpRev's `A/F ADJ-B1`/`-B2` read **0.000 / −0.002 constant** over
+    518 samples. That is a *completely independent transport
+    (K-line) and decoder* reaching the same answer, which rules out
+    a CANary decode bug.
+
+  So the ECU genuinely does not learn long-term fuel trim on this
+  calibration. **Phase 2 must not wait for LTFT.** Restated gate:
+  trim-based analysis uses **short-term trim alone**, and every
+  correction surface must be labelled as such — with LTFT pinned at
+  zero, STFT carries the entire correction permanently rather than
+  the residual it normally represents.
+
+  Cross-check that validates the approach: UpRev `A/F CORR` read
+  +9.1 % / +7.9 % while CANary `SHORT_FUEL_TRIM_1/2` read
+  +9.18 % / +7.42 % over the same period — two toolchains, two
+  transports, same answer.
 
 Software phases (1–2) don't need the cable and are overnight-eligible;
 the campaign itself (Phase 3) needs the truck, the cable, and the

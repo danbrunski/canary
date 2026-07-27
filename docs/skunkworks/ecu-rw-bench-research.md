@@ -67,6 +67,22 @@ the SH7055/SH7058 microcontrollers in the VQ40DE-era ECU:
   specifics.
 - **Ghidra** — SH-2 disassembly for the firmware/security-access RE.
 
+**Empirical confirmation that K-line is live on this ECU (2026-07-26).**
+These tools all assume a working K-line on the VQ40DE-era ECM; that is
+no longer an assumption. UpRev's datalogger was observed pulling 16.2 Hz
+of live parameters while putting **zero frames on CAN** — a 76 s
+`candump` with the daemon in passive mode caught 124 086 frames and not
+one tester frame on `7E0`/`7DF`/`0x743`. So the K-line is present,
+active, and carries manufacturer parameters that CAN does not expose
+(MAF sensor voltage, throttle map traces, `A/F ADJ`). Full evidence in
+`docs/data-architecture.md` §5.
+
+Note the split, because it matters for npkern: **reflashing on this
+vehicle runs over CAN**, not K-line — captured the same day, with the
+firmware streaming as raw 8-byte frames on `0x743` and *no* standard UDS
+download services. npkern's K-line path is therefore an alternative
+route to the ECU, not a mirror of what the stock tooling does.
+
 So the realistic shape is *assemble + extend existing tools*, and the
 genuinely novel contribution is the **CANary bridge**: translating
 CANary's behavior-analysis output (binned AFR-error / correction
