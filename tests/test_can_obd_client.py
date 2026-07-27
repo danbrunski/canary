@@ -83,6 +83,19 @@ def test_decode_timing_advance() -> None:
     assert decode_timing_advance(bytes([0xC0])) == (32.0, "degBTDC")
 
 
+def test_decode_timing_advance_rejects_unavailable_sentinel() -> None:
+    """Raw 0xFF is "not available", not 63.5°BTDC.
+
+    This ECU returns 0xFF whenever the engine is not running — measured at
+    63.5 in 1012/1012 samples at RPM==0 and 0/683 while running. Decoding it
+    as a number put a constant into the isolation forest's training corpus
+    (session 2026-07-22T154954 is 100% sentinel).
+    """
+    assert decode_timing_advance(bytes([0xFF])) is None
+    # The neighbouring value is still a legitimate (if extreme) reading.
+    assert decode_timing_advance(bytes([0xFE])) == (63.0, "degBTDC")
+
+
 def test_decode_o2_voltage() -> None:
     # raw 0xA0 (160) / 200 = 0.8V (typical lean threshold)
     assert decode_o2_voltage(bytes([0xA0])) == (0.8, "V")

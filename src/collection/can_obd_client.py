@@ -469,8 +469,34 @@ def decode_baro(data: bytes) -> tuple[float, str] | None:
     return (float(data[0]), "kPa")
 
 
+#: Raw 0xFF on PID 0x0E is the ECU's "not available" sentinel, not a reading.
+#: It decodes to exactly 63.5 degBTDC — the top of the A/2-64 scale — which is
+#: not a physically achievable spark advance on a spark-ignition engine (this
+#: one idles at ~17 and peaks around 40).
+TIMING_ADVANCE_UNAVAILABLE = 0xFF
+
+
 def decode_timing_advance(data: bytes) -> tuple[float, str] | None:
+    """Mode 01 PID 0x0E — spark advance, A/2 - 64.
+
+    Returns None for the 0xFF sentinel. Spark advance is undefined with no
+    combustion, and this ECU reports 0xFF whenever the engine is not running:
+    measured across four sessions on 2026-07-26, the value was 63.5 in 1012 of
+    1012 samples taken at RPM == 0 and in 0 of 683 taken while running. No
+    other polled PID behaves this way — ENGINE_LOAD reports a true 0.0,
+    CONTROL_MODULE_VOLTAGE a true 11.9 V, INTAKE_TEMP a genuinely heat-soaked
+    62 degC — so the sentinel handling belongs here rather than in a shared
+    engine-state gate.
+
+    Storing it as a number was actively harmful: `2026-07-22T154954` is 100%
+    sentinel (engine never ran) and is in the deployed isolation forest's
+    training set, so the model learned a constant. Emitting None drops the
+    reading like any other unavailable PID instead of inventing a max-scale
+    one, and downstream gap handling already copes with an absent sample.
+    """
     if not _need(data, 1):
+        return None
+    if data[0] == TIMING_ADVANCE_UNAVAILABLE:
         return None
     return (data[0] / 2.0 - 64.0, "degBTDC")
 
