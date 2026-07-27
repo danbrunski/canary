@@ -384,3 +384,75 @@ def test_loop_falls_back_when_the_ecu_refuses_batches() -> None:
     assert {r.pid for r in readings} >= {"RPM", "SPEED", "ENGINE_LOAD"}, (
         "must recover to single-PID polling and still produce every channel"
     )
+
+
+class _SizeLimitedEcu(_BatchingEcu):
+    """Answers batches only up to ``max_accepted`` PIDs, ignoring larger ones.
+
+    Models the realistic middle case the step-down exists for: an ECU that
+    supports batching but not the full J1979 six.
+    """
+
+    def __init__(self, max_accepted: int) -> None:
+        super().__init__()
+        self.max_accepted = max_accepted
+        self.rejected_sizes: list[int] = []
+
+    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
+        data = bytes(msg.data)
+        length, service = data[0], data[1]
+        pids = list(data[2 : 1 + length])
+        if service == 0x01 and len(pids) > self.max_accepted:
+            self.sent.append(msg)
+            self.batch_requests += 1
+            self.rejected_sizes.append(len(pids))
+            return  # silence
+        super().send(msg, timeout)
+
+
+def test_batch_size_steps_down_instead_of_giving_up() -> None:
+    """An ECU that takes 4 PIDs but refuses 6 should end up batching at 4, not
+    fall back to single-PID. 'Supports batching' is not binary."""
+    from src.collection.can_obd_collector import _next_batch_size
+
+    assert [_next_batch_size(n) for n in (6, 4, 2)] == [4, 2, 1]
+
+    bus = _SizeLimitedEcu(max_accepted=4)
+    readings: list = []
+    run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _spec(
+            pids=("RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS", "TIMING_ADVANCE"),
+            batch_max_pids=6,
+        ),
+        on_frame=lambda _m: None,
+        on_reading=readings.append,
+        stop_event=threading.Event(),
+        deadline_monotonic=time.monotonic() + 0.8,
+    )
+
+    assert bus.rejected_sizes, "should have tried a too-large batch first"
+    assert max(bus.rejected_sizes) > 4
+    # Having narrowed, it must still be batching (not single-PID) and still
+    # producing every channel.
+    assert {r.pid for r in readings} >= {"RPM", "SPEED", "ENGINE_LOAD"}
+
+
+def test_healthy_channels_are_not_backed_off_by_a_failed_batch() -> None:
+    """The subtle one. A whole-batch failure says nothing about any individual
+    PID, so crediting six misses would wrongly suppress six healthy channels.
+    After the fallback, every channel must still be polling."""
+    bus = _BatchingEcu(answer_batches=False)
+    readings: list = []
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _spec(pids=("RPM", "SPEED", "ENGINE_LOAD"), batch_max_pids=6),
+        on_frame=lambda _m: None,
+        on_reading=readings.append,
+        stop_event=threading.Event(),
+        deadline_monotonic=time.monotonic() + 0.8,
+    )
+
+    assert stats.batch_failures > 0
+    counts = {c: sum(1 for r in readings if r.pid == c) for c in ("RPM", "SPEED", "ENGINE_LOAD")}
+    assert all(n > 0 for n in counts.values()), f"a channel went silent: {counts}"

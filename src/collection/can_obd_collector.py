@@ -105,10 +105,25 @@ log = logging.getLogger(__name__)
 AUTO_PROBE_TIMEOUT_SECONDS = 0.25
 AUTO_BASELINE_PID_NAMES = tuple(name for _pid, (name, _decoder) in sorted(PID_DECODERS.items()))
 SCHEDULER_METRICS_INTERVAL_SECONDS = 5.0
-#: Consecutive whole-batch failures before a session gives up on multi-PID
-#: requests. Small on purpose: an ECU that dislikes batching should cost a
-#: handful of request slots to discover, not a whole drive.
+#: Consecutive whole-batch failures before the session narrows its batch size.
+#: Small on purpose: an ECU that dislikes a given size should cost a handful
+#: of request slots to discover, not a whole drive.
 MAX_CONSECUTIVE_BATCH_FAILURES = 3
+
+
+def _next_batch_size(current: int) -> int:
+    """Step a failing batch size down: 6 -> 4 -> 2 -> 1 (off).
+
+    Halving rather than disabling outright, because "supports batching" is not
+    binary. An ECU that answers four PIDs but refuses six would otherwise lose
+    the feature entirely, when it was worth 4x. Reaching 1 disables batching
+    for the session.
+    """
+    if current <= 2:
+        return 1
+    if current > 4:
+        return 4
+    return 2
 
 
 def parse_can_id(value: str | int) -> int:
@@ -181,6 +196,7 @@ def run_can_obd_loop(
     # stalling. This doubles as the adaptive form of the startup size probe:
     # we discover what the vehicle actually accepts by using it.
     batching_enabled = spec.batch_max_pids > 1
+    active_batch_max = spec.batch_max_pids
     consecutive_batch_failures = 0
     stats.loop_started_at = time.monotonic()
     while not _should_stop(stop_event, deadline_monotonic):
@@ -303,7 +319,7 @@ def run_can_obd_loop(
             request_states,
             now,
             leader_index=request_index,
-            max_pids=spec.batch_max_pids if batching_enabled else 1,
+            max_pids=active_batch_max if batching_enabled else 1,
             eligible=eligible,
         )
         if len(batch_indices) > 1:
@@ -324,13 +340,24 @@ def run_can_obd_loop(
             else:
                 consecutive_batch_failures += 1
                 if consecutive_batch_failures >= MAX_CONSECUTIVE_BATCH_FAILURES:
-                    batching_enabled = False
-                    log.warning(
-                        "multi-PID batching disabled after %d consecutive failures; "
-                        "falling back to single-PID polling for this session",
-                        consecutive_batch_failures,
-                        extra={"batch_max_pids": spec.batch_max_pids},
-                    )
+                    narrowed = _next_batch_size(active_batch_max)
+                    consecutive_batch_failures = 0
+                    if narrowed <= 1:
+                        batching_enabled = False
+                        log.warning(
+                            "multi-PID batching disabled: no batch size this ECU "
+                            "accepts; falling back to single-PID for this session",
+                            extra={"configured_batch_max_pids": spec.batch_max_pids},
+                        )
+                    else:
+                        log.warning(
+                            "narrowing multi-PID batch size %d -> %d after %d consecutive failures",
+                            active_batch_max,
+                            narrowed,
+                            MAX_CONSECUTIVE_BATCH_FAILURES,
+                        )
+                        active_batch_max = narrowed
+                    stats.batch_size_narrowings += 1
             if controller is not None:
                 for index in batch_indices:
                     controller.on_request_attempted(index)

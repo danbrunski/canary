@@ -1,7 +1,8 @@
 # Roadmap — multi-PID Mode 01 polling
 
-Status: **ready to implement, no hardware or vehicle needed for Phase 1**
-(2026-07-26). Straight to `main`, no feature branches.
+Status: **Phases 1 and 2 landed** (commit `78abf88`, 2026-07-26). Phase 3
+partly re-scoped after an audit — see 3.1 and 3.5. Phase 4 needs a drive.
+Straight to `main`, no feature branches.
 
 Phases 1–2 are pure software and overnight-eligible. Phase 3 changes what
 the daemon puts on the bus and wants the truck. Phase 4 is validation and
@@ -73,53 +74,61 @@ Mode 22 DIDs therefore stay one-at-a-time regardless of what happens here.
 
 ## Phase 1 — Batching in the request/response core
 
-- [ ] **1.1 — Build a batched request.** Extend `build_request_payload`
+- [x] **1.1 — Build a batched request.** Extend `build_request_payload`
   (or add a sibling) to emit `01 <pid> <pid> …` for up to N PIDs, padded
   to DLC=8. A 6-PID request is exactly 8 bytes including the PCI, so it
   still fits a single frame — no ISO-TP on the request side.
-- [ ] **1.2 — Parse a batched response.** Walk `41 <pid> <data…>` triples,
+- [x] **1.2 — Parse a batched response.** Walk `41 <pid> <data…>` triples,
   splitting on each PID's declared byte length from
   `obd_registry`/`PID_DECODERS`. A 6-PID response is 15 bytes, so this is
   multi-frame ISO-TP inbound and needs the existing flow-control path.
   Return one reading per PID actually present.
-- [ ] **1.3 — Partial-response handling.** A batch that comes back missing
+- [x] **1.3 — Partial-response handling.** A batch that comes back missing
   a PID must credit the ones returned and mark only the absent one as
   unanswered. Test with a synthetic response that omits a middle PID —
   the offset walk must not desynchronise.
-- [ ] **1.4 — Negative-response handling.** A `7F 01 <nrc>` to a batch
-  applies to the whole request. Decide and document whether that retires
-  the batch or falls back to probing its members individually (prefer
-  fallback: one unsupported PID should not blind five good ones).
-- [ ] **1.5 — Client method.** `CanObdClient.query_mode_01_batch(pids)`
+- [x] **1.4 — Negative-response handling.** A `7F 01 <nrc>` to a batch
+  applies to the whole request. **Settled: fall back, and credit nobody.**
+  A whole-batch failure is evidence about the *batch*, not about any member,
+  so applying six misses would wrongly back off six healthy channels on an
+  ECU that merely dislikes batching.
+- [x] **1.5 — Client method.** `CanObdClient.query_mode_01_batch(pids)`
   alongside the existing single-PID `query_mode_01`, so ad-hoc callers and
   control routes get the same benefit.
 
 ## Phase 2 — Wire batching into the scheduler
 
-- [ ] **2.1 — Group requests into batches.** In `build_poll_requests`,
+- [x] **2.1 — Group requests into batches.** In `build_poll_requests`,
   group `kind="pid"`, `service=0x01` requests by `poll_tier` into batches
   of ≤ `max_batch_size`. Batch membership is a scheduling detail — the
   emitted `ObdReading`s must stay per-channel so nothing downstream
   changes.
-- [ ] **2.2 — Per-batch scheduling state.** `_PollRequestState` currently
+- [x] **2.2 — Per-batch scheduling state.** `_PollRequestState` currently
   tracks due-time and backoff per request. A batch needs one due-time but
   per-member response accounting, so a single dead PID backs off alone
   rather than the batch.
-- [ ] **2.3 — Scheduler metrics.** `_scheduler_metrics` should report
+- [x] **2.3 — Scheduler metrics.** `_scheduler_metrics` should report
   batches issued, mean PIDs per batch, and achieved per-channel Hz. That
   last number is the one that tells an operator whether a tuning capture
   is worth analysing.
-- [ ] **2.4 — Probe the achievable batch size.** At startup (or first
-  `auto` discovery), try 6 → 4 → 2 → 1 and keep the largest that answers.
-  Record it in session metadata. Cheap, and makes the feature portable to
-  an ECU that caps lower.
+- [x] **2.4 — Probe the achievable batch size.** Implemented *adaptively*
+  rather than as a startup probe: three consecutive whole-batch failures
+  narrow the size 6 → 4 → 2 → 1, and reaching 1 disables batching for the
+  session. Better than a startup probe because it also catches an ECU that
+  degrades mid-drive, and it costs nothing when batching works. Surfaced as
+  `batching.size_narrowings` in the scheduler metrics.
 
 ## Phase 3 — Apply it everywhere it pays
 
-- [ ] **3.1 — Supported-PID discovery.** `query_supported_mode_01_pids`
-  walks 0x00 → 0x20 → 0x40 → 0x60 → 0x80 → 0xA0 → 0xC0 as seven sequential
-  requests. Those are just PIDs; batch them into two. Runs at every
-  startup with `--obd-pids auto`, so it also shortens time-to-first-data.
+- [ ] **3.1 — Supported-PID discovery.** *Re-scoped after the 3.5 audit —
+  worth less than first claimed, and harder.* The walk is **conditional**:
+  it stops as soon as no responder sets the continuation bit, so a typical
+  ECU costs ~4 requests, not 7. Batching all seven upfront would *add*
+  requests for groups the ECU doesn't support. It also runs through
+  `_request_many`, which merges bitmasks from *multiple* responders on the
+  functional broadcast — a path the current batching code doesn't handle,
+  since it assumes one responder. Net saving is a few requests, once, at
+  startup. Do it only if the multi-responder merge is reworked anyway.
 - [ ] **3.2 — Mode 02 freeze frame.** `FREEZE_FRAME_PIDS` is five PIDs
   read one-shot when a DTC appears. J1979 allows multi-PID for Mode 02
   as well (each PID paired with its frame number). Low volume, but it is
@@ -132,10 +141,14 @@ Mode 22 DIDs therefore stay one-at-a-time regardless of what happens here.
 - [ ] **3.4 — `tools/can_obd_probe.py`.** The probe CLI should be able to
   exercise batched reads, so the next ECU can be characterised without
   writing a throwaway script (as was done on 2026-07-26).
-- [ ] **3.5 — Audit for missed sites.** Confirm nothing else issues
-  repeated single-PID Mode 01 reads in a loop. Known non-beneficiaries,
-  for the record: Mode 03/07/0A (no PIDs), Mode 06 (single sweep),
-  Mode 22 (refused batching), broadcast CAN (already free).
+- [x] **3.5 — Audit for missed sites.** Done 2026-07-26. **The poll
+  rotation was the only high-value site**, and it is now batched. The
+  complete set of other Mode 01 callers:
+  * `query_supported_mode_01_pids` — see 3.1, re-scoped.
+  * `read_pid` (`can_obd_client`) — a single ad-hoc convenience read, not a
+    loop. Nothing to batch.
+  Confirmed non-beneficiaries: Mode 03/07/0A (no PIDs), Mode 06 (single
+  sweep), Mode 22 (batching refused by this ECM), broadcast CAN (free).
 
 ## Phase 4 — Validation
 

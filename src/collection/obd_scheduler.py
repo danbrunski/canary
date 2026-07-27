@@ -288,6 +288,8 @@ class CanObdLoopStats:
     #: collected before the stop are still good; this counts the events so a
     #: partially-understood PID set is visible rather than silent.
     batch_desyncs: int = 0
+    #: Times the session narrowed its batch size after repeated failures.
+    batch_size_narrowings: int = 0
     #: ``time.monotonic()`` when the loop started, so metrics can report an
     #: achieved rate rather than a bare count.
     loop_started_at: float | None = None
@@ -960,6 +962,7 @@ def _batching_metrics(
         "mean_pids_per_batch": mean_pids,
         "failures": stats.batch_failures,
         "desyncs": stats.batch_desyncs,
+        "size_narrowings": stats.batch_size_narrowings,
         "channel_reads_per_second": achieved_hz,
     }
 

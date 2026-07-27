@@ -312,7 +312,7 @@ backend features), plus the unchecked tail of
   untouched by anything landed tonight. `docs/CANary-overview.md`
   checked, no stale claims found.
 
-- [ ] **Q26 — multi-pid-polling.md Phases 1 + 2** (batched Mode 01 in the
+- [x] **Q26 — multi-pid-polling.md Phases 1 + 2** (batched Mode 01 in the
   request/response core, then wired into the scheduler). Pure software,
   no vehicle needed. The capability is already measured on the truck —
   67.7 batched requests/sec returning 6 PIDs each, 33.85 Hz per channel
@@ -325,6 +325,16 @@ backend features), plus the unchecked tail of
   unsupported PID — the `41 <pid> <data…>` offset walk must not
   desynchronise when that happens. Both are covered in the doc's
   guiding constraints.
+  **Landed** (commit `78abf88`): batching as a dispatch-time layer, so every
+  existing per-request backoff/metric keeps working; companions restricted to
+  the leader's poll tier; members decoded by synthesising the ObdResponse the
+  single-PID path would produce, so the two cannot drift; a whole-batch
+  failure credits and penalises nobody and instead narrows 6→4→2→1. Ships
+  `batch_max_pids=1` (off) — verified on the Xterra ECM but not universal,
+  and unverifiable against real traffic from the bench. 22 tests.
+  Phase 3.5 audit done in passing: the poll rotation was the only
+  high-value site, and 3.1 was re-scoped downward (the discovery walk is
+  conditional and multi-responder, so batching it saves less than claimed).
 
 ## Round-2 morning backlog
 
