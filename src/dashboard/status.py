@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker
-from src.collection import tx_gate
+from src.collection import tuning_profile, tx_gate
 from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
 from src.models.health import HealthMonitor
@@ -199,6 +199,12 @@ class StatusSnapshot:
     #: exactly like a dead OBD link from every other panel, and an operator
     #: who forgot they armed it would otherwise debug a phantom fault.
     passive: dict[str, Any] | None = None
+    #: Focused tuning poll profile: ``{active, source, channels}``. When
+    #: active the Mode 01 rotation is restricted and DID windows suspended,
+    #: so most channels legitimately stop updating — surfaced for the same
+    #: reason as ``passive``, so a narrowed rotation is not mistaken for a
+    #: collection fault.
+    tuning_mode: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -217,6 +223,7 @@ class StatusSnapshot:
             "detectors": self.detectors,
             "model_provenance": self.model_provenance,
             "passive": self.passive,
+            "tuning_mode": self.tuning_mode,
         }
 
 
@@ -437,6 +444,7 @@ def build_status(
         detectors=detectors,
         model_provenance=model_provenance if models_dir is not None else None,
         passive=tx_gate.snapshot(),
+        tuning_mode=tuning_profile.snapshot(),
     )
 
 

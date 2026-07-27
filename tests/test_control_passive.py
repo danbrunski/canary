@@ -76,3 +76,42 @@ def test_status_surfaces_passive_state(tmp_path: Path) -> None:
     status = client.get("/status").json()
 
     assert status["passive"]["enabled"] is True
+
+
+def test_tuning_mode_routes_require_auth(tmp_path: Path) -> None:
+    client = _api(tmp_path)
+    assert client.get("/control/tuning-mode").status_code == 401
+    assert client.post("/control/tuning-mode", json={"enabled": True}).status_code == 401
+
+
+def test_tuning_mode_arms_and_disarms(tmp_path: Path) -> None:
+    from src.collection import tuning_profile
+
+    client = _api(tmp_path)
+    try:
+        armed = client.post("/control/tuning-mode", json={"enabled": True}, headers=_auth()).json()
+        assert armed["tuning_mode"]["active"] is True
+        assert "RPM" in armed["tuning_mode"]["channels"]
+        assert tuning_profile.is_active() is True
+
+        # Status must surface it — a narrowed rotation looks exactly like a
+        # collection fault from every other panel.
+        assert client.get("/status").json()["tuning_mode"]["active"] is True
+
+        off = client.post("/control/tuning-mode", json={"enabled": False}, headers=_auth()).json()
+        assert off["tuning_mode"]["active"] is False
+        assert off["previous_active"] is True
+    finally:
+        tuning_profile.set_active(False, source="test")
+
+
+def test_tuning_mode_accepts_a_channel_override(tmp_path: Path) -> None:
+    from src.collection import tuning_profile
+
+    client = _api(tmp_path)
+    try:
+        body = {"enabled": True, "channels": ["RPM", "MAF"]}
+        got = client.post("/control/tuning-mode", json=body, headers=_auth()).json()
+        assert got["tuning_mode"]["channels"] == ["MAF", "RPM"]
+    finally:
+        tuning_profile.set_active(False, source="test")

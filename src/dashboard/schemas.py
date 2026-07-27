@@ -132,6 +132,17 @@ class PassiveModeRequest(_ControlRequest):
     enabled: bool
 
 
+class TuningModeRequest(_ControlRequest):
+    """Arm/disarm the focused high-rate tuning poll profile.
+
+    Narrows the Mode 01 rotation to a small tuning set and suspends the
+    Mode-22 DID windows, so each channel gets a far larger slice of the same
+    bus budget. See src/collection/tuning_profile.py."""
+
+    enabled: bool
+    channels: list[str] | None = None
+
+
 class CustomPidCreateRequest(_ControlRequest):
     """Define one new custom PID (Task 2.8c) — same fields as
     :class:`src.collection.custom_pids.CustomPid`; validated (read-only mode,
@@ -234,6 +245,7 @@ __all__ = [
     "SessionPinRequest",
     "TripSummaryFields",
     "TripSummaryResponse",
+    "TuningModeRequest",
     "TuningRevertRequest",
     "TuningUpdateRequest",
     "UpsKeepaliveRequest",

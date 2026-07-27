@@ -170,6 +170,7 @@ Control endpoints:
 | `GET /control/profiles` / `POST /control/profiles/{slug}/name` | list vehicle profiles / set a profile display name |
 | `GET /control/power` / `POST /control/power/keepalive` | UPS watchdog status / set or cancel the keep-alive hold |
 | `GET /control/passive` / `POST /control/passive` | inspect / arm the CAN transmit gate (receive-only mode) — see [Passive mode](#passive-mode) |
+| `GET /control/tuning-mode` / `POST /control/tuning-mode` | inspect / arm the focused high-rate tuning poll profile (narrows Mode 01 to a tuning channel set, suspends DID windows) |
 | `GET /control/feedback` / `POST /control/feedback` | read / record anomaly-feedback verdicts |
 | `GET /control/training-runs` | training-run ledger |
 | `GET /control/datasets/health` | corpus readiness + per-mode counts |

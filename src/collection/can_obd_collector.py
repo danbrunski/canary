@@ -31,7 +31,7 @@ from functools import partial
 import can
 
 from src.can_ids import parse_standard_can_id
-from src.collection import tx_gate
+from src.collection import tuning_profile, tx_gate
 from src.collection.can_collector import (
     DEFAULT_RECONNECT_POLICY,
     RecordingResult,
@@ -212,7 +212,14 @@ def run_can_obd_loop(
             continue
 
         eligible: RequestFilter | None = None
-        if controller is not None:
+        if tuning_profile.is_active():
+            # Phase 1.1 tuning capture: concentrate the whole bus budget on a
+            # small channel set, and skip the DID controller entirely so the
+            # `10 C0` session never blacks out Mode 01. Those blackouts stop
+            # Mode 01 for up to 10 s in every 60, which is exactly the gap
+            # that makes a steady-state hold unusable for tuning.
+            eligible = tuning_profile.request_eligible
+        elif controller is not None:
             controller.advance(request_states, now)
             if controller.session_control_due(request_states, now) and now >= next_budget_at:
                 ok = _send_session_control(

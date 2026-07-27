@@ -121,6 +121,9 @@ from src.mcp_server.write_tools import (
     tuning as tuning_write_tool,
 )
 from src.mcp_server.write_tools import (
+    tuning_mode as tuning_mode_write_tool,
+)
+from src.mcp_server.write_tools import (
     vehicle_ledger as vehicle_ledger_write_tool,
 )
 from src.storage.catalog import SessionCatalog
@@ -753,6 +756,19 @@ def _register_write_tools(
         real fault.
         """
         return await passive_write_tool.set_passive_mode(client, audit, enabled=enabled)
+
+    @mcp.tool()
+    async def set_tuning_mode(enabled: bool, channels: list[str] | None = None) -> dict[str, Any]:
+        """Arm/disarm the focused high-rate tuning poll profile.
+
+        Restricts Mode 01 to a small tuning channel set and suspends DID
+        windows so each channel gets far more of the bus budget. Channels
+        outside the set stop updating while armed - expected, not a fault;
+        `get_status` reports `tuning_mode.active`.
+        """
+        return await tuning_mode_write_tool.set_tuning_mode(
+            client, audit, enabled=enabled, channels=channels
+        )
 
     @mcp.tool()
     async def replay_window(

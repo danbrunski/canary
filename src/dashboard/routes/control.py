@@ -18,7 +18,7 @@ from src.alerts.tuning import (
     save_tuning_config,
 )
 from src.analysis.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore
-from src.collection import tx_gate
+from src.collection import tuning_profile, tx_gate
 from src.collection.custom_pids import (
     CustomPid,
     CustomPidSet,
@@ -93,6 +93,7 @@ from src.dashboard.schemas import (
     SequenceDetectorRequest,
     SessionMetadataRequest,
     SessionPinRequest,
+    TuningModeRequest,
     TuningRevertRequest,
     TuningUpdateRequest,
     UpsKeepaliveRequest,
@@ -414,6 +415,23 @@ def register_control_routes(
         previous = tx_gate.set_passive(request.enabled, source="control")
         payload = {"passive": tx_gate.snapshot(), "previous_enabled": previous}
         publish_control_event("passive", "ok", payload)
+        return payload
+
+    @app.get("/control/tuning-mode")
+    def get_control_tuning_mode(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        return {"tuning_mode": tuning_profile.snapshot()}
+
+    @app.post("/control/tuning-mode")
+    def post_control_tuning_mode(
+        request: TuningModeRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        names = frozenset(request.channels) if request.channels else None
+        previous = tuning_profile.set_active(request.enabled, channel_names=names, source="control")
+        payload = {"tuning_mode": tuning_profile.snapshot(), "previous_active": previous}
+        publish_control_event("tuning_mode", "ok", payload)
         return payload
 
     @app.post("/control/sessions/{session_id}/metadata")

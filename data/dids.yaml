@@ -152,6 +152,13 @@ dids:
       - session: 2026-05-16T223328
         method: four_state_plus_nt510_name
         finding: x0.005 ≈ 2.15 V, stable; NT510 "A/F sen1 b1" = 2.15. Bank pair with 0x1226.
+      - session: 2026-07-26T225058
+        method: uprev_kline_crosscheck
+        finding: >
+          Independent confirmation from a completely different transport and
+          decoder: UpRev's K-line "A/F WB-B1 (V)" spanned 0.57–5.065 V over a
+          drive where this DID at x0.005 spanned 0.97–5.07 V. Scaling was
+          previously resting on a single NT510 comparison.
 
   - did: 0x1226
     name: ECM_AF_SENSOR_V_B2
