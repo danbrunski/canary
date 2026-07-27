@@ -51,10 +51,13 @@ from src.collection.isotp import (
     FLOW_CONTROL_CTS,
     IsoTpResponseAssembler,
     ObdResponse,
+    build_batched_request_payload,
     build_request_payload,
+    split_batched_response,
 )
 from src.collection.obd_collector import JsonlReadingWriter, ObdReading, reading_to_record
 from src.collection.obd_registry import (
+    lookup,
     misfire_count_channel,
     misfire_counts_from_results,
     parse_mode06_response,
@@ -76,6 +79,7 @@ from src.collection.obd_scheduler import (
     _next_request_due_at,
     _PidDiscoveryClient,
     _PollRequest,
+    _PollRequestState,
     _scheduler_metrics,
     _select_next_due_request,
     _update_response_state,
@@ -83,6 +87,7 @@ from src.collection.obd_scheduler import (
     parse_did_token,
     parse_pid_token,
     resolve_did_session_spec,
+    select_batch_companions,
 )
 from src.collection.queueing import QueueDropCounter, log_dropped_can_frame, threadsafe_enqueue
 from src.collection.reconnect import (
@@ -100,6 +105,10 @@ log = logging.getLogger(__name__)
 AUTO_PROBE_TIMEOUT_SECONDS = 0.25
 AUTO_BASELINE_PID_NAMES = tuple(name for _pid, (name, _decoder) in sorted(PID_DECODERS.items()))
 SCHEDULER_METRICS_INTERVAL_SECONDS = 5.0
+#: Consecutive whole-batch failures before a session gives up on multi-PID
+#: requests. Small on purpose: an ECU that dislikes batching should cost a
+#: handful of request slots to discover, not a whole drive.
+MAX_CONSECUTIVE_BATCH_FAILURES = 3
 
 
 def parse_can_id(value: str | int) -> int:
@@ -166,6 +175,14 @@ def run_can_obd_loop(
     request_states = _initial_request_states(requests, spec, time.monotonic())
     next_budget_at = time.monotonic()
     next_metrics_at = time.monotonic()
+    # Batching is opt-in and self-disabling. An ECU that ignores or refuses
+    # multi-PID requests would otherwise fail every batch forever, so a run of
+    # consecutive failures falls the session back to single-PID rather than
+    # stalling. This doubles as the adaptive form of the startup size probe:
+    # we discover what the vehicle actually accepts by using it.
+    batching_enabled = spec.batch_max_pids > 1
+    consecutive_batch_failures = 0
+    stats.loop_started_at = time.monotonic()
     while not _should_stop(stop_event, deadline_monotonic):
         now = time.monotonic()
         if (
@@ -280,6 +297,49 @@ def run_can_obd_loop(
                 )
             continue
         request_index, request, request_state = selection
+
+        batch_indices = select_batch_companions(
+            requests,
+            request_states,
+            now,
+            leader_index=request_index,
+            max_pids=spec.batch_max_pids if batching_enabled else 1,
+            eligible=eligible,
+        )
+        if len(batch_indices) > 1:
+            answered = _issue_batched_request(
+                bus,
+                requests,
+                request_states,
+                batch_indices,
+                spec=spec,
+                on_frame=on_frame,
+                on_reading=on_reading,
+                stop_event=stop_event,
+                stats=stats,
+                deadline_monotonic=deadline_monotonic,
+            )
+            if answered:
+                consecutive_batch_failures = 0
+            else:
+                consecutive_batch_failures += 1
+                if consecutive_batch_failures >= MAX_CONSECUTIVE_BATCH_FAILURES:
+                    batching_enabled = False
+                    log.warning(
+                        "multi-PID batching disabled after %d consecutive failures; "
+                        "falling back to single-PID polling for this session",
+                        consecutive_batch_failures,
+                        extra={"batch_max_pids": spec.batch_max_pids},
+                    )
+            if controller is not None:
+                for index in batch_indices:
+                    controller.on_request_attempted(index)
+            for index in batch_indices:
+                request_states[index].next_due_at = _next_request_due_at(
+                    requests[index], request_states[index], spec
+                )
+            next_budget_at = max(next_budget_at + 1.0 / budget_rps, time.monotonic())
+            continue
 
         timeout_seconds = spec.request_timeout_seconds
         if request.auto_probe and (request.fast_probe or request_state.missed_responses > 0):
@@ -754,6 +814,180 @@ class QueryResult:
 
     response: ObdResponse | None = None
     negative_response_code: int | None = None
+
+
+@dataclass
+class BatchedQueryResult:
+    """Outcome of one multi-PID request/response cycle."""
+
+    #: ``{pid: payload}`` for PIDs present in the response, or ``None`` when
+    #: the batch as a whole failed (timeout, refusal, or a desynced walk).
+    readings: dict[int, bytes] | None = None
+    negative_response_code: int | None = None
+    #: True when the payload walk completed without hitting an unknown PID
+    #: or a truncated tail.
+    clean: bool = True
+
+
+def _batched_pid_width(pid: int) -> int | None:
+    """Mode 01 payload width for splitting a batched response."""
+    definition = lookup(0x01, pid)
+    if definition is None or definition.byte_length <= 0:
+        return None
+    return definition.byte_length
+
+
+def _query_batched_with_tap(
+    bus: can.BusABC,
+    leader: _PollRequest,
+    pids: list[int],
+    *,
+    timeout_seconds: float,
+    on_frame: Callable[[can.Message], None],
+    stop_event: threading.Event,
+    stats: CanObdLoopStats,
+    deadline_monotonic: float | None,
+) -> BatchedQueryResult:
+    """Issue one ``01 <pid> <pid> …`` request and split the response."""
+    message = can.Message(
+        arbitration_id=leader.request_id,
+        data=build_batched_request_payload(0x01, pids),
+        is_extended_id=False,
+    )
+    if not tx_gate.send(bus, message, what=f"batch {len(pids)} PIDs"):
+        return BatchedQueryResult()
+    stats.requests_sent += 1
+    stats.batched_requests += 1
+    stats.batched_pids_requested += len(pids)
+
+    request_deadline = time.monotonic() + timeout_seconds
+    if deadline_monotonic is not None:
+        request_deadline = min(request_deadline, deadline_monotonic)
+    # identifier=None: the payload is a stream of <pid> <data> pairs, so
+    # there is no single echo to match on.
+    assembler = IsoTpResponseAssembler(service=0x01, identifier=None)
+
+    while not _should_stop(stop_event, request_deadline):
+        remaining = max(0.001, request_deadline - time.monotonic())
+        msg = _recv_and_tap(bus, on_frame, stats, timeout=min(0.05, remaining))
+        if msg is None:
+            continue
+        if not (DEFAULT_RESPONSE_ID_MIN <= msg.arbitration_id <= DEFAULT_RESPONSE_ID_MAX):
+            continue
+        data = bytes(msg.data)
+        if not data:
+            continue
+        result = assembler.accept(int(msg.arbitration_id), data)
+        if result.negative_response:
+            return BatchedQueryResult(negative_response_code=result.negative_response_code)
+        if result.flow_control_id is not None:
+            tx_gate.send(
+                bus,
+                can.Message(
+                    arbitration_id=result.flow_control_id,
+                    data=FLOW_CONTROL_CTS,
+                    is_extended_id=False,
+                ),
+                what="flow-control",
+            )
+            continue
+        if result.response is not None:
+            readings, clean = split_batched_response(result.response.payload, _batched_pid_width)
+            return BatchedQueryResult(readings=readings, clean=clean)
+    return BatchedQueryResult()
+
+
+def _issue_batched_request(
+    bus: can.BusABC,
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    indices: list[int],
+    *,
+    spec: CanObdSpec,
+    on_frame: Callable[[can.Message], None],
+    on_reading: Callable[[ObdReading], None],
+    stop_event: threading.Event,
+    stats: CanObdLoopStats,
+    deadline_monotonic: float | None,
+) -> bool:
+    """Poll several Mode 01 PIDs in one round trip. True if the batch answered.
+
+    Per-member accounting is deliberate: a PID present in the response is
+    credited exactly as the single-PID path would credit it, and a PID absent
+    from an otherwise-good response takes a miss on its own — so one dead
+    channel backs off alone instead of dragging its five neighbours down.
+
+    A *whole-batch* failure (timeout, refusal, desynced walk) credits and
+    penalises nobody. We have no evidence about any individual PID in that
+    case, and applying six misses would wrongly back off six healthy channels
+    on what may be an ECU that simply dislikes batching. The caller counts
+    consecutive failures and stops batching instead.
+    """
+    pids = [requests[index].identifier for index in indices]
+    leader = requests[indices[0]]
+    started = time.monotonic()
+    for index in indices:
+        states[index].last_requested_at = started
+        states[index].requests_sent += 1
+
+    try:
+        result = _query_batched_with_tap(
+            bus,
+            leader,
+            pids,
+            timeout_seconds=spec.request_timeout_seconds,
+            on_frame=on_frame,
+            stop_event=stop_event,
+            stats=stats,
+            deadline_monotonic=deadline_monotonic,
+        )
+    except Exception:  # noqa: BLE001 - propagate after recording scheduler state
+        for index in indices:
+            states[index].bus_errors += 1
+        stats.bus_errors += 1
+        raise
+
+    if result.readings is None:
+        stats.batch_failures += 1
+        if result.negative_response_code is not None:
+            stats.negative_responses += 1
+            for index in indices:
+                states[index].last_negative_response_code = result.negative_response_code
+        return False
+    if not result.clean:
+        stats.batch_desyncs += 1
+
+    now = time.monotonic()
+    for index in indices:
+        request = requests[index]
+        state = states[index]
+        payload = result.readings.get(request.identifier)
+        emitted = False
+        if payload is not None:
+            # Synthesise the response the single-PID path would have seen, so
+            # both paths decode through exactly the same code.
+            readings = _response_to_reading(
+                request,
+                ObdResponse(
+                    service=0x41,
+                    pid=request.identifier,
+                    payload=payload,
+                    responder_id=DEFAULT_RESPONSE_ID_MIN,
+                ),
+            )
+            if readings:
+                emitted = True
+                stats.readings_emitted += len(readings)
+                for reading in readings:
+                    on_reading(reading)
+        if emitted:
+            state.responses += 1
+            state.last_response_at = now
+        else:
+            state.timeouts += 1
+            stats.request_timeouts += 1
+        _update_response_state(state, emitted=emitted, now=now)
+    return True
 
 
 def _query_with_tap(

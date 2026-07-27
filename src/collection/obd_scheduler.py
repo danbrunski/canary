@@ -240,6 +240,17 @@ class CanObdSpec:
     freeze_frame_trigger: FreezeFrameTrigger | None = None
     #: PIDs read once via Mode 02 when ``freeze_frame_trigger`` fires.
     freeze_frame_pids: tuple[int, ...] = FREEZE_FRAME_PIDS
+    #: Max Mode 01 PIDs to pack into one request (roadmap/multi-pid-polling.md).
+    #: SAE J1979 permits up to 6; on this ECM that was measured at 67.7
+    #: requests/sec returning 6 channels each — 33.85 Hz per channel against
+    #: 0.06-0.5 Hz today, because the cost here is the round trip, not the
+    #: bytes.
+    #:
+    #: Defaults to 1 (disabled) deliberately. Batching is verified on the
+    #: 2008 Xterra ECM but is not universal, and a vehicle that answers
+    #: single-PID requests happily may ignore or refuse a batched one. Opt in
+    #: per install, or let ``probe_batch_size`` establish it at startup.
+    batch_max_pids: int = 1
     #: User-defined custom PIDs (Task 2.6) loaded once at daemon startup via
     #: ``custom_pids.load_custom_pids`` and threaded straight through — the
     #: scheduler never re-reads the YAML itself. Empty by default (no
@@ -266,6 +277,20 @@ class CanObdLoopStats:
     bus_errors: int = 0
     scheduler_snapshots: int = 0
     session_controls_sent: int = 0
+    #: Multi-PID requests issued, and the PIDs they carried. The ratio is the
+    #: round-trip saving, which is the whole point of batching.
+    batched_requests: int = 0
+    batched_pids_requested: int = 0
+    #: Batches that produced nothing usable — timeout, refusal, or a walk that
+    #: desynced. Consecutive failures disable batching for the session.
+    batch_failures: int = 0
+    #: Batches that answered but whose payload walk stopped early. The values
+    #: collected before the stop are still good; this counts the events so a
+    #: partially-understood PID set is visible rather than silent.
+    batch_desyncs: int = 0
+    #: ``time.monotonic()`` when the loop started, so metrics can report an
+    #: achieved rate rather than a bare count.
+    loop_started_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -472,6 +497,12 @@ class ObdSchedulerMetrics:
     requests: list[dict[str, Any]] = field(default_factory=list)
     #: Mode-22 session-window state, ``None`` when no session gates DIDs.
     did_profile: dict[str, Any] | None = None
+    #: Multi-PID batching (roadmap/multi-pid-polling.md). ``None`` when
+    #: batching is off. ``mean_pids_per_batch`` is the round-trip saving, and
+    #: ``achieved_hz`` is what an operator actually needs to know before
+    #: trusting a tuning capture — a per-cell verdict is only as good as the
+    #: sample count behind it.
+    batching: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -488,6 +519,7 @@ class ObdSchedulerMetrics:
             "by_tier": self.by_tier,
             "requests": self.requests,
             "did_profile": self.did_profile,
+            "batching": self.batching,
         }
 
 
@@ -821,6 +853,60 @@ def _select_next_due_request(
     return index, request, state
 
 
+def is_batchable(request: _PollRequest) -> bool:
+    """Whether a request can ride along in a multi-PID Mode 01 batch.
+
+    Only plain Mode 01 PIDs. Custom PIDs are excluded even when they sit on
+    Mode 01: they decode through their own formula against a payload this
+    module doesn't know the width of, so they can't be split back out of a
+    batched response reliably.
+    """
+    return request.kind == "pid" and request.service == 0x01 and 0 <= request.identifier <= 0xFF
+
+
+def select_batch_companions(
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    now: float,
+    *,
+    leader_index: int,
+    max_pids: int,
+    eligible: RequestFilter | None = None,
+) -> list[int]:
+    """Indices to issue alongside ``leader_index`` as one batched request.
+
+    Returns the leader plus up to ``max_pids - 1`` companions, or just the
+    leader when batching is off or nothing else qualifies.
+
+    Companions must be due, unsuppressed, eligible, batchable, and **in the
+    same poll tier** as the leader. The tier rule is what stops a slow-tier
+    PID from being dragged to fast-tier cadence (wasting budget on data that
+    changes on the order of minutes) or a fast-tier one being held back.
+    """
+    leader = requests[leader_index]
+    if max_pids <= 1 or not is_batchable(leader):
+        return [leader_index]
+
+    chosen = [leader_index]
+    seen_pids = {leader.identifier}
+    for index, (request, state) in enumerate(zip(requests, states, strict=True)):
+        if len(chosen) >= max_pids:
+            break
+        if index == leader_index or not is_batchable(request):
+            continue
+        if request.poll_tier != leader.poll_tier:
+            continue
+        if request.identifier in seen_pids:
+            continue
+        if _is_request_suppressed(state, now) or state.next_due_at > now:
+            continue
+        if eligible is not None and not eligible(index, request):
+            continue
+        chosen.append(index)
+        seen_pids.add(request.identifier)
+    return chosen
+
+
 def _next_due_at(
     requests: list[_PollRequest],
     states: list[_PollRequestState],
@@ -842,6 +928,40 @@ def _is_request_suppressed(state: _PollRequestState, now: float) -> bool:
 
 def _is_request_backed_off(state: _PollRequestState, now: float) -> bool:
     return _is_request_suppressed(state, now) and state.suppressed_until != float("inf")
+
+
+def _batching_metrics(
+    spec: CanObdSpec,
+    stats: CanObdLoopStats,
+    now: float,
+) -> dict[str, Any] | None:
+    """Multi-PID batching summary, or ``None`` when batching is off.
+
+    ``achieved_hz`` is the number that decides whether a tuning capture is
+    worth analysing: a per-cell timing verdict is only as trustworthy as the
+    sample count behind it, and at the default 8 req/s a whole drive yields
+    roughly ten samples per rpm x load cell.
+    """
+    if spec.batch_max_pids <= 1 and stats.batched_requests == 0:
+        return None
+    mean_pids = (
+        round(stats.batched_pids_requested / stats.batched_requests, 2)
+        if stats.batched_requests
+        else None
+    )
+    elapsed = None if stats.loop_started_at is None else now - stats.loop_started_at
+    achieved_hz = (
+        round(stats.batched_pids_requested / elapsed, 2) if elapsed and elapsed > 0 else None
+    )
+    return {
+        "max_pids": spec.batch_max_pids,
+        "batched_requests": stats.batched_requests,
+        "batched_pids_requested": stats.batched_pids_requested,
+        "mean_pids_per_batch": mean_pids,
+        "failures": stats.batch_failures,
+        "desyncs": stats.batch_desyncs,
+        "channel_reads_per_second": achieved_hz,
+    }
 
 
 def _scheduler_metrics(
@@ -950,10 +1070,13 @@ def _scheduler_metrics(
         by_tier=by_tier,
         requests=request_rows,
         did_profile=did_profile,
+        batching=_batching_metrics(spec, stats, now),
     )
 
 
 __all__ = [
+    "select_batch_companions",
+    "is_batchable",
     "AUTO_MISS_BACKOFF_SECONDS",
     "AUTO_PIDS",
     "DEFAULT_DID_REQUEST_ID",

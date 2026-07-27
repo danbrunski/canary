@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 DEFAULT_REQUEST_ID = 0x7DF
@@ -59,6 +60,75 @@ def build_request_payload(service: int, identifier: int | None) -> bytes:
     else:
         raise ValueError(f"PID/DID identifier out of range: 0x{identifier:X}")
     return body + bytes(8 - len(body))
+
+
+#: SAE J1979 allows several PIDs in one Mode 01 request. Six is the ceiling
+#: that still fits a single CAN frame: 1 PCI byte + 1 service byte + 6 PID
+#: bytes = 8. Measured on the Xterra ECM 2026-07-26 at 2, 4 and 6 PIDs.
+MAX_BATCHED_PIDS = 6
+
+
+def build_batched_request_payload(service: int, pids: Sequence[int]) -> bytes:
+    """Single-frame multi-PID request body, padded to 8 bytes.
+
+    ``01 0C 0D 04 11 0E 10`` asks for six PIDs in one round trip and the ECU
+    answers with ``41 0C <2> 0D <1> 04 <1> 11 <1> 0E <1> 10 <2>`` — one
+    request instead of six, which is the whole point: on this bus the cost is
+    the round trip, not the bytes.
+
+    Padding to 8 is not cosmetic. This ECM ignores short frames outright — no
+    response at all, not a negative one — which is indistinguishable from an
+    unsupported service and cost two probe rounds to diagnose.
+    """
+    if not pids:
+        raise ValueError("batched request needs at least one PID")
+    if len(pids) > MAX_BATCHED_PIDS:
+        raise ValueError(f"at most {MAX_BATCHED_PIDS} PIDs per request, got {len(pids)}")
+    if len(set(pids)) != len(pids):
+        # A duplicate makes the response ambiguous to walk and wastes a slot.
+        raise ValueError(f"duplicate PID in batch: {[f'0x{p:02X}' for p in pids]}")
+    for pid in pids:
+        if not 0 <= pid <= 0xFF:
+            raise ValueError(f"Mode 01 PID out of range: 0x{pid:X}")
+    body = bytes([1 + len(pids), service, *pids])
+    return body + bytes(8 - len(body))
+
+
+def split_batched_response(
+    payload: bytes,
+    byte_length_for: Callable[[int], int | None],
+) -> tuple[dict[int, bytes], bool]:
+    """Walk a batched Mode 01 payload into ``{pid: data}``.
+
+    ``payload`` is what the assembler yields for a request built with
+    ``identifier=None`` — everything after the ``41`` echo, i.e. a stream of
+    ``<pid> <data…>`` pairs. ``byte_length_for`` returns a PID's expected
+    payload length, or ``None`` when the PID is unknown to the caller.
+
+    Returns ``(readings, clean)``. ``clean`` is False when the walk had to
+    stop early, which happens when a PID is unknown (we cannot know its
+    width, so we cannot find the next boundary) or the payload is truncated.
+
+    Deliberately keyed off the PIDs *present in the response* rather than the
+    ones requested. An ECU may omit a PID it does not support instead of
+    rejecting the whole batch, and matching positionally against the request
+    would then silently misattribute every subsequent value. Whatever is
+    returned before a desync is still trustworthy; everything after is not,
+    which is why the flag is returned rather than swallowed.
+    """
+    readings: dict[int, bytes] = {}
+    index = 0
+    while index < len(payload):
+        pid = payload[index]
+        width = byte_length_for(pid)
+        if width is None or width <= 0:
+            return readings, False
+        start, end = index + 1, index + 1 + width
+        if end > len(payload):
+            return readings, False
+        readings.setdefault(pid, payload[start:end])
+        index = end
+    return readings, True
 
 
 def pci_type(data: bytes) -> int | None:
@@ -223,6 +293,8 @@ class IsoTpResponseAssembler:
 
 
 __all__ = [
+    "split_batched_response",
+    "MAX_BATCHED_PIDS",
     "DEFAULT_REQUEST_ID",
     "DEFAULT_RESPONSE_ID_MAX",
     "DEFAULT_RESPONSE_ID_MIN",
@@ -230,6 +302,7 @@ __all__ = [
     "NRC_NAMES",
     "ObdResponse",
     "IsoTpResponseAssembler",
+    "build_batched_request_payload",
     "build_request_payload",
     "extract_service_payload",
     "handle_single_frame",
