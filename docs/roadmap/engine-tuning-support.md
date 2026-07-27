@@ -32,6 +32,20 @@ Blocked until both are true (operator confirms):
   +9.18 % / +7.42 % over the same period — two toolchains, two
   transports, same answer.
 
+  **Reconfirmed 2026-07-27 under ideal learning conditions.** A 41-minute
+  drive, fully warm (100 % of the first log above 70 °C, plus a complete
+  46→93 °C warm-up in the autosave), mostly closed loop, with short-term
+  trim actively working the whole time (`A/F CORR-B1` swinging 76–125 %).
+  Across ~4 600 samples: UpRev `A/F ADJ-B1/B2` = 0.000 / −0.002,
+  CANary `LONG_FUEL_TRIM_1/2` = 0.0 exactly. The ECU had a large,
+  persistent correction sitting in short-term trim and migrated none of
+  it. It has now survived a full reflash *and* a warm drive with active
+  correction — this is behaviour, not a pending relearn.
+
+  This is also why 3.2 matters: with nothing absorbing the base-model
+  error, short-term re-derives it every start and open-loop WOT never
+  gets it at all.
+
 Software phases (1–2) don't need the cable and are overnight-eligible;
 the campaign itself (Phase 3) needs the truck, the cable, and the
 operator.
@@ -105,11 +119,20 @@ volumetrically.
   maps force open loop and produce fueling the behavior models have
   never seen. Keep tuning sessions out of the training corpus via the
   existing `_`-prefix storage isolation (decision 1.2 below).
-- Timing/knock work stays on UpRev's side. Generic OBD does not
-  expose knock strength; CANary observes timing-advance behavior but
-  never drives advance decisions. UpRev's own guide: don't trust
-  ECU knock params for aggressive work — use Cipher logs and, if it
-  ever gets serious, a dedicated knock monitor.
+- **Knock is not observable on this ECM. Settled 2026-07-27, do not
+  re-probe.** All four knock parameters UpRev exposes read constant
+  across a drive reaching 4825 rpm and 95 % load: `HI DET` = 1,
+  `KNOCK STRENGTH` = 1280 (0x500), `KNOCK EVENT` = 0,
+  `KNOCK THRESHOLD %` = 1.95. Two of those (`KNOCK EVENT`,
+  `KNOCK THRESHOLD %`) were only found on the second pass through the
+  picker, so this is now an exhaustive test of what the tooling offers.
+  Not a failed sensor — the pre-flash DTC baseline was clean on the
+  stock calibration with no P0325/P0330, and timing behaves protectively
+  under load. The ECU is running knock control; it just does not report
+  it. Consequence: **timing advance is the largest available power lever
+  and the one that cannot be safely chased**, and a dedicated knock
+  monitor is the only thing that would unlock it. CANary observes
+  timing-advance behavior but never drives advance decisions.
 - Each accepted flash changes the engine's "normal." Model refits are
   part of the campaign (Phase 4), not an afterthought.
 
@@ -249,10 +272,20 @@ All must be **temperature-dependent and common to both banks**:
 The decisive change is to stop comparing sessions and compare **within** one:
 between-session means confound ambient, run time, traffic, and heat soak.
 
-- [ ] **G.3a — Single-session IAT sweep.** One long session from cold start
-  through full heat soak, returning to the *same* load/rpm holds at several
-  points as IAT climbs. If trim tracks IAT inside a single session, the
-  between-session confounds vanish. This is now the most valuable single log.
+- [~] **G.3a — Single-session IAT sweep. First attempt 2026-07-27: direction
+  confirmed, not clean.** 41-minute drive, IAT 33→47 °C, purge-closed
+  closed-loop warm samples only. Trim rose monotonically with IAT —
+  **2.11 → 4.49 → 5.78 → 5.89 %** across the bands, a slope of ~+0.35 %/°C
+  against the +0.45 between-session estimate. But correlation was only
+  **0.30** (n=110), and the bands are **load-confounded**: the low-IAT samples
+  sat at 34 % load versus 23 % for the rest.
+
+  The matched holds did not happen — understandable while driving, but it is
+  exactly what the test needs. **Retry: pick two or three specific load/rpm
+  points, hold each 15–20 s, and return to the *same* points once heat-soaked.**
+  Without matched operating points the temperature effect cannot be separated
+  from the load effect, and this attempt shows the confound is real rather than
+  hypothetical.
 - [ ] **G.3b — Steady-state load sweep, repeated at two IATs.** Hold several
   load points 15–20 s each, purge-closed, once cool and once heat-soaked.
   Flat across load = scaling or fuel; falling with load = a leak; wavy with
@@ -315,9 +348,17 @@ carrying the source sample age they are indistinguishable from measurements.
   puts every parameter in one frame, so it needs no join and has no staleness.
   That is why the lean-WOT reading in 3.2 survives while the CANary-side
   timing delta does not.
+- **Match the bound to how fast the channel changes, and budget for the
+  compounding.** Requiring N joins to be simultaneously fresh multiplies the
+  loss. On 2026-07-27 a within-session IAT analysis with six uniformly-bounded
+  joins kept **8 of 594** STFT samples. Re-running with per-channel bounds —
+  20 s for temperature (IAT, coolant move on a minutes scale), 6 s for purge,
+  loop status and load (which move fast) — recovered 110. A uniform bound is
+  either too loose for the fast channels or too tight for the slow ones.
 - **This is the strongest argument for multi-PID batching.** At the current
-  0.06–0.5 Hz per channel, most joins are stale by construction. At ~33 Hz the
-  freshness bound costs almost nothing. See `multi-pid-polling.md`.
+  0.06–0.5 Hz per channel, most joins are stale by construction, and every
+  additional channel in a filter compounds the loss. Batched channels share a
+  timestamp, so the whole problem disappears. See `multi-pid-polling.md`.
 
 ## Phase 2 — Correction-surface analysis (software; needs G.2 for the trim half)
 
@@ -352,61 +393,56 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
 - [ ] **3.1 — Baseline.** Pin 2–3 known-good pre-tune sessions
   (replay regression baseline + before/after comparison). ECU ROM
   dump saved and backed up before any flash.
-- [~] **3.2 — WOT AFR verification (safety gate).** *First data in
-  2026-07-27; not yet enough to act on, and it inverts the usual
-  assumption.* Stock-tune WOT pulls through the Phase 1 capture;
-  confirm commanded enrichment is delivered and nothing runs lean.
-  Cats are all retained so the cat-delete lean condition is excluded,
-  but headers+spacers still shift VE — verify, don't assume.
+- [x] **3.2 — WOT AFR verification (safety gate). MEASURED 2026-07-27: the
+  engine runs ~1.0 AFR (8 %) LEAN OF ITS OWN COMMANDED TARGET at WOT.**
 
-  **How to find WOT in the corpus.** `FUEL_STATUS` (PID 0x03) `== 4` is
-  "open loop due to engine load" — the ECU telling you directly that it
-  entered power enrichment. That is the reliable detector. **Do not use
-  RPM as a WOT proxy**: on a manual, WOT pulls shifted at 4–5k never
-  reach redline, and an earlier analysis wrongly concluded "no WOT data
-  exists" from an RPM histogram. Note `FUEL_STATUS == 4` *also* covers
-  deceleration fuel cut, so pair it with throttle — DFCO is closed
-  throttle and lean (λ ≈ 1.16), enrichment is open throttle and rich.
+  537 true-WOT samples from UpRev's synchronously-sampled K-line log
+  (throttle sensor ≥ 3.85 V of a 4.19 V max, rpm > 1500):
 
-  **What the July corpus actually contains:** 25 samples at 70–88.6 %
-  throttle, 83–90 % engine load, 2050–4163 rpm, with `FUEL_STATUS == 4`
-  present — genuine WOT events.
+  | rpm | n | load | target AFR | measured B1 | error | timing |
+  |---|---|---|---|---|---|---|
+  | 2000–2500 | 82 | 91 % | 12.63 | 13.69 | **+1.06** | 10.4 |
+  | 2500–3000 | 121 | 89 % | 12.64 | 13.69 | **+1.05** | 10.1 |
+  | 3000–3500 | 132 | 91 % | 12.80 | 13.79 | **+0.99** | 9.6 |
+  | 3500–4000 | 135 | 91 % | 12.53 | 13.55 | **+1.02** | 9.0 |
+  | 4000–5000 | 63 | 89 % | 12.26 | 13.13 | **+0.87** | 10.5 |
 
-  **Only 4 carry usable AFR**, because `O2_WR_LAMBDA_S1` polls at
-  ~0.13 Hz:
+  Overall target 12.61, measured 13.62 (B1) / 13.58 (B2) — **8.0 % lean**,
+  consistent across every rpm bin and both banks.
 
-  | throttle | rpm | load | AFR | λ sample age |
-  |---|---|---|---|---|
-  | 82.0 % | 4163 | 87.5 | **13.17** | 1.2 s |
-  | 88.6 % | 2338 | 89.0 | **13.26** | 0.8 s |
-  | 80.0 % | 2338 | 84.7 | **13.52** | 0.4 s |
-  | 88.6 % | 2863 | 86.7 | **13.52** | 0.4 s |
+  **This unifies the closed-loop and open-loop pictures into one root cause.**
+  Closed-loop short-term trim adds 8–9 % to hold stoich; at WOT there is no
+  feedback, so the same base-model shortfall appears raw as an AFR miss. One
+  under-delivering fuel model, two symptoms. And because LTFT never learns
+  (G.2), nothing ever absorbs it — short-term re-derives it every start and
+  open loop never gets it at all.
 
-  The July 18–19 WOT samples have **no** lambda (the wideband PID was
-  not yet polled), and four samples reading "12.63" are the *same stale
-  value* at 24–35 s age — an ASOF-join artifact, not measurements.
-  **Always carry the source sample age when joining slow-polled
-  channels**; without it those four look like a rich cluster.
+  **Safety reading:** 13.6 AFR at ~90 % load, with timing already pulled to
+  9–10° and no knock visibility (see below), is the strongest argument for
+  fixing the base fuel model before touching anything else. Cats are all
+  retained so the cat-delete lean condition is excluded; this is a fuelling
+  shortfall, not that.
 
-  **Reading:** best power on gasoline is ~12.8–13.2 (λ 0.87–0.90), so
-  this engine runs **at or lean of best power at WOT — not rich.** The
-  common assumption that a stock NA calibration runs rich at WOT with
-  room to lean out does **not** hold here, and altitude (~80 kPa) does
-  not make it richer as one might expect. If anything the move is
-  slightly *richer*, toward 12.8–13.0, which would gain a little power
-  and buy knock margin that is currently invisible (see G.3 and the
-  knock note in Guiding constraints).
+  **How to find WOT in the corpus.** `FUEL_STATUS` (PID 0x03) `== 4` is "open
+  loop due to engine load" — the ECU stating it entered power enrichment.
+  **Do not use RPM as a WOT proxy**: on a manual, pulls shifted at 4–5k never
+  reach redline, and an earlier analysis wrongly concluded "no WOT data exists"
+  from an RPM histogram. `FUEL_STATUS == 4` also covers deceleration fuel cut,
+  so pair it with throttle — DFCO is closed throttle and lean, enrichment is
+  open throttle and rich. On the UpRev side, throttle *sensor voltage* near its
+  maximum is the cleaner discriminator; the OBD throttle *percentage* tops out
+  around 89 % and understates true WOT.
 
-  (An earlier revision paired this with a claim that ZS44A had pulled
-  8–11° of high-load timing. **That claim is withdrawn** — see G.4. The
-  lean-WOT reading here stands on its own; it comes from UpRev's
-  synchronously-sampled log, not from an ASOF join.)
+  **An earlier reading of 13.2–13.5 "lean of best power" is superseded.** It
+  came from CANary samples at 70–88 % OBD throttle, which were not full WOT,
+  and had no target to compare against. The finding is not that the engine is
+  lean of an ideal — it is lean of what its own calibration commands.
 
-  **Not actionable yet — 4 samples, two at the same rpm, one pre-flash
-  and three post.** Do not move a WOT fuel table on this. What it does
-  establish is that the measurement is possible and worth doing
-  properly. See `multi-pid-polling.md`: at ~33 Hz a single 5 s pull
-  yields ~165 time-aligned samples per channel instead of one.
+  **Rate is why this needed UpRev.** Over the same 40-minute drive CANary in
+  tuning mode caught **23** throttle ≥ 70 % samples at ~0.33 Hz; UpRev caught
+  **537**. Until the budget rises (multi-pid-polling.md), WOT work belongs on
+  the synchronously-sampled log.
+
 - [ ] **3.3 — K + MAF calibration loop.** UpRev flat AFR-test table
   (open loop) → drive with tuning capture → Phase 2 report → adjust
   K, then MAF curve, then fuel comp in ROM Editor → reflash →

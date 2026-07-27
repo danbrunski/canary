@@ -19,17 +19,20 @@ something you switch on for a specific capture and off again, not a deployment
 posture.
 
 How much this buys depends on the bus budget, which is the real constraint and
-is far more conservative than the ECU requires. Measured on the Xterra
-2026-07-26, engine running, bus dedicated: 85 single-PID requests/sec, and
-67.7 batched requests/sec each returning 6 PIDs — 33.9 Hz per channel across a
-12-channel set, zero failures. Both are floors; the probe loop spent ~10 ms of
-each ~12 ms cycle in its own drain.
+is far more conservative than the ECU requires. Measured through `CanObdClient`
+on 2026-07-27: 667 channel-reads/s single-PID, 1387 batched — both two orders
+of magnitude above the 8 req/s the daemon actually uses.
 
-So CAN is NOT inherently slower than UpRev's K-line logger here. An earlier
-version of this docstring said otherwise and was wrong. The 8 req/s default
-(``BUS_BUDGET_MULTIPLIER`` × ``poll_rate_hz``) is a conservative heuristic,
-not a measured limit. Narrowing the channel set is one lever; raising the
-budget for a bounded capture is another; multi-PID batching multiplies both.
+Narrowing alone is not enough for everything, though. On the 2026-07-27 drive
+this profile delivered ~0.33 Hz per channel, which caught **23** throttle>=70%
+samples across 40 minutes; UpRev's synchronously-sampled K-line log caught
+**537** over the same drive. For WOT work the budget has to rise too.
+
+So CAN is not inherently slower than UpRev's K-line logger. The 8 req/s
+default (``BUS_BUDGET_MULTIPLIER`` × ``poll_rate_hz``) is a conservative
+heuristic, not a measured limit. Narrowing the channel set is one lever;
+raising the budget for a bounded capture is the bigger one; multi-PID batching
+multiplies whatever the budget is set to by ~2x.
 """
 
 from __future__ import annotations
@@ -56,6 +59,12 @@ DEFAULT_TUNING_CHANNELS: frozenset[str] = frozenset(
         "TIMING_ADVANCE",
         "THROTTLE_POS",
         "INTAKE_TEMP",
+        # Every trim analysis filters on coolant > 70 degC to exclude warm-up,
+        # so omitting this makes a tuning capture unfilterable after the fact.
+        # It also feeds `vehicle_state`, which reports coolant as null without
+        # it -- caught mid-drive on 2026-07-27 with the capture already
+        # running.
+        "COOLANT_TEMP",
         "O2_WR_LAMBDA_S1",
         "O2_WR_LAMBDA_S2",
         "SHORT_FUEL_TRIM_1",

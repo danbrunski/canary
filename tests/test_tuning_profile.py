@@ -172,3 +172,23 @@ def test_snapshot_carries_achieved_rate_when_supplied() -> None:
     assert snap["active"] is True
     assert snap["source"] == "control"
     assert snap["achieved_hz"] == {"RPM": 4.2}
+
+
+def test_default_set_carries_the_filters_every_analysis_depends_on() -> None:
+    """Regression guard. A tuning capture that omits any of these cannot be
+    filtered after the fact, and the data is unrecoverable once the drive is
+    over.
+
+    COOLANT_TEMP was genuinely missing from the first shipped set and was
+    caught mid-drive on 2026-07-27 with the capture already running: every
+    trim analysis filters on coolant > 70 degC to exclude warm-up, and
+    `vehicle_state` reports coolant as null without it.
+    """
+    required = {
+        "COOLANT_TEMP",  # warm-up exclusion
+        "EVAPORATIVE_PURGE",  # purge shifts trim 4.15 points
+        "FUEL_STATUS",  # open vs closed loop
+        "INTAKE_TEMP",  # trim tracks IAT at ~0.45 points/degC
+    }
+    missing = required - tuning_profile.DEFAULT_TUNING_CHANNELS
+    assert not missing, f"tuning captures would be unfilterable without {missing}"
