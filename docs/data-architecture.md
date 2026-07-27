@@ -75,9 +75,11 @@ Canable-native path.
 without an RE pass; the ECU's *intended* diagnostic interface.
 
 **Weaknesses for production:**
-* Polling round-robins through every watched PID on a single ELM327, so
-  per-PID refresh rate is roughly `1 / N_pids` Hz. At 35 PIDs that's
-  ~3 s per PID — much slower than broadcast.
+* Polling round-robins through every watched PID, so per-PID refresh rate
+  is roughly `budget / N_pids` Hz. At 42 requests against the default
+  8 req/s budget that is 0.06–0.5 Hz per channel — far slower than
+  broadcast. **This is a self-imposed pacing choice, not a bus or ECU
+  limit** (see "How fast Mode 01 can actually go" below).
 * The legacy ELM327 path requires an extra adapter plugged into the OBD-II port.
 * CH340-based clones over WSL-USB are flaky (the supervised reconnect
   loop in 1.E.1 exists to deal with this).
@@ -94,6 +96,48 @@ The default `record.py --obd-pids auto` auto-discovers the ECU's
 supported set, so this path *is* portable across vehicles without
 per-vehicle hardcoding (commit `0a17...`). But that portability is in
 service of RE / diagnostics, not the live data path.
+
+#### How fast Mode 01 can actually go
+
+Measured on the Xterra ECM, 2026-07-26, engine running at warm idle, with
+CANary in passive mode so the bus was dedicated to the probe:
+
+| approach | requests/s | per-channel rate (12 channels) |
+|---|---|---|
+| single PID per request | 85.1 | 7.09 Hz |
+| **multi-PID, 6 per request** | **67.7** | **33.85 Hz** |
+| (for reference) CANary today | 8 | 0.06–0.5 Hz |
+
+80 batched requests, zero failures, in 1.18 s. Both measured figures are
+**floors** — the probe loop blocked ~10 ms in its own drain before each
+request, so most of each ~12 ms cycle was self-inflicted overhead.
+
+**Multi-PID Mode 01 is standard SAE J1979**: a request may carry up to six
+PIDs and the response returns each as a `41 <pid> <data…>` triple. Verified
+at 2, 4 and 6 PIDs:
+
+```
+01 0C 0D 04 11 0E 10  →  41 0C 0000 0D 00 04 00 11 13 0E FF 10 0076
+```
+
+**Gotcha that looks exactly like a dead ECU:** this ECM answers **only
+DLC=8 frames**. A short frame gets no response at all — not a negative
+response, silence. Requests must be padded to 8 bytes. `CanObdClient`
+already pads; anything new must too. Two probe rounds were lost to this,
+and the failure mode is indistinguishable from an unsupported service.
+
+**What this ECM does *not* support** (all probed and refused, so don't
+spend time on them):
+
+| service | result |
+|---|---|
+| `2A` ReadDataByPeriodicIdentifier | `serviceNotSupported` — no CAN streaming |
+| `2C` DynamicallyDefineDataIdentifier | `subFunctionNotSupported` |
+| `22` with multiple DIDs | `subFunctionNotSupported` — Mode 22 stays one-at-a-time |
+
+So the round trip, not the byte count, is the cost — and batching is the
+lever that attacks it. Implementation is tracked in
+[`docs/roadmap/multi-pid-polling.md`](./roadmap/multi-pid-polling.md).
 
 ### 3. Mode 22 DIDs (Canable-native selected polling; broad sweep pending) — *manufacturer-extension diagnostic data*
 

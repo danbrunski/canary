@@ -312,6 +312,20 @@ backend features), plus the unchecked tail of
   untouched by anything landed tonight. `docs/CANary-overview.md`
   checked, no stale claims found.
 
+- [ ] **Q26 — multi-pid-polling.md Phases 1 + 2** (batched Mode 01 in the
+  request/response core, then wired into the scheduler). Pure software,
+  no vehicle needed. The capability is already measured on the truck —
+  67.7 batched requests/sec returning 6 PIDs each, 33.85 Hz per channel
+  over 12 channels, zero failures — so this is implementation against a
+  known-good target, not exploration. Phase 3.3 (tuning capture) and all
+  of Phase 4 are drive-gated; leave them.
+  **Two things that will bite:** the ECM answers only DLC=8 frames (a
+  short frame gets silence, not a negative response, which reads exactly
+  like an unsupported service), and a batch response may omit an
+  unsupported PID — the `41 <pid> <data…>` offset walk must not
+  desynchronise when that happens. Both are covered in the doc's
+  guiding constraints.
+
 ## Round-2 morning backlog
 
 Hardware purchases + wiring (BNO055/BMP390/10 Hz GPS w/ PPS — Q22's 2b),
