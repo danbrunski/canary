@@ -138,3 +138,20 @@ def test_uprev_loader_rejects_a_log_without_timing(tmp_path: Path) -> None:
 
     with pytest.raises(SystemExit, match="IGN TIMING"):
         timing_compare.load_uprev(csv, "x")
+
+
+def test_stale_join_guard_is_configured() -> None:
+    """Regression guard for the artifact class that produced four phantom WOT
+    AFR readings: an unbounded ASOF join re-pairs one stale sample many times.
+
+    CANary polls TIMING_ADVANCE at 0.06 Hz and ENGINE_LOAD at 0.08 Hz, so a
+    timing reading can be binned against a load reading 12+ s old — filing it
+    into a cell the engine never occupied. The default must be tight enough
+    to matter relative to those poll intervals.
+    """
+    assert timing_compare.DEFAULT_MAX_JOIN_AGE_S <= 5.0
+    # load_sessions must take the bound explicitly, not silently default.
+    import inspect
+
+    params = inspect.signature(timing_compare.load_sessions).parameters
+    assert "max_join_age" in params

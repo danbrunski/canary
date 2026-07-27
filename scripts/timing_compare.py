@@ -84,6 +84,11 @@ DEFAULT_MIN_DELTA_DEG = 1.5
 #: standard deviation but not a trustworthy one.
 MIN_CELL_N = 5
 
+#: Max age, in seconds, of the rpm/load sample a timing reading is binned
+#: against. CANary polls TIMING_ADVANCE at 0.06 Hz and ENGINE_LOAD at 0.08 Hz,
+#: so an unbounded ASOF join can file a sample into a cell it never occupied.
+DEFAULT_MAX_JOIN_AGE_S = 3.0
+
 RPM_EDGES = [600, 1000, 1500, 2000, 2500, 3500, 5000]
 LOAD_EDGES = [15, 30, 50, 70, 100]
 
@@ -130,7 +135,7 @@ def load_uprev(path: Path, label: str) -> Run:
     return Run(label, df.dropna(subset=["timing", "rpm"]), f"uprev:{path.name}")
 
 
-def load_sessions(sessions: list[str], label: str, root: str) -> Run:
+def load_sessions(sessions: list[str], label: str, root: str, max_join_age: float) -> Run:
     try:
         import duckdb
     except ImportError:  # pragma: no cover - duckdb ships with the venv
@@ -152,14 +157,37 @@ def load_sessions(sessions: list[str], label: str, root: str) -> Run:
     -- column, since the rest of the tool keys on that name.
     l AS (SELECT timestamp AS ts, value_number AS "load" FROM raw WHERE channel = 'ENGINE_LOAD'),
     i AS (SELECT timestamp AS ts, value_number AS air_temp FROM raw WHERE channel = 'INTAKE_TEMP')
-    SELECT t.timing, r.rpm, l."load", i.air_temp
+    SELECT t.timing, r.rpm, l."load", i.air_temp,
+           epoch(t.ts) - epoch(r.ts) AS rpm_age,
+           epoch(t.ts) - epoch(l.ts) AS load_age,
+           epoch(t.ts) - epoch(i.ts) AS air_temp_age
     FROM tim t
     ASOF LEFT JOIN r ON t.ts >= r.ts
     ASOF LEFT JOIN l ON t.ts >= l.ts
     ASOF LEFT JOIN i ON t.ts >= i.ts
     """
     df = duckdb.connect().sql(sql).df()
-    return Run(label, df.dropna(subset=["timing", "rpm"]), f"canary:{len(sessions)} session(s)")
+    df = df.dropna(subset=["timing", "rpm"])
+
+    # Drop rows whose rpm/load came from a stale sample. An ASOF join happily
+    # pairs a timing reading with a load reading from ten seconds earlier, and
+    # CANary polls ENGINE_LOAD at ~0.08 Hz -- so an unbounded join silently
+    # files samples into the wrong rpm x load cell.
+    #
+    # This is not hypothetical. The same pattern produced four apparent WOT
+    # AFR readings of 12.63 that were one stale lambda sample re-paired at
+    # 24-35 s age (see engine-tuning-support.md 3.2). Binning is only as
+    # trustworthy as the freshness of the axes you bin on.
+    before = len(df)
+    fresh = (df.rpm_age <= max_join_age) & (df.load_age <= max_join_age)
+    df = df[fresh.fillna(value=False)]
+    dropped = before - len(df)
+    if dropped:
+        print(
+            f"  [{label}] dropped {dropped}/{before} samples whose rpm/load "
+            f"axis was staler than {max_join_age}s"
+        )
+    return Run(label, df, f"canary:{len(sessions)} session(s)")
 
 
 def _cells(df: pd.DataFrame, load_floor: float) -> pd.DataFrame:
@@ -297,6 +325,14 @@ def main() -> int:
     p.add_argument("--sigma", type=float, default=2.0)
     p.add_argument("--iat-tolerance", type=float, default=DEFAULT_IAT_TOLERANCE_C)
     p.add_argument(
+        "--max-join-age",
+        type=float,
+        default=DEFAULT_MAX_JOIN_AGE_S,
+        help="Discard timing samples whose rpm/load axis came from a sample "
+        "older than this many seconds. Guards against an ASOF join filing a "
+        "reading into a cell it never occupied.",
+    )
+    p.add_argument(
         "--min-delta",
         type=float,
         default=DEFAULT_MIN_DELTA_DEG,
@@ -316,7 +352,7 @@ def main() -> int:
         if csv is not None:
             return load_uprev(csv, label)
         if sessions:
-            return load_sessions(sessions, label, args.sessions_root)
+            return load_sessions(sessions, label, args.sessions_root, args.max_join_age)
         raise SystemExit(f"provide --{label}-sessions or --{label}-csv")
 
     before = build(args.before_sessions, args.before_csv, "before")

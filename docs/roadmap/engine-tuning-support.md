@@ -273,6 +273,52 @@ between-session means confound ambient, run time, traffic, and heat soak.
 G.3a, G.3b and G.3e are satisfied by tuning-mode captures now that
 `EVAPORATIVE_PURGE` and `FUEL_STATUS` are in the channel set.
 
+## G.4 — Stale-join contamination: a methodology gate on every binned analysis
+
+**Not a task. A standing constraint on how binned analysis is done here**,
+recorded because it already invalidated one published finding.
+
+### What happened
+
+A ZS04C→ZS44A timing comparison reported that the tune had retarded high-load
+ignition by 8–11°, described as confirmed by two independent measurement paths.
+**That finding is withdrawn.** It was an artifact of unbounded ASOF joins.
+
+`TIMING_ADVANCE` polls at ~0.06 Hz and `ENGINE_LOAD` at ~0.08 Hz. An ASOF join
+pairs each timing reading with the *most recent* load reading regardless of
+age, so a sample can be filed into an rpm × load cell the engine occupied ten
+or more seconds earlier. Adding a 3 s freshness bound to the same query drops
+**717 of 1701** pre-flash samples and **132 of 196** post-flash — and every
+high-load cell then falls to n = 0–3, i.e. there was never enough clean
+post-flash high-load data to support the claim.
+
+The claim is *unsupported*, not disproven. Pre-flash high-load cells survive
+the filter (n ≈ 46–59); the post-flash side does not.
+
+### The same failure in a second place
+
+Four WOT samples appeared to show a rich cluster at 12.63 AFR. They are one
+lambda reading at 24–35 s age, re-paired four times (see 3.2). Without
+carrying the source sample age they are indistinguishable from measurements.
+
+### The rules that follow
+
+- **Always bound ASOF joins by sample age**, and make the bound explicit
+  rather than defaulted. `scripts/timing_compare.py` takes `--max-join-age`
+  (default 3 s) and prints how many rows it dropped.
+- **Always carry and report the joined sample's age** in any per-sample table.
+  A stale value looks exactly like a fresh one.
+- **Report the drop count.** If a freshness bound discards two-thirds of the
+  data, that is the headline, not a footnote — it means the conclusion rested
+  on almost nothing.
+- **Prefer synchronously-sampled sources for binned work.** UpRev's K-line log
+  puts every parameter in one frame, so it needs no join and has no staleness.
+  That is why the lean-WOT reading in 3.2 survives while the CANary-side
+  timing delta does not.
+- **This is the strongest argument for multi-PID batching.** At the current
+  0.06–0.5 Hz per channel, most joins are stale by construction. At ~33 Hz the
+  freshness bound costs almost nothing. See `multi-pid-polling.md`.
+
 ## Phase 2 — Correction-surface analysis (software; needs G.2 for the trim half)
 
 The deliverable UpRev workflow needs: for each cell, how far off is
@@ -306,11 +352,61 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
 - [ ] **3.1 — Baseline.** Pin 2–3 known-good pre-tune sessions
   (replay regression baseline + before/after comparison). ECU ROM
   dump saved and backed up before any flash.
-- [ ] **3.2 — WOT AFR verification (safety gate).** Stock-tune WOT
-  pulls through the Phase 1 capture; confirm commanded enrichment is
-  delivered and nothing runs lean. Cats are all retained so the
-  cat-delete lean condition is excluded, but headers+spacers still
-  shift VE — verify, don't assume.
+- [~] **3.2 — WOT AFR verification (safety gate).** *First data in
+  2026-07-27; not yet enough to act on, and it inverts the usual
+  assumption.* Stock-tune WOT pulls through the Phase 1 capture;
+  confirm commanded enrichment is delivered and nothing runs lean.
+  Cats are all retained so the cat-delete lean condition is excluded,
+  but headers+spacers still shift VE — verify, don't assume.
+
+  **How to find WOT in the corpus.** `FUEL_STATUS` (PID 0x03) `== 4` is
+  "open loop due to engine load" — the ECU telling you directly that it
+  entered power enrichment. That is the reliable detector. **Do not use
+  RPM as a WOT proxy**: on a manual, WOT pulls shifted at 4–5k never
+  reach redline, and an earlier analysis wrongly concluded "no WOT data
+  exists" from an RPM histogram. Note `FUEL_STATUS == 4` *also* covers
+  deceleration fuel cut, so pair it with throttle — DFCO is closed
+  throttle and lean (λ ≈ 1.16), enrichment is open throttle and rich.
+
+  **What the July corpus actually contains:** 25 samples at 70–88.6 %
+  throttle, 83–90 % engine load, 2050–4163 rpm, with `FUEL_STATUS == 4`
+  present — genuine WOT events.
+
+  **Only 4 carry usable AFR**, because `O2_WR_LAMBDA_S1` polls at
+  ~0.13 Hz:
+
+  | throttle | rpm | load | AFR | λ sample age |
+  |---|---|---|---|---|
+  | 82.0 % | 4163 | 87.5 | **13.17** | 1.2 s |
+  | 88.6 % | 2338 | 89.0 | **13.26** | 0.8 s |
+  | 80.0 % | 2338 | 84.7 | **13.52** | 0.4 s |
+  | 88.6 % | 2863 | 86.7 | **13.52** | 0.4 s |
+
+  The July 18–19 WOT samples have **no** lambda (the wideband PID was
+  not yet polled), and four samples reading "12.63" are the *same stale
+  value* at 24–35 s age — an ASOF-join artifact, not measurements.
+  **Always carry the source sample age when joining slow-polled
+  channels**; without it those four look like a rich cluster.
+
+  **Reading:** best power on gasoline is ~12.8–13.2 (λ 0.87–0.90), so
+  this engine runs **at or lean of best power at WOT — not rich.** The
+  common assumption that a stock NA calibration runs rich at WOT with
+  room to lean out does **not** hold here, and altitude (~80 kPa) does
+  not make it richer as one might expect. If anything the move is
+  slightly *richer*, toward 12.8–13.0, which would gain a little power
+  and buy knock margin that is currently invisible (see G.3 and the
+  knock note in Guiding constraints).
+
+  (An earlier revision paired this with a claim that ZS44A had pulled
+  8–11° of high-load timing. **That claim is withdrawn** — see G.4. The
+  lean-WOT reading here stands on its own; it comes from UpRev's
+  synchronously-sampled log, not from an ASOF join.)
+
+  **Not actionable yet — 4 samples, two at the same rpm, one pre-flash
+  and three post.** Do not move a WOT fuel table on this. What it does
+  establish is that the measurement is possible and worth doing
+  properly. See `multi-pid-polling.md`: at ~33 Hz a single 5 s pull
+  yields ~165 time-aligned samples per channel instead of one.
 - [ ] **3.3 — K + MAF calibration loop.** UpRev flat AFR-test table
   (open loop) → drive with tuning capture → Phase 2 report → adjust
   K, then MAF curve, then fuel comp in ROM Editor → reflash →

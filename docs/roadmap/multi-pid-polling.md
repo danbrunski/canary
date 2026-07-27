@@ -40,6 +40,22 @@ Two independent levers, and they multiply:
 Full evidence: [`docs/data-architecture.md`](../data-architecture.md) §2,
 "How fast Mode 01 can actually go".
 
+### A concrete cost of not having this
+
+The July corpus contains **25 genuine WOT samples** (70–88.6 % throttle,
+83–90 % load, up to 4163 rpm, `FUEL_STATUS == 4` confirming open-loop
+enrichment). **Only 4 carry usable AFR**, because `O2_WR_LAMBDA_S1` polls at
+~0.13 Hz — a five-second WOT pull catches lambda roughly once.
+
+Worse, four *other* samples appear to show a rich cluster at 12.63 AFR. They
+are the same stale reading at 24–35 s age, paired in by an ASOF join. Without
+carrying the source sample age they are indistinguishable from measurements.
+
+So the highest-value tuning question on the vehicle — what AFR does it run at
+wide-open throttle — is currently answerable only to within "four scattered
+points, two at the same rpm". At ~33 Hz the same pull yields ~165 time-aligned
+samples per channel. See `engine-tuning-support.md` 3.2.
+
 ## Guiding constraints
 
 - **Pad to DLC=8.** This ECM ignores short frames entirely — no response,
