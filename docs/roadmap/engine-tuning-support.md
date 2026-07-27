@@ -60,12 +60,20 @@ out of shared code paths):
 - Aftermarket cat-back exhaust.
 - Intake manifold spacers.
 
-Net effect: volumetric-efficiency shape shifted across the RPM band;
-factory feedforward calibration (MAF curve, K, open-loop WOT fueling,
-timing/cam schedules) no longer matches the plant. Tuning theory in
+Net effect on the *open-loop* calibration (WOT fuelling, timing and
+cam schedules): the VE shape shifted across the RPM band, so the
+factory feedforward tables no longer match the plant. Tuning theory in
 one line: make the ECU's model true (measured AFR == target, trims
 near zero), then move setpoints (WOT AFR ~12.8–13.2:1, timing toward
 MBT under knock supervision, cam phasing for the new scavenging).
+
+**Do not extend that reasoning to closed-loop fuel trim.** This is a
+MAF-based engine, so a VE change does not by itself put the ECU's
+airflow measurement wrong — the extra air still passes the sensor.
+See G.3, which measured what actually drives trim here (intake air
+temperature) and rules VE gain out as a direct mechanism. The headers
+running without heat shields matter for trim *thermally*, not
+volumetrically.
 
 ## Cross-links
 
@@ -133,94 +141,137 @@ a few Hz per channel, too slow to resolve a ~5 s WOT pull per cell.
   slice by maneuver. Predefine the tag vocabulary in config; tags are
   data, not code.
 
-## G.3 — Separate VE gain from an exhaust leak before rescaling the MAF
+## G.3 — Fuel trim tracks intake air temperature; find out why before rescaling the MAF
 
-**Gates the MAF half of Phase 3.3.** Not a software task; it decides whether
-the correction we are about to apply is real.
+**Gates the MAF half of Phase 3.3.** Not a software task. It decides whether
+there is a fixed correction to apply at all — and the current answer is no.
 
 ### What was measured
 
-Short-term fuel trim, filtered to purge-closed, closed-loop, coolant > 70 °C
-(the filters matter — EVAP purge alone shifts trim 4.15 points, and UpRev's
-logger has no purge parameter at all, so its logs cannot be filtered this way):
+Short-term fuel trim, filtered to purge-closed, closed-loop, coolant > 70 °C.
+The filters matter: EVAP purge alone shifts trim 4.15 points, and UpRev's
+logger has no purge parameter at all, so its logs cannot be filtered this way.
 
-| era | sessions | mean | median | range |
+Across 15 post-mod sessions (n ≈ 83 samples each), bank-1 trim spans
+**1.15 % – 10.63 %** — a nine-point swing on *fixed hardware*. That variability,
+not the mean, is the finding.
+
+It is almost entirely explained by intake air temperature:
+
+| | |
+|---|---|
+| corr(IAT, bank 1 trim) | **+0.73** |
+| corr(IAT, bank 2 trim) | **+0.74** |
+| corr(bank 1, bank 2) | **+0.92** |
+| slope | **+0.45 trim points per °C** |
+| across the observed 37–54 °C | **+7.6 points** of the 9.5-point spread |
+
+| IAT | sessions | mean trim |
+|---|---|---|
+| ≤ 42 °C | 4 | **2.76 %** |
+| ≥ 49 °C | 5 | **8.44 %** |
+
+### The apparent step at the mod boundary is a temperature confound
+
+An earlier revision of this section attributed a ~+3-point step to the
+2026-06-28 header and spacer install. **That does not survive controlling for
+temperature**, and the correction matters because it was gating the whole
+investigation on the wrong question.
+
+| era | sessions | mean IAT | mean trim | IAT range |
 |---|---|---|---|---|
-| pre-mod (May) | 5 | **2.80 %** | 2.41 % | 0.10 – 6.29 |
-| post-mod (July) | 15 | **5.90 %** | 5.25 % | 1.25 – 10.63 |
+| May (pre-mod) | 6 | 33.7 °C | 2.58 % | 31–40 °C |
+| July (post-mod) | 15 | 45.6 °C | 5.99 % | 37–54 °C |
 
-Roughly +3 points on the mean; the ceiling more than doubles. Bank 2 tracks
-bank 1. The step aligns with the 2026-06-28 shorty-header and plenum-spacer
-install (ledger `45f52a69`, `corpus_boundary=true`), **not** with the ECU
-reflash — an earlier reading of this data blamed the flash and was wrong,
-having compared a single pre-flash idle session against a single post-flash
-one.
+The eras barely overlap in temperature, so comparing era means compares
+temperatures. The raw difference is +3.41 points; temperature alone predicts
+**+5.34**, i.e. it *over*-predicts the step. Restricted to the overlapping
+36–41 °C band, post-mod trim is **3.49 points lower** than pre-mod (1 May
+session against 4 July — thin, so read it as "no mod effect is detectable",
+not as "the mods improved it").
 
-Two things the numbers do *not* say. The session-to-session swing is not new
-(pre-mod already ranged 0.1–6.3), so the mods raised the level rather than
-introducing the variability. And IAT was 32–40 °C in May against 37–64 °C in
-July, so some of the gap is plausibly heat rather than hardware.
+### But the mods plausibly act *through* temperature
 
-### The three candidates
+Splitting IAT into ambient and underhood contributions — session-minimum IAT
+approximates ambient after a soak; the rise to warm-running is engine-bay heat:
 
-1. **Genuine VE gain.** The engine really does flow more and the stock MAF
-   curve under-reports at the new operating points. Benign, and a MAF rescale
-   is exactly the right fix.
-2. **Exhaust leak at the header flanges or collectors**, upstream of the O2
-   sensors. Fresh air past the sensor reads lean and the ECU adds fuel the
-   engine never needed. A carb-cleaner test around the *plenum* does not test
-   for this — wrong end of the engine. That test was run and came back clean.
-3. **Plenum spacer leak** — unmetered air downstream of the MAF. This *was*
-   the right target for the carb-cleaner test, so the clean result is real
-   evidence against it. Weakest of the three, though a leak that only opens
-   once hot can survive a cold spray.
+| | May | July | Δ |
+|---|---|---|---|
+| IAT at start (≈ ambient) | 34.2 °C | 44.1 °C | **+9.9** |
+| **rise, cold → warm** (underhood) | **+2.5 °C** | **+5.6 °C** | **+3.1** |
 
-**Why this gates the tune:** if it is VE gain, the ~+9 % correction is real
-airflow and rescaling the MAF is correct. If it is an exhaust leak, rescaling
-adds fuel the engine does not need, and the truck goes genuinely rich the
-moment the leak is repaired.
+Ambient genuinely rose ~10 °C (unusually hot weather), *and* the underhood
+contribution more than doubled — consistent with the **shorty headers running
+without heat shields**. Excluding two July sessions that begin at 70 °C (hot
+restarts, not cold soaks): +6.7 °C ambient, +3.7 °C larger rise. Same
+conclusion.
 
-### The discriminating signal: trim versus load
+So the mods likely do raise trim — **indirectly, by heating intake air**, not
+by changing VE or by leaking. That points at a different remedy than a MAF
+rescale: heat shielding, intake-tract isolation, or a colder air source.
 
-- A **leak** (exhaust or intake) admits a roughly fixed amount of unmetered
-  air. As a *fraction* of total flow that is large at idle and shrinks as load
-  rises → **trim starts high and falls steeply with load**.
-- **VE gain / MAF scaling** error is proportional to airflow → **trim stays
-  roughly flat across load**.
+### What this rules out
 
-Note that exhaust and intake leaks share this shape; they are separated by
-*location* (the carb-cleaner test), not by the load curve. Since the intake
-was tested clean, a falling curve now points at the exhaust.
+- **A fixed MAF scaling error.** A scaling error is a constant percentage.
+  This one triples across ordinary operating temperatures, so no single
+  multiplier is correct. **Do not apply one derived from a single log.**
+- **The ECU reflash.** Post-flash trim sits inside the pre-flash range.
+- **A single-bank exhaust leak.** Both banks correlate with IAT almost
+  identically (0.73 / 0.74) and with each other at 0.92. An earlier reading
+  of a bank-1 bias as a per-bank fault was an artifact of five sessions; the
+  split grows with the overall level (corr 0.87), which is one bank having
+  slightly more gain on a *shared* cause, not a separate leak.
+- **VE gain as a direct mechanism.** This is a MAF-based engine — PID 0x0B
+  (manifold pressure) is refused by this ECU, consistent with MAF-primary
+  fuelling. A MAF measures *mass*, and in steady state every gram the engine
+  ingests passed the sensor. More VE means the MAF reads more and fuel scales
+  with it. "VE gain needs a rescale" is a **speed-density** mechanism, where
+  the ECU infers airflow from RPM × MAP × a VE table; it does not transfer.
+  Larger plenum volume from spacers is a *buffer*, not a source — it changes
+  transient manifold filling, which washes out in steady state.
 
-One existing data point, weakly in favour of VE gain: binning A/F CORR by MAF
-voltage came out flat (slope −2.16 %/V, spread 4–6 points across 1.0–2.6 V).
-But that came from purge-contaminated UpRev data, so it should be redone
-before anyone leans on it.
+### Candidates that remain
+
+All must be **temperature-dependent and common to both banks**:
+
+1. **Fuel heat soak.** Hot fuel is less dense; injectors meter volume, so the
+   same pulse width delivers less mass. Lean, trim adds. Scales with engine-bay
+   temperature, affects both banks equally.
+2. **MAF temperature-compensation error.** A hot-film sensor is mass-sensing
+   but its compensation is imperfect, and a contaminated element degrades worse
+   hot. Under-reads → lean → trim adds.
+3. **A thermally-opening intake leak** at the plenum or spacer gaskets. The
+   carb-cleaner test was clean, but it was run *cold* — exactly when such a
+   leak would be shut.
 
 ### Collection plan
 
-- [ ] **G.3a — Cold-start warm-up log.** Cold start through to full warm at
-  idle, logging trim, coolant, and `CATALYST_TEMP_B1S1`/`B2S1` as an exhaust
-  temperature proxy. An exhaust leak commonly seals as the metal expands, so
-  trim trending *down* as exhaust temp rises is a leak tell. VE gain is
-  temperature-stable apart from IAT density effects.
-- [ ] **G.3b — Steady-state load sweep.** Hold several load points at a fixed
-  rpm, 15–20 s each, purge-closed. This is the flat-versus-falling test and
-  the single most decisive measurement. Blips are useless here — the whole
-  point is holding one operating point long enough to fit it.
-- [ ] **G.3c — Bank asymmetry check.** Shorty headers are per-bank, so a
-  single leaking flange should show as one bank's trim running higher. Bank 1
-  already runs 1–2 points above bank 2 *pre-mod*, so the baseline asymmetry is
-  pre-existing; what matters is whether the **gap widened** (it looks larger
-  post-mod, 2.8–3.5 points, but on few sessions).
-- [ ] **G.3d — Physical check, cold.** Header flanges and collector joints
-  with soapy water, or listen for a tick that fades as the engine warms. The
-  earlier carb-cleaner test covered the plenum only.
-- [ ] **G.3e — Re-run the MAF-voltage binning on clean data**, purge-closed
-  and closed-loop, to confirm or overturn the flat result above.
+The decisive change is to stop comparing sessions and compare **within** one:
+between-session means confound ambient, run time, traffic, and heat soak.
 
-All of G.3a–c are satisfied by tuning-mode captures once
-`EVAPORATIVE_PURGE` and `FUEL_STATUS` are in the channel set (they are).
+- [ ] **G.3a — Single-session IAT sweep.** One long session from cold start
+  through full heat soak, returning to the *same* load/rpm holds at several
+  points as IAT climbs. If trim tracks IAT inside a single session, the
+  between-session confounds vanish. This is now the most valuable single log.
+- [ ] **G.3b — Steady-state load sweep, repeated at two IATs.** Hold several
+  load points 15–20 s each, purge-closed, once cool and once heat-soaked.
+  Flat across load = scaling or fuel; falling with load = a leak; wavy with
+  rpm peaking in a band = manifold-resonance/VE-model mismatch. Doing it at
+  two temperatures also separates the load shape from the thermal effect.
+- [ ] **G.3c — Ambient reference.** `AMBIANT_AIR_TEMP` (PID 0x46) is **not
+  supported** by this ECU, so ambient cannot be separated from underhood
+  directly. Session-minimum IAT is the current proxy and it fails on hot
+  restarts. Consider an external temperature source, or restrict the proxy to
+  sessions following a verified cold soak.
+- [ ] **G.3d — Physical check, hot and cold.** Intake tract *and* header
+  flanges, checked both cold and heat-soaked, since a thermally-opening leak
+  is consistent with everything above and the existing clean result was cold.
+- [ ] **G.3e — Re-run the MAF-voltage binning on clean data**, purge-closed
+  and closed-loop, at matched IAT. The earlier flat result (slope −2.16 %/V)
+  came from purge-contaminated UpRev data and should not be leaned on.
+
+G.3a, G.3b and G.3e are satisfied by tuning-mode captures now that
+`EVAPORATIVE_PURGE` and `FUEL_STATUS` are in the channel set.
 
 ## Phase 2 — Correction-surface analysis (software; needs G.2 for the trim half)
 
