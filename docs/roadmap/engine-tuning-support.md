@@ -167,7 +167,21 @@ a few Hz per channel, too slow to resolve a ~5 s WOT pull per cell.
 ## G.3 — Fuel trim tracks intake air temperature; find out why before rescaling the MAF
 
 **Gates the MAF half of Phase 3.3.** Not a software task. It decides whether
-there is a fixed correction to apply at all — and the current answer is no.
+there is a fixed correction to apply at all.
+
+**Scope note (2026-07-27), to avoid reading this against 3.3.** This section
+concludes "no single multiplier" for **closed-loop** fuelling, because trim
+appeared to triple across operating temperatures. 3.3 concludes a flat **+8 %**
+*is* right for **WOT**. Both hold, because they cover disjoint conditions: WOT
+occurs only at 33–37 °C intake (3.2a), a band inside which no temperature
+variation exists to defeat a scalar. Two further caveats now apply here:
+
+- The temperature dependence this section rests on is **itself in question** —
+  see the stagnation subsection below. It may be an idle-fraction effect.
+- If the +8 % base-model shortfall is real and flat, it is also present in
+  closed loop, where trim absorbs it. The temperature story and the scalar
+  story are not competing explanations; the scalar is the floor and the
+  temperature term (if it survives) rides on top of it.
 
 ### What was measured
 
@@ -255,6 +269,13 @@ rescale: heat shielding, intake-tract isolation, or a colder air source.
 
 ### Candidates that remain
 
+Separate the two things being explained. The **level** (trim sitting well above
+zero at all times) is now best explained by the flat ~8 % fuel-delivery
+shortfall in 3.3 — a K/injector mismatch or low fuel pressure — which needs no
+temperature term at all. What follows are candidates for the **variability**
+only, and all of them are conditional on that variability surviving the
+stagnation confound below.
+
 All must be **temperature-dependent and common to both banks**:
 
 1. **Fuel heat soak.** Hot fuel is less dense; injectors meter volume, so the
@@ -267,10 +288,57 @@ All must be **temperature-dependent and common to both banks**:
    carb-cleaner test was clean, but it was run *cold* — exactly when such a
    leak would be shut.
 
+### IAT is stagnation-dominated — this qualifies everything above
+
+**Measured 2026-07-27, and it weakens the whole temperature story rather than
+supporting it.** Intake air temperature on this vehicle is not a slowly-drifting
+thermal state. It is dominated by whether air is *moving*:
+
+| | |
+|---|---|
+| corr(IAT, RPM) | **−0.797** |
+| corr(IAT, MAF) | **−0.542** |
+| corr(IAT, ENGINE_LOAD) | −0.379 |
+| corr(IAT, wall-clock) | +0.866 |
+
+| airflow | mean MAF | mean IAT | IAT range |
+|---|---|---|---|
+| idle / coast < 8 g/s | 4.7 | **43.4 °C** | 34 – **52** |
+| light 8–20 | 12.3 | 35.6 | 34 – 36 |
+| cruise 20–45 | 33.6 | 35.2 | 34 – 36 |
+| **heavy 45+** | 60.6 | **34.7** | 33 – 36 |
+
+(n = 91, warm + fresh-join filtered per G.4.)
+
+**Whenever air moves, IAT collapses to 34–36 °C — essentially ambient —
+regardless of how hard the engine is working.** The 50 °C readings occur only
+at idle, where the sensor is measuring stagnant air sitting in a hot engine
+bay. Opening the throttle flushes it within seconds.
+
+Consequences:
+
+- **"IAT rose through the drive" is an idle-fraction artifact.** The +0.866
+  time correlation is not heat accumulating; it is more stopped time later in
+  the drive. The three IAT bands interleave throughout the session — soaked
+  samples as early as 09:28, cool ones as late as 10:02 — so there is no
+  monotonic soak ramp to point at.
+- **`ENGINE_LOAD` does not control for this.** Calculated load reads ~20 % at
+  idle *and* at light cruise, so binning on it mixes stationary with moving.
+  Use **MAF** to separate them. This invalidates the load-control claimed in
+  the first G.3a attempt.
+- **Whatever underhood soak exists is measured precisely when it cannot
+  affect fuelling.** The heat-shield hypothesis is not disproven, but this
+  drive cannot demonstrate it, and the "+3.1 °C larger underhood rise" figure
+  above is itself computed from session-mean IAT and therefore carries the
+  same idle-fraction confound.
+- **High IAT and WOT are close to mutually exclusive** — see 3.2a.
+
 ### Collection plan
 
 The decisive change is to stop comparing sessions and compare **within** one:
 between-session means confound ambient, run time, traffic, and heat soak.
+But note that *within*-session comparison has its own confound (stagnation,
+above), so the operating point must be matched on **MAF and rpm**, not load.
 
 - [~] **G.3a — Single-session IAT sweep. First attempt 2026-07-27: direction
   confirmed, not clean.** 41-minute drive, IAT 33→47 °C, purge-closed
@@ -280,12 +348,21 @@ between-session means confound ambient, run time, traffic, and heat soak.
   **0.30** (n=110), and the bands are **load-confounded**: the low-IAT samples
   sat at 34 % load versus 23 % for the rest.
 
-  The matched holds did not happen — understandable while driving, but it is
-  exactly what the test needs. **Retry: pick two or three specific load/rpm
-  points, hold each 15–20 s, and return to the *same* points once heat-soaked.**
-  Without matched operating points the temperature effect cannot be separated
-  from the load effect, and this attempt shows the confound is real rather than
-  hypothetical.
+  A second reading of the same session claimed the confound was resolved by
+  binning into drive-fifths at matched 20–24.5 % load, giving +0.50 %/°C with
+  coolant flat at 91 °C. **That claim is withdrawn.** `ENGINE_LOAD` reads ~20 %
+  at idle and at light cruise alike, so it never separated stationary from
+  moving, and IAT here is stagnation-dominated (corr with rpm **−0.797** — see
+  the subsection above). The apparent temperature effect may be an
+  idle-versus-moving effect wearing temperature's clothes; the two are nearly
+  collinear in this data and cannot be told apart from it.
+
+  **Retry design, revised.** Match on **MAF and rpm**, not load — hold two or
+  three specific points 15–20 s each. And because a hot intake charge does not
+  survive airflow, the two temperatures almost certainly have to come from
+  **two different sessions** (cool morning vs hot afternoon) rather than from
+  early-vs-late within one drive. A within-session sweep can only vary IAT by
+  varying stagnation, which is the confound itself.
 - [ ] **G.3b — Steady-state load sweep, repeated at two IATs.** Hold several
   load points 15–20 s each, purge-closed, once cool and once heat-soaked.
   Flat across load = scaling or fuel; falling with load = a leak; wavy with
@@ -359,6 +436,18 @@ carrying the source sample age they are indistinguishable from measurements.
   0.06–0.5 Hz per channel, most joins are stale by construction, and every
   additional channel in a filter compounds the loss. Batched channels share a
   timestamp, so the whole problem disappears. See `multi-pid-polling.md`.
+- **Verify that a control variable actually controls what you think.** Binning
+  on `ENGINE_LOAD` to "hold operating point constant" failed twice on
+  2026-07-27, because calculated load reads ~20 % at idle *and* at light
+  cruise. Two populations with completely different airflow landed in one bin
+  and the conclusion drawn from it was wrong. **For anything airflow- or
+  temperature-related, control on MAF and rpm**, and print the within-bin
+  range of the control variable to prove the bin is actually narrow.
+- **Treat a wall-clock trend as a hypothesis, not a mechanism.** "X rose
+  through the drive" invites a thermal-accumulation story. Check first whether
+  it tracks *duty cycle* instead: IAT's +0.866 correlation with time was
+  idle-fraction, not heat soak (G.3). Before attributing a trend to time,
+  regress it against what the engine was doing.
 
 ## Phase 2 — Correction-surface analysis (software; needs G.2 for the trim half)
 
@@ -443,11 +532,76 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   **537**. Until the budget rises (multi-pid-polling.md), WOT work belongs on
   the synchronously-sampled log.
 
+  **3.2a — WOT and high IAT do not co-occur, so the 8 % needs no temperature
+  term.** A natural worry is that the 8 % was measured cool and would worsen
+  when heat-soaked. It cannot, because going WOT is what makes the intake
+  cool (G.3, stagnation subsection). CANary's session 2026-07-27T152444, split
+  by IAT:
+
+  | IAT band | n | peak throttle | peak load | samples ≥ 60 % load |
+  |---|---|---|---|---|
+  | cool < 38 °C | 216 | **89.4 %** | **92.2 %** | **44** |
+  | warm 38–43 °C | 65 | 9.4 % | 27.1 % | **0** |
+  | soaked 44 °C+ | 79 | 9.4 % | 26.3 % | **0** |
+
+  Every heavy-throttle sample in the drive sat below 38 °C; above 38 °C the
+  throttle never exceeded 9.4 %. UpRev's two logs agree from the other
+  direction — their *whole-log* IAT spans are only 35.0–37.8 °C and
+  32.8–36.1 °C, so the K-line logs cannot address the temperature question at
+  all, while being the only source dense enough for WOT. **A flat scalar WOT
+  correction is therefore valid**; an IAT-dependent term is neither needed nor
+  measurable there.
+
 - [ ] **3.3 — K + MAF calibration loop.** UpRev flat AFR-test table
   (open loop) → drive with tuning capture → Phase 2 report → adjust
   K, then MAF curve, then fuel comp in ROM Editor → reflash →
   repeat until measured tracks target across the surface. Each
   iteration's session tagged with the ROM revision.
+
+  **Which knob: discriminator run 2026-07-27 (533 WOT samples).** UpRev logs
+  carry injector pulse width (`B-FUEL SCHDL`), `MAF GM/S` and `AFR WB-B1`
+  together, which lets the MAF reading be checked against the air implied by
+  fuel actually delivered.
+
+  | rpm | MAF g/s | implied VE | R = MAF/(pw·rpm·afr) |
+  |---|---|---|---|
+  | 2305 | 59.3 | 85.2 % | 12.140 |
+  | 2790 | 74.8 | 88.5 % | 12.165 |
+  | 3274 | 90.0 | 90.5 % | 11.983 |
+  | 3744 | 103.7 | 91.1 % | 12.144 |
+  | 4290 | 120.2 | **92.1 %** | 12.362 |
+
+  Two readings:
+
+  - **The MAF curve *shape* is correct.** R varies only **3.2 %** across a 2×
+    airflow range (59 → 120 g/s) with no trend. There is no region where the
+    sensor diverges from what fuel delivery implies, so **no reshape is
+    warranted — the error is a single scalar** (13.62/12.61 = **+8.0 %**).
+  - **The MAF's absolute reading is physically credible.** Implied VE rises
+    smoothly to 92 % at 4290 rpm — a textbook NA V6 curve for an engine with
+    headers and spacers. If the MAF under-read by 8 %, true VE would be
+    92–100 %, implausibly high with all four cats retained. That argues the
+    airflow measurement is roughly right and the shortfall is on the
+    fuel-delivery side.
+
+  **Adjust injector/K scaling, not MAF scaling.** For *fuel* the two are
+  mathematically degenerate — both multiply delivered fuel by 1.08 — but MAF
+  scaling also moves the ECU's load calculation, which indexes timing, cam
+  phasing and every other load-referenced table. Correcting K fixes fuelling
+  without silently shifting the operating point everywhere else. This supersedes
+  the task's original "adjust K, **then** MAF curve" ordering for the current
+  error: the MAF curve needs nothing.
+
+  **Check fuel pressure before compensating.** An 8 % shortfall is equally
+  consistent with a weak pump, failing regulator or clogged filter. Scaling K
+  around a mechanical fault masks it and the tune drifts wrong as the fault
+  worsens. If pressure is to spec, K genuinely does not match the injectors and
+  correcting it in the ROM is right.
+
+  **Validation:** measured WOT AFR should move 13.6 → ~12.6, and closed-loop
+  short-term trim should fall toward zero at the same time — that convergence is
+  the confirmation both symptoms shared one cause. With LTFT pinned at zero
+  (G.2) nothing adapts around an over-correction, so step small and re-measure.
 - [ ] **3.4 — AFR targets.** With the model true: stoich (closed
   loop) where the factory ran stoich; WOT/high-load targets per
   operator choice (~12.8–13.2:1 NA power mixture). Verify delivery

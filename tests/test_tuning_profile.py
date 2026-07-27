@@ -187,8 +187,14 @@ def test_default_set_carries_the_filters_every_analysis_depends_on() -> None:
     required = {
         "COOLANT_TEMP",  # warm-up exclusion
         "EVAPORATIVE_PURGE",  # purge shifts trim 4.15 points
-        "FUEL_STATUS",  # open vs closed loop
-        "INTAKE_TEMP",  # trim tracks IAT at ~0.45 points/degC
+        "FUEL_STATUS",  # open vs closed loop, and the only reliable WOT gate
+        "INTAKE_TEMP",  # charge temp; also the stagnation control (see G.3)
+        # MAF + RPM are the operating-point control. ENGINE_LOAD is NOT a
+        # substitute -- it reads ~20% at idle and at light cruise alike, so
+        # binning on it mixes stationary with moving and produced two wrong
+        # conclusions on 2026-07-27 (engine-tuning-support.md G.3a, G.4).
+        "MAF",
+        "RPM",
     }
     missing = required - tuning_profile.DEFAULT_TUNING_CHANNELS
     assert not missing, f"tuning captures would be unfilterable without {missing}"

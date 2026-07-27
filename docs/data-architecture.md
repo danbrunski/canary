@@ -261,6 +261,32 @@ and to treat UpRev logs as an importable reference, not a live source.
 | Knock / detonation | **Nothing.** ECM reports it on no transport | — (do not plan around K-line solving this) |
 | Watching another tool own a diagnostic session | **Passive mode** (`tx_gate`) + `candump`, decoded by `scripts/decode_flash.py` | — |
 
+## Signal interpretation gotchas
+
+Facts about what a channel *means* that are not visible in its decode, and
+that have each already produced a wrong conclusion.
+
+- **`INTAKE_TEMP` is stagnation-dominated, not a thermal state.** It tracks
+  whether air is *moving*, not how hot the engine bay has become:
+  `corr(IAT, RPM) = −0.797`, `corr(IAT, MAF) = −0.542`. Above ~8 g/s of
+  airflow it pins to ambient (34–36 °C measured); the 50 °C readings occur
+  only at idle. Do not read a rising IAT trend as heat soak without first
+  checking idle fraction, and do not expect high IAT to coincide with high
+  load — it essentially never does. See `roadmap/engine-tuning-support.md`
+  G.3.
+- **`ENGINE_LOAD` does not separate idle from light cruise** — calculated load
+  reads ~20 % in both. It is not a valid control variable for anything
+  airflow-related; use MAF and rpm.
+- **`LONG_FUEL_TRIM_*` reads a true 0.0 on this ECU** — it does not learn, and
+  this survived a full reflash. A flat zero here is the ECU's behaviour, not a
+  decode bug or a pending relearn. Short-term trim carries the whole
+  correction permanently.
+- **OBD `THROTTLE_POS` tops out near 89 %** and understates true WOT. For
+  wide-open-throttle detection use `FUEL_STATUS == 4` (open loop due to load),
+  paired with throttle to exclude decel fuel cut, which is also status 4.
+- **`AMBIANT_AIR_TEMP` (PID 0x46) is unsupported** by this ECU, so ambient
+  cannot be separated from underhood temperature from OBD alone.
+
 ## The production daemon's actual dependencies
 
 ```
