@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Early anomaly detection for vehicle telemetry via OBD-II and CAN bus monitoring."
 requires-python = ">=3.11"
 dependencies = [
+    # Keep NumPy below 2.5 while CI/mypy targets Python 3.11: NumPy 2.5+ stubs
+    # use `type` statements that mypy rejects in py311 mode.
+    "numpy<2.5",
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "obd>=0.7",
@@ -27,7 +30,8 @@ dependencies = [
     # MCP server (src/mcp_server) — exposes the daemon to Claude Code and any
     # MCP-speaking client. httpx is the async client to localhost:8000; duckdb
     # backs ad-hoc SQL over the Parquet ring buffer.
-    "mcp>=1.2",
+    # MCP 2.x removed `mcp.server.fastmcp`, which this codebase imports.
+    "mcp>=1.2,<2",
     "httpx>=0.27",
     "duckdb>=1.0",
     # duckdb's Python client lazily imports pytz to convert TIMESTAMPTZ
