@@ -43,8 +43,15 @@ DBC_SOURCE: Final = "dbc"
 #: that computes them is the only place the value ever exists — so, like
 #: ``DECODED_SOURCE``, they ride a real ``TelemetryRecord`` and get persisted.
 DERIVED_SOURCE: Final = "derived"
+#: Imported UpRev Osiris K-line datalog rows (``tools/import_uprev_log.py``).
+#: Never produced by the live daemon — only ever lands in a quarantined
+#: ``_uprev/<session>`` directory (excluded from training discovery /
+#: ``query_telemetry``'s unscoped sweep by the leading-underscore
+#: convention, same as ``_archive``), so a foreign log format riding this
+#: source can never reach the training corpus or a live capture.
+UPREV_SOURCE: Final = "uprev"
 
-TelemetrySource = Literal["obd", "can", "decoded", "gps", "derived", "imu"]
+TelemetrySource = Literal["obd", "can", "decoded", "gps", "derived", "imu", "uprev"]
 # PEP 586 forbids spelling a Literal from variables, so the line above is the
 # one unavoidable duplication. Guard it against silently drifting from the
 # constants it must mirror.
@@ -55,6 +62,7 @@ assert set(get_args(TelemetrySource)) == {
     GPS_SOURCE,
     DERIVED_SOURCE,
     IMU_SOURCE,
+    UPREV_SOURCE,
 }
 
 TelemetryValue = bool | int | float | str | None
@@ -233,6 +241,27 @@ class TelemetryRecord:
         return cls.from_epoch(
             timestamp,
             source="imu",
+            channel=channel,
+            value=value,
+            unit=unit,
+            metadata=metadata,
+        )
+
+    @classmethod
+    def uprev(
+        cls,
+        timestamp: float,
+        channel: str,
+        value: TelemetryValue,
+        unit: str = "",
+        *,
+        metadata: dict[str, MetadataValue] | None = None,
+    ) -> TelemetryRecord:
+        """One imported UpRev log row (``channel`` like ``TIMING_ADVANCE``,
+        ``COOLANT_TEMP``) at an epoch ts. See ``tools/import_uprev_log.py``."""
+        return cls.from_epoch(
+            timestamp,
+            source="uprev",
             channel=channel,
             value=value,
             unit=unit,

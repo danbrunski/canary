@@ -252,6 +252,17 @@ including no P0325/P0330.
 **Role:** external operator tool. CANary's job is to cover what CAN can
 reach (see the gap analysis in `docs/roadmap/engine-tuning-support.md`)
 and to treat UpRev logs as an importable reference, not a live source.
+`tools/import_uprev_log.py` does the importing: normalizes an exported CSV
+into the same long-format telemetry schema every other source uses (unit
+normalization included — UpRev's temperature columns carry no unit suffix
+and are Fahrenheit, the exact bug a hand-written CSV parser is one keystroke
+from reproducing) and lands it under `<storage_path>/_uprev/<session>/`,
+quarantined from training discovery like `_archive` but reachable via
+`query_telemetry(session=..., ...)` — see "DID sweep + diff" and "Raw CAN
+activity capture" in `docs/headless-api.md` for the sibling ad-hoc tools this
+session's tooling pass added; the UpRev importer isn't MCP-exposed (the CSV
+has to reach the Pi's filesystem first, e.g. `scp`), so it's a plain CLI
+step before the data is queryable.
 
 ## The mapping
 
