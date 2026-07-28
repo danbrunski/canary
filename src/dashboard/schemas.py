@@ -128,6 +128,19 @@ class UpsKeepaliveRequest(_ControlRequest):
     minutes: float = Field(..., ge=0.0, le=720.0)
 
 
+class CanActivityRequest(_ControlRequest):
+    """Capture N seconds of raw CAN traffic (the ``can_activity`` tool).
+
+    Per-arbitration-id frame rate plus which byte positions actually
+    changed — the RE workhorse for "press the brake, see what moved" (pairs
+    with AGENTS.md's "tag physical actions" convention). Pure listen: no
+    ``bus.send``, no interaction with passive mode. ``ids`` restricts the
+    capture to those arbitration ids; omit for the whole bus."""
+
+    seconds: float = Field(..., gt=0.0, le=30.0)
+    ids: list[int] | None = None
+
+
 class ObdRequestRequest(_ControlRequest):
     """One-shot read-only OBD/UDS request (the ``obd_request`` tool).
 

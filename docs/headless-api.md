@@ -170,6 +170,7 @@ Control endpoints:
 | `GET /control/profiles` / `POST /control/profiles/{slug}/name` | list vehicle profiles / set a profile display name |
 | `GET /control/power` / `POST /control/power/keepalive` | UPS watchdog status / set or cancel the keep-alive hold |
 | `GET /control/passive` / `POST /control/passive` | inspect / arm the CAN transmit gate (receive-only mode) — see [Passive mode](#passive-mode) |
+| `POST /control/can_activity` | capture N seconds (capped at 30) of raw CAN traffic — `{seconds, ids?}` — per-id frame rate + which byte positions changed |
 | `POST /control/obd_request` | one-shot read-only OBD/UDS request — `{service, identifier?, header?, timeout_seconds?}`, whitelisted to Mode 01/02/03/06/07/09/0A/22 |
 | `GET /control/tuning-mode` / `POST /control/tuning-mode` | inspect / arm the focused high-rate tuning poll profile (narrows Mode 01 to a tuning channel set, suspends DID windows) |
 | `GET /control/feedback` / `POST /control/feedback` | read / record anomaly-feedback verdicts |
@@ -287,6 +288,41 @@ Two interactions worth knowing:
   `CommunicationControl`/`ControlDTCSetting` to quiet normal bus traffic during
   erase/write. Without the suspension, recording would disarm during exactly
   the window passive mode was armed to capture.
+
+## Raw CAN activity capture
+
+`POST /control/can_activity` listens for N seconds (capped at 30) and
+summarizes, per arbitration id, how often it appeared and which byte
+positions actually varied. Pure receive — no frames are transmitted, no
+interaction with passive mode. This is the reverse-engineering workhorse:
+bracket a physical action (press the brake, flip a switch — see
+[Tag physical actions, not graph selections](../AGENTS.md) for why it has to
+be the action, not an NT510 graph selection) and `changed_byte_indices` on
+whichever id lit up is the answer to "which ID carries that signal" —
+without an offline `candump` capture and a hand-written byte diff.
+
+```bash
+curl -sX POST http://canary.local:8000/control/can_activity \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"seconds": 5}'
+```
+
+```json
+{
+  "can_activity": {
+    "duration_seconds": 5.0, "frames_captured": 4213, "truncated": false,
+    "ids": [
+      {"id": "0x180", "frame_count": 501, "hz": 100.2,
+       "first_hex": "...", "last_hex": "...", "changed_byte_indices": [2, 5]}
+    ]
+  }
+}
+```
+
+`ids` (a list of arbitration ids) restricts the capture — useful for a
+tighter follow-up window once a first wide capture has narrowed the
+candidates. MCP equivalent: `can_activity(seconds, ids)`.
 
 ## Ad-hoc OBD/UDS requests
 

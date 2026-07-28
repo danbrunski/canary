@@ -27,6 +27,7 @@ from src.dashboard import schemas
 from src.mcp_server.audit import MCPAuditLogger
 from src.mcp_server.client import DaemonClient
 from src.mcp_server.write_tools import (
+    can_activity,
     captures,
     feedback,
     obd_request,
@@ -126,6 +127,11 @@ CASES: list[tuple[str, Any, type]] = [
         "set_passive_mode",
         lambda c, a: passive.set_passive_mode(c, a, enabled=True),
         schemas.PassiveModeRequest,
+    ),
+    (
+        "can_activity",
+        lambda c, a: can_activity.can_activity(c, a, seconds=5.0, ids=[0x100, 0x200]),
+        schemas.CanActivityRequest,
     ),
     (
         "obd_request",

@@ -53,6 +53,7 @@ from src.companion.services import (
 )
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
+from src.control.can_activity import CanActivityBusError, capture_can_activity
 from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
 from src.control.classification import (
     classify_one_session,
@@ -84,6 +85,7 @@ from src.control.trends import corpus_trend_summary
 from src.dashboard.broadcast import Broadcaster
 from src.dashboard.readers import read_anomalies_since
 from src.dashboard.schemas import (
+    CanActivityRequest,
     CaptureStartRequest,
     CaptureStopRequest,
     CaptureTagRequest,
@@ -420,6 +422,23 @@ def register_control_routes(
             "expiry": expiry,
         }
         publish_control_event("power.keepalive", "ok", payload)
+        return payload
+
+    @app.post("/control/can_activity")
+    def post_control_can_activity(
+        request: CanActivityRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            result = capture_can_activity(
+                config.hardware.can,
+                seconds=request.seconds,
+                ids=request.ids,
+            )
+        except CanActivityBusError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        payload = {"can_activity": result.to_dict()}
+        publish_control_event("can_activity", "ok", payload)
         return payload
 
     @app.post("/control/obd_request")

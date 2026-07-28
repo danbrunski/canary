@@ -91,6 +91,9 @@ from src.mcp_server.tools import (
     vehicle_ledger as vehicle_ledger_tool,
 )
 from src.mcp_server.write_tools import (
+    can_activity as can_activity_write_tool,
+)
+from src.mcp_server.write_tools import (
     captures as captures_tool,
 )
 from src.mcp_server.write_tools import (
@@ -807,6 +810,20 @@ def _register_write_tools(
     async def set_ups_keepalive(minutes: float) -> dict[str, Any]:
         """Set (minutes>0) or cancel (minutes=0) the UPS watchdog keep-alive hold."""
         return await power_write_tool.set_ups_keepalive(client, audit, minutes=minutes)
+
+    @mcp.tool()
+    async def can_activity(seconds: float, ids: list[int] | None = None) -> dict[str, Any]:
+        """Capture N seconds of raw CAN traffic; per-ID frame rate + which
+        byte positions changed.
+
+        The RE workhorse: call it bracketing a physical action (press the
+        brake, flip a switch) and `changed_byte_indices` on each id answers
+        "which ID carries that signal," without an offline candump-and-diff
+        round trip. Pure listen — no frames transmitted, no interaction with
+        passive mode. `ids` restricts the capture to those arbitration ids;
+        omit for the whole bus. `seconds` is capped at 30 server-side.
+        """
+        return await can_activity_write_tool.can_activity(client, audit, seconds=seconds, ids=ids)
 
     @mcp.tool()
     async def obd_request(
