@@ -340,11 +340,15 @@ def parse_mode06_response(payload: bytes) -> list[MonitorTestResult]:
     return results
 
 
-#: SAE J1979-2 (ISO 15765-4) Mode 06 reserves MIDs 0x0B..0x12 for per-cylinder
-#: misfire counters (cylinder 1 through 8); MID 0x01 carries composite/
-#: engine-wide misfire data and is deliberately excluded here.
-MISFIRE_CYLINDER_MID_BASE = 0x0B
-MISFIRE_CYLINDER_MID_COUNT = 8
+#: SAE J1979 Mode 06 per-cylinder misfire MIDs: 0xA2 is cylinder 1 and the
+#: range extends through 0xAC for engines with up to 11 cylinders. MID 0xA1
+#: is composite/engine-wide data and is deliberately excluded.
+MISFIRE_CYLINDER_MID_BASE = 0xA2
+MISFIRE_CYLINDER_MID_COUNT = 11
+#: TID 0x0C is the current-drive-cycle count. TID 0x0B is the ten-drive-cycle
+#: EWMA and remains available in the raw monitor results, but must not be
+#: conflated with the live per-session counter.
+MISFIRE_CURRENT_CYCLE_TID = 0x0C
 
 
 def misfire_cylinder_number(monitor_id: int) -> int | None:
@@ -385,7 +389,7 @@ def misfire_counts_from_results(results: Sequence[MonitorTestResult]) -> dict[in
     counts: dict[int, int] = {}
     for result in results:
         cylinder = misfire_cylinder_number(result.monitor_id)
-        if cylinder is not None:
+        if cylinder is not None and result.test_id == MISFIRE_CURRENT_CYCLE_TID:
             counts[cylinder] = result.test_value
     return counts
 

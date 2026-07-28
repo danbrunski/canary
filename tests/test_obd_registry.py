@@ -218,20 +218,21 @@ def test_parse_mode06_ignores_trailing_padding() -> None:
 
 
 def test_misfire_cylinder_number_maps_reserved_mid_range() -> None:
-    assert misfire_cylinder_number(0x0B) == 1
-    assert misfire_cylinder_number(0x12) == 8
-    # Composite/engine-wide misfire data (MID 0x01) and any other monitor
+    assert misfire_cylinder_number(0xA2) == 1
+    assert misfire_cylinder_number(0xAC) == 11
+    # Composite/engine-wide misfire data (MID 0xA1) and any other monitor
     # (catalyst, EVAP, ...) are not per-cylinder.
     assert misfire_cylinder_number(0x01) is None
-    assert misfire_cylinder_number(0x13) is None
-    assert misfire_cylinder_number(0x0A) is None
+    assert misfire_cylinder_number(0xA1) is None
+    assert misfire_cylinder_number(0xAD) is None
 
 
 def test_misfire_counts_from_results_filters_to_cylinder_mids() -> None:
-    cyl1 = bytes([0x0B, 0x01, 0x10, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00])
-    cyl2 = bytes([0x0C, 0x01, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+    cyl1 = bytes([0xA2, 0x0C, 0x24, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00])
+    cyl2 = bytes([0xA3, 0x0C, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+    ewma = bytes([0xA2, 0x0B, 0x24, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00])
     composite = bytes([0x01, 0x01, 0x10, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00])
-    results = parse_mode06_response(cyl1 + cyl2 + composite)
+    results = parse_mode06_response(cyl1 + cyl2 + ewma + composite)
     counts = misfire_counts_from_results(results)
     assert counts == {1: 3, 2: 0}
 

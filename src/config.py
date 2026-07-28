@@ -234,6 +234,10 @@ class CollectionConfig(_Strict):
     #: counts + monitor margins, same "own knob, not a `PollTier`" cadence
     #: model as ``obd_dtc_poll_interval_seconds`` above. ``<= 0`` disables it.
     obd_monitor_poll_interval_seconds: float = 300.0
+    #: Mode 06 monitor IDs to poll. ``"auto"`` walks the standard supported-MID
+    #: bitmaps once when the collector connects; an explicit tuple skips
+    #: discovery for ECUs with a known fixed set.
+    obd_monitor_mids: Literal["auto"] | tuple[int, ...] = "auto"
     storage_path: Path
     session_retention_days: int
     storage_warning_mb: int

@@ -95,13 +95,18 @@ class MonitorState:
             return
         if session_id != self._session_id:
             self._last_counts = {}
+            self._results = []
+            self._misfire_counts = {}
             self._session_id = session_id
         try:
             payload = bytes.fromhex(str(record.value)) if record.value else b""
         except ValueError:
             log.warning("unparseable MONITOR_RESULTS payload; skipping")
             return
-        self._results = parse_mode06_response(payload)
+        incoming = parse_mode06_response(payload)
+        merged = {(result.monitor_id, result.test_id): result for result in self._results}
+        merged.update({(result.monitor_id, result.test_id): result for result in incoming})
+        self._results = [merged[key] for key in sorted(merged)]
         self._misfire_counts = misfire_counts_from_results(self._results)
         self._captured_at = datetime.now(UTC).isoformat()
         self._diff_and_emit(session_id=session_id, emitter=emitter)

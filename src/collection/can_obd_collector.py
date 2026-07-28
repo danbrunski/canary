@@ -733,14 +733,20 @@ def _response_to_reading(
         # above); `src.control.monitor_state.MonitorState` parses it back
         # with `parse_mode06_response`. Always emit, even empty, so "polled,
         # nothing reported" is distinguishable from "not polled yet".
-        readings = [ObdReading(timestamp, request.channel, response.payload.hex(), "")]
+        # The ISO-TP matcher strips the echoed MID. Reattach it so the shared
+        # Mode 06 parser receives its documented 9-byte
+        # ``MID TID UAS value min max`` record.
+        payload = response.payload
+        if response.pid is not None:
+            payload = bytes([response.pid]) + payload
+        readings = [ObdReading(timestamp, request.channel, payload.hex(), "")]
         if request.service == _MODE06_SERVICE:
             # Task 3.2: also land per-cylinder misfire counts as ordinary
             # numeric channels (mirrors the MIL_STATUS derived-reading
             # pattern below) so they flow through storage into the wide
             # telemetry frame the session fingerprint scans — the hex sweep
             # reading above can't be aggregated numerically.
-            counts = misfire_counts_from_results(parse_mode06_response(response.payload))
+            counts = misfire_counts_from_results(parse_mode06_response(payload))
             for cylinder, count in sorted(counts.items()):
                 readings.append(
                     ObdReading(timestamp, misfire_count_channel(cylinder), float(count), "count")
@@ -1027,12 +1033,13 @@ def _query_with_tap(
     stats: CanObdLoopStats,
     deadline_monotonic: float | None,
 ) -> QueryResult:
-    # Mode 03/07/0A (Task 1.3) and Mode 06 (Task 3.1) take no parameter byte
-    # at all — same shape as `CanObdClient.query_mode_03`'s
-    # `pid=None`/`expect_pid_echo=False`, so `_PollRequest.identifier` (a
-    # placeholder ``0``, the field isn't optional) must not leak into either
-    # the request bytes or the response's pid-echo match.
-    identifier = None if request.kind in ("dtc", "service") else request.identifier
+    # Mode 03/07/0A (Task 1.3) take no parameter byte, so their placeholder
+    # identifier must not leak onto the wire. Mode 06 is different: it
+    # requires a monitor ID (MID), including MID 0x00 for the supported-MID
+    # query. Dropping ``service`` identifiers here turned ``06 00`` into a
+    # bare ``06`` that this ECM silently ignores, and the assembler then also
+    # waited for the wrong response shape.
+    identifier = None if request.kind == "dtc" else request.identifier
     message = can.Message(
         arbitration_id=request.request_id,
         data=build_request_payload(request.service, identifier),

@@ -70,6 +70,7 @@ def default_collectors(
             did_session=resolve_did_session_spec(config.collection),
             dtc_poll_interval_seconds=config.collection.obd_dtc_poll_interval_seconds,
             service_poll_interval_seconds=config.collection.obd_monitor_poll_interval_seconds,
+            service_mids=config.collection.obd_monitor_mids,
             freeze_frame_trigger=freeze_frame_trigger,
             custom_pids=tuple(custom_pids),
             priority_channels=config.collection.obd_priority_channels,

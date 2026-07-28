@@ -294,6 +294,56 @@ def test_query_with_tap_true_timeout_has_no_negative_response_code() -> None:
     assert result.negative_response_code is None
 
 
+def test_query_with_tap_mode06_keeps_monitor_id_on_wire() -> None:
+    """Mode 06 requires a MID; MID 00 must serialize as ``02 06 00``."""
+    bus = _SilentBus()
+    request = _PollRequest(
+        kind="service",
+        service=0x06,
+        identifier=0x00,
+        request_id=DEFAULT_REQUEST_ID,
+        channel="MONITOR_RESULTS",
+        poll_tier="dtc",
+    )
+
+    _query_with_tap(
+        bus,  # type: ignore[arg-type]
+        request,
+        timeout_seconds=0.01,
+        on_frame=lambda _msg: None,
+        stop_event=threading.Event(),
+        stats=CanObdLoopStats(),
+        deadline_monotonic=time.monotonic() + 0.1,
+    )
+
+    assert bytes(bus.sent[0].data) == bytes([0x02, 0x06, 0x00, 0, 0, 0, 0, 0])
+
+
+def test_query_with_tap_dtc_services_remain_identifierless() -> None:
+    """Mode 03/07/0A are still one-byte service requests, unlike Mode 06."""
+    bus = _SilentBus()
+    request = _PollRequest(
+        kind="dtc",
+        service=0x03,
+        identifier=0x00,
+        request_id=DEFAULT_REQUEST_ID,
+        channel="DTC_STORED",
+        poll_tier="dtc",
+    )
+
+    _query_with_tap(
+        bus,  # type: ignore[arg-type]
+        request,
+        timeout_seconds=0.01,
+        on_frame=lambda _msg: None,
+        stop_event=threading.Event(),
+        stats=CanObdLoopStats(),
+        deadline_monotonic=time.monotonic() + 0.1,
+    )
+
+    assert bytes(bus.sent[0].data) == bytes([0x01, 0x03, 0, 0, 0, 0, 0, 0])
+
+
 def test_parse_pid_token_accepts_auto_names_and_hex() -> None:
     assert parse_pid_token("auto") is None
     assert parse_pid_token("RPM") == 0x0C
@@ -595,6 +645,26 @@ def test_build_poll_requests_adds_service_kind_for_mode06() -> None:
     assert service_requests[0].poll_tier == "dtc"
 
 
+def test_build_poll_requests_uses_discovered_mode06_mids() -> None:
+    class _Mode06Discovery(_StaticDiscovery):
+        def query_supported_mode_06_mids(self) -> tuple[int, ...]:
+            return (0x01, 0xA2, 0xA3)
+
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=(),
+        service_poll_interval_seconds=300.0,
+        service_mids="auto",
+    )
+
+    service_requests = [
+        request
+        for request in build_poll_requests(_Mode06Discovery(), spec)
+        if request.kind == "service"
+    ]
+    assert [request.identifier for request in service_requests] == [0x01, 0xA2, 0xA3]
+
+
 def test_build_poll_requests_service_poll_disabled_when_interval_non_positive() -> None:
     spec = CanObdSpec(
         can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
@@ -613,13 +683,14 @@ def test_response_to_reading_service_kind_emits_hex_payload_and_misfire_counts()
     request = _PollRequest(
         kind="service",
         service=0x06,
-        identifier=0,
+        identifier=0xA2,
         request_id=DEFAULT_REQUEST_ID,
         channel="MONITOR_RESULTS",
         poll_tier="dtc",
     )
-    payload = bytes([0x0B, 0x01, 0x10, 0x00, 0x03, 0x00, 0x00, 0x00, 0xFF])
-    response = ObdResponse(service=0x06, pid=None, payload=payload, responder_id=0x7E8)
+    response_payload = bytes([0x0C, 0x24, 0x00, 0x03, 0x00, 0x00, 0x00, 0xFF])
+    payload = bytes([0xA2]) + response_payload
+    response = ObdResponse(service=0x46, pid=0xA2, payload=response_payload, responder_id=0x7E8)
     readings = _response_to_reading(request, response)
     assert len(readings) == 2
     by_channel = {r.pid: r for r in readings}

@@ -154,6 +154,8 @@ def did_access() -> DidAccess | None:
 class _PidDiscoveryClient(Protocol):
     def query_supported_mode_01_pids(self) -> tuple[int, ...]: ...
 
+    def query_supported_mode_06_mids(self) -> tuple[int, ...]: ...
+
 
 @dataclass(frozen=True)
 class DidSessionSpec:
@@ -234,6 +236,10 @@ class CanObdSpec:
     #: cadence model as ``dtc_poll_interval_seconds`` above (own knob, not
     #: `poll_rate_hz`/tier scaled). ``<= 0`` disables the Mode 06 poll.
     service_poll_interval_seconds: float = DEFAULT_SERVICE_POLL_INTERVAL_SECONDS
+    #: ``"auto"`` discovers supported Mode 06 MIDs at connect time. The
+    #: low-level default keeps the historical MID-00 request and avoids adding
+    #: discovery traffic to callers that construct a spec directly.
+    service_mids: Literal["auto"] | tuple[int, ...] = (0x00,)
     #: Shared flag a ``DtcState`` sets when a stored DTC first appears (Task
     #: 3.3); ``None`` (the default) disables the Mode 02 freeze-frame read
     #: entirely — no ``freeze_frame`` requests are built at all.
@@ -667,17 +673,23 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
         # on the same "occasional service poll" cadence model as the DTC poll
         # above — no vehicle_state gating, the round-robin scheduler already
         # backs off an ECU that stops answering.
+        if spec.service_mids == "auto":
+            discover_mode06 = getattr(client, "query_supported_mode_06_mids", None)
+            mode06_mids = tuple(discover_mode06()) if discover_mode06 is not None else (0x00,)
+        else:
+            mode06_mids = spec.service_mids
         for service, channel in SERVICE_POLL_CHANNELS.items():
-            requests.append(
-                _PollRequest(
-                    kind="service",
-                    service=service,
-                    identifier=0,
-                    request_id=DEFAULT_REQUEST_ID,
-                    channel=channel,
-                    poll_tier="dtc",
+            for mid in mode06_mids:
+                requests.append(
+                    _PollRequest(
+                        kind="service",
+                        service=service,
+                        identifier=mid,
+                        request_id=DEFAULT_REQUEST_ID,
+                        channel=channel,
+                        poll_tier="dtc",
+                    )
                 )
-            )
     if spec.freeze_frame_trigger is not None:
         # Task 3.3: dormant ("on_demand" -> rate 0) until FreezeFrameTrigger
         # fires; run_can_obd_loop un-suppresses these for one shot each time.
