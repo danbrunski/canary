@@ -210,7 +210,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     config = CanaryConfig.from_yaml(args.config)
     out_root = config.collection.storage_path / "_uprev"
     out_root.mkdir(parents=True, exist_ok=True)
-    writer = ParquetTelemetryWriter(out_root, session_started_at=started_at)
+    session_dir = out_root / started_at.strftime("%Y-%m-%dT%H%M%S")
+    try:
+        writer = ParquetTelemetryWriter(out_root, session_started_at=started_at)
+    except FileExistsError:
+        print(
+            f"error: a session already exists at {session_dir} — an import at this exact "
+            "--started-at (to the second) was already run. Pass a different --started-at "
+            "(even by a second) to re-import, or leave the existing one.",
+            file=sys.stderr,
+        )
+        return 1
     writer.write_many(records)
     writer.close()
 

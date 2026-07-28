@@ -206,6 +206,26 @@ def test_main_rejects_a_missing_csv(tmp_path: Path) -> None:
     assert rc == 1
 
 
+def test_main_rejects_a_started_at_collision_cleanly(tmp_path: Path) -> None:
+    """Re-running with the same --started-at (to the second) must not crash
+    with a raw FileExistsError traceback — surfaced against real UpRev logs,
+    where re-importing after fixing a typo'd --label is a plausible retry."""
+    cfg_path, _storage = _write_config(tmp_path)
+    csv = tmp_path / "log.csv"
+    csv.write_text("Time,ENGINE RPM (rpm)\n0,800\n")
+    argv = [
+        "--csv",
+        str(csv),
+        "--started-at",
+        "2026-07-26T17:41:32-07:00",
+        "--config",
+        str(cfg_path),
+    ]
+
+    assert importer.main(argv) == 0
+    assert importer.main(argv) == 1
+
+
 def test_main_writes_a_quarantined_session_with_manifest(tmp_path: Path) -> None:
     cfg_path, storage = _write_config(tmp_path)
     csv = tmp_path / "UpRev_Log7-26-2026_5-41-32_PM.csv"
