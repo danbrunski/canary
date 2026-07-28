@@ -21,6 +21,7 @@ from src.alerts.tuning import (
 )
 from src.analysis.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore
 from src.collection import tuning_profile, tx_gate
+from src.collection.can_obd_client import DisallowedServiceError
 from src.collection.custom_pids import (
     CustomPid,
     CustomPidSet,
@@ -61,6 +62,7 @@ from src.control.classification import (
 )
 from src.control.jobs import JobController
 from src.control.models import publish_model_artifact
+from src.control.obd_request import AdHocRequestBusError, execute_ad_hoc_request
 from src.control.preflight import build_preflight
 from src.control.replay_control import (
     ReplayConflictError,
@@ -90,6 +92,7 @@ from src.dashboard.schemas import (
     FeedbackRequest,
     JobSubmitRequest,
     ModelUploadRequest,
+    ObdRequestRequest,
     PassiveModeRequest,
     ProfileNameUpdateRequest,
     ReplayStartRequest,
@@ -417,6 +420,27 @@ def register_control_routes(
             "expiry": expiry,
         }
         publish_control_event("power.keepalive", "ok", payload)
+        return payload
+
+    @app.post("/control/obd_request")
+    def post_control_obd_request(
+        request: ObdRequestRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            result = execute_ad_hoc_request(
+                config.hardware.can,
+                service=request.service,
+                identifier=request.identifier,
+                request_id=request.header,
+                timeout_seconds=request.timeout_seconds,
+            )
+        except DisallowedServiceError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except AdHocRequestBusError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        payload = {"obd_request": result.to_dict()}
+        publish_control_event("obd_request", "ok" if result.responded else "no_response", payload)
         return payload
 
     @app.get("/control/passive")

@@ -106,6 +106,9 @@ from src.mcp_server.write_tools import (
     models as models_write_tool,
 )
 from src.mcp_server.write_tools import (
+    obd_request as obd_request_write_tool,
+)
+from src.mcp_server.write_tools import (
     passive as passive_write_tool,
 )
 from src.mcp_server.write_tools import (
@@ -804,6 +807,32 @@ def _register_write_tools(
     async def set_ups_keepalive(minutes: float) -> dict[str, Any]:
         """Set (minutes>0) or cancel (minutes=0) the UPS watchdog keep-alive hold."""
         return await power_write_tool.set_ups_keepalive(client, audit, minutes=minutes)
+
+    @mcp.tool()
+    async def obd_request(
+        service: int,
+        identifier: int | None = None,
+        header: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        """One-shot read-only OBD/UDS request (Mode 01/02/03/06/07/09/0A/22).
+
+        Ask for one specific service/identifier immediately instead of
+        waiting for the poll scheduler's cadence (Mode 06/DTC sit on a
+        5-minute tier). `header` overrides the default functional request id
+        (0x7DF) for a physically-addressed request, e.g. 0x7E0 for the engine
+        ECM or another module's tester address. `responded: false` means no
+        answer in time, not necessarily "unsupported" — arm
+        `set_passive_mode` first if another tool owns a diagnostic session.
+        """
+        return await obd_request_write_tool.obd_request(
+            client,
+            audit,
+            service=service,
+            identifier=identifier,
+            header=header,
+            timeout_seconds=timeout_seconds,
+        )
 
     @mcp.tool()
     async def set_passive_mode(enabled: bool) -> dict[str, Any]:

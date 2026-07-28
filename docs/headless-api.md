@@ -170,6 +170,7 @@ Control endpoints:
 | `GET /control/profiles` / `POST /control/profiles/{slug}/name` | list vehicle profiles / set a profile display name |
 | `GET /control/power` / `POST /control/power/keepalive` | UPS watchdog status / set or cancel the keep-alive hold |
 | `GET /control/passive` / `POST /control/passive` | inspect / arm the CAN transmit gate (receive-only mode) — see [Passive mode](#passive-mode) |
+| `POST /control/obd_request` | one-shot read-only OBD/UDS request — `{service, identifier?, header?, timeout_seconds?}`, whitelisted to Mode 01/02/03/06/07/09/0A/22 |
 | `GET /control/tuning-mode` / `POST /control/tuning-mode` | inspect / arm the focused high-rate tuning poll profile (narrows Mode 01 to a tuning channel set, suspends DID windows) |
 | `GET /control/feedback` / `POST /control/feedback` | read / record anomaly-feedback verdicts |
 | `GET /control/training-runs` | training-run ledger |
@@ -286,6 +287,54 @@ Two interactions worth knowing:
   `CommunicationControl`/`ControlDTCSetting` to quiet normal bus traffic during
   erase/write. Without the suspension, recording would disarm during exactly
   the window passive mode was armed to capture.
+
+## Ad-hoc OBD/UDS requests
+
+`POST /control/obd_request` sends one read-only diagnostic request and
+returns whatever comes back, instead of waiting for the poll scheduler's
+cadence — useful for probing a specific Mode 06 MID or Mode 22 DID, or
+reading a Mode 09 InfoType (VIN, calibration ID, CVN), without arming a
+capture or writing a one-off script. Whitelisted to Mode
+01/02/03/06/07/09/0A/22 (`CanObdClient.query`'s allowlist, enforced
+independent of this route).
+
+```bash
+# calibration ID (Mode 09, InfoType 0x04)
+curl -sX POST http://canary.local:8000/control/obd_request \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"service": 9, "identifier": 4}'
+
+# a specific Mode 22 DID, addressed to the engine ECM (0x7E0)
+curl -sX POST http://canary.local:8000/control/obd_request \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"service": 34, "identifier": 4353, "header": 2016}'
+```
+
+Response shape:
+
+```json
+{
+  "obd_request": {
+    "service": "0x09", "identifier": "0x0004", "request_id": "0x7DF",
+    "responded": true, "responder_id": "0x7E8",
+    "raw_hex": "...", "decoded": {"ascii": "..."}
+  }
+}
+```
+
+`responded: false` means no answer arrived within `timeout_seconds`
+(default 2 s, capped at 10 s) — indistinguishable on the wire from "this ECU
+doesn't support it," so treat it as "no answer," not an error. `decoded` is
+populated when a Mode 01/02 PID, Mode 03/07/0A DTC list, Mode 09 ASCII
+payload, or catalogued (`data/dids.yaml`) Mode 22 DID matches; otherwise only
+`raw_hex` is set. MCP equivalent: `obd_request(service, identifier, header,
+timeout_seconds)`.
+
+This transmits like any other OBD request, so the same [passive
+mode](#passive-mode) caveat applies: arm it first if another tool currently
+owns a diagnostic session with the target module.
 
 ### Hardware-level listen-only
 

@@ -128,6 +128,22 @@ class UpsKeepaliveRequest(_ControlRequest):
     minutes: float = Field(..., ge=0.0, le=720.0)
 
 
+class ObdRequestRequest(_ControlRequest):
+    """One-shot read-only OBD/UDS request (the ``obd_request`` tool).
+
+    Whitelisted to the read-only diagnostic services CANary already sends on
+    every drive — Mode 01/02/03/06/07/09/0A/22 — re-enforced in
+    ``CanObdClient.query()`` itself, not just here. ``header`` overrides the
+    default functional request id (``0x7DF``) for a physically-addressed
+    request (e.g. ``0x7E0`` for the engine ECM, or another module's tester
+    address)."""
+
+    service: int = Field(..., ge=0, le=0xFF)
+    identifier: int | None = Field(default=None, ge=0, le=0xFFFF)
+    header: int | None = Field(default=None, ge=0, le=0x7FF)
+    timeout_seconds: float | None = Field(default=None, gt=0.0, le=10.0)
+
+
 class PassiveModeRequest(_ControlRequest):
     """Arm/disarm the CAN transmit gate (passive, receive-only mode).
 

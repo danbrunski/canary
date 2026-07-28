@@ -70,6 +70,21 @@ from src.collection.isotp import (
 
 log = logging.getLogger(__name__)
 
+#: Services `CanObdClient.query` will build a request for. The read-only
+#: diagnostic surface (NFR-06): standard Mode 01/02 PID reads, Mode 03/07/0A
+#: DTC lists, Mode 06 on-board monitor results, Mode 09 vehicle info, and
+#: Mode 22 ReadDataByIdentifier — exactly the services CANary already sends
+#: on every drive via the fixed `query_mode_*` methods above. Enforced here
+#: (not just by callers) because `query()` accepts a caller-supplied service
+#: byte instead of dispatching through one of those fixed methods, so the
+#: "no Mode 04/0x2E/0x2F path exists" guarantee this module's docstring
+#: makes would otherwise only hold for the methods someone remembered to use.
+ALLOWED_QUERY_SERVICES: frozenset[int] = frozenset({0x01, 0x02, 0x03, 0x06, 0x07, 0x09, 0x0A, 0x22})
+
+
+class DisallowedServiceError(ValueError):
+    """Raised by `CanObdClient.query` for a service outside `ALLOWED_QUERY_SERVICES`."""
+
 
 @dataclass(frozen=True)
 class BatchedMode01Response:
@@ -216,6 +231,39 @@ class CanObdClient:
             request_id=request_id,
         )
 
+    def query(
+        self,
+        *,
+        service: int,
+        identifier: int | None = None,
+        request_id: int | None = None,
+    ) -> ObdResponse | None:
+        """Generic read-only request for exploratory / ad-hoc use.
+
+        One escape hatch instead of a fixed ``query_mode_*`` method per
+        service, for probing a service/identifier combination nobody has
+        wired a dedicated method for yet (an unlisted Mode 06 MID, an unbound
+        Mode 22 DID, ...). Backs the ``obd_request`` control route.
+
+        Restricted to :data:`ALLOWED_QUERY_SERVICES` — unlike the fixed
+        ``query_mode_*`` methods above, ``service`` here is caller-supplied,
+        so the read-only guarantee has to be enforced at the door rather than
+        by which method happens to exist. ``identifier=None`` matches the
+        no-PID services (Mode 03/07/0A); anything else is passed through as
+        the request's PID/DID/MID byte(s).
+        """
+        if service not in ALLOWED_QUERY_SERVICES:
+            allowed = ", ".join(f"0x{s:02X}" for s in sorted(ALLOWED_QUERY_SERVICES))
+            raise DisallowedServiceError(
+                f"service 0x{service:02X} is not read-only allowlisted; allowed: {allowed}"
+            )
+        return self._request(
+            service=service,
+            pid=identifier,
+            expect_pid_echo=identifier is not None,
+            request_id=request_id,
+        )
+
     def enter_diagnostic_session(self, subfunction: int, *, request_id: int | None = None) -> bool:
         """UDS Service 0x10 DiagnosticSessionControl — enter a session.
 
@@ -273,6 +321,33 @@ class CanObdClient:
                 break
         # The probe PIDs themselves (0x00 / 0x20 / …) aren't telemetry; drop them.
         for base in (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0):
+            supported.discard(base)
+        return tuple(sorted(supported))
+
+    def query_supported_mode_06_mids(self) -> tuple[int, ...]:
+        """Enumerate Mode 06 monitor IDs using the J1979 support bitmaps.
+
+        Mode 06 requires a MID byte even for discovery. Walk each 0x20-wide
+        support group and merge all responders, mirroring Mode 01 discovery.
+        """
+        groups = (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0, 0xE0)
+        supported: set[int] = set()
+        for base in groups:
+            responses = self._request_many(service=0x06, pid=base, expect_pid_echo=True)
+            bitmasks = [
+                int.from_bytes(response.payload[:4], byteorder="big")
+                for response in responses
+                if len(response.payload) >= 4
+            ]
+            if not bitmasks:
+                break
+            for bits in bitmasks:
+                for index in range(32):
+                    if bits & (1 << (31 - index)):
+                        supported.add(base + 1 + index)
+            if not any(bits & 0x01 for bits in bitmasks):
+                break
+        for base in groups:
             supported.discard(base)
         return tuple(sorted(supported))
 
@@ -816,12 +891,14 @@ def read_pids(client: CanObdClient, pids: Iterable[int]) -> list[DecodedPid]:
 
 
 __all__ = [
+    "ALLOWED_QUERY_SERVICES",
     "DEFAULT_REQUEST_ID",
     "DEFAULT_RESPONSE_ID_MAX",
     "DEFAULT_RESPONSE_ID_MIN",
     "PID_DECODERS",
     "CanObdClient",
     "DecodedPid",
+    "DisallowedServiceError",
     "ObdResponse",
     "decode_absolute_load",
     "decode_baro",

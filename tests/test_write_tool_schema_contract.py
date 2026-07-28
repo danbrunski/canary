@@ -29,6 +29,7 @@ from src.mcp_server.client import DaemonClient
 from src.mcp_server.write_tools import (
     captures,
     feedback,
+    obd_request,
     passive,
     power,
     replay,
@@ -125,6 +126,13 @@ CASES: list[tuple[str, Any, type]] = [
         "set_passive_mode",
         lambda c, a: passive.set_passive_mode(c, a, enabled=True),
         schemas.PassiveModeRequest,
+    ),
+    (
+        "obd_request",
+        lambda c, a: obd_request.obd_request(
+            c, a, service=0x22, identifier=0x1101, header=0x7E0, timeout_seconds=3.0
+        ),
+        schemas.ObdRequestRequest,
     ),
     (
         "set_tuning_mode",

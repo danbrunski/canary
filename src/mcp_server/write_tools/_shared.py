@@ -23,17 +23,21 @@ async def audited_post(
     path: str,
     body: dict[str, Any] | None = None,
     audit_payload: dict[str, Any] | None = None,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
     """POST ``body`` to ``path``, audit-logging under ``tool``, and return the response.
 
     ``audit_payload`` overrides what's recorded (default: ``body``) — for
     call sites where the audit trail should differ from the request body
     (e.g. ``upload_model_artifact`` logs path/size instead of the base64
-    blob it actually posts).
+    blob it actually posts). ``timeout`` overrides the client's default HTTP
+    timeout — for a call site whose daemon-side work can legitimately take
+    longer than that (e.g. ``obd_request`` waiting out a caller-chosen
+    request timeout).
     """
     payload = audit_payload if audit_payload is not None else (body or {})
     try:
-        result = await client.post_json(path, body or {})
+        result = await client.post_json(path, body or {}, timeout=timeout)
     except DaemonError as exc:
         audit.record(tool=tool, result="error", payload={**payload, "error": str(exc)})
         raise

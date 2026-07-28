@@ -9,10 +9,12 @@ import can
 import pytest
 
 from src.collection.can_obd_client import (
+    ALLOWED_QUERY_SERVICES,
     DEFAULT_REQUEST_ID,
     DEFAULT_RESPONSE_ID_MIN,
     PID_DECODERS,
     CanObdClient,
+    DisallowedServiceError,
     decode_absolute_load,
     decode_baro,
     decode_catalyst_temp,
@@ -336,7 +338,7 @@ def _fake_ecu_loop(
         if not body:
             continue
         service = body[0]
-        pid = body[1] if len(body) > 1 and service in (0x01, 0x09) else None
+        pid = body[1] if len(body) > 1 and service in (0x01, 0x06, 0x09) else None
         key = (service, pid)
         canned = responses.get(key)
         if canned is None:
@@ -552,6 +554,29 @@ def test_discover_supported_pids_continues_past_continuation_bit() -> None:
     assert pids == (0x0C, 0x21)
 
 
+def test_discover_supported_mode06_mids_walks_bitmasks() -> None:
+    tester, ecu = _make_pair()
+    stop = threading.Event()
+    # MID 00 reports 01 plus continuation to 20; MID 20 reports 21 and stops.
+    responses = {
+        (0x06, 0x00): ((1 << 31) | 0x01).to_bytes(4, "big"),
+        (0x06, 0x20): (1 << 31).to_bytes(4, "big"),
+    }
+    thread = threading.Thread(
+        target=_fake_ecu_loop, args=(ecu, responses), kwargs={"stop": stop}, daemon=True
+    )
+    thread.start()
+    try:
+        client = CanObdClient(tester, timeout_seconds=1.0)
+        mids = client.query_supported_mode_06_mids()
+    finally:
+        stop.set()
+        thread.join(timeout=1.0)
+        tester.shutdown()
+        ecu.shutdown()
+    assert mids == (0x01, 0x21)
+
+
 def test_discover_supported_pids_merges_multiple_responders() -> None:
     """Functional supported-PID probes must not trust only the first ECU."""
 
@@ -650,6 +675,42 @@ def test_query_mode_03_single_frame() -> None:
         ecu.shutdown()
     assert resp is not None
     assert parse_dtc_payload(resp.payload) == ["P0420", "C0510"]
+
+
+def test_query_rejects_disallowed_service() -> None:
+    """`query()` refuses a service outside the read-only allowlist before
+    sending anything — no ECU stub needed since no frame should go out."""
+    tester, ecu = _make_pair()
+    try:
+        client = CanObdClient(tester, timeout_seconds=0.2)
+        assert 0x04 not in ALLOWED_QUERY_SERVICES  # CLEAR_DTC — write, must stay excluded
+        with pytest.raises(DisallowedServiceError):
+            client.query(service=0x04, identifier=None)
+    finally:
+        tester.shutdown()
+        ecu.shutdown()
+
+
+def test_query_generic_matches_dedicated_mode_03_method() -> None:
+    """The generic escape hatch round-trips a DTC-shaped (no-identifier)
+    service identically to the dedicated `query_mode_03` method."""
+    tester, ecu = _make_pair()
+    stop = threading.Event()
+    responses = {(0x03, None): bytes([0x01, 0x04, 0x20])}
+    t = threading.Thread(
+        target=_fake_ecu_loop, args=(ecu, responses), kwargs={"stop": stop}, daemon=True
+    )
+    t.start()
+    try:
+        client = CanObdClient(tester, timeout_seconds=1.0)
+        resp = client.query(service=0x03, identifier=None)
+    finally:
+        stop.set()
+        t.join(timeout=1.0)
+        tester.shutdown()
+        ecu.shutdown()
+    assert resp is not None
+    assert parse_dtc_payload(resp.payload) == ["P0420"]
 
 
 def test_query_mode_07_single_frame() -> None:
