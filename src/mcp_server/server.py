@@ -43,6 +43,9 @@ from src.mcp_server.tools import (
     classification as classification_tool,
 )
 from src.mcp_server.tools import (
+    did_sweep as did_sweep_tool,
+)
+from src.mcp_server.tools import (
     digest as digest_tool,
 )
 from src.mcp_server.tools import (
@@ -463,6 +466,21 @@ def _register_read_tools(
         return await jobs_tool.get_job_logs(client, job_id=job_id)
 
     @mcp.tool()
+    async def diff_did_snapshots(job_a: str, job_b: str) -> dict[str, Any]:
+        """Diff two completed `did_sweep` job results.
+
+        Run `start_job(kind="did_sweep", params={"start":..., "end":...,
+        "label":...})` twice — once per condition to compare (e.g. idle vs
+        loaded) — wait for both to succeed (`get_job`/`get_job_logs`), then
+        pass their job_ids here. `varying` DIDs (value differs between the
+        two runs) are the candidates worth investigating; `constant`
+        answered identically both times; `intermittent` answered in only
+        one run. Each entry carries the raw hex from each snapshot — no
+        scale/offset decode, most DIDs don't have one yet.
+        """
+        return await did_sweep_tool.diff_did_snapshots(client, job_a=job_a, job_b=job_b)
+
+    @mcp.tool()
     async def get_tuning() -> dict[str, Any]:
         """Currently active alert-tuning config (thresholds, dedupe, etc.)."""
         return await tuning_tool.get_tuning(client)
@@ -773,7 +791,15 @@ def _register_write_tools(
 
     @mcp.tool()
     async def start_job(kind: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Submit a job (corpus_report, retrain_if, retrain_lstm, ...)."""
+        """Submit a job (corpus_report, retrain_if, retrain_lstm, did_sweep, ...).
+
+        `did_sweep` sweeps a Mode 22 DID range in one pass: params
+        `{start, end, label}` required (`start`/`end` are DIDs, int or hex
+        string; `label` tags the snapshot for `diff_did_snapshots`),
+        optional `header`/`session`/`keepalive`/`delay_seconds`/
+        `read_timeout` — see `diff_did_snapshots`'s docstring for the
+        before/after workflow this feeds.
+        """
         return await jobs_write_tool.start_job(client, audit, kind=kind, params=params)
 
     @mcp.tool()

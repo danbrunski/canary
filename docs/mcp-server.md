@@ -42,6 +42,7 @@ Read tools:
 | `get_training_runs` | `GET /control/training-runs` |
 | `list_vehicle_events` | `GET /control/vehicle-ledger` — vehicle maintenance/intervention ledger (maintenance/mod/repair/observation/DTC), oldest-first, latest per id |
 | `list_jobs` / `get_job` / `get_job_logs` | `GET /control/jobs[...]` |
+| `diff_did_snapshots` | Compare two completed `did_sweep` job results (see `start_job`'s `did_sweep` kind) — reads each `<job_id>.did_sweep.json` snapshot directly off disk (no HTTP round trip for the diff itself) and classifies every DID that answered in either run: `varying` (differs between runs — the candidates worth investigating), `constant` (same both times), `intermittent` (answered in only one run). Each entry carries the raw hex from each snapshot; most DIDs have no `data/dids.yaml` scale/offset pinned yet |
 | `get_tuning` / `get_feedback` | `GET /control/{tuning,feedback}` |
 | `tail_daemon_log` | `journalctl --unit canary -o json` (fallback file when no systemd) |
 | `get_service_health` | `systemctl show {canary,canary-mcp,ups-shutdown}` — is-active/sub-state/restart-count/uptime, no SSH needed. `restart_count` climbing across polls is the crash-loop tell (this is what would have caught the 2026-07-18 UPS watchdog crash-loop instantly). |
@@ -60,7 +61,7 @@ Write tools (audit-logged with `actor="mcp"` via
 | `record_vehicle_event` | `POST /control/vehicle-ledger` — append a maintenance/mod/repair/observation entry (auto-appended for a new stored DTC too, see `src/control/dtc_state.py`); `corpus_boundary=True` flags an event that changes what "normal" looks like, for `--since-boundary` on `scripts/retrain.py` / `scripts/refit_behavior_models.py` |
 | `set_session_metadata` / `pin_session` / `unpin_session` | `POST /control/sessions/{id}[...]` |
 | `classify_session` | `POST /control/sessions/{id}/classification` — (re)run the session classifier and persist the sidecar |
-| `start_job` / `cancel_job` | `POST /control/jobs[...]` |
+| `start_job` / `cancel_job` | `POST /control/jobs[...]`. `start_job(kind="did_sweep", params={"start":..., "end":..., "label":...})` runs one unattended Mode 22 DID sweep pass (Canable-only), tagged `label` — run it twice (once per condition) and diff with `diff_did_snapshots` |
 | `set_tuning` / `estimate_tuning` / `revert_tuning` | `POST /control/tuning[...]` |
 | `set_ups_keepalive` | `POST /control/power/keepalive` — set (minutes>0) or cancel (minutes=0) the UPS watchdog keep-alive hold, for a bench transition longer than the watchdog's grace window |
 | `set_tuning_mode` | `POST /control/tuning-mode` — arm/disarm the focused tuning poll profile. Restricts Mode 01 to a small tuning set and suspends DID windows so each channel gets far more of the bus budget. Channels outside the set stop updating while armed — expected, not a fault |

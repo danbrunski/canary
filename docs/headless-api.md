@@ -190,13 +190,21 @@ Allowed job kinds:
 | `refit_behavior_models` | `scripts/refit_behavior_models.py` |
 | `corpus_report` | `tools/corpus_report.py --out data/analyses/...` |
 | `export_dataset` | `scripts/export_dataset.py` — the Export panel's backend (Task 5.6b) |
+| `did_sweep` | `tools/did_sweep.py` — one Mode 22 DID sweep pass, tagged with a label; writes `<job_id>.did_sweep.json` |
 
 Job parameters are structured JSON, not shell text. Common parameters include
 `days`, `all`, and `session_ids`. LSTM jobs also accept `device`; behavior
 refits accept `recipes` and `dry_run`; `export_dataset` requires
 `session_ids` (at least one) and also accepts `channels`, `resample_hz`,
 `include_tags`, `exclude_tags`, `formats` (default `["csv"]`), `purpose`,
-`zip` (default `true`), `out_dir`, and `name`.
+`zip` (default `true`), `out_dir`, and `name`. `did_sweep` requires `start`/
+`end` (Mode 22 DIDs, int or hex string) and `label`; optionally `header`
+(default `7E0`), `session` (`"auto"` resolves from `data/dids.yaml`,
+`"none"` forces bare polling, or an explicit hex sub-function), `keepalive`,
+`delay_seconds`, and `read_timeout`. `GET /control/jobs/{id}/result` reads
+the snapshot back once the job succeeds (same convention `replay_window`
+uses) — see [DID sweep + diff](#did-sweep--diff) below for the two-sweep
+comparison workflow.
 
 Job state is append-only in `daemon.jobs_dir/jobs.jsonl`, so recent job history
 survives daemon restarts. Control mutations are appended to
@@ -303,6 +311,22 @@ Two interactions worth knowing:
   erase/write. Without the suspension, recording would disarm during exactly
   the window passive mode was armed to capture.
 
+### Hardware-level listen-only
+
+For a guarantee no software path can defeat, put the controller itself in
+listen-only mode on the Pi — it then cannot drive the bus at all, not even ACK
+bits:
+
+```bash
+sudo ip link set can0 down
+sudo ip link set can0 type can bitrate 500000 listen-only on
+sudo ip link set can0 up
+```
+
+Reverse with `listen-only off`. This needs an interface cycle, so it is a
+deliberate pre-procedure step rather than a runtime toggle; use it *in
+addition to* passive mode when the stakes justify it (an ECU reflash does).
+
 ## Raw CAN activity capture
 
 `POST /control/can_activity` listens for N seconds (capped at 30) and
@@ -386,18 +410,49 @@ This transmits like any other OBD request, so the same [passive
 mode](#passive-mode) caveat applies: arm it first if another tool currently
 owns a diagnostic session with the target module.
 
-### Hardware-level listen-only
+## DID sweep + diff
 
-For a guarantee no software path can defeat, put the controller itself in
-listen-only mode on the Pi — it then cannot drive the bus at all, not even ACK
-bits:
+The interactive `tools/scan_constant_dids.py` (multi-pass, pauses between
+passes so you can change engine state by hand) is the right tool at the
+vehicle. The `did_sweep` job is its unattended sibling: one sweep pass over
+a DID range, tagged with a label, submitted like any other background job —
+turning a knock hunt's "sweep at idle, sweep under load, diff" into two
+`POST /control/jobs` calls and a read instead of an SSH session.
 
 ```bash
-sudo ip link set can0 down
-sudo ip link set can0 type can bitrate 500000 listen-only on
-sudo ip link set can0 up
+# sweep once per condition, distinct labels
+curl -sX POST http://canary.local:8000/control/jobs \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"kind": "did_sweep", "params": {"start": "0x1100", "end": "0x12FF", "label": "idle"}}'
+
+curl -sX POST http://canary.local:8000/control/jobs \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"kind": "did_sweep", "params": {"start": "0x1100", "end": "0x12FF", "label": "wot"}}'
+
+# once both report status=succeeded (GET /control/jobs/{id}):
+curl -s "http://canary.local:8000/control/jobs/<idle-job-id>/result" -H "Authorization: Bearer $CANARY_CONTROL_TOKEN"
 ```
 
-Reverse with `listen-only off`. This needs an interface cycle, so it is a
-deliberate pre-procedure step rather than a runtime toggle; use it *in
-addition to* passive mode when the stakes justify it (an ECU reflash does).
+MCP equivalent: `start_job(kind="did_sweep", params={"start":..., "end":...,
+"label":...})` twice, then `diff_did_snapshots(job_a, job_b)` — no separate
+HTTP round trip for the diff itself; the MCP tool reads both result files
+directly (same local-filesystem assumption `replay_window` already makes)
+and classifies every DID that answered in either run:
+
+* **`varying`** — value differs between the two runs; the candidates worth
+  investigating.
+* **`constant`** — answered in both runs, same value both times.
+* **`intermittent`** — answered in one run but not the other (a
+  session/timing flake, or a DID genuinely gated on the condition).
+
+Each entry carries the raw hex from each snapshot it appeared in — most DIDs
+have no `data/dids.yaml` scale/offset pinned yet, so raw bytes are the
+honest thing to hand back rather than a guessed decode.
+
+`did_sweep` is Canable-only (no ELM327 branch — the job runs inside
+`JobController`'s subprocess against the daemon's own CAN interface) and
+read-only: only Mode 22 reads and, when `session` resolves to something,
+Mode 0x10 session control (no memory write, no actuation) are ever sent.
+`session="auto"` (the default) resolves the gating sub-function from
+`data/dids.yaml`'s access block, matching what the live scheduler's DID
+windows already use for this vehicle.

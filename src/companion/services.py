@@ -577,32 +577,42 @@ def get_job_response(jobs: JobController, job_id: str) -> dict[str, Any]:
     return {"job": job.to_dict()}
 
 
+#: Job kinds that write a structured result JSON, and the suffix it lands
+#: under (``<jobs_dir>/<job_id>.<suffix>.json``) — see
+#: ``JobController._replay_window_command``/``_did_sweep_command``.
+_RESULT_SUFFIX_BY_KIND: dict[str, str] = {
+    "replay_window": "replay",
+    "did_sweep": "did_sweep",
+}
+
+
 def job_result_response(jobs: JobController, job_id: str) -> dict[str, Any]:
     """`GET /control/jobs/{id}/result` (dashboard-ux.md Task 4.1).
 
-    Only `replay_window` jobs write a structured report; that's the same
-    `<jobs_dir>/<job_id>.replay.json` path the MCP `replay_window` tool
-    resolves (`src/mcp_server/tools/replay.py`), so the dashboard's
-    "re-score this window" button can render the identical report an
-    agent would get. `result` is `null` while the job is still
-    queued/running rather than a 404 — the caller (job's own status) is
-    the honest "not ready yet" signal, not a hard error.
+    Only some job kinds write a structured report (`_RESULT_SUFFIX_BY_KIND`)
+    — that's the same `<jobs_dir>/<job_id>.<suffix>.json` path each kind's
+    MCP tool resolves on its own (`src/mcp_server/tools/replay.py`,
+    `src/mcp_server/tools/did_sweep.py`), so the dashboard can render the
+    identical result an agent would get. `result` is `null` while the job
+    is still queued/running rather than a 404 — the caller (job's own
+    status) is the honest "not ready yet" signal, not a hard error.
     """
     job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
-    if job.kind != "replay_window":
+    suffix = _RESULT_SUFFIX_BY_KIND.get(job.kind)
+    if suffix is None:
         raise HTTPException(
             status_code=404,
             detail=f"job {job_id} has no result (kind={job.kind!r} does not produce one)",
         )
-    result_path = job.log_path.parent / f"{job.job_id}.replay.json"
+    result_path = job.log_path.parent / f"{job.job_id}.{suffix}.json"
     if not result_path.exists():
         return {"job": job.to_dict(), "result": None}
     try:
         result = json.loads(result_path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=500, detail=f"unreadable replay result: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"unreadable job result: {exc}") from exc
     return {"job": job.to_dict(), "result": result}
 
 

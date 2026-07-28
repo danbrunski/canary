@@ -493,6 +493,62 @@ def test_control_job_result_reads_replay_report(tmp_path: Path) -> None:
     assert missing.status_code == 404
 
 
+def test_control_job_result_reads_did_sweep_snapshot(tmp_path: Path) -> None:
+    """`GET /control/jobs/{id}/result` also reads a `did_sweep` job's
+    `<job_id>.did_sweep.json` snapshot — the same generalization that let
+    `replay_window` results through (Task 4.1) covers this second kind."""
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(tmp_path / "storage"))
+    config = CanaryConfig.from_yaml(cfg_path)
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+
+    def _command_builder(_kind: str, _params: dict[str, Any]) -> list[str]:
+        return [sys.executable, "-c", "print('job ok')"]
+
+    app = create_app(
+        config,
+        anomalies_dir=tmp_path / "anomalies",
+        job_controller=JobController(
+            config=config,
+            repo_root=tmp_path,
+            config_path=cfg_path,
+            jobs_dir=jobs_dir,
+            python=Path(sys.executable),
+            command_builder=_command_builder,
+        ),
+        control_token="secret",
+    )
+    client = TestClient(app)
+
+    created = client.post(
+        "/control/jobs",
+        headers=_auth(),
+        json={
+            "kind": "did_sweep",
+            "params": {"start": "0x1100", "end": "0x1102", "label": "control"},
+        },
+    )
+    assert created.status_code == 201
+    job_id = created.json()["job"]["job_id"]
+
+    for _ in range(40):
+        status = client.get(f"/control/jobs/{job_id}", headers=_auth()).json()["job"]
+        if status["status"] in {"succeeded", "failed"}:
+            break
+        time.sleep(0.05)
+    assert status["status"] == "succeeded"
+
+    snapshot_path = jobs_dir / f"{job_id}.did_sweep.json"
+    snapshot_path.write_text(
+        json.dumps({"label": "control", "captured_at": 1.0, "values": {"0x1100": "0a0b"}})
+    )
+
+    result = client.get(f"/control/jobs/{job_id}/result", headers=_auth())
+    assert result.status_code == 200
+    assert result.json()["result"]["label"] == "control"
+
+
 def test_retrain_job_command_passes_job_id_to_ledger(tmp_path: Path) -> None:
     cfg_path = tmp_path / "canary.yaml"
     cfg_path.write_text(_config_yaml(tmp_path / "storage"))

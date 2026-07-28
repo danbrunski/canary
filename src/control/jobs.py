@@ -26,6 +26,7 @@ JobKind = Literal[
     "refit_behavior_models",
     "corpus_report",
     "export_dataset",
+    "did_sweep",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 CommandBuilder = Callable[[str, Mapping[str, Any]], Sequence[str]]
@@ -40,6 +41,7 @@ ALLOWED_JOB_KINDS: set[str] = {
     "corpus_report",
     "replay_window",
     "export_dataset",
+    "did_sweep",
 }
 
 
@@ -306,6 +308,8 @@ class JobController:
             return self._replay_window_command(params, job_id=job_id, config_arg=config_arg)
         if kind == "export_dataset":
             return self._export_dataset_command(params, config_arg=config_arg)
+        if kind == "did_sweep":
+            return self._did_sweep_command(params, job_id=job_id, config_arg=config_arg)
         raise ValueError(f"unsupported job kind: {kind}")
 
     def _replay_window_command(
@@ -357,6 +361,60 @@ class JobController:
         max_windows = params.get("max_windows")
         if isinstance(max_windows, int) and max_windows > 0:
             command.extend(["--max-windows", str(max_windows)])
+        return command
+
+    def _did_sweep_command(
+        self,
+        params: Mapping[str, Any],
+        *,
+        job_id: str | None,
+        config_arg: list[str],
+    ) -> list[str]:
+        """Build the ``tools/did_sweep.py`` invocation.
+
+        ``params`` must include ``start``/``end`` (DID range, int or hex
+        string) and ``label`` (tags the snapshot — the two ends of a
+        before/after comparison need distinct labels). The job's output JSON
+        lands at ``<jobs_dir>/<job_id>.did_sweep.json``, the same
+        ``<job_id>.<kind>.json`` convention ``replay_window`` uses, so
+        ``diff_did_snapshots`` (and the dashboard's ``/result`` route) can
+        find it from the job record alone.
+        """
+        start = params.get("start")
+        end = params.get("end")
+        label = params.get("label")
+        if start is None or end is None:
+            raise ValueError("did_sweep requires params.start and params.end")
+        if not isinstance(label, str) or not label:
+            raise ValueError("did_sweep requires params.label")
+        out_path = (
+            self._jobs_dir / f"{job_id}.did_sweep.json"
+            if job_id is not None
+            else self._jobs_dir / "did_sweep.json"
+        )
+        command = [
+            str(self._python),
+            "tools/did_sweep.py",
+            "--start",
+            str(start),
+            "--end",
+            str(end),
+            "--label",
+            label,
+            *config_arg,
+            "--out",
+            str(out_path),
+        ]
+        for key, flag in (
+            ("header", "--header"),
+            ("session", "--session"),
+            ("keepalive", "--keepalive"),
+            ("delay_seconds", "--delay-seconds"),
+            ("read_timeout", "--read-timeout"),
+        ):
+            value = params.get(key)
+            if value is not None:
+                command.extend([flag, str(value)])
         return command
 
     def _export_dataset_command(
