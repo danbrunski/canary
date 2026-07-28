@@ -124,6 +124,9 @@ from src.mcp_server.write_tools import (
     sessions as sessions_write_tool,
 )
 from src.mcp_server.write_tools import (
+    trigger_poll as trigger_poll_write_tool,
+)
+from src.mcp_server.write_tools import (
     tuning as tuning_write_tool,
 )
 from src.mcp_server.write_tools import (
@@ -850,6 +853,20 @@ def _register_write_tools(
             header=header,
             timeout_seconds=timeout_seconds,
         )
+
+    @mcp.tool()
+    async def trigger_poll(channels: list[str]) -> dict[str, Any]:
+        """Force specific channels due on the OBD scheduler's next tick.
+
+        Turns "wait up to 5 minutes" (DTC/Mode 06's tier) into "the answer is
+        ready in a few seconds." Channel names match `get_status`'s
+        `obd_scheduler.requests[].channel` (RPM, DTC_STORED,
+        MONITOR_RESULTS, DID_1101, ...), case-insensitive; an unknown name
+        is silently never matched. This only queues the request — read the
+        result back with `get_status`/`get_dtc`/`get_recent_telemetry`/
+        `query_telemetry` a few seconds later.
+        """
+        return await trigger_poll_write_tool.trigger_poll(client, audit, channels=channels)
 
     @mcp.tool()
     async def set_passive_mode(enabled: bool) -> dict[str, Any]:

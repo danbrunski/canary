@@ -213,6 +213,13 @@ def run_can_obd_loop(
             for index in freeze_frame_indices:
                 request_states[index].suppressed_until = 0.0
                 request_states[index].next_due_at = now
+        if spec.force_poll_trigger is not None:
+            forced_channels = spec.force_poll_trigger.take()
+            if forced_channels:
+                for index, request in enumerate(requests):
+                    if request.channel.upper() in forced_channels:
+                        request_states[index].suppressed_until = 0.0
+                        request_states[index].next_due_at = now
         if on_scheduler_metrics is not None and now >= next_metrics_at:
             on_scheduler_metrics(
                 _scheduler_metrics(

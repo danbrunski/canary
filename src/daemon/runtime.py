@@ -149,6 +149,7 @@ async def run_daemon(
             config,
             obd_scheduler_metrics_callback=components.health_monitor.observe_obd_scheduler,
             freeze_frame_trigger=components.freeze_frame_trigger,
+            force_poll_trigger=components.force_poll_trigger,
         )
 
     drain_task = asyncio.create_task(

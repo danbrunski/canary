@@ -47,6 +47,7 @@ from src.alerts.feedback import FeedbackStore
 from src.alerts.tuning import AlertTuner
 from src.analysis.gps_tracker import GpsTracker
 from src.analysis.vehicle_ledger import VehicleLedgerStore
+from src.collection.obd_scheduler import ForcePollTrigger
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
@@ -129,6 +130,9 @@ def create_app(
     monitor_state: MonitorState | None = None,
     gps_tracker: GpsTracker | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
+    #: Bridges `trigger_poll` into the OBD collector loop (`None` in tests
+    #: that don't wire the live collector — the route reports 503).
+    force_poll_trigger: ForcePollTrigger | None = None,
     #: Live writer, so arming tuning mode can quarantine the capture into a
     #: ``_tuning-*`` session (engine-tuning-support.md 1.2).
     storage_writer: AsyncParquetTelemetryWriter | None = None,
@@ -217,6 +221,7 @@ def create_app(
         vehicle_ledger_store=vehicle_ledger_store,
         alert_tuner=alert_tuner,
         sequence_detector_controller=sequence_detector_controller,
+        force_poll_trigger=force_poll_trigger,
         storage_writer=storage_writer,
         ups_status_path=ups_status_path,
         ups_keepalive_path=ups_keepalive_path,

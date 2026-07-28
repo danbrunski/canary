@@ -15,7 +15,7 @@ from src.alerts.notifier import Notifier
 from src.alerts.tuning import AlertTuner, load_tuning_config
 from src.analysis.gps_tracker import GpsTracker
 from src.analysis.vehicle_ledger import VehicleLedgerStore
-from src.collection.obd_scheduler import FreezeFrameTrigger
+from src.collection.obd_scheduler import ForcePollTrigger, FreezeFrameTrigger
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
@@ -88,6 +88,14 @@ class DaemonComponents:
     #: both ``dtc_state`` (constructed below) and the collector's
     #: ``CanObdSpec`` (``_default_collectors``, via ``run_daemon``).
     freeze_frame_trigger: FreezeFrameTrigger = field(default_factory=FreezeFrameTrigger)
+    #: Bridges the ``trigger_poll`` control route (asyncio) and the OBD
+    #: collector loop (its own thread) — forces specific channels due on the
+    #: collector's next tick instead of waiting out their tier cadence.
+    #: Threaded into the collector's ``CanObdSpec`` the same way
+    #: ``freeze_frame_trigger`` is (``_default_collectors``, via
+    #: ``run_daemon``); inert (never consumed) when the OBD source isn't
+    #: ``canable``.
+    force_poll_trigger: ForcePollTrigger = field(default_factory=ForcePollTrigger)
     #: Vehicle maintenance/intervention ledger (Task 3.1) — a new stored DTC
     #: (Task 3.4) and operator/MCP writes both append here.
     vehicle_ledger: VehicleLedgerStore = field(default_factory=VehicleLedgerStore)

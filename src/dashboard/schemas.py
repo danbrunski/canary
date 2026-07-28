@@ -141,6 +141,20 @@ class CanActivityRequest(_ControlRequest):
     ids: list[int] | None = None
 
 
+class TriggerPollRequest(_ControlRequest):
+    """Force specific channels due on the OBD scheduler's next tick (the
+    ``trigger_poll`` tool), instead of waiting out their tier cadence — the
+    DTC/Mode 06 poll sits at a 5-minute interval by default. Channel names
+    match ``GET /status``'s ``obd_scheduler.requests[].channel`` (``RPM``,
+    ``DTC_STORED``, ``MONITOR_RESULTS``, ``DID_1101``, ...), matched
+    case-insensitively; an unknown name is silently never matched. This only
+    nudges the scheduler — read the result back with the usual tools
+    (``get_status``, ``get_dtc``, ``query_telemetry``, ...) a few seconds
+    later."""
+
+    channels: list[str] = Field(..., min_length=1)
+
+
 class ObdRequestRequest(_ControlRequest):
     """One-shot read-only OBD/UDS request (the ``obd_request`` tool).
 

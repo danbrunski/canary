@@ -37,6 +37,7 @@ from src.collection.obd_scheduler import (
     AUTO_MISS_BACKOFF_SECONDS,
     MAX_MISS_BACKOFF_SECONDS,
     CanObdLoopStats,
+    ForcePollTrigger,
     FreezeFrameTrigger,
     _PollRequestState,
     _select_next_due_request,
@@ -782,6 +783,79 @@ def test_freeze_frame_trigger_is_consumed_once_then_reads_go_dormant() -> None:
     # loop ran for a full second at 20 Hz.
     assert sorted(channels) == sorted(set(channels))
     assert "FREEZE_FRAME_RPM" in channels
+
+
+def test_force_poll_trigger_take_is_atomic_and_normalizes_case() -> None:
+    trigger = ForcePollTrigger()
+    assert trigger.take() == frozenset()  # nothing pending yet
+
+    trigger.request(["rpm", " Dtc_Stored "])
+    assert trigger.take() == frozenset({"RPM", "DTC_STORED"})
+    assert trigger.take() == frozenset()  # consumed — not sticky
+
+    trigger.request(["a"])
+    trigger.request(["b"])  # a second request before take() merges, doesn't overwrite
+    assert trigger.take() == frozenset({"A", "B"})
+
+
+def test_force_poll_trigger_forces_a_channel_due_immediately() -> None:
+    """trigger_poll: DTC_STORED normally sits on a slow interval; forcing it
+    should produce a reading well before that interval would ever fire."""
+    bus = _DtcCapableBus()
+    stop = threading.Event()
+    readings: list[Any] = []
+    trigger = ForcePollTrigger()
+    trigger.request(["dtc_stored"])  # lowercase on purpose — matching is case-insensitive
+
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        poll_rate_hz=20.0,
+        pids=(),
+        request_timeout_seconds=0.1,
+        dtc_poll_interval_seconds=300.0,  # would never fire naturally in this window
+        service_poll_interval_seconds=0,  # unrelated to this test; keep the loop fast
+        force_poll_trigger=trigger,
+    )
+
+    run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        spec,
+        on_frame=lambda _msg: None,
+        on_reading=lambda r: readings.append(r),
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 0.5,
+    )
+
+    assert any(r.pid == "DTC_STORED" for r in readings)
+
+
+def test_force_poll_trigger_ignores_unknown_channel_names() -> None:
+    """An unmatched channel name is a silent no-op, not an error."""
+    bus = _DtcCapableBus()
+    stop = threading.Event()
+    trigger = ForcePollTrigger()
+    trigger.request(["not_a_real_channel"])
+
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        poll_rate_hz=20.0,
+        pids=(),
+        request_timeout_seconds=0.05,
+        dtc_poll_interval_seconds=300.0,
+        service_poll_interval_seconds=0,
+        force_poll_trigger=trigger,
+    )
+
+    run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        spec,
+        on_frame=lambda _msg: None,
+        on_reading=lambda _r: None,
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 0.2,
+    )
+    # No crash, no spurious channel appearing — this test's assertion is
+    # simply that the loop above completed cleanly.
 
 
 def test_dtc_poll_skips_cleanly_when_bus_never_answers() -> None:

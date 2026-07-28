@@ -29,6 +29,7 @@ from src.collection.custom_pids import (
     save_custom_pids,
     torque_csv_to_custom_pids,
 )
+from src.collection.obd_scheduler import ForcePollTrigger
 from src.companion.schemas import TrainingRunApprovalRequest
 from src.companion.services import (
     _artifact_path,
@@ -101,6 +102,7 @@ from src.dashboard.schemas import (
     SequenceDetectorRequest,
     SessionMetadataRequest,
     SessionPinRequest,
+    TriggerPollRequest,
     TuningModeRequest,
     TuningRevertRequest,
     TuningUpdateRequest,
@@ -156,6 +158,7 @@ def register_control_routes(
     alert_tuner: AlertTuner | None,
     vehicle_ledger_store: VehicleLedgerStore | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
+    force_poll_trigger: ForcePollTrigger | None = None,
     #: Live telemetry writer, so arming tuning mode can redirect storage into
     #: a quarantined ``_tuning-*`` session (engine-tuning-support.md 1.2).
     #: ``None`` leaves the poll-profile switch working without isolation.
@@ -422,6 +425,26 @@ def register_control_routes(
             "expiry": expiry,
         }
         publish_control_event("power.keepalive", "ok", payload)
+        return payload
+
+    @app.post("/control/trigger_poll")
+    def post_control_trigger_poll(
+        request: TriggerPollRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        if config.collection.obd_source != "canable":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "trigger_poll requires collection.obd_source=canable "
+                    f"(currently {config.collection.obd_source!r})"
+                ),
+            )
+        if force_poll_trigger is None:
+            raise HTTPException(status_code=503, detail="OBD collector is not running")
+        force_poll_trigger.request(request.channels)
+        payload = {"trigger_poll": {"queued_channels": request.channels}}
+        publish_control_event("trigger_poll", "ok", payload)
         return payload
 
     @app.post("/control/can_activity")

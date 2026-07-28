@@ -30,7 +30,7 @@ from src.collection.custom_pids import load_custom_pids
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
 from src.collection.obd_collector import ObdSpec, collect_obd
-from src.collection.obd_scheduler import FreezeFrameTrigger
+from src.collection.obd_scheduler import ForcePollTrigger, FreezeFrameTrigger
 from src.collection.pids import REQUIRED_PIDS
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig
@@ -46,6 +46,7 @@ def default_collectors(
     *,
     obd_scheduler_metrics_callback: Callable[[ObdSchedulerMetrics], None] | None = None,
     freeze_frame_trigger: FreezeFrameTrigger | None = None,
+    force_poll_trigger: ForcePollTrigger | None = None,
 ) -> list[CollectorStarter]:
     reconnect_policy = ReconnectPolicy(
         initial_delay_seconds=config.collection.reconnect_initial_delay_seconds,
@@ -72,6 +73,7 @@ def default_collectors(
             service_poll_interval_seconds=config.collection.obd_monitor_poll_interval_seconds,
             service_mids=config.collection.obd_monitor_mids,
             freeze_frame_trigger=freeze_frame_trigger,
+            force_poll_trigger=force_poll_trigger,
             custom_pids=tuple(custom_pids),
             priority_channels=config.collection.obd_priority_channels,
         )

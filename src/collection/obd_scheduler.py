@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -98,6 +98,41 @@ class FreezeFrameTrigger:
             self._event.clear()
             return True
         return False
+
+
+class ForcePollTrigger:
+    """Thread-safe bridge for the ``trigger_poll`` tool: force specific
+    channels due on the collector's *very next* tick instead of waiting out
+    their tier cadence (or the DTC/Mode 06 poll's 5-minute interval).
+
+    Same one-shot-flag shape as :class:`FreezeFrameTrigger`, generalized to a
+    caller-chosen channel set instead of the fixed freeze-frame list —
+    ``request()`` is called from the control route (asyncio), ``take()``
+    once per tick from ``run_can_obd_loop`` (its own thread). Channel names
+    are matched case-insensitively against ``_PollRequest.channel``
+    (``RPM``, ``DTC_STORED``, ``MONITOR_RESULTS``, ``DID_1101``,
+    ``custom:injector_pw``, ...) — see ``GET /status``'s
+    ``obd_scheduler.requests[].channel`` for what's currently active. An
+    unknown name is simply never matched; nothing tells the caller that, by
+    design symmetry with how a backed-off or unsupported channel already
+    behaves in this scheduler.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._pending: set[str] = set()
+
+    def request(self, channels: Iterable[str]) -> None:
+        normalized = {c.strip().upper() for c in channels if c.strip()}
+        with self._lock:
+            self._pending |= normalized
+
+    def take(self) -> frozenset[str]:
+        """Atomically consume and return the pending channel set (uppercased);
+        empty when nothing is pending."""
+        with self._lock:
+            pending, self._pending = self._pending, set()
+        return frozenset(pending)
 
 
 TIER_RATE_FACTORS: dict[PollTier, float] = {
@@ -246,6 +281,11 @@ class CanObdSpec:
     freeze_frame_trigger: FreezeFrameTrigger | None = None
     #: PIDs read once via Mode 02 when ``freeze_frame_trigger`` fires.
     freeze_frame_pids: tuple[int, ...] = FREEZE_FRAME_PIDS
+    #: Bridges the ``trigger_poll`` control route into the collector loop
+    #: (Task: force-poll on demand). ``None`` (the default) disables it —
+    #: no per-tick check, no behavior change for callers that construct a
+    #: spec directly without one.
+    force_poll_trigger: ForcePollTrigger | None = None
     #: Max Mode 01 PIDs to pack into one request (roadmap/multi-pid-polling.md).
     #: SAE J1979 permits up to 6; on this ECM that was measured at 67.7
     #: requests/sec returning 6 channels each — 33.85 Hz per channel against
@@ -1101,6 +1141,7 @@ __all__ = [
     "CanObdSpec",
     "DidSessionSpec",
     "DidWindowController",
+    "ForcePollTrigger",
     "FreezeFrameTrigger",
     "ObdSchedulerMetrics",
     "build_poll_requests",

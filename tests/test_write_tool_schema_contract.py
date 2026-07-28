@@ -35,6 +35,7 @@ from src.mcp_server.write_tools import (
     power,
     replay,
     sessions,
+    trigger_poll,
     tuning,
     tuning_mode,
     vehicle_ledger,
@@ -139,6 +140,11 @@ CASES: list[tuple[str, Any, type]] = [
             c, a, service=0x22, identifier=0x1101, header=0x7E0, timeout_seconds=3.0
         ),
         schemas.ObdRequestRequest,
+    ),
+    (
+        "trigger_poll",
+        lambda c, a: trigger_poll.trigger_poll(c, a, channels=["RPM", "DTC_STORED"]),
+        schemas.TriggerPollRequest,
     ),
     (
         "set_tuning_mode",
