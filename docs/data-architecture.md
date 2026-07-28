@@ -260,9 +260,12 @@ from reproducing) and lands it under `<storage_path>/_uprev/<session>/`,
 quarantined from training discovery like `_archive` but reachable via
 `query_telemetry(session=..., ...)` — see "DID sweep + diff" and "Raw CAN
 activity capture" in `docs/headless-api.md` for the sibling ad-hoc tools this
-session's tooling pass added; the UpRev importer isn't MCP-exposed (the CSV
-has to reach the Pi's filesystem first, e.g. `scp`), so it's a plain CLI
-step before the data is queryable.
+session's tooling pass added. Unlike those, the UpRev importer is a plain
+CLI step, not MCP-exposed: UpRev's logger runs on the operator's own
+laptop (K-line, not CAN — see above), so the CSV and the importer are
+naturally on the same machine already. It's mostly a local-analysis tool
+against a local `canary.yaml`/storage path, not something that needs to
+run on the Pi.
 
 ## The mapping
 
