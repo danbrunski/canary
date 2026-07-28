@@ -87,7 +87,55 @@ def test_snapshot_reports_state_source_and_count() -> None:
 
     snap = tx_gate.snapshot()
 
-    assert snap == {"enabled": True, "source": "control", "suppressed_frames": 1}
+    assert snap == {
+        "enabled": True,
+        "source": "control",
+        "suppressed_frames": 1,
+        "ttl_remaining_seconds": None,
+    }
+
+
+def test_set_passive_without_ttl_never_expires() -> None:
+    """The default (no TTL) must keep today's behavior exactly — armed until
+    someone explicitly disarms it, however long `check_expiry` is polled."""
+    tx_gate.set_passive(True, source="test", now=1000.0)
+
+    assert tx_gate.check_expiry(now=1000.0) is False
+    assert tx_gate.check_expiry(now=10_000_000.0) is False
+    assert tx_gate.is_passive() is True
+    assert tx_gate.snapshot(now=10_000_000.0)["ttl_remaining_seconds"] is None
+
+
+def test_check_expiry_auto_disarms_once_ttl_passes() -> None:
+    tx_gate.set_passive(True, source="test", ttl_seconds=60.0, now=1000.0)
+
+    assert tx_gate.snapshot(now=1030.0)["ttl_remaining_seconds"] == 30.0
+    assert tx_gate.check_expiry(now=1059.9) is False
+    assert tx_gate.is_passive() is True
+
+    assert tx_gate.check_expiry(now=1060.0) is True
+    assert tx_gate.is_passive() is False
+    # Fired once — a second call after expiry is a no-op, not a repeat fire.
+    assert tx_gate.check_expiry(now=1061.0) is False
+
+
+def test_disarming_clears_a_pending_ttl() -> None:
+    tx_gate.set_passive(True, source="test", ttl_seconds=60.0, now=1000.0)
+    tx_gate.set_passive(False, source="test", now=1010.0)
+
+    # Re-arm with no TTL: if the old deadline leaked through, this would
+    # auto-expire at 1060 even though no TTL was requested this time.
+    tx_gate.set_passive(True, source="test", now=1020.0)
+    assert tx_gate.check_expiry(now=1060.0) is False
+    assert tx_gate.is_passive() is True
+
+
+def test_rearming_replaces_the_previous_ttl() -> None:
+    tx_gate.set_passive(True, source="test", ttl_seconds=60.0, now=1000.0)
+    tx_gate.set_passive(True, source="test", ttl_seconds=600.0, now=1010.0)
+
+    assert tx_gate.check_expiry(now=1060.0) is False, "the old 60s deadline must not apply"
+    assert tx_gate.snapshot(now=1010.0)["ttl_remaining_seconds"] == 600.0
 
 
 def test_client_queries_send_nothing_when_passive() -> None:

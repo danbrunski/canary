@@ -14,6 +14,7 @@ async def set_passive_mode(
     audit: MCPAuditLogger,
     *,
     enabled: bool,
+    ttl_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Arm (``enabled=true``) or disarm the CAN transmit gate.
 
@@ -25,10 +26,20 @@ async def set_passive_mode(
     ECU reprogramming, a bidirectional actuator test, a scan-tool routine —
     so CANary's polling cannot contend with it.
 
+    ``ttl_seconds`` (only meaningful when arming, capped at 3600) auto-disarms
+    after that many seconds even if nobody calls this again — the daemon
+    polls for expiry in the background. Worth setting whenever the window is
+    known in advance (a timed reflash, a fixed-length scan-tool routine): it
+    is one less thing to remember, and a died session or an interrupted
+    conversation can't leave OBD polling suppressed indefinitely. Omit for
+    the old "stays armed until manually disarmed" behavior.
+
     Note that OBD channels go stale while armed, so ``vehicle_state`` will
     read ``engine_off``/``no_data`` and behavior models will stop scoring. That
-    is expected, not a fault; ``get_status`` reports ``passive.enabled`` so the
-    two are distinguishable. Disarm when the other tool is finished.
+    is expected, not a fault; ``get_status`` reports ``passive.enabled`` (and
+    ``passive.ttl_remaining_seconds`` when a TTL is set) so both are
+    distinguishable from a real fault. Disarm when the other tool is
+    finished, or let the TTL do it.
 
     For a guarantee no software path can defeat, additionally put the
     controller in listen-only mode on the Pi (``ip link set can0 type can
@@ -36,6 +47,8 @@ async def set_passive_mode(
     through this tool.
     """
     body: dict[str, Any] = {"enabled": enabled}
+    if ttl_seconds is not None:
+        body["ttl_seconds"] = ttl_seconds
     return await audited_post(
         client, audit, tool="set_passive_mode", path="/control/passive", body=body
     )

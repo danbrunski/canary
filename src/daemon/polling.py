@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from src.collection import tx_gate
 from src.config import CanaryConfig
 from src.decode.behavior_models import load_behavior_models, unknown_operating_modes
 from src.models.health import HealthMonitor
@@ -12,6 +13,32 @@ from src.models.manager import ModelManager
 from src.preprocessing.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
+
+#: Seconds-scale is plenty for a minutes-scale TTL (matches the UPS
+#: watchdog's own poll cadence) without adding meaningful drift to when an
+#: expired window actually clears.
+DEFAULT_PASSIVE_TTL_POLL_SECONDS = 2.0
+
+
+async def poll_passive_ttl(
+    stop_event: asyncio.Event,
+    *,
+    interval_seconds: float = DEFAULT_PASSIVE_TTL_POLL_SECONDS,
+) -> None:
+    """Auto-disarm passive mode once its TTL (if any) expires.
+
+    Unconditional, always-on background task — mirrors ``run_retention_sweeper``
+    rather than the ``live_source``-gated hot-reload tasks below, since passive
+    mode has nothing to do with live inference. ``tx_gate.check_expiry`` is a
+    cheap no-op when nothing is armed or no TTL was set, so this costs nothing
+    on the common path.
+    """
+    while not stop_event.is_set():
+        tx_gate.check_expiry()
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            continue
 
 
 async def poll_model_managers(
@@ -182,7 +209,9 @@ async def poll_behavior_models(
 
 
 __all__ = [
+    "DEFAULT_PASSIVE_TTL_POLL_SECONDS",
     "poll_behavior_models",
     "poll_config",
     "poll_model_managers",
+    "poll_passive_ttl",
 ]

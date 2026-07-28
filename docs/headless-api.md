@@ -258,6 +258,11 @@ curl -sX POST http://canary.local:8000/control/passive \
   -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
   -H 'Content-Type: application/json' -d '{"enabled": true}'
 
+# or arm with a TTL — auto-disarms after 300s even if you never come back
+curl -sX POST http://canary.local:8000/control/passive \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"enabled": true, "ttl_seconds": 300}'
+
 # confirm (also visible as `passive` in GET /status)
 curl -s http://canary.local:8000/control/passive \
   -H "Authorization: Bearer $CANARY_CONTROL_TOKEN"
@@ -268,8 +273,16 @@ curl -sX POST http://canary.local:8000/control/passive \
   -H 'Content-Type: application/json' -d '{"enabled": false}'
 ```
 
-MCP equivalent: `set_passive_mode(enabled=true|false)`. To boot the daemon
-already passive, set `CANARY_PASSIVE=1` in its environment.
+MCP equivalent: `set_passive_mode(enabled=true|false, ttl_seconds=...)`. To
+boot the daemon already passive, set `CANARY_PASSIVE=1` in its environment.
+
+**`ttl_seconds` (capped at 3600) is the fix for "I armed it and forgot to
+disarm."** A background daemon task (`poll_passive_ttl`) polls for expiry
+every couple of seconds and flips the gate back off on its own — no
+depending on a session staying alive, a script reaching its `finally`
+block, or an operator remembering. Omit it for the old
+arm-until-you-say-so behavior. `GET /status`'s `passive.ttl_remaining_seconds`
+shows the countdown (`null` when no TTL is set).
 
 **Expect OBD to go stale while armed.** `vehicle_state` will read
 `engine_off`/`no_data` and behavior models stop scoring, because nothing is

@@ -21,7 +21,7 @@ from .components import DaemonComponents, build_components
 from .drain import drain_queue_with_broadcast
 from .inference import build_live_feature_source, run_live_inference
 from .online_training import run_online_training_scheduler
-from .polling import poll_behavior_models, poll_config, poll_model_managers
+from .polling import poll_behavior_models, poll_config, poll_model_managers, poll_passive_ttl
 from .retention import _active_replay_dir, run_retention_sweeper
 from .server import serve_in_background
 
@@ -73,6 +73,8 @@ async def run_daemon(
         ``enable_live_inference``; degrades to behavior/fusion-only when no
         model artifact is loaded)
       * ``poll_model_managers`` → hot-swap loop
+      * ``poll_passive_ttl`` → auto-disarms ``tx_gate`` passive mode once a
+        caller-supplied TTL expires
       * ``run_retention_sweeper`` → age + byte-cap + low-space retention
       * ``run_online_training_scheduler`` (Task 3.2) → config-gated, default
         disabled; scheduled retrain via the existing subprocess-isolated
@@ -181,6 +183,7 @@ async def run_daemon(
             health=components.health_monitor,
         )
     )
+    passive_ttl_task = asyncio.create_task(poll_passive_ttl(stop_event))
     retention_task = asyncio.create_task(
         run_retention_sweeper(
             config.collection.storage_path,
@@ -287,6 +290,11 @@ async def run_daemon(
             poll_task.cancel()
             try:
                 await poll_task
+            except asyncio.CancelledError:
+                pass
+            passive_ttl_task.cancel()
+            try:
+                await passive_ttl_task
             except asyncio.CancelledError:
                 pass
             retention_task.cancel()

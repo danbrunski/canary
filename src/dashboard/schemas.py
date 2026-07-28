@@ -176,9 +176,14 @@ class PassiveModeRequest(_ControlRequest):
 
     Used when another tool owns a diagnostic session with a module — an ECU
     reprogramming run being the motivating case — and CANary's OBD polling
-    must not put frames on the bus. See src/collection/tx_gate.py."""
+    must not put frames on the bus. See src/collection/tx_gate.py.
+    ``ttl_seconds`` (only meaningful when arming) auto-disarms after that
+    many seconds, so a forgotten disarm doesn't silently stop OBD polling
+    forever — omit for the old "stays armed until manually disarmed"
+    behavior."""
 
     enabled: bool
+    ttl_seconds: float | None = Field(default=None, gt=0.0, le=3600.0)
 
 
 class TuningModeRequest(_ControlRequest):

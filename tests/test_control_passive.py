@@ -67,6 +67,25 @@ def test_post_passive_arms_and_disarms(tmp_path: Path) -> None:
     assert tx_gate.is_passive() is False
 
 
+def test_post_passive_accepts_a_ttl(tmp_path: Path) -> None:
+    client = _api(tmp_path)
+
+    armed = client.post(
+        "/control/passive", json={"enabled": True, "ttl_seconds": 300}, headers=_auth()
+    ).json()
+    assert armed["passive"]["enabled"] is True
+    assert armed["passive"]["ttl_remaining_seconds"] == pytest.approx(300.0, abs=1.0)
+
+
+def test_post_passive_rejects_a_ttl_above_the_cap(tmp_path: Path) -> None:
+    client = _api(tmp_path)
+
+    resp = client.post(
+        "/control/passive", json={"enabled": True, "ttl_seconds": 3601}, headers=_auth()
+    )
+    assert resp.status_code == 422
+
+
 def test_status_surfaces_passive_state(tmp_path: Path) -> None:
     """An operator who armed passive mode and forgot sees stale OBD everywhere
     else; /status is where the explanation has to live."""

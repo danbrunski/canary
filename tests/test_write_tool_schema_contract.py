@@ -126,7 +126,7 @@ CASES: list[tuple[str, Any, type]] = [
     ),
     (
         "set_passive_mode",
-        lambda c, a: passive.set_passive_mode(c, a, enabled=True),
+        lambda c, a: passive.set_passive_mode(c, a, enabled=True, ttl_seconds=300.0),
         schemas.PassiveModeRequest,
     ),
     (

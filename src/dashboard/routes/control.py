@@ -496,7 +496,9 @@ def register_control_routes(
         request: PassiveModeRequest,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
-        previous = tx_gate.set_passive(request.enabled, source="control")
+        previous = tx_gate.set_passive(
+            request.enabled, source="control", ttl_seconds=request.ttl_seconds
+        )
         payload = {"passive": tx_gate.snapshot(), "previous_enabled": previous}
         publish_control_event("passive", "ok", payload)
         return payload

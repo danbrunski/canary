@@ -869,15 +869,20 @@ def _register_write_tools(
         return await trigger_poll_write_tool.trigger_poll(client, audit, channels=channels)
 
     @mcp.tool()
-    async def set_passive_mode(enabled: bool) -> dict[str, Any]:
+    async def set_passive_mode(enabled: bool, ttl_seconds: float | None = None) -> dict[str, Any]:
         """Arm/disarm receive-only mode: daemon keeps logging but transmits no CAN.
 
         Use while another tool owns a diagnostic session (ECU reflash, actuator
         test). OBD channels go stale while armed — that is expected, and
         `get_status` reports `passive.enabled` so it is distinguishable from a
-        real fault.
+        real fault. `ttl_seconds` (arming only, capped at 3600) auto-disarms
+        after that long even if nobody calls this again — set it whenever the
+        window is known in advance so a forgotten disarm can't suppress OBD
+        polling indefinitely.
         """
-        return await passive_write_tool.set_passive_mode(client, audit, enabled=enabled)
+        return await passive_write_tool.set_passive_mode(
+            client, audit, enabled=enabled, ttl_seconds=ttl_seconds
+        )
 
     @mcp.tool()
     async def set_tuning_mode(enabled: bool, channels: list[str] | None = None) -> dict[str, Any]:
