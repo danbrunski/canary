@@ -15,7 +15,8 @@ async def start_capture(
     *,
     purpose: str,
     protocol: str = "drive",
-    metadata: dict[str, Any] | None = None,
+    fields: dict[str, Any] | None = None,
+    vehicle_state: str | None = None,
 ) -> dict[str, Any]:
     """Begin a labeled capture window on the current telemetry session.
 
@@ -31,12 +32,20 @@ async def start_capture(
     protocol:
         ``"drive"`` (default), ``"idle"``, ``"diagnostic"``, etc. — the
         operator's intent for downstream filtering.
-    metadata:
-        Arbitrary JSON; written into the capture's metadata block.
+    fields:
+        Arbitrary JSON recorded alongside the capture — tune revision, ROM
+        id, what the run is meant to prove. Named ``fields`` to match
+        ``CaptureStartRequest`` and :func:`tag_current_capture`; it was
+        previously sent as ``metadata``, which the daemon rejects outright
+        (``extra="forbid"``), so the parameter had never worked.
+    vehicle_state:
+        Operator's note of engine state at capture start.
     """
     body: dict[str, Any] = {"purpose": purpose, "protocol": protocol}
-    if metadata:
-        body["metadata"] = metadata
+    if fields:
+        body["fields"] = fields
+    if vehicle_state is not None:
+        body["vehicle_state"] = vehicle_state
     return await audited_post(
         client, audit, tool="start_capture", path="/control/captures", body=body
     )

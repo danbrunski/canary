@@ -115,3 +115,81 @@ def test_tuning_mode_accepts_a_channel_override(tmp_path: Path) -> None:
         assert got["tuning_mode"]["channels"] == ["MAF", "RPM"]
     finally:
         tuning_profile.set_active(False, source="test")
+
+
+def test_tuning_mode_redirects_storage_to_a_quarantined_session(tmp_path: Path) -> None:
+    """Arming tuning mode over the API must isolate the capture (1.2).
+
+    The `_tuning-*` convention was recognised by the catalog and the parquet
+    query layer, but nothing ever wrote such a directory — so a tuning drive
+    landed in a plain session that training discovery would happily pick up.
+    """
+    from datetime import UTC, datetime
+
+    from src.collection import tuning_profile
+    from src.storage.async_writer import AsyncParquetTelemetryWriter
+    from src.storage.parquet_writer import ParquetTelemetryWriter
+
+    storage = tmp_path / "sessions"
+    writer = AsyncParquetTelemetryWriter(
+        ParquetTelemetryWriter(
+            storage,
+            session_started_at=datetime(2026, 7, 27, 12, 0, tzinfo=UTC),
+        )
+    )
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    app = create_app(
+        config,
+        anomalies_dir=tmp_path / "anomalies",
+        control_token="secret",
+        storage_writer=writer,
+    )
+    client = TestClient(app)
+    try:
+        assert writer.paths.root.name == "2026-07-27T120000"
+
+        armed = client.post("/control/tuning-mode", json={"enabled": True}, headers=_auth())
+        assert armed.status_code == 200
+        assert writer.paths.root.name.startswith("_tuning-")
+        assert armed.json()["output_session_dir"] == str(writer.paths.root)
+
+        off = client.post("/control/tuning-mode", json={"enabled": False}, headers=_auth())
+        assert off.status_code == 200
+        assert not writer.paths.root.name.startswith("_")
+    finally:
+        tuning_profile.set_active(False, source="test")
+
+
+def test_rearming_tuning_mode_does_not_split_the_session(tmp_path: Path) -> None:
+    """Only a real transition rolls storage — a repeated arm is a no-op.
+
+    Otherwise re-sending `enabled: true` mid-drive would fragment the capture
+    into a new `_tuning-*` directory each time.
+    """
+    from datetime import UTC, datetime
+
+    from src.collection import tuning_profile
+    from src.storage.async_writer import AsyncParquetTelemetryWriter
+    from src.storage.parquet_writer import ParquetTelemetryWriter
+
+    writer = AsyncParquetTelemetryWriter(
+        ParquetTelemetryWriter(
+            tmp_path / "sessions",
+            session_started_at=datetime(2026, 7, 27, 12, 0, tzinfo=UTC),
+        )
+    )
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    app = create_app(
+        config,
+        anomalies_dir=tmp_path / "anomalies",
+        control_token="secret",
+        storage_writer=writer,
+    )
+    client = TestClient(app)
+    try:
+        client.post("/control/tuning-mode", json={"enabled": True}, headers=_auth())
+        first = writer.paths.root
+        client.post("/control/tuning-mode", json={"enabled": True}, headers=_auth())
+        assert writer.paths.root == first
+    finally:
+        tuning_profile.set_active(False, source="test")

@@ -612,3 +612,46 @@ def test_emergency_evict_rejects_negative_warning(tmp_path: Path) -> None:
 
 def test_emergency_evict_missing_root_is_noop(tmp_path: Path) -> None:
     assert emergency_evict_for_free_space(tmp_path / "nope", warning_mb=500) == []
+
+
+def test_tuning_mode_quarantines_the_session(tmp_path: Path) -> None:
+    """engine-tuning-support.md 1.2 — arming tuning mode must isolate storage.
+
+    The `_` prefix is what excludes a directory from training discovery, the
+    live-session listing and the retention sweep. Post-hoc archiving was
+    explicitly rejected: an open-loop AFR-test drive must not be discoverable
+    by training "even transiently".
+    """
+    writer = ParquetTelemetryWriter(
+        tmp_path,
+        session_started_at=datetime(2026, 7, 27, 12, 0, tzinfo=UTC),
+        max_rows=1,
+    )
+    live_dir = writer.paths.root
+    assert live_dir.name == "2026-07-27T120000"
+
+    writer.enter_tuning_mode("2026-07-27T230100")
+    assert writer.paths.root.name == "_tuning-2026-07-27T230100"
+
+    writer.write(TelemetryRecord.obd(1_785_000_000.0, "O2_WR_LAMBDA_S1", 0.99, "ratio"))
+    assert list(writer.paths.root.glob("*.parquet")), "tuning data must land in the _ dir"
+    assert not list(live_dir.glob("*.parquet")), "nothing may leak into the live session"
+
+    # Leaving tuning mode returns to a normal timestamped session, so ordinary
+    # driving after a tuning window is corpus-eligible again.
+    writer.exit_tuning_mode(started_at=datetime(2026, 7, 27, 12, 30, tzinfo=UTC))
+    assert writer.paths.root.name == "2026-07-27T123000"
+    assert not writer.paths.root.name.startswith("_")
+
+
+def test_exit_tuning_mode_avoids_a_name_collision(tmp_path: Path) -> None:
+    """A short tuning window can resume inside the same wall-clock second.
+
+    `make_session_dir` uses `exist_ok=False` on purpose, so without the
+    bump-forward the exit would raise instead of resuming.
+    """
+    started = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
+    writer = ParquetTelemetryWriter(tmp_path, session_started_at=started, max_rows=1)
+    writer.enter_tuning_mode("t1")
+    writer.exit_tuning_mode(started_at=started)
+    assert writer.paths.root.name == "2026-07-27T120001"

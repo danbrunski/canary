@@ -49,6 +49,7 @@ async def serve_in_background(
         capture_controller=components.capture_controller,
         job_controller=components.job_controller,
         replay_controller=components.replay_controller,
+        storage_writer=components.storage_writer,
         audit_logger=components.audit_logger,
         feedback_store=FeedbackStore(components.config.daemon.feedback_log),
         vehicle_ledger_store=components.vehicle_ledger,

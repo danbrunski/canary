@@ -92,6 +92,52 @@ def test_post_and_get_vehicle_ledger(tmp_path: Path) -> None:
     assert listed["events"][0]["title"] == "Cold air intake"
 
 
+def test_event_id_corrects_in_place(tmp_path: Path) -> None:
+    """Re-posting under an existing id supersedes it without losing the original.
+
+    The store is append-only and reads collapse to the latest line per id, but
+    nothing exposed that through the API — correcting a typo'd entry meant
+    hand-appending JSON to the ledger file over ssh.
+    """
+    client, store = _client(tmp_path)
+    first = client.post(
+        "/control/vehicle-ledger",
+        headers=_auth(),
+        json={
+            "occurred_at": "2026-07-27",
+            "kind": "mod",
+            "title": "Fuel K x1.07",
+            "details": "typo'd, and corpus_boundary was missed",
+            "corpus_boundary": False,
+        },
+    )
+    assert first.status_code == 201
+    event_id = first.json()["event"]["id"]
+
+    corrected = client.post(
+        "/control/vehicle-ledger",
+        headers=_auth(),
+        json={
+            "occurred_at": "2026-07-27",
+            "kind": "mod",
+            "title": "Fuel K x1.07",
+            "details": "corrected",
+            "corpus_boundary": True,
+            "event_id": event_id,
+        },
+    )
+    assert corrected.status_code == 201
+    assert corrected.json()["event"]["id"] == event_id
+
+    listed = client.get("/control/vehicle-ledger", headers=_auth()).json()
+    assert listed["count"] == 1, "a correction must not read as a second event"
+    assert listed["events"][0]["details"] == "corrected"
+    assert listed["events"][0]["corpus_boundary"] is True
+
+    # The superseded line is still on disk — corrections amend the view, not history.
+    assert len(list(store.raw_records())) == 2
+
+
 def test_invalid_kind_rejected(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
     resp = client.post(

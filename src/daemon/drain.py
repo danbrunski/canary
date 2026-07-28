@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -89,19 +90,17 @@ def _enqueue_sink(
         try:
             sink.queue.get_nowait()
             sink.queue.task_done()
-            _note_drop(health_monitor, sink.name)
+            _note_drop(health_monitor, sink.name, queue=sink.queue)
         except asyncio.QueueEmpty:
             pass
         try:
             sink.queue.put_nowait(record)
             return True
         except asyncio.QueueFull:
-            _note_drop(health_monitor, sink.name)
-            log.warning("telemetry sink queue full; dropping record", extra={"sink": sink.name})
+            _note_drop(health_monitor, sink.name, queue=sink.queue)
             return False
 
-    _note_drop(health_monitor, sink.name)
-    log.warning("telemetry sink queue full; dropping record", extra={"sink": sink.name})
+    _note_drop(health_monitor, sink.name, queue=sink.queue)
     return False
 
 
@@ -591,9 +590,86 @@ def _observe_queue(
         health_monitor.observe_telemetry_queue(name, queue)
 
 
-def _note_drop(health_monitor: HealthMonitor | None, name: str) -> None:
+#: A stalled sink drops every record that arrives until it drains, and the
+#: naive one-log-line-per-drop produced 3,570 identical journal lines inside a
+#: single second on 2026-07-27 — amplifying a stall on a Pi that was already
+#: failing to keep up, while saying nothing about how long it lasted. Drops are
+#: coalesced into *bursts* instead: consecutive drops on one sink separated by
+#: less than ``_DROP_BURST_GAP_SECONDS``.
+_DROP_BURST_GAP_SECONDS = 1.0
+#: Progress cadence inside a long burst, so a sink that never recovers still
+#: reports rather than going silent after its opening line.
+_DROP_BURST_REPORT_SECONDS = 10.0
+
+
+@dataclass
+class _DropBurst:
+    """Running tally for one sink's current run of drops."""
+
+    started_at: float
+    last_at: float
+    count: int = 1
+    reported_at: float = field(default=0.0)
+
+
+_drop_bursts: dict[str, _DropBurst] = {}
+
+
+def _log_burst_total(name: str, burst: _DropBurst) -> None:
+    log.warning(
+        "telemetry sink drop burst ended: %d record(s) over %.2fs",
+        burst.count,
+        burst.last_at - burst.started_at,
+        extra={
+            "sink": name,
+            "dropped": burst.count,
+            "duration_seconds": round(burst.last_at - burst.started_at, 3),
+        },
+    )
+
+
+def _note_drop(
+    health_monitor: HealthMonitor | None,
+    name: str,
+    *,
+    queue: asyncio.Queue[TelemetryRecord] | None = None,
+) -> None:
+    """Count the drop and log it burst-aware rather than once per record."""
     if health_monitor is not None:
         health_monitor.note_telemetry_drop(name)
+
+    now = time.monotonic()
+    burst = _drop_bursts.get(name)
+    if burst is not None and now - burst.last_at <= _DROP_BURST_GAP_SECONDS:
+        burst.count += 1
+        burst.last_at = now
+        if now - burst.reported_at >= _DROP_BURST_REPORT_SECONDS:
+            burst.reported_at = now
+            log.warning(
+                "telemetry sink still dropping: %d record(s) over %.1fs",
+                burst.count,
+                now - burst.started_at,
+                extra={"sink": name, "dropped": burst.count},
+            )
+        return
+
+    # A new burst. Report the previous one's total first — a burst's size is
+    # only known once it ends, and this avoids needing a background timer.
+    if burst is not None:
+        _log_burst_total(name, burst)
+    _drop_bursts[name] = _DropBurst(started_at=now, last_at=now, reported_at=now)
+    log.warning(
+        "telemetry sink queue full; dropping record",
+        extra={
+            "sink": name,
+            "queue_maxsize": queue.maxsize if queue is not None else None,
+        },
+    )
+
+
+def reset_drop_bursts() -> None:
+    """Clear burst state — for tests, which reuse sink names across cases."""
+    _drop_bursts.clear()
 
 
 def _note_error(health_monitor: HealthMonitor | None, name: str, exc: BaseException) -> None:

@@ -88,6 +88,7 @@ from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
 )
 from src.models.health import HealthMonitor
+from src.storage.async_writer import AsyncParquetTelemetryWriter
 
 log = logging.getLogger(__name__)
 
@@ -128,6 +129,9 @@ def create_app(
     monitor_state: MonitorState | None = None,
     gps_tracker: GpsTracker | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
+    #: Live writer, so arming tuning mode can quarantine the capture into a
+    #: ``_tuning-*`` session (engine-tuning-support.md 1.2).
+    storage_writer: AsyncParquetTelemetryWriter | None = None,
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
 ) -> FastAPI:
@@ -213,6 +217,7 @@ def create_app(
         vehicle_ledger_store=vehicle_ledger_store,
         alert_tuner=alert_tuner,
         sequence_detector_controller=sequence_detector_controller,
+        storage_writer=storage_writer,
         ups_status_path=ups_status_path,
         ups_keepalive_path=ups_keepalive_path,
         emitter=emitter,

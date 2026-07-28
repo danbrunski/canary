@@ -198,3 +198,35 @@ def test_default_set_carries_the_filters_every_analysis_depends_on() -> None:
     }
     missing = required - tuning_profile.DEFAULT_TUNING_CHANNELS
     assert not missing, f"tuning captures would be unfilterable without {missing}"
+
+
+def test_dtc_reads_survive_tuning_mode() -> None:
+    """DTC polling is exempt from the narrowed rotation.
+
+    It was excluded on a bus-budget argument that the numbers do not support:
+    the DTC tier polls at 0.0033 Hz, one request per five minutes against a
+    budget of eight per second. The cost was the 2026-07-27 post-flash drive,
+    where the whole question was whether a fresh calibration set a code and
+    `get_dtc` reported `stale: true` for the entire drive.
+    """
+    tuning_profile.set_active(True, source="test")
+
+    class R:
+        def __init__(self, channel: str, kind: str) -> None:
+            self.channel = channel
+            self.kind = kind
+
+    assert tuning_profile.request_eligible(0, R("DTC_STORED", "dtc")) is True
+    assert tuning_profile.request_eligible(0, R("DTC_PENDING", "dtc")) is True
+    # Mode 06 / freeze-frame stay excluded — those really are slow-tier bulk.
+    assert tuning_profile.request_eligible(0, R("MONITOR_RESULTS", "service")) is False
+    assert tuning_profile.request_eligible(0, R("FREEZE_FRAME_RPM", "freeze_frame")) is False
+
+
+def test_speed_is_polled_so_operating_mode_survives() -> None:
+    """SPEED is in the set for classification, not for tuning.
+
+    Without it the segmenter has only GPS to work from; on the 2026-07-27
+    post-flash drive 4 of 10 anomalies logged `operating_mode: unknown`.
+    """
+    assert "SPEED" in tuning_profile.DEFAULT_TUNING_CHANNELS

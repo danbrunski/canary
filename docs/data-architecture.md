@@ -172,9 +172,10 @@ transport and should be replaced with a Canable-native sweep CLI.
 diagnostic reads. The injector-PW DID, once identified (Task 4.E.4),
 is the input the fuel-surface behavior model needs.
 
-### 4. Nissan Consult-III via NT510 — *RE only, never production*
+### 4. Nissan Consult-III via scan tool — *RE only, never production*
 
-The NT510 handheld is Nissan's manufacturer-level scan tool. It speaks
+The operator has a Z1 Nissan scan tool; earlier captures used or referred to
+the NT510 handheld. These manufacturer-level tools speak
 the proprietary Consult-III protocol on top of UDS. We use it for:
 
 * **Stimulating the bus** during RE — actuator tests (cooling fan,
@@ -234,10 +235,17 @@ measured limit.
 | Throttle X/Y **map traces** | the ETC map's live axes (throttle % × RPM) |
 | `A/F ADJ` (long-term trim) | see below |
 
-**What it would *not* buy: knock.** `HI DET` and `KNOCK STRENGTH` read
+**Knock remains unconfirmed, not ruled out.** `HI DET` and `KNOCK STRENGTH` read
 constant (`1` and `0x500`) across two K-line sessions including a
-4575 rpm pull. The ECM does not report knock on *either* transport, so
-K-line hardware would not unblock timing work. This is not a failed
+4575 rpm pull, and the other UpRev-labelled knock fields were constant too.
+Those definitions do not unblock timing work, but they only establish that
+UpRev's exposed fields are unusable on this ROM. Nissan's published ECM Data
+Monitor list has no named knock item, while our successful session-`0xC0` DID
+sweep covered only `0x1100`-`0x12FF` in parked/no-load states. A proprietary
+DID outside that range, a dormant counter, or an unbound broadcast correction
+signal remains possible. The operator checked the Z1 Nissan scan tool's data
+streams and tests on 2026-07-27 and found no knock-related item; do not plan a
+knock-discovery capture around that tool. This is not a failed
 sensor — the pre-flash DTC baseline was clean on the stock calibration,
 including no P0325/P0330.
 
@@ -258,7 +266,7 @@ and to treat UpRev logs as an importable reference, not a live source.
 | Manufacturer-specific live data (injector PW, etc.) | **Canable-native Mode 22 selected DID polling** | Broad sweep CLI pending |
 | RE stimulus (force the engine into a known state) | **NT510 actuator tests** | Drive the vehicle yourself |
 | High-rate tuning parameters (MAF sensor V, throttle map traces, A/F ADJ) | **UpRev logger over K-line** — external tool, import its CSV | No CAN path exists; optional future K-line hardware |
-| Knock / detonation | **Nothing.** ECM reports it on no transport | — (do not plan around K-line solving this) |
+| Knock / detonation | **No confirmed channel.** UpRev-labelled fields are constant; standard Mode 01, the published CONSULT list, and the Z1 tool's menus provide none | Broader Mode 22/broadcast RE remains possible; dedicated knock monitor is required for timing decisions |
 | Watching another tool own a diagnostic session | **Passive mode** (`tx_gate`) + `candump`, decoded by `scripts/decode_flash.py` | — |
 
 ## Signal interpretation gotchas

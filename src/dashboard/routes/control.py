@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -113,8 +115,11 @@ from src.dashboard.version import _canary_version, _git_sha
 from src.models.manifest import manifest_path_for
 from src.preprocessing.loader import discover_sessions
 from src.profiles import load_registry, update_profile_name
+from src.storage.async_writer import AsyncParquetTelemetryWriter
 
 _T = TypeVar("_T")
+
+log = logging.getLogger(__name__)
 
 
 def _require(component: _T | None, name: str, *, detail: str | None = None) -> _T:
@@ -145,6 +150,10 @@ def register_control_routes(
     alert_tuner: AlertTuner | None,
     vehicle_ledger_store: VehicleLedgerStore | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
+    #: Live telemetry writer, so arming tuning mode can redirect storage into
+    #: a quarantined ``_tuning-*`` session (engine-tuning-support.md 1.2).
+    #: ``None`` leaves the poll-profile switch working without isolation.
+    storage_writer: AsyncParquetTelemetryWriter | None = None,
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
     emitter: AnomalyEventEmitter | None = None,
@@ -424,13 +433,39 @@ def register_control_routes(
         return {"tuning_mode": tuning_profile.snapshot()}
 
     @app.post("/control/tuning-mode")
-    def post_control_tuning_mode(
+    async def post_control_tuning_mode(
         request: TuningModeRequest,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
         names = frozenset(request.channels) if request.channels else None
         previous = tuning_profile.set_active(request.enabled, channel_names=names, source="control")
-        payload = {"tuning_mode": tuning_profile.snapshot(), "previous_active": previous}
+        payload: dict[str, Any] = {
+            "tuning_mode": tuning_profile.snapshot(),
+            "previous_active": previous,
+        }
+        # engine-tuning-support.md 1.2 — quarantine the capture at the moment
+        # the mode is armed, not afterwards. Only on a real transition, so
+        # re-arming an already-active tuning mode doesn't split the session.
+        if storage_writer is not None and previous != request.enabled:
+            try:
+                if request.enabled:
+                    tuning_id = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%S")
+                    await storage_writer.enter_tuning_mode(tuning_id)
+                    payload["output_session_dir"] = str(storage_writer.paths.root)
+                else:
+                    await storage_writer.exit_tuning_mode()
+                    payload["output_session_dir"] = str(storage_writer.paths.root)
+            except Exception as exc:
+                # Storage isolation failed, so the mode state and the on-disk
+                # layout now disagree. Put the poll profile back rather than
+                # silently logging a quarantined drive into the corpus.
+                log.exception("tuning-mode storage isolation failed; reverting poll profile")
+                tuning_profile.set_active(previous, source="control")
+                raise HTTPException(
+                    status_code=500,
+                    detail="failed to switch tuning session storage; tuning mode unchanged",
+                ) from exc
+        payload["tuning_mode"] = tuning_profile.snapshot()
         publish_control_event("tuning_mode", "ok", payload)
         return payload
 
@@ -855,6 +890,7 @@ def register_control_routes(
             odometer_km=request.odometer_km,
             affected_channels=request.affected_channels,
             corpus_boundary=request.corpus_boundary,
+            event_id=request.event_id,
         )
         publish_control_event("vehicle_ledger.record", "ok", event.to_dict())
         return {"event": event.to_dict()}

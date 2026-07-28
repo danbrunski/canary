@@ -33,7 +33,7 @@ The ELM327 path remains only as legacy fallback/emulator coverage.
   to `pids.jsonl` for byte-vs-PID regression. The current adapter is dead; keep
   this path documented only for emulator/fallback context and do not plan new
   required captures around it.
-- **NT510** (handheld Nissan scan tool) — the *human-driven* stimulus + extra
+- **Z1 Nissan scan tool / NT510** — the *human-driven* stimulus + extra
   reference. Live data for the many Nissan-Consult parameters generic OBD
   doesn't expose, and bidirectional actuator tests (cooling fan, IACV, EVAP,
   power balance, …) that force a sensor/actuator to a known state — a big clean
@@ -45,6 +45,27 @@ Capture CAN-only (`record.py --obd-source off`) when the NT510 is the active
 player, so there's zero diagnostic-request contention. For non-NT510 sessions,
 use `record.py --obd-source canable` so the session has both broadcast frames
 and OBD ground-truth readings.
+
+### Z1 knock-channel inventory — completed, negative
+
+The current result is **no confirmed observable knock channel**, not proof that
+the ECM exposes none. UpRev's four knock-labelled fields are constant on this
+ROM, and Nissan's published CONSULT-III ECM Data Monitor list has no named
+knock/retard item. Our successful session-`0xC0` Mode 22 inventory covered only
+`0x1100`-`0x12FF`, however, and its stimuli stopped at a no-load 2,500-rpm hold.
+
+On 2026-07-27 the operator inspected the Z1 Nissan scan tool's available data
+streams and tests. It exposes no knock, detonation, knock-retard, octane-state,
+or related correction item. Cross the Z1 menu/sniff experiment off as a knock
+discovery path; without a displayed parameter it supplies no knock-specific
+request to identify or replay.
+
+The negative result does not make the broader DID space or unbound broadcast
+bytes disappear. Investigate those independently if desired, but require a
+repeatable response distinct from final ignition timing, RPM/load, IAT,
+counters, and checksums before assigning a knock-related label. Correlation
+with timing alone is insufficient. External knock instrumentation remains the
+timing-development ground truth unless such a channel is validated.
 
 ## Capture
 

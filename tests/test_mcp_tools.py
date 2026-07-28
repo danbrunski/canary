@@ -318,19 +318,20 @@ async def test_set_ups_keepalive_audits_failure(tmp_path: Path) -> None:
 
 
 async def test_record_feedback_audit_carries_label(tmp_path: Path) -> None:
-    """Feedback writes audit entry with label + anomaly id in payload."""
+    """Feedback writes audit entry with label + the event in payload."""
     client = await _fake_daemon({"POST /control/feedback": {"stored": True}})
     audit = MCPAuditLogger(tmp_path / "audit.jsonl")
+    event = {"timestamp": "2026-07-27T23:02:33Z", "source": "isolation_forest", "score": 0.07}
     await feedback_tool.record_feedback(
         client,
         audit,
-        anomaly_id="anom-7",
+        event=event,
         label="false_positive",
-        note="dirt road, MAF spike expected",
+        reason="dirt road, MAF spike expected",
     )
     await client.aclose()
     entry = json.loads((tmp_path / "audit.jsonl").read_text().splitlines()[0])
-    assert entry["payload"]["anomaly_id"] == "anom-7"
+    assert entry["payload"]["event"] == event
     assert entry["payload"]["label"] == "false_positive"
 
 

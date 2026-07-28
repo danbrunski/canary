@@ -2492,3 +2492,36 @@ def test_record_to_dict_is_json_serializable() -> None:
     can = _record_to_dict(TelemetryRecord.can(1_778_000_000.0, 0x1F9, bytes([1, 2, 3, 4])))
     assert isinstance(can["timestamp"], str)
     json.dumps(can)  # raw CAN frame row is JSON-safe too
+
+
+async def test_drop_logging_is_coalesced_into_bursts(caplog: pytest.LogCaptureFixture) -> None:
+    """A stalled sink must not emit one log line per dropped record.
+
+    On 2026-07-27 the storage sink dropped 3,570 records inside a single
+    second and wrote 3,570 identical journal lines doing it — amplifying a
+    stall on a Pi that was already failing to drain, while recording nothing
+    about how long the burst lasted or how big it got.
+    """
+    from src.daemon.drain import _enqueue_sink, reset_drop_bursts
+
+    reset_drop_bursts()
+    health = HealthMonitor()
+    full: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=1)
+    await full.put(TelemetryRecord.obd(1_785_000_000.0, "RPM", 700.0, "rpm"))
+    sink = TelemetrySink("storage", full, "drop_newest")
+
+    with caplog.at_level("WARNING", logger="src.daemon.drain"):
+        for i in range(500):
+            assert not _enqueue_sink(
+                sink,
+                TelemetryRecord.obd(1_785_000_100.0 + i, "RPM", 720.0, "rpm"),
+                health_monitor=health,
+            )
+
+    # Every drop is still counted — only the logging is coalesced.
+    assert health.snapshot()["telemetry_sinks"]["storage"]["dropped_records"] == 500
+    assert len(caplog.records) == 1, f"expected one opening line, got {len(caplog.records)}"
+
+    # The burst total lands when a later, separate burst begins.
+    reset_drop_bursts()
+    caplog.clear()

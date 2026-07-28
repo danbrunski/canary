@@ -121,20 +121,29 @@ volumetrically.
   maps force open loop and produce fueling the behavior models have
   never seen. Keep tuning sessions out of the training corpus via the
   existing `_`-prefix storage isolation (decision 1.2 below).
-- **Knock is not observable on this ECM. Settled 2026-07-27, do not
-  re-probe.** All four knock parameters UpRev exposes read constant
+- **No usable knock channel has been identified yet; do not treat that as
+  proof that none exists.** All four knock parameters UpRev exposes read constant
   across a drive reaching 4825 rpm and 95 % load: `HI DET` = 1,
   `KNOCK STRENGTH` = 1280 (0x500), `KNOCK EVENT` = 0,
   `KNOCK THRESHOLD %` = 1.95. Two of those (`KNOCK EVENT`,
   `KNOCK THRESHOLD %`) were only found on the second pass through the
-  picker, so this is now an exhaustive test of what the tooling offers.
+  picker, so this is an exhaustive test of the knock-labelled fields that
+  UpRev exposes for this ROM, not of every Nissan diagnostic identifier or
+  broadcast-CAN byte.
   Not a failed sensor — the pre-flash DTC baseline was clean on the
   stock calibration with no P0325/P0330, and timing behaves protectively
-  under load. The ECU is running knock control; it just does not report
-  it. Consequence: **timing advance is the largest available power lever
-  and the one that cannot be safely chased**, and a dedicated knock
-  monitor is the only thing that would unlock it. CANary observes
-  timing-advance behavior but never drives advance decisions.
+  under load. Nissan's published CONSULT-III ECM Data Monitor list contains
+  final `IGN TIMING` but no named knock/retard item. The operator also checked
+  the Z1 Nissan scan tool's available data streams and tests on 2026-07-27;
+  it exposes no knock-related item, so that discovery route is closed.
+  However, CANary's only
+  successful in-session Mode 22 sweep covered `0x1100`-`0x12FF` and only
+  KOEO/idle/no-load rev states; unidentified DIDs elsewhere, dormant event
+  counters, and unbound broadcast bytes remain possible. Until one is
+  validated, **timing advance remains the
+  largest available power lever and the one that cannot be safely chased**.
+  Use dedicated knock hardware for timing decisions; CANary may investigate
+  and observe a future knock-related channel but never drives advance decisions.
 - Each accepted flash changes the engine's "normal." Model refits are
   part of the campaign (Phase 4), not an afterthought.
 
@@ -631,8 +640,17 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   loop) where the factory ran stoich; WOT/high-load targets per
   operator choice (~12.8–13.2:1 NA power mixture). Verify delivery
   with 2.1 on fresh pulls.
+
+  Do not use target changes to conceal delivery error. First make measured AFR
+  follow the existing commanded curve with K. The base tune currently commands
+  roughly 12.6 through much of 2,000–3,500 rpm and richens toward ~12.2 above
+  4,000 rpm. Once delivery is accurate, test whether a smoother ~12.7–13.0
+  upper-rpm target maintains or improves same-gear acceleration. Change one
+  target region at a time and retain the richer value unless repeatable pulls
+  demonstrate a benefit.
 - [ ] **3.5 — Timing & cam phasing (conservative).** Incremental,
-  UpRev-side, knock supervision via Cipher logging. CANary's role:
+  with external knock supervision unless a candidate ECM channel is first
+  validated. CANary's role:
   before/after comparison of timing-advance behavior and pull-vs-pull
   performance deltas (estimated HP/torque channels) at matched
   conditions. No aggressive advance without dedicated knock hardware.
@@ -653,8 +671,63 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   affected loaded cells and re-measure. Do not add the full observed 7–11° in
   one flash: the ECM's knock state is not observable through the available
   UpRev/CANary parameters.
+
+  **Cam phasing comes after fuel and ignition.** The headers and plenum spacers
+  can shift the rpm regions where overlap, scavenging and manifold resonance
+  help. Candidate tests are modest low/midrange intake-cam advance and a
+  different taper through 3,000–5,000 rpm. Change one rpm region per revision
+  and compare same-gear acceleration. Cam changes alter airflow, so every
+  accepted change triggers another commanded-versus-measured AFR check.
 - [ ] **3.6 — Throttle/ETC and drivability passes.** WOT-at-all-speeds
   fix and any map-switching setup; CANary just documents before/after.
+
+  Logged throttle reaches its physical maximum during pulls, so there is no
+  evidence of a universal WOT restriction. Investigate only specific
+  requested-versus-actual divergences: low-speed or gear-dependent limits,
+  closure near shifts, and pedal-map response. Preserve fine control at low
+  pedal positions rather than maximizing the whole map.
+
+  For the manual transmission, separately evaluate throttle decay, DFCO
+  entry/exit, fuel restoration near idle, and rev hang between shifts. These
+  are drivability changes, not power claims; capture pedal, throttle, lambda,
+  rpm and fuel status around each event before altering them.
+
+- [ ] **3.7 — Limiters and idle/startup only for a demonstrated need.** A
+  higher rev limit does not create power. Raise it only if measured power is
+  still increasing and the change avoids an otherwise unnecessary shift;
+  change the speed limiter only for a concrete use case. Likewise, leave idle
+  and startup calibration alone unless logs and symptoms show hot-idle
+  instability, cold-start difficulty, accessory-load dip, flare or rev hang.
+  Current idle timing is close to the previous calibration and idle is
+  generally stable.
+
+- [ ] **3.8 — Temperature compensation: verify protection, do not tune the
+  stationary IAT artifact.** Do not add fuel merely because IAT rises while
+  stopped; airflow flushes the sensor and later thermally soaked pulls did not
+  become leaner. Instead verify that ordinary summer moving-air temperatures
+  do not cause unnecessary retard, and retain high-temperature enrichment and
+  timing protection. A temperature-table change requires matched moving-air
+  observations, not idle-versus-cruise bins.
+
+- [ ] **3.9 — Residual injector-latency / MAF verification.** Revisit these
+  only after pressure, K, AFR targets, timing and cam revisions are stable:
+
+  - Correct high-pulse-width delivery but residual idle error points toward
+    injector latency/dead time.
+  - The same percentage error everywhere remains a K/scalar issue.
+  - A repeatable error versus MAF voltage or airflow region is the condition
+    for reconsidering MAF shape.
+
+  Do not change latency and K together. The existing MAF curve is a
+  verification item, not an active tuning candidate: its WOT shape is
+  internally consistent and its implied VE is credible. Reopen it only if
+  clean, matched-condition residuals cannot be reconciled with K and latency.
+
+**Campaign order after mechanical checks:** fuel pressure → K correction →
+verify commanded versus measured AFR → recover modest timing → optimize AFR
+target → test cam timing → address throttle/shift drivability → revisit
+latency/MAF only if a residual pattern demands it. Use one variable category
+per flash so every observed change remains attributable.
 
 ## Phase 4 — Post-tune model management
 

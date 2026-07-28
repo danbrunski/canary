@@ -64,6 +64,12 @@ class AsyncParquetTelemetryWriter:
     async def exit_replay_mode(self) -> Path | None:
         return await self._call(self._writer.exit_replay_mode)
 
+    async def enter_tuning_mode(self, tuning_id: str) -> Path | None:
+        return await self._call(self._writer.enter_tuning_mode, tuning_id)
+
+    async def exit_tuning_mode(self) -> Path | None:
+        return await self._call(self._writer.exit_tuning_mode)
+
     async def _call(self, func: Callable[..., _T], *args: object) -> _T:
         async with self._lock:
             return await asyncio.to_thread(func, *args)

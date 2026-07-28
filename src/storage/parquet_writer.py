@@ -22,7 +22,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.collection.record_arming import RecordArmingGate
-from src.session import SessionPaths, make_session_dir
+from src.session import SessionPaths, make_session_dir, session_paths
 from src.storage.retention import (
     EmptySessionSweep as EmptySessionSweep,
 )
@@ -176,35 +176,33 @@ class ParquetTelemetryWriter:
         if previous is None or timestamp > previous:
             self._last_record_timestamp = timestamp
 
-    def enter_replay_mode(self, replay_id: str) -> Path | None:
-        """Flush + redirect writes to ``<out_root>/_replay-<replay_id>/``.
+    def _enter_isolated_dir(self, dir_name: str) -> Path | None:
+        """Flush + redirect writes to ``<out_root>/<dir_name>/``.
 
-        The leading ``_`` excludes the directory from training discovery
-        (:mod:`src.preprocessing.loader`), from the ``GET /control/sessions``
-        listing (timestamp-only regex), and from the byte-bounded retention
-        sweep (timestamp parse fails) — see ``_replay-*`` isolation in
-        ``docs/mcp-server.md``.
+        ``dir_name`` must carry the leading ``_`` that excludes the directory
+        from training discovery (:mod:`src.preprocessing.loader`), from the
+        ``GET /control/sessions`` listing (timestamp-only regex), and from the
+        byte-bounded retention sweep (timestamp parse fails) — see the
+        ``_replay-*`` / ``_tuning-*`` isolation note in ``docs/mcp-server.md``.
         """
         flushed = self.flush()
-        replay_root = self._out_root / f"_replay-{replay_id}"
-        replay_root.mkdir(parents=True, exist_ok=True)
-        from src.session import session_paths
-
-        self.paths = session_paths(replay_root)
+        isolated_root = self._out_root / dir_name
+        isolated_root.mkdir(parents=True, exist_ok=True)
+        self.paths = session_paths(isolated_root)
         self.session_paths.append(self.paths)
         self._chunk_index = 0
         self._last_flush = self._clock()
         self._last_record_timestamp = None
         return flushed
 
-    def exit_replay_mode(self, *, started_at: datetime | None = None) -> Path | None:
-        """Flush the replay buffer and roll back to a fresh live session dir.
+    def _exit_isolated_dir(self, started_at: datetime | None = None) -> Path | None:
+        """Flush the isolated buffer and roll back to a fresh live session dir.
 
         :func:`make_session_dir` collides if called twice in one wall-clock
         second (it uses ``exist_ok=False`` on purpose to make collisions
-        loud). After a short replay, the post-replay timestamp can match
-        the pre-replay one — bump forward a second until the new dir name
-        is available.
+        loud). After a short replay or tuning window, the resuming timestamp
+        can match the one from before it — bump forward a second until the
+        new dir name is available.
         """
         flushed = self.flush()
         clock_now = self._clock() if started_at is None else started_at
@@ -221,6 +219,30 @@ class ParquetTelemetryWriter:
         self._last_flush = self._clock()
         self._last_record_timestamp = None
         return flushed
+
+    def enter_replay_mode(self, replay_id: str) -> Path | None:
+        """Flush + redirect writes to ``<out_root>/_replay-<replay_id>/``."""
+        return self._enter_isolated_dir(f"_replay-{replay_id}")
+
+    def exit_replay_mode(self, *, started_at: datetime | None = None) -> Path | None:
+        """Flush the replay buffer and roll back to a fresh live session dir."""
+        return self._exit_isolated_dir(started_at)
+
+    def enter_tuning_mode(self, tuning_id: str) -> Path | None:
+        """Flush + redirect writes to ``<out_root>/_tuning-<tuning_id>/``.
+
+        ``engine-tuning-support.md`` 1.2. Tuning captures are deliberately
+        abnormal — flat-AFR-target test maps force open loop and produce
+        fuelling the behavior models have never seen — so they must never be
+        discoverable by training, "even transiently". That rules out
+        post-hoc archiving and requires the quarantine to start the moment
+        tuning mode is armed, which is what this does.
+        """
+        return self._enter_isolated_dir(f"_tuning-{tuning_id}")
+
+    def exit_tuning_mode(self, *, started_at: datetime | None = None) -> Path | None:
+        """Flush the tuning buffer and roll back to a fresh live session dir."""
+        return self._exit_isolated_dir(started_at)
 
     def _rotate_if_engine_run_time_reset(self, record: TelemetryRecord) -> None:
         run_time = _engine_run_time_seconds(record)

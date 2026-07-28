@@ -84,6 +84,12 @@ class VehicleEventRequest(_ControlRequest):
     odometer_km: float | None = None
     affected_channels: list[str] = Field(default_factory=list)
     corpus_boundary: bool = False
+    #: Correct an existing entry by re-stating it under the same id. The
+    #: ledger is append-only and ``VehicleLedgerStore.records`` keeps the
+    #: latest line per id, so a correction supersedes without losing the
+    #: original — but nothing exposed that, and fixing a typo'd entry meant
+    #: hand-appending JSON over ssh. Omit for a new event.
+    event_id: str | None = None
 
 
 class ProfileNameUpdateRequest(_ControlRequest):

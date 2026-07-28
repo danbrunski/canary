@@ -27,6 +27,7 @@ async def record_vehicle_event(
     odometer_km: float | None = None,
     affected_channels: list[str] | None = None,
     corpus_boundary: bool = False,
+    event_id: str | None = None,
 ) -> dict[str, Any]:
     """Append one entry to the vehicle ledger.
 
@@ -49,6 +50,11 @@ async def record_vehicle_event(
         shifts expected sensor behavior should bisect the training corpus
         (see ``--since-boundary`` on ``scripts/retrain.py`` /
         ``scripts/refit_behavior_models.py``).
+    event_id:
+        Correct an existing entry by re-stating it under that id. The store
+        is append-only and keeps the latest line per id, so the original
+        stays on disk while reads see the correction. Pass the id from
+        ``list_vehicle_events``; omit it for a new event.
     """
     body: dict[str, Any] = {
         "occurred_at": occurred_at,
@@ -59,6 +65,8 @@ async def record_vehicle_event(
         "affected_channels": affected_channels or [],
         "corpus_boundary": corpus_boundary,
     }
+    if event_id is not None:
+        body["event_id"] = event_id
     return await audited_post(
         client, audit, tool="record_vehicle_event", path="/control/vehicle-ledger", body=body
     )

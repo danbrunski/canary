@@ -59,6 +59,13 @@ DEFAULT_TUNING_CHANNELS: frozenset[str] = frozenset(
         "TIMING_ADVANCE",
         "THROTTLE_POS",
         "INTAKE_TEMP",
+        # Not a tuning signal — a classification one. Without SPEED the
+        # operating-mode segmenter has only GPS to work from, and on the
+        # 2026-07-27 post-flash drive 4 of 10 anomalies logged
+        # `operating_mode: unknown`. Mode labels are how a tuning capture
+        # gets sliced afterwards (and how the corpus is partitioned), so
+        # losing them costs more than the one request slot.
+        "SPEED",
         # Every trim analysis filters on coolant > 70 degC to exclude warm-up,
         # so omitting this makes a tuning capture unfilterable after the fact.
         # It also feeds `vehicle_state`, which reports coolant as null without
@@ -139,12 +146,22 @@ def set_active(
 def request_eligible(index: int, request: Any) -> bool:
     """`RequestFilter` restricting the rotation to the tuning set.
 
-    Only consulted while tuning mode is active. DTC / Mode 06 / freeze-frame
+    Only consulted while tuning mode is active. Mode 06 / freeze-frame
     requests are excluded along with everything else: they are slow-tier and
     each one costs a request slot plus its timeout, which is precisely the
     budget we are trying to concentrate.
+
+    **DTC reads are exempt.** They were excluded on the same budget argument,
+    but the arithmetic does not support it: the DTC tier polls at 0.0033 Hz —
+    one request per five minutes against a budget of eight per second. What it
+    cost instead was the post-flash drive on 2026-07-27, where the whole point
+    was to find out whether a fresh calibration set a code, and `get_dtc`
+    reported `stale: true` for the entire drive because tuning mode had
+    suspended the poll.
     """
     del index
+    if getattr(request, "kind", None) == "dtc":
+        return True
     return getattr(request, "channel", None) in channels()
 
 

@@ -588,11 +588,21 @@ def _register_write_tools(
     async def start_capture(
         purpose: str,
         protocol: str = "drive",
-        metadata: dict[str, Any] | None = None,
+        fields: dict[str, Any] | None = None,
+        vehicle_state: str | None = None,
     ) -> dict[str, Any]:
-        """Begin a labeled capture window on the current telemetry session."""
+        """Begin a labeled capture window on the current telemetry session.
+
+        ``fields`` is free-form JSON kept with the capture (tune revision,
+        ROM id, what the run is meant to prove).
+        """
         return await captures_tool.start_capture(
-            client, audit, purpose=purpose, protocol=protocol, metadata=metadata
+            client,
+            audit,
+            purpose=purpose,
+            protocol=protocol,
+            fields=fields,
+            vehicle_state=vehicle_state,
         )
 
     @mcp.tool()
@@ -615,11 +625,21 @@ def _register_write_tools(
 
     @mcp.tool()
     async def record_feedback(
-        anomaly_id: str,
+        event: dict[str, Any],
         label: str,
-        note: str | None = None,
+        reason: str | None = None,
+        driving_context: dict[str, Any] | None = None,
+        labeled_by: str | None = None,
+        hypothesis: str | None = None,
+        clarifying_question: str | None = None,
+        clarifying_answer: str | None = None,
     ) -> dict[str, Any]:
-        """Record true_positive/false_positive/unknown verdict on an anomaly."""
+        """Record true_positive/false_positive/unknown verdict on an anomaly.
+
+        Pass the whole `event` dict straight through from
+        `get_recent_anomalies` — the store keys on the event, and these
+        events have no id field.
+        """
         # Cast at the boundary — FastMCP infers the schema from the str
         # annotation so the model passes a free string, and we validate it
         # against the Literal alias inside the tool body.
@@ -633,9 +653,14 @@ def _register_write_tools(
         return await feedback_tool.record_feedback(
             client,
             audit,
-            anomaly_id=anomaly_id,
+            event=event,
             label=narrowed_label,
-            note=note,
+            reason=reason,
+            driving_context=driving_context,
+            labeled_by=labeled_by,
+            hypothesis=hypothesis,
+            clarifying_question=clarifying_question,
+            clarifying_answer=clarifying_answer,
         )
 
     @mcp.tool()
@@ -647,6 +672,7 @@ def _register_write_tools(
         odometer_km: float | None = None,
         affected_channels: list[str] | None = None,
         corpus_boundary: bool = False,
+        event_id: str | None = None,
     ) -> dict[str, Any]:
         """Log a maintenance/mod/repair/observation to the vehicle ledger (3.3).
 
@@ -654,6 +680,11 @@ def _register_write_tools(
         ``corpus_boundary=True`` when the event changes what "normal" looks
         like (a mod or repair) so training can optionally start fresh from
         it (``--since-boundary``).
+
+        Pass ``event_id`` (from `list_vehicle_events`) to CORRECT an existing
+        entry: the ledger is append-only and reads collapse to the latest
+        line per id, so the correction wins while the original stays on
+        disk. Re-state the whole event, not just the changed field.
         """
         if kind not in ("maintenance", "mod", "repair", "observation", "dtc"):
             return {
@@ -674,6 +705,7 @@ def _register_write_tools(
             odometer_km=odometer_km,
             affected_channels=affected_channels,
             corpus_boundary=corpus_boundary,
+            event_id=event_id,
         )
 
     @mcp.tool()
