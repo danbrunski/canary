@@ -140,10 +140,24 @@ volumetrically.
   successful in-session Mode 22 sweep covered `0x1100`-`0x12FF` and only
   KOEO/idle/no-load rev states; unidentified DIDs elsewhere, dormant event
   counters, and unbound broadcast bytes remain possible. Until one is
-  validated, **timing advance remains the
-  largest available power lever and the one that cannot be safely chased**.
-  Use dedicated knock hardware for timing decisions; CANary may investigate
-  and observe a future knock-related channel but never drives advance decisions.
+  validated, **timing advance remains the largest available power lever**.
+  CANary may investigate and observe a future knock-related channel but never
+  drives advance decisions.
+
+  **Operator decision 2026-07-27: external knock supervision is waived; the
+  operator tunes timing in-house.** The reasoning is a precedent argument, not
+  a delegation: Z1's e-tune service adjusts timing from UpRev datalogs alone
+  and does not ask customers for knock hardware, so the same datalog-driven
+  method is available here. No third party is involved. The risk is accepted
+  deliberately, not overlooked.
+
+  What follows from it: the *logs* become the control, so log quality is the
+  safety margin — dense high-rpm WOT coverage, the knock parameters included
+  even though they read constant, and `A/F CORR-B1` in the parameter list.
+  The available proxy is mapped-versus-logged final `IGN TIMING` at matched
+  rpm x load (`scripts/timing_compare.py`), bearing in mind that IAT, coolant
+  and cam compensations also move final timing, so a delta is a signal and not
+  proof of knock retard.
 - Each accepted flash changes the engine's "normal." Model refits are
   part of the campaign (Phase 4), not an afterthought.
 
@@ -571,11 +585,30 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   The error did not worsen with soak; if anything it decreased slightly. A flat
   scalar is therefore the supported first correction, with no added IAT term.
 
-- [ ] **3.3 — K + MAF calibration loop.** UpRev flat AFR-test table
+- [~] **3.3 — K + MAF calibration loop.** UpRev flat AFR-test table
   (open loop) → drive with tuning capture → Phase 2 report → adjust
   K, then MAF curve, then fuel comp in ROM Editor → reflash →
   repeat until measured tracks target across the surface. Each
   iteration's session tagged with the ROM revision.
+
+  **First K iteration, 2026-07-27:** the operator multiplied `K Fuel
+  Multiplier` by 1.07. On comparable enriched samples (`load >= 85 %`, target
+  AFR 12–13, RPM >= 1,800), the pre-change UpRev log measured **13.44 AFR
+  against 12.53 commanded** (`measured/target = 1.073`, 298 samples). The
+  post-change log measured **12.70 against 12.61** (`1.007`, 256 samples).
+  That is the expected scalar response and reduces the remaining mean error to
+  approximately **0.7 % lean**, within the resolution/condition mismatch of
+  this road test. Individual stabilized pull segments ranged roughly
+  `0.994`–`1.019`; bank 1 averaged only ~0.11 AFR leaner than bank 2.
+
+  CANary session `2026-07-27T225711` overlaps the post-change UpRev log and
+  independently shows load to 99 %, RPM to 4,025, LTFT still zero, and median
+  STFT approximately -1.6 % / -3.1 % during the logged window—consistent with
+  the flat correction being very close and perhaps slightly rich in closed
+  loop. Do not make another K change from this result alone. This log only
+  validates enriched operation through about 4,300 rpm; it does not validate
+  the richer target region above that speed. Fuel-pressure verification under
+  load remains mechanically prudent even though the calibration test worked.
 
   **Which knob: discriminator run 2026-07-27 (533 WOT samples).** UpRev logs
   carry injector pulse width (`B-FUEL SCHDL`), `MAF GM/S` and `AFR WB-B1`
@@ -648,12 +681,14 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   upper-rpm target maintains or improves same-gear acceleration. Change one
   target region at a time and retain the richer value unless repeatable pulls
   demonstrate a benefit.
-- [ ] **3.5 — Timing & cam phasing (conservative).** Incremental,
-  with external knock supervision unless a candidate ECM channel is first
-  validated. CANary's role:
+- [ ] **3.5 — Timing & cam phasing (conservative).** Incremental, tuned
+  in-house from datalogs (external knock supervision waived — see the
+  2026-07-27 operator decision under Guiding constraints). CANary's role:
   before/after comparison of timing-advance behavior and pull-vs-pull
   performance deltas (estimated HP/torque channels) at matched
-  conditions. No aggressive advance without dedicated knock hardware.
+  conditions. Advance goes up 1–2° per iteration with a re-log between
+  each, and `KNOCK STRENGTH` is watched for the consistent rise that
+  UpRev documents as "the advance is too aggressive".
 
   **Three-era observation, freshness-bounded 2026-07-27.** The flash boundary
   is pinned by capture metadata: stock `ZS04C/1ZS04C` through 16:21 MDT on

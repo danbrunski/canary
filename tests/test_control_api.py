@@ -7,6 +7,7 @@ import json
 import sys
 import time
 import zipfile
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.jobs import JobController
+from src.control.sessions import filter_sessions, list_sessions
 from src.dashboard.api import create_app
 from src.dashboard.broadcast import Broadcaster
 
@@ -219,6 +221,27 @@ def test_session_list_detail_and_export(tmp_path: Path) -> None:
         names = set(archive.namelist())
     assert f"{session.name}/telemetry-00000.parquet" in names
     assert f"{session.name}/tags.jsonl" in names
+
+
+def test_session_list_filters_by_time_and_keeps_newest_limit(tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    for session_id in (
+        "2026-05-16T120000",
+        "2026-05-17T120000",
+        "2026-05-18T120000",
+        "2026-05-19T120000",
+    ):
+        (storage / session_id).mkdir()
+
+    selected = filter_sessions(
+        list_sessions(storage),
+        since=datetime(2026, 5, 17, tzinfo=UTC),
+        until=datetime(2026, 5, 19, tzinfo=UTC),
+        limit=1,
+    )
+
+    assert [row.session_id for row in selected] == ["2026-05-18T120000"]
 
 
 def test_session_metadata_pin_unpin_and_delete(tmp_path: Path) -> None:

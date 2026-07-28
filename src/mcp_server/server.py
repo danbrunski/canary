@@ -332,14 +332,41 @@ def _register_read_tools(
         )
 
     @mcp.tool()
-    async def list_sessions() -> dict[str, Any]:
-        """All known capture/telemetry sessions on disk, oldest-first."""
-        return await sessions_tool.list_sessions(client)
+    async def list_sessions(
+        since: str | None = None,
+        until: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Sessions, optionally bounded by ISO start times and newest count."""
+        return await sessions_tool.list_sessions(client, since=since, until=until, limit=limit)
 
     @mcp.tool()
     async def get_session(session_id: str) -> dict[str, Any]:
         """Detail for one session: tags, control.json, chunk count, metadata."""
         return await sessions_tool.get_session(client, session_id=session_id)
+
+    @mcp.tool()
+    async def get_session_timeseries(
+        session_id: str,
+        channels: list[str],
+        resample_hz: float = 1.0,
+    ) -> dict[str, Any]:
+        """Aligned historical channels from a Pi session, without SSH/export.
+
+        Use ``source:CHANNEL`` names such as ``obd:RPM`` and
+        ``obd:ENGINE_LOAD``. One Hz is appropriate for a whole drive; use a
+        higher rate only when resolving a short transient.
+        """
+        if not channels:
+            return {"error": "channels must not be empty"}
+        if not 0.1 <= resample_hz <= 20.0:
+            return {"error": "resample_hz must be between 0.1 and 20.0"}
+        return await sessions_tool.get_session_timeseries(
+            client,
+            session_id=session_id,
+            channels=channels,
+            resample_hz=resample_hz,
+        )
 
     @mcp.tool()
     async def get_dataset_health() -> dict[str, Any]:

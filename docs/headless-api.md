@@ -146,7 +146,7 @@ Control endpoints:
 | `GET /control/captures/current` | inspect the active capture window |
 | `POST /control/captures/current/tags` | append a tag to the active capture's `tags.jsonl` |
 | `POST /control/captures/current/stop` | stop the active capture window |
-| `GET /control/sessions` | list timestamped session directories |
+| `GET /control/sessions?since=&until=&limit=` | list timestamped session directories; optional ISO-8601 start-time bounds and newest-match limit |
 | `GET /control/sessions/{id}` | inspect one session |
 | `POST /control/sessions/{id}/metadata` | merge or replace operator metadata in `control.json` |
 | `POST /control/sessions/{id}/pin` | pin a session so retention cleanup skips it |

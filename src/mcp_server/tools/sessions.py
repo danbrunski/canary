@@ -7,17 +7,45 @@ from typing import Any
 from src.mcp_server.client import DaemonClient
 
 
-async def list_sessions(client: DaemonClient) -> dict[str, Any]:
+async def list_sessions(
+    client: DaemonClient,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
     """All known sessions on disk, oldest-first.
 
     Use this for navigation; combine with ``get_session`` to drill into one.
     """
-    return await client.get_json("/control/sessions")
+    params: dict[str, Any] = {}
+    if since is not None:
+        params["since"] = since
+    if until is not None:
+        params["until"] = until
+    if limit is not None:
+        params["limit"] = limit
+    return await client.get_json("/control/sessions", params=params or None)
 
 
 async def get_session(client: DaemonClient, *, session_id: str) -> dict[str, Any]:
     """Detail for one session: tags, control.json, chunk count, metadata."""
     return await client.get_json(f"/control/sessions/{session_id}")
+
+
+async def get_session_timeseries(
+    client: DaemonClient,
+    *,
+    session_id: str,
+    channels: list[str],
+    resample_hz: float = 1.0,
+) -> dict[str, Any]:
+    """Aligned selected channels without exporting the session's Parquet."""
+    return await client.get_json(
+        f"/control/sessions/{session_id}/chart",
+        params={"channels": ",".join(channels), "resample_hz": resample_hz},
+        timeout=60.0,
+    )
 
 
 async def get_dataset_health(client: DaemonClient) -> dict[str, Any]:
@@ -41,6 +69,7 @@ async def get_current_capture(client: DaemonClient) -> dict[str, Any]:
 __all__ = [
     "list_sessions",
     "get_session",
+    "get_session_timeseries",
     "get_dataset_health",
     "get_training_runs",
     "get_current_capture",

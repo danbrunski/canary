@@ -73,6 +73,7 @@ from src.control.sequence_detector import (
     SequenceDetectorUnavailableError,
 )
 from src.control.sessions import (
+    filter_sessions,
     list_sessions,
     resolve_session,
     summarize_session,
@@ -338,10 +339,18 @@ def register_control_routes(
 
     @app.get("/control/sessions")
     def get_control_sessions(
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int | None = Query(default=None, ge=1, le=1000),
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
-        sessions = [session.to_dict() for session in list_sessions(config.collection.storage_path)]
-        return sessions_list_response(sessions)
+        sessions = filter_sessions(
+            list_sessions(config.collection.storage_path),
+            since=since,
+            until=until,
+            limit=limit,
+        )
+        return sessions_list_response([session.to_dict() for session in sessions])
 
     @app.get("/control/sessions/{session_id}")
     def get_control_session(

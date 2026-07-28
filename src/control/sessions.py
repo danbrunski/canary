@@ -74,6 +74,38 @@ def list_sessions(root: Path) -> list[SessionSummary]:
     return sorted(sessions, key=lambda session: session.session_id)
 
 
+def filter_sessions(
+    sessions: list[SessionSummary],
+    *,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    limit: int | None = None,
+) -> list[SessionSummary]:
+    """Apply UTC start-time bounds and keep the newest ``limit`` matches."""
+
+    def as_utc(value: datetime) -> datetime:
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+    selected = sessions
+    if since is not None:
+        lower = as_utc(since)
+        selected = [
+            session
+            for session in selected
+            if session.started_at is not None
+            and as_utc(datetime.fromisoformat(session.started_at)) >= lower
+        ]
+    if until is not None:
+        upper = as_utc(until)
+        selected = [
+            session
+            for session in selected
+            if session.started_at is not None
+            and as_utc(datetime.fromisoformat(session.started_at)) <= upper
+        ]
+    return selected[-limit:] if limit is not None else selected
+
+
 def resolve_session(root: Path, session_id: str) -> Path:
     """Resolve a session id under root, rejecting traversal and unknown ids."""
     if not _SESSION_DIR_RE.match(session_id):
@@ -212,6 +244,7 @@ def _dir_size(path: Path) -> int:
 __all__ = [
     "SessionSummary",
     "delete_session",
+    "filter_sessions",
     "is_session_pinned",
     "list_sessions",
     "pin_session",

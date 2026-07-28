@@ -110,6 +110,53 @@ async def test_get_recent_telemetry_filters_channel() -> None:
     assert all(r["channel"] == "RPM" for r in result["rows"])
 
 
+async def test_list_sessions_forwards_time_bounds_and_limit() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> dict[str, Any]:
+        captured["params"] = dict(request.url.params)
+        return {"sessions": [], "count": 0}
+
+    client = await _fake_daemon({"GET /control/sessions": handler})
+    await sessions_tool.list_sessions(
+        client,
+        since="2026-07-27T00:00:00Z",
+        until="2026-07-28T00:00:00Z",
+        limit=5,
+    )
+    await client.aclose()
+
+    assert captured["params"] == {
+        "since": "2026-07-27T00:00:00Z",
+        "until": "2026-07-28T00:00:00Z",
+        "limit": "5",
+    }
+
+
+async def test_get_session_timeseries_forwards_channels_and_rate() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> dict[str, Any]:
+        captured["params"] = dict(request.url.params)
+        return {"session_id": "2026-07-27T225711", "channels": {}}
+
+    path = "/control/sessions/2026-07-27T225711/chart"
+    client = await _fake_daemon({f"GET {path}": handler})
+    result = await sessions_tool.get_session_timeseries(
+        client,
+        session_id="2026-07-27T225711",
+        channels=["obd:RPM", "obd:ENGINE_LOAD"],
+        resample_hz=5.0,
+    )
+    await client.aclose()
+
+    assert result["session_id"] == "2026-07-27T225711"
+    assert captured["params"] == {
+        "channels": "obd:RPM,obd:ENGINE_LOAD",
+        "resample_hz": "5.0",
+    }
+
+
 async def test_get_behavior_live_passthrough() -> None:
     """Behavior tools just forward the daemon response."""
     snapshot = {"observed": 42, "operating_mode": "idle", "models": {}}
