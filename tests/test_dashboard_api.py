@@ -1124,7 +1124,7 @@ def test_get_obd_monitors_returns_the_cached_sweep_shape(
     from src.telemetry import TelemetryRecord
 
     monitor_state = MonitorState()
-    payload = bytes([0x0B, 0x01, 0x10, 0x00, 0x03, 0x00, 0x00, 0x00, 0xFF])
+    payload = bytes([0xA2, 0x0C, 0x24, 0x00, 0x03, 0x00, 0x00, 0x00, 0xFF])
     monitor_state.observe(
         TelemetryRecord.obd(1_778_000_000.0, "MONITOR_RESULTS", payload.hex(), ""),
         session_id="s1",
@@ -1137,7 +1137,7 @@ def test_get_obd_monitors_returns_the_cached_sweep_shape(
     body = response.json()
     assert body["misfire_counts"] == {"1": 3}
     assert len(body["results"]) == 1
-    assert body["results"][0]["monitor_id"] == 0x0B
+    assert body["results"][0]["monitor_id"] == 0xA2
     assert body["stale"] is False
 
 
