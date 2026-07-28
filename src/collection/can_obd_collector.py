@@ -46,6 +46,7 @@ from src.collection.can_obd_client import (
 )
 from src.collection.custom_pids import evaluate_custom_pid
 from src.collection.isotp import (
+    DEFAULT_REQUEST_ID,
     DEFAULT_RESPONSE_ID_MAX,
     DEFAULT_RESPONSE_ID_MIN,
     FLOW_CONTROL_CTS,
@@ -109,6 +110,10 @@ SCHEDULER_METRICS_INTERVAL_SECONDS = 5.0
 #: Small on purpose: an ECU that dislikes a given size should cost a handful
 #: of request slots to discover, not a whole drive.
 MAX_CONSECUTIVE_BATCH_FAILURES = 3
+#: A zero-result Mode 06 discovery is ambiguous (passive mode, bus startup,
+#: ignition state, or genuinely unsupported). Once ordinary OBD contact has
+#: succeeded, retry no faster than this if discovery still returns nothing.
+MODE06_DISCOVERY_RETRY_SECONDS = 30.0
 
 
 def _next_batch_size(current: int) -> int:
@@ -158,6 +163,14 @@ def run_can_obd_loop(
         else client_factory(bus)
     )
     requests = build_poll_requests(client, spec)
+    mode06_discovery_pending = (
+        spec.service_poll_interval_seconds > 0
+        and spec.service_mids == "auto"
+        and not any(request.kind == "service" for request in requests)
+    )
+    next_mode06_discovery_at = 0.0
+    if mode06_discovery_pending:
+        log.warning("Mode 06 discovery returned zero MIDs; will retry after successful ECU contact")
     budget_rps = _bus_budget_requests_per_second(spec)
     did_indices = [index for index, request in enumerate(requests) if request.kind == "did"]
     freeze_frame_indices = [
@@ -188,6 +201,23 @@ def run_can_obd_loop(
         log.warning("canable obd streaming has no PID/DID requests; recording CAN only")
 
     request_states = _initial_request_states(requests, spec, time.monotonic())
+
+    def retry_mode06_after_contact(now: float) -> None:
+        nonlocal mode06_discovery_pending, next_mode06_discovery_at
+        if not mode06_discovery_pending or now < next_mode06_discovery_at:
+            return
+        discovered = _retry_mode06_discovery(
+            client,
+            requests,
+            request_states,
+            spec=spec,
+            now=now,
+        )
+        if discovered:
+            mode06_discovery_pending = False
+        else:
+            next_mode06_discovery_at = now + MODE06_DISCOVERY_RETRY_SECONDS
+
     next_budget_at = time.monotonic()
     next_metrics_at = time.monotonic()
     # Batching is opt-in and self-disabling. An ECU that ignores or refuses
@@ -344,6 +374,7 @@ def run_can_obd_loop(
             )
             if answered:
                 consecutive_batch_failures = 0
+                retry_mode06_after_contact(time.monotonic())
             else:
                 consecutive_batch_failures += 1
                 if consecutive_batch_failures >= MAX_CONSECUTIVE_BATCH_FAILURES:
@@ -406,6 +437,7 @@ def run_can_obd_loop(
         if emitted:
             request_state.responses += 1
             request_state.last_response_at = time.monotonic()
+            retry_mode06_after_contact(time.monotonic())
         elif result.negative_response_code is not None:
             # Formal ECU refusal, not a true timeout — counted separately
             # (see `QueryResult`) so it doesn't masquerade as bus silence.
@@ -437,6 +469,44 @@ def run_can_obd_loop(
         )
         stats.scheduler_snapshots += 1
     return stats
+
+
+def _retry_mode06_discovery(
+    client: _PidDiscoveryClient,
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    *,
+    spec: CanObdSpec,
+    now: float,
+) -> tuple[int, ...]:
+    """Discover and install Mode 06 requests after the bus becomes usable."""
+    discover = getattr(client, "query_supported_mode_06_mids", None)
+    mids = tuple(discover()) if discover is not None else ()
+    if not mids:
+        log.warning(
+            "Mode 06 retry returned zero MIDs; keeping discovery pending",
+            extra={"retry_seconds": MODE06_DISCOVERY_RETRY_SECONDS},
+        )
+        return ()
+
+    new_requests = [
+        _PollRequest(
+            kind="service",
+            service=0x06,
+            identifier=mid,
+            request_id=DEFAULT_REQUEST_ID,
+            channel="MONITOR_RESULTS",
+            poll_tier="dtc",
+        )
+        for mid in mids
+    ]
+    requests.extend(new_requests)
+    states.extend(_initial_request_states(new_requests, spec, now))
+    log.info(
+        "Mode 06 discovery recovered after ECU contact",
+        extra={"mode06_mids": [f"0x{mid:02X}" for mid in mids]},
+    )
+    return mids
 
 
 async def collect_can_obd_from_config(

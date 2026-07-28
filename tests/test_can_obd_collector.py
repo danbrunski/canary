@@ -345,6 +345,85 @@ def test_query_with_tap_dtc_services_remain_identifierless() -> None:
     assert bytes(bus.sent[0].data) == bytes([0x01, 0x03, 0, 0, 0, 0, 0, 0])
 
 
+def test_mode06_discovery_retries_after_successful_obd_contact(caplog) -> None:  # type: ignore[no-untyped-def]
+    caplog.set_level("INFO")
+
+    class _Discovery:
+        calls = 0
+
+        def query_supported_mode_01_pids(self) -> tuple[int, ...]:
+            return ()
+
+        def query_supported_mode_06_mids(self) -> tuple[int, ...]:
+            self.calls += 1
+            return () if self.calls == 1 else (0xA2,)
+
+    class _Bus(_SilentBus):
+        def __init__(self) -> None:
+            super().__init__()
+            self.responses: list[can.Message] = []
+
+        def send(self, msg: can.Message) -> None:
+            super().send(msg)
+            data = bytes(msg.data)
+            if data[:3] == bytes([0x02, 0x01, 0x0C]):
+                self.responses.append(
+                    can.Message(
+                        arbitration_id=0x7E8,
+                        data=bytes([0x04, 0x41, 0x0C, 0x0A, 0xF0, 0, 0, 0]),
+                        is_extended_id=False,
+                    )
+                )
+            elif data[:3] == bytes([0x02, 0x06, 0xA2]):
+                self.responses.append(
+                    can.Message(
+                        arbitration_id=0x7E8,
+                        data=bytes([0x03, 0x46, 0xA2, 0x0C, 0, 0, 0, 0]),
+                        is_extended_id=False,
+                    )
+                )
+
+        def recv(self, timeout: float = 0.0) -> can.Message | None:
+            if self.responses:
+                return self.responses.pop(0)
+            return super().recv(timeout)
+
+    discovery = _Discovery()
+    bus = _Bus()
+    stop = threading.Event()
+    readings: list[Any] = []
+
+    def on_reading(reading: Any) -> None:
+        readings.append(reading)
+        if reading.pid == "MONITOR_RESULTS":
+            stop.set()
+
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        poll_rate_hz=100.0,
+        pids=("RPM",),
+        request_timeout_seconds=0.05,
+        dtc_poll_interval_seconds=0.0,
+        service_poll_interval_seconds=300.0,
+        service_mids="auto",
+    )
+    run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        spec,
+        on_frame=lambda _msg: None,
+        on_reading=on_reading,
+        stop_event=stop,
+        deadline_monotonic=time.monotonic() + 1.0,
+        client_factory=lambda _bus: discovery,
+    )
+
+    assert discovery.calls == 2
+    assert any(bytes(message.data)[:3] == bytes([0x02, 0x06, 0xA2]) for message in bus.sent)
+    assert any(reading.pid == "MONITOR_RESULTS" for reading in readings)
+    assert "Mode 06 discovery returned zero MIDs" in caplog.text
+    assert "Mode 06 discovery recovered after ECU contact" in caplog.text
+
+
 def test_parse_pid_token_accepts_auto_names_and_hex() -> None:
     assert parse_pid_token("auto") is None
     assert parse_pid_token("RPM") == 0x0C
