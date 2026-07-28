@@ -21,7 +21,13 @@ from .components import DaemonComponents, build_components
 from .drain import drain_queue_with_broadcast
 from .inference import build_live_feature_source, run_live_inference
 from .online_training import run_online_training_scheduler
-from .polling import poll_behavior_models, poll_config, poll_model_managers, poll_passive_ttl
+from .polling import (
+    poll_behavior_models,
+    poll_bus_budget_ttl,
+    poll_config,
+    poll_model_managers,
+    poll_passive_ttl,
+)
 from .retention import _active_replay_dir, run_retention_sweeper
 from .server import serve_in_background
 
@@ -184,6 +190,7 @@ async def run_daemon(
         )
     )
     passive_ttl_task = asyncio.create_task(poll_passive_ttl(stop_event))
+    bus_budget_ttl_task = asyncio.create_task(poll_bus_budget_ttl(stop_event))
     retention_task = asyncio.create_task(
         run_retention_sweeper(
             config.collection.storage_path,
@@ -295,6 +302,11 @@ async def run_daemon(
             passive_ttl_task.cancel()
             try:
                 await passive_ttl_task
+            except asyncio.CancelledError:
+                pass
+            bus_budget_ttl_task.cancel()
+            try:
+                await bus_budget_ttl_task
             except asyncio.CancelledError:
                 pass
             retention_task.cancel()

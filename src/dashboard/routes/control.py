@@ -20,7 +20,7 @@ from src.alerts.tuning import (
     save_tuning_config,
 )
 from src.analysis.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore
-from src.collection import tuning_profile, tx_gate
+from src.collection import bus_budget, tuning_profile, tx_gate
 from src.collection.can_obd_client import DisallowedServiceError
 from src.collection.custom_pids import (
     CustomPid,
@@ -86,6 +86,7 @@ from src.control.trends import corpus_trend_summary
 from src.dashboard.broadcast import Broadcaster
 from src.dashboard.readers import read_anomalies_since
 from src.dashboard.schemas import (
+    BusBudgetRequest,
     CanActivityRequest,
     CaptureStartRequest,
     CaptureStopRequest,
@@ -501,6 +502,31 @@ def register_control_routes(
         )
         payload = {"passive": tx_gate.snapshot(), "previous_enabled": previous}
         publish_control_event("passive", "ok", payload)
+        return payload
+
+    @app.get("/control/bus-budget")
+    def get_control_bus_budget(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        return {"bus_budget": bus_budget.snapshot()}
+
+    @app.post("/control/bus-budget")
+    def post_control_bus_budget(
+        request: BusBudgetRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            previous = bus_budget.set_override(
+                request.requests_per_second,
+                source="control",
+                ttl_seconds=request.ttl_seconds,
+            )
+        except bus_budget.BudgetOutOfRangeError as exc:
+            # Schema bounds already cover the HTTP path; this catches a
+            # constant drifting out of sync with the module's own limits.
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        payload = {"bus_budget": bus_budget.snapshot(), "previous_requests_per_second": previous}
+        publish_control_event("bus_budget", "ok", payload)
         return payload
 
     @app.get("/control/tuning-mode")

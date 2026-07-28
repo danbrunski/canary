@@ -94,6 +94,9 @@ from src.mcp_server.tools import (
     vehicle_ledger as vehicle_ledger_tool,
 )
 from src.mcp_server.write_tools import (
+    bus_budget as bus_budget_write_tool,
+)
+from src.mcp_server.write_tools import (
     can_activity as can_activity_write_tool,
 )
 from src.mcp_server.write_tools import (
@@ -908,6 +911,29 @@ def _register_write_tools(
         """
         return await passive_write_tool.set_passive_mode(
             client, audit, enabled=enabled, ttl_seconds=ttl_seconds
+        )
+
+    @mcp.tool()
+    async def set_bus_budget(
+        requests_per_second: float | None,
+        ttl_seconds: float | None = 600.0,
+    ) -> dict[str, Any]:
+        """Raise/clear the OBD request-rate budget for a bounded capture.
+
+        Default is 8 req/s against a measured 667 req/s capability — the
+        reason a WOT pull yields ~23 usable samples where UpRev's K-line
+        logger gets 537. Raise it for the pull, drop it after; pass
+        `requests_per_second=None` to clear. Pairs with `set_tuning_mode`
+        (narrow the set *and* enlarge the budget), but tuning mode also
+        suspends Mode-22 DID windows, so leave it off if you need DIDs.
+
+        TTL defaults to 600 s because a forgotten override is silent — it
+        just keeps polling at up to 25x rate. Ceiling is 200 req/s; watch
+        `response_rate` in `get_status`, since past the point responses stop
+        keeping up the extra requests are only bus noise.
+        """
+        return await bus_budget_write_tool.set_bus_budget(
+            client, audit, requests_per_second=requests_per_second, ttl_seconds=ttl_seconds
         )
 
     @mcp.tool()

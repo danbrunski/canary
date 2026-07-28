@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker
+from src.collection import bus_budget as bus_budget_gate
 from src.collection import tuning_profile, tx_gate
 from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
@@ -205,6 +206,10 @@ class StatusSnapshot:
     #: reason as ``passive``, so a narrowed rotation is not mistaken for a
     #: collection fault.
     tuning_mode: dict[str, Any] | None = None
+    #: OBD request-rate override (src/collection/bus_budget.py). Surfaced
+    #: because an armed override silently changes every channel's achieved
+    #: rate, which otherwise reads as a collection anomaly.
+    bus_budget: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -224,6 +229,7 @@ class StatusSnapshot:
             "model_provenance": self.model_provenance,
             "passive": self.passive,
             "tuning_mode": self.tuning_mode,
+            "bus_budget": self.bus_budget,
         }
 
 
@@ -445,6 +451,7 @@ def build_status(
         model_provenance=model_provenance if models_dir is not None else None,
         passive=tx_gate.snapshot(),
         tuning_mode=tuning_profile.snapshot(),
+        bus_budget=bus_budget_gate.snapshot(),
     )
 
 

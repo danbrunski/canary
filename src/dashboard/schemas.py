@@ -186,6 +186,23 @@ class PassiveModeRequest(_ControlRequest):
     ttl_seconds: float | None = Field(default=None, gt=0.0, le=3600.0)
 
 
+class BusBudgetRequest(_ControlRequest):
+    """Override the OBD request-rate budget for a bounded capture.
+
+    The scheduler's default is a conservative 8 req/s against a measured
+    667 req/s capability, which is why WOT work has had to borrow UpRev's
+    K-line logger. Raise it for a pull, drop it after. Send
+    ``requests_per_second: null`` to clear. See src/collection/bus_budget.py
+    for why the ceiling is 200 rather than the measured maximum, and why the
+    TTL defaults to on here when passive mode's does not."""
+
+    #: ``None`` clears the override and returns to the configured default.
+    requests_per_second: float | None = Field(default=None, ge=2.0, le=200.0)
+    #: Omitted → the module's 600 s default. Explicit ``null`` opts out of
+    #: auto-revert entirely, which is deliberate-only.
+    ttl_seconds: float | None = Field(default=600.0, gt=0.0, le=3600.0)
+
+
 class TuningModeRequest(_ControlRequest):
     """Arm/disarm the focused high-rate tuning poll profile.
 

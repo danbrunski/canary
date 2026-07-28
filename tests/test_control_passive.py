@@ -212,3 +212,59 @@ def test_rearming_tuning_mode_does_not_split_the_session(tmp_path: Path) -> None
         assert writer.paths.root == first
     finally:
         tuning_profile.set_active(False, source="test")
+
+
+def test_bus_budget_routes_require_auth(tmp_path: Path) -> None:
+    client = _api(tmp_path)
+    assert client.get("/control/bus-budget").status_code == 401
+    assert client.post("/control/bus-budget", json={"requests_per_second": 50}).status_code == 401
+
+
+def test_bus_budget_override_round_trips(tmp_path: Path) -> None:
+    """Raise the budget for a bounded capture, then clear it.
+
+    The default 8 req/s is why a WOT pull yields ~23 usable samples where
+    UpRev's K-line logger gets 537; this is the lever that closes that gap.
+    """
+    from src.collection import bus_budget
+
+    client = _api(tmp_path)
+    try:
+        armed = client.post(
+            "/control/bus-budget",
+            json={"requests_per_second": 80.0, "ttl_seconds": 300.0},
+            headers=_auth(),
+        )
+        assert armed.status_code == 200
+        body = armed.json()["bus_budget"]
+        assert body["override_requests_per_second"] == 80.0
+        assert body["ttl_remaining_seconds"] == pytest.approx(300.0, abs=2.0)
+        assert bus_budget.effective(8.0) == 80.0
+
+        # Status must surface it — an unexplained jump in achieved rate
+        # otherwise reads as a collection anomaly.
+        assert client.get("/status").json()["bus_budget"]["override_requests_per_second"] == 80.0
+
+        cleared = client.post(
+            "/control/bus-budget", json={"requests_per_second": None}, headers=_auth()
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["previous_requests_per_second"] == 80.0
+        assert bus_budget.effective(8.0) == 8.0
+    finally:
+        bus_budget.reset()
+
+
+def test_bus_budget_rejects_above_ceiling(tmp_path: Path) -> None:
+    """422 rather than clamping — see test_bus_budget.py for why."""
+    from src.collection import bus_budget
+
+    client = _api(tmp_path)
+    try:
+        resp = client.post(
+            "/control/bus-budget", json={"requests_per_second": 500.0}, headers=_auth()
+        )
+        assert resp.status_code == 422
+        assert bus_budget.override() is None
+    finally:
+        bus_budget.reset()

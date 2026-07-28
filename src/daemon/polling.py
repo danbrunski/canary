@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from src.collection import tx_gate
+from src.collection import bus_budget, tx_gate
 from src.config import CanaryConfig
 from src.decode.behavior_models import load_behavior_models, unknown_operating_modes
 from src.models.health import HealthMonitor
@@ -35,6 +35,31 @@ async def poll_passive_ttl(
     """
     while not stop_event.is_set():
         tx_gate.check_expiry()
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            continue
+
+
+async def poll_bus_budget_ttl(
+    stop_event: asyncio.Event,
+    *,
+    interval_seconds: float = DEFAULT_PASSIVE_TTL_POLL_SECONDS,
+) -> None:
+    """Revert an OBD bus-budget override once its TTL expires.
+
+    Deliberately a separate task from :func:`poll_passive_ttl` rather than a
+    second line in its loop: the two gates are independent, and folding this
+    in would have meant renaming that function plus its references across
+    another session's freshly-landed code for no behavioural gain. The cost
+    is one extra task that sleeps.
+
+    Matters more than the passive TTL does, because a forgotten override is
+    *quiet* — it just keeps polling at up to 25x the intended rate. See
+    ``src.collection.bus_budget``.
+    """
+    while not stop_event.is_set():
+        bus_budget.check_expiry()
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
         except TimeoutError:
@@ -213,5 +238,6 @@ __all__ = [
     "poll_behavior_models",
     "poll_config",
     "poll_model_managers",
+    "poll_bus_budget_ttl",
     "poll_passive_ttl",
 ]

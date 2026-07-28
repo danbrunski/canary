@@ -31,7 +31,7 @@ from functools import partial
 import can
 
 from src.can_ids import parse_standard_can_id
-from src.collection import tuning_profile, tx_gate
+from src.collection import bus_budget, tuning_profile, tx_gate
 from src.collection.can_collector import (
     DEFAULT_RECONNECT_POLICY,
     RecordingResult,
@@ -303,7 +303,9 @@ def run_can_obd_loop(
                     deadline_monotonic=deadline_monotonic,
                 )
                 controller.on_session_response(ok=ok, states=request_states, now=time.monotonic())
-                next_budget_at = max(next_budget_at + 1.0 / budget_rps, time.monotonic())
+                next_budget_at = max(
+                    next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
+                )
                 continue
             eligible = partial(controller.request_eligible, now=now)
 
@@ -403,7 +405,9 @@ def run_can_obd_loop(
                 request_states[index].next_due_at = _next_request_due_at(
                     requests[index], request_states[index], spec
                 )
-            next_budget_at = max(next_budget_at + 1.0 / budget_rps, time.monotonic())
+            next_budget_at = max(
+                next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
+            )
             continue
 
         timeout_seconds = spec.request_timeout_seconds
@@ -452,7 +456,9 @@ def run_can_obd_loop(
             controller.on_request_attempted(request_index)
 
         request_state.next_due_at = _next_request_due_at(request, request_state, spec)
-        next_budget_at = max(next_budget_at + 1.0 / budget_rps, time.monotonic())
+        next_budget_at = max(
+            next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
+        )
 
     if on_scheduler_metrics is not None:
         on_scheduler_metrics(

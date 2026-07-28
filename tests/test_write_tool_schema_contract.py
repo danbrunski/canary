@@ -27,6 +27,7 @@ from src.dashboard import schemas
 from src.mcp_server.audit import MCPAuditLogger
 from src.mcp_server.client import DaemonClient
 from src.mcp_server.write_tools import (
+    bus_budget,
     can_activity,
     captures,
     feedback,
@@ -123,6 +124,11 @@ CASES: list[tuple[str, Any, type]] = [
             event_id="abc123",
         ),
         schemas.VehicleEventRequest,
+    ),
+    (
+        "set_bus_budget",
+        lambda c, a: bus_budget.set_bus_budget(c, a, requests_per_second=80.0, ttl_seconds=300.0),
+        schemas.BusBudgetRequest,
     ),
     (
         "set_passive_mode",
