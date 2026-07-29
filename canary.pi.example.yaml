@@ -82,6 +82,10 @@ collection:
   reconnect_max_delay_seconds: 60
   queue_max_size: 10000
   queue_warning_fraction: 0.8
+  # Persist decoded CAN signals (source "decoded", raw integer values) to
+  # session Parquet for bindings at these confidence levels. Storage is
+  # forever: default is validated bindings only. [] disables.
+  persist_decoded_confidence: [confirmed]
 
 preprocessing:
   resample_hz: 1

@@ -13,6 +13,8 @@ from src.config import CanaryConfig
 from src.control.capture import CaptureController
 from src.control.replay_control import ReplayController
 from src.control.trip_end import handle_trip_end
+from src.dashboard.paths import DEFAULT_BINDINGS_PATH
+from src.decode.frame_decoder import FrameDecoder
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
@@ -160,6 +162,27 @@ async def run_daemon(
             force_poll_trigger=components.force_poll_trigger,
         )
 
+    # Decoded-channel persistence (config-gated): bound CAN signals at the
+    # configured confidence levels are stored as queryable ``decoded:*`` rows
+    # next to their raw frames. Absent bindings file → decoder is None and
+    # only raw frames are persisted, exactly as before.
+    storage_frame_decoder = (
+        FrameDecoder.from_path(
+            DEFAULT_BINDINGS_PATH,
+            confidence_levels=config.collection.persist_decoded_confidence,
+        )
+        if config.collection.persist_decoded_confidence
+        else None
+    )
+    if storage_frame_decoder is not None:
+        log.info(
+            "decoded-channel persistence enabled",
+            extra={
+                "signals": storage_frame_decoder.signal_count,
+                "confidence": list(config.collection.persist_decoded_confidence),
+            },
+        )
+
     drain_task = asyncio.create_task(
         drain_queue_with_broadcast(
             queue,
@@ -179,6 +202,9 @@ async def run_daemon(
             storage_warning_mb=config.collection.storage_warning_mb,
             queue_warning_fraction=config.collection.queue_warning_fraction,
             health_monitor=components.health_monitor,
+            storage_decode=(
+                storage_frame_decoder.decode if storage_frame_decoder is not None else None
+            ),
         )
     )
     poll_task = asyncio.create_task(

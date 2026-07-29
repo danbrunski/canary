@@ -251,6 +251,14 @@ class CollectionConfig(_Strict):
     reconnect_max_delay_seconds: float = 60.0
     queue_max_size: int = 10_000
     queue_warning_fraction: float = 0.8
+    #: Bindings confidence levels whose decoded signals are persisted to
+    #: session Parquet alongside the raw CAN frames (source ``decoded``,
+    #: RAW integer values — same semantics as the training path's
+    #: decode-at-read, see ``src/decode/frame_decoder.py``). Storage is
+    #: forever, so the default persists only ground-truth-validated
+    #: bindings; widen to e.g. ``["confirmed", "high"]`` deliberately.
+    #: Empty disables decoded persistence (raw frames are always kept).
+    persist_decoded_confidence: tuple[str, ...] = ("confirmed",)
     #: Simulation backend: when set, the daemon replays this recorded
     #: session (dir path or id under storage) onto the telemetry queue
     #: *instead of* the real CAN/OBD collectors — no hardware needed, the

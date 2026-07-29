@@ -79,6 +79,15 @@ def decode_can_rows(
     signals = bindings.signals
     if confidence_levels is not None:
         signals = [s for s in signals if s.confidence in confidence_levels]
+    # Sessions written after decoded-channel persistence landed (or run
+    # through tools/backfill_decoded.py) already carry stored decoded rows
+    # with identical raw-value semantics — recomputing those signals here
+    # would double every row and feed duplicate observations to `to_wide`.
+    # Stored rows win; re-run the backfill tool to refresh them after a
+    # binding definition changes.
+    already_stored = set(long_frame.loc[long_frame["source"] == DECODED_SOURCE, "channel"].unique())
+    if already_stored:
+        signals = [s for s in signals if s.name not in already_stored]
     if not signals:
         return long_frame
 
