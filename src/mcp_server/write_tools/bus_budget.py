@@ -47,9 +47,16 @@ async def set_bus_budget(
     ``get_status`` reports ``bus_budget`` (override, source, TTL remaining)
     so an unexpectedly high achieved rate is distinguishable from a fault.
     """
-    body: dict[str, Any] = {"requests_per_second": requests_per_second}
-    if ttl_seconds is not None:
-        body["ttl_seconds"] = ttl_seconds
+    # Sent unconditionally, including as an explicit ``null``. Omitting the
+    # key on ``None`` would hand the decision back to the daemon's own
+    # ``600.0`` default, making the documented "opt out of the TTL" path
+    # unreachable through MCP: the caller asks for no auto-revert and gets a
+    # 600 s one, which is the failure mode the TTL exists to prevent —
+    # silently reverting mid-capture.
+    body: dict[str, Any] = {
+        "requests_per_second": requests_per_second,
+        "ttl_seconds": ttl_seconds,
+    }
     return await audited_post(
         client, audit, tool="set_bus_budget", path="/control/bus-budget", body=body
     )

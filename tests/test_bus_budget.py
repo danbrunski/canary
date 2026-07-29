@@ -113,3 +113,58 @@ def test_collector_reads_the_override_live_not_at_startup() -> None:
         "armed mid-drive would not take effect"
     )
     assert source.count("bus_budget.effective(budget_rps)") >= 3
+
+
+def test_status_reports_the_effective_rate_not_the_configured_one() -> None:
+    """/status must not contradict the bus.
+
+    The collector paces at `effective()`, so reporting the configured value
+    here made `/status` read 8.0 while requests actually went out at 25/s.
+    The override's whole documented value is that an unexpectedly high
+    achieved rate is distinguishable from a fault, which requires the two
+    numbers to agree.
+    """
+    from src.collection.can_obd_collector import CanObdLoopStats
+    from src.collection.obd_scheduler import CanObdSpec, _scheduler_metrics
+    from src.config import CanBusConfig
+
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        poll_rate_hz=1.0,
+        pids=("RPM",),
+    )
+    configured = _scheduler_metrics([], [], spec, CanObdLoopStats(), now=0.0).to_dict()
+    assert configured["bus_budget_requests_per_second"] == 8.0
+
+    bus_budget.set_override(25.0, source="test", ttl_seconds=None)
+    overridden = _scheduler_metrics([], [], spec, CanObdLoopStats(), now=0.0).to_dict()
+    assert overridden["bus_budget_requests_per_second"] == 25.0
+
+
+@pytest.mark.asyncio
+async def test_mcp_write_tool_can_express_no_ttl() -> None:
+    """`ttl_seconds=None` is the documented opt-out; it must reach the daemon.
+
+    Omitting the key instead handed the choice back to the daemon's own 600 s
+    default, so a caller asking for an override that persists for the drive
+    silently got one that auto-reverted mid-capture.
+    """
+    from src.mcp_server.write_tools import bus_budget as write_tool
+
+    sent: dict[str, object] = {}
+
+    async def _capture(client, audit, *, tool, path, body):  # type: ignore[no-untyped-def]
+        sent.update(body)
+        return {}
+
+    import src.mcp_server.write_tools.bus_budget as module
+
+    original = module.audited_post
+    module.audited_post = _capture  # type: ignore[assignment]
+    try:
+        await write_tool.set_bus_budget(None, None, requests_per_second=25.0, ttl_seconds=None)
+    finally:
+        module.audited_post = original  # type: ignore[assignment]
+
+    assert "ttl_seconds" in sent, "the opt-out never reached the daemon"
+    assert sent["ttl_seconds"] is None

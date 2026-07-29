@@ -10,6 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+from src.collection import bus_budget
 from src.collection.can_obd_client import DEFAULT_REQUEST_ID, PID_DECODERS
 from src.collection.isotp import nrc_name
 from src.collection.obd_registry import PollTier, lookup
@@ -1111,7 +1112,15 @@ def _scheduler_metrics(
 
     return ObdSchedulerMetrics(
         configured_poll_rate_hz=float(spec.poll_rate_hz),
-        bus_budget_requests_per_second=round(_bus_budget_requests_per_second(spec), 4),
+        # The *effective* rate, not the configured one. The collector paces at
+        # `bus_budget.effective(...)`, so reporting the config value here made
+        # /status contradict the bus whenever an override was armed: it read
+        # 8.0 while requests actually went out at 25/s. That defeats the one
+        # property the override is documented to have — that an unexpectedly
+        # high achieved rate is distinguishable from a fault.
+        bus_budget_requests_per_second=round(
+            bus_budget.effective(_bus_budget_requests_per_second(spec)), 4
+        ),
         active_requests=active,
         backed_off_requests=backed_off,
         requests_sent=stats.requests_sent,
