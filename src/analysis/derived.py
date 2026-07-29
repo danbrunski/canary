@@ -385,10 +385,15 @@ def compute_instantaneous_channels(wide: pd.DataFrame, vehicle: VehicleParameter
             out["derived:INSTANT_ECONOMY_MPG"] = mpg
 
     mapp = _series(out, "obd:INTAKE_PRESSURE", "decoded:MAP")
-    if mapp is not None:
-        baro = _series(out, "obd:BAROMETRIC_PRESSURE")
-        baro_v = baro if baro is not None else pd.Series(101.325, index=out.index)
-        out["derived:BOOST_VACUUM_KPA"] = mapp - baro_v
+    baro = _series(out, "obd:BAROMETRIC_PRESSURE")
+    if mapp is not None and baro is not None:
+        # Boost/vacuum is MAP *relative to ambient*, so a missing baro makes it
+        # uncomputable, not approximable. This used to substitute sea-level
+        # 101.325 kPa, which is ~21 kPa wrong at the 2000 m where this vehicle
+        # actually runs — enough to report a healthy NA engine as sitting in
+        # permanent deep vacuum, and wrong at *any* non-sea-level altitude.
+        # Skip the channel instead, per this function's stated contract.
+        out["derived:BOOST_VACUUM_KPA"] = mapp - baro
 
     power_kw = _estimated_power_kw(out, vehicle, fuel, fuel_g_s)
     if power_kw is not None:

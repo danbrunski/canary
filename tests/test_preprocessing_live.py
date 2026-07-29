@@ -651,13 +651,14 @@ def test_derived_instantaneous_channels_appear_on_live_tick(config: CanaryConfig
     src.observe(TelemetryRecord.obd(now.timestamp(), "SPEED", 60.0, "km/h"))
     src.observe(TelemetryRecord.obd(now.timestamp(), "MAF", 12.0, "g/s"))
     src.observe(TelemetryRecord.obd(now.timestamp(), "INTAKE_PRESSURE", 95.0, "kPa"))
+    src.observe(TelemetryRecord.obd(now.timestamp(), "BAROMETRIC_PRESSURE", 80.0, "kPa"))
     row = src.tick(now)
     assert row is not None
 
     point = src.latest_operating_point
     assert point is not None
     assert point["derived:FUEL_RATE_LPH"] > 0
-    assert point["derived:BOOST_VACUUM_KPA"] == pytest.approx(95.0 - 101.325)
+    assert point["derived:BOOST_VACUUM_KPA"] == pytest.approx(95.0 - 80.0)
     assert point["derived:ESTIMATED_POWER_HP"] > 0
     assert "derived:TRIP_DISTANCE_KM" not in point
 

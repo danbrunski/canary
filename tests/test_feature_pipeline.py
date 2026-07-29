@@ -242,6 +242,7 @@ def test_featurize_wide_frame_appends_instantaneous_derived_channels(
             "obd:MAF": [12.0] * n,
             "obd:SPEED": [60.0] * n,
             "obd:INTAKE_PRESSURE": [95.0] * n,
+            "obd:BAROMETRIC_PRESSURE": [80.0] * n,
         }
     )
     result = featurize_wide_frame(wide, config)
@@ -249,7 +250,7 @@ def test_featurize_wide_frame_appends_instantaneous_derived_channels(
     assert "derived:FUEL_RATE_LPH" in op.columns
     assert (op["derived:FUEL_RATE_LPH"] > 0).all()
     assert "derived:BOOST_VACUUM_KPA" in op.columns
-    assert op["derived:BOOST_VACUUM_KPA"].iloc[0] == pytest.approx(95.0 - 101.325)
+    assert op["derived:BOOST_VACUUM_KPA"].iloc[0] == pytest.approx(95.0 - 80.0)
     assert "derived:ESTIMATED_POWER_HP" in op.columns
     # The cumulative trip integrals are NOT part of this shared builder —
     # this frame is a live ring-buffer *window* on the streaming path, and a

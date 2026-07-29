@@ -88,6 +88,18 @@ def test_boost_vacuum_uses_baro_when_present() -> None:
     assert out["derived:BOOST_VACUUM_KPA"].tolist() == [-60.0, 10.0]
 
 
+def test_boost_vacuum_skipped_when_baro_missing() -> None:
+    """No baro means no ambient reference, so the channel is uncomputable.
+
+    It used to fall back to sea-level 101.325 kPa, which is ~21 kPa wrong at
+    the ~2000 m this vehicle runs at — reporting an NA engine as permanently
+    deep in vacuum. Skipping matches the rest of compute_derived_channels.
+    """
+    df = _frame(2, **{"obd:INTAKE_PRESSURE": [40.0, 110.0]})
+    out = compute_derived_channels(df, GASOLINE)
+    assert "derived:BOOST_VACUUM_KPA" not in out.columns
+
+
 def test_estimated_power_from_torque_pids() -> None:
     # 50% of 300 Nm = 150 Nm at 3000 rpm → P = 150 * 3000 * 2π/60 / 1000
     # = 47.12 kW crank; ×(1-0.15) wheel; ×1.341 hp.
