@@ -27,6 +27,12 @@ log = logging.getLogger(__name__)
 
 TelemetryOverflowPolicy = Literal["drop_oldest", "drop_newest"]
 
+# One worker-thread handoff per raw record made the storage sink unusually
+# sensitive to event-loop pressure. Keep batches bounded so the actor remains
+# responsive to mode transitions and shutdown while amortizing that handoff.
+STORAGE_WRITE_BATCH_SIZE = 1024
+STORAGE_WRITE_BATCH_MAX_WAIT_SECONDS = 0.01
+
 
 @dataclass(frozen=True)
 class TelemetrySink:
@@ -114,8 +120,14 @@ async def run_storage_sink(
     storage_warning_mb: int | None = None,
     queue_warning_fraction: float = 0.8,
     health_monitor: HealthMonitor | None = None,
+    write_batch_size: int = STORAGE_WRITE_BATCH_SIZE,
+    write_batch_max_wait_seconds: float = STORAGE_WRITE_BATCH_MAX_WAIT_SECONDS,
 ) -> None:
     """Persist telemetry to Parquet from its own queue."""
+    if write_batch_size <= 0:
+        raise ValueError("write_batch_size must be positive")
+    if write_batch_max_wait_seconds < 0:
+        raise ValueError("write_batch_max_wait_seconds must be non-negative")
     async_writer = ensure_async_writer(writer)
     queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
     if storage_path is not None and storage_warning_mb is not None:
@@ -126,7 +138,7 @@ async def run_storage_sink(
             queue_monitor.observe(queue)
             _observe_queue(health_monitor, "storage", queue)
             try:
-                record = await asyncio.wait_for(queue.get(), timeout=poll_interval)
+                first = await asyncio.wait_for(queue.get(), timeout=poll_interval)
             except TimeoutError:
                 if await async_writer.flush_due():
                     await _storage_call(
@@ -137,14 +149,43 @@ async def run_storage_sink(
                         warn_if_storage_low(storage_path, storage_warning_mb)
                 continue
 
+            records = [first]
+            batch_deadline = asyncio.get_running_loop().time() + write_batch_max_wait_seconds
+            while len(records) < write_batch_size:
+                try:
+                    records.append(queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    remaining = batch_deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        break
+                    try:
+                        records.append(await asyncio.wait_for(queue.get(), timeout=remaining))
+                    except TimeoutError:
+                        break
+
             try:
-                await _storage_call(
-                    async_writer.write,
-                    record,
+                started_at = time.perf_counter()
+                files = await _storage_call(
+                    async_writer.write_many,
+                    records,
                     health_monitor=health_monitor,
                 )
+                if health_monitor is not None:
+                    if files is None:
+                        # ``_storage_call`` reports and swallows the exception
+                        # so the sink can continue. The failed batch is no
+                        # longer queued, therefore count it as explicit loss.
+                        health_monitor.note_telemetry_drop("storage", count=len(records))
+                    else:
+                        health_monitor.observe_telemetry_write(
+                            "storage",
+                            records=len(records),
+                            elapsed_seconds=time.perf_counter() - started_at,
+                            flushes=len(files),
+                        )
             finally:
-                queue.task_done()
+                for _ in records:
+                    queue.task_done()
                 queue_monitor.observe(queue)
                 _observe_queue(health_monitor, "storage", queue)
     finally:

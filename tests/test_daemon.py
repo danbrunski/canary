@@ -21,12 +21,14 @@ from src.daemon import (
     drain_queue_with_broadcast,
     poll_model_managers,
     run_retention_sweeper,
+    run_storage_sink,
     run_telemetry_fanout,
 )
 from src.dashboard.broadcast import Broadcaster
 from src.models.health import HealthMonitor
 from src.models.manager import ModelManager
 from src.models.manifest import CURRENT_MANIFEST_FORMAT_VERSION
+from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 
@@ -221,6 +223,89 @@ async def test_telemetry_fanout_marks_storage_overflow_as_explicit_loss() -> Non
 
     assert storage.get_nowait().value == 700.0
     assert health.snapshot()["telemetry_sinks"]["storage"]["dropped_records"] == 2
+
+
+async def test_storage_sink_drains_backlog_in_bounded_batches() -> None:
+    class _RecordingWriter(AsyncParquetTelemetryWriter):
+        def __init__(self) -> None:
+            self.calls: list[list[TelemetryRecord]] = []
+
+        async def write_many(self, records: Any) -> list[Path]:
+            self.calls.append(list(records))
+            return []
+
+        async def flush_due(self) -> bool:
+            return False
+
+        async def flush(self) -> Path | None:
+            return None
+
+        async def close(self) -> Path | None:
+            return None
+
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    for i in range(2500):
+        queue.put_nowait(TelemetryRecord.can(1_778_000_000.0 + i, 0x123, b"12345678"))
+    stop = asyncio.Event()
+    stop.set()
+    health = HealthMonitor()
+    writer = _RecordingWriter()
+
+    await run_storage_sink(
+        queue,
+        writer,
+        stop,
+        health_monitor=health,
+        write_batch_size=1000,
+    )
+
+    assert [len(batch) for batch in writer.calls] == [1000, 1000, 500]
+    assert queue.empty()
+    metrics = health.snapshot()["telemetry_sinks"]["storage"]
+    assert metrics["write_calls"] == 3
+    assert metrics["records_processed"] == 2500
+    assert metrics["max_batch_size"] == 1000
+
+
+async def test_storage_sink_coalesces_records_arriving_just_after_first() -> None:
+    class _RecordingWriter(AsyncParquetTelemetryWriter):
+        def __init__(self) -> None:
+            self.calls: list[list[TelemetryRecord]] = []
+
+        async def write_many(self, records: Any) -> list[Path]:
+            self.calls.append(list(records))
+            return []
+
+        async def flush_due(self) -> bool:
+            return False
+
+        async def flush(self) -> Path | None:
+            return None
+
+        async def close(self) -> Path | None:
+            return None
+
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    queue.put_nowait(TelemetryRecord.can(1_778_000_000.0, 0x123, b"12345678"))
+    stop = asyncio.Event()
+    writer = _RecordingWriter()
+    task = asyncio.create_task(
+        run_storage_sink(
+            queue,
+            writer,
+            stop,
+            write_batch_size=100,
+            write_batch_max_wait_seconds=0.05,
+        )
+    )
+
+    await asyncio.sleep(0.005)
+    for i in range(1, 5):
+        queue.put_nowait(TelemetryRecord.can(1_778_000_000.0 + i, 0x123, b"12345678"))
+    stop.set()
+    await task
+
+    assert [len(batch) for batch in writer.calls] == [5]
 
 
 async def test_drain_publishes_each_record_to_broadcaster(tmp_path: Path) -> None:

@@ -518,6 +518,33 @@ class HealthMonitor:
         state["errors"] = int(state.get("errors", 0)) + 1
         state["last_error"] = f"{type(exc).__name__}: {exc}"
 
+    def observe_telemetry_write(
+        self,
+        name: str,
+        *,
+        records: int,
+        elapsed_seconds: float,
+        flushes: int = 0,
+    ) -> None:
+        """Record durable-writer throughput without retaining every sample."""
+        state = self._sink_state(name)
+        elapsed_ms = max(0.0, elapsed_seconds) * 1000.0
+        state["write_calls"] = int(state.get("write_calls", 0)) + 1
+        state["records_processed"] = int(state.get("records_processed", 0)) + records
+        state["flushes"] = int(state.get("flushes", 0)) + flushes
+        state["last_batch_size"] = records
+        state["max_batch_size"] = max(int(state.get("max_batch_size", 0)), records)
+        state["last_write_ms"] = round(elapsed_ms, 3)
+        state["max_write_ms"] = round(max(float(state.get("max_write_ms", 0.0)), elapsed_ms), 3)
+        state["last_write_records_per_second"] = (
+            round(records / elapsed_seconds, 1) if elapsed_seconds > 0 else None
+        )
+        if flushes:
+            state["last_flushing_write_ms"] = round(elapsed_ms, 3)
+            state["max_flushing_write_ms"] = round(
+                max(float(state.get("max_flushing_write_ms", 0.0)), elapsed_ms), 3
+            )
+
     def _sink_state(self, name: str) -> dict[str, Any]:
         return self._telemetry_sinks.setdefault(
             name,
