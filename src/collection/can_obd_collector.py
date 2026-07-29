@@ -849,7 +849,7 @@ def _response_to_reading(
         if decoded is None:
             return []
         value, unit = decoded
-        return [ObdReading(timestamp, request.channel, value, unit)]
+        return [ObdReading(timestamp, request.channel, value, unit, payload=response.payload)]
 
     if request.kind == "custom":
         # Task 2.6 — decode through the definition's sandboxed formula
@@ -860,7 +860,7 @@ def _response_to_reading(
         if decoded is None:
             return []
         value, unit = decoded
-        return [ObdReading(timestamp, request.channel, value, unit)]
+        return [ObdReading(timestamp, request.channel, value, unit, payload=response.payload)]
 
     # Reuse the public PID decoder behavior without issuing another request:
     # synthesize the same DecodedPid logic locally from PID_DECODERS.
@@ -872,11 +872,13 @@ def _response_to_reading(
     if decoded is None:
         return []
     value, unit = decoded
-    readings = [ObdReading(timestamp, name, value, unit)]
+    readings = [ObdReading(timestamp, name, value, unit, payload=response.payload)]
     if request.identifier == _MONITOR_STATUS_PID:
         mil_on = decode_mil_on(response.payload)
         if mil_on is not None:
-            readings.append(ObdReading(timestamp, _MIL_STATUS_CHANNEL, mil_on, "bool"))
+            readings.append(
+                ObdReading(timestamp, _MIL_STATUS_CHANNEL, mil_on, "bool", payload=response.payload)
+            )
     return readings
 
 

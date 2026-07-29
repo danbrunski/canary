@@ -141,8 +141,14 @@ class ObdReading:
     pid: str
     value: Any
     unit: str
+    #: Raw response data bytes the decoder consumed (None on paths that
+    #: never see the wire bytes, e.g. python-obd's pint-quantity readings).
+    #: Persisted to Parquet so a wrong decoder can be re-run over history.
+    payload: bytes | None = None
 
     def to_json_line(self) -> str:
+        # payload intentionally omitted: the JSONL sidecar is a human-facing
+        # debug log; the bytes ride the Parquet ``payload`` column instead.
         return json.dumps(
             {"t": self.timestamp, "pid": self.pid, "value": self.value, "unit": self.unit}
         )
@@ -385,7 +391,9 @@ def reading_to_record(reading: ObdReading) -> TelemetryRecord:
     value = reading.value
     if not isinstance(value, (bool, int, float, str, type(None))):
         value = str(value)
-    return TelemetryRecord.obd(reading.timestamp, reading.pid, value, reading.unit)
+    return TelemetryRecord.obd(
+        reading.timestamp, reading.pid, value, reading.unit, payload=reading.payload
+    )
 
 
 def queue_reading_callback(
