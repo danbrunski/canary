@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -116,7 +116,7 @@ def test_parse_column_unknown_non_temp_passes_through() -> None:
 def test_build_records_converts_and_anchors_timestamps() -> None:
     frame = pd.DataFrame(
         {
-            "Time": [0.0, 0.5],
+            "Time": [0.0, 500.0],  # ms since log start, as Osiris exports it
             "ENGINE RPM (rpm)": [800.0, 850.0],
             "INTAKE AIR TMP": [140.0, 141.0],
         }
@@ -131,12 +131,32 @@ def test_build_records_converts_and_anchors_timestamps() -> None:
     intake0 = by_channel[("INTAKE_TEMP", started_at)]
     assert intake0.value == pytest.approx(60.0)  # 140F -> 60C
     assert intake0.unit == "degC"
+    # 500 ms after row 0 — not 500 s, which is what reading the column as
+    # seconds would produce (and which the gap-rotator would split apart).
+    assert ("RPM", started_at + timedelta(milliseconds=500)) in by_channel
+
+
+def test_build_records_reads_time_as_milliseconds_not_seconds() -> None:
+    """A real 62 ms/row Osiris log must import as a ~5 min session, not 3.6 days."""
+    rows = 1000
+    frame = pd.DataFrame(
+        {
+            "Time": [float(i * 62) for i in range(rows)],
+            "ENGINE RPM (rpm)": [800.0] * rows,
+        }
+    )
+    started_at = datetime(2026, 7, 29, 11, 20, 29, tzinfo=UTC)
+    records = importer.build_records(frame, started_at=started_at)
+
+    span = max(r.timestamp for r in records) - min(r.timestamp for r in records)
+    assert span == timedelta(milliseconds=62 * (rows - 1))
+    assert span < timedelta(minutes=2)
 
 
 def test_build_records_skips_nan_cells_but_keeps_the_row() -> None:
     frame = pd.DataFrame(
         {
-            "Time": [0.0, 1.0],
+            "Time": [0.0, 1000.0],
             "ENGINE RPM (rpm)": [800.0, 900.0],
             "CAL/LD VALUE (%)": [25.0, None],
         }
@@ -144,7 +164,8 @@ def test_build_records_skips_nan_cells_but_keeps_the_row() -> None:
     started_at = datetime(2026, 7, 27, tzinfo=UTC)
     records = importer.build_records(frame, started_at=started_at)
 
-    channels_at_row_1 = {r.channel for r in records if r.timestamp.second == 1}
+    row_1_at = started_at + timedelta(seconds=1)
+    channels_at_row_1 = {r.channel for r in records if r.timestamp == row_1_at}
     assert channels_at_row_1 == {"RPM"}  # ENGINE_LOAD was NaN — absent, not zero
 
 

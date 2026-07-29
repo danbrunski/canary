@@ -23,10 +23,17 @@ F -> C, and labels the result ``degC`` — the same unit CANary's own
 COOLANT_TEMP/INTAKE_TEMP channels use — so the bug can't recur silently on
 imported data either.
 
-Absolute time anchor: UpRev's own ``Time`` column is seconds-since-log-start,
-not wall-clock, so ``--started-at`` (timezone-aware ISO-8601) is required —
-this script never guesses a timezone from the UpRev filename's local-time
-encoding (``UpRev_Log7-26-2026_5-41-32_PM.csv``), only prints it as a hint.
+Absolute time anchor: UpRev's own ``Time`` column is *milliseconds*-since-
+log-start, not wall-clock, so ``--started-at`` (timezone-aware ISO-8601) is
+required — this script never guesses a timezone from the UpRev filename's
+local-time encoding (``UpRev_Log7-26-2026_5-41-32_PM.csv``), only prints it
+as a hint.
+
+The millisecond unit is not cosmetic: every real Osiris export sampled to
+date carries a median row step of 41-72 (a plausible 14-24 Hz K-line poll
+rate in ms, an absurd one in seconds), and reading the column as seconds
+stretches a 5-minute drive across 3.6 days — which then trips the writer's
+session-gap rotation and shatters one log into hundreds of sessions.
 
 Usage:
   tools/import_uprev_log.py --csv UpRev_Log7-26-2026_5-41-32_PM.csv \
@@ -165,7 +172,7 @@ def build_records(frame: pd.DataFrame, *, started_at: datetime) -> list[Telemetr
     out-of-order timestamp and spuriously starts a second session."""
     if "Time" not in frame.columns:
         raise SystemExit("error: CSV has no 'Time' column (required to anchor row timestamps)")
-    elapsed = pd.to_numeric(frame["Time"], errors="coerce")
+    elapsed_ms = pd.to_numeric(frame["Time"], errors="coerce")
     start_epoch = started_at.timestamp()
 
     columns: list[tuple[str, str, str, bool]] = []
@@ -178,10 +185,10 @@ def build_records(frame: pd.DataFrame, *, started_at: datetime) -> list[Telemetr
 
     records: list[TelemetryRecord] = []
     for row_index in range(len(frame)):
-        row_elapsed = elapsed.iloc[row_index]
-        if pd.isna(row_elapsed):
+        row_elapsed_ms = elapsed_ms.iloc[row_index]
+        if pd.isna(row_elapsed_ms):
             continue
-        timestamp = start_epoch + float(row_elapsed)
+        timestamp = start_epoch + float(row_elapsed_ms) / 1000.0
         for header, channel, unit, is_fahrenheit in columns:
             raw_value = pd.to_numeric(frame[header].iloc[row_index], errors="coerce")
             if pd.isna(raw_value):
