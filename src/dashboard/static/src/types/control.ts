@@ -92,6 +92,41 @@ export interface SessionsResponse {
   count: number;
 }
 
+export interface CaptureProfile {
+  name: string;
+  description: string;
+  mode01: Record<string, number>;
+  mode22: string[];
+  bus_budget_override: number | null;
+  broadcast_decode: boolean;
+  corpus_eligible: boolean;
+  storage_prefix: string;
+}
+
+export interface CaptureProfileState {
+  active: boolean;
+  name: string;
+  started_at: string | null;
+  session_dir: string | null;
+  source: string;
+  channels: string[];
+  mode01: Record<string, number>;
+  mode22: string[];
+  broadcast_decode: boolean;
+  corpus_eligible: boolean;
+  bus_budget_override: number | null;
+}
+
+export interface CaptureProfilesResponse {
+  schema_version: number;
+  profiles: CaptureProfile[];
+}
+
+export interface CaptureProfileWarning {
+  model: string;
+  missing_channels: string[];
+}
+
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
 export interface JobRecord {

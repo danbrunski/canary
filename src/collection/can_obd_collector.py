@@ -103,6 +103,18 @@ from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
 
+
+def _capture_did_request_eligible(
+    controller: DidWindowController,
+    now: float,
+    index: int,
+    request: _PollRequest,
+) -> bool:
+    return controller.request_eligible(index, request, now=now) and tuning_profile.request_eligible(
+        index, request
+    )
+
+
 AUTO_PROBE_TIMEOUT_SECONDS = 0.25
 AUTO_BASELINE_PID_NAMES = tuple(name for _pid, (name, _decoder) in sorted(PID_DECODERS.items()))
 SCHEDULER_METRICS_INTERVAL_SECONDS = 5.0
@@ -282,19 +294,50 @@ def run_can_obd_loop(
             continue
 
         eligible: RequestFilter | None = None
-        if tuning_profile.is_active():
-            # Phase 1.1 tuning capture: concentrate the whole bus budget on a
-            # small channel set, and skip the DID controller entirely so the
-            # `10 C0` session never blacks out Mode 01. Those blackouts stop
-            # Mode 01 for up to 10 s in every 60, which is exactly the gap
-            # that makes a steady-state hold unusable for tuning.
+        if spec.capture_profiles_enabled and tuning_profile.mode22() and controller is not None:
+            # DID-owning profiles explicitly accept the configured diagnostic
+            # session tradeoff. Keep the session controller involved (unlike
+            # Mode-01-only focused captures, which suspend DID windows), while
+            # intersecting its phase gate with the selected profile.
+            controller.advance(request_states, now)
+            # The startup request plan is the union of every saved profile.
+            # A DID outside the active profile must not keep this window's
+            # pending set alive until its max-duration timeout.
+            for did_index in did_indices:
+                if not tuning_profile.request_eligible(did_index, requests[did_index]):
+                    controller.on_request_attempted(did_index)
+            if controller.session_control_due(request_states, now) and now >= next_budget_at:
+                ok = _send_session_control(
+                    bus,
+                    spec.did_session,  # type: ignore[arg-type]
+                    request_id=spec.did_request_id,
+                    timeout_seconds=spec.request_timeout_seconds,
+                    on_frame=on_frame,
+                    stop_event=stop_event,
+                    stats=stats,
+                    deadline_monotonic=deadline_monotonic,
+                )
+                controller.on_session_response(ok=ok, states=request_states, now=time.monotonic())
+                next_budget_at = max(
+                    next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
+                )
+                continue
+            eligible = partial(_capture_did_request_eligible, controller, now)
+        elif spec.capture_profiles_enabled or tuning_profile.is_active():
+            # Apply the selected profile even for ``default``. The request
+            # plan is a startup superset of every saved profile, and filtering
+            # here is what keeps the seeded default byte-identical to config.
+            # A profile with no DIDs deliberately suspends the session
+            # controller, concentrating the budget on its Mode-01 selection.
             eligible = tuning_profile.request_eligible
         elif controller is not None:
+            # Standalone recorder/tests that did not initialize the capture
+            # catalog retain the scheduler's historical behavior.
             controller.advance(request_states, now)
             if controller.session_control_due(request_states, now) and now >= next_budget_at:
                 ok = _send_session_control(
                     bus,
-                    spec.did_session,  # type: ignore[arg-type]  # controller implies non-None
+                    spec.did_session,  # type: ignore[arg-type]
                     request_id=spec.did_request_id,
                     timeout_seconds=spec.request_timeout_seconds,
                     on_frame=on_frame,

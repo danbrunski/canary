@@ -11,6 +11,7 @@ tail, which the loader skips and the husk sweep removes.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections.abc import Callable, Iterable
@@ -21,6 +22,8 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from src.atomic_write import atomic_write_text
+from src.collection.capture_profiles import CaptureProfile
 from src.collection.record_arming import RecordArmingGate
 from src.session import SessionPaths, make_session_dir, session_paths
 from src.storage.retention import (
@@ -239,6 +242,36 @@ class ParquetTelemetryWriter:
         tuning mode is armed, which is what this does.
         """
         return self._enter_isolated_dir(f"_tuning-{tuning_id}")
+
+    def enter_capture_mode(
+        self,
+        profile: CaptureProfile,
+        capture_id: str,
+        tune_revision: str | None = None,
+    ) -> Path | None:
+        """Rotate atomically into a profile-owned capture session."""
+        if profile.name == "default":
+            raise ValueError("default is normal collection, not a bounded capture")
+        if profile.corpus_eligible:
+            flushed = self.rotate_session()
+        else:
+            prefix = profile.storage_prefix or f"_capture-{profile.name}"
+            flushed = self._enter_isolated_dir(f"{prefix}-{capture_id}")
+        sidecar = {
+            "schema_version": 1,
+            "profile": profile.name,
+            "started_at": self._clock().isoformat(),
+            "tune_revision": tune_revision,
+            "profile_snapshot": profile.model_dump(mode="json"),
+        }
+        atomic_write_text(
+            self.paths.root / "capture_profile.json",
+            json.dumps(sidecar, indent=2, sort_keys=True) + "\n",
+        )
+        return flushed
+
+    def exit_capture_mode(self, *, started_at: datetime | None = None) -> Path | None:
+        return self._exit_isolated_dir(started_at)
 
     def exit_tuning_mode(self, *, started_at: datetime | None = None) -> Path | None:
         """Flush the tuning buffer and roll back to a fresh live session dir."""

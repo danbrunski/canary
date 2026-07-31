@@ -1,0 +1,42 @@
+schema_version: 1
+profiles:
+- name: default
+  description: Normal telemetry and anomaly-detection collection
+  mode01:
+    AUTO: 1.0
+  mode22:
+  - ECM_RPM
+  - ECM_INJECTOR_PW_B1
+  - ECM_AF_SENSOR_V_B1
+  - ECM_AF_SENSOR_V_B2
+  - ECM_THROTTLE_POS_SENSOR_1
+  - ECM_THROTTLE_POS_SENSOR_2
+  bus_budget_override: null
+  broadcast_decode: true
+  corpus_eligible: true
+  storage_prefix: ''
+- name: fuel-map
+  description: High-rate fueling and timing capture
+  mode01:
+    RPM: 1.0
+    ENGINE_LOAD: 1.0
+    MAF: 1.0
+    TIMING_ADVANCE: 1.0
+    THROTTLE_POS: 1.0
+    INTAKE_TEMP: 1.0
+    SPEED: 1.0
+    COOLANT_TEMP: 1.0
+    O2_WR_LAMBDA_S1: 1.0
+    O2_WR_LAMBDA_S2: 1.0
+    SHORT_FUEL_TRIM_1: 1.0
+    SHORT_FUEL_TRIM_2: 1.0
+    LONG_FUEL_TRIM_1: 1.0
+    LONG_FUEL_TRIM_2: 1.0
+    COMMANDED_EQUIV_RATIO: 1.0
+    EVAPORATIVE_PURGE: 1.0
+    FUEL_STATUS: 1.0
+  mode22: []
+  bus_budget_override: null
+  broadcast_decode: true
+  corpus_eligible: false
+  storage_prefix: _capture-fuel-map

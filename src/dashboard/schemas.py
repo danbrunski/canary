@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.collection.capture_profiles import CaptureProfile
+
 
 class _ControlRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -34,6 +36,16 @@ class CaptureTagRequest(_ControlRequest):
 class CaptureStopRequest(_ControlRequest):
     reason: str | None = None
     fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class CaptureProfileStartRequest(_ControlRequest):
+    profile: str = Field(..., min_length=1)
+    tune_revision: str | None = Field(default=None, max_length=255)
+
+
+class CaptureProfileSaveRequest(_ControlRequest):
+    profile: CaptureProfile
+    previous_name: str | None = None
 
 
 class JobSubmitRequest(_ControlRequest):

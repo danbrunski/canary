@@ -8,6 +8,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from src.collection import tuning_profile
 from src.collection.record_arming import RecordArmingGate
 from src.config import CanaryConfig
 from src.control.capture import CaptureController
@@ -203,7 +204,15 @@ async def run_daemon(
             queue_warning_fraction=config.collection.queue_warning_fraction,
             health_monitor=components.health_monitor,
             storage_decode=(
-                storage_frame_decoder.decode if storage_frame_decoder is not None else None
+                (
+                    lambda record: (
+                        storage_frame_decoder.decode(record)
+                        if tuning_profile.broadcast_decode_enabled()
+                        else ()
+                    )
+                )
+                if storage_frame_decoder is not None
+                else None
             ),
         )
     )

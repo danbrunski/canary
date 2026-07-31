@@ -72,6 +72,8 @@ Write tools (audit-logged with `actor="mcp"` via
 | `upload_model_artifact` | base64-encodes a local artifact + `POST /control/models/{type}/artifact` |
 | `replay_window` | submits a `replay_window` daemon job, polls until done, returns the inference report |
 | `start_replay` / `stop_replay` / `get_replay_status` | `POST /control/replay[...]` — runtime replay-into-collector with isolated outputs (see "End-to-end session replay" below) |
+| `list_capture_profiles` | list saved collection modes for the active vehicle |
+| `start_capture` / `stop_capture` | pass `profile` to rotate into a named capture session; stop returns to `default` (without `profile`, the legacy labeled-window behavior remains available) |
 
 Resources (URI-addressable; clients pin these to a conversation for stable context):
 

@@ -181,6 +181,11 @@ def _did_ids_by_name() -> dict[str, int]:
     return {entry.name: entry.did for entry in did_map.dids}
 
 
+def known_did_names() -> tuple[str, ...]:
+    """Return the vehicle DID inventory available to capture profiles."""
+    return tuple(_did_ids_by_name())
+
+
 def did_access() -> DidAccess | None:
     """The access block of data/dids.yaml (gating session, keep-alive)."""
     did_map = _load_did_map()
@@ -258,6 +263,9 @@ class CanObdSpec:
     poll_rate_hz: float = 1.0
     pids: tuple[str, ...] = (AUTO_PIDS,)
     dids: tuple[str, ...] = ()
+    #: Request plan is the union of persisted capture profiles and therefore
+    #: must be filtered through the process-wide active-profile gate.
+    capture_profiles_enabled: bool = False
     did_request_id: int = DEFAULT_DID_REQUEST_ID
     request_timeout_seconds: float = 1.0
     #: ``None`` = poll DIDs bare, interleaved with Mode 01 (ECUs that don't
@@ -840,7 +848,14 @@ def _request_rate_hz(request: _PollRequest, spec: CanObdSpec) -> float:
         interval = spec.service_poll_interval_seconds
         return 0.0 if interval <= 0 else 1.0 / interval
     base = max(float(spec.poll_rate_hz), 0.001)
-    return base * TIER_RATE_FACTORS.get(request.poll_tier, TIER_RATE_FACTORS["medium"])
+    rate = base * TIER_RATE_FACTORS.get(request.poll_tier, TIER_RATE_FACTORS["medium"])
+    if request.kind == "pid":
+        # A weight is a relative share within the selected profile; 1.0 is
+        # byte-for-byte the historic tier cadence.
+        from src.collection import tuning_profile
+
+        rate *= tuning_profile.rate_weight(request.channel)
+    return rate
 
 
 def _request_interval_seconds(request: _PollRequest, spec: CanObdSpec) -> float:

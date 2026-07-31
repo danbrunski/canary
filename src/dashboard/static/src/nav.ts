@@ -59,6 +59,7 @@ export const NAV: NavGroupDef[] = [
       { id: "control-test", label: "Test", group: "control" },
       { id: "control-main", label: "Control Plane", group: "control" },
       { id: "control-profiles", label: "Profiles", group: "control" },
+      { id: "control-capture", label: "Capture Profiles", group: "control" },
       { id: "control-power", label: "Power / UPS", group: "control" },
     ],
   },

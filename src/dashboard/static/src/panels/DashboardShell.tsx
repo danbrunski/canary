@@ -16,6 +16,7 @@ import { OperatingModeIndicator } from "./OperatingModeIndicator";
 import { ReplayBanner } from "./ReplayBanner";
 import { StatusStrip } from "./StatusStrip";
 import { VehicleStateBadge } from "./VehicleStateBadge";
+import { CaptureProfileBanner } from "./CaptureProfileBanner";
 
 interface DashboardShellProps {
   appMode: AppMode;
@@ -142,6 +143,7 @@ export function DashboardShell({
         </button>
       </header>
       <ReplayBanner replay={status?.replay} />
+      <CaptureProfileBanner state={status?.capture_profile} />
       <StatusStrip status={status} channels={channels} events={events} />
       <main className={mainClass}>{children}</main>
     </div>

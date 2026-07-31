@@ -19,6 +19,7 @@ import asyncio
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from src.collection import tuning_profile
 from src.collection.can_collector import collect_can_from_config
 from src.collection.can_obd_collector import (
     CanObdSpec,
@@ -26,11 +27,17 @@ from src.collection.can_obd_collector import (
     collect_can_obd_from_config,
     resolve_did_session_spec,
 )
+from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.custom_pids import load_custom_pids
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
 from src.collection.obd_collector import ObdSpec, collect_obd
-from src.collection.obd_scheduler import ForcePollTrigger, FreezeFrameTrigger
+from src.collection.obd_scheduler import (
+    ForcePollTrigger,
+    FreezeFrameTrigger,
+    known_did_names,
+    parse_did_token,
+)
 from src.collection.pids import REQUIRED_PIDS
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig
@@ -48,6 +55,30 @@ def default_collectors(
     freeze_frame_trigger: FreezeFrameTrigger | None = None,
     force_poll_trigger: ForcePollTrigger | None = None,
 ) -> list[CollectorStarter]:
+    capture_store = CaptureProfileStore(
+        config.daemon.capture_profiles,
+        config.collection,
+        config.daemon.behavior_models,
+    )
+    capture_catalog = capture_store.load()
+    default_capture = capture_catalog.by_name("default")
+    assert default_capture is not None
+    # Runtime state is intentionally reset on each daemon start (capture
+    # profiles are persistent; the *active capture* is not).
+    tuning_profile.configure_default(default_capture)
+    inventory_dids = known_did_names()
+    tuning_profile.configure_did_aliases(
+        {
+            token: f"DID_{parse_did_token(token):04X}"
+            for token in dict.fromkeys(
+                [
+                    *config.collection.obd_dids,
+                    *inventory_dids,
+                    *(did for profile in capture_catalog.profiles for did in profile.mode22),
+                ]
+            )
+        }
+    )
     reconnect_policy = ReconnectPolicy(
         initial_delay_seconds=config.collection.reconnect_initial_delay_seconds,
         max_delay_seconds=config.collection.reconnect_max_delay_seconds,
@@ -61,11 +92,42 @@ def default_collectors(
         # Task 2.6: loaded once here, not per poll tick. Absent file ⇒ an
         # empty set (load_custom_pids' own graceful-missing-file behavior).
         custom_pids = load_custom_pids(config.daemon.custom_pids).custom_pids
+        configured_pids = config.collection.obd_pids
+        request_pids = (
+            configured_pids
+            if any(token.strip().lower() == "auto" for token in configured_pids)
+            else tuple(
+                dict.fromkeys(
+                    [
+                        *configured_pids,
+                        *(
+                            channel
+                            for profile in capture_catalog.profiles
+                            for channel in profile.mode01
+                        ),
+                    ]
+                )
+            )
+        )
+        request_dids = tuple(
+            dict.fromkeys(
+                [
+                    *config.collection.obd_dids,
+                    *inventory_dids,
+                    *(did for profile in capture_catalog.profiles for did in profile.mode22),
+                ]
+            )
+        )
         can_obd_spec = CanObdSpec(
             can=config.hardware.can,
             poll_rate_hz=config.collection.obd_poll_rate_hz,
-            pids=config.collection.obd_pids,
-            dids=config.collection.obd_dids,
+            # ``auto`` already discovers every supported Mode-01 channel;
+            # explicit plans and DIDs are expanded to the saved-profile union.
+            # The runtime gate keeps default polling identical while making a
+            # profile switch restart-free.
+            pids=request_pids,
+            dids=request_dids,
+            capture_profiles_enabled=True,
             did_request_id=config.collection.obd_did_request_id,
             request_timeout_seconds=config.collection.obd_request_timeout_seconds,
             did_session=resolve_did_session_spec(config.collection),

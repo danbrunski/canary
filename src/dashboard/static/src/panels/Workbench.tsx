@@ -26,6 +26,7 @@ import { AlarmsPanel } from "./AlarmsPanel";
 import { AnomalyPanel } from "./AnomalyPanel";
 import { BehaviorModelsPanel } from "./BehaviorModelsPanel";
 import { ChartsPanel } from "./ChartsPanel";
+import { CaptureProfilesPanel } from "./CaptureProfilesPanel";
 import { ControlPanel } from "./ControlPanel";
 import { CustomDashboardPanel } from "./CustomDashboardPanel";
 import { CustomPidsPanel } from "./CustomPidsPanel";
@@ -153,6 +154,8 @@ function renderItem(
       return <TestSessionPanel token={d.token} />;
     case "control-profiles":
       return <ProfilesPanel token={d.token} />;
+    case "control-capture":
+      return <CaptureProfilesPanel token={d.token} status={d.status} />;
     case "control-power":
       return <PowerPanel token={d.token} />;
     case "live-charts":

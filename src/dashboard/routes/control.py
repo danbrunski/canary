@@ -22,6 +22,7 @@ from src.alerts.tuning import (
 from src.analysis.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore
 from src.collection import bus_budget, tuning_profile, tx_gate
 from src.collection.can_obd_client import DisallowedServiceError
+from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.custom_pids import (
     CustomPid,
     CustomPidSet,
@@ -88,6 +89,8 @@ from src.dashboard.readers import read_anomalies_since
 from src.dashboard.schemas import (
     BusBudgetRequest,
     CanActivityRequest,
+    CaptureProfileSaveRequest,
+    CaptureProfileStartRequest,
     CaptureStartRequest,
     CaptureStopRequest,
     CaptureTagRequest,
@@ -164,11 +167,22 @@ def register_control_routes(
     #: a quarantined ``_tuning-*`` session (engine-tuning-support.md 1.2).
     #: ``None`` leaves the poll-profile switch working without isolation.
     storage_writer: AsyncParquetTelemetryWriter | None = None,
+    capture_profile_store: CaptureProfileStore | None = None,
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
     emitter: AnomalyEventEmitter | None = None,
     publish_control_event: Callable[[str, str, dict[str, Any]], None],
 ) -> None:
+
+    #: Bus-budget override in force before a capture raised it, so stopping
+    #: restores the operator's setting instead of clearing it outright.
+    budget_before_capture: float | None = None
+
+    profile_store = capture_profile_store or CaptureProfileStore(
+        config.daemon.capture_profiles,
+        config.collection,
+        config.daemon.behavior_models,
+    )
 
     def require_control_auth(
         request: Request,
@@ -351,10 +365,11 @@ def register_control_routes(
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int | None = Query(default=None, ge=1, le=1000),
+        captures: bool = False,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
         sessions = filter_sessions(
-            list_sessions(config.collection.storage_path),
+            list_sessions(config.collection.storage_path, captures=captures),
             since=since,
             until=until,
             limit=limit,
@@ -534,6 +549,116 @@ def register_control_routes(
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
         return {"tuning_mode": tuning_profile.snapshot()}
+
+    @app.get("/control/capture/profiles")
+    def get_capture_profiles(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        catalog = profile_store.load()
+        return {
+            "schema_version": catalog.schema_version,
+            "profiles": [profile.model_dump(mode="json") for profile in catalog.profiles],
+        }
+
+    @app.put("/control/capture/profiles")
+    def put_capture_profile(
+        request: CaptureProfileSaveRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        try:
+            warnings = profile_store.save(request.profile, previous_name=request.previous_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if request.profile.name == "default" and not tuning_profile.is_active():
+            tuning_profile.activate(request.profile, source="capture-profile-save")
+        payload = {"profile": request.profile.model_dump(mode="json"), "warnings": warnings}
+        publish_control_event("capture_profile.save", "ok", payload)
+        return payload
+
+    @app.delete("/control/capture/profiles/{name}")
+    def delete_capture_profile(
+        name: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        # Normalize the same way the store does, so a case variant cannot slip
+        # past the guard and delete the profile that is currently running.
+        if tuning_profile.active_profile().name == name.strip().lower():
+            raise HTTPException(status_code=409, detail="cannot delete the active capture profile")
+        try:
+            profile_store.delete(name)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404, detail=f"capture profile not found: {name}"
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        payload = {"deleted": name}
+        publish_control_event("capture_profile.delete", "ok", payload)
+        return payload
+
+    @app.post("/control/capture")
+    async def start_profile_capture(
+        request: CaptureProfileStartRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        if storage_writer is None:
+            raise HTTPException(status_code=503, detail="capture storage writer is not available")
+        if tuning_profile.is_active():
+            raise HTTPException(status_code=409, detail="a capture profile is already active")
+        profile = profile_store.load().by_name(request.profile)
+        if profile is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"capture profile not found: {request.profile}",
+            )
+        if profile.name == "default":
+            raise HTTPException(status_code=409, detail="default collection is already active")
+        capture_id = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%S")
+        previous_budget = bus_budget.override()
+        nonlocal budget_before_capture
+        try:
+            await storage_writer.enter_capture_mode(profile, capture_id, request.tune_revision)
+            tuning_profile.activate(profile, session_dir=str(storage_writer.paths.root))
+            budget_before_capture = previous_budget
+            if profile.bus_budget_override is not None:
+                # A profile without its own override leaves whatever the
+                # operator set standing, rather than silently clearing it.
+                bus_budget.set_override(
+                    profile.bus_budget_override,
+                    source=f"capture:{profile.name}",
+                    ttl_seconds=None,
+                )
+        except Exception as exc:
+            bus_budget.set_override(previous_budget, source="capture-rollback", ttl_seconds=None)
+            default_profile = profile_store.load().by_name("default")
+            assert default_profile is not None
+            tuning_profile.activate(default_profile, source="rollback")
+            raise HTTPException(status_code=500, detail=f"failed to start capture: {exc}") from exc
+        payload = {"capture_profile": tuning_profile.snapshot()}
+        publish_control_event("capture_profile.start", "ok", payload)
+        return payload
+
+    @app.delete("/control/capture")
+    @app.post("/control/capture/stop")
+    async def stop_profile_capture(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        if storage_writer is None:
+            raise HTTPException(status_code=503, detail="capture storage writer is not available")
+        if not tuning_profile.is_active():
+            raise HTTPException(status_code=409, detail="default collection is already active")
+        nonlocal budget_before_capture
+        await storage_writer.exit_capture_mode()
+        default_profile = profile_store.load().by_name("default")
+        assert default_profile is not None
+        tuning_profile.activate(default_profile, session_dir=str(storage_writer.paths.root))
+        # Restore rather than clear: `None` clears, and a value the operator
+        # set by hand comes back under the normal auto-revert TTL.
+        bus_budget.set_override(budget_before_capture, source="capture:stop")
+        budget_before_capture = None
+        payload = {"capture_profile": tuning_profile.snapshot()}
+        publish_control_event("capture_profile.stop", "ok", payload)
+        return payload
 
     @app.post("/control/tuning-mode")
     async def post_control_tuning_mode(

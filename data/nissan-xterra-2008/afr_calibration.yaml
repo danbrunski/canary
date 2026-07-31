@@ -1,0 +1,33 @@
+schema_version: 1
+provenance:
+  method: synchronous UpRev K-line voltage/AFR cross-reference
+  session: data/sessions/_uprev/2026-07-29T172029
+  source_log: UpRev_Log7-29-2026_11-20-29_AM.csv
+  note: Bank-1 median AFR at each sampled voltage; bank 2 independently agrees.
+active_revision: null
+voltage_transfer:
+  censored_floor_afr: 10.0
+  points:
+    - {voltage: 0.000, afr: 10.000}
+    - {voltage: 0.240, afr: 10.560}
+    - {voltage: 0.470, afr: 11.100}
+    - {voltage: 0.725, afr: 11.700}
+    - {voltage: 0.965, afr: 12.270}
+    - {voltage: 1.205, afr: 12.830}
+    - {voltage: 1.445, afr: 13.290}
+    - {voltage: 1.690, afr: 13.750}
+    - {voltage: 1.930, afr: 14.250}
+    - {voltage: 2.170, afr: 14.720}
+    - {voltage: 2.410, afr: 15.650}
+    - {voltage: 2.675, afr: 17.000}
+    - {voltage: 2.875, afr: 18.150}
+    - {voltage: 3.135, afr: 19.680}
+    - {voltage: 3.350, afr: 21.860}
+    - {voltage: 3.610, afr: 24.880}
+    - {voltage: 3.820, afr: 27.330}
+    - {voltage: 4.070, afr: 30.470}
+    - {voltage: 4.300, afr: 35.810}
+    - {voltage: 4.535, afr: 42.000}
+    - {voltage: 4.860, afr: 57.940}
+    - {voltage: 5.065, afr: 60.000}
+target_maps: []

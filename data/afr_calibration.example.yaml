@@ -1,0 +1,19 @@
+schema_version: 1
+# Copy this file to the active vehicle profile's scoped data directory.
+# Both sections are operator-exported facts; no vehicle-specific curve or ROM
+# target is hard-coded in shared code.
+active_revision: example-rom-revision
+voltage_transfer:
+  censored_floor_afr: 10.0
+  points:
+    - {voltage: 0.5, afr: 10.0}
+    - {voltage: 2.15, afr: 14.7}
+    - {voltage: 5.0, afr: 20.0}
+target_maps:
+  - revision: example-rom-revision
+    rpm_breakpoints: [1000, 3000, 5000]
+    load_breakpoints: [20, 60, 100]
+    afr:
+      - [14.7, 14.7, 13.0]
+      - [14.7, 13.5, 12.8]
+      - [14.7, 13.0, 12.5]

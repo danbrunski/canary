@@ -13,6 +13,10 @@ import type {
   BinnedAnalysisResponse,
   CanCoverageResponse,
   CaptureResponse,
+  CaptureProfile,
+  CaptureProfilesResponse,
+  CaptureProfileState,
+  CaptureProfileWarning,
   CaptureTagResponse,
   CompanionStatusResponse,
   CustomPid,
@@ -240,8 +244,49 @@ export function listSessions(
   token: string,
   signal?: AbortSignal,
   baseUrl?: string,
+  captures = false,
 ): Promise<SessionsResponse> {
-  return controlJson<SessionsResponse>("/control/sessions", token, { signal }, baseUrl);
+  const suffix = captures ? "?captures=true" : "";
+  return controlJson<SessionsResponse>(`/control/sessions${suffix}`, token, { signal }, baseUrl);
+}
+
+export function getCaptureProfiles(
+  token: string,
+  signal?: AbortSignal,
+): Promise<CaptureProfilesResponse> {
+  return controlJson("/control/capture/profiles", token, { signal });
+}
+
+export function saveCaptureProfile(
+  token: string,
+  profile: CaptureProfile,
+  previousName?: string,
+): Promise<{ profile: CaptureProfile; warnings: CaptureProfileWarning[] }> {
+  return controlJson("/control/capture/profiles", token, {
+    method: "PUT",
+    body: jsonBody({ profile, previous_name: previousName ?? null }),
+  });
+}
+
+export function deleteCaptureProfile(token: string, name: string): Promise<{ deleted: string }> {
+  return controlJson(`/control/capture/profiles/${encodeURIComponent(name)}`, token, {
+    method: "DELETE",
+  });
+}
+
+export function startProfileCapture(
+  token: string,
+  profile: string,
+  tuneRevision?: string,
+): Promise<{ capture_profile: CaptureProfileState }> {
+  return controlJson("/control/capture", token, {
+    method: "POST",
+    body: jsonBody({ profile, tune_revision: tuneRevision || null }),
+  });
+}
+
+export function stopProfileCapture(token: string): Promise<{ capture_profile: CaptureProfileState }> {
+  return controlJson("/control/capture", token, { method: "DELETE" });
 }
 
 export function updateSessionMetadata(

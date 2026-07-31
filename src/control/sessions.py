@@ -22,6 +22,7 @@ METADATA_FILENAME = "control.json"
 PIN_FILENAME = ".canary-pin"
 
 _SESSION_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
+_CAPTURE_DIR_RE = re.compile(r"^_capture-[a-z0-9-]+-(\d{4}-\d{2}-\d{2}T\d{6})$")
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ class SessionSummary:
         }
 
 
-def list_sessions(root: Path) -> list[SessionSummary]:
+def list_sessions(root: Path, *, captures: bool = False) -> list[SessionSummary]:
     """Return timestamp-named session directories under `root`, newest last.
 
     Task 6.4(b) (eval-longitudinal-and-dtc.md): deliberately left reading the
@@ -69,7 +70,12 @@ def list_sessions(root: Path) -> list[SessionSummary]:
     sessions = [
         summarize_session(child)
         for child in root.iterdir()
-        if child.is_dir() and _SESSION_DIR_RE.match(child.name)
+        if child.is_dir()
+        and (
+            bool(_CAPTURE_DIR_RE.match(child.name))
+            if captures
+            else bool(_SESSION_DIR_RE.match(child.name))
+        )
     ]
     return sorted(sessions, key=lambda session: session.session_id)
 
@@ -108,7 +114,7 @@ def filter_sessions(
 
 def resolve_session(root: Path, session_id: str) -> Path:
     """Resolve a session id under root, rejecting traversal and unknown ids."""
-    if not _SESSION_DIR_RE.match(session_id):
+    if not (_SESSION_DIR_RE.match(session_id) or _CAPTURE_DIR_RE.match(session_id)):
         raise FileNotFoundError(f"session not found: {session_id}")
     session = root / session_id
     try:
@@ -128,6 +134,13 @@ def summarize_session(session: Path) -> SessionSummary:
     if tags.exists():
         tag_count = sum(1 for line in tags.read_text().splitlines() if line.strip())
     metadata = read_session_metadata(session)
+    capture_sidecar = session / "capture_profile.json"
+    if capture_sidecar.exists():
+        try:
+            capture = json.loads(capture_sidecar.read_text())
+            metadata = {**metadata, "capture_profile": capture.get("profile")}
+        except (OSError, json.JSONDecodeError):
+            pass
     return SessionSummary(
         session_id=session.name,
         session_path=session,
@@ -224,6 +237,9 @@ def write_session_zip(session: Path, out_path: Path) -> Path:
 
 
 def _parse_session_started_at(session_id: str) -> str | None:
+    capture_match = _CAPTURE_DIR_RE.match(session_id)
+    if capture_match:
+        session_id = capture_match.group(1)
     try:
         return datetime.strptime(session_id, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC).isoformat()
     except ValueError:

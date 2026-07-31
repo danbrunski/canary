@@ -211,6 +211,10 @@ class StatusSnapshot:
     #: rate, which otherwise reads as a collection anomaly.
     bus_budget: dict[str, Any] | None = None
 
+    #: Operator-selected capture profile. Alias of the generalized runtime
+    #: state; ``tuning_mode`` remains for compatibility with older clients.
+    capture_profile: dict[str, Any] | None = None
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "storage_path": self.storage_path,
@@ -230,6 +234,7 @@ class StatusSnapshot:
             "passive": self.passive,
             "tuning_mode": self.tuning_mode,
             "bus_budget": self.bus_budget,
+            "capture_profile": self.capture_profile,
         }
 
 
@@ -452,6 +457,7 @@ def build_status(
         passive=tx_gate.snapshot(),
         tuning_mode=tuning_profile.snapshot(),
         bus_budget=bus_budget_gate.snapshot(),
+        capture_profile=tuning_profile.snapshot(),
     )
 
 

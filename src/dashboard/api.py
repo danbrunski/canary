@@ -47,6 +47,7 @@ from src.alerts.feedback import FeedbackStore
 from src.alerts.tuning import AlertTuner
 from src.analysis.gps_tracker import GpsTracker
 from src.analysis.vehicle_ledger import VehicleLedgerStore
+from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.obd_scheduler import ForcePollTrigger
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
@@ -136,6 +137,7 @@ def create_app(
     #: Live writer, so arming tuning mode can quarantine the capture into a
     #: ``_tuning-*`` session (engine-tuning-support.md 1.2).
     storage_writer: AsyncParquetTelemetryWriter | None = None,
+    capture_profile_store: CaptureProfileStore | None = None,
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
 ) -> FastAPI:
@@ -166,6 +168,11 @@ def create_app(
     control_bus = control_broadcaster or Broadcaster()
     resolved_control_token = (
         os.environ.get(config.daemon.control_token_env) if control_token is None else control_token
+    )
+    resolved_capture_profile_store = capture_profile_store or CaptureProfileStore(
+        config.daemon.capture_profiles,
+        config.collection,
+        behavior_models_path,
     )
     # Stash them on app.state so producer threads / app extensions can reach
     # the same instances after construction.
@@ -223,6 +230,7 @@ def create_app(
         sequence_detector_controller=sequence_detector_controller,
         force_poll_trigger=force_poll_trigger,
         storage_writer=storage_writer,
+        capture_profile_store=resolved_capture_profile_store,
         ups_status_path=ups_status_path,
         ups_keepalive_path=ups_keepalive_path,
         emitter=emitter,

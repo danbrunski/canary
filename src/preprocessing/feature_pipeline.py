@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.analysis.afr import append_afr_channels, load_afr_calibration
 from src.analysis.committees import append_committee_residuals, non_trainable_committee_outputs
 from src.analysis.derived import compute_anomaly_signals, compute_instantaneous_channels
 from src.config import CanaryConfig
@@ -678,6 +679,12 @@ def featurize_wide_frame(
     # target them as outputs and the rolling feature builder picks up their
     # derivatives. `vehicle` unlocks VE_PERCENT (Task 4.1), which needs the
     # configured displacement.
+    afr_calibration = (
+        load_afr_calibration(config.daemon.afr_calibration)
+        if config.daemon.afr_calibration.exists()
+        else None
+    )
+    framed = append_afr_channels(framed, config.vehicle.parameters, afr_calibration)
     framed = compute_anomaly_signals(framed, config.vehicle.parameters)
     # Performance channels (Task 1.1): fuel rate, instant economy,
     # boost/vacuum, estimated power/torque. Row-local only — the cumulative

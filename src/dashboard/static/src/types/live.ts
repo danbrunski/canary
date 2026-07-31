@@ -7,6 +7,7 @@
 // explicit nulls when they have a None default.
 
 import type { ReplayStatus } from "./control";
+import type { CaptureProfileState } from "./control";
 
 /** One row from `/telemetry/latest` or one message on `/ws/telemetry`. */
 export interface TelemetryRow {
@@ -117,6 +118,7 @@ export interface StatusResponse {
    *  already drives everything else — no separate authenticated call. Null
    *  when the daemon has no replay controller wired (tests / bare app). */
   replay?: ReplayStatus | null;
+  capture_profile?: CaptureProfileState | null;
 }
 
 /** `/status.vehicle_state` — mirrors

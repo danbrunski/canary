@@ -124,6 +124,7 @@ export function SessionsCard({
           >
             <span>{session.session_id}</span>
             <small className="text-fg-dim">
+              {typeof session.metadata.capture_profile === "string" ? `${session.metadata.capture_profile} / ` : ""}
               {session.telemetry_chunks} chunks / {session.tag_count} tags
               {session.pinned ? " / pinned" : ""}
             </small>

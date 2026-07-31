@@ -126,6 +126,25 @@ def _append_dependency_gap(
     frame[gap_column(output)] = stale
 
 
+#: Inputs each derived channel needs, as the ordered fallback groups
+#: :func:`_append_dependency_gap` consumes (one group = "any one of these").
+#: Declared here so callers that must reason about a derived channel without
+#: computing it — capture-profile validation resolving a `derived:` model
+#: input down to pollable channels — share one source of truth with the
+#: computation itself.
+DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "derived:AIR_MASS_PER_CYCLE": (
+        ("obd:MAF",),
+        ("obd:RPM", "decoded:ECM_RPM"),
+    ),
+    "derived:VE_PERCENT": (
+        ("derived:AIR_MASS_PER_CYCLE",),
+        ("obd:INTAKE_PRESSURE", "decoded:MAP", "obd:BAROMETRIC_PRESSURE"),
+        ("obd:INTAKE_TEMP", "decoded:IAT"),
+    ),
+}
+
+
 @dataclass(frozen=True)
 class FuelProperties:
     """Per-fuel constants used by the fuel/CO2 math."""
@@ -641,8 +660,7 @@ def compute_anomaly_signals(
         _append_dependency_gap(
             out,
             "derived:AIR_MASS_PER_CYCLE",
-            ("obd:MAF",),
-            ("obd:RPM", "decoded:ECM_RPM"),
+            *DERIVED_CHANNEL_INPUTS["derived:AIR_MASS_PER_CYCLE"],
         )
 
         # True VE (Task 4.1): same measured mass, normalized against the
@@ -657,9 +675,7 @@ def compute_anomaly_signals(
                 _append_dependency_gap(
                     out,
                     "derived:VE_PERCENT",
-                    ("derived:AIR_MASS_PER_CYCLE",),
-                    ("obd:INTAKE_PRESSURE", "decoded:MAP", "obd:BAROMETRIC_PRESSURE"),
-                    ("obd:INTAKE_TEMP", "decoded:IAT"),
+                    *DERIVED_CHANNEL_INPUTS["derived:VE_PERCENT"],
                 )
 
     # Per-bank fuel trim asymmetry. Both STFT and LTFT versions, since

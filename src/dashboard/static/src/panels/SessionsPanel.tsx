@@ -26,13 +26,14 @@ interface SessionsPanelProps {
 export function SessionsPanel({ token, companion }: SessionsPanelProps) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState("");
+  const [showCaptures, setShowCaptures] = useState(false);
   const { notice, setNotice, busy, run: runAction } = useAsyncAction();
 
   const refreshSessions = useCallback(async () => {
     if (!token) return;
-    const next = await listSessions(token);
+    const next = await listSessions(token, undefined, undefined, showCaptures);
     setSessions(next.sessions);
-  }, [token]);
+  }, [token, showCaptures]);
 
   useEffect(() => {
     if (!token) {
@@ -71,6 +72,10 @@ export function SessionsPanel({ token, companion }: SessionsPanelProps) {
     <section className="flex flex-col gap-3">
       <Notice notice={notice} />
       <Notice notice={busy ? { kind: "busy", text: `Working: ${busy}` } : null} />
+      <label className="flex items-center gap-2 text-sm text-fg-dim">
+        <input type="checkbox" checked={showCaptures} onChange={(event) => setShowCaptures(event.target.checked)} />
+        captures ({showCaptures ? "isolated capture sessions" : "drive sessions"})
+      </label>
       <div className="grid grid-cols-3 gap-4 max-[1100px]:grid-cols-1">
         <SessionsCard
           token={token}

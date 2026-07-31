@@ -660,6 +660,10 @@ class DaemonConfig(_Strict):
     #: file ⇒ zero custom PIDs polled (``load_custom_pids`` handles that
     #: gracefully), same posture as ``behavior_models`` above.
     custom_pids: Path = Path("data/custom_pids.yaml")
+    #: Operator-selectable collection modes, scoped per vehicle.
+    capture_profiles: Path = Path("data/capture_profiles.yaml")
+    #: Per-vehicle, per-tune AFR voltage transfer and target-table exports.
+    afr_calibration: Path = Path("data/afr_calibration.yaml")
     #: Session catalog (Task 6.1, eval-longitudinal-and-dtc.md) — SQLite index
     #: over session sidecars. Rebuildable from disk at any time
     #: (``scripts/catalog.py rebuild``); never a second source of truth.

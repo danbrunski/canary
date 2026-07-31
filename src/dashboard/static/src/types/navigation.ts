@@ -34,6 +34,7 @@ export type WorkbenchItem =
   | "control-main"
   | "control-test"
   | "control-profiles"
+  | "control-capture"
   | "control-power";
 
 export interface NavItemDef {

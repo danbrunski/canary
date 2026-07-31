@@ -39,6 +39,7 @@ from src.mcp_server.tools import (
 from src.mcp_server.tools import (
     binned_analysis as binned_analysis_tool,
 )
+from src.mcp_server.tools import capture_profiles as capture_profiles_tool
 from src.mcp_server.tools import (
     classification as classification_tool,
 )
@@ -99,6 +100,7 @@ from src.mcp_server.write_tools import (
 from src.mcp_server.write_tools import (
     can_activity as can_activity_write_tool,
 )
+from src.mcp_server.write_tools import capture_profiles as capture_profiles_write_tool
 from src.mcp_server.write_tools import (
     captures as captures_tool,
 )
@@ -354,6 +356,11 @@ def _register_read_tools(
     ) -> dict[str, Any]:
         """Sessions, optionally bounded by ISO start times and newest count."""
         return await sessions_tool.list_sessions(client, since=since, until=until, limit=limit)
+
+    @mcp.tool()
+    async def list_capture_profiles() -> dict[str, Any]:
+        """List the active vehicle's saved collection profiles."""
+        return await capture_profiles_tool.list_capture_profiles(client)
 
     @mcp.tool()
     async def get_session(session_id: str) -> dict[str, Any]:
@@ -643,16 +650,24 @@ def _register_write_tools(
 
     @mcp.tool()
     async def start_capture(
-        purpose: str,
+        purpose: str | None = None,
         protocol: str = "drive",
         fields: dict[str, Any] | None = None,
         vehicle_state: str | None = None,
+        profile: str | None = None,
+        tune_revision: str | None = None,
     ) -> dict[str, Any]:
-        """Begin a labeled capture window on the current telemetry session.
+        """Start a named capture profile or a legacy labeled capture window.
 
-        ``fields`` is free-form JSON kept with the capture (tune revision,
-        ROM id, what the run is meant to prove).
+        Pass ``profile`` for an isolated collection session. Without it,
+        ``purpose`` starts the existing tag window on the current session.
         """
+        if profile is not None:
+            return await capture_profiles_write_tool.start_capture(
+                client, audit, profile=profile, tune_revision=tune_revision
+            )
+        if purpose is None:
+            raise ValueError("purpose is required when profile is omitted")
         return await captures_tool.start_capture(
             client,
             audit,
@@ -672,7 +687,10 @@ def _register_write_tools(
 
     @mcp.tool()
     async def stop_capture(reason: str | None = None) -> dict[str, Any]:
-        """Close the active capture; `reason` is recorded for later review."""
+        """Stop the active profile capture, otherwise close the tag window."""
+        status = await client.get_json("/status")
+        if status.get("capture_profile", {}).get("active"):
+            return await capture_profiles_write_tool.stop_capture(client, audit)
         return await captures_tool.stop_capture(client, audit, reason=reason)
 
     @mcp.tool()
