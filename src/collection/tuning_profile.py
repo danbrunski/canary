@@ -95,12 +95,24 @@ def is_active() -> bool:
 
 def channels() -> frozenset[str]:
     with _lock:
-        return frozenset(_profile.mode01)
+        return frozenset(_profile.mode01) if _profile.mode01_enabled else frozenset()
 
 
 def mode22() -> frozenset[str]:
+    """The DIDs to poll — empty while Mode 22 is switched off.
+
+    Callers use this to decide whether to run the diagnostic-session window
+    at all, so a disabled service must read as "no DIDs" rather than as a
+    populated-but-inert list.
+    """
     with _lock:
-        return frozenset(_profile.mode22)
+        return frozenset(_profile.mode22) if _profile.mode22_enabled else frozenset()
+
+
+def did_interval_override() -> float | None:
+    """Profile's Mode-22 window cadence, or ``None`` to use the config default."""
+    with _lock:
+        return _profile.did_interval_seconds
 
 
 def broadcast_decode_enabled() -> bool:
@@ -149,9 +161,13 @@ def request_eligible(index: int, request: Any) -> bool:
     with _lock:
         profile = _profile
         if kind == "did":
+            if not profile.mode22_enabled:
+                return False
             requested = {item.upper() for item in profile.mode22}
             resolved = {_did_channels.get(item, item) for item in requested}
             return channel.upper() in resolved or channel.removeprefix("DID_").upper() in resolved
+        if not profile.mode01_enabled:
+            return False
         return channel.upper() in profile.mode01 or "AUTO" in profile.mode01
 
 
@@ -171,6 +187,9 @@ def snapshot(achieved_hz: dict[str, float] | None = None) -> dict[str, Any]:
             "channels": sorted(_profile.mode01),
             "mode01": dict(_profile.mode01),
             "mode22": list(_profile.mode22),
+            "mode01_enabled": _profile.mode01_enabled,
+            "mode22_enabled": _profile.mode22_enabled,
+            "did_interval_seconds": _profile.did_interval_seconds,
             "broadcast_decode": _profile.broadcast_decode,
             "corpus_eligible": _profile.corpus_eligible,
             "bus_budget_override": _profile.bus_budget_override,

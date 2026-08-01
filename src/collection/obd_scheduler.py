@@ -217,6 +217,12 @@ class DidSessionSpec:
     window_interval_seconds: float = 60.0
     window_max_seconds: float = 10.0
     lapse_seconds: float = 5.0
+    #: Sub-function that hands the bus back to Mode 01 immediately (UDS
+    #: default session). ``None`` = no verified fast exit on this vehicle;
+    #: wait out ``lapse_seconds`` instead.
+    exit_session: int | None = None
+    #: Settling time after a successful fast exit, in place of the lapse.
+    exit_grace_seconds: float = 0.05
 
 
 def resolve_did_session_spec(collection: CollectionConfig) -> DidSessionSpec | None:
@@ -249,6 +255,7 @@ def resolve_did_session_spec(collection: CollectionConfig) -> DidSessionSpec | N
     return DidSessionSpec(
         session=session,
         keepalive_seconds=keepalive,
+        exit_session=access.exit_session if access is not None else None,
         window_interval_seconds=collection.obd_did_window_interval_seconds,
         window_max_seconds=collection.obd_did_window_max_seconds,
         lapse_seconds=collection.obd_did_session_lapse_seconds,
@@ -420,7 +427,7 @@ class DidWindowController:
         self._spec = spec
         self._did_indices = tuple(did_indices)
         self.phase: Literal["mode01", "window", "lapse"] = "mode01"
-        self._next_window_at = now + spec.window_interval_seconds
+        self._next_window_at = now + self._interval()
         self._window_deadline = 0.0
         self._lapse_until = 0.0
         self._last_session_sent = 0.0
@@ -429,6 +436,12 @@ class DidWindowController:
         self.windows_completed = 0
         self.session_failures = 0
         self.keepalives_sent = 0
+        self.fast_exits = 0
+        self.fast_exit_failures = 0
+        self._exit_due = False
+        #: Latches on a refused exit so one unsupported ECU costs one attempt,
+        #: not one per window.
+        self._fast_exit_unsupported = False
 
     def advance(self, states: Sequence[_PollRequestState], now: float) -> None:
         """Apply phase transitions that don't require bus I/O."""
@@ -439,6 +452,18 @@ class DidWindowController:
         elif self.phase == "lapse" and now >= self._lapse_until:
             self.phase = "mode01"
 
+    def _interval(self) -> float:
+        """Seconds between windows — the active capture profile wins.
+
+        DID cadence is a sampling choice, not an ECU constraint (this ECM
+        answers a DID in ~1.5 ms), so a capture that wants DIDs quickly says
+        so and gets them, without a restart or a config edit.
+        """
+        from src.collection import tuning_profile
+
+        override = tuning_profile.did_interval_override()
+        return override if override is not None else self._spec.window_interval_seconds
+
     def session_control_due(self, states: Sequence[_PollRequestState], now: float) -> bool:
         """Whether the loop should send ``10 <session>`` now."""
         if self.phase == "mode01":
@@ -446,7 +471,7 @@ class DidWindowController:
                 return False
             if all(states[i].suppressed_until > now for i in self._did_indices):
                 # Every DID is backed off; don't burn a window on them.
-                self._next_window_at = now + self._spec.window_interval_seconds
+                self._next_window_at = now + self._interval()
                 return False
             return True
         if self.phase == "window":
@@ -472,7 +497,7 @@ class DidWindowController:
                     states[i].next_due_at = now
             else:
                 self.session_failures += 1
-                self._next_window_at = now + self._spec.window_interval_seconds
+                self._next_window_at = now + self._interval()
         elif self.phase == "window":
             if ok:
                 self.keepalives_sent += 1
@@ -480,6 +505,22 @@ class DidWindowController:
                 # Session lost mid-window: let it lapse, resume Mode 01.
                 self.session_failures += 1
                 self._close_window(now)
+
+    def session_exit_due(self) -> bool:
+        """Whether the loop should send ``10 <exit_session>`` now."""
+        return self._exit_due
+
+    def on_exit_response(self, *, ok: bool, now: float) -> None:
+        """Result of the return-to-default request."""
+        self._exit_due = False
+        if ok:
+            self.fast_exits += 1
+            self._lapse_until = min(self._lapse_until, now + self._spec.exit_grace_seconds)
+        else:
+            # Fall back to waiting the session out, for this window and every
+            # one after it.
+            self.fast_exit_failures += 1
+            self._fast_exit_unsupported = True
 
     def request_eligible(self, index: int, request: _PollRequest, *, now: float) -> bool:
         del now  # phase state already advanced this tick
@@ -514,7 +555,11 @@ class DidWindowController:
     def _close_window(self, now: float) -> None:
         self.phase = "lapse"
         self._lapse_until = now + self._spec.lapse_seconds
-        self._next_window_at = now + self._spec.window_interval_seconds
+        # Prefer handing the bus back explicitly. The lapse exists only
+        # because the session has to expire on its own; when the ECU accepts a
+        # return-to-default it is seconds of Mode-01 blackout for nothing.
+        self._exit_due = self._spec.exit_session is not None and not self._fast_exit_unsupported
+        self._next_window_at = now + self._interval()
         self.windows_completed += 1
         self._pending.clear()
 
@@ -527,7 +572,11 @@ class DidWindowController:
             "next_window_in_seconds": (
                 round(max(0.0, self._next_window_at - now), 3) if self.phase == "mode01" else 0.0
             ),
-            "window_interval_seconds": self._spec.window_interval_seconds,
+            "window_interval_seconds": self._interval(),
+            "fast_exits": self.fast_exits,
+            "fast_exit_failures": self.fast_exit_failures,
+            "fast_exit_supported": self._spec.exit_session is not None
+            and not self._fast_exit_unsupported,
             "window_max_seconds": self._spec.window_max_seconds,
             "windows_opened": self.windows_opened,
             "windows_completed": self.windows_completed,

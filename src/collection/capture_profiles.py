@@ -63,6 +63,16 @@ class CaptureProfile(_Strict):
     description: str = ""
     mode01: dict[str, float] = Field(default_factory=dict)
     mode22: tuple[str, ...] = ()
+    #: Whether each service is polled at all. Disabling keeps the selection
+    #: intact so re-enabling doesn't mean rebuilding it — "off for this
+    #: capture" and "not of interest" are different statements.
+    mode01_enabled: bool = True
+    mode22_enabled: bool = True
+    #: Seconds between Mode-22 session windows, overriding the daemon default.
+    #: DID cadence is a *sampling choice*, not an ECU limit: the ECU answers a
+    #: DID in ~1.5 ms, so a slow default belongs in config, never in the
+    #: scheduler.
+    did_interval_seconds: float | None = None
     bus_budget_override: float | None = None
     broadcast_decode: bool = True
     corpus_eligible: bool = False
@@ -96,6 +106,13 @@ class CaptureProfile(_Strict):
         if len(cleaned) != len(value):
             raise ValueError("Mode-22 DIDs must be non-blank and unique")
         return cleaned
+
+    @field_validator("did_interval_seconds")
+    @classmethod
+    def _valid_did_interval(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0:
+            raise ValueError("did_interval_seconds must be positive")
+        return value
 
     @field_validator("bus_budget_override")
     @classmethod

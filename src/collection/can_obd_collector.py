@@ -306,6 +306,26 @@ def run_can_obd_loop(
             for did_index in did_indices:
                 if not tuning_profile.request_eligible(did_index, requests[did_index]):
                     controller.on_request_attempted(did_index)
+            if controller.session_exit_due() and now >= next_budget_at:
+                # Hand Mode 01 the bus back now instead of waiting out the S3
+                # timeout. A refusal latches the fallback, so an ECU with no
+                # fast exit pays one attempt total, not one per window.
+                exited = _send_session_control(
+                    bus,
+                    spec.did_session,  # type: ignore[arg-type]
+                    sub_function=spec.did_session.exit_session,  # type: ignore[union-attr]
+                    request_id=spec.did_request_id,
+                    timeout_seconds=spec.request_timeout_seconds,
+                    on_frame=on_frame,
+                    stop_event=stop_event,
+                    stats=stats,
+                    deadline_monotonic=deadline_monotonic,
+                )
+                controller.on_exit_response(ok=exited, now=time.monotonic())
+                next_budget_at = max(
+                    next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
+                )
+                continue
             if controller.session_control_due(request_states, now) and now >= next_budget_at:
                 ok = _send_session_control(
                     bus,
@@ -334,6 +354,26 @@ def run_can_obd_loop(
             # Standalone recorder/tests that did not initialize the capture
             # catalog retain the scheduler's historical behavior.
             controller.advance(request_states, now)
+            if controller.session_exit_due() and now >= next_budget_at:
+                # Hand Mode 01 the bus back now instead of waiting out the S3
+                # timeout. A refusal latches the fallback, so an ECU with no
+                # fast exit pays one attempt total, not one per window.
+                exited = _send_session_control(
+                    bus,
+                    spec.did_session,  # type: ignore[arg-type]
+                    sub_function=spec.did_session.exit_session,  # type: ignore[union-attr]
+                    request_id=spec.did_request_id,
+                    timeout_seconds=spec.request_timeout_seconds,
+                    on_frame=on_frame,
+                    stop_event=stop_event,
+                    stats=stats,
+                    deadline_monotonic=deadline_monotonic,
+                )
+                controller.on_exit_response(ok=exited, now=time.monotonic())
+                next_budget_at = max(
+                    next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
+                )
+                continue
             if controller.session_control_due(request_states, now) and now >= next_budget_at:
                 ok = _send_session_control(
                     bus,
@@ -929,6 +969,7 @@ def _send_session_control(
     bus: can.BusABC,
     session_spec: DidSessionSpec,
     *,
+    sub_function: int | None = None,
     request_id: int,
     timeout_seconds: float,
     on_frame: Callable[[can.Message], None],
@@ -938,16 +979,19 @@ def _send_session_control(
 ) -> bool:
     """Send ``10 <session>`` (UDS DiagnosticSessionControl) and await ``50 <session>``.
 
-    Opens or keeps alive the Mode-22 gating session. Session *control* only —
-    no memory write, no actuation; the read-only posture of the collector is
-    unchanged. Returns True on a positive response.
+    Opens or keeps alive the Mode-22 gating session, or — with
+    ``sub_function`` — hands the bus back by returning to the default
+    session. Session *control* only: no memory write, no actuation; the
+    read-only posture of the collector is unchanged. Returns True on a
+    positive response.
     """
+    exiting = sub_function is not None
     request = _PollRequest(
         kind="session",
         service=0x10,
-        identifier=session_spec.session,
+        identifier=sub_function if sub_function is not None else session_spec.session,
         request_id=request_id,
-        channel="UDS_SESSION_CONTROL",
+        channel="UDS_SESSION_EXIT" if exiting else "UDS_SESSION_CONTROL",
     )
     stats.session_controls_sent += 1
     result = _query_with_tap(

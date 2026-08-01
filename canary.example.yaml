@@ -86,8 +86,15 @@ collection:
   # auto = take the gating session (0xC0) + keep-alive cadence from
   # data/dids.yaml's access block; null = force bare polling; int = override.
   obd_did_session: auto
+  # Cadence is a *sampling choice*, not an ECU limit — this ECM answers a DID
+  # in ~1.5 ms. 60 s suits background diagnostic surfaces (sensor drift,
+  # injector-PW trends); a capture profile can ask for a much tighter interval
+  # without a restart via its `did_interval_seconds`.
   obd_did_window_interval_seconds: 60.0   # effective per-DID sample interval
   obd_did_window_max_seconds: 10.0        # hard cap; windows close much sooner
+  # Only used when the vehicle's dids.yaml declares no `exit_session`. With
+  # one, the window ends by returning to the default session instead of idling
+  # here until S3 expires; a refusal falls back to this wait automatically.
   obd_did_session_lapse_seconds: 5.0      # quiet time for the session to expire
   obd_request_timeout_seconds: 1.0
   obd_poll_rate_hz: 1

@@ -95,8 +95,13 @@ export interface SessionsResponse {
 export interface CaptureProfile {
   name: string;
   description: string;
+  /** OBD PIDs (Mode 01), channel -> relative rate weight. */
   mode01: Record<string, number>;
+  /** Manufacturer DIDs (Mode 22 / UDS ReadDataByIdentifier). */
   mode22: string[];
+  mode01_enabled: boolean;
+  mode22_enabled: boolean;
+  did_interval_seconds: number | null;
   bus_budget_override: number | null;
   broadcast_decode: boolean;
   corpus_eligible: boolean;
@@ -112,6 +117,9 @@ export interface CaptureProfileState {
   channels: string[];
   mode01: Record<string, number>;
   mode22: string[];
+  mode01_enabled: boolean;
+  mode22_enabled: boolean;
+  did_interval_seconds: number | null;
   broadcast_decode: boolean;
   corpus_eligible: boolean;
   bus_budget_override: number | null;

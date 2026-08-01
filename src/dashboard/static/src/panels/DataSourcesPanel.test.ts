@@ -123,7 +123,7 @@ describe("DataSourcesPanel", () => {
     });
     const channels = new Map([channel("did:INJECTOR_PW", 2.5, "ms")]);
     render(createElement(DataSourcesPanel, { channels, status: null }));
-    fireEvent.click(screen.getByRole("button", { name: "Nissan DIDs" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manufacturer DIDs (Mode 22)" }));
     expect(await screen.findByText("INJECTOR_PW")).toBeInTheDocument();
     expect(screen.getByText("0x1208")).toBeInTheDocument();
     expect(screen.getByText("2.5 ms")).toBeInTheDocument();
@@ -152,7 +152,7 @@ describe("DataSourcesPanel", () => {
     });
     const channels = new Map([channel("did:INJECTOR_PW", 28364, "raw")]);
     render(createElement(DataSourcesPanel, { channels, status: null }));
-    fireEvent.click(screen.getByRole("button", { name: "Nissan DIDs" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manufacturer DIDs (Mode 22)" }));
     expect(await screen.findByText("28364 raw")).toBeInTheDocument();
     expect(screen.queryByText("ms")).not.toBeInTheDocument();
   });
@@ -190,7 +190,7 @@ describe("DataSourcesPanel", () => {
     });
     const channels = new Map([channel("did:INJECTOR_PW", 2.5, "ms")]);
     render(createElement(DataSourcesPanel, { channels, status: null }));
-    fireEvent.click(screen.getByRole("button", { name: "Nissan DIDs" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manufacturer DIDs (Mode 22)" }));
 
     expect(
       await screen.findByText("1/1 polled DIDs responding (2 catalogued)"),

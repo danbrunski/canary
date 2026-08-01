@@ -22,6 +22,9 @@ const DEFAULT_PROFILE: CaptureProfile = {
   description: "Normal telemetry and anomaly-detection collection",
   mode01: { AUTO: 1 },
   mode22: [],
+  mode01_enabled: true,
+  mode22_enabled: true,
+  did_interval_seconds: null,
   bus_budget_override: null,
   broadcast_decode: true,
   corpus_eligible: true,
@@ -33,6 +36,9 @@ const FUEL_MAP: CaptureProfile = {
   description: "High-rate fueling and timing capture",
   mode01: { RPM: 1, ENGINE_LOAD: 1 },
   mode22: [],
+  mode01_enabled: true,
+  mode22_enabled: true,
+  did_interval_seconds: null,
   bus_budget_override: null,
   broadcast_decode: true,
   corpus_eligible: false,
@@ -51,6 +57,9 @@ function status(activeName: string | null): StatusResponse {
           channels: [],
           mode01: {},
           mode22: [],
+          mode01_enabled: true,
+          mode22_enabled: true,
+          did_interval_seconds: null,
           broadcast_decode: true,
           corpus_eligible: false,
           bus_budget_override: null,
@@ -146,5 +155,34 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
 
     // Otherwise captures land under the name the profile used to have.
     expect(screen.getByDisplayValue("_capture-dyno-pulls")).toBeInTheDocument();
+  });
+
+  it("disables a whole service without discarding its selection", async () => {
+    renderPanel();
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "fuel-map" } });
+
+    const didToggle = screen.getByLabelText("enable Manufacturer DIDs (Mode 22)");
+    const did = screen.getByRole("checkbox", { name: "ECM_AF_SENSOR_V_B1" });
+    fireEvent.click(did);
+    expect(did).toBeChecked();
+
+    // Switching the service off greys the list but keeps the ticks, so
+    // re-enabling doesn't mean rebuilding the selection.
+    fireEvent.click(didToggle);
+    expect(did).toBeChecked();
+    expect(did).toBeDisabled();
+
+    fireEvent.click(didToggle);
+    expect(did).toBeChecked();
+    expect(did).toBeEnabled();
+  });
+
+  it("labels each service by both its common and protocol name", async () => {
+    renderPanel();
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+
+    expect(screen.getByText("OBD PIDs (Mode 01)")).toBeInTheDocument();
+    expect(screen.getByText("Manufacturer DIDs (Mode 22)")).toBeInTheDocument();
   });
 });

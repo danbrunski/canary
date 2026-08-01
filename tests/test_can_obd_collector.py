@@ -1634,3 +1634,101 @@ def test_record_can_obd_reraises_config_value_error(tmp_path: Path) -> None:
             reconnect_policy=ReconnectPolicy(initial_delay_seconds=0.01, max_delay_seconds=0.01),
         )
     writer.close()
+
+
+def _controller(**overrides: object) -> tuple[Any, list[Any]]:
+    """A window controller holding one DID, plus its request states."""
+    from src.collection.obd_scheduler import DidWindowController, _PollRequestState
+
+    spec = DidSessionSpec(
+        session=0xC0,
+        keepalive_seconds=2.0,
+        window_interval_seconds=60.0,
+        window_max_seconds=10.0,
+        lapse_seconds=5.0,
+        **overrides,  # type: ignore[arg-type]
+    )
+    states = [_PollRequestState(), _PollRequestState()]
+    return DidWindowController(spec, [1], now=0.0), states
+
+
+def test_fast_exit_hands_mode_01_back_without_waiting_out_the_session() -> None:
+    """The lapse exists so the session expires; an accepted `10 81` ends it now."""
+    controller, states = _controller(exit_session=0x81, exit_grace_seconds=0.05)
+    controller.on_session_response(ok=True, states=states, now=100.0)
+    assert controller.phase == "window"
+
+    # Window closes; the exit is now owed.
+    controller.advance(states, now=100.0 + 10.0)
+    assert controller.phase == "lapse"
+    assert controller.session_exit_due() is True
+
+    controller.on_exit_response(ok=True, now=110.0)
+    assert controller.fast_exits == 1
+    assert controller.session_exit_due() is False
+    # Mode 01 resumes after the grace, not after the 5 s lapse.
+    controller.advance(states, now=110.06)
+    assert controller.phase == "mode01"
+
+
+def test_a_refused_fast_exit_falls_back_to_the_timed_lapse_once() -> None:
+    """An ECU without a fast exit should cost one attempt, not one per window."""
+    controller, states = _controller(exit_session=0x81)
+    controller.on_session_response(ok=True, states=states, now=100.0)
+    controller.advance(states, now=110.0)
+    controller.on_exit_response(ok=False, now=110.0)
+
+    assert controller.fast_exit_failures == 1
+    # Still waiting out the full lapse.
+    controller.advance(states, now=110.06)
+    assert controller.phase == "lapse"
+    controller.advance(states, now=115.01)
+    assert controller.phase == "mode01"
+
+    # And the next window doesn't try again.
+    controller.on_session_response(ok=True, states=states, now=200.0)
+    controller.advance(states, now=210.0)
+    assert controller.session_exit_due() is False
+    assert controller.snapshot(now=210.0)["fast_exit_supported"] is False
+
+
+def test_no_exit_configured_keeps_the_historic_lapse() -> None:
+    controller, states = _controller()
+    controller.on_session_response(ok=True, states=states, now=100.0)
+    controller.advance(states, now=110.0)
+    assert controller.session_exit_due() is False
+    assert controller.phase == "lapse"
+
+
+def test_capture_profile_sets_the_did_window_cadence() -> None:
+    """DID cadence is a sampling choice, so a profile can retune it live."""
+    from src.collection import tuning_profile
+    from src.collection.capture_profiles import CaptureProfile
+
+    controller, states = _controller(exit_session=0x81, exit_grace_seconds=0.05)
+    assert controller.snapshot(now=0.0)["window_interval_seconds"] == 60.0
+    try:
+        tuning_profile.activate(
+            CaptureProfile(
+                name="fast-dids",
+                mode01={"RPM": 1.0},
+                mode22=("ECM_RPM",),
+                did_interval_seconds=0.5,
+                corpus_eligible=False,
+                storage_prefix="_capture-fast-dids",
+            ),
+            source="test",
+        )
+        assert controller.snapshot(now=0.0)["window_interval_seconds"] == 0.5
+
+        # A 0.5 s cadence is only reachable because the fast exit ends the
+        # blackout; the 5 s lapse alone would swallow it whole.
+        controller.on_session_response(ok=True, states=states, now=100.0)
+        controller.on_request_attempted(1)  # the window's only DID was read
+        controller.advance(states, now=100.2)
+        controller.on_exit_response(ok=True, now=100.2)
+        controller.advance(states, now=100.26)
+        assert controller.phase == "mode01"
+        assert controller.session_control_due(states, now=100.7) is True
+    finally:
+        tuning_profile.set_active(False, source="test")

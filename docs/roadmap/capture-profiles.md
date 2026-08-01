@@ -45,6 +45,18 @@ for (2026-07-31):
   scheduler interleaving blackouts. The 0xC0 in-motion side-effect A/B
   (parked first) from `data/analyses/2026-05-16T223328.md` remains a
   prerequisite for DID-heavy driving profiles.
+- **No delay the ECU doesn't ask for.** The ECM answers a request in
+  ~1.5 ms, so every multi-second number in the window scheduler is
+  policy: the 60 s cadence is a *background-monitoring* choice (now
+  overridable per profile via `did_interval_seconds`), and the lapse
+  exists only because the session had to expire on its own — with
+  `exit_session` declared, a window ends by handing the bus back
+  explicitly. Slowness belongs in configuration, where an operator can
+  see and change it, never baked into the scheduler.
+- **Label both names.** Every operator-facing surface says "OBD PIDs
+  (Mode 01)" and "Manufacturer DIDs (Mode 22)" — some pages spoke
+  protocol, others spoke common name, and the reader had to know they
+  were the same thing.
 - **Budget honesty**: profiles may raise the bus budget for bounded
   captures, but watch `storage.queue_depth` — the 25 req/s overload
   incident (2026-05) was a writer bottleneck, not a bus fault.

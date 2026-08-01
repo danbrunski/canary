@@ -66,6 +66,10 @@ class DidAccess(_Strict):
     ecu_request_id: int = Field(ge=0, le=0x1FFFFFFF)
     ecu_response_id: int = Field(ge=0, le=0x1FFFFFFF)
     session: int | None = Field(default=None, ge=0, le=0xFF)
+    #: Sub-function that returns the ECU to the default session, ending the
+    #: Mode-01 blackout immediately instead of waiting out the S3 timeout.
+    #: Absent means "no verified fast exit" — wait for the lapse.
+    exit_session: int | None = Field(default=None, ge=0, le=0xFF)
     keepalive_seconds: float | None = None
     notes: str | None = None
 

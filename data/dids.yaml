@@ -25,6 +25,7 @@ access:
   ecu_request_id: 0x7E0       # engine ECM physical request
   ecu_response_id: 0x7E8
   session: 0xC0               # UDS 0x10 sub-function that unlocks Mode 22
+  exit_session: 0x81          # return to default session — ends the Mode-01 blackout
   keepalive_seconds: 2.0      # re-send 10 C0; 0x81/0x85 open but don't unlock 0x22
   notes: |
     The 2008 Nissan ECM refuses service 0x22 in the default session
@@ -35,6 +36,17 @@ access:
     ECM stops answering Mode 01 while a non-default session is held.
     Read-only: only 0x10 (session control) + 0x22 (read) are issued.
     See data/analyses/2026-05-16T214006.md and T223328.md.
+
+    `exit_session: 0x81` ends a DID window by returning to the default
+    session instead of idling until S3 expires — the 2026-05-16 sub-function
+    sweep showed `10 81` answers `50 81`. The ECU takes ~1.5 ms per request,
+    so a multi-second wait for Mode 01 to come back is scheduling policy, not
+    an ECU limit. NOT YET CONFIRMED IN-VEHICLE: what the sweep proved is that
+    `10 81` is accepted, not that Mode 01 answers on the next frame. The
+    scheduler falls back to the timed lapse the first time the exit is
+    refused, and `/status.obd_scheduler.did_profile.fast_exits` counts the
+    successes — check it against `fast_exit_failures` on the first drive.
+    Remove this line to force the old wait-it-out behavior.
 
 dids:
   - did: 0x1101

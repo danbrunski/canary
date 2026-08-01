@@ -19,9 +19,9 @@ import type {
 type TabId = "obd" | "did" | "can" | "gps";
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: "obd", label: "OBD PIDs" },
-  { id: "did", label: "Nissan DIDs" },
-  { id: "can", label: "CAN broadcast" },
+  { id: "obd", label: "OBD PIDs (Mode 01)" },
+  { id: "did", label: "Manufacturer DIDs (Mode 22)" },
+  { id: "can", label: "CAN broadcast (passive)" },
   { id: "gps", label: "GPS" },
 ];
 
@@ -30,8 +30,9 @@ interface DataSourcesPanelProps {
   status: StatusResponse | null;
 }
 
-/** One combined view of every intake stream, one tab per source (OBD PIDs,
- *  Nissan DIDs, broadcast CAN, GPS). Each tab is a table of *all* known
+/** One combined view of every intake stream, one tab per source (OBD PIDs /
+ *  Mode 01, manufacturer DIDs / Mode 22, broadcast CAN, GPS). Each tab is a
+ *  table of *all* known
  *  entries for that source; the live "value" column is overlaid from the
  *  telemetry stream (`channels`, keyed `<source>:<channel>`). View controls
  *  hide entries the vehicle doesn't support/isn't sending and float the

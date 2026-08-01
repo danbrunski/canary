@@ -44,6 +44,9 @@ const blankProfile = (): CaptureProfile => {
     description: "",
     mode01: {},
     mode22: [],
+    mode01_enabled: true,
+    mode22_enabled: true,
+    did_interval_seconds: null,
     bus_budget_override: null,
     broadcast_decode: true,
     corpus_eligible: false,
@@ -185,6 +188,9 @@ export function CaptureProfilesPanel({
         <label className="text-sm text-fg-dim">Bus budget (requests/s; blank = default)
           <input className={`${inputClass} mt-1 w-full`} type="number" min="2" max="200" value={draft.bus_budget_override ?? ""} onChange={(event) => setDraft({ ...draft, bus_budget_override: event.target.value ? Number(event.target.value) : null })} />
         </label>
+        <label className="text-sm text-fg-dim">Mode 22 window interval (s; blank = daemon default)
+          <input className={`${inputClass} mt-1 w-full`} type="number" min="0.1" step="0.1" disabled={!draft.mode22_enabled} value={draft.did_interval_seconds ?? ""} onChange={(event) => setDraft({ ...draft, did_interval_seconds: event.target.value ? Number(event.target.value) : null })} />
+        </label>
         <label className="text-sm text-fg-dim">Storage prefix (must be <code>_capture-&lt;slug&gt;</code>)
           <input className={`${inputClass} mt-1 w-full`} value={draft.storage_prefix} disabled={draft.name === "default" || draft.corpus_eligible} onChange={(event) => setDraft({ ...draft, storage_prefix: event.target.value })} />
         </label>
@@ -196,11 +202,11 @@ export function CaptureProfilesPanel({
       </div>
 
       <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
-        <ChannelPicker title="Mode 01 channels" items={pids} selected={mode01Set} onToggle={togglePid} weights={draft.mode01} onWeight={(channel, weight) => setDraft({ ...draft, mode01: { ...draft.mode01, [channel]: weight } })} />
-        <ChannelPicker title="Mode 22 DIDs" items={dids} selected={mode22Set} onToggle={toggleDid} />
+        <ChannelPicker title="OBD PIDs (Mode 01)" hint="Standard SAE J1979 parameters." items={pids} selected={mode01Set} onToggle={togglePid} weights={draft.mode01} onWeight={(channel, weight) => setDraft({ ...draft, mode01: { ...draft.mode01, [channel]: weight } })} enabled={draft.mode01_enabled} onEnabled={(value) => setDraft({ ...draft, mode01_enabled: value })} />
+        <ChannelPicker title="Manufacturer DIDs (Mode 22)" hint="UDS ReadDataByIdentifier, from this vehicle's DID map." items={dids} selected={mode22Set} onToggle={toggleDid} enabled={draft.mode22_enabled} onEnabled={(value) => setDraft({ ...draft, mode22_enabled: value })} />
       </div>
 
-      {draft.mode22.length > 0 && <p className="text-sm text-warn">This profile enters the vehicle's configured diagnostic session. On vehicles where Mode 22 silences Mode 01, public PID values will pause while DIDs own the bus.</p>}
+      {draft.mode22_enabled && draft.mode22.length > 0 && <p className="text-sm text-warn">This profile enters the vehicle's configured diagnostic session. On vehicles where Mode 22 silences Mode 01, OBD PID values pause while DIDs own the bus — untick <em>Manufacturer DIDs (Mode 22)</em> to keep Mode 01 continuous for this capture.</p>}
       {warnings.length > 0 && <div className="rounded border border-warn/50 p-2 text-sm text-warn">{warnings.map((warning) => <div key={warning.model}>{warning.model}: missing {warning.missing_channels.join(", ")}</div>)}</div>}
       <div className="flex flex-wrap gap-2">
         <button className={buttonClass} type="button" disabled={!token || !!busy} onClick={() => save(false)}>Save</button>
@@ -215,7 +221,7 @@ export function CaptureProfilesPanel({
 }
 
 function ChannelPicker({
-  title, items, selected, onToggle, weights, onWeight,
+  title, items, selected, onToggle, weights, onWeight, enabled, onEnabled, hint,
 }: {
   title: string;
   items: string[];
@@ -223,13 +229,24 @@ function ChannelPicker({
   onToggle: (item: string) => void;
   weights?: Record<string, number>;
   onWeight?: (item: string, weight: number) => void;
+  /** Whole-service switch. Disabling greys the list but keeps the ticks, so
+   *  re-enabling doesn't mean rebuilding the selection from scratch. */
+  enabled: boolean;
+  onEnabled: (value: boolean) => void;
+  hint?: string;
 }) {
-  return <fieldset className="max-h-80 overflow-y-auto rounded border border-border p-2">
-    <legend className="px-1 text-sm font-semibold">{title}</legend>
+  return <fieldset className={`max-h-80 overflow-y-auto rounded border border-border p-2 ${enabled ? "" : "opacity-50"}`}>
+    <legend className="px-1 text-sm font-semibold">
+      <label className="flex items-center gap-2">
+        <input aria-label={`enable ${title}`} type="checkbox" checked={enabled} onChange={(event) => onEnabled(event.target.checked)} />
+        {title}
+      </label>
+    </legend>
+    {hint && <p className="mt-0 mb-1 px-1 text-[0.72rem] text-fg-dim">{hint}</p>}
     {items.map((item) => <label key={item} className="flex min-h-8 items-center gap-2 border-b border-border/40 text-sm">
-      <input type="checkbox" checked={selected.has(item)} onChange={() => onToggle(item)} />
+      <input type="checkbox" checked={selected.has(item)} disabled={!enabled} onChange={() => onToggle(item)} />
       <span className="flex-1">{item}</span>
-      {selected.has(item) && weights && onWeight && <input aria-label={`${item} rate weight`} className={`${inputClass} w-20`} type="number" min="0.1" step="0.1" value={weights[item] ?? 1} onChange={(event) => onWeight(item, Number(event.target.value))} />}
+      {selected.has(item) && weights && onWeight && <input aria-label={`${item} rate weight`} className={`${inputClass} w-20`} type="number" min="0.1" step="0.1" disabled={!enabled} value={weights[item] ?? 1} onChange={(event) => onWeight(item, Number(event.target.value))} />}
     </label>)}
   </fieldset>;
 }
