@@ -69,6 +69,7 @@ export function CaptureProfilesPanel({
   const [dids, setDids] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<CaptureProfileWarning[]>([]);
   const [tuneRevision, setTuneRevision] = useState("");
+  const [showWeights, setShowWeights] = useState(false);
   const { notice, setNotice, busy, run } = useAsyncAction();
 
   const refresh = useCallback(async () => {
@@ -198,11 +199,19 @@ export function CaptureProfilesPanel({
 
       <div className="flex flex-wrap gap-5 text-sm">
         <label><input type="checkbox" checked={draft.broadcast_decode} onChange={(event) => setDraft({ ...draft, broadcast_decode: event.target.checked })} /> decode broadcast CAN</label>
+        <label title="Off by default: every selected channel is sampled each round, so a capture reads as synchronous rows. Uneven rates suit background monitoring, not tuning."><input type="checkbox" checked={showWeights} onChange={(event) => {
+          setShowWeights(event.target.checked);
+          // Leaving the picker resets weights to 1 so a half-finished
+          // experiment can't silently skew a later capture.
+          if (!event.target.checked) {
+            setDraft({ ...draft, mode01: Object.fromEntries(Object.keys(draft.mode01).map((key) => [key, 1])) });
+          }
+        }} /> per-channel rate weights (advanced)</label>
         <label><input type="checkbox" checked={draft.corpus_eligible} disabled={draft.name === "default"} onChange={(event) => setDraft({ ...draft, corpus_eligible: event.target.checked, storage_prefix: event.target.checked ? "" : `_capture-${draft.name}` })} /> eligible for training corpus</label>
       </div>
 
       <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
-        <ChannelPicker title="OBD PIDs (Mode 01)" hint="Standard SAE J1979 parameters." items={pids} selected={mode01Set} onToggle={togglePid} weights={draft.mode01} onWeight={(channel, weight) => setDraft({ ...draft, mode01: { ...draft.mode01, [channel]: weight } })} enabled={draft.mode01_enabled} onEnabled={(value) => setDraft({ ...draft, mode01_enabled: value })} />
+        <ChannelPicker title="OBD PIDs (Mode 01)" hint="Standard SAE J1979 parameters. Up to 6 share one request, so they carry one timestamp." showWeights={showWeights} items={pids} selected={mode01Set} onToggle={togglePid} weights={draft.mode01} onWeight={(channel, weight) => setDraft({ ...draft, mode01: { ...draft.mode01, [channel]: weight } })} enabled={draft.mode01_enabled} onEnabled={(value) => setDraft({ ...draft, mode01_enabled: value })} />
         <ChannelPicker title="Manufacturer DIDs (Mode 22)" hint="UDS ReadDataByIdentifier, from this vehicle's DID map." items={dids} selected={mode22Set} onToggle={toggleDid} enabled={draft.mode22_enabled} onEnabled={(value) => setDraft({ ...draft, mode22_enabled: value })} />
       </div>
 
@@ -221,7 +230,7 @@ export function CaptureProfilesPanel({
 }
 
 function ChannelPicker({
-  title, items, selected, onToggle, weights, onWeight, enabled, onEnabled, hint,
+  title, items, selected, onToggle, weights, onWeight, enabled, onEnabled, hint, showWeights,
 }: {
   title: string;
   items: string[];
@@ -234,6 +243,10 @@ function ChannelPicker({
   enabled: boolean;
   onEnabled: (value: boolean) => void;
   hint?: string;
+  /** Per-channel rate weights. Off by default: a capture normally wants every
+   *  selected channel sampled together, and uneven rates only make sense for
+   *  background monitoring, where slow signals shouldn't crowd out fast ones. */
+  showWeights?: boolean;
 }) {
   return <fieldset className={`max-h-80 overflow-y-auto rounded border border-border p-2 ${enabled ? "" : "opacity-50"}`}>
     <legend className="px-1 text-sm font-semibold">
@@ -246,7 +259,7 @@ function ChannelPicker({
     {items.map((item) => <label key={item} className="flex min-h-8 items-center gap-2 border-b border-border/40 text-sm">
       <input type="checkbox" checked={selected.has(item)} disabled={!enabled} onChange={() => onToggle(item)} />
       <span className="flex-1">{item}</span>
-      {selected.has(item) && weights && onWeight && <input aria-label={`${item} rate weight`} className={`${inputClass} w-20`} type="number" min="0.1" step="0.1" disabled={!enabled} value={weights[item] ?? 1} onChange={(event) => onWeight(item, Number(event.target.value))} />}
+      {showWeights && selected.has(item) && weights && onWeight && <input aria-label={`${item} rate weight`} className={`${inputClass} w-20`} type="number" min="0.1" step="0.1" disabled={!enabled} value={weights[item] ?? 1} onChange={(event) => onWeight(item, Number(event.target.value))} />}
     </label>)}
   </fieldset>;
 }

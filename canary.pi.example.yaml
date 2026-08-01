@@ -55,6 +55,11 @@ collection:
     # unpinned (only 0 at idle / 11 at 2500 rpm observed), so it lands as a
     # raw count until a rev sweep calibrates it.
     - ECM_INTAKE_VVT_SOLENOID_DUTY  # 0x1110 — intake cam phasing duty
+  # Batch up to N PIDs per Mode-01 request (SAE J1979 allows 6). Batched PIDs
+  # share one request *and one timestamp*, so a capture reads as synchronous
+  # rows instead of interleaved samples — and it roughly doubles throughput.
+  # The collector narrows 6 -> 4 -> 2 -> off by itself if the ECU refuses.
+  obd_batch_max_pids: 6
   obd_did_request_id: 0x7E0
   obd_request_timeout_seconds: 1.0
   obd_poll_rate_hz: 1

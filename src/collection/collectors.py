@@ -128,6 +128,7 @@ def default_collectors(
             pids=request_pids,
             dids=request_dids,
             capture_profiles_enabled=True,
+            batch_max_pids=config.collection.obd_batch_max_pids,
             did_request_id=config.collection.obd_did_request_id,
             request_timeout_seconds=config.collection.obd_request_timeout_seconds,
             did_session=resolve_did_session_spec(config.collection),

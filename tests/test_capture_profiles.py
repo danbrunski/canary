@@ -369,3 +369,16 @@ def test_active_profile_cannot_be_deleted_via_a_case_variant(tmp_path: Path) -> 
 
     assert client.delete("/control/capture/profiles/Fuel-Map", headers=headers).status_code == 409
     assert store.load().by_name("fuel-map") is not None
+
+
+def test_collectors_enable_multi_pid_batching_from_config() -> None:
+    """Batched PIDs share one request and one timestamp — the whole point of a
+    capture reading as synchronous rows rather than interleaved samples."""
+    from src.collection.can_obd_collector import CanObdSpec
+
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    assert config.collection.obd_batch_max_pids == 6, "batch when the protocol allows it"
+
+    # The spec default stays 1 so standalone/recorder paths are unchanged;
+    # the daemon is what opts in.
+    assert CanObdSpec.batch_max_pids == 1

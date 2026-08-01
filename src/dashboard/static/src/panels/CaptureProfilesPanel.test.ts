@@ -185,4 +185,17 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     expect(screen.getByText("OBD PIDs (Mode 01)")).toBeInTheDocument();
     expect(screen.getByText("Manufacturer DIDs (Mode 22)")).toBeInTheDocument();
   });
+
+  it("hides per-channel rate weights unless asked for", async () => {
+    renderPanel();
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "fuel-map" } });
+
+    // A capture normally wants every selected channel sampled together, so
+    // uneven rates are an advanced control rather than the default view.
+    expect(screen.queryByLabelText("RPM rate weight")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText(/per-channel rate weights/));
+    expect(screen.getByLabelText("RPM rate weight")).toBeInTheDocument();
+  });
 });

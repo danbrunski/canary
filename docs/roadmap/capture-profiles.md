@@ -53,6 +53,14 @@ for (2026-07-31):
   `exit_session` declared, a window ends by handing the bus back
   explicitly. Slowness belongs in configuration, where an operator can
   see and change it, never baked into the scheduler.
+- **Synchronous rows, not interleaved samples.** A capture is expected to
+  read like a datalog: every channel at one instant, one row per sample.
+  Multi-PID batching is what delivers that — up to 6 PIDs share a single
+  Mode-01 request *and a single timestamp* — so it is on by default
+  (`collection.obd_batch_max_pids`, narrowed automatically if an ECU
+  refuses). Per-channel rate weights are the opposite idea and belong to
+  background monitoring, where slow signals must not crowd out fast ones;
+  in the capture editor they are an advanced control, off by default.
 - **Label both names.** Every operator-facing surface says "OBD PIDs
   (Mode 01)" and "Manufacturer DIDs (Mode 22)" — some pages spoke
   protocol, others spoke common name, and the reader had to know they

@@ -206,6 +206,12 @@ class CollectionConfig(_Strict):
     #: scheduled windows (see the obd_did_window_* knobs below).
     obd_did_session: int | Literal["auto"] | None = "auto"
     #: ``null`` → keep-alive cadence from dids.yaml access block (or 2.0 s).
+    #: PIDs per Mode-01 request. SAE J1979 allows six; the collector narrows
+    #: 6 -> 4 -> 2 -> off on repeated failures, so a vehicle that refuses
+    #: batching degrades on its own rather than needing this tuned by hand.
+    #: Batched PIDs share one request *and one timestamp*, which is what makes
+    #: a capture read as synchronous rows instead of interleaved samples.
+    obd_batch_max_pids: int = Field(default=6, ge=1, le=6)
     obd_did_session_keepalive_seconds: float | None = None
     #: How often a DID window opens. Each window reads every active DID once,
     #: so this is the effective per-DID sample interval.

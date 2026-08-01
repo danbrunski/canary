@@ -158,7 +158,7 @@ Mode 22 DIDs therefore stay one-at-a-time regardless of what happens here.
   as well (each PID paired with its frame number). Low volume, but it is
   the same mechanism and the one-shot read gets closer to a coherent
   single instant — which is the entire point of a freeze frame.
-- [ ] **3.3 — Tuning capture profile.** `tuning_profile` narrows the
+- [x] **3.3 — Tuning capture profile.** `tuning_profile` narrows the
   rotation to 15 Mode 01 channels; batched that is 3 requests instead of
   15. Combined with a raised budget for the bounded capture window, this
   is what makes ~30 Hz per channel real rather than theoretical.

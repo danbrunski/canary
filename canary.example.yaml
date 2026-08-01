@@ -82,6 +82,11 @@ collection:
     - ECM_AF_SENSOR_V_B2       # wideband AFR sensor V, bank 2 (pre-cat)
     - ECM_THROTTLE_POS_SENSOR_1  # raw TPS voltage, for sensor-drift detection
     - ECM_THROTTLE_POS_SENSOR_2  # redundant TPS track for cross-checking
+  # Batch up to N PIDs per Mode-01 request (SAE J1979 allows 6). Batched PIDs
+  # share one request *and one timestamp*, so a capture reads as synchronous
+  # rows instead of interleaved samples — and it roughly doubles throughput.
+  # The collector narrows 6 -> 4 -> 2 -> off by itself if the ECU refuses.
+  obd_batch_max_pids: 6
   obd_did_request_id: 0x7E0
   # auto = take the gating session (0xC0) + keep-alive cadence from
   # data/dids.yaml's access block; null = force bare polling; int = override.
