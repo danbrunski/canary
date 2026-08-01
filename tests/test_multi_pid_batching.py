@@ -228,7 +228,18 @@ class _BatchingEcu:
 
     #: pid -> payload the fake ECU returns. 0x2F is deliberately absent so
     #: the "ECU omits an unsupported PID" path gets exercised.
-    VALUES = {0x0C: b"\x0b\xb8", 0x0D: b"\x32", 0x04: b"\x40", 0x11: b"\x19", 0x0E: b"\x50"}
+    #: 0x05/0x0F/0x10 give more than the six-PID ceiling, so a selection can
+    #: span two requests — the case a capture round has to hold together.
+    VALUES = {
+        0x0C: b"\x0b\xb8",
+        0x0D: b"\x32",
+        0x04: b"\x40",
+        0x11: b"\x19",
+        0x0E: b"\x50",
+        0x05: b"\x5a",
+        0x0F: b"\x46",
+        0x10: b"\x01\x00",
+    }
 
     def __init__(self, *, answer_batches: bool = True) -> None:
         self.sent: list[can.Message] = []
@@ -486,3 +497,61 @@ def test_every_pid_in_a_batch_lands_on_one_timestamp() -> None:
         {"RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS"} <= channels
         for channels in by_stamp.values()
     ), f"no timestamp carried the whole batch: {by_stamp}"
+
+
+def test_a_capture_round_puts_every_channel_on_one_row() -> None:
+    """More channels than the 6-PID ceiling still reads as a single sample.
+
+    capture-profiles.md 5.b: the operator's unit is a round, not a request.
+    Eight channels span two batches ~ms apart, and without a round stamp they
+    land on two timestamps — a "row" the consumer has to reassemble by
+    proximity.
+    """
+    from src.collection import tuning_profile
+    from src.collection.capture_profiles import CaptureProfile
+
+    channels = (
+        "RPM",
+        "SPEED",
+        "ENGINE_LOAD",
+        "THROTTLE_POS",
+        "COOLANT_TEMP",
+        "INTAKE_TEMP",
+        "TIMING_ADVANCE",
+        "MAF",
+    )
+    readings: list = []
+    try:
+        tuning_profile.activate(
+            CaptureProfile(
+                name="rows",
+                mode01=dict.fromkeys(channels, 1.0),
+                round_timestamps=True,
+                corpus_eligible=False,
+                storage_prefix="_capture-rows",
+            ),
+            source="test",
+        )
+        run_can_obd_loop(
+            _BatchingEcu(),  # type: ignore[arg-type]
+            _spec(pids=channels, batch_max_pids=6),
+            on_frame=lambda _m: None,
+            on_reading=readings.append,
+            stop_event=threading.Event(),
+            deadline_monotonic=time.monotonic() + 0.5,
+        )
+    finally:
+        tuning_profile.set_active(False, source="test")
+
+    by_stamp: dict[float, set[str]] = {}
+    for reading in readings:
+        by_stamp.setdefault(reading.timestamp, set()).add(reading.pid)
+    assert any(set(channels) <= got for got in by_stamp.values()), (
+        f"no single timestamp carried the whole round: "
+        f"{ {k: sorted(v) for k, v in by_stamp.items()} }"
+    )
+
+    # The scheduling stamp must not erase when the value actually arrived.
+    stamped = [r for r in readings if r.acquired_at is not None]
+    assert stamped, "round-stamped readings should retain their arrival instant"
+    assert any(r.acquired_at != r.timestamp for r in stamped)

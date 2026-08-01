@@ -144,6 +144,7 @@ class TelemetryRecord:
         unit: str,
         *,
         payload: bytes | None = None,
+        metadata: dict[str, MetadataValue] | None = None,
     ) -> TelemetryRecord:
         """`payload` is the raw response data the decoder consumed. Persisting
         it makes decoder bugs retroactively fixable — the LONG_FUEL_TRIM
@@ -156,6 +157,7 @@ class TelemetryRecord:
             value=value,
             unit=unit,
             payload=payload,
+            metadata=metadata,
         )
 
     @classmethod

@@ -145,6 +145,12 @@ class ObdReading:
     #: never see the wire bytes, e.g. python-obd's pint-quantity readings).
     #: Persisted to Parquet so a wrong decoder can be re-run over history.
     payload: bytes | None = None
+    #: True wire-arrival instant, set only when ``timestamp`` carries a
+    #: *round* stamp instead (capture profiles with ``round_timestamps``, so a
+    #: sample spanning several requests reads as one row). Kept so the primary
+    #: timestamp being a scheduling artifact never destroys the real timing —
+    #: scheduler drift stays diagnosable.
+    acquired_at: float | None = None
 
     def to_json_line(self) -> str:
         # payload intentionally omitted: the JSONL sidecar is a human-facing
@@ -392,7 +398,12 @@ def reading_to_record(reading: ObdReading) -> TelemetryRecord:
     if not isinstance(value, (bool, int, float, str, type(None))):
         value = str(value)
     return TelemetryRecord.obd(
-        reading.timestamp, reading.pid, value, reading.unit, payload=reading.payload
+        reading.timestamp,
+        reading.pid,
+        value,
+        reading.unit,
+        payload=reading.payload,
+        metadata={"acquired_at": reading.acquired_at} if reading.acquired_at is not None else None,
     )
 
 

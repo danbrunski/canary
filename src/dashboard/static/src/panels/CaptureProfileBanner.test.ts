@@ -17,6 +17,7 @@ const ACTIVE: CaptureProfileState = {
   mode01_enabled: true,
   mode22_enabled: true,
   did_interval_seconds: null,
+  round_timestamps: true,
   broadcast_decode: true,
   corpus_eligible: false,
   bus_budget_override: null,

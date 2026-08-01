@@ -102,6 +102,7 @@ export interface CaptureProfile {
   mode01_enabled: boolean;
   mode22_enabled: boolean;
   did_interval_seconds: number | null;
+  round_timestamps: boolean;
   bus_budget_override: number | null;
   broadcast_decode: boolean;
   corpus_eligible: boolean;
@@ -120,6 +121,7 @@ export interface CaptureProfileState {
   mode01_enabled: boolean;
   mode22_enabled: boolean;
   did_interval_seconds: number | null;
+  round_timestamps: boolean;
   broadcast_decode: boolean;
   corpus_eligible: boolean;
   bus_budget_override: number | null;

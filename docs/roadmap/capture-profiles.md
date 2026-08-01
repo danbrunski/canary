@@ -217,12 +217,19 @@ shared timestamp on. Three ways to get one, in ascending cost:
   shared `sample_id`; readings keep their real acquisition time, and
   query/export pivots on the id. Nothing is falsified and rows become
   trivial to build, at the cost of a new column consumers must know about.
-- [ ] **5.b — Round timestamp, acquisition time preserved alongside.**
+- [x] **5.b — Round timestamp, acquisition time preserved alongside.**
   Every reading in a round is stamped with the round's start; the true
   acquisition instant moves to a second field. Rows line up with no
   consumer changes. This is what dataloggers do, and the ~3 ms it papers
   over is well inside the resample grid — but it does mean the primary
   timestamp is a scheduling artifact rather than a measurement.
+  **Done.** `CaptureProfile.round_timestamps` (on for `fuel-map`, off for
+  `default` until multi-pid-polling.md 4.3 validates the arrival pattern
+  the resampler sees). The true instant rides along as `acquired_at` in
+  reading metadata, so scheduler drift stays diagnosable. Poll *tiers* are
+  suspended in round mode for the same reason weights were demoted: they
+  are a monitoring optimization, and a channel on a slower tier could
+  never share a round with the rest of the operator's selection.
 - [ ] **5.c — True sweep scheduling.** A capture profile stops using
   per-channel due times entirely: poll every enabled channel back to back
   (`ceil(n/6)` requests), stamp the round, sleep to the next round.

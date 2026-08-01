@@ -24,7 +24,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import partial
 
@@ -237,6 +237,11 @@ def run_can_obd_loop(
     # consecutive failures falls the session back to single-PID rather than
     # stalling. This doubles as the adaptive form of the startup size probe:
     # we discover what the vehicle actually accepts by using it.
+    # Wall clock at which the current burst of due requests began. Every
+    # reading issued inside it shares this stamp when the active capture
+    # profile asks for rounds, so a sample wider than one batch still reads as
+    # one row. Cleared whenever the loop runs out of due work.
+    round_wall_start: float | None = None
     batching_enabled = spec.batch_max_pids > 1
     active_batch_max = spec.batch_max_pids
     consecutive_batch_failures = 0
@@ -396,6 +401,7 @@ def run_can_obd_loop(
             requests, request_states, now, eligible=eligible
         )
         if active_request_count == 0:
+            round_wall_start = None
             _drain_frames_until(
                 bus,
                 on_frame,
@@ -419,6 +425,7 @@ def run_can_obd_loop(
 
         selection = _select_next_due_request(requests, request_states, now, eligible=eligible)
         if selection is None:
+            round_wall_start = None
             next_due = _next_due_at(requests, request_states, now, eligible=eligible)
             if controller is not None:
                 transition_at = controller.next_transition_at()
@@ -435,6 +442,9 @@ def run_can_obd_loop(
                 )
             continue
         request_index, request, request_state = selection
+        if round_wall_start is None:
+            round_wall_start = time.time()
+        round_timestamp = round_wall_start if tuning_profile.round_timestamps_enabled() else None
 
         batch_indices = select_batch_companions(
             requests,
@@ -443,6 +453,7 @@ def run_can_obd_loop(
             leader_index=request_index,
             max_pids=active_batch_max if batching_enabled else 1,
             eligible=eligible,
+            ignore_tier=round_timestamp is not None,
         )
         if len(batch_indices) > 1:
             answered = _issue_batched_request(
@@ -456,6 +467,7 @@ def run_can_obd_loop(
                 stop_event=stop_event,
                 stats=stats,
                 deadline_monotonic=deadline_monotonic,
+                round_timestamp=round_timestamp,
             )
             if answered:
                 consecutive_batch_failures = 0
@@ -515,7 +527,12 @@ def run_can_obd_loop(
             raise
         emitted = False
         if result.response is not None:
-            readings = _response_to_reading(request, result.response)
+            readings = _response_to_reading(
+                request,
+                result.response,
+                timestamp=round_timestamp,
+                acquired_at=time.time() if round_timestamp is not None else None,
+            )
             if readings:
                 emitted = True
                 stats.readings_emitted += len(readings)
@@ -872,6 +889,24 @@ def _response_to_reading(
     request: _PollRequest,
     response: ObdResponse,
     timestamp: float | None = None,
+    acquired_at: float | None = None,
+) -> list[ObdReading]:
+    """Decode a response, optionally re-stamping it onto a capture round.
+
+    ``timestamp`` overrides the decode-time clock read; ``acquired_at``
+    records what that clock actually said, so a round stamp never destroys
+    the real timing.
+    """
+    readings = _decode_response(request, response, timestamp)
+    if acquired_at is None:
+        return readings
+    return [replace(reading, acquired_at=acquired_at) for reading in readings]
+
+
+def _decode_response(
+    request: _PollRequest,
+    response: ObdResponse,
+    timestamp: float | None = None,
 ) -> list[ObdReading]:
     """Turn one raw response into zero or more decoded readings.
 
@@ -1122,6 +1157,7 @@ def _issue_batched_request(
     stop_event: threading.Event,
     stats: CanObdLoopStats,
     deadline_monotonic: float | None,
+    round_timestamp: float | None = None,
 ) -> bool:
     """Poll several Mode 01 PIDs in one round trip. True if the batch answered.
 
@@ -1174,7 +1210,10 @@ def _issue_batched_request(
     # One response, one instant: every PID in this batch was sampled by the
     # ECU together, so they share a timestamp rather than each taking its own
     # clock read while the payload is decoded.
-    batch_timestamp = time.time()
+    arrived_at = time.time()
+    # A round stamp keeps a sample that spans several requests on one row; the
+    # arrival instant is retained per reading so nothing is lost.
+    batch_timestamp = round_timestamp if round_timestamp is not None else arrived_at
     for index in indices:
         request = requests[index]
         state = states[index]
@@ -1192,6 +1231,7 @@ def _issue_batched_request(
                     responder_id=DEFAULT_RESPONSE_ID_MIN,
                 ),
                 timestamp=batch_timestamp,
+                acquired_at=arrived_at if round_timestamp is not None else None,
             )
             if readings:
                 emitted = True

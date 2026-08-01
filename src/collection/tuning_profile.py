@@ -109,6 +109,12 @@ def mode22() -> frozenset[str]:
         return frozenset(_profile.mode22) if _profile.mode22_enabled else frozenset()
 
 
+def round_timestamps_enabled() -> bool:
+    """Whether readings should carry their capture round's start time."""
+    with _lock:
+        return _profile.round_timestamps
+
+
 def did_interval_override() -> float | None:
     """Profile's Mode-22 window cadence, or ``None`` to use the config default."""
     with _lock:
@@ -176,6 +182,16 @@ def rate_weight(channel: str) -> float:
         return _profile.mode01.get(channel.upper(), 1.0)
 
 
+def rate_policy(channel: str) -> tuple[float, bool]:
+    """``(rate_weight, uniform_cadence)`` for one channel, under one lock.
+
+    The poll loop asks per request, so this is a hot path; taking the lock
+    once beats two round trips for two fields of the same profile.
+    """
+    with _lock:
+        return _profile.mode01.get(channel.upper(), 1.0), _profile.round_timestamps
+
+
 def snapshot(achieved_hz: dict[str, float] | None = None) -> dict[str, Any]:
     with _lock:
         payload: dict[str, Any] = {
@@ -190,6 +206,7 @@ def snapshot(achieved_hz: dict[str, float] | None = None) -> dict[str, Any]:
             "mode01_enabled": _profile.mode01_enabled,
             "mode22_enabled": _profile.mode22_enabled,
             "did_interval_seconds": _profile.did_interval_seconds,
+            "round_timestamps": _profile.round_timestamps,
             "broadcast_decode": _profile.broadcast_decode,
             "corpus_eligible": _profile.corpus_eligible,
             "bus_budget_override": _profile.bus_budget_override,

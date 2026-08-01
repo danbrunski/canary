@@ -47,6 +47,7 @@ const blankProfile = (): CaptureProfile => {
     mode01_enabled: true,
     mode22_enabled: true,
     did_interval_seconds: null,
+    round_timestamps: true,
     bus_budget_override: null,
     broadcast_decode: true,
     corpus_eligible: false,
@@ -199,6 +200,7 @@ export function CaptureProfilesPanel({
 
       <div className="flex flex-wrap gap-5 text-sm">
         <label><input type="checkbox" checked={draft.broadcast_decode} onChange={(event) => setDraft({ ...draft, broadcast_decode: event.target.checked })} /> decode broadcast CAN</label>
+        <label title="Every channel selected here is sampled together and shares the round's timestamp, so a capture reads as one row per sample. The true arrival instant of each value is kept alongside."><input type="checkbox" checked={draft.round_timestamps} onChange={(event) => setDraft({ ...draft, round_timestamps: event.target.checked })} /> one timestamp per round (synchronous rows)</label>
         <label title="Off by default: every selected channel is sampled each round, so a capture reads as synchronous rows. Uneven rates suit background monitoring, not tuning."><input type="checkbox" checked={showWeights} onChange={(event) => {
           setShowWeights(event.target.checked);
           // Leaving the picker resets weights to 1 so a half-finished

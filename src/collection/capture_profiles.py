@@ -73,6 +73,14 @@ class CaptureProfile(_Strict):
     #: DID in ~1.5 ms, so a slow default belongs in config, never in the
     #: scheduler.
     did_interval_seconds: float | None = None
+    #: Stamp every channel polled in one round with the round's start time, so
+    #: a sample spanning several requests reads as one row. The true arrival
+    #: instant is kept per reading (``acquired_at`` metadata), so this changes
+    #: how a sample is *presented*, not what was measured. Off for `default`:
+    #: it alters the arrival pattern the resampler and __roc derivatives see,
+    #: which wants validating (multi-pid-polling.md 4.3) before the training
+    #: corpus depends on it.
+    round_timestamps: bool = False
     bus_budget_override: float | None = None
     broadcast_decode: bool = True
     corpus_eligible: bool = False
@@ -199,6 +207,7 @@ def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
                 bus_budget_override=None,
                 broadcast_decode=True,
                 corpus_eligible=False,
+                round_timestamps=True,
                 storage_prefix="_capture-fuel-map",
             ),
         ]

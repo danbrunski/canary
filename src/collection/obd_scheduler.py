@@ -903,7 +903,15 @@ def _request_rate_hz(request: _PollRequest, spec: CanObdSpec) -> float:
         # byte-for-byte the historic tier cadence.
         from src.collection import tuning_profile
 
-        rate *= tuning_profile.rate_weight(request.channel)
+        weight, uniform_cadence = tuning_profile.rate_policy(request.channel)
+        if uniform_cadence:
+            # Tiers exist so a minute-scale signal doesn't burn budget at a
+            # fast channel's cadence — a monitoring optimization. A capture
+            # round is a *sample*: the operator picked these channels to see
+            # them together, so they all run at the base cadence or they can
+            # never share a round.
+            rate = base
+        rate *= weight
     return rate
 
 
@@ -983,7 +991,7 @@ def is_batchable(request: _PollRequest) -> bool:
     return request.kind == "pid" and request.service == 0x01 and 0 <= request.identifier <= 0xFF
 
 
-def select_batch_companions(
+def select_batch_companions(  # noqa: PLR0913
     requests: list[_PollRequest],
     states: list[_PollRequestState],
     now: float,
@@ -991,6 +999,7 @@ def select_batch_companions(
     leader_index: int,
     max_pids: int,
     eligible: RequestFilter | None = None,
+    ignore_tier: bool = False,
 ) -> list[int]:
     """Indices to issue alongside ``leader_index`` as one batched request.
 
@@ -1001,6 +1010,8 @@ def select_batch_companions(
     same poll tier** as the leader. The tier rule is what stops a slow-tier
     PID from being dragged to fast-tier cadence (wasting budget on data that
     changes on the order of minutes) or a fast-tier one being held back.
+    ``ignore_tier`` lifts it for capture rounds, where the operator's channel
+    selection *is* the sample and every member is expected on the same row.
     """
     leader = requests[leader_index]
     if max_pids <= 1 or not is_batchable(leader):
@@ -1013,7 +1024,7 @@ def select_batch_companions(
             break
         if index == leader_index or not is_batchable(request):
             continue
-        if request.poll_tier != leader.poll_tier:
+        if not ignore_tier and request.poll_tier != leader.poll_tier:
             continue
         if request.identifier in seen_pids:
             continue
