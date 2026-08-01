@@ -36,6 +36,17 @@ export interface LookupTableFit extends BehaviorFitBase {
   y_knots: number[];
 }
 
+/** Mode-conditioned location/spread with no claimed x relationship — the
+ *  expectation is flat across the domain (`RobustBaselineFit`, backend
+ *  `src/decode/behavior_models.py`). */
+export interface RobustBaselineFit extends BehaviorFitBase {
+  kind: "robust_baseline";
+  median: number;
+  mad: number;
+  p01: number;
+  p99: number;
+}
+
 export interface GridCell {
   mean: number;
   std: number;
@@ -65,7 +76,7 @@ export interface BehaviorModel1D {
   axis: BehaviorAxis1D;
   operating_mode: string | null;
   version: number;
-  fit: PolynomialFit | LookupTableFit;
+  fit: PolynomialFit | LookupTableFit | RobustBaselineFit;
   deviation: DeviationConfig | null;
   notes: string | null;
 }

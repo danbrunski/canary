@@ -25,16 +25,31 @@ import type {
   StatusResponse,
 } from "../types";
 
-const blankProfile = (): CaptureProfile => ({
-  name: "new-capture",
-  description: "",
-  mode01: {},
-  mode22: [],
-  bus_budget_override: null,
-  broadcast_decode: true,
-  corpus_eligible: false,
-  storage_prefix: "_capture-new-capture",
-});
+/** `2026-07-31-1830` — a lowercase slug the backend name validator accepts,
+ *  local time so it matches when the operator remembers running it. */
+function timestampSlug(now = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    `${pad(now.getHours())}${pad(now.getMinutes())}`,
+  ].join("-");
+}
+
+const blankProfile = (): CaptureProfile => {
+  const name = timestampSlug();
+  return {
+    name,
+    description: "",
+    mode01: {},
+    mode22: [],
+    bus_budget_override: null,
+    broadcast_decode: true,
+    corpus_eligible: false,
+    storage_prefix: `_capture-${name}`,
+  };
+};
 
 export function CaptureProfilesPanel({
   token,
@@ -151,7 +166,18 @@ export function CaptureProfilesPanel({
 
       <div className="grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
         <label className="text-sm text-fg-dim">Name
-          <input className={`${inputClass} mt-1 w-full`} value={draft.name} disabled={draft.name === "default"} onChange={(event) => setDraft({ ...draft, name: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })} />
+          <input className={`${inputClass} mt-1 w-full`} value={draft.name} disabled={draft.name === "default"} onChange={(event) => {
+            const name = event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "");
+            // Carry an auto-derived prefix along with the rename, so captures
+            // don't land under the name the profile used to have. A prefix the
+            // operator typed themselves is left alone.
+            const derived = draft.storage_prefix === `_capture-${draft.name}`;
+            setDraft({
+              ...draft,
+              name,
+              storage_prefix: derived && !draft.corpus_eligible ? `_capture-${name}` : draft.storage_prefix,
+            });
+          }} />
         </label>
         <label className="text-sm text-fg-dim">Description
           <input className={`${inputClass} mt-1 w-full`} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />

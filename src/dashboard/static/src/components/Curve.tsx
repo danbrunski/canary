@@ -6,7 +6,11 @@ import type {
   DeviationConfig,
   LookupTableFit,
   PolynomialFit,
+  RobustBaselineFit,
 } from "../types";
+
+/** Every 1D fit shape the backend can serve (`Fit1D`). */
+export type CurveFit = PolynomialFit | LookupTableFit | RobustBaselineFit;
 
 /** Live "you are here" overlay for a 1D surface. ``trail`` is the recent
  *  rolling history (server-side); points outside the domain or with a null
@@ -20,7 +24,7 @@ export interface CurveLive {
 }
 
 interface CurveProps {
-  fit: PolynomialFit | LookupTableFit;
+  fit: CurveFit;
   domain: [number, number];
   /** Drives the warning/critical envelope shading (absolute bands only —
    *  relative bands need a per-x local std the client doesn't have). */
@@ -195,7 +199,7 @@ export function Curve({
   return <canvas ref={ref} width={width} height={height} />;
 }
 
-function evaluate(fit: PolynomialFit | LookupTableFit, x: number): number {
+function evaluate(fit: CurveFit, x: number): number {
   if (fit.kind === "poly") {
     let y = 0;
     let xPow = 1;
@@ -205,6 +209,10 @@ function evaluate(fit: PolynomialFit | LookupTableFit, x: number): number {
     }
     return y;
   }
+  // robust_baseline claims no x relationship, so the expectation is flat.
+  // Falling through to the lookup-table branch would read knots it does not
+  // have and take the whole dashboard down with it.
+  if (fit.kind === "robust_baseline") return fit.median;
   // lookup_table: piecewise-linear interpolation
   const { x_knots, y_knots } = fit;
   if (x <= x_knots[0]) return y_knots[0];

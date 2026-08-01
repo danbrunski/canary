@@ -18,6 +18,11 @@ beforeAll(() => {
       arc: vi.fn(),
       beginPath: vi.fn(),
       clearRect: vi.fn(),
+      // Filled envelopes (Curve's deviation bands) close their path. Every
+      // 2D-context method the app calls belongs here: a gap makes the panel
+      // throw under test only, which reads as a product bug that isn't one —
+      // or worse, hides one that is.
+      closePath: vi.fn(),
       fill: vi.fn(),
       fillRect: vi.fn(),
       fillText: vi.fn(),

@@ -143,8 +143,20 @@ def _did_reply(*, did: int, responder_id: int, data: bytes) -> can.Message:
     return can.Message(arbitration_id=responder_id, data=frame, is_extended_id=False)
 
 
-def _run_fake_ecu(channel: str, values: dict[int, bytes], *, stop: threading.Event) -> None:
+def _run_fake_ecu(
+    channel: str,
+    values: dict[int, bytes],
+    *,
+    stop: threading.Event,
+    ready: threading.Event | None = None,
+) -> None:
     ecu = can.interface.Bus(interface="virtual", channel=channel)
+    if ready is not None:
+        # The virtual bus only receives what is sent after it exists. Without
+        # this handshake the sweep's first request can go out before the ECU
+        # is listening and simply vanish — rare when the machine is idle,
+        # routine under `pytest -n auto`.
+        ready.set()
     try:
         while not stop.is_set():
             frame = ecu.recv(timeout=0.1)
@@ -167,10 +179,15 @@ def test_main_sweeps_and_writes_a_snapshot(tmp_path: Path) -> None:
     out_path = tmp_path / "snap.json"
     values = {0x1100: bytes([0x0A, 0x0B]), 0x1102: bytes([0xFF])}
     stop = threading.Event()
+    ready = threading.Event()
     t = threading.Thread(
-        target=_run_fake_ecu, args=(channel, values), kwargs={"stop": stop}, daemon=True
+        target=_run_fake_ecu,
+        args=(channel, values),
+        kwargs={"stop": stop, "ready": ready},
+        daemon=True,
     )
     t.start()
+    assert ready.wait(timeout=5.0), "fake ECU never came up"
     try:
         rc = did_sweep.main(
             [

@@ -122,4 +122,29 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     await waitFor(() => expect(mocks.stopProfileCapture).toHaveBeenCalled());
   });
+
+  it("names a new profile after the current date and time", async () => {
+    renderPanel();
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+
+    // A slug the backend name validator accepts: `2026-07-31-1830`.
+    const nameField = screen.getByDisplayValue(/^\d{4}-\d{2}-\d{2}-\d{4}$/);
+    expect(nameField).toBeInTheDocument();
+    const name = (nameField as HTMLInputElement).value;
+    expect(screen.getByDisplayValue(`_capture-${name}`)).toBeInTheDocument();
+  });
+
+  it("carries an auto-derived storage prefix through a rename", async () => {
+    renderPanel();
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    const nameField = screen.getByDisplayValue(/^\d{4}-\d{2}-\d{2}-\d{4}$/);
+    fireEvent.change(nameField, { target: { value: "dyno-pulls" } });
+
+    // Otherwise captures land under the name the profile used to have.
+    expect(screen.getByDisplayValue("_capture-dyno-pulls")).toBeInTheDocument();
+  });
 });
