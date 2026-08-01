@@ -285,6 +285,16 @@ export function startProfileCapture(
   });
 }
 
+export function pauseProfileCapture(
+  token: string,
+  paused: boolean,
+): Promise<{ capture_profile: CaptureProfileState }> {
+  return controlJson("/control/capture/pause", token, {
+    method: "POST",
+    body: JSON.stringify({ paused }),
+  });
+}
+
 export function stopProfileCapture(token: string): Promise<{ capture_profile: CaptureProfileState }> {
   return controlJson("/control/capture", token, { method: "DELETE" });
 }

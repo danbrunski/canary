@@ -155,7 +155,7 @@ function renderItem(
     case "control-profiles":
       return <ProfilesPanel token={d.token} />;
     case "control-capture":
-      return <CaptureProfilesPanel token={d.token} status={d.status} />;
+      return <CaptureProfilesPanel token={d.token} status={d.status} channels={d.channels} />;
     case "control-power":
       return <PowerPanel token={d.token} />;
     case "live-charts":

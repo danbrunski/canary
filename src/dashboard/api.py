@@ -203,6 +203,7 @@ def create_app(
         feedback_store=feedback_store,
         behavior_models_path=behavior_models_path,
         accepted_baselines_path=accepted_baselines_path,
+        storage_writer=storage_writer,
         bindings_path=bindings_path,
         dids_path=dids_path,
         test_profiles_dir=test_profiles_dir,

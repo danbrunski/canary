@@ -4,6 +4,7 @@ import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -382,3 +383,80 @@ def test_collectors_enable_multi_pid_batching_from_config() -> None:
     # The spec default stays 1 so standalone/recorder paths are unchanged;
     # the daemon is what opts in.
     assert CanObdSpec.batch_max_pids == 1
+
+
+def test_pause_suspends_polling_without_ending_the_capture(tmp_path: Path) -> None:
+    """Pause stops spending bus budget on rows nobody wants, but the session
+    stays open so resuming continues the same log."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = config.model_copy(
+        update={
+            "collection": config.collection.model_copy(
+                update={"storage_path": tmp_path / "sessions"}
+            )
+        }
+    )
+    store = _store(tmp_path, config)
+    writer = AsyncParquetTelemetryWriter(
+        ParquetTelemetryWriter(
+            tmp_path / "sessions",
+            session_started_at=datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+        )
+    )
+    client = TestClient(
+        create_app(
+            config,
+            anomalies_dir=tmp_path / "anomalies",
+            control_token="secret",
+            storage_writer=writer,
+            capture_profile_store=store,
+        )
+    )
+    headers = {"Authorization": "Bearer secret"}
+
+    # Pausing means nothing without a capture to pause.
+    assert (
+        client.post("/control/capture/pause", headers=headers, json={"paused": True}).status_code
+        == 409
+    )
+
+    client.post("/control/capture", headers=headers, json={"profile": "fuel-map"})
+    session_dir = writer.paths.root
+
+    request = SimpleNamespace(kind="pid", channel="RPM")
+    assert tuning_profile.request_eligible(0, request) is True
+
+    paused = client.post("/control/capture/pause", headers=headers, json={"paused": True})
+    assert paused.status_code == 200
+    assert paused.json()["capture_profile"]["paused"] is True
+    assert tuning_profile.request_eligible(0, request) is False
+    # Same session — a pause is not a rotation.
+    assert writer.paths.root == session_dir
+    assert client.get("/status").json()["capture_profile"]["paused"] is True
+
+    resumed = client.post("/control/capture/pause", headers=headers, json={"paused": False})
+    assert resumed.json()["capture_profile"]["paused"] is False
+    assert tuning_profile.request_eligible(0, request) is True
+
+    # Ending a capture leaves nothing paused behind for the next one.
+    client.post("/control/capture/pause", headers=headers, json={"paused": True})
+    client.delete("/control/capture", headers=headers)
+    assert tuning_profile.is_paused() is False
+
+
+def test_status_reports_rows_recorded_for_the_active_session(tmp_path: Path) -> None:
+    """'Is it actually logging?' answered without waiting for a flush."""
+    from src.telemetry import TelemetryRecord
+
+    writer = ParquetTelemetryWriter(
+        tmp_path / "sessions",
+        session_started_at=datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+    )
+    assert writer.rows_written == 0
+    for index in range(3):
+        writer.write(TelemetryRecord.obd(1_760_000_000.0 + index, "RPM", 800.0, "rpm"))
+    assert writer.rows_written == 3
+
+    # A new session starts its own count rather than carrying the last one on.
+    writer.rotate_session(started_at=datetime(2026, 7, 31, 12, 5, tzinfo=UTC))
+    assert writer.rows_written == 0

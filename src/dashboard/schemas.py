@@ -38,6 +38,12 @@ class CaptureStopRequest(_ControlRequest):
     fields: dict[str, Any] = Field(default_factory=dict)
 
 
+class CapturePauseRequest(_ControlRequest):
+    """Pause/resume the running capture without closing its session."""
+
+    paused: bool
+
+
 class CaptureProfileStartRequest(_ControlRequest):
     profile: str = Field(..., min_length=1)
     tune_revision: str | None = Field(default=None, max_length=255)

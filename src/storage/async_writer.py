@@ -79,6 +79,11 @@ class AsyncParquetTelemetryWriter:
     ) -> Path | None:
         return await self._call(self._writer.enter_capture_mode, profile, capture_id, tune_revision)
 
+    @property
+    def rows_written(self) -> int:
+        """Rows accepted into the current session (see ParquetTelemetryWriter)."""
+        return self._writer.rows_written
+
     async def exit_capture_mode(self) -> Path | None:
         return await self._call(self._writer.exit_capture_mode)
 

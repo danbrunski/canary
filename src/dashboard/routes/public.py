@@ -54,6 +54,7 @@ def register_public_routes(
     gps_tracker: GpsTracker | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
     accepted_baselines_path: Path = DEFAULT_ACCEPTED_BASELINES_PATH,
+    storage_writer: Any = None,
 ) -> None:
     @app.get("/status")
     def get_status() -> dict[str, Any]:
@@ -64,6 +65,7 @@ def register_public_routes(
             health_monitor=health_monitor,
             replay_controller=replay_controller,
             gps_tracker=gps_tracker,
+            storage_writer=storage_writer,
         ).to_dict()
         if replay_controller is not None:
             payload["replay"] = replay_controller.status().to_dict()

@@ -89,6 +89,7 @@ from src.dashboard.readers import read_anomalies_since
 from src.dashboard.schemas import (
     BusBudgetRequest,
     CanActivityRequest,
+    CapturePauseRequest,
     CaptureProfileSaveRequest,
     CaptureProfileStartRequest,
     CaptureStartRequest,
@@ -636,6 +637,25 @@ def register_control_routes(
             raise HTTPException(status_code=500, detail=f"failed to start capture: {exc}") from exc
         payload = {"capture_profile": tuning_profile.snapshot()}
         publish_control_event("capture_profile.start", "ok", payload)
+        return payload
+
+    @app.post("/control/capture/pause")
+    def pause_profile_capture(
+        request: CapturePauseRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """Suspend or resume polling while keeping the capture session open.
+
+        Rows already written stay on disk — the writer flushes on its own
+        timer, so pausing never risks the log so far.
+        """
+        if not tuning_profile.is_active():
+            raise HTTPException(status_code=409, detail="no capture is active")
+        tuning_profile.set_paused(request.paused)
+        payload = {"capture_profile": tuning_profile.snapshot()}
+        publish_control_event(
+            "capture_profile.pause" if request.paused else "capture_profile.resume", "ok", payload
+        )
         return payload
 
     @app.delete("/control/capture")

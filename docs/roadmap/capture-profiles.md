@@ -200,6 +200,27 @@ The first real profile, closing the UpRev-replacement gaps identified
   End-to-end execution waits on 4.3's ROM grid and 4.4's first real
   `_capture-fuel-map-*` session.
 
+## Phase 6 — Running a capture (operator ergonomics)
+
+- [x] **6.1 — Pause / resume.** `/control/capture/pause` suspends polling
+  without closing the session, so a resumed capture continues the same log
+  rather than starting a new one. Paused means *stop asking* — there is no
+  point spending bus budget on rows nobody wants. Any profile switch
+  (start, stop, rollback) clears it, and it does not survive a restart:
+  a daemon should come back collecting, not silently paused.
+- [x] **6.2 — Spacebar hotkey.** Pause/resume from the keyboard, since a
+  capture is run between pulls with hands busy. Ignored while focus is in
+  an input, textarea, select, button or contenteditable — a space typed
+  into the tune-revision note must not stop recording.
+- [x] **6.3 — Live recording readout.** RECORDING/PAUSED, rows written to
+  this session, and the current value of every captured channel. Answers
+  "is it logging?" without waiting for a flush or opening the file.
+  `rows_written` counts rows accepted into the *current* session and
+  resets on every rotation.
+- [x] **6.4 — "End capture" rather than "Stop".** Stopping is not a save
+  step: the writer flushes on its own timer, so the log so far is already
+  on disk. The panel says so.
+
 ## Phase 5 — Sweep mode: one row per sample (design decision owed)
 
 Batching fixed the *within-a-batch* case: the PIDs in one request now

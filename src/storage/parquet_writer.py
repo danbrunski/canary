@@ -104,6 +104,10 @@ class ParquetTelemetryWriter:
         self._last_engine_run_time: float | None = None
         self._last_record_timestamp: datetime | None = None
         self.files_written: list[Path] = []
+        #: Rows accepted into the *current* session, buffered or flushed. The
+        #: capture UI reports it so an operator can see a log growing without
+        #: waiting for a flush.
+        self.rows_written = 0
         self.session_paths: list[SessionPaths] = [self.paths]
 
     def write(self, record: TelemetryRecord) -> Path | None:
@@ -113,6 +117,7 @@ class ParquetTelemetryWriter:
         if self.arming_gate is not None and not self.arming_gate.observe(record):
             return None
         self._buffer.append(record)
+        self.rows_written += 1
         if len(self._buffer) >= self.max_rows or self.flush_due():
             return self.flush()
         return None
@@ -157,6 +162,7 @@ class ParquetTelemetryWriter:
             self._clock() if started_at is None else started_at,
         )
         self.session_paths.append(self.paths)
+        self.rows_written = 0
         self._chunk_index = 0
         self._last_flush = self._clock()
         self._last_engine_run_time = None
@@ -193,6 +199,7 @@ class ParquetTelemetryWriter:
         isolated_root.mkdir(parents=True, exist_ok=True)
         self.paths = session_paths(isolated_root)
         self.session_paths.append(self.paths)
+        self.rows_written = 0
         self._chunk_index = 0
         self._last_flush = self._clock()
         self._last_record_timestamp = None
@@ -218,6 +225,7 @@ class ParquetTelemetryWriter:
             attempt = attempt + timedelta(seconds=1)
         self.paths = make_session_dir(self._out_root, attempt)
         self.session_paths.append(self.paths)
+        self.rows_written = 0
         self._chunk_index = 0
         self._last_flush = self._clock()
         self._last_record_timestamp = None

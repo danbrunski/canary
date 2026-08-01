@@ -122,6 +122,9 @@ export interface CaptureProfileState {
   mode22_enabled: boolean;
   did_interval_seconds: number | null;
   round_timestamps: boolean;
+  paused: boolean;
+  /** Rows accepted into the current session; absent if the writer is unwired. */
+  rows_written?: number;
   broadcast_decode: boolean;
   corpus_eligible: boolean;
   bus_budget_override: number | null;

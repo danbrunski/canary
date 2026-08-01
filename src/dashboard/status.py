@@ -296,6 +296,18 @@ def _resolve_latest_session(storage_path: Path) -> Path | None:
     return sessions[-1] if sessions else None
 
 
+def _capture_snapshot(storage_writer: Any = None) -> dict[str, Any]:
+    """Capture state plus how much this session has recorded so far.
+
+    The row count answers the question a running capture actually raises —
+    "is it logging?" — without waiting for a flush or opening the file.
+    """
+    snapshot = tuning_profile.snapshot()
+    if storage_writer is not None:
+        snapshot["rows_written"] = storage_writer.rows_written
+    return snapshot
+
+
 def _derive_vehicle_state(
     storage_path: Path,
     *,
@@ -402,6 +414,7 @@ def build_status(
     health_monitor: HealthMonitor | None = None,
     replay_controller: ReplayController | None = None,
     gps_tracker: GpsTracker | None = None,
+    storage_writer: Any = None,
 ) -> StatusSnapshot:
     """Assemble the status snapshot used by ``GET /status``."""
     storage = config.collection.storage_path
@@ -457,7 +470,7 @@ def build_status(
         passive=tx_gate.snapshot(),
         tuning_mode=tuning_profile.snapshot(),
         bus_budget=bus_budget_gate.snapshot(),
-        capture_profile=tuning_profile.snapshot(),
+        capture_profile=_capture_snapshot(storage_writer),
     )
 
 

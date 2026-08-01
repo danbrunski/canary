@@ -6,6 +6,7 @@ import { mockHttp } from "../test/harness";
 import type { CaptureProfile, StatusResponse } from "../types";
 
 const mocks = mockHttp([
+  "pauseProfileCapture",
   "getCaptureProfiles",
   "getObdCoverage",
   "getDids",
@@ -57,12 +58,14 @@ function status(activeName: string | null): StatusResponse {
           session_dir: `_capture-${activeName}-2026-07-31T100000`,
           source: "control",
           channels: [],
-          mode01: {},
+          mode01: { RPM: 1, ENGINE_LOAD: 1 },
           mode22: [],
+          rows_written: 12345,
           mode01_enabled: true,
           mode22_enabled: true,
           did_interval_seconds: null,
           round_timestamps: true,
+          paused: false,
           broadcast_decode: true,
           corpus_eligible: false,
           bus_budget_override: null,
@@ -71,7 +74,14 @@ function status(activeName: string | null): StatusResponse {
   } as unknown as StatusResponse;
 }
 
-function renderPanel(activeName: string | null = null) {
+function liveChannels() {
+  return new Map([
+    ["obd:RPM", { latest: { value: 812.5, unit: "rpm" }, history: [] }],
+    ["obd:ENGINE_LOAD", { latest: { value: 19.6, unit: "%" }, history: [] }],
+  ]) as never;
+}
+
+function renderPanel(activeName: string | null = null, extra: Record<string, unknown> = {}) {
   mocks.getCaptureProfiles.mockResolvedValue({
     schema_version: 1,
     profiles: [DEFAULT_PROFILE, FUEL_MAP],
@@ -85,7 +95,11 @@ function renderPanel(activeName: string | null = null) {
   });
   mocks.getDids.mockResolvedValue({ dids: [{ name: "ECM_AF_SENSOR_V_B1" }] });
   return render(
-    createElement(CaptureProfilesPanel, { token: "secret", status: status(activeName) }),
+    createElement(CaptureProfilesPanel, {
+      token: "secret",
+      status: status(activeName),
+      ...extra,
+    }),
   );
 }
 
@@ -131,7 +145,7 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     renderPanel("fuel-map");
     await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(screen.getByRole("button", { name: "End capture" }));
     await waitFor(() => expect(mocks.stopProfileCapture).toHaveBeenCalled());
   });
 
@@ -200,5 +214,41 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
 
     fireEvent.click(screen.getByLabelText(/per-channel rate weights/));
     expect(screen.getByLabelText("RPM rate weight")).toBeInTheDocument();
+  });
+
+  it("pauses and resumes a running capture", async () => {
+    renderPanel("fuel-map");
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: /Pause/ }));
+    await waitFor(() => expect(mocks.pauseProfileCapture).toHaveBeenCalled());
+    expect(mocks.pauseProfileCapture.mock.calls[0][1]).toBe(true);
+  });
+
+  it("uses the spacebar as a pause hotkey", async () => {
+    renderPanel("fuel-map");
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+
+    fireEvent.keyDown(document.body, { code: "Space" });
+    await waitFor(() => expect(mocks.pauseProfileCapture).toHaveBeenCalled());
+  });
+
+  it("leaves the spacebar alone while the operator is typing", async () => {
+    renderPanel("fuel-map");
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+
+    // Typing a space in any field must not toggle recording.
+    fireEvent.keyDown(screen.getByPlaceholderText("ROM / tune revision note"), { code: "Space" });
+    expect(mocks.pauseProfileCapture).not.toHaveBeenCalled();
+  });
+
+  it("shows rows recorded and the live value of each captured channel", async () => {
+    renderPanel("fuel-map", { channels: liveChannels() });
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+
+    expect(screen.getByText("RECORDING")).toBeInTheDocument();
+    expect(screen.getByText("12,345 rows")).toBeInTheDocument();
+    expect(screen.getByText("812.50")).toBeInTheDocument();
+    expect(screen.getByText("19.60")).toBeInTheDocument();
   });
 });

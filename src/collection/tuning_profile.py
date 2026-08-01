@@ -29,19 +29,24 @@ _session_dir: str | None = None
 _source = "default"
 _did_channels: dict[str, str] = {}
 _configured = False
+#: Polling suspended while a capture stays open. Process state, like the
+#: active profile: a restart resumes collecting rather than coming back up
+#: silently paused.
+_paused = False
 
 
 def configure_default(profile: CaptureProfile) -> None:
     """Initialize process state; always called as a non-persistent reset."""
     if profile.name != "default":
         raise ValueError("configure_default requires the default capture profile")
-    global _configured, _profile, _started_at, _session_dir, _source
+    global _configured, _profile, _started_at, _session_dir, _source, _paused
     with _lock:
         _profile = profile
         _started_at = None
         _session_dir = None
         _source = "startup"
         _configured = True
+        _paused = False
 
 
 def is_configured() -> bool:
@@ -66,10 +71,11 @@ def activate(
     session_dir: str | None = None,
     source: str = "control",
 ) -> CaptureProfile:
-    global _profile, _started_at, _session_dir, _source
+    global _profile, _started_at, _session_dir, _source, _paused
     with _lock:
         previous = _profile
         _profile = profile
+        _paused = False
         _started_at = None if profile.name == "default" else datetime.now(UTC).isoformat()
         _session_dir = session_dir
         _source = source
@@ -107,6 +113,21 @@ def mode22() -> frozenset[str]:
     """
     with _lock:
         return frozenset(_profile.mode22) if _profile.mode22_enabled else frozenset()
+
+
+def set_paused(value: bool) -> bool:
+    """Suspend/resume polling without ending the capture. Returns the previous state."""
+    global _paused
+    with _lock:
+        previous = _paused
+        _paused = value
+    log.warning("capture %s", "paused" if value else "resumed", extra={"paused": value})
+    return previous
+
+
+def is_paused() -> bool:
+    with _lock:
+        return _paused
 
 
 def round_timestamps_enabled() -> bool:
@@ -160,6 +181,11 @@ def set_active(
 
 def request_eligible(index: int, request: Any) -> bool:
     del index
+    with _lock:
+        if _paused:
+            # A paused capture stops polling outright rather than discarding
+            # answers: no point spending bus budget on rows nobody wants.
+            return False
     kind = getattr(request, "kind", None)
     if kind == "dtc":
         return True
@@ -207,6 +233,7 @@ def snapshot(achieved_hz: dict[str, float] | None = None) -> dict[str, Any]:
             "mode22_enabled": _profile.mode22_enabled,
             "did_interval_seconds": _profile.did_interval_seconds,
             "round_timestamps": _profile.round_timestamps,
+            "paused": _paused,
             "broadcast_decode": _profile.broadcast_decode,
             "corpus_eligible": _profile.corpus_eligible,
             "bus_budget_override": _profile.bus_budget_override,

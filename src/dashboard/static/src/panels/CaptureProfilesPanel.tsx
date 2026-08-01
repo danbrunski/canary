@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   deleteCaptureProfile,
   getCaptureProfiles,
   getDids,
   getObdCoverage,
+  pauseProfileCapture,
   saveCaptureProfile,
   startProfileCapture,
   stopProfileCapture,
@@ -19,6 +20,7 @@ import {
   panelHeaderClass,
   panelTitleClass,
 } from "../styles";
+import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type {
   CaptureProfile,
   CaptureProfileWarning,
@@ -58,9 +60,12 @@ const blankProfile = (): CaptureProfile => {
 export function CaptureProfilesPanel({
   token,
   status,
+  channels,
 }: {
   token: string;
   status: StatusResponse | null;
+  /** Live values, so a running capture shows what it is recording. */
+  channels?: Map<string, ChannelSnapshot>;
 }) {
   const [profiles, setProfiles] = useState<CaptureProfile[]>([]);
   const [selectedName, setSelectedName] = useState("default");
@@ -106,11 +111,55 @@ export function CaptureProfilesPanel({
   }, [profiles, selectedName]);
 
   const active = status?.capture_profile;
+  const paused = active?.paused ?? false;
+
+  const togglePause = useCallback(() => {
+    if (!token || !active?.active) return;
+    void run(paused ? "capture resume" : "capture pause", async () => {
+      await pauseProfileCapture(token, !paused);
+    });
+  }, [token, active?.active, paused, run]);
+
+  const togglePauseRef = useRef(togglePause);
+  togglePauseRef.current = togglePause;
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.code !== "Space" || event.repeat) return;
+      const target = event.target as HTMLElement | null;
+      // Space belongs to whatever the operator is typing in or has focused;
+      // only claim it when it would otherwise scroll the page.
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
+      if (target?.isContentEditable) return;
+      event.preventDefault();
+      togglePauseRef.current();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   const mode01Set = useMemo(
     () => new Set("AUTO" in draft.mode01 ? pids : Object.keys(draft.mode01)),
     [draft.mode01, pids],
   );
   const mode22Set = useMemo(() => new Set(draft.mode22), [draft.mode22]);
+
+  /** Latest value of each channel the *running* capture selected. */
+  const liveValues = useMemo(() => {
+    if (!active?.active || !channels) return [];
+    const wanted = [...Object.keys(active.mode01), ...active.mode22];
+    return wanted.flatMap((channel) => {
+      const snapshot =
+        channels.get(channel) ?? channels.get(`obd:${channel}`) ?? channels.get(`did:${channel}`);
+      if (!snapshot) return [];
+      const value = snapshot.latest.value;
+      return [{
+        channel,
+        value: typeof value === "number" ? value.toFixed(2) : String(value ?? "—"),
+        unit: snapshot.latest.unit ?? "",
+      }];
+    });
+  }, [active?.active, active?.mode01, active?.mode22, channels]);
 
   const togglePid = (channel: string) => {
     const next = "AUTO" in draft.mode01
@@ -163,11 +212,46 @@ export function CaptureProfilesPanel({
             await startProfileCapture(token, draft.name, tuneRevision || undefined);
           })}>Start</button>
         ) : (
-          <button className={buttonClass} type="button" disabled={!token || !!busy} onClick={() => run("capture stop", async () => {
-            await stopProfileCapture(token);
-          })}>Stop</button>
+          <>
+            <button className={buttonClass} type="button" disabled={!token || !!busy} onClick={togglePause}>
+              {paused ? "Resume" : "Pause"} <span className="text-fg-dim">(space)</span>
+            </button>
+            <button className={buttonClass} type="button" disabled={!token || !!busy} onClick={() => run("capture stop", async () => {
+              await stopProfileCapture(token);
+            })}>End capture</button>
+          </>
         )}
       </div>
+
+      {active?.active && (
+        <div className="rounded border border-border p-2">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
+            <span className={paused ? "font-semibold text-warn" : "font-semibold text-ok"}>
+              {paused ? "PAUSED" : "RECORDING"}
+            </span>
+            <span className="font-num tabular-nums">
+              {(active.rows_written ?? 0).toLocaleString()} rows
+            </span>
+            <span className="text-fg-dim">{active.session_dir ?? "rotating storage"}</span>
+            {/* Rows land on disk on the writer's own timer, so there is
+                nothing to lose by pausing or navigating away. */}
+            <span className="text-[0.72rem] text-fg-dim">saved continuously</span>
+          </div>
+          {liveValues.length > 0 && (
+            <table className="mt-2 w-full font-num text-[0.78rem] tabular-nums">
+              <tbody>
+                {liveValues.map((row) => (
+                  <tr key={row.channel} className="border-b border-border/40">
+                    <td className="py-0.5 pr-3 text-fg-dim">{row.channel}</td>
+                    <td className="py-0.5 pr-2 text-right">{row.value}</td>
+                    <td className="py-0.5 text-left text-fg-dim">{row.unit}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
         <label className="text-sm text-fg-dim">Name
