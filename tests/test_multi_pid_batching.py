@@ -456,3 +456,33 @@ def test_healthy_channels_are_not_backed_off_by_a_failed_batch() -> None:
     assert stats.batch_failures > 0
     counts = {c: sum(1 for r in readings if r.pid == c) for c in ("RPM", "SPEED", "ENGINE_LOAD")}
     assert all(n > 0 for n in counts.values()), f"a channel went silent: {counts}"
+
+
+def test_every_pid_in_a_batch_lands_on_one_timestamp() -> None:
+    """A batch is one ECU sampling operation, so it is one instant.
+
+    Each PID used to take its own clock read while the shared payload was
+    decoded, scattering a single measurement across several timestamps — which
+    is what forced consumers to re-group readings by proximity instead of
+    reading a batch as one row.
+    """
+    bus = _BatchingEcu()
+    readings: list = []
+    run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _spec(pids=("RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS"), batch_max_pids=6),
+        on_frame=lambda _m: None,
+        on_reading=readings.append,
+        stop_event=threading.Event(),
+        deadline_monotonic=time.monotonic() + 0.5,
+    )
+
+    assert bus.batch_requests > 0, "expected batched requests"
+    by_stamp: dict[float, set[str]] = {}
+    for reading in readings:
+        by_stamp.setdefault(reading.timestamp, set()).add(reading.pid)
+    # Each batch round put all four channels on a single timestamp.
+    assert any(
+        {"RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS"} <= channels
+        for channels in by_stamp.values()
+    ), f"no timestamp carried the whole batch: {by_stamp}"

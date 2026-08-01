@@ -1732,3 +1732,19 @@ def test_capture_profile_sets_the_did_window_cadence() -> None:
         assert controller.session_control_due(states, now=100.7) is True
     finally:
         tuning_profile.set_active(False, source="test")
+
+
+def test_single_pid_readings_still_stamp_themselves() -> None:
+    """Only the batch path shares a stamp; the single-PID path is unchanged."""
+    from src.collection.can_obd_collector import _response_to_reading
+    from src.collection.isotp import ObdResponse
+
+    request = _PollRequest(
+        kind="pid", service=0x01, identifier=0x0C, request_id=0x7DF, channel="RPM"
+    )
+    before = time.time()
+    readings = _response_to_reading(
+        request,
+        ObdResponse(service=0x41, pid=0x0C, payload=bytes([0x0B, 0xEA]), responder_id=0x7E8),
+    )
+    assert readings and before <= readings[0].timestamp <= time.time()

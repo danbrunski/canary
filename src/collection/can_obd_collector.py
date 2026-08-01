@@ -871,14 +871,22 @@ _MODE06_SERVICE = 0x06
 def _response_to_reading(
     request: _PollRequest,
     response: ObdResponse,
+    timestamp: float | None = None,
 ) -> list[ObdReading]:
     """Turn one raw response into zero or more decoded readings.
 
     Usually one reading per request; PID 0x01 emits a second (MIL_STATUS,
     Task 1.4) derived from the same payload instead of issuing another bus
     request just for the bit ``decode_monitor_status`` doesn't surface.
+
+    ``timestamp`` overrides the decode-time clock read. A batched response
+    carries several PIDs that were sampled by the ECU in *one* operation, so
+    they must land on one timestamp; letting each decode call its own
+    ``time.time()`` spreads a single measurement across several instants and
+    forces every consumer to re-group them by proximity.
     """
-    timestamp = time.time()
+    if timestamp is None:
+        timestamp = time.time()
     if request.kind == "did":
         if not response.payload:
             return []
@@ -1163,6 +1171,10 @@ def _issue_batched_request(
         stats.batch_desyncs += 1
 
     now = time.monotonic()
+    # One response, one instant: every PID in this batch was sampled by the
+    # ECU together, so they share a timestamp rather than each taking its own
+    # clock read while the payload is decoded.
+    batch_timestamp = time.time()
     for index in indices:
         request = requests[index]
         state = states[index]
@@ -1179,6 +1191,7 @@ def _issue_batched_request(
                     payload=payload,
                     responder_id=DEFAULT_RESPONSE_ID_MIN,
                 ),
+                timestamp=batch_timestamp,
             )
             if readings:
                 emitted = True

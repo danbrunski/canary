@@ -55,12 +55,19 @@ for (2026-07-31):
   see and change it, never baked into the scheduler.
 - **Synchronous rows, not interleaved samples.** A capture is expected to
   read like a datalog: every channel at one instant, one row per sample.
-  Multi-PID batching is what delivers that — up to 6 PIDs share a single
+  Multi-PID batching is most of the way there — up to 6 PIDs share a single
   Mode-01 request *and a single timestamp* — so it is on by default
   (`collection.obd_batch_max_pids`, narrowed automatically if an ECU
   refuses). Per-channel rate weights are the opposite idea and belong to
   background monitoring, where slow signals must not crowd out fast ones;
   in the capture editor they are an advanced control, off by default.
+- **Open: a *round* is the operator's unit, not a batch.** With 12
+  channels selected and a batch ceiling of 6, one logical sample spans two
+  requests ≈ 3 ms apart and therefore two timestamps — but the operator
+  reasonably expects all 12 values on one row, the way every datalogger
+  (UpRev included, whose K-line channels are polled sequentially and
+  stamped as one row) presents them. Batch-internal sharing is fixed; the
+  cross-batch half is a design decision, see Phase 5.
 - **Label both names.** Every operator-facing surface says "OBD PIDs
   (Mode 01)" and "Manufacturer DIDs (Mode 22)" — some pages spoke
   protocol, others spoke common name, and the reader had to know they
@@ -192,3 +199,38 @@ The first real profile, closing the UpRev-replacement gaps identified
   RPM × load median/IQR/count/sparse cells and excludes censored samples.
   End-to-end execution waits on 4.3's ROM grid and 4.4's first real
   `_capture-fuel-map-*` session.
+
+## Phase 5 — Sweep mode: one row per sample (design decision owed)
+
+Batching fixed the *within-a-batch* case: the PIDs in one request now
+share one timestamp (previously each took its own clock read while the
+shared payload was decoded — `test_every_pid_in_a_batch_lands_on_one_timestamp`).
+Beyond six channels a sample still spans several requests, so the rows
+don't line up, which is the thing an operator actually consumes.
+
+The scheduler is event-driven — each request carries its own due time and
+is issued when the budget allows — so there is no "round" object to hang a
+shared timestamp on. Three ways to get one, in ascending cost:
+
+- [ ] **5.a — Round token, true timestamps kept.** The loop marks the
+  batches issued in one pass over a capture profile's channel list with a
+  shared `sample_id`; readings keep their real acquisition time, and
+  query/export pivots on the id. Nothing is falsified and rows become
+  trivial to build, at the cost of a new column consumers must know about.
+- [ ] **5.b — Round timestamp, acquisition time preserved alongside.**
+  Every reading in a round is stamped with the round's start; the true
+  acquisition instant moves to a second field. Rows line up with no
+  consumer changes. This is what dataloggers do, and the ~3 ms it papers
+  over is well inside the resample grid — but it does mean the primary
+  timestamp is a scheduling artifact rather than a measurement.
+- [ ] **5.c — True sweep scheduling.** A capture profile stops using
+  per-channel due times entirely: poll every enabled channel back to back
+  (`ceil(n/6)` requests), stamp the round, sleep to the next round.
+  Simplest mental model and exactly the datalogger contract, but it is a
+  second scheduling mode inside `run_can_obd_loop`, which already carries
+  backoff, DID windows, budget pacing, freeze frames and DTC polling.
+
+Recommendation: **5.b**, with 5.c later if per-channel due times prove to
+be the wrong shape for captures generally. 5.a is the most conservative
+and the least useful — it moves the grouping problem onto every consumer.
+Operator decision owed before implementing.

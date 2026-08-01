@@ -211,7 +211,7 @@ export function CaptureProfilesPanel({
       </div>
 
       <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
-        <ChannelPicker title="OBD PIDs (Mode 01)" hint="Standard SAE J1979 parameters. Up to 6 share one request, so they carry one timestamp." showWeights={showWeights} items={pids} selected={mode01Set} onToggle={togglePid} weights={draft.mode01} onWeight={(channel, weight) => setDraft({ ...draft, mode01: { ...draft.mode01, [channel]: weight } })} enabled={draft.mode01_enabled} onEnabled={(value) => setDraft({ ...draft, mode01_enabled: value })} />
+        <ChannelPicker title="OBD PIDs (Mode 01)" hint="Standard SAE J1979 parameters. Polled 6 per request; a selection larger than that spans more than one request." showWeights={showWeights} items={pids} selected={mode01Set} onToggle={togglePid} weights={draft.mode01} onWeight={(channel, weight) => setDraft({ ...draft, mode01: { ...draft.mode01, [channel]: weight } })} enabled={draft.mode01_enabled} onEnabled={(value) => setDraft({ ...draft, mode01_enabled: value })} />
         <ChannelPicker title="Manufacturer DIDs (Mode 22)" hint="UDS ReadDataByIdentifier, from this vehicle's DID map." items={dids} selected={mode22Set} onToggle={toggleDid} enabled={draft.mode22_enabled} onEnabled={(value) => setDraft({ ...draft, mode22_enabled: value })} />
       </div>
 
