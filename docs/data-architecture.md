@@ -235,19 +235,28 @@ measured limit.
 | Throttle X/Y **map traces** | the ETC map's live axes (throttle % × RPM) |
 | `A/F ADJ` (long-term trim) | see below |
 
-**Knock remains unconfirmed, not ruled out.** `HI DET` and `KNOCK STRENGTH` read
-constant (`1` and `0x500`) across two K-line sessions including a
-4575 rpm pull, and the other UpRev-labelled knock fields were constant too.
-Those definitions do not unblock timing work, but they only establish that
-UpRev's exposed fields are unusable on this ROM. Nissan's published ECM Data
-Monitor list has no named knock item, while our successful session-`0xC0` DID
-sweep covered only `0x1100`-`0x12FF` in parked/no-load states. A proprietary
-DID outside that range, a dormant counter, or an unbound broadcast correction
-signal remains possible. The operator checked the Z1 Nissan scan tool's data
-streams and tests on 2026-07-27 and found no knock-related item; do not plan a
-knock-discovery capture around that tool. This is not a failed
-sensor — the pre-flash DTC baseline was clean on the stock calibration,
-including no P0325/P0330.
+**Knock is not streamed by this ECM — settled 2026-08-01 from the FSM, not
+inferred from failed searches.** `xterra_fsm/ec.pdf` EC-69's CONSULT-III
+application table marks the knock sensor under *self-diagnostic results* only,
+**not DATA MONITOR**, while streamable sensors (MAF, ECT, A/F sensor) are marked
+in both; `data/fsm/signals.json` agrees, with no knock item among 333 extracted
+DATA MONITOR parameters. The ECM exposes knock through exactly one interface, a
+**DTC** (P0327/P0328 bank 1, P0332/P0333 bank 2). There is no knock channel to
+discover, so **do not plan DID sweeps, broadcast RE, or scan-tool captures
+around finding one.**
+
+Knock *protection* is nonetheless working. EC-34: the retard system "is designed
+only for emergencies… does not operate under normal driving conditions," with
+base timing programmed inside the anti-knock zone on recommended (87 octane)
+fuel. UpRev's constant knock-labelled fields (`HI DET` = 1, `KNOCK STRENGTH` =
+`0x500`, `KNOCK EVENT` = 0, `KNOCK THRESHOLD %` = 1.95) therefore cannot be
+reading a diagnostic channel — they are RAM addresses from UpRev's ROM
+definitions, and a mismatch against this `ZS44A` calibration is far likelier
+than dead hardware. Sensors verified electrically intact on the truck
+2026-08-01 (disconnect set the code, reconnect cleared it; DTC logic is a
+voltage-range check against a 532–588 kΩ spec). Because "the MIL will not light
+up for these diagnoses" (EC-211), a knock-sensor failure is silent — **periodic
+DTC polling is the knock-health monitor.**
 
 **Role:** external operator tool. CANary's job is to cover what CAN can
 reach (see the gap analysis in `docs/roadmap/engine-tuning-support.md`)
@@ -280,7 +289,7 @@ run on the Pi.
 | Manufacturer-specific live data (injector PW, etc.) | **Canable-native Mode 22 selected DID polling** | Broad sweep CLI pending |
 | RE stimulus (force the engine into a known state) | **NT510 actuator tests** | Drive the vehicle yourself |
 | High-rate tuning parameters (MAF sensor V, throttle map traces, A/F ADJ) | **UpRev logger over K-line** — external tool, import its CSV | No CAN path exists; optional future K-line hardware |
-| Knock / detonation | **No confirmed channel.** UpRev-labelled fields are constant; standard Mode 01, the published CONSULT list, and the Z1 tool's menus provide none | Broader Mode 22/broadcast RE remains possible; dedicated knock monitor is required for timing decisions |
+| Knock / detonation | **Not streamed by design** (FSM EC-69: self-diagnostic results only, not DATA MONITOR). Health is observed via **DTC polling** — P0327/P0328, P0332/P0333, which set no MIL | None needed; do not plan discovery captures. Retard is emergency-only (EC-34) and the engine is not knock-limited as calibrated |
 | Watching another tool own a diagnostic session | **Passive mode** (`tx_gate`) + `candump`, decoded by `scripts/decode_flash.py` | — |
 
 ## Signal interpretation gotchas

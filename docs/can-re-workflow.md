@@ -46,26 +46,28 @@ player, so there's zero diagnostic-request contention. For non-NT510 sessions,
 use `record.py --obd-source canable` so the session has both broadcast frames
 and OBD ground-truth readings.
 
-### Z1 knock-channel inventory — completed, negative
+### Knock channel hunt — CLOSED 2026-08-01. Do not reopen.
 
-The current result is **no confirmed observable knock channel**, not proof that
-the ECM exposes none. UpRev's four knock-labelled fields are constant on this
-ROM, and Nissan's published CONSULT-III ECM Data Monitor list has no named
-knock/retard item. Our successful session-`0xC0` Mode 22 inventory covered only
-`0x1100`-`0x12FF`, however, and its stimuli stopped at a no-load 2,500-rpm hold.
+**The ECM does not stream knock, by design.** This is settled from the FSM
+(`xterra_fsm/ec.pdf`), not inferred from unsuccessful searches, so no further
+sweep, sniff, or scan-tool work is justified:
 
-On 2026-07-27 the operator inspected the Z1 Nissan scan tool's available data
-streams and tests. It exposes no knock, detonation, knock-retard, octane-state,
-or related correction item. Cross the Z1 menu/sniff experiment off as a knock
-discovery path; without a displayed parameter it supplies no knock-specific
-request to identify or replay.
+- **EC-69**, the CONSULT-III application table, marks the knock sensor under
+  *self-diagnostic results* **only — not DATA MONITOR**. Sensors that are
+  streamable (MAF, ECT, A/F sensor) carry marks in both columns.
+- `data/fsm/signals.json` agrees independently: **no knock item among the 333
+  extracted DATA MONITOR parameters.**
 
-The negative result does not make the broader DID space or unbound broadcast
-bytes disappear. Investigate those independently if desired, but require a
-repeatable response distinct from final ignition timing, RPM/load, IAT,
-counters, and checksums before assigning a knock-related label. Correlation
-with timing alone is insufficient. External knock instrumentation remains the
-timing-development ground truth unless such a channel is validated.
+The ECM exposes knock through exactly one interface: a **DTC** (P0327/P0328
+bank 1, P0332/P0333 bank 2). Earlier negative results — UpRev's four constant
+knock-labelled fields, the empty Z1 menus — were not sampling gaps; they were
+correctly observing something that isn't there. **Do not budget DID sweeps,
+broadcast RE, or capture sessions against finding a knock channel.**
+
+Knock *protection* works regardless (EC-34: retard "is designed only for
+emergencies… does not operate under normal driving conditions", with base timing
+inside the anti-knock zone on 87 octane). Health is monitored by **polling DTCs**
+— which set no MIL (EC-211), so a sensor failure here is otherwise silent.
 
 ## Capture
 

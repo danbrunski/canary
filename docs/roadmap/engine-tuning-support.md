@@ -121,28 +121,64 @@ volumetrically.
   maps force open loop and produce fueling the behavior models have
   never seen. Keep tuning sessions out of the training corpus via the
   existing `_`-prefix storage isolation (decision 1.2 below).
-- **No usable knock channel has been identified yet; do not treat that as
-  proof that none exists.** All four knock parameters UpRev exposes read constant
-  across a drive reaching 4825 rpm and 95 % load: `HI DET` = 1,
-  `KNOCK STRENGTH` = 1280 (0x500), `KNOCK EVENT` = 0,
-  `KNOCK THRESHOLD %` = 1.95. Two of those (`KNOCK EVENT`,
-  `KNOCK THRESHOLD %`) were only found on the second pass through the
-  picker, so this is an exhaustive test of the knock-labelled fields that
-  UpRev exposes for this ROM, not of every Nissan diagnostic identifier or
-  broadcast-CAN byte.
-  Not a failed sensor — the pre-flash DTC baseline was clean on the
-  stock calibration with no P0325/P0330, and timing behaves protectively
-  under load. Nissan's published CONSULT-III ECM Data Monitor list contains
-  final `IGN TIMING` but no named knock/retard item. The operator also checked
-  the Z1 Nissan scan tool's available data streams and tests on 2026-07-27;
-  it exposes no knock-related item, so that discovery route is closed.
-  However, CANary's only
-  successful in-session Mode 22 sweep covered `0x1100`-`0x12FF` and only
-  KOEO/idle/no-load rev states; unidentified DIDs elsewhere, dormant event
-  counters, and unbound broadcast bytes remain possible. Until one is
-  validated, **timing advance remains the largest available power lever**.
-  CANary may investigate and observe a future knock-related channel but never
-  drives advance decisions.
+- **SETTLED 2026-08-01 — the ECM does not stream knock, by design. Stop
+  treating the missing channel as a blocker or a fault.** The FSM
+  (`xterra_fsm/ec.pdf`) answers this directly, so no further discovery
+  effort is warranted:
+
+  - **EC-34 (Electric Ignition System):** *"The knock sensor retard system
+    is designed only for emergencies. The basic ignition timing is
+    programmed within the anti-knocking zone, if recommended fuel is used
+    under dry conditions. The retard system does not operate under normal
+    driving conditions. If engine knocking occurs, the knock sensor
+    monitors the condition. The signal is transmitted to the ECM. The ECM
+    retards the ignition timing to eliminate the knocking condition."*
+    Knock **protection is functional and continuous**; retard is an
+    emergency action, not a routine trim. Recommended fuel for this engine
+    is 87 octane, so the base map is designed knock-free on regular.
+  - **EC-69 (CONSULT-III application table):** the knock sensor is marked
+    under *self-diagnostic results* only — **not DATA MONITOR**. Sensors
+    that are streamable (MAF, ECT, A/F sensor) carry marks in both. This
+    matches `data/fsm/signals.json`: of 333 extracted DATA MONITOR
+    parameters, **none is knock-related**.
+
+  Conclusion: this ECU exposes knock through exactly one interface, a DTC.
+  There is no knock telemetry to find — the earlier "unconfirmed, not ruled
+  out" framing is superseded. UpRev's constant knock fields (`HI DET` = 1,
+  `KNOCK STRENGTH` = 1280/0x500, `KNOCK EVENT` = 0,
+  `KNOCK THRESHOLD %` = 1.95) therefore cannot be reading a diagnostic
+  channel; they are RAM addresses from UpRev's ROM definitions, and a
+  definition that does not match this `ZS44A` calibration is far likelier
+  than dead hardware. Do not spend further capture, sweep, or scan-tool
+  effort hunting a knock channel, and do not gate fuel or timing work on
+  acquiring one.
+
+  **Knock health is monitored via DTCs, not telemetry.** Codes are
+  P0327/P0328 (bank 1) and P0332/P0333 (bank 2) — note EC-211: *"The MIL
+  will not light up for these diagnoses,"* so a knock-sensor failure is
+  **silent** and only a DTC poll will reveal it. That poll is the standing
+  knock-health check.
+
+  Sensor hardware, for anyone tempted to suspect it (FSM EC-211/213):
+  two sensors, bank 1 on ECM terminal 15 and bank 2 on terminal 36, on the
+  cylinder block in the valley **under the intake manifold** (replacement
+  is a >$1000 job — require strong evidence). Terminal 1 = signal,
+  terminal 2 = shield with continuity to ground. Resistance
+  **532–588 kΩ at 20 °C**, measured terminal 1 to ground; the DTC logic is
+  a voltage-range check, so *code on disconnect + no code on reconnect
+  proves the element and harness are electrically intact*. The ECM biases
+  the signal line to **~2.5 V at idle** with the mV-scale ~6–8 kHz knock
+  signal riding on top, so a DC-coupled scope shows a flat 2.5 V line that
+  looks like "no activity" — use AC coupling at 20–100 mV/div, and tap the
+  **block**, not the manifold (gaskets isolate it). Verified on the truck
+  2026-08-01: disconnect set the code, reconnect cleared it.
+
+  Observed behaviour agrees with the FSM: exactly **one** retard event in a
+  21-minute drive (2200 rpm / 89 % load, timing 11 → 8 → recovering), and
+  identical WOT timing (±0.2°) between two sessions running 2–3 AFR apart —
+  an engine near its knock limit would not ignore that much change in charge
+  cooling. **This engine is not knock-limited as calibrated**, which is also
+  why higher-octane fuel buys nothing at stock timing.
 
   **Operator decision 2026-07-27: external knock supervision is waived; the
   operator tunes timing in-house.** The reasoning is a precedent argument, not
@@ -540,8 +576,11 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   that a substantial correction existed even before the headers and spacers.
 
   **Safety reading:** 13.6 AFR at ~90 % load, with timing already pulled to
-  9–10° and no knock visibility (see below), is the strongest argument for
-  fixing the base fuel model before touching anything else. Cats are all
+  9–10°, is the strongest argument for fixing the base fuel model before
+  touching anything else. (Knock telemetry is unavailable by ECM design, not
+  missing — see the settled note under Guiding constraints. Knock *protection*
+  is functional, so this is a "fix the fuelling first" argument, not a
+  "we're flying blind" one.) Cats are all
   retained so the cat-delete lean condition is excluded; this is a fuelling
   shortfall, not that.
 
@@ -687,8 +726,11 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   before/after comparison of timing-advance behavior and pull-vs-pull
   performance deltas (estimated HP/torque channels) at matched
   conditions. Advance goes up 1–2° per iteration with a re-log between
-  each, and `KNOCK STRENGTH` is watched for the consistent rise that
-  UpRev documents as "the advance is too aggressive".
+  each. `KNOCK STRENGTH` is **not** a usable feedback signal — it reads a
+  constant `0x500` because the ECM streams no knock data at all (settled
+  2026-08-01; see Guiding constraints). The observable proxy is final
+  `IGN TIMING` at matched rpm × load: a *retard* the map didn't command is the
+  ECM's emergency knock response and means the last increment was too much.
 
   **Three-era observation, freshness-bounded 2026-07-27.** The flash boundary
   is pinned by capture metadata: stock `ZS04C/1ZS04C` through 16:21 MDT on
@@ -704,8 +746,14 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   Treat the old observed timing as a reference ceiling, not a table to restore
   wholesale. After AFR is corrected, add only **1–2° per iteration** in the
   affected loaded cells and re-measure. Do not add the full observed 7–11° in
-  one flash: the ECM's knock state is not observable through the available
-  UpRev/CANary parameters.
+  one flash — not because knock is unobservable (the ECM never streams it; that
+  is settled), but because the only feedback available is *after-the-fact*: the
+  ECM's emergency retard shows up as logged `IGN TIMING` falling below what the
+  map commands. Small increments keep that signal interpretable. Note the
+  baseline is favourable — the engine is **not knock-limited as calibrated**
+  (one retard event in 21 min; WOT timing identical across sessions 2–3 AFR
+  apart), so 3000–4500 rpm at high load, where the map is most conservative, is
+  where advance has the most to give.
 
   **Cam phasing comes after fuel and ignition.** The headers and plenum spacers
   can shift the rpm regions where overlap, scavenging and manifold resonance
