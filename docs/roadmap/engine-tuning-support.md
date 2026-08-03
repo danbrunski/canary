@@ -696,6 +696,40 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   pressure throughout moves uniform injector-flow loss and MAF absolute
   calibration higher on the list.
 
+  **DONE 2026-08-03 — supply is sound; this gate is cleared.** Operator watched a
+  mechanical gauge through the WOT pulls of the `8-3-2026_9-26-33_AM` log:
+  **48 psi typical under load, 47 psi at the worst momentary dip**, against 49
+  psi static. Because MAP ≈ baro at WOT, gauge psi *is* injector ΔP here, so the
+  altitude caveat (~80 kPa, see the vehicle profile notes) does not distort the
+  reading. Converting by `√(ΔP)`:
+
+  | condition | pressure | fuel-flow effect |
+  |---|---|---|
+  | static → typical WOT | 49 → 48 psi | **−1.0 %** |
+  | static → worst momentary | 49 → 47 psi | **−2.1 %** |
+  | spec → measured WOT | 51 → 48 psi | **−3.0 %** |
+  | *anticipated failure case* | 49 → 40 psi | *−9.7 %* |
+
+  So **dynamic sag accounts for ~1 point of the residual, 2 at worst** — real but
+  not the driver, and nowhere near the low-40s collapse this task anticipated.
+  Two further reasons to stop treating supply as the suspect: the sag pattern is
+  the *opposite* shape to the error (fuel demand peaks at 5500–6000 rpm, which is
+  the best-matched band at 2.1–2.7 % lean, while the worst band is 4500–5000 at
+  4.8 % on lower flow); and a supply restriction would bite hardest exactly where
+  it doesn't.
+
+  **Open lead, not a conclusion: the 3 psi static offset against spec.** Running
+  48 where the calibration may assume 51 is a flat −3.0 % at *every* condition,
+  which is essentially the whole residual lean. Two things stop this being called
+  solved: closed-loop trims run *below* 100 (`A/F CORR` median 94/97 — the ECU
+  removing fuel at cruise), whereas a globally under-delivering fuel system
+  should push trims above 100; and 3 psi sits inside the tolerance of many
+  mechanical gauges, so part of the offset may be the instrument. Cheap next
+  step is confirming the 51 psi spec figure and cross-checking the gauge against
+  a second one. Per this task's own logic, normal pressure throughout now moves
+  **uniform injector-flow loss and MAF absolute calibration** to the top of the
+  list — see 3.9, which is where this residual belongs.
+
   This check matters because the correction predates both the 2026-06-28 mods
   and the UpRev flash: May LTFT commonly carried 5–7 %, and the sparse July 26
   pre-flash WOT events already show a 6–7 % miss. Scaling K around a weakening
@@ -806,7 +840,8 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   internally consistent and its implied VE is credible. Reopen it only if
   clean, matched-condition residuals cannot be reconciled with K and latency.
 
-**Campaign order after mechanical checks:** fuel pressure → K correction →
+**Campaign order after mechanical checks:** fuel pressure (**cleared 2026-08-03**,
+see 3.3) → K correction →
 verify commanded versus measured AFR → recover modest timing → optimize AFR
 target → test cam timing → address throttle/shift drivability → revisit
 latency/MAF only if a residual pattern demands it. Use one variable category
