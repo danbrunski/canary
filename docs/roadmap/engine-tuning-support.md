@@ -523,6 +523,7 @@ K-line logs. **2.1 and 2.3 below say "once known" — this is that.**
 | Fuel Targets | **BFS** (theoretical injector PW) | RPM | `AFR = 14.7 × 128 / N` — verified exactly against logged `TARGET AFR` |
 | Fuel Compensation Main | **Volumetric Flow Ratio** | RPM | `128 = 100 %` of measured plenum air used; above adds injector PW, below removes |
 | Ignition Timing Trim (Timing Main) | **BFS** | RPM | **none — no conversion to degrees BTDC exists** |
+| Cam Phasing | **BFS** (2.70–21.57 ms) | RPM (400–6400, clean 400/row) | `advance° = (N − 128) / 2`; `0x80` = 0.0°, `0xC6` = 35.0° |
 
 **Fuel Compensation's X axis is Volumetric Flow Ratio, not throttle-position
 percent.** Earlier notes in this campaign described its columns as "46.88/50 %
@@ -544,6 +545,30 @@ own limit rather than that the map is authoritative. Sibling tables:
 sensor activity — the only knock-*visibility* channel this ECU offers, since it
 streams no knock data), `Timing Cold` (below 70 °C coolant).
 
+**Cam phasing and spark are inversely coupled at WOT — do not read the timing
+notch as free power.** Decoded cam advance in the WOT columns (11–12) against
+logged spark:
+
+| rpm | 2800 | 3200 | 3600 | 4000 | 4400 | 4800 | 5200 | 5600 |
+|---|---|---|---|---|---|---|---|---|
+| cam advance | 35.0/33.5° | 33.0/28.5° | 33.0/28.5° | 28.0/25.0° | 15.0° | 10.0° | **0°** | 0° |
+| logged spark | — | 9.9° | 10.2° | 10.5° | 11.5° | 12.5° | 15.1° | 20.9° |
+
+r = −0.83 over 3200–5600. The mechanism is standard — intake advance closes the
+intake valve earlier, raising trapped mass and effective compression, which is
+paid for in spark — and the spark floor at 3000–4000 sits exactly on the cam
+advance peak. **Hold this moderately, not firmly**: both series are monotonic in
+rpm so they would correlate with almost anything, it is 7 points, and it does
+not explain 5200→5600 where cam is already 0 but spark still climbs 5.8°.
+
+The cheap discriminating experiment, which needs no spark edit: **pull ~5° of cam
+advance at 3200–4000 rpm, cols 11–13, and watch whether logged spark rises on its
+own** over several consecutive pulls (the ECU re-advances on knock feedback, so
+it is both the instrument and the safety net). Spark rises → cam advance was the
+constraint. Spark flat → the notch is something else. Cost: intake advance is
+what makes the low/mid torque, so the trade may net zero — that is what the
+dRPM/dt baseline measures. Cam changes alter airflow, so re-verify AFR after.
+
 Other facts worth not re-deriving:
 
 - **Calculated load is derived from BFS**, so any fuel-comp change inflates
@@ -563,6 +588,18 @@ Other facts worth not re-deriving:
 - Use the ROM editor's **map tracing** feature to confirm the crosshair stays
   inside a table during a WOT pull, rather than inferring cell coverage from
   logged axis channels.
+- **The rightmost columns of every BFS-indexed table are unreachable.** Max BFS
+  ever logged is 17.80 ms; Cam Phasing cols 14–16 sit at 19.05/20.31/21.57, and
+  the Fuel Targets equivalent went unexercised the same way. Three tables now.
+  Worth checking whether the **Load Point Scaler** is sized for an engine that
+  flows more than this one does — that is the correct fix, not axis editing.
+- **No cam feedback channel exists.** The UpRev log's 17 channels contain no cam
+  angle or VVT position; CANary's only candidate is
+  `ECM_INTAKE_VVT_SOLENOID_DUTY` (DID `0x1110`, `data/dids.yaml`) which is
+  medium-confidence with **scaling unpinned** (only 0 at idle and 11 at 2500 rpm
+  ever observed) — and is a solenoid *command*, not a measured position.
+  Pinning it is a prerequisite for evaluating any cam edit directly rather than
+  through downstream airflow.
 
 ## Phase 2 — Correction-surface analysis (software; needs G.2 for the trim half)
 
@@ -843,12 +880,30 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   apart), so 3000–4500 rpm at high load, where the map is most conservative, is
   where advance has the most to give.
 
-  **Cam phasing comes after fuel and ignition.** The headers and plenum spacers
-  can shift the rpm regions where overlap, scavenging and manifold resonance
-  help. Candidate tests are modest low/midrange intake-cam advance and a
-  different taper through 3,000–5,000 rpm. Change one rpm region per revision
+  **QUALIFIED 2026-08-03 — treat the above as a hypothesis, not a finding.** Two
+  facts landed after it was written. (1) The guide (p.14) says the ECU
+  **re-advances spark on knock feedback across consecutive runs**, so "timing
+  identical between sessions" is equally consistent with the ECU self-advancing
+  to the same ceiling both times — it does not show the map is the constraint,
+  and one post-flash pull never shows steady state. (2) The spark floor at
+  3000–4000 coincides with the **cam advance peak** (28–33°); see "ROM table
+  reference" above. Adding spark there in isolation means adding it at the
+  highest dynamic-compression point in the map with no knock visibility. Run the
+  cam-side discriminator first.
+
+  **Cam phasing comes after fuel and ignition** — *except* as the spark
+  discriminator described under "ROM table reference", which is cheaper and
+  safer than a blind spark edit and should run first. The headers and plenum
+  spacers can shift the rpm regions where overlap, scavenging and manifold
+  resonance help. Candidate tests are modest low/midrange intake-cam advance and
+  a different taper through 3,000–5,000 rpm. Change one rpm region per revision
   and compare same-gear acceleration. Cam changes alter airflow, so every
   accepted change triggers another commanded-versus-measured AFR check.
+
+  Decoded map shape (2026-08-03): advance is active 1200–4800 rpm, peaks at 35°,
+  and is **zeroed from 5200 rpm up**. At 2000 rpm it steps 35° → 15° → 10° across
+  cols 11–13 — deliberate low-rpm/high-load knock protection, and the region a
+  loaded grade actually lives in.
 - [ ] **3.6 — Throttle/ETC and drivability passes.** WOT-at-all-speeds
   fix and any map-switching setup; CANary just documents before/after.
 
