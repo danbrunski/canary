@@ -56,9 +56,16 @@ import type {
   VehicleProfilesResponse,
   VersionResponse,
 } from "../types";
-import { apiUrl, controlJson, fetchJson, HttpError, jsonBody } from "./core";
+import {
+  apiUrl,
+  controlJson,
+  fetchJson,
+  fetchOrNetworkError,
+  HttpError,
+  jsonBody,
+} from "./core";
 
-export { HttpError } from "./core";
+export { HttpError, NetworkError } from "./core";
 
 export function getStatus(signal?: AbortSignal): Promise<StatusResponse> {
   return fetchJson<StatusResponse>("/status", { signal });
@@ -344,9 +351,10 @@ export function deleteSession(
 }
 
 export async function downloadSession(token: string, sessionId: string): Promise<Blob> {
-  const response = await fetch(`/control/sessions/${encodeURIComponent(sessionId)}/export`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/zip" },
-  });
+  const response = await fetchOrNetworkError(
+    `/control/sessions/${encodeURIComponent(sessionId)}/export`,
+    { headers: { Authorization: `Bearer ${token}`, Accept: "application/zip" } },
+  );
   if (!response.ok) {
     throw new HttpError(response.status, await response.text());
   }
@@ -362,9 +370,10 @@ async function downloadSessionTrack(
   format: "gpx" | "kml",
   baseUrl?: string,
 ): Promise<Blob> {
-  const response = await fetch(apiUrl(`/control/sessions/${encodeURIComponent(sessionId)}/gps.${format}`, baseUrl), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await fetchOrNetworkError(
+    apiUrl(`/control/sessions/${encodeURIComponent(sessionId)}/gps.${format}`, baseUrl),
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
   if (!response.ok) {
     throw new HttpError(response.status, await response.text());
   }

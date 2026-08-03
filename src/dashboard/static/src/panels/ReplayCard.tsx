@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { HttpError, getReplay, startReplay, stopReplay } from "../api/http";
 import type { RunAction } from "../hooks/useAsyncAction";
-import { useControlResource } from "../hooks/useControlResource";
+import { describeError, useControlResource } from "../hooks/useControlResource";
 import {
   buttonClass,
   inputClass,
@@ -38,7 +38,9 @@ function replayErrorMessage(err: unknown): string {
     }
     return err.body || err.message;
   }
-  return err instanceof Error ? err.message : String(err);
+  // Anything that isn't an HTTP answer — notably an unreachable daemon —
+  // reads better through the shared formatter than as a raw browser string.
+  return describeError(err);
 }
 
 /** Start/stop/inspect runtime replay from the dashboard (Task 2.2), hosted

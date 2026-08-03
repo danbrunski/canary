@@ -11,11 +11,16 @@ const mocks = vi.hoisted(() => ({
   importCustomPidsCsv: vi.fn(),
 }));
 
+// `describeError` narrows on both error classes, so the mocked module has
+// to export both — vitest throws on `instanceof` against a missing export.
 vi.mock("../api/http", () => ({
   ...mocks,
   HttpError: class extends Error {
     status = 0;
     body = "";
+  },
+  NetworkError: class extends Error {
+    url = "";
   },
 }));
 

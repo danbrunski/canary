@@ -9,6 +9,57 @@ export class HttpError extends Error {
   }
 }
 
+/** A request that never got a response at all — the daemon is unreachable
+ *  (Pi powered down, off-network, `canary.local` not resolving), as opposed
+ *  to an error the daemon actually returned.
+ *
+ *  Worth distinguishing loudly: `public/sw.js` serves the app shell from
+ *  cache on a failed navigation, so an unreachable Pi presents as a
+ *  dashboard that opens and looks healthy until the first button is
+ *  pressed. Browsers name only the transport there ("NetworkError when
+ *  attempting to fetch resource"), which reads as an app bug rather than
+ *  "the truck's hotspot dropped". */
+export class NetworkError extends Error {
+  url: string;
+
+  constructor(url: string, cause?: unknown) {
+    super(`Network request to ${url} failed`, { cause });
+    this.name = "NetworkError";
+    this.url = url;
+  }
+}
+
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
+/** An aborted `fetch` rejects with a `DOMException`, which does not reliably
+ *  sit on `Error`'s prototype chain (it doesn't under jsdom), so narrow on
+ *  the name structurally rather than via `instanceof`. Getting this wrong
+ *  reports every cancelled poll as a dead daemon. */
+function isAbort(err: unknown): boolean {
+  return (
+    typeof err === "object" && err !== null && (err as { name?: unknown }).name === "AbortError"
+  );
+}
+
+/** `fetch`, with transport failures raised as `NetworkError`. Caller-driven
+ *  cancellation is passed through untouched — `AbortError` is not a
+ *  connectivity problem, and callers switch on `err.name`. */
+export async function fetchOrNetworkError(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (err) {
+    if (isAbort(err)) throw err;
+    throw new NetworkError(requestUrl(input), err);
+  }
+}
+
 export function apiUrl(path: string, baseUrl?: string): string {
   const base = baseUrl?.trim().replace(/\/+$/, "") ?? "";
   if (!base) return path;
@@ -19,7 +70,7 @@ export async function fetchJson<T>(
   input: RequestInfo,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(input, init);
+  const response = await fetchOrNetworkError(input, init);
   const text = await response.text();
   if (!response.ok) {
     throw new HttpError(response.status, text);

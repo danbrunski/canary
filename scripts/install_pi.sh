@@ -245,6 +245,35 @@ EOF
   echo "  Set 'hardware.gps.source: gpsd' in ${CANARY_CONFIG} to use it."
 fi
 
+# ---------------------------------------------------------------------------
+# Persistent journal
+# ---------------------------------------------------------------------------
+# Default journald storage is volatile on a stock Pi image: the journal lives
+# in /run and is discarded at every boot. That is exactly backwards for this
+# box — the failures worth reading are the ones that happen in the vehicle,
+# and the trip home is a power cycle. Without this, any in-vehicle incident is
+# already unreadable by the time the Pi reaches the bench.
+#
+# A drop-in, not an edit to journald.conf — same reasoning as the chrony
+# config above: that file belongs to the admin.
+install -d -m 0755 /etc/systemd/journald.conf.d
+cat >/etc/systemd/journald.conf.d/canary-persistent.conf <<'EOF'
+# Managed by canary scripts/install_pi.sh — survive the key-off power cycle.
+[Journal]
+Storage=persistent
+# Bounded so months of 1 Hz telemetry logging can't fill the card. 200 MB
+# holds several weeks of normal daemon chatter at this log volume.
+SystemMaxUse=200M
+SystemMaxFileSize=20M
+MaxRetentionSec=1month
+EOF
+
+# systemd creates /var/log/journal itself on restart, but doing it through
+# tmpfiles gets the root:systemd-journal 2755 ownership right up front.
+install -d -m 0755 /var/log/journal
+systemd-tmpfiles --create --prefix /var/log/journal >/dev/null 2>&1 || true
+systemctl restart systemd-journald || true
+
 cd "${CANARY_HOME}"
 runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
   --venv "${CANARY_HOME}/.venv" \

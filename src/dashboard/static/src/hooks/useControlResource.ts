@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { HttpError } from "../api/http";
+import { HttpError, NetworkError } from "../api/http";
 
 export interface ResourceState<T> {
   data: T | null;
@@ -74,14 +74,45 @@ export function useControlResource<T>(
   return { data, error, loading, status, refresh };
 }
 
+/** FastAPI errors are `{"detail": "..."}`; show the sentence, not the JSON
+ *  wrapper. Non-JSON bodies (an HTML 500 page, a proxy's error) fall back to
+ *  the raw text so nothing is hidden. */
+function serverDetail(body: string): string {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (parsed && typeof parsed === "object" && "detail" in parsed) {
+      const detail = (parsed as { detail: unknown }).detail;
+      if (typeof detail === "string") return detail.slice(0, 160);
+    }
+  } catch {
+    /* not JSON — fall through to the raw body */
+  }
+  return body.slice(0, 160);
+}
+
 export function describeError(err: unknown): string {
+  if (err instanceof NetworkError) {
+    // The page itself can be served from the service-worker cache, so
+    // "the dashboard loads" is no evidence the daemon is up — say so.
+    return (
+      `Can't reach the daemon (${err.url}) — the request got no response. ` +
+      "Check the Pi is powered and on this network, and that its hostname " +
+      "still resolves. The dashboard shell is cached offline, so this page " +
+      "keeps loading even when the daemon is gone."
+    );
+  }
   if (err instanceof HttpError) {
     if (err.status === 401 || err.status === 403)
       return "Not authorized — enter or check the control token.";
     if (err.status === 503)
       return "This API isn't available on the daemon (feature not wired).";
     if (err.status === 400 || err.status === 422)
-      return `Rejected by the server: ${err.body.slice(0, 160)}`;
+      return `Rejected by the server: ${serverDetail(err.body)}`;
+    // 404/409 carry the daemon's own reason ("no capture is active", "a
+    // capture profile is already active"); collapsing them to the bare
+    // status was throwing away the only actionable part.
+    if (err.status === 404 || err.status === 409)
+      return `Refused by the server: ${serverDetail(err.body)}`;
     return `Server error ${err.status}.`;
   }
   return err instanceof Error ? err.message : String(err);

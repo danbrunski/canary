@@ -6,6 +6,13 @@ export class HttpErrorStub extends Error {
   body = "";
 }
 
+/** Ditto for `NetworkError` (an unreachable daemon). `describeError`
+ *  narrows on both classes, so both have to exist on the mocked module —
+ *  a missing export makes vitest throw on the `instanceof` itself. */
+export class NetworkErrorStub extends Error {
+  url = "";
+}
+
 /** Mocks `../api/http`'s named exports for `names` and wires the
  *  reset(beforeEach)/clear(afterEach) lifecycle every panel test hand-rolled
  *  (Phase 4.6). Uses `vi.doMock` (not `vi.mock`) deliberately: `vi.mock` is
@@ -22,7 +29,11 @@ export function mockHttp<Name extends string>(
     Name,
     ReturnType<typeof vi.fn>
   >;
-  vi.doMock("../api/http", () => ({ ...mocks, HttpError: HttpErrorStub }));
+  vi.doMock("../api/http", () => ({
+    ...mocks,
+    HttpError: HttpErrorStub,
+    NetworkError: NetworkErrorStub,
+  }));
   beforeEach(() => {
     for (const name of names) mocks[name].mockReset();
   });
