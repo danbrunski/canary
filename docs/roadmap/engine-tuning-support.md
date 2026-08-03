@@ -512,6 +512,58 @@ carrying the source sample age they are indistinguishable from measurements.
   idle-fraction, not heat soak (G.3). Before attributing a trend to time,
   regress it against what the engine was doing.
 
+## ROM table reference — axes and decodes (settled 2026-08-03)
+
+Sourced from the UpRev Nissan Tuning Guide (Rev 8 Feb 2022, `~/UpRev-Nissan-
+Tuning-Guide-Rev2.pdf`, pp. 9–14) and verified against the 7-29 / 7-31 / 8-03
+K-line logs. **2.1 and 2.3 below say "once known" — this is that.**
+
+| table | X axis | Y axis | decode |
+|---|---|---|---|
+| Fuel Targets | **BFS** (theoretical injector PW) | RPM | `AFR = 14.7 × 128 / N` — verified exactly against logged `TARGET AFR` |
+| Fuel Compensation Main | **Volumetric Flow Ratio** | RPM | `128 = 100 %` of measured plenum air used; above adds injector PW, below removes |
+| Ignition Timing Trim (Timing Main) | **BFS** | RPM | **none — no conversion to degrees BTDC exists** |
+
+**Fuel Compensation's X axis is Volumetric Flow Ratio, not throttle-position
+percent.** Earlier notes in this campaign described its columns as "46.88/50 %
+TP" — that was wrong and any analysis binned on throttle position to mirror
+those columns is mis-aligned.
+
+**There is no base timing table.** Nissan computes MBT from an internal formula;
+what the ROM editor exposes is a *trim* on it:
+`RPM → load → MAF → calculated MBT → ignition timing trim → knock feedback =
+final timing`. Consequences: (a) counts cannot be converted to degrees — the
+guide says so outright, and a bilinear regression of logged `IGN TIMING` against
+the trim table over 8045 warm steady samples confirms it (R² 0.18, residual
+±9.9°, per-band slopes 0.67–3.66); (b) higher values yield more advance, which
+is the whole available semantics; (c) the ECU **re-advances on knock feedback
+over consecutive runs**, so a single post-flash pull does not show steady state,
+and "timing unchanged between sessions" may mean the ECU self-advanced to its
+own limit rather than that the map is authoritative. Sibling tables:
+`Timing Main` (normal), `Timing High Det` (ECU switches here on excess knock
+sensor activity — the only knock-*visibility* channel this ECU offers, since it
+streams no knock data), `Timing Cold` (below 70 °C coolant).
+
+Other facts worth not re-deriving:
+
+- **Calculated load is derived from BFS**, so any fuel-comp change inflates
+  `CAL/LD` *and* walks every BFS-indexed lookup (timing, cam phasing, fuel
+  targets) rightward. Measured: the 8-03 fuel-comp raise moved the spark lookup
+  +0.6–0.85 columns at 4000–5500 rpm, which is the ~1.1° of advance lost there
+  without touching the timing table. **Fuel and spark are not separable
+  variables on this ECU** — one category per flash is a correctness requirement,
+  not tidiness.
+- **Closed loop runs only where the AFR target is exactly 14.7**; any other
+  target puts that cell in open loop. This is what partitions the logs.
+- **Rescale via the Load Point Scaler, never by editing axis numbers** (guide
+  p. 13, explicit).
+- **Maps 1–5 are switchable tune slots**, not an octane or knock/non-knock pair;
+  there is a "Copy Map to Other Slots" utility. On this vehicle only Map 1 has
+  been edited.
+- Use the ROM editor's **map tracing** feature to confirm the crosshair stays
+  inside a table during a WOT pull, rather than inferring cell coverage from
+  logged axis channels.
+
 ## Phase 2 — Correction-surface analysis (software; needs G.2 for the trim half)
 
 The deliverable UpRev workflow needs: for each cell, how far off is
@@ -519,7 +571,9 @@ fueling, with how much confidence.
 
 - [ ] **2.1 — Binned AFR-error surface.** DuckDB over session Parquet:
   bin by RPM × calculated load (axes configurable to mirror the ROM's
-  fuel-table axes once known) and by MAF voltage (single axis, for
+  fuel-table axes — now documented under "ROM table reference" above;
+  note Fuel Compensation bins on **Volumetric Flow Ratio**, Fuel Targets
+  on **BFS**, so the two surfaces do not share one axis) and by MAF voltage (single axis, for
   the MAF transfer curve). Per cell: median and IQR of
   (measured λ − commanded λ), sample count, achieved poll rate.
   Sparse cells flagged, never interpolated silently.
