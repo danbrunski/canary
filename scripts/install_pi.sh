@@ -256,8 +256,16 @@ fi
 #
 # A drop-in, not an edit to journald.conf — same reasoning as the chrony
 # config above: that file belongs to the admin.
+#
+# The `90-` prefix is load-bearing. Raspberry Pi OS ships
+# /usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf to spare the
+# SD card, and drop-ins are applied in filename order across all search
+# directories — so beating the vendor default is a matter of sorting after
+# `40-`, not of living in /etc. This deliberately trades a bounded amount of
+# card wear for being able to read what happened during a drive; the size
+# caps below are what keep that trade small.
 install -d -m 0755 /etc/systemd/journald.conf.d
-cat >/etc/systemd/journald.conf.d/canary-persistent.conf <<'EOF'
+cat >/etc/systemd/journald.conf.d/90-canary-persistent.conf <<'EOF'
 # Managed by canary scripts/install_pi.sh — survive the key-off power cycle.
 [Journal]
 Storage=persistent
@@ -273,6 +281,11 @@ EOF
 install -d -m 0755 /var/log/journal
 systemd-tmpfiles --create --prefix /var/log/journal >/dev/null 2>&1 || true
 systemctl restart systemd-journald || true
+# Restarting journald is not enough: it keeps writing to /run until told to
+# migrate. That handoff is systemd-journal-flush's job and normally only
+# happens at boot — i.e. before this config existed — so trigger it here or
+# persistence silently waits for the next reboot.
+journalctl --flush >/dev/null 2>&1 || true
 
 cd "${CANARY_HOME}"
 runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
