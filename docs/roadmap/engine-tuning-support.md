@@ -577,7 +577,11 @@ Other facts worth not re-deriving:
   +0.6–0.85 columns at 4000–5500 rpm, which is the ~1.1° of advance lost there
   without touching the timing table. **Fuel and spark are not separable
   variables on this ECU** — one category per flash is a correctness requirement,
-  not tidiness.
+  not tidiness. **Measured twice**: the 8-04 flash combined a K raise with a
+  spark raise, and the axis walk (+0.43 ms BFS at matched rpm × load, airflow
+  flat) *reversed* the sign of the spark edit in the cells it targeted — see
+  3.5. A K change alone is enough to trigger this; it is not specific to fuel
+  comp.
 - **Closed loop runs only where the AFR target is exactly 14.7**; any other
   target puts that cell in open loop. This is what partitions the logs.
 - **Rescale via the Load Point Scaler, never by editing axis numbers** (guide
@@ -833,6 +837,36 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   closed-loop STFT should move toward zero. Change fuel first, re-log, and only
   then touch timing. While LTFT remains zero, it will not hide an
   over-correction, so re-measure before taking a second step.
+
+  **K responds 1:1 — measured 2026-08-04.** Operator raised K from ×1.05 to
+  ×1.06 (+0.95 %) overnight. Open-loop WOT delivery error moved **+3.93 % →
+  +3.02 %** (B1), i.e. **−0.91 points against −0.95 predicted**. The scalar
+  model is correct and the knob is linear; no reshape is needed and none of the
+  remaining error is K's fault.
+
+  | log | K | B1 delivery error | B2 |
+  |---|---|---|---|
+  | 7-31 | — | +5.37 % | +5.23 % |
+  | 8-03 | ×1.05 | +3.93 % | +2.44 % |
+  | 8-04 | ×1.06 | **+3.02 %** | +1.42 % |
+
+  **Methodology gate — filter to open loop before computing delivery error.**
+  A first pass at the 8-04 log pooled closed-loop stoich samples (`TARGET AFR`
+  == 14.7) in with the power cells and concluded "fuelling unchanged, +3.13 % →
+  +3.10 %". That is an artifact: in closed loop the ECU corrects to target
+  *regardless of K*, so those samples dilute any K effect toward zero by
+  construction. Filter `TARGET AFR < 13.5` (see "Closed loop runs only where the
+  AFR target is exactly 14.7" under ROM table reference) and load 86–96 % before
+  binning. Same class of error as G.4.
+
+  **The residual +3.0 % now equals the fuel-supply offset exactly — do not
+  simply keep stepping K.** Zeroing +3.02 % in the calibration needs K ≈ ×1.09.
+  But the measured static pressure is 48 psi against a ~51 psi spec, which is a
+  flat **−3.0 %** at every condition (see the 2026-08-03 gate above). Dialing K
+  to 1.09 would paper a supply offset into the injector constant, where it will
+  be wrong the moment supply is corrected. Confirm the 51 psi spec figure and
+  cross-check the gauge against a second one *before* the next K step. This is
+  the 3.9 residual, not a 3.3 one.
 - [ ] **3.4 — AFR targets.** With the model true: stoich (closed
   loop) where the factory ran stoich; WOT/high-load targets per
   operator choice (~12.8–13.2:1 NA power mixture). Verify delivery
@@ -845,6 +879,23 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   upper-rpm target maintains or improves same-gear acceleration. Change one
   target region at a time and retain the richer value unless repeatable pulls
   demonstrate a benefit.
+
+  **Top-end step smoothed 2026-08-04 — landed as intended.** Reconstructing the
+  commanded curve from open-loop cells either side of the flash:
+
+  | rpm | 8-03 | 8-04 |
+  |---|---|---|
+  | 4750–5000 | 11.91 | 11.95 |
+  | 5000–5250 | **11.70** | 11.85 |
+  | 5250–5500 | 11.65 | 11.83 |
+  | 5500–5750 | 11.68 | 11.83 |
+  | 5750–6000 | 11.67 | 11.84 |
+
+  The discontinuity at 5000 is gone; the curve is now monotone into a flat
+  11.83–11.85 top end (slightly leaner up top, slightly richer through
+  4000–4750). Delivery verification is unaffected — target changes move the
+  reference, so always recompute error against the *contemporaneous* target,
+  never against a remembered curve.
 - [ ] **3.5 — Timing & cam phasing (conservative).** Incremental, tuned
   in-house from datalogs (external knock supervision waived — see the
   2026-07-27 operator decision under Guiding constraints). CANary's role:
@@ -890,6 +941,57 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   reference" above. Adding spark there in isolation means adding it at the
   highest dynamic-compression point in the map with no knock visibility. Run the
   cam-side discriminator first.
+
+  **The BFS axis walk bit a second time — 2026-08-04. A spark edit combined with
+  a fuel edit in one flash is not measurable, and this is now demonstrated
+  twice.** Operator raised K ×1.05→×1.06, smoothed the AFR targets, *and* added
+  advance in the 3000–4500 high-load cells in a single flash. Logged spark on a
+  rpm × load grid (load is the grid axis, so composition is controlled; cam is a
+  tight function of rpm × load — within-cell σ 1.15° — and cam tables were
+  untouched, so cam is matched too):
+
+  | rpm | load | BFS 8-03 → 8-04 | Δ BFS | Δ spark |
+  |---|---|---|---|---|
+  | 3000–3500 | 90–94 | 16.76 → 17.11 | +2.1 % | **−1.57°** |
+  | 3500–4000 | 94–100 | 17.15 → 17.87 | +4.2 % | **−1.01°** |
+  | 4000–4500 | 90–94 | 17.48 → 18.00 | +3.0 % | **−0.74°** |
+  | 4500–5000 | 90–94 | 17.32 → 17.78 | +2.7 % | +0.07° |
+  | 4500–5000 | 86–90 | 17.29 → 17.45 | **+0.9 %** | **+0.61°** |
+
+  Spark went *down* 0.7–1.6° in exactly the cells where advance was added. The
+  cause is the documented mechanism, not knock: **`MAF` at matched rpm × load
+  moved +1.2 %** — actual airflow is unchanged — while **BFS rose +0.43 ms
+  (+2.5 %)** because fuel was added. BFS is the timing table's X axis, so the
+  lookup walked right into more-retarded columns and swamped the edit. The one
+  cell where BFS barely moved (+0.9 %) is the one where the edit shows through
+  cleanly at **+0.61°**. That cell is the control.
+
+  **This is not a sign inversion.** The natural reading of "I increased the
+  numbers and advance went down" is that the table is stored as retard. It is
+  not — the guide is explicit that higher values yield more advance (see ROM
+  table reference (b)), and the +0.61° control cell confirms the edit added
+  advance where the axis held still.
+
+  Three secondary observations that rule out the knock reading, and which
+  generalise as discriminators:
+
+  - **The retard is steady, not sawtoothing.** In the 8-04 pull 4 trace, spark
+    sits flat at 6–9° through 3300–3800 rpm at 93–97 % load with no
+    retard-then-re-advance. A lookup shift produces a steady offset; knock
+    feedback oscillates and recovers.
+  - **It got *colder*, not hotter.** IAT was 80 °F in 8-04 against 94 °F in
+    8-03 (coolant 194.6 vs 195.7, i.e. no difference). Cooler intake air lowers
+    knock propensity, so a knock-driven retard should have *shrunk*. It grew.
+  - **The loss tracks ΔBFS, not knock propensity.** Across cells, the cell with
+    the largest BFS walk lost the most spark and the cell with the smallest
+    gained.
+
+  **Consequence for method:** the "one category per flash" rule under ROM table
+  reference is now a hard gate on 3.5, not advice. A timing iteration must ship
+  with fuel frozen — same K, same targets, same fuel comp — or its result is
+  uninterpretable. To recover the current iteration, re-log with fuel held at
+  K ×1.06 and the smoothed targets, changing nothing else; that isolates the
+  spark edit against a stationary BFS axis.
 
   **Cam phasing comes after fuel and ignition** — *except* as the spark
   discriminator described under "ROM table reference", which is cheaper and

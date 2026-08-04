@@ -141,7 +141,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         required=True,
         help=(
             "Timezone-aware ISO-8601 timestamp for row 0 (UpRev's 'Time' column is "
-            "seconds-since-log-start, not wall-clock). E.g. 2026-07-26T17:41:32-07:00."
+            "milliseconds-since-log-start, not wall-clock). E.g. 2026-07-26T17:41:32-07:00."
         ),
     )
     parser.add_argument(
