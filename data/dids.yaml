@@ -288,3 +288,58 @@ dids:
         finding: >
           0 at KOEO; warm 60 -> 193 at rev (ratio ≈ 3.2, tracks RPM).
           Small magnitude; load/torque or ignition-dwell candidate, unnamed.
+
+  # --- Intake cam angle candidates (2026-08-05 drive sweeps) --------------
+  # Three DIDs behave as an intake-cam-angle family. Scale/offset come from
+  # the ROM Cam Phasing decode (advance = (N-128)/2, i.e. 0x80 = 0.0 deg),
+  # which these independently corroborate: ALL THREE read exactly 0x80 with
+  # the engine off, and span 0-37 deg in motion against the ROM table's
+  # 0-35 deg. They also correlate +0.72..+0.74 with ECM_INTAKE_VVT_SOLENOID_DUTY
+  # (0x1110, already known) in the causally correct direction -- solenoid
+  # energised, cam advances.
+  #
+  # WHICH IS WHICH IS UNRESOLVED. The FSM lists exactly two, INT/V TIM (B1)
+  # and (B2), so one of these three is something else (a target/commanded
+  # value is the obvious guess). They cannot be separated from this data: a
+  # sweep reads 0x1000->0x1400 sequentially at ~1.1 ms/DID, so these three are
+  # sampled ~50 ms apart, and their disagreement is 0.81 deg while the cam is
+  # parked versus 3.00 deg while it is moving -- the signature of read-order
+  # skew, not a bank-to-bank offset.
+  #
+  # To resolve: rotate ONLY these three at high rate (DIDs sustain 658 reads/s
+  # inside session 0xC0) during steady cruise, so reads are near-simultaneous;
+  # or log UpRev alongside, which reports INTK CAM TIM-B1 and -B2 as separate
+  # columns. Do not guess the bank assignment.
+  - did: 0x1135
+    name: ECM_INTAKE_CAM_ANGLE_1135
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 0.5
+    offset: -64.0
+    unit: degCA
+    confidence: high
+    plausible_min: -10.0
+    plausible_max: 45.0
+  - did: 0x113A
+    name: ECM_INTAKE_CAM_ANGLE_113A
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 0.5
+    offset: -64.0
+    unit: degCA
+    confidence: high
+    plausible_min: -10.0
+    plausible_max: 45.0
+  - did: 0x1163
+    name: ECM_INTAKE_CAM_ANGLE_1163
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 0.5
+    offset: -64.0
+    unit: degCA
+    confidence: high
+    plausible_min: -10.0
+    plausible_max: 45.0

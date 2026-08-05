@@ -149,3 +149,62 @@ better capture, not ever. Do not spend more time trying.
 
 **The all-DID plan above stands unchanged.** It never depended on this lead,
 and 658 reads/s inside session 0xC0 is measured, not inferred.
+
+## Drive sweep results, 2026-08-05 — cam angle found, and a costly interaction
+
+14 autonomous sweeps during a 52-minute drive (10 triggered by rpm ≥ 2500,
+spanning 2509–3843 rpm), diffed against the KOEO baseline above. All 158 DIDs
+responded in every sweep. 60 are engine-dependent, excluding the 5 known
+jitterers.
+
+### Intake cam angle: three candidates, bank assignment unresolved
+
+`0x1135`, `0x113A` and `0x1163` behave as an intake-cam-angle family:
+
+* all three read **exactly `0x80` (0.0°) with the engine off**, and span
+  0–37° in motion, against the ROM Cam Phasing table's 0–35° — so the ROM
+  decode `advance = (N − 128)/2` transfers directly and is independently
+  corroborated;
+* all three correlate **+0.72…+0.74** with `ECM_INTAKE_VVT_SOLENOID_DUTY`
+  (`0x1110`, already known) in the causally correct direction — solenoid
+  energised, cam advances;
+* they correlate **negatively** with rpm over 2509–3843, which is what the ROM
+  table predicts across that span (cam is past its peak and falling).
+
+The FSM lists exactly two (`INT/V TIM (B1)` / `(B2)`), so one of the three is
+something else — a commanded/target value is the obvious guess. **This data
+cannot separate them.** A sweep reads `0x1000`→`0x1400` sequentially at
+~1.1 ms/DID, so these three are sampled ~50 ms apart; their disagreement is
+**0.81° while the cam is parked and 3.00° while it is moving**, which is the
+signature of read-order skew, not a bank offset. Recorded in `dids.yaml` at
+`high` with neutral names rather than a guessed bank assignment.
+
+Resolve by rotating **only these three** at high rate during steady cruise
+(DIDs sustain 658 reads/s, so reads become near-simultaneous), or by logging
+UpRev alongside — it reports `INTK CAM TIM-B1` and `-B2` as separate columns,
+and the two loggers demonstrably coexist.
+
+### Interleaving DID sweeps into a Mode 01 capture is expensive
+
+**Each 1.5 s sweep cost ~40 s of `TIMING_ADVANCE`.** 12 of 13 gaps >5 s began
+within **3 s** of a sweep, and the channel was out for **1007 s of a 3127 s
+drive — 32%**. The pre-drive estimate was "~3 s per sweep": wrong by more than
+an order of magnitude.
+
+The mechanism is per-channel backoff, not the blackout window. During the
+session-`0xC0` window Mode 01 is refused; the channels that happen to be due
+earn a timeout and get suppressed, and the suppression far outlives the sweep.
+It is selective, which is why it was invisible in aggregate — `RPM` and `SPEED`
+held ~6 Hz through the same period while `TIMING_ADVANCE` fell to 2.6 Hz.
+
+**Do not interleave.** This is a further argument for the all-DID capture: one
+mode for the whole session, no mode-switching, nothing to back off. If a Mode 01
+capture is what's wanted, take the DID sweeps on a separate run.
+
+### What the capture still delivered
+
+52 minutes, `_tuning-2026-08-05T142720`. Peak 5675 rpm, 100% load, 248 s of
+open loop, **26 s at load > 85% & rpm > 2500 with 25 carrying a measured +
+commanded AFR pair** — against 4 such samples in the entire July corpus. Even
+with a third of the timing channel lost, this is the largest Pi-side WOT
+dataset yet collected.
