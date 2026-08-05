@@ -289,40 +289,31 @@ dids:
           0 at KOEO; warm 60 -> 193 at rev (ratio ≈ 3.2, tracks RPM).
           Small magnitude; load/torque or ignition-dwell candidate, unnamed.
 
-  # --- Intake cam angle candidates (2026-08-05 drive sweeps) --------------
-  # Three DIDs behave as an intake-cam-angle family. Scale/offset come from
-  # the ROM Cam Phasing decode (advance = (N-128)/2, i.e. 0x80 = 0.0 deg),
-  # which these independently corroborate: ALL THREE read exactly 0x80 with
-  # the engine off, and span 0-37 deg in motion against the ROM table's
-  # 0-35 deg. They also correlate +0.72..+0.74 with ECM_INTAKE_VVT_SOLENOID_DUTY
-  # (0x1110, already known) in the causally correct direction -- solenoid
-  # energised, cam advances.
+  # --- Intake cam phasing family (2026-08-05 drive sweeps) ---------------
+  # Scale/offset come from the ROM Cam Phasing decode (advance = (N-128)/2,
+  # 0x80 = 0.0 deg), independently corroborated: every member reads exactly
+  # 0x80 with the engine off, spans 0-37 deg in motion against the ROM
+  # table's 0-35, and correlates +0.72..+0.74 with the known VVT solenoid
+  # duty 0x1110 in the causally correct direction.
   #
-  # WHICH IS WHICH IS UNRESOLVED. The FSM lists exactly two, INT/V TIM (B1)
-  # and (B2), so one of these three is something else (a target/commanded
-  # value is the obvious guess). They cannot be separated from this data: a
-  # sweep reads 0x1000->0x1400 sequentially at ~1.1 ms/DID, so these three are
-  # sampled ~50 ms apart, and their disagreement is 0.81 deg while the cam is
-  # parked versus 3.00 deg while it is moving -- the signature of read-order
-  # skew, not a bank-to-bank offset.
+  # Resolved 2026-08-05 against UpRev's INTK CAM TIM-B1/-B2 columns. The
+  # discriminator is behaviour at the cam's mechanical stop, where the signal
+  # is not moving so sequential-read skew contributes nothing:
+  #   UpRev B1 parked: mean -1.10 deg, sd 1.34   (a real sensor, jitters)
+  #   UpRev B2 parked: mean +0.25 deg, sd 0.70   (a real sensor, jitters)
+  #   0x113A  parked: mean  0.00 deg, sd 0.00   (8/8 sweeps exactly zero)
+  # A position sensor jitters; a setpoint does not. 0x113A is therefore the
+  # COMMANDED angle, not a bank -- which also explains why it deviates from
+  # the skew prediction during motion (command leads response).
   #
-  # To resolve: rotate ONLY these three at high rate (DIDs sustain 658 reads/s
-  # inside session 0xC0) during steady cruise, so reads are near-simultaneous;
-  # or log UpRev alongside, which reports INTK CAM TIM-B1 and -B2 as separate
-  # columns. Do not guess the bank assignment.
-  - did: 0x1135
-    name: ECM_INTAKE_CAM_ANGLE_1135
-    byte_start: 0
-    byte_length: 1
-    byte_order: big
-    scale: 0.5
-    offset: -64.0
-    unit: degCA
-    confidence: high
-    plausible_min: -10.0
-    plausible_max: 45.0
+  # 0x1135 and 0x1163 are statistically identical at the stop
+  # (-0.12 +/- 0.15 deg) and differ during motion exactly as 46 DIDs of read
+  # skew predicts, so they are ONE measured signal mirrored across two
+  # registers -- a pattern this ECM already shows (heater duty appears on
+  # four DIDs). They are NOT a B1/B2 pair; a real pair would carry UpRev's
+  # ~1.0-1.35 deg separation.
   - did: 0x113A
-    name: ECM_INTAKE_CAM_ANGLE_113A
+    name: ECM_INTAKE_CAM_ANGLE_COMMANDED
     byte_start: 0
     byte_length: 1
     byte_order: big
@@ -332,8 +323,32 @@ dids:
     confidence: high
     plausible_min: -10.0
     plausible_max: 45.0
+    notes: >
+      Commanded/target intake cam advance, not a measured bank. Zero variance
+      at the stop across 8 sweeps while both real banks jitter. Useful as the
+      command half of a command-vs-response pair for cam work.
+
+  # Measured angle. Bank assignment is a MODERATE-CONFIDENCE inference, not a
+  # measurement: at the stop this reads mean +0.44 deg / sd 0.75, which sits
+  # 0.7 SE from UpRev's B2 (+0.25 / 0.70) and 5.9 SE from B1 (-1.10 / 1.34).
+  # Sign, magnitude and noise level all agree, and nothing points at B1 -- but
+  # it rests on 8 parked snapshots taken on a different day from the UpRev
+  # reference. Names stay bank-neutral until a simultaneous UpRev log settles
+  # it; do not let downstream code assume the bank.
+  - did: 0x1135
+    name: ECM_INTAKE_CAM_ANGLE_MEASURED
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 0.5
+    offset: -64.0
+    unit: degCA
+    confidence: high
+    plausible_min: -10.0
+    plausible_max: 45.0
+    notes: Probably bank 2 (see above). 0x1163 mirrors this register exactly.
   - did: 0x1163
-    name: ECM_INTAKE_CAM_ANGLE_1163
+    name: ECM_INTAKE_CAM_ANGLE_MEASURED_MIRROR
     byte_start: 0
     byte_length: 1
     byte_order: big
@@ -343,3 +358,15 @@ dids:
     confidence: high
     plausible_min: -10.0
     plausible_max: 45.0
+    notes: >
+      Mirror of 0x1135 (identical at rest, differs only by read skew in
+      motion). Polling both buys nothing; kept recorded so a future sweep
+      does not re-derive it as a new signal.
+
+  # The OTHER bank's measured angle was NOT found in 0x1000-0x1400. A search
+  # of all 158 responding DIDs turned up no second cam-like signal carrying a
+  # persistent ~1 deg offset with independent jitter. 0x1139 does look like
+  # the bank-2 VVT solenoid DUTY (sibling of the known 0x1110), so bank 2's
+  # actuator is exposed but its position is not -- extend the next sweep past
+  # 0x1400. Not blocking: the ROM Cam Phasing table is a single table, not
+  # per-bank, so commanded + one measured + both duties is a working set.

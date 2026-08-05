@@ -208,3 +208,74 @@ open loop, **26 s at load > 85% & rpm > 2500 with 25 carrying a measured +
 commanded AFR pair** — against 4 such samples in the entire July corpus. Even
 with a third of the timing channel lost, this is the largest Pi-side WOT
 dataset yet collected.
+
+## Fuel-side validation, 2026-08-05 — the Pi and UpRev disagree on measured AFR
+
+First Pi-only delivery-error computation, from the 8-05 drive capture
+(open loop, rpm > 2500, load > 85 %, both channels fresh in the same second so
+nothing is stale-joined):
+
+| rpm | n | commanded | measured | error |
+|---|---|---|---|---|
+| 2500–3000 | 8 | 12.63 | 12.87 | +1.91 % |
+| 3000–3500 | 2 | 12.63 | 12.94 | +2.48 % |
+| 3500–4000 | 2 | 12.90 | 13.00 | +0.83 % |
+| 4000–4500 | 2 | 12.18 | 12.16 | −0.12 % |
+| 4500–6000 | 2 | 11.88 | 11.71 | −1.49 % |
+
+**Band-averaged +0.72 % (pooled +1.17 %), against UpRev's +3.93–3.98 %.**
+
+### First, a decoder correction: this ECM reports φ, not λ
+
+Taken as λ, PID 0x44 gives a commanded 16.3–18.3 AFR at WOT — impossible, and
+it produced a −27 % delivery error. Read as φ (`14.7 / value`) it gives
+11.83–13.25, which matches the ROM fuel-target curve. φ and λ are reciprocals
+and both are 1.0 at stoich, so **the convention is invisible in closed loop and
+only reveals itself under enrichment.** Documented at
+`decode_commanded_lambda`; the stored value is deliberately left raw so the
+existing corpus stays comparable.
+
+### The disagreement is entirely in the measured path
+
+Comparing the same rpm bands, Pi (8-05) against UpRev (8-04):
+
+| | mean delta | |
+|---|---|---|
+| **commanded** AFR | **−0.052** | **−0.42 %** — agrees |
+| **measured** AFR | **−0.497** | **−3.84 %** — Pi reads richer |
+
+The commanded curves agreeing to 0.4 % independently corroborates the φ
+reading. The whole delivery-error gap (+0.72 vs +3.93) is the measured-AFR
+offset, and it is consistent across all four bands (−0.65, −0.14, −0.57,
+−0.63), so it is a bias, not sampling scatter.
+
+### Why this matters more than the validation question
+
+Both paths measure the **same physical sensor**. UpRev converts sensor voltage
+through its own table; the Pi reads the ECM's own computed λ (PID 0x24). They
+disagree by 3.84 % at WOT.
+
+**The campaign's headline number — "the engine runs ~3.9 % lean of its own
+commanded target" — rests entirely on UpRev's conversion.** If PID 0x24 is the
+better estimate, the engine is within ~1 % of target and the residual that K
+and fuel pressure have been chased over is largely a measurement artifact. Note
+also that our validated voltage→AFR table was calibrated *against UpRev's own
+AFR column*, so it reproduces UpRev's conversion rather than independently
+confirming it — the 0.005 AFR agreement there is not evidence about truth.
+
+**Do not act on either number until this is resolved.** Neither "step K again"
+nor "the residual was never real" is supported right now.
+
+### Resolving it
+
+One drive with both loggers running (now known to be possible — they coexisted
+for 32 s on 2026-07-26) **and** DID `0x1225` (A/F sensor voltage) captured
+alongside. That puts all three paths on the same samples: UpRev's AFR, the
+ECM's λ, and the raw voltage both are derived from. Note DIDs and Mode 01 are
+mutually exclusive, so capturing voltage and PID 0x24 together needs the
+all-DID route or two passes.
+
+**Caveats:** cross-day comparison, not simultaneous; Pi n = 16 s over roughly
+3–5 independent pulls; the ±1.5 %-per-cell floor from the 2026-08-04 null run
+applies. The consistency of the offset across bands is what makes it credible,
+not the sample size.

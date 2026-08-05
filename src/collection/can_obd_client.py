@@ -673,7 +673,25 @@ def decode_warmups(data: bytes) -> tuple[float, str] | None:
 
 
 def decode_commanded_lambda(data: bytes) -> tuple[float, str] | None:
-    """COMMANDED_EQUIV_RATIO: λ = (A*256+B) / 32768. λ=1.0 is stoichiometric."""
+    """COMMANDED_EQUIV_RATIO: raw = (A*256+B) / 32768. 1.0 is stoichiometric.
+
+    **This value is returned as J1979 sends it and is NOT necessarily λ.**
+    Measured on the 2008 Nissan ECM 2026-08-05: at wide-open throttle this
+    reads 1.109-1.242, and λ would make that a commanded 16.3-18.3 AFR, which
+    no ECU commands under power. Read as φ (fuel/air), `14.7 / value` gives
+    11.83-13.25 — which matches the ROM fuel-target curve to **-0.4 %** across
+    four rpm bands. So this ECM reports **φ**, not λ.
+
+    φ and λ are reciprocals and both equal 1.0 at stoich, so the two readings
+    are indistinguishable in closed loop — the convention only reveals itself
+    under enrichment. Any consumer converting this to AFR on a vehicle whose
+    convention has not been checked at WOT is guessing.
+
+    Left as the raw ratio deliberately: flipping it here would silently change
+    the meaning of every stored `COMMANDED_EQUIV_RATIO` row and break
+    comparability with the existing corpus. Convert at the point of use, and
+    verify the convention per vehicle.
+    """
     if not _need(data, 2):
         return None
     return ((data[0] * 256 + data[1]) / 32768.0, "ratio")
