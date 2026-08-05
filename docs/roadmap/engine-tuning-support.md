@@ -690,6 +690,13 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   maximum is the cleaner discriminator; the OBD throttle *percentage* tops out
   around 89 % and understates true WOT.
 
+  **Measured 2026-08-04 — the DFCO caveat above dominates; `FUEL_STATUS == 4`
+  alone is nearly useless as a WOT finder.** Across the 34-session May corpus,
+  only 52 engine-on seconds carry `fs == 4`, and they split **46 at load < 25 %
+  (mean TPS 6.6 %) / 3 at 25–60 % / 3 at 60–85 % / zero above 85 %**. So ~88 %
+  is deceleration fuel cut and *none* of it is power enrichment. Always
+  conjoin with load and throttle; treat a bare `fs == 4` count as a DFCO count.
+
   **An earlier reading of 13.2–13.5 "lean of best power" is superseded.** It
   came from CANary samples at 70–88 % OBD throttle, which were not full WOT,
   and had no target to compare against. The finding is not that the engine is
