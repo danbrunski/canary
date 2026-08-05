@@ -200,9 +200,16 @@ def test_capture_sessions_do_not_blank_vehicle_state(tmp_path: Path) -> None:
         capture,
     )
 
+    # Correct WITHOUT the caller passing anything: the fix lives in the
+    # resolver, not in six callers remembering a parameter. This assertion
+    # deliberately used to expect `no_data` — the bug — when the fix was still
+    # per-call-site.
     without = _derive_vehicle_state(storage, replay_controller=None, now=now)
-    assert without.state == "no_data"  # the bug, reproduced
+    assert without.state == "engine_running"
+    assert without.rpm == 2500.0
 
+    # An explicit session_dir stays supported: the writer knows its own path
+    # exactly, where the resolver infers it from disk.
     with_capture = _derive_vehicle_state(
         storage, replay_controller=None, now=now, session_dir=capture
     )
@@ -244,3 +251,87 @@ def test_all_did_capture_classifies_from_decoded_broadcast(tmp_path: Path) -> No
     # Not `engine_off`: that rule infers a powered-down ECM from OBD silence,
     # which is wrong when Mode 01 is blocked by design.
     assert state.state == "engine_running"
+
+
+def test_live_session_resolution_includes_captures(tmp_path: Path) -> None:
+    """ "What is live" and "what is eligible for training" are different questions.
+
+    `discover_sessions` excludes `_`-prefixed directories so captures stay out
+    of the training corpus — correct there, and wrong for every live read.
+    Reusing it meant /status, /telemetry/latest, OBD coverage and the replay
+    guard all silently showed the *previous* session for the whole duration of
+    a capture. Fixing that per-caller needed six call sites to remember; this
+    pins the fix at the resolver instead.
+    """
+    from src.control.sessions import latest_session
+    from src.preprocessing.loader import discover_sessions
+
+    root = tmp_path / "vehicle"
+    for name in ("2026-08-05T120000", "_capture-fuel-map-2026-08-05T130000"):
+        (root / name).mkdir(parents=True)
+        (root / name / "telemetry-00000.parquet").write_bytes(b"x")
+
+    live = latest_session(root)
+    assert live is not None and live.name == "_capture-fuel-map-2026-08-05T130000"
+    # The training view still excludes it — that exclusion is the point.
+    assert [p.name for p in discover_sessions(root)] == ["2026-08-05T120000"]
+
+
+def test_live_session_resolution_orders_by_time_not_name(tmp_path: Path) -> None:
+    """Capture prefixes make name-ordering wrong, which is its own bug class.
+
+    `_capture-` sorts before `_tuning-` regardless of date, so a capture a
+    month later compares as earlier.
+    """
+    from src.control.sessions import latest_session
+
+    root = tmp_path / "vehicle"
+    for name in ("_tuning-2026-08-01T100000", "_capture-fuel-map-2026-09-01T100000"):
+        (root / name).mkdir(parents=True)
+        # A session only counts once it holds data — an empty directory exists
+        # from the moment the writer rotates into it.
+        (root / name / "telemetry-00000.parquet").write_bytes(b"x")
+
+    live = latest_session(root)
+    assert live is not None and live.name == "_capture-fuel-map-2026-09-01T100000"
+
+
+def test_one_parser_for_session_timestamps() -> None:
+    """Every session shape resolves through the same function.
+
+    Three separate copies of this parse had accumulated; a fourth was about
+    to. Ordering sessions any other way is a bug waiting for a new prefix.
+    """
+    from src.analysis.tune_revisions import session_started_at as via_revisions
+    from src.control.sessions import session_started_at
+
+    for name in (
+        "2026-08-05T142720",
+        "_tuning-2026-08-05T142720",
+        "_capture-fuel-map-2026-08-05T142720",
+    ):
+        parsed = session_started_at(name)
+        assert parsed is not None
+        assert parsed.isoformat() == "2026-08-05T14:27:20+00:00"
+        assert via_revisions(name) == parsed
+    assert session_started_at("not-a-session") is None
+
+
+def test_an_empty_freshly_rotated_session_does_not_win(tmp_path: Path) -> None:
+    """A session directory exists before its first chunk flushes.
+
+    Without this the newest directory is briefly an empty one and every live
+    read returns nothing — the same "shows the wrong session" failure in a new
+    costume. Falling back to the last session holding data is correct and
+    self-correcting once the first chunk lands.
+    """
+    from src.control.sessions import latest_session
+
+    root = tmp_path / "vehicle"
+    has_data = root / "2026-08-05T120000"
+    has_data.mkdir(parents=True)
+    (has_data / "telemetry-00000.parquet").write_bytes(b"x")
+    (root / "_capture-fuel-map-2026-08-05T130000").mkdir()  # rotated, nothing flushed
+
+    live = latest_session(root)
+    assert live is not None and live.name == "2026-08-05T120000"

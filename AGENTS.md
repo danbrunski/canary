@@ -132,6 +132,46 @@ to direct HTTP.
   tolerance/threshold machinery. Prefer principled solutions over
   threshold hacks.
 
+## Make it impossible, not documented
+
+Three defects landed in a single day's work on the tuning toolkit, all the
+same shape: something was *learned*, written into a docstring or commit
+message, and left unenforced. Two were fixed by using code written hours
+earlier in the same session. These are the habits that would have caught
+them.
+
+**A fix that every caller must remember is at the wrong layer.** The live
+session resolver excluded `_`-prefixed capture directories, so every "what is
+happening right now" read — `/status`, `/telemetry/latest`, OBD coverage, the
+replay guard — silently showed the *previous* session for the whole duration
+of a capture. The first fix threaded an optional argument through one call
+site. There were six, and two were still broken a day later. Push the
+correctness into the shared function, or change the signature so the unsafe
+call cannot be written.
+
+**Changing a contract means sweeping the callers.** `grep` for the function
+before you decide a fix is complete. Both incomplete fixes above were one
+`grep -rn` from being complete.
+
+**A measured constraint belongs in a schema, not a comment.** The noise floor
+was measured under WOT; across all conditions the same data gives a 16x larger
+spread. That was recorded in a prose `note`, so nothing stopped the WOT figure
+being quoted against an idle comparison — turning ordinary jitter into a
+"finding". Making `conditions` a required field took minutes and made the
+misuse unrepresentable. Ask: *did I learn a fact, or a constraint?* Constraints
+become required fields, validators, or refusals that name the incident.
+
+**Never order sessions by directory name.** Captures carry prefixes
+(`_capture-fuel-map-…`, `_tuning-…`), so string order sorts by prefix first
+and a capture a month later compares as "earlier". Use
+`src.control.sessions.session_started_at` / `latest_session` — one parser,
+ordering by parsed time. This has now been re-derived four separate times.
+
+**Two questions that look like one:** "which sessions may train?" excludes
+captures by design (`preprocessing.loader.discover_sessions`); "which session
+is live?" must include them (`control.sessions.latest_session`). Conflating
+them is what caused the bug above.
+
 ## Roadmap docs & task truth
 
 Planned work lives in `docs/roadmap/` as checklist docs; **task-level

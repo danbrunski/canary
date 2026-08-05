@@ -80,15 +80,14 @@ class TuneRevisionRegistry(_Strict):
 def session_started_at(session: str | Path) -> datetime | None:
     """Parse a session directory name's UTC start time.
 
-    Tolerates the ``_``-prefixed capture forms, so a quarantined tuning
-    capture resolves to a revision like any other session.
+    Re-exported from :mod:`src.control.sessions`, which owns the session
+    naming rules. Kept as a name here because this module's callers think in
+    terms of revisions rather than session plumbing — but there is one parser,
+    not two.
     """
-    name = Path(session).name if isinstance(session, Path) else session
-    match = _SESSION_STAMP.search(name)
-    if match is None:
-        return None
-    date, hour, minute, second = match.groups()
-    return datetime.fromisoformat(f"{date}T{hour}:{minute}:{second}+00:00")
+    from src.control.sessions import session_started_at as _parse
+
+    return _parse(session)
 
 
 def load_tune_revisions(path: Path) -> TuneRevisionRegistry | None:

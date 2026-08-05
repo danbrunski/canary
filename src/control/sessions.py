@@ -24,6 +24,56 @@ PIN_FILENAME = ".canary-pin"
 _SESSION_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
 _CAPTURE_DIR_RE = re.compile(r"^_capture-[a-z0-9-]+-(\d{4}-\d{2}-\d{2}T\d{6})$")
 
+#: The UTC stamp every session directory carries, wherever it sits in the name.
+#: Plain sessions are ``2026-08-05T142720``; captures prefix a marker
+#: (``_capture-fuel-map-...``, ``_tuning-...``), which is why this *searches*
+#: rather than anchoring — and why ordering directories by NAME is wrong:
+#: ``_capture-`` sorts before ``_tuning-`` regardless of date, so a capture a
+#: month later compares as earlier.
+_SESSION_STAMP_RE = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})")
+
+
+def session_started_at(session: str | Path) -> datetime | None:
+    """Parse a session directory's UTC start time from its name.
+
+    The one parser for this. Ordering sessions any other way — by directory
+    name, by mtime — is a bug waiting for a capture prefix to expose it.
+    """
+    name = session.name if isinstance(session, Path) else session
+    match = _SESSION_STAMP_RE.search(name)
+    if match is None:
+        return None
+    date, hour, minute, second = match.groups()
+    return datetime.fromisoformat(f"{date}T{hour}:{minute}:{second}+00:00")
+
+
+def latest_session(root: Path) -> Path | None:
+    """The session most recently *written*, captures included.
+
+    Distinct from :func:`src.preprocessing.loader.discover_sessions`, which
+    excludes ``_``-prefixed directories so captures stay out of the training
+    corpus. That exclusion is right for training and wrong for "what is live":
+    reusing it meant every live read — /status, /telemetry/latest, OBD
+    coverage, the replay guard — silently fell back to the previous session
+    for the whole duration of a capture, showing frozen data with nothing
+    saying so. Two questions, two functions.
+    """
+    if not root.exists():
+        return None
+    dated = [
+        (started, child)
+        for child in root.iterdir()
+        if child.is_dir()
+        and (started := session_started_at(child.name)) is not None
+        # Must hold data. A session directory exists from the moment the
+        # writer rotates into it, before the first chunk flushes, so without
+        # this the newest directory is briefly an empty one and every live
+        # read returns nothing — the same "shows the wrong session" failure
+        # in a new costume. Mirrors `discover_sessions`' own predicate.
+        and any(chunk.stat().st_size > 0 for chunk in child.glob("telemetry-*.parquet"))
+    ]
+    return max(dated, key=lambda item: item[0])[1] if dated else None
+
 
 @dataclass(frozen=True)
 class SessionSummary:

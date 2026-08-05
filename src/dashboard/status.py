@@ -16,7 +16,6 @@ from src.collection import tuning_profile, tx_gate
 from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
 from src.models.health import HealthMonitor
-from src.preprocessing.loader import discover_sessions
 from src.timefmt import parse_iso_utc
 
 VehicleStateName = Literal[
@@ -304,8 +303,18 @@ def _model_provenance(manifest_path: Path) -> dict[str, Any] | None:
 
 
 def _resolve_latest_session(storage_path: Path) -> Path | None:
-    sessions = discover_sessions(storage_path)
-    return sessions[-1] if sessions else None
+    """The session being written right now — captures included.
+
+    Previously this reused ``discover_sessions``, which excludes
+    ``_``-prefixed directories so captures stay out of the training corpus.
+    Correct for training, wrong here: every live read inherited the exclusion
+    and silently showed the *previous* session for the whole duration of a
+    capture. Fixing it per-caller would have needed six call sites to
+    remember; fixing the resolver makes them right by construction.
+    """
+    from src.control.sessions import latest_session
+
+    return latest_session(storage_path)
 
 
 def _capture_snapshot(storage_writer: Any = None) -> dict[str, Any]:
