@@ -282,3 +282,79 @@ def test_mcp_compare_surfaces_the_axis_gate_as_an_error(tmp_path: Path) -> None:
     assert result["ok"] is False
     # Either the session lookup or the axis gate refuses; both must be messages.
     assert "error" in result
+
+
+def test_tune_revision_resolution_matches_the_campaign_timeline() -> None:
+    """ "Delivery error by tune revision" should be a groupby, not archaeology.
+
+    The 2026-07-26 boundary is pinned by capture metadata rather than
+    recollection: stock through 16:21 MDT, Osiris from the 16:31 session.
+    """
+    from src.analysis.tune_revisions import load_tune_revisions
+
+    registry = load_tune_revisions(Path("data/nissan-xterra-2008/tune_revisions.yaml"))
+    assert registry is not None
+    expected = {
+        "2026-07-19T202721": "ZS04C-stock",
+        "2026-07-27T152444": "ZS44A-osiris-initial",
+        "2026-08-03T163440": "ZS44A-k105",
+        # Capture sessions are `_`-prefixed; they must still resolve.
+        "_tuning-2026-08-05T142720": "ZS44A-k106",
+    }
+    for session, revision in expected.items():
+        found = registry.for_session(session)
+        assert found is not None and found.revision == revision
+
+
+def test_sessions_before_the_first_flash_have_no_revision() -> None:
+    """Better `None` than forcing a session into a calibration that did not exist."""
+    from datetime import UTC, datetime
+
+    from src.analysis.tune_revisions import TuneRevision, TuneRevisionRegistry
+
+    registry = TuneRevisionRegistry(
+        revisions=[
+            TuneRevision(revision="a", flashed_at=datetime(2026, 7, 1, tzinfo=UTC)),
+        ]
+    )
+    assert registry.at(datetime(2026, 6, 1, tzinfo=UTC)) is None
+    assert registry.at(datetime(2026, 7, 2, tzinfo=UTC)) is not None
+
+
+def test_registry_rejects_out_of_order_revisions() -> None:
+    """Resolution walks the list in order; unordered input would resolve wrongly."""
+    from datetime import UTC, datetime
+
+    from pydantic import ValidationError
+
+    from src.analysis.tune_revisions import TuneRevision, TuneRevisionRegistry
+
+    with pytest.raises(ValidationError, match="oldest-first"):
+        TuneRevisionRegistry(
+            revisions=[
+                TuneRevision(revision="b", flashed_at=datetime(2026, 8, 1, tzinfo=UTC)),
+                TuneRevision(revision="a", flashed_at=datetime(2026, 7, 1, tzinfo=UTC)),
+            ]
+        )
+
+
+def test_comparison_flags_whether_both_sides_share_a_revision(tmp_path: Path) -> None:
+    """Same revision means the spread IS noise; different means a flash is in it."""
+    from src.analysis.tune_revisions import load_tune_revisions
+
+    registry = load_tune_revisions(Path("data/nissan-xterra-2008/tune_revisions.yaml"))
+    samples = [(2000 + 100 * i, 50, 4, 1.2, 0.83) for i in range(30)]
+    a = _rows(tmp_path / "a", samples, name="2026-08-03T163440")
+    b = _rows(tmp_path / "b", samples, name="2026-08-05T142720")
+    result = compare_sessions(
+        a,
+        b,
+        value="obd:O2_WR_LAMBDA_S1",
+        axes=("obd:RPM",),
+        revisions=registry,
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+    )
+    payload = result.as_dict()
+    assert payload["tune_revisions"] == ["ZS44A-k105", "ZS44A-k106"]
+    assert payload["same_revision"] is False

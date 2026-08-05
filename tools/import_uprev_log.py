@@ -47,13 +47,16 @@ import json
 import re
 import sys
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from src.analysis.channels import read_channels
+from src.analysis.clock_align import Alignment, AlignmentError, align_clocks
 from src.config import CanaryConfig
+from src.control.sessions import resolve_session
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 
@@ -148,6 +151,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--label", default=None, help="Tag for this import (default: the CSV's filename stem)."
     )
     parser.add_argument(
+        "--align-session",
+        default=None,
+        help=(
+            "Session id recorded at the same time. The filename anchor is the laptop's "
+            "local clock and the two genuinely differ (measured -1.3 s / -1.6 s), so "
+            "RPM is cross-correlated against that session to refine --started-at. "
+            "Refuses below r=0.99 rather than claiming a bogus offset — that threshold "
+            "is what caught a nominal 314 s overlap containing zero real samples."
+        ),
+    )
+    parser.add_argument(
         "--config", type=Path, default=Path("canary.yaml"), help="canary.yaml path."
     )
     return parser.parse_args(argv)
@@ -198,6 +212,35 @@ def build_records(frame: pd.DataFrame, *, started_at: datetime) -> list[Telemetr
     return records
 
 
+def _align_to_session(
+    frame: pd.DataFrame, started_at: datetime, session_id: str, config_path: Path
+) -> Alignment:
+    """Cross-correlate this log's RPM against a session's, for a real anchor.
+
+    RPM is the signal because it is already confirmed on both sides, so a
+    strong peak validates the offset, the binding, and that both loggers saw
+    the same events — all at once.
+    """
+    if "ENGINE RPM (rpm)" not in frame.columns:
+        raise ValueError("log has no 'ENGINE RPM (rpm)' column to align on")
+    config = CanaryConfig.from_yaml(config_path)
+    session_dir = resolve_session(config.collection.storage_path, session_id)
+
+    pi = read_channels(session_dir, ["can:ECM_RPM"])
+    if pi.empty:
+        pi = read_channels(session_dir, ["decoded:ECM_RPM"])
+    if pi.empty:
+        raise ValueError(f"session {session_id} has no RPM to align against")
+    reference = pd.Series(pi["value"].to_numpy(), index=pd.DatetimeIndex(pi["timestamp"]))
+
+    candidate = pd.Series(
+        pd.to_numeric(frame["ENGINE RPM (rpm)"], errors="coerce").to_numpy(),
+        index=started_at
+        + pd.to_timedelta(pd.to_numeric(frame["Time"], errors="coerce"), unit="ms"),
+    )
+    return align_clocks(reference, candidate)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if not args.csv.exists():
@@ -209,6 +252,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"import_uprev_log: filename suggests local start ~{hint}", file=sys.stderr)
 
     raw = pd.read_csv(args.csv)
+
+    alignment = None
+    if args.align_session is not None:
+        try:
+            alignment = _align_to_session(raw, started_at, args.align_session, args.config)
+        except (AlignmentError, FileNotFoundError, ValueError) as exc:
+            print(f"error: clock alignment failed: {exc}", file=sys.stderr)
+            return 1
+        started_at = started_at + timedelta(seconds=alignment.offset_seconds)
+        print(
+            f"import_uprev_log: aligned to {args.align_session}: "
+            f"{alignment.offset_seconds:+.2f}s (r={alignment.r:.5f}, "
+            f"{alignment.overlapping_samples} overlapping samples)",
+            file=sys.stderr,
+        )
+
     records = build_records(raw, started_at=started_at)
     if not records:
         print("error: no usable rows (every row missing Time or every value NaN)", file=sys.stderr)
@@ -242,6 +301,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         "row_count": len(records),
         "channels": channels,
     }
+    if alignment is not None:
+        # Recorded so a later analysis can tell a measured anchor from a
+        # filename guess, and re-check the correlation that justified it.
+        manifest["clock_alignment"] = {
+            "session": args.align_session,
+            **alignment.as_dict(),
+        }
     writer.paths.manifest.write_text(json.dumps(manifest, indent=2, sort_keys=True))
 
     print(

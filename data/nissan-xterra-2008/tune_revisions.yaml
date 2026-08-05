@@ -1,0 +1,42 @@
+schema_version: 1
+# Flash history, oldest first. A session belongs to the newest revision
+# flashed at or before it started, so "delivery error by tune revision"
+# becomes a groupby instead of cross-checking a prose timeline.
+#
+# Times are UTC. The 2026-07-26 boundary is pinned by capture metadata rather
+# than recollection: stock ZS04C/1ZS04C through 16:21 MDT, Osiris ZS44A from
+# the 16:31 session (see engine-tuning-support.md 3.5).
+revisions:
+  - revision: ZS04C-stock
+    flashed_at: 2000-01-01T00:00:00Z
+    rom_file: 1ZS04C
+    notes: >
+      Factory calibration. The flashed_at is a floor, not a measurement -- it
+      predates any recorded session, which is all this entry needs to do:
+      claim everything before the first Osiris flash.
+  - revision: ZS44A-osiris-initial
+    flashed_at: 2026-07-26T22:31:00Z
+    k: 1.07
+    rom_file: 1ZS44A
+    notes: >
+      First Osiris flash. K 1.07 ran badly rich -- the 7-29 11AM log has the
+      factory A/F sensors pegged at their 10.0 floor for ~100% of samples at
+      5000-5750 rpm, so AFR readings from that window are censored, not
+      measurements.
+  - revision: ZS44A-k105
+    flashed_at: 2026-07-31T00:00:00Z
+    k: 1.05
+    notes: >
+      K reduced to 1.05, fuel-comp rpm axis rescaled 800-12750 -> 800-7200,
+      max-load cells cut. Overcorrected: 11-13% lean of target across
+      4000-6000 WOT on the 7-31 9AM log. Exact flash time not recorded, so
+      this boundary is approximate -- sessions near it may be mislabelled.
+  - revision: ZS44A-k106
+    flashed_at: 2026-08-05T00:00:00Z
+    k: 1.06
+    notes: >
+      K 1.05 -> 1.06 plus smoothed AFR targets and added spark at 3000-4500
+      high load, all in one flash. That combination is why the spark edit was
+      not measurable: the K change walks the BFS axis, which moves every
+      BFS-indexed lookup including the timing table. Exact flash time not
+      recorded (overnight before the 8-05 drive).

@@ -230,7 +230,7 @@ session-death quirk).
 
 ## Phase 4 — UpRev importer upgrades (ground truth without the guessing)
 
-- [ ] **4.1 — Clock alignment by RPM cross-correlation.** Port the
+- [x] **4.1 — Clock alignment by RPM cross-correlation.** Port the
   scratchpad method (peak r = 0.9998–0.9999 on a 100 ms grid; measured
   offsets −1.3 s / −1.6 s) into `tools/import_uprev_log.py`: given
   `--align-session <id>` (or auto-detected overlap from the session
@@ -239,17 +239,34 @@ session-death quirk).
   claim alignment when peak r < 0.99 — that threshold is what exposed the
   7-29 dead overlap. Validate against the 2026-07-27 pair with its known
   offsets.
-- [ ] **4.2 — Auto-import sweep (laptop-side).** The UpRev logs directory is
+  **DONE 2026-08-05** — `src/analysis/clock_align.py` + `--align-session`.
+  Validated exactly: the 2026-07-27 pair recovers 1.30 s / 1.60 s at
+  r = 0.99982 / 0.99989, and the 2026-07-29 pair is *refused* with 0
+  overlapping samples. Sign convention is "offset to add to the candidate's
+  timestamps"; the scratchpad reported the opposite shift, same relationship.
+  Those July sessions predate decoded persistence, so alignment falls back to
+  `can:ECM_RPM` when `decoded:` is absent.
+- [x] **4.2 — Auto-import sweep (laptop-side).** The UpRev logs directory is
   on the Windows side (`~/UpRev Logs/`); a small
   `tools/watch_uprev_logs.py --once` (cron/manual, not a daemon) imports
   new CSVs with the filename hint, then applies 4.1 when an overlapping
   session exists. Local-only, per the importer's existing design.
-- [ ] **4.3 — Era/tune registry.** Imports and capture sessions both carry a
+  **DONE 2026-08-05** — `tools/watch_uprev_logs.py`, skipping anything whose
+  `original_filename` already appears in an `_uprev` manifest. Dry run over
+  the real log directory correctly proposes the 9 un-imported logs and skips
+  autosaves, whose filenames carry no parseable stamp.
+- [x] **4.3 — Era/tune registry.** Imports and capture sessions both carry a
   `tune_revision` (the capture route already accepts one). Add the registry
   file (`data/<profile>/tune_revisions.yaml`: revision → flash time, K,
   notes, ROM file name) and have 2.1/2.2 label outputs by revision, so
   "delivery error by tune revision" is a groupby, not archaeology. Backfill
   the 2026-07/08 flash history from `engine-tuning-support.md`'s timeline.
+  **DONE 2026-08-05** — `src/analysis/tune_revisions.py` +
+  `data/nissan-xterra-2008/tune_revisions.yaml`; `delivery_error` carries
+  `tune_revision` and `compare_sessions` carries both sides plus a
+  `same_revision` flag (equal revisions mean the spread *is* noise). Two
+  boundaries are honestly approximate — the K1.05 and K1.06 flash times were
+  never recorded, so the yaml says so rather than implying precision.
 
 ## Phase 5 — Post-drive tuning digest
 

@@ -38,6 +38,7 @@ import pandas as pd
 
 from src.analysis.afr import AfrCalibration
 from src.analysis.channels import read_aligned
+from src.analysis.tune_revisions import TuneRevisionRegistry
 
 #: Axes that must never grid a cross-flash comparison. ``CAL/LD`` is computed
 #: from BFS, so it moves when fuelling moves; see the module docstring.
@@ -90,9 +91,14 @@ class DeliveryError:
     gates: dict[str, Any]
     rpm_window: tuple[float, float]
     measured_spec: str
+    #: Calibration in force when the session was recorded, when a registry
+    #: resolves it. Comparing delivery error across a flash boundary without
+    #: this is comparing two different engines.
+    tune_revision: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "tune_revision": self.tune_revision,
             "band_averaged_pct": self.band_averaged_pct,
             "pooled_pct": self.pooled_pct,
             "n": self.n,
@@ -130,6 +136,7 @@ def delivery_error(
     min_load: float | None = 85.0,
     grid: str = "1s",
     cell_agg: str = "last",
+    revisions: TuneRevisionRegistry | None = None,
     bindings_path: Path = Path("data/bindings.yaml"),
     dids_path: Path = Path("data/dids.yaml"),
 ) -> DeliveryError:
@@ -148,6 +155,11 @@ def delivery_error(
     3. optional load floor, for WOT-only questions
     4. band-averaged over rpm, so band composition cannot masquerade as an effect
     """
+    revision = None
+    if revisions is not None and isinstance(session, Path):
+        found = revisions.for_session(session)
+        revision = None if found is None else found.revision
+
     specs = ["obd:RPM", "obd:FUEL_STATUS", "obd:COMMANDED_AFR", measured_spec]
     if min_load is not None:
         specs.append("obd:ENGINE_LOAD")
@@ -201,6 +213,7 @@ def delivery_error(
             gates=report.as_dict(),
             rpm_window=(float("nan"), float("nan")),
             measured_spec=measured_spec,
+            tune_revision=revision,
         )
 
     frame = frame.assign(error_pct=(frame["measured_afr"] / frame["commanded_afr"] - 1.0) * 100.0)
@@ -221,6 +234,7 @@ def delivery_error(
         gates=report.as_dict(),
         rpm_window=(float(frame["obd:RPM"].min()), float(frame["obd:RPM"].max())),
         measured_spec=measured_spec,
+        tune_revision=revision,
     )
 
 
@@ -233,9 +247,15 @@ class SessionComparison:
     n_cells: int
     axes: tuple[str, ...]
     value: str
+    #: Calibrations in force for each side. Equal revisions mean this is a
+    #: null run (the spread IS the noise floor); different ones mean the
+    #: delta includes whatever the flash changed.
+    tune_revisions: tuple[str | None, str | None] = (None, None)
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "tune_revisions": list(self.tune_revisions),
+            "same_revision": self.tune_revisions[0] == self.tune_revisions[1],
             "value": self.value,
             "axes": list(self.axes),
             "mean_delta": self.mean_delta,
@@ -259,6 +279,7 @@ def compare_sessions(
     bindings_path: Path = Path("data/bindings.yaml"),
     dids_path: Path = Path("data/dids.yaml"),
     noise_floor: float | None = None,
+    revisions: TuneRevisionRegistry | None = None,
 ) -> SessionComparison:
     """A-vs-B on a matched grid, refusing load as an axis.
 
@@ -322,7 +343,14 @@ def compare_sessions(
         joined["delta_sigma"] = np.nan
         joined["distinguishable"] = pd.NA
 
+    def _revision(session: Path | pd.DataFrame) -> str | None:
+        if revisions is None or not isinstance(session, Path):
+            return None
+        found = revisions.for_session(session)
+        return None if found is None else found.revision
+
     return SessionComparison(
+        tune_revisions=(_revision(a), _revision(b)),
         cells=joined.reset_index(),
         mean_delta=float(joined["delta"].mean()) if len(joined) else float("nan"),
         n_cells=int(len(joined)),
