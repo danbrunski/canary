@@ -4,6 +4,29 @@ provenance:
   session: data/sessions/_uprev/2026-07-29T172029
   source_log: UpRev_Log7-29-2026_11-20-29_AM.csv
   note: Bank-1 median AFR at each sampled voltage; bank 2 independently agrees.
+  validated_2026-08-04: |
+    Held-out check against the five OTHER logs carrying both `A/F WB-Bn (V)`
+    and `AFR WB-Bn` (7-26 5:41PM, 7-27 9:59AM, 7-27 5:02PM, 7-28 10:42AM,
+    7-29 6:10PM) — different days, different tunes, 10,211 uncensored paired
+    samples, none of them the log this table was built from.
+
+    Residual by region, worst log to best: MAE 0.0288 overall, and by AFR band
+    power 10-13 **0.0049** (max 0.026) / 13-14.5 0.0082 / stoich 0.0399 /
+    >20 0.162. In the WOT band the campaign actually uses, the error is below
+    UpRev's own 0.01 reporting resolution, so the table is exact to the limit
+    of what the reference can show. Per-log MAE spans 0.0040-0.0404 with no
+    log an outlier, and the two banks agree (MAE 0.0294 / 0.0283, bias
+    -0.021 / -0.021).
+
+    The >20 band is the only weak region and it does not matter: that is
+    decel fuel cut, which `censored_ceiling_afr` already excludes.
+
+    Do NOT replace this table with a fitted curve. Parametric forms were
+    tried against the same held-out split and are far worse — 1/AFR linear
+    0.556 MAE, 1/AFR quadratic 0.211, log-linear 0.991, plain linear 1.833,
+    against 0.006 for the monotone table. The sensor's transfer is not any
+    of those shapes, and a 1/AFR fit also drifts 3.7% in slope between the
+    two eras.
 active_revision: null
 voltage_transfer:
   censored_floor_afr: 10.0

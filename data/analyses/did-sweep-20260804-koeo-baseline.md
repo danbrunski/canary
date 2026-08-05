@@ -99,3 +99,44 @@ free (`A/F WB-B1 (V)` and `AFR WB-B1` are paired columns in the same rows).
 Target AFR: `COMMANDED_EQUIV_RATIO` is Mode 01-only (PID 0x44), so in an
 all-DID capture the commanded side must come from a DID if one exists, or be
 snapshotted before/after the capture window.
+
+## Lead: UpRev does NOT use per-DID reads — it uses 0xAC + 0x23
+
+Found in `/data/canary/flash-20260726T222616Z.log` (mirrored to
+`~/canary-pi-mirror/`), which captured the UpRev tool's own dialogue with the
+ECM during the 2026-07-26 flash. Alongside the expected session control
+(`10 85`, `10 C0`, `10 FB`) and identification reads (`21 10` / `21 81`, which
+return the cal ID `1ZS04C…`), the tool issues:
+
+* **`AC 81` / `AC 82`** — multi-frame requests (62 and 24 bytes) whose payload
+  is a repeating 5-byte pattern `83 00 10 00 NN` with `NN` incrementing
+  `00,01,02,…,0C,0D,0E,0F`. This reads as *defining a block of parameters* —
+  a subscription list, not a one-shot read.
+* **`23 A1 00` / `23 A2 00`** — service 0x23 **ReadMemoryByAddress**, answered
+  with `63 …` first-frames of 17 bytes, i.e. a **packed 16-byte block of live
+  values in a single round trip**.
+
+That is almost certainly how UpRev gets 17 synchronously-sampled channels at
+~41 ms: it does not poll parameters individually at all. If replicable it is
+strictly better than the all-DID plan above — one round trip for the whole
+channel set, perfectly time-aligned by construction, and no per-channel rate
+budget to divide.
+
+Worth noting `22` with multiple DIDs was probed on 2026-07-26 and refused
+(`subFunctionNotSupported`), which is what made per-DID polling look like the
+only option. Service 0x23 sidesteps that entirely.
+
+**Caveats before anyone gets excited.** ReadMemoryByAddress needs the RAM
+address of each parameter, which UpRev knows from its ROM definitions and we
+do not — the `83 00 10 00 NN` pattern may be an indirection that avoids raw
+addresses, but that is a guess from 86 bytes of payload. This is also the one
+area of this project that is **not obviously read-only**: 0xAC is a *write-ish*
+service name in several manufacturer dialects, and it appeared here inside a
+reflash session. Reproduce `23` reads first, in isolation, and do not send
+`AC` on the truck until its semantics are established from the log alone.
+
+Next step is offline: reassemble the full multi-frame `AC` payloads and the
+`63` responses from the flash log and see whether the 16 returned bytes can be
+matched against the UpRev CSV rows recorded at the same wall-clock instant.
+The flash log has absolute timestamps and there are UpRev logs from that
+evening, so this is a desk exercise, not a truck one.
