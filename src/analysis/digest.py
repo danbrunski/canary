@@ -79,6 +79,10 @@ class SessionDigest:
     fingerprint_top_movers: list[dict[str, Any]]
     new_dtcs: list[dict[str, Any]]
     new_ledger_events: list[dict[str, Any]]
+    #: Tuning section, present only for capture sessions. ``None`` on an
+    #: ordinary drive rather than an empty block, so a reader can tell "not a
+    #: tuning capture" from "a capture that found nothing".
+    tuning: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -92,6 +96,7 @@ class SessionDigest:
             "fingerprint_top_movers": list(self.fingerprint_top_movers),
             "new_dtcs": list(self.new_dtcs),
             "new_ledger_events": list(self.new_ledger_events),
+            "tuning": self.tuning,
         }
 
 
@@ -218,6 +223,22 @@ def _fingerprint_top_movers(
     return movers[:_TOP_N]
 
 
+def _tuning_section(session_dir: Path, config: CanaryConfig) -> dict[str, Any] | None:
+    """Tuning digest for a capture session; ``None`` for an ordinary drive.
+
+    Never raises: a normal drive's digest must not fail because the tuning
+    section had nothing to say, or because a vehicle has no AFR calibration.
+    """
+    from src.analysis.tuning_digest import compute_tuning_digest
+
+    try:
+        section = compute_tuning_digest(session_dir, config)
+    except Exception:  # noqa: BLE001 — a digest is a report, not a gate
+        log.warning("tuning digest section failed for %s", session_dir.name, exc_info=True)
+        return None
+    return None if section is None else section.to_dict()
+
+
 def compute_digest(
     session_dir: Path,
     config: CanaryConfig,
@@ -260,6 +281,7 @@ def compute_digest(
         fingerprint_top_movers=_fingerprint_top_movers(stats, reference_stats),
         new_dtcs=_new_dtcs(session_dir),
         new_ledger_events=_new_ledger_events(ledger, start, end),
+        tuning=_tuning_section(session_dir, config),
     )
 
 

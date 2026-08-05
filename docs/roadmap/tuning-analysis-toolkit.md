@@ -270,17 +270,29 @@ session-death quirk).
 
 ## Phase 5 — Post-drive tuning digest
 
-- [ ] **5.1 — Digest flavor for capture sessions.** The trip-end hook
+- [x] **5.1 — Digest flavor for capture sessions.** The trip-end hook
   already writes `digest.json` per session. For sessions with a capture
   profile, add a tuning section: WOT inventory (seconds by rpm band × load,
   with AFR-pair counts), achieved per-channel Hz vs. requested, delivery
   error via 2.1 with floor annotation, cam commanded-vs-measured summary
   when the DID channels are present. Rendered by the existing
   `get_session_digest` path — no new endpoint.
-- [ ] **5.2 — Delta vs. previous capture.** When an earlier session shares
+  **DONE 2026-08-05** — `src/analysis/tuning_digest.py`, wired into
+  `compute_digest` as a `tuning` block that is `None` for ordinary drives (so
+  a reader can tell "not a capture" from "a capture that found nothing") and
+  never raises — a digest is a report, not a gate. Verified end-to-end against
+  the real 2026-08-05 capture: 27 WOT seconds, n=16, band-averaged +0.45 %,
+  tune revision ZS44A-k106. Achieved rate is computed from the stored rows
+  rather than read off `/status`, so it still works long after the drive and
+  reports what was actually written.
+- [x] **5.2 — Delta vs. previous capture.** When an earlier session shares
   the same profile + tune revision, the digest appends the 2.2 comparison
   (matched axes, floor-quoted). This is the "did the flash do what I meant"
   answer, produced without anyone typing SQL at 10 pm.
+  **DONE 2026-08-05** — matches on profile **and** tune revision, because
+  across a flash boundary the delta is the flash rather than drift. Quotes
+  `delta_sigma` + `distinguishable` against the measured floor, or `None` when
+  no floor exists.
 
 ## Explicitly out of scope
 
