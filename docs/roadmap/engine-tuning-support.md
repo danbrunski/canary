@@ -577,11 +577,12 @@ Other facts worth not re-deriving:
   +0.6–0.85 columns at 4000–5500 rpm, which is the ~1.1° of advance lost there
   without touching the timing table. **Fuel and spark are not separable
   variables on this ECU** — one category per flash is a correctness requirement,
-  not tidiness. **Measured twice**: the 8-04 flash combined a K raise with a
-  spark raise, and the axis walk (+0.43 ms BFS at matched rpm × load, airflow
-  flat) *reversed* the sign of the spark edit in the cells it targeted — see
-  3.5. A K change alone is enough to trigger this; it is not specific to fuel
-  comp.
+  not tidiness. **A K change alone is enough to trigger this** — it is not
+  specific to fuel comp: the 8-04 K raise of ×1.05→×1.06 moved BFS **+1.49 %** at
+  matched rpm × MAF voltage (null-run baseline +0.27 %), walking every
+  BFS-indexed lookup with it. The resulting spark shift was −0.64° at matched
+  airflow, which is only ~2 SE given the measurement floor — see 3.5 for the
+  floor and for two retracted claims that over-read this effect.
 - **Closed loop runs only where the AFR target is exactly 14.7**; any other
   target puts that cell in open loop. This is what partitions the logs.
 - **Rescale via the Load Point Scaler, never by editing axis numbers** (guide
@@ -838,17 +839,36 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   then touch timing. While LTFT remains zero, it will not hide an
   over-correction, so re-measure before taking a second step.
 
-  **K responds 1:1 — measured 2026-08-04.** Operator raised K from ×1.05 to
-  ×1.06 (+0.95 %) overnight. Open-loop WOT delivery error moved **+3.93 % →
-  +3.02 %** (B1), i.e. **−0.91 points against −0.95 predicted**. The scalar
-  model is correct and the knob is linear; no reshape is needed and none of the
-  remaining error is K's fault.
+  **A ×1.01 K step is BELOW THE MEASUREMENT FLOOR — retracted 2026-08-04.**
+  Operator raised K ×1.05→×1.06 (+0.95 %) overnight. A first analysis reported
+  delivery error moving +3.93 % → +3.02 %, i.e. "−0.91 against −0.95 predicted,
+  K responds 1:1." **That was band-composition bias, not a K effect.** The 8-04
+  AM log carried many 5000–6000 rpm samples (where error is lowest) that the
+  8-03 log lacks; pooling across an unequal rpm distribution moved the mean.
+  Restricted to a common 3000–4700 rpm window and **band-averaged** so each rpm
+  band carries equal weight:
 
-  | log | K | B1 delivery error | B2 |
+  | log | K | band-averaged B1 error | per-band |
   |---|---|---|---|
-  | 7-31 | — | +5.37 % | +5.23 % |
-  | 8-03 | ×1.05 | +3.93 % | +2.44 % |
-  | 8-04 | ×1.06 | **+3.02 %** | +1.42 % |
+  | 8-03 | ×1.05 | **+3.96 %** | 3.04 / 4.16 / 3.58 / 5.05 |
+  | 8-04 AM | ×1.06 | **+3.98 %** | 4.83 / 3.74 / 2.55 / 4.80 |
+  | 8-04 PM | ×1.06 | **+3.93 %** | 4.16 / 4.18 / 4.02 / 3.37 |
+
+  All three agree to 0.05 points. The K step is invisible in measured AFR.
+
+  **This is a resolution limit, not evidence that K does nothing.** Commanded
+  fuel — the ECU's own `B-FUEL SCHDL` at matched rpm × MAF voltage, a direct
+  readout rather than a sensor inference — rose **+1.49 %** across the flash,
+  against **+0.27 %** for a same-tune null run. So the flash landed and K did
+  move fuel; the factory A/F sensors simply cannot resolve a 1 % delivery change
+  (their WOT accuracy is ±5 %, see the caveat above). **Always confirm a fuel
+  edit landed via BFS at matched rpm × MAF, never via measured AFR alone.**
+
+  **Measurement floor, from the 8-04 AM→PM null run** (identical tune, two
+  drives, 12 °F IAT apart — see 3.5): per-cell delivery error scatters with
+  **sd 1.49 %, range ±2.4 %**. Multi-cell means resolve ~1.3 %. Anything smaller
+  needs either a bigger step or several times the sample. Do not take single
+  K steps below ~×1.03 expecting to measure them.
 
   **Methodology gate — filter to open loop before computing delivery error.**
   A first pass at the 8-04 log pooled closed-loop stoich samples (`TARGET AFR`
@@ -942,56 +962,76 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   highest dynamic-compression point in the map with no knock visibility. Run the
   cam-side discriminator first.
 
-  **The BFS axis walk bit a second time — 2026-08-04. A spark edit combined with
-  a fuel edit in one flash is not measurable, and this is now demonstrated
-  twice.** Operator raised K ×1.05→×1.06, smoothed the AFR targets, *and* added
-  advance in the 3000–4500 high-load cells in a single flash. Logged spark on a
-  rpm × load grid (load is the grid axis, so composition is controlled; cam is a
-  tight function of rpm × load — within-cell σ 1.15° — and cam tables were
-  untouched, so cam is matched too):
+  **The overnight spark edit is NOT MEASURABLE either way — and neither was the
+  first attempt to measure it. 2026-08-04.** Operator raised K ×1.05→×1.06,
+  smoothed the AFR targets, *and* added advance in the 3000–4500 high-load cells
+  in one flash. Two analysis errors and one null run are worth recording,
+  because the method matters more than this iteration's result.
 
-  | rpm | load | BFS 8-03 → 8-04 | Δ BFS | Δ spark |
-  |---|---|---|---|---|
-  | 3000–3500 | 90–94 | 16.76 → 17.11 | +2.1 % | **−1.57°** |
-  | 3500–4000 | 94–100 | 17.15 → 17.87 | +4.2 % | **−1.01°** |
-  | 4000–4500 | 90–94 | 17.48 → 18.00 | +3.0 % | **−0.74°** |
-  | 4500–5000 | 90–94 | 17.32 → 17.78 | +2.7 % | +0.07° |
-  | 4500–5000 | 86–90 | 17.29 → 17.45 | **+0.9 %** | **+0.61°** |
+  **Error 1 — `CAL/LD` is a contaminated control axis. Never grid on it.** The
+  first pass compared spark on an rpm × **load** grid and reported spark falling
+  0.7–1.6° in exactly the edited cells. But CAL/LD is *derived from BFS* (see
+  ROM table reference), so conditioning on load while fuel moves partly
+  conditions on the thing that moved. Worse, it is not even stable at fixed
+  fuel: across the same-tune null run below, **CAL/LD shifted +1.43 points at
+  identical rpm × MAF voltage**, apparently with IAT. Grid on **MAF voltage**
+  (real airflow) or on **BFS** (the actual table cell) — never on load.
 
-  Spark went *down* 0.7–1.6° in exactly the cells where advance was added. The
-  cause is the documented mechanism, not knock: **`MAF` at matched rpm × load
-  moved +1.2 %** — actual airflow is unchanged — while **BFS rose +0.43 ms
-  (+2.5 %)** because fuel was added. BFS is the timing table's X axis, so the
-  lookup walked right into more-retarded columns and swamped the edit. The one
-  cell where BFS barely moved (+0.9 %) is the one where the edit shows through
-  cleanly at **+0.61°**. That cell is the control.
+  **Error 2 — those per-cell deltas were inside the noise.** A same-tune
+  repeat run (8-04 PM, operator-confirmed: no fuel or timing changes) gives the
+  measurement floor directly:
 
-  **This is not a sign inversion.** The natural reading of "I increased the
-  numbers and advance went down" is that the table is stored as retard. It is
-  not — the guide is explicit that higher values yield more advance (see ROM
-  table reference (b)), and the +0.61° control cell confirms the edit added
-  advance where the axis held still.
+  | quantity, per cell | mean | sd | range |
+  |---|---|---|---|
+  | spark, matched rpm × MAF (n=5) | +0.01° | 0.64 | −1.03 … +0.52 |
+  | spark, matched rpm × BFS (n=6) | +0.01° | 0.75 | −1.25 … +0.99 |
+  | delivery error, matched rpm × MAF (n=5) | −0.36 % | 1.49 | −2.38 … +1.38 |
 
-  Three secondary observations that rule out the knock reading, and which
-  generalise as discriminators:
+  **A single cell can swing ±1.25° of spark with nothing changed at all.** So
+  the reported −1.57°/−1.01°/−0.74° were individually unresolvable, and the
+  "+0.61° cell where BFS barely moved, that cell is the control" claim was
+  noise. Retract both. Per-cell claims need ≳1.5°; multi-cell means resolve
+  ~0.6–0.8°.
 
-  - **The retard is steady, not sawtoothing.** In the 8-04 pull 4 trace, spark
-    sits flat at 6–9° through 3300–3800 rpm at 93–97 % load with no
-    retard-then-re-advance. A lookup shift produces a steady offset; knock
-    feedback oscillates and recovers.
-  - **It got *colder*, not hotter.** IAT was 80 °F in 8-04 against 94 °F in
-    8-03 (coolant 194.6 vs 195.7, i.e. no difference). Cooler intake air lowers
-    knock propensity, so a knock-driven retard should have *shrunk*. It grew.
-  - **The loss tracks ΔBFS, not knock propensity.** Across cells, the cell with
-    the largest BFS walk lost the most spark and the cell with the smallest
-    gained.
+  **What the properly-controlled comparison shows.** Decomposing the overnight
+  flash on the two clean axes:
 
-  **Consequence for method:** the "one category per flash" rule under ROM table
-  reference is now a hard gate on 3.5, not advice. A timing iteration must ship
-  with fuel frozen — same K, same targets, same fuel comp — or its result is
-  uninterpretable. To recover the current iteration, re-log with fuel held at
-  K ×1.06 and the smoothed targets, changing nothing else; that isolates the
-  spark edit against a stationary BFS axis.
+  | matched on | meaning | Δ spark |
+  |---|---|---|
+  | rpm × **BFS** | the timing table cell itself | **−0.19°** over 8 cells |
+  | rpm × **MAF** | net effect at real airflow | **−0.64°** over 5 cells |
+
+  At matched BFS the table shows **no detectable change** — consistent with the
+  axis-walk mechanism (the table didn't move, the lookup did), and also with the
+  operator's edit being too small to see. At matched airflow the net is −0.64°
+  ± 0.29 (1 SE), which is marginal, ~2 SE, and should be held loosely. The
+  commanded-fuel side is firmer because it is a direct ECU readout: BFS at
+  matched rpm × MAF rose **+1.49 %** across the flash against **+0.27 %** for
+  the null run, so the axis demonstrably walked.
+
+  **Not a sign inversion.** "I increased the numbers and advance went down" reads
+  naturally as a table stored in retard. It is not — the guide is explicit that
+  higher values yield more advance (ROM table reference (b)). Note this rests on
+  the guide, *not* on the retracted control cell.
+
+  **A discriminator that did NOT work, recorded so it is not re-tried:** "it got
+  colder, not hotter, so knock can't explain the retard" (8-04 AM ran 80 °F IAT
+  vs 8-03's 94 °F). The null run ran **12 °F hotter than the AM log with an
+  identical tune and moved spark +0.01°** — WOT spark is insensitive to IAT over
+  this range, so IAT direction carries almost no evidential weight here. The
+  surviving discriminator is shape: a lookup shift produces a *steady* offset,
+  while knock feedback oscillates and re-advances. Logged spark sat flat at 6–9°
+  through 3300–3800 rpm at 93–97 % load with no sawtooth.
+
+  **Consequence for method — the binding constraint is sample size, not just
+  flash hygiene.** "One category per flash" (ROM table reference) remains a hard
+  gate: a timing iteration must ship with fuel frozen — same K, same targets,
+  same comp. But the null run shows that is *not sufficient*. A single pull pair
+  cannot resolve a 1–2° spark edit or a 1 % fuel edit. Each iteration needs
+  **several repeat pulls per condition in the same gear**, compared on rpm × MAF
+  and rpm × BFS grids, with the per-cell floor above quoted alongside any claim.
+  Otherwise the honest answer is "not measurable", which is what this iteration
+  is.
 
   **Cam phasing comes after fuel and ignition** — *except* as the spark
   discriminator described under "ROM table reference", which is cheaper and
