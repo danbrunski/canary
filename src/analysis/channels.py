@@ -13,6 +13,12 @@ least once during the 2026-08 tuning campaign:
   1200 rpm; taking it at face value looks like a factor-of-8 bug and was
   first diagnosed as one.
 * ``can:`` — raw frame bytes in ``payload``, needing a binding to slice.
+* ``uprev:`` — imported UpRev K-line logs (``tools/import_uprev_log.py``),
+  stored numeric and already in engineering units like ``obd:``. Kept as its
+  own namespace because it is a *different instrument* reading the same
+  vehicle: the 3.8 % measured-AFR disagreement between UpRev's conversion and
+  the ECM's own λ is exactly the kind of thing that must not be blurred by
+  filing both under one name.
 
 This module is the single place that knows all four, so callers ask for
 ``obd:RPM`` or ``did:ECM_AF_SENSOR_V_B1`` and get numbers they can compare.
@@ -42,7 +48,7 @@ from src.telemetry import DECODED_SOURCE, SOURCE_SEP
 #: Namespaces a spec may name. ``did``/``can`` are decode routes rather than
 #: literal ``source`` column values — a DID reading is stored with
 #: ``source="obd"`` and channel ``DID_1225``.
-SpecSource = Literal["obd", "did", "decoded", "can"]
+SpecSource = Literal["obd", "did", "decoded", "can", "uprev"]
 
 _RAW_UNIT = "counts"
 
@@ -80,9 +86,9 @@ def parse_spec(text: str) -> ChannelSpec:
     name = name.strip()
     if not name:
         raise ChannelSpecError(f"channel spec {text!r} has no channel name")
-    if source not in ("obd", "did", "decoded", "can"):
+    if source not in ("obd", "did", "decoded", "can", "uprev"):
         raise ChannelSpecError(
-            f"unknown namespace {source!r} in {text!r}; expected obd/did/decoded/can"
+            f"unknown namespace {source!r} in {text!r}; expected obd/did/decoded/can/uprev"
         )
     return ChannelSpec(source=source, name=name, text=raw)  # type: ignore[arg-type]
 
@@ -141,8 +147,9 @@ def _long_frame(session: Path | pd.DataFrame) -> pd.DataFrame:
     return read_session(Path(session))
 
 
-def _obd_series(frame: pd.DataFrame, spec: ChannelSpec) -> pd.DataFrame:
-    rows = frame[(frame["source"] == "obd") & (frame["channel"] == spec.name.upper())]
+def _numeric_series(frame: pd.DataFrame, spec: ChannelSpec, source: str) -> pd.DataFrame:
+    """``obd:``/``uprev:`` — already engineering units, just select and coerce."""
+    rows = frame[(frame["source"] == source) & (frame["channel"] == spec.name.upper())]
     out = rows.loc[:, ["timestamp"]].copy()
     out["value"] = pd.to_numeric(rows["value_number"], errors="coerce")
     out["unit"] = rows["unit"].astype("string").fillna("")
@@ -275,7 +282,8 @@ def read_channels(
     parsed = [parse_spec(text) for text in specs]
 
     readers = {
-        "obd": lambda s: _obd_series(frame, s),
+        "obd": lambda s: _numeric_series(frame, s, "obd"),
+        "uprev": lambda s: _numeric_series(frame, s, "uprev"),
         "did": lambda s: _did_series(frame, s, catalogs),
         "decoded": lambda s: _decoded_series(frame, s, catalogs),
         "can": lambda s: _can_series(frame, s, catalogs),
@@ -303,6 +311,7 @@ def read_aligned(
     *,
     grid: str = "1s",
     require_all: bool = True,
+    cell_agg: Literal["last", "mean"] = "last",
     max_staleness: pd.Timedelta | str | None = None,
     with_age: bool = False,
     bindings_path: Path = Path("data/bindings.yaml"),
@@ -322,6 +331,14 @@ def read_aligned(
     purpose. When it is set — or ``with_age=True`` — the frame also carries a
     ``<spec>__age_s`` column per channel, so a caller can always see how old
     the number it is using actually is.
+
+    ``cell_agg`` decides what a cell holding several samples reports.
+    ``"last"`` (default) keeps a real sample taken at a known instant;
+    ``"mean"`` averages, which is smoother but synthetic and can smear a
+    transient. This is not cosmetic: on the 2026-08-05 capture the choice
+    moved band-averaged delivery error from +0.58 % to +0.72 %, purely by
+    reassigning boundary samples between rpm bands. It is a parameter rather
+    than a hidden default for exactly that reason.
     """
     long = read_channels(
         session,
@@ -345,9 +362,7 @@ def read_aligned(
 
     for name in names:
         rows = long[long["spec"] == name]
-        # Last sample within each cell — a cell wider than the sample interval
-        # would otherwise average across a transient.
-        cell = rows.groupby("bucket", sort=True).agg(value=("value", "last"))
+        cell = rows.groupby("bucket", sort=True).agg(value=("value", cell_agg))
         series = cell["value"].reindex(buckets)
         seen = pd.Series(cell.index, index=cell.index).reindex(buckets)
         if tolerance is not None:

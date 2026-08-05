@@ -114,7 +114,7 @@ session-death quirk).
 
 ## Phase 2 — Tuning analysis module (the gates, as code)
 
-- [ ] **2.1 — `delivery_error(sessions, *, profile)`.** Measured-vs-commanded
+- [x] **2.1 — `delivery_error(sessions, *, profile)`.** Measured-vs-commanded
   AFR with every gate baked in: open-loop-only (`FUEL_STATUS == 4` **and**
   enrichment target strictly below stoich, so DFCO is excluded by
   construction), same-instant pairing via 1.2, commanded AFR via the 1.3
@@ -127,7 +127,15 @@ session-death quirk).
   DID-voltage path) so the 3.8 % dispute stays visible rather than being
   silently resolved either way. Acceptance: reproduces the hand-computed
   +0.72 % band-averaged result on `_tuning-2026-08-05T142720`.
-- [ ] **2.2 — `compare_sessions(a, b, value, axes)`.** Cross-flash / A-B
+  **DONE 2026-08-05** — `src/analysis/tuning.py`. On the reference session it
+  gives n=16 (identical), pooled +1.15 % vs the hand +1.17 %, band-averaged
+  +0.69 % vs +0.72 %. The residual is conversion order — this converts each
+  sample's commanded ratio to AFR *then* averages, where the hand analysis
+  averaged the ratio first; per-sample is the more correct order, and the
+  difference is far inside the ±1.5 % floor. Cell aggregation turned out to
+  matter (last-vs-mean within a cell moved the band average 0.58 → 0.72 %),
+  so it is now an explicit `cell_agg` parameter rather than a hidden default.
+- [x] **2.2 — `compare_sessions(a, b, value, axes)`.** Cross-flash / A-B
   deltas on a matched grid. **Refuses `ENGINE_LOAD`/`CAL/LD` as an axis**
   (message cites the +1.43-points-at-fixed-airflow measurement and points
   at `rpm×MAF` / `rpm×BFS`); resolves aliases so `obd:ENGINE_LOAD` and
@@ -136,7 +144,11 @@ session-death quirk).
   `did:ECM_INJECTOR_PW_B1` unscaled (scale is null) with the raw-counts
   caveat carried in the output. `unsafe_axes=` overrides with a logged
   warning.
-- [ ] **2.3 — Noise floor as an artifact.** `data/<profile>/noise_floor.yaml`:
+  **DONE 2026-08-05** — refusal covers `obd:ENGINE_LOAD`, bare `ENGINE_LOAD`
+  and the `CALCULATED_LOAD`/`ABSOLUTE_LOAD` aliases. Two extra gates emerged
+  from real data: an empty matched frame and a zero-spread axis both used to
+  surface as cryptic pandas errors, and now name what is wrong.
+- [x] **2.3 — Noise floor as an artifact.** `data/<profile>/noise_floor.yaml`:
   per-channel, per-cell sd measured from designated null-run pairs, with
   provenance (which sessions, which day). Seed it from the 2026-08-04 AM/PM
   pair (delivery error sd 1.49 %, spark sd 0.64°/0.75° — see
@@ -147,19 +159,35 @@ session-death quirk).
   as *not distinguishable from noise* — the phrasing that was missing from
   three confident claims. A missing floor degrades to `floor: unavailable`,
   never an invented one.
-- [ ] **2.4 — Scale-stability validator.** The decisive binding test
+  **DONE 2026-08-05** — `src/analysis/noise_floor.py`, seeded by recomputing
+  against the imported UpRev null pair rather than copying the prose numbers:
+  spark sd **0.483°** (campaign 0.64), delivery sd **1.250 %** (campaign 1.49),
+  5 cells each, means +0.069 / −0.338 against +0.01 / −0.36. Two findings from
+  doing the recompute properly: the floor is only valid for the conditions it
+  was measured under (across *all* conditions spark spread is 7.7°, because
+  idle timing swings 17–45°), and it needs a 50 ms grid — UpRev rows are
+  synchronous by construction, so a 1 s grid discards most of them and left
+  zero matched cells.
+- [x] **2.4 — Scale-stability validator.** The decisive binding test
   (`c341570`) as a reusable function: fit linear map on window A, predict
   window B, report OOS R², refitted-scale drift, and verdict against the
   0.10 % `ECM_RPM` control. Regression-test against the recorded 0x23D
   outcomes (pedal +0.24 % stable, airflow −6.5 % unstable). Used by future
   binding/DID promotions instead of each one re-inventing the arithmetic.
-- [ ] **2.5 — CLI + MCP surface.** `scripts/tuning_report.py
+  **DONE 2026-08-05** — `scale_stability()`; regression test reproduces both
+  0x23D verdicts (pedal `stable`, airflow `unstable` despite r ≈ 0.98).
+- [x] **2.5 — CLI + MCP surface.** `scripts/tuning_report.py
   --delivery-error --compare A B ...` for the laptop; MCP
   `get_delivery_error` / `compare_tuning_sessions` (read-only) for agents,
   following the `get_behavior_deviations` local-tool pattern (requires
   `CANARY_CONFIG`, no daemon round-trip). Docs: `docs/mcp-server.md` table
   + a "tuning analysis" subsection in `docs/headless-api.md` cross-linking
   here.
+  **DONE 2026-08-05** — `scripts/tuning_report.py` (`delivery-error`,
+  `compare`, `null-run`) and MCP `get_delivery_error` /
+  `compare_tuning_sessions`, both local-tool pattern, returning
+  `{ok: false, error}` on a gate refusal so a refusal reaches an agent as a
+  message rather than a stack trace. Documented in `docs/mcp-server.md`.
 
 ## Phase 3 — Capture orchestration: one verb, honest telemetry
 

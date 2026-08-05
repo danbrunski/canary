@@ -92,6 +92,9 @@ from src.mcp_server.tools import (
     tuning as tuning_tool,
 )
 from src.mcp_server.tools import (
+    tuning_analysis as tuning_analysis_tool,
+)
+from src.mcp_server.tools import (
     vehicle_ledger as vehicle_ledger_tool,
 )
 from src.mcp_server.write_tools import (
@@ -633,6 +636,52 @@ def _register_read_tools(
             id instead (Task 5.4: before-mod vs. after-mod, session-to-session)."""
             return behavior_tool.get_behavior_deviations(
                 config_path, session=session, mode=mode, against=against
+            )
+
+        @mcp.tool()
+        def get_delivery_error(
+            session: str,
+            measured_spec: str = "obd:O2_WR_LAMBDA_S1",
+            min_load: float | None = 85.0,
+            cell_agg: str = "last",
+        ) -> dict[str, Any]:
+            """Measured-vs-commanded AFR at enrichment for one stored session,
+            with the methodology gates applied and reported (local, no daemon
+            call). Closed-loop samples and decel fuel cut are excluded by
+            construction, and results are band-averaged over rpm so uneven
+            coverage cannot masquerade as an effect. ``measured_spec`` is
+            explicit because the ECM lambda and A/F-voltage paths disagree by
+            ~3.8% at WOT and neither is established as truth."""
+            return tuning_analysis_tool.get_delivery_error(
+                config_path,
+                session=session,
+                measured_spec=measured_spec,
+                min_load=min_load,
+                cell_agg=cell_agg,
+            )
+
+        @mcp.tool()
+        def compare_tuning_sessions(
+            session: str,
+            against: str,
+            value: str,
+            axes: list[str] | None = None,
+            floor_channel: str | None = None,
+            unsafe_axes: bool = False,
+        ) -> dict[str, Any]:
+            """A/B two stored sessions on a matched grid (local). Refuses
+            calculated load as an axis — it is derived from BFS, so it moves
+            when fuelling moves; grid on rpm x MAF or rpm x BFS. Pass
+            ``floor_channel`` to quote each delta against the measured
+            same-tune noise floor, below which nothing is distinguishable."""
+            return tuning_analysis_tool.compare_tuning_sessions(
+                config_path,
+                session=session,
+                against=against,
+                value=value,
+                axes=tuple(axes) if axes else ("obd:RPM", "obd:MAF"),
+                floor_channel=floor_channel,
+                unsafe_axes=unsafe_axes,
             )
     else:
         logger.info(

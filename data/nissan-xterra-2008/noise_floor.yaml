@@ -1,0 +1,21 @@
+schema_version: 1
+provenance:
+  sessions:
+  - 2026-08-04T164301
+  - 2026-08-04T232712
+  note: 'Same-tune UpRev captures ~7 h apart on 2026-08-04, matched on rpm x MAF voltage
+    at a 50 ms grid, restricted to WOT (throttle >=85) and 3000-5000 rpm. The restriction
+    matters: measured across all conditions instead, spark spread is 7.7 deg rather
+    than sub-degree, because idle timing swings 17-45 deg. A floor is only valid for
+    the conditions it was measured under.'
+channels:
+  timing_advance_deg:
+    unit: deg
+    sd: 0.4826928881203356
+    mean: 0.06910319859168972
+    n_cells: 5
+  delivery_error_pct:
+    unit: percent
+    sd: 1.2500943557413935
+    mean: -0.33767483728620096
+    n_cells: 5
