@@ -14,6 +14,7 @@ from typing import Any
 
 import can
 import pytest
+from pydantic import ValidationError
 
 from src.collection import tuning_profile, tx_gate
 from src.collection.can_obd_collector import run_can_obd_loop
@@ -230,3 +231,75 @@ def test_speed_is_polled_so_operating_mode_survives() -> None:
     post-flash drive 4 of 10 anomalies logged `operating_mode: unknown`.
     """
     assert "SPEED" in tuning_profile.DEFAULT_TUNING_CHANNELS
+
+
+def test_target_rate_hz_overrides_the_relative_rate_model() -> None:
+    """A capture can ask for an absolute rate; weights alone cannot express one.
+
+    The relative model is ``poll_rate_hz × tier_factor × weight``, and every
+    path that built a tuning profile hardcoded weight 1.0 — so per-channel
+    demand topped out at ``poll_rate_hz`` however much bus budget was free.
+    Measured on the truck 2026-08-04: raising the budget 8 → 30 req/s moved
+    the achieved rate from 0.54 Hz to 0.54 Hz, because demand never reached
+    the old ceiling. Meanwhile the ECM answered 478 channel-reads/s batched
+    with zero timeouts, so the ceiling was never the bus.
+    """
+    from src.collection.obd_scheduler import _PollRequest, _request_rate_hz
+
+    spec = _spec(poll_rate_hz=1.0)
+    request = _PollRequest(
+        kind="pid",
+        service=0x01,
+        identifier=0x0E,
+        request_id=0x7DF,
+        channel="TIMING_ADVANCE",
+        poll_tier="medium",
+    )
+
+    # Relative model: medium tier is a third of a 1 Hz base.
+    tuning_profile.set_active(True, channel_names=frozenset({"TIMING_ADVANCE"}), source="test")
+    assert _request_rate_hz(request, spec) == pytest.approx(1.0 / 3.0)
+
+    # Absolute rate ignores both the tier factor and the base rate.
+    tuning_profile.set_active(
+        True, channel_names=frozenset({"TIMING_ADVANCE"}), rate_hz=20.0, source="test"
+    )
+    assert _request_rate_hz(request, spec) == pytest.approx(20.0)
+    assert tuning_profile.snapshot()["target_rate_hz"] == pytest.approx(20.0)
+
+
+def test_target_rate_applies_only_to_selected_channels() -> None:
+    """A profile carrying a target rate must not accelerate channels it omits.
+
+    ``request_eligible`` already excludes them, but rate and eligibility are
+    consulted independently, so an unlisted channel leaking the capture rate
+    would spend budget on rows the capture never asked for.
+    """
+    from src.collection.obd_scheduler import _PollRequest, _request_rate_hz
+
+    spec = _spec(poll_rate_hz=1.0)
+    tuning_profile.set_active(
+        True, channel_names=frozenset({"TIMING_ADVANCE"}), rate_hz=20.0, source="test"
+    )
+    other = _PollRequest(
+        kind="pid",
+        service=0x01,
+        identifier=0x05,
+        request_id=0x7DF,
+        channel="COOLANT_TEMP",
+        poll_tier="medium",
+    )
+    assert tuning_profile.absolute_rate_hz("COOLANT_TEMP") is None
+    assert _request_rate_hz(other, spec) == pytest.approx(1.0 / 3.0)
+
+
+def test_target_rate_hz_is_bounded() -> None:
+    """Demand above the bus budget's own ceiling is a config error, not a request."""
+    from src.collection.capture_profiles import MAX_TARGET_RATE_HZ, CaptureProfile
+
+    with pytest.raises(ValidationError):
+        CaptureProfile(name="x", description="", mode01={"RPM": 1.0}, target_rate_hz=0)
+    with pytest.raises(ValidationError):
+        CaptureProfile(
+            name="x", description="", mode01={"RPM": 1.0}, target_rate_hz=MAX_TARGET_RATE_HZ + 1
+        )

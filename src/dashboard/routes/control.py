@@ -686,7 +686,12 @@ def register_control_routes(
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
         names = frozenset(request.channels) if request.channels else None
-        previous = tuning_profile.set_active(request.enabled, channel_names=names, source="control")
+        previous = tuning_profile.set_active(
+            request.enabled,
+            channel_names=names,
+            rate_hz=request.rate_hz,
+            source="control",
+        )
         payload: dict[str, Any] = {
             "tuning_mode": tuning_profile.snapshot(),
             "previous_active": previous,

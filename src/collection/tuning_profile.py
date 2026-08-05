@@ -151,9 +151,15 @@ def set_active(
     enabled: bool,
     *,
     channel_names: frozenset[str] | None = None,
+    rate_hz: float | None = None,
     source: str = "control",
 ) -> bool:
-    """Compatibility shim for the old boolean tuning-mode endpoint."""
+    """Compatibility shim for the old boolean tuning-mode endpoint.
+
+    ``rate_hz`` pins every selected channel to that absolute rate. Without it
+    the profile keeps the relative model, which caps each channel at
+    ``poll_rate_hz`` — 1 Hz as configured, regardless of bus budget.
+    """
     previous = is_active()
     if enabled:
         activate(
@@ -161,6 +167,7 @@ def set_active(
                 name="fuel-map",
                 description="Legacy tuning-mode activation",
                 mode01={name: 1.0 for name in (channel_names or DEFAULT_TUNING_CHANNELS)},
+                target_rate_hz=rate_hz,
                 corpus_eligible=False,
                 storage_prefix="_capture-fuel-map",
             ),
@@ -208,6 +215,20 @@ def rate_weight(channel: str) -> float:
         return _profile.mode01.get(channel.upper(), 1.0)
 
 
+def absolute_rate_hz(channel: str) -> float | None:
+    """The profile's fixed poll rate for ``channel``, or ``None``.
+
+    When set it replaces ``poll_rate_hz × tier × weight`` outright. Only
+    applies to channels the profile actually lists, so a profile carrying a
+    target rate never accelerates something it did not ask for.
+    """
+    with _lock:
+        target = _profile.target_rate_hz
+        if target is None or channel.upper() not in _profile.mode01:
+            return None
+        return target
+
+
 def rate_policy(channel: str) -> tuple[float, bool]:
     """``(rate_weight, uniform_cadence)`` for one channel, under one lock.
 
@@ -233,6 +254,7 @@ def snapshot(achieved_hz: dict[str, float] | None = None) -> dict[str, Any]:
             "mode22_enabled": _profile.mode22_enabled,
             "did_interval_seconds": _profile.did_interval_seconds,
             "round_timestamps": _profile.round_timestamps,
+            "target_rate_hz": _profile.target_rate_hz,
             "paused": _paused,
             "broadcast_decode": _profile.broadcast_decode,
             "corpus_eligible": _profile.corpus_eligible,
@@ -254,6 +276,7 @@ __all__ = [
     "is_active",
     "is_configured",
     "mode22",
+    "absolute_rate_hz",
     "rate_weight",
     "request_eligible",
     "set_active",

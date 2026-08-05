@@ -903,6 +903,14 @@ def _request_rate_hz(request: _PollRequest, spec: CanObdSpec) -> float:
         # byte-for-byte the historic tier cadence.
         from src.collection import tuning_profile
 
+        # A capture profile may pin an absolute rate instead. The relative
+        # model tops out at `poll_rate_hz` (1.0) per channel however much bus
+        # budget exists, which is not a rate a tuning capture can be expressed
+        # in — see CaptureProfile.target_rate_hz.
+        absolute = tuning_profile.absolute_rate_hz(request.channel)
+        if absolute is not None:
+            return absolute
+
         weight, uniform_cadence = tuning_profile.rate_policy(request.channel)
         if uniform_cadence:
             # Tiers exist so a minute-scale signal doesn't burn budget at a

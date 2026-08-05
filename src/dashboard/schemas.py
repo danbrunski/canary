@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.collection.capture_profiles import CaptureProfile
+from src.collection.capture_profiles import MAX_TARGET_RATE_HZ, CaptureProfile
 
 
 class _ControlRequest(BaseModel):
@@ -230,6 +230,12 @@ class TuningModeRequest(_ControlRequest):
 
     enabled: bool
     channels: list[str] | None = None
+    #: Poll every selected channel at exactly this rate. Without it the
+    #: relative rate model applies, which caps each channel at ``poll_rate_hz``
+    #: (1 Hz) no matter how much bus budget is free — so a capture could not
+    #: previously be asked for a rate at all. Raise the bus budget to match:
+    #: this sets demand, the budget still gates issuance.
+    rate_hz: float | None = Field(default=None, gt=0, le=MAX_TARGET_RATE_HZ)
 
 
 class CustomPidCreateRequest(_ControlRequest):

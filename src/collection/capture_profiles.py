@@ -27,6 +27,12 @@ SCHEMA_VERSION = 1
 DEFAULT_PROFILE_NAME = "default"
 FUEL_MAP_PROFILE_NAME = "fuel-map"
 _SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+#: Ceiling on a profile's absolute per-channel poll rate. Matches the bus
+#: budget's own ceiling: demand above what the budget can ever issue is a
+#: configuration error, not a request. Measured headroom on the Xterra ECM is
+#: 478 channel-reads/s batched with zero errors, so this is not the binding
+#: limit — the budget is, deliberately.
+MAX_TARGET_RATE_HZ = 200.0
 #: Session directories are discovered by name. A capture that does not match
 #: ``src.control.sessions._CAPTURE_DIR_RE`` still records telemetry but becomes
 #: unreachable through the sessions API — no listing, no export, no delete — so
@@ -81,6 +87,22 @@ class CaptureProfile(_Strict):
     #: which wants validating (multi-pid-polling.md 4.3) before the training
     #: corpus depends on it.
     round_timestamps: bool = False
+    #: Poll every channel in this profile at exactly this rate, bypassing
+    #: ``poll_rate_hz × tier × weight`` entirely.
+    #:
+    #: Weights express a *relative share* of the historic tier cadence, and
+    #: with `poll_rate_hz` at 1.0 that caps any channel at 1 Hz no matter how
+    #: much bus budget is available — measured 2026-08-04, when raising the
+    #: budget 8 → 30 req/s moved the achieved rate not at all because demand
+    #: never reached the old ceiling. A capture wants an *absolute* rate
+    #: ("give me lambda at 20 Hz"), which no combination of the relative knobs
+    #: can express. The bus is nowhere near the constraint: the same session
+    #: measured 478 channel-reads/s over 6 batched PIDs with zero timeouts,
+    #: zero desyncs and zero `rx_dropped`, at 4.9 ms p50.
+    #:
+    #: ``None`` keeps the relative model. The bus budget still gates what is
+    #: actually issued, so this raises *demand* — it cannot exceed the budget.
+    target_rate_hz: float | None = None
     bus_budget_override: float | None = None
     broadcast_decode: bool = True
     corpus_eligible: bool = False
@@ -121,6 +143,17 @@ class CaptureProfile(_Strict):
         if value is not None and value <= 0:
             raise ValueError("did_interval_seconds must be positive")
         return value
+
+    @field_validator("target_rate_hz")
+    @classmethod
+    def _valid_target_rate(cls, value: float | None) -> float | None:
+        if value is None:
+            return None
+        if value <= 0:
+            raise ValueError("target_rate_hz must be positive")
+        if value > MAX_TARGET_RATE_HZ:
+            raise ValueError(f"target_rate_hz must not exceed {MAX_TARGET_RATE_HZ}")
+        return float(value)
 
     @field_validator("bus_budget_override")
     @classmethod
