@@ -106,41 +106,128 @@ signals:
           certainly the true scaling (byte 2 alone ≈ RPM / 32, also r2 ≈ 1.0).
     notes: |
       Confirmed engine RPM, 16-bit at 8 counts/rpm on the ~100 Hz 0x1F9 frame.
-      This is the real RPM signal — NOT 0x23D:1-2 (see ECM_AIRFLOW_PROXY_23D,
-      which the earlier rev-session analysis had mislabeled as the "rev level"
-      prize but which actually cross-references to airflow).
+      This is the real RPM signal — NOT 0x23D:1-2, which the earlier rev-session
+      analysis had mislabeled as the "rev level" prize. Those turned out to be
+      two independent bytes: pedal position and throttle position (see
+      ECM_ACCEL_PEDAL_POS_V and ECM_THROTTLE_SENSOR_V).
 
-  - name: ECM_AIRFLOW_PROXY_23D
+      Independently re-derived 2026-08-04 from UpRev K-line ground truth: scale
+      0.1252 against the 0.125 recorded here, out-of-sample R2 0.9998, refitted
+      scale drift 0.10 % across two windows. This binding is the control that
+      calibrates how tight a "confirmed" byte→engineering map should look.
+
+  - name: ECM_ACCEL_PEDAL_POS_V
     module: ECM
     can_id: 0x23D
     byte_start: 1
-    byte_length: 2
-    byte_order: big   # assumed MSB-first, byte 1 then byte 2
-    scale: null       # correlation is real but not clean enough to pin
-    offset: null
-    unit: unknown     # airflow / fuel-related — possibly MAF (g/s), injector PW, or VE
-    confidence: medium
+    byte_length: 1
+    byte_order: big
+    scale: 0.01485
+    offset: 0.795
+    unit: V
+    confidence: confirmed
+    plausible_min: 0.7
+    plausible_max: 4.8
     evidence:
       - session: 2026-05-11T152858
         method: byte_vs_tag_differential
         finding: >
           byte 1 and byte 2 spike together in lockstep across every rev event,
           ordered with RPM target (idle 0,0 → blip_4k 42.5,37.4), zero engine-off.
+          Recorded when this entry was still ECM_AIRFLOW_PROXY_23D — consistent
+          with pedal position, which is what drives a no-load rev.
       - session: 2026-05-13T005522
         method: broadcast_vs_pid_regression
         finding: >
           Bytes 1-2 regress against Mode 01 PID 0x10 (MAF) at r2 ≈ 0.79
           (byte 2 alone r2 ≈ 0.82); NO clean correlation with RPM (PID 0x0C).
-          So this is an airflow/fuel-related quantity, not RPM. Scaling left
-          unpinned: the fit (raw×0.0016+4 g/s) doesn't match the idle MAF floor,
-          so it's likely a filtered/derived value (injector PW or VE), not the
-          raw MAF reading.
+          Read at the time as "airflow-related". Superseded — see below: pedal
+          drives airflow, so a pedal signal correlates with MAF at exactly this
+          strength without being MAF.
+      - session: 2026-07-27T152444 + 2026-07-27T225711
+        method: uprev_kline_ground_truth
+        finding: >
+          Regressed against the synchronously-sampled UpRev K-line channel
+          "ACCEL PED POS 1 (V-Accel)" over two independent simultaneous windows
+          (171 s total, clock-aligned to the CAN bus by RPM cross-correlation at
+          r = 0.9998/0.9999, lags -1.3 s and -1.6 s). Byte 1 ALONE gives
+          r = +0.997 / +0.999, partial r given RPM = 0.996 / 0.999. Fitting
+          scale/offset on the AM window and predicting the PM window
+          out-of-sample: R2 = 0.998, MAE 0.029 V, and the independently refitted
+          scale drifts only +0.24 % — as stable as the ECM_RPM control (+0.10 %).
+          Byte 2 is a SEPARATE signal (throttle sensor, see
+          ECM_THROTTLE_SENSOR_V), so the old 16-bit big-endian reading spanning
+          bytes 1-2 was decoding two independent 8-bit channels as one number.
     notes: |
-      Renamed from ECM_ENGINE_REV_LEVEL — the cross-reference rules out RPM
-      (that's ECM_RPM @ 0x1F9:2-3). Cross-broadcast siblings 0x233:0 / 0x23D:7
-      may carry the same value. Promotion needs a session with the MAP PID
-      (0x0B) and/or MAF watched alongside a tagged drive (not just no-load revs)
-      to separate MAF from injector-PW from VE.
+      Renamed twice: ECM_ENGINE_REV_LEVEL → ECM_AIRFLOW_PROXY_23D → this. The
+      first rename ruled out RPM (that's ECM_RPM @ 0x1F9:2-3); the second ruled
+      out airflow. Both earlier labels were fitted against signals that are
+      merely downstream of pedal position, which is why each looked plausible.
+      Airflow does have a real home — see ECM_AIRFLOW_233_B2 — but it is a
+      different frame and byte, and its scale is NOT stable enough to pin.
+
+      Field width corrected 2 bytes → 1: bytes 1 and 2 are independent.
+
+  - name: ECM_THROTTLE_SENSOR_V
+    module: ECM
+    can_id: 0x23D
+    byte_start: 2
+    byte_length: 1
+    byte_order: big
+    scale: 0.01341
+    offset: 0.684
+    unit: V
+    confidence: confirmed
+    plausible_min: 0.6
+    plausible_max: 4.8
+    evidence:
+      - session: 2026-07-27T152444 + 2026-07-27T225711
+        method: uprev_kline_ground_truth
+        finding: >
+          Regressed against UpRev "THROTTLE SENSOR 1-B1 (V)" over the same two
+          simultaneous windows. r = +0.991 / +0.997, partial r given RPM =
+          0.989 / 0.996. Fit on AM, predicted PM out-of-sample: R2 = 0.993,
+          MAE 0.063 V, refitted scale drift -0.16 %. Discriminated from the
+          neighbouring pedal byte by map stability: byte 2 predicts throttle
+          with R2 0.993 vs 0.919 for pedal, and byte 1 predicts pedal with
+          R2 0.998 vs 0.905 for throttle. Each byte is decisively better at its
+          own target than at the other's, so the two are not duplicates.
+    notes: |
+      Previously unbound — byte 2 was being consumed as the low half of the
+      16-bit ECM_AIRFLOW_PROXY_23D field. Throttle-plate position on an
+      electronic-throttle engine tracks pedal closely but not identically
+      (the ECM arbitrates), which is why the two adjacent bytes correlate with
+      each other at r ≈ 0.95 yet resolve cleanly against their own ground truth.
+
+  - name: ECM_AIRFLOW_233_B2
+    module: ECM
+    can_id: 0x233
+    byte_start: 2
+    byte_length: 1
+    byte_order: big
+    scale: null       # correlation is strong but the map is NOT stable — see below
+    offset: null
+    unit: unknown     # tracks MAF g/s, but non-linearly or with a drifting term
+    confidence: medium
+    evidence:
+      - session: 2026-07-27T152444 + 2026-07-27T225711
+        method: uprev_kline_ground_truth
+        finding: >
+          Best airflow candidate in the whole scan: r = +0.984 / +0.973 against
+          UpRev "MAF GM/S", partial r given RPM = 0.972 / 0.950. But the linear
+          map is NOT stable across windows — refitted scale drifts -6.5 %, and
+          predicting PM from an AM fit gives R2 0.942 with MAE 4.7 g/s. Compare
+          ECM_RPM (+0.10 %) and the two 0x23D bytes (0.24 % / 0.16 %) measured
+          the same way on the same windows. A genuine linear byte→engineering
+          binding holds its scale; this one does not, so it is airflow-RELATED
+          rather than a pinnable MAF reading.
+    notes: |
+      Do not pin a scale on the strength of the correlation alone — that is the
+      trap the old ECM_AIRFLOW_PROXY_23D fell into. Candidate explanations for
+      the drift: the byte is a filtered/derived airflow term (VE or injector PW)
+      rather than raw MAF, or it saturates. Promotion wants a window pair with
+      genuinely different air density (different day/altitude/temperature) to
+      separate a scale error from a state-dependent term.
 
   - name: ECM_INTAKE_VACUUM_OR_IAC
     module: ECM

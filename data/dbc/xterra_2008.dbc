@@ -51,12 +51,14 @@ BO_ 561 M_231: 8 Vector__XXX
 
 BO_ 563 M_233: 8 Vector__XXX
  SG_ ECM_CALC_LOAD_A : 39|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ ECM_AIRFLOW_233_B2 : 23|8@0+ (1,0) [0|0] "" Vector__XXX
  SG_ ECM_INTAKE_VACUUM_OR_IAC : 15|8@0+ (1,0) [0|0] "" Vector__XXX
 
 BO_ 573 M_23D: 8 Vector__XXX
  SG_ ECM_THROTTLE_TRANSIENT : 55|8@0+ (1,0) [0|0] "" Vector__XXX
  SG_ ECM_CALC_LOAD_B : 31|8@0+ (1,0) [0|0] "" Vector__XXX
- SG_ ECM_AIRFLOW_PROXY_23D : 15|16@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ ECM_THROTTLE_SENSOR_V : 23|8@0+ (0.01341,0.684) [0.6|4.8] "V" Vector__XXX
+ SG_ ECM_ACCEL_PEDAL_POS_V : 15|8@0+ (0.01485,0.795) [0.7|4.8] "V" Vector__XXX
 
 BO_ 640 M_280: 8 Vector__XXX
  SG_ MOTION_SIGNAL_280_5 : 47|8@0+ (1,0) [0|0] "" Vector__XXX
@@ -111,11 +113,13 @@ CM_ SG_ 561 ECM_ENGINE_STATE_B "confidence=high; Cross-broadcast duplicate.";
 CM_ SG_ 561 ECM_ENGINE_STATE_A "confidence=high; State enum, useful as an anomaly-detection input: an unexpected";
 CM_ BO_ 563 "Xterra 0x233 (draft from bindings.yaml)";
 CM_ SG_ 563 ECM_CALC_LOAD_A "confidence=medium; The cross-broadcast pair (with ECM_CALC_LOAD_B) reduces the candidate";
+CM_ SG_ 563 ECM_AIRFLOW_233_B2 "confidence=medium; Do not pin a scale on the strength of the correlation alone — that is the";
 CM_ SG_ 563 ECM_INTAKE_VACUUM_OR_IAC "confidence=high; A/C-load drop in the second session promotes this from \"vacuum or IAC\"";
 CM_ BO_ 573 "Xterra 0x23D (draft from bindings.yaml)";
 CM_ SG_ 573 ECM_THROTTLE_TRANSIENT "confidence=high; Three physical-action sessions agree, including a full engine-off";
 CM_ SG_ 573 ECM_CALC_LOAD_B "confidence=medium; Cross-broadcast duplicate of ECM_CALC_LOAD_A.";
-CM_ SG_ 573 ECM_AIRFLOW_PROXY_23D "confidence=medium; Renamed from ECM_ENGINE_REV_LEVEL — the cross-reference rules out RPM";
+CM_ SG_ 573 ECM_THROTTLE_SENSOR_V "confidence=confirmed; Previously unbound — byte 2 was being consumed as the low half of the";
+CM_ SG_ 573 ECM_ACCEL_PEDAL_POS_V "confidence=confirmed; Renamed twice: ECM_ENGINE_REV_LEVEL → ECM_AIRFLOW_PROXY_23D → this. The";
 CM_ BO_ 640 "Xterra 0x280 (draft from bindings.yaml)";
 CM_ SG_ 640 MOTION_SIGNAL_280_5 "confidence=hypothesized; Strong motion-correlated; type TBD.";
 CM_ BO_ 644 "Xterra 0x284 (draft from bindings.yaml)";

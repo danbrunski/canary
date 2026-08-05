@@ -176,4 +176,85 @@ also r² ≈ 1.0) → `bindings.yaml`: `ECM_RPM`, 0x1F9:2-3 big-endian, scale 0.
 offset 0, `confirmed`, plausible 0–7000 rpm → `decode_bindings.py` confirms it
 decodes to 0–4597 rpm on the session. The earlier rev-session analysis had
 mislabeled 0x23D:1-2 as the RPM candidate; the cross-reference ruled that out
-(it tracks airflow, r² ≈ 0.8) — now `ECM_AIRFLOW_PROXY_23D`.
+(it tracks airflow, r² ≈ 0.8) — renamed `ECM_AIRFLOW_PROXY_23D`.
+
+**That second label was also wrong, and the way it was wrong is the lesson**
+(settled 2026-08-04 against UpRev K-line ground truth — see "Ground truth from
+a second logger" below). 0x23D:1-2 is not one 16-bit field at all: byte 1 is
+accelerator pedal position and byte 2 is throttle position, two independent
+8-bit signals. Both earlier labels were fitted against quantities that sit
+*downstream* of pedal position — first RPM, then airflow — so each produced a
+believable r² without being the signal. **Correlation picks the wrong byte
+whenever the true signal drives the one you regressed against.** The test that
+settles it is scale stability across independent windows, not r².
+
+## Ground truth from a second logger (UpRev K-line)
+
+The OBD-request path is a poor cross-reference for broadcast RE: the scheduler
+round-robins ~86 PIDs against an 8 req/s budget, so each PID lands roughly every
+11 s and never at the same instant as the frame you are trying to explain. An
+UpRev K-line datalog is the opposite — 17 channels, all sampled synchronously on
+every row at ~24-41 ms. When both loggers ran at once, that is a labelled
+dataset for the broadcast bus.
+
+**Finding the overlaps.** Session directories are UTC-named; UpRev encodes local
+time in its filename and stores `Time` as **milliseconds** since log start. Do
+not trust session bounds — check for actual frames, because plugging in the
+UpRev cable can take the bus away from the Pi. On 2026-07-29 the CAN side went
+silent 11:12→11:42, exactly covering that log's window, leaving 0 s of usable
+overlap out of a nominal 314 s. Verified simultaneous coverage across the whole
+corpus is **171 s**, both windows on 2026-07-27.
+
+**Aligning the clocks — free, and self-validating.** The two loggers have
+independent clocks (offsets measured at -1.3 s and -1.6 s, so this is not
+optional). Cross-correlate a signal already confirmed on both sides — RPM — over
+a lag grid on a common 100 ms grid. Peak correlation gives the offset; the
+r = 0.9998/0.9999 at that peak simultaneously proves the alignment, the RPM
+binding, and that both loggers saw the same events. If this step does not reach
+r > 0.99, stop: the windows are not really simultaneous.
+
+**Scanning.** Enumerate every contiguous 1-byte and 2-byte (big- and
+little-endian) field of every frame, drop zero-variance ones, and correlate each
+against each UpRev channel. ~300 candidates × 16 targets is seconds of compute.
+
+**Acceptance — three gates, in order.** r² alone will hand you the wrong byte:
+
+1. **Out-of-sample sign and strength.** Two independent windows, |r| ≥ 0.85 in
+   both, same sign. Kills window-specific coincidences.
+2. **Partial correlation given RPM.** Almost everything on an engine bus is
+   RPM-monotonic. `0x23D:W3le` correlates 0.9998 with RPM but has partial
+   r ≈ 0.02 — an RPM duplicate, correctly rejected.
+3. **Scale stability — the decisive one.** Fit scale/offset on window A, predict
+   window B in engineering units, and independently refit on B. A real binding
+   keeps its scale: ECM_RPM drifts **0.10 %**, the two 0x23D bytes 0.24 % and
+   0.16 %. A merely-correlated byte does not: the best airflow candidate
+   (`0x233:B2`, r = 0.98) drifts **-6.5 %**. Correlation says "these move
+   together"; scale stability says "this byte *is* that quantity".
+
+Disambiguate neighbouring bytes the same way. Bytes 1 and 2 of 0x23D correlate
+with *each other* at r ≈ 0.95 (pedal drives throttle), but each predicts its own
+target far better than its neighbour's — 0.998 vs 0.905, and 0.993 vs 0.919 —
+so they are distinct signals, not duplicates.
+
+**Known blind spots.** Slow or constant channels cannot be recovered from a
+short window: coolant temp varies 1.3 °F over 84 s, so the *correct* known
+binding `0x551:B0` scores only r = 0.72/0.81 and fails gate 1. That is the
+method behaving properly, not a missing signal — validate those against a
+cold-start session instead.
+
+### Spark and AFR are not on the broadcast bus
+
+Scanned against `IGN TIMING (BTDC)`, `AFR WB-B1/B2`, `A/F WB-B1 (V)` and
+`TARGET AFR`, the best candidate anywhere reached |r| ≈ 0.33-0.47 — nothing,
+against a background where real signals score 0.97+. This is not a
+low-variance artifact: timing swings -1° to 40° (sd 8.7°) inside the windows.
+
+Consistent with the FSM: these are DATA MONITOR items, served on request, not
+broadcast. **So the tuning campaign cannot be moved onto the CAN bus** — spark
+and mixture stay on UpRev K-line logs. What the broadcast bus can contribute is
+the *axes* (pedal, throttle, RPM at ~100 Hz) to give those logs dense context.
+
+Bounded claim, not proof of absence: the scan covers contiguous 1-2 byte fields
+on frames with ≥500 samples in one session, over 171 s from a single day. A
+bit-packed, non-adjacent, multiplexed, or non-linearly scaled encoding would
+evade it.

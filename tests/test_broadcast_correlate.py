@@ -117,9 +117,9 @@ def test_byte_probe_from_signal_and_display() -> None:
 def test_probes_from_bindings_unpinned_only() -> None:
     probes = probes_from_bindings(REPO_ROOT / "data" / "bindings.yaml")
     labels = {p.label for p in probes}
-    # ECM_RPM has a pinned scale → excluded; ECM_AIRFLOW_PROXY_23D has scale: null → included
+    # ECM_RPM has a pinned scale → excluded; ECM_CALC_LOAD_A has scale: null → included
     assert "ECM_RPM" not in labels
-    assert "ECM_AIRFLOW_PROXY_23D" in labels
+    assert "ECM_CALC_LOAD_A" in labels
     all_probes = probes_from_bindings(REPO_ROOT / "data" / "bindings.yaml", unpinned_only=False)
     assert "ECM_RPM" in {p.label for p in all_probes}
     assert len(all_probes) > len(probes)
