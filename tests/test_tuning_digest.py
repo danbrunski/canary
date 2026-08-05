@@ -113,3 +113,35 @@ def test_digest_reproduces_the_reference_capture(config: CanaryConfig) -> None:
     assert digest.delivery["n"] == 16
     # The closed-loop gate is what makes this number meaningful at all.
     assert digest.delivery["gates"]["filtered"]["closed_loop"] > 1000
+
+
+def test_previous_capture_orders_by_time_not_directory_name(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    """Capture dirs carry different prefixes, so string order is not time order.
+
+    `_capture-fuel-map-...` always sorts before `_tuning-...` regardless of
+    date, so a capture a month *later* compared as "earlier" and could be
+    picked as the previous run — silently comparing a drive against its own
+    future.
+    """
+    from src.analysis.tune_revisions import load_tune_revisions
+    from src.analysis.tuning_digest import _previous_capture
+
+    registry = load_tune_revisions(Path("data/nissan-xterra-2008/tune_revisions.yaml"))
+    root = tmp_path / "vehicle"
+    for name in (
+        "_tuning-2026-08-06T100000",  # the session under test
+        "_tuning-2026-08-05T100000",  # genuinely earlier
+        "_capture-fuel-map-2026-09-01T100000",  # LATER, but sorts first by string
+    ):
+        (root / name).mkdir(parents=True)
+
+    found = _previous_capture(
+        root / "_tuning-2026-08-06T100000",
+        profile=None,
+        revision="ZS44A-k106",
+        revisions=registry,
+    )
+    assert found is not None
+    assert found.name == "_tuning-2026-08-05T100000"

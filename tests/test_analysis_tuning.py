@@ -198,7 +198,12 @@ def test_missing_floor_degrades_to_unavailable() -> None:
 
 def test_record_null_run_needs_more_than_one_cell() -> None:
     with pytest.raises(ValueError, match="at least|>=2"):
-        record_null_run({"x": pd.Series([1.0])}, sessions=("a", "b"), units={"x": "deg"})
+        record_null_run(
+            {"x": pd.Series([1.0])},
+            sessions=("a", "b"),
+            units={"x": "deg"},
+            conditions="WOT",
+        )
 
 
 def test_scale_stability_reproduces_the_0x23d_verdicts() -> None:
@@ -358,3 +363,70 @@ def test_comparison_flags_whether_both_sides_share_a_revision(tmp_path: Path) ->
     payload = result.as_dict()
     assert payload["tune_revisions"] == ["ZS44A-k105", "ZS44A-k106"]
     assert payload["same_revision"] is False
+
+
+def test_floor_conditions_travel_with_the_sigma_figures(tmp_path: Path) -> None:
+    """A floor is only valid for the regime it was measured in.
+
+    The same null pair gives 0.48 deg of spark spread at WOT and 7.7 deg across
+    all conditions, so quoting one against the other understates noise ~16x and
+    turns ordinary idle jitter into a "finding". Passing the floor object keeps
+    the regime attached to the numbers it gates.
+    """
+    from src.analysis.noise_floor import NoiseFloor
+
+    floor = NoiseFloor(
+        channels={
+            "spark": {
+                "unit": "deg",
+                "sd": 0.48,
+                "mean": 0.07,
+                "n_cells": 5,
+                "conditions": "WOT: throttle>=85, 3000-5000 rpm",
+            }
+        }
+    )
+    samples = [(2000 + 100 * i, 50, 4, 1.2, 0.83) for i in range(30)]
+    session = _rows(tmp_path, samples)
+    result = compare_sessions(
+        session,
+        session,
+        value="obd:O2_WR_LAMBDA_S1",
+        axes=("obd:RPM",),
+        noise_floor=floor,
+        floor_channel="spark",
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+    )
+    assert result.floor_conditions == "WOT: throttle>=85, 3000-5000 rpm"
+    assert result.as_dict()["floor_conditions"] == "WOT: throttle>=85, 3000-5000 rpm"
+
+
+def test_a_floor_object_without_a_named_channel_is_refused(tmp_path: Path) -> None:
+    """Silently picking a channel would be picking a regime too."""
+    from src.analysis.noise_floor import NoiseFloor
+
+    floor = NoiseFloor(
+        channels={"spark": {"unit": "deg", "sd": 0.48, "n_cells": 5, "conditions": "WOT"}}
+    )
+    session = _rows(tmp_path, [(2000 + 100 * i, 90, 4, 1.2, 0.83) for i in range(30)])
+    with pytest.raises(GateError, match="floor_channel"):
+        compare_sessions(
+            session,
+            session,
+            value="obd:RPM",
+            axes=("obd:RPM",),
+            noise_floor=floor,
+            bindings_path=BINDINGS,
+            dids_path=DIDS,
+        )
+
+
+def test_the_shipped_floor_records_its_regime() -> None:
+    from src.analysis.noise_floor import load_noise_floor
+
+    floor = load_noise_floor(Path("data/nissan-xterra-2008/noise_floor.yaml"))
+    assert floor is not None
+    for entry in floor.channels.values():
+        assert "WOT" in entry.conditions
+        assert entry.conditions != "unspecified"

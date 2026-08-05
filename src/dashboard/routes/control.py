@@ -115,7 +115,11 @@ from src.dashboard.schemas import (
     VehicleEventRequest,
 )
 from src.dashboard.security import _client_is_loopback, _require_control_auth
-from src.dashboard.status import _derive_vehicle_state, _resolve_latest_session
+from src.dashboard.status import (
+    _active_session_dir,
+    _derive_vehicle_state,
+    _resolve_latest_session,
+)
 from src.dashboard.ups import (
     DEFAULT_UPS_KEEPALIVE_PATH,
     DEFAULT_UPS_STATUS_PATH,
@@ -317,8 +321,14 @@ def register_control_routes(
         # replay is a bench/desk tool, not something to run while actually
         # driving — refuse outright rather than gating live collectors out
         # of the queue while a replay is active.
+        # The writer's live directory, not the newest-session search: capture
+        # sessions are `_`-prefixed and invisible to that search, so during a
+        # capture this guard would read a stale session, see `no_data`, and
+        # let a replay start on a running engine.
         vehicle_state = _derive_vehicle_state(
-            config.collection.storage_path, replay_controller=controller
+            config.collection.storage_path,
+            replay_controller=controller,
+            session_dir=_active_session_dir(storage_writer),
         )
         if vehicle_state.state == "engine_running":
             raise HTTPException(

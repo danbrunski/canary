@@ -38,6 +38,7 @@ import pandas as pd
 
 from src.analysis.afr import AfrCalibration
 from src.analysis.channels import read_aligned
+from src.analysis.noise_floor import NoiseFloor
 from src.analysis.tune_revisions import TuneRevisionRegistry
 
 #: Axes that must never grid a cross-flash comparison. ``CAL/LD`` is computed
@@ -251,10 +252,16 @@ class SessionComparison:
     #: null run (the spread IS the noise floor); different ones mean the
     #: delta includes whatever the flash changed.
     tune_revisions: tuple[str | None, str | None] = (None, None)
+    #: Regime the quoted floor was measured in. A floor is only valid for its
+    #: own conditions — the same null pair gives 0.48 deg of spark spread at
+    #: WOT and 7.7 deg across all conditions — so this travels with the sigma
+    #: figures rather than being assumed to match.
+    floor_conditions: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "tune_revisions": list(self.tune_revisions),
+            "floor_conditions": self.floor_conditions,
             "same_revision": self.tune_revisions[0] == self.tune_revisions[1],
             "value": self.value,
             "axes": list(self.axes),
@@ -278,18 +285,28 @@ def compare_sessions(
     afr_stoich: float = 14.7,
     bindings_path: Path = Path("data/bindings.yaml"),
     dids_path: Path = Path("data/dids.yaml"),
-    noise_floor: float | None = None,
+    noise_floor: NoiseFloor | float | None = None,
+    floor_channel: str | None = None,
     revisions: TuneRevisionRegistry | None = None,
 ) -> SessionComparison:
     """A-vs-B on a matched grid, refusing load as an axis.
 
-    ``noise_floor``, when given, is the per-cell sd from a same-tune null run
-    (:mod:`src.analysis.noise_floor`); each cell then carries ``delta_sigma``
-    and a ``distinguishable`` flag. Without it those columns read
+    ``noise_floor`` is either a :class:`~src.analysis.noise_floor.NoiseFloor`
+    (with ``floor_channel``) or a bare per-cell sd. Prefer the object: it
+    carries the regime the floor was measured in, and that regime is part of
+    the measurement — the same null pair gives 0.48 deg of spark spread at WOT
+    and 7.7 deg across all conditions, so quoting one against the other
+    understates noise by ~16x. Without any floor the sigma columns read
     ``unavailable`` rather than an invented significance.
     """
     for axis in axes:
         _assert_axis_allowed(axis, unsafe=unsafe_axes)
+    if isinstance(noise_floor, NoiseFloor) and floor_channel is None:
+        raise GateError(
+            "a NoiseFloor was given without floor_channel — name the channel whose "
+            "spread should gate these deltas. Picking one silently would also pick "
+            "the regime it was measured in, and a floor is only valid for its own."
+        )
 
     specs = [value, *axes]
     read = dict(
@@ -336,8 +353,17 @@ def compare_sessions(
     joined = joined[(joined["n_a"] >= min_cell_samples) & (joined["n_b"] >= min_cell_samples)]
     joined = joined.assign(delta=joined["mean_b"] - joined["mean_a"])
 
-    if noise_floor is not None and noise_floor > 0:
-        joined["delta_sigma"] = joined["delta"] / noise_floor
+    floor_sd: float | None = None
+    floor_conditions: str | None = None
+    if isinstance(noise_floor, NoiseFloor) and floor_channel is not None:
+        floor_sd = noise_floor.sd_for(floor_channel)
+        entry = noise_floor.channels.get(floor_channel)
+        floor_conditions = entry.conditions if entry is not None else None
+    elif isinstance(noise_floor, (int, float)):
+        floor_sd = float(noise_floor)
+
+    if floor_sd is not None and floor_sd > 0:
+        joined["delta_sigma"] = joined["delta"] / floor_sd
         joined["distinguishable"] = joined["delta_sigma"].abs() >= 2.0
     else:
         joined["delta_sigma"] = np.nan
@@ -351,6 +377,7 @@ def compare_sessions(
 
     return SessionComparison(
         tune_revisions=(_revision(a), _revision(b)),
+        floor_conditions=floor_conditions,
         cells=joined.reset_index(),
         mean_delta=float(joined["delta"].mean()) if len(joined) else float("nan"),
         n_cells=int(len(joined)),

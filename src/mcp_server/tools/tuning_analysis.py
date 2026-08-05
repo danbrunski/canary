@@ -110,22 +110,27 @@ def compare_tuning_sessions(
     except FileNotFoundError as exc:
         return {"ok": False, "error": str(exc)}
 
-    sd: float | None = None
-    floor_path = Path(scoped.collection.storage_path).parent / "noise_floor.yaml"
-    floor = load_noise_floor(floor_path)
-    if floor_channel:
-        sd = floor.sd_for(floor_channel) if floor is not None else None
+    floor = load_noise_floor(scoped.daemon.afr_calibration.parent / "noise_floor.yaml")
+    sd = floor.sd_for(floor_channel) if (floor is not None and floor_channel) else None
 
     try:
         result = compare_sessions(
-            a, b, value=value, axes=tuple(axes), unsafe_axes=unsafe_axes, noise_floor=sd
+            a,
+            b,
+            value=value,
+            axes=tuple(axes),
+            unsafe_axes=unsafe_axes,
+            noise_floor=floor if floor_channel else None,
+            floor_channel=floor_channel,
         )
     except (GateError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
 
     payload = result.as_dict()
     payload["noise_floor"] = (
-        {"channel": floor_channel, "sd": sd} if sd is not None else "unavailable"
+        {"channel": floor_channel, "sd": sd, "conditions": result.floor_conditions}
+        if sd is not None
+        else "unavailable"
     )
     return {"ok": True, **payload}
 

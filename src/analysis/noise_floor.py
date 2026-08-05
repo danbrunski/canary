@@ -39,6 +39,14 @@ class ChannelFloor(_Strict):
 
     #: What the sd is in — ``percent`` for delivery error, else the channel's unit.
     unit: str
+    #: The operating regime this was measured in. **A floor is only valid for
+    #: the conditions it was measured under** — measured across all conditions
+    #: instead of WOT, spark spread is 7.7 deg rather than 0.48, because idle
+    #: timing swings 17-45 deg. Quoting the WOT floor against an idle
+    #: comparison would understate noise ~16x and make ordinary jitter look
+    #: like a finding. Machine-readable so the mismatch can be surfaced rather
+    #: than living in a prose note nobody reads.
+    conditions: str = "unspecified"
     #: Per-cell standard deviation of the A-vs-B delta.
     sd: float = Field(gt=0)
     #: Mean delta; a real null run should sit near zero, and a large value is
@@ -94,6 +102,8 @@ def annotate(
     frame["delta_sigma"] = frame["delta"] / sd
     frame["distinguishable"] = frame["delta_sigma"].abs() >= sigma_threshold
     frame.attrs["floor"] = sd
+    entry = floor.channels[channel] if floor is not None else None
+    frame.attrs["floor_conditions"] = entry.conditions if entry is not None else "unspecified"
     return frame
 
 
@@ -102,6 +112,7 @@ def record_null_run(
     *,
     sessions: tuple[str, str],
     units: dict[str, str],
+    conditions: str,
     note: str = "",
 ) -> NoiseFloor:
     """Build a floor from paired same-tune captures.
@@ -110,6 +121,11 @@ def record_null_run(
     The caller does the matching (it is :func:`~src.analysis.tuning.compare_sessions`'s
     job); this only measures the spread, so the floor is always in the same
     units and grid as the comparisons it will gate.
+
+    ``conditions`` is required, not optional: the regime is part of the
+    measurement. The same null pair yields 0.48 deg of spark spread at WOT and
+    7.7 deg across all conditions, so a floor without its regime recorded is
+    not interpretable.
     """
     channels: dict[str, ChannelFloor] = {}
     for channel, deltas in per_cell_deltas.items():
@@ -118,6 +134,7 @@ def record_null_run(
             raise ValueError(f"channel {channel!r} needs >=2 cells to have a spread")
         channels[channel] = ChannelFloor(
             unit=units.get(channel, "unknown"),
+            conditions=conditions,
             sd=float(values.std(ddof=1)),
             mean=float(values.mean()),
             n_cells=int(len(values)),

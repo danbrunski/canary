@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,7 @@ import pandas as pd
 from src.analysis.afr import load_afr_calibration
 from src.analysis.channels import read_aligned, read_channels
 from src.analysis.noise_floor import load_noise_floor
-from src.analysis.tune_revisions import load_tune_revisions
+from src.analysis.tune_revisions import load_tune_revisions, session_started_at
 from src.analysis.tuning import DEFAULT_RPM_BANDS, GateError, delivery_error
 from src.config import CanaryConfig
 
@@ -206,13 +207,24 @@ def _previous_capture(
     """
     if revision is None:
         return None
+    started = session_started_at(session_dir)
+    if started is None:
+        return None
     root = session_dir.parent
-    candidates = [
-        p
-        for p in sorted(root.glob("_capture-*")) + sorted(root.glob("_tuning-*"))
-        if p.is_dir() and p.name < session_dir.name
-    ]
-    for candidate in sorted(candidates, key=lambda p: p.name, reverse=True):
+
+    # Order by the PARSED start time, never by directory name. Capture dirs
+    # carry different prefixes (`_capture-fuel-map-...` vs `_tuning-...`) and
+    # string order sorts by prefix first, so a `_capture-` session a month
+    # later compares as "earlier" than a `_tuning-` one.
+    dated: list[tuple[datetime, Path]] = []
+    for path in list(root.glob("_capture-*")) + list(root.glob("_tuning-*")):
+        if not path.is_dir():
+            continue
+        when = session_started_at(path)
+        if when is not None and when < started:
+            dated.append((when, path))
+
+    for _when, candidate in sorted(dated, key=lambda item: item[0], reverse=True):
         if profile is not None and _capture_profile_name(candidate) != profile:
             continue
         found = revisions.for_session(candidate) if revisions is not None else None

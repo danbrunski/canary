@@ -86,15 +86,16 @@ def _run_compare(args: argparse.Namespace) -> int:
     floor = load_noise_floor(Path(config.collection.storage_path).parent / "noise_floor.yaml")
     if floor is None and args.floor_channel:
         floor = load_noise_floor(Path(args.floor_file)) if args.floor_file else None
-    sd = floor.sd_for(args.floor_channel) if (floor and args.floor_channel) else None
     result = compare_sessions(
         _session_dir(config, args.session),
         _session_dir(config, args.against),
         value=args.value,
         axes=tuple(args.axes),
         unsafe_axes=args.unsafe_axes,
-        noise_floor=sd,
+        noise_floor=floor if args.floor_channel else None,
+        floor_channel=args.floor_channel,
     )
+    sd = floor.sd_for(args.floor_channel) if (floor and args.floor_channel) else None
     print(f"{args.value}: {args.session} -> {args.against}, gridded on {', '.join(result.axes)}")
     if result.n_cells == 0:
         print("  no cells matched in both sessions at the minimum sample count")
@@ -104,7 +105,11 @@ def _run_compare(args: argparse.Namespace) -> int:
     if sd is None:
         print("  noise floor: unavailable — deltas carry no significance verdict")
     else:
-        print(f"  noise floor: sd {sd:.3f}; cells under 2 sigma are not distinguishable")
+        print(
+            f"  noise floor: sd {sd:.3f} measured under [{result.floor_conditions}]; "
+            "cells under 2 sigma are not distinguishable. A floor is only valid for the "
+            "conditions it was measured under."
+        )
     return 0
 
 
@@ -125,6 +130,7 @@ def _run_null_run(args: argparse.Namespace) -> int:
         {args.channel: result.cells["delta"]},
         sessions=(args.session, args.against),
         units={args.channel: args.unit},
+        conditions=args.conditions,
         note=args.note,
     )
     out = Path(args.out)
@@ -175,6 +181,16 @@ def build_parser() -> argparse.ArgumentParser:
     nr.add_argument("--value", required=True)
     nr.add_argument("--channel", required=True, help="Floor key, e.g. timing_advance_deg.")
     nr.add_argument("--unit", default="unknown")
+    nr.add_argument(
+        "--conditions",
+        required=True,
+        help=(
+            "Operating regime this floor was measured under, e.g. "
+            "'WOT, throttle>=85, 3000-5000 rpm'. Required: the same null pair gives "
+            "0.48 deg of spark spread at WOT and 7.7 deg across all conditions, so a "
+            "floor without its regime is not interpretable."
+        ),
+    )
     nr.add_argument("--axes", nargs="+", default=["obd:RPM", "obd:MAF"])
     nr.add_argument("--out", required=True)
     nr.add_argument("--note", default="")
