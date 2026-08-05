@@ -446,11 +446,24 @@ class DidWindowController:
     def advance(self, states: Sequence[_PollRequestState], now: float) -> None:
         """Apply phase transitions that don't require bus I/O."""
         if self.phase == "window":
+            if self._continuous():
+                # Nothing to hand the bus back to, so the window never closes:
+                # re-arm every DID that has come due instead. Closing would
+                # cost a session re-entry and, worse, a lapse during which the
+                # capture records nothing.
+                self._pending = {i for i in self._did_indices if states[i].suppressed_until <= now}
+                return
             live = any(states[i].suppressed_until <= now for i in self._pending)
             if now >= self._window_deadline or not live:
                 self._close_window(now)
         elif self.phase == "lapse" and now >= self._lapse_until:
             self.phase = "mode01"
+
+    @staticmethod
+    def _continuous() -> bool:
+        from src.collection import tuning_profile
+
+        return tuning_profile.did_continuous_enabled()
 
     def _interval(self) -> float:
         """Seconds between windows — the active capture profile wins.
@@ -544,6 +557,11 @@ class DidWindowController:
 
     def next_transition_at(self) -> float:
         if self.phase == "window":
+            if self._continuous():
+                # The window deadline is meaningless here and, once passed,
+                # would pin this to a time in the past and spin the loop.
+                # Keep-alive is the only scheduled event left.
+                return self._last_session_sent + self._spec.keepalive_seconds
             return min(
                 self._window_deadline,
                 self._last_session_sent + self._spec.keepalive_seconds,
@@ -898,6 +916,15 @@ def _request_rate_hz(request: _PollRequest, spec: CanObdSpec) -> float:
         return 0.0 if interval <= 0 else 1.0 / interval
     base = max(float(spec.poll_rate_hz), 0.001)
     rate = base * TIER_RATE_FACTORS.get(request.poll_tier, TIER_RATE_FACTORS["medium"])
+    if request.kind == "did":
+        # An all-DID capture needs its rate sayable too. Outside a capture
+        # this returns None and DID cadence stays the window controller's
+        # business, as before.
+        from src.collection import tuning_profile
+
+        absolute = tuning_profile.absolute_rate_hz(request.channel)
+        if absolute is not None:
+            return absolute
     if request.kind == "pid":
         # A weight is a relative share within the selected profile; 1.0 is
         # byte-for-byte the historic tier cadence.

@@ -60,6 +60,33 @@ FUEL_MAP_CHANNELS: tuple[str, ...] = (
 )
 
 
+TUNING_DID_PROFILE_NAME = "tuning-did"
+
+#: The all-DID tuning set. Every entry is identified in data/dids.yaml.
+#:
+#: Chosen for what Mode 01 *cannot* give: intake cam angle (commanded and
+#: measured) exists only as a DID, and the A/F sensor VOLTAGE is the input to
+#: the validated voltage→AFR table — the other half of the measured-AFR
+#: disagreement found 2026-08-05, where the ECM's own λ (PID 0x24) and the
+#: voltage path differ by 3.8 % at WOT. Capturing voltage at rate is what
+#: lets that be settled from Pi data alone.
+#:
+#: RPM and coolant are included despite being free on broadcast CAN: they cost
+#: ~1.5 ms each and give same-instant anchors inside the DID round, which is
+#: what makes the set self-aligning rather than needing a cross-source join.
+TUNING_DID_CHANNELS: tuple[str, ...] = (
+    "ECM_RPM",
+    "ECM_AF_SENSOR_V_B1",
+    "ECM_AF_SENSOR_V_B2",
+    "ECM_INJECTOR_PW_B1",
+    "ECM_INTAKE_CAM_ANGLE_MEASURED",
+    "ECM_INTAKE_CAM_ANGLE_COMMANDED",
+    "ECM_INTAKE_VVT_SOLENOID_DUTY",
+    "ECM_THROTTLE_POS_SENSOR_1",
+    "ECM_COOLANT_TEMP",
+)
+
+
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -103,6 +130,22 @@ class CaptureProfile(_Strict):
     #: ``None`` keeps the relative model. The bus budget still gates what is
     #: actually issued, so this raises *demand* — it cannot exceed the budget.
     target_rate_hz: float | None = None
+    #: Hold the Mode-22 session open for the whole capture instead of polling
+    #: DIDs in short windows.
+    #:
+    #: The windowed model exists so Mode 01 gets the bus back — the two are
+    #: mutually exclusive on this ECM. A tuning capture that wants only DIDs
+    #: has nothing to hand the bus back *to*, and windowing then costs it
+    #: everything: measured 2026-08-05, each brief session cost ~40 s of the
+    #: Mode-01 channels it interrupted, because they earn backoff while the
+    #: session refuses them. One mode for the whole capture has no such edge.
+    #:
+    #: Safe because the reads themselves keep the session alive (bench
+    #: 2026-08-04: 658 DID reads/s for 8 s, zero failures, no explicit
+    #: keepalive needed). Requires ``mode01_enabled: false`` — a profile that
+    #: pins the session open while still expecting Mode 01 answers would
+    #: starve every PID it lists.
+    did_continuous: bool = False
     bus_budget_override: float | None = None
     broadcast_decode: bool = True
     corpus_eligible: bool = False
@@ -143,6 +186,24 @@ class CaptureProfile(_Strict):
         if value is not None and value <= 0:
             raise ValueError("did_interval_seconds must be positive")
         return value
+
+    @model_validator(mode="after")
+    def _continuous_requires_did_only(self) -> CaptureProfile:
+        """A pinned session and Mode-01 expectations are incompatible.
+
+        Caught here rather than at run time: the failure mode is silent — the
+        PIDs simply never answer — and it would look like a dead channel set
+        rather than a configuration error.
+        """
+        if self.did_continuous:
+            if self.mode01_enabled and self.mode01:
+                raise ValueError(
+                    "did_continuous holds the Mode-22 session open, which blocks Mode 01; "
+                    "set mode01_enabled: false or clear mode01"
+                )
+            if not self.mode22:
+                raise ValueError("did_continuous requires at least one Mode-22 DID")
+        return self
 
     @field_validator("target_rate_hz")
     @classmethod
@@ -243,6 +304,25 @@ def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
                 round_timestamps=True,
                 storage_prefix="_capture-fuel-map",
             ),
+            CaptureProfile(
+                name=TUNING_DID_PROFILE_NAME,
+                description="All-DID tuning capture (session held open)",
+                # Mode 01 off by construction: holding session 0xC0 blocks it.
+                # What that buys is the channels Mode 01 cannot reach at all —
+                # cam angle and A/F sensor voltage — sampled synchronously
+                # rather than in windows, at 658 reads/s of measured headroom.
+                mode01={},
+                mode01_enabled=False,
+                mode22=TUNING_DID_CHANNELS,
+                did_continuous=True,
+                # Same hands-off stance on the budget as `fuel-map`: the
+                # storage-writer shakedown is still outstanding.
+                bus_budget_override=None,
+                broadcast_decode=True,
+                corpus_eligible=False,
+                round_timestamps=True,
+                storage_prefix="_capture-tuning-did",
+            ),
         ]
     )
 
@@ -253,11 +333,26 @@ def save_capture_profiles(path: Path, catalog: CaptureProfileCatalog) -> None:
 
 
 def load_capture_profiles(path: Path, collection: CollectionConfig) -> CaptureProfileCatalog:
+    """Load the catalog, back-filling built-in profiles the file predates.
+
+    A saved catalog is authoritative for the profiles it names — operator
+    edits survive. But a file written before a built-in existed would
+    otherwise hide it forever, and the failure is a 404 from
+    ``POST /control/captures`` on the vehicle, which is exactly where nobody
+    wants to be editing YAML. Missing built-ins are appended and persisted;
+    ones the file already names are left untouched.
+    """
     if not path.exists():
         catalog = seed_catalog(collection)
         save_capture_profiles(path, catalog)
         return catalog
-    return CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
+    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
+    known = {profile.name for profile in catalog.profiles}
+    missing = [p for p in seed_catalog(collection).profiles if p.name not in known]
+    if missing:
+        catalog = catalog.model_copy(update={"profiles": [*catalog.profiles, *missing]})
+        save_capture_profiles(path, catalog)
+    return catalog
 
 
 def _channel_satisfied(channel: str, profile: CaptureProfile, seen: frozenset[str]) -> bool:

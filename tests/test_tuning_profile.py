@@ -10,6 +10,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterator
+from types import SimpleNamespace
 from typing import Any
 
 import can
@@ -18,6 +19,7 @@ from pydantic import ValidationError
 
 from src.collection import tuning_profile, tx_gate
 from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.capture_profiles import CaptureProfile
 from src.collection.obd_scheduler import CanObdSpec
 from src.config import CanBusConfig
 
@@ -303,3 +305,126 @@ def test_target_rate_hz_is_bounded() -> None:
         CaptureProfile(
             name="x", description="", mode01={"RPM": 1.0}, target_rate_hz=MAX_TARGET_RATE_HZ + 1
         )
+
+
+def _did_controller(monkeypatch: pytest.MonkeyPatch, *, continuous: bool):
+    """A window controller over two DIDs, with the profile's continuity forced."""
+    from src.collection.obd_scheduler import DidSessionSpec, DidWindowController, _PollRequestState
+
+    monkeypatch.setattr(tuning_profile, "did_continuous_enabled", lambda: continuous)
+    spec = DidSessionSpec(session=0xC0, window_max_seconds=10.0, lapse_seconds=5.0)
+    ctrl = DidWindowController(spec, (0, 1), now=0.0)
+    states = [_PollRequestState(), _PollRequestState()]
+    ctrl.on_session_response(ok=True, states=states, now=0.0)
+    assert ctrl.phase == "window"
+    return ctrl, states
+
+
+def test_did_window_closes_when_every_did_was_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Baseline: the windowed model hands the bus back once the round is done."""
+    ctrl, states = _did_controller(monkeypatch, continuous=False)
+    for i in (0, 1):
+        ctrl.on_request_attempted(i)
+    ctrl.advance(states, 1.0)
+    assert ctrl.phase == "lapse"
+
+
+def test_continuous_capture_holds_the_session_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An all-DID capture must not close the window, and must re-arm its DIDs.
+
+    Closing costs a session re-entry plus a lapse in which the capture records
+    nothing — and there is no Mode 01 to hand the bus back to, since a
+    continuous profile has `mode01_enabled: false`. Measured 2026-08-05, the
+    windowed alternative cost ~40 s of Mode-01 channels per brief session.
+    """
+    ctrl, states = _did_controller(monkeypatch, continuous=True)
+    for i in (0, 1):
+        ctrl.on_request_attempted(i)
+    ctrl.advance(states, 1.0)
+    assert ctrl.phase == "window"
+    # Both DIDs are due again, so the next round can proceed immediately.
+    assert ctrl.request_eligible(0, SimpleNamespace(kind="did"), now=1.0) is True
+    assert ctrl.request_eligible(1, SimpleNamespace(kind="did"), now=1.0) is True
+    # Past the window deadline it still does not close.
+    ctrl.advance(states, 999.0)
+    assert ctrl.phase == "window"
+
+
+def test_continuous_capture_does_not_spin_the_poll_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`next_transition_at` must stay in the future once the deadline passes.
+
+    The windowed form returns min(deadline, keepalive); with the deadline long
+    gone that is a time in the past, and the loop would busy-wait on it.
+    """
+    ctrl, states = _did_controller(monkeypatch, continuous=True)
+    # Hold the window well past `window_max_seconds` (10 s), with a keep-alive
+    # sent recently — the state a long capture is actually in.
+    ctrl.advance(states, 500.0)
+    ctrl.on_session_response(ok=True, states=states, now=500.0)
+
+    monkeypatch.setattr(tuning_profile, "did_continuous_enabled", lambda: False)
+    windowed = ctrl.next_transition_at()
+    monkeypatch.setattr(tuning_profile, "did_continuous_enabled", lambda: True)
+    continuous = ctrl.next_transition_at()
+
+    # Windowed returns the long-expired deadline, i.e. a time in the past,
+    # which the poll loop would spin on. Continuous returns the next
+    # keep-alive, still ahead.
+    assert windowed < 500.0
+    assert continuous > 500.0
+
+
+def test_ending_a_continuous_capture_releases_the_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deactivating the profile must let the window close, or Mode 01 stays dead.
+
+    The ECM answers no Mode 01 while session 0xC0 is held, and the blackout
+    outlives the session (measured 2026-08-04: >30 s after an S3 lapse), so a
+    capture that ended without releasing would look like a dead bus.
+    """
+    ctrl, states = _did_controller(monkeypatch, continuous=True)
+    ctrl.advance(states, 999.0)
+    assert ctrl.phase == "window"
+    monkeypatch.setattr(tuning_profile, "did_continuous_enabled", lambda: False)
+    ctrl.advance(states, 1000.0)
+    assert ctrl.phase == "lapse"
+
+
+def test_target_rate_applies_to_dids_not_just_pids() -> None:
+    """An all-DID capture is exactly the case where the rate must be sayable."""
+    from src.collection.obd_scheduler import _PollRequest, _request_rate_hz
+
+    tuning_profile.configure_did_aliases({"ECM_AF_SENSOR_V_B1": "DID_1225"})
+    profile = CaptureProfile(
+        name="tuning-did",
+        description="",
+        mode01={},
+        mode01_enabled=False,
+        mode22=("ECM_AF_SENSOR_V_B1",),
+        did_continuous=True,
+        target_rate_hz=25.0,
+        corpus_eligible=False,
+        storage_prefix="_capture-tuning-did",
+    )
+    tuning_profile.activate(profile, source="test")
+    req = _PollRequest(
+        kind="did",
+        service=0x22,
+        identifier=0x1225,
+        request_id=0x7E0,
+        channel="DID_1225",
+        poll_tier="medium",
+    )
+    assert _request_rate_hz(req, _spec(poll_rate_hz=1.0)) == pytest.approx(25.0)
+    # A DID the profile did not list keeps the relative model.
+    other = _PollRequest(
+        kind="did",
+        service=0x22,
+        identifier=0x1226,
+        request_id=0x7E0,
+        channel="DID_1226",
+        poll_tier="medium",
+    )
+    assert tuning_profile.absolute_rate_hz("DID_1226") is None
+    assert _request_rate_hz(other, _spec(poll_rate_hz=1.0)) == pytest.approx(1.0 / 3.0)

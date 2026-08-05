@@ -11,6 +11,12 @@ profiles:
   - ECM_AF_SENSOR_V_B2
   - ECM_THROTTLE_POS_SENSOR_1
   - ECM_THROTTLE_POS_SENSOR_2
+  mode01_enabled: true
+  mode22_enabled: true
+  did_interval_seconds: null
+  round_timestamps: false
+  target_rate_hz: null
+  did_continuous: false
   bus_budget_override: null
   broadcast_decode: true
   corpus_eligible: true
@@ -36,7 +42,36 @@ profiles:
     EVAPORATIVE_PURGE: 1.0
     FUEL_STATUS: 1.0
   mode22: []
+  mode01_enabled: true
+  mode22_enabled: true
+  did_interval_seconds: null
+  round_timestamps: false
+  target_rate_hz: null
+  did_continuous: false
   bus_budget_override: null
   broadcast_decode: true
   corpus_eligible: false
   storage_prefix: _capture-fuel-map
+- name: tuning-did
+  description: All-DID tuning capture (session held open)
+  mode01: {}
+  mode22:
+  - ECM_RPM
+  - ECM_AF_SENSOR_V_B1
+  - ECM_AF_SENSOR_V_B2
+  - ECM_INJECTOR_PW_B1
+  - ECM_INTAKE_CAM_ANGLE_MEASURED
+  - ECM_INTAKE_CAM_ANGLE_COMMANDED
+  - ECM_INTAKE_VVT_SOLENOID_DUTY
+  - ECM_THROTTLE_POS_SENSOR_1
+  - ECM_COOLANT_TEMP
+  mode01_enabled: false
+  mode22_enabled: true
+  did_interval_seconds: null
+  round_timestamps: true
+  target_rate_hz: null
+  did_continuous: true
+  bus_budget_override: null
+  broadcast_decode: true
+  corpus_eligible: false
+  storage_prefix: _capture-tuning-did

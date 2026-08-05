@@ -215,18 +215,35 @@ def rate_weight(channel: str) -> float:
         return _profile.mode01.get(channel.upper(), 1.0)
 
 
+def did_continuous_enabled() -> bool:
+    """Whether the active profile pins the Mode-22 session open."""
+    with _lock:
+        return _profile.did_continuous
+
+
 def absolute_rate_hz(channel: str) -> float | None:
     """The profile's fixed poll rate for ``channel``, or ``None``.
 
     When set it replaces ``poll_rate_hz × tier × weight`` outright. Only
     applies to channels the profile actually lists, so a profile carrying a
     target rate never accelerates something it did not ask for.
+
+    Covers Mode-22 DIDs as well as Mode-01 PIDs: an all-DID capture is
+    exactly the case where the rate has to be sayable, and DID names are
+    matched through the same alias resolution ``request_eligible`` uses.
     """
     with _lock:
         target = _profile.target_rate_hz
-        if target is None or channel.upper() not in _profile.mode01:
+        if target is None:
             return None
-        return target
+        name = channel.upper()
+        if name in _profile.mode01:
+            return target
+        requested = {item.upper() for item in _profile.mode22}
+        resolved = {_did_channels.get(item, item) for item in requested}
+        if name in resolved or channel.removeprefix("DID_").upper() in resolved:
+            return target
+        return None
 
 
 def rate_policy(channel: str) -> tuple[float, bool]:
@@ -255,6 +272,7 @@ def snapshot(achieved_hz: dict[str, float] | None = None) -> dict[str, Any]:
             "did_interval_seconds": _profile.did_interval_seconds,
             "round_timestamps": _profile.round_timestamps,
             "target_rate_hz": _profile.target_rate_hz,
+            "did_continuous": _profile.did_continuous,
             "paused": _paused,
             "broadcast_decode": _profile.broadcast_decode,
             "corpus_eligible": _profile.corpus_eligible,
@@ -271,6 +289,7 @@ __all__ = [
     "active_profile",
     "broadcast_decode_enabled",
     "channels",
+    "did_continuous_enabled",
     "configure_default",
     "configure_did_aliases",
     "is_active",

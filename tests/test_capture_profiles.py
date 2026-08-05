@@ -460,3 +460,60 @@ def test_status_reports_rows_recorded_for_the_active_session(tmp_path: Path) -> 
     # A new session starts its own count rather than carrying the last one on.
     writer.rotate_session(started_at=datetime(2026, 7, 31, 12, 5, tzinfo=UTC))
     assert writer.rows_written == 0
+
+
+def test_load_backfills_builtin_profiles_added_after_the_file_was_written(
+    tmp_path: Path,
+) -> None:
+    """A catalog saved before a built-in existed must not hide it forever.
+
+    Otherwise the first symptom is a 404 from POST /control/captures, in the
+    vehicle, where hand-editing YAML is the worst possible remedy. Operator
+    edits to profiles the file already names are still authoritative.
+    """
+    from src.collection.capture_profiles import (
+        TUNING_DID_PROFILE_NAME,
+        CaptureProfileCatalog,
+        load_capture_profiles,
+        save_capture_profiles,
+        seed_catalog,
+    )
+
+    collection = CanaryConfig.from_yaml(EXAMPLE_YAML).collection
+    seeded = seed_catalog(collection)
+    stale = CaptureProfileCatalog(
+        profiles=[p for p in seeded.profiles if p.name != TUNING_DID_PROFILE_NAME]
+    )
+    # Prove the fixture is actually missing the profile under test.
+    assert TUNING_DID_PROFILE_NAME not in {p.name for p in stale.profiles}
+    path = tmp_path / "capture_profiles.yaml"
+    save_capture_profiles(path, stale)
+
+    loaded = load_capture_profiles(path, collection)
+    assert loaded.by_name(TUNING_DID_PROFILE_NAME) is not None
+    # Persisted, so the back-fill happens once rather than on every load.
+    assert TUNING_DID_PROFILE_NAME in path.read_text()
+
+
+def test_load_does_not_overwrite_an_operator_edited_profile(tmp_path: Path) -> None:
+    """Back-filling must add only what is absent, never reset what is present."""
+    from src.collection.capture_profiles import (
+        FUEL_MAP_PROFILE_NAME,
+        CaptureProfileCatalog,
+        load_capture_profiles,
+        save_capture_profiles,
+        seed_catalog,
+    )
+
+    collection = CanaryConfig.from_yaml(EXAMPLE_YAML).collection
+    seeded = seed_catalog(collection)
+    edited = [
+        p.model_copy(update={"target_rate_hz": 33.0}) if p.name == FUEL_MAP_PROFILE_NAME else p
+        for p in seeded.profiles
+    ]
+    path = tmp_path / "capture_profiles.yaml"
+    save_capture_profiles(path, CaptureProfileCatalog(profiles=edited))
+
+    loaded = load_capture_profiles(path, collection)
+    fuel = loaded.by_name(FUEL_MAP_PROFILE_NAME)
+    assert fuel is not None and fuel.target_rate_hz == 33.0
