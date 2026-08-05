@@ -100,43 +100,52 @@ Target AFR: `COMMANDED_EQUIV_RATIO` is Mode 01-only (PID 0x44), so in an
 all-DID capture the commanded side must come from a DID if one exists, or be
 snapshotted before/after the capture window.
 
-## Lead: UpRev does NOT use per-DID reads — it uses 0xAC + 0x23
+## RETRACTED lead: "UpRev streams via 0xAC + 0x23"
 
-Found in `/data/canary/flash-20260726T222616Z.log` (mirrored to
-`~/canary-pi-mirror/`), which captured the UpRev tool's own dialogue with the
-ECM during the 2026-07-26 flash. Alongside the expected session control
-(`10 85`, `10 C0`, `10 FB`) and identification reads (`21 10` / `21 81`, which
-return the cal ID `1ZS04C…`), the tool issues:
+An earlier revision of this file claimed the flash log showed UpRev defining a
+parameter block with `AC 81`/`AC 82` and streaming it back via service 0x23,
+and that replicating it would beat the per-DID plan. **That was wrong twice
+over, and the second error is the instructive one.**
 
-* **`AC 81` / `AC 82`** — multi-frame requests (62 and 24 bytes) whose payload
-  is a repeating 5-byte pattern `83 00 10 00 NN` with `NN` incrementing
-  `00,01,02,…,0C,0D,0E,0F`. This reads as *defining a block of parameters* —
-  a subscription list, not a one-shot read.
-* **`23 A1 00` / `23 A2 00`** — service 0x23 **ReadMemoryByAddress**, answered
-  with `63 …` first-frames of 17 bytes, i.e. a **packed 16-byte block of live
-  values in a single round trip**.
+**Wrong on the evidence.** Reassembling the ISO-TP properly (`src/analysis/iso_tp.py`,
+which already existed) shows both `AC` requests were **refused — `7F AC 11`,
+serviceNotSupported**, as were `A1`/`A2` (`7F A1 11`) and `23 A100`/`23 A200`
+(`7F 23 12`). I read request payloads off raw frames and never checked the
+replies. The tool was *probing* and being told no.
 
-That is almost certainly how UpRev gets 17 synchronously-sampled channels at
-~41 ms: it does not poll parameters individually at all. If replicable it is
-strictly better than the all-DID plan above — one round trip for the whole
-channel set, perfectly time-aligned by construction, and no per-channel rate
-budget to divide.
+**Wrong on the premise.** That capture is a *reflash* session; it contains no
+datalogging at all — 350 ISO-TP messages in 138 s on the ECM channel, ~2.5/s.
+The bulk 742/743 traffic is the ROM transfer.
 
-Worth noting `22` with multiple DIDs was probed on 2026-07-26 and refused
-(`subFunctionNotSupported`), which is what made per-DID polling look like the
-only option. Service 0x23 sidesteps that entirely.
+### What settles it: UpRev datalogging does not use CAN
 
-**Caveats before anyone gets excited.** ReadMemoryByAddress needs the RAM
-address of each parameter, which UpRev knows from its ROM definitions and we
-do not — the `83 00 10 00 NN` pattern may be an indirection that avoids raw
-addresses, but that is a guess from 86 bytes of payload. This is also the one
-area of this project that is **not obviously read-only**: 0xAC is a *write-ish*
-service name in several manufacturer dialects, and it appeared here inside a
-reflash session. Reproduce `23` reads first, in isolation, and do not send
-`AC` on the truck until its semantics are established from the log alone.
+The sniff log ran 17:41:13 for 76 s on 2026-07-26, and
+`UpRev_Log7-26-2026_5-41-32_PM.csv` starts at 17:41:32 — 19 s inside it. So a
+full UpRev logging session is bracketed by a full-bus CAN capture. In the 32 s
+where UpRev recorded **518 rows at 16.2 Hz across 17 channels**, the CAN bus
+carried **51,985 frames and not one diagnostic frame**: zero `7DF`, `7E0`,
+`7E8`, `742`, `743`. Only broadcast IDs, plus an unrelated periodic `0x794`
+(`03 28 NN`, ~98 Hz, present with or without UpRev).
 
-Next step is offline: reassemble the full multi-frame `AC` payloads and the
-`63` responses from the flash log and see whether the 16 returned bytes can be
-matched against the UpRev CSV rows recorded at the same wall-clock instant.
-The flash log has absolute timestamps and there are UpRev logs from that
-evening, so this is a desk exercise, not a truck one.
+**UpRev logs over the physical K-line, which a CAN interface cannot see.** Its
+streaming protocol is therefore not discoverable by sniffing CAN — not with a
+better capture, not ever. Do not spend more time trying.
+
+### Two things this does establish
+
+1. **Service 0x23 ReadMemoryByAddress works on this ECM over CAN.** Confirmed
+   format `23 <4-byte address> <2-byte length>`, answered with `63` + the bytes:
+   `23 00080000 0010`, `23 000C0000 0010` and `23 00020004 0010` each returned
+   16 bytes; `23 00100000 0010` gave NRC 0x22 (conditionsNotCorrect), so the
+   address space is gated, not open. This is a genuine packed-multi-value read
+   and it is the only mechanism seen that could beat per-DID polling — but it
+   needs the RAM address of each parameter, which UpRev has from its ROM
+   definitions and we do not. Filed as a capability, not a plan.
+2. **The Pi and UpRev can run simultaneously.** They did, right here, for 32 s.
+   So the 30-minute CAN blackout on 2026-07-29 was the OBD connector being
+   physically unplugged to make room for the UpRev cable, not protocol
+   contention. A splitter or second tap makes paired ground-truth capture
+   repeatable — which is what the binding work is short of (171 s total).
+
+**The all-DID plan above stands unchanged.** It never depended on this lead,
+and 658 reads/s inside session 0xC0 is measured, not inferred.
