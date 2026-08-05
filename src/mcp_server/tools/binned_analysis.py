@@ -19,10 +19,18 @@ async def get_binned_analysis(
     session: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    units: str = "stored",
 ) -> dict[str, Any]:
     """Bin ``value`` (a ``source:channel`` key) by ``x`` (and ``y`` if given)
     over the requested scope — "trims by rpm×load" without hand-written SQL
     or a refit. ``agg`` is one of ``mean``/``median``/``p95``/``count``.
+
+    ``units="engineering"`` rescales ``decoded:`` channels through
+    ``bindings.yaml`` first. Those are stored as raw integers on purpose
+    (``decoded:ECM_RPM`` is 8 counts/rpm), so the default ``stored`` bins them
+    in counts — right for comparing against training features, wrong for
+    reading as rpm. ``did:`` channels are not available on this path at all
+    (their values live in ``value_text``); use the local channel reader.
 
     Equivalent to ``GET /analysis/binned`` — see
     :func:`src.analysis.binned_analysis.compute_binned_analysis` for the
@@ -39,6 +47,8 @@ async def get_binned_analysis(
         params["y"] = y
     if y_bins is not None:
         params["y_bins"] = y_bins
+    if units != "stored":
+        params["units"] = units
     if session is not None:
         params["session"] = session
     if since is not None:

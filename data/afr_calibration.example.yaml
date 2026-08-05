@@ -3,6 +3,13 @@ schema_version: 1
 # Both sections are operator-exported facts; no vehicle-specific curve or ROM
 # target is hard-coded in shared code.
 active_revision: example-rom-revision
+# How this ECM reports Mode-01 PID 0x44: phi (fuel/air) | lambda (air/fuel).
+# They are reciprocals and BOTH read 1.0 at stoich, so the convention is
+# invisible in closed loop — it can only be settled under enrichment. Log PID
+# 0x44 at wide-open throttle and check which of 14.7/value or 14.7*value lands
+# on a plausible power target (~11.5-13.5), then record it here. Until then
+# the derived commanded-AFR channel refuses rather than guessing.
+commanded_equiv_ratio_convention: unverified
 voltage_transfer:
   censored_floor_afr: 10.0
   points:

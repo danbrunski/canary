@@ -28,6 +28,13 @@ provenance:
     of those shapes, and a 1/AFR fit also drifts 3.7% in slope between the
     two eras.
 active_revision: null
+# Settled 2026-08-05 (commit 78592f4). At WOT PID 0x44 reads 1.109-1.242:
+# as lambda that is a commanded 16.3-18.3 AFR, which no ECU commands under
+# power and which produced a -27% phantom delivery error. As phi it gives
+# 11.83-13.25, matching the ROM fuel-target curve to -0.4% across four rpm
+# bands. Both conventions read 1.0 at stoich, so this could only be settled
+# under enrichment.
+commanded_equiv_ratio_convention: phi
 voltage_transfer:
   censored_floor_afr: 10.0
   points:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -68,12 +68,51 @@ class TargetAfrMap(_Strict):
         return self
 
 
+#: How this ECM reports Mode-01 PID 0x44 (`COMMANDED_EQUIV_RATIO`).
+#:
+#: J1979 calls the field "equivalence ratio" without settling which one, and
+#: φ (fuel/air) and λ (air/fuel) are reciprocals that **both read 1.0 at
+#: stoich** — so the convention is invisible in closed loop and only reveals
+#: itself under enrichment. Measured on the Xterra 2026-08-05: at WOT the
+#: value reads 1.109-1.242, which as λ would be a commanded 16.3-18.3 AFR (no
+#: ECU commands that under power, and it produced a -27 % phantom delivery
+#: error). As φ it gives 11.83-13.25, matching the ROM fuel-target curve to
+#: -0.4 %. See commit 78592f4 and `decode_commanded_lambda`.
+#:
+#: ``unverified`` is the honest default for a vehicle nobody has checked at
+#: WOT: the derived commanded-AFR channel refuses rather than guessing.
+EquivRatioConvention = Literal["phi", "lambda", "unverified"]
+
+
 class AfrCalibration(_Strict):
     schema_version: int = 1
     provenance: dict[str, str] = Field(default_factory=dict)
     active_revision: str | None = None
+    #: Per-vehicle, because it is an ECM behaviour rather than a standard.
+    commanded_equiv_ratio_convention: EquivRatioConvention = "unverified"
     voltage_transfer: VoltageAfrTransfer | None = None
     target_maps: list[TargetAfrMap] = Field(default_factory=list)
+
+    def commanded_afr(self, value: float, *, afr_stoich: float) -> float:
+        """Convert a raw PID 0x44 reading to commanded AFR.
+
+        Raises when the convention is unverified — a wrong guess here is a
+        reciprocal, i.e. an error that grows with how rich the target is,
+        and it is silent at idle where most sanity-checking happens.
+        """
+        if self.commanded_equiv_ratio_convention == "unverified":
+            raise ValueError(
+                "commanded_equiv_ratio_convention is 'unverified' for this vehicle: "
+                "phi and lambda are reciprocals and agree at stoich, so the convention "
+                "must be checked under enrichment (WOT). Log PID 0x44 at wide-open "
+                "throttle and compare 14.7/value against 14.7*value with the ROM "
+                "target curve, then record the winner in afr_calibration.yaml."
+            )
+        if value <= 0:
+            raise ValueError(f"equivalence ratio must be positive, got {value}")
+        if self.commanded_equiv_ratio_convention == "phi":
+            return afr_stoich / value
+        return afr_stoich * value
 
     def target_map(self, revision: str | None = None) -> TargetAfrMap | None:
         selected = revision or self.active_revision

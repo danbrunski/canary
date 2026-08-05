@@ -289,6 +289,7 @@ def register_public_routes(
         session: str | None = Query(default=None),
         since: str | None = Query(default=None),
         until: str | None = Query(default=None),
+        units: str = Query(default="stored"),
     ) -> dict[str, Any]:
         # Task 5.1: ad-hoc binned aggregation ("trims by rpm×load") over the
         # DuckDB parquet layer — no hand-written SQL, no refit. Public/
@@ -299,6 +300,10 @@ def register_public_routes(
 
         if agg not in ("mean", "median", "p95", "count"):
             raise HTTPException(status_code=400, detail=f"unsupported agg: {agg!r}")
+        # `units="engineering"` rescales decoded: channels via bindings.yaml;
+        # they are stored raw on purpose, so binning them as-is works in counts.
+        if units not in ("stored", "engineering"):
+            raise HTTPException(status_code=400, detail=f"unsupported units: {units!r}")
         return binned_analysis_response(
             config,
             value=value,
@@ -310,6 +315,7 @@ def register_public_routes(
             session=session,
             since=since,
             until=until,
+            units=units,
         )
 
     @app.get("/analysis/llm-assist/cards")

@@ -62,7 +62,7 @@ session-death quirk).
 
 ## Phase 1 — Engineering-units reader (foundation; everything else consumes it)
 
-- [ ] **1.1 — One accessor over the three storage conventions.**
+- [x] **1.1 — One accessor over the three storage conventions.**
   `src/analysis/channels.py`: `read_channels(session_glob, specs) ->
   DataFrame` where a spec is `source:CHANNEL` (`obd:RPM`, `did:0x1225` /
   `did:ECM_AF_SENSOR_V_B1`, `decoded:ECM_RPM`, `can:0x1F9`). Returns
@@ -74,13 +74,20 @@ session-death quirk).
   stored session; `can:0x1F9` byte-slicing agrees with `decoded:ECM_RPM`.
   Suggested scope cut: raw `can:` reads decode *bound* signals only —
   unbound payload archaeology stays in DuckDB.
-- [ ] **1.2 — Same-instant pairing.** `read_aligned(session, specs,
+  **DONE 2026-08-05** — `src/analysis/channels.py`. Verified on a stored drive:
+  `decoded:ECM_RPM` vs `obd:RPM` ratio 1.0082 (the residual is sub-second
+  sampling offset during a drive), `can:ECM_RPM` matches `decoded:ECM_RPM` to
+  0.000 rpm. Deviation from the sketch: `can:` specs name a *signal*, not a
+  CAN id — one frame carries several, so `can:0x1F9` could not say which.
+- [x] **1.2 — Same-instant pairing.** `read_aligned(session, specs,
   grid="1s", require_all=True)` — the stale-join guard (G.4) as the
   default: a row exists only where *every* requested channel has a fresh
   sample in the grid cell. `require_all=False` keeps NaNs; nothing ever
   forward-fills silently. Any `max_staleness` tolerance is explicit opt-in
   and carries per-cell age columns.
-- [ ] **1.3 — Convention registry for PID 0x44.** The decoder deliberately
+  **DONE 2026-08-05** — `read_aligned`; `max_staleness` emits `<spec>__age_s`
+  so a carried-forward value always shows its age.
+- [x] **1.3 — Convention registry for PID 0x44.** The decoder deliberately
   stores the raw ratio (`78592f4`). Add per-vehicle-profile metadata —
   `afr_calibration.yaml` is the natural home:
   `commanded_equiv_ratio_convention: phi | lambda | unverified`.
@@ -88,11 +95,22 @@ session-death quirk).
   convention is recorded; `unverified` raises with instructions to check at
   WOT. Record `phi` for the Xterra with the WOT evidence from `78592f4`;
   the example config ships `unverified`.
-- [ ] **1.4 — Expose through the existing query path.** `query_telemetry`
+  **DONE 2026-08-05** — `AfrCalibration.commanded_equiv_ratio_convention` +
+  `commanded_afr()`; derived `obd:COMMANDED_AFR` spec in the reader; `phi`
+  recorded for the Xterra with the WOT evidence. `unverified` raises with
+  instructions rather than guessing.
+- [x] **1.4 — Expose through the existing query path.** `query_telemetry`
   (MCP) and `/analysis/binned` gain an engineering-units option routed
   through the reader, so remote/agent callers get real units without SSH.
   Naming note: prefer `units="engineering"` over `decoded=` — `decoded:`
   already names the broadcast-decoder source namespace.
+  **DONE 2026-08-05** — `units=` on `GET /analysis/binned` and the
+  `get_binned_analysis` MCP tool, rescaling `decoded:` rows via
+  `rescale_channel_rows`. Scope limit, documented in both docstrings: `did:`
+  channels cannot reach this path at all — the query layer filters on
+  `value_number` and DID values live in `value_text` — so those stay on
+  `read_channels`. Closing that would mean a second query engine, which the
+  roadmap's own constraint forbids.
 
 ## Phase 2 — Tuning analysis module (the gates, as code)
 
