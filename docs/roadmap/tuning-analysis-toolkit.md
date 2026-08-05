@@ -1,6 +1,6 @@
 # Roadmap — tuning analysis toolkit: encode the gates, kill the curl
 
-Status: **planned** (2026-08-05). Straight to `main`, no feature branches.
+Status: **complete** (2026-08-05) — all 18 tasks across 5 phases. Straight to `main`, no feature branches.
 Not yet queued in `OVERNIGHT-QUEUE.md` — operator decides ordering. Every
 phase here is software-only (no truck needed) unless a task says otherwise.
 
