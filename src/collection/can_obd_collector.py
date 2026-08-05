@@ -537,6 +537,7 @@ def run_can_obd_loop(
                 emitted = True
                 stats.readings_emitted += len(readings)
                 for reading in readings:
+                    stats.record_read(reading.pid, time.monotonic())
                     on_reading(reading)
         if emitted:
             request_state.responses += 1
@@ -1237,6 +1238,7 @@ def _issue_batched_request(
                 emitted = True
                 stats.readings_emitted += len(readings)
                 for reading in readings:
+                    stats.record_read(reading.pid, time.monotonic())
                     on_reading(reading)
         if emitted:
             state.responses += 1

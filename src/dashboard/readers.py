@@ -77,9 +77,19 @@ def read_latest_per_channel(
     *,
     window_seconds: float = 90.0,
     max_chunks: int = 300,
+    session_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Return the most recent row for every distinct channel in the newest session."""
-    latest = _resolve_latest_session(storage_path)
+    """Return the most recent row for every distinct channel in the newest session.
+
+    ``session_dir`` overrides the "newest session" search. Capture sessions are
+    ``_``-prefixed and therefore *deliberately* invisible to that search (they
+    must not reach the training corpus), so a caller that wants live state
+    during a capture has to name the directory — otherwise it silently reads
+    the previous session, which stopped being written when the capture started.
+    That is exactly how `vehicle_state` came to report `no_data` for the whole
+    of every tuning capture.
+    """
+    latest = session_dir if session_dir is not None else _resolve_latest_session(storage_path)
     if latest is None:
         return []
     chunks = [c for c in sorted(latest.glob(PARQUET_PATTERN)) if c.stat().st_size > 0]

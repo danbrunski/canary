@@ -141,6 +141,9 @@ from src.mcp_server.write_tools import (
     tuning as tuning_write_tool,
 )
 from src.mcp_server.write_tools import (
+    tuning_capture as tuning_capture_write_tool,
+)
+from src.mcp_server.write_tools import (
     tuning_mode as tuning_mode_write_tool,
 )
 from src.mcp_server.write_tools import (
@@ -1014,6 +1017,49 @@ def _register_write_tools(
         """
         return await tuning_mode_write_tool.set_tuning_mode(
             client, audit, enabled=enabled, channels=channels
+        )
+
+    @mcp.tool()
+    async def arm_tuning_capture(
+        profile: str,
+        rate_hz: float | None = None,
+        bus_budget_requests_per_second: float | None = None,
+        ttl_seconds: float | None = 3600.0,
+        tune_revision: str | None = None,
+        verify_seconds: float = 20.0,
+    ) -> dict[str, Any]:
+        """Start a capture profile, raise the bus budget, and verify the rate.
+
+        Rate and budget are two different knobs and both are needed: raising
+        the budget alone does nothing (measured — 8 to 30 req/s moved the
+        achieved rate not at all, because per-channel demand was capped),
+        and raising demand alone just queues. The response reports
+        `achieved_hz_60s` sampled after `verify_seconds`, so a shortfall
+        against `rate_hz` is visible immediately — that means demand exceeded
+        the budget, which is throttling working, not a fault. `rate_hz`
+        overrides the profile's own target for this capture only."""
+        return await tuning_capture_write_tool.arm_tuning_capture(
+            client,
+            audit,
+            profile=profile,
+            rate_hz=rate_hz,
+            bus_budget_requests_per_second=bus_budget_requests_per_second,
+            ttl_seconds=ttl_seconds,
+            tune_revision=tune_revision,
+            verify_seconds=verify_seconds,
+        )
+
+    @mcp.tool()
+    async def disarm_tuning_capture(
+        reason: str | None = None, clear_bus_budget: bool = True
+    ) -> dict[str, Any]:
+        """Stop the active capture profile and restore the bus budget.
+
+        Returns the capture's session directory so it can be analysed without
+        hunting for it (capture sessions are `_`-prefixed and deliberately
+        invisible to the normal session listing)."""
+        return await tuning_capture_write_tool.disarm_tuning_capture(
+            client, audit, reason=reason, clear_bus_budget=clear_bus_budget
         )
 
     @mcp.tool()

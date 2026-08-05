@@ -428,3 +428,74 @@ def test_target_rate_applies_to_dids_not_just_pids() -> None:
     )
     assert tuning_profile.absolute_rate_hz("DID_1226") is None
     assert _request_rate_hz(other, _spec(poll_rate_hz=1.0)) == pytest.approx(1.0 / 3.0)
+
+
+def test_achieved_hz_reports_a_trailing_window_not_a_lifetime_average() -> None:
+    """The rate an operator needs is "right now", not "since boot".
+
+    On 2026-08-04 the lifetime average barely moved through a real rate
+    change, because hours of history dominated a few minutes of new
+    behaviour — which read as "the change did nothing". The trailing window
+    answers the question that was actually being asked.
+    """
+    from src.collection.obd_scheduler import ACHIEVED_HZ_WINDOW, CanObdLoopStats
+
+    stats = CanObdLoopStats()
+    now = 1000.0
+    # Chronological, as real reads arrive: 10 stale, then 30 inside the window.
+    for i in range(10):
+        stats.record_read("RPM", now - ACHIEVED_HZ_WINDOW - 10 + i)
+    for i in range(30, 0, -1):
+        stats.record_read("RPM", now - i)
+    achieved = stats.achieved_hz(now)
+    assert achieved["RPM"] == pytest.approx(30 / ACHIEVED_HZ_WINDOW, rel=1e-6)
+
+    # A channel that has gone quiet drops out rather than reporting a stale rate.
+    stats.record_read("MAF", now - ACHIEVED_HZ_WINDOW - 1)
+    assert "MAF" not in stats.achieved_hz(now)
+
+
+def test_achieved_hz_is_per_channel() -> None:
+    """A capture can be fine for one channel and starved for another.
+
+    TIMING_ADVANCE fell to 2.6 Hz while RPM held ~6 Hz on the same drive; an
+    aggregate rate hid that completely.
+    """
+    from src.collection.obd_scheduler import CanObdLoopStats
+
+    stats = CanObdLoopStats()
+    now = 500.0
+    for i in range(60):
+        stats.record_read("RPM", now - i * 0.5)
+    for i in range(6):
+        stats.record_read("TIMING_ADVANCE", now - i * 5)
+    achieved = stats.achieved_hz(now)
+    assert achieved["RPM"] > achieved["TIMING_ADVANCE"]
+    assert set(achieved) == {"RPM", "TIMING_ADVANCE"}
+
+
+def test_metrics_payload_labels_the_unfiltered_request_count() -> None:
+    """`active_requests` ignores the capture profile filter — say so in the payload.
+
+    It reported ~77 during a capture narrowed to 9 channels, which read as
+    "the capture did not narrow" when it had. The session parquet was the
+    real answer; the metric just had a misleading name.
+    """
+    from src.collection.obd_scheduler import ObdSchedulerMetrics
+
+    payload = ObdSchedulerMetrics(
+        configured_poll_rate_hz=1.0,
+        bus_budget_requests_per_second=8.0,
+        active_requests=77,
+        backed_off_requests=0,
+        requests_sent=10,
+        readings_emitted=20,
+        request_timeouts=0,
+        negative_responses=0,
+        bus_errors=0,
+        response_rate=2.0,
+        by_tier={},
+        achieved_hz_60s={"RPM": 8.3},
+    ).to_dict()
+    assert payload["active_requests_unfiltered"] == 77
+    assert payload["achieved_hz_60s"] == {"RPM": 8.3}

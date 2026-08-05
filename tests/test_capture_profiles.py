@@ -517,3 +517,40 @@ def test_load_does_not_overwrite_an_operator_edited_profile(tmp_path: Path) -> N
     loaded = load_capture_profiles(path, collection)
     fuel = loaded.by_name(FUEL_MAP_PROFILE_NAME)
     assert fuel is not None and fuel.target_rate_hz == 33.0
+
+
+def test_capture_start_accepts_a_per_capture_rate_override(tmp_path: Path) -> None:
+    """A one-off fast pull must not become the profile's new normal.
+
+    The saved catalog entry stays untouched; only this capture runs at the
+    overridden rate.
+    """
+    from src.collection.capture_profiles import TUNING_DID_PROFILE_NAME
+
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    store = _store(tmp_path, config)
+    before = store.load().by_name(TUNING_DID_PROFILE_NAME)
+    assert before is not None
+    assert before.target_rate_hz is None
+
+    overridden = before.model_copy(update={"target_rate_hz": 25.0})
+    assert overridden.target_rate_hz == 25.0
+    # The catalog is unchanged by the copy — that is the property under test.
+    after = store.load().by_name(TUNING_DID_PROFILE_NAME)
+    assert after is not None and after.target_rate_hz is None
+
+
+def test_bus_budget_ttl_allows_a_capture_length_override() -> None:
+    """A 30-minute drive brushed the old 1 h cap mid-arming.
+
+    The capture teardown reverts the budget itself, so the TTL is a backstop
+    against a forgotten override rather than the mechanism — 6 h is a
+    sensible backstop, 1 h was an obstacle.
+    """
+    from pydantic import ValidationError
+
+    from src.dashboard.schemas import BusBudgetRequest
+
+    assert BusBudgetRequest(requests_per_second=40, ttl_seconds=14400).ttl_seconds == 14400
+    with pytest.raises(ValidationError):
+        BusBudgetRequest(requests_per_second=40, ttl_seconds=21601)

@@ -614,6 +614,10 @@ def register_control_routes(
             )
         if profile.name == "default":
             raise HTTPException(status_code=409, detail="default collection is already active")
+        if request.rate_hz is not None:
+            # Per-capture override. The saved catalog entry is untouched, so a
+            # one-off fast pull cannot silently become the profile's normal.
+            profile = profile.model_copy(update={"target_rate_hz": request.rate_hz})
         capture_id = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%S")
         previous_budget = bus_budget.override()
         nonlocal budget_before_capture

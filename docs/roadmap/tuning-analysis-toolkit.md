@@ -191,14 +191,19 @@ session-death quirk).
 
 ## Phase 3 — Capture orchestration: one verb, honest telemetry
 
-- [ ] **3.1 — Instantaneous achieved rate.** `/status.obd_scheduler` gains
+- [x] **3.1 — Instantaneous achieved rate.** `/status.obd_scheduler` gains
   `achieved_hz_60s`: per-channel reads in the trailing 60 s window (ring of
   timestamps per channel; cheap). The lifetime `channel_reads_per_second`
   stays but is renamed/labelled `lifetime` so nobody reads it as current
   again. `active_requests` either applies the profile filter or is
   explicitly renamed `active_requests_unfiltered`. Dashboard bindings
   updated in the same change (`pnpm test` + `typecheck` gate applies).
-- [ ] **3.2 — `vehicle_state` from broadcast during captures.** The
+  **DONE 2026-08-05** — `achieved_hz_60s` (per-channel deque over a 60 s
+  window), `active_requests_unfiltered` alongside the original key, and the
+  lifetime average relabelled `channel_reads_per_second_lifetime`. No
+  dashboard change was needed after all: the frontend never bound either
+  field, so the pnpm gate does not apply here.
+- [x] **3.2 — `vehicle_state` from broadcast during captures.** The
   classifier currently reads OBD freshness from the storage session, which
   rotates at capture start → `no_data` for every capture (bug found
   2026-08-04). During an active capture profile, classify from decoded
@@ -206,7 +211,7 @@ session-death quirk).
   `confirmed`). Also fixes the all-DID case, where Mode 01 is dark *by ECU
   design*. Acceptance: arm a capture during replay → state stays
   `engine_running`.
-- [ ] **3.3 — `arm_tuning_capture` / `disarm_tuning_capture` MCP verbs.**
+- [x] **3.3 — `arm_tuning_capture` / `disarm_tuning_capture` MCP verbs.**
   One call: activate profile (by name — `tuning-did`, `fuel-map`), set
   `rate_hz`, set bus budget with TTL, then **verify** by sampling
   `achieved_hz_60s` after ~20 s and reporting it in the response. Disarm
@@ -215,11 +220,13 @@ session-death quirk).
   `/control/bus-budget` routes — no new daemon state. Expose
   `set_bus_budget` standalone too (MCP write-tool, same auth gating as
   `start_capture`).
-- [ ] **3.4 — TTL ergonomics.** The `bus-budget` TTL cap (3600 s) rejected a
+- [x] **3.4 — TTL ergonomics.** The `bus-budget` TTL cap (3600 s) rejected a
   4-hour request mid-arming; `null` disables expiry but silently. Accept
   `ttl_seconds` up to 6 h for capture-scoped overrides (the capture
   teardown already reverts budget — the TTL is a backstop, not the
   mechanism), and include `ttl_remaining` in `arm` responses.
+  **DONE 2026-08-05** — cap raised 1 h → 6 h; the arm response carries the
+  whole `bus_budget` snapshot, `ttl_remaining_seconds` included.
 
 ## Phase 4 — UpRev importer upgrades (ground truth without the guessing)
 

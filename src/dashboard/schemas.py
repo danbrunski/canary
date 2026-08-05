@@ -47,6 +47,10 @@ class CapturePauseRequest(_ControlRequest):
 class CaptureProfileStartRequest(_ControlRequest):
     profile: str = Field(..., min_length=1)
     tune_revision: str | None = Field(default=None, max_length=255)
+    #: Override the profile's own ``target_rate_hz`` for this capture only.
+    #: The saved profile is untouched, so a one-off fast pull cannot silently
+    #: become the profile's new normal.
+    rate_hz: float | None = Field(default=None, gt=0, le=MAX_TARGET_RATE_HZ)
 
 
 class CaptureProfileSaveRequest(_ControlRequest):
@@ -218,7 +222,11 @@ class BusBudgetRequest(_ControlRequest):
     requests_per_second: float | None = Field(default=None, ge=2.0, le=200.0)
     #: Omitted → the module's 600 s default. Explicit ``null`` opts out of
     #: auto-revert entirely, which is deliberate-only.
-    ttl_seconds: float | None = Field(default=600.0, gt=0.0, le=3600.0)
+    #: Capped at 6 h rather than 1: a capture's teardown reverts the budget
+    #: itself, so the TTL is a backstop against a forgotten override, not the
+    #: mechanism. The old 1 h ceiling rejected a request mid-arming on a drive
+    #: that was going to outlast it. Explicit ``null`` still opts out entirely.
+    ttl_seconds: float | None = Field(default=600.0, gt=0.0, le=21600.0)
 
 
 class TuningModeRequest(_ControlRequest):

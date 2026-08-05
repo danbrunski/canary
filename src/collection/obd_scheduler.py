@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -135,6 +136,12 @@ class ForcePollTrigger:
             pending, self._pending = self._pending, set()
         return frozenset(pending)
 
+
+#: Trailing window for the per-channel achieved rate, in seconds. Long enough
+#: that a slow tier still lands a sample, short enough that arming a capture
+#: and re-reading /status a moment later shows the new rate rather than an
+#: average dominated by however long the daemon has been up.
+ACHIEVED_HZ_WINDOW = 60.0
 
 TIER_RATE_FACTORS: dict[PollTier, float] = {
     "fast": 1.0,
@@ -355,6 +362,41 @@ class CanObdLoopStats:
     #: ``time.monotonic()`` when the loop started, so metrics can report an
     #: achieved rate rather than a bare count.
     loop_started_at: float | None = None
+    #: Recent reading times per channel, for a *trailing-window* rate.
+    #:
+    #: The lifetime average (`batching.channel_reads_per_second`) cannot answer
+    #: "is the capture I just armed working?" — it is diluted by however long
+    #: the daemon has been up, and on 2026-08-04 it stayed near its old value
+    #: through a rate change, which read as "the change did nothing". Deques
+    #: bounded by ACHIEVED_HZ_WINDOW keep this O(reads in the window).
+    recent_reads: dict[str, deque[float]] = field(default_factory=dict)
+
+    def record_read(self, channel: str, now: float) -> None:
+        """Note one reading of ``channel`` for the trailing-window rate.
+
+        Assumes ``now`` is non-decreasing per channel, which holds because
+        this is called as readings arrive. That is what lets eviction be a
+        left-pop rather than a scan.
+        """
+        window = self.recent_reads.get(channel)
+        if window is None:
+            window = deque()
+            self.recent_reads[channel] = window
+        window.append(now)
+        cutoff = now - ACHIEVED_HZ_WINDOW
+        while window and window[0] < cutoff:
+            window.popleft()
+
+    def achieved_hz(self, now: float) -> dict[str, float]:
+        """Per-channel reads/s over the trailing window."""
+        cutoff = now - ACHIEVED_HZ_WINDOW
+        out: dict[str, float] = {}
+        for channel, window in self.recent_reads.items():
+            while window and window[0] < cutoff:
+                window.popleft()
+            if window:
+                out[channel] = round(len(window) / ACHIEVED_HZ_WINDOW, 2)
+        return out
 
 
 @dataclass(frozen=True)
@@ -609,6 +651,11 @@ class ObdSchedulerMetrics:
 
     configured_poll_rate_hz: float
     bus_budget_requests_per_second: float
+    #: Requests due and not backed off — counted WITHOUT the active capture
+    #: profile's eligibility filter, so during a narrowed capture this still
+    #: reports the full startup plan. It read as "the capture did not narrow"
+    #: on 2026-08-04 when the capture had in fact narrowed correctly; the
+    #: session's own parquet is the answer to what was polled.
     active_requests: int
     backed_off_requests: int
     requests_sent: int
@@ -619,6 +666,12 @@ class ObdSchedulerMetrics:
     response_rate: float | None
     by_tier: dict[str, dict[str, float | int | None]]
     requests: list[dict[str, Any]] = field(default_factory=list)
+    #: Per-channel reads/s over the trailing ACHIEVED_HZ_WINDOW seconds — the
+    #: "is this capture actually running at the rate I asked for?" number.
+    #: Distinct from `batching.channel_reads_per_second_lifetime`, which is
+    #: diluted by daemon uptime and stayed near its old value through a real
+    #: rate change on 2026-08-04.
+    achieved_hz_60s: dict[str, float] = field(default_factory=dict)
     #: Mode-22 session-window state, ``None`` when no session gates DIDs.
     did_profile: dict[str, Any] | None = None
     #: Multi-PID batching (roadmap/multi-pid-polling.md). ``None`` when
@@ -633,6 +686,8 @@ class ObdSchedulerMetrics:
             "configured_poll_rate_hz": self.configured_poll_rate_hz,
             "bus_budget_requests_per_second": self.bus_budget_requests_per_second,
             "active_requests": self.active_requests,
+            "active_requests_unfiltered": self.active_requests,
+            "achieved_hz_60s": self.achieved_hz_60s,
             "backed_off_requests": self.backed_off_requests,
             "requests_sent": self.requests_sent,
             "readings_emitted": self.readings_emitted,
@@ -1126,6 +1181,11 @@ def _batching_metrics(
         "failures": stats.batch_failures,
         "desyncs": stats.batch_desyncs,
         "size_narrowings": stats.batch_size_narrowings,
+        # Lifetime average since the loop started. Explicitly named: read as
+        # a current rate it is misleading, and was — on 2026-08-04 it barely
+        # moved through a real rate change because hours of history dominated.
+        # `obd_scheduler.achieved_hz_60s` is the trailing-window answer.
+        "channel_reads_per_second_lifetime": achieved_hz,
         "channel_reads_per_second": achieved_hz,
     }
 
@@ -1235,6 +1295,7 @@ def _scheduler_metrics(
         backed_off_requests=backed_off,
         requests_sent=stats.requests_sent,
         readings_emitted=stats.readings_emitted,
+        achieved_hz_60s=stats.achieved_hz(now),
         request_timeouts=stats.request_timeouts,
         negative_responses=stats.negative_responses,
         bus_errors=stats.bus_errors,

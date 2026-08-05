@@ -8,6 +8,8 @@ disambiguation the agent docs rely on.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from src.dashboard.status import classify_vehicle_state
 
 
@@ -155,3 +157,90 @@ def test_to_dict_rounds_floats_for_stable_json() -> None:
     assert payload["coolant_temp"] == 83.0
     assert payload["obd_freshness_seconds"] == 0.35
     assert payload["can_freshness_seconds"] == 0.12
+
+
+def test_capture_sessions_do_not_blank_vehicle_state(tmp_path: Path) -> None:
+    """A capture must not make the truck look absent (bug found 2026-08-04).
+
+    Capture sessions are `_`-prefixed and therefore invisible to the
+    newest-session search *on purpose* — they must stay out of the training
+    corpus. The side effect was that `_derive_vehicle_state` kept reading the
+    previous, no-longer-written session, so OBD and CAN freshness both grew in
+    lockstep from the arming instant and the state read `no_data` for the whole
+    of every tuning capture, engine running or not.
+    """
+    from datetime import UTC, datetime
+
+    from src.dashboard.status import _derive_vehicle_state
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    now = datetime(2026, 8, 5, 12, 0, 30, tzinfo=UTC)
+    stale = now.replace(second=0)
+
+    storage = tmp_path / "vehicle"
+    # The normal session stopped being written when the capture started.
+    write_records_to_parquet(
+        [
+            TelemetryRecord(timestamp=stale, source="obd", channel="RPM", value=800.0),
+            TelemetryRecord(timestamp=stale, source="can", channel="0x1F9", payload=b"\x00"),
+        ],
+        storage / "2026-08-05T115900",
+    )
+    capture = storage / "_capture-tuning-did-2026-08-05T120000"
+    write_records_to_parquet(
+        [
+            TelemetryRecord(
+                timestamp=now.replace(second=29), source="obd", channel="RPM", value=2500.0
+            ),
+            TelemetryRecord(
+                timestamp=now.replace(second=29), source="can", channel="0x1F9", payload=b"\x00"
+            ),
+        ],
+        capture,
+    )
+
+    without = _derive_vehicle_state(storage, replay_controller=None, now=now)
+    assert without.state == "no_data"  # the bug, reproduced
+
+    with_capture = _derive_vehicle_state(
+        storage, replay_controller=None, now=now, session_dir=capture
+    )
+    assert with_capture.state == "engine_running"
+    assert with_capture.rpm == 2500.0
+
+
+def test_all_did_capture_classifies_from_decoded_broadcast(tmp_path: Path) -> None:
+    """Mode 01 is dark by ECU design during an all-DID capture.
+
+    Session 0xC0 blocks Mode 01 outright, so there is no `obd:RPM` to classify
+    from — but broadcast decode never stops. `decoded:ECM_RPM` is stored raw
+    (8 counts/rpm), so the fallback has to scale it or a running engine reads
+    as 20 000 rpm.
+    """
+    from datetime import UTC, datetime
+
+    from src.dashboard.status import _derive_vehicle_state
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    now = datetime(2026, 8, 5, 12, 0, 30, tzinfo=UTC)
+    storage = tmp_path / "vehicle"
+    capture = storage / "_capture-tuning-did-2026-08-05T120000"
+    write_records_to_parquet(
+        [
+            # 2500 rpm x 8 counts, exactly as the frame decoder persists it.
+            TelemetryRecord(
+                timestamp=now.replace(second=29),
+                source="decoded",
+                channel="ECM_RPM",
+                value=20000.0,
+            ),
+        ],
+        capture,
+    )
+    state = _derive_vehicle_state(storage, replay_controller=None, now=now, session_dir=capture)
+    assert state.rpm == 2500.0
+    # Not `engine_off`: that rule infers a powered-down ECM from OBD silence,
+    # which is wrong when Mode 01 is blocked by design.
+    assert state.state == "engine_running"

@@ -81,6 +81,7 @@ def classify_vehicle_state(
     obd_freshness_seconds: float | None,
     can_freshness_seconds: float | None,
     replay_id: str | None = None,
+    rpm_from_broadcast: bool = False,
     freshness_threshold_seconds: float = _FRESHNESS_THRESHOLD_SECONDS,
     rpm_running_threshold: float = _RPM_RUNNING_THRESHOLD,
 ) -> VehicleState:
@@ -106,6 +107,15 @@ def classify_vehicle_state(
        but the ECM isn't responding to OBD, typical of full power-down).
     6. Anything else → ``unknown`` (caller should still trust the raw
        fields).
+
+    ``rpm_from_broadcast`` says the ``rpm`` argument came from the decoded
+    broadcast bus rather than an OBD reply, which makes rule 5's inference
+    unsafe: during an all-DID capture the ECM stops answering Mode 01 **by
+    design** (session 0xC0 and Mode 01 are mutually exclusive on this ECM),
+    so "OBD stale" no longer implies a powered-down ECM. A fresh broadcast
+    RPM above the threshold is direct evidence the engine is turning, so it
+    outranks that inference. Only set it when the value really is broadcast-
+    sourced — an OBD-sourced rpm is as stale as its OBD read.
     """
     if replay_id is not None:
         return VehicleState(
@@ -125,9 +135,11 @@ def classify_vehicle_state(
         can_freshness_seconds is not None and can_freshness_seconds <= freshness_threshold_seconds
     )
 
+    engine_evidence_fresh = obd_fresh or (can_fresh and rpm_from_broadcast)
+
     if not obd_fresh and not can_fresh:
         state: VehicleStateName = "no_data"
-    elif obd_fresh and rpm is not None and rpm >= rpm_running_threshold:
+    elif engine_evidence_fresh and rpm is not None and rpm >= rpm_running_threshold:
         state = "engine_running"
     elif obd_fresh and (rpm is None or rpm == 0):
         state = "ignition_only"
@@ -308,11 +320,18 @@ def _capture_snapshot(storage_writer: Any = None) -> dict[str, Any]:
     return snapshot
 
 
+#: `decoded:ECM_RPM` is stored raw (8 counts/rpm) so training's scaler stays
+#: comparable across sessions; see src/decode/frame_decoder.py. Taking it at
+#: face value reads as a factor-of-8 bug.
+_ECM_RPM_SCALE = 0.125
+
+
 def _derive_vehicle_state(
     storage_path: Path,
     *,
     replay_controller: ReplayController | None,
     now: datetime | None = None,
+    session_dir: Path | None = None,
 ) -> VehicleState:
     """Read latest-per-channel + replay state and run the classifier.
 
@@ -330,6 +349,7 @@ def _derive_vehicle_state(
 
     now_dt = datetime.now(UTC) if now is None else now
     rpm: float | None = None
+    decoded_rpm: float | None = None
     coolant: float | None = None
     run_time: float | None = None
     obd_latest_ts: datetime | None = None
@@ -340,7 +360,7 @@ def _derive_vehicle_state(
     from src.dashboard.readers import read_latest_per_channel
 
     try:
-        rows = read_latest_per_channel(storage_path)
+        rows = read_latest_per_channel(storage_path, session_dir=session_dir)
     except (OSError, ValueError):
         rows = []
 
@@ -371,18 +391,48 @@ def _derive_vehicle_state(
         elif source == "can":
             if ts is not None and (can_latest_ts is None or ts > can_latest_ts):
                 can_latest_ts = ts
+        elif source == "decoded":
+            # Broadcast decode never stops, even when Mode 01 is dark — which
+            # it is *by ECU design* during an all-DID capture, since session
+            # 0xC0 blocks Mode 01. Treat it as CAN liveness, and use its RPM
+            # when the OBD one is absent.
+            if ts is not None and (can_latest_ts is None or ts > can_latest_ts):
+                can_latest_ts = ts
+            if rpm is None and channel == "ECM_RPM" and isinstance(value, (int, float)):
+                decoded_rpm = float(value)
 
     obd_freshness = (now_dt - obd_latest_ts).total_seconds() if obd_latest_ts is not None else None
     can_freshness = (now_dt - can_latest_ts).total_seconds() if can_latest_ts is not None else None
 
+    rpm_from_broadcast = False
+    if rpm is None and decoded_rpm is not None:
+        # `decoded:` rows carry raw counts by design; ECM_RPM is 8 per rpm.
+        rpm = decoded_rpm * _ECM_RPM_SCALE
+        rpm_from_broadcast = True
+
     return classify_vehicle_state(
         rpm=rpm,
+        rpm_from_broadcast=rpm_from_broadcast,
         coolant_temp=coolant,
         run_time=run_time,
         obd_freshness_seconds=obd_freshness,
         can_freshness_seconds=can_freshness,
         replay_id=replay_id,
     )
+
+
+def _active_session_dir(storage_writer: Any) -> Path | None:
+    """The directory the writer is *currently* filling, if it can be read.
+
+    Capture sessions are ``_``-prefixed and invisible to the newest-session
+    search on purpose (they must stay out of the training corpus), so during a
+    capture the search finds the previous session — which stopped being written
+    at capture start. Asking the writer directly is the only way to see live
+    state while a capture is running.
+    """
+    paths = getattr(storage_writer, "paths", None)
+    root = getattr(paths, "root", None)
+    return root if isinstance(root, Path) else None
 
 
 def _active_profile(config: CanaryConfig) -> dict[str, str | None] | None:
@@ -461,7 +511,11 @@ def build_status(
         vehicle=f"{config.vehicle.year} {config.vehicle.make} {config.vehicle.model}".strip(),
         emitter_counters=emitter.counters.to_dict() if emitter is not None else None,
         health=health_monitor.snapshot() if health_monitor is not None else None,
-        vehicle_state=_derive_vehicle_state(storage, replay_controller=replay_controller),
+        vehicle_state=_derive_vehicle_state(
+            storage,
+            replay_controller=replay_controller,
+            session_dir=_active_session_dir(storage_writer),
+        ),
         gps=gps_tracker.gps_status() if gps_tracker is not None else None,
         trip=gps_tracker.trip_status() if gps_tracker is not None else None,
         profile=_active_profile(config),
