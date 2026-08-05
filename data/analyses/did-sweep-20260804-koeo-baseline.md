@@ -62,3 +62,40 @@ almost a pure set difference rather than a correlation hunt.
 
 A rev sweep costs ~1.5 s of bus time per pass, so several passes at different
 rpm are cheap. Take them.
+
+## Session-exclusivity bench (same evening, KOEO) — the architecture verdict
+
+Measured with the daemon's TX gated (`/control/passive`), physical `7E0`:
+
+| question | answer |
+|---|---|
+| Mode 01 inside session 0xC0 | **hard-blocked** — 0/10, functional and physical |
+| sustained 0x22 rate in-session | **658 reads/s** (4-DID rotation, 8 s, 0 failures, p50 1.09 ms) |
+| does polling keep the session alive | yes — no explicit keepalive needed while reading |
+| idle session lapse | alive at 3 s gap, lapsed at 5 s |
+| exit `10 01` → Mode 01 back | **no** — dead >30 s (recovers within minutes) |
+| lapse → Mode 01 back | **no** — blackout outlives the session, >30 s |
+| exit `10 81` → Mode 01 back | **instant** (0.0 s, next request) |
+| session enter cost | 1.0 ms |
+
+**Verdict: run tuning captures entirely inside session 0xC0 (all-DID).**
+658 reads/s means 8 channels at 20 Hz costs a quarter of the measured
+capacity. A Mode 01/Mode 22 interleave was benched too and is not worth the
+complexity — and with `10 01` as the exit it produced *zero* Mode 01 readings.
+`10 81` is the only exit that restores Mode 01 promptly; anything that opens
+0xC0 must exit through it (the daemon's DID-window code already does).
+
+During an all-DID capture, Mode 01 is dark by ECU design. Broadcast CAN keeps
+flowing (RPM/pedal/throttle at ~100 Hz, free), so `vehicle_state` should
+classify from decoded broadcast channels during captures rather than OBD
+freshness — which is also the principled fix for the "tuning mode reads
+`no_data`" bug.
+
+Remaining channel gaps for a full UpRev-replacement capture, all DID-side:
+`INT/V TIM (B1)/(B2)`, `B/FUEL SCHDL`, `IGN TIMING` (all in the FSM DATA
+MONITOR list, DIDs unidentified — the engine-running sweep finds them), plus
+an A/F-voltage → AFR transform, which the existing UpRev logs calibrate for
+free (`A/F WB-B1 (V)` and `AFR WB-B1` are paired columns in the same rows).
+Target AFR: `COMMANDED_EQUIV_RATIO` is Mode 01-only (PID 0x44), so in an
+all-DID capture the commanded side must come from a DID if one exists, or be
+snapshotted before/after the capture window.

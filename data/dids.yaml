@@ -41,12 +41,25 @@ access:
     session instead of idling until S3 expires — the 2026-05-16 sub-function
     sweep showed `10 81` answers `50 81`. The ECU takes ~1.5 ms per request,
     so a multi-second wait for Mode 01 to come back is scheduling policy, not
-    an ECU limit. NOT YET CONFIRMED IN-VEHICLE: what the sweep proved is that
-    `10 81` is accepted, not that Mode 01 answers on the next frame. The
-    scheduler falls back to the timed lapse the first time the exit is
-    refused, and `/status.obd_scheduler.did_profile.fast_exits` counts the
-    successes — check it against `fast_exit_failures` on the first drive.
-    Remove this line to force the old wait-it-out behavior.
+    an ECU limit.
+
+    CONFIRMED IN-VEHICLE 2026-08-04 (KOEO bench, daemon TX gated): after
+    `10 81`, Mode 01 answers on the *next request* — recovery 0.0 s. The
+    other exits do NOT work and the old wait-it-out model is wrong on both
+    counts:
+      * `10 01` (the textbook UDS defaultSession) is answered positively but
+        leaves Mode 01 dead for somewhere past 30 s (it does recover within
+        a couple of minutes).
+      * Letting S3 lapse kills DID reads within ~3-5 s (alive at a 3 s gap,
+        lapsed at 5 s), but Mode 01 stays dead >30 s after the lapse — the
+        blackout outlives the session that caused it. "Wait for the session
+        to expire and Mode 01 answers again" is NOT a safe fallback; it is
+        the slowest possible exit. `10 81` is the only fast door out.
+    Same bench, sustained 0x22 throughput inside 0xC0: a 4-DID rotation ran
+    8 s at 658 reads/s (165 Hz/channel), zero failures, p50 1.09 ms — the
+    continuous reads themselves keep the session alive, no explicit
+    keepalive needed while actively polling. Session enter costs 1.0 ms.
+    Mode 01 inside the session: 0/10, functional and physical alike.
 
 dids:
   - did: 0x1101
