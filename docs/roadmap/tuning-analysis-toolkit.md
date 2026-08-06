@@ -214,12 +214,13 @@ session-death quirk).
 - [x] **3.3 — `arm_tuning_capture` / `disarm_tuning_capture` MCP verbs.**
   One call: activate profile (by name — `tuning-did`, `fuel-map`), set
   `rate_hz`, set bus budget with TTL, then **verify** by sampling
-  `achieved_hz_60s` after ~20 s and reporting it in the response. Disarm
-  reverts profile + budget and returns the session dir + a one-line
-  achieved-rate summary. Wraps the existing `/control/captures` +
-  `/control/bus-budget` routes — no new daemon state. Expose
-  `set_bus_budget` standalone too (MCP write-tool, same auth gating as
-  `start_capture`).
+  capture-scoped `achieved_hz_capture` after ~20 s and reporting the actual
+  observation interval, sample count, and maximum gap in the response. Disarm
+  reverts profile + the exact prior budget state and returns `ended_capture_dir`.
+  The daemon owns this transaction at `/control/capture`; the MCP verb makes
+  no follow-up state-changing calls. Repeating the same arm, or immediately
+  retrying disarm after a lost response, is idempotent. Expose `set_bus_budget`
+  standalone too (MCP write-tool, same auth gating as `start_capture`).
 - [x] **3.4 — TTL ergonomics.** The `bus-budget` TTL cap (3600 s) rejected a
   4-hour request mid-arming; `null` disables expiry but silently. Accept
   `ttl_seconds` up to 6 h for capture-scoped overrides (the capture

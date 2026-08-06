@@ -225,15 +225,17 @@ implementer to revisit:
   is unavailable, either map it or limit the artifact to a validated WOT row/
   curve with that limitation encoded in its schema.
 
-- [ ] **3.3 — Voltage-DID measured AFR provider.** Route
+- [x] **3.3 — Voltage-DID measured AFR provider.** Route
   `did:ECM_AF_SENSOR_V_B1/B2` through `VoltageAfrTransfer` inside the semantic
-  frame. Keep raw voltage beside derived AFR and carry censor flags. Never use
-  `measured_is_lambda=False` as a shortcut that treats volts as AFR.
+  frame. The semantic frame retains raw voltage and carries censor flags beside
+  transformed AFR. Never use `measured_is_lambda=False` as a shortcut that
+  treats volts as AFR.
 
-- [ ] **3.4 — Record instrument lineage.** Every AFR result states that the
+- [~] **3.4 — Record instrument lineage.** The tuning digest's measured-AFR
+  section now states that the
   current voltage transfer was fitted to UpRev's voltage/AFR conversion and is
   therefore the same measurement family, not independent absolute truth.
-  Canary-only A/B conclusions remain valid as same-instrument comparisons.
+  Extend the same language to every other AFR-facing result and UI surface.
 
 - [ ] **3.5 — Validate injector-PW fuel-cut semantics.** Use a tagged physical
   protocol (steady fueled idle, closed-throttle decel, key-on engine-off) to
@@ -328,9 +330,9 @@ implementer to revisit:
   band, fueled samples, AFR-bearing samples, and target-bearing samples as
   separate counts.
 
-- [~] **5.3 — Partial reports are first-class.** All-DID digest now names
-  missing pull tags and missing delivery roles rather than reporting them as
-  a zero WOT result; censored-sample and conclusion-state reporting remain.
+- [x] **5.3 — Partial reports are first-class.** All-DID digest names missing
+  pull tags and missing delivery roles rather than reporting them as a zero
+  WOT result, and reports per-bank censor counts and conclusion state.
   Distinguish:
 
   - capture did not contain a role;
@@ -344,12 +346,12 @@ implementer to revisit:
   only when the semantic registry exposes confirmed command and measured
   providers; it reads those provider specs rather than shared-code DID names.
 
-- [ ] **5.5 — Honest stored-rate summary.** Compute per-channel rate over
-  active, unpaused capture intervals, including first/last sample and dropout
-  coverage. Report duration, count, median inter-arrival rate, effective whole-
-  capture rate, and longest gap; one `len/span` number hides stalls.
+- [~] **5.5 — Honest stored-rate summary.** The digest reports per semantic
+  provider duration, sample count, observed rate, median interval, and longest
+  persisted gap. Capture pause intervals are not yet persisted, so these are
+  explicitly wall-clock timings rather than a claim of active/unpaused rate.
 
-- [ ] **5.6 — Use manifest identity in the digest.** `capture_profile` and
+- [x] **5.6 — Use manifest identity in the digest.** `capture_profile` and
   `tune_revision` come from Phase 1. The digest carries the exact target-map
   artifact hash and source-resolution method.
 
@@ -359,10 +361,10 @@ implementer to revisit:
   If no compatible previous run exists, say so without selecting a different
   profile or unknown revision.
 
-- [ ] **5.8 — Fix the outer digest window.** Capture-prefixed session names
-  must produce correct anomaly and ledger windows through the shared parser.
-  Add a production-shaped capture digest that includes an event near the
-  beginning of the capture and proves it is counted.
+- [x] **5.8 — Fix the outer digest window.** Capture-prefixed session names
+  produce correct anomaly and ledger windows through the shared parser. A
+  production-shaped capture digest includes an event near the beginning of the
+  capture and proves it is counted while later records are excluded.
 
 ## Phase 6 — Transactional capture control and truthful rate verification
 
@@ -403,15 +405,17 @@ implementer to revisit:
   daemon route and MCP disarm response, along with its manifest and final rate
   summary.
 
-- [ ] **6.8 — Idempotent recovery.** Repeating arm with the same active
+- [~] **6.8 — Idempotent recovery.** Repeating arm with the same active
   capture reports existing state rather than splitting storage; repeating
-  disarm reports the already-ended capture where possible rather than clearing
-  unrelated state. Document daemon-restart behavior during a capture.
+  disarm reports the immediately-ended capture rather than clearing unrelated
+  state. The endpoint documents that this response cache is in-memory. Daemon
+  restart behavior *during an active capture* still needs a durable recovery
+  contract rather than an assumption that the previous stop response survives.
 
-- [ ] **6.9 — Update stale documentation.** Correct `docs/mcp-server.md`,
-  `docs/headless-api.md`, and `tuning-analysis-toolkit.md` claims about
-  20-second verification, budget restoration, and returned capture path once
-  the new transaction lands.
+- [x] **6.9 — Update stale documentation.** `docs/mcp-server.md`,
+  `docs/headless-api.md`, and `tuning-analysis-toolkit.md` describe the
+  capture-scoped rate observation, budget restoration, returned capture path,
+  and idempotent retry behavior.
 
 ## Phase 7 — Noise-floor contracts that cannot be misapplied
 

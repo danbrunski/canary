@@ -102,7 +102,15 @@ def build_tuning_frame(
                     "reason": "voltage-to-AFR transfer is unavailable",
                 }
                 continue
+            # Preserve the instrument reading and make censoring a first-class
+            # column. Replacing volts with AFR alone made it impossible for a
+            # report to distinguish a real rich/lean sample from the transfer
+            # boundary (or to audit the conversion later).
+            values[f"{role}_raw_voltage"] = values[role]
             values[role] = voltage_to_afr(values[role], transfer)
+            values[f"{role}_censored"] = values[role].le(transfer.censored_floor_afr) | values[
+                role
+            ].ge(transfer.censored_ceiling_afr)
         capability[role] = {"available": True, "provider": provider.spec, "reason": None}
         parts.append(values)
     frame = pd.DataFrame(columns=["timestamp"])

@@ -59,6 +59,7 @@ from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.can_activity import CanActivityBusError, capture_can_activity
 from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
+from src.control.capture_manifest import read_capture_manifest
 from src.control.classification import (
     classify_one_session,
     corpus_mode_summary,
@@ -184,6 +185,12 @@ def register_control_routes(
     #: Bus-budget override in force before a capture raised it, so stopping
     #: restores the operator's setting instead of clearing it outright.
     budget_before_capture: dict[str, Any] | None = None
+    #: The immediately preceding stop response makes a lost HTTP response
+    #: recoverable: retrying disarm must not clear a budget that was already
+    #: restored. This is intentionally in-memory; after daemon restart the
+    #: durable capture manifest identifies the completed session, but a caller
+    #: must not assume a previous stop response is still available.
+    last_ended_capture: dict[str, Any] | None = None
     capture_transition_lock = asyncio.Lock()
 
     profile_store = capture_profile_store or CaptureProfileStore(
@@ -617,19 +624,38 @@ def register_control_routes(
     ) -> dict[str, Any]:
         if storage_writer is None:
             raise HTTPException(status_code=503, detail="capture storage writer is not available")
+        profile = profile_store.load().by_name(request.profile)
+        if profile is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"capture profile not found: {request.profile}",
+            )
+        if profile.name == "default":
+            raise HTTPException(status_code=409, detail="default collection is already active")
+        if request.rate_hz is not None:
+            profile = profile.model_copy(update={"target_rate_hz": request.rate_hz})
         async with capture_transition_lock:
+            nonlocal last_ended_capture
             if tuning_profile.is_active():
-                raise HTTPException(status_code=409, detail="a capture profile is already active")
-            profile = profile_store.load().by_name(request.profile)
-            if profile is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"capture profile not found: {request.profile}",
+                active = tuning_profile.active_profile()
+                manifest = read_capture_manifest(storage_writer.paths.root)
+                same_capture = (
+                    active.name == profile.name
+                    and active.target_rate_hz == profile.target_rate_hz
+                    and manifest is not None
+                    and manifest.tune_revision == request.tune_revision
                 )
-            if profile.name == "default":
-                raise HTTPException(status_code=409, detail="default collection is already active")
-            if request.rate_hz is not None:
-                profile = profile.model_copy(update={"target_rate_hz": request.rate_hz})
+                if same_capture:
+                    return {
+                        "capture_profile": tuning_profile.snapshot(),
+                        "output_session_dir": str(storage_writer.paths.root),
+                        "bus_budget": bus_budget.snapshot(),
+                        "idempotent": True,
+                    }
+                raise HTTPException(
+                    status_code=409,
+                    detail="a different capture profile is already active",
+                )
             capture_id = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%S")
             requested_budget = request.bus_budget_requests_per_second
             if requested_budget is None:
@@ -647,6 +673,7 @@ def register_control_routes(
                         ttl_seconds=request.bus_budget_ttl_seconds,
                     )
                 tuning_profile.activate(profile, session_dir=str(storage_writer.paths.root))
+                last_ended_capture = None
                 budget_before_capture = (
                     {**previous_budget, "_capture_started_monotonic": time.monotonic()}
                     if requested_budget is not None
@@ -700,10 +727,11 @@ def register_control_routes(
     ) -> dict[str, Any]:
         if storage_writer is None:
             raise HTTPException(status_code=503, detail="capture storage writer is not available")
-        if not tuning_profile.is_active():
-            raise HTTPException(status_code=409, detail="default collection is already active")
         async with capture_transition_lock:
+            nonlocal last_ended_capture
             if not tuning_profile.is_active():
+                if last_ended_capture is not None:
+                    return {**last_ended_capture, "idempotent": True}
                 raise HTTPException(status_code=409, detail="default collection is already active")
             nonlocal budget_before_capture
             ended_capture_dir = str(storage_writer.paths.root)
@@ -728,6 +756,7 @@ def register_control_routes(
                 "ended_capture_dir": ended_capture_dir,
                 "bus_budget": bus_budget.snapshot(),
             }
+            last_ended_capture = dict(payload)
         publish_control_event("capture_profile.stop", "ok", payload)
         return payload
 

@@ -127,6 +127,53 @@ def test_all_did_capture_never_falls_back_to_mode01(tmp_path: Path, config: Cana
     assert any("all-DID capture lacks confirmed semantic roles" in note for note in digest.notes)
 
 
+def test_all_did_digest_carries_afr_lineage_rom_identity_and_polling_gaps(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    """A partial all-DID drive still says exactly what its usable data means."""
+    session = tmp_path / "_tuning-2026-08-05T142720"
+    records: list[TelemetryRecord] = []
+    for second in range(4):
+        ts = T0 + timedelta(seconds=second)
+        records.extend(
+            [
+                TelemetryRecord(timestamp=ts, source="obd", channel="DID_1219", value="0bb8"),
+                # 2.170 V -> 14.72 AFR; 1.690 V -> 13.75 AFR via the vehicle table.
+                TelemetryRecord(timestamp=ts, source="obd", channel="DID_1225", value="01b2"),
+                TelemetryRecord(timestamp=ts, source="obd", channel="DID_1226", value="0152"),
+            ]
+        )
+    write_records_to_parquet(records, session)
+    (session / "capture_profile.json").write_text(
+        json.dumps(
+            {
+                "profile": "tuning-did",
+                "started_at": T0.isoformat(),
+                "profile_snapshot": {"corpus_eligible": False},
+            }
+        )
+    )
+
+    digest = compute_tuning_digest(session, config)
+
+    assert digest is not None
+    assert digest.measured_afr["available"] is True
+    assert digest.measured_afr["instrument"] == "factory A/F voltage transformed to AFR"
+    assert digest.measured_afr["banks"][0]["samples"] == 4
+    assert digest.measured_afr["banks"][0]["afr_median"] == pytest.approx(14.72)
+    assert digest.rate_summary["did:ECM_RPM"] == {
+        "samples": 4,
+        "duration_seconds": 3.0,
+        "observed_hz": 1.0,
+        "median_interval_seconds": 1.0,
+        "longest_gap_seconds": 1.0,
+    }
+    assert digest.target_map["rom_artifact"]["sha256"] == (
+        "c5325776b08c3084edd49d8f68587dad4668e02b0e77c7686f7548fb6f7c8fa9"
+    )
+    assert digest.target_map["lookup_ready"] is False
+
+
 def test_digest_reproduces_the_reference_capture(config: CanaryConfig) -> None:
     """End-to-end against the real 2026-08-05 capture and its hand-checked numbers."""
     session = Path("sessions/nissan-xterra-2008/_tuning-2026-08-05T142720")

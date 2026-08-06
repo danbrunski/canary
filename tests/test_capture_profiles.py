@@ -139,6 +139,54 @@ def test_capture_lifecycle_rotates_writes_sidecar_and_reverts(tmp_path: Path) ->
     assert stopped.json()["capture_profile"]["name"] == "default"
 
 
+def test_repeated_matching_capture_arm_and_stop_are_idempotent(tmp_path: Path) -> None:
+    """A dropped HTTP response cannot split a drive into two capture sessions."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = config.model_copy(
+        update={
+            "collection": config.collection.model_copy(
+                update={"storage_path": tmp_path / "sessions"}
+            )
+        }
+    )
+    store = _store(tmp_path, config)
+    writer = AsyncParquetTelemetryWriter(
+        ParquetTelemetryWriter(
+            tmp_path / "sessions",
+            session_started_at=datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+        )
+    )
+    client = TestClient(
+        create_app(
+            config,
+            anomalies_dir=tmp_path / "anomalies",
+            control_token="secret",
+            storage_writer=writer,
+            capture_profile_store=store,
+        )
+    )
+    headers = {"Authorization": "Bearer secret"}
+    request = {"profile": "fuel-map", "tune_revision": "rom-17"}
+
+    first = client.post("/control/capture", headers=headers, json=request)
+    capture_dir = first.json()["output_session_dir"]
+    repeated = client.post("/control/capture", headers=headers, json=request)
+
+    assert first.status_code == 200
+    assert repeated.status_code == 200
+    assert repeated.json()["idempotent"] is True
+    assert repeated.json()["output_session_dir"] == capture_dir
+    assert len(list_sessions(tmp_path / "sessions", captures=True)) == 1
+
+    stopped = client.post("/control/capture/stop", headers=headers)
+    repeated_stop = client.post("/control/capture/stop", headers=headers)
+
+    assert stopped.status_code == 200
+    assert repeated_stop.status_code == 200
+    assert repeated_stop.json()["idempotent"] is True
+    assert repeated_stop.json()["ended_capture_dir"] == capture_dir
+
+
 def test_capture_profile_api_crud_and_auth(tmp_path: Path) -> None:
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     store = _store(tmp_path, config)

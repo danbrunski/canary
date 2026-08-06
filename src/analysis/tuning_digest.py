@@ -23,7 +23,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.analysis.afr import load_afr_calibration
+from src.analysis.afr import AfrCalibration, TargetAfrMap, load_afr_calibration, voltage_to_afr
 from src.analysis.channels import read_aligned, read_channels
 from src.analysis.noise_floor import load_noise_floor
 from src.analysis.tune_revisions import (
@@ -54,8 +54,18 @@ class TuningDigest:
     wot_with_afr_pair: int
     wot_by_band: list[dict[str, Any]]
     achieved_hz: dict[str, float]
-    delivery: dict[str, Any] | None
-    cam: dict[str, Any] | None
+    #: Per-provider stored-sample timing.  Unlike the live scheduler's
+    #: trailing observation window, this is the evidence preserved with the
+    #: completed drive and makes long polling stalls visible.
+    rate_summary: dict[str, dict[str, float | int | None]] = field(default_factory=dict)
+    #: Voltage-derived readings remain a distinct instrument from an external
+    #: wideband.  Carry the transform and censoring evidence beside the result.
+    measured_afr: dict[str, Any] = field(default_factory=dict)
+    #: The exact ROM-backed target artifact selected for this session.  This
+    #: does not claim a target lookup happened when the load provider is absent.
+    target_map: dict[str, Any] = field(default_factory=dict)
+    delivery: dict[str, Any] | None = None
+    cam: dict[str, Any] | None = None
     #: Delta against the previous capture sharing this profile *and* tune
     #: revision — the "did the flash do what I meant" answer. Requires both
     #: to match: across a flash boundary the delta is the flash, not drift.
@@ -72,6 +82,9 @@ class TuningDigest:
             "wot_with_afr_pair": self.wot_with_afr_pair,
             "wot_by_band": list(self.wot_by_band),
             "achieved_hz": dict(self.achieved_hz),
+            "rate_summary": self.rate_summary,
+            "measured_afr": self.measured_afr,
+            "target_map": self.target_map,
             "delivery": self.delivery,
             "cam": self.cam,
             "previous": self.previous,
@@ -104,6 +117,139 @@ def _achieved_hz(session_dir: Path, specs: list[str]) -> dict[str, float]:
         if span > 0:
             out[spec] = round(len(frame) / span, 2)
     return out
+
+
+def _rate_summary(session_dir: Path, specs: list[str]) -> dict[str, dict[str, float | int | None]]:
+    """Summarize persisted polling cadence and its worst gap by provider.
+
+    A nominal target rate cannot tell a post-drive reader whether a channel
+    disappeared for ten seconds.  The session has no reliable "paused" state,
+    so these are deliberately wall-clock sample timings, not a claim about
+    active scheduler time.
+    """
+    out: dict[str, dict[str, float | int | None]] = {}
+    for spec in specs:
+        try:
+            frame = read_channels(session_dir, [spec], acquired_time=True)
+        except Exception:  # noqa: BLE001 — absent optional providers are normal
+            continue
+        timestamps = frame["timestamp"].dropna().sort_values().drop_duplicates()
+        count = len(timestamps)
+        if not count:
+            continue
+        intervals = timestamps.diff().dropna().dt.total_seconds()
+        positive = intervals[intervals > 0]
+        span = (
+            float((timestamps.iloc[-1] - timestamps.iloc[0]).total_seconds()) if count > 1 else 0.0
+        )
+        out[spec] = {
+            "samples": int(count),
+            "duration_seconds": round(span, 3),
+            "observed_hz": round((count - 1) / span, 3) if span > 0 else None,
+            "median_interval_seconds": round(float(positive.median()), 3)
+            if not positive.empty
+            else None,
+            "longest_gap_seconds": round(float(positive.max()), 3) if not positive.empty else None,
+        }
+    return out
+
+
+def _measured_afr_summary(
+    session_dir: Path,
+    *,
+    calibration: AfrCalibration | None,
+    role_capabilities: dict[str, Any],
+) -> dict[str, Any]:
+    """Report transformed factory A/F readings without presenting them as independent WB data."""
+    transfer = None if calibration is None else calibration.voltage_transfer
+    if transfer is None:
+        return {"available": False, "reason": "voltage-to-AFR transfer is unavailable", "banks": []}
+    assert calibration is not None
+
+    banks: list[dict[str, Any]] = []
+    for bank in (1, 2):
+        role = f"measured_afr_b{bank}"
+        provider = role_capabilities.get(role, {}).get("provider")
+        if not isinstance(provider, str) or not role_capabilities.get(role, {}).get(
+            "available", False
+        ):
+            continue
+        try:
+            samples = read_channels(session_dir, [provider], acquired_time=True)
+        except Exception:  # noqa: BLE001 — capability report carries the ordinary reason
+            continue
+        afr = voltage_to_afr(samples["value"], transfer).dropna()
+        if afr.empty:
+            continue
+        floor = int(afr.le(transfer.censored_floor_afr).sum())
+        ceiling = int(afr.ge(transfer.censored_ceiling_afr).sum())
+        banks.append(
+            {
+                "bank": bank,
+                "provider": provider,
+                "samples": int(len(afr)),
+                "uncensored_samples": int(len(afr) - floor - ceiling),
+                "censored_floor_samples": floor,
+                "censored_ceiling_samples": ceiling,
+                "afr_range": [round(float(afr.min()), 3), round(float(afr.max()), 3)],
+                "afr_median": round(float(afr.median()), 3),
+            }
+        )
+    provenance = calibration.provenance
+    return {
+        "available": bool(banks),
+        "instrument": "factory A/F voltage transformed to AFR",
+        "independence_caveat": (
+            "This is a calibrated transform of the ECU A/F voltage, not an independent wideband "
+            "measurement; use the recorded external-reference provenance below."
+        ),
+        "transfer_provenance": {
+            key: provenance[key]
+            for key in ("method", "session", "source_log", "validated_2026-08-04")
+            if key in provenance
+        },
+        "censor_bounds_afr": [transfer.censored_floor_afr, transfer.censored_ceiling_afr],
+        "banks": banks,
+    }
+
+
+def _target_map_summary(
+    target: TargetAfrMap | None,
+    *,
+    revision: str | None,
+    role_capabilities: dict[str, Any],
+) -> dict[str, Any]:
+    """Identify the target artifact and say explicitly whether its load is observable."""
+    if target is None:
+        return {
+            "available": False,
+            "revision": revision,
+            "reason": "no ROM target map is recorded for this tune revision",
+        }
+    provenance = target.provenance
+    result: dict[str, Any] = {
+        "available": True,
+        "revision": target.revision,
+        "load_axis": {"name": target.load_axis_name, "unit": target.load_axis_unit},
+        "rpm_breakpoints": target.rpm_breakpoints,
+        "load_breakpoints": target.load_breakpoints,
+    }
+    if provenance is not None:
+        result["rom_artifact"] = {
+            "file": provenance.rom_file,
+            "sha256": provenance.rom_sha256,
+            "modified_at": provenance.rom_modified_at.isoformat(),
+            "map_slot": provenance.map_slot,
+            "cell_decode": provenance.cell_decode,
+            "guide_reference": provenance.guide_reference,
+        }
+    load_provider = role_capabilities.get("airflow_or_table_load", {})
+    result["lookup_ready"] = bool(load_provider.get("available", False))
+    if not result["lookup_ready"]:
+        result["lookup_reason"] = (
+            "Base Fuel Schedule/load provider is not confirmed in this capture"
+        )
+    return result
 
 
 def _wot_inventory(
@@ -327,16 +473,26 @@ def compute_tuning_digest(
             "in the same second, so delivery error cannot be computed from this drive."
         )
 
-    achieved = _achieved_hz(
-        session_dir,
-        [
-            "obd:RPM",
-            "obd:O2_WR_LAMBDA_S1",
-            "obd:TIMING_ADVANCE",
-            "did:ECM_AF_SENSOR_V_B1",
-            "did:ECM_INTAKE_CAM_ANGLE_MEASURED",
-        ],
+    # An all-DID report measures exactly the semantic providers that were
+    # actually present; hard-coded Mode-01 names here previously made a DID
+    # capture look slower or emptier than it was.  Retain the legacy list only
+    # for the older Mode-01 capture profile, which has no DID registry roles.
+    rate_specs = sorted(
+        {
+            str(role["provider"])
+            for role in role_capabilities.values()
+            if role.get("available", False) and isinstance(role.get("provider"), str)
+        }
     )
+    if not rate_specs and not did_continuous:
+        rate_specs = ["obd:RPM", "obd:O2_WR_LAMBDA_S1", "obd:TIMING_ADVANCE"]
+    achieved = _achieved_hz(session_dir, rate_specs)
+    rate_summary = _rate_summary(session_dir, rate_specs)
+    measured_afr = _measured_afr_summary(
+        session_dir, calibration=calibration, role_capabilities=role_capabilities
+    )
+    target = None if calibration is None else calibration.target_map(revision)
+    target_map = _target_map_summary(target, revision=revision, role_capabilities=role_capabilities)
 
     delivery: dict[str, Any] | None = None
     delivery_available = (
@@ -418,6 +574,9 @@ def compute_tuning_digest(
         wot_with_afr_pair=paired,
         wot_by_band=bands,
         achieved_hz=achieved,
+        rate_summary=rate_summary,
+        measured_afr=measured_afr,
+        target_map=target_map,
         delivery=delivery,
         cam=cam,
         previous=previous,

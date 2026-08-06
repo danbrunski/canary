@@ -104,6 +104,61 @@ def test_compute_digest_gated_anomaly_counts_by_source_windowed(tmp_path: Path) 
     assert digest.anomaly_counts_by_source == {"fused": 1, "behavior": 1}
 
 
+def test_capture_prefixed_digest_uses_its_timestamp_for_all_windows(tmp_path: Path) -> None:
+    """A capture prefix must not make its anomaly/ledger window start at `now`.
+
+    This is production-shaped rather than a bare parser test: the same digest
+    call that serves a completed tuning capture must include early drive
+    evidence while excluding later records.
+    """
+    session = _write_rich_session(tmp_path, name="_capture-tuning-did-2026-05-20T180000")
+    (session / "capture_profile.json").write_text(
+        '{"profile":"tuning-did","started_at":"2026-05-20T18:00:00+00:00",'
+        '"profile_snapshot":{"corpus_eligible":false}}\n'
+    )
+    config = _config(tmp_path)
+    logger = AnomalyEventLogger(config.daemon.anomalies_dir)
+    logger.log(
+        AnomalyEvent(
+            timestamp="2026-05-20T18:00:02+00:00",
+            source="behavior",
+            model_version="behavior/rpm",
+            score=1.0,
+        )
+    )
+    logger.log(
+        AnomalyEvent(
+            timestamp="2026-05-20T18:06:00+00:00",
+            source="behavior",
+            model_version="behavior/rpm",
+            score=1.0,
+        )
+    )
+    logger.close()
+    ledger = VehicleLedgerStore(config.daemon.vehicle_ledger)
+    ledger.append(
+        VehicleEvent(
+            recorded_at="2026-05-20T18:00:03+00:00",
+            occurred_at="2026-05-20",
+            kind="observation",
+            title="capture began",
+        )
+    )
+    ledger.append(
+        VehicleEvent(
+            recorded_at="2026-05-20T18:06:00+00:00",
+            occurred_at="2026-05-20",
+            kind="observation",
+            title="later record",
+        )
+    )
+
+    digest = compute_digest(session, config, now=SESSION_END)
+
+    assert digest.anomaly_counts_by_source == {"behavior": 1}
+    assert [event["title"] for event in digest.new_ledger_events] == ["capture began"]
+
+
 def test_compute_digest_new_dtcs_from_session_sidecar(tmp_path: Path) -> None:
     session = _session(tmp_path)
     report = build_dtc_report(stored=["P0171"], pending=["P0300"], mil_on=True)
