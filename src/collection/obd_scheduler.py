@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+import statistics
 import threading
 import time
 from collections import deque
@@ -331,6 +333,25 @@ class CanObdSpec:
     priority_channels: tuple[str, ...] = DEFAULT_PRIORITY_CHANNELS
 
 
+@dataclass(frozen=True)
+class ChannelRate:
+    """What a capture achieved for one channel: rate and coverage, separately.
+
+    Keeping these apart is the whole point. A single "achieved Hz" derived
+    from ``samples / wall-clock`` answers neither question honestly — a
+    perfectly-paced channel looks slow if the capture spans time it wasn't
+    being polled, which is exactly when an operator reaches for the number.
+    """
+
+    #: Sampling rate while actually sampling, from the median inter-sample gap.
+    hz: float
+    #: Samples observed within the capture epoch.
+    samples: int
+    #: Longest stretch with no sample, bracketed by the capture epoch and now.
+    #: Large relative to ``1 / hz`` means a coverage problem, not a rate one.
+    max_gap_seconds: float
+
+
 @dataclass
 class CanObdLoopStats:
     frames_seen: int = 0
@@ -398,37 +419,44 @@ class CanObdLoopStats:
                 out[channel] = round(len(window) / ACHIEVED_HZ_WINDOW, 2)
         return out
 
-    def achieved_hz_since(self, now: float, started_at: float) -> tuple[dict[str, float], float]:
-        """Per-channel rate since capture arm, capped at the recent-rate window.
+    def capture_rates(self, now: float, started_at: float) -> tuple[dict[str, ChannelRate], float]:
+        """Per-channel sampling rate and stall exposure since capture arm.
 
-        The first 20 seconds of a capture previously divided its samples by
-        60, and pre-arm samples could enter the result.  This keeps the
-        daemon-wide trailing metric separate while reporting the actual
-        capture observation interval and excluding older reads.
+        Rate comes from the *median inter-sample interval*, not from dividing
+        the sample count by wall-clock.  Dividing by wall-clock conflates rate
+        with duty cycle, and the two fail in opposite directions: on
+        2026-08-06 a capture polling at a solid 14.93 Hz reported 11.25 Hz
+        purely because the Mode 22 window opened ~11 s after the arm, and the
+        same artifact made a 97.7 Hz broadcast channel read as 52.9 Hz across
+        a session that spent half its span with the engine off.  Both read as
+        rate shortfalls that did not exist.
+
+        ``max_gap_seconds`` keeps the coverage question answerable without
+        contaminating the rate: it brackets the samples with the capture epoch
+        and ``now``, so a channel that started late, stalled mid-capture, or
+        has gone quiet right now all surface as a gap.
         """
         observed_seconds = min(ACHIEVED_HZ_WINDOW, max(0.0, now - started_at))
         if observed_seconds <= 0:
             return {}, 0.0
-        out: dict[str, float] = {}
+        epoch = max(started_at, now - ACHIEVED_HZ_WINDOW)
+        out: dict[str, ChannelRate] = {}
         for channel, window in self.recent_reads.items():
             while window and window[0] < now - ACHIEVED_HZ_WINDOW:
                 window.popleft()
-            count = sum(read_at >= started_at for read_at in window)
-            if count:
-                out[channel] = round(count / observed_seconds, 2)
+            samples = [read_at for read_at in window if read_at >= started_at]
+            if not samples:
+                continue
+            bounds = [epoch, *samples, now]
+            gaps = [later - earlier for earlier, later in itertools.pairwise(bounds)]
+            between = gaps[1:-1]
+            median_interval = statistics.median(between) if between else 0.0
+            out[channel] = ChannelRate(
+                hz=round(1.0 / median_interval, 2) if median_interval > 0 else 0.0,
+                samples=len(samples),
+                max_gap_seconds=round(max(gaps), 3),
+            )
         return out, round(observed_seconds, 3)
-
-    def read_counts_since(self, now: float, started_at: float) -> dict[str, int]:
-        """Capture-epoch sample counts, matching :meth:`achieved_hz_since`."""
-        cutoff = now - ACHIEVED_HZ_WINDOW
-        out: dict[str, int] = {}
-        for channel, window in self.recent_reads.items():
-            while window and window[0] < cutoff:
-                window.popleft()
-            count = sum(read_at >= started_at for read_at in window)
-            if count:
-                out[channel] = count
-        return out
 
 
 @dataclass(frozen=True)
@@ -704,12 +732,19 @@ class ObdSchedulerMetrics:
     #: diluted by daemon uptime and stayed near its old value through a real
     #: rate change on 2026-08-04.
     achieved_hz_60s: dict[str, float] = field(default_factory=dict)
-    #: Capture-only rate.  Empty when normal collection is active.
+    #: Capture-only rate, measured while sampling (see :class:`ChannelRate`).
+    #: Empty when normal collection is active.
     achieved_hz_capture: dict[str, float] = field(default_factory=dict)
-    #: Exact denominator for ``achieved_hz_capture`` (up to 60 s).
+    #: Wall-clock span of the capture observation (up to 60 s). This is *not*
+    #: the denominator of ``achieved_hz_capture`` — it is the window those
+    #: samples were drawn from. Pair it with ``capture_max_gap_seconds`` to
+    #: judge coverage; using it to re-derive a rate reintroduces the
+    #: duty-cycle conflation this split exists to prevent.
     capture_observed_seconds: float | None = None
     #: Capture-only sample count by requested channel.
     capture_samples: dict[str, int] = field(default_factory=dict)
+    #: Longest no-sample stretch per channel within the capture epoch.
+    capture_max_gap_seconds: dict[str, float] = field(default_factory=dict)
     #: Mode-22 session-window state, ``None`` when no session gates DIDs.
     did_profile: dict[str, Any] | None = None
     #: Multi-PID batching (roadmap/multi-pid-polling.md). ``None`` when
@@ -729,6 +764,7 @@ class ObdSchedulerMetrics:
             "achieved_hz_capture": self.achieved_hz_capture,
             "capture_observed_seconds": self.capture_observed_seconds,
             "capture_samples": self.capture_samples,
+            "capture_max_gap_seconds": self.capture_max_gap_seconds,
             "backed_off_requests": self.backed_off_requests,
             "requests_sent": self.requests_sent,
             "readings_emitted": self.readings_emitted,
@@ -1325,14 +1361,13 @@ def _scheduler_metrics(
         )
 
     capture_started_at = tuning_profile.capture_started_monotonic()
-    capture_hz, capture_observed_seconds = (
-        stats.achieved_hz_since(now, capture_started_at)
-        if capture_started_at is not None
-        else ({}, None)
-    )
-    capture_samples = (
-        stats.read_counts_since(now, capture_started_at) if capture_started_at is not None else {}
-    )
+    capture_rates: dict[str, ChannelRate] = {}
+    capture_observed_seconds: float | None = None
+    if capture_started_at is not None:
+        capture_rates, capture_observed_seconds = stats.capture_rates(now, capture_started_at)
+    capture_hz = {channel: rate.hz for channel, rate in capture_rates.items()}
+    capture_samples = {channel: rate.samples for channel, rate in capture_rates.items()}
+    capture_max_gaps = {channel: rate.max_gap_seconds for channel, rate in capture_rates.items()}
     return ObdSchedulerMetrics(
         configured_poll_rate_hz=float(spec.poll_rate_hz),
         # The *effective* rate, not the configured one. The collector paces at
@@ -1352,6 +1387,7 @@ def _scheduler_metrics(
         achieved_hz_capture=capture_hz,
         capture_observed_seconds=capture_observed_seconds,
         capture_samples=capture_samples,
+        capture_max_gap_seconds=capture_max_gaps,
         request_timeouts=stats.request_timeouts,
         negative_responses=stats.negative_responses,
         bus_errors=stats.bus_errors,

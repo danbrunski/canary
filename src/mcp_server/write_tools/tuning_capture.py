@@ -31,6 +31,7 @@ def _rate_verification(status: dict[str, Any], requested_rate_hz: float | None) 
     scheduler = (status.get("health") or {}).get("obd_scheduler") or {}
     rates = scheduler.get("achieved_hz_capture") or {}
     samples = scheduler.get("capture_samples") or {}
+    max_gaps = scheduler.get("capture_max_gap_seconds") or {}
     requested: list[dict[str, Any]] = []
     for request in scheduler.get("requests") or []:
         kind = request.get("kind")
@@ -41,6 +42,14 @@ def _rate_verification(status: dict[str, Any], requested_rate_hz: float | None) 
             requested_rate_hz or profile.get("target_rate_hz") or request.get("configured_rate_hz")
         )
         achieved = rates.get(channel)
+        max_gap = max_gaps.get(channel)
+        # A gap much longer than the requested period is a coverage problem
+        # (window closed, engine off, channel stalled), not a slow rate. They
+        # were one number until 2026-08-06, when idle time inside a capture
+        # made an on-target 14.93 Hz poll report 11.25 Hz and read as a fault.
+        stalled = (
+            max_gap is not None and target is not None and float(max_gap) > 5.0 / float(target)
+        )
         requested.append(
             {
                 "channel": channel,
@@ -48,11 +57,14 @@ def _rate_verification(status: dict[str, Any], requested_rate_hz: float | None) 
                 "requested_hz": target,
                 "achieved_hz": achieved,
                 "samples": int(samples.get(channel, 0)),
+                "max_gap_seconds": max_gap,
                 "status": (
                     "missing"
                     if achieved is None
                     else "shortfall"
                     if target is not None and float(achieved) < float(target) * 0.9
+                    else "stalled"
+                    if stalled
                     else "ok"
                 ),
             }
@@ -88,9 +100,15 @@ async def arm_tuning_capture(
     per-channel demand was capped at 1 Hz). Set both.
 
     The response carries capture-scoped ``achieved_hz`` sampled after
-    ``verify_seconds`` and its exact ``observed_seconds`` denominator.
-    Compare it against what you asked for: a shortfall means demand exceeded
-    the budget, which is throttling working as designed rather than a fault.
+    ``verify_seconds``, measured while the channel is actually sampling.
+    ``status`` separates the two ways a capture disappoints, because they
+    have opposite fixes: ``shortfall`` means demand exceeded the budget
+    (throttling working as designed — lower the rate or raise the budget),
+    while ``stalled`` means the rate was fine but the channel went quiet for
+    a stretch (Mode 22 window closed, engine off, ECU stopped answering) —
+    check ``max_gap_seconds``. ``observed_seconds`` is the window the samples
+    were drawn from, not a denominator; dividing by it re-creates the
+    conflation that made an on-target capture look broken on 2026-08-06.
     Pass ``verify_seconds=0`` to skip the wait and return immediately.
     """
     body: dict[str, Any] = {"profile": profile}

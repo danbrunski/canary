@@ -507,7 +507,56 @@ def test_capture_rate_uses_capture_epoch_and_observed_interval() -> None:
     from src.collection.can_obd_collector import CanObdLoopStats
 
     stats = CanObdLoopStats(recent_reads={"RPM": deque([90.0, 110.0, 115.0])})
-    rates, observed = stats.achieved_hz_since(now=120.0, started_at=100.0)
+    rates, observed = stats.capture_rates(now=120.0, started_at=100.0)
 
+    # Pre-arm reads stay out; the 5 s gap between the two in-epoch samples is
+    # the rate, and the 10 s wait before the first one is coverage, not rate.
     assert observed == 20.0
-    assert rates == {"RPM": 0.1}
+    assert rates["RPM"].samples == 2
+    assert rates["RPM"].hz == pytest.approx(0.2)
+    assert rates["RPM"].max_gap_seconds == pytest.approx(10.0)
+
+
+def test_capture_rate_is_not_diluted_by_idle_time_inside_the_capture() -> None:
+    """Idle time inside a capture is a coverage fact, not a slow rate.
+
+    Measured 2026-08-06: an all-DID capture polled at a solid 14.93 Hz for its
+    whole active stretch, but the Mode 22 window only opened ~11 s after the
+    arm. Dividing samples by wall-clock reported 11.25 Hz, which read as a
+    rate shortfall and sent debugging after per-request loop latency that did
+    not exist. The rate must reflect the pace while sampling; the late start
+    must show up as a gap instead.
+    """
+    from collections import deque
+
+    from src.collection.obd_scheduler import CanObdLoopStats
+
+    started_at, now = 0.0, 60.0
+    period = 1.0 / 15.0
+    # Nothing for the first 11 s, then a clean 15 Hz to the end.
+    reads = [11.0 + i * period for i in range(int((now - 11.0) / period))]
+    stats = CanObdLoopStats(recent_reads={"DID_1219": deque(reads)})
+
+    rates, observed = stats.capture_rates(now=now, started_at=started_at)
+
+    assert observed == 60.0
+    assert rates["DID_1219"].hz == pytest.approx(15.0, rel=1e-3)
+    # The naive samples/wall-clock number this replaces.
+    assert len(reads) / observed == pytest.approx(12.2, abs=0.5)
+    assert rates["DID_1219"].max_gap_seconds == pytest.approx(11.0, abs=0.1)
+
+
+def test_capture_rate_surfaces_a_mid_capture_stall_the_median_would_hide() -> None:
+    """A channel that dies halfway keeps its rate but must not read as healthy."""
+    from collections import deque
+
+    from src.collection.obd_scheduler import CanObdLoopStats
+
+    period = 1.0 / 15.0
+    reads = [i * period for i in range(150)]  # 15 Hz for 10 s, then silence
+    stats = CanObdLoopStats(recent_reads={"DID_1219": deque(reads)})
+
+    rates, _ = stats.capture_rates(now=40.0, started_at=0.0)
+
+    assert rates["DID_1219"].hz == pytest.approx(15.0, rel=1e-3)
+    assert rates["DID_1219"].max_gap_seconds == pytest.approx(30.0, abs=0.2)
