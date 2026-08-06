@@ -346,9 +346,13 @@ dids:
     confidence: high
     plausible_min: -10.0
     plausible_max: 45.0
-    notes: Probably bank 2 (see above). 0x1163 mirrors this register exactly.
+    notes: >
+      One of the two measured banks; 0x1163 is the other. Probably bank 2 --
+      MEASURED minus 0x1163 is +0.51 deg with the cam static, the same sign as
+      UpRev's B2-B1 (+1.35 parked), though only ~40% of its magnitude and
+      measured on a different day. Do not let downstream code assume the bank.
   - did: 0x1163
-    name: ECM_INTAKE_CAM_ANGLE_MEASURED_MIRROR
+    name: ECM_INTAKE_CAM_ANGLE_MEASURED_B
     byte_start: 0
     byte_length: 1
     byte_order: big
@@ -359,9 +363,20 @@ dids:
     plausible_min: -10.0
     plausible_max: 45.0
     notes: >
-      Mirror of 0x1135 (identical at rest, differs only by read skew in
-      motion). Polling both buys nothing; kept recorded so a future sweep
-      does not re-derive it as a new signal.
+      The second measured bank -- NOT a mirror of 0x1135, corrected 2026-08-06.
+
+      The mirror call came from 8 parked sweep snapshots that showed the pair
+      "statistically identical at rest (-0.12 +/- 0.15)". That sample was
+      underpowered and the uncertainty was stated at the time, then treated as
+      settled anyway. The first all-DID capture reads both in the same rotation
+      for 12 minutes and separates them decisively: over 1011 aligned rows they
+      differ by +0.46 deg on average, and only 22% of samples are identical.
+
+      Read skew cannot explain it. Skew scales with how fast the signal is
+      moving and vanishes at rest, but with the cam STATIC (<1 deg/s, n=313)
+      the offset is +0.514 deg, t=12.5, p=2.3e-29 -- and it does not grow when
+      the cam is slewing (+0.658 deg at >20 deg/s, within noise of the static
+      figure). A persistent offset while nothing moves is two sensors.
 
   - did: 0x1139
     name: ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2

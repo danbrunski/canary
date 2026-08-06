@@ -74,6 +74,11 @@ TUNING_DID_PROFILE_NAME = "tuning-did"
 #: RPM and coolant are included despite being free on broadcast CAN: they cost
 #: ~1.5 ms each and give same-instant anchors inside the DID round, which is
 #: what makes the set self-aligning rather than needing a cross-source join.
+#:
+#: Both measured cam channels are polled because they are two banks, not one
+#: register mirrored — settled by the first capture using this profile, which
+#: read them in the same rotation for 12 minutes and found a +0.51 deg offset
+#: with the cam static (p=2.3e-29). Dropping either would lose a bank.
 TUNING_DID_CHANNELS: tuple[str, ...] = (
     "ECM_RPM",
     "ECM_AF_SENSOR_V_B1",
@@ -81,7 +86,7 @@ TUNING_DID_CHANNELS: tuple[str, ...] = (
     "ECM_INJECTOR_PW_B1",
     "ECM_INTAKE_CAM_ANGLE_MEASURED",
     "ECM_INTAKE_CAM_ANGLE_COMMANDED",
-    "ECM_INTAKE_CAM_ANGLE_MEASURED_MIRROR",
+    "ECM_INTAKE_CAM_ANGLE_MEASURED_B",
     "ECM_INTAKE_VVT_SOLENOID_DUTY",
     "ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2",
     "ECM_THROTTLE_POS_SENSOR_1",
