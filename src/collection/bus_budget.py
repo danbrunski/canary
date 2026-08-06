@@ -171,6 +171,28 @@ def snapshot(*, now: float | None = None) -> dict[str, Any]:
         }
 
 
+def restore(snapshot_state: dict[str, Any], *, now: float | None = None) -> None:
+    """Restore a state previously returned by :func:`snapshot`.
+
+    Capture control temporarily owns the override.  Restoring only the numeric
+    value loses an operator-set source and, more importantly, turns a bounded
+    override into one with a fresh or missing TTL.  The snapshot's remaining
+    duration is intentionally reapplied rather than its original duration.
+    """
+    rps = snapshot_state.get("override_requests_per_second")
+    source = str(snapshot_state.get("source") or "control")
+    remaining = snapshot_state.get("ttl_remaining_seconds")
+    if rps is None:
+        set_override(None, source=source, ttl_seconds=None, now=now)
+        return
+    set_override(
+        float(rps),
+        source=source,
+        ttl_seconds=None if remaining is None else max(0.0, float(remaining)),
+        now=now,
+    )
+
+
 __all__ = [
     "DEFAULT_TTL_SECONDS",
     "MAX_BUDGET_REQUESTS_PER_SECOND",
@@ -179,6 +201,7 @@ __all__ = [
     "check_expiry",
     "effective",
     "override",
+    "restore",
     "reset",
     "set_override",
     "snapshot",

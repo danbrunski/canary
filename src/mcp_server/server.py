@@ -1034,7 +1034,8 @@ def _register_write_tools(
         the budget alone does nothing (measured — 8 to 30 req/s moved the
         achieved rate not at all, because per-channel demand was capped),
         and raising demand alone just queues. The response reports
-        `achieved_hz_60s` sampled after `verify_seconds`, so a shortfall
+        capture-scoped `achieved_hz` plus its `observed_seconds` sampled after
+        `verify_seconds`, so a shortfall
         against `rate_hz` is visible immediately — that means demand exceeded
         the budget, which is throttling working, not a fault. `rate_hz`
         overrides the profile's own target for this capture only."""
@@ -1051,7 +1052,7 @@ def _register_write_tools(
 
     @mcp.tool()
     async def disarm_tuning_capture(
-        reason: str | None = None, clear_bus_budget: bool = True
+        reason: str | None = None, clear_bus_budget: bool = False
     ) -> dict[str, Any]:
         """Stop the active capture profile and restore the bus budget.
 

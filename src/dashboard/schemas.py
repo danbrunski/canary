@@ -51,6 +51,13 @@ class CaptureProfileStartRequest(_ControlRequest):
     #: The saved profile is untouched, so a one-off fast pull cannot silently
     #: become the profile's new normal.
     rate_hz: float | None = Field(default=None, gt=0, le=MAX_TARGET_RATE_HZ)
+    #: Applied as part of the same capture transition, never by a follow-up
+    #: request from the MCP client.  ``None`` preserves the profile's own
+    #: override (or the existing operator override when it has none).
+    bus_budget_requests_per_second: float | None = Field(default=None, ge=2.0, le=200.0)
+    #: A bounded capture override is normally a backstop against a forgotten
+    #: stop.  Explicit null intentionally keeps it until capture teardown.
+    bus_budget_ttl_seconds: float | None = Field(default=None, gt=0.0, le=21600.0)
 
 
 class CaptureProfileSaveRequest(_ControlRequest):

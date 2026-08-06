@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -25,6 +26,7 @@ _profile = CaptureProfile(
     corpus_eligible=True,
 )
 _started_at: str | None = None
+_started_monotonic: float | None = None
 _session_dir: str | None = None
 _source = "default"
 _did_channels: dict[str, str] = {}
@@ -39,10 +41,11 @@ def configure_default(profile: CaptureProfile) -> None:
     """Initialize process state; always called as a non-persistent reset."""
     if profile.name != "default":
         raise ValueError("configure_default requires the default capture profile")
-    global _configured, _profile, _started_at, _session_dir, _source, _paused
+    global _configured, _profile, _started_at, _started_monotonic, _session_dir, _source, _paused
     with _lock:
         _profile = profile
         _started_at = None
+        _started_monotonic = None
         _session_dir = None
         _source = "startup"
         _configured = True
@@ -71,12 +74,13 @@ def activate(
     session_dir: str | None = None,
     source: str = "control",
 ) -> CaptureProfile:
-    global _profile, _started_at, _session_dir, _source, _paused
+    global _profile, _started_at, _started_monotonic, _session_dir, _source, _paused
     with _lock:
         previous = _profile
         _profile = profile
         _paused = False
         _started_at = None if profile.name == "default" else datetime.now(UTC).isoformat()
+        _started_monotonic = None if profile.name == "default" else time.monotonic()
         _session_dir = session_dir
         _source = source
     log.warning(
@@ -97,6 +101,16 @@ def is_active() -> bool:
     """Legacy meaning: a non-default focused profile is active."""
     with _lock:
         return _profile.name != "default"
+
+
+def capture_started_monotonic() -> float | None:
+    """Monotonic start of the active bounded capture, if any.
+
+    Scheduler reads use monotonic time, so this is the epoch that can exclude
+    pre-arm samples without a wall-clock conversion or directory-name guess.
+    """
+    with _lock:
+        return _started_monotonic
 
 
 def channels() -> frozenset[str]:
@@ -289,6 +303,7 @@ __all__ = [
     "active_profile",
     "broadcast_decode_enabled",
     "channels",
+    "capture_started_monotonic",
     "did_continuous_enabled",
     "configure_default",
     "configure_did_aliases",

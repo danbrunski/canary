@@ -499,3 +499,15 @@ def test_metrics_payload_labels_the_unfiltered_request_count() -> None:
     ).to_dict()
     assert payload["active_requests_unfiltered"] == 77
     assert payload["achieved_hz_60s"] == {"RPM": 8.3}
+
+
+def test_capture_rate_uses_capture_epoch_and_observed_interval() -> None:
+    from collections import deque
+
+    from src.collection.can_obd_collector import CanObdLoopStats
+
+    stats = CanObdLoopStats(recent_reads={"RPM": deque([90.0, 110.0, 115.0])})
+    rates, observed = stats.achieved_hz_since(now=120.0, started_at=100.0)
+
+    assert observed == 20.0
+    assert rates == {"RPM": 0.1}

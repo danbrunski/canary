@@ -398,6 +398,26 @@ class CanObdLoopStats:
                 out[channel] = round(len(window) / ACHIEVED_HZ_WINDOW, 2)
         return out
 
+    def achieved_hz_since(self, now: float, started_at: float) -> tuple[dict[str, float], float]:
+        """Per-channel rate since capture arm, capped at the recent-rate window.
+
+        The first 20 seconds of a capture previously divided its samples by
+        60, and pre-arm samples could enter the result.  This keeps the
+        daemon-wide trailing metric separate while reporting the actual
+        capture observation interval and excluding older reads.
+        """
+        observed_seconds = min(ACHIEVED_HZ_WINDOW, max(0.0, now - started_at))
+        if observed_seconds <= 0:
+            return {}, 0.0
+        out: dict[str, float] = {}
+        for channel, window in self.recent_reads.items():
+            while window and window[0] < now - ACHIEVED_HZ_WINDOW:
+                window.popleft()
+            count = sum(read_at >= started_at for read_at in window)
+            if count:
+                out[channel] = round(count / observed_seconds, 2)
+        return out, round(observed_seconds, 3)
+
 
 @dataclass(frozen=True)
 class _PollRequest:
@@ -672,6 +692,10 @@ class ObdSchedulerMetrics:
     #: diluted by daemon uptime and stayed near its old value through a real
     #: rate change on 2026-08-04.
     achieved_hz_60s: dict[str, float] = field(default_factory=dict)
+    #: Capture-only rate.  Empty when normal collection is active.
+    achieved_hz_capture: dict[str, float] = field(default_factory=dict)
+    #: Exact denominator for ``achieved_hz_capture`` (up to 60 s).
+    capture_observed_seconds: float | None = None
     #: Mode-22 session-window state, ``None`` when no session gates DIDs.
     did_profile: dict[str, Any] | None = None
     #: Multi-PID batching (roadmap/multi-pid-polling.md). ``None`` when
@@ -688,6 +712,8 @@ class ObdSchedulerMetrics:
             "active_requests": self.active_requests,
             "active_requests_unfiltered": self.active_requests,
             "achieved_hz_60s": self.achieved_hz_60s,
+            "achieved_hz_capture": self.achieved_hz_capture,
+            "capture_observed_seconds": self.capture_observed_seconds,
             "backed_off_requests": self.backed_off_requests,
             "requests_sent": self.requests_sent,
             "readings_emitted": self.readings_emitted,
@@ -1280,6 +1306,14 @@ def _scheduler_metrics(
             }
         )
 
+    from src.collection import tuning_profile
+
+    capture_started_at = tuning_profile.capture_started_monotonic()
+    capture_hz, capture_observed_seconds = (
+        stats.achieved_hz_since(now, capture_started_at)
+        if capture_started_at is not None
+        else ({}, None)
+    )
     return ObdSchedulerMetrics(
         configured_poll_rate_hz=float(spec.poll_rate_hz),
         # The *effective* rate, not the configured one. The collector paces at
@@ -1296,6 +1330,8 @@ def _scheduler_metrics(
         requests_sent=stats.requests_sent,
         readings_emitted=stats.readings_emitted,
         achieved_hz_60s=stats.achieved_hz(now),
+        achieved_hz_capture=capture_hz,
+        capture_observed_seconds=capture_observed_seconds,
         request_timeouts=stats.request_timeouts,
         negative_responses=stats.negative_responses,
         bus_errors=stats.bus_errors,

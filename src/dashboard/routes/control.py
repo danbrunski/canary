@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -181,7 +183,8 @@ def register_control_routes(
 
     #: Bus-budget override in force before a capture raised it, so stopping
     #: restores the operator's setting instead of clearing it outright.
-    budget_before_capture: float | None = None
+    budget_before_capture: dict[str, Any] | None = None
+    capture_transition_lock = asyncio.Lock()
 
     profile_store = capture_profile_store or CaptureProfileStore(
         config.daemon.capture_profiles,
@@ -614,42 +617,60 @@ def register_control_routes(
     ) -> dict[str, Any]:
         if storage_writer is None:
             raise HTTPException(status_code=503, detail="capture storage writer is not available")
-        if tuning_profile.is_active():
-            raise HTTPException(status_code=409, detail="a capture profile is already active")
-        profile = profile_store.load().by_name(request.profile)
-        if profile is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"capture profile not found: {request.profile}",
-            )
-        if profile.name == "default":
-            raise HTTPException(status_code=409, detail="default collection is already active")
-        if request.rate_hz is not None:
-            # Per-capture override. The saved catalog entry is untouched, so a
-            # one-off fast pull cannot silently become the profile's normal.
-            profile = profile.model_copy(update={"target_rate_hz": request.rate_hz})
-        capture_id = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%S")
-        previous_budget = bus_budget.override()
-        nonlocal budget_before_capture
-        try:
-            await storage_writer.enter_capture_mode(profile, capture_id, request.tune_revision)
-            tuning_profile.activate(profile, session_dir=str(storage_writer.paths.root))
-            budget_before_capture = previous_budget
-            if profile.bus_budget_override is not None:
-                # A profile without its own override leaves whatever the
-                # operator set standing, rather than silently clearing it.
-                bus_budget.set_override(
-                    profile.bus_budget_override,
-                    source=f"capture:{profile.name}",
-                    ttl_seconds=None,
+        async with capture_transition_lock:
+            if tuning_profile.is_active():
+                raise HTTPException(status_code=409, detail="a capture profile is already active")
+            profile = profile_store.load().by_name(request.profile)
+            if profile is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"capture profile not found: {request.profile}",
                 )
-        except Exception as exc:
-            bus_budget.set_override(previous_budget, source="capture-rollback", ttl_seconds=None)
-            default_profile = profile_store.load().by_name("default")
-            assert default_profile is not None
-            tuning_profile.activate(default_profile, source="rollback")
-            raise HTTPException(status_code=500, detail=f"failed to start capture: {exc}") from exc
-        payload = {"capture_profile": tuning_profile.snapshot()}
+            if profile.name == "default":
+                raise HTTPException(status_code=409, detail="default collection is already active")
+            if request.rate_hz is not None:
+                profile = profile.model_copy(update={"target_rate_hz": request.rate_hz})
+            capture_id = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%S")
+            requested_budget = request.bus_budget_requests_per_second
+            if requested_budget is None:
+                requested_budget = profile.bus_budget_override
+            previous_budget = bus_budget.snapshot()
+            entered = False
+            nonlocal budget_before_capture
+            try:
+                await storage_writer.enter_capture_mode(profile, capture_id, request.tune_revision)
+                entered = True
+                if requested_budget is not None:
+                    bus_budget.set_override(
+                        requested_budget,
+                        source=f"capture:{profile.name}",
+                        ttl_seconds=request.bus_budget_ttl_seconds,
+                    )
+                tuning_profile.activate(profile, session_dir=str(storage_writer.paths.root))
+                budget_before_capture = (
+                    {**previous_budget, "_capture_started_monotonic": time.monotonic()}
+                    if requested_budget is not None
+                    else None
+                )
+            except Exception as exc:
+                if entered:
+                    await storage_writer.exit_capture_mode()
+                bus_budget.restore(previous_budget)
+                default_profile = profile_store.load().by_name("default")
+                assert default_profile is not None
+                tuning_profile.activate(
+                    default_profile,
+                    session_dir=str(storage_writer.paths.root),
+                    source="rollback",
+                )
+                raise HTTPException(
+                    status_code=500, detail=f"failed to start capture: {exc}"
+                ) from exc
+            payload = {
+                "capture_profile": tuning_profile.snapshot(),
+                "output_session_dir": str(storage_writer.paths.root),
+                "bus_budget": bus_budget.snapshot(),
+            }
         publish_control_event("capture_profile.start", "ok", payload)
         return payload
 
@@ -681,16 +702,32 @@ def register_control_routes(
             raise HTTPException(status_code=503, detail="capture storage writer is not available")
         if not tuning_profile.is_active():
             raise HTTPException(status_code=409, detail="default collection is already active")
-        nonlocal budget_before_capture
-        await storage_writer.exit_capture_mode()
-        default_profile = profile_store.load().by_name("default")
-        assert default_profile is not None
-        tuning_profile.activate(default_profile, session_dir=str(storage_writer.paths.root))
-        # Restore rather than clear: `None` clears, and a value the operator
-        # set by hand comes back under the normal auto-revert TTL.
-        bus_budget.set_override(budget_before_capture, source="capture:stop")
-        budget_before_capture = None
-        payload = {"capture_profile": tuning_profile.snapshot()}
+        async with capture_transition_lock:
+            if not tuning_profile.is_active():
+                raise HTTPException(status_code=409, detail="default collection is already active")
+            nonlocal budget_before_capture
+            ended_capture_dir = str(storage_writer.paths.root)
+            await storage_writer.exit_capture_mode()
+            default_profile = profile_store.load().by_name("default")
+            assert default_profile is not None
+            tuning_profile.activate(default_profile, session_dir=str(storage_writer.paths.root))
+            if budget_before_capture is not None:
+                restored_budget = dict(budget_before_capture)
+                remaining = restored_budget.get("ttl_remaining_seconds")
+                started_at = restored_budget.pop("_capture_started_monotonic", None)
+                if remaining is not None and started_at is not None:
+                    restored_budget["ttl_remaining_seconds"] = max(
+                        0.0, float(remaining) - (time.monotonic() - float(started_at))
+                    )
+                    if restored_budget["ttl_remaining_seconds"] == 0.0:
+                        restored_budget["override_requests_per_second"] = None
+                bus_budget.restore(restored_budget)
+            budget_before_capture = None
+            payload = {
+                "capture_profile": tuning_profile.snapshot(),
+                "ended_capture_dir": ended_capture_dir,
+                "bus_budget": bus_budget.snapshot(),
+            }
         publish_control_event("capture_profile.stop", "ok", payload)
         return payload
 

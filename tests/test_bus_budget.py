@@ -93,6 +93,19 @@ def test_snapshot_reports_state_and_remaining_ttl() -> None:
     assert snap["max_requests_per_second"] == bus_budget.MAX_BUDGET_REQUESTS_PER_SECOND
 
 
+def test_restore_preserves_source_and_remaining_ttl() -> None:
+    bus_budget.set_override(120.0, source="operator", ttl_seconds=60.0, now=100.0)
+    saved = bus_budget.snapshot(now=115.0)
+    bus_budget.set_override(40.0, source="capture", ttl_seconds=None, now=115.0)
+
+    bus_budget.restore(saved, now=115.0)
+
+    restored = bus_budget.snapshot(now=115.0)
+    assert restored["override_requests_per_second"] == 120.0
+    assert restored["source"] == "operator"
+    assert restored["ttl_remaining_seconds"] == 45.0
+
+
 def test_collector_reads_the_override_live_not_at_startup() -> None:
     """Regression guard for the wiring bug this feature could easily have had.
 

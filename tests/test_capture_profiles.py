@@ -340,6 +340,54 @@ def test_capture_with_its_own_budget_restores_the_previous_one_on_stop(tmp_path:
     assert bus_budget.override() == 9.0
 
 
+def test_capture_route_applies_budget_atomically_and_returns_ended_path(tmp_path: Path) -> None:
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML).model_copy(
+        update={
+            "collection": CanaryConfig.from_yaml(EXAMPLE_YAML).collection.model_copy(
+                update={"storage_path": tmp_path / "sessions"}
+            )
+        }
+    )
+    store = _store(tmp_path, config)
+    writer = AsyncParquetTelemetryWriter(
+        ParquetTelemetryWriter(
+            tmp_path / "sessions",
+            session_started_at=datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+        )
+    )
+    client = TestClient(
+        create_app(
+            config,
+            anomalies_dir=tmp_path / "anomalies",
+            control_token="secret",
+            storage_writer=writer,
+            capture_profile_store=store,
+        )
+    )
+    headers = {"Authorization": "Bearer secret"}
+    bus_budget.set_override(12.0, source="operator", ttl_seconds=None)
+
+    started = client.post(
+        "/control/capture",
+        headers=headers,
+        json={
+            "profile": "fuel-map",
+            "bus_budget_requests_per_second": 30.0,
+            "bus_budget_ttl_seconds": 300.0,
+        },
+    )
+    assert started.status_code == 200
+    assert started.json()["bus_budget"]["override_requests_per_second"] == 30.0
+    assert started.json()["output_session_dir"].endswith(writer.paths.root.name)
+
+    ended_path = writer.paths.root
+    stopped = client.post("/control/capture/stop", headers=headers)
+    assert stopped.status_code == 200
+    assert stopped.json()["ended_capture_dir"] == str(ended_path)
+    assert bus_budget.snapshot()["source"] == "operator"
+    assert bus_budget.override() == 12.0
+
+
 def test_active_profile_cannot_be_deleted_via_a_case_variant(tmp_path: Path) -> None:
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     config = config.model_copy(
