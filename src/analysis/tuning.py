@@ -29,15 +29,16 @@ See ``docs/roadmap/tuning-analysis-toolkit.md`` Phase 2.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import numpy as np
 import pandas as pd
 
 from src.analysis.afr import AfrCalibration
-from src.analysis.channels import read_aligned
+from src.analysis.channels import read_aligned, read_channels
 from src.analysis.noise_floor import NoiseFloor
 from src.analysis.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 
@@ -128,6 +129,81 @@ def _assert_axis_allowed(axis: str, *, unsafe: bool) -> None:
         )
 
 
+def _refuse_missing_inputs(
+    session: Path | pd.DataFrame,
+    specs: list[str],
+    *,
+    bindings_path: Path,
+    dids_path: Path,
+    calibration: AfrCalibration | None = None,
+    afr_stoich: float = 14.7,
+) -> NoReturn:
+    """Say *why* there is nothing to analyse instead of reporting zero bands.
+
+    An empty aligned frame has two causes that demand opposite responses, and
+    reporting ``started: 0`` for both made them indistinguishable:
+
+    * the gates filtered everything — a real answer about the drive, meaning
+      go and capture the regime you care about;
+    * the inputs were never captured — not an answer at all, and no amount of
+      driving will change it.
+
+    Measured 2026-08-06: a clean 25-minute all-DID capture, 18k samples per
+    channel at 14.93 Hz, returned ``started: 0``. That reads as "the gates
+    rejected everything". In fact the ``tuning-did`` profile sets
+    ``mode01_enabled: false`` — it must, because Mode 01 and Mode 22 are
+    mutually exclusive on this ECM — and commanded AFR exists only as Mode 01
+    PID 0x44. The question was unanswerable before the truck moved.
+    """
+    missing: list[str] = []
+    for spec in specs:
+        try:
+            rows = read_channels(
+                session,
+                [spec],
+                bindings_path=bindings_path,
+                dids_path=dids_path,
+                calibration=calibration,
+                afr_stoich=afr_stoich,
+            )
+        except Exception as exc:  # unresolvable spec is itself a missing input
+            missing.append(f"{spec} ({type(exc).__name__}: {exc})")
+            continue
+        if rows.empty:
+            missing.append(spec)
+
+    detail = ""
+    if isinstance(session, Path):
+        manifest = session / "capture_profile.json"
+        if manifest.exists():
+            try:
+                profile = json.loads(manifest.read_text())
+            except ValueError:
+                profile = {}
+            snapshot = profile.get("profile_snapshot") or profile
+            if snapshot.get("mode01_enabled") is False:
+                detail = (
+                    f" This session was captured with profile "
+                    f"{profile.get('profile')!r}, which disables Mode 01 — and Mode 01 "
+                    "cannot run alongside Mode 22 on this ECM. Commanded AFR (PID 0x44) "
+                    "is therefore absent by construction, not by chance."
+                )
+
+    raise GateError(
+        "this session cannot answer delivery error — its inputs were never "
+        "captured, which is not the same as the gates rejecting every sample. "
+        + (
+            "Empty in this session: " + ", ".join(missing)
+            if missing
+            else "No two required channels overlapped in time."
+        )
+        + detail
+        + " Use a Mode 01 capture for commanded-vs-measured fuelling, or feed a"
+        " semantic frame to delivery_error_from_semantic_frame() once a Mode 22"
+        " provider for commanded AFR exists."
+    )
+
+
 def delivery_error(
     session: Path | pd.DataFrame,
     *,
@@ -173,6 +249,15 @@ def delivery_error(
         bindings_path=bindings_path,
         dids_path=dids_path,
     )
+    if frame.empty:
+        _refuse_missing_inputs(
+            session,
+            specs,
+            bindings_path=bindings_path,
+            dids_path=dids_path,
+            calibration=calibration,
+            afr_stoich=afr_stoich,
+        )
     measured = frame[measured_spec].astype(float)
     semantic = pd.DataFrame(
         {

@@ -172,6 +172,51 @@ captures by design (`preprocessing.loader.discover_sessions`); "which session
 is live?" must include them (`control.sessions.latest_session`). Conflating
 them is what caused the bug above.
 
+**Never compare two signals by their aggregates.** This is the single most
+expensive mistake in the project's history — six retracted findings across
+three months, all the same shape:
+
+- `ECM_CALC_LOAD_B` was bound to a byte because its per-window *mean* matched
+  another byte's mean. It is the low byte of a 16-bit rpm counter, which
+  averages near mid-scale whatever the engine does, so it matched anything
+  else near mid-scale. Removed 2026-08-06.
+- `achieved_hz_capture` reported a rate as *count ÷ wall-clock*. A capture
+  polling at a solid 14.93 Hz read as 11.25 Hz because the window opened late.
+- The Mode 22 "session cycling" diagnosis read *cumulative* counters as if
+  they were scoped to the capture. Nothing was cycling.
+- The "K responds 1:1" fuel result averaged across rpm bands whose
+  *composition* differed between the two sides.
+
+Use `src.analysis.compare.compare_channels` — the only sanctioned comparison.
+It takes specs and a session and does the pairing itself, so a pre-aggregated
+frame cannot be handed to it. It refuses too-few-pairs and
+barely-moving-signal, the two cases where an aggregate yields a confident
+number and same-instant values yield nothing. `n_pairs` counts *pairs*, never
+either input's length. Ranking by r² is not enough either: over one drive
+nearly every engine signal correlates with rpm, so read `scale_verdict`, which
+separates *unstable* from *unresolvable* rather than condemning slow signals.
+
+**Reproduce a known answer before trusting a novel one.** Every retraction
+above looked convincing in isolation and none was checked against a case with
+a known answer first. `tests/test_analysis_ground_truth.py` runs the real
+chain over a committed slice of a real drive and asserts it still lands where
+independent instruments already agree; expectations are data
+(`tests/fixtures/ground_truth/expectations.yaml`), so recording a new fact is
+editing YAML. The strongest check there is nearly free: a broadcast binding
+and the Mode 01 PID for the same quantity must agree **1:1** once both are in
+engineering units — that one assertion catches a wrong byte offset,
+endianness, scale, offset, or unit without anyone stating the right answer.
+Note its measured blind spot: slope is a ratio, so a +4% scale error shows as
+only −2.9% slope error, which is why exact decode parameters are pinned
+separately in `catalog_pins`.
+
+**An empty result must say which kind of empty it is.** "The gates filtered
+everything" is an answer about the drive; "the inputs were never captured" is
+not an answer at all, and they demand opposite responses. `delivery_error`
+reported `started: 0` for a 25-minute all-DID capture with 18k samples per
+channel — the `tuning-did` profile disables Mode 01, so commanded AFR was
+absent by construction. It now refuses and names the cause.
+
 ## Roadmap docs & task truth
 
 Planned work lives in `docs/roadmap/` as checklist docs; **task-level

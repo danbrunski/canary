@@ -81,7 +81,14 @@ def build_tuning_frame(
             }
             continue
         try:
-            series = read_channels(session_dir, [provider.spec], acquired_time=True)
+            # Pass the calibration: derived specs such as `obd:COMMANDED_AFR`
+            # need it to resolve at all, and without it an absent role reports
+            # "needs an AFR calibration" — pointing at a config problem when
+            # the real cause is that the capture profile disabled Mode 01. A
+            # misleading reason on an unavailable role is worse than none.
+            series = read_channels(
+                session_dir, [provider.spec], acquired_time=True, calibration=calibration
+            )
         except ChannelSpecError as exc:
             capability[role] = {"available": False, "provider": provider.spec, "reason": str(exc)}
             continue

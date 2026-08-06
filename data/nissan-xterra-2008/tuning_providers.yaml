@@ -7,7 +7,23 @@ providers:
   - {role: injector_pw_b1, spec: 'did:ECM_INJECTOR_PW_B1'}
   - {role: coolant_temp, spec: 'did:ECM_COOLANT_TEMP'}
   # The 2026-08-05 all-DID capture confirms a command plus two distinct
-  # measured positions. Their exact physical bank mapping remains unknown.
+  # measured positions. Their exact physical bank mapping remains unknown, and
+  # the 2026-08-06 drive weakened the evidence that had suggested one: the
+  # A-vs-B offset was +0.16 degCA under load against +0.514 degCA measured
+  # static, both stable fits. Treat the mapping as open.
   - {role: cam_command, spec: 'did:ECM_INTAKE_CAM_ANGLE_COMMANDED'}
   - {role: cam_measured, spec: 'did:ECM_INTAKE_CAM_ANGLE_MEASURED'}
   - {role: cam_measured_b, spec: 'did:ECM_INTAKE_CAM_ANGLE_MEASURED_B'}
+  # Commanded AFR has NO Mode 22 provider, and that is the single biggest gap
+  # in the all-DID workflow. It is declared here pointing at the Mode 01 PID so
+  # the capability report *names* it as unavailable on a tuning capture. Left
+  # out, build_tuning_frame reported nine roles all available on the 2026-08-06
+  # capture — a clean all-green summary of a session that could not answer the
+  # fuel question at all, because delivery error needs a commanded target and
+  # Mode 01 cannot run alongside Mode 22 on this ECM.
+  #
+  # A missing role must be visible as missing. Promote this to a `did:` spec if
+  # a Mode 22 target-AFR identifier is ever bound; the search signature is a
+  # value that holds at stoich through closed-loop cruise and drops during the
+  # WOT windows.
+  - {role: commanded_afr, spec: 'obd:COMMANDED_AFR'}
