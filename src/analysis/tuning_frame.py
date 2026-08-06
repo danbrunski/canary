@@ -112,6 +112,23 @@ def build_tuning_frame(
     )
 
 
+def section_capabilities(
+    capability: dict[str, dict[str, str | bool | None]],
+) -> dict[str, dict[str, object]]:
+    """State the exact evidence available for each tuning conclusion."""
+    required: dict[str, tuple[Role, ...]] = {
+        "pull_inventory": ("rpm", "operator_demand"),
+        "measured_afr": ("rpm", "measured_afr_b1"),
+        "delivery_error": ("rpm", "measured_afr_b1", "injector_pw_b1"),
+        "cam_tracking": ("cam_command", "cam_measured"),
+    }
+    out: dict[str, dict[str, object]] = {}
+    for section, roles in required.items():
+        missing = [role for role in roles if not capability.get(role, {}).get("available", False)]
+        out[section] = {"available": not missing, "missing_roles": missing}
+    return out
+
+
 __all__ = [
     "Provider",
     "ProviderRegistry",
@@ -119,4 +136,5 @@ __all__ = [
     "TuningFrame",
     "build_tuning_frame",
     "load_provider_registry",
+    "section_capabilities",
 ]

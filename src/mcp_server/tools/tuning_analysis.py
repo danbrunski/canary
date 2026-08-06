@@ -19,6 +19,7 @@ from src.analysis.afr import load_afr_calibration
 from src.analysis.noise_floor import load_noise_floor
 from src.analysis.tune_revisions import load_tune_revisions
 from src.analysis.tuning import GateError, compare_sessions, delivery_error
+from src.analysis.tuning_frame import build_tuning_frame, section_capabilities
 from src.config import CanaryConfig
 from src.control.sessions import resolve_session
 from src.profiles import resolve_profile_for_tooling, scope_config
@@ -27,6 +28,19 @@ from src.profiles import resolve_profile_for_tooling, scope_config
 def _scoped(config_path: Path, profile: str | None) -> CanaryConfig:
     config = CanaryConfig.from_yaml(config_path)
     return scope_config(config, resolve_profile_for_tooling(config, profile))
+
+
+def _capability_payload(session_dir: Path, scoped: CanaryConfig) -> dict[str, Any] | None:
+    providers_path = scoped.daemon.afr_calibration.parent / "tuning_providers.yaml"
+    if not providers_path.exists():
+        return None
+    calibration = (
+        load_afr_calibration(scoped.daemon.afr_calibration)
+        if scoped.daemon.afr_calibration.exists()
+        else None
+    )
+    frame = build_tuning_frame(session_dir, providers_path=providers_path, calibration=calibration)
+    return {"roles": frame.capability, "sections": section_capabilities(frame.capability)}
 
 
 def get_delivery_error(
@@ -81,7 +95,11 @@ def get_delivery_error(
         )
     except (GateError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
-    return {"ok": True, **result.as_dict()}
+    return {
+        "ok": True,
+        "capabilities": _capability_payload(session_dir, scoped),
+        **result.as_dict(),
+    }
 
 
 def compare_tuning_sessions(
@@ -139,7 +157,7 @@ def compare_tuning_sessions(
         if sd is not None
         else "unavailable"
     )
-    return {"ok": True, **payload}
+    return {"ok": True, "capabilities": _capability_payload(a, scoped), **payload}
 
 
 __all__ = ["compare_tuning_sessions", "get_delivery_error"]

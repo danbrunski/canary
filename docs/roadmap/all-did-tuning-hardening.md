@@ -178,7 +178,7 @@ implementer to revisit:
   and the capture manifest. The output records the selected provider for every
   role and why a higher-priority provider was unavailable.
 
-- [ ] **2.4 — Section-level capability gates.** Define required roles per
+- [x] **2.4 — Section-level capability gates.** Define required roles per
   conclusion:
 
   - pull inventory: RPM + physical operator demand;
@@ -458,7 +458,7 @@ implementer to revisit:
   the same active session contract. Tests cover normal, capture, tuning,
   replay, freshly rotated/unflushed, and post-disarm states.
 
-- [ ] **8.3 — Semantic MCP/CLI responses.** Expose the tuning-frame capability
+- [x] **8.3 — Semantic MCP/CLI responses.** Expose the tuning-frame capability
   report, role provenance, capture manifest identity, and partial-section
   refusals. `measured_spec` may remain as an expert override but cannot bypass
   transforms or unit validation.

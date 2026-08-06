@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.analysis.afr import load_afr_calibration
-from src.analysis.tuning_frame import build_tuning_frame
+from src.analysis.tuning_frame import build_tuning_frame, section_capabilities
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
@@ -45,3 +45,6 @@ def test_all_did_frame_uses_semantic_roles_and_marks_candidates_unavailable(tmp_
     assert frame.values["rpm"].iloc[0] == pytest.approx(2500.0)
     assert frame.values["measured_afr_b1"].iloc[0] == pytest.approx(14.83625)
     assert frame.capability["cam_command"]["available"] is False
+    sections = section_capabilities(frame.capability)
+    assert sections["measured_afr"]["available"] is True
+    assert sections["cam_tracking"]["missing_roles"] == ["cam_command", "cam_measured"]

@@ -32,6 +32,7 @@ from src.analysis.tune_revisions import (
     session_started_at,
 )
 from src.analysis.tuning import DEFAULT_RPM_BANDS, GateError, delivery_error
+from src.analysis.tuning_frame import build_tuning_frame, section_capabilities
 from src.config import CanaryConfig
 from src.control.capture_manifest import read_capture_manifest
 
@@ -58,6 +59,7 @@ class TuningDigest:
     #: revision — the "did the flash do what I meant" answer. Requires both
     #: to match: across a flash boundary the delta is the flash, not drift.
     previous: dict[str, Any] | None = None
+    capabilities: dict[str, Any] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -72,6 +74,7 @@ class TuningDigest:
             "delivery": self.delivery,
             "cam": self.cam,
             "previous": self.previous,
+            "capabilities": self.capabilities,
             "notes": list(self.notes),
         }
 
@@ -241,6 +244,18 @@ def compute_tuning_digest(
 
     notes: list[str] = []
     profile_data = config.daemon.afr_calibration.parent
+    calibration_path = config.daemon.afr_calibration
+    calibration = load_afr_calibration(calibration_path) if calibration_path.exists() else None
+    providers_path = profile_data / "tuning_providers.yaml"
+    capabilities: dict[str, Any] = {}
+    if providers_path.exists():
+        semantic = build_tuning_frame(
+            session_dir, providers_path=providers_path, calibration=calibration
+        )
+        capabilities = {
+            "roles": semantic.capability,
+            "sections": section_capabilities(semantic.capability),
+        }
     revisions = load_tune_revisions(profile_data / "tune_revisions.yaml")
     revision, revision_source, revision_conflict = resolve_session_revision(session_dir, revisions)
     if revision_conflict:
@@ -268,12 +283,11 @@ def compute_tuning_digest(
     )
 
     delivery: dict[str, Any] | None = None
-    calibration_path = config.daemon.afr_calibration
-    if calibration_path.exists():
+    if calibration is not None:
         try:
             result = delivery_error(
                 session_dir,
-                calibration=load_afr_calibration(calibration_path),
+                calibration=calibration,
                 revisions=revisions,
             )
             delivery = result.as_dict() if result.n else None
@@ -300,11 +314,11 @@ def compute_tuning_digest(
     )
     if earlier is not None:
         previous = {"session_id": earlier.name}
-        if delivery is not None and calibration_path.exists():
+        if delivery is not None and calibration is not None:
             try:
                 before = delivery_error(
                     earlier,
-                    calibration=load_afr_calibration(calibration_path),
+                    calibration=calibration,
                     revisions=revisions,
                 )
             except (GateError, ValueError):
@@ -332,6 +346,7 @@ def compute_tuning_digest(
         delivery=delivery,
         cam=_cam_tracking(session_dir),
         previous=previous,
+        capabilities=capabilities,
         notes=[*notes, f"tune revision source: {revision_source}"],
     )
 
