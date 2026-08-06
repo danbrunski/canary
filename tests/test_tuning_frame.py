@@ -12,13 +12,16 @@ from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
 
-def test_all_did_frame_uses_semantic_roles_and_marks_candidates_unavailable(tmp_path: Path) -> None:
+def test_all_did_frame_uses_confirmed_semantic_roles(tmp_path: Path) -> None:
     session = tmp_path / "_capture-tuning-did-2026-08-05T120000"
     timestamp = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
     write_records_to_parquet(
         [
             TelemetryRecord(timestamp=timestamp, source="obd", channel="DID_1219", value="09c4"),
             TelemetryRecord(timestamp=timestamp, source="obd", channel="DID_1225", value="01b8"),
+            TelemetryRecord(timestamp=timestamp, source="obd", channel="DID_113A", value="80"),
+            TelemetryRecord(timestamp=timestamp, source="obd", channel="DID_1135", value="81"),
+            TelemetryRecord(timestamp=timestamp, source="obd", channel="DID_1163", value="82"),
         ],
         session,
     )
@@ -44,7 +47,9 @@ def test_all_did_frame_uses_semantic_roles_and_marks_candidates_unavailable(tmp_
     assert frame.capability["rpm"]["available"] is True
     assert frame.values["rpm"].iloc[0] == pytest.approx(2500.0)
     assert frame.values["measured_afr_b1"].iloc[0] == pytest.approx(14.83625)
-    assert frame.capability["cam_command"]["available"] is False
+    assert frame.capability["cam_command"]["available"] is True
+    assert frame.capability["cam_measured"]["available"] is True
+    assert frame.capability["cam_measured_b"]["available"] is True
     sections = section_capabilities(frame.capability)
     assert sections["measured_afr"]["available"] is True
-    assert sections["cam_tracking"]["missing_roles"] == ["cam_command", "cam_measured"]
+    assert sections["cam_tracking"]["available"] is True

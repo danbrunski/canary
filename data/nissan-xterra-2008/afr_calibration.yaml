@@ -60,4 +60,49 @@ voltage_transfer:
     - {voltage: 4.535, afr: 42.000}
     - {voltage: 4.860, afr: 57.940}
     - {voltage: 5.065, afr: 60.000}
-target_maps: []
+target_maps:
+  - revision: ZS44A-k106
+    load_axis_name: base_fuel_schedule
+    load_axis_unit: ms
+    # Raw RPM axis 18 20 28 38 48 50 58 68, decoded as count x 50 rpm.
+    rpm_breakpoints: [1200, 1600, 2000, 2800, 3600, 4000, 4400, 5200]
+    raw_rpm_breakpoints: [0x18, 0x20, 0x28, 0x38, 0x48, 0x50, 0x58, 0x68]
+    # Raw BFS axis 34 44 5D 64 6C 6E 7F 80. Displayed values were transcribed
+    # from UpRev; the approximately 0.1685 ms/count representation is retained
+    # as raw values rather than treated as a cross-vehicle decoder.
+    load_breakpoints: [8.76, 11.46, 15.67, 16.85, 18.20, 18.54, 21.40, 21.57]
+    raw_load_breakpoints: [0x34, 0x44, 0x5D, 0x64, 0x6C, 0x6E, 0x7F, 0x80]
+    # AFR = 14.7 * 128 / raw cell count.
+    afr:
+      - [14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 12.887671]
+      - [14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 12.628188]
+      - [14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 12.628188]
+      - [14.700000, 14.700000, 14.700000, 14.700000, 13.250704, 13.066667, 13.066667, 12.628188]
+      - [14.700000, 14.700000, 14.700000, 12.800000, 12.544000, 12.628188, 12.628188, 12.628188]
+      - [14.700000, 14.700000, 13.066667, 12.800000, 12.544000, 12.298039, 12.298039, 12.298039]
+      - [14.700000, 13.536691, 12.460927, 12.298039, 11.984713, 12.139355, 12.139355, 12.139355]
+      - [12.800000, 12.378947, 11.984713, 11.760000, 11.614815, 11.833962, 11.833962, 11.833962]
+    raw_values:
+      - [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x92]
+      - [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x95]
+      - [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x95]
+      - [0x80, 0x80, 0x80, 0x80, 0x8E, 0x90, 0x90, 0x95]
+      - [0x80, 0x80, 0x80, 0x93, 0x96, 0x95, 0x95, 0x95]
+      - [0x80, 0x80, 0x90, 0x93, 0x96, 0x99, 0x99, 0x99]
+      - [0x80, 0x8B, 0x97, 0x99, 0x9D, 0x9B, 0x9B, 0x9B]
+      - [0x93, 0x98, 0x9D, 0xA0, 0xA2, 0x9F, 0x9F, 0x9F]
+    provenance:
+      method: uprev_rom_editor_transcription
+      rom_file: ZS44A-Tuned.OsirisROM
+      rom_sha256: c5325776b08c3084edd49d8f68587dad4668e02b0e77c7686f7548fb6f7c8fa9
+      rom_modified_at: 2026-08-03T18:45:21Z
+      recorded_on: 2026-08-05
+      map_slot: 1
+      cell_decode: 'AFR = 14.7 * 128 / raw cell count'
+      guide_reference: 'UpRev Nissan Tuning Guide Rev 8 (Feb 2022), pages 9-10'
+      notes: >
+        Operator transcribed the complete 8x8 Fuel Targets table and confirmed
+        this ROM is the latest version flashed on the ECU. The Osiris container
+        does not expose the raw table bytes in clear text, so the transcription
+        is bound to the independently computed file hash rather than claimed as
+        an automated extraction.

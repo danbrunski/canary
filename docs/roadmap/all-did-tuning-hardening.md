@@ -190,10 +190,11 @@ implementer to revisit:
   A missing role produces a named unavailable section, never an empty frame
   that looks like “nothing happened.”
 
-- [ ] **2.5 — Make all-DID the reference adapter.** The first real adapter
-  must resolve RPM, coolant, A/F voltages, injector PW, throttle, and cam
-  candidates from DIDs plus passive CAN. It must not look for Mode-01 rows
-  while a `did_continuous` profile is active.
+- [~] **2.5 — Make all-DID the reference adapter.** DID roles now drive the
+  all-DID tuning frame and digest without Mode-01 fallback; passive-CAN
+  cross-check providers remain to be added. The adapter must resolve RPM,
+  coolant, A/F voltages, injector PW, throttle, and cam candidates from DIDs
+  plus passive CAN.
 
 - [x] **2.6 — Preserve acquisition time.** Logical round timestamps may be
   used for table presentation, but dynamic analysis (cam command/response,
@@ -208,13 +209,16 @@ implementer to revisit:
 
 ## Phase 3 — Canary-native fueling analysis
 
-- [ ] **3.1 — Land real ROM target artifacts.** Export the target AFR surface
+- [x] **3.1 — Land real ROM target artifacts.** Export the target AFR surface
   for every active tune revision into the profile-scoped
   `afr_calibration.yaml` `target_maps`. Record ROM filename/hash, export time,
   axes, units, and revision. No target is reconstructed from an unreliable
   UpRev log.
 
-- [ ] **3.2 — Prove the target-map axes are observable.** Name the exact live
+- [~] **3.2 — Prove the target-map axes are observable.** RPM is confirmed,
+  and `data/analyses/bfs-provider-search-20260805.md` uses two independently
+  aligned UpRev/CANary windows to reject the current passive substitutes; an
+  exact Canary BFS provider remains unavailable. Name the exact live
   quantity indexing each ROM axis and its Canary provider. Do not substitute
   `ENGINE_LOAD`/`CAL/LD` merely because the units look plausible; the campaign
   already measured that calculated load moves with BFS. If the load/BFS axis
@@ -259,13 +263,11 @@ implementer to revisit:
 
 ## Phase 4 — Missing-DID program and cam-role correction
 
-- [ ] **4.1 — Demote the cam-role claims pending proof.** Rename or alias
-  `0x1135`, `0x113A`, and `0x1163` to neutral candidate names for automatic
-  analysis, or lower confidence so the semantic provider registry refuses
-  them. The current “mirror exactly” statement is contradicted by stored data:
-  only 5/8 parked drive sweeps are exactly equal, and older cold/warm/rev
-  snapshots show 1.0–1.5° separation. Preserve the commanded-angle hypothesis
-  as evidence, not a settled bank/mirror mapping.
+- [x] **4.1 — Correct and promote the cam-role evidence.** The 12.4-minute
+  all-DID capture confirms `0x113A` as command and `0x1135`/`0x1163` as two
+  distinct measured positions; the obsolete mirror claim was removed. The
+  provider registry promotes a neutral primary/secondary measured role, not a
+  B1/B2 physical-bank assignment, until simultaneous evidence settles it.
 
 - [ ] **4.2 — Targeted high-rate cam protocol.** Rotate only the three cam
   candidates plus both known/candidate VVT duties, RPM, and throttle during
@@ -326,7 +328,10 @@ implementer to revisit:
   band, fueled samples, AFR-bearing samples, and target-bearing samples as
   separate counts.
 
-- [ ] **5.3 — Partial reports are first-class.** Distinguish:
+- [~] **5.3 — Partial reports are first-class.** All-DID digest now names
+  missing pull tags and missing delivery roles rather than reporting them as
+  a zero WOT result; censored-sample and conclusion-state reporting remain.
+  Distinguish:
 
   - capture did not contain a role;
   - role existed but no samples survived gates;
@@ -335,10 +340,9 @@ implementer to revisit:
 
   Do not collapse all four to `0`, `None`, or a swallowed exception.
 
-- [ ] **5.4 — Cam section requires confirmed roles.** Until Phase 4 settles
-  the mapping, report neutral candidate traces/residuals and explicitly omit
-  command-vs-response tracking. A confidence label in YAML must control code,
-  not merely decorate the output.
+- [x] **5.4 — Cam section requires confirmed roles.** Cam tracking now runs
+  only when the semantic registry exposes confirmed command and measured
+  providers; it reads those provider specs rather than shared-code DID names.
 
 - [ ] **5.5 — Honest stored-rate summary.** Compute per-channel rate over
   active, unpaused capture intervals, including first/last sample and dropout

@@ -32,11 +32,17 @@ revisions:
       4000-6000 WOT on the 7-31 9AM log. Exact flash time not recorded, so
       this boundary is approximate -- sessions near it may be mislabelled.
   - revision: ZS44A-k106
-    flashed_at: 2026-08-05T00:00:00Z
+    # Exact flash time was not recorded. The operator confirmed this was
+    # edited and flashed on 2026-08-03; use the ROM file's 12:45:21 MDT mtime
+    # as the earliest defensible boundary. The next stored session is hours
+    # later, so this approximation does not straddle known session data.
+    flashed_at: 2026-08-03T18:45:21Z
     k: 1.06
+    rom_file: ZS44A-Tuned.OsirisROM
+    rom_sha256: c5325776b08c3084edd49d8f68587dad4668e02b0e77c7686f7548fb6f7c8fa9
     notes: >
       K 1.05 -> 1.06 plus smoothed AFR targets and added spark at 3000-4500
       high load, all in one flash. That combination is why the spark edit was
       not measurable: the K change walks the BFS axis, which moves every
       BFS-indexed lookup including the timing table. Exact flash time not
-      recorded (overnight before the 8-05 drive).
+      recorded; operator confirmed the August 3 date on 2026-08-05.

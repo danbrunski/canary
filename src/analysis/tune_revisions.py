@@ -44,6 +44,7 @@ class TuneRevision(_Strict):
     #: campaign moves, so worth carrying alongside the results it explains.
     k: float | None = None
     rom_file: str | None = None
+    rom_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     notes: str = ""
 
 

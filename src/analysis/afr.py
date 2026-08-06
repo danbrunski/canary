@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -47,11 +48,29 @@ class VoltageAfrTransfer(_Strict):
         return self
 
 
+class TargetMapProvenance(_Strict):
+    method: Literal["uprev_rom_editor_transcription"]
+    rom_file: str
+    rom_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    rom_modified_at: datetime
+    recorded_on: date
+    map_slot: int = Field(default=1, ge=1)
+    cell_decode: str
+    guide_reference: str
+    notes: str = ""
+
+
 class TargetAfrMap(_Strict):
     revision: str
+    load_axis_name: Literal["base_fuel_schedule"] = "base_fuel_schedule"
+    load_axis_unit: Literal["ms"] = "ms"
     rpm_breakpoints: list[float] = Field(min_length=2)
     load_breakpoints: list[float] = Field(min_length=2)
     afr: list[list[float]]
+    raw_rpm_breakpoints: list[int] | None = None
+    raw_load_breakpoints: list[int] | None = None
+    raw_values: list[list[int]] | None = None
+    provenance: TargetMapProvenance | None = None
 
     @model_validator(mode="after")
     def _rectangular(self) -> TargetAfrMap:
@@ -65,6 +84,19 @@ class TargetAfrMap(_Strict):
         ):
             if any(left >= right for left, right in zip(values, values[1:], strict=False)):
                 raise ValueError(f"{name} breakpoints must be strictly increasing")
+        if self.raw_rpm_breakpoints is not None and len(self.raw_rpm_breakpoints) != len(
+            self.rpm_breakpoints
+        ):
+            raise ValueError("raw rpm breakpoints must match decoded rpm breakpoints")
+        if self.raw_load_breakpoints is not None and len(self.raw_load_breakpoints) != len(
+            self.load_breakpoints
+        ):
+            raise ValueError("raw load breakpoints must match decoded load breakpoints")
+        if self.raw_values is not None and (
+            len(self.raw_values) != len(self.rpm_breakpoints)
+            or any(len(row) != len(self.load_breakpoints) for row in self.raw_values)
+        ):
+            raise ValueError("raw target grid must be rpm_breakpoints x load_breakpoints")
         return self
 
 
@@ -267,6 +299,7 @@ def afr_error_surface(
 __all__ = [
     "AfrCalibration",
     "TargetAfrMap",
+    "TargetMapProvenance",
     "VoltageAfrTransfer",
     "append_afr_channels",
     "afr_error_surface",

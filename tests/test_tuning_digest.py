@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -98,6 +99,32 @@ def test_a_capture_with_no_usable_pairs_says_so(tmp_path: Path, config: CanaryCo
     assert digest is not None
     assert digest.wot_with_afr_pair == 0
     assert any("cannot answer" in note or "no samples" in note for note in digest.notes)
+
+
+def test_all_did_capture_never_falls_back_to_mode01(tmp_path: Path, config: CanaryConfig) -> None:
+    """Mode-01 rows cannot make an all-DID capture appear analysable."""
+    session = _capture(
+        tmp_path,
+        "_capture-tuning-did-2026-08-05T142720",
+        [(3000, 90, 4, 1.2, 0.83)] * 4,
+    )
+    (session / "capture_profile.json").write_text(
+        json.dumps(
+            {
+                "profile": "tuning-did",
+                "started_at": T0.isoformat(),
+                "profile_snapshot": {"corpus_eligible": False},
+            }
+        )
+    )
+
+    digest = compute_tuning_digest(session, config)
+
+    assert digest is not None
+    assert digest.wot_seconds == 0
+    assert digest.delivery is None
+    assert any("pull inventory unavailable" in note for note in digest.notes)
+    assert any("all-DID capture lacks confirmed semantic roles" in note for note in digest.notes)
 
 
 def test_digest_reproduces_the_reference_capture(config: CanaryConfig) -> None:

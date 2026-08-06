@@ -17,12 +17,18 @@ from src.control.capture_manifest import read_capture_manifest
 Role = Literal[
     "rpm",
     "operator_demand",
+    "airflow_or_table_load",
     "measured_afr_b1",
     "measured_afr_b2",
+    "commanded_afr",
+    "fueling_active",
     "injector_pw_b1",
+    "injector_pw_b2",
     "coolant_temp",
+    "ignition_timing",
     "cam_command",
     "cam_measured",
+    "cam_measured_b",
 ]
 
 
@@ -119,7 +125,7 @@ def section_capabilities(
     required: dict[str, tuple[Role, ...]] = {
         "pull_inventory": ("rpm", "operator_demand"),
         "measured_afr": ("rpm", "measured_afr_b1"),
-        "delivery_error": ("rpm", "measured_afr_b1", "injector_pw_b1"),
+        "delivery_error": ("rpm", "measured_afr_b1", "commanded_afr", "fueling_active"),
         "cam_tracking": ("cam_command", "cam_measured"),
     }
     out: dict[str, dict[str, object]] = {}

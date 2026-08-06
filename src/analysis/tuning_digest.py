@@ -106,7 +106,9 @@ def _achieved_hz(session_dir: Path, specs: list[str]) -> dict[str, float]:
     return out
 
 
-def _wot_inventory(session_dir: Path) -> tuple[int, int, list[dict[str, Any]]]:
+def _wot_inventory(
+    session_dir: Path, *, rpm_spec: str | None, did_continuous: bool
+) -> tuple[int, int, list[dict[str, Any]]]:
     """Seconds at WOT by rpm band, and how many carry a usable AFR pair.
 
     The pair count is the number that matters: WOT seconds without both a
@@ -118,9 +120,9 @@ def _wot_inventory(session_dir: Path) -> tuple[int, int, list[dict[str, Any]]]:
         float(tag["t"]) for tag in tags if tag.get("label") in {"tuning_pull_start", "wot_pull"}
     ]
     ends = [float(tag["t"]) for tag in tags if tag.get("label") == "tuning_pull_end"]
-    if starts:
+    if starts and rpm_spec is not None:
         try:
-            rpm = read_channels(session_dir, ["did:ECM_RPM"], acquired_time=True)
+            rpm = read_channels(session_dir, [rpm_spec], acquired_time=True)
             if not rpm.empty:
                 epoch = rpm["timestamp"].astype("int64") / 1_000_000_000
                 selected = pd.Series(False, index=rpm.index)
@@ -144,6 +146,11 @@ def _wot_inventory(session_dir: Path) -> tuple[int, int, list[dict[str, Any]]]:
                     )
         except Exception:  # noqa: BLE001
             pass
+    # A DID-continuous capture must never borrow Mode 01 to make an empty
+    # all-DID report look populated. Tags are the physical-demand evidence for
+    # these captures; absent tags are reported as absent evidence.
+    if did_continuous:
+        return 0, 0, []
     try:
         frame = read_aligned(
             session_dir,
@@ -190,7 +197,9 @@ def _wot_inventory(session_dir: Path) -> tuple[int, int, list[dict[str, Any]]]:
     return int(len(wot)), paired, rows
 
 
-def _cam_tracking(session_dir: Path) -> dict[str, Any] | None:
+def _cam_tracking(
+    session_dir: Path, *, command_spec: str, measured_spec: str
+) -> dict[str, Any] | None:
     """How the measured cam angle followed its command.
 
     Only meaningful on an all-DID capture — cam angle exists as a DID and
@@ -199,7 +208,7 @@ def _cam_tracking(session_dir: Path) -> dict[str, Any] | None:
     try:
         frame = read_aligned(
             session_dir,
-            ["did:ECM_INTAKE_CAM_ANGLE_COMMANDED", "did:ECM_INTAKE_CAM_ANGLE_MEASURED"],
+            [command_spec, measured_spec],
             grid="1s",
             require_all=True,
         )
@@ -207,8 +216,8 @@ def _cam_tracking(session_dir: Path) -> dict[str, Any] | None:
         return None
     if len(frame) < 3:
         return None
-    commanded = frame["did:ECM_INTAKE_CAM_ANGLE_COMMANDED"].astype(float)
-    measured = frame["did:ECM_INTAKE_CAM_ANGLE_MEASURED"].astype(float)
+    commanded = frame[command_spec].astype(float)
+    measured = frame[measured_spec].astype(float)
     error = measured - commanded
     return {
         "n": int(len(frame)),
@@ -296,7 +305,22 @@ def compute_tuning_digest(
             "automatic previous-capture comparison is refused."
         )
 
-    wot_seconds, paired, bands = _wot_inventory(session_dir)
+    role_capabilities = capabilities.get("roles", {})
+    rpm_provider = role_capabilities.get("rpm", {}).get("provider")
+    did_continuous = profile == "tuning-did"
+    wot_seconds, paired, bands = _wot_inventory(
+        session_dir,
+        rpm_spec=rpm_provider if isinstance(rpm_provider, str) else None,
+        did_continuous=did_continuous,
+    )
+    if did_continuous and not any(
+        tag.get("label") in {"tuning_pull_start", "wot_pull"}
+        for tag in load_tags(session_dir / "tags.jsonl")
+    ):
+        notes.append(
+            "pull inventory unavailable: all-DID captures require a tagged physical pull "
+            "(`tuning_pull_start` or `wot_pull`); this is not evidence of zero pulls."
+        )
     if wot_seconds and not paired:
         notes.append(
             "WOT seconds were captured but none carry both a measured and a commanded AFR "
@@ -315,7 +339,18 @@ def compute_tuning_digest(
     )
 
     delivery: dict[str, Any] | None = None
-    if calibration is not None:
+    delivery_available = (
+        capabilities.get("sections", {}).get("delivery_error", {}).get("available", False)
+    )
+    if did_continuous and not delivery_available:
+        missing = (
+            capabilities.get("sections", {}).get("delivery_error", {}).get("missing_roles", [])
+        )
+        notes.append(
+            "delivery error unavailable: all-DID capture lacks confirmed semantic roles "
+            + ", ".join(map(str, missing))
+        )
+    elif calibration is not None:
         try:
             result = delivery_error(
                 session_dir,
@@ -367,6 +402,14 @@ def compute_tuning_digest(
                     previous["delta_sigma"] = None
                     previous["distinguishable"] = None
 
+    cam: dict[str, Any] | None = None
+    cam_roles = role_capabilities
+    if capabilities.get("sections", {}).get("cam_tracking", {}).get("available"):
+        command_spec = cam_roles["cam_command"]["provider"]
+        measured_spec = cam_roles["cam_measured"]["provider"]
+        if isinstance(command_spec, str) and isinstance(measured_spec, str):
+            cam = _cam_tracking(session_dir, command_spec=command_spec, measured_spec=measured_spec)
+
     return TuningDigest(
         session_id=session_dir.name,
         capture_profile=profile,
@@ -376,7 +419,7 @@ def compute_tuning_digest(
         wot_by_band=bands,
         achieved_hz=achieved,
         delivery=delivery,
-        cam=_cam_tracking(session_dir),
+        cam=cam,
         previous=previous,
         capabilities=capabilities,
         notes=[*notes, f"tune revision source: {revision_source}"],
