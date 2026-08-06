@@ -91,3 +91,9 @@ models/_*/
 .claude/overnight-mode
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Ground-truth regression fixture: a small slice of a real session, committed
+# deliberately so tests/test_analysis_ground_truth.py can check the analysis
+# chain against answers we already know. Real bytes off the wire — a
+# synthesised fixture would only prove the chain agrees with itself.
+!tests/fixtures/**/*.parquet

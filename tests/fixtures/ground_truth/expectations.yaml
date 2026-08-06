@@ -1,0 +1,194 @@
+# Ground truth for the analysis chain — facts we already know the answer to.
+#
+# The point of this file is to stop a tool's *novel* output being trusted
+# before it has reproduced what is already established. Every wrong finding
+# this project retracted looked convincing in isolation; none of them were
+# checked against a case with a known answer first.
+#
+# `unit_agreement` is the strongest single check available, and it is nearly
+# free: when a broadcast binding and an independent Mode 01 PID measure the
+# same physical quantity, decoding both to engineering units must produce
+# slope ~ 1.0 and offset ~ 0. That one assertion catches a wrong byte offset,
+# wrong endianness, wrong scale, wrong offset, and wrong units — each of which
+# has actually happened here — without anyone having to state what the right
+# answer is. The PID is the answer.
+#
+# Adding a fact is editing this file, not writing a test.
+
+fixture: drive-slice
+source_session: 2026-08-03T163440
+window: 2026-08-03T17:19:00-06:00 +420s
+notes: |
+  A real slice: bytes off the wire, written by the production parquet writer.
+  Broadcast frames are decimated 10:1 (real frames, just fewer) to buy a window
+  long enough to move coolant while staying small enough to live in git.
+
+  Dynamic range in the slice — rpm 725-4300, speed 0-106 km/h, throttle 3-89%,
+  coolant 85-92 degC. Speed reaching zero and 106 in one window is what makes
+  the wheel-speed checks meaningful.
+
+# Exact decode parameters for the bindings the empirical checks rely on.
+#
+# This exists because the empirical check has a measured blind spot. `slope` is
+# a ratio, so a +4% scale error surfaces as only a -2.9% slope error, and the
+# broadcast-vs-PID baseline is already ~1% off for reasons that are physical
+# rather than wrong. Tolerances tight enough to catch a small scale edit would
+# be too tight to survive an honest window change. Verified 2026-08-06: a
+# byte_start shift is caught (25,000% error) and an endianness flip is caught
+# (r2 0.003), but a 0.125 -> 0.130 scale edit slipped through a 3% tolerance.
+#
+# So the two checks divide the work. These pins catch a careless catalog edit
+# exactly; `unit_agreement` below catches the things a pin cannot see — that
+# the bytes still mean what the catalog claims, against a separate instrument.
+catalog_pins:
+  - name: ECM_RPM
+    can_id: 0x1F9
+    byte_start: 2
+    byte_length: 2
+    byte_order: big
+    scale: 0.125
+    offset: 0.0
+  - name: ECM_RPM_23D
+    can_id: 0x23D
+    byte_start: 3
+    byte_length: 2
+    byte_order: little
+    scale: 3.125
+    offset: 0.0
+  - name: ECM_COOLANT_TEMP
+    can_id: 0x551
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 1.0
+    offset: -40.0
+  - name: ECM_COOLANT_TEMP_233
+    can_id: 0x233
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 1.0
+    offset: -50.0
+  - name: ECM_COOLANT_TEMP_23D
+    can_id: 0x23D
+    byte_start: 7
+    byte_length: 1
+    byte_order: big
+    scale: 1.0
+    offset: -50.0
+  - name: WHEEL_SPEED_6F7_A
+    can_id: 0x6F7
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: 0.0625
+    offset: 0.0
+  - name: WHEEL_SPEED_6F7_B
+    can_id: 0x6F7
+    byte_start: 2
+    byte_length: 2
+    byte_order: big
+    scale: 0.0625
+    offset: 0.0
+  - name: WHEEL_SPEED_6F7_C
+    can_id: 0x6F7
+    byte_start: 4
+    byte_length: 2
+    byte_order: big
+    scale: 0.0625
+    offset: 0.0
+
+# Broadcast binding vs the independent Mode 01 PID for the same quantity.
+# Both sides arrive in engineering units, so a correct decode gives slope ~ 1.
+#
+# Tolerances are the measured baseline on this fixture plus ~0.5% headroom, not
+# round numbers — a round 3% was measured to let a real 4% scale error through.
+unit_agreement:
+  - signal: can:ECM_RPM
+    reference: obd:RPM
+    min_r_squared: 0.98
+    max_scale_error_pct: 1.6
+    max_offset: 60.0          # rpm, against a 725-4300 range
+    why: >
+      The oldest confirmed binding and the control the project calibrates
+      everything else against. If this drifts, suspect the chain, not the tool
+      that reported it.
+
+  - signal: can:ECM_RPM_23D
+    reference: obd:RPM
+    min_r_squared: 0.98
+    max_scale_error_pct: 1.5
+    max_offset: 60.0
+    why: >
+      Second rpm copy found 2026-08-06 (0x23D bytes 3-4, little-endian). Also
+      the only little-endian binding in the catalog, so it is the one check
+      that would catch an endianness regression in the decoder.
+
+  - signal: can:WHEEL_SPEED_6F7_A
+    reference: obd:SPEED
+    min_r_squared: 0.99
+    max_scale_error_pct: 2.1
+    max_offset: 3.0           # km/h
+    why: Wheel speed, found 2026-08-06. Scale pinned at 1/16 km/h per count.
+  - signal: can:WHEEL_SPEED_6F7_B
+    reference: obd:SPEED
+    min_r_squared: 0.99
+    max_scale_error_pct: 2.3
+    max_offset: 3.0
+    why: Second of three wheel-speed fields on 0x6F7.
+  - signal: can:WHEEL_SPEED_6F7_C
+    reference: obd:SPEED
+    min_r_squared: 0.99
+    max_scale_error_pct: 1.6
+    max_offset: 3.0
+    why: Third of three wheel-speed fields on 0x6F7.
+
+  - signal: can:ECM_COOLANT_TEMP
+    reference: obd:COOLANT_TEMP
+    min_r_squared: 0.98
+    max_scale_error_pct: 0.9
+    max_offset: 2.0           # degC
+    why: >
+      0x551:0 with offset -40. This is the anchor that settled which coolant
+      offset convention is correct, so it must not move quietly.
+  - signal: can:ECM_COOLANT_TEMP_233
+    reference: obd:COOLANT_TEMP
+    min_r_squared: 0.98
+    max_scale_error_pct: 0.8
+    max_offset: 2.0
+    why: 0x233:0 with offset -50 — the other convention, same sensor.
+  - signal: can:ECM_COOLANT_TEMP_23D
+    reference: obd:COOLANT_TEMP
+    min_r_squared: 0.98
+    max_scale_error_pct: 0.9
+    max_offset: 2.0
+    why: 0x23D:7, bit-identical to 0x233:0.
+
+# Exact byte-level relationships, independent of any decode. Deliberately below
+# the decode layer, so these keep working — and keep meaning something — even
+# if a scale or offset in the catalog is wrong.
+#
+# On the full-rate session these hold bit-exactly (sd 0.000). This fixture
+# decimates broadcast frames 10:1 to fit in git, which desynchronises the two
+# ids by up to a frame period, so within one sample of a step the pair can read
+# one count apart. Hence: the *median* must be exactly `delta`, deviations may
+# never exceed one count, and the overwhelming majority must be exact. A byte
+# that stopped being this signal would miss by far more than one count.
+byte_relationships:
+  - a: {can_id: 0x233, byte: 0}
+    b: {can_id: 0x23D, byte: 7}
+    delta: 0
+    max_deviation: 1
+    min_exact_fraction: 0.95    # measured 0.9703 on this fixture
+    why: >
+      The same coolant value published on two frames. Bit-identical across the
+      2026-08-06 capture (mean difference 0.000, sd 0.000, n = 412).
+  - a: {can_id: 0x551, byte: 0}
+    b: {can_id: 0x233, byte: 0}
+    delta: -10
+    max_deviation: 1
+    min_exact_fraction: 0.95    # measured 0.9765 on this fixture
+    why: >
+      The two offset conventions, exactly 10 counts apart (sd 0.000). This is
+      the relationship that exposed data/dids.yaml 0x1101 as contested; if it
+      ever stops holding, that investigation has to be reopened.

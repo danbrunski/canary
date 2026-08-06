@@ -24,7 +24,6 @@ carries that, and :func:`credible_fits` refuses to return a fit without it.
 
 from __future__ import annotations
 
-import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,44 +33,16 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.channels import read_channels
-
-#: Sub-windows used for the scale-stability check. Three is the fewest that can
-#: distinguish "drifting" from "one noisy window".
-STABILITY_WINDOWS = 3
-
-#: Slope spread (max-min over mean, percent) below which a probe's scale is
-#: treated as holding across the session. Matches the tuning toolkit's
-#: ``scale_stability`` band so the two agree on what "stable" means.
-STABLE_DRIFT_PCT = 1.5
+from src.analysis.compare import STABLE_DRIFT_PCT, ScaleVerdict, regress, scale_stability
 
 #: A probe must clear this to be worth a human's attention at all.
 MIN_R_SQUARED = 0.90
 
 #: Fewer pairs than this and neither r² nor the drift figure means anything.
+#: Higher than :data:`src.analysis.compare.MIN_PAIRS` because a sweep tests
+#: hundreds of probes against every reference, so a threshold that is merely
+#: adequate for one deliberate comparison lets chance matches through here.
 MIN_PAIRS = 200
-
-#: Slope spread must exceed this many pooled standard errors before it counts
-#: as evidence of real drift rather than fitting noise. The conventional 3σ —
-#: the point of the test is to require *evidence* of instability, not to tune a
-#: cutoff until the answers look right.
-DRIFT_SIGNIFICANCE_SIGMA = 3.0
-
-#: Whether a probe's scale held across the session.
-#:
-#: ``unresolved`` is not a soft ``drifting``: it means this session lacked the
-#: dynamic range to settle the question, and a session that exercises the
-#: signal is needed before the binding can be promoted.
-ScaleVerdict = Literal["stable", "unresolved", "drifting"]
-
-
-@dataclass(frozen=True)
-class _Fit:
-    """One OLS pass, carrying the slope's own uncertainty."""
-
-    r_squared: float
-    slope: float
-    offset: float
-    slope_se: float
 
 
 @dataclass(frozen=True)
@@ -192,81 +163,6 @@ def _payload_matrix(frame: pd.DataFrame, can_id: int) -> tuple[pd.Series, np.nda
     return rows["timestamp"].reset_index(drop=True), matrix.reshape(len(rows), modal)
 
 
-def _regress(raw: np.ndarray, reference: np.ndarray) -> _Fit | None:
-    """OLS ``reference = raw * slope + offset``."""
-    if len(raw) < 3:
-        return None
-    raw_var = float(np.var(raw))
-    ref_var = float(np.var(reference))
-    if raw_var <= 0.0 or ref_var <= 0.0:
-        # A constant byte or a constant reference has no relationship to find.
-        return None
-    slope, offset = np.polyfit(raw, reference, 1)
-    predicted = raw * slope + offset
-    residual = float(np.sum((reference - predicted) ** 2))
-    total = float(np.sum((reference - float(np.mean(reference))) ** 2))
-    if total <= 0.0:
-        return None
-    # Textbook OLS slope standard error. It is what separates "this scale is
-    # unstable" from "this session cannot pin the scale down at all".
-    dof = len(raw) - 2
-    slope_se = float(
-        np.sqrt((residual / dof) / (raw_var * len(raw))) if dof > 0 and raw_var > 0 else np.inf
-    )
-    return _Fit(
-        r_squared=1.0 - residual / total,
-        slope=float(slope),
-        offset=float(offset),
-        slope_se=slope_se,
-    )
-
-
-def _scale_stability(raw: np.ndarray, reference: np.ndarray) -> tuple[float | None, ScaleVerdict]:
-    """Does the fitted scale hold across disjoint sub-windows?
-
-    Returns the slope spread as a percentage and a verdict. Percentage alone
-    is not enough, because two different things make it large:
-
-    * a byte that merely co-varies with the reference over one drive — its
-      scale really is different in each window, and the spread is far larger
-      than the fits' own uncertainty;
-    * a slow, near-monotonic signal that barely moves inside any one window,
-      so each slope is fitted mostly to noise. 0x551 byte 0 *is* the confirmed
-      coolant byte and still spread 83% on the 2026-08-06 drive.
-
-    Condemning the second case would throw away correct bindings, so a probe
-    is only called ``drifting`` when the spread is both practically large and
-    bigger than sampling noise can explain. Otherwise the honest verdict is
-    ``unresolved`` — this session cannot settle it, and a session that
-    actually exercises the signal is required.
-    """
-    if len(raw) < STABILITY_WINDOWS * 3:
-        return None, "unresolved"
-    fits: list[_Fit] = []
-    for chunk_raw, chunk_ref in zip(
-        np.array_split(raw, STABILITY_WINDOWS),
-        np.array_split(reference, STABILITY_WINDOWS),
-        strict=True,
-    ):
-        fit = _regress(chunk_raw, chunk_ref)
-        if fit is None:
-            return None, "unresolved"
-        fits.append(fit)
-    slopes = [fit.slope for fit in fits]
-    mean_slope = statistics.fmean(slopes)
-    if mean_slope == 0.0:
-        return None, "unresolved"
-    spread = abs(max(slopes) - min(slopes))
-    drift_pct = spread / abs(mean_slope) * 100.0
-    if drift_pct <= STABLE_DRIFT_PCT:
-        return drift_pct, "stable"
-    pooled_se = float(np.sqrt(statistics.fmean([fit.slope_se**2 for fit in fits])))
-    if not np.isfinite(pooled_se) or pooled_se <= 0.0:
-        return drift_pct, "unresolved"
-    resolvable = spread > DRIFT_SIGNIFICANCE_SIGMA * pooled_se
-    return drift_pct, ("drifting" if resolvable else "unresolved")
-
-
 def sweep_session(
     session: Path | pd.DataFrame,
     references: Sequence[str],
@@ -335,10 +231,10 @@ def sweep_session(
                     continue
                 raw_values = joined["raw"].to_numpy(dtype=float)
                 ref_values = joined["ref"].to_numpy(dtype=float)
-                fit = _regress(raw_values, ref_values)
+                fit = regress(raw_values, ref_values)
                 if fit is None:
                     continue
-                drift_pct, verdict = _scale_stability(raw_values, ref_values)
+                drift_pct, verdict = scale_stability(raw_values, ref_values)
                 fits.append(
                     ProbeFit(
                         probe=probe,
@@ -405,7 +301,6 @@ def _load_session(session: Path) -> pd.DataFrame:
 __all__ = [
     "MIN_PAIRS",
     "MIN_R_SQUARED",
-    "STABILITY_WINDOWS",
     "STABLE_DRIFT_PCT",
     "Probe",
     "ProbeFit",
