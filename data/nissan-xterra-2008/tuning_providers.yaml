@@ -1,0 +1,10 @@
+schema_version: 1
+providers:
+  - {role: rpm, spec: 'did:ECM_RPM'}
+  - {role: operator_demand, spec: 'did:ECM_THROTTLE_POS_SENSOR_1'}
+  - {role: measured_afr_b1, spec: 'did:ECM_AF_SENSOR_V_B1', transform: voltage_afr}
+  - {role: measured_afr_b2, spec: 'did:ECM_AF_SENSOR_V_B2', transform: voltage_afr}
+  - {role: injector_pw_b1, spec: 'did:ECM_INJECTOR_PW_B1'}
+  - {role: coolant_temp, spec: 'did:ECM_COOLANT_TEMP'}
+  - {role: cam_command, spec: 'did:ECM_INTAKE_CAM_ANGLE_COMMANDED', confidence: candidate}
+  - {role: cam_measured, spec: 'did:ECM_INTAKE_CAM_ANGLE_MEASURED', confidence: candidate}

@@ -148,7 +148,7 @@ implementer to revisit:
 
 ## Phase 2 — Canonical semantic tuning frame
 
-- [ ] **2.1 — Define semantic roles.** Add a small typed vocabulary used by
+- [x] **2.1 — Define semantic roles.** Add a small typed vocabulary used by
   tuning analysis, initially:
 
   - `rpm`
@@ -165,14 +165,14 @@ implementer to revisit:
 
   These are analysis roles, not new telemetry source names.
 
-- [ ] **2.2 — Profile-scoped provider registry.** Store candidate/confirmed
+- [x] **2.2 — Profile-scoped provider registry.** Store candidate/confirmed
   providers and transforms under the vehicle profile, e.g. DID RPM first and
   passive broadcast RPM as a cross-check. A provider declares source spec,
   transform/artifact, unit, confidence required for automatic use, and whether
   it is independent or derived from another instrument. Do not hard-code the
   Xterra's DID names in shared analysis code.
 
-- [ ] **2.3 — `build_tuning_frame()`.** Build one aligned frame from semantic
+- [x] **2.3 — `build_tuning_frame()`.** Build one aligned frame from semantic
   roles and return both values and a capability/provenance report. It routes
   through `read_channels`/`read_aligned`, AFR calibration, ROM target lookup,
   and the capture manifest. The output records the selected provider for every
