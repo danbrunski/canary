@@ -101,10 +101,9 @@ class SessionDigest:
 
 
 def _session_start(session_dir: Path) -> datetime | None:
-    try:
-        return datetime.strptime(session_dir.name, _SESSION_DIR_FORMAT).replace(tzinfo=UTC)
-    except ValueError:
-        return None
+    from src.control.sessions import session_started_at
+
+    return session_started_at(session_dir)
 
 
 def _anomaly_counts_by_source(

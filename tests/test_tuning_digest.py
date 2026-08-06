@@ -135,11 +135,16 @@ def test_previous_capture_orders_by_time_not_directory_name(
         "_tuning-2026-08-05T100000",  # genuinely earlier
         "_capture-fuel-map-2026-09-01T100000",  # LATER, but sorts first by string
     ):
-        (root / name).mkdir(parents=True)
+        path = root / name
+        path.mkdir(parents=True)
+        (path / "capture_profile.json").write_text(
+            '{"profile":"tuning-did","started_at":"2026-08-05T10:00:00+00:00",'
+            '"profile_snapshot":{"corpus_eligible":false}}\n'
+        )
 
     found = _previous_capture(
         root / "_tuning-2026-08-06T100000",
-        profile=None,
+        profile="tuning-did",
         revision="ZS44A-k106",
         revisions=registry,
     )

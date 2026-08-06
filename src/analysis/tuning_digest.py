@@ -196,7 +196,7 @@ def _previous_capture(
     question — the delta is then whatever the flash changed, which is
     interesting but is not "is this drive like the last one".
     """
-    if revision is None:
+    if profile is None or revision is None:
         return None
     started = session_started_at(session_dir)
     if started is None:
@@ -216,10 +216,10 @@ def _previous_capture(
             dated.append((when, path))
 
     for _when, candidate in sorted(dated, key=lambda item: item[0], reverse=True):
-        if profile is not None and _capture_profile_name(candidate) != profile:
+        if _capture_profile_name(candidate) != profile:
             continue
-        found = revisions.for_session(candidate) if revisions is not None else None
-        if found is not None and found.revision == revision:
+        found, _source, conflict = resolve_session_revision(candidate, revisions)
+        if not conflict and found == revision:
             return candidate
     return None
 

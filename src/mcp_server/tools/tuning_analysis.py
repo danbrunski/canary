@@ -17,6 +17,7 @@ from typing import Any
 
 from src.analysis.afr import load_afr_calibration
 from src.analysis.noise_floor import load_noise_floor
+from src.analysis.tune_revisions import load_tune_revisions
 from src.analysis.tuning import GateError, compare_sessions, delivery_error
 from src.config import CanaryConfig
 from src.control.sessions import resolve_session
@@ -67,12 +68,16 @@ def get_delivery_error(
         return {"ok": False, "error": f"no afr_calibration.yaml found ({calibration_path})"}
 
     try:
+        revisions = load_tune_revisions(
+            scoped.daemon.afr_calibration.parent / "tune_revisions.yaml"
+        )
         result = delivery_error(
             session_dir,
             calibration=load_afr_calibration(calibration_path),
             measured_spec=measured_spec,
             min_load=min_load,
             cell_agg=cell_agg,
+            revisions=revisions,
         )
     except (GateError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
@@ -111,6 +116,7 @@ def compare_tuning_sessions(
         return {"ok": False, "error": str(exc)}
 
     floor = load_noise_floor(scoped.daemon.afr_calibration.parent / "noise_floor.yaml")
+    revisions = load_tune_revisions(scoped.daemon.afr_calibration.parent / "tune_revisions.yaml")
     sd = floor.sd_for(floor_channel) if (floor is not None and floor_channel) else None
 
     try:
@@ -122,6 +128,7 @@ def compare_tuning_sessions(
             unsafe_axes=unsafe_axes,
             noise_floor=floor if floor_channel else None,
             floor_channel=floor_channel,
+            revisions=revisions,
         )
     except (GateError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}

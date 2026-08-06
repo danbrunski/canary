@@ -110,38 +110,38 @@ implementer to revisit:
   disagree, surface a metadata conflict and refuse cross-revision comparison;
   never silently choose the timestamp inference.
 
-- [ ] **1.3 — Make tune identity tri-state.** Replace the current
+- [x] **1.3 — Make tune identity tri-state.** Replace the current
   `same_revision = left == right` behavior with `true | false | unknown` (or
   an equivalent enum). `None`/`None` means unknown, not same. Comparison
   payloads carry both resolution source (`capture_manifest`, `registry`,
   `import_manifest`, `unknown`) and revision value.
 
-- [ ] **1.4 — Connect the registry to every public analysis surface.** CLI
+- [x] **1.4 — Connect the registry to every public analysis surface.** CLI
   `delivery-error`/`compare`, MCP `get_delivery_error`/
   `compare_tuning_sessions`, and digest construction load the active vehicle's
   registry once and pass it through. Sweep all callers of `delivery_error`
   and `compare_sessions`; this is a contract change, not a per-tool patch.
 
-- [ ] **1.5 — Stamp imports without making UpRev required.** Extend
+- [x] **1.5 — Stamp imports without making UpRev required.** Extend
   `import_uprev_log.py` with `--tune-revision` and registry inference as a
   fallback; record value + resolution source in the manifest. Import remains
   useful without a revision, but comparisons then report revision unknown and
   cannot claim a same-tune null run.
 
-- [ ] **1.6 — Require profile + revision for automatic previous-capture
+- [x] **1.6 — Require profile + revision for automatic previous-capture
   selection.** `_previous_capture` must return no automatic comparison when
   either identity is unknown. It must read the real capture manifest, match an
   exact capture-profile name, match an exact tune revision, and order by
   `src.control.sessions.session_started_at`. A manually requested comparison
   remains available with explicit warnings.
 
-- [ ] **1.7 — Use the shared session timestamp parser everywhere.** Replace
+- [x] **1.7 — Use the shared session timestamp parser everywhere.** Replace
   `src.analysis.digest._session_start`'s plain-directory parser with
   `src.control.sessions.session_started_at`. Sweep other session-name parsers.
   Acceptance: ordinary, `_capture-*`, and `_tuning-*` digests use the real
   start for anomaly and ledger windows.
 
-- [ ] **1.8 — Add production-shaped fixtures.** Tests that claim capture
+- [x] **1.8 — Add production-shaped fixtures.** Tests that claim capture
   behavior create the session through the real writer or at least write the
   real `capture_profile.json`; a directory whose name merely begins with `_`
   is not sufficient proof of the metadata path.

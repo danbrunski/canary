@@ -55,6 +55,7 @@ import pandas as pd
 
 from src.analysis.channels import read_channels
 from src.analysis.clock_align import Alignment, AlignmentError, align_clocks
+from src.analysis.tune_revisions import load_tune_revisions
 from src.config import CanaryConfig
 from src.control.sessions import resolve_session
 from src.storage.parquet_writer import ParquetTelemetryWriter
@@ -149,6 +150,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--label", default=None, help="Tag for this import (default: the CSV's filename stem)."
+    )
+    parser.add_argument(
+        "--tune-revision", default=None, help="Explicit ECU tune revision for this log."
     )
     parser.add_argument(
         "--align-session",
@@ -301,6 +305,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         "row_count": len(records),
         "channels": channels,
     }
+    registry = load_tune_revisions(config.daemon.afr_calibration.parent / "tune_revisions.yaml")
+    inferred = registry.at(started_at).revision if registry and registry.at(started_at) else None
+    manifest["tune_revision"] = args.tune_revision or inferred
+    manifest["tune_revision_source"] = (
+        "import_manifest"
+        if args.tune_revision is not None
+        else "registry"
+        if inferred
+        else "unknown"
+    )
     if alignment is not None:
         # Recorded so a later analysis can tell a measured anchor from a
         # filename guess, and re-check the correlation that justified it.

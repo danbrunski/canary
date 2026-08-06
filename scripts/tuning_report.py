@@ -32,6 +32,7 @@ except ImportError:  # loaded as `scripts.tuning_report`
 
 from src.analysis.afr import load_afr_calibration
 from src.analysis.noise_floor import load_noise_floor, record_null_run, save_noise_floor
+from src.analysis.tune_revisions import load_tune_revisions
 from src.analysis.tuning import GateError, compare_sessions, delivery_error
 from src.config import CanaryConfig
 from src.profiles import resolve_profile_for_tooling, scope_config
@@ -51,12 +52,14 @@ def _session_dir(config: CanaryConfig, session: str) -> Path:
 def _run_delivery_error(args: argparse.Namespace) -> int:
     config = _scoped(args)
     calibration = load_afr_calibration(config.daemon.afr_calibration)
+    revisions = load_tune_revisions(config.daemon.afr_calibration.parent / "tune_revisions.yaml")
     result = delivery_error(
         _session_dir(config, args.session),
         calibration=calibration,
         measured_spec=args.measured,
         min_load=args.min_load,
         cell_agg=args.cell_agg,
+        revisions=revisions,
     )
     print(f"delivery error — measured from {result.measured_spec}")
     if result.n == 0:
@@ -84,6 +87,7 @@ def _run_delivery_error(args: argparse.Namespace) -> int:
 def _run_compare(args: argparse.Namespace) -> int:
     config = _scoped(args)
     floor = load_noise_floor(Path(config.collection.storage_path).parent / "noise_floor.yaml")
+    revisions = load_tune_revisions(config.daemon.afr_calibration.parent / "tune_revisions.yaml")
     if floor is None and args.floor_channel:
         floor = load_noise_floor(Path(args.floor_file)) if args.floor_file else None
     result = compare_sessions(
@@ -94,6 +98,7 @@ def _run_compare(args: argparse.Namespace) -> int:
         unsafe_axes=args.unsafe_axes,
         noise_floor=floor if args.floor_channel else None,
         floor_channel=args.floor_channel,
+        revisions=revisions,
     )
     sd = floor.sd_for(args.floor_channel) if (floor and args.floor_channel) else None
     print(f"{args.value}: {args.session} -> {args.against}, gridded on {', '.join(result.axes)}")
@@ -116,12 +121,14 @@ def _run_compare(args: argparse.Namespace) -> int:
 def _run_null_run(args: argparse.Namespace) -> int:
     """Measure a floor from two same-tune captures and persist it."""
     config = _scoped(args)
+    revisions = load_tune_revisions(config.daemon.afr_calibration.parent / "tune_revisions.yaml")
     result = compare_sessions(
         _session_dir(config, args.session),
         _session_dir(config, args.against),
         value=args.value,
         axes=tuple(args.axes),
         unsafe_axes=args.unsafe_axes,
+        revisions=revisions,
     )
     if result.n_cells < 2:
         print(f"only {result.n_cells} matched cell(s) — need at least 2 to have a spread")

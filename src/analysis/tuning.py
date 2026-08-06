@@ -39,7 +39,7 @@ import pandas as pd
 from src.analysis.afr import AfrCalibration
 from src.analysis.channels import read_aligned
 from src.analysis.noise_floor import NoiseFloor
-from src.analysis.tune_revisions import TuneRevisionRegistry
+from src.analysis.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 
 #: Axes that must never grid a cross-flash comparison. ``CAL/LD`` is computed
 #: from BFS, so it moves when fuelling moves; see the module docstring.
@@ -96,10 +96,12 @@ class DeliveryError:
     #: resolves it. Comparing delivery error across a flash boundary without
     #: this is comparing two different engines.
     tune_revision: str | None = None
+    tune_revision_source: str = "unknown"
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "tune_revision": self.tune_revision,
+            "tune_revision_source": self.tune_revision_source,
             "band_averaged_pct": self.band_averaged_pct,
             "pooled_pct": self.pooled_pct,
             "n": self.n,
@@ -157,9 +159,9 @@ def delivery_error(
     4. band-averaged over rpm, so band composition cannot masquerade as an effect
     """
     revision = None
-    if revisions is not None and isinstance(session, Path):
-        found = revisions.for_session(session)
-        revision = None if found is None else found.revision
+    revision_source = "unknown"
+    if isinstance(session, Path):
+        revision, revision_source, _conflict = resolve_session_revision(session, revisions)
 
     specs = ["obd:RPM", "obd:FUEL_STATUS", "obd:COMMANDED_AFR", measured_spec]
     if min_load is not None:
@@ -236,6 +238,7 @@ def delivery_error(
         rpm_window=(float(frame["obd:RPM"].min()), float(frame["obd:RPM"].max())),
         measured_spec=measured_spec,
         tune_revision=revision,
+        tune_revision_source=revision_source,
     )
 
 
@@ -252,6 +255,8 @@ class SessionComparison:
     #: null run (the spread IS the noise floor); different ones mean the
     #: delta includes whatever the flash changed.
     tune_revisions: tuple[str | None, str | None] = (None, None)
+    tune_revision_sources: tuple[str, str] = ("unknown", "unknown")
+    tune_revision_conflicts: tuple[bool, bool] = (False, False)
     #: Regime the quoted floor was measured in. A floor is only valid for its
     #: own conditions — the same null pair gives 0.48 deg of spark spread at
     #: WOT and 7.7 deg across all conditions — so this travels with the sigma
@@ -261,8 +266,14 @@ class SessionComparison:
     def as_dict(self) -> dict[str, Any]:
         return {
             "tune_revisions": list(self.tune_revisions),
+            "tune_revision_sources": list(self.tune_revision_sources),
+            "tune_revision_conflicts": list(self.tune_revision_conflicts),
             "floor_conditions": self.floor_conditions,
-            "same_revision": self.tune_revisions[0] == self.tune_revisions[1],
+            "same_revision": (
+                self.tune_revisions[0] == self.tune_revisions[1]
+                if self.tune_revisions[0] is not None and self.tune_revisions[1] is not None
+                else None
+            ),
             "value": self.value,
             "axes": list(self.axes),
             "mean_delta": self.mean_delta,
@@ -369,14 +380,18 @@ def compare_sessions(
         joined["delta_sigma"] = np.nan
         joined["distinguishable"] = pd.NA
 
-    def _revision(session: Path | pd.DataFrame) -> str | None:
-        if revisions is None or not isinstance(session, Path):
-            return None
-        found = revisions.for_session(session)
-        return None if found is None else found.revision
+    def _revision(session: Path | pd.DataFrame) -> tuple[str | None, str, bool]:
+        if not isinstance(session, Path):
+            return None, "unknown", False
+        return resolve_session_revision(session, revisions)
+
+    revision_a = _revision(a)
+    revision_b = _revision(b)
 
     return SessionComparison(
-        tune_revisions=(_revision(a), _revision(b)),
+        tune_revisions=(revision_a[0], revision_b[0]),
+        tune_revision_sources=(revision_a[1], revision_b[1]),
+        tune_revision_conflicts=(revision_a[2], revision_b[2]),
         floor_conditions=floor_conditions,
         cells=joined.reset_index(),
         mean_delta=float(joined["delta"].mean()) if len(joined) else float("nan"),
