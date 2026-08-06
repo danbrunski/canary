@@ -96,6 +96,30 @@ def test_did_values_come_from_value_text_hex(tmp_path: Path) -> None:
     assert by_id["value"].iloc[0] == pytest.approx(2.20)
 
 
+def test_gps_channels_are_readable_despite_their_lower_case_names(tmp_path: Path) -> None:
+    """GPS is the only road-speed reference a Mode 22-only capture has.
+
+    Its channels are stored lower-case (``speed``), while OBD and UpRev are
+    upper-case. The reader used to upper-case the requested name, so
+    ``gps:speed`` matched nothing and returned an empty frame with no error —
+    the same silent-empty failure the DID hex trap above pins.
+    """
+    session = _session(
+        tmp_path,
+        [
+            TelemetryRecord(timestamp=T0, source="gps", channel="speed", value=42.5),
+            TelemetryRecord(timestamp=T0, source="obd", channel="RPM", value=1500.0),
+        ],
+    )
+    frame = read_channels(session, ["gps:speed"], bindings_path=BINDINGS, dids_path=DIDS)
+    assert frame["value"].iloc[0] == pytest.approx(42.5)
+    # Upper-case OBD channels still resolve — the match is case-insensitive,
+    # not lower-cased in place of upper-cased.
+    assert read_channels(session, ["obd:RPM"], bindings_path=BINDINGS, dids_path=DIDS)[
+        "value"
+    ].iloc[0] == pytest.approx(1500.0)
+
+
 def test_acquired_time_opt_in_uses_persisted_read_arrival(tmp_path: Path) -> None:
     session = _session(
         tmp_path,

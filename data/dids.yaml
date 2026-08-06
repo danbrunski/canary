@@ -70,7 +70,11 @@ dids:
     scale: 1.0
     offset: -40.0
     unit: degC
-    confidence: confirmed
+    # CONTESTED — demoted from `confirmed` 2026-08-06. Two pieces of evidence
+    # below disagree by exactly 10 degC and cannot both be right. Do not quote
+    # this channel's absolute value in a finding until the test named in
+    # `notes` has been run; differences and trends are unaffected.
+    confidence: medium
     plausible_min: -40.0
     plausible_max: 130.0
     evidence:
@@ -80,7 +84,36 @@ dids:
           A-40: cold idle raw 0x65 = 61 degC matched the parallel Mode 01
           coolant reading (61) exactly; warm 0x82 = 90; NT510 read 91.
           Exact scale/offset validated against ground truth.
-    notes: Same signal as broadcast ECM_COOLANT_TEMP (0x551:0); DID form is the cross-check.
+      - session: _capture-tuning-did-2026-08-06T003148
+        method: did_vs_broadcast_differential
+        finding: >
+          Contradicts the offset above. In-session, DID_1101 raw tracks
+          broadcast 0x233:0 exactly (mean difference +0.29 counts, sd 0.58,
+          n = 205) and sits exactly 10 counts above broadcast 0x551:0
+          (mean +10.29, sd 0.58). Broadcast 0x551:0 regressed against Mode 01
+          PID 0x05 gives degC = raw x 1.0020 - 40.25 (r2 = 0.994, n = 282,
+          session 2026-08-03T163440), reproducing its own confirmed
+          scale 1.0 / offset -40. Chaining those puts this DID's offset at
+          -50, not -40: with -40 it reported 101 degC where 0x551 and the
+          Mode 01 PID both put the engine at 91 degC — implausibly hot for a
+          thermostat-regulated VQ40DE at steady cruise.
+    notes: |
+      Same *signal* as broadcast ECM_COOLANT_TEMP (0x551:0), but the two
+      offsets above disagree by 10 degC and no session on hand can separate
+      them: the normal profile's DID window does not include 0x1101, so there
+      is no capture holding this DID and Mode 01 PID 0x05 together.
+
+      Decisive test: add 0x1101 to the default profile's DID window set and
+      take one ordinary drive. Mode 01 is suspended only for the window
+      itself, and coolant moves slowly enough that a DID sample compares
+      cleanly against PID samples seconds either side. If (raw - 40) matches
+      the PID, the 2026-05-16 reading stands; if (raw - 50) matches, this
+      offset is wrong and every absolute coolant figure quoted from a DID
+      capture has been 10 degC high.
+
+      Note the same physical value is broadcast three ways with two offset
+      conventions: 0x233:0 and 0x23D:7 are bit-identical to each other and
+      use -50, while 0x551:0 runs 10 counts lower and uses -40.
 
   - did: 0x1219
     name: ECM_RPM

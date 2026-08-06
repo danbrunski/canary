@@ -280,27 +280,25 @@ signals:
         finding: >
           Mean values are IDENTICAL to 0x23D:3 in every window, indicating
           the ECM publishes this value on two CAN IDs simultaneously.
+      - session: _capture-tuning-did-2026-08-06T003148
+        method: broadcast_byte_sweep_vs_did
+        finding: >
+          RETRACTS the cross-broadcast pairing above. 0x23D:3 is the low byte
+          of a 16-bit engine-speed counter (see ECM_RPM_23D), not a copy of
+          this byte. The two were paired on identical per-window *means*, and
+          the low byte of a fast counter averages near mid-scale in every
+          window regardless of engine state — so it matches any signal that
+          also sits near mid-scale. This byte's own identification is
+          untouched; only the corroboration it drew from the pair is gone.
     notes: |
-      The cross-broadcast pair (with ECM_CALC_LOAD_B) reduces the candidate
-      list — only signals published by the ECM appear in both. Direction
-      (high cranking, mid idle, low at sustained throttle) is consistent
-      with engine load or fuel pulse width.
-
-  - name: ECM_CALC_LOAD_B
-    module: ECM
-    can_id: 0x23D
-    byte_start: 3
-    byte_length: 1
-    byte_order: big
-    scale: null
-    offset: null
-    unit: unknown
-    confidence: medium
-    evidence:
-      - session: 2026-05-11T152858
-        method: cross_broadcast_pairing
-        finding: Identical means to ECM_CALC_LOAD_A (0x233:4) in every window.
-    notes: Cross-broadcast duplicate of ECM_CALC_LOAD_A.
+      Direction (high cranking, mid idle, low at sustained throttle) is
+      consistent with engine load or fuel pulse width. The cross-broadcast
+      pair that once narrowed this was withdrawn on 2026-08-06 — see the
+      retraction above — so this rests on the differential alone and is
+      weaker than its `medium` grade suggests. Distinguishing load from
+      pulse width needs a reference for one of them: Mode 22 DID 0x1208
+      (ECM_INJECTOR_PW_B1) is captured by the tuning profile and would
+      settle it in one drive.
 
   - name: ECM_THROTTLE_TRANSIENT
     module: ECM
@@ -960,6 +958,182 @@ signals:
       value: coolant high while bit 0x80 never asserts → stage-2 fan
       fault, detectable passively with no active polling. Bits
       0x01–0x10 of this byte not yet characterized.
+
+  # --------------------------------------------------------------------------
+  # ABS / wheel speeds — found 2026-08-06 by src.analysis.broadcast_discovery
+  # sweeping every byte slice of the ids that had no binding at all.
+  # --------------------------------------------------------------------------
+
+  - name: WHEEL_SPEED_6F7_A
+    module: ABS
+    can_id: 0x6F7
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: 0.0625
+    offset: 0.0
+    unit: "km/h"
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 250.0
+    evidence: &wheel_speed_6f7_evidence
+      - session: 2026-08-03T163440
+        method: broadcast_byte_sweep_vs_pid
+        finding: >
+          Regressed against Mode 01 PID 0x0D (vehicle speed) over a drive
+          reaching 106 km/h: bytes 0-1 r2 = 0.99872 (km/h = raw x 0.062881
+          - 0.428), bytes 2-3 r2 = 0.99878 (x 0.062965), bytes 4-5
+          r2 = 0.99884 (x 0.062631), n = 987 each. The three fields agree
+          with each other to a few counts all session (0-1 vs 2-3: mean
+          -0.38, sd 2.95; 2-3 vs 4-5: mean -4.12, sd 4.19) — the spread of
+          three wheels through corners, not three unrelated signals.
+          Bytes 6-7 are NOT a fourth wheel: r2 = 0.0005 against speed and
+          the field never exceeds 2 all session.
+    notes: &wheel_speed_6f7_notes |
+      One of three 16-bit wheel-speed fields on the ABS 0x6F7 frame
+      (bytes 0-1, 2-3, 4-5). Which corner each field is has NOT been
+      established — that needs a capture with a known single-wheel
+      difference (a tight steady-radius turn, tagged for direction), so
+      they are named A/B/C rather than guessed into FL/FR/RL.
+
+      Scale is pinned at exactly 1/16 km/h per count. All three fields fit
+      ~0.0627-0.0630 rather than 0.0625, a consistent +0.4%; Mode 01 PID
+      0x0D is quantised to whole km/h, which is enough to explain it, but
+      not enough to rule out a true scale slightly above 1/16. Confidence
+      is `high`, not `confirmed`, for exactly that reason — the binding and
+      direction are certain, the last digit of the scale is not.
+
+  - name: WHEEL_SPEED_6F7_B
+    module: ABS
+    can_id: 0x6F7
+    byte_start: 2
+    byte_length: 2
+    byte_order: big
+    scale: 0.0625
+    offset: 0.0
+    unit: "km/h"
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 250.0
+    evidence: *wheel_speed_6f7_evidence
+    notes: *wheel_speed_6f7_notes
+
+  - name: WHEEL_SPEED_6F7_C
+    module: ABS
+    can_id: 0x6F7
+    byte_start: 4
+    byte_length: 2
+    byte_order: big
+    scale: 0.0625
+    offset: 0.0
+    unit: "km/h"
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 250.0
+    evidence: *wheel_speed_6f7_evidence
+    notes: *wheel_speed_6f7_notes
+
+  # --------------------------------------------------------------------------
+  # Redundant ECM copies — the same value published on more than one frame.
+  # Worth binding because the bus serves them free, at ~97 Hz, where the
+  # Mode 22 equivalent costs a poll slot and arrives at 15 Hz.
+  # --------------------------------------------------------------------------
+
+  - name: ECM_RPM_23D
+    module: ECM
+    can_id: 0x23D
+    byte_start: 3
+    byte_length: 2
+    byte_order: little
+    scale: 3.125
+    offset: 0.0
+    unit: "rpm"
+    # Held at `high` deliberately. The mapping itself is not in doubt — the
+    # correlation below is 1.000000 at an exactly integral ratio. But
+    # `collection.persist_decoded_confidence` defaults to ("confirmed",), so
+    # promoting this line is not a statement about evidence: it starts
+    # persisting a new ~97 Hz decoded channel, which `trainable_feature_columns`
+    # derives from the data and would therefore add to the training feature
+    # set, breaking parity with every model trained before it. That is an
+    # operator decision about storage and retraining, not a decode question.
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 8000.0
+    evidence:
+      - session: _capture-tuning-did-2026-08-06T003148
+        method: broadcast_byte_sweep_vs_did
+        finding: >
+          A second copy of engine speed. Against the confirmed ECM_RPM
+          field (0x1F9 bytes 2-3) this field correlates at 1.000000 with a
+          ratio of exactly 25.0000 (sd 0.0133, n = 2021) — i.e. the same
+          counter at 1/25 the resolution. Independently regressed against
+          Mode 22 DID 0x1219 (ECM_RPM): r2 = 0.9992, rpm = raw x 3.12457
+          - 1.34, slope drift 0.14% across three disjoint sub-windows.
+    notes: |
+      0x1F9 stores rpm x 8; this field stores rpm x 0.32, so it carries the
+      same value with 25x coarser quantisation (~3.1 rpm per count). Prefer
+      0x1F9 for anything rate-sensitive; this one is useful as a redundancy
+      cross-check and as a second opinion during 0x1F9 dropouts.
+
+      This supersedes ECM_CALC_LOAD_B, which bound byte 3 of this frame as
+      a load duplicate on the strength of "identical means to
+      ECM_CALC_LOAD_A in every window". Byte 3 is the low byte of this
+      16-bit counter, so its per-window *mean* sits near mid-scale
+      regardless of engine state — a statistic that matches almost
+      anything. Comparing means is what let a fast LSB pass as a slow load
+      signal; the sweep compares values.
+
+  - name: ECM_COOLANT_TEMP_233
+    module: ECM
+    can_id: 0x233
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 1.0
+    offset: -50.0
+    unit: "degC"
+    confidence: high
+    plausible_min: -10.0
+    plausible_max: 130.0
+    evidence: &coolant_alt_evidence
+      - session: 2026-08-03T163440
+        method: broadcast_byte_sweep_vs_pid
+        finding: >
+          Regressed against Mode 01 PID 0x05: degC = raw x 1.0019 - 50.27
+          (r2 = 0.99404, n = 282), against 0x551:0's raw x 1.0020 - 40.25
+          (r2 = 0.99406) on the same rows. Same signal, offset convention
+          10 lower.
+      - session: _capture-tuning-did-2026-08-06T003148
+        method: cross_broadcast_differential
+        finding: >
+          0x233:0 and 0x23D:7 are bit-identical across the whole session
+          (mean difference 0.000, sd 0.000, n = 412) and both run exactly
+          10 counts above 0x551:0 (mean -10.000, sd 0.000).
+    notes: &coolant_alt_notes |
+      Engine coolant temperature, published on three frames with two offset
+      conventions: 0x233:0 and 0x23D:7 use -50, 0x551:0 uses -40. The
+      values are bit-identical within each convention, so this is one
+      sensor formatted twice, not two sensors.
+
+      Kept at `high` rather than `confirmed` because it is entangled with
+      an unresolved conflict over DID 0x1101's offset — see the CONTESTED
+      note in data/dids.yaml. The relationship *between* the broadcast
+      fields is settled; which convention the Mode 22 DID follows is not.
+
+  - name: ECM_COOLANT_TEMP_23D
+    module: ECM
+    can_id: 0x23D
+    byte_start: 7
+    byte_length: 1
+    byte_order: big
+    scale: 1.0
+    offset: -50.0
+    unit: "degC"
+    confidence: high
+    plausible_min: -10.0
+    plausible_max: 130.0
+    evidence: *coolant_alt_evidence
+    notes: *coolant_alt_notes
 
 # Future sections (placeholders for organization once data arrives):
 #

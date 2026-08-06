@@ -19,6 +19,10 @@ least once during the 2026-08 tuning campaign:
   vehicle: the 3.8 % measured-AFR disagreement between UpRev's conversion and
   the ECM's own λ is exactly the kind of thing that must not be blurred by
   filing both under one name.
+* ``gps:`` — the GPS receiver's own fields (``speed``, ``heading``,
+  ``altitude``, …), numeric and in engineering units. Also a separate
+  instrument, and the only road-speed reference in a Mode 22-only tuning
+  capture, where no Mode 01 PID is being polled at all.
 
 This module is the single place that knows all four, so callers ask for
 ``obd:RPM`` or ``did:ECM_AF_SENSOR_V_B1`` and get numbers they can compare.
@@ -49,7 +53,7 @@ from src.telemetry import DECODED_SOURCE, SOURCE_SEP
 #: Namespaces a spec may name. ``did``/``can`` are decode routes rather than
 #: literal ``source`` column values — a DID reading is stored with
 #: ``source="obd"`` and channel ``DID_1225``.
-SpecSource = Literal["obd", "did", "decoded", "can", "uprev"]
+SpecSource = Literal["obd", "did", "decoded", "can", "uprev", "gps"]
 
 _RAW_UNIT = "counts"
 
@@ -87,9 +91,9 @@ def parse_spec(text: str) -> ChannelSpec:
     name = name.strip()
     if not name:
         raise ChannelSpecError(f"channel spec {text!r} has no channel name")
-    if source not in ("obd", "did", "decoded", "can", "uprev"):
+    if source not in ("obd", "did", "decoded", "can", "uprev", "gps"):
         raise ChannelSpecError(
-            f"unknown namespace {source!r} in {text!r}; expected obd/did/decoded/can/uprev"
+            f"unknown namespace {source!r} in {text!r}; expected obd/did/decoded/can/uprev/gps"
         )
     return ChannelSpec(source=source, name=name, text=raw)  # type: ignore[arg-type]
 
@@ -164,8 +168,14 @@ def _long_frame(session: Path | pd.DataFrame, *, acquired_time: bool = False) ->
 
 
 def _numeric_series(frame: pd.DataFrame, spec: ChannelSpec, source: str) -> pd.DataFrame:
-    """``obd:``/``uprev:`` — already engineering units, just select and coerce."""
-    rows = frame[(frame["source"] == source) & (frame["channel"] == spec.name.upper())]
+    """``obd:``/``uprev:``/``gps:`` — engineering units already, select and coerce.
+
+    Matched case-insensitively rather than upper-cased: OBD and UpRev channels
+    are stored upper-case but the GPS receiver's are lower-case (``speed``),
+    and forcing one convention silently returned an empty frame for the other.
+    """
+    channel = frame["channel"].astype("string").str.casefold()
+    rows = frame[(frame["source"] == source) & (channel == spec.name.casefold())]
     out = rows.loc[:, ["timestamp"]].copy()
     out["value"] = pd.to_numeric(rows["value_number"], errors="coerce")
     out["unit"] = rows["unit"].astype("string").fillna("")
@@ -304,6 +314,7 @@ def read_channels(
     readers = {
         "obd": lambda s: _numeric_series(frame, s, "obd"),
         "uprev": lambda s: _numeric_series(frame, s, "uprev"),
+        "gps": lambda s: _numeric_series(frame, s, "gps"),
         "did": lambda s: _did_series(frame, s, catalogs),
         "decoded": lambda s: _decoded_series(frame, s, catalogs),
         "can": lambda s: _can_series(frame, s, catalogs),
