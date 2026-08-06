@@ -31,7 +31,12 @@ from src.analysis.tune_revisions import (
     resolve_session_revision,
     session_started_at,
 )
-from src.analysis.tuning import DEFAULT_RPM_BANDS, GateError, delivery_error
+from src.analysis.tuning import (
+    DEFAULT_RPM_BANDS,
+    GateError,
+    delivery_error,
+    delivery_error_from_semantic_frame,
+)
 from src.analysis.tuning_frame import build_tuning_frame, section_capabilities
 from src.config import CanaryConfig
 from src.control.capture_manifest import read_capture_manifest
@@ -54,6 +59,9 @@ class TuningDigest:
     wot_with_afr_pair: int
     wot_by_band: list[dict[str, Any]]
     achieved_hz: dict[str, float]
+    #: Evidence inside physically tagged all-DID pulls. Separate counts avoid
+    #: treating absent command/fueling/target roles as a measured zero.
+    pull_inventory: dict[str, Any] = field(default_factory=dict)
     #: Per-provider stored-sample timing.  Unlike the live scheduler's
     #: trailing observation window, this is the evidence preserved with the
     #: completed drive and makes long polling stalls visible.
@@ -82,6 +90,7 @@ class TuningDigest:
             "wot_with_afr_pair": self.wot_with_afr_pair,
             "wot_by_band": list(self.wot_by_band),
             "achieved_hz": dict(self.achieved_hz),
+            "pull_inventory": self.pull_inventory,
             "rate_summary": self.rate_summary,
             "measured_afr": self.measured_afr,
             "target_map": self.target_map,
@@ -270,7 +279,11 @@ def _wot_inventory(
         try:
             rpm = read_channels(session_dir, [rpm_spec], acquired_time=True)
             if not rpm.empty:
-                epoch = rpm["timestamp"].astype("int64") / 1_000_000_000
+                # Parquet can round-trip timestamps as microseconds rather
+                # than nanoseconds; ``astype(int64) / 1e9`` then puts every
+                # sample in 1970 and makes valid physical tags miss. Convert
+                # the timezone-aware values through their own epoch method.
+                epoch = rpm["timestamp"].map(lambda value: value.timestamp())
                 selected = pd.Series(False, index=rpm.index)
                 for start in starts:
                     end = next((item for item in ends if item > start), float(epoch.max()))
@@ -341,6 +354,98 @@ def _wot_inventory(
     except Exception:  # noqa: BLE001
         paired = 0
     return int(len(wot)), paired, rows
+
+
+def _did_pull_inventory(
+    session_dir: Path,
+    *,
+    role_capabilities: dict[str, Any],
+    target_lookup_ready: bool,
+) -> dict[str, Any]:
+    """Count evidence inside physical-pull tags without inventing WOT thresholds.
+
+    The all-DID profile has no validated universal throttle/load threshold.
+    Tags state what the operator physically did; this inventory then says which
+    semantic observations were actually present during those intervals.
+    """
+    tags = load_tags(session_dir / "tags.jsonl")
+    starts = [
+        float(tag["t"])
+        for tag in tags
+        if tag.get("label") in {"tuning_pull_start", "wot_pull"}
+        and isinstance(tag.get("t"), int | float)
+    ]
+    ends = [
+        float(tag["t"])
+        for tag in tags
+        if tag.get("label") == "tuning_pull_end" and isinstance(tag.get("t"), int | float)
+    ]
+    rpm_spec = role_capabilities.get("rpm", {}).get("provider")
+    if not starts:
+        return {
+            "available": False,
+            "reason": "no physical pull tags (`tuning_pull_start` or `wot_pull`)",
+        }
+    if not isinstance(rpm_spec, str) or not role_capabilities.get("rpm", {}).get(
+        "available", False
+    ):
+        return {"available": False, "reason": "confirmed RPM provider is unavailable"}
+    try:
+        rpm = read_channels(session_dir, [rpm_spec], acquired_time=True)
+    except Exception:  # noqa: BLE001 — surfaced as absent evidence below
+        return {"available": False, "reason": "RPM provider could not be read"}
+    if rpm.empty:
+        return {"available": False, "reason": "RPM provider has no samples"}
+
+    epoch = rpm["timestamp"].map(lambda value: value.timestamp())
+    intervals: list[tuple[float, float]] = []
+    for start in starts:
+        intervals.append((start, next((end for end in ends if end > start), float(epoch.max()))))
+
+    def in_intervals(series: pd.Series) -> pd.Series:
+        seconds = series.map(lambda value: value.timestamp())
+        selected = pd.Series(False, index=series.index)
+        for start, end in intervals:
+            selected |= seconds.between(start, end, inclusive="left")
+        return selected
+
+    tagged_rpm = rpm[in_intervals(rpm["timestamp"])].copy()
+    # One count per role is intentionally not an alignment claim. These are
+    # independent observations present during the physical pull; delivery
+    # analysis still requires same-cell semantic alignment.
+    evidence: dict[str, int | None] = {}
+    for role, label in (
+        ("operator_demand", "operator_demand_samples"),
+        ("measured_afr_b1", "measured_afr_samples"),
+        ("fueling_active", "fueled_samples"),
+        ("commanded_afr", "commanded_afr_samples"),
+    ):
+        provider = role_capabilities.get(role, {}).get("provider")
+        if not isinstance(provider, str) or not role_capabilities.get(role, {}).get(
+            "available", False
+        ):
+            evidence[label] = None
+            continue
+        try:
+            samples = read_channels(session_dir, [provider], acquired_time=True)
+        except Exception:  # noqa: BLE001 — optional evidence stays unavailable
+            evidence[label] = None
+            continue
+        evidence[label] = int(in_intervals(samples["timestamp"]).sum())
+
+    tagged_rpm["second"] = tagged_rpm["timestamp"].dt.floor("1s")
+    per_second = tagged_rpm.groupby("second", sort=True)["value"].last()
+    return {
+        "available": True,
+        "method": "physical pull tags + semantic providers",
+        "pulls": len(intervals),
+        "rpm_samples": int(len(tagged_rpm)),
+        "rpm_seconds": int(len(per_second)),
+        "rpm_over_2500_seconds": int((per_second > WOT_RPM_FLOOR).sum()),
+        "target_bearing_samples": 0 if target_lookup_ready else None,
+        "target_lookup_ready": target_lookup_ready,
+        **evidence,
+    }
 
 
 def _cam_tracking(
@@ -435,6 +540,7 @@ def compute_tuning_digest(
     calibration = load_afr_calibration(calibration_path) if calibration_path.exists() else None
     providers_path = profile_data / "tuning_providers.yaml"
     capabilities: dict[str, Any] = {}
+    semantic = None
     if providers_path.exists():
         semantic = build_tuning_frame(
             session_dir, providers_path=providers_path, calibration=calibration
@@ -493,6 +599,15 @@ def compute_tuning_digest(
     )
     target = None if calibration is None else calibration.target_map(revision)
     target_map = _target_map_summary(target, revision=revision, role_capabilities=role_capabilities)
+    pull_inventory = (
+        _did_pull_inventory(
+            session_dir,
+            role_capabilities=role_capabilities,
+            target_lookup_ready=bool(target_map.get("lookup_ready", False)),
+        )
+        if did_continuous
+        else {}
+    )
 
     delivery: dict[str, Any] | None = None
     delivery_available = (
@@ -506,6 +621,33 @@ def compute_tuning_digest(
             "delivery error unavailable: all-DID capture lacks confirmed semantic roles "
             + ", ".join(map(str, missing))
         )
+    elif did_continuous and semantic is not None:
+        values = semantic.values.rename(
+            columns={
+                "measured_afr_b1": "measured_afr",
+                "measured_afr_b1_censored": "measured_afr_censored",
+            }
+        )
+        provider = role_capabilities.get("measured_afr_b1", {}).get("provider")
+        try:
+            result = delivery_error_from_semantic_frame(
+                values,
+                measured_spec=f"semantic:measured_afr_b1 ({provider})",
+                # The ROM's Base Fuel Schedule axis is not yet observable, so
+                # an all-DID delivery result cannot claim the Mode-01 load
+                # gate. Physical pull tags remain the evidence for demand.
+                min_load=None,
+                tune_revision=revision,
+                tune_revision_source=revision_source,
+            )
+            delivery = result.as_dict() if result.n else None
+            if result.n == 0:
+                notes.append(
+                    "no samples survived the semantic delivery-error gates: "
+                    + ", ".join(f"{k} -{v}" for k, v in result.gates["filtered"].items())
+                )
+        except (GateError, ValueError) as exc:
+            notes.append(f"delivery error unavailable: {exc}")
     elif calibration is not None:
         try:
             result = delivery_error(
@@ -574,6 +716,7 @@ def compute_tuning_digest(
         wot_with_afr_pair=paired,
         wot_by_band=bands,
         achieved_hz=achieved,
+        pull_inventory=pull_inventory,
         rate_summary=rate_summary,
         measured_afr=measured_afr,
         target_map=target_map,

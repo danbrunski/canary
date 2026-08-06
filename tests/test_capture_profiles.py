@@ -187,6 +187,54 @@ def test_repeated_matching_capture_arm_and_stop_are_idempotent(tmp_path: Path) -
     assert repeated_stop.json()["ended_capture_dir"] == capture_dir
 
 
+def test_capture_start_budget_failure_restores_writer_profile_and_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure after storage rotation must not strand the daemon in capture mode."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = config.model_copy(
+        update={
+            "collection": config.collection.model_copy(
+                update={"storage_path": tmp_path / "sessions"}
+            )
+        }
+    )
+    store = _store(tmp_path, config)
+    writer = AsyncParquetTelemetryWriter(
+        ParquetTelemetryWriter(
+            tmp_path / "sessions",
+            session_started_at=datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+        )
+    )
+    client = TestClient(
+        create_app(
+            config,
+            anomalies_dir=tmp_path / "anomalies",
+            control_token="secret",
+            storage_writer=writer,
+            capture_profile_store=store,
+        )
+    )
+
+    def fail_budget(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("injected budget failure")
+
+    monkeypatch.setattr(bus_budget, "set_override", fail_budget)
+    response = client.post(
+        "/control/capture",
+        headers={"Authorization": "Bearer secret"},
+        json={"profile": "fuel-map", "bus_budget_requests_per_second": 30.0},
+    )
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail["error"] == "capture_start_failed"
+    assert detail["failed_step"] == "bus_budget"
+    assert detail["restored"]["profile"]["name"] == "default"
+    assert detail["restored"]["bus_budget"]["override_requests_per_second"] is None
+    assert not writer.paths.root.name.startswith("_capture-")
+
+
 def test_capture_profile_api_crud_and_auth(tmp_path: Path) -> None:
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     store = _store(tmp_path, config)

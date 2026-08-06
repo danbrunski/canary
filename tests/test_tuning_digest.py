@@ -117,7 +117,6 @@ def test_all_did_capture_never_falls_back_to_mode01(tmp_path: Path, config: Cana
             }
         )
     )
-
     digest = compute_tuning_digest(session, config)
 
     assert digest is not None
@@ -153,6 +152,16 @@ def test_all_did_digest_carries_afr_lineage_rom_identity_and_polling_gaps(
             }
         )
     )
+    (session / "tags.jsonl").write_text(
+        "\n".join(
+            json.dumps(tag)
+            for tag in (
+                {"t": T0.timestamp(), "label": "tuning_pull_start"},
+                {"t": (T0 + timedelta(seconds=3)).timestamp(), "label": "tuning_pull_end"},
+            )
+        )
+        + "\n"
+    )
 
     digest = compute_tuning_digest(session, config)
 
@@ -161,6 +170,20 @@ def test_all_did_digest_carries_afr_lineage_rom_identity_and_polling_gaps(
     assert digest.measured_afr["instrument"] == "factory A/F voltage transformed to AFR"
     assert digest.measured_afr["banks"][0]["samples"] == 4
     assert digest.measured_afr["banks"][0]["afr_median"] == pytest.approx(14.72)
+    assert digest.pull_inventory == {
+        "available": True,
+        "method": "physical pull tags + semantic providers",
+        "pulls": 1,
+        "rpm_samples": 3,
+        "rpm_seconds": 3,
+        "rpm_over_2500_seconds": 3,
+        "operator_demand_samples": None,
+        "measured_afr_samples": 3,
+        "fueled_samples": None,
+        "commanded_afr_samples": None,
+        "target_bearing_samples": None,
+        "target_lookup_ready": False,
+    }
     assert digest.rate_summary["did:ECM_RPM"] == {
         "samples": 4,
         "duration_seconds": 3.0,

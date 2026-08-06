@@ -661,17 +661,22 @@ def register_control_routes(
             if requested_budget is None:
                 requested_budget = profile.bus_budget_override
             previous_budget = bus_budget.snapshot()
+            previous_profile = tuning_profile.active_profile()
+            previous_writer_dir = storage_writer.paths.root
             entered = False
+            failed_step = "storage_rotation"
             nonlocal budget_before_capture
             try:
                 await storage_writer.enter_capture_mode(profile, capture_id, request.tune_revision)
                 entered = True
                 if requested_budget is not None:
+                    failed_step = "bus_budget"
                     bus_budget.set_override(
                         requested_budget,
                         source=f"capture:{profile.name}",
                         ttl_seconds=request.bus_budget_ttl_seconds,
                     )
+                failed_step = "profile_activation"
                 tuning_profile.activate(profile, session_dir=str(storage_writer.paths.root))
                 last_ended_capture = None
                 budget_before_capture = (
@@ -680,19 +685,38 @@ def register_control_routes(
                     else None
                 )
             except Exception as exc:
-                if entered:
-                    await storage_writer.exit_capture_mode()
-                bus_budget.restore(previous_budget)
-                default_profile = profile_store.load().by_name("default")
-                assert default_profile is not None
-                tuning_profile.activate(
-                    default_profile,
-                    session_dir=str(storage_writer.paths.root),
-                    source="rollback",
-                )
-                raise HTTPException(
-                    status_code=500, detail=f"failed to start capture: {exc}"
-                ) from exc
+                rollback_errors: list[str] = []
+                # A writer can rotate its path before a later manifest write
+                # fails, so inspect its actual path as well as the success flag.
+                if entered or storage_writer.paths.root != previous_writer_dir:
+                    try:
+                        await storage_writer.exit_capture_mode()
+                    except Exception as rollback_exc:  # noqa: BLE001
+                        rollback_errors.append(f"writer: {rollback_exc}")
+                try:
+                    bus_budget.restore(previous_budget)
+                except Exception as rollback_exc:  # noqa: BLE001
+                    rollback_errors.append(f"bus_budget: {rollback_exc}")
+                try:
+                    tuning_profile.activate(
+                        previous_profile,
+                        session_dir=str(storage_writer.paths.root),
+                        source="rollback",
+                    )
+                except Exception as rollback_exc:  # noqa: BLE001
+                    rollback_errors.append(f"profile: {rollback_exc}")
+                detail: dict[str, Any] = {
+                    "error": "capture_start_failed",
+                    "failed_step": failed_step,
+                    "restored": {
+                        "writer_session_dir": str(storage_writer.paths.root),
+                        "profile": tuning_profile.snapshot(),
+                        "bus_budget": bus_budget.snapshot(),
+                    },
+                }
+                if rollback_errors:
+                    detail["rollback_errors"] = rollback_errors
+                raise HTTPException(status_code=500, detail=detail) from exc
             payload = {
                 "capture_profile": tuning_profile.snapshot(),
                 "output_session_dir": str(storage_writer.paths.root),

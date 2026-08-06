@@ -158,11 +158,6 @@ def delivery_error(
     3. optional load floor, for WOT-only questions
     4. band-averaged over rpm, so band composition cannot masquerade as an effect
     """
-    revision = None
-    revision_source = "unknown"
-    if isinstance(session, Path):
-        revision, revision_source, _conflict = resolve_session_revision(session, revisions)
-
     specs = ["obd:RPM", "obd:FUEL_STATUS", "obd:COMMANDED_AFR", measured_spec]
     if min_load is not None:
         specs.append("obd:ENGINE_LOAD")
@@ -178,36 +173,115 @@ def delivery_error(
         bindings_path=bindings_path,
         dids_path=dids_path,
     )
-    report = GateReport(started=len(frame))
-
     measured = frame[measured_spec].astype(float)
-    frame = frame.assign(
-        measured_afr=measured * afr_stoich if measured_is_lambda else measured,
-        commanded_afr=frame["obd:COMMANDED_AFR"].astype(float),
+    semantic = pd.DataFrame(
+        {
+            "timestamp": frame["timestamp"],
+            "rpm": frame["obd:RPM"],
+            "measured_afr": measured * afr_stoich if measured_is_lambda else measured,
+            "commanded_afr": frame["obd:COMMANDED_AFR"],
+            "fueling_active": frame["obd:FUEL_STATUS"].astype(float).eq(OPEN_LOOP),
+        }
+    )
+    if min_load is not None:
+        semantic["load"] = frame["obd:ENGINE_LOAD"]
+
+    revision = None
+    revision_source = "unknown"
+    if isinstance(session, Path):
+        revision, revision_source, _conflict = resolve_session_revision(session, revisions)
+    return delivery_error_from_semantic_frame(
+        semantic,
+        measured_spec=measured_spec,
+        afr_stoich=afr_stoich,
+        rpm_bands=rpm_bands,
+        min_load=min_load,
+        grid=grid,
+        fueling_gate_name="closed_loop",
+        tune_revision=revision,
+        tune_revision_source=revision_source,
     )
 
-    before = len(frame)
-    frame = frame[frame["obd:FUEL_STATUS"].astype(float) == OPEN_LOOP]
-    report.drop("closed_loop", before, len(frame))
 
-    # Enrichment, not overrun. DFCO is also FUEL_STATUS 4, but its commanded
-    # mixture is not richer than stoich, so this excludes it structurally
-    # instead of guessing a lean threshold.
-    before = len(frame)
-    frame = frame[frame["commanded_afr"] < afr_stoich]
-    report.drop("not_enrichment", before, len(frame))
+def delivery_error_from_semantic_frame(
+    frame: pd.DataFrame,
+    *,
+    measured_spec: str,
+    afr_stoich: float = 14.7,
+    rpm_bands: tuple[float, ...] = DEFAULT_RPM_BANDS,
+    min_load: float | None = None,
+    grid: str = "1s",
+    fueling_gate_name: str = "fueling_inactive",
+    tune_revision: str | None = None,
+    tune_revision_source: str = "semantic_frame",
+) -> DeliveryError:
+    """Apply delivery gates to semantic roles instead of transport names.
+
+    Required columns are ``timestamp``, ``rpm``, ``measured_afr``,
+    ``commanded_afr``, and boolean ``fueling_active``.  An optional
+    ``measured_afr_censored`` column removes transfer-boundary samples before
+    they can become a false mixture error.  ``load`` is optional and may only
+    be used when an independently validated load provider exists.
+
+    This is the all-DID adapter boundary: callers resolve/transform roles
+    before this function, so an A/F voltage can never be mislabeled as AFR by
+    a transport-specific shortcut.
+    """
+    required = {"timestamp", "rpm", "measured_afr", "commanded_afr", "fueling_active"}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise GateError("semantic delivery frame is missing roles: " + ", ".join(missing))
+    if min_load is not None and "load" not in frame:
+        raise GateError(
+            "delivery load gate requested but no validated semantic load provider exists"
+        )
+
+    values = frame.copy()
+    values["timestamp"] = pd.to_datetime(values["timestamp"], utc=True)
+    # A row exists only when every required role was independently observed in
+    # the same grid cell. Grouping does not forward-fill across cells.
+    columns = ["rpm", "measured_afr", "commanded_afr", "fueling_active"]
+    if min_load is not None:
+        columns.append("load")
+    if "measured_afr_censored" in values:
+        columns.append("measured_afr_censored")
+    values = (
+        values.loc[:, ["timestamp", *columns]]
+        .sort_values("timestamp", kind="stable")
+        .groupby(pd.Grouper(key="timestamp", freq=grid), sort=True)
+        .last()
+        .dropna(subset=["rpm", "measured_afr", "commanded_afr", "fueling_active"])
+        .reset_index()
+    )
+    report = GateReport(started=len(values))
+
+    before = len(values)
+    values = values[values["fueling_active"].astype(bool)]
+    report.drop(fueling_gate_name, before, len(values))
+
+    # Enrichment, not overrun. A semantic fueling-active role is deliberately
+    # separate from the mixture target: a future DID decoder can identify fuel
+    # cut without carrying Mode-01's overloaded `FUEL_STATUS == 4` convention.
+    before = len(values)
+    values = values[values["commanded_afr"].astype(float) < afr_stoich]
+    report.drop("not_enrichment", before, len(values))
 
     if min_load is not None:
-        before = len(frame)
-        frame = frame[frame["obd:ENGINE_LOAD"].astype(float) > min_load]
-        report.drop("below_min_load", before, len(frame))
+        before = len(values)
+        values = values[values["load"].astype(float) > min_load]
+        report.drop("below_min_load", before, len(values))
 
-    before = len(frame)
-    frame = frame[(frame["obd:RPM"] >= rpm_bands[0]) & (frame["obd:RPM"] <= rpm_bands[-1])]
-    report.drop("outside_rpm_bands", before, len(frame))
-    report.remaining = len(frame)
+    if "measured_afr_censored" in values:
+        before = len(values)
+        values = values[~values["measured_afr_censored"].astype(bool)]
+        report.drop("censored_measured_afr", before, len(values))
 
-    if frame.empty:
+    before = len(values)
+    values = values[(values["rpm"] >= rpm_bands[0]) & (values["rpm"] <= rpm_bands[-1])]
+    report.drop("outside_rpm_bands", before, len(values))
+    report.remaining = len(values)
+
+    if values.empty:
         return DeliveryError(
             bands=pd.DataFrame(columns=["rpm_band", "n", "commanded", "measured", "error_pct"]),
             band_averaged_pct=float("nan"),
@@ -216,11 +290,14 @@ def delivery_error(
             gates=report.as_dict(),
             rpm_window=(float("nan"), float("nan")),
             measured_spec=measured_spec,
-            tune_revision=revision,
+            tune_revision=tune_revision,
+            tune_revision_source=tune_revision_source,
         )
 
-    frame = frame.assign(error_pct=(frame["measured_afr"] / frame["commanded_afr"] - 1.0) * 100.0)
-    binned = frame.groupby(pd.cut(frame["obd:RPM"], list(rpm_bands)), observed=True)
+    values = values.assign(
+        error_pct=(values["measured_afr"] / values["commanded_afr"] - 1.0) * 100.0
+    )
+    binned = values.groupby(pd.cut(values["rpm"], list(rpm_bands)), observed=True)
     bands = binned.agg(
         n=("error_pct", "size"),
         commanded=("commanded_afr", "mean"),
@@ -232,13 +309,13 @@ def delivery_error(
     return DeliveryError(
         bands=bands,
         band_averaged_pct=float(bands["error_pct"].mean()),
-        pooled_pct=float(frame["error_pct"].mean()),
-        n=int(len(frame)),
+        pooled_pct=float(values["error_pct"].mean()),
+        n=int(len(values)),
         gates=report.as_dict(),
-        rpm_window=(float(frame["obd:RPM"].min()), float(frame["obd:RPM"].max())),
+        rpm_window=(float(values["rpm"].min()), float(values["rpm"].max())),
         measured_spec=measured_spec,
-        tune_revision=revision,
-        tune_revision_source=revision_source,
+        tune_revision=tune_revision,
+        tune_revision_source=tune_revision_source,
     )
 
 
@@ -488,5 +565,6 @@ __all__ = [
     "SessionComparison",
     "compare_sessions",
     "delivery_error",
+    "delivery_error_from_semantic_frame",
     "scale_stability",
 ]

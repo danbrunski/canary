@@ -20,6 +20,7 @@ from src.analysis.tuning import (
     GateError,
     compare_sessions,
     delivery_error,
+    delivery_error_from_semantic_frame,
     scale_stability,
 )
 from src.storage.parquet_writer import write_records_to_parquet
@@ -115,6 +116,29 @@ def test_measured_source_is_carried_in_the_result(tmp_path: Path) -> None:
     session = _rows(tmp_path, [(3000, 90, 4, 1.2, 0.83)] * 4)
     result = delivery_error(session, calibration=PHI, bindings_path=BINDINGS, dids_path=DIDS)
     assert result.measured_spec == "obd:O2_WR_LAMBDA_S1"
+
+
+def test_semantic_delivery_adapter_excludes_censored_samples_without_mode01() -> None:
+    """All-DID analysis consumes transformed roles, never raw transport values."""
+    frame = pd.DataFrame(
+        {
+            "timestamp": [T0 + timedelta(seconds=offset) for offset in range(4)],
+            "rpm": [3000.0] * 4,
+            "measured_afr": [12.4, 12.6, 18.2, 12.5],
+            "commanded_afr": [12.5] * 4,
+            "fueling_active": [True, True, True, False],
+            "measured_afr_censored": [False, False, True, False],
+        }
+    )
+
+    result = delivery_error_from_semantic_frame(
+        frame,
+        measured_spec="did:ECM_AF_SENSOR_V_B1 (voltage_afr)",
+    )
+
+    assert result.n == 2
+    assert result.gates["filtered"] == {"fueling_inactive": 1, "censored_measured_afr": 1}
+    assert result.measured_spec.endswith("(voltage_afr)")
 
 
 def test_compare_sessions_refuses_load_as_an_axis(tmp_path: Path) -> None:

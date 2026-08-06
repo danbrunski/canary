@@ -48,7 +48,7 @@ def test_all_did_frame_uses_confirmed_semantic_roles(tmp_path: Path) -> None:
     assert frame.values["rpm"].iloc[0] == pytest.approx(2500.0)
     assert frame.values["measured_afr_b1_raw_voltage"].iloc[0] == pytest.approx(2.2)
     assert frame.values["measured_afr_b1"].iloc[0] == pytest.approx(14.83625)
-    assert frame.values["measured_afr_b1_censored"].iloc[0] is False
+    assert bool(frame.values["measured_afr_b1_censored"].iloc[0]) is False
     assert frame.capability["cam_command"]["available"] is True
     assert frame.capability["cam_measured"]["available"] is True
     assert frame.capability["cam_measured_b"]["available"] is True

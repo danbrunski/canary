@@ -320,15 +320,17 @@ implementer to revisit:
 
 ## Phase 5 — Digest and report correctness
 
-- [ ] **5.1 — Rebuild the tuning digest on `build_tuning_frame`.** Remove
-  hard-coded `obd:*` requirements from `_wot_inventory`, `delivery_error`, and
-  achieved-role selection. The digest consumes semantic roles and includes the
-  capability/provenance block.
+- [~] **5.1 — Rebuild the tuning digest on `build_tuning_frame`.** All-DID
+  achieved-rate selection and the delivery adapter now consume semantic roles;
+  the semantic delivery path carries its transformed/censored AFR rather than
+  hard-coded Mode-01 channels. Legacy Mode-01 remains a compatibility wrapper,
+  and all-DID pull inventory still needs physical-demand evidence.
 
-- [ ] **5.2 — All-DID pull inventory.** Count tagged/inferred pulls using DID
-  or passive RPM plus physical operator demand. Report seconds/samples by rpm
-  band, fueled samples, AFR-bearing samples, and target-bearing samples as
-  separate counts.
+- [~] **5.2 — All-DID pull inventory.** Tagged pulls now report DID-RPM
+  samples/seconds, >2500-rpm seconds, measured-AFR samples, and separately
+  unavailable fueling/commanded/target evidence; tag matching uses real epoch
+  timestamps rather than assuming Parquet nanoseconds. Inferred pulls and a
+  validated passive-demand gate still need drive evidence.
 
 - [x] **5.3 — Partial reports are first-class.** All-DID digest names missing
   pull tags and missing delivery roles rather than reporting them as a zero
@@ -373,11 +375,11 @@ implementer to revisit:
   capture-manifest creation behind one control operation. MCP calls one route;
   it does not orchestrate two state-changing HTTP requests.
 
-- [ ] **6.2 — Roll back every partial failure.** If profile validation,
-  storage rotation, budget setting, manifest write, or verification setup
-  fails, restore the previous profile, writer path, and exact previous budget
-  state. Return a structured failure naming which step failed and what was
-  restored. Exercise failures at every boundary.
+- [~] **6.2 — Roll back every partial failure.** Arm failures now return a
+  structured failed-step/restored-state response and roll back writer path,
+  profile, and exact budget state; the budget-failure boundary is covered.
+  Storage/manifest and post-arm verification failure injection still need
+  explicit tests.
 
 - [x] **6.3 — Capture-scoped rate epoch.** Add a rate metric whose counters
   begin when the capture becomes active. Pre-capture readings cannot enter it.
