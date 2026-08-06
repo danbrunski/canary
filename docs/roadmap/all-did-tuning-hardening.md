@@ -95,7 +95,7 @@ implementer to revisit:
 
 ## Phase 1 — One authoritative capture manifest and tune identity
 
-- [ ] **1.1 — Typed capture-manifest reader.** Add one shared reader for
+- [x] **1.1 — Typed capture-manifest reader.** Add one shared reader for
   `capture_profile.json`, returning profile name, profile snapshot, capture
   start, explicit tune revision, and storage/corpus properties. Reuse it from
   `src.control.sessions`, the tuning digest, catalog indexing, MCP session
@@ -104,7 +104,7 @@ implementer to revisit:
   Acceptance: a session created through `ParquetTelemetryWriter.enter_capture_mode`
   resolves the same profile and revision through all consumers.
 
-- [ ] **1.2 — Define metadata precedence.** The capture sidecar's explicit
+- [x] **1.2 — Define metadata precedence.** The capture sidecar's explicit
   `tune_revision` is authoritative. A revision registry lookup by session time
   is a fallback only when the sidecar field is absent. If both exist and
   disagree, surface a metadata conflict and refuse cross-revision comparison;
@@ -195,7 +195,7 @@ implementer to revisit:
   candidates from DIDs plus passive CAN. It must not look for Mode-01 rows
   while a `did_continuous` profile is active.
 
-- [ ] **2.6 — Preserve acquisition time.** Logical round timestamps may be
+- [x] **2.6 — Preserve acquisition time.** Logical round timestamps may be
   used for table presentation, but dynamic analysis (cam command/response,
   cross-source alignment, lag) uses the true per-reading `acquired_at` time.
   If `acquired_at` is not persisted in Parquet today, add it or preserve an
@@ -302,13 +302,13 @@ implementer to revisit:
   Correlation alone cannot promote it. Store evidence sessions and rejected
   alternatives in `data/dids.yaml` or a linked analysis artifact.
 
-- [ ] **4.6 — Separate candidate inventory from the active poll map.** Unknown
+- [x] **4.6 — Separate candidate inventory from the active poll map.** Unknown
   or ambiguous responders remain in sweep artifacts/candidate analyses rather
   than acquiring confident operational names in `data/dids.yaml`. The active
   capture profile polls only confirmed/high-enough providers and explicitly
   selected research candidates.
 
-- [ ] **4.7 — Capacity-budget each profile.** The bench measured 658 DID
+- [x] **4.7 — Capacity-budget each profile.** The bench measured 658 DID
   reads/s. A 12–15 DID set at 20 Hz requests 240–300 reads/s and is a reasonable
   starting envelope, not a universal constant. The saved profile records
   requested per-channel rate, expected total demand, and measured vehicle
@@ -383,7 +383,7 @@ implementer to revisit:
   before issuing a pass/fail verdict. Acceptance: a synthetic and live 20 Hz
   stream sampled after 20 seconds reports approximately 20 Hz, not 6.67 Hz.
 
-- [ ] **6.5 — Verify the active profile, not every historical channel.** The
+- [x] **6.5 — Verify the active profile, not every historical channel.** The
   response lists requested rate, achieved rate, sample count, observed span,
   and pass/shortfall per selected channel. A missing channel is an explicit
   failure. Passive broadcast roles are labeled separately from requested DIDs.

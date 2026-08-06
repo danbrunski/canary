@@ -15,7 +15,6 @@ See ``docs/roadmap/tuning-analysis-toolkit.md`` Phase 5.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -27,9 +26,14 @@ import pandas as pd
 from src.analysis.afr import load_afr_calibration
 from src.analysis.channels import read_aligned, read_channels
 from src.analysis.noise_floor import load_noise_floor
-from src.analysis.tune_revisions import load_tune_revisions, session_started_at
+from src.analysis.tune_revisions import (
+    load_tune_revisions,
+    resolve_session_revision,
+    session_started_at,
+)
 from src.analysis.tuning import DEFAULT_RPM_BANDS, GateError, delivery_error
 from src.config import CanaryConfig
+from src.control.capture_manifest import read_capture_manifest
 
 #: Load floor for the WOT inventory. The OBD throttle percentage tops out
 #: around 89 % and understates true WOT, so load is the better gate.
@@ -73,21 +77,8 @@ class TuningDigest:
 
 
 def _capture_profile_name(session_dir: Path) -> str | None:
-    """Profile recorded in ``control.json`` when the capture was armed."""
-    control = session_dir / "control.json"
-    if not control.exists():
-        return None
-    try:
-        payload = json.loads(control.read_text())
-    except (OSError, ValueError):
-        return None
-    for key in ("capture_profile", "profile"):
-        value = payload.get(key)
-        if isinstance(value, str):
-            return value
-        if isinstance(value, dict) and isinstance(value.get("name"), str):
-            return str(value["name"])
-    return None
+    manifest = read_capture_manifest(session_dir)
+    return None if manifest is None else manifest.profile
 
 
 def _achieved_hz(session_dir: Path, specs: list[str]) -> dict[str, float]:
@@ -251,10 +242,12 @@ def compute_tuning_digest(
     notes: list[str] = []
     profile_data = config.daemon.afr_calibration.parent
     revisions = load_tune_revisions(profile_data / "tune_revisions.yaml")
-    revision = None
-    if revisions is not None:
-        found = revisions.for_session(session_dir)
-        revision = None if found is None else found.revision
+    revision, revision_source, revision_conflict = resolve_session_revision(session_dir, revisions)
+    if revision_conflict:
+        notes.append(
+            "capture manifest tune revision conflicts with the timestamp registry; "
+            "automatic previous-capture comparison is refused."
+        )
 
     wot_seconds, paired, bands = _wot_inventory(session_dir)
     if wot_seconds and not paired:
@@ -300,8 +293,10 @@ def compute_tuning_digest(
         )
 
     previous: dict[str, Any] | None = None
-    earlier = _previous_capture(
-        session_dir, profile=profile, revision=revision, revisions=revisions
+    earlier = (
+        None
+        if revision_conflict
+        else _previous_capture(session_dir, profile=profile, revision=revision, revisions=revisions)
     )
     if earlier is not None:
         previous = {"session_id": earlier.name}
@@ -337,7 +332,7 @@ def compute_tuning_digest(
         delivery=delivery,
         cam=_cam_tracking(session_dir),
         previous=previous,
-        notes=notes,
+        notes=[*notes, f"tune revision source: {revision_source}"],
     )
 
 

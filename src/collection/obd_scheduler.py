@@ -418,6 +418,18 @@ class CanObdLoopStats:
                 out[channel] = round(count / observed_seconds, 2)
         return out, round(observed_seconds, 3)
 
+    def read_counts_since(self, now: float, started_at: float) -> dict[str, int]:
+        """Capture-epoch sample counts, matching :meth:`achieved_hz_since`."""
+        cutoff = now - ACHIEVED_HZ_WINDOW
+        out: dict[str, int] = {}
+        for channel, window in self.recent_reads.items():
+            while window and window[0] < cutoff:
+                window.popleft()
+            count = sum(read_at >= started_at for read_at in window)
+            if count:
+                out[channel] = count
+        return out
+
 
 @dataclass(frozen=True)
 class _PollRequest:
@@ -696,6 +708,8 @@ class ObdSchedulerMetrics:
     achieved_hz_capture: dict[str, float] = field(default_factory=dict)
     #: Exact denominator for ``achieved_hz_capture`` (up to 60 s).
     capture_observed_seconds: float | None = None
+    #: Capture-only sample count by requested channel.
+    capture_samples: dict[str, int] = field(default_factory=dict)
     #: Mode-22 session-window state, ``None`` when no session gates DIDs.
     did_profile: dict[str, Any] | None = None
     #: Multi-PID batching (roadmap/multi-pid-polling.md). ``None`` when
@@ -714,6 +728,7 @@ class ObdSchedulerMetrics:
             "achieved_hz_60s": self.achieved_hz_60s,
             "achieved_hz_capture": self.achieved_hz_capture,
             "capture_observed_seconds": self.capture_observed_seconds,
+            "capture_samples": self.capture_samples,
             "backed_off_requests": self.backed_off_requests,
             "requests_sent": self.requests_sent,
             "readings_emitted": self.readings_emitted,
@@ -1265,8 +1280,10 @@ def _scheduler_metrics(
             "response_rate": round(responses / sent, 4) if sent else None,
         }
 
+    from src.collection import tuning_profile
+
     request_rows: list[dict[str, Any]] = []
-    for request, state in zip(requests, states, strict=True):
+    for index, (request, state) in enumerate(zip(requests, states, strict=True)):
         backed = _is_request_backed_off(state, now)
         request_rows.append(
             {
@@ -1276,6 +1293,7 @@ def _scheduler_metrics(
                 if request.identifier > 0xFF
                 else f"0x{request.identifier:02X}",
                 "channel": request.channel,
+                "capture_selected": tuning_profile.request_eligible(index, request),
                 "poll_tier": request.poll_tier,
                 "priority": request.priority,
                 "configured_rate_hz": round(_request_rate_hz(request, spec), 4),
@@ -1306,13 +1324,14 @@ def _scheduler_metrics(
             }
         )
 
-    from src.collection import tuning_profile
-
     capture_started_at = tuning_profile.capture_started_monotonic()
     capture_hz, capture_observed_seconds = (
         stats.achieved_hz_since(now, capture_started_at)
         if capture_started_at is not None
         else ({}, None)
+    )
+    capture_samples = (
+        stats.read_counts_since(now, capture_started_at) if capture_started_at is not None else {}
     )
     return ObdSchedulerMetrics(
         configured_poll_rate_hz=float(spec.poll_rate_hz),
@@ -1332,6 +1351,7 @@ def _scheduler_metrics(
         achieved_hz_60s=stats.achieved_hz(now),
         achieved_hz_capture=capture_hz,
         capture_observed_seconds=capture_observed_seconds,
+        capture_samples=capture_samples,
         request_timeouts=stats.request_timeouts,
         negative_responses=stats.negative_responses,
         bus_errors=stats.bus_errors,

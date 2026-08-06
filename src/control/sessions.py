@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from src.atomic_write import atomic_write_text
+from src.control.capture_manifest import read_capture_manifest
 from src.preprocessing.loader import PARQUET_PATTERN
 from src.session import MANIFEST_FILENAME, TAGS_FILENAME
 
@@ -184,13 +185,15 @@ def summarize_session(session: Path) -> SessionSummary:
     if tags.exists():
         tag_count = sum(1 for line in tags.read_text().splitlines() if line.strip())
     metadata = read_session_metadata(session)
-    capture_sidecar = session / "capture_profile.json"
-    if capture_sidecar.exists():
-        try:
-            capture = json.loads(capture_sidecar.read_text())
-            metadata = {**metadata, "capture_profile": capture.get("profile")}
-        except (OSError, json.JSONDecodeError):
-            pass
+    capture = read_capture_manifest(session)
+    if capture is not None:
+        metadata = {
+            **metadata,
+            "capture_profile": capture.profile,
+            "tune_revision": capture.tune_revision,
+            "capture_started_at": capture.started_at.isoformat(),
+            "corpus_eligible": capture.corpus_eligible,
+        }
     return SessionSummary(
         session_id=session.name,
         session_path=session,

@@ -81,7 +81,9 @@ TUNING_DID_CHANNELS: tuple[str, ...] = (
     "ECM_INJECTOR_PW_B1",
     "ECM_INTAKE_CAM_ANGLE_MEASURED",
     "ECM_INTAKE_CAM_ANGLE_COMMANDED",
+    "ECM_INTAKE_CAM_ANGLE_MEASURED_MIRROR",
     "ECM_INTAKE_VVT_SOLENOID_DUTY",
+    "ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2",
     "ECM_THROTTLE_POS_SENSOR_1",
     "ECM_COOLANT_TEMP",
 )
@@ -147,6 +149,10 @@ class CaptureProfile(_Strict):
     #: starve every PID it lists.
     did_continuous: bool = False
     bus_budget_override: float | None = None
+    #: Evidence behind the requested rate/budget, kept beside the profile so
+    #: a vehicle-specific envelope is not mistaken for a platform constant.
+    expected_total_demand_hz: float | None = Field(default=None, gt=0)
+    capacity_evidence: str = ""
     broadcast_decode: bool = True
     corpus_eligible: bool = False
     storage_prefix: str = ""
@@ -315,9 +321,12 @@ def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
                 mode01_enabled=False,
                 mode22=TUNING_DID_CHANNELS,
                 did_continuous=True,
-                # Same hands-off stance on the budget as `fuel-map`: the
-                # storage-writer shakedown is still outstanding.
-                bus_budget_override=None,
+                target_rate_hz=15.0,
+                bus_budget_override=180.0,
+                expected_total_demand_hz=165.0,
+                capacity_evidence=(
+                    "2026-08-04 bench: 658 DID reads/s; 11 DIDs x 15 Hz = 165 reads/s."
+                ),
                 broadcast_decode=True,
                 corpus_eligible=False,
                 round_timestamps=True,

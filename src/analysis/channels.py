@@ -33,6 +33,7 @@ See ``docs/roadmap/tuning-analysis-toolkit.md`` Phase 1.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -141,10 +142,25 @@ class _Catalogs:
         raise ChannelSpecError(f"no DID 0x{did_id:04X} in {self.dids_path}")
 
 
-def _long_frame(session: Path | pd.DataFrame) -> pd.DataFrame:
-    if isinstance(session, pd.DataFrame):
-        return session
-    return read_session(Path(session))
+def _long_frame(session: Path | pd.DataFrame, *, acquired_time: bool = False) -> pd.DataFrame:
+    frame = session.copy() if isinstance(session, pd.DataFrame) else read_session(Path(session))
+    if not acquired_time or "metadata_json" not in frame:
+        return frame
+
+    def acquired_at(raw: object) -> object:
+        if not isinstance(raw, str):
+            return None
+        try:
+            value = json.loads(raw).get("acquired_at")
+            return value if isinstance(value, (int, float)) else None
+        except (TypeError, ValueError):
+            return None
+
+    acquired = pd.to_datetime(frame["metadata_json"].map(acquired_at), unit="s", utc=True)
+    # Broadcast and legacy rows have no acquisition field; retain their stored
+    # timestamp rather than dropping an otherwise valid cross-source series.
+    frame["timestamp"] = acquired.fillna(frame["timestamp"])
+    return frame
 
 
 def _numeric_series(frame: pd.DataFrame, spec: ChannelSpec, source: str) -> pd.DataFrame:
@@ -266,6 +282,7 @@ def read_channels(
     dids_path: Path = Path("data/dids.yaml"),
     calibration: AfrCalibration | None = None,
     afr_stoich: float = 14.7,
+    acquired_time: bool = False,
 ) -> pd.DataFrame:
     """Read ``specs`` from one session as a long frame in engineering units.
 
@@ -276,8 +293,11 @@ def read_channels(
 
     ``unit`` is ``"counts"`` wherever the catalog's ``scale`` is unpinned, so a
     caller can tell "raw" from "engineering" without consulting the YAML.
+    Set ``acquired_time=True`` for lag/cross-source work: OBD/DID rows then
+    use their persisted per-reading arrival time rather than a logical round
+    timestamp, while sources without that field retain their stored time.
     """
-    frame = _long_frame(session)
+    frame = _long_frame(session, acquired_time=acquired_time)
     catalogs = _Catalogs(bindings_path=bindings_path, dids_path=dids_path)
     parsed = [parse_spec(text) for text in specs]
 

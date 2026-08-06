@@ -25,6 +25,45 @@ from src.mcp_server.write_tools._shared import audited_post
 DEFAULT_VERIFY_SECONDS = 20.0
 
 
+def _rate_verification(status: dict[str, Any], requested_rate_hz: float | None) -> dict[str, Any]:
+    """Report only the active profile's requests, never daemon history."""
+    profile = status.get("capture_profile") or {}
+    scheduler = (status.get("health") or {}).get("obd_scheduler") or {}
+    rates = scheduler.get("achieved_hz_capture") or {}
+    samples = scheduler.get("capture_samples") or {}
+    requested: list[dict[str, Any]] = []
+    for request in scheduler.get("requests") or []:
+        kind = request.get("kind")
+        channel = str(request.get("channel") or "")
+        if not request.get("capture_selected", False):
+            continue
+        target = (
+            requested_rate_hz or profile.get("target_rate_hz") or request.get("configured_rate_hz")
+        )
+        achieved = rates.get(channel)
+        requested.append(
+            {
+                "channel": channel,
+                "kind": kind,
+                "requested_hz": target,
+                "achieved_hz": achieved,
+                "samples": int(samples.get(channel, 0)),
+                "status": (
+                    "missing"
+                    if achieved is None
+                    else "shortfall"
+                    if target is not None and float(achieved) < float(target) * 0.9
+                    else "ok"
+                ),
+            }
+        )
+    return {
+        "observed_seconds": scheduler.get("capture_observed_seconds"),
+        "channels": requested,
+        "passive_broadcast_enabled": bool(profile.get("broadcast_decode", False)),
+    }
+
+
 async def arm_tuning_capture(
     client: DaemonClient,
     audit: MCPAuditLogger,
@@ -70,10 +109,8 @@ async def arm_tuning_capture(
     if verify_seconds and verify_seconds > 0:
         await asyncio.sleep(verify_seconds)
         status = await client.get_json("/status")
-        scheduler = (status.get("health") or {}).get("obd_scheduler") or {}
         payload["verified_after_seconds"] = verify_seconds
-        payload["achieved_hz"] = scheduler.get("achieved_hz_capture")
-        payload["observed_seconds"] = scheduler.get("capture_observed_seconds")
+        payload["rate_verification"] = _rate_verification(status, rate_hz)
         payload["requested_rate_hz"] = rate_hz
         payload["vehicle_state"] = (status.get("vehicle_state") or {}).get("state")
     return payload

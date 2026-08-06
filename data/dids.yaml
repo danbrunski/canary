@@ -363,6 +363,21 @@ dids:
       motion). Polling both buys nothing; kept recorded so a future sweep
       does not re-derive it as a new signal.
 
+  - did: 0x1139
+    name: ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: percent
+    confidence: low
+    notes: >
+      Candidate sibling of 0x1110 for the other intake VVT solenoid. It is a
+      research candidate, not a confirmed bank-2 actuator mapping; retain it
+      only in the focused all-DID capture while tagged transition evidence is
+      collected.
+
   # The OTHER bank's measured angle was NOT found in 0x1000-0x1400. A search
   # of all 158 responding DIDs turned up no second cam-like signal carrying a
   # persistent ~1 deg offset with independent jitter. 0x1139 does look like

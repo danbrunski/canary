@@ -579,13 +579,13 @@ def test_capture_start_accepts_a_per_capture_rate_override(tmp_path: Path) -> No
     store = _store(tmp_path, config)
     before = store.load().by_name(TUNING_DID_PROFILE_NAME)
     assert before is not None
-    assert before.target_rate_hz is None
+    assert before.target_rate_hz == 15.0
 
     overridden = before.model_copy(update={"target_rate_hz": 25.0})
     assert overridden.target_rate_hz == 25.0
     # The catalog is unchanged by the copy — that is the property under test.
     after = store.load().by_name(TUNING_DID_PROFILE_NAME)
-    assert after is not None and after.target_rate_hz is None
+    assert after is not None and after.target_rate_hz == 15.0
 
 
 def test_bus_budget_ttl_allows_a_capture_length_override() -> None:

@@ -62,16 +62,20 @@ profiles:
   - ECM_INJECTOR_PW_B1
   - ECM_INTAKE_CAM_ANGLE_MEASURED
   - ECM_INTAKE_CAM_ANGLE_COMMANDED
+  - ECM_INTAKE_CAM_ANGLE_MEASURED_MIRROR
   - ECM_INTAKE_VVT_SOLENOID_DUTY
+  - ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2
   - ECM_THROTTLE_POS_SENSOR_1
   - ECM_COOLANT_TEMP
   mode01_enabled: false
   mode22_enabled: true
   did_interval_seconds: null
   round_timestamps: true
-  target_rate_hz: null
+  target_rate_hz: 15.0
   did_continuous: true
-  bus_budget_override: null
+  bus_budget_override: 180.0
+  expected_total_demand_hz: 165.0
+  capacity_evidence: '2026-08-04 bench: 658 DID reads/s; 11 DIDs x 15 Hz = 165 reads/s.'
   broadcast_decode: true
   corpus_eligible: false
   storage_prefix: _capture-tuning-did

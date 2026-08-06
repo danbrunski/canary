@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -77,6 +78,25 @@ class TuneRevisionRegistry(_Strict):
         return None if started is None else self.at(started)
 
 
+def resolve_session_revision(
+    session: Path, registry: TuneRevisionRegistry | None
+) -> tuple[str | None, Literal["capture_manifest", "registry", "unknown"], bool]:
+    """Resolve identity with explicit capture metadata taking precedence."""
+    from src.control.capture_manifest import read_capture_manifest
+
+    manifest = read_capture_manifest(session)
+    explicit = None if manifest is None else manifest.tune_revision
+    inferred = None
+    if registry is not None:
+        found = registry.for_session(session)
+        inferred = None if found is None else found.revision
+    if explicit is not None:
+        return explicit, "capture_manifest", inferred is not None and inferred != explicit
+    if inferred is not None:
+        return inferred, "registry", False
+    return None, "unknown", False
+
+
 def session_started_at(session: str | Path) -> datetime | None:
     """Parse a session directory name's UTC start time.
 
@@ -101,5 +121,6 @@ __all__ = [
     "TuneRevision",
     "TuneRevisionRegistry",
     "load_tune_revisions",
+    "resolve_session_revision",
     "session_started_at",
 ]

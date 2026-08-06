@@ -96,6 +96,27 @@ def test_did_values_come_from_value_text_hex(tmp_path: Path) -> None:
     assert by_id["value"].iloc[0] == pytest.approx(2.20)
 
 
+def test_acquired_time_opt_in_uses_persisted_read_arrival(tmp_path: Path) -> None:
+    session = _session(
+        tmp_path,
+        [
+            TelemetryRecord(
+                timestamp=T0,
+                source="obd",
+                channel="DID_1225",
+                value="01b8",
+                metadata={"acquired_at": T0.timestamp() + 0.125},
+            )
+        ],
+    )
+    logical = read_channels(session, ["did:ECM_AF_SENSOR_V_B1"], dids_path=DIDS)
+    acquired = read_channels(
+        session, ["did:ECM_AF_SENSOR_V_B1"], dids_path=DIDS, acquired_time=True
+    )
+    offset = (acquired["timestamp"].iloc[0] - logical["timestamp"].iloc[0]).total_seconds()
+    assert offset == pytest.approx(0.125)
+
+
 def test_can_specs_decode_frame_bytes_by_signal_name(tmp_path: Path) -> None:
     """``can:`` is named by signal, not CAN id — one frame carries several."""
     session = _session(

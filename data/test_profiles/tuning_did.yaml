@@ -1,0 +1,19 @@
+id: tuning_did
+label: "All-DID tuning / cam validation"
+description: >-
+  Use with the tuning-did capture profile. Tags are physical actions used to
+  validate injector fuel-cut state, pull boundaries, and cam/VVT response.
+protocol: tuning_did_v1
+vehicle_state: driving
+purpose: "all-DID fueling and cam/VVT validation"
+order: 2
+events:
+  - { label: "KOEO", tag: tuning_koeo, kind: state, hint: "Key on, engine off — hold 15 s" }
+  - { label: "Fueled idle", tag: tuning_fueled_idle, kind: state, hint: "Warm, steady idle — hold 20 s" }
+  - { label: "RPM hold ~2k", tag: tuning_rpm_hold_2k, kind: state, hint: "Neutral, steady 2000 rpm — hold 15 s" }
+  - { label: "RPM hold ~3k", tag: tuning_rpm_hold_3k, kind: state, hint: "Neutral, steady 3000 rpm — hold 15 s" }
+  - { label: "Throttle step", tag: tuning_throttle_step, hint: "Deliberate pedal step, then return" }
+  - { label: "Steady cruise", tag: tuning_steady_cruise, kind: state, hint: "Hold speed and pedal steady — 30 s" }
+  - { label: "Decel fuel cut", tag: tuning_dfco, kind: state, hint: "Closed throttle, in gear, clutch out — 10 s" }
+  - { label: "Pull start", tag: tuning_pull_start, hint: "Pedal floored; begin repeatable pull" }
+  - { label: "Pull end", tag: tuning_pull_end, hint: "Lift pedal; end the pull" }
