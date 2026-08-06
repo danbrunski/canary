@@ -35,6 +35,7 @@ from src.analysis.tuning import DEFAULT_RPM_BANDS, GateError, delivery_error
 from src.analysis.tuning_frame import build_tuning_frame, section_capabilities
 from src.config import CanaryConfig
 from src.control.capture_manifest import read_capture_manifest
+from src.session import load_tags
 
 #: Load floor for the WOT inventory. The OBD throttle percentage tops out
 #: around 89 % and understates true WOT, so load is the better gate.
@@ -112,6 +113,37 @@ def _wot_inventory(session_dir: Path) -> tuple[int, int, list[dict[str, Any]]]:
     measured and a commanded AFR in the same second cannot answer anything,
     and the July corpus had 25 such seconds against 4 usable ones.
     """
+    tags = load_tags(session_dir / "tags.jsonl")
+    starts = [
+        float(tag["t"]) for tag in tags if tag.get("label") in {"tuning_pull_start", "wot_pull"}
+    ]
+    ends = [float(tag["t"]) for tag in tags if tag.get("label") == "tuning_pull_end"]
+    if starts:
+        try:
+            rpm = read_channels(session_dir, ["did:ECM_RPM"], acquired_time=True)
+            if not rpm.empty:
+                epoch = rpm["timestamp"].astype("int64") / 1_000_000_000
+                selected = pd.Series(False, index=rpm.index)
+                for start in starts:
+                    end = next((item for item in ends if item > start), float(epoch.max()))
+                    selected |= epoch.between(start, end, inclusive="left")
+                tagged = rpm[selected & (rpm["value"] > WOT_RPM_FLOOR)].copy()
+                if not tagged.empty:
+                    tagged["second"] = tagged["timestamp"].dt.floor("1s")
+                    per_second = tagged.groupby("second", sort=True)["value"].last()
+                    tagged_bands = per_second.groupby(
+                        pd.cut(per_second, list(DEFAULT_RPM_BANDS)), observed=True
+                    ).size()
+                    return (
+                        int(len(per_second)),
+                        0,
+                        [
+                            {"rpm_band": str(band), "seconds": int(seconds)}
+                            for band, seconds in tagged_bands.items()
+                        ],
+                    )
+        except Exception:  # noqa: BLE001
+            pass
     try:
         frame = read_aligned(
             session_dir,
