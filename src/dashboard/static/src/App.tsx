@@ -66,7 +66,11 @@ export default function App() {
       onTokenChange={controlToken.setToken}
     >
       {mode === "driving" ? (
-        <DriveScreen channels={telemetry.channels} bindings={bindings} />
+        <DriveScreen
+          channels={telemetry.channels}
+          bindings={bindings}
+          scheduler={status?.health?.obd_scheduler}
+        />
       ) : (
         <Workbench active={item} onNavigate={setItem} data={data} />
       )}

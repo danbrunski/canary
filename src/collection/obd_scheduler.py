@@ -61,9 +61,13 @@ MIN_BUS_BUDGET_REQUESTS_PER_SECOND = 2.0
 # requests (2592 + 2503 of 25146). The segmenter now coalesces speed onto
 # gps:speed and rpm onto decoded:ECM_RPM, both of which are already on the
 # wire and cost no request slot, so buying SPEED a lane bought nothing the
-# segmenter could not get for free. RPM keeps its lane only because the
-# behaviour models are fitted on the `obd:RPM` column itself and would need a
-# refit to move; revisit that when they are next refitted.
+# segmenter could not get for free. RPM keeps its lane because behavior
+# models still consume `obd:RPM`. THROTTLE_POS has no broadcast/GPS fallback,
+# feeds operating-mode/event classification, and the 75-request AUTO plan was
+# measured at only 0.20 Hz for it on 2026-08-07 despite a configured 1 Hz.
+# Giving those two due requests first refusal consumes at most 2 of the 8
+# default slots per second; neither can starve the remaining plan while it is
+# not due.
 #: Default cadence for the Mode 03/07/0A DTC poll (Task 1.3). DTCs are a
 #: minutes-scale signal (nothing polls faster than the ECM's own confirm
 #: window), so ~5 min keeps it off the fast bus budget entirely.

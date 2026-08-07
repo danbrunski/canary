@@ -149,6 +149,7 @@ export interface CaptureProfileState {
 
 export interface DidWindowStatus {
   phase: "mode01" | "window" | "lapse";
+  window_interval_seconds?: number;
   fast_exits: number;
   fast_exit_failures: number;
   fast_exit_supported: boolean;
@@ -156,10 +157,20 @@ export interface DidWindowStatus {
   windows_completed: number;
 }
 
+export interface ObdSchedulerRequestStatus {
+  kind: string;
+  channel: string;
+  configured_rate_hz: number;
+  backed_off: boolean;
+  last_response_age_seconds: number | null;
+}
+
 export interface ObdSchedulerStatus {
+  achieved_hz_60s?: Record<string, number>;
   achieved_hz_capture?: Record<string, number>;
   capture_max_gap_seconds?: Record<string, number>;
   did_profile?: DidWindowStatus | null;
+  requests?: ObdSchedulerRequestStatus[];
 }
 
 export interface CaptureProfilesResponse {

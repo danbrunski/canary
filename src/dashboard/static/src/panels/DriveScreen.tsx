@@ -1,11 +1,12 @@
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { cn, responsiveGridClass, scrollPaneClass } from "../styles";
-import type { BindingsByChannel } from "../types";
+import type { BindingsByChannel, ObdSchedulerStatus } from "../types";
 import { TelemetryPanel } from "./TelemetryPanel";
 
 interface DriveScreenProps {
   channels: Map<string, ChannelSnapshot>;
   bindings: BindingsByChannel;
+  scheduler?: ObdSchedulerStatus;
 }
 
 /** The Drive context: one locked, glanceable screen. The compact gauge
@@ -13,11 +14,16 @@ interface DriveScreenProps {
  *  freshness, model health) live in the always-visible StatusStrip above,
  *  so a moving driver never navigates and never hunts for status. The full
  *  workbench is one tap away via the header mode toggle. */
-export function DriveScreen({ channels, bindings }: DriveScreenProps) {
+export function DriveScreen({ channels, bindings, scheduler }: DriveScreenProps) {
   return (
     <div className={scrollPaneClass}>
       <div className={cn(responsiveGridClass, "grid-cols-1")}>
-        <TelemetryPanel channels={channels} bindings={bindings} compact />
+        <TelemetryPanel
+          channels={channels}
+          bindings={bindings}
+          scheduler={scheduler}
+          compact
+        />
       </div>
     </div>
   );

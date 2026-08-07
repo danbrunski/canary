@@ -19,7 +19,13 @@ import {
   panelTitleClass,
   placeholderClass,
 } from "../styles";
-import type { BindingDisplay, BindingsByChannel } from "../types";
+import type {
+  BindingDisplay,
+  BindingsByChannel,
+  ObdSchedulerRequestStatus,
+  ObdSchedulerStatus,
+} from "../types";
+import { STALE_THRESHOLD_MS } from "../util/freshness";
 import { writeJson } from "../util/storage";
 import { formatAge } from "../util/time";
 
@@ -28,6 +34,7 @@ export { renderChannel } from "../lib/telemetryDisplay";
 interface TelemetryPanelProps {
   channels: Map<string, ChannelSnapshot>;
   bindings: BindingsByChannel;
+  scheduler?: ObdSchedulerStatus;
   /** Drive view: equal-prominence tile grid + a user-pinned subset, no
    *  hero tile, nothing hidden behind an expander. */
   compact?: boolean;
@@ -83,7 +90,12 @@ function loadKeys(storageKey: string): string[] {
  *  engineering units when their binding has a pinned scale
  *  (``decoded:ECM_RPM`` raw 16376 → "2047 rpm"); values outside a binding's
  *  plausibility bounds are colour-flagged. */
-export function TelemetryPanel({ channels, bindings, compact = false }: TelemetryPanelProps) {
+export function TelemetryPanel({
+  channels,
+  bindings,
+  scheduler,
+  compact = false,
+}: TelemetryPanelProps) {
   const [query, setQuery] = useState("");
   const [pinned, setPinned] = useState<string[] | null>(() => loadStoredKeys(PIN_STORAGE_KEY));
   const [pinnedOnly, setPinnedOnly] = useState(false);
@@ -212,6 +224,7 @@ export function TelemetryPanel({ channels, bindings, compact = false }: Telemetr
                   channelKey={key}
                   snapshot={snap}
                   binding={bindings[key]}
+                  scheduler={scheduler}
                   pinned={pinnedSet.has(key)}
                   onTogglePin={() => togglePin(key)}
                   graphOn={graphSet.has(key)}
@@ -334,6 +347,7 @@ function ChannelCard({
   channelKey,
   snapshot,
   binding,
+  scheduler,
   pinned,
   onTogglePin,
   graphOn = false,
@@ -342,6 +356,7 @@ function ChannelCard({
   channelKey: string;
   snapshot: ChannelSnapshot;
   binding?: BindingDisplay;
+  scheduler?: ObdSchedulerStatus;
   pinned?: boolean;
   onTogglePin?: () => void;
   graphOn?: boolean;
@@ -351,11 +366,13 @@ function ChannelCard({
   const sparkValues = sparkSeries(snapshot, binding);
   const pretty = prettyChannel(channelKey);
   const canGraph = sparkValues.length > 1;
+  const freshness = channelFreshness(snapshot, scheduler);
   return (
     <div
       className={cn(
         "relative rounded-tile border border-border-soft bg-[linear-gradient(180deg,var(--color-elev-2),var(--color-elev))] px-3 py-2 transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border hover:shadow-panel",
         pinned && "border-accent/55",
+        freshness.stale && "border-warn/60",
         bandUtility(rendered.bandClass),
       )}
     >
@@ -429,8 +446,81 @@ function ChannelCard({
           <span className="text-[0.66rem] text-fg-faint">no history yet</span>
         )}
       </div>
+      <div className="mt-1 flex items-center justify-between gap-2 text-[0.62rem] uppercase tracking-[0.08em] text-fg-faint">
+        <span className={cn(freshness.stale && "font-semibold text-warn")}>
+          age {freshness.ageLabel}{freshness.stale && " stale"}
+        </span>
+        {freshness.achievedHz !== null && (
+          <span
+            className={cn(freshness.slow && "font-semibold text-warn")}
+            title="Trailing 60-second achieved rate / configured scheduler rate"
+          >
+            {freshness.achievedHz.toFixed(2)}
+            {freshness.targetHz !== null && `/${formatRate(freshness.targetHz)}`} Hz
+            {freshness.slow && " slow"}
+          </span>
+        )}
+      </div>
     </div>
   );
+}
+
+interface ChannelFreshness {
+  ageLabel: string;
+  achievedHz: number | null;
+  targetHz: number | null;
+  slow: boolean;
+  stale: boolean;
+}
+
+function channelFreshness(
+  snapshot: ChannelSnapshot,
+  scheduler?: ObdSchedulerStatus,
+  now: number = Date.now(),
+): ChannelFreshness {
+  const timestampMs = snapshot.latest.timestamp == null
+    ? Number.NaN
+    : Date.parse(snapshot.latest.timestamp);
+  const ageMs = Number.isFinite(timestampMs) ? Math.max(0, now - timestampMs) : null;
+  const request = matchingRequest(snapshot, scheduler);
+  const achievedHz = scheduler?.achieved_hz_60s?.[snapshot.latest.channel] ?? null;
+  const targetHz = effectiveTargetHz(request, scheduler);
+  const intervalMs = targetHz !== null && targetHz > 0 ? 1_000 / targetHz : null;
+  const staleAfterMs = intervalMs === null
+    ? STALE_THRESHOLD_MS
+    : Math.max(3_000, intervalMs * 3);
+  return {
+    ageLabel: formatAge(snapshot.latest.timestamp),
+    achievedHz,
+    targetHz,
+    slow: achievedHz !== null && targetHz !== null && achievedHz < targetHz * 0.8,
+    stale: ageMs === null || ageMs > staleAfterMs,
+  };
+}
+
+function matchingRequest(
+  snapshot: ChannelSnapshot,
+  scheduler?: ObdSchedulerStatus,
+): ObdSchedulerRequestStatus | undefined {
+  const channel = snapshot.latest.channel.toUpperCase();
+  return scheduler?.requests?.find((request) => request.channel.toUpperCase() === channel);
+}
+
+function effectiveTargetHz(
+  request: ObdSchedulerRequestStatus | undefined,
+  scheduler?: ObdSchedulerStatus,
+): number | null {
+  if (!request || request.configured_rate_hz <= 0) return null;
+  if (request.kind === "did") {
+    const interval = scheduler?.did_profile?.window_interval_seconds;
+    if (interval != null && interval > 0) return 1 / interval;
+  }
+  return request.configured_rate_hz;
+}
+
+function formatRate(rate: number): string {
+  if (rate >= 1) return rate.toFixed(Number.isInteger(rate) ? 0 : 1);
+  return rate.toFixed(2);
 }
 
 function bandUtility(bandClass: RenderedValue["bandClass"]): string {

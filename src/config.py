@@ -23,7 +23,7 @@ class _Strict(BaseModel):
 #: it) only to keep the config default and the scheduler constant from
 #: drifting apart. See the scheduler's ``DEFAULT_PRIORITY_CHANNELS`` re-export
 #: for why this channel specifically.
-DEFAULT_PRIORITY_CHANNELS: tuple[str, ...] = ("RPM",)
+DEFAULT_PRIORITY_CHANNELS: tuple[str, ...] = ("RPM", "THROTTLE_POS")
 
 
 class VehicleParameters(_Strict):

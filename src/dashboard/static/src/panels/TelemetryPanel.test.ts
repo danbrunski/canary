@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { BindingDisplay } from "../types";
@@ -187,7 +187,10 @@ describe("TelemetryPanel", () => {
 });
 
 describe("TelemetryPanel — Drive (compact) pinning", () => {
-  afterEach(() => window.localStorage.clear());
+  afterEach(() => {
+    window.localStorage.clear();
+    vi.useRealTimers();
+  });
 
   const defaultDriveKeys = [
     "obd:RPM",
@@ -233,6 +236,43 @@ describe("TelemetryPanel — Drive (compact) pinning", () => {
     expect(
       screen.getByRole("button", { name: "pin STEERING_ANGLE_002" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows per-channel age, achieved rate, and stale/slow state", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-07T16:00:06Z"));
+    const channels = new Map<string, ChannelSnapshot>([
+      [
+        "obd:THROTTLE_POS",
+        snapshot({
+          timestamp: "2026-08-07T16:00:00Z",
+          channel: "THROTTLE_POS",
+          value: 4.71,
+          unit: "%",
+        }),
+      ],
+    ]);
+
+    render(createElement(TelemetryPanel, {
+      channels,
+      bindings: {},
+      compact: true,
+      scheduler: {
+        achieved_hz_60s: { THROTTLE_POS: 0.2 },
+        requests: [
+          {
+            kind: "pid",
+            channel: "THROTTLE_POS",
+            configured_rate_hz: 1,
+            backed_off: false,
+            last_response_age_seconds: 6,
+          },
+        ],
+      },
+    }));
+
+    expect(screen.getByText("age 6s stale")).toBeInTheDocument();
+    expect(screen.getByText("0.20/1 Hz slow")).toBeInTheDocument();
   });
 
   it("pins a channel, persists it, and exposes the pinned-only toggle", () => {

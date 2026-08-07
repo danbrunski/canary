@@ -523,23 +523,23 @@ def test_monitor_status_pid_is_in_the_default_auto_poll_set() -> None:
 
 
 def test_build_poll_requests_marks_mode_critical_channels_priority() -> None:
-    """Only RPM holds the lane; SPEED gave it up on 2026-08-07.
+    """RPM and throttle hold the lane; SPEED gave it up on 2026-08-07.
 
     The lane costs the other tiers a share of a contended bus, so a channel
     earns it only if nothing cheaper can keep the segmenter fed. SPEED cannot
     clear that bar any more: the segmenter coalesces it onto `gps:speed`,
-    which is already on the wire and costs no request slot. RPM keeps the lane
-    only because the behaviour models are fitted on the `obd:RPM` column
-    itself, so moving it needs a refit rather than a config change.
+    which is already on the wire and costs no request slot. Throttle has no
+    passive fallback and is required by event/operating-mode classification.
     """
     spec = CanObdSpec(
         can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
-        pids=("RPM", "SPEED", "COOLANT_TEMP"),
+        pids=("RPM", "SPEED", "THROTTLE_POS", "COOLANT_TEMP"),
     )
 
     priority = {r.channel: r.priority for r in build_poll_requests(_StaticDiscovery(), spec)}
 
     assert priority["RPM"] is True
+    assert priority["THROTTLE_POS"] is True
     assert priority["SPEED"] is False
     assert priority["COOLANT_TEMP"] is False
 
