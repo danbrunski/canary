@@ -85,11 +85,14 @@ def expected_value(
 
     * ``operating_mode`` is set on the model and ``operating_point[MODE_COLUMN]``
       doesn't match,
+    * a persisted rate-of-change condition is missing or outside its bound,
     * a required input column is missing or NaN,
     * the point is outside the fit domain / grid extent,
     * (2D only) the grid cell is empty (``count == 0``).
     """
-    if not _operating_mode_matches(model, operating_point):
+    if not _operating_mode_matches(model, operating_point) or not _conditions_match(
+        model, operating_point
+    ):
         return None
     if isinstance(model, BehaviorModel1D):
         x = _scalar(operating_point.get(model.axis.channel))
@@ -185,7 +188,7 @@ def expected_value_column(
     as the scalar API apply.
     """
     result = np.full(len(frame), np.nan, dtype=float)
-    in_mode = _operating_mode_mask(frame, model)
+    in_mode = _operating_mode_mask(frame, model) & _conditions_mask(frame, model)
     if not in_mode.any():
         return pd.Series(result, index=frame.index, dtype=float)
 
@@ -265,6 +268,7 @@ def append_deviation_columns(
             dependencies.append(model.axis.channel)
         else:
             dependencies.extend(axis.channel for axis in model.axes)
+        dependencies.extend(condition.channel for condition in model.conditions)
         stale = delta.isna()
         for dependency in dependencies:
             if dependency not in out.columns:
@@ -313,6 +317,27 @@ def _operating_mode_mask(
     if MODE_COLUMN not in frame.columns:
         return np.zeros(len(frame), dtype=bool)
     return (frame[MODE_COLUMN].astype(object) == model.operating_mode).to_numpy()
+
+
+def _conditions_match(
+    model: BehaviorModel1D | BehaviorModel2D, point: Mapping[str, object]
+) -> bool:
+    """Fail closed when a persisted serve-time condition cannot be checked."""
+    for condition in model.conditions:
+        value = _scalar(point.get(condition.channel))
+        if value is None or abs(value) > condition.max_abs_per_second:
+            return False
+    return True
+
+
+def _conditions_mask(frame: pd.DataFrame, model: BehaviorModel1D | BehaviorModel2D) -> np.ndarray:
+    mask = np.ones(len(frame), dtype=bool)
+    for condition in model.conditions:
+        if condition.channel not in frame.columns:
+            return np.zeros(len(frame), dtype=bool)
+        values = pd.to_numeric(frame[condition.channel], errors="coerce").to_numpy(dtype=float)
+        mask &= np.isfinite(values) & (np.abs(values) <= condition.max_abs_per_second)
+    return mask
 
 
 def _grade_severity(

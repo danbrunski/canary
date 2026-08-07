@@ -58,6 +58,7 @@ const blankProfile = (): CaptureProfile => {
     capacity_evidence: "",
     broadcast_decode: true,
     corpus_eligible: false,
+    behavior_model_recipes: [],
     storage_prefix: `_capture-${name}`,
   };
 };
@@ -276,6 +277,9 @@ export function CaptureProfilesPanel({
             {plan.bus_budget_override != null && <span>{plan.bus_budget_override} requests/s budget</span>}
             {plan.expected_total_demand_hz != null && <span>{plan.expected_total_demand_hz} expected channel reads/s</span>}
             <span>{plan.corpus_eligible ? "training eligible" : "training corpus excluded"}</span>
+            {plan.behavior_model_recipes.length > 0 && (
+              <span>{plan.behavior_model_recipes.length} behavior-model recipes allowed</span>
+            )}
           </div>
           {plan.capacity_evidence && <p className="mt-2 text-xs text-fg-dim">{plan.capacity_evidence}</p>}
         </div>
@@ -375,6 +379,19 @@ export function CaptureProfilesPanel({
         </label>
         <label className="col-span-2 text-sm text-fg-dim max-[900px]:col-span-1">Capacity / validation evidence
           <textarea className={`${inputClass} mt-1 min-h-20 w-full`} value={draft.capacity_evidence} onChange={(event) => setDraft({ ...draft, capacity_evidence: event.target.value })} />
+        </label>
+        <label className="col-span-2 text-sm text-fg-dim max-[900px]:col-span-1">Behavior-model evidence recipes (comma separated)
+          <input
+            className={`${inputClass} mt-1 w-full`}
+            value={draft.behavior_model_recipes.join(", ")}
+            onChange={(event) => setDraft({
+              ...draft,
+              behavior_model_recipes: event.target.value
+                .split(",")
+                .map((item) => item.trim())
+                .filter(Boolean),
+            })}
+          />
         </label>
       </div>
 

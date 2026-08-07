@@ -66,8 +66,16 @@ const MODELS: BehaviorModelsResponse = {
       min_cell_count: 10,
       min_cell_dwell_seconds: 1,
       min_cell_sessions: 2,
+      conditions: [
+        {
+          kind: "max_abs_rate_of_change",
+          channel: "did:ECM_RPM__roc",
+          max_abs_per_second: 75,
+        },
+      ],
       fit: {
         ...FIT_BASE,
+        tune_revision: "ZS44A-k106",
         kind: "grid_binned_mean",
         cells: [
           { mean: 12, std: 2, count: 40 },
@@ -127,6 +135,8 @@ describe("BehaviorModelsPanel", () => {
     expect(screen.getByText("warm_idle_rpm_baseline")).toBeInTheDocument();
     expect(screen.getByText("cat_warmup")).toBeInTheDocument();
     expect(screen.getByText("timing_advance_vs_rpm_load")).toBeInTheDocument();
+    expect(screen.getByText("tune ZS44A-k106")).toBeInTheDocument();
+    expect(screen.getByText(/did:ECM_RPM__roc ≤ ±75\/s/)).toBeInTheDocument();
   });
 
   it("renders without the live overlay", () => {

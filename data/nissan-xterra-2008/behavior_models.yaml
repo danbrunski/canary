@@ -1,5 +1,319 @@
 schema_version: 1
 models:
+- name: injector_pw_vs_rpm_throttle_did
+  kind: surface_2d
+  output: did:ECM_INJECTOR_PW_B1
+  output_unit: raw
+  axes:
+  - name: rpm
+    channel: did:ECM_RPM
+    unit: rpm
+    bin_edges:
+    - 0.0
+    - 728.0
+    - 859.428571428571
+    - 2123.285714285714
+    - 2290.0
+    - 2393.0
+    - 2606.0
+    - 5634.0
+  - name: throttle_sensor_voltage
+    channel: did:ECM_THROTTLE_POS_SENSOR_1
+    unit: V
+    bin_edges:
+    - 0.6100000143051147
+    - 0.6600000262260437
+    - 0.7400000095367432
+    - 0.7799999713897705
+    - 0.9449999928474426
+    - 1.1950000524520874
+    - 1.4907142945698328
+    - 4.159999847412109
+  conditions: []
+  version: 1
+  fit:
+    sample_count: 1876
+    sessions:
+    - _capture-tuning-did-2026-08-06T003148
+    - _capture-tuning-did-2026-08-06T034041
+    - _capture-tuning-did-2026-08-06T145004
+    fitted_at: '2026-08-07T15:04:47.245437+00:00'
+    training_data_hash: sha256:0f214145f2c116e0
+    tune_revision: ZS44A-k106
+    calibration_sessions:
+    - _capture-tuning-did-2026-08-07T005351
+    validation_sample_count: 1180
+    validation_coverage: 0.8177408177408177
+    validation_warning_rate: 0.010169491525423728
+    validation_critical_rate: 0.002542372881355932
+    validation_residual_median: 20.318793706293945
+    validation_residual_mad: 1199.8799245806617
+    validation_r_squared: 0.8721170893482392
+    kind: grid_binned_mean
+    cells:
+    - mean: 12470.0
+      std: 3661.110214129042
+      count: 4
+      session_count: 2
+      dwell_seconds: 2.0
+    - mean: 26775.5875
+      std: 3796.192100953764
+      count: 80
+      session_count: 2
+      dwell_seconds: 87.0
+    - mean: 27884.0
+      std: 135.7645019878171
+      count: 3
+      session_count: 2
+      dwell_seconds: 2.0
+    - mean: 27892.488764044945
+      std: 1205.7649222077089
+      count: 178
+      session_count: 2
+      dwell_seconds: 186.0
+    - mean: 18901.0
+      std: 0.0
+      count: 1
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 6132.5874125874125
+      std: 425.03402296841824
+      count: 143
+      session_count: 2
+      dwell_seconds: 246.0
+    - mean: 6900.775
+      std: 897.7723213831371
+      count: 120
+      session_count: 2
+      dwell_seconds: 220.0
+    - mean: 8245.25
+      std: 1097.5888062020313
+      count: 4
+      session_count: 2
+      dwell_seconds: 10.0
+    - mean: 10849.5
+      std: 2306.5
+      count: 2
+      session_count: 1
+      dwell_seconds: 5.0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 5796.0
+      std: 0.0
+      count: 1
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 4725.837209302325
+      std: 963.5533059977474
+      count: 43
+      session_count: 2
+      dwell_seconds: 93.0
+    - mean: 4810.183486238532
+      std: 1559.442214825119
+      count: 109
+      session_count: 2
+      dwell_seconds: 273.0
+    - mean: 8223.923076923076
+      std: 4435.453241284514
+      count: 13
+      session_count: 2
+      dwell_seconds: 48.0
+    - mean: 7790.375
+      std: 2170.0125539671426
+      count: 32
+      session_count: 2
+      dwell_seconds: 95.0
+    - mean: 12670.894736842105
+      std: 4064.834752836459
+      count: 38
+      session_count: 2
+      dwell_seconds: 119.0
+    - mean: 23161.055555555555
+      std: 2444.4179373562815
+      count: 18
+      session_count: 2
+      dwell_seconds: 57.0
+    - mean: 28091.8
+      std: 2029.5641962418106
+      count: 15
+      session_count: 2
+      dwell_seconds: 41.0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 4241.323529411765
+      std: 845.638941190702
+      count: 34
+      session_count: 2
+      dwell_seconds: 98.0
+    - mean: 4333.541666666667
+      std: 573.9020662074864
+      count: 24
+      session_count: 2
+      dwell_seconds: 88.0
+    - mean: 7069.764705882353
+      std: 3001.0441227995334
+      count: 17
+      session_count: 2
+      dwell_seconds: 53.0
+    - mean: 13042.268656716418
+      std: 3779.351020582607
+      count: 67
+      session_count: 2
+      dwell_seconds: 176.0
+    - mean: 21787.558823529413
+      std: 3539.8673969113956
+      count: 68
+      session_count: 2
+      dwell_seconds: 162.0
+    - mean: 29701.264150943396
+      std: 2149.1482310216584
+      count: 53
+      session_count: 2
+      dwell_seconds: 139.0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 4011.0
+      std: 0.0
+      count: 1
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 4149.555555555556
+      std: 824.4087593355226
+      count: 36
+      session_count: 2
+      dwell_seconds: 87.0
+    - mean: 6294.545454545455
+      std: 1832.2337764516428
+      count: 11
+      session_count: 2
+      dwell_seconds: 33.0
+    - mean: 12422.894736842105
+      std: 3880.8232291986824
+      count: 38
+      session_count: 2
+      dwell_seconds: 107.0
+    - mean: 22767.67021276596
+      std: 3063.875849480134
+      count: 94
+      session_count: 2
+      dwell_seconds: 213.0
+    - mean: 30435.955555555556
+      std: 2406.42242948652
+      count: 90
+      session_count: 1
+      dwell_seconds: 182.0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 3841.121212121212
+      std: 494.35340429486746
+      count: 66
+      session_count: 2
+      dwell_seconds: 129.0
+    - mean: 5064.690476190476
+      std: 1606.4399191127009
+      count: 42
+      session_count: 2
+      dwell_seconds: 98.0
+    - mean: 12507.015151515152
+      std: 2967.1152273711423
+      count: 66
+      session_count: 2
+      dwell_seconds: 140.0
+    - mean: 21420.022222222222
+      std: 3260.2403080406266
+      count: 45
+      session_count: 1
+      dwell_seconds: 121.0
+    - mean: 29601.775510204083
+      std: 2415.29958648228
+      count: 49
+      session_count: 2
+      dwell_seconds: 116.0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 0.0
+      std: 0.0
+      count: 0
+      session_count: 1
+      dwell_seconds: 0.0
+    - mean: 4848.411764705882
+      std: 3387.8988119277697
+      count: 17
+      session_count: 1
+      dwell_seconds: 43.0
+    - mean: 4101.593406593406
+      std: 940.9437158725508
+      count: 91
+      session_count: 2
+      dwell_seconds: 209.0
+    - mean: 9326.207547169812
+      std: 3426.3577579152557
+      count: 53
+      session_count: 2
+      dwell_seconds: 136.0
+    - mean: 18299.938775510203
+      std: 3972.198956154131
+      count: 49
+      session_count: 2
+      dwell_seconds: 114.0
+    - mean: 31896.475409836065
+      std: 5233.059985015686
+      count: 61
+      session_count: 2
+      dwell_seconds: 140.0
+  deviation:
+    kind: sigma
+    warning_band: 3.0
+    critical_band: 6.0
+    sigma_floor: 1.0
+    better_direction: ignore
+    std_scaled: false
+  notes: Mode-22-synchronous fuel-delivery surface. Detects a change in commanded
+    PW at the same DID RPM and throttle position. It cannot distinguish injector/fuel-pressure
+    faults from ECU compensation, and does not claim MAF drift by itself.
+  diagnostic_capabilities:
+  - commanded fueling-map drift
+  diagnostic_limitations:
+  - cannot uniquely identify injector wear, fuel pressure, MAF bias, or ECU compensation
+  min_cell_count: 30
+  min_cell_sessions: 2
+  min_cell_dwell_seconds: 10.0
+  grid_version: 1
 - name: warm_idle_rpm_baseline
   kind: surface_1d
   output: obd:RPM
@@ -12,6 +326,7 @@ models:
     - 450.0
     - 2450.0
   operating_mode: idle
+  conditions: []
   version: 2
   fit:
     sample_count: 1859
@@ -82,6 +397,7 @@ models:
     - 27.058822631835938
     - 43.52941131591797
     - 90.98039245605469
+  conditions: []
   version: 2
   fit:
     sample_count: 2065
@@ -367,6 +683,7 @@ models:
     - 45.0
     - 51.0
     - 68.0
+  conditions: []
   version: 2
   fit:
     sample_count: 3859
@@ -733,6 +1050,7 @@ models:
     - 26.66666603088379
     - 32.09150441487627
     - 89.80392456054688
+  conditions: []
   version: 2
   fit:
     sample_count: 1388
@@ -956,6 +1274,7 @@ models:
     - 28.235294342041016
     - 49.411766052246094
     - 90.98039245605469
+  conditions: []
   version: 2
   fit:
     sample_count: 2410
@@ -1273,6 +1592,7 @@ models:
     - 28.235294342041016
     - 49.411766052246094
     - 90.98039245605469
+  conditions: []
   version: 2
   fit:
     sample_count: 2382
@@ -1576,6 +1896,7 @@ models:
     - 0.0
     - 705.0
   operating_mode: warmup
+  conditions: []
   version: 4
   fit:
     sample_count: 1027

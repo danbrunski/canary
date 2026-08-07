@@ -35,6 +35,7 @@ const DEFAULT_PROFILE: CaptureProfile = {
   capacity_evidence: "",
   broadcast_decode: true,
   corpus_eligible: true,
+  behavior_model_recipes: [],
   storage_prefix: "",
 };
 
@@ -55,6 +56,7 @@ const FUEL_MAP: CaptureProfile = {
   capacity_evidence: "",
   broadcast_decode: true,
   corpus_eligible: false,
+  behavior_model_recipes: [],
   storage_prefix: "_capture-fuel-map",
 };
 
@@ -79,6 +81,11 @@ const HYBRID: CaptureProfile = {
   capacity_evidence: "10 81 restored Mode 01 on the next request.",
   broadcast_decode: true,
   corpus_eligible: false,
+  behavior_model_recipes: [
+    "injector_pw_vs_rpm_throttle_did",
+    "cam_primary_vs_command_rpm_did",
+    "cam_secondary_vs_command_rpm_did",
+  ],
   storage_prefix: "_capture-tuning-hybrid-research",
 };
 
@@ -108,6 +115,7 @@ function status(activeName: string | null): StatusResponse {
           paused: false,
           broadcast_decode: true,
           corpus_eligible: false,
+          behavior_model_recipes: [],
           bus_budget_override: null,
         }
       : null,
@@ -198,6 +206,7 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     expect(plan).toHaveTextContent("4 Hz/channel");
     expect(plan).toHaveTextContent("Mode 01 / Mode 22 alternating");
     expect(plan).toHaveTextContent("DID window every 0.25s");
+    expect(plan).toHaveTextContent("3 behavior-model recipes allowed");
     expect(plan).toHaveTextContent("10 81 restored Mode 01 on the next request");
     expect(screen.getByText("ECM_BASE_FUEL_SCHEDULE_CANDIDATE")).toBeInTheDocument();
 

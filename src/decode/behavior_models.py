@@ -128,6 +128,11 @@ class _BaseFit(_Strict):
     sessions: list[str] = Field(default_factory=list)
     fitted_at: str  # ISO-8601 UTC; kept as str so the YAML round-trip is verbatim
     training_data_hash: str = ""
+    #: Calibration identity shared by every training and held-out session.
+    #: ``None`` is retained for vehicles without a revision registry; when a
+    #: registry exists the refit CLI refuses mixed/conflicting revisions
+    #: before a model can be written.
+    tune_revision: str | None = None
     calibration_sessions: list[str] = Field(default_factory=list)
     validation_sample_count: int = Field(default=0, ge=0)
     validation_coverage: float | None = Field(default=None, ge=0, le=1)
@@ -360,6 +365,20 @@ class DeviationConfig(_Strict):
 # ---------------------------------------------------------------------------
 
 
+class RateOfChangeCondition(_Strict):
+    """A persisted serve-time steady-state gate.
+
+    Training only on steady rows is insufficient: without the same condition
+    here, the daemon would grade command transitions against a steady-state
+    surface and manufacture alerts.  The condition names the already-derived
+    ``__roc`` feature explicitly so missing derivative data fails closed.
+    """
+
+    kind: Literal["max_abs_rate_of_change"] = "max_abs_rate_of_change"
+    channel: str
+    max_abs_per_second: float = Field(gt=0)
+
+
 class BehaviorModel1D(_Strict):
     """A 1D expected-behavior surface."""
 
@@ -369,6 +388,7 @@ class BehaviorModel1D(_Strict):
     output_unit: str = "unknown"
     axis: Axis1D
     operating_mode: str | None = None  # restrict evaluation to this mode (e.g. "warmup")
+    conditions: list[RateOfChangeCondition] = Field(default_factory=list)
     version: int = 1
     fit: Fit1D
     deviation: DeviationConfig | None = None
@@ -400,6 +420,7 @@ class BehaviorModel2D(_Strict):
     output_unit: str = "unknown"
     axes: tuple[Axis2D, Axis2D]
     operating_mode: str | None = None
+    conditions: list[RateOfChangeCondition] = Field(default_factory=list)
     version: int = 1
     fit: Fit2D
     deviation: DeviationConfig | None = None

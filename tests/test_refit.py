@@ -112,6 +112,78 @@ def test_fit_recipe_1d_polynomial() -> None:
     assert result.model.fit.r_squared > 0.9
 
 
+def test_fit_recipe_persists_and_applies_rate_gate_and_tune_revision() -> None:
+    frame = pd.DataFrame(
+        {
+            "x": [0.0, 1.0, 2.0, 3.0, 4.0],
+            "x__roc": [0.0, 0.1, 5.0, -0.2, -6.0],
+            "y": [1.0, 3.0, 5.0, 7.0, 9.0],
+        }
+    )
+    recipe = Surface1DRecipe(
+        name="steady",
+        output="y",
+        x_column="x",
+        degree=1,
+        min_samples=3,
+        min_r_squared=None,
+        max_abs_rate_of_change={"x": 0.25},
+    )
+
+    result = fit_recipe(recipe, frame, tune_revision="rom-1")
+
+    assert result.model is not None
+    assert result.model.fit.sample_count == 3
+    assert result.model.fit.tune_revision == "rom-1"
+    assert result.model.conditions[0].channel == "x__roc"
+    assert result.model.conditions[0].max_abs_per_second == 0.25
+
+
+def test_fit_recipe_refuses_rate_gate_without_derivative() -> None:
+    recipe = Surface1DRecipe(
+        name="steady",
+        output="y",
+        x_column="x",
+        min_samples=2,
+        max_abs_rate_of_change={"x": 1.0},
+    )
+    result = fit_recipe(recipe, pd.DataFrame({"x": [1.0, 2.0], "y": [2.0, 4.0]}))
+    assert result.skipped is True
+    assert "can't enforce steady-state rate gate" in result.reason
+
+
+def test_fit_recipe_enforces_capture_allowlist_per_recipe() -> None:
+    x = np.arange(100, dtype=float)
+    frame = pd.concat(
+        [
+            pd.DataFrame({SESSION_COLUMN: "capture-a", "x": x, "y": 2.0 * x}),
+            pd.DataFrame({SESSION_COLUMN: "capture-b", "x": x, "y": -100.0 - x}),
+        ],
+        ignore_index=True,
+    )
+    recipe = Surface1DRecipe(
+        name="authorized_surface",
+        output="y",
+        x_column="x",
+        degree=1,
+        min_samples=50,
+    )
+
+    result = fit_recipe(
+        recipe,
+        frame,
+        capture_recipe_allowlists={
+            "capture-a": {"authorized_surface"},
+            "capture-b": {"different_surface"},
+        },
+    )
+
+    assert result.model is not None
+    assert result.model.fit.sample_count == 100
+    assert result.model.fit.sessions == ["capture-a"]
+    assert result.model.fit.r_squared == 1.0
+
+
 def test_fit_recipe_1d_binned_lookup() -> None:
     frame = _warmup_frame()
     recipe = Surface1DRecipe(

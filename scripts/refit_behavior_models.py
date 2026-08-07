@@ -33,11 +33,17 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from _cli import add_common_args, load_config, resolve_sessions
+from _cli import add_common_args, filter_sessions_by_age, load_config, resolve_sessions
 
 from src.analysis.refit import Recipe, default_recipes, refit_all
 from src.analysis.session_classifier import read_classification
+from src.analysis.tune_revisions import (
+    TuneRevisionRegistry,
+    load_tune_revisions,
+    resolve_session_revision,
+)
 from src.analysis.vehicle_ledger import VehicleLedgerStore
+from src.control.capture_manifest import read_capture_manifest
 from src.decode.behavior_models import (
     dump_behavior_models,
     load_behavior_models,
@@ -188,6 +194,87 @@ def _select_recipes(catalog: list[Recipe], names: list[str] | None) -> list[Reci
     return [by_name[n] for n in names]
 
 
+def _discover_behavior_capture_sessions(
+    root: Path,
+    recipe_names: set[str],
+) -> list[Path]:
+    """Discover isolated captures explicitly allowlisted for these recipes.
+
+    General training discovery must continue to exclude every ``_capture-*``
+    directory. Behavior surfaces are narrower: a capture sidecar may name the
+    exact recipes it is evidence for, and no others. Keeping this resolver in
+    the refit CLI makes it impossible for IF/LSTM callers to accidentally opt
+    into research captures.
+    """
+    if not root.exists() or not recipe_names:
+        return []
+    sessions: list[Path] = []
+    for child in root.iterdir():
+        if not child.is_dir() or not child.name.startswith("_capture-"):
+            continue
+        manifest = read_capture_manifest(child)
+        if manifest is None or not recipe_names.intersection(manifest.behavior_model_recipes):
+            continue
+        if any(path.stat().st_size > 0 for path in child.glob("telemetry-*.parquet")):
+            sessions.append(child)
+    return sorted(sessions)
+
+
+def _consistent_tune_revision(
+    sessions: list[Path],
+    registry: TuneRevisionRegistry | None,
+) -> str | None:
+    """Return the single calibration identity, refusing ambiguity when known."""
+    if registry is None:
+        return None
+    resolved: dict[str, list[str]] = {}
+    unknown: list[str] = []
+    conflicts: list[str] = []
+    for session in sessions:
+        revision, _source, conflict = resolve_session_revision(session, registry)
+        if conflict:
+            conflicts.append(session.name)
+        if revision is None:
+            unknown.append(session.name)
+        else:
+            resolved.setdefault(revision, []).append(session.name)
+    if conflicts:
+        raise ValueError(
+            "capture-manifest tune revision conflicts with the vehicle registry for: "
+            + ", ".join(sorted(conflicts))
+        )
+    if unknown:
+        raise ValueError("tune revision is unknown for sessions: " + ", ".join(sorted(unknown)))
+    if len(resolved) != 1:
+        details = "; ".join(
+            f"{revision}={','.join(names)}" for revision, names in sorted(resolved.items())
+        )
+        raise ValueError(
+            "behavior-model refit refuses mixed tune revisions; select one revision "
+            f"with explicit session paths or a corpus boundary ({details})"
+        )
+    return next(iter(resolved))
+
+
+def _capture_recipe_allowlists(
+    sessions: Sequence[Path],
+    *,
+    explicit_recipe_grants: set[str] | None = None,
+) -> dict[str, set[str]]:
+    """Return exact per-capture grants from sidecars or an explicit CLI selection."""
+    allowlists: dict[str, set[str]] = {}
+    for session in sessions:
+        if not session.name.startswith("_capture-"):
+            continue
+        if explicit_recipe_grants is not None:
+            allowlists[session.name] = set(explicit_recipe_grants)
+            continue
+        manifest = read_capture_manifest(session)
+        if manifest is not None:
+            allowlists[session.name] = set(manifest.behavior_model_recipes)
+    return allowlists
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
@@ -203,7 +290,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     sessions_root = args.sessions_root or scoped.collection.storage_path
     out: Path = args.out or scoped.daemon.behavior_models
 
+    catalog = default_recipes()
+    recipes = _select_recipes(catalog, args.recipe)
+    explicit_sessions = bool(args.sessions)
     sessions = resolve_sessions(args, sessions_root)
+    if not explicit_sessions:
+        capture_sessions = _discover_behavior_capture_sessions(
+            sessions_root, {recipe.name for recipe in recipes}
+        )
+        if not args.use_all_sessions:
+            capture_sessions = filter_sessions_by_age(
+                capture_sessions, args.days, datetime.now(UTC)
+            )
+        sessions = sorted({*sessions, *capture_sessions})
     if args.since_boundary:
         boundary = VehicleLedgerStore(scoped.daemon.vehicle_ledger).latest_boundary()
         if boundary is not None:
@@ -226,8 +325,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
-    catalog = default_recipes()
-    recipes = _select_recipes(catalog, args.recipe)
+    revision_registry = load_tune_revisions(
+        scoped.daemon.behavior_models.parent / "tune_revisions.yaml"
+    )
+    try:
+        tune_revision = _consistent_tune_revision(sessions, revision_registry)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    capture_recipe_allowlists = _capture_recipe_allowlists(
+        sessions,
+        explicit_recipe_grants=({recipe.name for recipe in recipes} if explicit_sessions else None),
+    )
     log.info(
         "starting refit",
         extra={
@@ -235,6 +344,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "recipes": [r.name for r in recipes],
             "out": str(out),
             "dry_run": args.dry_run,
+            "tune_revision": tune_revision,
         },
     )
 
@@ -274,6 +384,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         session_events=session_events,
         catalog=catalog,
         regrid_recipes=set(args.regrid or ()),
+        tune_revision=tune_revision,
+        capture_recipe_allowlists=capture_recipe_allowlists,
     )
 
     _print_report(results, frame_rows=len(frame))
@@ -355,6 +467,7 @@ def _write_bakeoff_report(path: Path, results: Sequence, *, frame_rows: int) -> 
                     "kind": model.kind,
                     "training_samples": fit.sample_count,
                     "training_sessions": fit.sessions,
+                    "tune_revision": fit.tune_revision,
                     "calibration_sessions": fit.calibration_sessions,
                     "r_squared": fit.r_squared,
                     "validation_samples": fit.validation_sample_count,
@@ -366,6 +479,7 @@ def _write_bakeoff_report(path: Path, results: Sequence, *, frame_rows: int) -> 
                     "validation_r_squared": fit.validation_r_squared,
                     "diagnostic_capabilities": model.diagnostic_capabilities,
                     "diagnostic_limitations": model.diagnostic_limitations,
+                    "conditions": [condition.model_dump() for condition in model.conditions],
                 }
             )
             if model.kind == "surface_2d":

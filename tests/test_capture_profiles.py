@@ -86,6 +86,11 @@ def test_vehicle_hybrid_profile_keeps_its_experimental_fast_exit_plan() -> None:
     assert hybrid.bus_budget_override == 90.0
     assert "COMMANDED_EQUIV_RATIO" in hybrid.mode01
     assert "ECM_BASE_FUEL_SCHEDULE_CANDIDATE" in hybrid.mode22
+    assert hybrid.behavior_model_recipes == (
+        "injector_pw_vs_rpm_throttle_did",
+        "cam_primary_vs_command_rpm_did",
+        "cam_secondary_vs_command_rpm_did",
+    )
 
 
 def test_default_cannot_be_deleted_and_profile_crud_round_trips(tmp_path: Path) -> None:
@@ -142,6 +147,7 @@ def test_capture_lifecycle_rotates_writes_sidecar_and_reverts(tmp_path: Path) ->
     sidecar = json.loads((writer.paths.root / "capture_profile.json").read_text())
     assert sidecar["profile"] == "fuel-map"
     assert sidecar["tune_revision"] == "rom-17"
+    assert sidecar["profile_snapshot"]["behavior_model_recipes"] == []
     # The seeded profile carries no override, and a profile without one must
     # leave the operator's budget alone rather than clearing or raising it.
     assert bus_budget.override() is None

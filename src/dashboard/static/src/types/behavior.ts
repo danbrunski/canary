@@ -23,6 +23,13 @@ export interface BehaviorFitBase {
   sessions: string[];
   fitted_at: string;
   training_data_hash: string;
+  tune_revision?: string | null;
+}
+
+export interface BehaviorRateCondition {
+  kind: "max_abs_rate_of_change";
+  channel: string;
+  max_abs_per_second: number;
 }
 
 export interface PolynomialFit extends BehaviorFitBase {
@@ -75,6 +82,7 @@ export interface BehaviorModel1D {
   output_unit: string;
   axis: BehaviorAxis1D;
   operating_mode: string | null;
+  conditions?: BehaviorRateCondition[];
   version: number;
   fit: PolynomialFit | LookupTableFit | RobustBaselineFit;
   deviation: DeviationConfig | null;
@@ -88,6 +96,7 @@ export interface BehaviorModel2D {
   output_unit: string;
   axes: [BehaviorAxis2D, BehaviorAxis2D];
   operating_mode: string | null;
+  conditions?: BehaviorRateCondition[];
   version: number;
   fit: GridBinnedMeanFit;
   deviation: DeviationConfig | null;

@@ -27,6 +27,7 @@ const ACTIVE: CaptureProfileState = {
   paused: false,
   broadcast_decode: true,
   corpus_eligible: false,
+  behavior_model_recipes: [],
   bus_budget_override: null,
 };
 

@@ -32,6 +32,7 @@ from src.decode.behavior_models import (
     GridBinnedMeanFit,
     GridCell,
     PolynomialFit,
+    RateOfChangeCondition,
 )
 
 # ---------------------------------------------------------------------------
@@ -138,6 +139,31 @@ def test_expected_value_respects_operating_mode_filter() -> None:
     ) == pytest.approx(40.0)
     # wrong mode → no expectation
     assert expected_value(model, {"obd:RUN_TIME": 100.0, "operating_mode": "city"}) is None
+
+
+def test_rate_condition_is_enforced_by_scalar_and_vectorized_serving() -> None:
+    model = _make_coolant_model().model_copy(
+        update={
+            "conditions": [
+                RateOfChangeCondition(channel="obd:RUN_TIME__roc", max_abs_per_second=2.0)
+            ]
+        }
+    )
+    assert expected_value(model, {"obd:RUN_TIME": 100.0}) is None
+    assert expected_value(model, {"obd:RUN_TIME": 100.0, "obd:RUN_TIME__roc": 2.1}) is None
+    assert expected_value(
+        model, {"obd:RUN_TIME": 100.0, "obd:RUN_TIME__roc": -1.5}
+    ) == pytest.approx(40.0)
+
+    frame = pd.DataFrame(
+        {
+            "obd:RUN_TIME": [100.0, 100.0, 100.0],
+            "obd:RUN_TIME__roc": [1.0, 3.0, np.nan],
+        }
+    )
+    values = expected_value_column(frame, model)
+    assert values.iloc[0] == pytest.approx(40.0)
+    assert values.iloc[1:].isna().all()
 
 
 # ---------------------------------------------------------------------------

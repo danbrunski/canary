@@ -174,11 +174,19 @@ function ModelCard({
           )}
         </span>
         {model.operating_mode && <span>mode {model.operating_mode}</span>}
+        {model.fit.tune_revision && <span>tune {model.fit.tune_revision}</span>}
         <span>n = {model.fit.sample_count.toLocaleString()}</span>
         {model.fit.r_squared !== null && (
           <span>r² {model.fit.r_squared.toFixed(3)}</span>
         )}
       </div>
+      {(model.conditions ?? []).length > 0 && (
+        <p className="mb-2 text-[0.72rem] text-fg-dim">
+          Steady-state only: {(model.conditions ?? []).map((condition) => (
+            `${condition.channel} ≤ ±${condition.max_abs_per_second}/s`
+          )).join(", ")}
+        </p>
+      )}
 
       {model.kind === "surface_1d" ? (
         <Surface1DView model={model} live={active} />

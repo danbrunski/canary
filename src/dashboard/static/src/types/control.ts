@@ -114,6 +114,8 @@ export interface CaptureProfile {
   capacity_evidence: string;
   broadcast_decode: boolean;
   corpus_eligible: boolean;
+  /** Exact behavior-surface recipes this isolated capture may train. */
+  behavior_model_recipes: string[];
   storage_prefix: string;
 }
 
@@ -141,6 +143,7 @@ export interface CaptureProfileState {
   rows_written?: number;
   broadcast_decode: boolean;
   corpus_eligible: boolean;
+  behavior_model_recipes: string[];
   bus_budget_override: number | null;
 }
 

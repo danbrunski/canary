@@ -165,6 +165,10 @@ class CaptureProfile(_Strict):
     capacity_evidence: str = ""
     broadcast_decode: bool = True
     corpus_eligible: bool = False
+    #: Narrow exception to corpus isolation: these captures may be evidence
+    #: for only the named behavior-surface recipes. They remain excluded from
+    #: IF/LSTM discovery and from every unlisted behavior model.
+    behavior_model_recipes: tuple[str, ...] = ()
     storage_prefix: str = ""
 
     @field_validator("name")
@@ -194,6 +198,14 @@ class CaptureProfile(_Strict):
         cleaned = tuple(dict.fromkeys(item.strip() for item in value if item.strip()))
         if len(cleaned) != len(value):
             raise ValueError("Mode-22 DIDs must be non-blank and unique")
+        return cleaned
+
+    @field_validator("behavior_model_recipes")
+    @classmethod
+    def _valid_behavior_recipes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        cleaned = tuple(dict.fromkeys(item.strip() for item in value if item.strip()))
+        if len(cleaned) != len(value):
+            raise ValueError("behavior-model recipe names must be non-blank and unique")
         return cleaned
 
     @field_validator("did_interval_seconds")
@@ -339,6 +351,11 @@ def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
                 ),
                 broadcast_decode=True,
                 corpus_eligible=False,
+                behavior_model_recipes=(
+                    "injector_pw_vs_rpm_throttle_did",
+                    "cam_primary_vs_command_rpm_did",
+                    "cam_secondary_vs_command_rpm_did",
+                ),
                 round_timestamps=True,
                 storage_prefix="_capture-tuning-did",
             ),
@@ -423,6 +440,11 @@ def model_input_warnings(
                 *(axis.channel for axis in model.axes),
             }
         )
+        for condition in model.conditions:
+            base = condition.channel
+            for suffix in ("__mean", "__std", "__roc"):
+                base = base.removesuffix(suffix)
+            required.add(base)
         missing = sorted(
             channel for channel in required if not _channel_satisfied(channel, profile, frozenset())
         )

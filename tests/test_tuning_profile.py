@@ -189,6 +189,7 @@ def test_snapshot_exposes_the_capture_plan_the_dashboard_must_verify() -> None:
         bus_budget_override=90.0,
         expected_total_demand_hz=8.0,
         capacity_evidence="fast exit verified",
+        behavior_model_recipes=("cam_secondary_vs_command_rpm_did",),
         corpus_eligible=False,
         storage_prefix="_capture-research",
     )
@@ -202,6 +203,7 @@ def test_snapshot_exposes_the_capture_plan_the_dashboard_must_verify() -> None:
     assert snap["did_continuous"] is False
     assert snap["expected_total_demand_hz"] == 8.0
     assert snap["capacity_evidence"] == "fast exit verified"
+    assert snap["behavior_model_recipes"] == ["cam_secondary_vs_command_rpm_did"]
 
 
 def test_default_set_carries_the_filters_every_analysis_depends_on() -> None:

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Literal, cast
 
 import numpy as np
@@ -40,7 +40,9 @@ from src.decode.behavior_models import (
     BehaviorModel2D,
     BehaviorModels,
     DeviationConfig,
+    RateOfChangeCondition,
 )
+from src.preprocessing.features import roc_column
 from src.preprocessing.resampler import SESSION_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
 
@@ -128,6 +130,11 @@ class _RecipeBase:
     max_initial_coolant_c: float | None = None
     require_contiguous_runtime: bool = False
     closed_loop_only: bool = False
+    #: Persisted steady-state constraints. Keys are base telemetry columns;
+    #: values are maximum absolute per-second rates over the feature
+    #: pipeline's rolling horizon. The fitter applies them and the resulting
+    #: model stores the corresponding ``__roc`` conditions for live serving.
+    max_abs_rate_of_change: Mapping[str, float] = field(default_factory=dict)
     notes: str | None = None
     #: Auto-detected events (see ``src.analysis.events``) the *source session*
     #: must contain for any of its rows to feed this recipe. Use to gate
@@ -145,6 +152,17 @@ class _RecipeBase:
     #: falls below this is skipped rather than published, same as a
     #: missing-column or too-few-samples skip. ``None`` disables the gate.
     min_r_squared: float | None = 0.6
+
+    def __post_init__(self) -> None:
+        invalid = {
+            channel: limit
+            for channel, limit in self.max_abs_rate_of_change.items()
+            if not channel or limit <= 0
+        }
+        if invalid:
+            raise ValueError(
+                f"max_abs_rate_of_change requires named channels and positive limits: {invalid}"
+            )
 
 
 @dataclass(frozen=True)
@@ -572,6 +590,64 @@ def default_recipes() -> list[Recipe]:
                 "MAF bias, or ECU compensation",
             ),
         ),
+        Surface2DRecipe(
+            name="cam_primary_vs_command_rpm_did",
+            output="did:ECM_INTAKE_CAM_ANGLE_MEASURED",
+            output_unit="deg",
+            x_column="did:ECM_INTAKE_CAM_ANGLE_COMMANDED",
+            y_column="did:ECM_RPM",
+            x_axis_name="commanded_cam",
+            y_axis_name="rpm",
+            x_axis_unit="deg",
+            y_axis_unit="rpm",
+            min_samples=500,
+            max_validation_warning_rate=0.03,
+            max_abs_rate_of_change={
+                "did:ECM_INTAKE_CAM_ANGLE_COMMANDED": 0.25,
+                "did:ECM_RPM": 75.0,
+            },
+            deviation=DeviationConfig(
+                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+            ),
+            notes=(
+                "Neutral primary measured-cam tracking surface; physical bank "
+                "assignment remains intentionally unspecified. Evaluates only "
+                "while commanded angle and RPM satisfy the persisted steady-state gates."
+            ),
+            diagnostic_capabilities=("cam command/position relationship drift",),
+            diagnostic_limitations=(
+                "does not identify the physical bank and does not evaluate command transitions",
+            ),
+        ),
+        Surface2DRecipe(
+            name="cam_secondary_vs_command_rpm_did",
+            output="did:ECM_INTAKE_CAM_ANGLE_MEASURED_B",
+            output_unit="deg",
+            x_column="did:ECM_INTAKE_CAM_ANGLE_COMMANDED",
+            y_column="did:ECM_RPM",
+            x_axis_name="commanded_cam",
+            y_axis_name="rpm",
+            x_axis_unit="deg",
+            y_axis_unit="rpm",
+            min_samples=500,
+            max_validation_warning_rate=0.03,
+            max_abs_rate_of_change={
+                "did:ECM_INTAKE_CAM_ANGLE_COMMANDED": 0.25,
+                "did:ECM_RPM": 75.0,
+            },
+            deviation=DeviationConfig(
+                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+            ),
+            notes=(
+                "Neutral secondary measured-cam tracking surface; physical bank "
+                "assignment remains intentionally unspecified. Evaluates only "
+                "while commanded angle and RPM satisfy the persisted steady-state gates."
+            ),
+            diagnostic_capabilities=("cam command/position relationship drift",),
+            diagnostic_limitations=(
+                "does not identify the physical bank and does not evaluate command transitions",
+            ),
+        ),
         Surface1DRecipe(
             name="afr_bank_balance_robust",
             output="derived:AFR_BANK_BALANCE",
@@ -744,6 +820,8 @@ def fit_recipe(
     session_events: Mapping[str, set[str]] | None = None,
     prior_model: BehaviorModel1D | BehaviorModel2D | None = None,
     regrid: bool = False,
+    tune_revision: str | None = None,
+    capture_recipe_allowlists: Mapping[str, Collection[str]] | None = None,
 ) -> RecipeResult:
     """Run one recipe; return a ``RecipeResult`` (never raises on missing data).
 
@@ -767,9 +845,37 @@ def fit_recipe(
     """
     version = (next_version_for or {}).get(recipe.name, 1)
 
-    # 0. engine-running gate — applied before everything else so KOEO rows
-    # can't reach the fitters OR the 2D auto-edge quantiles.
+    # 0. Capture evidence is authorized per recipe.  General sessions are
+    # unrestricted here; isolated captures are present in this mapping only
+    # when their manifest explicitly names the recipes they may inform.
     sub = frame
+    if capture_recipe_allowlists:
+        if SESSION_COLUMN not in sub.columns:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason=(
+                    f"no {SESSION_COLUMN} column in frame; can't enforce capture "
+                    "behavior-model allowlists"
+                ),
+            )
+        disallowed = {
+            session_id
+            for session_id, allowed_recipes in capture_recipe_allowlists.items()
+            if recipe.name not in allowed_recipes
+        }
+        sub = sub[~sub[SESSION_COLUMN].astype(str).isin(disallowed)]
+        if sub.empty:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason="no rows from sessions authorized for this behavior-model recipe",
+            )
+
+    # 0a. engine-running gate — applied before everything else so KOEO rows
+    # can't reach the fitters OR the 2D auto-edge quantiles.
     if recipe.min_rpm is not None:
         if RPM_COLUMN not in sub.columns:
             # The gate is load-bearing (KOEO contamination); silently fitting
@@ -859,6 +965,29 @@ def fit_recipe(
         if sub.empty:
             return RecipeResult(
                 recipe.name, None, skipped=True, reason="no closed-loop fuel-system rows"
+            )
+
+    # 1d. Steady-state conditions are a model contract, not merely a corpus
+    # cleanup. Refuse if the derivative cannot be enforced, filter training
+    # and held-out rows here, then persist the same bounds on the model below
+    # so runtime evaluation applies them identically.
+    for channel, limit in recipe.max_abs_rate_of_change.items():
+        derivative = roc_column(channel)
+        if derivative not in sub.columns:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason=f"missing {derivative}; can't enforce steady-state rate gate",
+            )
+        rate = pd.to_numeric(sub[derivative], errors="coerce")
+        sub = sub[rate.notna() & (rate.abs() <= limit)]
+        if sub.empty:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason=f"no rows satisfy abs({derivative}) <= {limit}",
             )
 
     # 2. required columns present?
@@ -977,6 +1106,17 @@ def fit_recipe(
         )
         return RecipeResult(recipe.name, None, skipped=True, reason=str(exc))
 
+    conditions = [
+        RateOfChangeCondition(channel=roc_column(channel), max_abs_per_second=limit)
+        for channel, limit in recipe.max_abs_rate_of_change.items()
+    ]
+    model = model.model_copy(
+        update={
+            "conditions": conditions,
+            "fit": model.fit.model_copy(update={"tune_revision": tune_revision}),
+        }
+    )
+
     if not calibration.empty:
         validation_reason, model = _validate_held_out(recipe, model, calibration)
         if validation_reason is not None:
@@ -1007,6 +1147,8 @@ def fit_recipe(
         prior_model is not None
         and model.fit.training_data_hash
         and model.fit.training_data_hash == prior_model.fit.training_data_hash
+        and model.conditions == prior_model.conditions
+        and model.fit.tune_revision == prior_model.fit.tune_revision
     ):
         model = model.model_copy(update={"version": prior_model.version})
 
@@ -1068,6 +1210,8 @@ def refit_all(
     session_events: Mapping[str, set[str]] | None = None,
     catalog: Sequence[Recipe] | None = None,
     regrid_recipes: Collection[str] = (),
+    tune_revision: str | None = None,
+    capture_recipe_allowlists: Mapping[str, Collection[str]] | None = None,
 ) -> tuple[BehaviorModels, list[RecipeResult]]:
     """Fit ``recipes``; return the new ``BehaviorModels`` + per-recipe results.
 
@@ -1119,6 +1263,8 @@ def refit_all(
             session_events=session_events,
             prior_model=carry_over.get(recipe.name),
             regrid=recipe.name in regrid_recipes,
+            tune_revision=tune_revision,
+            capture_recipe_allowlists=capture_recipe_allowlists,
         )
         results.append(res)
         if res.model is not None:

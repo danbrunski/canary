@@ -294,6 +294,7 @@ def snapshot(achieved_hz: dict[str, float] | None = None) -> dict[str, Any]:
             "paused": _paused,
             "broadcast_decode": _profile.broadcast_decode,
             "corpus_eligible": _profile.corpus_eligible,
+            "behavior_model_recipes": list(_profile.behavior_model_recipes),
             "bus_budget_override": _profile.bus_budget_override,
         }
     if achieved_hz is not None:

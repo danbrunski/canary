@@ -78,6 +78,10 @@ profiles:
   capacity_evidence: '2026-08-04 bench: 658 DID reads/s; 11 DIDs x 15 Hz = 165 reads/s.'
   broadcast_decode: true
   corpus_eligible: false
+  behavior_model_recipes:
+  - injector_pw_vs_rpm_throttle_did
+  - cam_primary_vs_command_rpm_did
+  - cam_secondary_vs_command_rpm_did
   storage_prefix: _capture-tuning-did
 - name: fuel-did-research
   description: Narrow all-DID capture to identify raw 0x1209 as the Base Fuel Schedule candidate
@@ -102,6 +106,8 @@ profiles:
   capacity_evidence: '2026-08-04 bench: 658 DID reads/s; 7 DIDs x 20 Hz = 140 reads/s. Raw 0x1209 remains a candidate, not a decoded provider.'
   broadcast_decode: true
   corpus_eligible: false
+  behavior_model_recipes:
+  - injector_pw_vs_rpm_throttle_did
   storage_prefix: _capture-fuel-did-research
 - name: tuning-hybrid-research
   description: Experimental 4 Hz Mode 01 plus Mode 22 capture using the confirmed fast session exit
@@ -135,4 +141,8 @@ profiles:
   capacity_evidence: '2026-08-04 bench: 10 C0 entry about 1 ms and 10 81 restored Mode 01 on the next request; 16 selected channels x 4 Hz = 64 channel reads/s. Validate one short drive before using for tuning conclusions.'
   broadcast_decode: true
   corpus_eligible: false
+  behavior_model_recipes:
+  - injector_pw_vs_rpm_throttle_did
+  - cam_primary_vs_command_rpm_did
+  - cam_secondary_vs_command_rpm_did
   storage_prefix: _capture-tuning-hybrid-research

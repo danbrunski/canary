@@ -113,6 +113,83 @@ def test_select_recipes_rejects_unknown_name() -> None:
         refit_cli._select_recipes(catalog, ["nope"])
 
 
+def test_behavior_capture_discovery_requires_an_exact_recipe_allowlist(tmp_path: Path) -> None:
+    eligible = tmp_path / "_capture-tuning-did-2026-08-07T000000"
+    unrelated = tmp_path / "_capture-other-2026-08-07T010000"
+    normal = tmp_path / "2026-08-07T020000"
+    for session in (eligible, unrelated, normal):
+        session.mkdir()
+        (session / "telemetry-00000.parquet").write_bytes(b"evidence")
+    for session, recipes in (
+        (eligible, ["cam_secondary_vs_command_rpm_did"]),
+        (unrelated, ["another_recipe"]),
+    ):
+        (session / "capture_profile.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "profile": "research",
+                    "started_at": "2026-08-07T00:00:00Z",
+                    "profile_snapshot": {"behavior_model_recipes": recipes},
+                }
+            )
+        )
+
+    found = refit_cli._discover_behavior_capture_sessions(
+        tmp_path, {"cam_secondary_vs_command_rpm_did"}
+    )
+    assert found == [eligible]
+
+
+def test_capture_recipe_allowlists_preserve_exact_per_capture_grants(tmp_path: Path) -> None:
+    first = tmp_path / "_capture-first"
+    second = tmp_path / "_capture-second"
+    normal = tmp_path / "2026-08-07T020000"
+    for session in (first, second, normal):
+        session.mkdir()
+    for session, recipes in ((first, ["recipe-a"]), (second, ["recipe-b", "recipe-c"])):
+        (session / "capture_profile.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "profile": "research",
+                    "started_at": "2026-08-07T00:00:00Z",
+                    "profile_snapshot": {"behavior_model_recipes": recipes},
+                }
+            )
+        )
+
+    assert refit_cli._capture_recipe_allowlists([first, second, normal]) == {
+        "_capture-first": {"recipe-a"},
+        "_capture-second": {"recipe-b", "recipe-c"},
+    }
+    assert refit_cli._capture_recipe_allowlists(
+        [first, second, normal], explicit_recipe_grants={"manual-recipe"}
+    ) == {
+        "_capture-first": {"manual-recipe"},
+        "_capture-second": {"manual-recipe"},
+    }
+
+
+def test_tune_revision_gate_accepts_one_revision_and_refuses_mixed(tmp_path: Path) -> None:
+    from src.analysis.tune_revisions import TuneRevision, TuneRevisionRegistry
+
+    old = tmp_path / "2026-08-06T000000"
+    new = tmp_path / "2026-08-07T000000"
+    old.mkdir()
+    new.mkdir()
+    registry = TuneRevisionRegistry(
+        revisions=[
+            TuneRevision(revision="rom-a", flashed_at=datetime(2026, 8, 1, tzinfo=UTC)),
+            TuneRevision(revision="rom-b", flashed_at=datetime(2026, 8, 7, tzinfo=UTC)),
+        ]
+    )
+
+    assert refit_cli._consistent_tune_revision([old], registry) == "rom-a"
+    with pytest.raises(ValueError, match="mixed tune revisions"):
+        refit_cli._consistent_tune_revision([old, new], registry)
+
+
 # ---------------------------------------------------------------------------
 # main() — dry run, smoke, write-out
 # ---------------------------------------------------------------------------
@@ -212,6 +289,8 @@ def test_main_writes_output_yaml(
     report = json.loads(out.with_suffix(out.suffix + ".report.json").read_text())
     assert report["frame_rows"] == 1200
     assert report["recipes"][0]["calibration_sessions"]
+    assert "tune_revision" in report["recipes"][0]
+    assert "conditions" in report["recipes"][0]
     # YAML loads cleanly and contains the model
     from src.decode.behavior_models import load_behavior_models
 

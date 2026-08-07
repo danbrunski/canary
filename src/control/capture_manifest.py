@@ -27,6 +27,13 @@ class CaptureManifest(BaseModel):
     def corpus_eligible(self) -> bool:
         return bool(self.profile_snapshot.get("corpus_eligible", False))
 
+    @property
+    def behavior_model_recipes(self) -> tuple[str, ...]:
+        raw = self.profile_snapshot.get("behavior_model_recipes", ())
+        if not isinstance(raw, list | tuple):
+            return ()
+        return tuple(str(item) for item in raw if str(item).strip())
+
 
 def read_capture_manifest(session_dir: Path) -> CaptureManifest | None:
     """Read a valid capture sidecar, or ``None`` for normal/invalid sessions."""
