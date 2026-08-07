@@ -8,6 +8,8 @@ import { CaptureProfileBanner } from "./CaptureProfileBanner";
 const ACTIVE: CaptureProfileState = {
   active: true,
   name: "fuel-map",
+  description: "High-rate fueling and timing capture",
+  experimental: false,
   started_at: "2026-07-31T10:00:00+00:00",
   session_dir: "_capture-fuel-map-2026-07-31T100000",
   source: "control",
@@ -18,6 +20,10 @@ const ACTIVE: CaptureProfileState = {
   mode22_enabled: true,
   did_interval_seconds: null,
   round_timestamps: true,
+  target_rate_hz: null,
+  did_continuous: false,
+  expected_total_demand_hz: null,
+  capacity_evidence: "",
   paused: false,
   broadcast_decode: true,
   corpus_eligible: false,
@@ -51,5 +57,21 @@ describe("CaptureProfileBanner (capture-profiles.md 3.1)", () => {
   it("still reports the capture when the session directory is unknown", () => {
     render(createElement(CaptureProfileBanner, { state: { ...ACTIVE, session_dir: null } }));
     expect(screen.getByRole("status")).toHaveTextContent("rotating storage");
+  });
+
+  it("keeps experimental cadence visible outside the capture panel", () => {
+    render(
+      createElement(CaptureProfileBanner, {
+        state: {
+          ...ACTIVE,
+          name: "tuning-hybrid-research",
+          experimental: true,
+          target_rate_hz: 4,
+        },
+      }),
+    );
+    const banner = screen.getByRole("status");
+    expect(banner).toHaveTextContent("EXPERIMENTAL");
+    expect(banner).toHaveTextContent("4 Hz/channel");
   });
 });

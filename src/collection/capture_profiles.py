@@ -101,6 +101,11 @@ class _Strict(BaseModel):
 class CaptureProfile(_Strict):
     name: str
     description: str = ""
+    #: Research profiles are intentionally operator-visible but have not yet
+    #: earned the same trust as routine captures.  Keep that status in the
+    #: schema so every UI/API consumer can render it; parsing words such as
+    #: "experimental" out of a description would lose the warning on rename.
+    experimental: bool = False
     mode01: dict[str, float] = Field(default_factory=dict)
     mode22: tuple[str, ...] = ()
     #: Whether each service is polled at all. Disabling keeps the selection

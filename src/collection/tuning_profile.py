@@ -275,6 +275,8 @@ def snapshot(achieved_hz: dict[str, float] | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "active": _profile.name != "default",
             "name": _profile.name,
+            "description": _profile.description,
+            "experimental": _profile.experimental,
             "started_at": _started_at,
             "session_dir": _session_dir,
             "source": _source,
@@ -287,6 +289,8 @@ def snapshot(achieved_hz: dict[str, float] | None = None) -> dict[str, Any]:
             "round_timestamps": _profile.round_timestamps,
             "target_rate_hz": _profile.target_rate_hz,
             "did_continuous": _profile.did_continuous,
+            "expected_total_demand_hz": _profile.expected_total_demand_hz,
+            "capacity_evidence": _profile.capacity_evidence,
             "paused": _paused,
             "broadcast_decode": _profile.broadcast_decode,
             "corpus_eligible": _profile.corpus_eligible,

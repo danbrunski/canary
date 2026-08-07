@@ -21,13 +21,18 @@ const { CaptureProfilesPanel } = await import("./CaptureProfilesPanel");
 const DEFAULT_PROFILE: CaptureProfile = {
   name: "default",
   description: "Normal telemetry and anomaly-detection collection",
+  experimental: false,
   mode01: { AUTO: 1 },
   mode22: [],
   mode01_enabled: true,
   mode22_enabled: true,
   did_interval_seconds: null,
   round_timestamps: true,
+  target_rate_hz: null,
+  did_continuous: false,
   bus_budget_override: null,
+  expected_total_demand_hz: null,
+  capacity_evidence: "",
   broadcast_decode: true,
   corpus_eligible: true,
   storage_prefix: "",
@@ -36,16 +41,45 @@ const DEFAULT_PROFILE: CaptureProfile = {
 const FUEL_MAP: CaptureProfile = {
   name: "fuel-map",
   description: "High-rate fueling and timing capture",
+  experimental: false,
   mode01: { RPM: 1, ENGINE_LOAD: 1 },
   mode22: [],
   mode01_enabled: true,
   mode22_enabled: true,
   did_interval_seconds: null,
   round_timestamps: true,
+  target_rate_hz: null,
+  did_continuous: false,
   bus_budget_override: null,
+  expected_total_demand_hz: null,
+  capacity_evidence: "",
   broadcast_decode: true,
   corpus_eligible: false,
   storage_prefix: "_capture-fuel-map",
+};
+
+const HYBRID: CaptureProfile = {
+  name: "tuning-hybrid-research",
+  description: "Experimental fast-exit capture",
+  experimental: true,
+  mode01: {
+    RPM: 1,
+    COMMANDED_EQUIV_RATIO: 1,
+    TIMING_ADVANCE: 1,
+  },
+  mode22: ["ECM_AF_SENSOR_V_B1", "ECM_BASE_FUEL_SCHEDULE_CANDIDATE"],
+  mode01_enabled: true,
+  mode22_enabled: true,
+  did_interval_seconds: 0.25,
+  round_timestamps: true,
+  target_rate_hz: 4,
+  did_continuous: false,
+  bus_budget_override: 90,
+  expected_total_demand_hz: 20,
+  capacity_evidence: "10 81 restored Mode 01 on the next request.",
+  broadcast_decode: true,
+  corpus_eligible: false,
+  storage_prefix: "_capture-tuning-hybrid-research",
 };
 
 function status(activeName: string | null): StatusResponse {
@@ -54,6 +88,8 @@ function status(activeName: string | null): StatusResponse {
       ? {
           active: true,
           name: activeName,
+          description: "High-rate fueling and timing capture",
+          experimental: false,
           started_at: "2026-07-31T10:00:00+00:00",
           session_dir: `_capture-${activeName}-2026-07-31T100000`,
           source: "control",
@@ -65,6 +101,10 @@ function status(activeName: string | null): StatusResponse {
           mode22_enabled: true,
           did_interval_seconds: null,
           round_timestamps: true,
+          target_rate_hz: null,
+          did_continuous: false,
+          expected_total_demand_hz: null,
+          capacity_evidence: "",
           paused: false,
           broadcast_decode: true,
           corpus_eligible: false,
@@ -84,7 +124,7 @@ function liveChannels() {
 function renderPanel(activeName: string | null = null, extra: Record<string, unknown> = {}) {
   mocks.getCaptureProfiles.mockResolvedValue({
     schema_version: 1,
-    profiles: [DEFAULT_PROFILE, FUEL_MAP],
+    profiles: [DEFAULT_PROFILE, FUEL_MAP, HYBRID],
   });
   mocks.getObdCoverage.mockResolvedValue({
     rows: [
@@ -93,7 +133,12 @@ function renderPanel(activeName: string | null = null, extra: Record<string, unk
       { channel: "NOT_SUPPORTED", status: "unsupported" },
     ],
   });
-  mocks.getDids.mockResolvedValue({ dids: [{ name: "ECM_AF_SENSOR_V_B1" }] });
+  mocks.getDids.mockResolvedValue({
+    dids: [
+      { name: "ECM_AF_SENSOR_V_B1" },
+      { name: "ECM_BASE_FUEL_SCHEDULE_CANDIDATE" },
+    ],
+  });
   return render(
     createElement(CaptureProfilesPanel, {
       token: "secret",
@@ -123,6 +168,88 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
 
     await waitFor(() => expect(mocks.startProfileCapture).toHaveBeenCalled());
     expect(mocks.startProfileCapture.mock.calls[0][1]).toBe("fuel-map");
+  });
+
+  it("cannot launch an unsaved draft under a saved profile name", async () => {
+    renderPanel();
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "fuel-map" } });
+    await screen.findByText("High-rate fueling and timing capture");
+    fireEvent.change(screen.getByLabelText("Target rate (Hz/channel; blank = relative cadence)"), {
+      target: { value: "8" },
+    });
+
+    expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+    expect(screen.getByText("Save this profile before starting it.")).toBeInTheDocument();
+    expect(mocks.startProfileCapture).not.toHaveBeenCalled();
+  });
+
+  it("shows and starts the experimental hybrid plan without hiding its policy", async () => {
+    renderPanel();
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "tuning-hybrid-research" },
+    });
+
+    const plan = await screen.findByTestId("capture-plan");
+    expect(plan).toHaveTextContent("Experimental");
+    expect(plan).toHaveTextContent("4 Hz/channel");
+    expect(plan).toHaveTextContent("Mode 01 / Mode 22 alternating");
+    expect(plan).toHaveTextContent("DID window every 0.25s");
+    expect(plan).toHaveTextContent("10 81 restored Mode 01 on the next request");
+    expect(screen.getByText("ECM_BASE_FUEL_SCHEDULE_CANDIDATE")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() =>
+      expect(mocks.startProfileCapture).toHaveBeenCalledWith(
+        "secret",
+        "tuning-hybrid-research",
+        undefined,
+      ),
+    );
+  });
+
+  it("shows achieved rates, gaps, and fast-exit failures for an active capture", async () => {
+    const hybridStatus = status("tuning-hybrid-research");
+    hybridStatus.capture_profile = {
+      ...hybridStatus.capture_profile!,
+      ...HYBRID,
+      active: true,
+      source: "control",
+      channels: Object.keys(HYBRID.mode01),
+      started_at: "2026-08-07T12:00:00+00:00",
+      session_dir: "_capture-tuning-hybrid-research-2026-08-07T120000",
+      paused: false,
+    };
+    hybridStatus.health = {
+      observed: 1,
+      inference_latency_ms: { mean: null, p95: null, max: null },
+      missing_feature_rate: null,
+      data_freshness_seconds: 0.1,
+      model_swaps: {},
+      active_model_version: null,
+      system: {},
+      obd_scheduler: {
+        achieved_hz_capture: { RPM: 3.95 },
+        capture_max_gap_seconds: { RPM: 0.31 },
+        did_profile: {
+          phase: "mode01",
+          fast_exits: 8,
+          fast_exit_failures: 1,
+          fast_exit_supported: false,
+          windows_opened: 9,
+          windows_completed: 8,
+        },
+      },
+    };
+    renderPanel("tuning-hybrid-research", { status: hybridStatus });
+
+    expect(await screen.findByText(/fast exits 8/)).toHaveTextContent("failures 1");
+    expect(screen.getByText(/fast exit unavailable/)).toBeInTheDocument();
+    expect(screen.getByText("3.95")).toBeInTheDocument();
+    expect(screen.getByText("0.31 s")).toBeInTheDocument();
   });
 
   it("refuses to start the reserved default profile", async () => {

@@ -68,6 +68,26 @@ def test_strict_schema_and_seed_mirrors_collection(tmp_path: Path) -> None:
         )
 
 
+def test_vehicle_hybrid_profile_keeps_its_experimental_fast_exit_plan() -> None:
+    """The one-click UI profile must carry the exact plan tested on the ECM."""
+    from src.collection.capture_profiles import load_capture_profiles
+
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    catalog = load_capture_profiles(
+        REPO_ROOT / "data/nissan-xterra-2008/capture_profiles.yaml",
+        config.collection,
+    )
+    hybrid = catalog.by_name("tuning-hybrid-research")
+    assert hybrid is not None
+    assert hybrid.experimental is True
+    assert hybrid.target_rate_hz == 4.0
+    assert hybrid.did_interval_seconds == 0.25
+    assert hybrid.did_continuous is False
+    assert hybrid.bus_budget_override == 90.0
+    assert "COMMANDED_EQUIV_RATIO" in hybrid.mode01
+    assert "ECM_BASE_FUEL_SCHEDULE_CANDIDATE" in hybrid.mode22
+
+
 def test_default_cannot_be_deleted_and_profile_crud_round_trips(tmp_path: Path) -> None:
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     store = _store(tmp_path, config)

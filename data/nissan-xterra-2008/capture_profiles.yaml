@@ -81,6 +81,7 @@ profiles:
   storage_prefix: _capture-tuning-did
 - name: fuel-did-research
   description: Narrow all-DID capture to identify raw 0x1209 as the Base Fuel Schedule candidate
+  experimental: true
   mode01: {}
   mode22:
   - ECM_RPM
@@ -89,7 +90,7 @@ profiles:
   - ECM_INJECTOR_PW_B1
   - ECM_THROTTLE_POS_SENSOR_1
   - ECM_INTAKE_AIR_TEMP
-  - '1209'
+  - ECM_BASE_FUEL_SCHEDULE_CANDIDATE
   mode01_enabled: false
   mode22_enabled: true
   did_interval_seconds: null
@@ -104,6 +105,7 @@ profiles:
   storage_prefix: _capture-fuel-did-research
 - name: tuning-hybrid-research
   description: Experimental 4 Hz Mode 01 plus Mode 22 capture using the confirmed fast session exit
+  experimental: true
   mode01:
     RPM: 1.0
     ENGINE_LOAD: 1.0
@@ -121,7 +123,7 @@ profiles:
   - ECM_INTAKE_CAM_ANGLE_COMMANDED
   - ECM_INTAKE_CAM_ANGLE_MEASURED_B
   - ECM_THROTTLE_POS_SENSOR_1
-  - '1209'
+  - ECM_BASE_FUEL_SCHEDULE_CANDIDATE
   mode01_enabled: true
   mode22_enabled: true
   did_interval_seconds: 0.25

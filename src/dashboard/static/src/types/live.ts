@@ -6,8 +6,7 @@
 // (not `?`) to mirror the JSON Pydantic produces, where absent fields land as
 // explicit nulls when they have a None default.
 
-import type { ReplayStatus } from "./control";
-import type { CaptureProfileState } from "./control";
+import type { CaptureProfileState, ObdSchedulerStatus, ReplayStatus } from "./control";
 
 /** One row from `/telemetry/latest` or one message on `/ws/telemetry`. */
 export interface TelemetryRow {
@@ -247,7 +246,7 @@ export interface StatusHealth {
   power?: PowerStatus | null;
   feature_drift?: Record<string, unknown>;
   reconstruction_error_drift?: Record<string, unknown>;
-  obd_scheduler?: Record<string, unknown>;
+  obd_scheduler?: ObdSchedulerStatus;
   /** can0 rx overrun/drop/error sysfs counters (Task 6.8); absent when
    *  there's no can0 interface (dev laptop, or a Pi before the CAN HAT is
    *  up). Nonzero growth in `since_start` during a drive is the (only)

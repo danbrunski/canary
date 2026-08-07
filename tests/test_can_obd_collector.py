@@ -436,6 +436,7 @@ def test_parse_pid_token_accepts_auto_names_and_hex() -> None:
 
 def test_parse_did_and_can_id() -> None:
     assert parse_did_token("1101") == 0x1101
+    assert parse_did_token("ECM_BASE_FUEL_SCHEDULE_CANDIDATE") == 0x1209
     assert parse_can_id("7E0") == 0x7E0
     assert parse_can_id("0x7e1") == 0x7E1
     with pytest.raises(ValueError, match="4-character"):

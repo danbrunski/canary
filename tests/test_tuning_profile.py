@@ -177,6 +177,33 @@ def test_snapshot_carries_achieved_rate_when_supplied() -> None:
     assert snap["achieved_hz"] == {"RPM": 4.2}
 
 
+def test_snapshot_exposes_the_capture_plan_the_dashboard_must_verify() -> None:
+    profile = CaptureProfile(
+        name="research",
+        description="Hybrid validation",
+        experimental=True,
+        mode01={"RPM": 1.0},
+        mode22=("ECM_RPM",),
+        target_rate_hz=4.0,
+        did_interval_seconds=0.25,
+        bus_budget_override=90.0,
+        expected_total_demand_hz=8.0,
+        capacity_evidence="fast exit verified",
+        corpus_eligible=False,
+        storage_prefix="_capture-research",
+    )
+    tuning_profile.activate(profile, source="test")
+
+    snap = tuning_profile.snapshot()
+
+    assert snap["description"] == "Hybrid validation"
+    assert snap["experimental"] is True
+    assert snap["target_rate_hz"] == 4.0
+    assert snap["did_continuous"] is False
+    assert snap["expected_total_demand_hz"] == 8.0
+    assert snap["capacity_evidence"] == "fast exit verified"
+
+
 def test_default_set_carries_the_filters_every_analysis_depends_on() -> None:
     """Regression guard. A tuning capture that omits any of these cannot be
     filtered after the fact, and the data is unrecoverable once the drive is

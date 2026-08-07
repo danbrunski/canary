@@ -95,6 +95,8 @@ export interface SessionsResponse {
 export interface CaptureProfile {
   name: string;
   description: string;
+  /** Visible warning: this profile still needs an in-vehicle validation run. */
+  experimental: boolean;
   /** OBD PIDs (Mode 01), channel -> relative rate weight. */
   mode01: Record<string, number>;
   /** Manufacturer DIDs (Mode 22 / UDS ReadDataByIdentifier). */
@@ -103,7 +105,13 @@ export interface CaptureProfile {
   mode22_enabled: boolean;
   did_interval_seconds: number | null;
   round_timestamps: boolean;
+  /** Absolute requested cadence per selected channel. */
+  target_rate_hz: number | null;
+  /** Hold the manufacturer session open instead of alternating services. */
+  did_continuous: boolean;
   bus_budget_override: number | null;
+  expected_total_demand_hz: number | null;
+  capacity_evidence: string;
   broadcast_decode: boolean;
   corpus_eligible: boolean;
   storage_prefix: string;
@@ -112,6 +120,8 @@ export interface CaptureProfile {
 export interface CaptureProfileState {
   active: boolean;
   name: string;
+  description: string;
+  experimental: boolean;
   started_at: string | null;
   session_dir: string | null;
   source: string;
@@ -122,12 +132,31 @@ export interface CaptureProfileState {
   mode22_enabled: boolean;
   did_interval_seconds: number | null;
   round_timestamps: boolean;
+  target_rate_hz: number | null;
+  did_continuous: boolean;
+  expected_total_demand_hz: number | null;
+  capacity_evidence: string;
   paused: boolean;
   /** Rows accepted into the current session; absent if the writer is unwired. */
   rows_written?: number;
   broadcast_decode: boolean;
   corpus_eligible: boolean;
   bus_budget_override: number | null;
+}
+
+export interface DidWindowStatus {
+  phase: "mode01" | "window" | "lapse";
+  fast_exits: number;
+  fast_exit_failures: number;
+  fast_exit_supported: boolean;
+  windows_opened: number;
+  windows_completed: number;
+}
+
+export interface ObdSchedulerStatus {
+  achieved_hz_capture?: Record<string, number>;
+  capture_max_gap_seconds?: Record<string, number>;
+  did_profile?: DidWindowStatus | null;
 }
 
 export interface CaptureProfilesResponse {

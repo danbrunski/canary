@@ -207,6 +207,38 @@ dids:
       scale constant outstanding (the blip peaks were eyeballed). 0x1209
       is a correlated fuel/air sibling, not injector PW.
 
+  - did: 0x1209
+    name: ECM_BASE_FUEL_SCHEDULE_CANDIDATE
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: null
+    offset: null
+    unit: raw
+    confidence: hypothesized
+    evidence:
+      - session: 2026-05-16T214006
+        method: four_state_classification
+        finding: >
+          Two-byte value changed with cold enrichment and engine load
+          (676 cold, 359 warm idle, 984 at the rev hold), giving it the
+          expected broad fuel/air signature. Later NT510 evidence identified
+          neighbouring 0x1208 as actual injector pulse width, leaving 0x1209
+          as a distinct correlated fuel/air quantity.
+      - session: data/analyses/bfs-provider-search-20260805.md
+        method: evidence_gap_review
+        finding: >
+          No stored session pairs this DID with UpRev B/FUEL SCHDL, so its
+          identity and scale cannot be promoted. It is the highest-value
+          candidate for a narrow research capture, not a semantic BFS
+          provider.
+    notes: >
+      Collection-only candidate for Base Fuel Schedule, the load axis of the
+      ROM fuel-target and timing tables. Emit its raw count so it is visible
+      in the profile editor and live capture table, but do not use it for a
+      target-map lookup until same-instant or causal evidence pins identity
+      and scaling.
+
   - did: 0x1107
     name: ECM_AF_SENSOR_HEATER_DUTY
     byte_start: 0

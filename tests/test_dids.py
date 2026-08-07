@@ -110,3 +110,17 @@ def test_injector_pw_is_present_and_unscaled() -> None:
     inj = next(e for e in load_did_map(DIDS_PATH).dids if e.did == 0x1208)
     assert inj.name == "ECM_INJECTOR_PW_B1"
     assert inj.scale is None, "0x1208 scale was pinned — update the calibration evidence"
+
+
+def test_bfs_candidate_is_visible_but_cannot_be_mistaken_for_a_provider() -> None:
+    """Research profiles need a named picker/live-stream entry for 0x1209.
+
+    Naming it is not promotion: the unscaled, hypothesized fields preserve the
+    evidence gap and prevent target-map code from treating it as engineering
+    BFS milliseconds.
+    """
+    candidate = next(e for e in load_did_map(DIDS_PATH).dids if e.did == 0x1209)
+    assert candidate.name == "ECM_BASE_FUEL_SCHEDULE_CANDIDATE"
+    assert candidate.confidence == "hypothesized"
+    assert candidate.scale is None
+    assert candidate.unit == "raw"
