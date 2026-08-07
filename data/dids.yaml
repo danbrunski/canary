@@ -68,13 +68,12 @@ dids:
     byte_length: 1
     byte_order: big
     scale: 1.0
-    offset: -40.0
+    offset: -50.0
     unit: degC
-    # CONTESTED — demoted from `confirmed` 2026-08-06. Two pieces of evidence
-    # below disagree by exactly 10 degC and cannot both be right. Do not quote
-    # this channel's absolute value in a finding until the test named in
-    # `notes` has been run; differences and trends are unaffected.
-    confidence: medium
+    # RESOLVED 2026-08-07 in favour of -50; see the third evidence entry.
+    # The 2026-05-16 reading below is retained because it is what made this
+    # `confirmed` at -40 for three months, and it is still unexplained.
+    confidence: high
     plausible_min: -40.0
     plausible_max: 130.0
     evidence:
@@ -97,23 +96,55 @@ dids:
           -50, not -40: with -40 it reported 101 degC where 0x551 and the
           Mode 01 PID both put the engine at 91 degC — implausibly hot for a
           thermostat-regulated VQ40DE at steady cruise.
+      - session: _capture-tuning-did-2026-08-07T005351
+        method: did_vs_broadcast_differential
+        finding: >
+          Reproduces the entry above on an independent 25-minute drive at
+          7x the sample count, and closes it. Same-instant pairing (<=100 ms,
+          n = 18138 raw DID samples): DID_1101 - 0x233:0 = +0.78 counts
+          (sd 0.70) — the same signal to within sub-count quantisation — while
+          DID_1101 - 0x551:0 = +10.78 counts (sd 0.70), i.e. exactly the
+          10-count split between the two broadcast conventions. The 0x551:0
+          leg was re-verified inside two *other* sessions from the same day
+          that do poll Mode 01: mean(0x551 decoded - PID 0x05) = +0.00 degC
+          (sd 0.21, n = 584, session 2026-08-06T162657) and -0.02 degC
+          (sd 0.15, n = 43, session 2026-08-07T011836). So 0x551 keeps its
+          -40 and this DID follows 0x233 at -50.
+      - session: 2026-05-11T222447
+        method: single_instant_three_way_frame_log
+        finding: >
+          Independent confirmation from a raw frame log three months earlier,
+          with all three paths in one file. At the instant of the Mode 22
+          response pinned by the protocol regression corpus
+          (t = 1778538289.894549, frames.log:418): DID_1101 byte0 = 127,
+          broadcast 0x233:0 = 127 (bit-identical, +-2 ms), broadcast
+          0x551:0 = 117 (exactly 10 counts lower). Over the whole log the
+          ranges hold the same relation — 0x1101 spans 127-144, 0x233
+          125-144, 0x551 115-134. With 0x551 at -40 both paths read 77 degC;
+          with this DID at -40 it would have read 87. Note this log has no
+          Mode 01 PID 0x05 at all (it is a Mode 22 session capture), which is
+          precisely why the contradiction survived so long.
     notes: |
-      Same *signal* as broadcast ECM_COOLANT_TEMP (0x551:0), but the two
-      offsets above disagree by 10 degC and no session on hand can separate
-      them: the normal profile's DID window does not include 0x1101, so there
-      is no capture holding this DID and Mode 01 PID 0x05 together.
+      Same *signal* as broadcast ECM_COOLANT_TEMP, and it follows the
+      0x233:0 / 0x23D:7 convention (-50), not 0x551:0's (-40). The same
+      physical value is broadcast three ways with two offset conventions:
+      0x233:0 and 0x23D:7 are bit-identical to each other and use -50, while
+      0x551:0 runs 10 counts lower and uses -40.
 
-      Decisive test: add 0x1101 to the default profile's DID window set and
-      take one ordinary drive. Mode 01 is suspended only for the window
-      itself, and coolant moves slowly enough that a DID sample compares
-      cleanly against PID samples seconds either side. If (raw - 40) matches
-      the PID, the 2026-05-16 reading stands; if (raw - 50) matches, this
-      offset is wrong and every absolute coolant figure quoted from a DID
-      capture has been 10 degC high.
+      Residual after the fix: this DID sits +0.78 counts above 0x233:0, which
+      is below the 1-count quantisation of either channel, so -50 is the
+      correct round offset rather than -50.78. Do not "improve" it to a
+      fractional value without a reference finer than 1 degC.
 
-      Note the same physical value is broadcast three ways with two offset
-      conventions: 0x233:0 and 0x23D:7 are bit-identical to each other and
-      use -50, while 0x551:0 runs 10 counts lower and uses -40.
+      Still unexplained: the 2026-05-16 four_state_classification reading,
+      which matched a parallel Mode 01 coolant value at -40. That evidence was
+      taken with a different capture path and has never been reproduced; the
+      2026-08 differentials are same-instant, three-way, and n is 90x larger.
+      If it ever *is* reproduced, the thing to check first is whether that
+      session's "DID_1101" was actually 0x1101 and not a neighbouring id.
+
+      Every absolute coolant figure quoted from a DID capture before
+      2026-08-07 was 10 degC high. Differences and trends were unaffected.
 
   - did: 0x1219
     name: ECM_RPM

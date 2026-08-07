@@ -154,7 +154,23 @@ def test_multiframe_local_identifier_response_reassembles() -> None:
 
 
 def test_did_coolant_temp_decodes_to_expected_engineering_value() -> None:
-    """data/sessions/2026-05-11T222447/frames.log lines 417-418."""
+    """data/sessions/2026-05-11T222447/frames.log lines 417-418.
+
+    Unlike its neighbours, this expectation is NOT merely a snapshot of what
+    the decoder happened to produce — that is how it sat at 87.0 for three
+    months while the offset was wrong. It is now anchored to two broadcast
+    frames in *this same log*, at this same instant (within 3 ms):
+
+        DID 0x1101 byte0 = 127   <- the frame below
+        0x233      byte0 = 127   <- bit-identical, -50 convention
+        0x551      byte0 = 117   <- exactly 10 counts lower, -40 convention
+
+    Across the whole log the three keep that relationship (0x1101 spans
+    127-144, 0x233 125-144, 0x551 115-134). 0x551's -40 is independently tied
+    to Mode 01 PID 0x05 — mean difference +0.00 degC over 584 paired seconds
+    of session 2026-08-06T162657 — so both paths put the engine at 77 degC
+    here, and 87.0 was 10 degC high. See the 0x1101 evidence in dids.yaml.
+    """
     msgs = _replay(
         [
             "(1778538289.893963) vcan0 7E0#03221101FFFFFFFF R",
@@ -166,7 +182,11 @@ def test_did_coolant_temp_decodes_to_expected_engineering_value() -> None:
     entry = _did_entry(0x1101)
     raw = decode_did_raw(entry, response.body)
     assert raw == 127
-    assert apply_scaling(entry, raw) == 87.0
+    assert apply_scaling(entry, raw) == 77.0
+    # The broadcast leg of the same instant, decoded its own way, must land on
+    # the identical temperature. This is what makes the number above evidence
+    # rather than a self-consistent snapshot.
+    assert 117 + (-40.0) == apply_scaling(entry, raw)
 
 
 def test_did_injector_pw_stays_unscaled_raw() -> None:
