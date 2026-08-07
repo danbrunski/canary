@@ -22,8 +22,8 @@ class _Strict(BaseModel):
 #: bus. Lives here rather than in ``collection.obd_scheduler`` (which imports
 #: it) only to keep the config default and the scheduler constant from
 #: drifting apart. See the scheduler's ``DEFAULT_PRIORITY_CHANNELS`` re-export
-#: for why these two channels specifically.
-DEFAULT_PRIORITY_CHANNELS: tuple[str, ...] = ("RPM", "SPEED")
+#: for why this channel specifically.
+DEFAULT_PRIORITY_CHANNELS: tuple[str, ...] = ("RPM",)
 
 
 class VehicleParameters(_Strict):

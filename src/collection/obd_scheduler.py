@@ -53,6 +53,17 @@ MIN_BUS_BUDGET_REQUESTS_PER_SECOND = 2.0
 # Reserving their configured rate costs the other tiers a share of a contended
 # bus; mislabeling every operating mode costs more. Vehicle-agnostic: these are
 # standard Mode 01 PIDs, not Xterra-isms.
+#
+# SPEED left the lane on 2026-08-07. The lane exists to keep a mode-gating
+# signal inside the 2 s fast-channel ceiling, and it was not succeeding at
+# that for either channel: on 2026-08-06T162657 RPM and SPEED still ran a
+# 6.6 s and 32 s p99 gap respectively, together consuming 20.3% of all Mode 01
+# requests (2592 + 2503 of 25146). The segmenter now coalesces speed onto
+# gps:speed and rpm onto decoded:ECM_RPM, both of which are already on the
+# wire and cost no request slot, so buying SPEED a lane bought nothing the
+# segmenter could not get for free. RPM keeps its lane only because the
+# behaviour models are fitted on the `obd:RPM` column itself and would need a
+# refit to move; revisit that when they are next refitted.
 #: Default cadence for the Mode 03/07/0A DTC poll (Task 1.3). DTCs are a
 #: minutes-scale signal (nothing polls faster than the ECM's own confirm
 #: window), so ~5 min keeps it off the fast bus budget entirely.

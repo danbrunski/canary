@@ -535,3 +535,98 @@ def test_required_signals_include_accel_axes_when_spec_gates_on_them() -> None:
     spec = OperatingModeSpec(accel_lon_min=0.3, accel_lat_max=0.5)
     assert "accel_lon" in _required_signals(spec)
     assert "accel_lat" in _required_signals(spec)
+
+
+# ---------------------------------------------------------------------------
+# Broadcast-CAN coalesce (2026-08-07): Mode 01 rpm/coolant go stale between
+# polls, and the rows they NaN'd were falling through to `unknown`.
+# ---------------------------------------------------------------------------
+
+
+def test_segment_coalesces_obd_rpm_over_decoded_can_per_row() -> None:
+    """OBD rpm wins where present; stale rows fall back to the ~98 Hz broadcast.
+
+    Both columns are the same physical signal (r2 = 0.9944 over 2557 paired
+    seconds), but Mode 01 delivers it with a 6.6 s p99 gap against broadcast
+    CAN's 0.05 s, so the fallback is what keeps a row labelled at all.
+    """
+    frame = pd.DataFrame(
+        [
+            # OBD present and disagreeing with a decoded value → OBD still wins.
+            {"obd:RPM": 800.0, "decoded:ECM_RPM": 3000.0, "obd:SPEED": 0.0},
+            # OBD rpm stale this row → coalesce takes the broadcast value.
+            {"obd:RPM": float("nan"), "decoded:ECM_RPM": 2500.0, "obd:SPEED": 0.0},
+        ]
+    )
+    modes = {
+        "idle": OperatingModeSpec(rpm_max=900, speed_max=0),
+        "revving": OperatingModeSpec(rpm_min=2000, speed_max=0),
+    }
+    segmented = segment_operating_modes(frame, modes)
+    assert list(segmented[MODE_COLUMN]) == ["idle", "revving"]
+
+
+def test_segment_coalesces_coolant_temp_onto_broadcast() -> None:
+    """The warmup/idle split survives a stale Mode 01 coolant PID.
+
+    Coolant is polled at ~0.12 Hz, so on a 1 Hz grid most rows have no fresh
+    PID value; without the fallback those rows cannot tell a cold engine from
+    a warm one and land in `unknown`.
+    """
+    frame = pd.DataFrame(
+        [
+            {"obd:RPM": 1200.0, "obd:SPEED": 0.0, "obd:COOLANT_TEMP": 40.0},
+            {
+                "obd:RPM": 1200.0,
+                "obd:SPEED": 0.0,
+                "obd:COOLANT_TEMP": float("nan"),
+                "decoded:ECM_COOLANT_TEMP": 40.0,
+            },
+        ]
+    )
+    modes = {"warmup": OperatingModeSpec(rpm_min=400, speed_max=0, coolant_temp_max=70)}
+    segmented = segment_operating_modes(frame, modes)
+    assert list(segmented[MODE_COLUMN]) == ["warmup", "warmup"]
+
+
+def test_default_segmenter_config_ranks_obd_ahead_of_broadcast() -> None:
+    """Order is the contract: the behaviour models are fitted on `obd:` columns.
+
+    A coalesce that preferred broadcast CAN would silently swap the instrument
+    under a fitted surface.
+    """
+    frame = pd.DataFrame(
+        columns=[
+            "obd:RPM",
+            "decoded:ECM_RPM",
+            "obd:SPEED",
+            "obd:THROTTLE_POS",
+            "obd:COOLANT_TEMP",
+            "decoded:ECM_COOLANT_TEMP",
+        ]
+    )
+    config = default_segmenter_config(frame)
+    assert config.signal_columns["rpm"] == ("obd:RPM", "decoded:ECM_RPM")
+    assert config.signal_columns["coolant_temp"] == (
+        "obd:COOLANT_TEMP",
+        "decoded:ECM_COOLANT_TEMP",
+    )
+
+
+def test_training_pipeline_signal_columns_track_the_segmenter_defaults() -> None:
+    """The two tables are separate on purpose; their candidate lists are not.
+
+    `_SEGMENTER_SIGNAL_COLUMNS` is the *required* set (every key must resolve
+    or the session collapses to one mode) while `DEFAULT_SIGNAL_COLUMNS` is the
+    full candidate map including optional `imu:` signals. A fallback added to
+    one and not the other silently does nothing on the training path.
+    """
+    from src.preprocessing.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS
+    from src.preprocessing.segmenter import DEFAULT_SIGNAL_COLUMNS
+
+    for signal, required in _SEGMENTER_SIGNAL_COLUMNS.items():
+        candidates = (required,) if isinstance(required, str) else tuple(required)
+        full = DEFAULT_SIGNAL_COLUMNS[signal]
+        full_candidates = (full,) if isinstance(full, str) else tuple(full)
+        missing = [c for c in candidates if c not in full_candidates]
+        assert not missing, f"{signal}: {missing} present in training table but not the default"

@@ -79,14 +79,26 @@ ALL_MODE = "all"
 #: ``idle`` modes in canary.example.yaml — without it the segmenter can't
 #: tell a cold engine from a warm one and behavior models fit one surface
 #: to both regimes, which is what caused the May 2026 R²=0.41 warmup mess.
+#:
+#: Deliberately NOT ``segmenter.DEFAULT_SIGNAL_COLUMNS``, despite the overlap:
+#: ``have_inputs`` below requires *every* key here to resolve, and that table
+#: carries optional signals (``imu:``) absent from all pre-Phase-2b data. Using
+#: it would send every historical session to ``ALL_MODE``. This is the
+#: *required* set; that one is the full candidate map. Keep the per-signal
+#: candidate lists in step between them — a fallback added there and not here
+#: silently does nothing on the training path.
 _SEGMENTER_SIGNAL_COLUMNS: dict[str, str | tuple[str, ...]] = {
-    "rpm": "obd:RPM",
+    # Broadcast CAN sits last: ~98 Hz against Mode 01's 0.26-0.93 Hz, so it
+    # fills the rows where the PID was stale rather than overriding it. See
+    # segmenter.DEFAULT_SIGNAL_COLUMNS for the measured agreement and for why
+    # those NaN rows mattered (they became the degenerate `unknown` mode).
+    "rpm": ("obd:RPM", "decoded:ECM_RPM"),
     # OBD wheel-speed PID is the reliable primary; GPS is the back-stop when OBD
     # is absent, coalesced row-wise (see segmenter). GPS↔OBD disagreement is a
     # sensor-committee residual, not a coalesce winner.
     "speed": ("obd:SPEED", "gps:speed"),
     "throttle": "obd:THROTTLE_POS",
-    "coolant_temp": "obd:COOLANT_TEMP",
+    "coolant_temp": ("obd:COOLANT_TEMP", "decoded:ECM_COOLANT_TEMP"),
 }
 
 #: GPS channels logged for trip reconstruction and data-quality context but

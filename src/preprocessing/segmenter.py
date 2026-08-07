@@ -42,11 +42,30 @@ DEFAULT_RECENT_MOTION_WINDOW_SECONDS = 180.0
 # OBD's 110), so it corroborates rather than gates. GPS↔OBD *disagreement* is
 # surfaced separately as a sensor-committee residual (see analysis.committees),
 # not by which one wins the coalesce.
+# The `decoded:` entries below are broadcast CAN, which arrives at ~98 Hz
+# against Mode 01's 0.26-0.93 Hz. They sit *after* the OBD PID because the
+# behaviour models are fitted on `obd:` columns and must keep seeing them —
+# this is a coalesce, so OBD still wins every row where it is fresh.
+#
+# They matter because the resampler holds rpm/speed to the *fast*-channel
+# staleness ceiling (2 s on a 1 Hz grid) while Mode 01 delivers them with a
+# 6.6-32 s p99 gap. Every row where they went NaN fell through to the
+# `unknown` mode: on the 2026-07-27 isolation-forest fit that bucket held
+# 15464 of 21784 complete rows with a degenerate -0.0 threshold, flagging
+# 100% of what landed in it. A broadcast signal that never goes stale is the
+# fix, and it costs no bus time at all — the frames are already being read.
+#
+# Verified same-instant on 2026-08-06T162657 before being added here:
+# obd:RPM vs decoded:ECM_RPM r2 = 0.9944 over 2557 paired seconds, and
+# obd:COOLANT_TEMP vs decoded:ECM_COOLANT_TEMP r2 = 0.9929 over 584. Both
+# fit slightly under unity (0.9939 / 0.9888) purely because the OBD side is
+# stale between polls on a 1 s grid; against a 15 Hz DID the same RPM
+# binding fits 1.0007 with 0.09% drift.
 DEFAULT_SIGNAL_COLUMNS: Mapping[str, tuple[str, ...]] = {
-    "rpm": ("obd:RPM", "obd:rpm"),
+    "rpm": ("obd:RPM", "obd:rpm", "decoded:ECM_RPM"),
     "speed": ("obd:SPEED", "obd:speed", "gps:speed"),
     "throttle": ("obd:THROTTLE_POS", "obd:throttle_pos"),
-    "coolant_temp": ("obd:COOLANT_TEMP", "obd:coolant_temp"),
+    "coolant_temp": ("obd:COOLANT_TEMP", "obd:coolant_temp", "decoded:ECM_COOLANT_TEMP"),
     # Phase 2a.7 — decimated IMU peaks (src.preprocessing.imu_decimation).
     # Absent from every frame recorded before Phase 2b hardware, so any mode
     # gating on these is simply skipped (same "missing candidate columns"
