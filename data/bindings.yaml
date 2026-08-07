@@ -1007,6 +1007,38 @@ signals:
       is `high`, not `confirmed`, for exactly that reason — the binding and
       direction are certain, the last digit of the scale is not.
 
+      THIS SCALE IS ECU-RELATIVE, NOT GROUND TRUTH (2026-08-07). It was
+      pinned against Mode 01 PID 0x0D, and that PID is itself ~8% under true
+      ground speed on this vehicle: per-row median obd/gps = 0.9203 over 2185
+      paired seconds of 2026-08-06T162657, flat across speed bands (7.97% /
+      7.93% / 7.82% above 0, 30, 60 km/h). These fields agree with the PID to
+      0.55%, so they inherit the same error — pinning one against the other
+      cannot detect it.
+
+      GPS is the correct one. Steady-cruise engine-rpm clusters resolve the
+      driveline exactly against GPS speed: at the regeared 4.08 final drive
+      the three clusters give gear ratios 1.000 (direct drive), 1.309 and
+      1.740, with a back-solved loaded circumference of 2.609 m (32.69 in,
+      against 32.83 in nominal for the fitted LT285/75R16). At the stock 3.69
+      the top gear would compute to 1.110, which is not a real ratio. A
+      mis-scaled speed reference does not land three independent gears on
+      recognisable gearbox values.
+
+      The vehicle runs LT285/75R16 against a P265/75R16 stock fitment, which
+      accounts for ~4 points of the 8; the remaining ~4 is NOT explained by
+      tire size or by the regear (wheel-speed sensors sit outboard of the
+      diffs, so gearing cannot reach them — and a driveshaft-derived speed
+      would read 6.6% HIGH, the wrong sign). Candidates: the ABS calibration
+      assuming a smaller base fitment than P265/75R16, or a speedometer
+      correction applied for the regear to a signal that never needed one.
+      Settling it needs a measured ground distance — a tape run or known mile
+      markers — not more stored data.
+
+      Consequence: use these fields for anything that must agree with
+      obd:SPEED (mode gating, comparisons against fitted models). Do NOT use
+      them for absolute distance, fuel economy, or any figure quoted as real
+      road speed until the residual is resolved.
+
   - name: WHEEL_SPEED_6F7_B
     module: ABS
     # Only fast road-speed source the live segmenter can reach; GPS trails

@@ -63,12 +63,27 @@ DEFAULT_RECENT_MOTION_WINDOW_SECONDS = 180.0
 # binding fits 1.0007 with 0.09% drift.
 DEFAULT_SIGNAL_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "rpm": ("obd:RPM", "obd:rpm", "decoded:ECM_RPM"),
-    # CAN wheel speed goes ahead of GPS: against obd:SPEED on
-    # 2026-08-06T162657 it fits r2 = 0.9992, slope 0.9945, drift 1.00%
-    # (`stable`, n = 2458) while gps:speed fits slope 1.0718 — a 7% over-read,
-    # which is 5.6 km/h at the 80 km/h city/highway boundary and enough to
-    # flip the mode. GPS stays as the last resort for rolling with the engine
-    # off, where neither the PID nor the ABS frame is present.
+    # CAN wheel speed goes ahead of GPS because it is on the *same scale* as
+    # the primary, not because it is more accurate — it is not. Against
+    # obd:SPEED on 2026-08-06T162657 it fits r2 = 0.9992, slope 0.9945, drift
+    # 1.00% (`stable`, n = 2458), while gps:speed sits ~8% higher.
+    #
+    # GPS is the one telling the truth there. This vehicle runs LT285/75R16
+    # against a P265/75R16 stock fitment and 4.08 diffs in place of 3.69, and
+    # both ECU-derived speeds read ~8% under true ground speed (per-row median
+    # obd/gps 0.9203, flat across speed bands). Steady-cruise engine-rpm
+    # clusters resolve the driveline exactly against GPS — gear ratios of
+    # 1.000 (direct drive), 1.309 and 1.740 at FD 4.08 and a 2.609 m loaded
+    # circumference — which a mis-scaled speed reference could not produce.
+    # Tire size accounts for only ~4 points of the 8; the rest is unexplained
+    # and is tracked on the 0x6F7 binding in bindings.yaml.
+    #
+    # Mode thresholds were set, and the behaviour models fitted, against
+    # obd:SPEED. So the fallback must match *that* scale or a row that
+    # coalesces onto it gets gated differently from its neighbours — an 8%
+    # step is 6.4 km/h at the 80 km/h city/highway boundary, enough to flip
+    # the label. GPS stays last: right about the road, wrong for this job,
+    # and the only option left when rolling with the engine off.
     "speed": ("obd:SPEED", "obd:speed", "decoded:WHEEL_SPEED_6F7_C", "gps:speed"),
     "throttle": ("obd:THROTTLE_POS", "obd:throttle_pos"),
     "coolant_temp": ("obd:COOLANT_TEMP", "obd:coolant_temp", "decoded:ECM_COOLANT_TEMP"),
