@@ -69,9 +69,9 @@ def test_capture_reports_wot_inventory_and_the_pair_count(
     )
     digest = compute_tuning_digest(session, config)
     assert digest is not None
-    assert digest.wot_seconds == 10
-    assert digest.wot_with_afr_pair == 10
-    assert {row["rpm_band"] for row in digest.wot_by_band} == {
+    assert digest.wot.seconds == 10
+    assert digest.wot.with_afr_pair == 10
+    assert {row["rpm_band"] for row in digest.wot.by_band} == {
         "(2500.0, 3000.0]",
         "(3500.0, 4000.0]",
     }
@@ -97,7 +97,7 @@ def test_a_capture_with_no_usable_pairs_says_so(tmp_path: Path, config: CanaryCo
     write_records_to_parquet(records, session)
     digest = compute_tuning_digest(session, config)
     assert digest is not None
-    assert digest.wot_with_afr_pair == 0
+    assert digest.wot.with_afr_pair == 0
     assert any("cannot answer" in note or "no samples" in note for note in digest.notes)
 
 
@@ -120,7 +120,10 @@ def test_all_did_capture_never_falls_back_to_mode01(tmp_path: Path, config: Cana
     digest = compute_tuning_digest(session, config)
 
     assert digest is not None
-    assert digest.wot_seconds == 0
+    assert digest.wot.seconds == 0
+    # The point of the test: Mode-01 load rows are present and must not be
+    # used. `unavailable` (not `inferred`) is what proves nothing was borrowed.
+    assert digest.wot.source == "unavailable"
     assert digest.delivery is None
     assert any("pull inventory unavailable" in note for note in digest.notes)
     assert any("all-DID capture lacks confirmed semantic roles" in note for note in digest.notes)
@@ -205,7 +208,7 @@ def test_digest_reproduces_the_reference_capture(config: CanaryConfig) -> None:
     digest = compute_tuning_digest(session, config)
     assert digest is not None
     assert digest.tune_revision == "ZS44A-k106"
-    assert digest.wot_seconds == 27
+    assert digest.wot.seconds == 27
     assert digest.delivery is not None
     assert digest.delivery["n"] == 16
     # The closed-loop gate is what makes this number meaningful at all.
@@ -247,3 +250,137 @@ def test_previous_capture_orders_by_time_not_directory_name(
     )
     assert found is not None
     assert found.name == "_tuning-2026-08-05T100000"
+
+
+def _did_capture(root: Path, name: str, tps_volts: list[float], rpm: list[float]) -> Path:
+    """An all-DID capture carrying only Mode 22 rows: rpm, TPS volts, both A/F banks."""
+    records: list[TelemetryRecord] = []
+    for second, (volts, revs) in enumerate(zip(tps_volts, rpm, strict=True)):
+        ts = T0 + timedelta(seconds=second)
+        records.extend(
+            [
+                TelemetryRecord(
+                    timestamp=ts, source="obd", channel="DID_1219", value=f"{int(revs):04x}"
+                ),
+                TelemetryRecord(
+                    timestamp=ts,
+                    source="obd",
+                    channel="DID_120F",
+                    value=f"{round(volts / 0.005):04x}",
+                ),
+                TelemetryRecord(timestamp=ts, source="obd", channel="DID_1225", value="01b2"),
+                TelemetryRecord(timestamp=ts, source="obd", channel="DID_1226", value="01b2"),
+            ]
+        )
+    session = root / name
+    write_records_to_parquet(records, session)
+    (session / "capture_profile.json").write_text(
+        json.dumps(
+            {
+                "profile": "tuning-did",
+                "started_at": T0.isoformat(),
+                "profile_snapshot": {"corpus_eligible": False},
+            }
+        )
+    )
+    return session
+
+
+def test_untagged_all_did_capture_infers_wot_from_the_throttle_stop(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    """An untagged capture still yields WOT seconds — labelled `inferred`.
+
+    Before this, a 25-minute drive containing real full-throttle pulls
+    reported `wot_seconds: 0` purely because nobody tagged it.
+    """
+    session = _did_capture(
+        tmp_path,
+        "_capture-tuning-did-2026-08-05T142720",
+        tps_volts=[0.7, 0.7, 4.12, 4.12, 4.12, 0.7],
+        rpm=[900, 1200, 3200, 3800, 4600, 1000],
+    )
+
+    digest = compute_tuning_digest(session, config)
+
+    assert digest is not None
+    assert digest.wot.source == "inferred"
+    assert digest.wot.seconds == 3
+    assert digest.wot.with_measured_afr == 3
+    # A commanded target needs Mode 01, which this profile disables.
+    assert digest.wot.with_afr_pair == 0
+    assert digest.wot.criterion is not None
+    assert digest.wot.criterion["provider"] == "did:ECM_THROTTLE_POS_SENSOR_1"
+    assert {row["rpm_band"] for row in digest.wot.by_band} == {
+        "(3000.0, 3500.0]",
+        "(3500.0, 4000.0]",
+        "(4500.0, 5000.0]",
+    }
+    assert any("INFERRED" in note for note in digest.notes)
+
+
+def test_a_drive_that_never_opened_the_throttle_says_so(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    """Zero WOT because the throttle stayed shut is an ANSWER, not a gap.
+
+    It must not be reported the same way as a capture that carried no demand
+    channel at all — those two zeros call for opposite responses.
+    """
+    session = _did_capture(
+        tmp_path,
+        "_capture-tuning-did-2026-08-05T142720",
+        tps_volts=[0.7, 1.4, 2.1, 1.8],
+        rpm=[900, 2600, 3100, 2800],
+    )
+
+    digest = compute_tuning_digest(session, config)
+
+    assert digest is not None
+    assert digest.wot.seconds == 0
+    assert digest.wot.source == "inferred"
+    assert digest.wot.reason is not None
+    assert "never opened" in digest.wot.reason
+    assert digest.wot.criterion is not None
+
+
+def test_tags_beat_the_inferred_criterion(tmp_path: Path, config: CanaryConfig) -> None:
+    """Physical tags are stronger evidence and must win when both are present."""
+    session = _did_capture(
+        tmp_path,
+        "_capture-tuning-did-2026-08-05T142720",
+        tps_volts=[0.7, 0.7, 4.12, 4.12, 4.12, 0.7],
+        rpm=[900, 3300, 3200, 3800, 4600, 3100],
+    )
+    (session / "tags.jsonl").write_text(
+        json.dumps({"t": T0.timestamp(), "label": "tuning_pull_start"})
+        + "\n"
+        + json.dumps({"t": (T0 + timedelta(seconds=2)).timestamp(), "label": "tuning_pull_end"})
+        + "\n"
+    )
+
+    digest = compute_tuning_digest(session, config)
+
+    assert digest is not None
+    assert digest.wot.source == "tagged"
+    # Only the tagged window counts, and only its second above the rpm floor —
+    # not the three seconds the throttle criterion would have selected.
+    assert digest.wot.seconds == 1
+
+
+def test_wot_source_travels_with_the_counts_in_the_serialised_digest(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    """Any reader that finds `wot_seconds` finds how it was established."""
+    session = _did_capture(
+        tmp_path,
+        "_capture-tuning-did-2026-08-05T142720",
+        tps_volts=[0.7, 4.12, 4.12],
+        rpm=[900, 3200, 3800],
+    )
+    digest = compute_tuning_digest(session, config)
+    assert digest is not None
+
+    payload = digest.to_dict()
+    assert payload["wot_seconds"] == payload["wot"]["seconds"] == 2
+    assert payload["wot_source"] == payload["wot"]["source"] == "inferred"

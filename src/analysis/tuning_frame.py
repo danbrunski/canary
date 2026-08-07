@@ -8,7 +8,7 @@ from typing import Literal
 
 import pandas as pd
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.afr import AfrCalibration, voltage_to_afr
 from src.analysis.channels import ChannelSpecError, read_channels
@@ -41,11 +41,44 @@ class Provider(BaseModel):
     confidence: Literal["confirmed", "candidate"] = "confirmed"
 
 
+class WotCriterion(BaseModel):
+    """How to recognise wide-open throttle without a load PID or a pull tag.
+
+    Every value here is vehicle-specific — a throttle's mechanical stop is a
+    property of the vehicle, not of the platform — so this lives in the
+    per-vehicle provider registry and never in code. The fields are required
+    rather than defaulted for the same reason: a wrong-but-plausible default
+    threshold would silently relabel part throttle as WOT.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Role = "operator_demand"
+    unit: str
+    closed_value: float
+    wide_open_value: float
+    threshold_value: float
+    reached_stop_tolerance: float
+    rpm_floor: float
+
+    @model_validator(mode="after")
+    def _ordered(self) -> WotCriterion:
+        if not self.closed_value < self.threshold_value <= self.wide_open_value:
+            raise ValueError(
+                "wot_criterion requires closed_value < threshold_value <= wide_open_value "
+                f"(got {self.closed_value}, {self.threshold_value}, {self.wide_open_value})"
+            )
+        return self
+
+
 class ProviderRegistry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: int = 1
     providers: list[Provider] = Field(default_factory=list)
+    #: Optional: a vehicle with no measured stop cannot infer WOT, and must
+    #: say so rather than fall back to a guess.
+    wot_criterion: WotCriterion | None = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +87,10 @@ class TuningFrame:
     capability: dict[str, dict[str, str | bool | None]]
     capture_profile: str | None
     tune_revision: str | None
+    #: Carried from the registry so callers never re-parse it, and so a
+    #: vehicle without a measured throttle stop reads as ``None`` rather than
+    #: silently inheriting another vehicle's threshold.
+    wot_criterion: WotCriterion | None = None
 
 
 def load_provider_registry(path: Path) -> ProviderRegistry:
@@ -130,6 +167,7 @@ def build_tuning_frame(
         capability=capability,
         capture_profile=None if manifest is None else manifest.profile,
         tune_revision=None if manifest is None else manifest.tune_revision,
+        wot_criterion=registry.wot_criterion,
     )
 
 

@@ -27,3 +27,35 @@ providers:
   # value that holds at stoich through closed-loop cruise and drops during the
   # WOT windows.
   - {role: commanded_afr, spec: 'obd:COMMANDED_AFR'}
+
+# How to recognise wide-open throttle from the operator_demand role alone,
+# for captures that carry no Mode 01 load PID and no physical pull tags.
+#
+# Evidence, from the two all-DID captures that reach the stop
+# (_capture-tuning-did-2026-08-06T145004, n=18386, and -2026-08-07T005351,
+# n=18523):
+#
+#   * The plate hits a mechanical stop and the sensor DWELLS there: above
+#     3.5 V the modal value is 4.125 V (397 samples) and 4.120 V (259) on the
+#     two drives, falling away sharply either side. Session maxima agree to
+#     +-2.5 mV (4.175 / 4.170) across independent drives.
+#   * Injector pulse width corroborates from a channel that needs no pinned
+#     scale: at rpm > 2500 the raw median PW rises 4530 -> 16304 -> 32585
+#     across the part-throttle bands, then only 34146 -> 35032 (+2.6 %) from
+#     [3,4) V to [4,4.2) V. Fuelling is saturated, so this really is WOT.
+#   * Closed-throttle floor (p1) is 0.615 / 0.635 V on the same two drives.
+#
+# `threshold_value` sits below the stop so the approach counts, but above the
+# highest part-throttle dwell: the [3.0,4.0) V band holds only 78 samples
+# against 364 in [4.0,4.2), so 4.0 V separates cleanly.
+wot_criterion:
+  role: operator_demand
+  unit: V
+  closed_value: 0.62
+  wide_open_value: 4.12
+  threshold_value: 4.00
+  # A drive whose demand never gets within this much of the stop never opened
+  # the throttle. That is a real answer about the drive, and it must not be
+  # reported the same way as "this capture carried no demand channel at all".
+  reached_stop_tolerance: 0.25
+  rpm_floor: 2500.0

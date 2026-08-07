@@ -243,13 +243,37 @@ implementer to revisit:
   “fuel cut.” Encode the discrete state/decoder from observed protocol values;
   do not invent a runtime fuzzy threshold to paper over unknown scaling.
 
-- [ ] **3.6 — Physical-action WOT/pull segmentation.** Reuse the existing
+- [~] **3.6 — Physical-action WOT/pull segmentation.** Reuse the existing
   capture event path (`POST /control/captures/current/tags` and `tags.jsonl`)
   for what the operator physically did (pedal floored, pull start/end, held N
   rpm), then combine those tags with passive pedal/throttle evidence. Do not
   use the Mode-01 `ENGINE_LOAD > 85` gate in an all-DID capture. The automatic
   segmenter may infer the same state only after validation against tagged
   pulls.
+
+  **Partial, 2026-08-07, and the precondition above is NOT met — read this
+  before trusting an inferred result.** The passive half is built:
+  `tuning_providers.yaml` carries a per-vehicle `wot_criterion` and
+  `_infer_wot` selects WOT seconds from the throttle's measured mechanical
+  stop, returning a `WotInventory` whose `source` is `tagged` / `inferred` /
+  `unavailable` so the two kinds of evidence cannot be confused. The Mode-01
+  prohibition holds — the DID-continuous branch never reads `ENGINE_LOAD`, and
+  `test_all_did_capture_never_falls_back_to_mode01` pins that by asserting
+  `source == "unavailable"` when only Mode-01 rows exist.
+
+  What is missing is exactly the validation this task requires: **no tagged
+  pull has ever been captured on this vehicle**, so the criterion has never
+  been checked against one. It was instead corroborated by an independent
+  channel — injector PW saturates across the criterion boundary (raw median
+  34146 -> 35032, +2.6 %, against roughly a doubling per part-throttle band),
+  so the selected seconds really are at full fuelling. That is good evidence
+  that the threshold is not selecting part throttle; it is *not* evidence that
+  an inferred window equals a deliberate pull. Inference cannot distinguish a
+  pull from a hard highway merge.
+
+  Close this properly by taking one drive with `tuning_pull_start` /
+  `tuning_pull_end` tags, then comparing tagged windows against what the
+  criterion selects on the same drive.
 
 - [ ] **3.7 — Canary-native delivery error.** Compute measured-vs-ROM-target
   AFR only where the target-map lookup is valid and injection is active.

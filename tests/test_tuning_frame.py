@@ -5,9 +5,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from src.analysis.afr import load_afr_calibration
-from src.analysis.tuning_frame import build_tuning_frame, section_capabilities
+from src.analysis.tuning_frame import (
+    build_tuning_frame,
+    load_provider_registry,
+    section_capabilities,
+)
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
@@ -55,3 +60,32 @@ def test_all_did_frame_uses_confirmed_semantic_roles(tmp_path: Path) -> None:
     sections = section_capabilities(frame.capability)
     assert sections["measured_afr"]["available"] is True
     assert sections["cam_tracking"]["available"] is True
+
+
+def test_wot_criterion_rejects_an_out_of_order_threshold(tmp_path: Path) -> None:
+    """A threshold at or below the closed position would mark the whole drive WOT.
+
+    Ordering is a measured constraint, so it belongs in the schema rather than
+    in a comment nobody reads while editing a vehicle's YAML.
+    """
+    path = tmp_path / "providers.yaml"
+    path.write_text(
+        "schema_version: 1\n"
+        "providers: []\n"
+        "wot_criterion:\n"
+        "  unit: V\n"
+        "  closed_value: 0.62\n"
+        "  wide_open_value: 4.12\n"
+        "  threshold_value: 0.5\n"
+        "  reached_stop_tolerance: 0.25\n"
+        "  rpm_floor: 2500.0\n"
+    )
+    with pytest.raises(ValidationError, match="closed_value < threshold_value"):
+        load_provider_registry(path)
+
+
+def test_a_vehicle_without_a_measured_stop_has_no_criterion(tmp_path: Path) -> None:
+    """No stop measured for this vehicle means no inference, not a borrowed default."""
+    path = tmp_path / "providers.yaml"
+    path.write_text("schema_version: 1\nproviders: []\n")
+    assert load_provider_registry(path).wot_criterion is None

@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -37,7 +37,7 @@ from src.analysis.tuning import (
     delivery_error,
     delivery_error_from_semantic_frame,
 )
-from src.analysis.tuning_frame import build_tuning_frame, section_capabilities
+from src.analysis.tuning_frame import WotCriterion, build_tuning_frame, section_capabilities
 from src.config import CanaryConfig
 from src.control.capture_manifest import read_capture_manifest
 from src.session import load_tags
@@ -47,6 +47,52 @@ from src.session import load_tags
 WOT_LOAD_FLOOR = 85.0
 WOT_RPM_FLOOR = 2500.0
 
+#: How a WOT inventory knows its seconds were WOT. See :class:`WotInventory`.
+WotSource = Literal["tagged", "inferred", "unavailable"]
+
+
+@dataclass(frozen=True)
+class WotInventory:
+    """WOT seconds, and how we know they were WOT.
+
+    ``source`` is not decorative metadata. Seconds delimited by a physical
+    pull tag, seconds inferred from a throttle threshold, and "we could not
+    tell" are three different kinds of evidence, and a reader that cannot
+    distinguish them will quote one as another — which is how a capture that
+    answered nothing came to read as a clean zero. The counts cannot be
+    constructed without stating which kind they are.
+
+    ``inferred`` is genuinely weaker than ``tagged``: it knows the throttle
+    was open, not what the operator was doing or why, so it cannot separate a
+    deliberate pull from a merge onto a highway. Use it to find data worth
+    analysing, not to attribute a result to an intended manoeuvre.
+    """
+
+    seconds: int
+    with_afr_pair: int
+    by_band: list[dict[str, Any]]
+    source: WotSource
+    #: Populated for every source, including ``inferred`` with zero seconds —
+    #: "the throttle never opened" is an answer about the drive, while "no
+    #: demand channel" is not an answer at all.
+    reason: str | None = None
+    #: Seconds carrying a measured AFR. Distinct from ``with_afr_pair``, which
+    #: also needs a *commanded* target and is therefore always 0 on an all-DID
+    #: capture; reporting only the pair would hide usable measured data.
+    with_measured_afr: int = 0
+    criterion: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "seconds": self.seconds,
+            "with_afr_pair": self.with_afr_pair,
+            "with_measured_afr": self.with_measured_afr,
+            "by_band": list(self.by_band),
+            "source": self.source,
+            "reason": self.reason,
+            "criterion": self.criterion,
+        }
+
 
 @dataclass
 class TuningDigest:
@@ -55,9 +101,10 @@ class TuningDigest:
     session_id: str
     capture_profile: str | None
     tune_revision: str | None
-    wot_seconds: int
-    wot_with_afr_pair: int
-    wot_by_band: list[dict[str, Any]]
+    #: The WOT inventory *and the evidence it rests on*. Kept whole rather
+    #: than flattened into bare counts, because `wot_seconds: 0` read as "the
+    #: drive had no WOT" when it meant "nothing here could tell".
+    wot: WotInventory
     achieved_hz: dict[str, float]
     #: Evidence inside physically tagged all-DID pulls. Separate counts avoid
     #: treating absent command/fueling/target roles as a measured zero.
@@ -86,9 +133,14 @@ class TuningDigest:
             "session_id": self.session_id,
             "capture_profile": self.capture_profile,
             "tune_revision": self.tune_revision,
-            "wot_seconds": self.wot_seconds,
-            "wot_with_afr_pair": self.wot_with_afr_pair,
-            "wot_by_band": list(self.wot_by_band),
+            "wot": self.wot.to_dict(),
+            # Flat mirrors for existing consumers. `wot_source` sits alongside
+            # them deliberately: any reader that finds `wot_seconds` also finds
+            # what kind of evidence produced it, in the same dict.
+            "wot_seconds": self.wot.seconds,
+            "wot_with_afr_pair": self.wot.with_afr_pair,
+            "wot_by_band": list(self.wot.by_band),
+            "wot_source": self.wot.source,
             "achieved_hz": dict(self.achieved_hz),
             "pull_inventory": self.pull_inventory,
             "rate_summary": self.rate_summary,
@@ -261,9 +313,118 @@ def _target_map_summary(
     return result
 
 
+def _bands(per_second: pd.Series) -> list[dict[str, Any]]:
+    """Seconds per rpm band, in the shared band edges."""
+    counts = per_second.groupby(pd.cut(per_second, list(DEFAULT_RPM_BANDS)), observed=True).size()
+    return [{"rpm_band": str(band), "seconds": int(seconds)} for band, seconds in counts.items()]
+
+
+def _infer_wot(
+    session_dir: Path,
+    *,
+    criterion: WotCriterion,
+    rpm_spec: str,
+    demand_spec: str,
+    measured_afr_specs: list[str],
+) -> WotInventory:
+    """WOT seconds from the throttle's own saturation, with no tags.
+
+    Weaker evidence than a physical tag and labelled as such, but it answers
+    a question the tagged path cannot: whether there is anything in an
+    untagged capture worth looking at. The criterion is vehicle data
+    (:class:`~src.analysis.tuning_frame.WotCriterion`), never a constant
+    here — a throttle stop is a property of the vehicle.
+    """
+    try:
+        frame = read_aligned(session_dir, [rpm_spec, demand_spec], grid="1s", require_all=True)
+    except Exception as exc:  # noqa: BLE001
+        return WotInventory(0, 0, [], "unavailable", reason=f"{demand_spec}: {exc}")
+    if frame.empty:
+        return WotInventory(
+            0, 0, [], "unavailable", reason=f"no seconds carry both {rpm_spec} and {demand_spec}"
+        )
+
+    demand = frame[demand_spec]
+    observed_max = float(demand.max())
+    detail: dict[str, Any] = {
+        "role": criterion.role,
+        "provider": demand_spec,
+        "unit": criterion.unit,
+        "threshold_value": criterion.threshold_value,
+        "wide_open_value": criterion.wide_open_value,
+        "observed_max": round(observed_max, 4),
+        "rpm_floor": criterion.rpm_floor,
+    }
+    # "The throttle never opened" is a finding about the drive. Distinguish it
+    # from "there was no demand channel", which is not a finding at all.
+    if observed_max < criterion.wide_open_value - criterion.reached_stop_tolerance:
+        return WotInventory(
+            0,
+            0,
+            [],
+            "inferred",
+            reason=(
+                f"demand peaked at {observed_max:.3g} {criterion.unit}, short of the measured "
+                f"stop {criterion.wide_open_value:.3g} — the throttle was never opened on this "
+                "drive, so there is no WOT to analyse (this is an answer, not a gap)"
+            ),
+            criterion=detail,
+        )
+
+    at_wot = frame[(demand >= criterion.threshold_value) & (frame[rpm_spec] > criterion.rpm_floor)]
+    if at_wot.empty:
+        return WotInventory(
+            0,
+            0,
+            [],
+            "inferred",
+            reason=(
+                f"the throttle reached its stop but never above {criterion.rpm_floor:.0f} rpm, "
+                "so no second qualifies as a WOT pull"
+            ),
+            criterion=detail,
+        )
+
+    measured = 0
+    if measured_afr_specs:
+        try:
+            with_afr = read_aligned(
+                session_dir,
+                [rpm_spec, demand_spec, *measured_afr_specs],
+                grid="1s",
+                require_all=True,
+            )
+            measured = int(
+                (
+                    (with_afr[demand_spec] >= criterion.threshold_value)
+                    & (with_afr[rpm_spec] > criterion.rpm_floor)
+                ).sum()
+            )
+        except Exception:  # noqa: BLE001
+            measured = 0
+    return WotInventory(
+        seconds=int(len(at_wot)),
+        # Always 0 on an all-DID capture: a commanded target needs Mode 01,
+        # which this profile disables. Kept rather than dropped so the number
+        # that gates delivery error stays visible.
+        with_afr_pair=0,
+        by_band=_bands(at_wot[rpm_spec]),
+        source="inferred",
+        reason=None,
+        with_measured_afr=measured,
+        criterion=detail,
+    )
+
+
 def _wot_inventory(
-    session_dir: Path, *, rpm_spec: str | None, did_continuous: bool
-) -> tuple[int, int, list[dict[str, Any]]]:
+    session_dir: Path,
+    *,
+    rpm_spec: str | None,
+    did_continuous: bool,
+    criterion: WotCriterion | None = None,
+    demand_spec: str | None = None,
+    measured_afr_specs: list[str] | None = None,
+) -> WotInventory:
     """Seconds at WOT by rpm band, and how many carry a usable AFR pair.
 
     The pair count is the number that matters: WOT seconds without both a
@@ -292,24 +453,38 @@ def _wot_inventory(
                 if not tagged.empty:
                     tagged["second"] = tagged["timestamp"].dt.floor("1s")
                     per_second = tagged.groupby("second", sort=True)["value"].last()
-                    tagged_bands = per_second.groupby(
-                        pd.cut(per_second, list(DEFAULT_RPM_BANDS)), observed=True
-                    ).size()
-                    return (
-                        int(len(per_second)),
-                        0,
-                        [
-                            {"rpm_band": str(band), "seconds": int(seconds)}
-                            for band, seconds in tagged_bands.items()
-                        ],
+                    return WotInventory(
+                        seconds=int(len(per_second)),
+                        with_afr_pair=0,
+                        by_band=_bands(per_second),
+                        source="tagged",
                     )
         except Exception:  # noqa: BLE001
             pass
     # A DID-continuous capture must never borrow Mode 01 to make an empty
-    # all-DID report look populated. Tags are the physical-demand evidence for
-    # these captures; absent tags are reported as absent evidence.
+    # all-DID report look populated. Tags are the strongest physical-demand
+    # evidence for these captures; failing those, the throttle's own measured
+    # saturation is admissible but is labelled `inferred`, never `tagged`.
     if did_continuous:
-        return 0, 0, []
+        if criterion is not None and rpm_spec is not None and demand_spec is not None:
+            return _infer_wot(
+                session_dir,
+                criterion=criterion,
+                rpm_spec=rpm_spec,
+                demand_spec=demand_spec,
+                measured_afr_specs=measured_afr_specs or [],
+            )
+        missing = "wot_criterion" if criterion is None else "an rpm or operator_demand provider"
+        return WotInventory(
+            0,
+            0,
+            [],
+            "unavailable",
+            reason=(
+                f"all-DID capture has no pull tags and {missing} is not configured for this "
+                "vehicle, so nothing establishes which seconds were WOT"
+            ),
+        )
     try:
         frame = read_aligned(
             session_dir,
@@ -317,25 +492,26 @@ def _wot_inventory(
             grid="1s",
             require_all=True,
         )
-    except Exception:  # noqa: BLE001
-        return 0, 0, []
+    except Exception as exc:  # noqa: BLE001
+        return WotInventory(0, 0, [], "unavailable", reason=f"obd:RPM/obd:ENGINE_LOAD: {exc}")
     if frame.empty:
-        return 0, 0, []
+        return WotInventory(
+            0, 0, [], "unavailable", reason="no seconds carry both obd:RPM and obd:ENGINE_LOAD"
+        )
     wot = frame[(frame["obd:RPM"] > WOT_RPM_FLOOR) & (frame["obd:ENGINE_LOAD"] > WOT_LOAD_FLOOR)]
     if wot.empty:
-        return 0, 0, []
-
-    bands = (
-        wot.groupby(pd.cut(wot["obd:RPM"], list(DEFAULT_RPM_BANDS)), observed=True)
-        .size()
-        .reset_index(name="seconds")
-    )
-    rows: list[dict[str, Any]] = [
-        {"rpm_band": str(band), "seconds": int(seconds)}
-        for band, seconds in zip(
-            bands.iloc[:, 0].astype(str), bands["seconds"].astype(int), strict=True
+        return WotInventory(
+            0,
+            0,
+            [],
+            "inferred",
+            reason=(
+                f"no second reached load > {WOT_LOAD_FLOOR:.0f} % above "
+                f"{WOT_RPM_FLOOR:.0f} rpm on this drive"
+            ),
         )
-    ]
+
+    rows = _bands(wot["obd:RPM"])
 
     paired = 0
     try:
@@ -353,7 +529,22 @@ def _wot_inventory(
         )
     except Exception:  # noqa: BLE001
         paired = 0
-    return int(len(wot)), paired, rows
+    # The Mode 01 path gates on measured load, not on a tag, so it is inferred
+    # too — it just has a better instrument than the throttle-stop criterion.
+    return WotInventory(
+        seconds=int(len(wot)),
+        with_afr_pair=paired,
+        by_band=rows,
+        source="inferred",
+        with_measured_afr=paired,
+        criterion={
+            "role": "airflow_or_table_load",
+            "provider": "obd:ENGINE_LOAD",
+            "unit": "%",
+            "threshold_value": WOT_LOAD_FLOOR,
+            "rpm_floor": WOT_RPM_FLOOR,
+        },
+    )
 
 
 def _did_pull_inventory(
@@ -560,10 +751,19 @@ def compute_tuning_digest(
     role_capabilities = capabilities.get("roles", {})
     rpm_provider = role_capabilities.get("rpm", {}).get("provider")
     did_continuous = profile == "tuning-did"
-    wot_seconds, paired, bands = _wot_inventory(
+    demand_provider = role_capabilities.get("operator_demand", {}).get("provider")
+    afr_providers = [
+        str(role_capabilities.get(name, {}).get("provider"))
+        for name in ("measured_afr_b1", "measured_afr_b2")
+        if role_capabilities.get(name, {}).get("available", False)
+    ]
+    wot = _wot_inventory(
         session_dir,
         rpm_spec=rpm_provider if isinstance(rpm_provider, str) else None,
         did_continuous=did_continuous,
+        criterion=None if semantic is None else semantic.wot_criterion,
+        demand_spec=demand_provider if isinstance(demand_provider, str) else None,
+        measured_afr_specs=afr_providers,
     )
     if did_continuous and not any(
         tag.get("label") in {"tuning_pull_start", "wot_pull"}
@@ -573,7 +773,16 @@ def compute_tuning_digest(
             "pull inventory unavailable: all-DID captures require a tagged physical pull "
             "(`tuning_pull_start` or `wot_pull`); this is not evidence of zero pulls."
         )
-    if wot_seconds and not paired:
+        if wot.source == "inferred" and wot.seconds and wot.criterion is not None:
+            notes.append(
+                f"WOT seconds below are INFERRED from {wot.criterion['provider']} reaching its "
+                f"measured stop, not from tags. They locate data worth analysing; they do not "
+                "establish what the operator was doing, so do not attribute them to an "
+                "intended manoeuvre."
+            )
+        elif wot.reason:
+            notes.append(f"WOT inventory: {wot.reason}")
+    if wot.seconds and not wot.with_afr_pair:
         notes.append(
             "WOT seconds were captured but none carry both a measured and a commanded AFR "
             "in the same second, so delivery error cannot be computed from this drive."
@@ -712,9 +921,7 @@ def compute_tuning_digest(
         session_id=session_dir.name,
         capture_profile=profile,
         tune_revision=revision,
-        wot_seconds=wot_seconds,
-        wot_with_afr_pair=paired,
-        wot_by_band=bands,
+        wot=wot,
         achieved_hz=achieved,
         pull_inventory=pull_inventory,
         rate_summary=rate_summary,
