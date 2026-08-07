@@ -1028,11 +1028,26 @@ signals:
       accounts for ~4 points of the 8; the remaining ~4 is NOT explained by
       tire size or by the regear (wheel-speed sensors sit outboard of the
       diffs, so gearing cannot reach them — and a driveshaft-derived speed
-      would read 6.6% HIGH, the wrong sign). Candidates: the ABS calibration
-      assuming a smaller base fitment than P265/75R16, or a speedometer
-      correction applied for the regear to a signal that never needed one.
-      Settling it needs a measured ground distance — a tape run or known mile
-      markers — not more stored data.
+      would read 6.6% HIGH, the wrong sign).
+
+      Two candidates have since been eliminated, so do not re-propose them:
+
+        * "the ABS assumes a smaller base fitment" — no. This truck is the
+          Off-Road trim, which shipped on P265/75R16; the smaller P265/70R16
+          went on the X and S. The stock figure used above is already the
+          correct one for this vehicle.
+        * "the Osiris tune carries a speedometer correction" — no. The
+          under-read predates the flash. Across 11 sessions the per-session
+          median obd/gps is 0.9113-0.9196 on stock ZS04C (2026-07-18 and
+          07-26, 4 sessions) against 0.9168-0.9328 on ZS44A (7 sessions):
+          indistinguishable, and the stock side is if anything *slightly*
+          worse. The ROM itself cannot be inspected to confirm — the Osiris
+          container is compressed or encrypted (base and tuned ROMs share
+          0.59% of bytes at the best of 64 tested alignments, i.e. none), so
+          this is settled by the telemetry, not the artifact.
+
+      Settling the residual needs a measured ground distance — a tape run or
+      known mile markers — not more stored data.
 
       Consequence: use these fields for anything that must agree with
       obd:SPEED (mode gating, comparisons against fitted models). Do NOT use
