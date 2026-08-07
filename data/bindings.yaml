@@ -994,11 +994,32 @@ signals:
           Bytes 6-7 are NOT a fourth wheel: r2 = 0.0005 against speed and
           the field never exceeds 2 all session.
     notes: &wheel_speed_6f7_notes |
-      One of three 16-bit wheel-speed fields on the ABS 0x6F7 frame
-      (bytes 0-1, 2-3, 4-5). Which corner each field is has NOT been
-      established — that needs a capture with a known single-wheel
-      difference (a tight steady-radius turn, tagged for direction), so
-      they are named A/B/C rather than guessed into FL/FR/RL.
+      One of three 16-bit speed fields on the ABS 0x6F7 frame (bytes 0-1,
+      2-3, 4-5).
+
+      THESE ARE NOT INDIVIDUAL CORNERS (established 2026-08-07). The
+      original note read the few-count spread between them as "the spread of
+      three wheels through corners". It is not. In a turn the speed split
+      across an axle is dv = omega * T, so regressing the pairwise difference
+      on GPS-derived yaw rate measures the lateral separation directly. Over
+      703 cornering samples (>40 km/h, |yaw| > 0.04 rad/s) all three pairs fit
+      a separation of 0.001-0.012 m with r = 0.07-0.14 — zero to within noise,
+      against ~0.8 m for a real half-track. Decisively, the A-C offset is
+      -0.44 km/h in left turns and -0.45 in right turns: a constant bias that
+      does not flip sign with direction, which opposite corners must.
+
+      So these are three vehicle-speed variants (filtered/unfiltered, or per
+      consumer), not FL/FR/RL. Do not difference them to infer wheel slip.
+
+      Candidates for real per-corner speeds, from the same yaw-rate sweep over
+      every byte slice on the bus — SUGGESTIVE ONLY, not bound: 0x284[6:8]
+      (implied half-track +0.81 m), 0x385[4:6] (+0.86 m), 0x285[6:8]
+      (+1.04 m), each with a speed coefficient near 9.1 counts per km/h. All
+      three share a positive yaw sign, so if they are wheels they are on one
+      side and the opposite pair is still unfound. Confirming needs the tagged
+      steady-radius turn this note has always asked for. Note 0x284/0x285 are
+      already bound at byte 1 as WHEEL_SPEED_PAIR_A/B (hypothesized); the
+      yaw-responsive slices are at bytes 6-7, not byte 1.
 
       Scale is pinned at exactly 1/16 km/h per count. All three fields fit
       ~0.0627-0.0630 rather than 0.0625, a consistent +0.4%; Mode 01 PID
