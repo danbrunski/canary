@@ -407,14 +407,29 @@ def _derive_vehicle_state(
             # when the OBD one is absent.
             if ts is not None and (can_latest_ts is None or ts > can_latest_ts):
                 can_latest_ts = ts
-            if rpm is None and channel == "ECM_RPM" and isinstance(value, (int, float)):
+            # Captured unconditionally: whether it is *preferred* depends on how
+            # stale the OBD rpm turns out to be, and freshness is not known
+            # until the loop has finished.
+            if channel == "ECM_RPM" and isinstance(value, (int, float)):
                 decoded_rpm = float(value)
 
     obd_freshness = (now_dt - obd_latest_ts).total_seconds() if obd_latest_ts is not None else None
     can_freshness = (now_dt - can_latest_ts).total_seconds() if can_latest_ts is not None else None
 
     rpm_from_broadcast = False
-    if rpm is None and decoded_rpm is not None:
+    obd_rpm_usable = rpm is not None and (
+        obd_freshness is not None and obd_freshness <= _FRESHNESS_THRESHOLD_SECONDS
+    )
+    if not obd_rpm_usable and decoded_rpm is not None:
+        # A *stale* OBD rpm is no more informative than a missing one, and it
+        # is worse: it looks like data. This condition used to be `rpm is
+        # None`, so a held-over reading kept the broadcast fallback from ever
+        # firing. Observed 2026-08-07 with a second scan tool on an OBD-II
+        # Y-cable: it took the ECM's tester session, canary's Mode 01 went
+        # unanswered, and a 27 s stale rpm of 750 held while the broadcast
+        # reported 781 rpm at 96 Hz. The state read `engine_off` — "plugged in,
+        # key out" — with the engine idling.
+        #
         # `decoded:` rows carry raw counts by design; ECM_RPM is 8 per rpm.
         rpm = decoded_rpm * _ECM_RPM_SCALE
         rpm_from_broadcast = True

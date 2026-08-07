@@ -335,3 +335,110 @@ def test_an_empty_freshly_rotated_session_does_not_win(tmp_path: Path) -> None:
 
     live = latest_session(root)
     assert live is not None and live.name == "2026-08-05T120000"
+
+
+def test_a_stale_obd_rpm_does_not_beat_a_live_broadcast(tmp_path: Path) -> None:
+    """A second tester on the bus must not make a running engine read `engine_off`.
+
+    Observed live 2026-08-07: a Z1 scan tool shared the OBD-II connector on a
+    Y-cable, took the ECM's tester session, and canary's Mode 01 went
+    unanswered. The last OBD rpm (750) sat 27 s stale while `decoded:ECM_RPM`
+    reported 781 rpm at 96 Hz throughout. The fallback was gated on
+    `rpm is None`, so a held-over reading suppressed it and the state read
+    `engine_off` — "plugged into the bus, key out" — with the engine idling.
+
+    A stale OBD rpm is no more informative than a missing one, and worse
+    because it looks like data.
+    """
+    from datetime import UTC, datetime
+
+    from src.dashboard.status import _derive_vehicle_state
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    now = datetime(2026, 8, 7, 20, 0, 30, tzinfo=UTC)
+    storage = tmp_path / "vehicle"
+    session = storage / "2026-08-07T200000"
+    write_records_to_parquet(
+        [
+            # OBD rpm, 27 s old — present, plausible, and useless.
+            TelemetryRecord(
+                timestamp=now.replace(second=3),
+                source="obd",
+                channel="RPM",
+                value=750.0,
+            ),
+            # Broadcast rpm, current: 781 rpm x 8 counts.
+            TelemetryRecord(
+                timestamp=now.replace(second=29),
+                source="decoded",
+                channel="ECM_RPM",
+                value=6248.0,
+            ),
+        ],
+        session,
+    )
+
+    state = _derive_vehicle_state(storage, replay_controller=None, now=now, session_dir=session)
+
+    assert state.state == "engine_running"
+    assert state.rpm == 781.0
+
+
+def test_broadcast_fallback_still_reports_a_genuinely_stopped_engine(tmp_path: Path) -> None:
+    """The fallback must not manufacture a running engine out of a parked one.
+
+    Same shape as above — OBD stale, CAN live — but the broadcast says 0 rpm,
+    which is the real `engine_off` case the rule exists for.
+    """
+    from datetime import UTC, datetime
+
+    from src.dashboard.status import _derive_vehicle_state
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    now = datetime(2026, 8, 7, 20, 0, 30, tzinfo=UTC)
+    storage = tmp_path / "vehicle"
+    session = storage / "2026-08-07T200000"
+    write_records_to_parquet(
+        [
+            TelemetryRecord(
+                timestamp=now.replace(second=3), source="obd", channel="RPM", value=750.0
+            ),
+            TelemetryRecord(
+                timestamp=now.replace(second=29), source="decoded", channel="ECM_RPM", value=0.0
+            ),
+        ],
+        session,
+    )
+
+    state = _derive_vehicle_state(storage, replay_controller=None, now=now, session_dir=session)
+    assert state.state == "engine_off"
+
+
+def test_fresh_obd_still_wins_over_the_broadcast(tmp_path: Path) -> None:
+    """The fallback is for stale OBD only; a fresh PID stays the primary."""
+    from datetime import UTC, datetime
+
+    from src.dashboard.status import _derive_vehicle_state
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    now = datetime(2026, 8, 7, 20, 0, 30, tzinfo=UTC)
+    storage = tmp_path / "vehicle"
+    session = storage / "2026-08-07T200000"
+    write_records_to_parquet(
+        [
+            TelemetryRecord(
+                timestamp=now.replace(second=29), source="obd", channel="RPM", value=900.0
+            ),
+            TelemetryRecord(
+                timestamp=now.replace(second=29), source="decoded", channel="ECM_RPM", value=6248.0
+            ),
+        ],
+        session,
+    )
+
+    state = _derive_vehicle_state(storage, replay_controller=None, now=now, session_dir=session)
+    assert state.rpm == 900.0
+    assert state.state == "engine_running"
