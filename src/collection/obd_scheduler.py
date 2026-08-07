@@ -26,6 +26,12 @@ if TYPE_CHECKING:
 AUTO_PIDS = "auto"
 DEFAULT_DID_REQUEST_ID = 0x7E0
 AUTO_MISS_BACKOFF_SECONDS = 30.0
+#: A focused high-rate capture has already established that every selected
+#: channel answers.  One transient miss must not erase 30 seconds of that
+#: channel (roughly 450 samples at 15 Hz), so retry quickly and escalate only
+#: if the channel keeps missing.  Normal collection retains the conservative
+#: 30-second retry below.
+CAPTURE_MISS_BACKOFF_SECONDS = 1.0
 #: Ceiling for the escalating backoff applied to a request the ECU has *never*
 #: answered (see ``_miss_backoff_seconds``). The ``auto`` PID set probes every
 #: decoder in the catalog, so a dozen-odd PIDs this ECU simply doesn't support
@@ -980,24 +986,25 @@ def _update_response_state(
     *,
     emitted: bool,
     now: float,
+    focused_capture: bool = False,
 ) -> None:
     if emitted:
         state.missed_responses = 0
         state.suppressed_until = 0.0
         return
     state.missed_responses += 1
-    state.suppressed_until = now + _miss_backoff_seconds(state)
+    state.suppressed_until = now + _miss_backoff_seconds(state, focused_capture=focused_capture)
     state.backoffs += 1
 
 
-def _miss_backoff_seconds(state: _PollRequestState) -> float:
+def _miss_backoff_seconds(state: _PollRequestState, *, focused_capture: bool = False) -> float:
     """Backoff to apply after a missed response.
 
-    A request that has answered at least once keeps the flat
-    ``AUTO_MISS_BACKOFF_SECONDS`` — it's a live channel that dropped a
-    response (bus dropout, DID window, momentary ECU silence) and must come
-    back promptly once the bus recovers, so this path is deliberately not
-    escalated.
+    A request that has answered at least once normally keeps the flat
+    ``AUTO_MISS_BACKOFF_SECONDS``.  During a focused high-rate capture that
+    would turn one transient timeout into a 30-second hole, so capture-owned
+    channels retry after one second and exponentially approach the normal
+    ceiling only when misses continue.
 
     A request that has *never* answered is a different thing: on the ``auto``
     PID set the catalog is probed wholesale, so unsupported PIDs are expected
@@ -1008,6 +1015,12 @@ def _miss_backoff_seconds(state: _PollRequestState) -> float:
     ECU that only answers in a particular state still gets a periodic probe.
     """
     if state.last_response_at is not None:
+        if focused_capture:
+            exponent = min(max(state.missed_responses - 1, 0), 20)
+            return min(
+                CAPTURE_MISS_BACKOFF_SECONDS * (2.0**exponent),
+                AUTO_MISS_BACKOFF_SECONDS,
+            )
         return AUTO_MISS_BACKOFF_SECONDS
     # Clamped before the exponentiation: float ** big raises OverflowError.
     exponent = min(max(state.missed_responses - 1, 0), 20)
@@ -1405,6 +1418,7 @@ __all__ = [
     "select_batch_companions",
     "is_batchable",
     "AUTO_MISS_BACKOFF_SECONDS",
+    "CAPTURE_MISS_BACKOFF_SECONDS",
     "AUTO_PIDS",
     "DEFAULT_DID_REQUEST_ID",
     "DEFAULT_PRIORITY_CHANNELS",

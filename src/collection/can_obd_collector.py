@@ -552,7 +552,15 @@ def run_can_obd_loop(
         else:
             request_state.timeouts += 1
             stats.request_timeouts += 1
-        _update_response_state(request_state, emitted=emitted, now=time.monotonic())
+        _update_response_state(
+            request_state,
+            emitted=emitted,
+            now=time.monotonic(),
+            focused_capture=(
+                tuning_profile.is_active()
+                and tuning_profile.request_eligible(request_index, request)
+            ),
+        )
         if controller is not None:
             controller.on_request_attempted(request_index)
 
@@ -1246,7 +1254,14 @@ def _issue_batched_request(
         else:
             state.timeouts += 1
             stats.request_timeouts += 1
-        _update_response_state(state, emitted=emitted, now=now)
+        _update_response_state(
+            state,
+            emitted=emitted,
+            now=now,
+            focused_capture=(
+                tuning_profile.is_active() and tuning_profile.request_eligible(index, request)
+            ),
+        )
     return True
 
 

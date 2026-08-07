@@ -35,6 +35,7 @@ from src.collection.obd_collector import JsonlReadingWriter
 from src.collection.obd_registry import MODE01_REGISTRY
 from src.collection.obd_scheduler import (
     AUTO_MISS_BACKOFF_SECONDS,
+    CAPTURE_MISS_BACKOFF_SECONDS,
     MAX_MISS_BACKOFF_SECONDS,
     CanObdLoopStats,
     ForcePollTrigger,
@@ -632,6 +633,35 @@ def test_miss_backoff_escalates_only_for_requests_that_never_answered() -> None:
     for _ in range(3):
         _update_response_state(answered_before, emitted=False, now=0.0)
     assert answered_before.suppressed_until == AUTO_MISS_BACKOFF_SECONDS
+
+
+def test_focused_capture_retries_a_transient_miss_without_a_30_second_hole() -> None:
+    """A single miss in today's 15 Hz DID capture cost about 450 samples.
+
+    Capture channels are known responders, so retry promptly; consecutive
+    misses still escalate to the normal ceiling instead of hammering a DID
+    that became unavailable mid-capture.
+    """
+    state = _PollRequestState(last_response_at=5.0)
+
+    delays: list[float] = []
+    for _ in range(7):
+        _update_response_state(state, emitted=False, now=0.0, focused_capture=True)
+        delays.append(state.suppressed_until)
+
+    assert delays == [
+        CAPTURE_MISS_BACKOFF_SECONDS,
+        2.0,
+        4.0,
+        8.0,
+        16.0,
+        AUTO_MISS_BACKOFF_SECONDS,
+        AUTO_MISS_BACKOFF_SECONDS,
+    ]
+
+    _update_response_state(state, emitted=True, now=0.0, focused_capture=True)
+    assert state.missed_responses == 0
+    assert state.suppressed_until == 0.0
 
 
 def test_miss_backoff_is_capped_and_resets_on_a_response() -> None:
