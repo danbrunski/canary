@@ -73,15 +73,27 @@ CANary is strictly read-only — use a dedicated scan tool to clear codes.
 - **First-class live DID telemetry profiles + dashboard switching:** available
   in the Capture Profiles panel. `tuning-did` runs continuous Mode 22;
   `tuning-hybrid-research` uses the confirmed `10 81` fast exit to alternate
-  4 Hz Mode 01 windows with Mode 22. `10 C0` remains mutually exclusive with
-  Mode 01 while the session itself is open.
+  nominally 4 Hz Mode 01 requests with Mode 22. `10 C0` remains mutually
+  exclusive with Mode 01 while the session itself is open; the delivered rate
+  is substantially lower, as recorded below.
 - **The hybrid profile alternates; it does not sample concurrently.** Mode 01
   and Mode 22 readings land in the same second, not at the same instant.
+  On the 2026-08-07 drive, A/F DID and commanded-ratio acquisitions were
+  separated by 0.341 s median and 0.819 s at p95 inside those shared cells.
   Restrict to steady state before drawing any quantitative conclusion from a
   Mode 01 x Mode 22 pairing — on the 2026-08-07 drive that was the difference
   between r² 0.79 and r² 0.96. It also runs well under its stated
-  `target_rate_hz` (~1 Hz achieved against 4 Hz); see
+  `target_rate_hz` (Mode 01 ~1.46 Hz, DIDs ~0.90 Hz, 18.25 aggregate channel
+  readings/s against 64 expected). The first DID was also delayed 26.56 s
+  after arming even though Mode 01 began immediately; see
   `docs/abs-wheel-speed-and-did-gap-protocol.md`.
+- **Do not treat the hybrid digest's empty delivery section as absent data.**
+  The current semantic registry does not map Mode-01 fuel status into the
+  `fueling_active` role, and the fallback looks for a Mode-01 wideband PID the
+  profile does not capture. The 2026-08-07 drive contains 20 same-cell
+  high-load enrichment pairs, but their inter-stream timing skew makes them a
+  screening result, not a tune verdict. PID 0x44 uses the verified `phi`
+  convention; a reported zero means unavailable, never lambda zero.
 - **A degraded fast exit self-heals — watch, don't restart.** `/status`
   `did_profile` reports `fast_exit_retry_in_seconds` and `last_exit_nrc_name`.
   Non-zero means Mode 01 is running at the slower lapse-path rate and the exit

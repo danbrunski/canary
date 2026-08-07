@@ -87,12 +87,16 @@ minimum set `--vehicle-state`.
    - `tools/scan_constant_dids.py --canable --session C0` does the
      Canable-native sweep + constant-vs-varying classification (no ELM327;
      early-returns on negative responses so a full sweep is minutes).
-   - **Prize captured: injector pulse width = DID `0x1208`** (2-byte,
-     scale ≈ raw×4e-4 ms, exact constant TBD). Plus RPM `0x1219`, coolant
-     `0x1101`, IAT `0x123F`, TPS `0x120F/10`, A/F sensor `0x1225/26`, VVT
-     `0x1110`, A/F-heater `0x1107..0A`. See `data/analyses/2026-05-16T223328.md`
-     for the full DID map. Remaining: calibrate the `0x1208` scale and
-     structure the map as `data/dids.yaml` (parallel to `bindings.yaml`).
+   - **Prize captured: effective injection quantity = DID `0x1208`**
+     (2-byte). The 2026-08-07 hybrid drive pins 916,416 counts per gram of
+     fuel per injection at steady state in closed loop (r² 0.962, n=401) and
+     shows no observable dead-time intercept. The older approximate
+     raw×4e-4 ms scale remains unpinned because converting counts/g to ms/count
+     requires an independently measured injector flow rate. Plus RPM `0x1219`,
+     coolant `0x1101`, IAT `0x123F`, TPS `0x120F/10`, A/F sensor `0x1225/26`,
+     VVT `0x1110`, A/F-heater `0x1107..0A`. The structured map is
+     `data/dids.yaml`; see `data/analyses/2026-05-16T223328.md` and
+     `docs/abs-wheel-speed-and-did-gap-protocol.md` for evidence and limits.
 
 Opportunistic extras: towing / heavy load (pushes into the high-load corner an
 empty truck on flat ground can't reach); a tagged drive specifically for

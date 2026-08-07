@@ -314,11 +314,16 @@ and 0x285 slices are not speeds. Do not re-propose them.
 to 122 km/h. This is the "validate on one short drive" run the profile's own
 `capacity_evidence` asks for. It validates, with caveats.
 
-**The profile does deliver simultaneity.** 1024 one-second cells held all seven
-of `did:ECM_INJECTOR_PW_B1`, `obd:MAF`, `obd:RPM`, `obd:COMMANDED_EQUIV_RATIO`,
-`obd:FUEL_STATUS`, `did:ECM_BASE_FUEL_SCHEDULE_CANDIDATE` and `obd:ENGINE_LOAD`
-with **zero staleness**. Ground truth passes: `decoded:ECM_RPM` vs `obd:RPM` is
-slope 0.9988, r² 0.9955, n=1333, verdict `stable`.
+**The profile does deliver coarse overlap, not simultaneity.** 1024 one-second
+cells held all seven of `did:ECM_INJECTOR_PW_B1`, `obd:MAF`, `obd:RPM`,
+`obd:COMMANDED_EQUIV_RATIO`, `obd:FUEL_STATUS`,
+`did:ECM_BASE_FUEL_SCHEDULE_CANDIDATE` and `obd:ENGINE_LOAD` without
+forward-filling from another cell. That is useful overlap, but the persisted
+acquisition times show the distinction: A/F DID 0x1225 and PID 0x44 were
+separated by 0.341 s median, 0.819 s at p95, and as much as 0.984 s even when
+they landed in the same cell. Ground truth still passes:
+`decoded:ECM_RPM` vs `obd:RPM` is slope 0.9988, r² 0.9955, n=1333, verdict
+`stable`.
 
 **But Mode 01 and Mode 22 are interleaved, never concurrent.** They are mutually
 exclusive on this ECM, so "simultaneous" means "within the same 1 s cell", not
@@ -329,6 +334,8 @@ r² 0.79 and r² 0.96 on the injector fit below.
 
 **`0x1208` is an effective injection quantity, not a raw pulse width.** Pairing
 it against fuel per injection, `(MAF / (14.7·λ)) / (rpm/120 · 6)`:
+here λ is reconstructed as `1 / phi` from PID 0x44 under the vehicle's verified
+equivalence-ratio convention.
 
 | fit | n | slope (counts/g) | intercept | r² |
 |---|---|---|---|---|
@@ -351,29 +358,49 @@ Note what this does *not* establish — fuel per injection was derived from the
 same MAF the ECM uses, so this pins the register scale, not the injector's
 physical flow rate.
 
-**Target AFR: captured in closed loop, absent where tuning needs it.** This is
+**Target AFR: intermittently captured in open loop, but not at a cadence that
+supports a tune verdict.** This is
 the first profile to produce commanded AFR at all (`tuning-did` disables Mode
-01, which is what `project_bottleneck_is_experiment_design` recorded). PID 0x44
-gives 1184 closed-loop samples, λ 0.871-1.164 (AFR 12.80-17.11), only 2 zeros.
-But in open loop **227 of 385 samples read λ = 0** — the ECM's "not available"
-— and the non-zero remainder sits at λ≈1.000, which is not a credible
-enrichment command. **Open-loop/WOT target AFR is still not obtainable from
-this ECM over Mode 01**, so the WOT fuel question is not unblocked by this
-profile. That is an ECM limitation, not a capture-design one.
+01, which is what `project_bottleneck_is_experiment_design` recorded). PID
+0x44 is the vehicle's verified **phi** convention, not lambda; zero still means
+"not available". In the seven-channel analysis 227 of 385 open-loop samples
+were zero, but the non-zero open-loop samples do include credible enrichment
+commands. A semantic same-cell pass found 20 cells that were open-loop,
+commanded richer than stoich, above 85 % load, and above 2500 rpm. The factory
+A/F-voltage transforms read +8.00 % lean of command on bank 1 and +6.34 % on
+bank 2.
 
-**Other results from the same drive.** AF sensor banks balanced: B1 vs B2
-slope 0.9978, offset 0.012 V, r² 0.9885, n=1206. VVT tracking good on both
-banks: measured vs commanded slope 0.981 / 0.978, r² ≈ 0.95, offsets
--0.36 / -0.46°, bank 2 marginally worse. `0x1209` is `0.2078 × 0x1208`
-(r² 0.949) — the same quantity at a different scale, not an independent
-signal, which weakens it further as a BFS provider.
+Those two numbers are a screening result, **not evidence that the tune is
+lean**. There are only 20 cells, some rpm bands hold 1-4 observations, the
+Mode-01/DID acquisition separation above is large during a changing pull, and
+the instrument/method does not match the existing delivery-error noise floor.
+The automatic tuning digest's `with_afr_pair: 0` / `delivery: null` is the
+opposite kind of problem: a false empty caused by the hybrid path lacking a
+semantic `fueling_active` provider and then looking for the uncaptured Mode-01
+wideband PID. The data are present; the current digest cannot express the
+hybrid pairing safely.
 
-**Broadcast decode coverage.** 29 distinct CAN IDs, 2.39 M frames at ~90 Hz.
+**Other results from the same drive.** The AF sensor banks track closely: B1
+vs B2 slope 0.9978, offset 0.012 V, r² 0.9885, n=1206. The sanctioned
+comparison's scale verdict is nevertheless `unresolved` (1.85 % sub-window
+drift), so this capture does not establish exact 1:1 bank balance. Measured VVT
+also follows command overall (digest n=1202, correlation 0.9733, mean error
++0.65°), but the command-to-measured fit is `drifting` and the worst transient
+error is 30°; the interleaved cadence cannot validate transient cam tracking.
+
+`0x1209` remains only a Base Fuel Schedule candidate. The sanctioned
+full-session `0x1208` -> `0x1209` comparison gives r² 0.820, slope 0.2149, and
+18.49 % scale drift (`drifting`). A more favorable steady-state correlation
+does not make it the same quantity or a scaled injector-PW alias.
+
+**Broadcast decode coverage.** 29 distinct CAN IDs and 2.39 M frames at
+~1556 frames/s aggregate; the highest-rate individual IDs run at ~90 Hz.
 Only four are bound: `0x6F7` (wheel speeds A/B/C), `0x1F9` (`ECM_RPM`), `0x23D`
 (pedal/throttle volts), `0x551` (coolant). The unbound high-rate IDs — `0x2`,
 `0x2DE`, `0x2A5`, `0x2D1`, `0x231`, `0x233`, `0x23E`, `0x794`, and the 46 Hz
 group `0x280`/`0x284`/`0x285`/`0x29E`/`0x215`/`0x216`/`0x2A0` — now have 26
-minutes of simultaneous Mode 01 engineering units to be identified against.
+minutes of coarsely overlapping Mode 01 engineering units to be identified
+against.
 That is a binding opportunity, not a set of bindings: see AGENTS.md on the six
 retracted findings before correlating anything.
 
@@ -387,15 +414,26 @@ retracted findings before correlating anything.
    expired, so Mode 01 was starved to exactly zero rather than degrading. On
    *this* drive the exit failed transiently 11 times and recovered every time.
 2. *Fixed.* 80 % of the drive's `FUEL_USED_L` and `CO2_KG` were `inf`, because
-   `λ = 0` reached `maf / (14.7·λ)` and `inf` passes `notna()`, so the
-   cumulative integrators carried it to the end of the session. Guarded at
-   both the λ site and the integrator.
+   PID 0x44's zero sentinel reached the AFR division as if it were a measured
+   ratio, and `inf` passes `notna()`, so the cumulative integrators carried it
+   to the end of the session. Guarded at both the ratio site and the
+   integrator.
 
 **Still open: the profile runs at a quarter of its stated rate.** Mode 01
-achieved 1.43-1.59 Hz and the DIDs 0.91 Hz, against a 4 Hz target; the median
-DID cycle is 1.07 s, not 0.25 s. There is also a one-off 36 s Mode 01 hole at
-capture start. Neither is the latch bug, and neither is diagnosed yet — treat
-`target_rate_hz: 4.0` in the profile as aspirational until it is.
+achieved 1.43-1.59 Hz and the DIDs 0.903-0.906 Hz, against a 4 Hz target; all
+16 selected channels persisted only 18.25 readings/s against the stated 64.
+Median DID intervals were ~1.05 s, p95 ~1.62 s, with ordinary worst gaps near
+5.95 s and one 8.21 s gap.
+
+The apparent 36 s Mode-01 startup hole is a logical-timestamp artifact:
+`acquired_at` puts the first Mode-01 response 0.22 s after arming. The real
+startup hole is Mode 22 — its first DID arrived 26.56 s after arming. That
+arrival is almost exactly the daemon's pre-capture default 60 s DID deadline
+measured from collector startup, strongly indicating that profile activation
+changes the interval without resetting the already-scheduled next window.
+Treat `target_rate_hz: 4.0` as aspirational, and do not use this profile for
+transient comparison, until both the startup schedule and steady-state rate
+shortfall are fixed and re-measured.
 
 ## Phase 5 — the seven unpinned DID scales
 
@@ -414,11 +452,13 @@ engineering value.
 | `0x1207` | `ECM_INTAKE_PRESSURE_1207` | As above; also establish how it differs from 0x1206. |
 | `0x1201` | `ECM_RPM_LOAD_CORRELATED_1201` | Against `obd:ENGINE_LOAD`, but **not** by gridding on load — it is BFS-derived. Grid on `rpm x MAF`. |
 
-The `tuning-hybrid-research` capture profile (Mode 01 at 4 Hz alongside
-Mode 22, using the confirmed `10 81` fast session exit) is the right tool for
-most of these, because they need a simultaneous Mode 01 reference. Its own
-`capacity_evidence` says to validate it on one short drive before trusting
-tuning conclusions from it — do that first, on this drive.
+The `tuning-hybrid-research` capture profile is useful for the steady-state
+cross-calibrations above because it alternates Mode 01 and Mode 22 through the
+confirmed `10 81` fast exit. The 2026-08-07 drive completed its required first
+validation and rejected the profile's 4 Hz capacity claim: use it only with
+persisted steady-state gates until the startup delay and ~1 Hz delivered DID
+rate are fixed and re-verified. It is not yet a transient or WOT comparison
+tool.
 
 ## What this cannot answer
 
