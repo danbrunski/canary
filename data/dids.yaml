@@ -204,14 +204,17 @@ dids:
           Cold-enrich consistent (cold 2.68 > warm 2.17 ≈ NT510 2.14).
       - session: _capture-tuning-hybrid-research-2026-08-07T170918
         method: fuel_mass_balance_vs_mode01_maf
-        constant: 916416.0
+        constant: 914943.0
         constant_unit: counts per gram of fuel per injection
         conditions: >
           Steady state only (|d rpm/dt| < 100 rpm/s and |d MAF/dt| < 5 g/s²)
-          AND closed loop (FUEL_STATUS == 2), n = 401 same-instant pairs,
-          625-3000 rpm, 0.0061-0.0337 g per injection. Outside steady state
-          r² falls to 0.79 and the fit is not a calibration; in open loop
-          PID 0x44 reports λ = 0 so fuel per injection is uncomputable.
+          AND closed loop (FUEL_STATUS == 2), n = 411 same-cell pairs on a 1 s
+          grid, 625-3000 rpm, 0.0061-0.0337 g per injection. AFR taken as
+          14.7/φ through this vehicle's verified phi convention for PID 0x44
+          (afr_calibration.yaml) — reading it as λ instead gives 916,416, a
+          −0.16 % difference here only because φ ≈ 1 in closed loop. Outside
+          steady state r² falls to 0.79 and the fit is not a calibration; a
+          PID 0x44 reading of 0 means "not available", not φ = 0.
         finding: >
           First capture to hold Mode 01 and Mode 22 simultaneously, so
           injector counts could be paired against MAF-derived fuel mass at

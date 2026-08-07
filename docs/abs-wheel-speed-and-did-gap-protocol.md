@@ -339,12 +339,17 @@ equivalence-ratio convention.
 
 | fit | n | slope (counts/g) | intercept | r² |
 |---|---|---|---|---|
-| all valid | 886 | 806,800 | 2113 | 0.762 |
-| closed loop | 778 | 800,900 | 2031 | 0.787 |
-| **steady state + closed loop** | **401** | **914,941** | **34** | **0.962** |
-| steady state, zero-intercept | 401 | 916,416 | — | 0.962 |
+| **steady state + closed loop** | **411** | **908,424** | **152** | **0.962** |
+| steady state, zero-intercept | 411 | 914,943 | — | 0.962 |
 
-The intercept is 34 counts, 0.23 % of mean, and forcing it to zero costs
+An earlier pass of this table read PID 0x44 as λ rather than φ and reported
+916,416. The correction is only −0.16 % because the steady-state closed-loop
+set sits at φ ≈ 1.0, where the two conventions coincide — which is exactly
+why a reciprocal error of this kind survives every sanity check made at idle.
+Do not read that small delta as evidence the convention does not matter: on
+the enrichment samples below it is the difference between 12.6 and 18.3 AFR.
+
+The intercept is 152 counts, ~1 % of mean, and forcing it to zero costs
 nothing. The ratio PW/(g per injection) is flat to ±1.3 % across a 5.5x range
 of fuel quantity (0.0061-0.0337 g), where a ~1 ms dead time would have roughly
 doubled the low-fuel bin. **So the register excludes injector dead time**; any
@@ -379,6 +384,41 @@ opposite kind of problem: a false empty caused by the hybrid path lacking a
 semantic `fueling_active` provider and then looking for the uncaptured Mode-01
 wideband PID. The data are present; the current digest cannot express the
 hybrid pairing safely.
+
+**The acquisition-skew objection is testable, and it fails.** Skew inflating
+the lean reading requires the command to be *moving* while the two streams are
+sampled apart — so the bias must shrink once the pull settles, and must
+vanish on samples where the command is static. Neither happens. Selecting
+enrichment as commanded AFR < 13.5 (31 samples, 11 runs) and bucketing by
+seconds into a sustained run:
+
+| into the run | n | commanded | measured | delivery error |
+|---|---|---|---|---|
+| onset | 11 | 12.63 | 13.34 | +5.61 % |
+| 1 s in | 3 | 12.63 | 13.07 | +5.46 % |
+| 2-3 s in | 8 | 12.63 | 13.24 | +7.53 % |
+| >3 s in | 9 | 12.22 | 12.87 | +6.53 % |
+
+Flat, not decaying. And on the 14 enrichment samples where commanded AFR is
+essentially static (|d cmd/dt| < 0.2 AFR/s, so the 0.341 s median skew aliases
+only ~0.6 %), the error is **+6.28 %** (p25 +4.6, p75 +7.6). For scale, the
+median enrichment sample moves at 0.23 AFR/s — 0.6 % of skew error — and only
+the p90 sample at 2.09 AFR/s could alias the full ~5.6 %.
+
+The strongest internal control is the closed-loop figure from the same
+voltage transform on the same drive: **+0.14 % over 802 samples**, with bank 2
+matching bank 1 to +0.00 % over 946. So the measurement chain is not biased at
+stoich, and the enrichment readings sit inside the tabulated transfer range
+(≈1.4-1.5 V), not extrapolated past it.
+
+This does not make 14 samples a tune verdict. It does retire "it is probably
+the skew" as the leading explanation, and moves the question to *why*: a fuel
+supply limited at high flow (the recorded 48-vs-51 psi offset would grow
+exactly this way) versus MAF under-reading at high airflow. **This capture
+cannot separate those two**, and they call for opposite fixes. Adding
+`obd:INTAKE_PRESSURE` to the hybrid profile would: a speed-density cross-check
+against MAF at high load discriminates them directly. Remember the ~80 kPa
+operating altitude in any such calculation.
 
 **Other results from the same drive.** The AF sensor banks track closely: B1
 vs B2 slope 0.9978, offset 0.012 V, r² 0.9885, n=1206. The sanctioned
