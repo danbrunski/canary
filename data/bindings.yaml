@@ -1034,8 +1034,23 @@ signals:
 
       Combined with the 2026-08-07 in-vehicle probe finding no module
       answering Mode 22 at 0x7E1-0x7E7 or 0x740-0x77F (only the ECM at
-      0x7E0/0x7E8), per-corner wheel speed is not reachable on this vehicle
-      by any access path currently available.
+      0x7E0/0x7E8), per-corner wheel speed is not present on the CAN pair
+      CANary taps.
+
+      It DOES exist and is readable — just not from here. Same session, the
+      operator had a Z1 scan tool on an OBD-II Y-cable alongside the Pi,
+      displaying live per-wheel speeds and confirming they track when the
+      truck is rolled. A 25 s sniff during that showed 30 ids, all already
+      known, and ZERO new frames — while the daemon's own 0x7DF requests
+      (6.84 Hz) and 0x7E8 responses (6.72 Hz) were plainly visible, so the
+      sniff was healthy and diagnostic traffic on this pair is observable.
+
+      By elimination: the Z1 is not using CAN pins 6/14 at all. The ABS sits
+      on K-line (pin 7, Nissan CONSULT) or a second CAN pair on other
+      connector pins, and CANary is wired only to 6/14. Reaching per-wheel
+      speed is therefore a wiring/transport problem, not a protocol dead end
+      — and the earlier phrasing here ("not reachable by any access path")
+      was scoped too broadly on the strength of a one-bus test.
 
       Worth noting from the same sweep: 0x284[0:2], 0x285[0:2] and 0x590[1:3]
       carry vehicle speed at ~153 counts per km/h against 0x6F7's ~14.5, so
