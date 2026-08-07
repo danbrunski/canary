@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 import pandas as pd
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 log = logging.getLogger(__name__)
 
@@ -46,11 +46,47 @@ class _Strict(BaseModel):
 
 
 class Evidence(_Strict):
-    """One piece of evidence backing a DID identification."""
+    """One piece of evidence backing a DID identification.
+
+    Evidence that establishes a *number* must also say when the number holds.
+    A calibration measured at steady state does not apply during a transient,
+    and one measured in closed loop does not apply under enrichment — quoting
+    a constant outside its conditions is the shape of every retracted finding
+    in this project's history (AGENTS.md, "never compare aggregates"). So
+    ``constant`` cannot be recorded without ``conditions``: the validator
+    below makes the unsafe entry unwritable rather than merely discouraged.
+    """
 
     session: str
     method: str
     finding: str
+    #: The quantitative result, when this evidence establishes one.
+    constant: float | None = None
+    #: Units of ``constant``, e.g. ``"counts per gram of fuel"``.
+    constant_unit: str | None = None
+    #: The operating envelope the constant was measured in, and outside which
+    #: it must not be quoted.
+    conditions: str | None = None
+
+    @model_validator(mode="after")
+    def _constant_requires_conditions_and_unit(self) -> Evidence:
+        if self.constant is None:
+            return self
+        missing = [
+            name
+            for name, value in (
+                ("conditions", self.conditions),
+                ("constant_unit", self.constant_unit),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(
+                f"evidence carrying `constant` must also set {' and '.join(missing)} "
+                "— a bare number invites being quoted against data it was never "
+                "measured on"
+            )
+        return self
 
 
 class DidAccess(_Strict):

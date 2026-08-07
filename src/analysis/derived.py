@@ -240,7 +240,12 @@ def _cumulative_time_integral(wide: pd.DataFrame, values: pd.Series) -> pd.Serie
     before the first valid sample are 0.
     """
     ts = pd.to_datetime(wide[TIMESTAMP_COLUMN], utc=True)
-    valid = values.notna() & ts.notna()
+    # `isfinite`, not `notna`: ±inf passes `notna`, and one infinite sample in
+    # a *cumulative* channel is not one bad row — the running total never
+    # comes back. A single `inf` fuel rate took out 80 % of a 26-minute
+    # drive's FUEL_USED_L and CO2_KG on 2026-08-07. Callers should not have to
+    # remember to sanitise; the integrator is the layer that can guarantee it.
+    valid = np.isfinite(values) & ts.notna()
     out = pd.Series(np.nan, index=wide.index, dtype=float)
     if not valid.any():
         return out.fillna(0.0)
@@ -279,8 +284,20 @@ def _instant_fuel_g_s(
         lam = _series(
             wide, "obd:O2_WR_LAMBDA_S1", "obd:O2_WR_LAMBDA_S2", "obd:COMMANDED_EQUIV_RATIO"
         )
-        afr_actual = fuel.afr_stoich * (lam if lam is not None else 1.0)
-        return maf / afr_actual
+        if lam is None:
+            return maf / fuel.afr_stoich
+        # A reported λ of 0 is the ECM saying "not available", not a
+        # measurement: PID 0x44 reads 0 through open loop on this ECM (227 of
+        # 385 open-loop samples on the 2026-08-07 hybrid drive). Dividing by
+        # it yielded `inf` fuel rate, and because `inf` is not NaN the
+        # cumulative integrators carried it to the end of the session — 80 %
+        # of that drive's FUEL_USED_L and CO2_KG.
+        #
+        # NaN, not a fallback to stoich: λ is missing precisely during
+        # open-loop enrichment, which is the one condition where assuming
+        # λ=1.0 is guaranteed wrong. An absent sample is honest; a
+        # stoich-shaped guess is a fabricated measurement.
+        return maf / (fuel.afr_stoich * lam.where(lam > 0))
 
     rpm = _series(wide, "obd:RPM", "decoded:ECM_RPM")
     mapp = _series(wide, "obd:INTAKE_PRESSURE", "decoded:MAP")

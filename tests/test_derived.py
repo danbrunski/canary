@@ -36,6 +36,36 @@ def test_fuel_rate_from_maf_and_economy() -> None:
     assert out["derived:INSTANT_ECONOMY_MPG"].iloc[0] > 0
 
 
+def test_a_reported_lambda_of_zero_is_absent_not_infinite() -> None:
+    """PID 0x44 reads 0 through open loop on this ECM — "not available".
+
+    Dividing by it produced `inf` fuel rate on the 2026-08-07 hybrid drive.
+    The sample must go missing, not infinite, and not silently be recomputed
+    at stoich: λ is unavailable exactly during open-loop enrichment, where
+    assuming λ=1.0 is guaranteed wrong.
+    """
+    df = _frame(3, **{"obd:MAF": [7.35] * 3, "obd:COMMANDED_EQUIV_RATIO": [1.0, 0.0, 1.0]})
+    out = compute_derived_channels(df, GASOLINE)
+    rate = out["derived:FUEL_RATE_LPH"]
+    assert np.isfinite(rate.iloc[0]) and rate.iloc[0] == pytest.approx(2.4161, rel=1e-3)
+    assert pd.isna(rate.iloc[1])
+    assert np.isfinite(rate.iloc[2])
+
+
+def test_one_infinite_sample_cannot_poison_a_cumulative_channel() -> None:
+    """`inf` passes `notna`, so it used to latch the running total forever.
+
+    80 % of a 26-minute drive's FUEL_USED_L was `inf` from a single bad
+    sample. The guard belongs in the integrator, not in every caller.
+    """
+    df = _frame(4, **{"obd:MAF": [7.35] * 4, "obd:SPEED": [100.0] * 4})
+    df.loc[1, "obd:MAF"] = np.inf
+    out = compute_derived_channels(df, GASOLINE)
+    used = out["derived:FUEL_USED_L"]
+    assert np.isfinite(used).all(), "an infinite sample escaped into the integral"
+    assert used.iloc[-1] > 0
+
+
 def test_engine_fuel_rate_pid_preferred_over_maf() -> None:
     df = _frame(2, **{"obd:ENGINE_FUEL_RATE": [6.0, 6.0], "obd:MAF": [50.0, 50.0]})
     out = compute_derived_channels(df, GASOLINE)

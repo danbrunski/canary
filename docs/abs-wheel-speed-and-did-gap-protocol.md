@@ -308,6 +308,95 @@ divided a small yaw response by a near-zero speed coefficient, inflating noise
 into plausible half-track values. Full-range testing showed that the 0x284
 and 0x285 slices are not speeds. Do not re-propose them.
 
+### The hybrid drive, 2026-08-07 17:09-17:35 UTC (Phase 5, first results)
+
+`_capture-tuning-hybrid-research-2026-08-07T170918` — 26 minutes, 625-5588 rpm,
+to 122 km/h. This is the "validate on one short drive" run the profile's own
+`capacity_evidence` asks for. It validates, with caveats.
+
+**The profile does deliver simultaneity.** 1024 one-second cells held all seven
+of `did:ECM_INJECTOR_PW_B1`, `obd:MAF`, `obd:RPM`, `obd:COMMANDED_EQUIV_RATIO`,
+`obd:FUEL_STATUS`, `did:ECM_BASE_FUEL_SCHEDULE_CANDIDATE` and `obd:ENGINE_LOAD`
+with **zero staleness**. Ground truth passes: `decoded:ECM_RPM` vs `obd:RPM` is
+slope 0.9988, r² 0.9955, n=1333, verdict `stable`.
+
+**But Mode 01 and Mode 22 are interleaved, never concurrent.** They are mutually
+exclusive on this ECM, so "simultaneous" means "within the same 1 s cell", not
+"at the same instant". `did:ECM_RPM` vs `obd:RPM` reads slope 0.9939 / verdict
+`drifting` purely from that offset. **Restrict to steady state before drawing a
+quantitative conclusion** — this is not optional, it is the difference between
+r² 0.79 and r² 0.96 on the injector fit below.
+
+**`0x1208` is an effective injection quantity, not a raw pulse width.** Pairing
+it against fuel per injection, `(MAF / (14.7·λ)) / (rpm/120 · 6)`:
+
+| fit | n | slope (counts/g) | intercept | r² |
+|---|---|---|---|---|
+| all valid | 886 | 806,800 | 2113 | 0.762 |
+| closed loop | 778 | 800,900 | 2031 | 0.787 |
+| **steady state + closed loop** | **401** | **914,941** | **34** | **0.962** |
+| steady state, zero-intercept | 401 | 916,416 | — | 0.962 |
+
+The intercept is 34 counts, 0.23 % of mean, and forcing it to zero costs
+nothing. The ratio PW/(g per injection) is flat to ±1.3 % across a 5.5x range
+of fuel quantity (0.0061-0.0337 g), where a ~1 ms dead time would have roughly
+doubled the low-fuel bin. **So the register excludes injector dead time**; any
+fuel model built on it must add dead time separately or it will under-fuel at
+short pulse widths.
+
+Cross-check that raises confidence in both numbers: at the NT510-derived
+`4e-4 ms/count`, 916,416 counts/g implies an injector flow of **~220 cc/min**,
+which is right for a VQ40DE. Two independent methods, one plausible injector.
+Note what this does *not* establish — fuel per injection was derived from the
+same MAF the ECM uses, so this pins the register scale, not the injector's
+physical flow rate.
+
+**Target AFR: captured in closed loop, absent where tuning needs it.** This is
+the first profile to produce commanded AFR at all (`tuning-did` disables Mode
+01, which is what `project_bottleneck_is_experiment_design` recorded). PID 0x44
+gives 1184 closed-loop samples, λ 0.871-1.164 (AFR 12.80-17.11), only 2 zeros.
+But in open loop **227 of 385 samples read λ = 0** — the ECM's "not available"
+— and the non-zero remainder sits at λ≈1.000, which is not a credible
+enrichment command. **Open-loop/WOT target AFR is still not obtainable from
+this ECM over Mode 01**, so the WOT fuel question is not unblocked by this
+profile. That is an ECM limitation, not a capture-design one.
+
+**Other results from the same drive.** AF sensor banks balanced: B1 vs B2
+slope 0.9978, offset 0.012 V, r² 0.9885, n=1206. VVT tracking good on both
+banks: measured vs commanded slope 0.981 / 0.978, r² ≈ 0.95, offsets
+-0.36 / -0.46°, bank 2 marginally worse. `0x1209` is `0.2078 × 0x1208`
+(r² 0.949) — the same quantity at a different scale, not an independent
+signal, which weakens it further as a BFS provider.
+
+**Broadcast decode coverage.** 29 distinct CAN IDs, 2.39 M frames at ~90 Hz.
+Only four are bound: `0x6F7` (wheel speeds A/B/C), `0x1F9` (`ECM_RPM`), `0x23D`
+(pedal/throttle volts), `0x551` (coolant). The unbound high-rate IDs — `0x2`,
+`0x2DE`, `0x2A5`, `0x2D1`, `0x231`, `0x233`, `0x23E`, `0x794`, and the 46 Hz
+group `0x280`/`0x284`/`0x285`/`0x29E`/`0x215`/`0x216`/`0x2A0` — now have 26
+minutes of simultaneous Mode 01 engineering units to be identified against.
+That is a binding opportunity, not a set of bindings: see AGENTS.md on the six
+retracted findings before correlating anything.
+
+**Two defects this drive exposed.**
+
+1. *Fixed (`e0704c0`).* The first hybrid attempt that afternoon
+   (`...T164035`) produced 76 s of data and then went DID-only. One `0x78
+   responsePending` on a `10 81` fast exit was read as a refusal and latched
+   the fallback off permanently; with `did_interval_seconds` (0.25 s) below
+   `lapse_seconds` (5 s), the next window was always overdue when the lapse
+   expired, so Mode 01 was starved to exactly zero rather than degrading. On
+   *this* drive the exit failed transiently 11 times and recovered every time.
+2. *Fixed.* 80 % of the drive's `FUEL_USED_L` and `CO2_KG` were `inf`, because
+   `λ = 0` reached `maf / (14.7·λ)` and `inf` passes `notna()`, so the
+   cumulative integrators carried it to the end of the session. Guarded at
+   both the λ site and the integrator.
+
+**Still open: the profile runs at a quarter of its stated rate.** Mode 01
+achieved 1.43-1.59 Hz and the DIDs 0.91 Hz, against a 4 Hz target; the median
+DID cycle is 1.07 s, not 0.25 s. There is also a one-off 36 s Mode 01 hole at
+capture start. Neither is the latch bug, and neither is diagnosed yet — treat
+`target_rate_hz: 4.0` in the profile as aspirational until it is.
+
 ## Phase 5 — the seven unpinned DID scales
 
 Separate goal, same drive. These decode to raw counts today because
@@ -317,7 +406,7 @@ engineering value.
 
 | DID | name | what would pin it |
 |---|---|---|
-| `0x1208` | `ECM_INJECTOR_PW_B1` | **Highest value.** At steady state fuel mass flow = `MAF / AFR`, and also `PW x injectors x rpm/2 x flow_rate`. Simultaneous Mode 01 `MAF` + measured AFR pins the ms scale. Needs the `tuning-hybrid-research` profile (Mode 01 + Mode 22 together). |
+| `0x1208` | `ECM_INJECTOR_PW_B1` | **Done 2026-08-07** — see the hybrid-drive results above. Pinned as **916,416 counts per gram of fuel per injection** (steady-state closed-loop only), and shown to carry no dead time. The `ms` scale is still open, because ms/count and counts/gram only convert through an injector flow rate nobody has measured directly. |
 | `0x1209` | `ECM_BASE_FUEL_SCHEDULE_CANDIDATE` | The `fuel-did-research` profile exists for exactly this. Still a candidate, not a provider. |
 | `0x1110` | `ECM_INTAKE_VVT_SOLENOID_DUTY` | Physically bounded 0-100%. Look for saturation at both rails across a full cam sweep; the rails pin the scale without a reference. |
 | `0x1139` | `..._DUTY_CANDIDATE_B2` | Same, plus agreement with 0x1110 on a bank-symmetric manoeuvre. |

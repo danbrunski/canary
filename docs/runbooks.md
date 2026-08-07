@@ -75,6 +75,21 @@ CANary is strictly read-only — use a dedicated scan tool to clear codes.
   `tuning-hybrid-research` uses the confirmed `10 81` fast exit to alternate
   4 Hz Mode 01 windows with Mode 22. `10 C0` remains mutually exclusive with
   Mode 01 while the session itself is open.
+- **The hybrid profile alternates; it does not sample concurrently.** Mode 01
+  and Mode 22 readings land in the same second, not at the same instant.
+  Restrict to steady state before drawing any quantitative conclusion from a
+  Mode 01 x Mode 22 pairing — on the 2026-08-07 drive that was the difference
+  between r² 0.79 and r² 0.96. It also runs well under its stated
+  `target_rate_hz` (~1 Hz achieved against 4 Hz); see
+  `docs/abs-wheel-speed-and-did-gap-protocol.md`.
+- **A degraded fast exit self-heals — watch, don't restart.** `/status`
+  `did_profile` reports `fast_exit_retry_in_seconds` and `last_exit_nrc_name`.
+  Non-zero means Mode 01 is running at the slower lapse-path rate and the exit
+  is being re-probed; only a genuine `serviceNotSupported`/
+  `subFunctionNotSupported`, twice in a row, disables it, and even that
+  expires. Before `e0704c0` any single failure — including a `0x78
+  responsePending`, which is not a refusal at all — disabled it permanently
+  and starved Mode 01 to zero for the rest of the capture.
 - **Do not generalize the ECM's CAN diagnostic protocol to other modules.** A
   2026-08-07 sweep found no Mode-22 response at guessed CAN request IDs
   `0x7E1`-`0x7E7` or `0x740`-`0x77F`; that proves only that those requests did

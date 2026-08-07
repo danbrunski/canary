@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from src.decode.dids import (
     DidEntry,
+    Evidence,
     apply_scaling,
     decode_did_raw,
     is_plausible,
@@ -124,3 +125,35 @@ def test_bfs_candidate_is_visible_but_cannot_be_mistaken_for_a_provider() -> Non
     assert candidate.confidence == "hypothesized"
     assert candidate.scale is None
     assert candidate.unit == "raw"
+
+
+# --- quantitative evidence must carry its operating envelope ---
+
+
+def test_a_measured_constant_cannot_be_recorded_without_its_conditions() -> None:
+    """A bare number invites being quoted against data it was never measured on.
+
+    The 0x1208 fuel constant holds at steady state in closed loop only; outside
+    that envelope the same fit is not a calibration. Recording the number
+    without the envelope is the shape of every retracted finding in this
+    project, so the schema refuses it rather than a docstring discouraging it.
+    """
+    with pytest.raises(ValidationError, match="conditions"):
+        Evidence(session="s", method="m", finding="f", constant=916416.0, constant_unit="counts/g")
+    with pytest.raises(ValidationError, match="constant_unit"):
+        Evidence(session="s", method="m", finding="f", constant=916416.0, conditions="steady state")
+
+
+def test_qualitative_evidence_still_needs_no_conditions() -> None:
+    """Most evidence is an identification, not a measurement — unchanged."""
+    assert Evidence(session="s", method="m", finding="f").constant is None
+
+
+def test_the_shipped_catalog_states_conditions_for_every_constant() -> None:
+    """Whole-file guarantee, not just the entry that prompted the rule."""
+    did_map = load_did_map(DIDS_PATH)
+    for entry in did_map.dids:
+        for evidence in entry.evidence:
+            if evidence.constant is not None:
+                assert evidence.conditions, f"0x{entry.did:04X} constant without conditions"
+                assert evidence.constant_unit, f"0x{entry.did:04X} constant without unit"

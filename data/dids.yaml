@@ -202,10 +202,38 @@ dids:
           0x1208 (2-byte) raw 4962 / 10384 / 23487 / 24416 over the same,
           broadcast-RPM-timed windows; LSQ scale ≈ 4e-4 ms, err 0.28.
           Cold-enrich consistent (cold 2.68 > warm 2.17 ≈ NT510 2.14).
+      - session: _capture-tuning-hybrid-research-2026-08-07T170918
+        method: fuel_mass_balance_vs_mode01_maf
+        constant: 916416.0
+        constant_unit: counts per gram of fuel per injection
+        conditions: >
+          Steady state only (|d rpm/dt| < 100 rpm/s and |d MAF/dt| < 5 g/s²)
+          AND closed loop (FUEL_STATUS == 2), n = 401 same-instant pairs,
+          625-3000 rpm, 0.0061-0.0337 g per injection. Outside steady state
+          r² falls to 0.79 and the fit is not a calibration; in open loop
+          PID 0x44 reports λ = 0 so fuel per injection is uncomputable.
+        finding: >
+          First capture to hold Mode 01 and Mode 22 simultaneously, so
+          injector counts could be paired against MAF-derived fuel mass at
+          the same instant. Fuel per injection = (MAF / (14.7·λ)) /
+          (rpm/120 · 6 cyl). Regression gives 916416 counts/g, r² = 0.962.
+          The zero-intercept fit is indistinguishable (r² 0.9622 both) and
+          the intercept is 34 counts = 0.23 % of mean — so this register
+          carries NO injector dead time. Ratio PW/(g per injection) is flat
+          to ±1.3 % across a 5.5x range of fuel quantity, where a ~1 ms dead
+          time would have roughly doubled the low-fuel bin. Cross-check: at
+          the NT510 scale of 4e-4 ms/count this implies an injector flow of
+          ~220 cc/min, which is right for a VQ40DE — two independent methods
+          agreeing, so both the scale and this constant gain support.
     notes: >
-      Phase 4.E.4 fuel-surface enabler. DID identification firm; exact
-      scale constant outstanding (the blip peaks were eyeballed). 0x1209
-      is a correlated fuel/air sibling, not injector PW.
+      Phase 4.E.4 fuel-surface enabler. DID identification firm. The register
+      is an *effective* (dead-time-excluded) injection quantity: any fuel
+      model built on it must add injector dead time separately, or it will
+      under-fuel at short pulse widths. Scale left null because the two
+      available routes measure different things — NT510 gives ms/count,
+      the 2026-08-07 mass balance gives counts/gram — and converting between
+      them requires the injector flow rate, which is not independently
+      measured. 0x1209 is a correlated fuel/air sibling, not injector PW.
 
   - did: 0x1209
     name: ECM_BASE_FUEL_SCHEDULE_CANDIDATE
