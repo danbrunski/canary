@@ -411,14 +411,33 @@ matching bank 1 to +0.00 % over 946. So the measurement chain is not biased at
 stoich, and the enrichment readings sit inside the tabulated transfer range
 (≈1.4-1.5 V), not extrapolated past it.
 
-This does not make 14 samples a tune verdict. It does retire "it is probably
-the skew" as the leading explanation, and moves the question to *why*: a fuel
+**But it is not independent evidence, and it must not be read as confirming
+the campaign's "runs lean" premise.** The measured AFR here comes from
+`afr_calibration.yaml`'s `voltage_transfer`, whose provenance is
+`synchronous UpRev K-line voltage/AFR cross-reference` — it was fitted against
+UpRev's own AFR column, so it *reproduces* UpRev's conversion rather than
+checking it. That conversion is exactly what is in dispute: the same physical
+sensor read through the ECM's own λ (PID 0x24) gave +0.72 % band-averaged where
+UpRev's gave +3.93 %, a consistent −3.84 % bias rather than scatter. So
++6.28 % belongs to the UpRev family of numbers, not to a third opinion, and the
+standing instruction not to act on either number still holds. For scale, the
+same-tune null run puts the per-cell delivery-error floor at sd 1.49 %, range
+−2.38…+1.38 %, and these factory A/F sensors are ±5 %-ish at WOT.
+
+What this drive *did* do is capture the A/F voltage DIDs (`0x1225`/`0x1226`)
+on the same samples as commanded AFR — two of the three paths the resolution
+needs. **The missing one is PID 0x24**, which this profile did not select even
+though the ECM answers it 91 % of the time (PID 0x25 never answers). It has now
+been added to `tuning-hybrid-research`, so the next drive puts the ECM's λ, the
+A/F sensor voltage, and the commanded target on one clock. That, not another
+fuel edit, is the next step.
+
+Only once the instrument disagreement is settled does the *why* matter: fuel
 supply limited at high flow (the recorded 48-vs-51 psi offset would grow
 exactly this way) versus MAF under-reading at high airflow. **This capture
-cannot separate those two**, and they call for opposite fixes. Adding
-`obd:INTAKE_PRESSURE` to the hybrid profile would: a speed-density cross-check
-against MAF at high load discriminates them directly. Remember the ~80 kPa
-operating altitude in any such calculation.
+cannot separate those two** and they call for opposite fixes; adding
+`obd:INTAKE_PRESSURE` would, via a speed-density cross-check against MAF at
+high load. Remember the ~80 kPa operating altitude in any such calculation.
 
 **Other results from the same drive.** The AF sensor banks track closely: B1
 vs B2 slope 0.9978, offset 0.012 V, r² 0.9885, n=1206. The sanctioned

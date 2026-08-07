@@ -120,6 +120,16 @@ profiles:
     INTAKE_TEMP: 1.0
     COMMANDED_EQUIV_RATIO: 1.0
     FUEL_STATUS: 1.0
+    # The ECM's own measured lambda, alongside the A/F sensor *voltage* DIDs
+    # below. These are two readings of one physical sensor by two different
+    # conversions, and they disagree by ~3.8 % — the disagreement the whole
+    # "engine runs lean of command" question rests on, because
+    # afr_calibration.yaml's voltage transfer was fitted against UpRev's AFR
+    # column and therefore reproduces UpRev's conversion rather than checking
+    # it. Capturing both on the same samples is the resolution the campaign
+    # has been waiting for. S2 is omitted: PID 0x25 never answers on this ECM
+    # (0/3 on 2026-08-07), while 0x24 answers 91 % of the time.
+    O2_WR_LAMBDA_S1: 1.0
   mode22:
   - ECM_RPM
   - ECM_AF_SENSOR_V_B1
@@ -137,8 +147,8 @@ profiles:
   target_rate_hz: 4.0
   did_continuous: false
   bus_budget_override: 90.0
-  expected_total_demand_hz: 64.0
-  capacity_evidence: '2026-08-04 bench: 10 C0 entry about 1 ms and 10 81 restored Mode 01 on the next request; 16 selected channels x 4 Hz = 64 channel reads/s. Validate one short drive before using for tuning conclusions.'
+  expected_total_demand_hz: 68.0
+  capacity_evidence: '2026-08-07 drive (25 min, _capture-tuning-hybrid-research-2026-08-07T170918): the fast exit works and Mode 01 survives a full drive, but delivered rate is far below target - Mode 01 1.46 Hz, DIDs 0.90 Hz, 18.25 aggregate channel reads/s against the 68 expected from 17 selected channels x 4 Hz. Treat target_rate_hz as aspirational and check achieved_hz_capture before trusting any rate-dependent conclusion. Mode 01 and Mode 22 alternate rather than sample together (0.341 s median separation), so restrict to steady state for cross-mode pairings.'
   broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes:
