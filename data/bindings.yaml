@@ -1058,6 +1058,27 @@ signals:
       wanted. Unbound pending a check that the extra counts are real
       resolution and not just a larger number.
 
+      ROLL TEST, 2026-08-07 (engine idling, truck pushed slowly back and forth,
+      three episodes of 0.7-2.3 s). Bytes 0-1 read EXACTLY ZERO throughout,
+      0% nonzero, while bytes 2-3 and 4-5 both tracked the motion to a peak of
+      59 counts (3.69 km/h at 1/16) and stayed within 1 count of each other. A
+      Z1 scan tool showed ~2 km/h per wheel over the same rolls, consistent
+      after display rounding.
+
+      So bytes 0-1 have a low-speed cut-in: over a full 63-minute drive that
+      field correlates with vehicle speed at r = 0.99, yet it is dead below
+      ~4 km/h. Do not use bytes 0-1 as a speed source at walking pace — it
+      reports a confident zero, not a missing value. Bytes 2-3 and 4-5 have no
+      such floor.
+
+      Bytes 2-3 and 4-5 agreeing to 1 count here proves nothing about sides:
+      rolling straight turns every wheel at the same rate. The corner question
+      is settled separately above, from real cornering data.
+
+      Bytes 6-7 sat constant at 3 through every roll — consistent with the
+      earlier finding that the field never exceeds a small value all session.
+      It is a counter or status, not a speed.
+
       Scale is pinned at exactly 1/16 km/h per count. All three fields fit
       ~0.0627-0.0630 rather than 0.0625, a consistent +0.4%; Mode 01 PID
       0x0D is quantised to whole km/h, which is enough to explain it, but

@@ -73,16 +73,39 @@ CANary is strictly read-only — use a dedicated scan tool to clear codes.
 - **First-class live DID telemetry profile + dashboard switching:** pending
   (Task 6.15) — `10 C0` is mutually exclusive with Mode 01 so it needs
   explicit profile scheduling, not silent mixing.
-- **Non-ECM modules are unexplored.** Every diagnostic exchange in every frame
-  log here is `0x7E0`/`0x7E8` — the engine. `--header 7E2` (ABS/VDC) has never
-  been *requested*, so its silence is untested rather than established. The
-  ECM's `10 C0` gate is an ECM quirk; try the default session first on any
-  other module, and if it answers there is no Mode 01 blackout.
+- **Only the ECM answers diagnostics on this bus.** Probed 2026-08-07: Mode 22
+  at `0x7E1`-`0x7E7` and `0x740`-`0x77F` drew no reply, with the probe proven
+  live first. The ABS publishes per-wheel data *passively* instead — a Z1 scan
+  tool showing live wheel speeds transmitted nothing at all.
 - **Per-wheel speeds + the seven unpinned DID scales:**
-  `docs/abs-wheel-speed-and-did-gap-protocol.md` — full capture protocol,
-  including the steady-radius left/right circles that identify which signal is
-  which corner. Note `0x6F7` A/B/C are *not* per-corner (proved 2026-08-07);
-  do not difference them to infer slip.
+  `docs/abs-wheel-speed-and-did-gap-protocol.md`. Read the Results section
+  first; the original plan's Phases 1-3 are superseded. `0x6F7` A/B/C are
+  *not* per-corner — do not difference them to infer slip — and `0x6F7` bytes
+  0-1 read a confident zero below ~4 km/h.
+
+## Run another scan tool alongside canary
+
+Expect canary to lose Mode 01 entirely. Measured 2026-08-07 with a Z1 on an
+OBD-II Y-cable: while it polled generic OBD-II, `0x7E8` responses to canary
+went to **zero** and the daemon backed off from 6.84 to 2.88 Hz. This ECM
+serves one tester session and the second arrival wins. Recovery is automatic
+once the other tool stops.
+
+- Broadcast decode is unaffected, so `decoded:*` channels keep flowing.
+- `vehicle_state` used to misreport this as `engine_off` — "plugged in, key
+  out" — with the engine running. Fixed 2026-08-07; it now falls back to the
+  broadcast rpm whenever the OBD rpm is stale, not merely absent.
+- Tell the two apart by ISO-TP padding on `0x7DF`: canary pads `0x00`, the Z1
+  pads `0xFF`.
+
+## Probe for a module at an unknown address
+
+`POST /control/obd_request` **cannot distinguish a negative response from
+silence** — both return `responded: false` with a null payload. Verified by
+pointing it at the ECM with DID `0x1101`, which is known to answer
+`7F 22 80`. Until that is fixed, pair every probe with
+`POST /control/can_activity` and look for the module's response id on the
+wire; a bare `responded: false` is not evidence that nothing is there.
 
 ## Run a parked diagnostic / actuator test
 

@@ -1,8 +1,119 @@
 # Protocol: per-wheel speeds from the ABS module, and the unpinned DIDs
 
-Two capture goals that share a vehicle session. Written 2026-08-07; nothing
-here has been run yet, so treat every expectation below as a prediction to be
-checked, not a result.
+Two capture goals that share a vehicle session. Written 2026-08-07 and **run
+the same afternoon** — read "Results" first. Phase 1 returned a different
+answer than the plan assumed, and most of what follows is superseded.
+
+---
+
+## Results, 2026-08-07 (supersedes Phases 1-3 below)
+
+### The ABS does not answer diagnostics on our bus, and does not need to
+
+Probed `0x7E1`-`0x7E7` and `0x740`-`0x77F` with Mode 22 while sniffing raw CAN.
+Only `0x7E8` ever replied — the ECM. The probe was proven live first: Mode 01
+PID 0x0D at `0x7E0` answered, and the sniff caught the daemon's own `10 C0` /
+`10 81` session traffic, so the silence is real. One frame at `0x765`
+(`03 7F 22 11`, serviceNotSupported) appeared once and never reproduced across
+two further isolated attempts; treat it as unexplained, not as a module.
+
+**But the wheel speeds are on the bus already.** With a Z1 scan tool on an
+OBD-II Y-cable displaying live per-wheel speeds — confirmed updating as the
+truck was rolled — a 25 s sniff caught *zero* frames from it. The ABS
+live-data screen is reading passive broadcast traffic, not polling. So the
+data is in every session we have ever recorded, and this is a decode problem.
+
+The Z1 *is* on our CAN pair for generic OBD-II: on its OBDII menu it emits
+`020100ffffffffff` on `0x7DF`, distinguishable from our daemon by 0xFF padding
+where we pad 0x00. So both testers share pins 6/14, and the ABS screen simply
+transmits nothing.
+
+### Two testers cannot both poll this ECM
+
+While the Z1 polled generic OBD-II, `0x7E8` responses to canary fell to
+**zero** and the daemon's request rate backed off from 6.84 to 2.88 Hz. The
+ECM serves one tester session; the second arrival wins and canary silently
+loses all Mode 01. Recovery is automatic once the other tool stops.
+
+This produced a real defect, now fixed (`src/dashboard/status.py`):
+`vehicle_state` reported `engine_off` — "plugged in, key out" — with the
+engine idling at 781 rpm, because a 27 s stale OBD rpm of 750 suppressed the
+broadcast fallback. **If you run another scan tool alongside canary, expect
+Mode 01 to stop.** Broadcast decode is unaffected.
+
+### What `0x6F7` A/B/C actually are
+
+Rolling the truck slowly back and forth (three episodes, 0.7-2.3 s each) with
+the engine idling:
+
+| field | bytes | behaviour |
+|---|---|---|
+| A | 0-1 | **exactly 0 throughout**, 0% nonzero |
+| B | 2-3 | tracks the roll, peak 59 counts = 3.69 km/h |
+| C | 4-5 | tracks the roll, within 1 count of B |
+| D | 6-7 | constant at 3 — a counter or status, not a speed |
+
+The Z1 displayed ~2 km/h per wheel over the same rolls, consistent with B/C at
+3.69 km/h given display rounding and that it peaked briefly.
+
+A is the surprise: over a full 63-minute drive it correlates with speed at
+r = 0.99, yet it sits at exactly zero below ~4 km/h. **Whatever A is, it is
+unusable at walking pace** — relevant to anything downstream treating it as
+vehicle speed at low speed.
+
+B and C tracking to within 1 count is *expected* here and proves nothing about
+sides: rolling straight turns all four wheels at the same rate. The corner
+question was already settled from real driving (see below).
+
+### Per-corner speeds are still not identified
+
+`0x6F7` A/B/C are not FL/FR/RL. Over 703 cornering samples from real driving,
+regressing pairwise differences on GPS yaw rate fits a lateral separation of
+0.001-0.012 m (r = 0.07-0.14) against ~0.875 m for a real half-track, and the
+A-C offset is -0.44 km/h in left turns and -0.45 in right — a constant bias
+where opposite corners must flip sign. A full-lock roll would only have made
+this more dramatic; it would not have changed the verdict.
+
+Seventeen byte-aligned slices across `0x6F7`, `0x284`, `0x285`, `0x280`,
+`0x354`, `0x590` and `0x2D1` pass "zero at rest, linear in GPS speed, stable
+scale", and every one lands within 0.08-0.15 m of vehicle speed. All vehicle
+speed at differing resolutions.
+
+### The blind spots that remain — where to look next
+
+The sweeps above were byte-aligned and absolute. Neither covers:
+
+1. **Bit-packed fields.** ABS frames commonly pack four 12- or 14-bit wheel
+   speeds into 6-7 bytes; a byte-boundary sweep cannot see them. `0x284`,
+   `0x285`, `0x280`, `0x29E` and `0x2A0` all run 49 Hz with 8 bytes — the right
+   shape. A first bit-level pass over the roll window flagged `0x6F7`
+   dominantly, but a sliding bit window produces many overlapping views of the
+   same data and the hits were not deduplicated to aligned fields.
+2. **Delta encodings.** If a wheel speed is transmitted as a small signed
+   offset from vehicle speed, it sits near zero at *all* speeds and fails the
+   "proportional to GPS velocity" test by construction — the criterion would
+   reject exactly what we are hunting. `0x284`/`0x285` are nonzero at rest and
+   were filtered out on that basis, which is the shape a delta encoding has.
+3. Ids with <5000 frames (`0x004`, `0x342`, `0x512`, `0x682`) and fields wider
+   than 2 bytes.
+
+Both real gaps close on stored data with no vehicle time.
+
+### Tooling defect found
+
+`POST /control/obd_request` reports `responded: false` identically for a
+negative response and for silence — proven by pointing it at the ECM with DID
+`0x1101`, which is known to answer `7F 22 80`, and getting the same empty
+payload as a dead address. That is why Phase 1 had to fall back to sniffing
+raw CAN. Until fixed, **do not read a bare `responded: false` as "nothing is
+there"**; confirm with `POST /control/can_activity`.
+
+---
+
+## Original plan (2026-08-07, pre-run)
+
+Retained for the Phase 4/5 method and the DID work, which stand. Phases 1-3
+are superseded by the results above.
 
 **Motivation.** The operator's Titan-swap suspension moves each wheel out ~3 in
 (track ~1.60 m → ~1.75 m, +9.5%). In a corner the speed split across an axle is
