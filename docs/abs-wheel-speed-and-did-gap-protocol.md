@@ -1,14 +1,40 @@
 # Protocol: per-wheel speeds from the ABS module, and the unpinned DIDs
 
 Two capture goals that share a vehicle session. Written 2026-08-07 and **run
-the same afternoon** — read "Results" first. Phase 1 returned a different
-answer than the plan assumed, and most of what follows is superseded.
+the same afternoon**. The results were corrected after checking the factory
+network and brake-control wiring: the ABS uses both the vehicle CAN bus and a
+separate DDL2 K-line diagnostic connection. Read "Results" first; the original
+CAN-address sweep below is historical and is not an exhaustive module-discovery
+procedure.
 
 ---
 
-## Results, 2026-08-07 (supersedes Phases 1-3 below)
+## Results, 2026-08-07 (supersedes Phases 1-4 below)
 
-### The ABS does not answer diagnostics on our bus, and does not need to
+### Factory topology: ABS on CAN, with a separate K-line diagnostic path
+
+The factory manuals remove the ambiguity left by the capture:
+
+- `xterra_fsm/lan.pdf` LAN-54 and LAN-62 connect DLC pins 6/14 to the ABS
+  actuator's CAN terminals 12/13. This is the same CAN pair CANary records.
+- `xterra_fsm/gi.pdf` GI-46/47 and `xterra_fsm/brc.pdf` BRC-88 connect DLC pin
+  7 to ABS terminal 10. That is the DDL2 K-line diagnostic path.
+- `xterra_fsm/lan.pdf` LAN-6 explicitly distinguishes DDL2 units, which use
+  K-line for diagnosis and CAN-H/CAN-L for control, from "Diag on CAN" units.
+  CONSULT-III is a multi-transport tool; its name does not imply that every
+  module diagnostic session is carried over CAN.
+- `xterra_fsm/brc.pdf` BRC-29/30 and BRC-83 list `FR RH SENSOR`, `FR LH
+  SENSOR`, `RR RH SENSOR`, and `RR LH SENSOR` as ABS data-monitor items. The
+  CAN signal chart at LAN-46-48 lists the ABS-transmitted **vehicle speed**
+  signal, but not four transmitted corner speeds.
+
+The supported conclusion is therefore: the ABS is a normal participant on
+pins 6/14 CAN and has a dedicated diagnostic path on pin 7 K-line. The factory
+manual strongly favors K-line for the CONSULT ABS data monitor, but it does
+not prove how the aftermarket Z1 implements its screen. No second CAN pair or
+"wrong CAN pins" hypothesis is needed.
+
+### What the CAN probes did—and did not—establish
 
 Probed `0x7E1`-`0x7E7` and `0x740`-`0x77F` with Mode 22 while sniffing raw CAN.
 Only `0x7E8` ever replied — the ECM. The probe was proven live first: Mode 01
@@ -17,16 +43,27 @@ PID 0x0D at `0x7E0` answered, and the sniff caught the daemon's own `10 C0` /
 (`03 7F 22 11`, serviceNotSupported) appeared once and never reproduced across
 two further isolated attempts; treat it as unexplained, not as a module.
 
-**But the wheel speeds are on the bus already.** With a Z1 scan tool on an
-OBD-II Y-cable displaying live per-wheel speeds — confirmed updating as the
-truck was rolled — a 25 s sniff caught *zero* frames from it. The ABS
-live-data screen is reading passive broadcast traffic, not polling. So the
-data is in every session we have ever recorded, and this is a decode problem.
+That rules out UDS/Mode-22 responses at those guessed CAN request IDs. It does
+**not** prove that only the ECM supports CAN diagnostics: another module could
+use different Nissan addressing or a diagnostic service other than Mode 22.
+More importantly for ABS, the factory wiring identifies K-line as its
+diagnostic transport, so a CAN Mode-22 header sweep was never a complete ABS
+access test.
+
+With a Z1 scan tool displaying live per-wheel speeds—confirmed updating as the
+truck was rolled—a passive CAN capture caught *zero* frames transmitted by the
+tool during the ABS screen. That test is complete. It leaves exactly two
+explanations: the Z1 polled the ABS over pin 7, outside CANary's CAN
+transceiver, or it decoded wheel speeds from already-present passive CAN
+frames. The factory DDL2 wiring and the FSM's omission of per-corner speeds
+from the CAN signal chart favor K-line, but the CAN capture alone cannot choose
+between them.
 
 The Z1 *is* on our CAN pair for generic OBD-II: on its OBDII menu it emits
 `020100ffffffffff` on `0x7DF`, distinguishable from our daemon by 0xFF padding
-where we pad 0x00. So both testers share pins 6/14, and the ABS screen simply
-transmits nothing.
+where we pad 0x00. The same physical scan tool can use CAN in its generic OBD
+menu while using either of the two non-transmitting strategies above in its
+Nissan ABS menu.
 
 ### Two testers cannot both poll this ECM
 
@@ -53,8 +90,10 @@ the engine idling:
 | C | 4-5 | tracks the roll, within 1 count of B |
 | D | 6-7 | constant at 3 — a counter or status, not a speed |
 
-The Z1 displayed ~2 km/h per wheel over the same rolls, consistent with B/C at
-3.69 km/h given display rounding and that it peaked briefly.
+The Z1 displayed about 2 km/h per wheel while B/C reached a brief 3.69 km/h
+peak. Those were not paired same-instant samples, so they establish only that
+both instruments detected motion; they are not a scale or identity
+cross-reference.
 
 A is the surprise: over a full 63-minute drive it correlates with speed at
 r = 0.99, yet it sits at exactly zero below ~4 km/h. **Whatever A is, it is
@@ -76,12 +115,12 @@ this more dramatic; it would not have changed the verdict.
 
 Seventeen byte-aligned slices across `0x6F7`, `0x284`, `0x285`, `0x280`,
 `0x354`, `0x590` and `0x2D1` pass "zero at rest, linear in GPS speed, stable
-scale", and every one lands within 0.08-0.15 m of vehicle speed. All vehicle
-speed at differing resolutions.
+scale", and every one lands within 0.08-0.15 m of aggregate vehicle speed.
+None has the yaw sign or magnitude required of an individual corner.
 
-### The blind spots that remain — where to look next
+### Passive-decode blind spots that remain
 
-The sweeps above were byte-aligned and absolute. Neither covers:
+The sweeps above were byte-aligned and absolute. They do not cover:
 
 1. **Bit-packed fields.** ABS frames commonly pack four 12- or 14-bit wheel
    speeds into 6-7 bytes; a byte-boundary sweep cannot see them. `0x284`,
@@ -97,7 +136,31 @@ The sweeps above were byte-aligned and absolute. Neither covers:
 3. Ids with <5000 frames (`0x004`, `0x342`, `0x512`, `0x682`) and fields wider
    than 2 bytes.
 
-Both real gaps close on stored data with no vehicle time.
+These are legitimate stored-data checks. The factory signal chart points to
+aggregate speed being the documented CAN broadcast and the four internal
+corner values being diagnostic data-monitor items, so K-line is the leading
+hypothesis. But completing the bit/delta sweep is also how the passive-CAN
+hypothesis can be tested from existing captures. A negative sweep would
+strengthen the K-line conclusion; it would not prove that arbitrary hidden
+encodings cannot exist.
+
+### Decisive transport check and next collection step
+
+The passive-CAN half of the transport test is already complete: CANary sent no
+OBD requests, and the Z1 sent no CAN frames while its ABS wheel-speed values
+updated. Do not repeat it. The remaining discriminating observation is pin 7:
+
+1. Monitor DLC pin 7 with a high-impedance oscilloscope or automotive K-line
+   receiver while opening the Z1 ABS wheel-speed screen. Do not connect a
+   3.3 V GPIO directly to the nominal 12 V K-line.
+2. Pin-7 request/response bursts would establish K-line. No pin-7 activity
+   would leave passive CAN decoding as the explanation and make the bit/delta
+   search the primary next step.
+
+If pin-7 activity is confirmed, the useful engineering target is a passive or
+read-only DDL2/K-line capture path and protocol decode. If pin 7 is quiet, the
+stored passive-CAN search takes priority. Continuing to guess UDS CAN headers
+is lower value in either case.
 
 ### Tooling defect found
 
@@ -110,10 +173,11 @@ there"**; confirm with `POST /control/can_activity`.
 
 ---
 
-## Original plan (2026-08-07, pre-run)
+## Original plan (2026-08-07, pre-run; historical)
 
-Retained for the Phase 4/5 method and the DID work, which stand. Phases 1-3
-are superseded by the results above.
+Retained as an audit trail and for the separate Phase 5 ECM-DID work. Phases
+1-4 are superseded by the results above; do not execute their ABS steps as a
+current runbook.
 
 **Motivation.** The operator's Titan-swap suspension moves each wheel out ~3 in
 (track ~1.60 m → ~1.75 m, +9.5%). In a corner the speed split across an axle is
@@ -143,13 +207,14 @@ notes in `data/bindings.yaml`.
 
 ## Phase 1 — does any second module answer? (KOEO, stationary, ~5 min)
 
-This is the gate. Every diagnostic exchange in every frame log this repo holds
-is ECM-only: `0x7E0` request / `0x7E8` response. `0x7E2` **has never been
-requested**, so "it never appears" is absence of evidence, not evidence of
-absence.
+This was the original gate. Every diagnostic exchange then present in the
+frame logs was ECM-only: `0x7E0` request / `0x7E8` response. The plan assumed
+conventional ISO-TP physical addresses for the other modules; the factory
+manual later showed that ABS diagnosis is DDL2 K-line instead.
 
 `tools/scan_constant_dids.py` already supports this — `--header` is documented
-as "7E0 = engine; trans 7E1, ABS 7E2, …". Read-only, service 0x22 only.
+with the historical guess "7E0 = engine; trans 7E1, ABS 7E2, …". That mapping
+is not an Xterra FSM fact. The tool is read-only and service 0x22 only.
 
 ```bash
 # Try the default session FIRST. The ECM's 0xC0 gate is an ECM quirk; most
@@ -169,9 +234,9 @@ Sweep the addresses in this order, one short probe each:
 | `740`–`74F` | unknown | Nissan-specific range; only if the standard range is silent |
 
 If a header answers, re-run with `--session C0` **and** without, and record
-which is required. If nothing answers anywhere, stop: per-wheel speeds are not
-reachable by Mode 22 on this vehicle, and the fallback is the broadcast
-candidates in Phase 4.
+which is required. If nothing answers, the only valid conclusion is that
+Mode 22 did not answer at the tested CAN addresses. It says nothing about
+K-line, other CAN addressing, or other diagnostic services.
 
 ## Phase 2 — DID sweep on whatever answered (KOEO → idle, stationary)
 
@@ -237,9 +302,11 @@ is 8.2% under true ground speed on this vehicle, and the existing `0x6F7`
 scale inherited exactly that error by being pinned against it. Use `gps:speed`
 for any absolute claim.
 
-Candidates already worth testing first, from a yaw sweep of the 2026-08-06
-drive — **suggestive only, all same-sign so at most one side**:
-`0x284[6:8]` (+0.81 m), `0x385[4:6]` (+0.86 m), `0x285[6:8]` (+1.04 m).
+The original candidates from this method—`0x284[6:8]`, `0x385[4:6]`, and
+`0x285[6:8]`—are **retracted**. The sweep discarded stationary samples and
+divided a small yaw response by a near-zero speed coefficient, inflating noise
+into plausible half-track values. Full-range testing showed that the 0x284
+and 0x285 slices are not speeds. Do not re-propose them.
 
 ## Phase 5 — the seven unpinned DID scales
 

@@ -70,33 +70,42 @@ CANary is strictly read-only — use a dedicated scan tool to clear codes.
   issues read-only Mode 22 reads over the Canable into `pids.jsonl`.
   `tools/scan_constant_dids.py --session C0` sweeps the `10 C0` DID space;
   `data/dids.yaml` + `src/decode/dids.py` decode known DIDs.
-- **First-class live DID telemetry profile + dashboard switching:** pending
-  (Task 6.15) — `10 C0` is mutually exclusive with Mode 01 so it needs
-  explicit profile scheduling, not silent mixing.
-- **Only the ECM answers diagnostics on this bus.** Probed 2026-08-07: Mode 22
-  at `0x7E1`-`0x7E7` and `0x740`-`0x77F` drew no reply, with the probe proven
-  live first. The ABS publishes per-wheel data *passively* instead — a Z1 scan
-  tool showing live wheel speeds transmitted nothing at all.
+- **First-class live DID telemetry profiles + dashboard switching:** available
+  in the Capture Profiles panel. `tuning-did` runs continuous Mode 22;
+  `tuning-hybrid-research` uses the confirmed `10 81` fast exit to alternate
+  4 Hz Mode 01 windows with Mode 22. `10 C0` remains mutually exclusive with
+  Mode 01 while the session itself is open.
+- **Do not generalize the ECM's CAN diagnostic protocol to other modules.** A
+  2026-08-07 sweep found no Mode-22 response at guessed CAN request IDs
+  `0x7E1`-`0x7E7` or `0x740`-`0x77F`; that proves only that those requests did
+  not answer. The factory wiring shows the ABS on the normal pins 6/14 CAN
+  network *and* on the pin-7 DDL2 K-line diagnostic path (`xterra_fsm/lan.pdf`
+  LAN-6/54/62; `xterra_fsm/gi.pdf` GI-46/47; `xterra_fsm/brc.pdf` BRC-88).
+  CONSULT-III supports both transports.
 - **Per-wheel speeds + the seven unpinned DID scales:**
   `docs/abs-wheel-speed-and-did-gap-protocol.md`. Read the Results section
-  first; the original plan's Phases 1-3 are superseded. `0x6F7` A/B/C are
+  first; the original plan's Phases 1-4 are superseded. `0x6F7` A/B/C are
   *not* per-corner — do not difference them to infer slip — and `0x6F7` bytes
   0-1 read a confident zero below ~4 km/h.
 
 ## Run another scan tool alongside canary
 
-Expect canary to lose Mode 01 entirely. Measured 2026-08-07 with a Z1 on an
-OBD-II Y-cable: while it polled generic OBD-II, `0x7E8` responses to canary
-went to **zero** and the daemon backed off from 6.84 to 2.88 Hz. This ECM
-serves one tester session and the second arrival wins. Recovery is automatic
-once the other tool stops.
+Expect canary to lose Mode 01 while the other tool polls the **ECM over CAN**.
+Measured 2026-08-07 with a Z1 on an OBD-II Y-cable: while its generic OBD menu
+polled, `0x7E8` responses to canary went to **zero** and the daemon backed off
+from 6.84 to 2.88 Hz. This ECM serves one tester session and the second arrival
+wins. Recovery is automatic once the other tool stops. The Z1's ABS screen is
+different: it transmitted no CAN frames while live wheel speeds updated. It
+either used pin-7 K-line—the factory-wiring-favored explanation—or decoded
+existing passive CAN traffic. Do not assume that merely opening ABS data
+monitor contests the ECM.
 
 - Broadcast decode is unaffected, so `decoded:*` channels keep flowing.
 - `vehicle_state` used to misreport this as `engine_off` — "plugged in, key
   out" — with the engine running. Fixed 2026-08-07; it now falls back to the
   broadcast rpm whenever the OBD rpm is stale, not merely absent.
-- Tell the two apart by ISO-TP padding on `0x7DF`: canary pads `0x00`, the Z1
-  pads `0xFF`.
+- In the tested generic OBD menu, tell the two apart by ISO-TP padding on
+  `0x7DF`: canary pads `0x00`, the Z1 pads `0xFF`.
 
 ## Probe for a module at an unknown address
 
@@ -105,7 +114,9 @@ silence** — both return `responded: false` with a null payload. Verified by
 pointing it at the ECM with DID `0x1101`, which is known to answer
 `7F 22 80`. Until that is fixed, pair every probe with
 `POST /control/can_activity` and look for the module's response id on the
-wire; a bare `responded: false` is not evidence that nothing is there.
+wire; a bare `responded: false` is not evidence that nothing is there. This
+endpoint is a CAN/ISO-TP probe and cannot discover a module whose diagnostic
+path is on DLC pin 7.
 
 ## Run a parked diagnostic / actuator test
 

@@ -53,10 +53,12 @@ BO_ 563 M_233: 8 Vector__XXX
  SG_ ECM_CALC_LOAD_A : 39|8@0+ (1,0) [0|0] "" Vector__XXX
  SG_ ECM_AIRFLOW_233_B2 : 23|8@0+ (1,0) [0|0] "" Vector__XXX
  SG_ ECM_INTAKE_VACUUM_OR_IAC : 15|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ ECM_COOLANT_TEMP_233 : 7|8@0+ (1,-50) [-10.0|130.0] "degC" Vector__XXX
 
 BO_ 573 M_23D: 8 Vector__XXX
+ SG_ ECM_COOLANT_TEMP_23D : 63|8@0+ (1,-50) [-10.0|130.0] "degC" Vector__XXX
  SG_ ECM_THROTTLE_TRANSIENT : 55|8@0+ (1,0) [0|0] "" Vector__XXX
- SG_ ECM_CALC_LOAD_B : 31|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ ECM_RPM_23D : 24|16@1+ (3.125,0.0) [0.0|8000.0] "rpm" Vector__XXX
  SG_ ECM_THROTTLE_SENSOR_V : 23|8@0+ (0.01341,0.684) [0.6|4.8] "V" Vector__XXX
  SG_ ECM_ACCEL_PEDAL_POS_V : 15|8@0+ (0.01485,0.795) [0.7|4.8] "V" Vector__XXX
 
@@ -98,6 +100,11 @@ BO_ 1573 M_625: 8 Vector__XXX
  SG_ POWER_STATE_625_3 : 31|8@0+ (1,0) [0|0] "" Vector__XXX
  SG_ AC_COMPRESSOR_STATE : 15|8@0+ (1,0) [0|0] "" Vector__XXX
 
+BO_ 1783 M_6F7: 8 Vector__XXX
+ SG_ WHEEL_SPEED_6F7_C : 39|16@0+ (0.0625,0.0) [0.0|250.0] "km/h" Vector__XXX
+ SG_ WHEEL_SPEED_6F7_B : 23|16@0+ (0.0625,0.0) [0.0|250.0] "km/h" Vector__XXX
+ SG_ WHEEL_SPEED_6F7_A : 7|16@0+ (0.0625,0.0) [0.0|250.0] "km/h" Vector__XXX
+
 
 
 
@@ -112,20 +119,22 @@ CM_ BO_ 561 "Xterra 0x231 (draft from bindings.yaml)";
 CM_ SG_ 561 ECM_ENGINE_STATE_B "confidence=high; Cross-broadcast duplicate.";
 CM_ SG_ 561 ECM_ENGINE_STATE_A "confidence=high; State enum, useful as an anomaly-detection input: an unexpected";
 CM_ BO_ 563 "Xterra 0x233 (draft from bindings.yaml)";
-CM_ SG_ 563 ECM_CALC_LOAD_A "confidence=medium; The cross-broadcast pair (with ECM_CALC_LOAD_B) reduces the candidate";
+CM_ SG_ 563 ECM_CALC_LOAD_A "confidence=medium; Direction (high cranking, mid idle, low at sustained throttle) is";
 CM_ SG_ 563 ECM_AIRFLOW_233_B2 "confidence=medium; Do not pin a scale on the strength of the correlation alone — that is the";
 CM_ SG_ 563 ECM_INTAKE_VACUUM_OR_IAC "confidence=high; A/C-load drop in the second session promotes this from \"vacuum or IAC\"";
+CM_ SG_ 563 ECM_COOLANT_TEMP_233 "confidence=high; Engine coolant temperature, published on three frames with two offset";
 CM_ BO_ 573 "Xterra 0x23D (draft from bindings.yaml)";
+CM_ SG_ 573 ECM_COOLANT_TEMP_23D "confidence=high; Engine coolant temperature, published on three frames with two offset";
 CM_ SG_ 573 ECM_THROTTLE_TRANSIENT "confidence=high; Three physical-action sessions agree, including a full engine-off";
-CM_ SG_ 573 ECM_CALC_LOAD_B "confidence=medium; Cross-broadcast duplicate of ECM_CALC_LOAD_A.";
+CM_ SG_ 573 ECM_RPM_23D "confidence=high; 0x1F9 stores rpm x 8; this field stores rpm x 0.32, so it carries the";
 CM_ SG_ 573 ECM_THROTTLE_SENSOR_V "confidence=confirmed; Previously unbound — byte 2 was being consumed as the low half of the";
 CM_ SG_ 573 ECM_ACCEL_PEDAL_POS_V "confidence=confirmed; Renamed twice: ECM_ENGINE_REV_LEVEL → ECM_AIRFLOW_PROXY_23D → this. The";
 CM_ BO_ 640 "Xterra 0x280 (draft from bindings.yaml)";
 CM_ SG_ 640 MOTION_SIGNAL_280_5 "confidence=hypothesized; Strong motion-correlated; type TBD.";
 CM_ BO_ 644 "Xterra 0x284 (draft from bindings.yaml)";
-CM_ SG_ 644 WHEEL_SPEED_PAIR_A "confidence=hypothesized; Strong wheel-speed candidate. 4 channels likely fit:";
+CM_ SG_ 644 WHEEL_SPEED_PAIR_A "confidence=hypothesized; RETRACTED 2026-08-07: the inventory comparison established only that";
 CM_ BO_ 645 "Xterra 0x285 (draft from bindings.yaml)";
-CM_ SG_ 645 WHEEL_SPEED_PAIR_B "confidence=hypothesized; See WHEEL_SPEED_PAIR_A notes.";
+CM_ SG_ 645 WHEEL_SPEED_PAIR_B "confidence=hypothesized; See WHEEL_SPEED_PAIR_A retraction; not a wheel-speed binding.";
 CM_ BO_ 670 "Xterra 0x29E (draft from bindings.yaml)";
 CM_ SG_ 670 BRAKE_ACTIVITY_29E_7 "confidence=high; Brake-dominant driver-demand / pedal-activity composite on the ~20 ms";
 CM_ SG_ 670 MOTION_29E_5 "confidence=high; Reinterpreted from \"vehicle motion\" to \"calculated engine load /";
@@ -147,6 +156,10 @@ CM_ SG_ 1424 MOTION_SIGNAL_590_2 "confidence=hypothesized; On the slow 92ms body
 CM_ BO_ 1573 "Xterra 0x625 (draft from bindings.yaml)";
 CM_ SG_ 1573 POWER_STATE_625_3 "confidence=medium; Plausible ignition/power state byte. 157 = key-on-engine-off,";
 CM_ SG_ 1573 AC_COMPRESSOR_STATE "confidence=high; A/C compressor commanded state: 0 = off, ~128 = engaged, with";
+CM_ BO_ 1783 "Xterra 0x6F7 (draft from bindings.yaml)";
+CM_ SG_ 1783 WHEEL_SPEED_6F7_C "confidence=high; One of three 16-bit speed fields on the ABS 0x6F7 frame (bytes 0-1,";
+CM_ SG_ 1783 WHEEL_SPEED_6F7_B "confidence=high; One of three 16-bit speed fields on the ABS 0x6F7 frame (bytes 0-1,";
+CM_ SG_ 1783 WHEEL_SPEED_6F7_A "confidence=high; One of three 16-bit speed fields on the ABS 0x6F7 frame (bytes 0-1,";
 
 
 

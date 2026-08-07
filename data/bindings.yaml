@@ -523,14 +523,16 @@ signals:
       slowly with vehicle motion.
 
   - name: WHEEL_SPEED_PAIR_A
-    module: ABS          # tentative — 18.8ms drivetrain cadence
+    # Legacy channel name retained because existing model manifests refer to
+    # it. The wheel-speed interpretation below was retracted 2026-08-07.
+    module: unknown
     can_id: 0x284
     byte_start: 1
     byte_length: 2       # bytes 1 + 3 with byte 0/2 = MSB? or two 16-bit signals?
     byte_order: big
     scale: null
     offset: null
-    unit: unknown        # presumed rpm or km/h
+    unit: unknown
     confidence: hypothesized
     evidence:
       - session: 2026-05-11T154648
@@ -541,16 +543,19 @@ signals:
           Cross-broadcast pair (0x284 left wheels / 0x285 right wheels?)
           on the 18.8ms drivetrain bus — textbook ABS wheel-speed encoding.
     notes: |
-      Strong wheel-speed candidate. 4 channels likely fit:
-        0x284:0-1 = front-left wheel speed (16-bit)
-        0x284:2-3 = front-right wheel speed (16-bit)
-        0x285:0-1 = rear-left wheel speed (16-bit)
-        0x285:2-3 = rear-right wheel speed (16-bit)
-      Or front/rear axles. Cross-reference with PID 0x0D (vehicle speed)
-      when ELM327 arrives — VSS should be the average of the four.
+      RETRACTED 2026-08-07: the inventory comparison established only that
+      bytes varied while driving. It did not establish a coherent 16-bit
+      field, an ABS publisher, or wheel identity. Later same-instant/full-range
+      work found aggregate vehicle-speed copies elsewhere in 0x284/0x285 and
+      rejected the proposed per-corner interpretations. This extraction even
+      straddles the originally proposed 0-1 and 2-3 fields, so it must not be
+      treated as an engineering signal. The legacy name remains only to avoid
+      silently changing existing model feature schemas; do not use it for
+      wheel-speed, slip, or geometry analysis.
 
   - name: WHEEL_SPEED_PAIR_B
-    module: ABS
+    # Legacy compatibility name; see WHEEL_SPEED_PAIR_A.
+    module: unknown
     can_id: 0x285
     byte_start: 1
     byte_length: 2
@@ -565,7 +570,7 @@ signals:
         finding: >
           Mirrors 0x284 variability profile exactly (bytes 1 and 3 both go
           2→128). Probable rear-axle counterpart.
-    notes: See WHEEL_SPEED_PAIR_A notes.
+    notes: See WHEEL_SPEED_PAIR_A retraction; not a wheel-speed binding.
 
   - name: STEERING_002_LOW
     module: unknown      # 9.9ms hot-path; chassis/ABS-published
@@ -1021,23 +1026,23 @@ signals:
       samples, 0x284[6:8] and 0x285[6:8] correlate with GPS speed at
       r = 0.0007 and 0.0010. They are not speeds at all.
 
-      NO INDIVIDUAL WHEEL SPEED IS BROADCAST ON THIS BUS. The right test is
-      first-order, not the yaw term: a wheel must read zero at rest and rise
-      linearly with ground speed. Seventeen distinct byte slices pass that
-      (r ~ 0.986, zero at rest, stable counts-per-km/h) across 0x6F7, 0x284,
-      0x285, 0x280, 0x354, 0x590 and 0x2D1 — and after converting each by its
-      own fitted scale, every one sits within 0.08-0.15 m of vehicle speed
-      against 0.875 m for a real half-track. They are all vehicle speed at
-      differing resolutions. The residual ~0.11 m is common to all of them,
-      which points at a sampling-lag artifact between GPS heading and the CAN
-      frame rather than any geometry.
+      NO INDIVIDUAL WHEEL SPEED HAS BEEN IDENTIFIED IN THE RECORDED BROADCAST
+      CAN. The right first-order test is that a wheel must read zero at rest
+      and rise linearly with ground speed. Seventeen distinct byte slices pass
+      that (r ~ 0.986, zero at rest, stable counts-per-km/h) across 0x6F7,
+      0x284, 0x285, 0x280, 0x354, 0x590 and 0x2D1 — and after converting each
+      by its own fitted scale, every one sits within 0.08-0.15 m of vehicle
+      speed against 0.875 m for a real half-track. They are all vehicle speed
+      at differing resolutions. The residual ~0.11 m is common to all of
+      them, which points at a sampling-lag artifact between GPS heading and
+      the CAN frame rather than any geometry.
 
-      Combined with the 2026-08-07 in-vehicle probe finding no module
-      answering Mode 22 at 0x7E1-0x7E7 or 0x740-0x77F (only the ECM at
-      0x7E0/0x7E8), per-corner wheel speed is not present on the CAN pair
-      CANary taps.
+      A 2026-08-07 in-vehicle probe found no Mode-22 answer at the guessed CAN
+      request ids 0x7E1-0x7E7 or 0x740-0x77F (only the ECM at 0x7E0/0x7E8).
+      That rules out only that service/address combination; it does not prove
+      that other CAN diagnostics or passive encodings do not exist.
 
-      It DOES exist and is readable — just not from here. Same session, the
+      It DOES exist and is readable. Same session, the
       operator had a Z1 scan tool on an OBD-II Y-cable alongside the Pi,
       displaying live per-wheel speeds and confirming they track when the
       truck is rolled. A 25 s sniff during that showed 30 ids, all already
@@ -1045,12 +1050,19 @@ signals:
       (6.84 Hz) and 0x7E8 responses (6.72 Hz) were plainly visible, so the
       sniff was healthy and diagnostic traffic on this pair is observable.
 
-      By elimination: the Z1 is not using CAN pins 6/14 at all. The ABS sits
-      on K-line (pin 7, Nissan CONSULT) or a second CAN pair on other
-      connector pins, and CANary is wired only to 6/14. Reaching per-wheel
-      speed is therefore a wiring/transport problem, not a protocol dead end
-      — and the earlier phrasing here ("not reachable by any access path")
-      was scoped too broadly on the strength of a one-bus test.
+      Factory wiring resolves the topology but not the Z1 implementation. The
+      ABS is on this same CAN pair: DLC pins 6/14 connect to ABS terminals
+      12/13 (`xterra_fsm/lan.pdf` LAN-54/62). It also has a DDL2 K-line
+      diagnostic path from DLC pin 7 to ABS terminal 10
+      (`xterra_fsm/gi.pdf` GI-46/47; `xterra_fsm/brc.pdf` BRC-88). CONSULT-III
+      supports both transports (LAN-6).
+
+      Therefore zero Z1 transmissions on CAN leaves two possibilities: it
+      polled the ABS over pin 7, or it decoded already-present passive CAN
+      frames. The factory diagnostic wiring and CAN signal chart favor
+      K-line, but only observing pin 7 during the Z1 ABS screen distinguishes
+      them. The earlier "wrong CAN pins / second CAN pair" conclusion is
+      retracted.
 
       Worth noting from the same sweep: 0x284[0:2], 0x285[0:2] and 0x590[1:3]
       carry vehicle speed at ~153 counts per km/h against 0x6F7's ~14.5, so
@@ -1062,8 +1074,9 @@ signals:
       three episodes of 0.7-2.3 s). Bytes 0-1 read EXACTLY ZERO throughout,
       0% nonzero, while bytes 2-3 and 4-5 both tracked the motion to a peak of
       59 counts (3.69 km/h at 1/16) and stayed within 1 count of each other. A
-      Z1 scan tool showed ~2 km/h per wheel over the same rolls, consistent
-      after display rounding.
+      Z1 scan tool showed ~2 km/h per wheel over the same rolls. Those were
+      not paired same-instant samples, so the two peaks are not a scale or
+      identity cross-reference.
 
       So bytes 0-1 have a low-speed cut-in: over a full 63-minute drive that
       field correlates with vehicle speed at r = 0.99, yet it is dead below

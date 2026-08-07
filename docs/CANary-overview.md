@@ -228,7 +228,10 @@ or Canable USB (gs_usb)
 
 ### CAN Bus Channels (via Canable + `bindings.yaml`)
 
-- ABS individual wheel speeds (FL, FR, RL, RR)
+- ABS-published aggregate vehicle-speed variants; individual FL/FR/RL/RR
+  speeds are visible on the Z1 scan tool but are not yet decoded from CANary
+  captures (the Z1 either uses the separate pin-7 DDL2 K-line diagnostic path
+  or decodes an as-yet-unidentified passive CAN encoding)
 - Transfer case engagement state (2H / 4H / 4Lo)
 - Steering angle sensor
 - IPDM relay states
@@ -271,7 +274,9 @@ in-vehicle. `docs/implementation-tasks.md` is the maintained task index;
 - [x] CAN RE workflow + tooling (`docs/can-re-workflow.md`); sessions ongoing
 - [x] Emit Xterra DBC for decoded signals (`data/dbc/xterra_2008.dbc`)
 - [x] Integrate decoded CAN channels as additional ML features
-- [ ] Validate ABS wheel speed anomaly detection (bearing wear scenario)
+- [ ] Identify/collect individual ABS wheel speeds, then validate the bearing
+  wear scenario (blocked until the pin-7 K-line vs passive-CAN question is
+  resolved)
 
 ### Phase 5 — Dashboard & Deployment
 - [x] Implement FastAPI backend with WebSocket telemetry stream
