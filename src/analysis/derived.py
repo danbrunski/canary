@@ -24,13 +24,19 @@ field is ``None``, never a fake zero.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 
 from src.config import VehicleParameters
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
+
+if TYPE_CHECKING:
+    # `src.analysis.afr` imports `fuel_properties` from this module, so the
+    # runtime import would be circular. Only the annotation is needed; the
+    # code below reads one attribute and never constructs one.
+    from src.analysis.afr import AfrCalibration
 
 __all__ = [
     "FUEL_PROPERTIES",
@@ -66,6 +72,11 @@ _LAUNCH_SPEED_KPH = 2.0 * _KPH_PER_MPH
 #: poll spacing while still bounding a true dropout (USB drop, daemon
 #: restart) to one capped increment.
 _MAX_DT_S = 60.0
+#: How close PID 0x44 must read to 1.0 before φ and λ can be used
+#: interchangeably. Inside this band the two conventions disagree by at most
+#: ~2 % of AFR; outside it, an unverified convention makes the reading
+#: uninterpretable rather than merely imprecise.
+_EQUIV_RATIO_STOICH_TOLERANCE = 0.01
 #: An accel run (0-60, 1/4-mile) is only trustworthy on a *dense* speed
 #: trace; a gap longer than this breaks the run rather than interpolating
 #: through it. Deliberately much tighter than the trip-integral cap above —
@@ -262,16 +273,53 @@ def _cumulative_time_integral(wide: pd.DataFrame, values: pd.Series) -> pd.Serie
     return out.ffill().fillna(0.0)
 
 
+def _commanded_afr_from_pid_44(
+    commanded: pd.Series,
+    calibration: AfrCalibration | None,
+    afr_stoich: float,
+) -> pd.Series:
+    """Actual AFR from PID 0x44, or NaN where the reading cannot be read.
+
+    φ and λ are reciprocals that **both read 1.0 at stoich**, so treating one
+    as the other is silent everywhere most sanity-checking happens and grows
+    with how rich the target is. This ECM is φ; reading it as λ turns a
+    commanded 12.6 AFR into 18.3 and understates fuel by ~1.5x at peak
+    enrichment. :meth:`AfrCalibration.commanded_afr` already refuses to guess —
+    this is the vectorised equivalent for the wide-frame path, which used to
+    bypass it entirely and hard-code the λ reading.
+
+    Without a verified convention the only rows that can be interpreted are
+    those reading ≈1.0, where both conventions agree. The rest go NaN: we know
+    fuelling is *not* stoich there and cannot say in which direction, and a
+    stoich-shaped guess would be a fabricated measurement.
+    """
+    # 0 means "not available" on this ECM, never a real ratio — see the
+    # `inf` incident recorded in the caller.
+    ratio = commanded.where(commanded > 0)
+    convention = calibration.commanded_equiv_ratio_convention if calibration else "unverified"
+    if convention == "phi":
+        return afr_stoich / ratio
+    if convention == "lambda":
+        return afr_stoich * ratio
+    return pd.Series(afr_stoich, index=commanded.index, dtype=float).where(
+        (ratio - 1.0).abs() <= _EQUIV_RATIO_STOICH_TOLERANCE
+    )
+
+
 def _instant_fuel_g_s(
-    wide: pd.DataFrame, vehicle: VehicleParameters, fuel: FuelProperties
+    wide: pd.DataFrame,
+    vehicle: VehicleParameters,
+    fuel: FuelProperties,
+    calibration: AfrCalibration | None = None,
 ) -> pd.Series | None:
     """Instantaneous fuel mass flow (g/s), best available method.
 
     1. ``ENGINE_FUEL_RATE`` PID (L/h) — most direct.
-    2. MAF ÷ actual AFR, where actual AFR = stoich × λ. λ prefers the
-       *measured* wideband O2 PIDs (0x24/0x25 — Task 2.1) over the
-       *commanded* λ (PID 0x44), falling back to it when wideband isn't
-       polled; λ defaults to 1.0 when neither is reported.
+    2. MAF ÷ actual AFR. Prefers the *measured* wideband O2 PIDs (0x24/0x25 —
+       Task 2.1), which are λ. Falls back to *commanded* PID 0x44, which is
+       φ or λ depending on the ECM and therefore needs ``calibration``; see
+       :func:`_commanded_afr_from_pid_44`. With neither reported, AFR is
+       stoich.
     3. Speed-density: ideal-gas air mass from MAP/IAT/RPM/displacement/VE,
        then ÷ stoich AFR — the last resort when only MAP-style data exists.
     """
@@ -281,17 +329,16 @@ def _instant_fuel_g_s(
 
     maf = _series(wide, "obd:MAF", "decoded:MAF")
     if maf is not None:
-        lam = _series(
-            wide, "obd:O2_WR_LAMBDA_S1", "obd:O2_WR_LAMBDA_S2", "obd:COMMANDED_EQUIV_RATIO"
-        )
+        lam = _series(wide, "obd:O2_WR_LAMBDA_S1", "obd:O2_WR_LAMBDA_S2")
         if lam is None:
-            return maf / fuel.afr_stoich
+            commanded = _series(wide, "obd:COMMANDED_EQUIV_RATIO")
+            if commanded is None:
+                return maf / fuel.afr_stoich
+            return maf / _commanded_afr_from_pid_44(commanded, calibration, fuel.afr_stoich)
         # A reported λ of 0 is the ECM saying "not available", not a
-        # measurement: PID 0x44 reads 0 through open loop on this ECM (227 of
-        # 385 open-loop samples on the 2026-08-07 hybrid drive). Dividing by
-        # it yielded `inf` fuel rate, and because `inf` is not NaN the
-        # cumulative integrators carried it to the end of the session — 80 %
-        # of that drive's FUEL_USED_L and CO2_KG.
+        # measurement. Dividing by it yielded `inf` fuel rate, and because
+        # `inf` is not NaN the cumulative integrators carried it to the end of
+        # the session — 80 % of the 2026-08-07 drive's FUEL_USED_L and CO2_KG.
         #
         # NaN, not a fallback to stoich: λ is missing precisely during
         # open-loop enrichment, which is the one condition where assuming
@@ -379,7 +426,12 @@ def _gear_estimate(
     return gear
 
 
-def compute_instantaneous_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> pd.DataFrame:
+def compute_instantaneous_channels(
+    wide: pd.DataFrame,
+    vehicle: VehicleParameters,
+    *,
+    calibration: AfrCalibration | None = None,
+) -> pd.DataFrame:
     """Append the row-local (non-integrated) ``derived:<NAME>`` channels.
 
     Unlike the cumulative trip integrals in :func:`compute_derived_channels`,
@@ -403,7 +455,7 @@ def compute_instantaneous_channels(wide: pd.DataFrame, vehicle: VehicleParameter
 
     speed = _series(out, "obd:SPEED", "decoded:VEHICLE_SPEED")
     rpm = _series(out, "obd:RPM", "decoded:ECM_RPM")
-    fuel_g_s = _instant_fuel_g_s(out, vehicle, fuel)
+    fuel_g_s = _instant_fuel_g_s(out, vehicle, fuel, calibration)
 
     if fuel_g_s is not None:
         fuel_lph = fuel_g_s / (fuel.density_kg_per_l * 1000.0) * 3600.0
@@ -447,7 +499,12 @@ def compute_instantaneous_channels(wide: pd.DataFrame, vehicle: VehicleParameter
     return out
 
 
-def compute_derived_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> pd.DataFrame:
+def compute_derived_channels(
+    wide: pd.DataFrame,
+    vehicle: VehicleParameters,
+    *,
+    calibration: AfrCalibration | None = None,
+) -> pd.DataFrame:
     """Append ``derived:<NAME>`` columns. Returns a copy; input untouched.
 
     Runs :func:`compute_instantaneous_channels` (``FUEL_RATE_LPH``,
@@ -462,7 +519,7 @@ def compute_derived_channels(wide: pd.DataFrame, vehicle: VehicleParameters) -> 
     """
     if wide.empty or "timestamp" not in wide.columns:
         return wide.copy()
-    out = compute_instantaneous_channels(wide, vehicle)
+    out = compute_instantaneous_channels(wide, vehicle, calibration=calibration)
 
     speed = _series(out, "obd:SPEED", "decoded:VEHICLE_SPEED")
     rpm = _series(out, "obd:RPM", "decoded:ECM_RPM")
@@ -876,7 +933,12 @@ def _accel_metrics(
     return best_060, best_qm, best_qm_trap
 
 
-def summarize_trip(wide: pd.DataFrame, vehicle: VehicleParameters) -> TripSummary:
+def summarize_trip(
+    wide: pd.DataFrame,
+    vehicle: VehicleParameters,
+    *,
+    calibration: AfrCalibration | None = None,
+) -> TripSummary:
     """Reduce a wide telemetry frame to a :class:`TripSummary`.
 
     Runs :func:`compute_derived_channels` internally, then reads the final
@@ -900,7 +962,7 @@ def summarize_trip(wide: pd.DataFrame, vehicle: VehicleParameters) -> TripSummar
             quarter_mile_s=None,
             quarter_mile_trap_kph=None,
         )
-    enriched = compute_derived_channels(wide, vehicle)
+    enriched = compute_derived_channels(wide, vehicle, calibration=calibration)
     ts = pd.to_datetime(enriched["timestamp"], utc=True)
     duration_s = float((ts.iloc[-1] - ts.iloc[0]).total_seconds()) if len(ts) > 1 else 0.0
     fuel = fuel_properties(vehicle)

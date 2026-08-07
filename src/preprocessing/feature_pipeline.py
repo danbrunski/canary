@@ -706,7 +706,14 @@ def featurize_wide_frame(
     # reset every time the window evicts old rows. See
     # ``compute_instantaneous_channels`` and ``LiveFeatureSource``'s
     # session-scoped accumulators (Task 1.3) for the integrated versions.
-    framed = compute_instantaneous_channels(framed, config.vehicle.parameters)
+    # `calibration` is not optional decoration: PID 0x44 is φ on some ECMs and
+    # λ on others, the two are reciprocals, and they agree at stoich — so
+    # guessing is silent at idle and worst under enrichment, exactly where the
+    # fuel estimate matters. Passing it lets the fuel math use the verified
+    # convention instead of hard-coding λ.
+    framed = compute_instantaneous_channels(
+        framed, config.vehicle.parameters, calibration=afr_calibration
+    )
     # Sensor-committee divergence residuals (redundant sensors of one quantity,
     # e.g. OBD↔GPS speed). Distinct from the physical residuals above; gated on
     # input quality. Non-trainable committees are emitted here but excluded from

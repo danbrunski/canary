@@ -314,3 +314,59 @@ def test_gear_estimate_masks_low_speed() -> None:
     values = out["derived:GEAR_ESTIMATE"]
     assert pd.isna(values.iloc[0])
     assert values.iloc[1] == 1.0
+
+
+# --- PID 0x44 is phi on some ECMs and lambda on others ---
+
+
+def _phi_cal() -> object:
+    from src.analysis.afr import AfrCalibration
+
+    return AfrCalibration(commanded_equiv_ratio_convention="phi")
+
+
+def _lambda_cal() -> object:
+    from src.analysis.afr import AfrCalibration
+
+    return AfrCalibration(commanded_equiv_ratio_convention="lambda")
+
+
+def test_commanded_ratio_is_read_through_the_vehicles_convention() -> None:
+    """phi and lambda are reciprocals; the wide-frame path used to assume lambda.
+
+    At an enrichment command of 1.242 the two readings are 11.83 vs 18.26 AFR
+    — a 1.54x fuel error, silent at stoich and worst at WOT.
+    """
+    df = _frame(2, **{"obd:MAF": [14.7] * 2, "obd:COMMANDED_EQUIV_RATIO": [1.242] * 2})
+    as_phi = compute_derived_channels(df, GASOLINE, calibration=_phi_cal())
+    as_lambda = compute_derived_channels(df, GASOLINE, calibration=_lambda_cal())
+    # fuel g/s = MAF / AFR; AFR = 14.7/1.242 = 11.83 (phi) vs 14.7*1.242 = 18.26.
+    phi_lph = as_phi["derived:FUEL_RATE_LPH"].iloc[0]
+    lambda_lph = as_lambda["derived:FUEL_RATE_LPH"].iloc[0]
+    assert phi_lph / lambda_lph == pytest.approx(1.242**2, rel=1e-6)
+
+
+def test_an_unverified_convention_refuses_to_guess_away_from_stoich() -> None:
+    """Both conventions agree at 1.0, so only those rows are interpretable."""
+    df = _frame(2, **{"obd:MAF": [14.7] * 2, "obd:COMMANDED_EQUIV_RATIO": [1.0, 1.242]})
+    out = compute_derived_channels(df, GASOLINE)  # no calibration passed
+    rate = out["derived:FUEL_RATE_LPH"]
+    assert np.isfinite(rate.iloc[0]), "a stoich command is unambiguous and must compute"
+    assert pd.isna(rate.iloc[1]), "an enrichment command with no verified convention must not guess"
+
+
+def test_measured_wideband_lambda_is_unaffected_by_the_convention() -> None:
+    """The calibration describes PID 0x44 only; 0x24/0x25 stay lambda."""
+    df = _frame(
+        2,
+        **{
+            "obd:MAF": [14.7] * 2,
+            "obd:O2_WR_LAMBDA_S1": [1.25] * 2,
+            "obd:COMMANDED_EQUIV_RATIO": [1.242] * 2,
+        },
+    )
+    with_cal = compute_derived_channels(df, GASOLINE, calibration=_phi_cal())
+    without = compute_derived_channels(df, GASOLINE)
+    assert with_cal["derived:FUEL_RATE_LPH"].iloc[0] == pytest.approx(
+        without["derived:FUEL_RATE_LPH"].iloc[0], rel=1e-9
+    )
