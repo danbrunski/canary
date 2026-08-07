@@ -73,6 +73,16 @@ CANary is strictly read-only — use a dedicated scan tool to clear codes.
 - **First-class live DID telemetry profile + dashboard switching:** pending
   (Task 6.15) — `10 C0` is mutually exclusive with Mode 01 so it needs
   explicit profile scheduling, not silent mixing.
+- **Non-ECM modules are unexplored.** Every diagnostic exchange in every frame
+  log here is `0x7E0`/`0x7E8` — the engine. `--header 7E2` (ABS/VDC) has never
+  been *requested*, so its silence is untested rather than established. The
+  ECM's `10 C0` gate is an ECM quirk; try the default session first on any
+  other module, and if it answers there is no Mode 01 blackout.
+- **Per-wheel speeds + the seven unpinned DID scales:**
+  `docs/abs-wheel-speed-and-did-gap-protocol.md` — full capture protocol,
+  including the steady-radius left/right circles that identify which signal is
+  which corner. Note `0x6F7` A/B/C are *not* per-corner (proved 2026-08-07);
+  do not difference them to infer slip.
 
 ## Run a parked diagnostic / actuator test
 
