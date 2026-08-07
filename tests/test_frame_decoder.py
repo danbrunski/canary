@@ -191,3 +191,50 @@ def test_from_bindings_confidence_edge_cases(levels: tuple[str, ...] | None) -> 
     # None → everything; empty tuple → nothing (runtime treats empty config
     # as "disabled" before construction, but the class itself is literal).
     assert decoder.signal_count == (2 if levels is None else 0)
+
+
+def test_persist_flag_survives_a_confidence_filter() -> None:
+    """`persist` answers "worth disk forever", not "trustworthy".
+
+    The wheel-speed bindings sit at `high` for a documented reason — Mode 01
+    speed is quantised to whole km/h, so the last digit of the 1/16 scale is
+    unpinned — and must NOT be promoted to `confirmed` to get persisted. They
+    are still the only fast road-speed source the live segmenter can reach.
+    """
+    bindings = Bindings(
+        schema_version=1,
+        signals=[
+            Signal(
+                name="WHEEL_SPEED",
+                module="ABS",
+                can_id=0x6F7,
+                byte_start=0,
+                byte_length=2,
+                scale=0.0625,
+                offset=0.0,
+                unit="km/h",
+                confidence="high",
+                persist=True,
+            ),
+            Signal(
+                name="UNTRUSTED",
+                module="ABS",
+                can_id=0x6F7,
+                byte_start=2,
+                byte_length=2,
+                confidence="high",
+            ),
+        ],
+    )
+
+    decoder = FrameDecoder.from_bindings(bindings, confidence_levels=("confirmed",))
+    names = {sig.name for sigs in decoder._by_can_id.values() for sig in sigs}
+    assert names == {"WHEEL_SPEED"}
+
+
+def test_persist_defaults_off_so_storage_stays_opt_in() -> None:
+    """Storage is forever; a new binding must not start writing rows by default."""
+    signal = Signal(
+        name="NEW", module="ECM", can_id=0x123, byte_start=0, byte_length=1, confidence="confirmed"
+    )
+    assert signal.persist is False

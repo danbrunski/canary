@@ -966,6 +966,10 @@ signals:
 
   - name: WHEEL_SPEED_6F7_A
     module: ABS
+    # Only fast road-speed source the live segmenter can reach; GPS trails
+    # obd:SPEED by ~7% in slope. See `persist` on Signal for why this is not
+    # a confidence promotion.
+    persist: true
     can_id: 0x6F7
     byte_start: 0
     byte_length: 2
@@ -1005,6 +1009,10 @@ signals:
 
   - name: WHEEL_SPEED_6F7_B
     module: ABS
+    # Only fast road-speed source the live segmenter can reach; GPS trails
+    # obd:SPEED by ~7% in slope. See `persist` on Signal for why this is not
+    # a confidence promotion.
+    persist: true
     can_id: 0x6F7
     byte_start: 2
     byte_length: 2
@@ -1020,6 +1028,10 @@ signals:
 
   - name: WHEEL_SPEED_6F7_C
     module: ABS
+    # Only fast road-speed source the live segmenter can reach; GPS trails
+    # obd:SPEED by ~7% in slope. See `persist` on Signal for why this is not
+    # a confidence promotion.
+    persist: true
     can_id: 0x6F7
     byte_start: 4
     byte_length: 2

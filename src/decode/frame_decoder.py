@@ -49,10 +49,19 @@ class FrameDecoder:
         *,
         confidence_levels: frozenset[str] | set[str] | tuple[str, ...] | None = None,
     ) -> FrameDecoder:
-        """Index ``bindings`` by CAN ID, optionally filtered by confidence."""
+        """Index ``bindings`` by CAN ID, optionally filtered by confidence.
+
+        A signal with ``persist: true`` is included whatever the filter says —
+        see :attr:`~src.decode.bindings.Signal.persist` for why that is a
+        separate question from confidence.
+        """
         by_id: dict[int, list[Signal]] = {}
         for sig in bindings.signals:
-            if confidence_levels is not None and sig.confidence not in confidence_levels:
+            if (
+                confidence_levels is not None
+                and sig.confidence not in confidence_levels
+                and not sig.persist
+            ):
                 continue
             by_id.setdefault(sig.can_id, []).append(sig)
         return cls(_by_can_id=by_id)

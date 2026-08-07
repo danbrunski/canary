@@ -58,6 +58,21 @@ class Signal(_Strict):
     offset: float | None = None
     unit: str = "unknown"
     confidence: Literal["confirmed", "high", "medium", "low", "hypothesized"]
+    #: Persist this signal as a ``decoded:`` row regardless of confidence.
+    #:
+    #: Deliberately orthogonal to ``confidence``, because they answer different
+    #: questions. Confidence is *is this binding trustworthy*; this is *is it
+    #: worth disk forever*, and the answers diverge in both directions. A
+    #: `confirmed` third copy of a value already persisted from another frame
+    #: earns nothing at 88 Hz, while a `high` wheel speed is the only fast,
+    #: always-present road-speed source the live segmenter can reach.
+    #:
+    #: Persisting buys serve-time reach only — never information. Raw frame
+    #: payloads are stored regardless, and the training pipeline re-decodes
+    #: every binding from them irrespective of confidence or this flag. Set it
+    #: only when something *live* (segmenter, dashboard, status) needs the
+    #: value without a payload decode.
+    persist: bool = False
     # Optional sanity bounds for the *decoded* value. When set, the decoder
     # flags samples that fall outside this range — typical use is to catch
     # binding bugs (e.g. coolant decoding to -40degC because the scale/offset

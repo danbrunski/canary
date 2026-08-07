@@ -63,7 +63,13 @@ DEFAULT_RECENT_MOTION_WINDOW_SECONDS = 180.0
 # binding fits 1.0007 with 0.09% drift.
 DEFAULT_SIGNAL_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "rpm": ("obd:RPM", "obd:rpm", "decoded:ECM_RPM"),
-    "speed": ("obd:SPEED", "obd:speed", "gps:speed"),
+    # CAN wheel speed goes ahead of GPS: against obd:SPEED on
+    # 2026-08-06T162657 it fits r2 = 0.9992, slope 0.9945, drift 1.00%
+    # (`stable`, n = 2458) while gps:speed fits slope 1.0718 — a 7% over-read,
+    # which is 5.6 km/h at the 80 km/h city/highway boundary and enough to
+    # flip the mode. GPS stays as the last resort for rolling with the engine
+    # off, where neither the PID nor the ABS frame is present.
+    "speed": ("obd:SPEED", "obd:speed", "decoded:WHEEL_SPEED_6F7_C", "gps:speed"),
     "throttle": ("obd:THROTTLE_POS", "obd:throttle_pos"),
     "coolant_temp": ("obd:COOLANT_TEMP", "obd:coolant_temp", "decoded:ECM_COOLANT_TEMP"),
     # Phase 2a.7 — decimated IMU peaks (src.preprocessing.imu_decimation).

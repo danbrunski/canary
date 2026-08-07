@@ -96,7 +96,7 @@ _SEGMENTER_SIGNAL_COLUMNS: dict[str, str | tuple[str, ...]] = {
     # OBD wheel-speed PID is the reliable primary; GPS is the back-stop when OBD
     # is absent, coalesced row-wise (see segmenter). GPS↔OBD disagreement is a
     # sensor-committee residual, not a coalesce winner.
-    "speed": ("obd:SPEED", "gps:speed"),
+    "speed": ("obd:SPEED", "decoded:WHEEL_SPEED_6F7_C", "gps:speed"),
     "throttle": "obd:THROTTLE_POS",
     "coolant_temp": ("obd:COOLANT_TEMP", "decoded:ECM_COOLANT_TEMP"),
 }
