@@ -9,6 +9,8 @@ no-frame timeout.
 from __future__ import annotations
 
 from src.collection.isotp import (
+    PERMANENT_REFUSAL_NRCS,
+    RESPONSE_PENDING_NRC,
     IsoTpResponseAssembler,
     is_negative_response,
     negative_response_code,
@@ -20,6 +22,36 @@ def _sf(*body: int) -> bytes:
     """Single-frame CAN payload: PCI byte (length) + body, padded to 8 bytes."""
     data = bytes([len(body), *body])
     return data + bytes(8 - len(data))
+
+
+def test_response_pending_is_not_a_refusal() -> None:
+    """ISO 14229 0x78 means "received you, still working" — the tester must wait.
+
+    Scoring it as a refusal is how one busy moment on the 2026-08-07 hybrid
+    capture got recorded as "this ECU has no fast exit" and killed Mode 01 for
+    the rest of the run.
+    """
+    assembler = IsoTpResponseAssembler(service=0x10, identifier=0x81)
+    result = assembler.accept(0x7E8, _sf(0x7F, 0x10, RESPONSE_PENDING_NRC))
+    assert result.response_pending is True
+    assert result.negative_response is False
+    assert result.negative_response_code == RESPONSE_PENDING_NRC
+
+
+def test_a_real_refusal_is_still_a_refusal() -> None:
+    assembler = IsoTpResponseAssembler(service=0x10, identifier=0x81)
+    result = assembler.accept(0x7E8, _sf(0x7F, 0x10, 0x12))
+    assert result.response_pending is False
+    assert result.negative_response is True
+    assert result.negative_response_code == 0x12
+
+
+def test_only_never_means_never() -> None:
+    """The NRCs that justify disabling a capability rather than retrying it."""
+    assert 0x11 in PERMANENT_REFUSAL_NRCS  # serviceNotSupported
+    assert 0x12 in PERMANENT_REFUSAL_NRCS  # subFunctionNotSupported
+    for retryable in (0x21, 0x22, RESPONSE_PENDING_NRC):
+        assert retryable not in PERMANENT_REFUSAL_NRCS
 
 
 def test_negative_response_code_extracts_request_out_of_range() -> None:

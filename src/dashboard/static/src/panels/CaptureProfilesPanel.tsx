@@ -322,7 +322,12 @@ export function CaptureProfilesPanel({
                 <p className={didWindow.fast_exit_failures > 0 ? "text-warn" : "text-fg-dim"}>
                   DID session: {didWindow.phase} · fast exits {didWindow.fast_exits}
                   {` · failures ${didWindow.fast_exit_failures}`}
-                  {!didWindow.fast_exit_supported && " · fast exit unavailable"}
+                  {!didWindow.fast_exit_supported &&
+                    (didWindow.fast_exit_retry_in_seconds
+                      ? ` · Mode 01 degraded${
+                          didWindow.last_exit_nrc_name ? ` (${didWindow.last_exit_nrc_name})` : ""
+                        }, retrying in ${Math.ceil(didWindow.fast_exit_retry_in_seconds)}s`
+                      : " · fast exit unavailable")}
                 </p>
               )}
               {achievedRates.length > 0 && (

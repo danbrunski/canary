@@ -50,6 +50,7 @@ from src.collection.isotp import (
     DEFAULT_RESPONSE_ID_MAX,
     DEFAULT_RESPONSE_ID_MIN,
     FLOW_CONTROL_CTS,
+    RESPONSE_PENDING_NRC,
     IsoTpResponseAssembler,
     ObdResponse,
     build_batched_request_payload,
@@ -73,6 +74,7 @@ from src.collection.obd_scheduler import (
     DidWindowController,
     ObdSchedulerMetrics,
     RequestFilter,
+    SessionControlResult,
     _bus_budget_requests_per_second,
     _count_active_requests,
     _initial_request_states,
@@ -122,6 +124,13 @@ SCHEDULER_METRICS_INTERVAL_SECONDS = 5.0
 #: Small on purpose: an ECU that dislikes a given size should cost a handful
 #: of request slots to discover, not a whole drive.
 MAX_CONSECUTIVE_BATCH_FAILURES = 3
+#: Extra wait granted each time the ECU answers `0x78 responsePending`
+#: (ISO 14229 P2*). The ECU has told us it is working, so scoring this as a
+#: timeout throws away an answer that was on its way.
+RESPONSE_PENDING_EXTENSION_SECONDS = 0.5
+#: Cap on those extensions, so a stuck ECU cannot hold the bus indefinitely.
+#: Exceeding it is a real failure and is reported as NRC 0x78.
+MAX_RESPONSE_PENDING_EXTENSIONS = 4
 #: A zero-result Mode 06 discovery is ambiguous (passive mode, bus startup,
 #: ignition state, or genuinely unsupported). Once ordinary OBD contact has
 #: succeeded, retry no faster than this if discovery still returns nothing.
@@ -313,9 +322,10 @@ def run_can_obd_loop(
                     controller.on_request_attempted(did_index)
             if controller.session_exit_due() and now >= next_budget_at:
                 # Hand Mode 01 the bus back now instead of waiting out the S3
-                # timeout. A refusal latches the fallback, so an ECU with no
-                # fast exit pays one attempt total, not one per window.
-                exited = _send_session_control(
+                # timeout. Only a permanent refusal disables this; a busy or
+                # silent ECU is retried, so one bad moment costs one window
+                # rather than every window for the rest of the drive.
+                exit_result = _send_session_control(
                     bus,
                     spec.did_session,  # type: ignore[arg-type]
                     sub_function=spec.did_session.exit_session,  # type: ignore[union-attr]
@@ -326,13 +336,13 @@ def run_can_obd_loop(
                     stats=stats,
                     deadline_monotonic=deadline_monotonic,
                 )
-                controller.on_exit_response(ok=exited, now=time.monotonic())
+                controller.on_exit_response(result=exit_result, now=time.monotonic())
                 next_budget_at = max(
                     next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
                 )
                 continue
             if controller.session_control_due(request_states, now) and now >= next_budget_at:
-                ok = _send_session_control(
+                entry_result = _send_session_control(
                     bus,
                     spec.did_session,  # type: ignore[arg-type]
                     request_id=spec.did_request_id,
@@ -342,7 +352,9 @@ def run_can_obd_loop(
                     stats=stats,
                     deadline_monotonic=deadline_monotonic,
                 )
-                controller.on_session_response(ok=ok, states=request_states, now=time.monotonic())
+                controller.on_session_response(
+                    ok=entry_result.ok, states=request_states, now=time.monotonic()
+                )
                 next_budget_at = max(
                     next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
                 )
@@ -361,9 +373,10 @@ def run_can_obd_loop(
             controller.advance(request_states, now)
             if controller.session_exit_due() and now >= next_budget_at:
                 # Hand Mode 01 the bus back now instead of waiting out the S3
-                # timeout. A refusal latches the fallback, so an ECU with no
-                # fast exit pays one attempt total, not one per window.
-                exited = _send_session_control(
+                # timeout. Only a permanent refusal disables this; a busy or
+                # silent ECU is retried, so one bad moment costs one window
+                # rather than every window for the rest of the drive.
+                exit_result = _send_session_control(
                     bus,
                     spec.did_session,  # type: ignore[arg-type]
                     sub_function=spec.did_session.exit_session,  # type: ignore[union-attr]
@@ -374,13 +387,13 @@ def run_can_obd_loop(
                     stats=stats,
                     deadline_monotonic=deadline_monotonic,
                 )
-                controller.on_exit_response(ok=exited, now=time.monotonic())
+                controller.on_exit_response(result=exit_result, now=time.monotonic())
                 next_budget_at = max(
                     next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
                 )
                 continue
             if controller.session_control_due(request_states, now) and now >= next_budget_at:
-                ok = _send_session_control(
+                entry_result = _send_session_control(
                     bus,
                     spec.did_session,  # type: ignore[arg-type]
                     request_id=spec.did_request_id,
@@ -390,7 +403,9 @@ def run_can_obd_loop(
                     stats=stats,
                     deadline_monotonic=deadline_monotonic,
                 )
-                controller.on_session_response(ok=ok, states=request_states, now=time.monotonic())
+                controller.on_session_response(
+                    ok=entry_result.ok, states=request_states, now=time.monotonic()
+                )
                 next_budget_at = max(
                     next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
                 )
@@ -1028,7 +1043,7 @@ def _send_session_control(
     stop_event: threading.Event,
     stats: CanObdLoopStats,
     deadline_monotonic: float | None,
-) -> bool:
+) -> SessionControlResult:
     """Send ``10 <session>`` (UDS DiagnosticSessionControl) and await ``50 <session>``.
 
     Opens or keeps alive the Mode-22 gating session, or — with
@@ -1055,7 +1070,16 @@ def _send_session_control(
         stats=stats,
         deadline_monotonic=deadline_monotonic,
     )
-    return result.response is not None
+    if result.response is not None:
+        return SessionControlResult(ok=True)
+    # Session control bypasses the poll-request path, so without these the
+    # only trace of a failure was a bare counter — a refusal and a silent bus
+    # looked identical in `/status` and neither appeared in the log at all.
+    if result.negative_response_code is not None:
+        stats.negative_responses += 1
+    else:
+        stats.request_timeouts += 1
+    return SessionControlResult(ok=False, negative_response_code=result.negative_response_code)
 
 
 @dataclass(frozen=True)
@@ -1123,6 +1147,7 @@ def _query_batched_with_tap(
     # identifier=None: the payload is a stream of <pid> <data> pairs, so
     # there is no single echo to match on.
     assembler = IsoTpResponseAssembler(service=0x01, identifier=None)
+    pending_extensions = 0
 
     while not _should_stop(stop_event, request_deadline):
         remaining = max(0.001, request_deadline - time.monotonic())
@@ -1135,6 +1160,12 @@ def _query_batched_with_tap(
         if not data:
             continue
         result = assembler.accept(int(msg.arbitration_id), data)
+        if result.response_pending:
+            if pending_extensions >= MAX_RESPONSE_PENDING_EXTENSIONS:
+                return BatchedQueryResult(negative_response_code=RESPONSE_PENDING_NRC)
+            pending_extensions += 1
+            request_deadline = _extend_for_response_pending(request_deadline, deadline_monotonic)
+            continue
         if result.negative_response:
             return BatchedQueryResult(negative_response_code=result.negative_response_code)
         if result.flow_control_id is not None:
@@ -1300,6 +1331,7 @@ def _query_with_tap(
     if deadline_monotonic is not None:
         request_deadline = min(request_deadline, deadline_monotonic)
     assembler = IsoTpResponseAssembler(service=request.service, identifier=identifier)
+    pending_extensions = 0
 
     while not _should_stop(stop_event, request_deadline):
         remaining = max(0.001, request_deadline - time.monotonic())
@@ -1313,6 +1345,12 @@ def _query_with_tap(
             continue
         responder = int(msg.arbitration_id)
         result = assembler.accept(responder, data)
+        if result.response_pending:
+            if pending_extensions >= MAX_RESPONSE_PENDING_EXTENSIONS:
+                return QueryResult(negative_response_code=RESPONSE_PENDING_NRC)
+            pending_extensions += 1
+            request_deadline = _extend_for_response_pending(request_deadline, deadline_monotonic)
+            continue
         if result.negative_response:
             return QueryResult(negative_response_code=result.negative_response_code)
         if result.flow_control_id is not None:
@@ -1329,6 +1367,21 @@ def _query_with_tap(
         if result.response is not None:
             return QueryResult(response=result.response)
     return QueryResult()
+
+
+def _extend_for_response_pending(
+    request_deadline: float,
+    deadline_monotonic: float | None,
+) -> float:
+    """Grant one P2* extension after an ECU `0x78 responsePending`.
+
+    Never pushes past ``deadline_monotonic`` — a shutdown or capture deadline
+    still wins over an ECU asking for more time.
+    """
+    extended = request_deadline + RESPONSE_PENDING_EXTENSION_SECONDS
+    if deadline_monotonic is not None:
+        extended = min(extended, deadline_monotonic)
+    return extended
 
 
 def _recv_and_tap(

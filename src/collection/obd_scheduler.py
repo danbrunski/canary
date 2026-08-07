@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 import statistics
 import threading
 import time
@@ -15,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from src.collection import bus_budget
 from src.collection.can_obd_client import DEFAULT_REQUEST_ID, PID_DECODERS
-from src.collection.isotp import nrc_name
+from src.collection.isotp import PERMANENT_REFUSAL_NRCS, nrc_name
 from src.collection.obd_registry import PollTier, lookup
 from src.config import DEFAULT_PRIORITY_CHANNELS, CanBusConfig, CollectionConfig
 
@@ -23,9 +24,25 @@ if TYPE_CHECKING:
     from src.collection.custom_pids import CustomPid
     from src.decode.dids import DidAccess, DidMap
 
+log = logging.getLogger(__name__)
+
 AUTO_PIDS = "auto"
 DEFAULT_DID_REQUEST_ID = 0x7E0
 AUTO_MISS_BACKOFF_SECONDS = 30.0
+#: Consecutive *permanent* refusals before the Mode-22 fast exit is disabled.
+#: Two, not one: the ECM that motivated this answered 139 of 140 exits
+#: correctly, and one stray frame must never cost the rest of the drive.
+FAST_EXIT_REFUSALS_BEFORE_DISABLE = 2
+#: Disabling the fast exit is always provisional. Re-probe after this long,
+#: doubling to the cap, so an ECU that refused while busy recovers on its own
+#: instead of needing a daemon restart mid-drive.
+FAST_EXIT_RETRY_MIN_SECONDS = 30.0
+FAST_EXIT_RETRY_MAX_SECONDS = 300.0
+#: Clear air handed to Mode 01 when a lapse ends with the next window already
+#: overdue. Applied *only* in that case, so the fast-exit path — where the
+#: window is still in the future when the exit grace ends — keeps its full
+#: DID rate.
+MODE01_MIN_SHARE_SECONDS = 0.5
 #: A focused high-rate capture has already established that every selected
 #: channel answers.  One transient miss must not erase 30 seconds of that
 #: channel (roughly 450 samples at 15 Hz), so retry quickly and escalate only
@@ -253,6 +270,26 @@ class DidSessionSpec:
     exit_session: int | None = None
     #: Settling time after a successful fast exit, in place of the lapse.
     exit_grace_seconds: float = 0.05
+
+
+@dataclass(frozen=True)
+class SessionControlResult:
+    """Outcome of one ``10 <session>`` DiagnosticSessionControl request.
+
+    Carries the NRC, not just a pass/fail bit, so callers can separate "this
+    ECU will never do this" (`serviceNotSupported`, `subFunctionNotSupported`)
+    from "not right now" (busy, conditions-not-correct, or no answer at all).
+    Collapsing the two into a bool is what let a single transient failure
+    permanently disable the Mode-22 fast exit mid-drive on 2026-08-07.
+    """
+
+    ok: bool
+    negative_response_code: int | None = None
+
+    @property
+    def permanently_refused(self) -> bool:
+        """True only for NRCs that no amount of retrying will change."""
+        return self.negative_response_code in PERMANENT_REFUSAL_NRCS
 
 
 def resolve_did_session_spec(collection: CollectionConfig) -> DidSessionSpec | None:
@@ -562,9 +599,17 @@ class DidWindowController:
         self.fast_exits = 0
         self.fast_exit_failures = 0
         self._exit_due = False
-        #: Latches on a refused exit so one unsupported ECU costs one attempt,
-        #: not one per window.
-        self._fast_exit_unsupported = False
+        #: Consecutive *permanent* refusals (serviceNotSupported and friends).
+        #: Any success resets it — a busy ECU must not accumulate toward being
+        #: declared incapable.
+        self._exit_refusals = 0
+        #: Monotonic time the fast exit may next be attempted. 0.0 = now.
+        #: This replaces the old boolean latch, which never cleared and so
+        #: turned one refused exit into a Mode-01 blackout for the whole drive.
+        self._exit_retry_at = 0.0
+        self._exit_retry_backoff = FAST_EXIT_RETRY_MIN_SECONDS
+        #: NRC of the most recent failed exit, for `/status` and the log.
+        self.last_exit_nrc: int | None = None
 
     def advance(self, states: Sequence[_PollRequestState], now: float) -> None:
         """Apply phase transitions that don't require bus I/O."""
@@ -581,6 +626,15 @@ class DidWindowController:
                 self._close_window(now)
         elif self.phase == "lapse" and now >= self._lapse_until:
             self.phase = "mode01"
+            if self._next_window_at <= now:
+                # The lapse ate the whole inter-window gap, so the next window
+                # is already overdue and would reopen before a single Mode 01
+                # request could be issued — starving Mode 01 to *exactly* zero
+                # rather than merely slowing it. Any `window_interval` below
+                # `lapse_seconds` guarantees this, which is how the 0.25 s
+                # hybrid profile lost Mode 01 entirely on 2026-08-07. Hand
+                # Mode 01 a slice before reopening.
+                self._next_window_at = now + MODE01_MIN_SHARE_SECONDS
 
     @staticmethod
     def _continuous() -> bool:
@@ -646,17 +700,59 @@ class DidWindowController:
         """Whether the loop should send ``10 <exit_session>`` now."""
         return self._exit_due
 
-    def on_exit_response(self, *, ok: bool, now: float) -> None:
-        """Result of the return-to-default request."""
+    def fast_exit_available(self, now: float) -> bool:
+        """Whether a fast exit should be attempted when the next window closes."""
+        return self._spec.exit_session is not None and now >= self._exit_retry_at
+
+    def on_exit_response(self, *, result: SessionControlResult, now: float) -> None:
+        """Result of the return-to-default request.
+
+        Only an NRC that means "never" disables the fast exit, and only after
+        `FAST_EXIT_REFUSALS_BEFORE_DISABLE` of them in a row. Everything else —
+        busy, conditions-not-correct, or silence — costs this window's lapse
+        and is retried on the next one. Even a disable is provisional: it
+        expires, so the capture heals mid-drive without a restart.
+        """
         self._exit_due = False
-        if ok:
+        if result.ok:
             self.fast_exits += 1
+            if self._exit_retry_at:
+                log.info(
+                    "Mode-22 fast exit recovered; Mode 01 back at full rate",
+                    extra={"fast_exits": self.fast_exits, "failures": self.fast_exit_failures},
+                )
+            self._exit_refusals = 0
+            self._exit_retry_at = 0.0
+            self._exit_retry_backoff = FAST_EXIT_RETRY_MIN_SECONDS
+            self.last_exit_nrc = None
             self._lapse_until = min(self._lapse_until, now + self._spec.exit_grace_seconds)
-        else:
-            # Fall back to waiting the session out, for this window and every
-            # one after it.
-            self.fast_exit_failures += 1
-            self._fast_exit_unsupported = True
+            return
+
+        self.fast_exit_failures += 1
+        self.last_exit_nrc = result.negative_response_code
+        if not result.permanently_refused:
+            # Transient: wait this window's lapse out and try again next time.
+            return
+        self._exit_refusals += 1
+        if self._exit_refusals < FAST_EXIT_REFUSALS_BEFORE_DISABLE:
+            return
+        self._exit_retry_at = now + self._exit_retry_backoff
+        log.warning(
+            "Mode-22 fast exit refused %d times in a row (%s); falling back to the "
+            "%.1fs session lapse and re-probing in %.0fs. Mode 01 sample rate drops "
+            "until then.",
+            self._exit_refusals,
+            nrc_name(result.negative_response_code)
+            if result.negative_response_code is not None
+            else "no response",
+            self._spec.lapse_seconds,
+            self._exit_retry_backoff,
+            extra={
+                "nrc": result.negative_response_code,
+                "retry_in_seconds": self._exit_retry_backoff,
+            },
+        )
+        self._exit_retry_backoff = min(self._exit_retry_backoff * 2, FAST_EXIT_RETRY_MAX_SECONDS)
 
     def request_eligible(self, index: int, request: _PollRequest, *, now: float) -> bool:
         del now  # phase state already advanced this tick
@@ -699,7 +795,7 @@ class DidWindowController:
         # Prefer handing the bus back explicitly. The lapse exists only
         # because the session has to expire on its own; when the ECU accepts a
         # return-to-default it is seconds of Mode-01 blackout for nothing.
-        self._exit_due = self._spec.exit_session is not None and not self._fast_exit_unsupported
+        self._exit_due = self.fast_exit_available(now)
         self._next_window_at = now + self._interval()
         self.windows_completed += 1
         self._pending.clear()
@@ -716,8 +812,18 @@ class DidWindowController:
             "window_interval_seconds": self._interval(),
             "fast_exits": self.fast_exits,
             "fast_exit_failures": self.fast_exit_failures,
-            "fast_exit_supported": self._spec.exit_session is not None
-            and not self._fast_exit_unsupported,
+            "fast_exit_supported": self.fast_exit_available(now),
+            #: Seconds until the fast exit is re-probed; 0.0 when it is live.
+            #: Non-zero means Mode 01 is running at the reduced lapse-path
+            #: rate *and will recover on its own* — the state the old boolean
+            #: could not express.
+            "fast_exit_retry_in_seconds": (
+                round(max(0.0, self._exit_retry_at - now), 1) if self._exit_retry_at else 0.0
+            ),
+            "last_exit_nrc": self.last_exit_nrc,
+            "last_exit_nrc_name": (
+                nrc_name(self.last_exit_nrc) if self.last_exit_nrc is not None else None
+            ),
             "window_max_seconds": self._spec.window_max_seconds,
             "windows_opened": self.windows_opened,
             "windows_completed": self.windows_completed,

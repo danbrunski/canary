@@ -153,6 +153,11 @@ export interface DidWindowStatus {
   fast_exits: number;
   fast_exit_failures: number;
   fast_exit_supported: boolean;
+  /** Seconds until the fast exit is re-probed; 0 when it is live. Non-zero
+   * means Mode 01 is degraded but recovering on its own. */
+  fast_exit_retry_in_seconds?: number;
+  /** NRC of the last failed exit, e.g. "subFunctionNotSupported". */
+  last_exit_nrc_name?: string | null;
   windows_opened: number;
   windows_completed: number;
 }

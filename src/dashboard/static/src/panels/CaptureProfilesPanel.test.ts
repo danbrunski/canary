@@ -261,6 +261,39 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     expect(screen.getByText("0.31 s")).toBeInTheDocument();
   });
 
+  it("says a disabled fast exit is recovering, not dead", async () => {
+    // "unavailable" read as permanent, so a self-healing degradation looked
+    // like a capture that needed a restart. Name the NRC and the countdown.
+    const hybridStatus = status("tuning-hybrid-research");
+    hybridStatus.health = {
+      observed: 1,
+      inference_latency_ms: { mean: null, p95: null, max: null },
+      missing_feature_rate: null,
+      data_freshness_seconds: 0.1,
+      model_swaps: {},
+      active_model_version: null,
+      system: {},
+      obd_scheduler: {
+        did_profile: {
+          phase: "lapse",
+          fast_exits: 139,
+          fast_exit_failures: 2,
+          fast_exit_supported: false,
+          fast_exit_retry_in_seconds: 27.4,
+          last_exit_nrc_name: "subFunctionNotSupported",
+          windows_opened: 145,
+          windows_completed: 145,
+        },
+      },
+    };
+    renderPanel("tuning-hybrid-research", { status: hybridStatus });
+
+    const banner = await screen.findByText(/fast exits 139/);
+    expect(banner).toHaveTextContent("Mode 01 degraded (subFunctionNotSupported)");
+    expect(banner).toHaveTextContent("retrying in 28s");
+    expect(screen.queryByText(/fast exit unavailable/)).not.toBeInTheDocument();
+  });
+
   it("refuses to start the reserved default profile", async () => {
     renderPanel();
     await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());

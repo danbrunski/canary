@@ -43,6 +43,12 @@ class IsoTpFrameResult:
     #: is True; `None` otherwise, or if the frame is malformed (missing the
     #: third body byte) despite matching the 0x7F <service> prefix.
     negative_response_code: int | None = None
+    #: NRC 0x78 (`requestCorrectlyReceived-ResponsePending`). NOT a refusal:
+    #: ISO 14229 requires the tester to keep waiting on the P2* timer for the
+    #: real answer. Kept distinct from `negative_response` because reading it
+    #: as a refusal is how one busy moment got recorded as "this ECU does not
+    #: support the request" — see `DidWindowController.on_exit_response`.
+    response_pending: bool = False
 
 
 def positive_response_service(service: int) -> int:
@@ -157,6 +163,17 @@ def negative_response_code(data: bytes, service: int) -> int | None:
     return None
 
 
+#: The one NRC that is not a refusal: the ECU acknowledges the request and
+#: asks for more time (ISO 14229 P2* timing). Named because treating it as a
+#: refusal is a silent-data-loss bug, not a cosmetic one.
+RESPONSE_PENDING_NRC = 0x78
+
+#: NRCs that mean the ECU will never answer this request, however many times
+#: it is asked — the only grounds for disabling a capability rather than
+#: retrying it. Everything else (busy, conditions-not-correct, timeout) is a
+#: "try again", and must not latch.
+PERMANENT_REFUSAL_NRCS: frozenset[int] = frozenset({0x11, 0x12})
+
 #: ISO 14229-1 Annex A negative response codes actually seen on Mode
 #: 01/03/06/07/0A/22 traffic. Not exhaustive by design (AGENTS.md: no
 #: premature abstraction) — `nrc_name` falls back to raw hex for anything
@@ -166,6 +183,7 @@ NRC_NAMES: dict[int, str] = {
     0x11: "serviceNotSupported",
     0x12: "subFunctionNotSupported",
     0x13: "incorrectMessageLengthOrInvalidFormat",
+    0x21: "busyRepeatRequest",
     0x22: "conditionsNotCorrect",
     0x31: "requestOutOfRange",
     0x33: "securityAccessDenied",
@@ -234,9 +252,18 @@ class IsoTpResponseAssembler:
         frame_type = pci_type(data)
         if frame_type == PCI_SINGLE_FRAME:
             if is_negative_response(data, self.request_service):
+                nrc = negative_response_code(data, self.request_service)
+                if nrc == RESPONSE_PENDING_NRC:
+                    # "Received you, still working." The real response — positive
+                    # or negative — is still coming; the caller extends its
+                    # deadline rather than scoring this as a failure.
+                    return IsoTpFrameResult(
+                        response_pending=True,
+                        negative_response_code=nrc,
+                    )
                 return IsoTpFrameResult(
                     negative_response=True,
-                    negative_response_code=negative_response_code(data, self.request_service),
+                    negative_response_code=nrc,
                 )
             payload = handle_single_frame(data, self.expected_service, self.identifier)
             if payload is None:
@@ -300,6 +327,8 @@ __all__ = [
     "DEFAULT_RESPONSE_ID_MIN",
     "FLOW_CONTROL_CTS",
     "NRC_NAMES",
+    "PERMANENT_REFUSAL_NRCS",
+    "RESPONSE_PENDING_NRC",
     "ObdResponse",
     "IsoTpResponseAssembler",
     "build_batched_request_payload",

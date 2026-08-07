@@ -15,6 +15,7 @@ import pytest
 from src.collection.can_collector import make_session_dir
 from src.collection.can_obd_collector import (
     AUTO_BASELINE_PID_NAMES,
+    MAX_RESPONSE_PENDING_EXTENSIONS,
     CanObdSpec,
     DidSessionSpec,
     ObdSchedulerMetrics,
@@ -36,10 +37,12 @@ from src.collection.obd_registry import MODE01_REGISTRY
 from src.collection.obd_scheduler import (
     AUTO_MISS_BACKOFF_SECONDS,
     CAPTURE_MISS_BACKOFF_SECONDS,
+    FAST_EXIT_RETRY_MIN_SECONDS,
     MAX_MISS_BACKOFF_SECONDS,
     CanObdLoopStats,
     ForcePollTrigger,
     FreezeFrameTrigger,
+    SessionControlResult,
     _PollRequestState,
     _select_next_due_request,
     _update_response_state,
@@ -1703,7 +1706,7 @@ def test_fast_exit_hands_mode_01_back_without_waiting_out_the_session() -> None:
     assert controller.phase == "lapse"
     assert controller.session_exit_due() is True
 
-    controller.on_exit_response(ok=True, now=110.0)
+    controller.on_exit_response(result=SessionControlResult(ok=True), now=110.0)
     assert controller.fast_exits == 1
     assert controller.session_exit_due() is False
     # Mode 01 resumes after the grace, not after the 5 s lapse.
@@ -1711,25 +1714,223 @@ def test_fast_exit_hands_mode_01_back_without_waiting_out_the_session() -> None:
     assert controller.phase == "mode01"
 
 
-def test_a_refused_fast_exit_falls_back_to_the_timed_lapse_once() -> None:
-    """An ECU without a fast exit should cost one attempt, not one per window."""
+def test_a_transient_exit_failure_is_retried_on_the_next_window() -> None:
+    """One silence must cost one window, not the rest of the drive.
+
+    The real ECM answered 139 of 140 fast exits on 2026-08-07. The 140th
+    failed, and because any failure latched the fallback off, Mode 01 went to
+    zero for the remainder of the capture.
+    """
     controller, states = _controller(exit_session=0x81)
     controller.on_session_response(ok=True, states=states, now=100.0)
     controller.advance(states, now=110.0)
-    controller.on_exit_response(ok=False, now=110.0)
+    controller.on_exit_response(result=SessionControlResult(ok=False), now=110.0)
 
     assert controller.fast_exit_failures == 1
-    # Still waiting out the full lapse.
+    # This window still waits the full lapse out — nothing else to hand back to.
     controller.advance(states, now=110.06)
     assert controller.phase == "lapse"
     controller.advance(states, now=115.01)
     assert controller.phase == "mode01"
 
-    # And the next window doesn't try again.
+    # ...but the next window tries again.
+    assert controller.fast_exit_available(now=115.01) is True
     controller.on_session_response(ok=True, states=states, now=200.0)
     controller.advance(states, now=210.0)
-    assert controller.session_exit_due() is False
-    assert controller.snapshot(now=210.0)["fast_exit_supported"] is False
+    assert controller.session_exit_due() is True
+    assert controller.snapshot(now=210.0)["fast_exit_supported"] is True
+
+
+@pytest.mark.parametrize(
+    ("nrc", "label"),
+    [
+        (None, "no response"),
+        (0x21, "busyRepeatRequest"),
+        (0x22, "conditionsNotCorrect"),
+        (0x78, "responsePending"),
+    ],
+)
+def test_a_busy_or_silent_ecu_never_disables_the_fast_exit(nrc: int | None, label: str) -> None:
+    """Only "never" disables a capability. Everything else is a retry."""
+    controller, _states = _controller(exit_session=0x81)
+    for tick in range(10):
+        controller.on_exit_response(
+            result=SessionControlResult(ok=False, negative_response_code=nrc),
+            now=100.0 + tick,
+        )
+    assert controller.fast_exit_available(now=200.0) is True, label
+    assert controller.snapshot(now=200.0)["fast_exit_supported"] is True
+
+
+def test_two_permanent_refusals_disable_the_fast_exit_and_then_re_probe() -> None:
+    """A genuine `subFunctionNotSupported` disables it — provisionally."""
+    controller, _states = _controller(exit_session=0x81)
+    refusal = SessionControlResult(ok=False, negative_response_code=0x12)
+
+    controller.on_exit_response(result=refusal, now=100.0)
+    assert controller.fast_exit_available(now=100.0) is True  # one is not proof
+
+    controller.on_exit_response(result=refusal, now=101.0)
+    assert controller.fast_exit_available(now=101.0) is False
+    snapshot = controller.snapshot(now=101.0)
+    assert snapshot["fast_exit_supported"] is False
+    assert snapshot["fast_exit_retry_in_seconds"] == FAST_EXIT_RETRY_MIN_SECONDS
+    assert snapshot["last_exit_nrc_name"] == "subFunctionNotSupported"
+
+    # Self-healing: the disable expires on its own, mid-drive, no restart.
+    assert controller.fast_exit_available(now=101.0 + FAST_EXIT_RETRY_MIN_SECONDS + 0.1) is True
+
+
+def test_repeated_refusals_back_off_but_a_success_clears_everything() -> None:
+    controller, _states = _controller(exit_session=0x81)
+    refusal = SessionControlResult(ok=False, negative_response_code=0x11)
+
+    controller.on_exit_response(result=refusal, now=100.0)
+    controller.on_exit_response(result=refusal, now=101.0)
+    assert controller.snapshot(now=101.0)["fast_exit_retry_in_seconds"] == pytest.approx(
+        FAST_EXIT_RETRY_MIN_SECONDS, abs=0.1
+    )
+
+    # The re-probe fails too, so the next wait doubles rather than giving up.
+    retry_at = 101.0 + FAST_EXIT_RETRY_MIN_SECONDS
+    controller.on_exit_response(result=refusal, now=retry_at)
+    assert controller.snapshot(now=retry_at)["fast_exit_retry_in_seconds"] == pytest.approx(
+        FAST_EXIT_RETRY_MIN_SECONDS * 2, abs=0.1
+    )
+
+    controller.on_exit_response(result=SessionControlResult(ok=True), now=retry_at + 100.0)
+    assert controller.fast_exit_available(now=retry_at + 100.0) is True
+    recovered = controller.snapshot(now=retry_at + 100.0)
+    assert recovered["fast_exit_retry_in_seconds"] == 0.0
+    assert recovered["last_exit_nrc_name"] is None
+
+
+class _BusyThenAnsweringSessionBus:
+    """Answers session control with `0x78 responsePending` before the real reply.
+
+    ISO 14229's "received you, still working" — the shape of an ECU under
+    load, which is exactly when a 90 req/s hybrid capture asks it to switch
+    sessions.
+    """
+
+    def __init__(self, pending_frames: int) -> None:
+        self.sent: list[can.Message] = []
+        self._responses: list[can.Message] = []
+        self._pending_frames = pending_frames
+
+    def send(self, msg: can.Message) -> None:
+        self.sent.append(msg)
+        data = bytes(msg.data)
+        if data[:2] != bytes([0x02, 0x10]):
+            return
+        for _ in range(self._pending_frames):
+            self._responses.append(
+                can.Message(
+                    arbitration_id=0x7E8,
+                    data=bytes([0x03, 0x7F, 0x10, 0x78, 0x00, 0x00, 0x00, 0x00]),
+                    is_extended_id=False,
+                )
+            )
+        self._responses.append(
+            can.Message(
+                arbitration_id=0x7E8,
+                data=bytes([0x02, 0x50, data[2], 0x00, 0x00, 0x00, 0x00, 0x00]),
+                is_extended_id=False,
+            )
+        )
+
+    def recv(self, timeout: float = 0.0) -> can.Message | None:
+        if self._responses:
+            return self._responses.pop(0)
+        if timeout:
+            time.sleep(min(timeout, 0.005))
+        return None
+
+
+def _send_exit(bus: object, stats: CanObdLoopStats) -> SessionControlResult:
+    from src.collection.can_obd_collector import _send_session_control
+
+    return _send_session_control(
+        bus,  # type: ignore[arg-type]
+        DidSessionSpec(session=0xC0, exit_session=0x81),
+        sub_function=0x81,
+        request_id=0x7E0,
+        timeout_seconds=0.2,
+        on_frame=lambda _msg: None,
+        stop_event=threading.Event(),
+        stats=stats,
+        deadline_monotonic=None,
+    )
+
+
+def test_a_busy_ecu_gets_its_answer_through_instead_of_being_called_unsupported() -> None:
+    """`0x78` must extend the wait, not score a failure.
+
+    This is the trigger end of the 2026-08-07 blackout: the answer was on its
+    way, and reading the "please wait" as a refusal threw it away.
+    """
+    stats = CanObdLoopStats()
+    result = _send_exit(_BusyThenAnsweringSessionBus(pending_frames=2), stats)
+
+    assert result.ok is True
+    assert result.negative_response_code is None
+    assert stats.negative_responses == 0
+    assert stats.request_timeouts == 0
+
+
+def test_an_endlessly_busy_ecu_still_gives_up_and_says_why() -> None:
+    """The wait is bounded — but the reason is reported, not silently dropped."""
+    stats = CanObdLoopStats()
+    result = _send_exit(
+        _BusyThenAnsweringSessionBus(pending_frames=MAX_RESPONSE_PENDING_EXTENSIONS + 1),
+        stats,
+    )
+
+    assert result.ok is False
+    assert result.negative_response_code == 0x78
+    assert result.permanently_refused is False  # so it will be retried
+    # Session control used to bypass the counters entirely.
+    assert stats.negative_responses == 1
+
+
+def test_a_failed_session_control_is_visible_in_the_scheduler_counters() -> None:
+    """A silent ECU on session control used to leave no trace anywhere."""
+    stats = CanObdLoopStats()
+    result = _send_exit(_SilentBus(), stats)
+
+    assert result.ok is False
+    assert result.negative_response_code is None
+    assert stats.request_timeouts == 1
+
+
+def test_a_lapse_always_leaves_mode_01_a_share_of_the_bus() -> None:
+    """Regression: `window_interval` below `lapse_seconds` starved Mode 01 to zero.
+
+    The next window was scheduled `interval` after the window *closed*, so once
+    a 5 s lapse expired it was already ~4.75 s overdue and reopened before a
+    single Mode 01 request could be issued — permanently, not transiently.
+    """
+    from src.collection.obd_scheduler import MODE01_MIN_SHARE_SECONDS, DidWindowController
+
+    spec = DidSessionSpec(
+        session=0xC0,
+        keepalive_seconds=2.0,
+        window_interval_seconds=0.25,  # the hybrid profile's cadence
+        window_max_seconds=10.0,
+        lapse_seconds=5.0,  # ...twenty times longer than the interval
+    )
+    states = [_PollRequestState(), _PollRequestState()]
+    controller = DidWindowController(spec, [1], now=0.0)
+
+    controller.on_session_response(ok=True, states=states, now=100.0)
+    controller.on_request_attempted(1)
+    controller.advance(states, now=100.01)
+    assert controller.phase == "lapse"
+
+    controller.advance(states, now=105.02)
+    assert controller.phase == "mode01"
+    assert controller.session_control_due(states, now=105.02) is False
+    assert controller.session_control_due(states, now=105.03 + MODE01_MIN_SHARE_SECONDS) is True
 
 
 def test_no_exit_configured_keeps_the_historic_lapse() -> None:
@@ -1766,7 +1967,7 @@ def test_capture_profile_sets_the_did_window_cadence() -> None:
         controller.on_session_response(ok=True, states=states, now=100.0)
         controller.on_request_attempted(1)  # the window's only DID was read
         controller.advance(states, now=100.2)
-        controller.on_exit_response(ok=True, now=100.2)
+        controller.on_exit_response(result=SessionControlResult(ok=True), now=100.2)
         controller.advance(states, now=100.26)
         assert controller.phase == "mode01"
         assert controller.session_control_due(states, now=100.7) is True
