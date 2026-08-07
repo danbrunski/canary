@@ -1046,8 +1046,22 @@ signals:
           0.59% of bytes at the best of 64 tested alignments, i.e. none), so
           this is settled by the telemetry, not the artifact.
 
-      Settling the residual needs a measured ground distance — a tape run or
-      known mile markers — not more stored data.
+      The MAGNITUDE is settled; do not spend a drive re-measuring it. GPS
+      carries two physically independent measurements — carrier-Doppler
+      speed-over-ground (RMC, what `gps:speed` reports) and code-phase
+      position — and over 2026-08-06T162657 they agree to 0.11%: the speed
+      integral gives 67.606 km, the position track 67.678 km when sampled at
+      10 s. Sampling the track finer inflates it (68.27 km at 360 ms: summing
+      absolute steps turns position noise into length, and can only ever add)
+      while sampling coarser cuts chords across curves (62.49 km at 120 s);
+      10 s is where the two biases cross. The ECU integrates the same drive to
+      62.03 km, so it is 8.2% under, confirmed twice by different physics.
+
+      What is NOT settled is the cause of the ~4 points tire size does not
+      explain. That is a question about the ABS module's internal
+      circumference constant, and no amount of further speed or distance
+      measurement will answer it — every instrument on the vehicle side of
+      that constant inherits it.
 
       Consequence: use these fields for anything that must agree with
       obd:SPEED (mode gating, comparisons against fitted models). Do NOT use
