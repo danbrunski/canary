@@ -1,0 +1,55 @@
+{
+  "skill_name": "engine-management",
+  "evals": [
+    {
+      "id": 0,
+      "name": "fuel-trim-differential-diagnosis",
+      "prompt": "Pulled logs off my 4.0 V6 this weekend (stock, 190k miles, no mods). Warm idle in park: bank 1 STFT bouncing around +3%, LTFT sitting at +19%. Bank 2 is basically identical. At 45 mph steady cruise LTFT is down to +6% and STFT +2%. On a hard pull both trims go to 0 and stay there. No codes, MIL is off, and fuel pressure at idle reads spec on a gauge. What's actually going on here and what should I check first?",
+      "expected_output": "Reads the SHAPE, not the number: large at idle and shrinking as load/airflow rises = an additive / fixed-quantity error (unmetered air), not a multiplicative/scaling error (MAF calibration, fuel pressure, injector flow), which would hold roughly constant in percent across load. Both banks equal points at a shared source rather than a bank-specific part. Notes trims going to 0 under a hard pull is OPEN LOOP, not the fault resolving, and carries no diagnostic information. Flags purge duty and an upstream exhaust leak as classic confounders. Notes LTFT +19% is approaching typical adaptation authority. Prescribes a differential check and says what re-logging should show if the hypothesis is right.",
+      "assertions": [
+        "Identifies the trim-vs-load shape (large at idle, shrinking with load) as a fixed-quantity/additive error — unmetered air — rather than a scaling error",
+        "Explicitly rules out or deprioritizes scaling causes (MAF calibration, fuel pressure, injector flow) using the fact that they would hold roughly constant in percent across load",
+        "States that trims reading 0 under the hard pull is open loop, not the fault resolving, and carries no diagnostic information",
+        "Uses both-banks-equal to point at a shared source (plenum, PCV, brake booster, purge, MAF) rather than bank-specific hardware",
+        "Names at least two confounders that mimic this pattern (EVAP purge, upstream exhaust leak, adaptation reset, MAF pulsation) before diagnosing hardware",
+        "Notes that 'no codes' does not exclude the fault — these failures are electrically perfect",
+        "Gives a concrete first check (smoke/vacuum test, purge commanded closed, PCV) and states what re-logging should show if the hypothesis holds",
+        "Does not state a universal numeric DTC threshold for P0171/P0174 as if it were standardized"
+      ],
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "wot-fuel-correction-magnitude",
+      "prompt": "I've got a wideband and I'm datalogging WOT pulls in 3rd on my NA build. The tune targets 12.8 AFR at WOT. From 3000-4000 rpm I'm measuring right on 12.8, but above 4500 I'm reading 13.6-13.9. I'm at about 6800 ft elevation. Injectors are 550cc at 43.5 psi base and the log shows 78% duty at redline. Should I just add 7% fuel to the top of the VE table?",
+      "expected_output": "Does not accept the framing. Separates the two candidate causes that produce an identical lean-at-high-rpm trace: a VE/airflow model error versus running out of fuel DELIVERY (rail pressure falling at high flow, injectors near their usable limit) — distinguished by whether rail pressure holds at WOT. Sizes the correction from the measured/target ratio per rpm bin rather than a whole-pull average. Notes ~6800 ft is about 79-80 kPa, which changes airflow and duty math but not the AFR target. Raises measurement validity and prescribes a re-log.",
+      "assertions": [
+        "Does not simply endorse adding 7%; presents VE/airflow error and fuel-delivery shortfall as competing causes of the same lean-at-high-rpm trace",
+        "Names the discriminating measurement — whether rail/fuel pressure holds at high rpm WOT (or an equivalent delivery check)",
+        "Sizes the correction from the measured-to-target ratio in engineering units (roughly 6-8%) and applies it only to the affected rpm/load cells rather than to a whole-pull average",
+        "Treats altitude correctly: ~6800 ft is roughly 79-80 kPa ambient, which affects airflow, power, and duty-cycle math but does NOT change the AFR/lambda target",
+        "Raises measurement validity — wideband response lag or placement, channel alignment at high rpm, and that a single pull is not a dataset",
+        "Prescribes a re-log to validate the change and states what a successful correction should look like",
+        "Does not assert that 78% injector duty by itself proves the injectors are out of capacity"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "boost-taper-no-codes",
+      "prompt": "2.0T, tune targets 18 psi. Datalog shows boost peaking at 18.2 psi around 3500 rpm then falling off to 14.5 psi by 6500. Wastegate duty is at 92% at 6500. IATs climb from 38C at the start of the pull to 68C at the end. Timing is about 4 degrees lower at 6000 rpm than in a log I took back in spring. No codes. Ambient was 95F. Is my turbo dying?",
+      "expected_output": "Uses duty cycle as the control-effort channel: 92% with boost still falling means the boost controller is out of authority (leak, gate, or compressor past its efficient flow), NOT the ECU deliberately limiting, which would show LOW duty with the same boost trace. Identifies 68C IAT as heat soak and the likely cause of the timing being down, so the 4-degree delta versus a spring log is confounded by charge temperature and 95F ambient and is not evidence of turbo failure. Reasons in absolute pressure / pressure ratio. Prescribes discriminating next steps.",
+      "assertions": [
+        "Reads 92% wastegate duty as the control effort saturating — the boost controller is out of authority",
+        "Explicitly contrasts saturated duty versus low duty as opposite diagnoses producible from the same boost trace",
+        "Attributes the 4-degree timing reduction primarily to charge temperature (68C IAT) and 95F ambient rather than to turbo failure",
+        "States that comparing this log against the spring log is confounded by ambient and charge temperature, so the timing delta is not evidence",
+        "Reasons about boost in absolute pressure or pressure ratio rather than gauge psi when comparing across conditions",
+        "Answers the user's actual question — turbo failure is not established — instead of only listing observations",
+        "Prescribes discriminating next steps including a boost leak check (justified by the saturated duty) and a back-to-back log at comparable IAT/ambient",
+        "Notes that high-rpm boost taper is partly expected rather than treating any taper as a fault"
+      ],
+      "files": []
+    }
+  ]
+}
