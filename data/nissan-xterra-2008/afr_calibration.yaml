@@ -4,6 +4,29 @@ provenance:
   session: data/sessions/_uprev/2026-07-29T172029
   source_log: UpRev_Log7-29-2026_11-20-29_AM.csv
   note: Bank-1 median AFR at each sampled voltage; bank 2 independently agrees.
+  pid_0x24_is_lambda_verified_2026-08-07: |
+    PID 0x24 (`O2_WR_LAMBDA_S1`) is **λ** on this ECM, while PID 0x44
+    (`COMMANDED_EQUIV_RATIO`) is **φ** — reciprocal conventions on the same
+    ECM, so neither can be inferred from the other. Verified on
+    `_capture-tuning-hybrid-research-2026-08-07T210613` by the one condition
+    that separates them: under decel fuel cut 0x24 pegs at 2.000 (lean), where
+    φ would go toward zero. Confirmed from the other side too — at an
+    enrichment command of φ=1.16 (λ=0.862) the sensor read 0.866.
+
+    Code already treated 0x24 as λ; this is the check that had never been run.
+  cross_check_2026-08-07: |
+    First capture holding PID 0x24 and the A/F voltage DIDs (0x1225/0x1226)
+    on one clock — the resolution the campaign wanted for the −3.84 %
+    UpRev-vs-Pi disagreement. On 174 same-cell pairs the two paths agree to
+    +0.52 % near stoich. Rich of stoich the raw gap looks large (+17 % at
+    12.4 AFR), but it **collapses to +1.38 % once the mixture is stable**
+    (|dAFR/dt| < 1 AFR/s, n=7) — most of it is the ~0.34 s Mode-01/Mode-22
+    acquisition skew during fast transients, not an instrument bias.
+
+    NOT settled: this drive never sustained deep enrichment, so the richest
+    stable comparison sits near 13.5 AFR, not the 12.6 the dispute is about.
+    A sustained WOT pull on this profile puts both instruments there and
+    closes it in one run.
   validated_2026-08-04: |
     Held-out check against the five OTHER logs carrying both `A/F WB-Bn (V)`
     and `AFR WB-Bn` (7-26 5:41PM, 7-27 9:59AM, 7-27 5:02PM, 7-28 10:42AM,
