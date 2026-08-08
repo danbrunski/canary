@@ -91,6 +91,12 @@ class Bindings(_Strict):
     vehicle: dict[str, Any] = Field(default_factory=dict)
     bus: dict[str, Any] | None = None
     signals: list[Signal]
+    # Quantities SEARCHED FOR on the broadcast bus and not found, with the
+    # dynamic range the search actually covered. Recorded so a future scan does
+    # not re-derive the same negative, and so "we never looked" stays
+    # distinguishable from "we looked with a well-powered sweep and it is not
+    # there". Not consumed by the decoder.
+    absent_signals: list[dict[str, Any]] | None = None
 
 
 def load_bindings(path: Path) -> Bindings:

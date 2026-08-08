@@ -36,6 +36,67 @@ bus:
     - name: vehicle_can
       ids_observed: 29  # in session 2026-05-11T152858
 
+# Quantities searched for on the broadcast bus and NOT found. Each records the
+# dynamic range the search covered, so "we never looked" stays distinguishable
+# from "we looked properly and it is not there". Consumed by nothing — this is
+# a record for the next person tempted to run the same scan.
+absent_signals:
+  - session: 2026-08-08T214218 (capture idle_rev_ac_loadstep)
+    method: uprev_kline_ground_truth_full_byte_sweep
+    conditions: >
+      Parked, warm (coolant 90 C), no load, manual transmission in neutral.
+      CANary in passive mode — zero CAN transmits — so UpRev was the only
+      tester on the bus. Protocol: 30 s idle, 3x slow ramp 750->3362 rpm, 3x
+      snap blip 750->3231 rpm (snap-closed producing decel fuel cut), then the
+      same with A/C engaged, then 30 s idle. Every CAN id x byte offset x width
+      {1,2} correlated against every UpRev channel, same-instant paired within
+      30 ms, with per-channel lag scanned over +/-1 s to allow for K-line poll
+      rotation, and scored on correlation of RPM-residuals so that rpm
+      collinearity cannot manufacture a match.
+    caveat: >
+      NO-LOAD ONLY. A parked rev sweep moves rpm, throttle and airflow together;
+      it cannot exercise high-load / low-rpm regions at all. A signal that only
+      appears under road load would be missed. Re-run on a drive before treating
+      any of these as settled for all regimes.
+    not_found:
+      - quantity: ignition timing
+        uprev_channel: IGN TIMING (BTDC)
+        range_covered: -4 to +42 deg BTDC
+        best_r2: 0.28
+      - quantity: wideband AFR
+        uprev_channel: AFR WB-B1
+        range_covered: 12.1 to 60.0 (60.0 = decel-fuel-cut lean peg)
+        best_r2: 0.15
+      - quantity: intake cam timing
+        uprev_channel: INTK CAM TIM-B1 (Deg CA)
+        range_covered: -1 to +38 deg CA
+        best_r2: 0.51
+        note: >
+          Answers an open question — cam angle is reachable via Mode 22 in
+          session 0xC0 but has no broadcast home. Worth re-testing under road
+          load, since VVT phasing at no load is not representative.
+      - quantity: injector pulse width
+        uprev_channel: INJ PULSE-B1 (ms)
+        range_covered: 0.5 to 9.6 ms
+        best_r2: 0.41
+      - quantity: base fuel schedule
+        uprev_channel: B-FUEL SCHDL (ms)
+        range_covered: 1.7 to 13.9 ms
+        best_r2: 0.78
+        note: best match was 0x29E:7, a brake-activity byte — treated as spurious
+      - quantity: calculated load
+        uprev_channel: CAL/LD VALUE (%)
+        range_covered: 9 to 87 %
+        best_r2: 0.73
+      - quantity: mass airflow (as a pinnable channel)
+        uprev_channel: MAF  GM/S (gm/s)
+        range_covered: 3.3 to 71.3 g/s
+        best_r2: 0.86
+        note: >
+          0x233:2 does track it (r = +0.928 at lag +0.10 s) but with only 11
+          distinct raw values across a 22x swing — see ECM_AIRFLOW_233_B2.
+          No finer-resolution airflow channel exists on the bus.
+
 signals:
 
   # --------------------------------------------------------------------------
@@ -221,7 +282,27 @@ signals:
           the same way on the same windows. A genuine linear byte→engineering
           binding holds its scale; this one does not, so it is airflow-RELATED
           rather than a pinnable MAF reading.
+      - session: 2026-08-08T214218 (capture idle_rev_ac_loadstep)
+        method: uprev_kline_ground_truth
+        finding: >
+          Corroborates airflow, and reframes the instability as QUANTISATION.
+          Parked no-load sweep with CANary in passive mode (zero CAN transmits),
+          so UpRev was the only tester on the bus. Clock-aligned to CAN by RPM
+          cross-correlation (r = 0.99981; the ECM_RPM control fits slope 1.0000
+          with stability 0.9985-1.0011 across 750-3700 rpm). Against UpRev
+          "MAF GM/S": r = +0.928 (r2 0.862) once a per-channel lag of +0.10 s is
+          applied. MAF swung 3.3 -> 71.3 g/s (22x) yet this byte took only
+          ELEVEN distinct values (0-10), reads 0.0 +/- 0.1 at idle, and does not
+          move for an A/C load step at matched rpm (764 vs 759 rpm, n = 1919 /
+          2957). Bytes 2-3 read as a 16-bit pair give an IDENTICAL r to 4 dp, so
+          byte 3 is not its low byte -- the coarseness is real.
     notes: |
+      Resolution ceiling (2026-08-08): at ~0.147 counts per g/s, idle airflow
+      rounds to 0-1, so every low-flow fit is dominated by rounding rather than
+      by a state-dependent term. Some or all of the -6.5 % "scale drift" above
+      may be plain quantisation. Any promotion attempt should fit on the
+      high-flow half of a sweep only, and must not use idle data.
+
       Do not pin a scale on the strength of the correlation alone — that is the
       trap the old ECM_AIRFLOW_PROXY_23D fell into. Candidate explanations for
       the drift: the byte is a filtered/derived airflow term (VE or injector PW)
@@ -253,7 +334,30 @@ signals:
           (engine briefly higher rpm) spikes to 243; cruising stabilizes around
           133. A/C-load → MAP drop is the textbook engine-load signature; this
           is almost certainly manifold absolute pressure (Mode 01 PID 0x0B).
+      - session: 2026-08-08T214218 (capture idle_rev_ac_loadstep)
+        method: ac_load_step_rpm_matched
+        finding: >
+          DIRECTION CONFLICT with 2026-05-11T211240. Restricting both windows to
+          735-790 rpm so the comparison is rpm-matched (off: 764 rpm, n = 1919;
+          on: 759 rpm, n = 2957), A/C-on RAISES this byte: 112.3 +/- 5.5 ->
+          146.0 +/- 16.2, delta +33.7 (~6 pooled sd). The earlier session
+          recorded the opposite (74 -> 49) and that drop is what promoted this
+          entry to `high` and to the MAP label.
     notes: |
+      UNRESOLVED DIRECTION as of 2026-08-08 — do not rely on the sign.
+
+      The 2026-08-08 rpm-matched result (+33.7) and the 2026-05-11 result (-25)
+      disagree, and the physics favours the NEW one: at idle the ECM holds rpm
+      by opening the idle-air path when the A/C compressor loads it, so manifold
+      pressure RISES (vacuum falls). "A/C-load → MAP drop is textbook", written
+      in the 211240 note below, is backwards for an idle-speed-controlled
+      engine. The older windows were not rpm-matched, which is the likeliest
+      source of the disagreement.
+
+      Settling it needs Mode 01 PID 0x0B (MAP) sampled against this byte in the
+      same window — that pins scale AND sign at once. Until then treat the
+      quantity as identified but the sign as open.
+
       A/C-load drop in the second session promotes this from "vacuum or IAC"
       to "MAP" (manifold absolute pressure) with high confidence in the
       direction. Exact scale (raw → kPa) still pending ELM327 cross-reference
@@ -268,8 +372,21 @@ signals:
     scale: null
     offset: null
     unit: unknown
-    confidence: medium
+    confidence: low  # demoted 2026-08-08 — it is neither load nor pulse width
     evidence:
+      - session: 2026-08-08T214218 (capture idle_rev_ac_loadstep)
+        method: uprev_kline_ground_truth + ac_load_step_rpm_matched
+        finding: >
+          RULES OUT both candidates in the note below. Against synchronously
+          sampled UpRev channels over a no-load sweep, scanning per-channel lag
+          over +/-1 s to allow for K-line poll rotation, with every channel
+          moving over a wide range: CAL/LD VALUE (9 -> 87 %) best |r| = 0.155;
+          INJ PULSE-B1 (0.5 -> 9.6 ms) best |r| = 0.069; B-FUEL SCHDL (1.7 ->
+          13.9 ms) best |r| = 0.078; MAF best |r| = 0.317. Every best lag landed
+          on the +/-1 s scan boundary, i.e. no real peak. Independently, an A/C
+          load step at matched idle rpm (764 vs 759) moved it by -1.7 counts
+          (244.6 +/- 1.1 -> 242.9 +/- 3.2) — calculated load MUST respond to a
+          load step at constant rpm, and this does not.
       - session: 2026-05-11T152858
         method: byte_vs_tag_differential
         finding: >
@@ -309,8 +426,27 @@ signals:
     scale: null
     offset: null
     unit: unknown
-    confidence: high  # promoted from medium — cranking transition seals it
+    confidence: low  # demoted 2026-08-08 — the "burst" was an averaging artifact
     evidence:
+      - session: 2026-08-08T214218 (capture idle_rev_ac_loadstep)
+        method: instantaneous_trace_vs_pedal
+        finding: >
+          RETRACTS the "transient burst" reading below. Read INSTANTANEOUSLY
+          rather than as window means, this byte sits at 254-255 for every
+          sample where pedal (0x23D:1) is 0 — including the whole of a decel
+          from 2131 rpm to idle — then drops to 0-8 within one frame of the
+          pedal moving, tracks pedal magnitude while applied (peak 8 at pedal
+          67, peak 5 at pedal 47), and snaps back to 254-255 on release.
+          254, 255, 0, 1, 3, 5, 8 is a CONTINUOUS sequence through zero, so the
+          field is SIGNED int8: about -2 at closed throttle, up to +8 under
+          acceleration. It is a small signed demand/error term, not a burst.
+
+          Why the old reading looked like bursts: a window containing both
+          closed-throttle samples (254) and pedal-applied samples (0-8) averages
+          to mid-scale. That is exactly the 95.5 / 145.6 / 151.9 "burst"
+          magnitudes recorded below — means of a value that wraps 255 -> 0.
+          Averaging a signed field across its own wrap point produces a number
+          that describes nothing.
       - session: 2026-05-11T152858
         method: byte_vs_tag_differential
         finding: >
@@ -675,6 +811,14 @@ signals:
           blower_max, blower_low; ~106 in ac_on_blower_low (duty/cycling).
           Same 0↔128 transition tied one-for-one to the A/C tag as in
           211240, on a different day and engine state.
+      - session: 2026-08-08T214218 (capture idle_rev_ac_loadstep)
+        method: byte_vs_tag_differential
+        finding: >
+          Third independent tagged confirmation, and the first with CANary in
+          passive mode (zero CAN transmits, so nothing this daemon sent could
+          have influenced the bus). A/C off: 0x00 on 219/219 frames. A/C on:
+          0x80 on 264 frames and 0x00 on 65 — a ~80 % duty cycle, i.e. the
+          clutch visibly cycling at steady idle. Bit 7 (0x80) is the flag.
     notes: |
       A/C compressor commanded state: 0 = off, ~128 = engaged, with
       intermediate values when the compressor cycles under load (the drop
@@ -922,6 +1066,16 @@ signals:
           7 at headlights_off (blower was off across the headlight windows).
           Two independent inputs move it: blower → +64, headlights → a
           larger/different pattern (~125).
+      - session: 2026-08-08T214218 (capture idle_rev_ac_loadstep)
+        method: byte_vs_tag_differential
+        finding: >
+          Corroborates the blower bit with perfect separation: 0x00 on 221/221
+          frames A/C-off, 0x40 on 331/331 frames A/C-on, zero contamination
+          either side. Adds no NEW information about which input drives it —
+          switching A/C on also ran the blower here, so this window cannot
+          separate them. The 202800 session already can (ac_off_blower_low = 64
+          with A/C off), which is what pins 0x40 to the blower rather than to
+          the A/C request.
     notes: |
       Bit-packed HVAC-blower + exterior-lighting status byte (not a scalar):
       a blower-active bit (~value 64) and a headlights bit are encoded
@@ -954,7 +1108,24 @@ signals:
           The broadcast bit pattern maps one-for-one onto the commanded
           stages, so the commanded actuator and the broadcast reflection
           corroborate each other independently.
+      - session: 2026-08-08T214218 (capture idle_rev_ac_loadstep)
+        method: ac_load_step_rpm_matched
+        finding: >
+          NEW BIT 0x08, not in the OFF/LOW/HIGH model below. A/C off: 0x20 on
+          all 2148 frames (base bit only, fan commanded off). A/C on: 0x20 (372),
+          0x28 (266), 0x60 (267), 0x68 (2317). So bit 0x40 (fan stage 1) behaves
+          as documented, but bit 0x08 also toggles independently and is set on
+          the large majority of A/C-on frames. Bit 0x80 (stage 2) never
+          appeared — the fan never went to high in this window.
     notes: |
+      Bit 0x08 (found 2026-08-08) is UNIDENTIFIED. It toggles independently of
+      the 0x40 stage-1 bit while A/C is engaged, so it is not a fan stage in the
+      OFF/LOW/HIGH ladder. Candidates: an A/C-request-to-ECM flag, or a fan
+      request distinct from fan commanded-state. The NT510 active test that
+      pinned 0x40/0x80 drove the fan directly without A/C, which is exactly why
+      it never surfaced this bit. Separating it wants one window with A/C on and
+      the fan commanded off, and one with the fan driven while A/C is off.
+
       Cooling-fan status on the ECM 0x1F9 frame, byte 0: base bit 0x20
       always set; bit 0x40 = fan stage 1 (low), bit 0x80 = fan stage 2
       (high). OFF=0x20, LOW=0x60, HIGH=0xE0. Decode as flags, not a
