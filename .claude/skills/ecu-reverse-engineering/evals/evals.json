@@ -1,0 +1,47 @@
+{
+  "skill_name": "ecu-reverse-engineering",
+  "evals": [
+    {
+      "id": 0,
+      "name": "obd-decode-and-broadcast-probe",
+      "prompt": "I'm poking at my 2008 Xterra over the OBD-II port with candump. I sent `7DF#02010C` and got back `7E8 04 41 0C 1A F8`. What engine RPM does that decode to, and walk me through the bytes? Separately, there's a frame `380#02020000E0007E0E` that streams by at maybe 50 Hz and clearly isn't a diagnostic reply \u2014 how would I figure out what physical quantity it carries?",
+      "expected_output": "RPM decode: strip ISO-TP length (04) and mode+0x40 (41) and echoed PID (0C); data bytes A=0x1A B=0xF8; RPM=(256*A+B)/4=(6656+248)/4=1726 rpm. For 0x380: identify it as a broadcast (non-diagnostic) frame that must be reverse-engineered by correlation, not lookup; prescribe record -> single physical action -> playback -> bisect to one ID, cansniffer grouping/changed-byte highlighting, expect multi-byte/shifted encoding, and validate any binding against the Mode-01 PID 1:1 in engineering units.",
+      "assertions": [
+        "Decodes RPM to 1726 rpm via (256*A+B)/4 with A=0x1A, B=0xF8.",
+        "Explains response byte roles: 04=ISO-TP length, 41=mode 0x01+0x40 positive, 0C=echoed PID.",
+        "For 0x380, names the CANary path: can_activity (changed_byte_indices) bracketed around a tagged physical action, not external candump/cansniffer as the thing to run.",
+        "Says to validate any 0x380 binding 1:1 against the Mode-01 PID in engineering units (compare_channels), not by inspection/aggregates.",
+        "Concise: leads with the decoded value and keeps the walkthrough compact (roughly <= 700 words)."
+      ],
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "enumerate-services-and-hold-session",
+      "prompt": "Before I start a tuning capture I want to know exactly which diagnostic services and PIDs my ECU actually supports instead of guessing. What's the cheapest way to enumerate the supported Mode 01 PIDs and to discover any UDS services, and once I'm reading Mode 22 DIDs how do I keep the diagnostic session from timing out mid-poll?",
+      "expected_output": "Mode 01 PID 0x00 returns a 4-byte bitmask of supported PIDs 0x01-0x20, with 0x20/0x40/0x60... chaining to further blocks (one request maps the whole standard surface). UDS/service discovery via a sweep such as CaringCaribou dcm discovery + dcm services (TesterPresent to every arbitration ID, reads 0x40+svc vs 0x7F). Hold the session with TesterPresent 0x3E as a heartbeat every 1-2s (7DF#013E, or cangen). Bonus: distinguishing kinds of empty response (0x7F not-supported vs no-reply vs 0x00/0x80 sentinel).",
+      "assertions": [
+        "Enumerates supported PIDs via CANary: get_obd_coverage and/or obd_request Mode 01 PID 00 bitmask with 0x20/0x40 chaining.",
+        "Issues a specific enhanced read via obd_request Mode 22 (header 0x7E0 for the ECM); references get_dids / get_dtc for inventory.",
+        "Frames session-hold correctly for CANary: obd_request is one-shot read-only and cannot hold an extended/secured UDS session (0x3E/0x10 excluded); TesterPresent heartbeat is the reference / a feature to add, NOT 'go install CaringCaribou / run cangen'.",
+        "Stays CANary-native: does not instruct the user to install and run an external CLI tool as the primary method.",
+        "Concise: roughly <= 700 words."
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "aggregate-binding-pushback",
+      "prompt": "I think I found my wideband AFR on the broadcast bus. Byte 3 of arbitration ID 0x1208, averaged over each 10-second window, tracks the average of my commanded-AFR PID really well across a whole drive \u2014 r-squared of 0.94. Good enough to register 0x1208 byte 3 as the AFR channel?",
+      "expected_output": "Push back: matching per-window AGGREGATES (mean vs mean) is the classic spurious-binding trap; r-squared over a whole drive is not sufficient because nearly every engine signal correlates over one drive. Require same-instant, sample-by-sample correlation under a controlled physical action, and the near-free strong check: the broadcast binding and the Mode-01/commanded PID for the same quantity must agree 1:1 once both are in engineering units. Note commanded AFR is a computed PID and may not be broadcast at all.",
+      "assertions": [
+        "Advises against binding on matching per-window aggregates (mean-vs-mean); identifies it as a spurious-correlation trap.",
+        "Notes r-squared over a whole drive is insufficient (nearly every engine signal correlates over one drive).",
+        "Requires same-instant sample-by-sample correlation via compare_channels instead of aggregates.",
+        "Recommends the 1:1 engineering-units agreement check against the PID as the strong validator.",
+        "Concise: roughly <= 600 words."
+      ],
+      "files": []
+    }
+  ]
+}

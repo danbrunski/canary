@@ -1,5 +1,10 @@
 # Reversing ECU firmware / ROM tables
 
+> **Outside CANary's scope.** CANary is a read-only CAN telemetry system; it does
+> not read, disassemble, or modify firmware. Everything here is external-tooling
+> territory (chip readers, disassemblers, WinOLS). Reach for it only when the task
+> genuinely crosses from decoding the wire into understanding/changing ECU internals.
+
 When the live stream isn't enough — you need the calibration maps, the meaning of
 an OEM DID, or the seed-key algorithm to read protected engine data — you go into
 the firmware. From *The Car Hacker's Handbook* Ch. 6 (by Dave Blundell).
