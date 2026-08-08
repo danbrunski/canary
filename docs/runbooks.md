@@ -115,6 +115,24 @@ CANary is strictly read-only — use a dedicated scan tool to clear codes.
   *not* per-corner — do not difference them to infer slip — and `0x6F7` bytes
   0-1 read a confident zero below ~4 km/h.
 
+## Decide whether a fuel-trim bank skew is a fault
+
+Bank 1 runs richer than bank 2 on this engine in **every** session measured —
+roughly **−3 to −4 points at 40-62 °C coolant and −0.4 to −2.3 at 70-100 °C**
+(`data/analyses/stft-bank-balance-baseline-20260808.md`). Before calling a
+reading abnormal:
+
+- Use `derived:STFT_BANK_BALANCE`, not `SHORT_FUEL_TRIM_1 − SHORT_FUEL_TRIM_2`.
+  The banks are polled at different points in the OBD round-robin, so the
+  instantaneous difference is mostly sampling skew; the derived channel is
+  30 s smoothed for exactly this reason.
+- **Match coolant temperature.** The skew is temperature-dependent, and a cold
+  idle compared against warm-idle history invents a fault. A session that
+  never reached operating temperature has no warm-band data at all — check
+  `n`, don't assume the filter returned something.
+- Misfire counts of 1-3 per cylinder per session are also routine here (totals
+  2-44 across a week), so they are not corroboration on their own.
+
 ## Run another scan tool alongside canary
 
 Expect canary to lose Mode 01 while the other tool polls the **ECM over CAN**.
