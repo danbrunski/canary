@@ -344,24 +344,28 @@ signals:
           recorded the opposite (74 -> 49) and that drop is what promoted this
           entry to `high` and to the MAP label.
     notes: |
-      UNRESOLVED DIRECTION as of 2026-08-08 — do not rely on the sign.
+      THE "MAP" READING IS RETRACTED (2026-08-08). This vehicle has NO manifold
+      pressure sensor — the VQ40DE is mass-airflow based, not speed-density.
+      Confirmed by the operator and corroborated by the scheduler's own active
+      request set, which carries BAROMETRIC_PRESSURE (PID 0x33) and
+      EVAP_VAPOR_PRESSURE (PID 0x32) but no INTAKE_PRESSURE (PID 0x0B) at all.
+      A byte cannot be manifold absolute pressure on a vehicle that never
+      measures it, so the 211240 promotion below rests on a quantity that does
+      not exist here.
 
-      The 2026-08-08 rpm-matched result (+33.7) and the 2026-05-11 result (-25)
-      disagree, and the physics favours the NEW one: at idle the ECM holds rpm
-      by opening the idle-air path when the A/C compressor loads it, so manifold
-      pressure RISES (vacuum falls). "A/C-load → MAP drop is textbook", written
-      in the 211240 note below, is backwards for an idle-speed-controlled
-      engine. The older windows were not rpm-matched, which is the likeliest
-      source of the disagreement.
+      IAC / idle-air is now the leading reading, and the 2026-08-08 evidence
+      fits it cleanly: A/C load at idle makes the idle-speed controller open
+      the idle-air path to hold rpm, so idle-air duty RISES — which is the
+      +33.7 measured at matched rpm. Under the MAP story that same rise needed
+      a sensor the truck does not have.
 
-      Settling it needs Mode 01 PID 0x0B (MAP) sampled against this byte in the
-      same window — that pins scale AND sign at once. Until then treat the
-      quantity as identified but the sign as open.
+      Still open: the 2026-05-11 windows recorded a DROP. They were not
+      rpm-matched, which is the likeliest explanation. Settling it wants a
+      clean rpm-matched A/C step repeated on another day, plus a idle-air-duty
+      reference — Mode 22 is the only source, since no Mode 01 PID carries it.
 
-      A/C-load drop in the second session promotes this from "vacuum or IAC"
-      to "MAP" (manifold absolute pressure) with high confidence in the
-      direction. Exact scale (raw → kPa) still pending ELM327 cross-reference
-      with Mode 01 PID 0x0B.
+      Do NOT reach for Mode 01 PID 0x0B as the reference. It is unsupported on
+      this ECU. That instruction appeared in this file for three months.
 
   - name: ECM_CALC_LOAD_A
     module: ECM
