@@ -85,7 +85,9 @@ def test_vehicle_hybrid_profile_keeps_its_experimental_fast_exit_plan() -> None:
     assert hybrid.did_continuous is False
     assert hybrid.bus_budget_override == 90.0
     assert "COMMANDED_EQUIV_RATIO" in hybrid.mode01
-    assert "ECM_BASE_FUEL_SCHEDULE_CANDIDATE" in hybrid.mode22
+    assert (
+        "ECM_MAF_GPS" in hybrid.mode22
+    )  # renamed 2026-08-08 from ECM_BASE_FUEL_SCHEDULE_CANDIDATE
     assert hybrid.behavior_model_recipes == (
         "injector_pw_vs_rpm_throttle_did",
         "cam_primary_vs_command_rpm_did",

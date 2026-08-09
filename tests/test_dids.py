@@ -113,18 +113,58 @@ def test_injector_pw_is_present_and_unscaled() -> None:
     assert inj.scale is None, "0x1208 scale was pinned — update the calibration evidence"
 
 
-def test_bfs_candidate_is_visible_but_cannot_be_mistaken_for_a_provider() -> None:
-    """Research profiles need a named picker/live-stream entry for 0x1209.
+def test_0x1209_is_airflow_not_base_fuel_schedule() -> None:
+    """0x1209 was ECM_BASE_FUEL_SCHEDULE_CANDIDATE until 2026-08-08, when four
+    steady rungs against a simultaneous UpRev K-line log identified it as mass
+    airflow (raw/100 g/s; idle matched 3.62 vs 3.62 exactly, and the 2026-05
+    values corroborate once divided by 100).
 
-    Naming it is not promotion: the unscaled, hypothesized fields preserve the
-    evidence gap and prevent target-map code from treating it as engineering
-    BFS milliseconds.
+    The BFS reading rested on "changes with cold enrichment and load", which
+    airflow does too — a signature broad enough to fit either.
     """
-    candidate = next(e for e in load_did_map(DIDS_PATH).dids if e.did == 0x1209)
-    assert candidate.name == "ECM_BASE_FUEL_SCHEDULE_CANDIDATE"
-    assert candidate.confidence == "hypothesized"
-    assert candidate.scale is None
-    assert candidate.unit == "raw"
+    entry = next(e for e in load_did_map(DIDS_PATH).dids if e.did == 0x1209)
+    assert entry.name == "ECM_MAF_GPS"
+    assert entry.scale == 0.01
+    assert entry.unit == "g/s"
+
+
+def test_renaming_a_did_cannot_break_a_saved_capture_profile() -> None:
+    """Capture profiles reference DIDs BY NAME and ``parse_did_token`` raises on
+    an unknown one, so a rename silently breaks every saved profile still using
+    the old name — including vehicle-scoped profiles on the Pi that this repo
+    cannot see. Renaming means MOVING the old name into ``aliases``, and this
+    test is what makes that non-optional rather than a docstring nobody reads.
+    """
+    from src.collection.obd_scheduler import parse_did_token
+
+    assert parse_did_token("ECM_BASE_FUEL_SCHEDULE_CANDIDATE") == 0x1209
+    assert parse_did_token("ECM_MAF_GPS") == 0x1209
+
+    # Every alias must resolve, and must not collide with a live name.
+    entries = load_did_map(DIDS_PATH).dids
+    live = {e.name for e in entries}
+    for e in entries:
+        for alias in e.aliases:
+            assert parse_did_token(alias) == e.did, f"alias {alias} does not resolve"
+            assert alias not in live, f"alias {alias} shadows a current DID name"
+
+
+def test_no_did_claims_to_be_a_base_fuel_schedule_provider() -> None:
+    """Base Fuel Schedule is still UNLOCATED and must not be faked.
+
+    This is the guarantee the old 0x1209 test was really protecting, hoisted off
+    that one DID so renaming it cannot quietly retire the protection. UpRev's
+    "B-FUEL SCHDL" moved 2.92/2.65/2.88/3.98 ms across the 2026-08-08 rungs and
+    NO catalogued DID matched that shape. Until one does, nothing may present
+    itself to target-map code as engineering BFS milliseconds.
+    """
+    for e in load_did_map(DIDS_PATH).dids:
+        name = e.name.upper()
+        claims_bfs = ("BASE_FUEL" in name or "BFS" in name) and "CANDIDATE" not in name
+        assert not claims_bfs, (
+            f"0x{e.did:04X} {e.name} presents as a Base Fuel Schedule provider, but BFS "
+            "has never been matched to a DID — see the 2026-08-08 rung evidence."
+        )
 
 
 # --- quantitative evidence must carry its operating envelope ---

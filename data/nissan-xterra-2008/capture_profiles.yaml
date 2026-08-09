@@ -94,7 +94,7 @@ profiles:
   - ECM_INJECTOR_PW_B1
   - ECM_THROTTLE_POS_SENSOR_1
   - ECM_INTAKE_AIR_TEMP
-  - ECM_BASE_FUEL_SCHEDULE_CANDIDATE
+  - ECM_MAF_GPS
   mode01_enabled: false
   mode22_enabled: true
   did_interval_seconds: null
@@ -139,7 +139,7 @@ profiles:
   - ECM_INTAKE_CAM_ANGLE_COMMANDED
   - ECM_INTAKE_CAM_ANGLE_MEASURED_B
   - ECM_THROTTLE_POS_SENSOR_1
-  - ECM_BASE_FUEL_SCHEDULE_CANDIDATE
+  - ECM_MAF_GPS
   mode01_enabled: true
   mode22_enabled: true
   did_interval_seconds: 0.25

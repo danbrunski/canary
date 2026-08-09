@@ -239,15 +239,37 @@ dids:
       measured. 0x1209 is a correlated fuel/air sibling, not injector PW.
 
   - did: 0x1209
-    name: ECM_BASE_FUEL_SCHEDULE_CANDIDATE
+    name: ECM_MAF_GPS
     byte_start: 0
     byte_length: 2
     byte_order: big
-    scale: null
-    offset: null
-    unit: raw
-    confidence: hypothesized
+    scale: 0.01
+    offset: 0.0
+    unit: "g/s"
+    confidence: high  # was hypothesized ECM_BASE_FUEL_SCHEDULE_CANDIDATE
+    aliases:
+      - ECM_BASE_FUEL_SCHEDULE_CANDIDATE   # renamed 2026-08-08; saved profiles still use it
     evidence:
+      - session: 2026-08-08T214218 (rungs idle / 2000 / 3000 / idle+AC)
+        method: uprev_kline_steady_state_rungs
+        finding: >
+          IDENTIFIES this as mass airflow, displacing the BFS hypothesis.
+          Four steady rungs with UpRev K-line logging simultaneous, each rung
+          held ~10 s so channel-rotation skew cannot matter. raw/100 against
+          UpRev "MAF GM/S": 3.62 vs 3.62 (idle, exact), 14.35 vs 14.21 (3000,
+          1 %), 5.34 vs 5.19 (idle+A/C, 3 %). The 2000 rung reads 9.68 vs 8.78
+          (10 %) and was demonstrably the least steady hold of the four — MAF
+          sd 0.87 g/s and rpm sd +/-60 within that window — so it is read as
+          window instability, not decode error. Wants one steadier mid-rpm
+          point to promote to confirmed.
+      - session: 2026-05-16T214006 (re-reading, no new capture)
+        method: retrospective_consistency
+        finding: >
+          The 2026-05 evidence below CORROBORATES MAF once divided by 100, and
+          nobody captured it for that purpose: 676 -> 6.76 g/s (cold fast
+          idle, elevated airflow), 359 -> 3.59 g/s (warm idle — today's warm
+          idle measured 3.62), 984 -> 9.84 g/s (rev hold). Three independent
+          points from a different session, all landing where MAF belongs.
       - session: 2026-05-16T214006
         method: four_state_classification
         finding: >
@@ -264,11 +286,56 @@ dids:
           candidate for a narrow research capture, not a semantic BFS
           provider.
     notes: >
-      Collection-only candidate for Base Fuel Schedule, the load axis of the
-      ROM fuel-target and timing tables. Emit its raw count so it is visible
-      in the profile editor and live capture table, but do not use it for a
-      target-map lookup until same-instant or causal evidence pins identity
-      and scaling.
+      Renamed 2026-08-08: ECM_BASE_FUEL_SCHEDULE_CANDIDATE -> ECM_MAF_GPS.
+      The BFS reading came from "changes with cold enrichment and load", which
+      airflow does too — a signature broad enough to fit either. Base Fuel
+      Schedule is still unlocated; do NOT reuse this DID for a fuel-target map
+      lookup. UpRev's "B-FUEL SCHDL" moved 2.92 / 2.65 / 2.88 / 3.98 ms across
+      the same four rungs and no DID matched that shape, so BFS remains open.
+
+      Why this matters operationally: Mode 01 and Mode 22 are mutually
+      exclusive in a capture, so a tuning-DID profile loses PID 0x10 (MAF).
+      This DID restores airflow inside a DID-only capture.
+
+  - did: 0x1117
+    name: ECM_CALC_LOAD_PCT
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: 0.390625   # 100/256 — the SAE J1979 calculated-load scaling
+    offset: 0.0
+    unit: percent
+    confidence: high
+    evidence:
+      - session: 2026-08-08T214218 (rungs idle / 2000 / 3000 / idle+AC)
+        method: uprev_kline_steady_state_rungs
+        finding: >
+          The published J1979 scaling reproduces UpRev "CAL/LD VALUE (%)" with
+          NO fitted parameters — the strongest cheap check there is, because
+          nothing was tuned to make it land. raw*100/256 vs UpRev: 22.66/22.38,
+          16.21/16.08, 15.62/15.86, 29.69/29.64. Worst error 0.28 percentage
+          points across a 15.9-29.6 % span. A free 2-parameter fit does no
+          better (scale 0.3865, residuals <= 0.23 pp), which is what you expect
+          when the true scaling is already the standard one.
+
+          Correctly load-responsive at MATCHED rpm: 58 -> 76 counts between the
+          idle (800 rpm) and idle+A/C (809 rpm) rungs, +31 %. Calculated load
+          must move for a load step at constant rpm, and it does.
+    notes: >
+      Not previously catalogued. This is the same quantity as Mode 01 PID 0x04,
+      which matters because Mode 01 and Mode 22 are mutually exclusive within a
+      capture — a tuning-DID profile loses PID 0x04, and this DID restores it.
+
+      Read it as what it is: calculated load is airflow / peak available
+      airflow, normalised for baro and ambient temperature. It reaches ~100 %
+      at WOT at ANY altitude, so it is "fraction of the torque available
+      today", not "how much air". At this vehicle's ~80 kPa operating altitude
+      that distinction is not academic. For the honest physical quantity use
+      airflow per intake event derived from ECM_MAF_GPS and rpm.
+
+      Distinct from ECM_CALC_LOAD_A (a broadcast byte, 0x233:4), which was
+      demoted to `low` on 2026-08-08 after failing against this same UpRev
+      channel — see data/bindings.yaml.
 
   - did: 0x1107
     name: ECM_AF_SENSOR_HEATER_DUTY
@@ -287,6 +354,32 @@ dids:
         finding: >
           raw x0.5: 0 % engine-off, ~46.5 % warm idle, 35 % at rev;
           NT510 "A/F S1 HTR b1" = 48 %.
+    evidence_against:
+      - session: 2026-08-08T214218 (rungs idle / 2000 / 3000 / idle+AC)
+        method: uprev_kline_steady_state_rungs
+        finding: >
+          REJECTED: an ignition-timing reading of this DID. Recorded because it
+          is seductive and someone will re-derive it. Across four steady rungs
+          this block fits UpRev "IGN TIMING (BTDC)" at |r| = 0.9997 with a
+          strikingly clean advance = 110 - raw (residuals <= 0.42 deg over a
+          15-42 deg span). It is still wrong:
+
+          (1) Spark has no other known home on this vehicle, which makes the
+          match feel explanatory when it is not. (2) Heater duty and spark
+          advance are BOTH monotone in rpm/load, and four steady points where
+          rpm and load move together cannot separate two such quantities —
+          the standing collinearity trap. (3) The block holds four near-identical
+          DIDs (0x1107-0x110A), matching this engine's four O2/AF sensors, not
+          its six cylinders; genuine per-cylinder spark would come in sixes.
+          (4) Decisive: the NT510 above independently NAMES this channel
+          "A/F S1 HTR b1" at 48 % against raw x0.5 = 46.5 %. The spark reading
+          has no comparable independent confirmation.
+
+          To overturn this you would need a fast-transient test, not more
+          steady points: spark advance moves within one combustion event, while
+          heater duty is thermal and lags seconds. Poll 0x1107-0x110A at high
+          rate through a throttle snap (batched, 2 requests) and see which
+          timescale the value follows.
     notes: >
       DIDs 0x1108, 0x1109, 0x110A and 0x113C mirror this exact value
       (per-sensor / redundant heater-duty registers).

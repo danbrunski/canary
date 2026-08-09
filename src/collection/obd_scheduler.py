@@ -225,7 +225,16 @@ def _did_ids_by_name() -> dict[str, int]:
     did_map = _load_did_map()
     if did_map is None:
         return {}
-    return {entry.name: entry.did for entry in did_map.dids}
+    # Aliases resolve too, so renaming a DID cannot break a saved capture
+    # profile that still references its old name. Current names are inserted
+    # last so they win any collision with a stale alias.
+    resolved: dict[str, int] = {}
+    for entry in did_map.dids:
+        for alias in entry.aliases:
+            resolved[alias] = entry.did
+    for entry in did_map.dids:
+        resolved[entry.name] = entry.did
+    return resolved
 
 
 def known_did_names() -> tuple[str, ...]:

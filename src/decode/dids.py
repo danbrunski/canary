@@ -130,7 +130,19 @@ class DidEntry(_Strict):
     confidence: Literal["confirmed", "high", "medium", "low", "hypothesized"]
     plausible_min: float | None = None
     plausible_max: float | None = None
+    #: Former names this DID has carried. Capture profiles reference DIDs BY
+    #: NAME and `parse_did_token` raises on an unknown one, so a rename would
+    #: otherwise break every saved profile still using the old name —
+    #: including vehicle-scoped profiles on the Pi that this repo cannot see.
+    #: Renaming an entry means moving its old name here, not deleting it.
+    aliases: list[str] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
+    #: Readings of this DID that were CONSIDERED AND REJECTED, with why.
+    #: A plausible-but-wrong identification gets re-derived by the next person
+    #: unless the refutation is recorded as data — the same reason
+    #: bindings.yaml carries `absent_signals`. Same shape as `evidence`; the
+    #: decoder ignores both.
+    evidence_against: list[Evidence] = Field(default_factory=list)
     notes: str | None = None
 
 
