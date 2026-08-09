@@ -22,12 +22,27 @@ profiles already partition all learned state, and vehicle-specific
 facts belong in profile/config/data files, never hard-coded. Don't bake
 Xterra-isms into shared code paths.
 
-**This is not a safety-critical system.** It is read-only on the CAN bus
-(no `bus.send`, no actuation, no influence on vehicle behavior). Wrong
+**This is a single-operator research rig, not a fleet product.** Wrong
 inference, a stalled daemon, a missing anomaly event, a deleted session
-directory — none of these can affect the vehicle, the operator, or
-anyone else on the road. The truck drives the same whether canary is
-running or not.
+directory — none of these matter to anyone but the operator, who is also
+the only person in the vehicle.
+
+CANary is **no longer restricted to read-only bus access**. On the active
+Canable path, `CanObdClient.query()` and `POST /control/obd_request` take
+any service byte the caller asks for and will build and send write,
+clear-DTC, actuation, security-access and memory-access requests — there
+is no allowlist between the caller and the bus. Whoever issues the
+request owns the consequences: check what a service does on the target
+module before sending it, and prefer the fixed `query_mode_*` read
+helpers when a read is all you need.
+
+Two things are still non-transmitting, by construction rather than by
+policy: the broadcast capture path (`can_collector`) is a pure sniffer
+that never calls `bus.send()`, and the **legacy ELM327 path**
+(`obd_collector.py`) still refuses Mode 04/0x2E/0x2F via
+`WRITE_COMMAND_MODES` / `assert_read_only_command`. That legacy guard was
+left in place deliberately; drop it too if the ELM327 path needs to
+write.
 
 **Implications for how to work:**
 

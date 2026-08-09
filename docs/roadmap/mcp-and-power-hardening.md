@@ -27,7 +27,7 @@ context and ROI.
 ## Guiding constraints
 
 - Whole-repo gate before every commit: `ruff check . && ruff format --check . && mypy src && pytest` (+ `pnpm test` in `src/dashboard/static` for FE changes).
-- Not safety-critical, read-only on CAN — size effort accordingly; don't
+- Single-operator research rig — size effort accordingly; don't
   over-engineer failure modes the system can't have.
 - Pi deploy: `git pull` + `sudo systemctl restart …`; unit/tmpfiles changes go
   through `scripts/install_pi.sh`. Model binaries are gitignored (scp, not pull).

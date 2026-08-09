@@ -57,11 +57,10 @@ Capture a labeled session for training/RE without SSH.
 
 ## Clear a DTC while parked
 
-**Not implemented (Task 6.5).** When built, Mode 04 will be the *only*
-write CANary makes and must be: behind the authenticated control plane,
-parked-interlocked (never available while moving), explicitly confirmed in
-browser/CLI, audit-logged, and followed by an automatic rescan. Until then
-CANary is strictly read-only — use a dedicated scan tool to clear codes.
+**No dedicated clear-DTC UI (Task 6.5).** `POST /control/obd_request` with
+`service: 4` will send a Mode 04 clear — it is behind the authenticated
+control plane and audit-logged, but there is no parked interlock, no
+confirmation step, and no automatic rescan. Task 6.5 is what adds those.
 
 ## Capture Nissan proprietary DIDs
 

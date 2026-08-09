@@ -51,10 +51,10 @@ fuel/ignition tables. We deliberately don't do this, for three reasons:
    target," it's "is it behaving like the engine has been behaving over the
    last N months." The runtime-inferred surface is exactly that baseline.
 
-3. **Avoiding ECU writes, Mode 23 ReadMemoryByAddress, and Mode 27
-   SecurityAccess bypass keeps us in unambiguous read-only territory.**
-   These advanced UDS services exist with a security gate for a reason; we
-   don't need to circumvent it for diagnostics, and we won't.
+3. **The inferred surface needs no ECU writes, no Mode 23
+   ReadMemoryByAddress and no Mode 27 SecurityAccess bypass.** Those
+   services are reachable now, but nothing in this approach requires them —
+   the baseline is built from ordinary reads.
 
 The factory map remains interesting as **named calibration constants** —
 some Mode 22 DIDs expose those directly without security. See the

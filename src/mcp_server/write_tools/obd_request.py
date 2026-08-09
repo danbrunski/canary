@@ -1,4 +1,4 @@
-"""Ad-hoc read-only OBD/UDS request (``obd_request`` tool)."""
+"""Ad-hoc OBD/UDS request (``obd_request`` tool)."""
 
 from __future__ import annotations
 
@@ -23,14 +23,14 @@ async def obd_request(
     header: int | None = None,
     timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
-    """One-shot read-only OBD/UDS request against the live ECU(s).
+    """One-shot OBD/UDS request against the live ECU(s).
 
-    Whitelisted to Mode 01/02/03/06/07/09/0A/22 — the diagnostic services
-    CANary already transmits on every drive as part of its normal poll
-    scheduler; this just lets you ask for one specific service/identifier
-    combination immediately instead of waiting for the scheduler's cadence
-    (Mode 06 and DTC sit on a 5-minute tier). Enforced by the daemon
-    (``CanObdClient.query``'s allowlist), not just documented here.
+    ``service`` takes any service byte — read, write and actuation alike.
+    Nothing filters it, so a Mode 04 or a UDS 0x2E/0x2F goes out exactly as
+    asked; the caller decides what is appropriate to send. For the ordinary
+    read services this just lets you ask for one specific service/identifier
+    combination immediately instead of waiting for the poll scheduler's
+    cadence (Mode 06 and DTC sit on a 5-minute tier).
 
     ``identifier`` is the PID/DID/MID/InfoType byte(s) — omit it for the
     no-identifier services (Mode 03/07/0A). ``header`` overrides the default

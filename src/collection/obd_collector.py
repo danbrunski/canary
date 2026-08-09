@@ -43,8 +43,9 @@ from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
 
-# OBD-II service modes that mutate ECU state. We never want to send any of
-# these — CANary is strictly read-only against the ECU (NFR-06). The only one
+# OBD-II service modes that mutate ECU state. This legacy ELM327 path does
+# not send them. (The active Canable path has no such restriction — see
+# ``can_obd_client.query``; this guard is local to this module.) The only one
 # python-obd exposes today is Mode 04 (`CLEAR_DTC`); Mode 0x2E
 # `WriteDataByIdentifier` and 0x2F `InputOutputControlByIdentifier` aren't in
 # python-obd's stock command table, but anyone hand-crafting an `OBDCommand`
@@ -78,7 +79,7 @@ def assert_read_only_command(command: Any, *, requester: str = "") -> None:
         prefix = f"{requester}: " if requester else ""
         raise WriteCommandRejectedError(
             f"{prefix}OBD command {name!r} is service mode 0x{mode:02X} "
-            f"(write/control); CANary is read-only. Refusing to send."
+            f"(write/control); the ELM327 path does not send these. Refusing."
         )
 
 

@@ -419,9 +419,9 @@ from candidate to confirmed in one rev-protocol session).
    `query_supported_mode_01_pids` walks the PIDS_A/B/C/D bitmasks.
    `tools/can_obd_probe.py` is the one-shot CLI — same information as
    `tools/obd_coverage.py` but over the Canable, no ELM327 USB device
-   needed. Read-only by construction (the request builder has no path
-   for Mode 04 / 0x2E / 0x2F). 28 tests including a multi-frame VIN
-   round-trip with flow-control.
+   needed. The request builder takes any service byte, Mode 04 / 0x2E /
+   0x2F included. 28 tests including a multi-frame VIN round-trip with
+   flow-control.
 
    The streaming path is now the default when `collection.obd_source: canable`.
    The legacy `obd_collector.py` remains available only when

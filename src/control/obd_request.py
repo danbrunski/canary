@@ -34,11 +34,9 @@ import can
 
 from src.collection.can_collector import bus_factory
 from src.collection.can_obd_client import (
-    ALLOWED_QUERY_SERVICES,
     DEFAULT_REQUEST_ID,
     PID_DECODERS,
     CanObdClient,
-    DisallowedServiceError,
     parse_dtc_payload,
 )
 from src.config import CanBusConfig
@@ -118,19 +116,12 @@ def execute_ad_hoc_request(
     request_id: int | None = None,
     timeout_seconds: float | None = None,
 ) -> AdHocRequestResult:
-    """Send one read-only OBD/UDS request and return whatever came back.
+    """Send one OBD/UDS request and return whatever came back.
 
-    Raises :class:`~src.collection.can_obd_client.DisallowedServiceError` for
-    a service outside :data:`~src.collection.can_obd_client.ALLOWED_QUERY_SERVICES`
-    (checked here too, before touching the bus, so a rejected request never
-    opens a handle) and :class:`AdHocRequestBusError` when the bus can't be
-    opened at all.
+    ``service`` is passed through unfiltered — read, write and actuation
+    services alike. Raises :class:`AdHocRequestBusError` when the bus can't
+    be opened at all.
     """
-    if service not in ALLOWED_QUERY_SERVICES:
-        allowed = ", ".join(f"0x{s:02X}" for s in sorted(ALLOWED_QUERY_SERVICES))
-        raise DisallowedServiceError(
-            f"service 0x{service:02X} is not read-only allowlisted; allowed: {allowed}"
-        )
     effective_timeout = min(
         MAX_TIMEOUT_SECONDS,
         DEFAULT_TIMEOUT_SECONDS if timeout_seconds is None else max(0.1, timeout_seconds),

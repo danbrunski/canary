@@ -56,8 +56,9 @@ detecting subtle signs of trouble before they become failures.
 - **MCP server** — the daemon's read/control surface exposed to MCP-speaking
   agents (Claude Code and others), including ad-hoc SQL over the Parquet
   store.
-- **Read-only by design** — active OBD polling may transmit diagnostic read
-  requests, but the system never issues write or actuation commands.
+- **Transmits on the bus** — active OBD polling sends diagnostic requests,
+  and the ad-hoc request path accepts any service, including write and
+  actuation commands. Broadcast capture itself is sniff-only.
 
 See [`docs/CANary-overview.md`](docs/CANary-overview.md) for the full architecture,
 requirements, and development phases.
