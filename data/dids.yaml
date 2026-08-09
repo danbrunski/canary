@@ -364,8 +364,13 @@ dids:
           strikingly clean advance = 110 - raw (residuals <= 0.42 deg over a
           15-42 deg span). It is still wrong:
 
-          (1) Spark has no other known home on this vehicle, which makes the
-          match feel explanatory when it is not. (2) Heater duty and spark
+          (1) Spark is ALREADY available on this vehicle via Mode 01 PID 0x0E
+          (TIMING_ADVANCE) — it is in the capture profiles and the
+          timing_advance_vs_rpm_load behavior model is fit on captured values.
+          So there is no "spark has nowhere else to live" pressure making this
+          match necessary; it only felt that way because the broadcast sweep
+          had just ruled spark off the BROADCAST bus, which is a different
+          claim. (2) Heater duty and spark
           advance are BOTH monotone in rpm/load, and four steady points where
           rpm and load move together cannot separate two such quantities —
           the standing collinearity trap. (3) The block holds four near-identical
