@@ -1076,6 +1076,14 @@ signals:
           separate them. The 202800 session already can (ac_off_blower_low = 64
           with A/C off), which is what pins 0x40 to the blower rather than to
           the A/C request.
+      - session: 2026-08-08T214218 (capture blower_only_no_ac)
+        method: byte_vs_tag_differential
+        finding: >
+          Independent re-confirmation that 0x40 is the BLOWER bit, on a
+          different day and with CANary passive: blower ON / A/C OFF gives 0x40
+          on all 150 frames, while AC_COMPRESSOR_STATE stays 0x00 throughout.
+          Blower alone is sufficient to set the bit; the compressor is not
+          involved. Combined with both-off (0x00) this closes the question.
     notes: |
       Bit-packed HVAC-blower + exterior-lighting status byte (not a scalar):
       a blower-active bit (~value 64) and a headlights bit are encoded
@@ -1117,14 +1125,40 @@ signals:
           as documented, but bit 0x08 also toggles independently and is set on
           the large majority of A/C-on frames. Bit 0x80 (stage 2) never
           appeared — the fan never went to high in this window.
+      - session: 2026-08-08T214218 (capture blower_only_no_ac)
+        method: nested_condition_differential + same_instant_bit_pairing
+        finding: >
+          IDENTIFIES bit 0x08 as the A/C compressor clutch. Two steps.
+
+          (1) Blower ON with A/C OFF: byte 0 is 0x20 on all 1464 frames — bit
+          0x08 does not appear. Combined with both-off (0x20) and blower+A/C
+          (0x08 present), the bit tracks A/C and not the blower. Note "A/C on
+          with blower off" is unreachable on this vehicle by design, so this
+          three-state nesting is the complete separation available.
+
+          (2) Same-instant pairing against AC_COMPRESSOR_STATE (0x625:1 bit
+          0x80) over the A/C-on window, matched within 60 ms: 9265 / 9275 pairs
+          AGREE (99.89 %). Contingency 6617 both-set, 2648 both-clear, 4 + 6
+          split. The 10 disagreements are transition-edge artifacts — 0x625 is
+          a ~10 Hz body frame, so its value can be up to 100 ms stale against
+          this ~100 Hz ECM frame. Duty cycle matched too (80.2 % both), but
+          that was NOT the basis of the call — matching two aggregate duty
+          percentages is the failure mode this project keeps retracting.
     notes: |
-      Bit 0x08 (found 2026-08-08) is UNIDENTIFIED. It toggles independently of
-      the 0x40 stage-1 bit while A/C is engaged, so it is not a fan stage in the
-      OFF/LOW/HIGH ladder. Candidates: an A/C-request-to-ECM flag, or a fan
-      request distinct from fan commanded-state. The NT510 active test that
-      pinned 0x40/0x80 drove the fan directly without A/C, which is exactly why
-      it never surfaced this bit. Separating it wants one window with A/C on and
-      the fan commanded off, and one with the fan driven while A/C is off.
+      Bit 0x08 = A/C compressor clutch engaged, mirrored from the body bus onto
+      the ECM frame (identified 2026-08-08). Useful because it carries the
+      clutch state at ~100 Hz where AC_COMPRESSOR_STATE (0x625) is ~10 Hz —
+      10x the resolution for observing compressor cycling and its load step.
+      Prefer this bit over 0x625 for anything rate-sensitive; prefer 0x625 when
+      you want the body bus's own view.
+
+      The NT510 active test that pinned 0x40/0x80 drove the fan directly with
+      A/C off, which is exactly why it never surfaced this bit.
+
+      NAME IS NOW NARROWER THAN THE BYTE: this is a fan+A/C status byte, not a
+      cooling-fan byte. A rename to ECM_FAN_AC_STATUS_1F9_0 is warranted but
+      touches the decoder and dashboard, so it is deliberately left for a
+      separate change rather than folded into a data commit.
 
       Cooling-fan status on the ECM 0x1F9 frame, byte 0: base bit 0x20
       always set; bit 0x40 = fan stage 1 (low), bit 0x80 = fan stage 2
