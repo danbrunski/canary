@@ -111,14 +111,34 @@ service/PID genuinely unsupported (or not-in-this-session), a decoded `0x00`/`0x
 sentinel = ECU-side not-available (a real supported PID, not a decode bug). Never
 collapse them into "no data."
 
-**Session-hold is a CANary gap, state it honestly.** `obd_request` is one-shot and
-read-only; its allowlist excludes TesterPresent (`0x3E`) and DiagnosticSessionControl
-(`0x10`), so CANary cannot currently hold an *extended or secured* UDS session open.
-DIDs available in the default session poll fine (scheduler / `trigger_poll` /
-`arm_tuning_capture`). DIDs that need a held non-default session are **not reachable
-today** — that's a feature to add (a session manager sending TesterPresent `0x3E`
-every 1–2 s to reset the ~5 s S3 timer, the standard UDS keep-alive). Don't hand-wave
-it as done.
+**Session-gated DIDs ARE reachable — but not via `obd_request`.** Many ECUs gate
+service `0x22` behind a non-default diagnostic session, and CANary can hold one:
+`CanableMode22Transport` (used by `did_sweep` and `sweep_dids_batched`) enters the
+session before reads and re-enters it every `keepalive_seconds`, and the OBD
+scheduler runs its own enter/exit cycle. **Never hard-code the sub-function** —
+`--session auto` resolves it from the vehicle's `data/dids.yaml` `access` block,
+which is where a per-vehicle value belongs.
+
+**Don't assume the keep-alive is TesterPresent.** `0x3E` every 1–2 s to reset the
+S3 timer is the textbook pattern, but some ECUs reject `0x3E` outright, in which
+case the session is held by re-sending `10 <sub-function>` periodically. Which one
+applies is a per-vehicle fact: read it from the `access` block, and if it isn't
+recorded there, determine it and record it rather than guessing.
+
+What remains true everywhere: **`obd_request` is one-shot** and its allowlist
+excludes `0x10` and `0x3E`, so an ad-hoc single read of a session-gated DID through
+that route returns a negative response. Use a sweep/scheduler path for those — and
+never report "unsupported" from an `obd_request` NRC alone when the DID may simply
+be session-gated. That distinction is the difference between "this ECU lacks the
+channel" and "you asked the wrong way."
+
+**Batched Mode 22 is available** (`--batch`, up to 3 DIDs/request — the frame
+ceiling for 2-byte identifiers, vs 6 for one-byte Mode 01 PIDs). Its value is
+same-instant sampling, not speed: DIDs in one request share one ECU sample, where
+sequential polls are rotation-sampled with unknown relative age. It requires
+measured payload widths (`--widths-from` a prior snapshot) because a multi-DID
+response is not self-delimiting. Support for batched `0x22` is itself per-ECU —
+verify before relying on it.
 
 ## Reversing the broadcast bus
 
@@ -169,6 +189,16 @@ CANary does not do firmware analysis — this is external-tooling territory
 recovery, OEM DID meanings — see `references/firmware-reversing.md` for the
 front-door/backdoor tradeoffs, finding tables by their physics-determined shape, and
 disassembly breadcrumbs.
+
+## Vehicle-specific facts live elsewhere
+
+This skill is deliberately ECU-agnostic — another CANary install may be on a
+completely different vehicle. Gating sub-functions, keep-alive services, which
+quantities exist on the broadcast bus, sensor fitment, and altitude are all
+**per-vehicle** and belong in that vehicle's skill (e.g.
+`vehicle-nissan-xterra-2008`) or, better, in `data/dids.yaml` / `data/bindings.yaml`
+where tooling can read them. If you learn a fact about one truck, do not write it
+here.
 
 ## Reference files
 - `references/obd-uds-reference.md` — modes, PIDs + SAE scaling, Mode 09, UDS

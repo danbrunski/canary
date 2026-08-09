@@ -255,3 +255,7 @@ table.
   and in engineering units.
 - **Planning a test that varies several factors, or tempted by a full grid sweep?** →
   `designed-experiments`, then come back here to interpret.
+- **Working on a specific vehicle?** → its vehicle skill, e.g.
+  `vehicle-nissan-xterra-2008`. This skill is deliberately make- and
+  model-agnostic; sensor fitment, altitude, and fuel/spark availability are
+  per-vehicle and change what a number means.
