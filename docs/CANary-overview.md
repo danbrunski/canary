@@ -163,6 +163,14 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 - All core modules SHALL have unit test coverage for preprocessing transforms, feature engineering, and threshold logic
 
 #### NFR-06 — Security
+- The system MAY send any diagnostic service required to read vehicle data —
+  telemetry polling, session control, security access, and memory reads are all
+  in scope. Transmitting on the bus is inherent to diagnostics, not an exception
+- The system SHALL NOT write the ECU's non-volatile memory: no reflash, no
+  calibration/ROM write, nothing whose failure mode is an unrecoverable module.
+  Reflashing is `canary-rw`'s scope, against bench ECUs only
+  (`docs/skunkworks/ecu-rw-bench-research.md`), and SHALL NOT be linked into
+  the `canary` daemon
 - The dashboard SHALL be accessible on localhost / LAN only; no external internet exposure by default
 
 ---
