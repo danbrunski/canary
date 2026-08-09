@@ -18,6 +18,11 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+# Pure protocol helpers — stdlib-only, no python-can, so importing them at
+# runtime does not couple this analysis module to the CAN stack (which is why
+# CanObdClient below stays behind TYPE_CHECKING and duck-typed).
+from src.collection.isotp import MAX_BATCHED_DIDS, split_batched_did_response
+
 if TYPE_CHECKING:
     from src.collection.can_obd_client import CanObdClient
 
@@ -83,6 +88,72 @@ def sweep_dids(
             values[did] = data
         if delay_seconds > 0:
             time.sleep(delay_seconds)
+    return DidSnapshot(values=dict(values), captured_at=time.time(), label=label)
+
+
+def sweep_dids_batched(
+    transport: Mode22Transport,
+    dids: Iterable[int],
+    byte_length_for: Callable[[int], int | None],
+    *,
+    batch_size: int = MAX_BATCHED_DIDS,
+    delay_seconds: float = 0.0,
+    label: str = "",
+    on_progress: Callable[[int, bytes | None], None] | None = None,
+) -> DidSnapshot:
+    """Read ``dids`` using same-instant batched requests where possible.
+
+    Only DIDs with a KNOWN width can be batched — a multi-DID response is not
+    self-delimiting, so an unknown width makes the rest of that response
+    unsplittable. Those fall back to individual reads, which is why this is
+    safe to point at a mixed list: nothing is silently misattributed, it just
+    loses the same-instant guarantee for the unknown ones.
+
+    ``transport`` needs a ``read_dids`` method to batch at all; a plain
+    :class:`Mode22Transport` degrades to single reads throughout.
+    """
+    batch_size = max(1, min(batch_size, MAX_BATCHED_DIDS))
+    read_dids = getattr(transport, "read_dids", None)
+    values: dict[int, bytes] = {}
+
+    def _single(did: int) -> None:
+        data = transport.read_did(did)
+        if on_progress is not None:
+            on_progress(did, data)
+        if data is not None:
+            values[did] = data
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+
+    requested = list(dids)
+    batchable = [d for d in requested if (byte_length_for(d) or 0) > 0]
+    unknown = [d for d in requested if (byte_length_for(d) or 0) <= 0]
+
+    if read_dids is None or batch_size == 1:
+        for did in requested:
+            _single(did)
+        return DidSnapshot(values=dict(values), captured_at=time.time(), label=label)
+
+    for start in range(0, len(batchable), batch_size):
+        group = batchable[start : start + batch_size]
+        readings, clean = read_dids(group, byte_length_for)
+        for did in group:
+            data = readings.get(did)
+            if data is None:
+                # Either the ECU omitted it or the walk desynced before
+                # reaching it — re-read individually rather than guess.
+                _single(did)
+                continue
+            values[did] = data
+            if on_progress is not None:
+                on_progress(did, data)
+        del clean  # every gap is already re-read individually above
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+
+    for did in unknown:
+        _single(did)
+
     return DidSnapshot(values=dict(values), captured_at=time.time(), label=label)
 
 
@@ -277,3 +348,19 @@ class CanableMode22Transport:
         self._ensure_session()
         response = self._client.query_mode_22(did, request_id=self._request_id)
         return None if response is None else response.payload
+
+    def read_dids(
+        self, dids: Sequence[int], byte_length_for: Callable[[int], int | None]
+    ) -> tuple[dict[int, bytes], bool]:
+        """Read up to ``MAX_BATCHED_DIDS`` DIDs in one same-instant request.
+
+        Returns ``(readings, clean)`` — ``clean`` is False if the response
+        could not be walked to the end, which means a width was unknown or
+        the payload was short. Callers must fall back to single-DID reads for
+        anything missing rather than treat a partial walk as complete.
+        """
+        self._ensure_session()
+        response = self._client.query_mode_22_batch(dids, request_id=self._request_id)
+        if response is None:
+            return {}, False
+        return split_batched_did_response(response.payload, byte_length_for)

@@ -26,12 +26,13 @@ import argparse
 import json
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from src.analysis.did_scan import CanableMode22Transport, sweep_dids
+from src.analysis.did_scan import CanableMode22Transport, sweep_dids, sweep_dids_batched
 from src.collection.can_collector import bus_factory
 from src.collection.can_obd_client import CanObdClient
+from src.collection.isotp import MAX_BATCHED_DIDS
 from src.collection.obd_scheduler import did_access
 from src.config import CanaryConfig
 
@@ -76,7 +77,51 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--read-timeout", type=float, default=1.0, help="Per-request read timeout (default 1.0)."
     )
     parser.add_argument("--out", type=Path, required=True, help="Write the snapshot JSON here.")
+    parser.add_argument(
+        "--batch",
+        type=int,
+        default=1,
+        help=(
+            f"DIDs per request, 1-{MAX_BATCHED_DIDS} (default 1 = one DID per request). "
+            "Batched DIDs share ONE ECU sample instant, which is the reason to use this — "
+            "throughput is already ~270 DIDs/s unbatched. Requires known widths: a "
+            "multi-DID response is not self-delimiting, so DIDs whose width is unknown "
+            "fall back to individual reads. Widths come from data/dids.yaml plus "
+            "--widths-from."
+        ),
+    )
+    parser.add_argument(
+        "--widths-from",
+        type=Path,
+        default=None,
+        help=(
+            "A previous sweep snapshot JSON. Every DID it recorded contributes its "
+            "measured payload width, making that DID batchable. Run one unbatched "
+            "discovery sweep first, then point later sweeps at it."
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def _width_lookup(snapshot_path: Path | None) -> Callable[[int], int | None]:
+    """Build ``did -> payload width`` from a previously MEASURED snapshot.
+
+    Deliberately NOT sourced from data/dids.yaml. A catalog entry's
+    ``byte_length`` is the width of the decoded value *within* the payload and
+    pairs with a ``byte_start`` that may be non-zero — it is not the payload
+    length, and using it as one would walk the batched response to the wrong
+    boundary and misattribute every later DID. A snapshot records what the ECU
+    actually returned, so its length is the payload length by construction.
+
+    An unknown DID returns None rather than a guess, which makes
+    ``sweep_dids_batched`` read it individually instead of desyncing.
+    """
+    widths: dict[int, int] = {}
+    if snapshot_path is not None:
+        raw = json.loads(snapshot_path.read_text())
+        for key, hexvalue in (raw.get("values") or {}).items():
+            widths[int(key, 16)] = len(hexvalue) // 2
+    return lambda did: widths.get(did)
 
 
 def _resolve_session(raw: str) -> int | None:
@@ -111,6 +156,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
+    if not 1 <= args.batch <= MAX_BATCHED_DIDS:
+        print(
+            f"error: --batch must be 1-{MAX_BATCHED_DIDS} (1 PCI + 1 service + "
+            f"{MAX_BATCHED_DIDS} x 2 DID bytes fills a CAN frame), got {args.batch}",
+            file=sys.stderr,
+        )
+        return 1
+    if args.batch > 1 and args.widths_from is None:
+        # Refuse rather than silently degrade to single reads: without measured
+        # widths NOTHING is batchable, so --batch would be a no-op that still
+        # reports success and quietly gives up the same-instant guarantee the
+        # caller asked for.
+        print(
+            "error: --batch > 1 requires --widths-from <snapshot.json>. A multi-DID "
+            "response is not self-delimiting, so each DID's payload width must "
+            "already have been measured by an unbatched discovery sweep.",
+            file=sys.stderr,
+        )
+        return 1
+    if args.widths_from is not None and not args.widths_from.is_file():
+        print(f"error: --widths-from not found: {args.widths_from}", file=sys.stderr)
+        return 1
+
     config = CanaryConfig.from_yaml(args.config)
     dids = range(args.start, args.end + 1)
     bus = bus_factory(config.hardware.can)
@@ -142,13 +210,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                 hits += 1
                 print(f"  0x{did:04X}: {data.hex()}")
 
-        snapshot = sweep_dids(
-            transport,
-            dids,
-            delay_seconds=args.delay_seconds,
-            label=args.label,
-            on_progress=_progress,
-        )
+        if args.batch > 1:
+            snapshot = sweep_dids_batched(
+                transport,
+                dids,
+                _width_lookup(args.widths_from),
+                batch_size=args.batch,
+                delay_seconds=args.delay_seconds,
+                label=args.label,
+                on_progress=_progress,
+            )
+        else:
+            snapshot = sweep_dids(
+                transport,
+                dids,
+                delay_seconds=args.delay_seconds,
+                label=args.label,
+                on_progress=_progress,
+            )
     finally:
         bus.shutdown()
 

@@ -58,6 +58,7 @@ from src.collection.isotp import (
     PCI_SINGLE_FRAME,
     IsoTpResponseAssembler,
     ObdResponse,
+    build_batched_did_request_payload,
     build_batched_request_payload,
     build_request_payload,
     extract_service_payload,
@@ -230,6 +231,36 @@ class CanObdClient:
             expect_pid_echo=True,
             request_id=request_id,
         )
+
+    def query_mode_22_batch(
+        self, dids: Sequence[int], *, request_id: int | None = None
+    ) -> ObdResponse | None:
+        """UDS Mode 22 ReadDataByIdentifier for several DIDs in one request.
+
+        Returns the raw payload after the ``62`` echo — a stream of
+        ``<did_hi> <did_lo> <data…>`` groups. Split it with
+        :func:`~src.collection.isotp.split_batched_did_response`, which needs
+        each DID's width because the response is not self-delimiting.
+
+        Every DID in one request is sampled by the ECU at the same instant,
+        which is the reason to use this over repeated ``query_mode_22``.
+        Capped at :data:`~src.collection.isotp.MAX_BATCHED_DIDS` per request.
+        """
+        payload = build_batched_did_request_payload(0x22, dids)
+        message = can.Message(
+            arbitration_id=self._request_id if request_id is None else request_id,
+            data=payload,
+            is_extended_id=False,
+        )
+        try:
+            if not tx_gate.send(self._bus, message, what="request service=0x22 (batched)"):
+                return None
+        except can.CanError:
+            log.warning("CAN send failed", extra={"service": 0x22, "batch": len(dids)})
+            return None
+        # identifier=None: the assembler must not try to match one DID echo,
+        # because the response carries several.
+        return self._collect_response(service=0x22, pid_echo=None)
 
     def query(
         self,

@@ -411,6 +411,11 @@ class JobController:
             ("keepalive", "--keepalive"),
             ("delay_seconds", "--delay-seconds"),
             ("read_timeout", "--read-timeout"),
+            # Same-instant batched reads. `widths_from` points at an earlier
+            # snapshot; the tool refuses batch > 1 without it, because a
+            # multi-DID response cannot be split without measured widths.
+            ("batch", "--batch"),
+            ("widths_from", "--widths-from"),
         ):
             value = params.get(key)
             if value is not None:

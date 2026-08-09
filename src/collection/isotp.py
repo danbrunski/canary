@@ -137,6 +137,85 @@ def split_batched_response(
     return readings, True
 
 
+#: UDS service 0x22 allows several DIDs in one ReadDataByIdentifier request.
+#: Three is the ceiling that still fits a single CAN frame: 1 PCI byte +
+#: 1 service byte + 3 x 2 DID bytes = 8. (Mode 01 fits six because its
+#: identifiers are one byte, not two — see MAX_BATCHED_PIDS.)
+#:
+#: The ECM's support for batching 0x22 is not an assumption: UpRev's own
+#: tester was observed on 2026-08-08 sending ``05 22 11 03 04 01`` — service
+#: 0x22 carrying DIDs 0x1103 and 0x0401 in one frame — to this ECM.
+MAX_BATCHED_DIDS = 3
+
+
+def build_batched_did_request_payload(service: int, dids: Sequence[int]) -> bytes:
+    """Single-frame multi-DID request body, padded to 8 bytes.
+
+    ``22 11 01 12 19 12 08`` asks for three DIDs in one round trip and the
+    ECU answers ``62 1101 <n> 1219 <n> 1208 <n>``.
+
+    The point is NOT throughput — a single-DID sweep already manages ~270
+    DIDs/s on this bus. It is that every DID in one request is sampled by the
+    ECU at the *same instant*, so batched values can be compared with each
+    other. Sequentially polled DIDs cannot: they are rotation-sampled and
+    carry an unknown relative age, which is the same defect that skews an
+    UpRev K-line log by ~100 ms between channels.
+
+    Padding to 8 is not cosmetic — see build_batched_request_payload.
+    """
+    if not dids:
+        raise ValueError("batched request needs at least one DID")
+    if len(dids) > MAX_BATCHED_DIDS:
+        raise ValueError(f"at most {MAX_BATCHED_DIDS} DIDs per request, got {len(dids)}")
+    if len(set(dids)) != len(dids):
+        # A duplicate makes the response ambiguous to walk and wastes a slot.
+        raise ValueError(f"duplicate DID in batch: {[f'0x{d:04X}' for d in dids]}")
+    for did in dids:
+        if not 0 <= did <= 0xFFFF:
+            raise ValueError(f"Mode 22 DID out of range: 0x{did:X}")
+    body = bytes([1 + 2 * len(dids), service, *(b for d in dids for b in (d >> 8, d & 0xFF))])
+    return body + bytes(8 - len(body))
+
+
+def split_batched_did_response(
+    payload: bytes,
+    byte_length_for: Callable[[int], int | None],
+) -> tuple[dict[int, bytes], bool]:
+    """Walk a batched Mode 22 payload into ``{did: data}``.
+
+    ``payload`` is everything after the ``62`` echo, i.e. a stream of
+    ``<did_hi> <did_lo> <data…>`` groups. ``byte_length_for`` returns a DID's
+    expected payload width, or ``None`` when the width is unknown.
+
+    Returns ``(readings, clean)``. ``clean`` is False when the walk stopped
+    early — an unknown width (we cannot find the next boundary) or a
+    truncated payload.
+
+    A multi-DID response is NOT self-delimiting: nothing in the wire format
+    says how long each value is, so a batch over DIDs of unknown width cannot
+    be split at all. That is why blind discovery must stay single-DID and
+    batching is only for DIDs already measured once. Keyed off the DIDs
+    *present in the response* rather than the ones requested, for the same
+    reason as the Mode 01 splitter: an ECU may omit an unsupported DID, and
+    positional matching would then misattribute every later value.
+    """
+    readings: dict[int, bytes] = {}
+    index = 0
+    while index < len(payload):
+        if index + 2 > len(payload):
+            return readings, False
+        did = (payload[index] << 8) | payload[index + 1]
+        width = byte_length_for(did)
+        if width is None or width <= 0:
+            return readings, False
+        start, end = index + 2, index + 2 + width
+        if end > len(payload):
+            return readings, False
+        readings.setdefault(did, payload[start:end])
+        index = end
+    return readings, True
+
+
 def pci_type(data: bytes) -> int | None:
     if not data:
         return None
