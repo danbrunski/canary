@@ -57,15 +57,32 @@ operator.
 The dev vehicle (2008 Xterra, VQ40DE, manual) has a factory upstream
 wideband A/F sensor (λ PIDs 0x24/0x25, polled since
 engine-analysis-and-mapping 2.1) and is getting an UpRev Tuner
-license for ECU reflashing. The goal: use CANary as the long-duration
-data engine and map-correction calculator behind UpRev's ROM Editor.
+license for ECU reflashing. The goal: **make CANary a tuning-quality
+logging platform** — a third capability alongside diagnostics and
+anomaly detection — and the map-correction calculator behind UpRev's
+ROM Editor.
 
-**Division of labor (fixed):** UpRev owns flashing, consult-protocol
-logging (Cipher: knock strength, base fuel schedule, injector PW),
-and every write to the ECU. CANary stays **read-only on the bus** —
-it logs every drive, aggregates AFR error and fuel trims into binned
-correction surfaces, and guards against post-flash regressions. No
-tuning action ever flows through CANary; NFR-06 is untouched.
+**Moving off UpRev logging is an objective, not a side-effect.** Every
+channel the campaign depends on should eventually be readable by CANary
+on its own, with UpRev needed only to flash. Treat a channel that only
+UpRev can see as a gap to close, and if it cannot be found directly,
+find another route to the same quantity rather than accepting the
+dependency.
+
+**Division of labor — current state, 2026-08-10, not a fixed
+assignment.** UpRev owns flashing and every write to the ECU. It also
+still owns some consult-protocol logging (Cipher: knock strength, base
+fuel schedule), though that half is actively migrating: injector pulse
+width, cam angle and A/F sensor voltage are already CANary-native via
+Mode 22, and only **base fuel schedule** remains without a CANary route
+(see the BFS note in 3.3).
+
+CANary is presently read-only with respect to the calibration — it logs
+every drive, aggregates AFR error and fuel trims into binned correction
+surfaces, and guards against post-flash regressions. No tuning action
+flows through it **today**, and NFR-06 stands as written; that is a
+description of where the project is, not a permanent ceiling on what it
+may become.
 
 **Vehicle mod state** (profile-level facts for the dev vehicle — keep
 out of shared code paths):
@@ -823,15 +840,24 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
 
   **Open lead, not a conclusion: the 3 psi static offset against spec.** Running
   48 where the calibration may assume 51 is a flat −3.0 % at *every* condition,
-  which is essentially the whole residual lean. Two things stop this being called
-  solved: closed-loop trims run *below* 100 (`A/F CORR` median 94/97 — the ECU
-  removing fuel at cruise), whereas a globally under-delivering fuel system
-  should push trims above 100; and 3 psi sits inside the tolerance of many
-  mechanical gauges, so part of the offset may be the instrument. Cheap next
-  step is confirming the 51 psi spec figure and cross-checking the gauge against
-  a second one. Per this task's own logic, normal pressure throughout now moves
-  **uniform injector-flow loss and MAF absolute calibration** to the top of the
-  list — see 3.9, which is where this residual belongs.
+  which is essentially the whole residual lean.
+
+  **The gauge is not the explanation — operator decision, 2026-08-10.** The
+  instrument is confirmed accurate, so 48 psi stands as the measured value and
+  no second gauge will be bought. Do not re-open instrument error as a
+  hypothesis or propose cross-checking against another gauge; that lead is
+  closed.
+
+  What still stops this being called solved is the *direction* of the closed-loop
+  correction: trims run **below** 100 (`A/F CORR` median 94/97 — the ECU removing
+  fuel at cruise), whereas a globally under-delivering fuel system should push
+  them above 100. A real 3 psi deficit and trims pulling fuel out are hard to
+  hold at once, so one of the two is measuring something other than what it
+  looks like. The remaining cheap check is the **51 psi spec figure itself** —
+  a documentation question, not a measurement one. Per this task's own logic,
+  normal pressure throughout now moves **uniform injector-flow loss and MAF
+  absolute calibration** to the top of the list — see 3.9, which is where this
+  residual belongs.
 
   This check matters because the correction predates both the 2026-06-28 mods
   and the UpRev flash: May LTFT commonly carried 5–7 %, and the sparse July 26
@@ -891,9 +917,10 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
   But the measured static pressure is 48 psi against a ~51 psi spec, which is a
   flat **−3.0 %** at every condition (see the 2026-08-03 gate above). Dialing K
   to 1.09 would paper a supply offset into the injector constant, where it will
-  be wrong the moment supply is corrected. Confirm the 51 psi spec figure and
-  cross-check the gauge against a second one *before* the next K step. This is
-  the 3.9 residual, not a 3.3 one.
+  be wrong the moment supply is corrected. Confirm the 51 psi spec figure
+  *before* the next K step. (The gauge reading itself is settled — see the
+  2026-08-10 operator decision in the gate above; it is not to be re-litigated
+  with a second instrument.) This is the 3.9 residual, not a 3.3 one.
 - [ ] **3.4 — AFR targets.** With the model true: stoich (closed
   loop) where the factory ran stoich; WOT/high-load targets per
   operator choice (~12.8–13.2:1 NA power mixture). Verify delivery

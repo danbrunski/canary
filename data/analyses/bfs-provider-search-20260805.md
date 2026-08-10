@@ -82,3 +82,60 @@ The next evidence-efficient capture is a narrow BFS research profile containing
 `0x1209`, `0x1208`, RPM, throttle/pedal evidence, and passive CAN. A successful
 UpRev BFS trace is optional corroboration; without it, a deliberately changed
 ROM target region can provide Canary-native causal identification.
+
+## Update 2026-08-10 — BFS as a *derived* quantity, not a found one
+
+The searches above ask "which stored field **is** BFS". Both came back empty
+(passive sweep here; all-DID rung sweep 2026-08-08). Since moving off UpRev
+logging is an objective rather than a convenience, the next question is whether
+BFS can be **computed** from quantities CANary already has.
+
+**Hypothesis.** BFS is a per-injection base fuel time, so it should track air
+mass per intake event, not raw airflow. The earlier attempt above regressed BFS
+against MAF in engineering g/s and found no stable map — but g/s is a *rate*,
+and dividing by rpm is the difference between the two. For a V6,
+`air_per_event = MAF_gps * 20 / rpm`.
+
+**First pass, 12 UpRev logs carrying BFS and MAF g/s on the same K-line
+transport** (single clock, so no cross-source join; restricted to steady state,
+`|d rpm/dt| < 100 rpm/s` and `|d MAF/dt| < 5 g/s²`, because UpRev is
+rotation-polled and its channels do not share a timestamp):
+
+| log | n | r² | slope ms/(g/event) | offset ms | within-log slope drift | median err |
+|---|---:|---:|---:|---:|---:|---:|
+| 7-26 4:53 PM | 1181 | 0.897 | 24.53 | +0.552 | 78.5 % | 1.5 % |
+| 7-29 6:10 PM | 133 | 0.996 | 30.83 | +0.020 | 64.5 % | 1.4 % |
+| 8-08 4:48 PM | 1795 | 0.887 | 26.89 | +0.457 | **4.6 %** | 1.7 % |
+| 8-08 5:12 PM | 4271 | 0.907 | 26.82 | +0.429 | **5.1 %** | 1.6 % |
+| 8-08 5:26 PM | 2543 | 0.958 | 28.85 | +0.172 | 152.2 % | 1.0 % |
+| 8-08 6:56 PM | 1596 | 0.965 | 28.99 | +0.195 | 15.4 % | 1.1 % |
+| autosave 7-27 | 1572 | 0.994 | 29.50 | −0.025 | 37.6 % | 1.5 % |
+
+**Verdict: promising, NOT yet a provider.** Within a log the fit predicts BFS
+to **1.0–1.7 % median error**, which is the same order as the delivery-error
+noise floor (1.25 %). But the slope spans **24.5–30.8 across logs (23 %)** while
+K moved only ~1 % over the same period, so something other than K dominates the
+scale, and within-log drift reaches 152 % on the drives. A constant cannot be
+pinned from this.
+
+**Do not promote this to a semantic BFS provider on these numbers.** Ranking by
+r² would have — six of seven logs clear 0.88 — which is exactly the failure mode
+`scale_verdict` exists to catch.
+
+**What to try next, in order.**
+
+1. The UpRev guide says "MAF value" in `BFS = MAF value × K` is the ECU's
+   **internal MAF-table quantity**, not the logged g/s. Fit
+   `air_per_event → BFS` with IAT as a second term: a density correction is the
+   most likely missing factor and IAT is logged on both sides.
+2. Separate open- from closed-loop samples before fitting. Base schedule is
+   pre-correction, so closed-loop rows may carry a different effective scale.
+3. The two lowest-drift logs (8-08 4:48/5:12 PM, both ≈ 4.6–5.1 %) are the
+   steady rung captures. If the residual scale is an artifact of transients
+   surviving the steady-state gate, a rung-only protocol across a wider rpm ×
+   load span should pin it — and that protocol also runs CANary Mode 22
+   simultaneously, so `ECM_INJECTOR_PW_B1` can be fitted in the same window.
+4. Injector pulse width (`0x1208`, CANary-native, already carrying a fuel-mass
+   constant of 914943 counts/g from n=411) is the other candidate for BFS's
+   *job* — confirming a fuel edit landed — even if it never reproduces BFS's
+   *value*. Test both from one capture; they need the same window.
