@@ -243,8 +243,8 @@ Only one ID EEPROM may exist across the whole stack. The X1202 does not present 
 | Parameter | Value |
 |---|---|
 | Part series | Phoenix Contact MC/MCV series |
-| Pitch | 3.5mm or 5.08mm (to be finalized) |
-| Footprint source | KiCad built-in TerminalBlock_Phoenix library |
+| Pitch | **5.08mm** |
+| Footprint source | KiCad built-in TerminalBlock_Phoenix library — the MC/MCV-G-5.08 `P5.08mm` variants |
 | Block 1 | **5-position** — vehicle side: 12V, GND, CANH, CANL, K-line |
 | Block 2 | **2-position** — +12V pass-through (12V, GND) to the X1202 via a DC barrel-jack pigtail |
 | Placement | Board edge, with protection diode cluster placed nearby |
@@ -340,7 +340,7 @@ Confirm before finalizing the board for fabrication.
 - Exact density of the 24Cxx HAT ID EEPROM — 24C32 recommended over 24C02.
 - EEPROM WP level when the jumper is open (§3.8).
 - SPI net naming: SDI/SDO labels vs the chip's own pin names, so MISO/MOSI don't get crossed at layout.
-- Final pitch selection for the Phoenix Contact MC/MCV terminal blocks (3.5mm vs 5.08mm).
+- Edge budget for the two 5.08mm blocks: 5-position + 2-position is ~36mm of connector plus end walls, against a 65mm board edge. Confirm it clears the mounting holes and the Pi 5 active cooler.
 - Specific protection component part numbers in the 12V input chain (TVS diode rated for automotive load dump, reverse-blocking diode, PTC fuse ratings).
 - Quiescent draw on +12V with the vehicle parked, if the harness ever lands on always-hot OBD pin 16.
 - BMP384 RMS noise against the grade budget; keep the BMP390 footprint option (§3.5).
