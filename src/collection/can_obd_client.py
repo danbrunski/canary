@@ -34,9 +34,11 @@ Not in v1:
   request CTS=0 (all frames) which works for the response sizes
   Mode 01 / 03 / 07 / 0A / 09 / 22 produce.
 
-Read-only by construction: no Mode 04 / Mode 0x2E / Mode 0x2F path
-exists in this module. Tools that drive it can't accidentally send a
-write because the request builder doesn't know how to construct one.
+Any diagnostic service can be sent. ``query()`` passes a caller-supplied
+service byte straight to the request builder, so write and actuation
+services (Mode 04, UDS 0x2E / 0x2F, ...) are reachable from this module.
+The fixed ``query_mode_*`` helpers still only cover the read services they
+are named for; ``query()`` is the general path.
 """
 
 from __future__ import annotations
@@ -70,21 +72,6 @@ from src.collection.isotp import (
 )
 
 log = logging.getLogger(__name__)
-
-#: Services `CanObdClient.query` will build a request for. The read-only
-#: diagnostic surface (NFR-06): standard Mode 01/02 PID reads, Mode 03/07/0A
-#: DTC lists, Mode 06 on-board monitor results, Mode 09 vehicle info, and
-#: Mode 22 ReadDataByIdentifier — exactly the services CANary already sends
-#: on every drive via the fixed `query_mode_*` methods above. Enforced here
-#: (not just by callers) because `query()` accepts a caller-supplied service
-#: byte instead of dispatching through one of those fixed methods, so the
-#: "no Mode 04/0x2E/0x2F path exists" guarantee this module's docstring
-#: makes would otherwise only hold for the methods someone remembered to use.
-ALLOWED_QUERY_SERVICES: frozenset[int] = frozenset({0x01, 0x02, 0x03, 0x06, 0x07, 0x09, 0x0A, 0x22})
-
-
-class DisallowedServiceError(ValueError):
-    """Raised by `CanObdClient.query` for a service outside `ALLOWED_QUERY_SERVICES`."""
 
 
 @dataclass(frozen=True)
@@ -269,25 +256,19 @@ class CanObdClient:
         identifier: int | None = None,
         request_id: int | None = None,
     ) -> ObdResponse | None:
-        """Generic read-only request for exploratory / ad-hoc use.
+        """Generic request for exploratory / ad-hoc use.
 
         One escape hatch instead of a fixed ``query_mode_*`` method per
         service, for probing a service/identifier combination nobody has
         wired a dedicated method for yet (an unlisted Mode 06 MID, an unbound
         Mode 22 DID, ...). Backs the ``obd_request`` control route.
 
-        Restricted to :data:`ALLOWED_QUERY_SERVICES` — unlike the fixed
-        ``query_mode_*`` methods above, ``service`` here is caller-supplied,
-        so the read-only guarantee has to be enforced at the door rather than
-        by which method happens to exist. ``identifier=None`` matches the
-        no-PID services (Mode 03/07/0A); anything else is passed through as
-        the request's PID/DID/MID byte(s).
+        ``service`` is caller-supplied and passed through unfiltered, so this
+        reaches write and actuation services as well as read ones — the
+        caller decides what is appropriate to send. ``identifier=None``
+        matches the no-PID services (Mode 03/07/0A); anything else is passed
+        through as the request's PID/DID/MID byte(s).
         """
-        if service not in ALLOWED_QUERY_SERVICES:
-            allowed = ", ".join(f"0x{s:02X}" for s in sorted(ALLOWED_QUERY_SERVICES))
-            raise DisallowedServiceError(
-                f"service 0x{service:02X} is not read-only allowlisted; allowed: {allowed}"
-            )
         return self._request(
             service=service,
             pid=identifier,
@@ -940,14 +921,12 @@ def read_pids(client: CanObdClient, pids: Iterable[int]) -> list[DecodedPid]:
 
 
 __all__ = [
-    "ALLOWED_QUERY_SERVICES",
     "DEFAULT_REQUEST_ID",
     "DEFAULT_RESPONSE_ID_MAX",
     "DEFAULT_RESPONSE_ID_MIN",
     "PID_DECODERS",
     "CanObdClient",
     "DecodedPid",
-    "DisallowedServiceError",
     "ObdResponse",
     "decode_absolute_load",
     "decode_baro",

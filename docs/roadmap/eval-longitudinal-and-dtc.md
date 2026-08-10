@@ -35,10 +35,10 @@ index at the bottom.
 - Whole-repo gate before every commit: `ruff check . && ruff format
   --check . && mypy src && pytest` (+ `pnpm test` in
   `src/dashboard/static` for FE changes).
-- Read-only on CAN. **Mode 04 (clear DTC) stays forbidden** (NFR-06);
-  it is unconstructable in `can_obd_client.py` and guarded by
-  `WRITE_COMMAND_MODES` on the legacy path. The DTC reader adds Modes
-  03/07/0A reads only — no clear button, ever.
+- The DTC reader adds Modes 03/07/0A reads only — no clear button in
+  this scope. Mode 04 is reachable via `POST /control/obd_request` on the
+  Canable path (the legacy ELM327 path still blocks it via
+  `WRITE_COMMAND_MODES`); wiring a UI for it is Task 6.5, not this.
 - Not safety-critical — size effort accordingly; don't over-engineer
   failure modes the system can't have.
 - Everything per-vehicle-scoped must go through `scope_config`

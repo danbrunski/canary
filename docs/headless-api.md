@@ -371,13 +371,12 @@ candidates. MCP equivalent: `can_activity(seconds, ids)`.
 
 ## Ad-hoc OBD/UDS requests
 
-`POST /control/obd_request` sends one read-only diagnostic request and
-returns whatever comes back, instead of waiting for the poll scheduler's
-cadence — useful for probing a specific Mode 06 MID or Mode 22 DID, or
-reading a Mode 09 InfoType (VIN, calibration ID, CVN), without arming a
-capture or writing a one-off script. Whitelisted to Mode
-01/02/03/06/07/09/0A/22 (`CanObdClient.query`'s allowlist, enforced
-independent of this route).
+`POST /control/obd_request` sends one diagnostic request and returns
+whatever comes back, instead of waiting for the poll scheduler's cadence —
+useful for probing a specific Mode 06 MID or Mode 22 DID, or reading a Mode
+09 InfoType (VIN, calibration ID, CVN), without arming a capture or writing
+a one-off script. `service` is not filtered: any service byte is built and
+sent, write and actuation services included.
 
 ```bash
 # calibration ID (Mode 09, InfoType 0x04)
@@ -458,8 +457,9 @@ honest thing to hand back rather than a guessed decode.
 
 `did_sweep` is Canable-only (no ELM327 branch — the job runs inside
 `JobController`'s subprocess against the daemon's own CAN interface) and
-read-only: only Mode 22 reads and, when `session` resolves to something,
-Mode 0x10 session control (no memory write, no actuation) are ever sent.
+narrow by construction: only Mode 22 reads and, when `session` resolves to
+something, Mode 0x10 session control are ever sent by this job — it builds no
+other service, whatever `obd_request` may allow elsewhere.
 `session="auto"` (the default) resolves the gating sub-function from
 `data/dids.yaml`'s access block, matching what the live scheduler's DID
 windows already use for this vehicle.

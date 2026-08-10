@@ -71,9 +71,9 @@ hardware:
     bitrate: 500000
 ```
 
-CANary's OBD path enforces read-only diagnostic services and rejects write /
-actuation modes, but it still has to transmit diagnostic read requests. Use
-listen-only only for passive CAN-only captures.
+CANary's OBD path transmits diagnostic requests and does not filter them by
+service, so listen-only mode disables the whole active-OBD path. Use it only
+for passive CAN-only captures.
 
 ## Idempotent Bring-up Helper
 

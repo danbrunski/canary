@@ -30,12 +30,13 @@ ourselves" rabbit hole, done properly and safely on isolated hardware.
 - **Bench hardware only.** A separately purchased ECU on a bench
   harness. The write path never touches the vehicle or the vehicle's
   CAN bus. If it's plugged into the truck, this project is not running.
-- **`canary-rw` is a SEPARATE tool from `canary`.** The read-only
-  monitoring daemon's core invariant — no bus transmit, no actuation
-  (NFR-06) — is load-bearing for its safety story and must stay
-  intact. Anything that transmits or writes flash lives in a distinct
+- **`canary-rw` is a SEPARATE tool from `canary`.** `canary` transmits
+  freely — telemetry polling, session control, security access, memory
+  reads — but NFR-06 still forbids it writing ECU non-volatile memory,
+  because that is the one failure mode that bricks a module in the
+  operator's own truck. Reflashing therefore lives in a distinct
   module/package with its own entry point and its own hardware target.
-  No write capability is ever linked into the `canary` daemon. The
+  No flash-write capability is ever linked into the `canary` daemon. The
   only shared surface is *offline binary analysis* (see Phase 3),
   which touches files, not buses.
 - **Own hardware, own vehicle.** Legitimate as personal
@@ -152,5 +153,7 @@ hand if desired — never by automation.
   roadmap/queue-eligible; this one is not. Keep the entanglement
   one-directional: skunkworks may read roadmap outputs; roadmap never
   depends on skunkworks.
-- `AGENTS.md` NFR-06 (read-only bus) — the invariant `canary-rw` must
-  never violate by leaking into `canary`.
+- `AGENTS.md` / NFR-06 — no ECU non-volatile writes from `canary`. The
+  constraint `canary-rw` must never violate by leaking into `canary`.
+  (NFR-06 formerly said "read-only bus", which was over-broad: ordinary
+  diagnostics transmit. Only the no-reflash half survives.)

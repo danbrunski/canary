@@ -62,10 +62,18 @@ def test_obd_request_requires_auth(tmp_path: Path) -> None:
     assert resp.status_code == 401
 
 
-def test_obd_request_rejects_disallowed_service(tmp_path: Path) -> None:
-    client = _api(tmp_path, channel="obdreq-disallowed")
-    resp = client.post("/control/obd_request", json={"service": 0x04}, headers=_auth())
-    assert resp.status_code == 400
+def test_obd_request_accepts_any_service(tmp_path: Path) -> None:
+    """No service allowlist: Mode 04 (CLEAR_DTC, a write) is accepted and
+    sent like any other. Nothing answers on the virtual bus, so the route
+    reports `responded: false` rather than rejecting the request."""
+    client = _api(tmp_path, channel="obdreq-anyservice")
+    resp = client.post(
+        "/control/obd_request",
+        json={"service": 0x04, "timeout_seconds": 0.2},
+        headers=_auth(),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["obd_request"]["responded"] is False
 
 
 def test_obd_request_reports_no_response_on_timeout(tmp_path: Path) -> None:

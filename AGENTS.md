@@ -22,12 +22,39 @@ profiles already partition all learned state, and vehicle-specific
 facts belong in profile/config/data files, never hard-coded. Don't bake
 Xterra-isms into shared code paths.
 
-**This is not a safety-critical system.** It is read-only on the CAN bus
-(no `bus.send`, no actuation, no influence on vehicle behavior). Wrong
+**This is a single-operator research rig, not a fleet product.** Wrong
 inference, a stalled daemon, a missing anomaly event, a deleted session
-directory — none of these can affect the vehicle, the operator, or
-anyone else on the road. The truck drives the same whether canary is
-running or not.
+directory — none of these matter to anyone but the operator, who is also
+the only person in the vehicle.
+
+**Transmitting on the CAN bus is normal and required — don't hedge about
+it.** Every OBD/UDS request is a bus write. Polling telemetry, ISO-TP
+flow control, DiagnosticSessionControl (0x10), SecurityAccess (0x27) and
+ReadMemoryByAddress (0x23) to command a memory dump are all ordinary
+CANary operations. There is no service allowlist on the active Canable
+path: `CanObdClient.query()` and `POST /control/obd_request` build and
+send whatever service byte the caller asks for. An earlier `read-only`
+requirement (NFR-06) was written to mean "don't brick the ECU" and got
+read literally as "never transmit," which blocked routine work; it has
+been removed.
+
+**The line that actually matters: `canary` must never write the ECU's
+non-volatile memory.** No reflash, no calibration/ROM write, nothing
+whose failure mode is an unrecoverable module. That is the damage the
+old requirement existed to prevent, and it is the only part worth
+keeping. Reads of any depth are fine; so are volatile, reversible writes
+(clear DTC, actuation tests, session control). Reflashing belongs to
+**`canary-rw`** — a separate tool, bench ECUs only, never the vehicle
+(`docs/skunkworks/ecu-rw-bench-research.md`).
+
+Two narrower cases, neither of them the policy above: the broadcast
+capture path (`can_collector`) is a pure sniffer with no send path at
+all, and the **legacy ELM327 path** (`obd_collector.py`) still refuses
+Mode 04/0x2E/0x2F via `WRITE_COMMAND_MODES` / `assert_read_only_command`.
+That legacy guard is now *stricter than NFR-06 requires* — none of those
+three touch non-volatile memory — and survives only because nothing
+needed it lifted yet. Lift it when the ELM327 path needs them; it is not
+defending the no-reflash line.
 
 **Implications for how to work:**
 

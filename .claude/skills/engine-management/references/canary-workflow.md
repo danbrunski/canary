@@ -5,10 +5,11 @@ K-line log, an HP Tuners CSV, or a notebook. This file is the CANary-specific
 mapping: which tool answers which question, and which gates the repo already
 enforces so you don't re-derive them.
 
-CANary is **read-only on the bus**. It can log, request, decode, and analyze.
-It cannot flash a calibration — the tuning software (UpRev on the dev vehicle)
-is the only writer. So "tuning" here means *measure → decide the change →
-someone else applies it → measure again*.
+CANary can log, request, decode, and analyze, and its ad-hoc request path
+will send any diagnostic service. It still cannot **flash a calibration** —
+that is the tuning software's job (UpRev on the dev vehicle). So "tuning"
+here means *measure → decide the change → someone else applies it →
+measure again*.
 
 ## Naming trap: two unrelated things are called "tuning"
 

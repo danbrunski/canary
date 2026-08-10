@@ -52,8 +52,8 @@ the analysis UX.
 
 - Whole-repo gate before every commit: `ruff check . && ruff format
   --check . && mypy src && pytest` (+ `pnpm test` for FE work).
-- Read-only on the bus (NFR-06): everything here is Mode 01/02/06/09/22
-  reads; no actuation, no Mode 04.
+- Everything in this roadmap is Mode 01/02/06/09/22 reads — no actuation,
+  no Mode 04. That is this work's own scope, not a platform restriction.
 - New physics channels follow `derived.py` conventions: pure functions,
   gated on inputs (absent → NaN/None, never fake zeros), engine-
   performance channels in `compute_derived_channels`, residuals in

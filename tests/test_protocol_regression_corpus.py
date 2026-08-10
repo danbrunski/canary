@@ -30,9 +30,9 @@ Covers the 6.19 acceptance clauses:
     rely on.
   * IO-control identification — `src/analysis/iso_tp.py`'s UDS service-name
     table naming 0x2F (InputOutputControlByIdentifier). No real 0x2F
-    exchange exists anywhere in this repo's captures (the collection layer
-    is read-only by construction — see `WRITE_COMMAND_MODES` in
-    `src/collection/obd_collector.py` — so 0x2F is never issued, and no
+    exchange exists anywhere in this repo's captures (nothing in the
+    collection layer issues 0x2F — the legacy ELM327 path blocks it via
+    `WRITE_COMMAND_MODES`, and no scheduled poll builds one — and no
     external tool's IO-control traffic was ever sniffed either); that one
     case is necessarily a direct decoder-identification check on a
     constructed frame rather than a captured exchange, and is labeled as
@@ -225,9 +225,9 @@ def test_did_af_sensor_voltage_decodes_to_expected_engineering_value() -> None:
 
 # ---------------------------------------------------------------------------
 # IO-control identification. No real 0x2F (InputOutputControlByIdentifier)
-# exchange exists anywhere in this repo's captures — the collection layer is
-# read-only by construction (WRITE_COMMAND_MODES in
-# src/collection/obd_collector.py excludes it) so it's never issued, and no
+# exchange exists anywhere in this repo's captures — nothing in the collection
+# layer issues 0x2F (the legacy ELM327 path blocks it via WRITE_COMMAND_MODES
+# in src/collection/obd_collector.py, and no scheduled poll builds one), and no
 # external scan tool's IO-control traffic was ever sniffed. This is
 # therefore a direct decoder-identification check on a constructed frame,
 # not a captured "known-good exchange" — labeled as such per the task scope.

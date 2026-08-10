@@ -9,12 +9,10 @@ import can
 import pytest
 
 from src.collection.can_obd_client import (
-    ALLOWED_QUERY_SERVICES,
     DEFAULT_REQUEST_ID,
     DEFAULT_RESPONSE_ID_MIN,
     PID_DECODERS,
     CanObdClient,
-    DisallowedServiceError,
     decode_absolute_load,
     decode_baro,
     decode_catalyst_temp,
@@ -677,15 +675,19 @@ def test_query_mode_03_single_frame() -> None:
     assert parse_dtc_payload(resp.payload) == ["P0420", "C0510"]
 
 
-def test_query_rejects_disallowed_service() -> None:
-    """`query()` refuses a service outside the read-only allowlist before
-    sending anything — no ECU stub needed since no frame should go out."""
+def test_query_sends_any_service_byte() -> None:
+    """`query()` passes the caller's service byte straight through — no
+    allowlist. Mode 04 (CLEAR_DTC, a write) is the case that used to be
+    refused, so assert the frame actually reaches the bus."""
     tester, ecu = _make_pair()
     try:
         client = CanObdClient(tester, timeout_seconds=0.2)
-        assert 0x04 not in ALLOWED_QUERY_SERVICES  # CLEAR_DTC — write, must stay excluded
-        with pytest.raises(DisallowedServiceError):
-            client.query(service=0x04, identifier=None)
+        assert client.query(service=0x04, identifier=None) is None  # nothing answers
+        sent = ecu.recv(timeout=0.5)
+        assert sent is not None
+        assert sent.arbitration_id == DEFAULT_REQUEST_ID
+        assert sent.data[0] == 0x01  # single-frame PCI: one payload byte
+        assert sent.data[1] == 0x04  # ...and that byte is the service
     finally:
         tester.shutdown()
         ecu.shutdown()

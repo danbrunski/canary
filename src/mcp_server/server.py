@@ -934,7 +934,7 @@ def _register_write_tools(
         header: int | None = None,
         timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
-        """One-shot read-only OBD/UDS request (Mode 01/02/03/06/07/09/0A/22).
+        """One-shot OBD/UDS request (any service byte).
 
         Ask for one specific service/identifier immediately instead of
         waiting for the poll scheduler's cadence (Mode 06/DTC sit on a

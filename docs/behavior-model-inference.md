@@ -51,10 +51,12 @@ fuel/ignition tables. We deliberately don't do this, for three reasons:
    target," it's "is it behaving like the engine has been behaving over the
    last N months." The runtime-inferred surface is exactly that baseline.
 
-3. **Avoiding ECU writes, Mode 23 ReadMemoryByAddress, and Mode 27
-   SecurityAccess bypass keeps us in unambiguous read-only territory.**
-   These advanced UDS services exist with a security gate for a reason; we
-   don't need to circumvent it for diagnostics, and we won't.
+3. **The inferred surface is cheaper than a memory dump, not forbidden
+   from one.** Mode 23 ReadMemoryByAddress behind Mode 27 SecurityAccess is
+   available to CANary and is a legitimate way to get at the factory map.
+   It is simply more work — and a dump gives you the *shipped* calibration,
+   whereas this baseline gives you what the engine is doing now, which is
+   the more useful comparand on a 200k-mile engine.
 
 The factory map remains interesting as **named calibration constants** —
 some Mode 22 DIDs expose those directly without security. See the

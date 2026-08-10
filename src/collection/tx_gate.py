@@ -1,7 +1,7 @@
 """Process-wide CAN transmit gate — "passive mode".
 
-CANary's *broadcast* capture (``can_collector``) has always been listen-only
-per FR-02 / NFR-06, but the OBD side is not: ``can_obd_client`` and
+CANary's *broadcast* capture (``can_collector``) is listen-only by
+construction, but the OBD side is not: ``can_obd_client`` and
 ``can_obd_collector`` transmit tester requests (Mode 01/03/06/07/09/0A polls,
 Mode 22 DID reads, session control) and ISO-TP flow-control frames. That is
 normally exactly what we want, and it is harmless — the ECU answers diagnostic

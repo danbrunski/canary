@@ -135,7 +135,7 @@ request downsampled API data from the backend.
 
 ## Safety Boundary
 
-CANary's default system behavior remains read-only. Any future diagnostic
-control path is a separate, gated feature. The dashboard should make that
-boundary visible in the UI and enforce it in the backend as well as the
-frontend.
+CANary can write to the bus: `POST /control/obd_request` accepts any
+service byte. The dashboard should make that visible in the UI — a read and
+a write must not look alike — and keep write paths behind the authenticated
+control plane in the backend, not only in the frontend.

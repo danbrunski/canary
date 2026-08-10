@@ -23,7 +23,6 @@ from src.alerts.tuning import (
 )
 from src.analysis.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore
 from src.collection import bus_budget, tuning_profile, tx_gate
-from src.collection.can_obd_client import DisallowedServiceError
 from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.custom_pids import (
     CustomPid,
@@ -514,8 +513,6 @@ def register_control_routes(
                 request_id=request.header,
                 timeout_seconds=request.timeout_seconds,
             )
-        except DisallowedServiceError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except AdHocRequestBusError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         payload = {"obd_request": result.to_dict()}

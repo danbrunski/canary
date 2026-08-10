@@ -175,7 +175,7 @@ def test_assert_read_only_command_blocks_synthesized_write_modes() -> None:
         name = "PROPRIETARY_WRITE"
         mode = 0x2E  # WriteDataByIdentifier
 
-    with pytest.raises(WriteCommandRejectedError, match=r"0x2E.*read-only"):
+    with pytest.raises(WriteCommandRejectedError, match=r"0x2E.*Refusing"):
         assert_read_only_command(_Fake(), requester="test")
 
 

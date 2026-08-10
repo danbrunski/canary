@@ -1,7 +1,7 @@
 # Reversing ECU firmware / ROM tables
 
-> **Outside CANary's scope.** CANary is a read-only CAN telemetry system; it does
-> not read, disassemble, or modify firmware. Everything here is external-tooling
+> **Outside CANary's scope.** CANary works the wire, not the image — it does not
+> read, disassemble, or modify firmware. Everything here is external-tooling
 > territory (chip readers, disassemblers, WinOLS). Reach for it only when the task
 > genuinely crosses from decoding the wire into understanding/changing ECU internals.
 

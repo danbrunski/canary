@@ -90,8 +90,8 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 
 #### FR-02 — Raw CAN Bus Collection
 - The system SHALL connect to a Canable USB adapter via SocketCAN (`can0`)
-- The system SHALL capture broadcast CAN frames continuously and avoid write or
-  actuation traffic; diagnostic requests are limited to read-only OBD services
+- The system SHALL capture broadcast CAN frames continuously; the broadcast
+  capture path itself is a sniffer and never transmits
 - The system SHALL capture all CAN frame IDs present on the bus at full bus rate
 - The system SHALL apply `data/bindings.yaml` to decode proprietary Nissan
   signals into named channels; generated DBC export is optional interop
@@ -163,9 +163,14 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 - All core modules SHALL have unit test coverage for preprocessing transforms, feature engineering, and threshold logic
 
 #### NFR-06 — Security
-- OBD/CAN tooling SHALL be read-only at the application layer; the system SHALL
-  never issue write, clear-DTC, actuation, security-access, or memory-read/write
-  commands to the vehicle bus
+- The system MAY send any diagnostic service required to read vehicle data —
+  telemetry polling, session control, security access, and memory reads are all
+  in scope. Transmitting on the bus is inherent to diagnostics, not an exception
+- The system SHALL NOT write the ECU's non-volatile memory: no reflash, no
+  calibration/ROM write, nothing whose failure mode is an unrecoverable module.
+  Reflashing is `canary-rw`'s scope, against bench ECUs only
+  (`docs/skunkworks/ecu-rw-bench-research.md`), and SHALL NOT be linked into
+  the `canary` daemon
 - The dashboard SHALL be accessible on localhost / LAN only; no external internet exposure by default
 
 ---

@@ -6,7 +6,7 @@ the ecosystem (SavvyCAN, Cabana, Wireshark, `canplayer`) reads it natively
 and it's append-safe across crashes — Parquet conversion happens later as a
 separate offline step.
 
-The collector NEVER calls `bus.send()`. CANary is listen-only by FR-02 / NFR-06.
+The collector NEVER calls `bus.send()` — this path is a sniffer by FR-02.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def bus_factory(spec: CanBusConfig) -> can.BusABC:
 
     `bitrate` is omitted for `virtual` (the backend rejects it as unknown).
 
-    The collector is read-only by FR-02 / NFR-06: it never calls `bus.send()`,
+    The collector is a sniffer by FR-02: it never calls `bus.send()`,
     so no data frame is ever injected regardless of how the adapter is opened.
     Hardware bus-monitoring (no ACK either) is desirable but adapter-dependent:
     python-can's slcan `listen_only=True` sends the `L` open command, but the
