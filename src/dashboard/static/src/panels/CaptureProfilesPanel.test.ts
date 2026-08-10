@@ -167,6 +167,20 @@ function renderPanel(activeName: string | null = null, extra: Record<string, unk
       { name: "ECM_BASE_FUEL_SCHEDULE_CANDIDATE" },
     ],
   });
+  // The daemon returns the new snapshot from every capture mutation and the
+  // panel applies it immediately — /status only polls every 5 s, which is what
+  // made start/stop feel unresponsive. Mocks must return it or the tests
+  // silently exercise the error path instead.
+  mocks.startProfileCapture.mockResolvedValue({
+    capture_profile: status("fuel-map").capture_profile,
+  });
+  mocks.pauseProfileCapture.mockResolvedValue({
+    capture_profile: { ...status("fuel-map").capture_profile!, paused: true },
+  });
+  mocks.stopProfileCapture.mockResolvedValue({
+    capture_profile: { ...status(null), active: false, name: "default", paused: false },
+    capture_quality: null,
+  });
   return render(
     createElement(CaptureProfilesPanel, {
       token: "secret",
@@ -204,7 +218,7 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
 
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "fuel-map" } });
     await screen.findByText("High-rate fueling and timing capture");
-    fireEvent.change(screen.getByLabelText("Target rate (Hz/channel; blank = relative cadence)"), {
+    fireEvent.change(screen.getByLabelText("Target rate"), {
       target: { value: "8" },
     });
 
@@ -334,7 +348,7 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     renderPanel("fuel-map");
     await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole("button", { name: "End capture" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     await waitFor(() => expect(mocks.stopProfileCapture).toHaveBeenCalled());
   });
 
@@ -342,7 +356,7 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     renderPanel();
     await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("button", { name: "New profile" }));
 
     // A slug the backend name validator accepts: `2026-07-31-1830`.
     const nameField = screen.getByDisplayValue(/^\d{4}-\d{2}-\d{2}-\d{4}$/);
@@ -355,7 +369,7 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     renderPanel();
     await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("button", { name: "New profile" }));
     const nameField = screen.getByDisplayValue(/^\d{4}-\d{2}-\d{2}-\d{4}$/);
     fireEvent.change(nameField, { target: { value: "dyno-pulls" } });
 
@@ -440,4 +454,79 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     expect(screen.getByText("812.50")).toBeInTheDocument();
     expect(screen.getByText("19.60")).toBeInTheDocument();
   });
+
+  it("shows the capture state without waiting for the next status poll", async () => {
+    // /status polls every 5 s. Before this, a capture that had already started
+    // still read "Not capturing" for up to five seconds, which is the whole
+    // "it takes a while to respond" complaint — the request was fast, the UI
+    // was not. The mutation response carries the new snapshot; use it.
+    renderPanel();
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+    expect(screen.getByTestId("capture-phase")).toHaveTextContent("Not capturing");
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "fuel-map" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    // The `status` prop is deliberately never updated in this test.
+    await waitFor(() =>
+      expect(screen.getByTestId("capture-phase")).toHaveTextContent("Recording"),
+    );
+    expect(screen.getByRole("button", { name: /Pause/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+  });
+
+  it("reports a pause immediately rather than on the next poll", async () => {
+    renderPanel("fuel-map");
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+    expect(screen.getByTestId("capture-phase")).toHaveTextContent("Recording");
+
+    fireEvent.click(screen.getByRole("button", { name: /Pause/ }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("capture-phase")).toHaveTextContent("Paused"),
+    );
+    expect(screen.getByRole("button", { name: /Resume/ })).toBeInTheDocument();
+  });
+
+  it("surfaces the contract verdict when a capture ends", async () => {
+    // Stopping used to report nothing at all. The verdict is the answer to
+    // "was that capture any good", and it is only available at this moment.
+    renderPanel("fuel-map");
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+    // After renderPanel: it installs the default mocks and would overwrite this.
+    mocks.stopProfileCapture.mockResolvedValue({
+      capture_profile: { ...status(null), active: false, name: "default", paused: false },
+      capture_quality: {
+        verdict: "fail",
+        profile: "fuel-map",
+        observed_seconds: 1434,
+        required_tuple: ["RPM", "COMMANDED_EQUIV_RATIO"],
+        tuple_rate_bound_hz: 0.28,
+        tuple_bound_is_exact: true,
+        failures: [{ clause: "required_tuple_rate", channels: ["COMMANDED_EQUIV_RATIO"] }],
+        notes: [],
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    const verdict = await screen.findByTestId("capture-verdict");
+    expect(verdict).toHaveTextContent("contract fail");
+    expect(verdict).toHaveTextContent("required_tuple_rate");
+    expect(verdict).toHaveTextContent("0.28 Hz");
+  });
+
+  it("says whether the editor is on a saved profile or an unsaved new one", async () => {
+    // "New" gave no clue whether it was required before every capture. The
+    // editor now states which profile it is editing, and the button says what
+    // it makes.
+    renderPanel();
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "fuel-map" } });
+    expect(await screen.findByText(/editing .fuel-map./)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "New profile" }));
+    expect(screen.getByText(/new, unsaved profile/)).toBeInTheDocument();
+  });
 });
+

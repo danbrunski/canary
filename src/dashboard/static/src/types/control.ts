@@ -164,6 +164,36 @@ export interface CaptureProfileState {
   bus_budget_override: number | null;
 }
 
+/** One clause of the capture contract that a finished capture failed. */
+export interface CaptureQualityFailure {
+  clause: string;
+  channels?: string[];
+  detail?: string;
+  observed_hz?: number | null;
+  required_hz?: number | null;
+}
+
+/**
+ * The verdict scored when a capture stops. Returned by the stop call and
+ * persisted beside the data as `capture_quality.json`.
+ *
+ * `verdict` is `pass` | `fail` | `unverified`. Absent (`null`) means no
+ * sidecar was written — that is *unknown*, never a pass, and the UI must not
+ * render it as success.
+ */
+export interface CaptureQuality {
+  verdict: string;
+  profile: string;
+  observed_seconds: number | null;
+  required_tuple: string[];
+  /** Slowest member of the required tuple: the ceiling on how often the whole
+   *  tuple can complete, which per-channel rates cannot express. */
+  tuple_rate_bound_hz: number | null;
+  tuple_bound_is_exact: boolean;
+  failures: CaptureQualityFailure[];
+  notes: string[];
+}
+
 export interface DidWindowStatus {
   phase: "mode01" | "window" | "lapse";
   window_interval_seconds?: number;

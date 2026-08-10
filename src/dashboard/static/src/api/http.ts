@@ -16,6 +16,7 @@ import type {
   CaptureProfile,
   CaptureProfilesResponse,
   CaptureProfileState,
+  CaptureQuality,
   CaptureProfileWarning,
   CaptureTagResponse,
   CompanionStatusResponse,
@@ -302,7 +303,14 @@ export function pauseProfileCapture(
   });
 }
 
-export function stopProfileCapture(token: string): Promise<{ capture_profile: CaptureProfileState }> {
+/** Stopping returns the contract verdict for the capture that just ended.
+ *  `capture_quality` is null when no sidecar could be written — unknown, not a
+ *  pass, and the caller must render it that way. */
+export function stopProfileCapture(token: string): Promise<{
+  capture_profile: CaptureProfileState;
+  ended_capture_dir?: string;
+  capture_quality?: CaptureQuality | null;
+}> {
   return controlJson("/control/capture", token, { method: "DELETE" });
 }
 

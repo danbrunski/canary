@@ -23,9 +23,34 @@ import {
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type {
   CaptureProfile,
+  CaptureProfileState,
   CaptureProfileWarning,
+  CaptureQuality,
   StatusResponse,
 } from "../types";
+
+/** Numeric settings are 2–4 digits. Sizing them to the grid column made a
+ *  bus-budget box span half the page and read as a free-text field. */
+const numFieldClass = `${inputClass} mt-1 w-24 text-right`;
+
+/** A labelled control sized to its content, with the units and the
+ *  blank-means-what note demoted out of the label so the label stays short. */
+function Field({
+  label, hint, className = "", children,
+}: {
+  label: string;
+  hint?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className={`text-sm text-fg-dim ${className}`}>
+      <span className="block">{label}</span>
+      {children}
+      {hint && <span className="mt-0.5 block text-[0.68rem] text-fg-dim/80">{hint}</span>}
+    </label>
+  );
+}
 
 /** `2026-07-31-1830` — a lowercase slug the backend name validator accepts,
  *  local time so it matches when the operator remembers running it. */
@@ -87,6 +112,12 @@ export function CaptureProfilesPanel({
   const [warnings, setWarnings] = useState<CaptureProfileWarning[]>([]);
   const [tuneRevision, setTuneRevision] = useState("");
   const [showWeights, setShowWeights] = useState(false);
+  // `/status` polls every 5 s, so a capture that started instantly still read
+  // as "not capturing" for up to five seconds — the whole reason start/stop
+  // felt unresponsive. Every capture mutation already returns the new
+  // snapshot; hold it here and let polling catch up.
+  const [optimistic, setOptimistic] = useState<CaptureProfileState | null>(null);
+  const [lastVerdict, setLastVerdict] = useState<CaptureQuality | null>(null);
   const { notice, setNotice, busy, run } = useAsyncAction();
 
   const refresh = useCallback(async () => {
@@ -121,8 +152,37 @@ export function CaptureProfilesPanel({
     }
   }, [profiles, selectedName]);
 
-  const active = status?.capture_profile;
+  const polled = status?.capture_profile ?? null;
+  const active = optimistic ?? polled;
   const paused = active?.paused ?? false;
+
+  // Drop the optimistic snapshot as soon as polling agrees on the three things
+  // the controls are driven by. Keeping it any longer would mask a capture that
+  // the daemon ended on its own.
+  useEffect(() => {
+    if (!optimistic) return;
+    if (!polled) return;
+    if (
+      Boolean(polled.active) === Boolean(optimistic.active)
+      && polled.name === optimistic.name
+      && Boolean(polled.paused) === Boolean(optimistic.paused)
+    ) {
+      setOptimistic(null);
+    }
+  }, [polled, optimistic]);
+
+  /** What the controls are doing right now. An in-flight transition is a
+   *  distinct state from the settled ones: "Starting…" is the answer to the
+   *  complaint that nothing happens when Start is pressed. */
+  const phase: "idle" | "starting" | "stopping" | "pausing" | "resuming" | "recording" | "paused" =
+    busy === "capture start" ? "starting"
+    : busy === "capture stop" ? "stopping"
+    : busy === "capture pause" ? "pausing"
+    : busy === "capture resume" ? "resuming"
+    : active?.active ? (paused ? "paused" : "recording")
+    : "idle";
+  const transitioning = phase === "starting" || phase === "stopping"
+    || phase === "pausing" || phase === "resuming";
   const selectedProfile = profiles.find((profile) => profile.name === selectedName);
   // Starting is intentionally name-only: the daemon reloads the authoritative
   // profile from disk.  Never present an edited draft as the plan that request
@@ -149,8 +209,9 @@ export function CaptureProfilesPanel({
   const togglePause = useCallback(() => {
     if (!token || !active?.active) return;
     void run(paused ? "capture resume" : "capture pause", async () => {
-      await pauseProfileCapture(token, !paused);
-    });
+      const result = await pauseProfileCapture(token, !paused);
+      setOptimistic(result.capture_profile);
+    }, { okText: null });
   }, [token, active?.active, paused, run]);
 
   const togglePauseRef = useRef(togglePause);
@@ -229,38 +290,131 @@ export function CaptureProfilesPanel({
       <Notice notice={notice} />
       <Notice notice={busy ? { kind: "busy", text: `Working: ${busy}` } : null} />
 
-      <div className="flex flex-wrap gap-2">
-        <select className={inputClass} value={selectedName} onChange={(event) => setSelectedName(event.target.value)}>
-          {profiles.map((profile) => <option key={profile.name}>{profile.name}</option>)}
-        </select>
-        <button className={buttonClass} type="button" onClick={() => {
-          const next = blankProfile();
-          setDraft(next);
-          setOriginalName(undefined);
-          setSelectedName("");
-        }}>New</button>
-        <input className={inputClass} value={tuneRevision} onChange={(event) => setTuneRevision(event.target.value)} placeholder="ROM / tune revision note" />
-        {!active?.active ? (
-          <button
-            className={buttonClass}
-            type="button"
-            title={hasUnsavedChanges ? "Save profile changes before starting" : undefined}
-            disabled={!token || selectedProfile?.name === "default" || hasUnsavedChanges || !!busy}
-            onClick={() => run("capture start", async () => {
-              await startProfileCapture(token, selectedProfile!.name, tuneRevision || undefined);
-            })}
-          >Start</button>
-        ) : (
-          <>
-            <button className={buttonClass} type="button" disabled={!token || !!busy} onClick={togglePause}>
-              {paused ? "Resume" : "Pause"} <span className="text-fg-dim">(space)</span>
-            </button>
-            <button className={buttonClass} type="button" disabled={!token || !!busy} onClick={() => run("capture stop", async () => {
-              await stopProfileCapture(token);
-            })}>End capture</button>
-          </>
-        )}
+      {/* Running a capture and authoring a profile are different jobs that
+          shared one button row, which is what made "New" ambiguous. They are
+          now separate blocks with the relationship stated once. */}
+      <div className="rounded border border-border p-3" data-testid="capture-controls">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold">Run a capture</span>
+          <span
+            className={
+              phase === "recording" ? "rounded bg-ok/15 px-2 py-0.5 text-xs font-semibold text-ok"
+              : phase === "paused" ? "rounded bg-warn/15 px-2 py-0.5 text-xs font-semibold text-warn"
+              : transitioning ? "rounded bg-warn/10 px-2 py-0.5 text-xs font-semibold text-warn"
+              : "rounded bg-fg-dim/10 px-2 py-0.5 text-xs font-semibold text-fg-dim"
+            }
+            data-testid="capture-phase"
+            role="status"
+            aria-live="polite"
+          >
+            {phase === "starting" ? "Starting…"
+              : phase === "stopping" ? "Stopping…"
+              : phase === "pausing" ? "Pausing…"
+              : phase === "resuming" ? "Resuming…"
+              : phase === "recording" ? "Recording"
+              : phase === "paused" ? "Paused"
+              : "Not capturing"}
+          </span>
+          {active?.active && <span className="text-xs text-fg-dim">{active.name}</span>}
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <Field label="Profile" hint="picks what runs — and what the editor below shows">
+            {/* Left usable during a capture: it also drives the editor below,
+                and locking it would stop the operator preparing the next
+                profile while one runs. What is *running* is the badge above,
+                which names the active profile independently. */}
+            <select
+              className={`${inputClass} mt-1 w-56`}
+              value={selectedName}
+              disabled={transitioning}
+              onChange={(event) => setSelectedName(event.target.value)}
+            >
+              {profiles.map((profile) => <option key={profile.name}>{profile.name}</option>)}
+            </select>
+          </Field>
+          <Field
+            label="Tune revision"
+            hint={selectedProfile?.requires_tune_revision ? "required by this profile" : "optional"}
+          >
+            <input
+              className={`${inputClass} mt-1 w-48`}
+              value={tuneRevision}
+              disabled={active?.active || transitioning}
+              onChange={(event) => setTuneRevision(event.target.value)}
+              placeholder="ROM / tune revision note"
+            />
+          </Field>
+
+          {!active?.active ? (
+            <button
+              className={buttonClass}
+              type="button"
+              title={hasUnsavedChanges ? "Save profile changes before starting" : undefined}
+              disabled={!token || selectedProfile?.name === "default" || hasUnsavedChanges || !!busy}
+              onClick={() => run("capture start", async () => {
+                const result = await startProfileCapture(
+                  token, selectedProfile!.name, tuneRevision || undefined,
+                );
+                setOptimistic(result.capture_profile);
+                setLastVerdict(null);
+              }, { okText: null })}
+            >{phase === "starting" ? "Starting…" : "Start"}</button>
+          ) : (
+            <>
+              <button className={buttonClass} type="button" disabled={!token || !!busy} onClick={togglePause}>
+                {phase === "pausing" ? "Pausing…"
+                  : phase === "resuming" ? "Resuming…"
+                  : paused ? "Resume" : "Pause"}
+                {!transitioning && <span className="ml-1 text-fg-dim">(space)</span>}
+              </button>
+              <button className={buttonClass} type="button" disabled={!token || !!busy} onClick={() => run("capture stop", async () => {
+                const result = await stopProfileCapture(token);
+                setOptimistic(result.capture_profile);
+                setLastVerdict(result.capture_quality ?? null);
+              }, { okText: null })}>{phase === "stopping" ? "Stopping…" : "Stop"}</button>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* The contract verdict for the capture that just ended. Absent means no
+          sidecar was written — unknown, never a pass. */}
+      {lastVerdict && (
+        <div
+          className={`rounded border p-3 text-sm ${
+            lastVerdict.verdict === "pass"
+              ? "border-ok/50 text-ok"
+              : lastVerdict.verdict === "fail"
+                ? "border-warn/60 text-warn"
+                : "border-border text-fg-dim"
+          }`}
+          data-testid="capture-verdict"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold">
+              Capture ended — contract {lastVerdict.verdict}
+            </span>
+            {lastVerdict.tuple_rate_bound_hz != null && (
+              <span className="text-xs">
+                required tuple ≤ {lastVerdict.tuple_rate_bound_hz.toFixed(2)} Hz
+              </span>
+            )}
+            <button
+              className="ml-auto text-xs underline"
+              type="button"
+              onClick={() => setLastVerdict(null)}
+            >dismiss</button>
+          </div>
+          {lastVerdict.failures.map((failure) => (
+            <p key={failure.clause} className="mt-1 text-xs">
+              <span className="font-semibold">{failure.clause}</span>
+              {failure.channels?.length ? `: ${failure.channels.join(", ")}` : ""}
+              {failure.detail ? ` — ${failure.detail}` : ""}
+            </p>
+          ))}
+        </div>
+      )}
 
       {plan.name !== "default" && (
         <div className="rounded border border-border p-3 text-sm" data-testid="capture-plan">
@@ -364,6 +518,26 @@ export function CaptureProfilesPanel({
         </div>
       )}
 
+      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+        <span className="text-sm font-semibold">Edit profile</span>
+        <span className="text-xs text-fg-dim">
+          {originalName
+            ? `editing “${originalName}” — Save overwrites it, Save as makes a copy`
+            : "new, unsaved profile — Save to add it to the list"}
+        </span>
+        <button
+          className={`${buttonClass} ml-auto`}
+          type="button"
+          title="Only needed to create an additional profile. To run or change an existing one, pick it from Profile above."
+          onClick={() => {
+            const next = blankProfile();
+            setDraft(next);
+            setOriginalName(undefined);
+            setSelectedName("");
+          }}
+        >New profile</button>
+      </div>
+
       <div className="grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
         <label className="text-sm text-fg-dim">Name
           <input className={`${inputClass} mt-1 w-full`} value={draft.name} disabled={draft.name === "default"} onChange={(event) => {
@@ -382,21 +556,28 @@ export function CaptureProfilesPanel({
         <label className="text-sm text-fg-dim">Description
           <input className={`${inputClass} mt-1 w-full`} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
         </label>
-        <label className="text-sm text-fg-dim">Bus budget (requests/s; blank = default)
-          <input className={`${inputClass} mt-1 w-full`} type="number" min="2" max="200" value={draft.bus_budget_override ?? ""} onChange={(event) => setDraft({ ...draft, bus_budget_override: event.target.value ? Number(event.target.value) : null })} />
-        </label>
-        <label className="text-sm text-fg-dim">Target rate (Hz/channel; blank = relative cadence)
-          <input className={`${inputClass} mt-1 w-full`} type="number" min="0.1" step="0.1" value={draft.target_rate_hz ?? ""} onChange={(event) => setDraft({ ...draft, target_rate_hz: event.target.value ? Number(event.target.value) : null })} />
-        </label>
-        <label className="text-sm text-fg-dim">Expected total demand (channel reads/s)
-          <input className={`${inputClass} mt-1 w-full`} type="number" min="0.1" step="0.1" value={draft.expected_total_demand_hz ?? ""} onChange={(event) => setDraft({ ...draft, expected_total_demand_hz: event.target.value ? Number(event.target.value) : null })} />
-        </label>
-        <label className="text-sm text-fg-dim">Mode 22 window interval (s; blank = daemon default)
-          <input className={`${inputClass} mt-1 w-full`} type="number" min="0.1" step="0.1" disabled={!draft.mode22_enabled} value={draft.did_interval_seconds ?? ""} onChange={(event) => setDraft({ ...draft, did_interval_seconds: event.target.value ? Number(event.target.value) : null })} />
-        </label>
-        <label className="text-sm text-fg-dim">Storage prefix (must be <code>_capture-&lt;slug&gt;</code>)
-          <input className={`${inputClass} mt-1 w-full`} value={draft.storage_prefix} disabled={draft.name === "default" || draft.corpus_eligible} onChange={(event) => setDraft({ ...draft, storage_prefix: event.target.value })} />
-        </label>
+        {/* Numeric settings are a handful of digits — sized to fit, not to the
+            column, so they stop reading as free-text fields. */}
+        <div className="col-span-2 flex flex-wrap gap-x-4 gap-y-2 max-[900px]:col-span-1">
+          <Field label="Bus budget" hint="req/s · blank = default">
+            <input aria-label="Bus budget" className={numFieldClass} type="number" min="2" max="200" value={draft.bus_budget_override ?? ""} onChange={(event) => setDraft({ ...draft, bus_budget_override: event.target.value ? Number(event.target.value) : null })} />
+          </Field>
+          <Field label="Target rate" hint="Hz/channel · blank = relative">
+            <input aria-label="Target rate" className={numFieldClass} type="number" min="0.1" step="0.1" value={draft.target_rate_hz ?? ""} onChange={(event) => setDraft({ ...draft, target_rate_hz: event.target.value ? Number(event.target.value) : null })} />
+          </Field>
+          <Field label="Expected demand" hint="channel reads/s">
+            <input aria-label="Expected demand" className={numFieldClass} type="number" min="0.1" step="0.1" value={draft.expected_total_demand_hz ?? ""} onChange={(event) => setDraft({ ...draft, expected_total_demand_hz: event.target.value ? Number(event.target.value) : null })} />
+          </Field>
+          <Field label="Rate floor" hint="Hz · enforced by the contract">
+            <input aria-label="Rate floor" className={numFieldClass} type="number" min="0.1" step="0.1" value={draft.min_achieved_rate_hz ?? ""} onChange={(event) => setDraft({ ...draft, min_achieved_rate_hz: event.target.value ? Number(event.target.value) : null })} />
+          </Field>
+          <Field label="Mode 22 window" hint="seconds · blank = daemon default">
+            <input aria-label="Mode 22 window" className={numFieldClass} type="number" min="0.1" step="0.1" disabled={!draft.mode22_enabled} value={draft.did_interval_seconds ?? ""} onChange={(event) => setDraft({ ...draft, did_interval_seconds: event.target.value ? Number(event.target.value) : null })} />
+          </Field>
+          <Field label="Storage prefix" hint="must be _capture-<slug>" className="grow">
+            <input aria-label="Storage prefix" className={`${inputClass} mt-1 w-64 max-w-full`} value={draft.storage_prefix} disabled={draft.name === "default" || draft.corpus_eligible} onChange={(event) => setDraft({ ...draft, storage_prefix: event.target.value })} />
+          </Field>
+        </div>
         <label className="col-span-2 text-sm text-fg-dim max-[900px]:col-span-1">Capacity / validation evidence
           <textarea className={`${inputClass} mt-1 min-h-20 w-full`} value={draft.capacity_evidence} onChange={(event) => setDraft({ ...draft, capacity_evidence: event.target.value })} />
         </label>
