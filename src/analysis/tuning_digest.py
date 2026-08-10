@@ -38,8 +38,9 @@ from src.analysis.tuning import (
     delivery_error_from_semantic_frame,
 )
 from src.analysis.tuning_frame import WotCriterion, build_tuning_frame, section_capabilities
+from src.collection.capture_profiles import FUEL_DELIVERY_TUPLE
 from src.config import CanaryConfig
-from src.control.capture_manifest import read_capture_manifest
+from src.control.capture_manifest import read_capture_manifest, read_capture_quality
 from src.session import load_tags
 
 #: Load floor for the WOT inventory. The OBD throttle percentage tops out
@@ -113,6 +114,13 @@ class TuningDigest:
     #: trailing observation window, this is the evidence preserved with the
     #: completed drive and makes long polling stalls visible.
     rate_summary: dict[str, dict[str, float | int | None]] = field(default_factory=dict)
+    #: How often the profile's ``required_tuple`` was actually co-observed —
+    #: the number that predicts whether the headline analysis has any samples
+    #: at all, and which no per-channel rate can substitute for.
+    complete_tuples: dict[str, Any] = field(default_factory=dict)
+    #: The contract verdict recorded when the capture stopped, verbatim.
+    #: ``None`` means no sidecar was written, which is *unknown* — not a pass.
+    capture_quality: dict[str, Any] | None = None
     #: Voltage-derived readings remain a distinct instrument from an external
     #: wideband.  Carry the transform and censoring evidence beside the result.
     measured_afr: dict[str, Any] = field(default_factory=dict)
@@ -144,6 +152,8 @@ class TuningDigest:
             "achieved_hz": dict(self.achieved_hz),
             "pull_inventory": self.pull_inventory,
             "rate_summary": self.rate_summary,
+            "complete_tuples": self.complete_tuples,
+            "capture_quality": self.capture_quality,
             "measured_afr": self.measured_afr,
             "target_map": self.target_map,
             "delivery": self.delivery,
@@ -159,6 +169,51 @@ def _capture_profile_name(session_dir: Path) -> str | None:
     return None if manifest is None else manifest.profile
 
 
+def _profile_mode01_channels(session_dir: Path) -> tuple[str, ...]:
+    """Mode-01 channels the capture manifest says were requested."""
+    manifest = read_capture_manifest(session_dir)
+    if manifest is None:
+        return ()
+    return tuple(name for name in manifest.mode01_channels if name != "AUTO")
+
+
+def _read_specs(
+    session_dir: Path,
+    specs: list[str],
+    *,
+    acquired_time: bool = False,
+) -> dict[str, pd.DataFrame]:
+    """Read every spec in **one** pass and split the long frame per spec.
+
+    ``read_channels`` already loads the session once and demultiplexes, so
+    calling it per spec re-reads every Parquet chunk once per channel. That
+    cost nothing while the digest measured three hard-coded channels; measuring
+    what the profile actually asked for took it to 16, and a 24-minute capture
+    went from seconds to 228 s. Same numbers, one read.
+
+    A spec that raises is dropped rather than failing the digest — but only the
+    whole batch can raise here, so a single unresolvable spec is retried alone
+    to keep one bad name from hiding fifteen good ones.
+    """
+    if not specs:
+        return {}
+    try:
+        frame = read_channels(session_dir, specs, acquired_time=acquired_time)
+    except Exception:  # noqa: BLE001 — fall back to per-spec so one bad name is not fatal
+        out: dict[str, pd.DataFrame] = {}
+        for spec in specs:
+            try:
+                rows = read_channels(session_dir, [spec], acquired_time=acquired_time)
+            except Exception:  # noqa: BLE001, PERF203 — an absent channel is normal
+                continue
+            if not rows.empty:
+                out[spec] = rows
+        return out
+    if frame.empty:
+        return {}
+    return {str(spec): rows for spec, rows in frame.groupby("spec", sort=False)}
+
+
 def _achieved_hz(session_dir: Path, specs: list[str]) -> dict[str, float]:
     """Real per-channel rate over the session, from the rows themselves.
 
@@ -167,16 +222,12 @@ def _achieved_hz(session_dir: Path, specs: list[str]) -> dict[str, float]:
     actually written, not what the scheduler believed it was doing.
     """
     out: dict[str, float] = {}
-    for spec in specs:
-        try:
-            frame = read_channels(session_dir, [spec])
-        except Exception:  # noqa: BLE001 — a missing channel is not a digest failure
+    for spec, rows in _read_specs(session_dir, specs).items():
+        if rows.empty:
             continue
-        if frame.empty:
-            continue
-        span = (frame["timestamp"].max() - frame["timestamp"].min()).total_seconds()
+        span = (rows["timestamp"].max() - rows["timestamp"].min()).total_seconds()
         if span > 0:
-            out[spec] = round(len(frame) / span, 2)
+            out[spec] = round(len(rows) / span, 2)
     return out
 
 
@@ -189,11 +240,7 @@ def _rate_summary(session_dir: Path, specs: list[str]) -> dict[str, dict[str, fl
     active scheduler time.
     """
     out: dict[str, dict[str, float | int | None]] = {}
-    for spec in specs:
-        try:
-            frame = read_channels(session_dir, [spec], acquired_time=True)
-        except Exception:  # noqa: BLE001 — absent optional providers are normal
-            continue
+    for spec, frame in _read_specs(session_dir, specs, acquired_time=True).items():
         timestamps = frame["timestamp"].dropna().sort_values().drop_duplicates()
         count = len(timestamps)
         if not count:
@@ -210,9 +257,106 @@ def _rate_summary(session_dir: Path, specs: list[str]) -> dict[str, dict[str, fl
             "median_interval_seconds": round(float(positive.median()), 3)
             if not positive.empty
             else None,
+            # The median says what the cadence usually was; p95 says how bad
+            # the tail got without letting one stop-and-restart dominate the
+            # way `longest_gap_seconds` alone does. A channel can hold a good
+            # median and still be unusable for transients.
+            "p95_interval_seconds": round(float(positive.quantile(0.95)), 3)
+            if not positive.empty
+            else None,
             "longest_gap_seconds": round(float(positive.max()), 3) if not positive.empty else None,
         }
     return out
+
+
+def _resolve_required_tuple(session_dir: Path) -> tuple[list[str], str]:
+    """The tuple to score, and *how we know it* — declared or inferred.
+
+    Same discipline as :class:`WotInventory`'s ``source``: a capture recorded
+    before ``required_tuple`` existed has no declared contract, and silently
+    substituting one would present an inference as the profile's own promise.
+    But refusing outright would make the count unavailable for exactly the
+    captures that motivated it, so a Mode-01 capture polling all five delivery
+    channels gets the delivery tuple, labelled ``inferred``.
+    """
+    manifest = read_capture_manifest(session_dir)
+    if manifest is None:
+        return [], "none"
+    declared = list(manifest.required_tuple)
+    if declared:
+        return declared, "declared"
+    polled = set(manifest.mode01_channels)
+    if polled and set(FUEL_DELIVERY_TUPLE).issubset(polled):
+        return list(FUEL_DELIVERY_TUPLE), "inferred"
+    return [], "none"
+
+
+def _complete_tuple_summary(
+    session_dir: Path,
+    required_tuple: list[str],
+    *,
+    source: str = "declared",
+    grid: str = "1s",
+) -> dict[str, Any]:
+    """How often every member of ``required_tuple`` was actually co-observed.
+
+    The exact count the scheduler cannot produce. ``capture_quality.json``
+    reports an upper *bound* (the slowest member's rate); this reads the rows
+    and counts grid cells in which every member independently appears, which is
+    the same pairing rule the delivery-error path applies and therefore the
+    number that predicts its yield.
+
+    This is the figure whose absence let a 24-minute capture with healthy-looking
+    per-channel rates report two usable delivery samples with no earlier
+    warning. It is reported even when it is zero — especially then, since
+    "captured but never co-observed" and "never captured" demand opposite
+    responses and only this can tell them apart.
+    """
+    if not required_tuple:
+        return {
+            "available": False,
+            "source": source,
+            "reason": (
+                "this capture declares no required_tuple and does not poll the delivery "
+                "channels, so there is no joint requirement to count"
+            ),
+        }
+    specs = [name if ":" in name else f"obd:{name}" for name in required_tuple]
+    rows_by_spec = _read_specs(session_dir, specs)
+    per_channel: dict[str, int] = {}
+    cells: list[set[Any]] = []
+    for spec in specs:
+        frame = rows_by_spec.get(spec)
+        if frame is None or frame.empty:
+            per_channel[spec] = 0
+            cells.append(set())
+            continue
+        stamps = pd.to_datetime(frame["timestamp"], utc=True).dt.floor(grid)
+        per_channel[spec] = int(len(frame))
+        cells.append(set(stamps.unique()))
+
+    absent = sorted(spec for spec, count in per_channel.items() if count == 0)
+    complete = set.intersection(*cells) if cells and all(cells) else set()
+    span_cells = len(set.union(*cells)) if cells and any(cells) else 0
+    return {
+        "available": True,
+        # `inferred` means the capture never promised this tuple — it is the
+        # delivery tuple applied to a profile that predates the field. Weaker
+        # evidence than `declared`, and never to be quoted as the profile's own.
+        "source": source,
+        "grid": grid,
+        "members": specs,
+        "samples_per_member": per_channel,
+        "absent_members": absent,
+        "complete_cells": len(complete),
+        "cells_with_any_member": span_cells,
+        "reason": (
+            "members absent from this session, so the tuple can never complete: "
+            + ", ".join(absent)
+            if absent
+            else None
+        ),
+    }
 
 
 def _measured_afr_summary(
@@ -790,19 +934,31 @@ def compute_tuning_digest(
 
     # An all-DID report measures exactly the semantic providers that were
     # actually present; hard-coded Mode-01 names here previously made a DID
-    # capture look slower or emptier than it was.  Retain the legacy list only
-    # for the older Mode-01 capture profile, which has no DID registry roles.
+    # capture look slower or emptier than it was.
+    #
+    # But the semantic registry is DID-oriented, so on a Mode-01 fuelling
+    # capture it resolves almost nothing and the report fell back to three
+    # hard-coded channels — RPM, lambda, timing. Those are the *fast* ones. The
+    # 2026-08-10 capture's rate summary therefore showed 0.67-0.78 Hz and
+    # omitted every channel that was actually running at 0.28 Hz and gating the
+    # analysis. A rate summary that silently drops the limiting channel is
+    # worse than none. The profile snapshot names what the capture asked for,
+    # so measure exactly that.
     rate_specs = sorted(
         {
             str(role["provider"])
             for role in role_capabilities.values()
             if role.get("available", False) and isinstance(role.get("provider"), str)
         }
+        | {f"obd:{name.upper()}" for name in _profile_mode01_channels(session_dir)}
     )
     if not rate_specs and not did_continuous:
         rate_specs = ["obd:RPM", "obd:O2_WR_LAMBDA_S1", "obd:TIMING_ADVANCE"]
     achieved = _achieved_hz(session_dir, rate_specs)
     rate_summary = _rate_summary(session_dir, rate_specs)
+    required_tuple, tuple_source = _resolve_required_tuple(session_dir)
+    complete_tuples = _complete_tuple_summary(session_dir, required_tuple, source=tuple_source)
+    capture_quality = read_capture_quality(session_dir)
     measured_afr = _measured_afr_summary(
         session_dir, calibration=calibration, role_capabilities=role_capabilities
     )
@@ -873,6 +1029,42 @@ def compute_tuning_digest(
         except (GateError, ValueError) as exc:
             notes.append(f"delivery error unavailable: {exc}")
 
+    # Coverage in the terms an operator can act on, stated before any result:
+    # "captured but never co-observed" and "never captured" demand opposite
+    # responses, and a bare delivery-error `n` distinguishes neither.
+    if complete_tuples.get("available"):
+        if complete_tuples.get("absent_members"):
+            notes.append(
+                "required-tuple members absent from this session — "
+                f"{', '.join(complete_tuples['absent_members'])} — so the tuple could never "
+                "complete. Nothing about the drive can change this; fix the profile."
+            )
+        else:
+            qualifier = (
+                " (tuple inferred, not declared by this capture's profile)"
+                if complete_tuples.get("source") == "inferred"
+                else ""
+            )
+            notes.append(
+                f"{wot.seconds} WOT seconds, {wot.with_afr_pair} carrying an AFR pair, "
+                f"{complete_tuples['complete_cells']} seconds where the full required tuple "
+                f"({', '.join(complete_tuples['members'])}) was co-observed{qualifier}."
+            )
+    if capture_quality is None:
+        notes.append(
+            "no capture_quality.json in this session, so whether the capture met its "
+            "profile's rate contract is unknown — not verified, and not a pass."
+        )
+    elif capture_quality.get("verdict") != "pass":
+        clauses = ", ".join(
+            str(item.get("clause")) for item in capture_quality.get("failures") or []
+        )
+        notes.append(
+            f"capture contract verdict: {capture_quality.get('verdict')}"
+            + (f" ({clauses})" if clauses else "")
+            + " — read capture_quality.json before trusting any rate-sensitive result here."
+        )
+
     floor = load_noise_floor(profile_data / "noise_floor.yaml")
     if floor is None:
         notes.append(
@@ -925,6 +1117,8 @@ def compute_tuning_digest(
         achieved_hz=achieved,
         pull_inventory=pull_inventory,
         rate_summary=rate_summary,
+        complete_tuples=complete_tuples,
+        capture_quality=capture_quality,
         measured_afr=measured_afr,
         target_map=target_map,
         delivery=delivery,

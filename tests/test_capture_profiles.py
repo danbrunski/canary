@@ -12,9 +12,15 @@ from pydantic import ValidationError
 
 from src.collection import bus_budget, tuning_profile
 from src.collection.capture_profiles import (
+    BUILTIN_REVISION,
+    STORAGE_SAFE_REQUESTS_PER_SECOND,
     CaptureProfile,
+    CaptureProfileCatalog,
     CaptureProfileStore,
+    load_capture_profiles,
     model_input_warnings,
+    save_capture_profiles,
+    seed_catalog,
 )
 from src.config import CanaryConfig
 from src.control.sessions import list_sessions
@@ -106,11 +112,166 @@ def test_default_cannot_be_deleted_and_profile_crud_round_trips(tmp_path: Path) 
         storage_prefix="_capture-diagnostic",
     )
     assert store.save(profile) == []
-    assert store.load().by_name("diagnostic") == profile
+    saved = store.load().by_name("diagnostic")
+    # Saving stamps operator provenance, which is what freezes a profile
+    # against future seed upgrades. Everything else round-trips unchanged.
+    assert saved is not None
+    assert saved.operator_modified is True
+    assert saved == profile.model_copy(update={"operator_modified": True})
     store.delete("diagnostic")
     assert store.load().by_name("diagnostic") is None
     with pytest.raises(ValueError, match="cannot be deleted"):
         store.delete("default")
+
+
+def test_a_tuning_capture_refuses_to_start_without_a_tune_revision(tmp_path: Path) -> None:
+    """Fuelling is only interpretable against the calibration in force.
+
+    There is no registry fallback: the 2026-08-10 capture stored
+    ``tune_revision: null`` and the digest resolved it to ``unknown`` with no
+    ROM target map, so a comparison across a flash would have silently
+    compared two different engines. Refused at the only moment it is
+    recoverable.
+    """
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = config.model_copy(
+        update={
+            "collection": config.collection.model_copy(
+                update={"storage_path": tmp_path / "sessions"}
+            )
+        }
+    )
+    store = _store(tmp_path, config)
+    writer = AsyncParquetTelemetryWriter(
+        ParquetTelemetryWriter(
+            tmp_path / "sessions",
+            session_started_at=datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+        )
+    )
+    client = TestClient(
+        create_app(
+            config,
+            anomalies_dir=tmp_path / "anomalies",
+            control_token="secret",
+            storage_writer=writer,
+            capture_profile_store=store,
+        )
+    )
+    headers = {"Authorization": "Bearer secret"}
+
+    refused = client.post("/control/capture", headers=headers, json={"profile": "fuel-map"})
+    assert refused.status_code == 400
+    assert "tune_revision" in refused.json()["detail"]
+    # Blank is not a revision either.
+    blank = client.post(
+        "/control/capture",
+        headers=headers,
+        json={"profile": "fuel-map", "tune_revision": "   "},
+    )
+    assert blank.status_code == 400
+    assert not writer.paths.root.name.startswith("_capture-")
+
+    accepted = client.post(
+        "/control/capture",
+        headers=headers,
+        json={"profile": "fuel-map", "tune_revision": "ZS44A-k106"},
+    )
+    assert accepted.status_code == 200
+
+
+def test_capture_stop_writes_a_quality_sidecar_beside_the_data(tmp_path: Path) -> None:
+    """Whether a capture was sound is a property of that capture.
+
+    The 2026-08-10 session directory held only the profile and the DTC list, so
+    the post-mortem could not establish the achieved rates, the gaps, or even
+    whether request batching was on.
+    """
+    from src.models.health import HealthMonitor
+
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = config.model_copy(
+        update={
+            "collection": config.collection.model_copy(
+                update={"storage_path": tmp_path / "sessions"}
+            )
+        }
+    )
+    store = _store(tmp_path, config)
+    writer = AsyncParquetTelemetryWriter(
+        ParquetTelemetryWriter(
+            tmp_path / "sessions",
+            session_started_at=datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+        )
+    )
+    health = HealthMonitor()
+    health.observe_obd_scheduler(
+        {
+            # The rates the 2026-08-10 capture actually ran at.
+            "capture_observed_seconds": 60.0,
+            "achieved_hz_capture": {
+                "RPM": 0.78,
+                "ENGINE_LOAD": 0.78,
+                "O2_WR_LAMBDA_S1": 0.67,
+                "FUEL_STATUS": 0.29,
+                "COMMANDED_EQUIV_RATIO": 0.28,
+            },
+            "capture_samples": {
+                "RPM": 47,
+                "ENGINE_LOAD": 47,
+                "O2_WR_LAMBDA_S1": 40,
+                "FUEL_STATUS": 17,
+                "COMMANDED_EQUIV_RATIO": 17,
+            },
+            "capture_max_gap_seconds": {
+                "RPM": 1.3,
+                "ENGINE_LOAD": 1.3,
+                "O2_WR_LAMBDA_S1": 1.4,
+                "FUEL_STATUS": 6.2,
+                "COMMANDED_EQUIV_RATIO": 6.2,
+            },
+            "requests": [
+                {"channel": name, "kind": "pid", "capture_selected": True}
+                for name in (
+                    "RPM",
+                    "ENGINE_LOAD",
+                    "O2_WR_LAMBDA_S1",
+                    "FUEL_STATUS",
+                    "COMMANDED_EQUIV_RATIO",
+                )
+            ],
+            "batching": None,
+        }
+    )
+    client = TestClient(
+        create_app(
+            config,
+            anomalies_dir=tmp_path / "anomalies",
+            control_token="secret",
+            storage_writer=writer,
+            capture_profile_store=store,
+            health_monitor=health,
+        )
+    )
+    headers = {"Authorization": "Bearer secret"}
+    client.post(
+        "/control/capture",
+        headers=headers,
+        json={"profile": "fuel-map", "tune_revision": "ZS44A-k106"},
+    )
+    capture_dir = writer.paths.root
+
+    stopped = client.post("/control/capture/stop", headers=headers)
+    assert stopped.status_code == 200
+
+    sidecar = json.loads((capture_dir / "capture_quality.json").read_text())
+    assert sidecar["verdict"] == "fail"
+    assert sidecar["profile"] == "fuel-map"
+    # The rates that actually ran are preserved, not just the verdict.
+    assert sidecar["tuple_rate_bound_hz"] == 0.28
+    assert "required_tuple_rate" in {f["clause"] for f in sidecar["failures"]}
+    assert "RPM" in {row["channel"] for row in sidecar["channels"]}
+    assert any("batching" in note for note in sidecar["notes"])
+    assert stopped.json()["capture_quality"]["verdict"] == "fail"
 
 
 def test_capture_lifecycle_rotates_writes_sidecar_and_reverts(tmp_path: Path) -> None:
@@ -150,9 +311,9 @@ def test_capture_lifecycle_rotates_writes_sidecar_and_reverts(tmp_path: Path) ->
     assert sidecar["profile"] == "fuel-map"
     assert sidecar["tune_revision"] == "rom-17"
     assert sidecar["profile_snapshot"]["behavior_model_recipes"] == []
-    # The seeded profile carries no override, and a profile without one must
-    # leave the operator's budget alone rather than clearing or raising it.
-    assert bus_budget.override() is None
+    # `fuel-map` now declares its own budget, because demand and budget both
+    # bind and raising only one achieves nothing. Arming applies it.
+    assert bus_budget.override() == 20.0
     assert client.get("/status").json()["capture_profile"]["name"] == "fuel-map"
 
     captures = client.get("/control/sessions?captures=true", headers=headers).json()
@@ -251,7 +412,11 @@ def test_capture_start_budget_failure_restores_writer_profile_and_budget(
     response = client.post(
         "/control/capture",
         headers={"Authorization": "Bearer secret"},
-        json={"profile": "fuel-map", "bus_budget_requests_per_second": 30.0},
+        json={
+            "profile": "fuel-map",
+            "tune_revision": "rom-17",
+            "bus_budget_requests_per_second": 30.0,
+        },
     )
 
     assert response.status_code == 500
@@ -277,19 +442,29 @@ def test_capture_profile_api_crud_and_auth(tmp_path: Path) -> None:
     assert client.get("/control/capture/profiles").status_code == 401
     headers = {"Authorization": "Bearer secret"}
     assert client.get("/control/capture/profiles", headers=headers).status_code == 200
-    payload = {
-        "profile": {
-            "name": "idle-map",
-            "description": "idle calibration",
-            "mode01": {"RPM": 3},
-            "mode22": [],
-            "bus_budget_override": 30,
-            "broadcast_decode": True,
-            "corpus_eligible": False,
-            "storage_prefix": "_capture-idle-map",
-        }
+    profile = {
+        "name": "idle-map",
+        "description": "idle calibration",
+        "mode01": {"RPM": 3},
+        "mode22": [],
+        "bus_budget_override": 30,
+        "broadcast_decode": True,
+        "corpus_eligible": False,
+        "storage_prefix": "_capture-idle-map",
     }
-    assert client.put("/control/capture/profiles", headers=headers, json=payload).status_code == 200
+    # 30 req/s is past the line where the storage sink is known to drop rows,
+    # so the API refuses it unevidenced rather than accepting it and finding
+    # out during the drive.
+    refused = client.put("/control/capture/profiles", headers=headers, json={"profile": profile})
+    assert refused.status_code == 422
+
+    evidenced = {**profile, "capacity_evidence": "bench 2026-08-04: 478 reads/s, zero drops"}
+    assert (
+        client.put(
+            "/control/capture/profiles", headers=headers, json={"profile": evidenced}
+        ).status_code
+        == 200
+    )
     assert client.delete("/control/capture/profiles/idle-map", headers=headers).status_code == 200
     assert client.delete("/control/capture/profiles/default", headers=headers).status_code == 409
 
@@ -331,12 +506,99 @@ def test_storage_prefix_must_stay_resolvable_as_a_session(tmp_path: Path) -> Non
         )
 
 
-def test_seeded_fuel_map_profile_ships_no_bus_budget_override(tmp_path: Path) -> None:
-    """25 req/s dropped 2491 records live; the seed must not re-arm it."""
+def test_seeded_fuel_map_budget_stays_under_the_storage_safe_line(tmp_path: Path) -> None:
+    """25 req/s dropped 2491 records live; the seed must stay clear of it.
+
+    The seed used to ship no override at all, which stopped the incident but
+    also guaranteed the failure it was paired with: demand capped at
+    ``poll_rate_hz x tier`` and throughput at the default 8 req/s, so the
+    2026-08-10 "high-rate" capture ran at 0.28-0.78 Hz. Both knobs now move,
+    and the real invariant is the one asserted here — under the measured
+    storage-sink line, or carrying evidence.
+    """
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     fuel_map = _store(tmp_path, config).load().by_name("fuel-map")
     assert fuel_map is not None
-    assert fuel_map.bus_budget_override is None
+    assert fuel_map.bus_budget_override is not None
+    assert fuel_map.bus_budget_override <= STORAGE_SAFE_REQUESTS_PER_SECOND
+    assert fuel_map.target_rate_hz is not None
+
+
+def test_raising_the_budget_past_the_storage_line_requires_evidence() -> None:
+    """The 2026-07-29 drop is a measured constraint, so it is a validator.
+
+    It had been a comment in the seed for months; a comment cannot refuse.
+    """
+    with pytest.raises(ValidationError, match="capacity_evidence"):
+        CaptureProfile(
+            name="reckless",
+            mode01={"RPM": 1.0},
+            bus_budget_override=STORAGE_SAFE_REQUESTS_PER_SECOND + 1.0,
+            storage_prefix="_capture-reckless",
+        )
+    # ...and is allowed with it, because the ceiling is a claim about evidence,
+    # not a hard limit.
+    profile = CaptureProfile(
+        name="measured",
+        mode01={"RPM": 1.0},
+        bus_budget_override=STORAGE_SAFE_REQUESTS_PER_SECOND + 1.0,
+        capacity_evidence="bench 2026-08-04: 478 reads/s, zero drops",
+        storage_prefix="_capture-measured",
+    )
+    assert profile.bus_budget_override == STORAGE_SAFE_REQUESTS_PER_SECOND + 1.0
+
+
+def test_required_tuple_must_name_channels_the_profile_polls() -> None:
+    """A tuple naming an unpolled channel would verify as a vehicle fault."""
+    with pytest.raises(ValidationError, match="does not poll"):
+        CaptureProfile(
+            name="mistyped",
+            mode01={"RPM": 1.0},
+            required_tuple=("RPM", "COMMANDED_EQUIV_RATIO"),
+            storage_prefix="_capture-mistyped",
+        )
+
+
+def test_builtin_profiles_upgrade_but_operator_edits_are_frozen(tmp_path: Path) -> None:
+    """A saved built-in must not pin a superseded definition forever.
+
+    This is the defect that produced the 0.28 Hz fuel-map capture: the source
+    seed had been corrected, and a catalog written before the correction
+    shadowed it with nothing reporting the divergence.
+    """
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    path = tmp_path / "vehicle" / "capture_profiles.yaml"
+    seeded = seed_catalog(config.collection)
+    stale = [
+        profile.model_copy(update={"target_rate_hz": None, "builtin_revision": 0})
+        if profile.name == "fuel-map"
+        else profile
+        for profile in seeded.profiles
+    ]
+    save_capture_profiles(path, CaptureProfileCatalog(profiles=stale))
+
+    upgraded = load_capture_profiles(path, config.collection).by_name("fuel-map")
+    assert upgraded is not None
+    assert upgraded.target_rate_hz is not None
+    assert upgraded.builtin_revision == BUILTIN_REVISION
+
+    # An operator edit is a decision, not a stale copy: it survives.
+    edited = [
+        profile.model_copy(
+            update={
+                "target_rate_hz": 2.0,
+                "builtin_revision": 0,
+                "operator_modified": True,
+            }
+        )
+        if profile.name == "fuel-map"
+        else profile
+        for profile in seeded.profiles
+    ]
+    save_capture_profiles(path, CaptureProfileCatalog(profiles=edited))
+    kept = load_capture_profiles(path, config.collection).by_name("fuel-map")
+    assert kept is not None
+    assert kept.target_rate_hz == 2.0
 
 
 def test_model_input_warnings_resolve_derived_and_decoded_channels(tmp_path: Path) -> None:
@@ -404,11 +666,25 @@ def test_capture_preserves_and_restores_an_operator_bus_budget(tmp_path: Path) -
         )
     )
     headers = {"Authorization": "Bearer secret"}
+    # A profile that declares no budget of its own. `fuel-map` used to serve
+    # here and no longer can: it now ships one, because demand and budget both
+    # bind and moving only one achieves nothing.
+    store.save(
+        CaptureProfile(
+            name="no-budget",
+            mode01={"RPM": 1.0},
+            corpus_eligible=False,
+            storage_prefix="_capture-no-budget",
+        )
+    )
     bus_budget.set_override(12.0, source="operator", ttl_seconds=None)
 
-    # `fuel-map` declares no override of its own, so the operator's stands.
     assert (
-        client.post("/control/capture", headers=headers, json={"profile": "fuel-map"}).status_code
+        client.post(
+            "/control/capture",
+            headers=headers,
+            json={"profile": "no-budget"},
+        ).status_code
         == 200
     )
     assert bus_budget.override() == 12.0
@@ -455,7 +731,11 @@ def test_capture_with_its_own_budget_restores_the_previous_one_on_stop(tmp_path:
     bus_budget.set_override(9.0, source="operator", ttl_seconds=None)
 
     assert (
-        client.post("/control/capture", headers=headers, json={"profile": "high-rate"}).status_code
+        client.post(
+            "/control/capture",
+            headers=headers,
+            json={"profile": "high-rate", "tune_revision": "rom-17"},
+        ).status_code
         == 200
     )
     assert bus_budget.override() == 20.0
@@ -496,6 +776,7 @@ def test_capture_route_applies_budget_atomically_and_returns_ended_path(tmp_path
         headers=headers,
         json={
             "profile": "fuel-map",
+            "tune_revision": "rom-17",
             "bus_budget_requests_per_second": 30.0,
             "bus_budget_ttl_seconds": 300.0,
         },
@@ -538,7 +819,9 @@ def test_active_profile_cannot_be_deleted_via_a_case_variant(tmp_path: Path) -> 
         )
     )
     headers = {"Authorization": "Bearer secret"}
-    client.post("/control/capture", headers=headers, json={"profile": "fuel-map"})
+    client.post(
+        "/control/capture", headers=headers, json={"profile": "fuel-map", "tune_revision": "rom-17"}
+    )
 
     assert client.delete("/control/capture/profiles/Fuel-Map", headers=headers).status_code == 409
     assert store.load().by_name("fuel-map") is not None
@@ -592,7 +875,9 @@ def test_pause_suspends_polling_without_ending_the_capture(tmp_path: Path) -> No
         == 409
     )
 
-    client.post("/control/capture", headers=headers, json={"profile": "fuel-map"})
+    client.post(
+        "/control/capture", headers=headers, json={"profile": "fuel-map", "tune_revision": "rom-17"}
+    )
     session_dir = writer.paths.root
 
     request = SimpleNamespace(kind="pid", channel="RPM")

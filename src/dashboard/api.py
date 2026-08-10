@@ -232,6 +232,7 @@ def create_app(
         force_poll_trigger=force_poll_trigger,
         storage_writer=storage_writer,
         capture_profile_store=resolved_capture_profile_store,
+        health_monitor=health_monitor,
         ups_status_path=ups_status_path,
         ups_keepalive_path=ups_keepalive_path,
         emitter=emitter,

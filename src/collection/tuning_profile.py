@@ -238,21 +238,34 @@ def did_continuous_enabled() -> bool:
 def absolute_rate_hz(channel: str) -> float | None:
     """The profile's fixed poll rate for ``channel``, or ``None``.
 
-    When set it replaces ``poll_rate_hz × tier × weight`` outright. Only
-    applies to channels the profile actually lists, so a profile carrying a
-    target rate never accelerates something it did not ask for.
+    When set it replaces ``poll_rate_hz × tier`` outright, but **keeps the
+    profile's own weight** as a per-channel multiplier: the target is the rate
+    for a weight-1.0 channel, and a weight of 0.25 asks for a quarter of it.
+
+    That the weight survives is the point. Without it a target rate flattened
+    every channel to one cadence, so a capture wanting a WOT transient at 4 Hz
+    also dragged coolant, trims and purge along at 4 Hz — spending most of the
+    budget on channels that move over seconds to minutes, and forcing the
+    "split it into two profiles" workaround. A single profile can now say
+    "these fast, those slow" in the structure it already had, where the weights
+    were previously accepted and then silently ignored.
+
+    Only applies to channels the profile actually lists, so a profile carrying
+    a target rate never accelerates something it did not ask for.
 
     Covers Mode-22 DIDs as well as Mode-01 PIDs: an all-DID capture is
     exactly the case where the rate has to be sayable, and DID names are
-    matched through the same alias resolution ``request_eligible`` uses.
+    matched through the same alias resolution ``request_eligible`` uses. DIDs
+    carry no weight, so they take the target unscaled.
     """
     with _lock:
         target = _profile.target_rate_hz
         if target is None:
             return None
         name = channel.upper()
-        if name in _profile.mode01:
-            return target
+        weight = _profile.mode01.get(name)
+        if weight is not None:
+            return target * weight
         requested = {item.upper() for item in _profile.mode22}
         resolved = {_did_channels.get(item, item) for item in requested}
         if name in resolved or channel.removeprefix("DID_").upper() in resolved:
@@ -271,31 +284,26 @@ def rate_policy(channel: str) -> tuple[float, bool]:
 
 
 def snapshot(achieved_hz: dict[str, float] | None = None) -> dict[str, Any]:
+    """The active profile plus its runtime state, as a plain payload.
+
+    Every profile field is emitted by dumping the model rather than by naming
+    fields one at a time. That enumeration was the bug it replaces: the payload
+    is what ``capture_quality.evaluate_capture_quality`` scores a capture
+    against and what the manifest stores, so a field nobody remembered to add
+    here was not a cosmetic omission — it silently switched off the check that
+    depended on it. Adding a field to :class:`CaptureProfile` now carries it
+    through automatically.
+    """
     with _lock:
         payload: dict[str, Any] = {
+            **_profile.model_dump(mode="json"),
             "active": _profile.name != "default",
-            "name": _profile.name,
-            "description": _profile.description,
-            "experimental": _profile.experimental,
             "started_at": _started_at,
             "session_dir": _session_dir,
             "source": _source,
+            # Kept alongside `mode01` for consumers that only want the names.
             "channels": sorted(_profile.mode01),
-            "mode01": dict(_profile.mode01),
-            "mode22": list(_profile.mode22),
-            "mode01_enabled": _profile.mode01_enabled,
-            "mode22_enabled": _profile.mode22_enabled,
-            "did_interval_seconds": _profile.did_interval_seconds,
-            "round_timestamps": _profile.round_timestamps,
-            "target_rate_hz": _profile.target_rate_hz,
-            "did_continuous": _profile.did_continuous,
-            "expected_total_demand_hz": _profile.expected_total_demand_hz,
-            "capacity_evidence": _profile.capacity_evidence,
             "paused": _paused,
-            "broadcast_decode": _profile.broadcast_decode,
-            "corpus_eligible": _profile.corpus_eligible,
-            "behavior_model_recipes": list(_profile.behavior_model_recipes),
-            "bus_budget_override": _profile.bus_budget_override,
         }
     if achieved_hz is not None:
         payload["achieved_hz"] = achieved_hz

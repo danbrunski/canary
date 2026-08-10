@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 CAPTURE_MANIFEST_FILENAME = "capture_profile.json"
+CAPTURE_QUALITY_FILENAME = "capture_quality.json"
 
 
 class CaptureManifest(BaseModel):
@@ -34,6 +35,27 @@ class CaptureManifest(BaseModel):
             return ()
         return tuple(str(item) for item in raw if str(item).strip())
 
+    @property
+    def mode01_channels(self) -> tuple[str, ...]:
+        """Mode-01 channels this capture actually asked for.
+
+        The authoritative answer to "what was this capture measuring", as
+        opposed to whatever a downstream registry happens to resolve. A report
+        that picks its own channel list can silently omit the slow ones — which
+        are exactly the ones that limit an analysis.
+        """
+        raw = self.profile_snapshot.get("mode01") or {}
+        if not isinstance(raw, dict):
+            return ()
+        return tuple(sorted(str(name).upper() for name in raw if str(name).strip()))
+
+    @property
+    def required_tuple(self) -> tuple[str, ...]:
+        raw = self.profile_snapshot.get("required_tuple") or ()
+        if not isinstance(raw, list | tuple):
+            return ()
+        return tuple(str(item).upper() for item in raw if str(item).strip())
+
 
 def read_capture_manifest(session_dir: Path) -> CaptureManifest | None:
     """Read a valid capture sidecar, or ``None`` for normal/invalid sessions."""
@@ -44,4 +66,24 @@ def read_capture_manifest(session_dir: Path) -> CaptureManifest | None:
         return None
 
 
-__all__ = ["CAPTURE_MANIFEST_FILENAME", "CaptureManifest", "read_capture_manifest"]
+def read_capture_quality(session_dir: Path) -> dict[str, Any] | None:
+    """The contract verdict written when this capture stopped, if any.
+
+    ``None`` means the sidecar is absent — an older capture, a daemon without a
+    health monitor, or a stop that failed to write it. That is *unknown*, not a
+    pass, and every caller must render it as such.
+    """
+    try:
+        payload = json.loads((Path(session_dir) / CAPTURE_QUALITY_FILENAME).read_text())
+    except (OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+__all__ = [
+    "CAPTURE_MANIFEST_FILENAME",
+    "CAPTURE_QUALITY_FILENAME",
+    "CaptureManifest",
+    "read_capture_manifest",
+    "read_capture_quality",
+]

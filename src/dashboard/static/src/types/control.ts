@@ -112,6 +112,20 @@ export interface CaptureProfile {
   bus_budget_override: number | null;
   expected_total_demand_hz: number | null;
   capacity_evidence: string;
+  /**
+   * Channels that must be observed together for this profile's headline
+   * analysis to yield a sample. Verified as a joint rate, because per-channel
+   * rates can all pass while the tuple almost never completes.
+   */
+  required_tuple: string[];
+  /** Per-channel floor the capture contract enforces; null promises nothing. */
+  min_achieved_rate_hz: number | null;
+  /** Refuse to arm without a named calibration. */
+  requires_tune_revision: boolean;
+  /** Seed revision a built-in shipped from; 0 marks an operator-authored one. */
+  builtin_revision: number;
+  /** Set once saved over, which freezes a built-in against seed upgrades. */
+  operator_modified: boolean;
   broadcast_decode: boolean;
   corpus_eligible: boolean;
   /** Exact behavior-surface recipes this isolated capture may train. */
@@ -138,6 +152,9 @@ export interface CaptureProfileState {
   did_continuous: boolean;
   expected_total_demand_hz: number | null;
   capacity_evidence: string;
+  required_tuple: string[];
+  min_achieved_rate_hz: number | null;
+  requires_tune_revision: boolean;
   paused: boolean;
   /** Rows accepted into the current session; absent if the writer is unwired. */
   rows_written?: number;

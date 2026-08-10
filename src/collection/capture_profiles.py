@@ -7,6 +7,7 @@ small enough to reload on every API operation.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -23,9 +24,24 @@ from src.collection.bus_budget import (
 from src.config import CollectionConfig
 from src.decode.behavior_models import load_behavior_models
 
+log = logging.getLogger(__name__)
+
 SCHEMA_VERSION = 1
 DEFAULT_PROFILE_NAME = "default"
 FUEL_MAP_PROFILE_NAME = "fuel-map"
+#: Bump the seed's ``builtin_revision`` whenever a built-in profile's shipped
+#: definition changes meaningfully. ``load_capture_profiles`` then upgrades
+#: saved copies that are older *and* untouched by the operator. Without this a
+#: catalog written once pinned the built-in forever: the 2026-08-10 fuel-map
+#: capture ran at 0.28-0.78 Hz because a saved copy predating ``target_rate_hz``
+#: shadowed a source-level correction, and nothing in the system could say so.
+BUILTIN_REVISION = 1
+
+#: Request rate above which the storage sink has a *measured* problem: 25 req/s
+#: backed the writer up until it dropped 2491 records on 2026-07-29, and the
+#: writer-side root cause was never established. Exceeding it is allowed, but
+#: only with ``capacity_evidence`` — see ``_raised_budget_needs_evidence``.
+STORAGE_SAFE_REQUESTS_PER_SECOND = 24.0
 _SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 #: Ceiling on a profile's absolute per-channel poll rate. Matches the bus
 #: budget's own ceiling: demand above what the budget can ever issue is a
@@ -39,25 +55,58 @@ MAX_TARGET_RATE_HZ = 200.0
 #: the prefix is constrained here rather than left to the operator.
 _SAFE_PREFIX = re.compile(r"^_capture-[a-z0-9][a-z0-9-]*$")
 
-FUEL_MAP_CHANNELS: tuple[str, ...] = (
+#: Channels that must land in the *same* poll round for a delivery-error
+#: sample to exist at all. Declared rather than described: a fuel capture whose
+#: per-channel rates all look healthy can still yield nothing, because delivery
+#: error needs these five co-observed and the scarcest one sets the real yield.
+#: The 2026-08-10 capture polled every one of them and produced two usable
+#: sample-instants in 24 minutes; per-channel rates never said so.
+FUEL_DELIVERY_TUPLE: tuple[str, ...] = (
+    "RPM",
+    "ENGINE_LOAD",
+    "FUEL_STATUS",
+    "COMMANDED_EQUIV_RATIO",
+    "O2_WR_LAMBDA_S1",
+)
+
+#: Fueling channels that resolve a WOT transient and therefore want the
+#: profile's full rate. A 5 s pull is the unit of work; anything slower than a
+#: few Hz here samples the pull two or three times.
+FUEL_MAP_FAST_CHANNELS: tuple[str, ...] = (
     "RPM",
     "ENGINE_LOAD",
     "MAF",
     "TIMING_ADVANCE",
     "THROTTLE_POS",
+    "O2_WR_LAMBDA_S1",
+    "O2_WR_LAMBDA_S2",
+    "COMMANDED_EQUIV_RATIO",
+    "FUEL_STATUS",
+)
+
+#: Context channels: closed-loop adaptation and thermal state, which move on
+#: the order of seconds to minutes. Held at a quarter of the fast rate so they
+#: stay present for gating without diluting the transient channels — the whole
+#: point of the weight being honoured under ``target_rate_hz``.
+FUEL_MAP_CONTEXT_CHANNELS: tuple[str, ...] = (
     "INTAKE_TEMP",
     "SPEED",
     "COOLANT_TEMP",
-    "O2_WR_LAMBDA_S1",
-    "O2_WR_LAMBDA_S2",
     "SHORT_FUEL_TRIM_1",
     "SHORT_FUEL_TRIM_2",
     "LONG_FUEL_TRIM_1",
     "LONG_FUEL_TRIM_2",
-    "COMMANDED_EQUIV_RATIO",
     "EVAPORATIVE_PURGE",
-    "FUEL_STATUS",
 )
+
+FUEL_MAP_CONTEXT_WEIGHT = 0.25
+
+FUEL_MAP_CHANNELS: tuple[str, ...] = (*FUEL_MAP_FAST_CHANNELS, *FUEL_MAP_CONTEXT_CHANNELS)
+
+FUEL_MAP_WEIGHTS: dict[str, float] = {
+    **{name: 1.0 for name in FUEL_MAP_FAST_CHANNELS},
+    **{name: FUEL_MAP_CONTEXT_WEIGHT for name in FUEL_MAP_CONTEXT_CHANNELS},
+}
 
 
 TUNING_DID_PROFILE_NAME = "tuning-did"
@@ -163,6 +212,24 @@ class CaptureProfile(_Strict):
     #: a vehicle-specific envelope is not mistaken for a platform constant.
     expected_total_demand_hz: float | None = Field(default=None, gt=0)
     capacity_evidence: str = ""
+    #: Channels that must be observed together for this profile's headline
+    #: analysis to yield a sample. Verified as a *tuple rate*, because the
+    #: per-channel rates can all pass while the tuple almost never completes.
+    required_tuple: tuple[str, ...] = ()
+    #: Per-channel floor the capture contract enforces. ``None`` means the
+    #: profile makes no rate promise and the contract only reports.
+    min_achieved_rate_hz: float | None = Field(default=None, gt=0)
+    #: Refuse to start without a named calibration. A fuelling capture compared
+    #: against the wrong ROM target map is not wrong-looking, it is wrong — and
+    #: the 2026-08-10 capture stored ``tune_revision: null`` with no registry
+    #: fallback, so nothing downstream could even flag the ambiguity.
+    requires_tune_revision: bool = False
+    #: Seed revision this profile's shipped definition came from. ``0`` marks a
+    #: profile the operator authored, which is never upgraded.
+    builtin_revision: int = Field(default=0, ge=0)
+    #: Set once the operator saves over a built-in. Freezes it against seed
+    #: upgrades: their edit is a decision, not a stale copy.
+    operator_modified: bool = False
     broadcast_decode: bool = True
     corpus_eligible: bool = False
     #: Narrow exception to corpus isolation: these captures may be evidence
@@ -256,6 +323,48 @@ class CaptureProfile(_Strict):
             )
         return value
 
+    @model_validator(mode="after")
+    def _required_tuple_is_polled(self) -> CaptureProfile:
+        """Every tuple member must actually be requested by this profile.
+
+        A tuple naming a channel the profile never polls would verify as
+        permanently 0 Hz and read as a vehicle fault. Catching it here makes
+        the contract's failures mean "the capture underperformed", never "the
+        contract was written wrong".
+        """
+        if not self.required_tuple:
+            return self
+        polled = {name.upper() for name in self.mode01} | {name.upper() for name in self.mode22}
+        if "AUTO" in polled:
+            return self
+        unpolled = sorted({name.upper() for name in self.required_tuple} - polled)
+        if unpolled:
+            raise ValueError(
+                "required_tuple names channels this profile does not poll: " + ", ".join(unpolled)
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _raised_budget_needs_evidence(self) -> CaptureProfile:
+        """A budget above the storage sink's known-safe line must cite why.
+
+        25 req/s backed the storage writer up until it dropped 2491 records on
+        2026-07-29 and the writer-side root cause was never established. That
+        made the number a measured constraint, and a measured constraint
+        belongs in a validator rather than in the comment where it has been
+        sitting — the comment did not stop anything.
+        """
+        budget = self.bus_budget_override
+        if budget is not None and budget > STORAGE_SAFE_REQUESTS_PER_SECOND:
+            if not self.capacity_evidence.strip():
+                raise ValueError(
+                    f"bus_budget_override above {STORAGE_SAFE_REQUESTS_PER_SECOND:g} req/s "
+                    "requires capacity_evidence: 25 req/s dropped 2491 records on 2026-07-29 "
+                    "and the writer-side cause was never found, so exceeding it is a claim "
+                    "that needs a measurement behind it"
+                )
+        return self
+
     @field_validator("storage_prefix")
     @classmethod
     def _valid_prefix(cls, value: str) -> str:
@@ -316,21 +425,32 @@ def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
             CaptureProfile(
                 name=FUEL_MAP_PROFILE_NAME,
                 description="High-rate fueling and timing capture",
-                mode01={name: 1.0 for name in FUEL_MAP_CHANNELS},
+                mode01=dict(FUEL_MAP_WEIGHTS),
                 mode22=(),
-                # Deliberately no budget override. Narrowing the channel set
-                # already multiplies per-channel rate within the existing
-                # budget; raising the budget is the separate, riskier lever.
-                # 25 req/s backed the storage sink up until it dropped 2491
-                # records on 2026-07-29 and the writer-side root cause was
-                # never established, so the operator raises this by hand after
-                # the capture-profiles.md 4.4 shakedown, watching
-                # `telemetry_sinks.storage.queue_depth`.
-                bus_budget_override=None,
+                # Both knobs, because either alone does nothing. Demand was
+                # capped at `poll_rate_hz x tier x weight` = 1 Hz x tier, and
+                # throughput at the default 8 req/s budget; the 2026-08-10
+                # capture hit both at once and landed at 0.28-0.78 Hz while
+                # calling itself "high-rate".
+                target_rate_hz=4.0,
+                # 9 fast x 4 Hz + 8 context x 1 Hz = 44 channel-reads/s.
+                expected_total_demand_hz=44.0,
+                bus_budget_override=20.0,
+                capacity_evidence=(
+                    "44 channel-reads/s against 478/s measured batched on this ECM "
+                    "(2026-08-04). Budget held at 20 req/s, under the 24 req/s storage-sink "
+                    "line: batching packs 6 PIDs per request, so 44 reads/s needs ~8 req/s "
+                    "batched and 44 unbatched. If batching is off the contract reports a "
+                    "shortfall rather than silently exceeding the sink's known-safe rate."
+                ),
+                required_tuple=FUEL_DELIVERY_TUPLE,
+                min_achieved_rate_hz=3.0,
+                requires_tune_revision=True,
                 broadcast_decode=True,
                 corpus_eligible=False,
                 round_timestamps=True,
                 storage_prefix="_capture-fuel-map",
+                builtin_revision=BUILTIN_REVISION,
             ),
             CaptureProfile(
                 name=TUNING_DID_PROFILE_NAME,
@@ -356,8 +476,11 @@ def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
                     "cam_primary_vs_command_rpm_did",
                     "cam_secondary_vs_command_rpm_did",
                 ),
+                min_achieved_rate_hz=12.0,
+                requires_tune_revision=True,
                 round_timestamps=True,
                 storage_prefix="_capture-tuning-did",
+                builtin_revision=BUILTIN_REVISION,
             ),
         ]
     )
@@ -369,24 +492,58 @@ def save_capture_profiles(path: Path, catalog: CaptureProfileCatalog) -> None:
 
 
 def load_capture_profiles(path: Path, collection: CollectionConfig) -> CaptureProfileCatalog:
-    """Load the catalog, back-filling built-in profiles the file predates.
+    """Load the catalog, back-filling and upgrading built-in profiles.
 
-    A saved catalog is authoritative for the profiles it names — operator
-    edits survive. But a file written before a built-in existed would
-    otherwise hide it forever, and the failure is a 404 from
-    ``POST /control/captures`` on the vehicle, which is exactly where nobody
-    wants to be editing YAML. Missing built-ins are appended and persisted;
-    ones the file already names are left untouched.
+    A saved catalog is authoritative for the profiles the *operator* wrote or
+    edited. Built-ins are different: a file written before a built-in existed
+    would hide it forever (404 from ``POST /control/capture`` on the vehicle,
+    which is exactly where nobody wants to be editing YAML), and — the failure
+    this exists for — a file written before a built-in was *corrected* pins the
+    stale definition just as permanently.
+
+    So three cases, deliberately distinct:
+
+    * a built-in the file never named is appended;
+    * a built-in the file names at an older ``builtin_revision``, never saved
+      over by the operator, is replaced by the seed;
+    * anything with ``operator_modified`` set, or authored by the operator, is
+      left exactly alone. Their edit is a decision, not a stale copy.
     """
     if not path.exists():
         catalog = seed_catalog(collection)
         save_capture_profiles(path, catalog)
         return catalog
     catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
-    known = {profile.name for profile in catalog.profiles}
-    missing = [p for p in seed_catalog(collection).profiles if p.name not in known]
-    if missing:
-        catalog = catalog.model_copy(update={"profiles": [*catalog.profiles, *missing]})
+    seeds = {profile.name: profile for profile in seed_catalog(collection).profiles}
+    resolved: list[CaptureProfile] = []
+    changed = False
+    for saved in catalog.profiles:
+        seed = seeds.pop(saved.name, None)
+        if (
+            seed is not None
+            and not saved.operator_modified
+            and saved.builtin_revision < seed.builtin_revision
+        ):
+            resolved.append(seed)
+            changed = True
+            log.warning(
+                "upgraded built-in capture profile %s from revision %d to %d",
+                saved.name,
+                saved.builtin_revision,
+                seed.builtin_revision,
+                extra={
+                    "capture_profile": saved.name,
+                    "from_revision": saved.builtin_revision,
+                    "to_revision": seed.builtin_revision,
+                },
+            )
+            continue
+        resolved.append(saved)
+    if seeds:
+        resolved.extend(seeds.values())
+        changed = True
+    if changed:
+        catalog = catalog.model_copy(update={"profiles": resolved})
         save_capture_profiles(path, catalog)
     return catalog
 
@@ -479,7 +636,11 @@ class CaptureProfileStore:
             raise ValueError("the default profile cannot be renamed")
         if any(item.name == profile.name for item in profiles):
             raise ValueError(f"capture profile already exists: {profile.name}")
-        profiles.append(profile)
+        # An operator save freezes a built-in against future seed upgrades.
+        # Marked here rather than trusted from the request body: the flag is
+        # provenance, and a client that omitted it would silently re-open the
+        # profile to being overwritten by the next seed bump.
+        profiles.append(profile.model_copy(update={"operator_modified": True}))
         profiles.sort(key=lambda item: (item.name != DEFAULT_PROFILE_NAME, item.name))
         save_capture_profiles(self.path, CaptureProfileCatalog(profiles=profiles))
         return model_input_warnings(profile, self.behavior_models_path)
@@ -496,10 +657,16 @@ class CaptureProfileStore:
 
 
 __all__ = [
+    "BUILTIN_REVISION",
+    "STORAGE_SAFE_REQUESTS_PER_SECOND",
     "CaptureProfile",
     "CaptureProfileCatalog",
     "CaptureProfileStore",
+    "FUEL_DELIVERY_TUPLE",
     "FUEL_MAP_CHANNELS",
+    "FUEL_MAP_CONTEXT_CHANNELS",
+    "FUEL_MAP_FAST_CHANNELS",
+    "FUEL_MAP_WEIGHTS",
     "load_capture_profiles",
     "model_input_warnings",
     "seed_catalog",

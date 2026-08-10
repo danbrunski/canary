@@ -56,6 +56,11 @@ const blankProfile = (): CaptureProfile => {
     bus_budget_override: null,
     expected_total_demand_hz: null,
     capacity_evidence: "",
+    required_tuple: [],
+    min_achieved_rate_hz: null,
+    requires_tune_revision: false,
+    builtin_revision: 0,
+    operator_modified: false,
     broadcast_decode: true,
     corpus_eligible: false,
     behavior_model_recipes: [],
@@ -277,10 +282,20 @@ export function CaptureProfilesPanel({
             {plan.bus_budget_override != null && <span>{plan.bus_budget_override} requests/s budget</span>}
             {plan.expected_total_demand_hz != null && <span>{plan.expected_total_demand_hz} expected channel reads/s</span>}
             <span>{plan.corpus_eligible ? "training eligible" : "training corpus excluded"}</span>
+            {plan.min_achieved_rate_hz != null && <span>{plan.min_achieved_rate_hz} Hz floor enforced</span>}
+            {plan.requires_tune_revision && <span>tune revision required</span>}
             {plan.behavior_model_recipes.length > 0 && (
               <span>{plan.behavior_model_recipes.length} behavior-model recipes allowed</span>
             )}
           </div>
+          {plan.required_tuple.length > 0 && (
+            /* The joint requirement, shown because it is the thing per-channel
+               rates cannot express: these must land in the same poll round or
+               the capture yields nothing regardless of how healthy each looks. */
+            <p className="mt-2 text-xs text-fg-dim">
+              Required together: {plan.required_tuple.join(", ")}
+            </p>
+          )}
           {plan.capacity_evidence && <p className="mt-2 text-xs text-fg-dim">{plan.capacity_evidence}</p>}
         </div>
       )}

@@ -501,6 +501,25 @@ class HealthMonitor:
         else:
             self._obd_scheduler = dict(metrics)
 
+    def capture_quality_inputs(
+        self, storage_sink: str = "storage"
+    ) -> tuple[
+        dict[str, Any],
+        dict[str, Any],
+    ]:
+        """The scheduler and storage state a capture contract is scored on.
+
+        Separate from :meth:`snapshot` because that one needs model/scaler
+        arguments a control route has no business assembling, and because the
+        capture sidecar wants exactly these two payloads. ``dropped_records``
+        here is what makes "the bus delivered it" and "it reached the disk"
+        distinguishable after the fact — a distinction the 2026-07-29 incident
+        cost 2491 records to learn.
+        """
+        scheduler = dict(self._obd_scheduler or {})
+        storage = dict(self._telemetry_sinks.get(storage_sink, {}))
+        return scheduler, storage
+
     def observe_telemetry_queue(self, name: str, queue: Any) -> None:
         """Record queue depth for one telemetry sink."""
         state = self._sink_state(name)

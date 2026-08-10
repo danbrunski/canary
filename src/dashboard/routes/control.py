@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -22,8 +23,10 @@ from src.alerts.tuning import (
     save_tuning_config,
 )
 from src.analysis.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore
+from src.atomic_write import atomic_write_text
 from src.collection import bus_budget, tuning_profile, tx_gate
 from src.collection.capture_profiles import CaptureProfileStore
+from src.collection.capture_quality import evaluate_capture_quality
 from src.collection.custom_pids import (
     CustomPid,
     CustomPidSet,
@@ -131,6 +134,7 @@ from src.dashboard.ups import (
     write_keepalive,
 )
 from src.dashboard.version import _canary_version, _git_sha
+from src.models.health import HealthMonitor
 from src.models.manifest import manifest_path_for
 from src.preprocessing.loader import discover_sessions
 from src.profiles import load_registry, update_profile_name
@@ -175,6 +179,10 @@ def register_control_routes(
     #: ``None`` leaves the poll-profile switch working without isolation.
     storage_writer: AsyncParquetTelemetryWriter | None = None,
     capture_profile_store: CaptureProfileStore | None = None,
+    #: Source of the achieved rates, gaps and storage-drop counters the capture
+    #: contract is scored on. ``None`` leaves captures working without a
+    #: quality sidecar — the verdict then reads as unknown, never as a pass.
+    health_monitor: HealthMonitor | None = None,
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
     emitter: AnomalyEventEmitter | None = None,
@@ -197,6 +205,50 @@ def register_control_routes(
         config.collection,
         config.daemon.behavior_models,
     )
+
+    def _write_capture_quality(
+        session_dir: Path,
+        profile_snapshot: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Persist the capture contract's verdict beside the data it scores.
+
+        Whether a capture was sound is a property of *that capture*, so it has
+        to survive the daemon: the 2026-08-10 fuel-map session directory held
+        only the profile and the DTC list, and the post-mortem could not
+        establish the achieved rates, the gaps, or even whether request
+        batching was on. Reconstructing that from Parquet is possible for rates
+        and impossible for the rest.
+
+        Never raises. A capture that recorded good data must not fail to stop
+        because its report card could not be written; the failure is logged and
+        the sidecar is simply absent, which the digest reads as unknown rather
+        than as a pass.
+        """
+        if health_monitor is None:
+            return None
+        try:
+            scheduler, storage = health_monitor.capture_quality_inputs()
+            quality = evaluate_capture_quality(
+                profile=profile_snapshot,
+                scheduler=scheduler,
+                storage=storage,
+            )
+            payload = quality.to_dict()
+            atomic_write_text(
+                session_dir / "capture_quality.json",
+                json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            )
+        except Exception:
+            log.exception("failed to write capture quality sidecar for %s", session_dir)
+            return None
+        if not quality.passed:
+            log.warning(
+                "capture %s ended with verdict %s",
+                session_dir.name,
+                quality.verdict,
+                extra={"capture_verdict": quality.verdict, "failures": quality.failures},
+            )
+        return payload
 
     def require_control_auth(
         request: Request,
@@ -629,6 +681,20 @@ def register_control_routes(
             )
         if profile.name == "default":
             raise HTTPException(status_code=409, detail="default collection is already active")
+        if profile.requires_tune_revision and not (request.tune_revision or "").strip():
+            # Refused rather than defaulted. There is no registry fallback: the
+            # 2026-08-10 capture stored `tune_revision: null` and the digest
+            # resolved it to `unknown` with no ROM target map, so an analysis
+            # across a flash boundary would have silently compared two
+            # different engines with nothing marking the ambiguity.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"capture profile {profile.name!r} requires tune_revision: fuelling and "
+                    "timing are only interpretable against the calibration in force, and "
+                    "nothing downstream can recover it after the fact"
+                ),
+            )
         if request.rate_hz is not None:
             profile = profile.model_copy(update={"target_rate_hz": request.rate_hz})
         async with capture_transition_lock:
@@ -756,6 +822,11 @@ def register_control_routes(
                 raise HTTPException(status_code=409, detail="default collection is already active")
             nonlocal budget_before_capture
             ended_capture_dir = str(storage_writer.paths.root)
+            # Scored and written *before* the writer rotates away: after
+            # exit_capture_mode the scheduler's capture-scoped counters are
+            # about to be reset and `paths.root` no longer names the session
+            # this data belongs to.
+            quality = _write_capture_quality(Path(ended_capture_dir), tuning_profile.snapshot())
             await storage_writer.exit_capture_mode()
             default_profile = profile_store.load().by_name("default")
             assert default_profile is not None
@@ -776,6 +847,7 @@ def register_control_routes(
                 "capture_profile": tuning_profile.snapshot(),
                 "ended_capture_dir": ended_capture_dir,
                 "bus_budget": bus_budget.snapshot(),
+                "capture_quality": quality,
             }
             last_ended_capture = dict(payload)
         publish_control_event("capture_profile.stop", "ok", payload)

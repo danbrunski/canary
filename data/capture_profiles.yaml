@@ -2,6 +2,7 @@ schema_version: 1
 profiles:
 - name: default
   description: Normal telemetry and anomaly-detection collection
+  experimental: false
   mode01:
     AUTO: 1.0
   mode22:
@@ -26,42 +27,69 @@ profiles:
   target_rate_hz: null
   did_continuous: false
   bus_budget_override: null
+  expected_total_demand_hz: null
+  capacity_evidence: ''
+  required_tuple: []
+  min_achieved_rate_hz: null
+  requires_tune_revision: false
+  builtin_revision: 0
+  operator_modified: false
   broadcast_decode: true
   corpus_eligible: true
+  behavior_model_recipes: []
   storage_prefix: ''
 - name: fuel-map
   description: High-rate fueling and timing capture
+  experimental: false
   mode01:
     RPM: 1.0
     ENGINE_LOAD: 1.0
     MAF: 1.0
     TIMING_ADVANCE: 1.0
     THROTTLE_POS: 1.0
-    INTAKE_TEMP: 1.0
-    SPEED: 1.0
-    COOLANT_TEMP: 1.0
     O2_WR_LAMBDA_S1: 1.0
     O2_WR_LAMBDA_S2: 1.0
-    SHORT_FUEL_TRIM_1: 1.0
-    SHORT_FUEL_TRIM_2: 1.0
-    LONG_FUEL_TRIM_1: 1.0
-    LONG_FUEL_TRIM_2: 1.0
     COMMANDED_EQUIV_RATIO: 1.0
-    EVAPORATIVE_PURGE: 1.0
     FUEL_STATUS: 1.0
+    INTAKE_TEMP: 0.25
+    SPEED: 0.25
+    COOLANT_TEMP: 0.25
+    SHORT_FUEL_TRIM_1: 0.25
+    SHORT_FUEL_TRIM_2: 0.25
+    LONG_FUEL_TRIM_1: 0.25
+    LONG_FUEL_TRIM_2: 0.25
+    EVAPORATIVE_PURGE: 0.25
   mode22: []
   mode01_enabled: true
   mode22_enabled: true
   did_interval_seconds: null
-  round_timestamps: false
-  target_rate_hz: null
+  round_timestamps: true
+  target_rate_hz: 4.0
   did_continuous: false
-  bus_budget_override: null
+  bus_budget_override: 20.0
+  expected_total_demand_hz: 44.0
+  capacity_evidence: '44 channel-reads/s against 478/s measured batched on this ECM
+    (2026-08-04). Budget held at 20 req/s, under the 24 req/s storage-sink line: batching
+    packs 6 PIDs per request, so 44 reads/s needs ~8 req/s batched and 44 unbatched.
+    If batching is off the contract reports a shortfall rather than silently exceeding
+    the sink''s known-safe rate.'
+  required_tuple:
+  - RPM
+  - ENGINE_LOAD
+  - FUEL_STATUS
+  - COMMANDED_EQUIV_RATIO
+  - O2_WR_LAMBDA_S1
+  min_achieved_rate_hz: 3.0
+  requires_tune_revision: true
+  builtin_revision: 1
+  operator_modified: false
   broadcast_decode: true
   corpus_eligible: false
+  behavior_model_recipes: []
   storage_prefix: _capture-fuel-map
 - name: tuning-did
   description: All-DID tuning capture (session held open)
+  experimental: false
   mode01: {}
   mode22:
   - ECM_RPM
@@ -84,6 +112,11 @@ profiles:
   bus_budget_override: 180.0
   expected_total_demand_hz: 165.0
   capacity_evidence: '2026-08-04 bench: 658 DID reads/s; 11 DIDs x 15 Hz = 165 reads/s.'
+  required_tuple: []
+  min_achieved_rate_hz: 12.0
+  requires_tune_revision: true
+  builtin_revision: 1
+  operator_modified: false
   broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes:

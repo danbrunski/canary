@@ -192,6 +192,7 @@ def test_all_did_digest_carries_afr_lineage_rom_identity_and_polling_gaps(
         "duration_seconds": 3.0,
         "observed_hz": 1.0,
         "median_interval_seconds": 1.0,
+        "p95_interval_seconds": 1.0,
         "longest_gap_seconds": 1.0,
     }
     assert digest.target_map["rom_artifact"]["sha256"] == (
@@ -384,3 +385,164 @@ def test_wot_source_travels_with_the_counts_in_the_serialised_digest(
     payload = digest.to_dict()
     assert payload["wot_seconds"] == payload["wot"]["seconds"] == 2
     assert payload["wot_source"] == payload["wot"]["source"] == "inferred"
+
+
+def _manifest(session: Path, snapshot: dict[str, object]) -> None:
+    (session / "capture_profile.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "profile": "fuel-map",
+                "started_at": T0.isoformat(),
+                "tune_revision": "ZS44A-k106",
+                "profile_snapshot": snapshot,
+            }
+        )
+    )
+
+
+def test_rate_summary_covers_what_the_profile_asked_for_not_a_fixed_list(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    """The rate summary must include the channels that limited the analysis.
+
+    It used to fall back to three hard-coded names — RPM, lambda, timing —
+    because the semantic registry is DID-oriented and resolves nothing on a
+    Mode-01 fuelling capture. Those three are the *fast* channels, so the
+    2026-08-10 report showed 0.67-0.78 Hz and silently omitted every channel
+    actually running at 0.28 Hz and gating the result.
+    """
+    session = _capture(
+        tmp_path, "_capture-fuel-map-2026-08-05T142720", [(3000, 90, 4, 1.2, 0.83)] * 6
+    )
+    _manifest(
+        session,
+        {
+            "name": "fuel-map",
+            "mode01": {
+                "RPM": 1.0,
+                "ENGINE_LOAD": 1.0,
+                "FUEL_STATUS": 1.0,
+                "COMMANDED_EQUIV_RATIO": 1.0,
+                "O2_WR_LAMBDA_S1": 1.0,
+            },
+            "required_tuple": [
+                "RPM",
+                "ENGINE_LOAD",
+                "FUEL_STATUS",
+                "COMMANDED_EQUIV_RATIO",
+                "O2_WR_LAMBDA_S1",
+            ],
+        },
+    )
+    digest = compute_tuning_digest(session, config)
+    assert digest is not None
+    measured = set(digest.rate_summary)
+    assert "obd:FUEL_STATUS" in measured
+    assert "obd:COMMANDED_EQUIV_RATIO" in measured
+    # p95 sits beside the median so a bad tail is visible without one
+    # stop-and-restart dominating it the way `longest_gap_seconds` does.
+    assert "p95_interval_seconds" in digest.rate_summary["obd:RPM"]
+
+
+def test_complete_tuple_count_is_reported_and_says_how_it_knows(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    """The number that predicts the yield, and its evidence class."""
+    session = _capture(
+        tmp_path, "_capture-fuel-map-2026-08-05T142720", [(3000, 90, 4, 1.2, 0.83)] * 6
+    )
+    _manifest(
+        session,
+        {
+            "name": "fuel-map",
+            "mode01": {
+                "RPM": 1.0,
+                "ENGINE_LOAD": 1.0,
+                "FUEL_STATUS": 1.0,
+                "COMMANDED_EQUIV_RATIO": 1.0,
+                "O2_WR_LAMBDA_S1": 1.0,
+            },
+            "required_tuple": [
+                "RPM",
+                "ENGINE_LOAD",
+                "FUEL_STATUS",
+                "COMMANDED_EQUIV_RATIO",
+                "O2_WR_LAMBDA_S1",
+            ],
+        },
+    )
+    digest = compute_tuning_digest(session, config)
+    assert digest is not None
+    tuples = digest.complete_tuples
+    assert tuples["available"] is True
+    assert tuples["source"] == "declared"
+    assert tuples["complete_cells"] == 6
+    assert tuples["absent_members"] == []
+
+
+def test_a_capture_predating_required_tuple_infers_it_and_labels_it(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    """Refusing outright would blind exactly the captures that motivated this.
+
+    Substituting silently would present an inference as the profile's promise,
+    so it is labelled `inferred` — the same discipline as WotInventory.source.
+    """
+    session = _capture(
+        tmp_path, "_capture-fuel-map-2026-08-05T142720", [(3000, 90, 4, 1.2, 0.83)] * 6
+    )
+    _manifest(
+        session,
+        {
+            "name": "fuel-map",
+            "mode01": {
+                "RPM": 1.0,
+                "ENGINE_LOAD": 1.0,
+                "FUEL_STATUS": 1.0,
+                "COMMANDED_EQUIV_RATIO": 1.0,
+                "O2_WR_LAMBDA_S1": 1.0,
+            },
+        },
+    )
+    digest = compute_tuning_digest(session, config)
+    assert digest is not None
+    assert digest.complete_tuples["source"] == "inferred"
+    assert digest.complete_tuples["complete_cells"] == 6
+    assert any("inferred, not declared" in note for note in digest.notes)
+
+
+def test_a_missing_quality_sidecar_reads_as_unknown_never_as_a_pass(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    session = _capture(
+        tmp_path, "_capture-fuel-map-2026-08-05T142720", [(3000, 90, 4, 1.2, 0.83)] * 5
+    )
+    digest = compute_tuning_digest(session, config)
+    assert digest is not None
+    assert digest.capture_quality is None
+    assert any("not verified, and not a pass" in note for note in digest.notes)
+
+
+def test_a_failed_capture_contract_is_carried_into_the_digest(
+    tmp_path: Path, config: CanaryConfig
+) -> None:
+    """A rate-sensitive result must not be read without its capture's verdict."""
+    session = _capture(
+        tmp_path, "_capture-fuel-map-2026-08-05T142720", [(3000, 90, 4, 1.2, 0.83)] * 5
+    )
+    (session / "capture_quality.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "verdict": "fail",
+                "profile": "fuel-map",
+                "failures": [{"clause": "required_tuple_rate"}],
+            }
+        )
+    )
+    digest = compute_tuning_digest(session, config)
+    assert digest is not None
+    assert digest.capture_quality is not None
+    assert digest.capture_quality["verdict"] == "fail"
+    assert any("required_tuple_rate" in note for note in digest.notes)

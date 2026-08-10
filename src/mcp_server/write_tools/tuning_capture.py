@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from src.collection.capture_quality import evaluate_capture_quality
 from src.mcp_server.audit import MCPAuditLogger
 from src.mcp_server.client import DaemonClient
 from src.mcp_server.write_tools._shared import audited_post
@@ -26,54 +27,27 @@ DEFAULT_VERIFY_SECONDS = 20.0
 
 
 def _rate_verification(status: dict[str, Any], requested_rate_hz: float | None) -> dict[str, Any]:
-    """Report only the active profile's requests, never daemon history."""
+    """Score the running capture against its profile's contract.
+
+    Delegates to :func:`src.collection.capture_quality.evaluate_capture_quality`
+    rather than re-deriving the rules, so the arm-time check and the sidecar
+    written at capture stop cannot disagree about whether a capture is sound.
+    They were separate implementations until 2026-08-10, and only the weaker
+    one ran before the drive.
+    """
     profile = status.get("capture_profile") or {}
-    scheduler = (status.get("health") or {}).get("obd_scheduler") or {}
-    rates = scheduler.get("achieved_hz_capture") or {}
-    samples = scheduler.get("capture_samples") or {}
-    max_gaps = scheduler.get("capture_max_gap_seconds") or {}
-    requested: list[dict[str, Any]] = []
-    for request in scheduler.get("requests") or []:
-        kind = request.get("kind")
-        channel = str(request.get("channel") or "")
-        if not request.get("capture_selected", False):
-            continue
-        target = (
-            requested_rate_hz or profile.get("target_rate_hz") or request.get("configured_rate_hz")
-        )
-        achieved = rates.get(channel)
-        max_gap = max_gaps.get(channel)
-        # A gap much longer than the requested period is a coverage problem
-        # (window closed, engine off, channel stalled), not a slow rate. They
-        # were one number until 2026-08-06, when idle time inside a capture
-        # made an on-target 14.93 Hz poll report 11.25 Hz and read as a fault.
-        stalled = (
-            max_gap is not None and target is not None and float(max_gap) > 5.0 / float(target)
-        )
-        requested.append(
-            {
-                "channel": channel,
-                "kind": kind,
-                "requested_hz": target,
-                "achieved_hz": achieved,
-                "samples": int(samples.get(channel, 0)),
-                "max_gap_seconds": max_gap,
-                "status": (
-                    "missing"
-                    if achieved is None
-                    else "shortfall"
-                    if target is not None and float(achieved) < float(target) * 0.9
-                    else "stalled"
-                    if stalled
-                    else "ok"
-                ),
-            }
-        )
-    return {
-        "observed_seconds": scheduler.get("capture_observed_seconds"),
-        "channels": requested,
-        "passive_broadcast_enabled": bool(profile.get("broadcast_decode", False)),
-    }
+    health = status.get("health") or {}
+    scheduler = health.get("obd_scheduler") or {}
+    storage = (health.get("telemetry_sinks") or {}).get("storage") or {}
+    quality = evaluate_capture_quality(
+        profile=profile,
+        scheduler=scheduler,
+        storage=storage,
+        requested_rate_hz=requested_rate_hz,
+    )
+    payload = quality.to_dict()
+    payload["passive_broadcast_enabled"] = bool(profile.get("broadcast_decode", False))
+    return payload
 
 
 async def arm_tuning_capture(
@@ -99,17 +73,31 @@ async def arm_tuning_capture(
     2026-08-04 — 8 → 30 req/s moved the achieved rate not at all, because
     per-channel demand was capped at 1 Hz). Set both.
 
-    The response carries capture-scoped ``achieved_hz`` sampled after
-    ``verify_seconds``, measured while the channel is actually sampling.
-    ``status`` separates the two ways a capture disappoints, because they
-    have opposite fixes: ``shortfall`` means demand exceeded the budget
+    After ``verify_seconds`` the capture is scored against its profile's
+    contract and the response carries a ``verdict``: ``pass``, ``fail``, or
+    ``unverified``. **Read the verdict before driving.** A ``fail`` names the
+    clause and the fix in ``rate_verification.failures``; re-arm with the
+    correction rather than starting the drive, because none of these problems
+    are recoverable afterwards.
+
+    Per-channel ``status`` separates the ways a capture disappoints, because
+    they have opposite fixes: ``shortfall`` means demand exceeded the budget
     (throttling working as designed — lower the rate or raise the budget),
-    while ``stalled`` means the rate was fine but the channel went quiet for
-    a stretch (Mode 22 window closed, engine off, ECU stopped answering) —
-    check ``max_gap_seconds``. ``observed_seconds`` is the window the samples
-    were drawn from, not a denominator; dividing by it re-creates the
-    conflation that made an on-target capture look broken on 2026-08-06.
-    Pass ``verify_seconds=0`` to skip the wait and return immediately.
+    ``stalled`` means the rate was fine but the channel went quiet for a
+    stretch (Mode 22 window closed, engine off, ECU stopped answering) — check
+    ``max_gap_seconds`` — and ``missing`` means the ECU never answered at all,
+    which wants the channel removed from the profile, not more budget.
+
+    ``tuple_rate_bound_hz`` is the one to look at for a fuelling capture: it
+    bounds how often the profile's ``required_tuple`` can complete, and it is
+    what per-channel rates cannot tell you. A capture whose channels all read
+    healthy still yields nothing if the tuple never completes.
+
+    ``observed_seconds`` is the window the samples were drawn from, not a
+    denominator; dividing by it re-creates the conflation that made an
+    on-target capture look broken on 2026-08-06. Pass ``verify_seconds=0`` to
+    skip the wait and return immediately — the verdict is then absent rather
+    than assumed good.
     """
     body: dict[str, Any] = {"profile": profile}
     if rate_hz is not None:
@@ -128,7 +116,11 @@ async def arm_tuning_capture(
         await asyncio.sleep(verify_seconds)
         status = await client.get_json("/status")
         payload["verified_after_seconds"] = verify_seconds
-        payload["rate_verification"] = _rate_verification(status, rate_hz)
+        verification = _rate_verification(status, rate_hz)
+        payload["rate_verification"] = verification
+        # Hoisted to the top level so a caller cannot read the channel table
+        # and miss that the contract failed.
+        payload["verdict"] = verification.get("verdict")
         payload["requested_rate_hz"] = rate_hz
         payload["vehicle_state"] = (status.get("vehicle_state") or {}).get("state")
     return payload
