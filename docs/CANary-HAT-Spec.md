@@ -212,31 +212,88 @@ Vehicle OBD 12V ──> CANary-HAT terminal block ──> protection chain ─�
 
 The X1202 remains the sole power source for the Pi and the sole owner of power-loss detection and battery-backed shutdown (`scripts/ups_shutdown_watch.py`, `systemd/ups-shutdown.service`).
 
-#### 3.7.3 Consequences of having no power sense on this board
+#### 3.7.3 The pass-through carries the Pi's entire supply
 
-The CANary-HAT has no ignition sense, no 12V voltage sense, and no power-loss detect of its own. Two accepted consequences:
+The 12V pass-through leg branches off VSUP_12V_RAW **downstream of the protection chain**, so the PTC fuse, reverse-blocking diode, TVS, and +12V copper are in series with everything the X1202 draws — the Pi 5 itself plus UPS battery charging — not just the HAT's own ~150 mA. A Pi 5 at full tilt is ~25W, so budget on the order of **3A at 12V**, worst case.
 
-1. **The rig is unplugged when not in use, or** the daemon infers engine-off from bus activity and commands a shutdown/suspend. The second path is software work that does not exist yet — `vehicle_state` already classifies `engine_off` / `no_data` (see `AGENTS.md`), and `RecordArmingConfig.disarm_after_seconds` already detects the quiet period, but nothing currently escalates that to a system shutdown.
-2. **Brownout asymmetry on the UPS battery path.** When vehicle 12V disappears but the X1202 keeps the Pi alive on battery, the Pi's 3V3/5V rails stay up while **+12V and therefore 3V3_BUCK collapse**. Anything on 3V3_BUCK dies mid-run while the host keeps driving its I/O lines into a dead rail — current flows through the parts' ESD clamps into 3V3_BUCK, which is a real partial-power-down stress case and can hang a shared I2C or SPI bus for the surviving devices. Mitigations, in order of preference:
-   - Put the digital devices (MCP2518FD, LSM6DSOX, BMP384, GNSS, EEPROM) on the **Pi 3V3** rail and leave 3V3_BUCK for nothing, or for the analog/bus-side loads only. Total 3.3V draw here is on the order of 100–150 mA, well inside the Pi 5 header's HAT budget — which raises the fair question of whether the buck earns its place at all.
-   - Or keep 3V3_BUCK, and accept/handle the collapse deliberately: series resistors on host-driven lines into buck-powered devices, and a documented expectation that CAN and sensors drop out the instant vehicle power does.
-   - The **ID EEPROM must be on Pi 3V3 regardless** — the Pi reads it at boot, and a UPS-battery boot with the vehicle disconnected must still enumerate the HAT.
+Two consequences:
+
+- **A series reverse-blocking diode dissipates ~2W at 3A.** In a TSOT/SMA package in a hot cabin that is a thermal problem, and the forward drop also eats into the buck's and the X1202's input headroom during cranking sag. Prefer an ideal-diode controller with a P-FET, or at minimum a low-Vf Schottky sized for the full load with the pad area to sink it.
+- **Size the PTC hold current above the Pi's peak, not the HAT's.** A fuse chosen for the HAT alone will trip on a Pi 5 workload spike, and the failure looks like a random power-down rather than a fuse.
+
+If neither is attractive, the alternative is to branch the pass-through *upstream* of the protection chain and let the X1202 own its own input protection — at the cost of the vehicle-side protection no longer covering the pigtail.
+
+#### 3.7.4 3.3V current budget: does the buck earn its place?
+
+The AP63203Q was added on the assumption that the HAT's 3.3V draw was near the limit of what the Pi can source on its header 3V3 pins. Itemising it against datasheet figures does not support that assumption.
+
+| Device | 3.3V draw | Source |
+|---|---|---|
+| MCP2518FD (active, 40 MHz CAN clock) | 20 mA max | §3.1, worst case quoted at 5.5V — less at 3.3V |
+| TCAN1042VDRQ1 **VIO only** | a few mA | VDD's ~70 mA sits on **5V**, not this rail |
+| MAX-M10M (continuous tracking) | ~8 mA avg (<25 mW) | §3.6 |
+| MAX-M10M (acquisition peak) | several tens of mA, transient | confirm against the u-blox datasheet |
+| **Active antenna LNA bias** | 5–20 mA | easily the largest single item, and the one most often forgotten |
+| LSM6DSOX (combo high-performance) | 0.55 mA | §3.4 |
+| BMP384 (peak during measurement) | 0.7 mA | §3.5 |
+| 4.7 kΩ K-line RXD pull-up (when low) | 0.7 mA | §3.3.1 |
+| ID EEPROM + pull-ups | µA | — |
+| **Total** | **~35 mA typical, ~90 mA peak** | ~150 mA with generous margin |
+
+Against that, **there is no official Pi 3V3 limit to be near.** The Raspberry Pi HAT+ specification (RP-008281-DS) sets no maximum current for a HAT+ on the 3.3V rail, and Raspberry Pi has consistently declined to publish one for any model — the widely-cited 500 mA is an unofficial rule of thumb dating to the B+, not a spec. Even taken at face value, this board's peak is under a fifth of it.
+
+So the buck is not buying current headroom. What it does buy is a second, independently-powered 3.3V domain — and in this stack that is a **liability, not a feature**, because it creates two asymmetric power states (§3.7.5). It also puts a 1.1 MHz switcher on a board whose GNSS receiver has no SAW filter.
+
+**Recommendation:** lay out the buck footprint but **ship it depopulated**, with a 0Ω link tying the HAT's 3.3V devices to the Pi 3V3 rail. Measure the assembled board's actual draw; populate the buck only if the measurement contradicts the budget above. This keeps the option without paying for it, and the depopulated case is HAT+ compliant by construction. Nothing on the board requires a 12V-derived 3.3V rail — the TLIN1027-Q1 runs its VSUP and its commander pull-up directly off +12V.
+
+#### 3.7.5 Two asymmetric power states, and why one rail avoids both
+
+The HAT sits between a vehicle 12V feed and a UPS-backed host, so the two supplies can each outlive the other. With split rails, both directions are a partial-power-down case: a device is powered while the domain driving its I/O is not, and current flows through the parts' ESD clamps into the dead rail — which can also hang a shared I2C or SPI bus for whatever survives.
+
+| State | Vehicle +12V / 3V3_BUCK | Pi 5V | Pi 3V3 | Split-rail consequence |
+|---|---|---|---|---|
+| Normal run | up | up | up | fine |
+| **UPS battery run** (key off, X1202 carrying the Pi) | **down** | up | up | HAT devices die mid-run; host drives I/O into a dead 3V3_BUCK |
+| **STANDBY** (`sudo halt`, vehicle still connected) | **up** | up | **down** | HAT devices stay alive and drive I/O into an unpowered host domain |
+
+The STANDBY row is not hypothetical — it is a HAT+ conformance requirement: *"HAT+ boards must be electrically compatible with the STANDBY power state, where the 5V power rail is powered, but the 3.3V rail is not powered. Raspberry Pi 4 and later models support the STANDBY state,"* and *"HAT+ boards must not assume any particular sequencing timing between the 5V and 3.3V rails."* A HAT whose devices are powered from vehicle 12V violates this the moment the Pi is halted with the truck still plugged in.
+
+Putting every 3.3V device on the Pi 3V3 rail collapses both rows: the HAT's logic domain lives and dies exactly with the host's, which is the state the HAT+ rules are written around. The one device that stays on 5V is the TCAN1042's VDD — and that is precisely what its VIO undervoltage protection exists for, so confirm that behaviour in the datasheet rather than assuming it.
+
+If the buck is populated anyway, handle both rows deliberately: series resistors on every line crossing between domains, and a documented expectation that CAN and sensors drop out the instant vehicle power does.
+
+#### 3.7.6 Consequences of having no power sense on this board
+
+The CANary-HAT has no ignition sense, no 12V voltage sense, and no power-loss detect of its own. Accepted consequence: **the rig is unplugged when not in use, or** the daemon infers engine-off from bus activity and commands a shutdown/suspend. The second path is software work that does not exist yet — `vehicle_state` already classifies `engine_off` / `no_data` (see `AGENTS.md`), and `RecordArmingConfig.disarm_after_seconds` already detects the quiet period, but nothing currently escalates that to a system shutdown.
+
+Note the interaction with §3.7.5: a software-commanded `halt` lands the system in STANDBY with the vehicle still connected, which is exactly the row that punishes a split rail.
 
 ### 3.8 HAT ID EEPROM
 
 | Parameter | Value |
 |---|---|
-| Part number | 24Cxx family (density to be finalized — **24C32 recommended**, per the Pi HAT reference design; 24C02 is tight) |
+| Part number | **24C32** — see the conformance rules below; 24C02 is disqualified |
 | Function | Raspberry Pi HAT ID EEPROM, stores HAT identification data for auto-configuration |
-| Interface | I2C, address 0x50 |
+| Interface | I2C (100 kHz is sufficient), address 0x50 |
 | GPIO connection | GPIO0 (ID_SD), GPIO1 (ID_SC) — dedicated HAT ID EEPROM pins on Pi 40-pin header, isolated from main I2C1 bus |
 | Package | SOIC-8 |
-| Supply | Pi 3V3 rail (must enumerate at boot with no vehicle power present) |
-| Support circuitry | Pull-up resistors on GPIO0/GPIO1 (3.9 kΩ per the HAT spec); write-protect (WP) jumper **normally open, not assembled** |
+| Supply | **Pi 3V3 rail** — 3.3V part, not a 5V-only EEPROM |
+| Support circuitry | 3.9 kΩ pull-ups to 3.3V on GPIO0/GPIO1; WP pulled up to 3.3V via 1 kΩ to a test point |
 
-The WP jumper pads are left unsoldered in production. Confirm that WP has a **defined logic level with the jumper open** — a floating WP pin on a 24Cxx is undefined unless the part specifies an internal pulldown. A resistor to the intended default rail plus the solder jumper to the other state costs one 0402.
+#### 3.8.1 HAT+ conformance rules (RP-008281-DS)
 
-Only one ID EEPROM may exist across the whole stack. The X1202 does not present one; confirm this before adding any third board.
+The specification is prescriptive here, and two of its rules change the current design:
+
+- **16-bit addressing is mandatory** — *"Use 16-bit addressable EEPROM. Do not use EEPROMs with 8-bit addressing."* This **disqualifies the 24C02** outright; it is an addressing rule, not a capacity judgement. The open item resolves to 24C32. The spec notes these restrictions "exclude many smaller I2C EEPROMs," so check the datasheet of whatever part is actually sourced.
+- **WP should default asserted, not floating.** The spec's guidance is *"connect the EEPROM write protect pin to a test point on the board pulled-up to 3.3V with a 1KΩ resistor. During board test and probe, you can write to the EEPROM by driving the write protect pin low."* The current plan — an unassembled, normally-open jumper — leaves WP floating and the part unprotected-but-undefined. Adopting the spec's 1 kΩ pull-up plus test point costs two passives, gives WP a defined level, keeps the part programmable on the bench, and is what `eepflash.sh` expects.
+- Also required: a 3.3V part (not 5V-only), a WP pin covering the **entire** memory, **no I2C clock stretching**, and no paged EEPROM where the low address bits select the page.
+- Only an EEPROM and its 3.9 kΩ pull-ups may connect to ID_SD/ID_SC — nothing else, ever.
+
+**Stacking.** Contrary to the older HAT rules, HAT+ explicitly supports stacking: permitted EEPROM addresses take the form `101_00XY`, where the `XY` suffix encodes the HAT class. Confirm the X1202 presents no ID EEPROM (it predates HAT+ and almost certainly does not), and keep 0x50 for this board.
+
+**The EEPROM can carry the board's device-tree overlay name**, which firmware loads at boot. That is the cleanest way to bring up `mcp251xfd`, the GNSS UART, and `pps-gpio` — an overlay named in the EEPROM instead of hand-edited `config.txt` entries that have to be re-applied on every fresh Pi image. See §11.
+
+**Not a Power HAT+.** This board sources no 5V to the Pi, so the Power HAT+ rules (`hat_current_supply`, the MODE1 address that makes firmware set `usb_max_current_enable=1`) do not apply. They would apply if the X1202's job ever migrated onto this board.
 
 ### 3.9 Terminal Blocks
 
@@ -245,11 +302,15 @@ Only one ID EEPROM may exist across the whole stack. The X1202 does not present 
 | Part series | Phoenix Contact MC/MCV series |
 | Pitch | **5.08mm** |
 | Footprint source | KiCad built-in TerminalBlock_Phoenix library — the MC/MCV-G-5.08 `P5.08mm` variants |
-| Block 1 | **5-position** — vehicle side: 12V, GND, CANH, CANL, K-line |
+| Block 1 | **6-position** — vehicle side: 12V, signal ground, chassis ground, K-line, CANH, CANL |
 | Block 2 | **2-position** — +12V pass-through (12V, GND) to the X1202 via a DC barrel-jack pigtail |
 | Placement | Board edge, with protection diode cluster placed nearby |
 
-The 5-position block has no spare way for an ISO 9141 **L-line**. The dev vehicle does not need one (Nissan CONSULT inits with a byte sequence, not an L-line pulse), but some pre-CAN vehicles do — a scope decision to record rather than discover later.
+Block 1 maps 1:1 onto the OBD-II connector: pin 16 (battery +12V), pin 5 (signal ground), pin 4 (chassis ground), pin 7 (K-line), pin 6 (CAN High), pin 14 (CAN Low).
+
+**Signal ground and chassis ground are tied together on the board.** That makes the HAT the bonding point between the two returns, which is fine on a vehicle where they are already bonded at the battery — the offset is millivolts. The layout consequence is worth being deliberate about: bring the 12V return in on chassis ground and reference the bus receivers to signal ground, joining the two at a **single star point** near the connector rather than letting them merge across the whole Gnd.Cu pour. Otherwise the HAT's power-return current (including the pass-through leg feeding the X1202 and therefore the entire Pi) shares copper with the CAN and K-line voltage reference.
+
+The block has no spare way for an ISO 9141 **L-line**. The dev vehicle does not need one (Nissan CONSULT inits with a byte sequence, not an L-line pulse), but some pre-CAN vehicles do — a scope decision to record rather than discover later.
 
 ## 4. Raspberry Pi 5 GPIO Header Mapping
 
@@ -271,10 +332,10 @@ The 5-position block has no spare way for an ISO 9141 **L-line**. The dev vehicl
 | IMU_INT | **TBD (verify)** — drafted as GPIO16 | LSM6DSOXTR INT1 pin |
 | GNSS_TXD / GNSS_RXD | **TBD** — a secondary Pi 5 UART | MAX-M10M-00B UART |
 | GNSS_PPS | **TBD / unassigned** | MAX-M10M-00B TIMEPULSE |
-| GPIO0 (ID_SD) | GPIO0 | 24Cxx HAT ID EEPROM (dedicated ID bus) |
-| GPIO1 (ID_SC) | GPIO1 | 24Cxx HAT ID EEPROM (dedicated ID bus) |
+| GPIO0 (ID_SD) | GPIO0 | 24C32 HAT ID EEPROM (dedicated ID bus) |
+| GPIO1 (ID_SC) | GPIO1 | 24C32 HAT ID EEPROM (dedicated ID bus) |
 | 3V3 (Pi) | 3.3V rail, header | TCAN1042 VIO, K-line RXD pull-up, EEPROM + ID pull-ups |
-| 3V3_BUCK | AP63203Q output | HAT device supplies (see §3.7.3 before finalizing) |
+| 3V3_BUCK | AP63203Q output (**depopulate — see §3.7.4**) | Nothing, if the recommendation is taken |
 | 5V0 | 5V rail, header | TCAN1042VDRQ1 VDD |
 | VSUP_12V_RAW | 12V input (via terminal block) | TLIN1027-Q1 VSUP, protection chain, buck input, 12V pass-through |
 | GND | Ground plane (Gnd.Cu) | All subsystems |
@@ -295,7 +356,7 @@ The 5-position block has no spare way for an ISO 9141 **L-line**. The dev vehicl
 | CAN | MCP2518FDT-E/SL → TCAN1042VDRQ1 → bus (no on-board termination) | ISO 11898-1:2015 / ISO 11898-2:2016, CAN 2.0B / CAN FD up to 2 Mbps |
 | K-Line / LIN (uart0) | TLIN1027-Q1 | ISO 9141 (K-line), LIN 2.x — 20 kbps TX / 100 kbps RX, no dominant timeout |
 | I2C (I2C1) | BMP384 (0x76/0x77), LSM6DSOXTR (0x6A/0x6B) | Up to 3.4 MHz |
-| I2C (dedicated ID bus) | 24Cxx HAT ID EEPROM (0x50) | Standard I2C |
+| I2C (dedicated ID bus) | 24C32 HAT ID EEPROM (0x50) | Standard I2C, 100 kHz |
 | UART (secondary, TBD) + PPS | MAX-M10M-00B | NMEA / UBX protocol |
 | Power | Vehicle 12V → protection → +12V; AP63203Q → 3V3_BUCK; Pi header → 3V3, 5V0; 12V pass-through → X1202 | Distributed via Power.Cu |
 
@@ -304,7 +365,8 @@ I2C1 address check: the X1202 fuel gauge sits at 0x36 on bus 1 and does not coll
 ## 6. KiCad Implementation Notes
 
 - Schematic organized hierarchically: root sheet plus six sub-sheets — Power, GPIO_Header, KLine_Transceiver, CANFD_Interface, Sensors, ID_EEPROM.
-- Board outline: 65mm x 56mm standard HAT form factor with four mounting holes at Raspberry Pi standard hole coordinates. Verify clearance for the Pi 5 active cooler and for the X1202 stacking below.
+- Board outline: 65mm x 56mm standard HAT form factor with four mounting holes at Raspberry Pi standard hole coordinates.
+- Mechanical: screw terminals mount on the **top** side, facing away from the stack. The Pi 5 active cooler sits below the HAT and does not conflict with them; stack height is therefore set by the cooler plus the X1202 below, so size the standoffs and the header extension to clear both.
 - Symbols/footprints for TLIN1027-Q1, TCAN1042VDRQ1, BMP384, and LSM6DSOXTR sourced from SnapEDA/UltraLibrarian in KiCad format; MCP2518FDT-E/SL uses a generic SOIC-14 footprint from the built-in Package_SO library with a custom symbol built from datasheet pinout if no verified listing is found.
 - Layout guidance: terminal blocks at board edge with protection diode cluster nearby; MCP2518FDT-E/SL + TCAN1042VDRQ1 + 40 MHz crystal grouped tightly near the terminal block; BMP384/LSM6DSOXTR placed away from the crystal and any regulator, over solid Gnd.Cu with stitching vias underneath.
 - TLIN1027-Q1 layout per datasheet §11: two vias minimum on GND, 100 nF at VSUP as close to the pin as possible, protection/filtering placed at the connector so ESD transients never propagate inboard.
@@ -319,7 +381,8 @@ I2C1 address check: the X1202 fuel gauge sits at 0x36 on bus 1 and does not coll
 - Gnd.Cu and Power.Cu filled as zones — Gnd.Cu solid, Power.Cu split per §2 — stitched to component pads via through-hole vias sized to meet a minimum 0.15mm annular ring requirement (0.7–0.8mm via diameter / 0.4mm drill).
 - MAX-M10M-00B requires an external active antenna with integrated SAW filter and LNA, since this variant omits onboard RF front-end filtering to reduce cost and power [cite:39].
 - Pick-and-place/centroid file to be exported alongside Gerbers if outsourcing partial assembly (e.g. PCBWay Combo sourcing) for BMP384 and LSM6DSOXTR; these two line items should be flagged in the BOM/order notes as assembly targets while other SOIC parts are self-supplied and hand-soldered.
-- EEPROM WP jumper: pads left open, not soldered closed.
+- EEPROM WP: 1 kΩ pull-up to 3.3V plus a test point, per HAT+ §3.3 — drive WP low to program with `eepflash.sh`, leave it pulled up otherwise.
+- AP63203Q and its passives: footprints laid out, **depopulated by default**, with the 0Ω link to Pi 3V3 fitted instead (§3.7.4).
 
 ## 8. Open Items
 
@@ -330,17 +393,20 @@ Confirm before finalizing the board for fabrication.
 - **§4 pin map is stale.** Capture the deconflicted BARO_INT pin from the schematic; confirm IMU_INT.
 - **GNSS UART assignment** — which secondary Pi 5 UART (uart2 GPIO4/5 or uart4 GPIO12/13), and disable the console on it.
 - **GNSS PPS** — still unaddressed. Roadmap task 2b.3 and `docs/time-sync.md` both depend on it; without a pulse chrony stays at `precision 5e-1` and sits unselected, and the truck has no NTP at boot. Route TIMEPULSE to a free GPIO (GPIO18 = `pps-gpio` default).
-- **3V3_BUCK vs Pi 3V3 device assignment**, per §3.7.3 — decide the brownout behavior deliberately rather than discovering it on the first UPS-battery run.
+- **3V3_BUCK vs Pi 3V3 device assignment**, per §3.7.4/§3.7.5 — the recommendation is one rail (Pi 3V3) with the buck laid out but depopulated. Either way this must be an explicit decision, because a split rail has to survive both the UPS-battery row and the HAT+-mandated STANDBY row.
 - **TCAN1042 S/STB pin** tied low (or driven).
 - **MCP2518FD nRESET** pull-up / RC — must not float.
 - **K-line commander termination**: 1 kΩ + series blocking diode from LIN to VSUP, plus the 200–220 pF bus capacitor.
 
 **Confirm**
 
-- Exact density of the 24Cxx HAT ID EEPROM — 24C32 recommended over 24C02.
-- EEPROM WP level when the jumper is open (§3.8).
+- ~~EEPROM density~~ — **resolved: 24C32.** HAT+ mandates 16-bit addressing, which disqualifies the 24C02 (§3.8.1). Verify the sourced part also has no clock stretching and a whole-device WP pin.
+- TCAN1042 VIO undervoltage behaviour with VDD present and VIO absent — the STANDBY row depends on it (§3.7.5).
+- MAX-M10M acquisition peak current and the active-antenna LNA bias draw, the two least-certain lines in the §3.7.4 budget.
 - SPI net naming: SDI/SDO labels vs the chip's own pin names, so MISO/MOSI don't get crossed at layout.
-- Edge budget for the two 5.08mm blocks: 5-position + 2-position is ~36mm of connector plus end walls, against a 65mm board edge. Confirm it clears the mounting holes and the Pi 5 active cooler.
+- Edge budget for the two 5.08mm blocks: 6-position + 2-position is 8 ways ≈ 41mm of pitch plus end walls, against a 65mm board edge. Confirm it clears the mounting holes.
+- **Current rating of the protection chain and the pass-through leg** (see §3.7.3) — the PTC fuse, reverse-blocking diode, and +12V copper carry the Pi's entire supply, not just the HAT's.
+- Star-point placement for the signal/chassis ground bond (§3.9).
 - Specific protection component part numbers in the 12V input chain (TVS diode rated for automotive load dump, reverse-blocking diode, PTC fuse ratings).
 - Quiescent draw on +12V with the vehicle parked, if the harness ever lands on always-hot OBD pin 16.
 - BMP384 RMS noise against the grade budget; keep the BMP390 footprint option (§3.5).
@@ -380,9 +446,10 @@ The IMU, barometer, and GNSS consolidate hardware the roadmap already committed 
 
 None of this is blocking for fabrication, but none of it exists yet either.
 
+- **Overlay delivery:** write a single board overlay covering `mcp251xfd`, the GNSS UART, and `pps-gpio`, and name it in the HAT+ ID EEPROM so firmware loads it at boot (§3.8.1). That beats hand-edited `config.txt` entries, which `scripts/install_pi.sh` would otherwise have to re-apply on every fresh image.
 - **CAN:** swap the `mcp2515` overlay for `mcp251xfd` with `oscillator=40000000` and the final interrupt GPIO; `hardware.can` config (`interface: socketcan`, `channel: can0`) is unchanged.
 - **IMU:** add `lsm6dsox` to the `ImuConfig.source` Literal in `src/config.py` (currently `bno055 | mpu6050 | icm20948 | disabled`) and write `imu_collector.py` (roadmap task 2b.2). The frame-resolution math in `imu_frame.py` already covers the raw-chip case.
 - **Barometer:** no config, collector, or channel exists — only the `trainable=False` committee declarations from task 2a.8, waiting on members.
 - **GNSS:** works as-is over a tty (`gps_collector.py` / gpsd), but the receiver needs its nav rate configured and the chosen UART's console disabled. PPS needs `pps-gpio` plus the chrony refclock change in `docs/time-sync.md`.
 - **K-line:** entirely new — a source in the telemetry Literal, a `hardware.kline` config block (note `HardwareConfig` still carries a required `elm327_port`, which this is not), a CONSULT/KWP collector with EN-gating, `tMODE_CHANGE` blanking, and local-echo suppression.
-- **Shutdown on engine-off:** the software half of §3.7.3 — escalate a sustained `engine_off` / `no_data` `vehicle_state` to a system shutdown or suspend. Nothing does this today.
+- **Shutdown on engine-off:** the software half of §3.7.6 — escalate a sustained `engine_off` / `no_data` `vehicle_state` to a system shutdown or suspend. Nothing does this today.
