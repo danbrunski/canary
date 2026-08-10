@@ -272,22 +272,45 @@ Note the interaction with §3.7.5: a software-commanded `halt` lands the system 
 
 | Parameter | Value |
 |---|---|
-| Part number | **24C32** — see the conformance rules below; 24C02 is disqualified |
+| Part number | **CAT24C32 (onsemi), e.g. CAT24C32WI-GT3** — the specific part matters, see §3.8.2; 24C02 is disqualified |
 | Function | Raspberry Pi HAT ID EEPROM, stores HAT identification data for auto-configuration |
 | Interface | I2C (100 kHz is sufficient), address 0x50 |
 | GPIO connection | GPIO0 (ID_SD), GPIO1 (ID_SC) — dedicated HAT ID EEPROM pins on Pi 40-pin header, isolated from main I2C1 bus |
 | Package | SOIC-8 |
 | Supply | **Pi 3V3 rail** — 3.3V part, not a 5V-only EEPROM |
-| Support circuitry | 3.9 kΩ pull-ups to 3.3V on GPIO0/GPIO1; WP pulled up to 3.3V via 1 kΩ to a test point |
+| Support circuitry | 3.9 kΩ pull-ups to 3.3V on GPIO0/GPIO1; WP left floating (valid for this part — §3.8.2), with an unpopulated 1 kΩ pull-up footprint |
 
 #### 3.8.1 HAT+ conformance rules (RP-008281-DS)
 
 The specification is prescriptive here, and two of its rules change the current design:
 
 - **16-bit addressing is mandatory** — *"Use 16-bit addressable EEPROM. Do not use EEPROMs with 8-bit addressing."* This **disqualifies the 24C02** outright; it is an addressing rule, not a capacity judgement. The open item resolves to 24C32. The spec notes these restrictions "exclude many smaller I2C EEPROMs," so check the datasheet of whatever part is actually sourced.
-- **WP should default asserted, not floating.** The spec's guidance is *"connect the EEPROM write protect pin to a test point on the board pulled-up to 3.3V with a 1KΩ resistor. During board test and probe, you can write to the EEPROM by driving the write protect pin low."* The current plan — an unassembled, normally-open jumper — leaves WP floating and the part unprotected-but-undefined. Adopting the spec's 1 kΩ pull-up plus test point costs two passives, gives WP a defined level, keeps the part programmable on the bench, and is what `eepflash.sh` expects.
+- **WP guidance is a recommendation, not a requirement** — *"connect the EEPROM write protect pin to a test point on the board pulled-up to 3.3V with a 1KΩ resistor. During board test and probe, you can write to the EEPROM by driving the write protect pin low."* This makes the default state *protected*. Leaving WP floating is also valid on the right part, and makes the default state *writable*; see §3.8.2 for why the current design is fine as drawn.
 - Also required: a 3.3V part (not 5V-only), a WP pin covering the **entire** memory, **no I2C clock stretching**, and no paged EEPROM where the low address bits select the page.
 - Only an EEPROM and its 3.9 kΩ pull-ups may connect to ID_SD/ID_SC — nothing else, ever.
+
+#### 3.8.2 Floating WP is correct — but only for parts that specify it
+
+The KiCad HAT template leaves WP unconnected, and for the CAT24C32 that is defined behaviour, not an oversight. From the onsemi datasheet:
+
+> **WP:** When pulled HIGH, the Write Protect input pin inhibits all write operations. **When left floating, this pin is pulled LOW internally.**
+
+> **Hardware Write Protection.** With the WP pin held HIGH, the entire memory is protected against Write operations. **If the WP pin is left floating or is grounded, it has no impact on the Write operation.**
+
+> *Note 5:* When not driven, the WP, A0, A1 and A2 pins are pulled down to GND internally. For improved noise immunity, the internal pull-down is relatively strong; therefore the external driver must be able to supply the pull-down current when attempting to drive the input HIGH. To conserve power, as the input level exceeds the trip point of the CMOS input buffer (~0.5 × VCC), the strong pull-down reverts to a weak current source.
+
+So floating WP gives a **defined logic low** and a write-enabled EEPROM. The DC table puts `IWP` at **120 µA at VCC = 3.3V** (130 µA at 5.5V) — which is also why the HAT+ spec calls for a **1 kΩ** pull-up rather than a casual 10 kΩ: 1 kΩ sources 3.3 mA and swamps the strong internal pull-down, whereas a weak pull-up would lose to it.
+
+**This is a BOM constraint, not a schematic one.** The same "24C32" ordered from another vendor may have no internal pull-down at all. Microchip's 24AA32A/24LC32A, a natural second source, says the opposite:
+
+> **2.4 Write-Protect (WP).** This pin must be connected to either VSS or VCC. If tied to VSS, write operations are enabled. If tied to VCC, write operations are inhibited, but read operations are not affected.
+
+A drop-in substitution to that part turns a floating WP from "defined low" into an out-of-spec floating CMOS input — a corruption risk that no schematic review would catch, because the schematic never changed. Two ways to make that impossible rather than documented:
+
+1. **Pin the manufacturer part number on the BOM line**, not the generic "24C32", with the reason attached: *floating WP is only valid for parts specifying an internal WP pull-down.*
+2. **Fit an unpopulated 1 kΩ pull-up to 3.3V plus a test point** on WP. Costs one 0402 footprint and one pad, keeps the board's current tested behaviour by default, and converts it to the HAT+ default-protected arrangement — or rescues a second-sourced part with no internal pull-down — without a respin.
+
+**Which default is right here?** Write-enabled is more convenient for a one-off you will program in place and possibly re-flash as the overlay evolves, and the ID bus is only touched by firmware at boot, so accidental writes are unlikely. Keep it. The pull-up footprint is the hedge, not a correction.
 
 **Stacking.** Contrary to the older HAT rules, HAT+ explicitly supports stacking: permitted EEPROM addresses take the form `101_00XY`, where the `XY` suffix encodes the HAT class. Confirm the X1202 presents no ID EEPROM (it predates HAT+ and almost certainly does not), and keep 0x50 for this board.
 
@@ -381,7 +404,7 @@ I2C1 address check: the X1202 fuel gauge sits at 0x36 on bus 1 and does not coll
 - Gnd.Cu and Power.Cu filled as zones — Gnd.Cu solid, Power.Cu split per §2 — stitched to component pads via through-hole vias sized to meet a minimum 0.15mm annular ring requirement (0.7–0.8mm via diameter / 0.4mm drill).
 - MAX-M10M-00B requires an external active antenna with integrated SAW filter and LNA, since this variant omits onboard RF front-end filtering to reduce cost and power [cite:39].
 - Pick-and-place/centroid file to be exported alongside Gerbers if outsourcing partial assembly (e.g. PCBWay Combo sourcing) for BMP384 and LSM6DSOXTR; these two line items should be flagged in the BOM/order notes as assembly targets while other SOIC parts are self-supplied and hand-soldered.
-- EEPROM WP: 1 kΩ pull-up to 3.3V plus a test point, per HAT+ §3.3 — drive WP low to program with `eepflash.sh`, leave it pulled up otherwise.
+- EEPROM WP: left floating (defined low on the CAT24C32), with an unpopulated 1 kΩ pull-up + test point as the hedge (§3.8.2).
 - AP63203Q and its passives: footprints laid out, **depopulated by default**, with the 0Ω link to Pi 3V3 fitted instead (§3.7.4).
 
 ## 8. Open Items
@@ -400,7 +423,7 @@ Confirm before finalizing the board for fabrication.
 
 **Confirm**
 
-- ~~EEPROM density~~ — **resolved: 24C32.** HAT+ mandates 16-bit addressing, which disqualifies the 24C02 (§3.8.1). Verify the sourced part also has no clock stretching and a whole-device WP pin.
+- ~~EEPROM density~~ — **resolved: 24C32**, HAT+ mandates 16-bit addressing (§3.8.1). Remaining action: **pin the manufacturer part number** (CAT24C32) on the BOM rather than a generic 24C32 — the floating WP is only valid for parts specifying an internal pull-down, and a second source such as Microchip's 24LC32A explicitly requires WP tied to a rail (§3.8.2). Also verify no clock stretching and a whole-device WP pin.
 - TCAN1042 VIO undervoltage behaviour with VDD present and VIO absent — the STANDBY row depends on it (§3.7.5).
 - MAX-M10M acquisition peak current and the active-antenna LNA bias draw, the two least-certain lines in the §3.7.4 budget.
 - SPI net naming: SDI/SDO labels vs the chip's own pin names, so MISO/MOSI don't get crossed at layout.
