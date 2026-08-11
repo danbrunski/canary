@@ -190,6 +190,12 @@ export function CaptureProfilesPanel({
   const plan = active?.active ? active : (selectedProfile ?? draft);
   const hasUnsavedChanges = selectedProfile == null
     || JSON.stringify(draft) !== JSON.stringify(selectedProfile);
+  // The daemon refuses these outright, and it is the only moment the value can
+  // be recorded. Gating here turns a round-trip rejection into a control that
+  // was never armable — the operator finds out before pressing Start, not
+  // after. Trimmed, because the daemon treats blank as absent too.
+  const needsTuneRevision = Boolean(selectedProfile?.requires_tune_revision)
+    && tuneRevision.trim() === "";
   const scheduler = status?.health?.obd_scheduler;
   const achievedRates = Object.entries(scheduler?.achieved_hz_capture ?? {}).sort(
     ([a], [b]) => a.localeCompare(b),
@@ -456,6 +462,15 @@ export function CaptureProfilesPanel({
 
       {!active?.active && hasUnsavedChanges && draft.name !== "default" && (
         <p className="text-xs text-warn">Save this profile before starting it.</p>
+      )}
+      {/* Advisory, never a gate (operator decision 2026-08-10). The capture
+          runs either way; this only says what is lost by leaving it blank. */}
+      {!active?.active && needsTuneRevision && (
+        <p className="text-xs text-fg-dim">
+          No tune revision entered. {selectedProfile?.name} records fuelling or timing, which is
+          only interpretable against the calibration in force — the capture will run, but it
+          cannot be compared across a flash.
+        </p>
       )}
 
       {active?.active && (

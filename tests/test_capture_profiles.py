@@ -124,14 +124,13 @@ def test_default_cannot_be_deleted_and_profile_crud_round_trips(tmp_path: Path) 
         store.delete("default")
 
 
-def test_a_tuning_capture_refuses_to_start_without_a_tune_revision(tmp_path: Path) -> None:
-    """Fuelling is only interpretable against the calibration in force.
+def test_a_tuning_capture_starts_without_a_tune_revision(tmp_path: Path) -> None:
+    """`requires_tune_revision` prompts; it must never block a capture.
 
-    There is no registry fallback: the 2026-08-10 capture stored
-    ``tune_revision: null`` and the digest resolved it to ``unknown`` with no
-    ROM target map, so a comparison across a flash would have silently
-    compared two different engines. Refused at the only moment it is
-    recoverable.
+    An earlier version refused to arm, which got in the way more than it
+    helped (operator decision 2026-08-10). Nothing is silently lost: the
+    manifest still records the absence, so an analysis across a flash boundary
+    can tell the calibration was unrecorded.
     """
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     config = config.model_copy(
@@ -159,24 +158,16 @@ def test_a_tuning_capture_refuses_to_start_without_a_tune_revision(tmp_path: Pat
     )
     headers = {"Authorization": "Bearer secret"}
 
-    refused = client.post("/control/capture", headers=headers, json={"profile": "fuel-map"})
-    assert refused.status_code == 400
-    assert "tune_revision" in refused.json()["detail"]
-    # Blank is not a revision either.
-    blank = client.post(
-        "/control/capture",
-        headers=headers,
-        json={"profile": "fuel-map", "tune_revision": "   "},
-    )
-    assert blank.status_code == 400
-    assert not writer.paths.root.name.startswith("_capture-")
+    fuel_map = store.load().by_name("fuel-map")
+    assert fuel_map is not None and fuel_map.requires_tune_revision is True
 
-    accepted = client.post(
-        "/control/capture",
-        headers=headers,
-        json={"profile": "fuel-map", "tune_revision": "ZS44A-k106"},
-    )
-    assert accepted.status_code == 200
+    started = client.post("/control/capture", headers=headers, json={"profile": "fuel-map"})
+    assert started.status_code == 200
+    assert writer.paths.root.name.startswith("_capture-fuel-map-")
+
+    # The absence is still on the record, which is what makes it safe to allow.
+    sidecar = json.loads((writer.paths.root / "capture_profile.json").read_text())
+    assert sidecar["tune_revision"] is None
 
 
 def test_capture_stop_writes_a_quality_sidecar_beside_the_data(tmp_path: Path) -> None:

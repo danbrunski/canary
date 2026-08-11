@@ -446,6 +446,29 @@ def test_parse_did_and_can_id() -> None:
         parse_did_token("110")
 
 
+def test_dids_reaching_one_identifier_are_polled_once() -> None:
+    """A name and its alias are one register, not two channels.
+
+    `ECM_MAF_GPS` kept its retired `ECM_BASE_FUEL_SCHEDULE_CANDIDATE` name as a
+    catalogue alias, so both could appear in a DID list and the scheduler issued
+    a request for each. The 2026-08-10 all-DID capture polled 0x1209 at 29.4 Hz
+    while every other channel got 14.7 — a seventh of the round spent on a
+    duplicate whose rows are indistinguishable from the original's, because the
+    channel name is derived from the identifier. Mode 01 already deduplicated
+    this way; DIDs did not.
+    """
+    spec = CanObdSpec(
+        can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        pids=(),
+        # Two catalogue names for one register, then the same DID twice by hex.
+        dids=("ECM_MAF_GPS", "ECM_BASE_FUEL_SCHEDULE_CANDIDATE", "1208", "1208"),
+    )
+    requests = build_poll_requests(_StaticDiscovery(), spec)
+    did_channels = [r.channel for r in requests if r.kind == "did"]
+
+    assert did_channels == ["DID_1209", "DID_1208"]
+
+
 def test_build_poll_requests_combines_auto_explicit_and_dids() -> None:
     spec = CanObdSpec(
         can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),

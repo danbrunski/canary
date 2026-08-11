@@ -219,10 +219,12 @@ class CaptureProfile(_Strict):
     #: Per-channel floor the capture contract enforces. ``None`` means the
     #: profile makes no rate promise and the contract only reports.
     min_achieved_rate_hz: float | None = Field(default=None, gt=0)
-    #: Refuse to start without a named calibration. A fuelling capture compared
-    #: against the wrong ROM target map is not wrong-looking, it is wrong — and
-    #: the 2026-08-10 capture stored ``tune_revision: null`` with no registry
-    #: fallback, so nothing downstream could even flag the ambiguity.
+    #: Prompt for a named calibration, without requiring one. **Advisory by
+    #: operator decision 2026-08-10** — an earlier version refused to arm and
+    #: that got in the way more than it helped. Nothing is silently lost: the
+    #: manifest still records ``tune_revision: null`` and the digest still
+    #: reports the source as ``unknown``, so a comparison across a flash can
+    #: tell the calibration was unrecorded. Do not restore the refusal.
     requires_tune_revision: bool = False
     #: Seed revision this profile's shipped definition came from. ``0`` marks a
     #: profile the operator authored, which is never upgraded.

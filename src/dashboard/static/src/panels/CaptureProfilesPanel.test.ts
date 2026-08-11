@@ -529,4 +529,3 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     expect(screen.getByText(/new, unsaved profile/)).toBeInTheDocument();
   });
 });
-

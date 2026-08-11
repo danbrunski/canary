@@ -139,3 +139,42 @@ r² would have — six of seven logs clear 0.88 — which is exactly the failure
    constant of 914943 counts/g from n=411) is the other candidate for BFS's
    *job* — confirming a fuel edit landed — even if it never reproduces BFS's
    *value*. Test both from one capture; they need the same window.
+
+## First capture on the repointed profile — 2026-08-11T002443
+
+`_capture-fuel-did-research-2026-08-11T002443`, 36 minutes, 5.2M records,
+DID-continuous.
+
+| channel | n | range |
+|---|---:|---|
+| `ECM_MAF_GPS` | 62,433 | 1.18 – 122.19 g/s |
+| `ECM_RPM` | 31,184 | 0 – 4,790 rpm |
+| `ECM_INJECTOR_PW_B1` | 31,219 | 3,136 – 36,557 counts |
+| `ECM_AF_SENSOR_V_B1` | 31,204 | 0 – 5.065 V |
+| `ECM_THROTTLE_POS_SENSOR_1` | 31,217 | 0.485 – 4.160 V |
+
+**1,927 one-second cells carry the full required tuple**, against 78 in the
+same-day `fuel-map` capture — and the airflow span is 1.18–122 g/s where the
+2026-08-08 rungs covered roughly 3.6–14. Range was the binding constraint on
+the fit; this is the first capture that has it.
+
+**Three defects, all fixed rather than tolerated.**
+
+- `ECM_INTAKE_AIR_TEMP` (0x123F) is **not intake air temperature** — raw
+  0x0006 on all 31,199 samples, a constant −34 °C across a full warm-up. Its
+  binding is retracted to `confidence: low` in `data/dids.yaml`; the density
+  term the fit needs must come from UpRev's `INTAKE AIR TMP` or Mode 01 PID
+  0x0F until a replacement DID is found.
+- 0x1209 was polled **twice** (29.4 Hz against 14.7 for every other channel):
+  `ECM_MAF_GPS` and its retired `ECM_BASE_FUEL_SCHEDULE_CANDIDATE` alias are
+  one register, and `build_poll_requests` deduplicated Mode 01 but not DIDs.
+  Fixed; a seventh of each round was being spent on a redundant read.
+- Achieved 14.7 Hz against a 20 Hz target. Real, and the profile's 15 Hz floor
+  catches it. Lower the target or raise the budget before the next run.
+
+**Still unanswered, and this capture cannot answer it:** no UpRev log for this
+window is present on the laptop — the newest is 8-08 — so there is no BFS to
+fit against. UpRev logs to memory and the operator saves the CSV by hand, so
+check whether one exists unsaved before concluding none was taken. The capture
+proves the profile and the range; pairing it with a simultaneous K-line log is
+the remaining step.

@@ -224,6 +224,34 @@ def request_eligible(index: int, request: Any) -> bool:
         return channel.upper() in profile.mode01 or "AUTO" in profile.mode01
 
 
+def profile_channel_for(channel: str) -> str | None:
+    """The name the *active profile* uses for a scheduler request channel.
+
+    The scheduler reports DIDs by identifier (``DID_1209``) while a profile
+    names them semantically (``ECM_MAF_GPS``), and ``request_eligible`` already
+    resolves between the two. Anything else that has to match a profile's
+    channel list against live scheduler rows needs the same mapping — and
+    re-deriving it is how the capture contract came to report four DIDs as
+    "never answered" while they were visibly answering.
+
+    Returns the profile's own name, or ``None`` when this request is not part
+    of the active profile's selection.
+    """
+    upper = channel.upper()
+    stripped = channel.removeprefix("DID_").upper()
+    with _lock:
+        # Mode 01 needs no translation: scheduler and profile use the same PID
+        # channel name. "AUTO" selects every supported PID, so the request's own
+        # name is the profile's name for it.
+        if upper in _profile.mode01 or "AUTO" in _profile.mode01:
+            return upper
+        for item in _profile.mode22:
+            resolved = _did_channels.get(item.upper(), item.upper())
+            if upper in {resolved, item.upper()} or stripped in {resolved, item.upper()}:
+                return item
+    return None
+
+
 def rate_weight(channel: str) -> float:
     with _lock:
         return _profile.mode01.get(channel.upper(), 1.0)

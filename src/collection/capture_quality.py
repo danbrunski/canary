@@ -47,6 +47,21 @@ RATE_TOLERANCE = 0.9
 #: capture made an on-target 14.93 Hz poll report 11.25 Hz and read as a fault.
 STALL_PERIODS = 5.0
 
+#: Floor under the stall threshold. Without it a 20 Hz channel was called
+#: stalled after 0.25 s, which is ordinary scheduling jitter — the first live
+#: run of this contract flagged every DID in the capture on that basis. A fast
+#: channel silent for two seconds is a real coverage gap; a quarter-second is
+#: not, at any rate.
+MIN_STALL_SECONDS = 2.0
+
+#: Poll tiers that are not part of a capture's channel selection. DTC reads are
+#: always eligible (`request_eligible` returns True for them regardless of
+#: profile) and are polled on their own slow schedule, so scoring them against
+#: the capture's rate reported DTC_STORED/PENDING/PERMANENT as unanswered on
+#: the contract's first live run. They are diagnostics, not capture channels.
+EXCLUDED_KINDS = frozenset({"dtc"})
+EXCLUDED_TIERS = frozenset({"dtc", "on_demand"})
+
 #: Minimum verification window. Below this the sample is too short to separate
 #: a slow channel from an unlucky one, and a "pass" would be noise. Returned as
 #: ``unverified`` rather than as a pass, because those are different claims.
@@ -161,7 +176,7 @@ def _channel_status(
     if requested is not None and float(achieved) < float(requested) * RATE_TOLERANCE:
         return "shortfall"
     if max_gap is not None and requested is not None and requested > 0:
-        if float(max_gap) > STALL_PERIODS / float(requested):
+        if float(max_gap) > max(STALL_PERIODS / float(requested), MIN_STALL_SECONDS):
             return "stalled"
     return "ok"
 
@@ -198,11 +213,22 @@ def evaluate_capture_quality(  # noqa: PLR0912
 
     channels: list[ChannelQuality] = []
     achieved_by_channel: dict[str, float | None] = {}
+    seen: set[str] = set()
     for request in scheduler.get("requests") or []:
         if not request.get("capture_selected", False):
             continue
+        if request.get("kind") in EXCLUDED_KINDS or request.get("poll_tier") in EXCLUDED_TIERS:
+            continue
         channel = str(request.get("channel") or "")
-        upper = channel.upper()
+        # Two requests can resolve to one DID (a catalogue alias and the
+        # profile's own name both map to 0x1209), which listed it twice.
+        if channel.upper() in seen:
+            continue
+        seen.add(channel.upper())
+        # The profile's own name for this request, resolved by the scheduler.
+        # Falling back to the raw channel keeps older payloads working.
+        profile_channel = str(request.get("profile_channel") or channel)
+        upper = profile_channel.upper()
         # The weight is part of the promise: under a target rate a 0.25-weight
         # context channel is *asked* for a quarter of it, so holding it to the
         # full target would report a shortfall the profile never claimed.
@@ -219,7 +245,10 @@ def evaluate_capture_quality(  # noqa: PLR0912
         achieved_by_channel[upper] = None if achieved is None else float(achieved)
         channels.append(
             ChannelQuality(
-                channel=channel,
+                # Reported under the profile's name, not the transport's:
+                # "ECM_INJECTOR_PW_B1" is what the operator selected,
+                # "DID_1208" is what they then have to look up.
+                channel=profile_channel,
                 kind=request.get("kind"),
                 requested_hz=requested_hz,
                 achieved_hz=achieved,

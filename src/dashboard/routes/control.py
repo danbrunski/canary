@@ -681,20 +681,12 @@ def register_control_routes(
             )
         if profile.name == "default":
             raise HTTPException(status_code=409, detail="default collection is already active")
-        if profile.requires_tune_revision and not (request.tune_revision or "").strip():
-            # Refused rather than defaulted. There is no registry fallback: the
-            # 2026-08-10 capture stored `tune_revision: null` and the digest
-            # resolved it to `unknown` with no ROM target map, so an analysis
-            # across a flash boundary would have silently compared two
-            # different engines with nothing marking the ambiguity.
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"capture profile {profile.name!r} requires tune_revision: fuelling and "
-                    "timing are only interpretable against the calibration in force, and "
-                    "nothing downstream can recover it after the fact"
-                ),
-            )
+        # `requires_tune_revision` is advisory, by operator decision 2026-08-10:
+        # a missing revision must never block a capture. The information is not
+        # lost — the manifest records `tune_revision: null` and the digest
+        # reports the revision source as `unknown` — so an analysis across a
+        # flash boundary can still tell that the calibration was unrecorded.
+        # It is surfaced as a hint in the UI, not as a gate here.
         if request.rate_hz is not None:
             profile = profile.model_copy(update={"target_rate_hz": request.rate_hz})
         async with capture_transition_lock:

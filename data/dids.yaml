@@ -174,16 +174,41 @@ dids:
     scale: 1.0
     offset: -40.0
     unit: degC
-    confidence: high
+    #: RETRACTED to `low` 2026-08-10 — see the disproving evidence below. Do
+    #: NOT use this DID as an intake-air-temperature provider. Mode 01 PID 0x0F
+    #: is the supported reference; UpRev's `INTAKE AIR TMP` is the other.
+    confidence: low
     plausible_min: -40.0
     plausible_max: 90.0
     evidence:
+      - session: _capture-fuel-did-research-2026-08-11T002443
+        method: full_drive_constancy_check
+        conditions: >
+          36-minute drive, DID-continuous at 14.7 Hz, rpm 0-4790 and airflow
+          1.18-122.19 g/s — a full warm-up and load range, not a parked hold.
+        finding: >
+          DISPROVES the binding. Raw payload was 0x0006 on ALL 31,199 samples,
+          decoding to a constant -34 degC. Intake air temperature cannot be
+          constant across a 36-minute drive spanning idle to 4790 rpm, and
+          -34 degC is not a plausible reading at any point of it. The value
+          also differs from the 0x0050 recorded in 2026-05, so this is not an
+          offset error on a live signal: 0x123F is a static or unrelated
+          register.
+
+          Why the original evidence could not catch this: it was taken parked,
+          and its own note says "intake air barely moves parked". A constant
+          and a correct reading are indistinguishable under that condition, so
+          `confidence: high` rested on a test the binding could not fail.
+          Rule this generalises to: never promote a binding on evidence taken
+          where the quantity cannot move.
       - session: 2026-05-16T214006
         method: four_state_classification
         finding: >
           2-byte payload 0x0050 = 80; A-40 → flat ~40 degC across all four
           states (intake air barely moves parked); NT510 "INT/A temp" = 42.
           (byte_length corrected 1→2 — caught by tools/decode_dids.py.)
+          RETAINED for the byte-width correction only; the identification it
+          supports is disproved above.
 
   - did: 0x1208
     name: ECM_INJECTOR_PW_B1

@@ -1002,7 +1002,15 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
                 priority=channel.upper() in priority_channels,
             )
         )
-    for did in [parse_did_token(d) for d in spec.dids]:
+    # Deduplicated by resolved identifier, the way `add_pid` already does for
+    # Mode 01. Names and hex tokens both reach the same DID, and the catalogue
+    # carries aliases — `ECM_MAF_GPS` and its old `ECM_BASE_FUEL_SCHEDULE_
+    # CANDIDATE` name are one register. Without this the scheduler issued two
+    # requests for it: the 2026-08-10 all-DID capture polled 0x1209 at 29.4 Hz
+    # while every other channel got 14.7, spending a seventh of the round on a
+    # duplicate. The channel name is derived from the identifier, so the second
+    # request also wrote rows indistinguishable from the first.
+    for did in dict.fromkeys(parse_did_token(d) for d in spec.dids):
         requests.append(
             _PollRequest(
                 kind="did",
@@ -1472,6 +1480,13 @@ def _scheduler_metrics(
                 if request.identifier > 0xFF
                 else f"0x{request.identifier:02X}",
                 "channel": request.channel,
+                # The active profile's own name for this request. DIDs are
+                # reported here by identifier (`DID_1209`) while a profile names
+                # them semantically (`ECM_MAF_GPS`); carrying the resolved name
+                # means a consumer matching against a profile's channel list
+                # never has to re-derive the alias map, which is what made the
+                # capture contract call four answering DIDs "never answered".
+                "profile_channel": tuning_profile.profile_channel_for(request.channel),
                 "capture_selected": tuning_profile.request_eligible(index, request),
                 "poll_tier": request.poll_tier,
                 "priority": request.priority,

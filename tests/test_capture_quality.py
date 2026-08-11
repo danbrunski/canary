@@ -208,3 +208,130 @@ def test_tuple_bound_is_the_slowest_member() -> None:
     assert tuple_rate_bound_hz({"A": 4.0, "B": 0.3}, ("A", "B")) == 0.3
     assert tuple_rate_bound_hz({"A": 4.0}, ("A", "B")) is None
     assert tuple_rate_bound_hz({"A": 4.0}, ()) is None
+
+
+def _did_scheduler() -> dict[str, object]:
+    """An all-DID capture as the scheduler actually reports one.
+
+    DIDs come back by identifier while the profile names them semantically,
+    and DTC reads are always `capture_selected` regardless of profile.
+    """
+    return {
+        "capture_observed_seconds": 120.0,
+        "achieved_hz_capture": {"DID_1209": 19.4, "DID_1208": 19.1, "DID_1219": 18.9},
+        "capture_samples": {"DID_1209": 2328, "DID_1208": 2292, "DID_1219": 2268},
+        "capture_max_gap_seconds": {"DID_1209": 0.4, "DID_1208": 0.35, "DID_1219": 0.5},
+        "requests": [
+            {
+                "channel": "DID_1209",
+                "profile_channel": "ECM_MAF_GPS",
+                "kind": "did",
+                "poll_tier": "fast",
+                "capture_selected": True,
+            },
+            {
+                "channel": "DID_1208",
+                "profile_channel": "ECM_INJECTOR_PW_B1",
+                "kind": "did",
+                "poll_tier": "fast",
+                "capture_selected": True,
+            },
+            {
+                "channel": "DID_1219",
+                "profile_channel": "ECM_RPM",
+                "kind": "did",
+                "poll_tier": "fast",
+                "capture_selected": True,
+            },
+            # A catalogue alias resolving to a DID already listed.
+            {
+                "channel": "DID_1209",
+                "profile_channel": "ECM_MAF_GPS",
+                "kind": "did",
+                "poll_tier": "fast",
+                "capture_selected": True,
+            },
+            {
+                "channel": "DTC_STORED",
+                "profile_channel": None,
+                "kind": "dtc",
+                "poll_tier": "dtc",
+                "capture_selected": True,
+            },
+            {
+                "channel": "DTC_PENDING",
+                "profile_channel": None,
+                "kind": "dtc",
+                "poll_tier": "dtc",
+                "capture_selected": True,
+            },
+        ],
+        "batching": {"max_pids": 3},
+    }
+
+
+def _did_profile() -> dict[str, object]:
+    return {
+        "name": "fuel-did-research",
+        "mode01": {},
+        "mode22": ["ECM_MAF_GPS", "ECM_INJECTOR_PW_B1", "ECM_RPM"],
+        "target_rate_hz": 20.0,
+        "required_tuple": ["ECM_RPM", "ECM_MAF_GPS", "ECM_INJECTOR_PW_B1"],
+        "min_achieved_rate_hz": 15.0,
+        "round_timestamps": True,
+    }
+
+
+def test_a_did_capture_is_scored_under_the_profiles_own_channel_names() -> None:
+    """The first live run called four answering DIDs "never answered".
+
+    The scheduler reports `DID_1209`; the profile says `ECM_MAF_GPS`. Matching
+    one against the other found nothing, so `required_tuple_incomplete` fired
+    on a capture whose channels were all healthy.
+    """
+    quality = evaluate_capture_quality(profile=_did_profile(), scheduler=_did_scheduler())
+
+    assert quality.verdict == "pass", quality.failures
+    assert quality.tuple_rate_bound_hz == 18.9
+    # Reported under the name the operator selected, not the transport's.
+    assert {row.channel for row in quality.channels} == {
+        "ECM_MAF_GPS",
+        "ECM_INJECTOR_PW_B1",
+        "ECM_RPM",
+    }
+
+
+def test_dtc_reads_are_not_capture_channels() -> None:
+    """`request_eligible` returns True for DTC reads whatever the profile.
+
+    They poll on their own slow schedule, so scoring them against a 20 Hz
+    capture reported DTC_STORED/PENDING as unanswered on the first live run.
+    """
+    quality = evaluate_capture_quality(profile=_did_profile(), scheduler=_did_scheduler())
+    assert not any(row.channel.startswith("DTC_") for row in quality.channels)
+    assert "channel_unanswered" not in {f["clause"] for f in quality.failures}
+
+
+def test_one_did_reached_by_two_requests_is_listed_once() -> None:
+    quality = evaluate_capture_quality(profile=_did_profile(), scheduler=_did_scheduler())
+    names = [row.channel for row in quality.channels]
+    assert len(names) == len(set(names))
+
+
+def test_sub_second_jitter_at_a_high_rate_is_not_a_stall() -> None:
+    """A 20 Hz channel was called stalled after 0.25 s of quiet.
+
+    That is ordinary scheduling jitter and it flagged every DID in the first
+    live capture. Two seconds of silence is a coverage gap; a quarter-second
+    is not, at any rate.
+    """
+    scheduler = _did_scheduler()
+    scheduler["capture_max_gap_seconds"] = {"DID_1209": 0.9, "DID_1208": 1.5, "DID_1219": 0.4}
+    quality = evaluate_capture_quality(profile=_did_profile(), scheduler=scheduler)
+    assert "channel_stalled" not in {f["clause"] for f in quality.failures}
+
+    # A genuinely long silence still fails.
+    scheduler["capture_max_gap_seconds"] = {"DID_1209": 30.0, "DID_1208": 0.3, "DID_1219": 0.4}
+    stalled = evaluate_capture_quality(profile=_did_profile(), scheduler=scheduler)
+    failure = next(f for f in stalled.failures if f["clause"] == "channel_stalled")
+    assert failure["channels"] == ["ECM_MAF_GPS"]
