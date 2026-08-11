@@ -1,37 +1,141 @@
 # CANary-HAT — Board Specification
 
+> **Revision status.** This document describes the board **as drawn in the
+> KiCad project at `C:\Users\thebo\Documents\canary-hat`** (schematic and PCB
+> both dated 2026-08-10), not the original design intent. Everything in §2–§7
+> was read back out of the schematic netlist, the PCB file, and the project's
+> design rules. Where the as-built circuit contradicts the design intent that
+> earlier revisions of this document recorded, the contradiction is called out
+> in place; §8.1 logs the defects that were found this way and have since been
+> fixed.
+>
+> Board state: **schematic complete, PCB placed and fully routed** (0
+> unconnected items), **0 DRC violations and 0 schematic-parity issues** as of
+> 2026-08-11. ERC is 0 errors / 5 benign warnings. No schematic defects remain
+> (§8.1).
+
 ## 1. Overview
 
-The CANary-HAT is a 4-layer Raspberry Pi 5 HAT integrating a CAN FD interface, K-line/LIN transceiver, 6-axis IMU, barometric pressure sensor, GNSS/GPS receiver, HAT ID EEPROM, and an automotive-grade buck power converter with 12V input protection. The board is designed for vehicle telematics, diagnostics, and asset-tracking applications requiring simultaneous CAN, K-line, motion, altitude, and positioning data on a Raspberry Pi 5 host.
+The CANary-HAT is a 4-layer Raspberry Pi 5 HAT integrating a CAN FD interface,
+K-line/LIN transceiver, 6-axis IMU, barometric pressure sensor, GNSS/GPS
+receiver, HAT ID EEPROM, and a protected 12V vehicle input. The board is
+designed for vehicle telematics, diagnostics, and asset-tracking applications
+requiring simultaneous CAN, K-line, motion, altitude, and positioning data on a
+Raspberry Pi 5 host.
 
-**Role in the CANary stack.** This board **replaces the Waveshare 2-CH CAN HAT** as the in-vehicle CAN interface, and additionally folds in the GNSS receiver, IMU, and barometer that are currently unbuilt or externally attached. It does **not** replace the X1202 UPS HAT, which continues to power the Pi and own battery-backed shutdown. See §7 for the resulting power topology and §11 for the software work each subsystem implies.
+**Role in the CANary stack.** This board **replaces the Waveshare 2-CH CAN HAT**
+as the in-vehicle CAN interface, and additionally folds in the GNSS receiver,
+IMU, and barometer that are currently unbuilt or externally attached. It does
+**not** replace the X1202 UPS HAT, which continues to power the Pi and own
+battery-backed shutdown. See §3.7 for the resulting power topology and §11 for
+the software work each subsystem implies.
+
+**The buck converter is gone.** Earlier revisions specified an AP63203Q
+generating a board-local 3V3_BUCK rail from vehicle 12V, and then argued
+(§3.7.4/§3.7.5, retained below) that the rail should be depopulated in favour of
+the Pi's 3V3. The current schematic goes further and **omits the buck and its
+footprint entirely**: every 3.3V device on the board is fed from the Pi header's
+3V3 pins. That decision is now settled and is reflected throughout this
+document; §3.7.4/§3.7.5 are kept because the reasoning still governs any future
+attempt to re-add a local rail.
 
 ## 2. Board Stackup
 
-| Layer | Assignment | Notes |
+| Layer | Assignment | As-built |
 |---|---|---|
-| F.Cu | Signal | Component placement + primary routing |
-| Gnd.Cu (inner 1) | Ground plane | Solid GND pour, stitched with vias to component GND pads |
-| Power.Cu (inner 2) | Power plane | Carries the **+12V** net (VSUP_12V_RAW) plus the derived rails |
-| B.Cu | Signal | Secondary routing |
+| F.Cu | Signal + GND pour | Components, primary routing (341 segments), **GND pour** |
+| In1.Cu (`Gnd.Cu`) | Ground plane | **Solid GND pour**, board-wide, with one anti-pad notch at the SMA launch (§3.6) |
+| In2.Cu (`Power.Cu`) | Power plane | **Single `+3V3` pour** (zone named `Pwr`) — see note |
+| B.Cu | Signal + GND pour | Secondary routing (104 segments), **GND pour** |
 
-- Board thickness: 1.6mm standard
-- Copper weight: 1oz per layer
-- Via configuration: through-hole, 0.7–0.8mm diameter / 0.4mm drill (≥0.15mm annular ring)
-- Board outline: 65mm x 56mm (standard Raspberry Pi HAT form factor)
+**Outer-layer GND pours (added 2026-08-11)** — one zone spanning F.Cu and B.Cu,
+priority 2, filling to 9 regions. Two pad-connection settings are deliberate, and
+both were arrived at by failing DRC first:
 
-**Plane note.** Power.Cu is a mixed-rail plane, not a single-net pour: +12V, 3V3_BUCK, 3V3_PI, and 5V0 all live there as separate zones. Any B.Cu signal that crosses a zone boundary loses its return path — keep fast signals (SPI at up to 20 MHz, the GNSS RF feed) on F.Cu over solid Gnd.Cu, or stitch a local GND island on Power.Cu beneath them.
+- **J4's SMA ground pads connect *solid*, not thermal relief.** Thermal spokes add
+  inductance exactly at the RF launch, and solid connections are exempt from the
+  minimum-spoke check they were failing.
+- **J1's pads connect with *None*.** At 2.54mm pitch with 1.7mm pads the edge gap
+  is 0.84mm, while a 0.5mm thermal gap needs 1.0mm — so the pour physically cannot
+  pass between the header pins and fragments into isolated pockets that then catch
+  the pads' spokes. J1's GND pins reach ground through their plated barrels into
+  In1.Cu regardless, so the outer pours were never carrying that current. This
+  took the fill from 15 fragments to 9.
+
+- Board outline: **65.0mm × 56.0mm** (X 100–165, Y 44–100 in board coordinates),
+  standard Raspberry Pi HAT form factor.
+- Board thickness: 1.6mm. Stackup as entered in the project:
+  0.035 / **0.1 prepreg** / 0.035 / 1.24 core / 0.035 / **0.1 prepreg** / 0.035 mm.
+  The thin outer dielectrics matter: they are what make a 0.2mm F.Cu trace over
+  In1.Cu land near 50Ω (§3.6).
+- 1oz copper per layer, **64 through-hole vias** (stitching added at the RF launch
+  and through the outer pours), no blind/buried vias, no microvias.
+- Mounting holes at (103.5, 47.5), (161.5, 47.5), (103.5, 96.5), (161.5, 96.5) —
+  58mm × 49mm, the standard HAT hole pattern.
+- All components are on **F.Cu**; only the 40-pin socket J1 is on **B.Cu**, as a
+  HAT requires.
+
+**Plane note (revised).** The earlier plan for a mixed-rail Power.Cu carrying
++12V plus derived rails did not survive the removal of the buck. Power.Cu is now
+a **single-net +3V3 pour**, so B.Cu signals crossing it keep a continuous return
+— but the return is a *power* plane, not ground. Fast signals (SPI up to 20 MHz,
+the GNSS RF feed) still belong on F.Cu over the solid Gnd.Cu pour. **+12V is
+routed as tracks, not as plane copper** (see §3.7.3 for why the width matters).
+
+### 2.1 Design rules and net classes (from `canary-hat.kicad_pro`)
+
+| Net class | Track | Clearance | Via (dia/drill) | Pattern |
+|---|---|---|---|---|
+| Default | 0.20mm | 0.20mm | 0.6 / 0.3 | — |
+| Signal | 0.20mm | **0.15mm** | 0.6 / 0.3 | `*GPIO*`, `*SPI0*`, `*SDA*`, `*SCL*`, `*RXD*`, `*TXD*` |
+| CAN | 0.25mm | 0.20mm | 0.6 / 0.3 | `*CAN*` |
+| Power | 0.35mm | 0.20mm | 0.9 / 0.5 | `+3V3*`, `+5V` |
+| Power_High | **0.40mm** | 0.20mm | 0.9 / 0.5 | `*12V*` |
+| GND | 0.60mm | 0.20mm | 0.7 / 0.4 | `*GND*` |
+| **RF** | 0.20mm | 0.20mm | — | `*J4-In*`, `*U7-RF_IN*` |
+
+**Two custom rules live in `canary-hat.kicad_dru`**, both scoped rather than
+global — each exists because a blanket rule collided with a manufacturer land
+pattern, which happened twice:
+
+- **`U6 LGA-14L land pattern`** — 0.14mm clearance inside U6's courtyard. The
+  LSM6DSOX land pattern has 0.1952mm pad-to-pad gaps against the 0.2mm default
+  (§3.4). Scoped so board-wide clearance stays 0.2mm.
+- **`RF feed`** — 0.5mm between the RF netclass and any *zone*. The RF feed is
+  0.2mm over a 0.1mm dielectric; a GND pour at the default 0.2mm sits at
+  gap/height = 2, which turns the microstrip into a grounded coplanar waveguide
+  and drags Z₀ from ~45Ω toward the low 30s. **This constrains the pour only.**
+  Putting the 0.5mm on the netclass instead breaks U7's land pattern, where RF_IN
+  (pad 11) sits **0.262mm** from its neighbouring ground pads — no netclass
+  clearance above 0.262mm can ever pass there.
+
+The general lesson, recorded because it cost two rounds: *constrain the thing you
+actually mean*. "Keep pours off this trace" is a relationship between a pour and a
+trace; expressing it as a property of the net drags in every pad-to-pad pair on
+that net, and land patterns are not yours to change.
+
+Board minima: track 0.15mm, via 0.4mm, annular ring 0.15mm, hole-to-hole
+0.25mm, PTH 0.3mm, copper-to-edge 0.05mm. Measured widths on the routed board
+generally match the classes: CANH/CANL at 0.25mm, K-line and the RF feed at
+0.20mm, GND up to 0.60mm. The two 12V nets are routed **well above their
+`Power_High` class** wherever it matters: the `+12V_RAW` pass-through leg from J2
+to J3 is **1.3mm** because it feeds the Pi (§3.7.4), while the mA-level branches
+— up to D4's anode, and all of `+12V` past it — sit at 0.6mm with a 0.4mm stub.
 
 ## 3. Major Components
 
-### 3.1 CAN FD Controller
+As-built reference designators are given for each block. Full designator list:
+U1–U7, Y1, J1–J4, JP1, BT1, L1, D1/D2/D4/D5, R1–R9, C1–C16, MH1–MH4 — 48
+footprints, with schematic and PCB in sync. There is no D3.
+
+### 3.1 CAN FD Controller — U3
 
 | Parameter | Value |
 |---|---|
-| Part number | MCP2518FDT-E/SL |
+| Part number | MCP2518FDT-E/SL (MPN pinned on the symbol) |
 | Manufacturer | Microchip Technology |
 | Function | External CAN FD controller with SPI interface |
-| Supply voltage (VDD) | 2.7V to 5.5V |
+| Supply voltage (VDD) | 2.7V to 5.5V — **wired to +3V3 (Pi rail)**, decoupled by C7/C9 (100n) |
 | Interface | SPI, up to 20 MHz clock speed |
 | Arbitration bit rate | Up to 1 Mbps |
 | Data bit rate | Up to 8 Mbps |
@@ -39,440 +143,1225 @@ The CANary-HAT is a 4-layer Raspberry Pi 5 HAT integrating a CAN FD interface, K
 | Standards compliance | ISO 11898-1:2015, AEC-Q100 qualified |
 | Active current | Max 20 mA at 5.5V, 40 MHz CAN clock |
 | Sleep current | 15 µA typical |
-| Support circuitry | 40 MHz crystal with load capacitors; nRESET pull-up (see open items) |
+| Support circuitry | **Y1 40 MHz crystal (ABLS2-40.000MHZ-D4YF-T, Abracon) with C5/C6 = 22pF** on OSC1/OSC2 |
 
-The MCP2518FDT-E/SL handles CAN FD/2.0B protocol framing and message filtering over SPI to the Pi 5, pairing with the TCAN1042VDRQ1 physical-layer transceiver to drive the actual CAN bus. Its TXCAN/RXCAN pins cross-connect directly to the transceiver's TXD/RXD pins.
+TXCAN (pin 1) and RXCAN (pin 2) cross-connect directly to the TCAN1042's TXD and
+RXD. CLKO/SOF (pin 3), nINT1/GPIO1 (pin 8), and nINT0/GPIO0/XSTBY (pin 9) are
+left unconnected. nINT (pin 4) goes to GPIO25.
 
-Linux support is the mainline `mcp251xfd` driver, configured by device-tree overlay — `dtoverlay=mcp251xfd,spi0-0,interrupt=<INT GPIO>,oscillator=40000000`. The driver expects a level-sensitive, active-low interrupt; the 40 MHz crystal must be declared to the overlay or the bit timing is wrong.
+**The old "nRESET must not float" open item is void.** The 14-pin SOIC
+MCP2518FD has no nRESET pin — the package exposes TXCAN, RXCAN, CLKO/SOF, nINT,
+OSC2, OSC1, VSS, nINT1/GPIO1, nINT0/GPIO0/XSTBY, SCK, SDI, SDO, nCS, VDD and
+nothing else. There is nothing to pull up.
 
-### 3.2 CAN FD Transceiver (Physical Layer)
+#### 3.1.1 Crystal: resolved against both datasheets
+
+Worked through the Abracon ABLS2 datasheet (rev. 11.15.2016) and MCP2518FD
+DS20006027B on 2026-08-11.
+
+**C5/C6 should be 27pF, not 22pF.** The part number `ABLS2-40.000MHZ-D4YF-T`
+carries no load-capacitance field, and the ABLS2 ordering scheme treats an
+omitted field as standard — **CL = 18pF**. The load caps follow from
+C = 2·(CL − C_stray); with ~4pF of stray that is **28pF, so 27pF standard
+value**. At 22pF the circuit presents CL ≈ 15pF to a crystal cut for 18pF.
+
+**But the frequency consequence is negligible, and that is worth knowing before
+anyone panics.** The pulling from a 3pF CL error is roughly **30ppm**, against
+the MCP2518FD's `FOSC1,40M` requirement of **40 MHz ±0.5% — that is ±5000ppm**.
+Even stacked with the crystal's own ±30ppm tolerance and ±30ppm stability, the
+total is under 0.01% of a 0.5% budget. Fit 27pF because it is correct and free;
+the secondary reason is drive level, since undersized load caps raise it toward
+the ABLS2's 1000µW maximum.
+
+**The part of this BOM line that actually matters is the `F`.** The ABLS2
+frequency table makes 24.01–70.00 MHz **3rd overtone the *standard* product**, and
+24.01–50.00 MHz fundamental only as an *option*. The `F` in `D4YF` is that option
+("Fund. AT >24MHz"). The MCP2518FD's oscillator is a plain Pierce circuit with no
+tank, so a 3rd-overtone crystal in this socket either fails to start or runs at
+its ~13.3 MHz fundamental — and `mcp251xfd` would be told 40 MHz regardless, so
+every bit time on the bus would be wrong by 3×. **One letter in the part number
+prevents that.** Do not let it be dropped in BOM transcription.
+
+Two other options in that part number are load-bearing:
+
+- **`D` = −40°C to +85°C.** The ABLS2 *standard* temperature range is 0 to +70°C,
+  which is not a vehicle-cabin part.
+- **`4Y` = ±30ppm tolerance, ±30ppm stability.** Ample against ±0.5%.
+
+Supporting numbers: ESR 40Ω max for 16–50 MHz fundamental, C0 ≤ 7pF, drive level
+100µW typ / 1000µW max, against the MCP2518FD's specified transconductance of
+2040–3060 µA/V for a 40 MHz crystal — comfortable margin. Oscillator
+stabilisation is 3ms from power-on.
+
+Two notes rather than problems: the ABLS2 is an HC49/US can, **11.4 × 4.7 ×
+3.3mm**, which is physically large for a 65 × 56mm board where a 3.2 × 2.5mm SMD
+crystal would do; and Abracon markets it as COTS commercial/industrial, not
+AEC-Q200, unlike the AEC-qualified parts elsewhere on this board. Neither
+matters for a single research rig.
+
+Linux support is the mainline `mcp251xfd` driver, configured by device-tree
+overlay — `dtoverlay=mcp251xfd,spi0-0,interrupt=25,oscillator=40000000`. The
+driver expects a level-sensitive, active-low interrupt.
+
+### 3.2 CAN FD Transceiver (Physical Layer) — U4
 
 | Parameter | Value |
 |---|---|
 | Part number | TCAN1042VDRQ1 [cite:54][cite:57] |
 | Manufacturer | Texas Instruments [cite:54] |
 | Function | Fault-protected CAN transceiver with I/O level shifting, CAN FD capable [cite:54] |
-| Supply voltage (VDD) | 4.5V to 5.5V, connected to 5V0 rail [cite:57][cite:60] |
-| I/O level-shifting voltage (VIO) | 3V to 5.5V, connected to the Pi 3V3 rail [cite:54] |
+| Supply voltage (VDD) | 4.5V to 5.5V — **wired to +5V (Pi header pins 2/4)**, decoupled by C8 (100n) [cite:57][cite:60] |
+| I/O level-shifting voltage (VIO) | 3V to 5.5V — **wired to +3V3 (Pi rail)** [cite:54] |
 | Data rate | Classic CAN and up to 2 Mbps CAN FD [cite:54] |
 | Standards compliance | ISO 11898-2:2016, ISO 11898-5:2007, AEC-Q100 (Grade 1) [cite:54] |
 | Protection | ESD up to ±15kV (IEC), bus fault protection ±58V, undervoltage protection on VDD/VIO, thermal shutdown [cite:54] |
-| Package | SOIC (8), VSON (8) 3.0mm x 3.0mm [cite:54] |
-| Operating temperature | -55°C to 125°C (junction) [cite:54] |
+| Package | SOIC-8 (footprint `D0008A_L`) [cite:54] |
 | Loop delay | 110 ns typical [cite:54] |
-| Support circuitry | CANH/CANL routed to terminal block; **no on-board 120Ω termination** |
+| Support circuitry | CANH/CANL straight to J2 pins 5/6; **no on-board termination, no ESD array, no common-mode choke** |
 
-The TCAN1042VDRQ1 provides the physical CAN bus driver/receiver stage. Its "V" suffix indicates a secondary I/O supply pin (VIO) that allows level-shifting between the CAN controller's 3.3V logic and the transceiver's 5V bus-side supply, with decoupling kept separate between the two supply pins [cite:54].
+**STB is resolved.** Pin 8 (STB) is tied directly to GND in the schematic, so the
+transceiver is hard-wired into normal mode. The old open item is closed.
 
-**Termination.** The board deliberately carries no 120Ω termination resistor. A vehicle bus is already terminated at both ends by the vehicle's own nodes; a third terminator is a fault. Bench use against an unterminated bus requires an external terminator in the harness.
+**Termination.** The board deliberately carries no 120Ω termination resistor. A
+vehicle bus is already terminated at both ends by the vehicle's own nodes; a
+third terminator is a fault. Bench use against an unterminated bus requires an
+external terminator in the harness.
 
-**Standby pin.** The transceiver's S (STB) pin must be held low for normal operation — floating or high puts the device in silent/standby and no traffic reaches the controller. Confirm this is a hard pulldown or a driven GPIO (see open items).
+**Nothing else sits on the bus pins.** CANH and CANL run from the terminal block
+to the transceiver with no series resistors, no bus TVS array, and no choke —
+the transceiver's own ±58V fault rating and ±15kV IEC ESD rating is the entire
+protection story on the CAN side. That is defensible for a device that lives
+permanently inside a vehicle harness, but it is a deliberate position, not an
+oversight to discover at bring-up (§8.2).
 
-### 3.3 K-Line / LIN Transceiver
+### 3.3 K-Line / LIN Transceiver — U2
 
 | Parameter | Value |
 |---|---|
-| Part number | TLIN1027-Q1 [cite:53][cite:56] |
+| Part number | TLIN1027DRQ1 [cite:53][cite:56] |
 | Manufacturer | Texas Instruments [cite:56] |
 | Function | LIN physical layer transceiver, **without dominant state timeout**; also supports ISO 9141 K-line diagnostics [cite:53][cite:56] |
-| Supply voltage (VSUP) | 4V to 36V, connected to VSUP_12V_RAW rail, in series with an external reverse-blocking diode; 100 nF decoupling at the pin [cite:56] |
+| Supply voltage (VSUP) | 4V to 36V — wired to **+12V** (downstream of D4/D1), 100nF (C3) at the rail [cite:56] |
 | Input voltage threshold (VIH) | 2V to 5.5V (supports 2.5V/3.3V/5V logic) [cite:62] |
-| Data rate | LIN **transmit up to 20 kbps**; LIN receive up to 100 kbps for in-line programming [cite:53][cite:56] |
-| Standards compliance | LIN 2.0/2.1/2.2/2.2A, ISO/DIS 17987-4.2, SAE J2602, AEC-Q100 (Grade 1: -40°C to 125°C) [cite:53][cite:56] |
+| Data rate | LIN **transmit up to 20 kbps**; LIN receive up to 100 kbps [cite:53][cite:56] |
+| Standards compliance | LIN 2.0/2.1/2.2/2.2A, ISO/DIS 17987-4.2, SAE J2602, AEC-Q100 (Grade 1) [cite:53][cite:56] |
 | Bus fault protection | ±45V [cite:56] |
-| Protection | Undervoltage protection on VSUP, thermal shutdown, unpowered/ground-disconnect failsafe, bus-stuck-dominant false-wake lockout [cite:53] |
-| Package | SOIC (8), VSON (8) 3.0mm x 3.0mm [cite:56] |
-| Support circuitry | **4.7 kΩ RXD pull-up**; bus-side commander termination (see below); protection diode network |
+| Package | SOIC-8 HV (footprint `D0008B_HV`) [cite:56] |
 
-The TLIN1027-Q1 provides the K-line diagnostic interface, converting the Raspberry Pi's UART_TXD signal into a current-limited, wave-shaped K-line/LIN bus signal to reduce EMI, with UART_RXD feeding the response back to the host and GPIO26_EN controlling transceiver enable state [cite:56].
+**As-built support network:**
+
+| Ref | Value | Connection | Assessment |
+|---|---|---|---|
+| R3 | 4.7 kΩ | RXD (pin 1) → **+3V3** | ✅ correct — see §3.3.2 for why 4.7 kΩ specifically |
+| R6 | 1 kΩ | GPIO14/TXD0 → TXD (pin 4), in series | ✅ series protection on the host drive line, per §11.1 Pin 4 |
+| **R8** | 4.7 kΩ | GPIO14/TXD0 → **+3V3**, on the **Pi side** of R6 | ✅ added 2026-08-10 — holds TXD recessive when the host stops driving (§3.3.2) |
+| R4 | 4.7 kΩ | **EN (pin 2) → GND** | ✅ corrected 2026-08-10 — external pull-down backing the internal one |
+| C4 | 220 pF | LIN (pin 6) → GND | ✅ correct — Figure 9-1 shows 220pF on the commander node too |
+| R5 + D5 | 1 kΩ + **1N4148W** | **+12V → R5 → D5 (anode→cathode) → LIN**, commander pull-up | ✅ corrected 2026-08-10 — see below |
+| C3 | 100 nF | +12V → GND at the VSUP pin | ✅ required by §10, and now drawn on this sheet |
+| — | — | NC pins 3 and 8 unconnected; GND pin 5 to GND | ✅ |
+
+**Bus topology as built** — J2 pin 4 lands directly on the LIN pin, with the
+commander termination across it, which is Figure 8-1:
+
+```
++12V ──> R5 (1 kΩ) ──> D5 anode
+                       D5 cathode ──┬── U2.6 (LIN)
+                                    ├── C4 (220 pF) ── GND
+                                    └── J2 pin 4  (vehicle K-line)
+```
+
+The pull-up is taken from `+12V` (post-D4) rather than `+12V_RAW` so it shares the
+receiver's reference — the LIN thresholds are ratiometric (`VBUS_CNT` = 0.5 ×
+VSUP). Two diodes sit in the pull-up path (D4 + D5), so recessive lands near
+Vbat − 1.1V against VSUP ≈ Vbat − 0.4V; Figure 8-1 annotates exactly this drop,
+and it stays far above the 0.6 × VSUP recessive threshold.
+
+D5 is a **1N4148W, not a Schottky**. Its job is blocking reverse current from a
+live bus into an unpowered VSUP (§8.3.4), and Schottky reverse leakage — tens to
+hundreds of µA at 12V, worse hot — undermines exactly that. The silicon part
+leaks <100 nA while carrying 12 mA forward.
 
 #### 3.3.1 Datasheet-verified design notes (TI SLLSF58B, rev. May 2022)
 
-Verified against the TLIN1027-Q1 datasheet, since the K-line path is the board's highest-value new capability:
+Verified against the TLIN1027-Q1 datasheet, since the K-line path is the board's
+highest-value new capability:
 
-- **No dominant state timeout — this is the part's defining feature**, and it is the correct choice for K-line. Every other TI LIN transceiver enforces a TXD dominant timeout in the 10–20 ms range, which would abort an ISO 9141-2 **5-baud slow init** (200 ms per bit, up to ~600 ms held dominant). The TLIN1027-Q1 imposes no such limit, so both 5-baud slow init and fast init are possible. The datasheet Features list states "Supports ISO 9141 (K-Line)" outright. *Caveat from TI's applications team: the family is specified as* compatible with *ISO 9141 systems, not* compliant with *the ISO 9141 physical-layer levels and timings — it works in an otherwise-compliant system, but its own levels/timings are not guaranteed against that standard.*
-- **RXD is an open-drain output** and requires an external pull-up of **1 kΩ to 10 kΩ** to the host I/O supply. The board's **4.7 kΩ is in spec** for 3.3V (check IOL: 1.5 mA at VOL = 0.4V). Pull it up to the Pi 3V3 rail, not 3V3_BUCK, so RXD stays referenced to the host that reads it.
-- **Commander (master) mode needs external bus termination.** The internal termination is a **45 kΩ** pull-up (spec 20/45/60 kΩ) plus series diode to VSUP — that is *responder/slave* termination. A diagnostic tester is a commander node and requires an **external 1 kΩ pull-up plus series blocking diode from LIN to VSUP**, per the LIN spec and the datasheet's Figure 9-1. A 220 pF (responder) / 200 pF (commander) LIN-to-GND capacitor completes the network. **Confirm the "protection diode network" in the current design includes this 1 kΩ + series diode path** — the 4.7 kΩ RXD pull-up is a logic-side part and does not substitute for it.
-- **TXD is internally pulled to ground**, so the bus defaults *dominant* if the host UART floats. This is why the EN gate matters: hold EN low (sleep, transmitter off) until the K-line collector is ready to talk, and pull EN low by default at boot. Per the datasheet, if EN were tied permanently active it should go to the host I/O supply through a 1–10 kΩ series resistor.
-- **Mode-transition blanking.** RXD is indeterminate during mode changes while the receivers switch; software must not treat an RXD edge as data or as a wake event until `tMODE_CHANGE` has elapsed after raising EN.
-- **20 kbps transmit ceiling.** This covers ISO 9141/KWP2000 at 10.4 kbps and Nissan CONSULT at 9600 baud, with margin for 15625 baud. It does **not** cover any protocol needing >20 kbps *transmit* (receive is fine to 100 kbps). Verify against the intended CONSULT baud before assuming full UpRev-equivalent coverage.
-- **Single-wire echo is unavoidable.** Everything transmitted appears on RXD. The collector must strip its own echo — a software requirement, not a hardware fix.
+- **No dominant state timeout — this is the part's defining feature**, and it is
+  the correct choice for K-line. Every other TI LIN transceiver enforces a TXD
+  dominant timeout in the 10–20 ms range, which would abort an ISO 9141-2
+  **5-baud slow init** (200 ms per bit, up to ~600 ms held dominant). The
+  TLIN1027-Q1 imposes no such limit, so both 5-baud slow init and fast init are
+  possible. The datasheet Features list states "Supports ISO 9141 (K-Line)"
+  outright. *Caveat from TI's applications team: the family is specified as*
+  compatible with *ISO 9141 systems, not* compliant with *the ISO 9141
+  physical-layer levels and timings.*
+- **RXD is an open-drain output** and requires an external pull-up to the host
+  I/O supply. The datasheet's "1 kΩ to 10 kΩ" range is qualified by a footnote to
+  check `IOL` for the actual VIO — at 3.3V the real floor is ~2 kΩ, not 1 kΩ.
+  R3's 4.7 kΩ is correct; §3.3.2 works the numbers.
+- **Commander (master) mode needs external bus termination.** The internal
+  termination is a **45 kΩ** pull-up (spec 20/45/60 kΩ) plus series diode to VSUP
+  — that is *responder/slave* termination. A diagnostic tester is a commander
+  node and requires an **external 1 kΩ pull-up plus series blocking diode from
+  LIN to VSUP**, per the LIN spec and the datasheet's Figure 9-1. R5 + D5 provide
+  it. §11.1 Pin 6 is explicit that the resistor and blocking diode go "between the
+  LIN pin and the VSUP pin" — across the bus, not in series with it, which is how
+  they were originally drawn.
 
-### 3.4 Inertial Measurement Unit (IMU)
+  *Value note:* 1 kΩ is the LIN commander figure and what the datasheet calls
+  for. ISO 9141-2 specifies ~510Ω on the **tester** side, and this board is a
+  tester rather than a LIN master. The Xterra's ECU supplies its own pull-up so
+  1 kΩ should be sufficient; if a real ECU shows sluggish rise, 510Ω is the
+  ISO-correct value and doubles pull-up current to ~24 mA. That is a value
+  change, not a layout change.
+- **TXD is internally pulled to ground** (Table 5-1; `RTXD` = 125/350/800 kΩ), so
+  the transceiver requests *dominant* whenever the host stops driving TXD high.
+  Two independent guards now cover that, because neither covers every state on
+  its own — see §3.3.2.
+- **EN has an internal pull-down** (`REN` = 125/205/800 kΩ), and §8.3.6 states its
+  purpose outright: to keep the device in low-power mode if EN floats. R4 backs
+  it externally so the guarantee does not rest on the 800 kΩ corner.
+- **Mode-transition blanking, with numbers** (§6.8). `tMODE_CHANGE` 2–15 µs;
+  sleep/standby → normal additionally needs `tNOMINT` 35 µs, so allow **~50 µs
+  after raising EN** before trusting RXD. From power-up, `tPWR` is 1.5 ms. The
+  bus wake filter `tLINBUS` is 25–150 µs.
+- **20 kbps transmit ceiling.** This covers ISO 9141/KWP2000 at 10.4 kbps and
+  Nissan CONSULT at 9600 baud, with margin for 15625 baud. It does **not** cover
+  any protocol needing >20 kbps *transmit* (receive is fine to 100 kbps).
+- **Single-wire echo is unavoidable.** Everything transmitted appears on RXD. The
+  collector must strip its own echo — a software requirement, not a hardware fix.
+
+#### 3.3.2 The host interface: why EN, TXD and RXD are wired the way they are
+
+Both logic pins default to the *unsafe* state on their own, so the resistor
+choices here are load-bearing rather than cosmetic. Recorded because the values
+are not obvious and the failure modes are silent.
+
+**EN — R4 as a pull-down to GND (4.7 kΩ).** EN is the only thing standing between
+"host not driving TXD" and "HAT holds the vehicle's K-line dominant," so it must
+be low by default and it must be *reliably* low. The internal pull-down alone
+would do the job at its 205 kΩ typical, but at the specified 800 kΩ corner just
+2.5 µA of node leakage reaches `VIH` = 2V — not a margin worth trusting on an
+uncoated board in a vehicle cabin. R4 makes it ~425 µA. It costs GPIO26 0.7 mA to
+drive EN high, against a pin good for several mA.
+
+*Rejected alternatives:* a pull-up to 3V3 is what §11.1 Pin 2 suggests, but only
+*"if this feature is not used"* — the EN gate is used here. A series resistor for
+fault-current limiting (also §11.1 Pin 2) buys nothing once R4 goes to GND, since
+GPIO26 → EN is entirely internal to the HAT with no connector on the net.
+
+**TXD — R6 1 kΩ series plus R8 4.7 kΩ pull-up on the Pi side.** R6 is the
+datasheet's suggested input-current limiter and is otherwise invisible: at the
+125 kΩ `RTXD` corner it costs 26 mV of high level, and its RC with the pin
+capacitance is ~10 ns against a 96 µs bit.
+
+R8 closes a gap EN cannot. EN low covers the Pi being off or still booting, but
+**not** the case where the collector has already raised EN and then dies,
+releases the tty, or lets the GPIO revert to an input — TXD then falls to its
+internal pull-down and the bus is held dominant with the transmitter still
+enabled. R8 makes the released state *recessive* instead.
+
+The two placement/value decisions:
+
+- **Pi side of R6, not the transceiver side.** On the Pi side, the host driver
+  sits directly on the pull-up node and TXD simply follows it through the 1 kΩ /
+  125 kΩ divider — driving low costs nothing (~0.1V at the pin against `VIL` =
+  0.8V). On the transceiver side the pull-up fights R6 and lands around 0.4V,
+  spending half the low-level budget for no gain.
+- **4.7 kΩ, not 10–22 kΩ.** The sizing case is GPIO14 high-Z, where the pull-up
+  must beat the *Pi's own* internal pull-down (tens of kΩ) in parallel with
+  `RTXD`. At a pessimistic 30 kΩ host pull-down and the 125 kΩ `RTXD` corner,
+  4.7 kΩ holds 2.76V — clear of `VIH` = 2V. 22 kΩ would land near 1.8V and fail.
+
+R8 only works while the Pi's 3V3 is up; EN covers every state where it is not.
+Neither guard is sufficient alone, which is why both are fitted.
+
+**RXD — R3 4.7 kΩ to the Pi 3V3 rail.** Squeezed from both directions:
+
+- *Lower bound:* `IOL` is 1.5 mA at VOL = 0.4V, and `VOL` ≤ 0.6V is quoted at
+  `RPU` = 2.4 kΩ. 4.7 kΩ sinks 0.62 mA — 40% of the spec point — so VOL comes in
+  below 0.6V against a host input threshold near 0.8V. Counter-intuitively, a
+  *smaller* pull-up makes the low level worse, not better.
+- *Upper bound:* GPIO15's default internal pull-down fights R3. At a pessimistic
+  30 kΩ, 4.7 kΩ still holds 2.85V; 10 kΩ would give 2.48V.
+- *Not a constraint:* rise time is 4.7 kΩ × ~20 pF ≈ 94 ns, 0.1% of a 96 µs bit.
+
+Set GPIO15's bias explicitly in the overlay rather than relying on the default
+pull-down being at the weak end.
+
+**RXD idle level differs by mode** (Table 8-1), and this is the bring-up trap:
+
+| Mode | RXD | What the host UART sees |
+|---|---|---|
+| Sleep | floating → R3 pulls high | clean idle |
+| **Standby** | **driven low** | **continuous break** |
+| Normal | LIN bus data | traffic |
+
+Per §8.4.1 the device powers up with EN low into **standby**, not sleep — §8.4.2
+makes sleep reachable only *from* normal mode. So the first state after plugging
+into the vehicle is the break-y one, and it stays that way until the collector
+raises EN once. Reaching the clean idle state takes a deliberate EN high-then-low
+cycle.
+
+**RXD low means three different things** — a dominant bit (normal), a bus wake-up
+request (standby, §8.4.4.1), and a VSUP undervoltage indication (§9.2.2.2, which
+drops the device to standby). The line alone cannot distinguish them; the
+collector must track the mode it commanded and apply the ~50 µs blanking. A
+sudden break during operation may mean the truck's voltage sagged, not that the
+bus went quiet.
+
+**No series resistor on RXD** (unlike TXD): its high level is bounded by the
+pull-up rail, so there is no overvoltage path into the host. For the same reason
+the STANDBY power case is clean — when the Pi's 3V3 is down, both ends of R3 sit
+at 0 with no back-feed path, which is exactly what a board-local 3.3V rail would
+have broken.
+
+### 3.4 Inertial Measurement Unit (IMU) — U6
 
 | Parameter | Value |
 |---|---|
 | Part number | LSM6DSOXTR |
 | Manufacturer | STMicroelectronics |
-| Function | 6-axis IMU (3-axis accelerometer + 3-axis gyroscope only — no onboard sensor fusion, no magnetometer) |
-| Supply voltage | 1.71V to 3.6V (analog); 1.62V independent IO supply |
-| Interface | I2C (shared bus with BMP384), also supports SPI / MIPI I3C |
+| Function | 6-axis IMU (3-axis accelerometer + 3-axis gyroscope only — no onboard fusion, no magnetometer) |
+| Supply | VDD (pin 8) and VDDIO (pin 5) both on **+3V3** |
+| Interface | **I2C** — CS (pin 12) strapped to +3V3 selects I2C mode; SCL on pin 13, SDA on pin 14 |
+| I2C address | **0x6B** — SDO/SA0 (pin 1) strapped to +3V3 |
+| Aux bus | SDX (pin 2) and SCX (pin 3) tied to GND (sensor hub unused) |
+| Interrupts | **INT1 (pin 4) → GPIO16**; INT2 (pin 9) unconnected |
 | Accelerometer range | ±2/±4/±8/±16 g full scale |
 | Gyroscope range | ±125/±250/±500/±1000/±2000 dps full scale |
 | Supply current | 0.55 mA in combo high-performance mode |
-| Package | LGA-14L, 2.5mm x 3.0mm x 0.83mm |
-| Temperature range | -40°C to +85°C |
-| Packing | Tape and reel (TR suffix) |
-| Interrupt | INT1 to a host GPIO (pin reassigned — see §4) |
-| Address strap | SA0 pin strapped for I2C address selection (0x6A / 0x6B) |
+| Package | LGA-14L, 2.5mm × 3.0mm × 0.83mm |
 
-The LSM6DSOXTR was selected over a fusion-capable part such as the BNO085 to cut sensor cost roughly 5-7x, deliberately dropping onboard sensor fusion and the magnetometer entirely; orientation-fusion is instead handled in software running on the Raspberry Pi 5 host.
+The LSM6DSOXTR was selected over a fusion-capable part such as the BNO085 to cut
+sensor cost roughly 5-7×, deliberately dropping onboard sensor fusion and the
+magnetometer entirely; orientation-fusion is instead handled in software running
+on the Raspberry Pi 5 host.
 
-**This is compatible with the existing CANary code path.** `src/preprocessing/imu_frame.py` already implements the raw-chip route — a gravity low-pass over quiescent windows, yaw-offset resolution from straight segments, and longitudinal sign resolution against the OBD speed derivative — with on-chip fusion (BNO055) handled as a `gravity_removed=True` parameter rather than a separate code path. The absent magnetometer costs nothing: heading already comes from GPS course, not from the IMU.
+**This is compatible with the existing CANary code path.**
+`src/preprocessing/imu_frame.py` already implements the raw-chip route — a
+gravity low-pass over quiescent windows, yaw-offset resolution from straight
+segments, and longitudinal sign resolution against the OBD speed derivative —
+with on-chip fusion (BNO055) handled as a `gravity_removed=True` parameter
+rather than a separate code path. The absent magnetometer costs nothing: heading
+already comes from GPS course, not from the IMU.
 
-### 3.5 Barometric Pressure Sensor
+**Every outstanding DRC violation is under this part.** The imported LGA-14L
+footprint has 0.1952mm pad-to-pad gaps against a 0.2mm default clearance; the
+current run flags pads 1–2, 3–4, 9–10 and 12–13. This is a footprint-geometry
+fact, not a routing error — fix it with a local clearance override on U6 (or a
+footprint-level rule), not by moving copper.
+
+### 3.5 Barometric Pressure Sensor — U5
 
 | Parameter | Value |
 |---|---|
 | Part number | BMP384 [cite:52][cite:55] |
 | Manufacturer | Bosch Sensortec [cite:55] |
 | Function | Digital absolute pressure sensor for altitude tracking [cite:52] |
-| Supply voltage | 1.65V to 3.6V, VDD and VDDIO both on the same 3.3V rail [cite:61][cite:64] |
-| Interface | I2C (up to 3.4 MHz, shared bus with LSM6DSOXTR) / SPI (up to 10 MHz) [cite:61] |
+| Supply | VDD (pin 10) and VDDIO (pin 1) both on **+3V3** [cite:61][cite:64] |
+| Interface | **I2C** — CSB (pin 6) strapped to +3V3 selects I2C; SCK (pin 2) = SCL, SDI (pin 4) = SDA [cite:61] |
+| I2C address | **0x77** — SDO (pin 5) strapped to +3V3 |
+| Interrupt | **INT (pin 7) → GPIO17** (header pin 11) — moved off GPIO6, see §4.1 |
 | Pressure range | 300 hPa to 1250 hPa [cite:61] |
 | Resolution | Up to 21-24 bit [cite:61][cite:64] |
 | Relative accuracy | ±9 Pa (900-1100 hPa, 25-40°C) [cite:61] |
-| Current draw | ~2 µA sleep, ~700 µA peak during measurement, 3.4 µA @ 1Hz low-power mode [cite:61][cite:64] |
-| Package | 10-pin metal-lid LGA, 2.0mm x 2.0mm x 0.95mm [cite:55] |
-| Operating temperature | -40°C to +85°C [cite:61] |
-| Interrupt | INT to a host GPIO (pin reassigned — see §4) |
+| Current draw | ~2 µA sleep, ~700 µA peak during measurement [cite:61][cite:64] |
+| Package | 10-pin metal-lid LGA, 2.0mm × 2.0mm × 0.95mm [cite:55] |
 
-The BMP384 provides altitude/barometric data suited to drone and vehicle applications, with best-in-class temperature coefficient offset in the -20°C to 65°C range [cite:52].
+**Range check:** the vehicle operates at ~80 kPa (800 hPa, ~2072 m), comfortably
+inside the 300–1250 hPa range.
 
-**Range check:** the vehicle operates at ~80 kPa (800 hPa, ~2072 m), comfortably inside the 300–1250 hPa range.
+**Noise vs the roadmap's BMP390.** `docs/roadmap/imu-gps-integration.md`
+specifies a BMP390 for the `derived:GRADE` channel. Grade is a *derivative* of
+altitude, so what matters is short-term RMS noise and noise density, not the ±9
+Pa relative-accuracy figure quoted above (BMP390: ±3 Pa). Confirm the BMP384's
+RMS noise at the intended ODR/oversampling against a grade budget. Both parts are
+2.0 × 2.0 mm 10-pin LGA — the footprint on the board is swap-compatible, so a
+BMP390 can drop in if the 384 proves too coarse.
 
-**Noise vs the roadmap's BMP390.** `docs/roadmap/imu-gps-integration.md` specifies a BMP390 for the `derived:GRADE` channel. Grade is a *derivative* of altitude, so what matters is short-term RMS noise and noise density, not the ±9 Pa relative-accuracy figure quoted above (BMP390: ±3 Pa). Confirm the BMP384's RMS noise at the intended ODR/oversampling against a grade budget. Both parts are 2.0 × 2.0 mm 10-pin LGA — keep the footprint swap-compatible so a BMP390 can drop in if the 384 proves too coarse.
-
-### 3.6 GNSS / GPS Module
+### 3.6 GNSS / GPS Module — U7
 
 | Parameter | Value |
 |---|---|
-| Part number | MAX-M10M-00B [cite:35][cite:41] |
+| Part number | **MAX-M10M-00B** [cite:35][cite:41] |
 | Manufacturer | u-blox AG [cite:35] |
 | Function | Standard precision GNSS/GPS receiver module [cite:35] |
-| Supply voltage (VCC) | 1.8V to 5V main supply range [cite:35] |
-| Interface | **UART** (to a secondary Pi UART — see §4), I2C (DDC) unused [cite:34][cite:41] |
+| Supply | VCC (pin 8) and V_IO (pin 7) both on **+3V3**; VIO_SEL (pin 15) unconnected |
+| Interface | **UART** — TXD (pin 2) → GPIO5, RXD (pin 3) → GPIO4 (Pi 5 `uart2`). DDC/I2C pins 16/17 unconnected [cite:34][cite:41] |
+| Time pulse | TIMEPULSE (pin 4) → **header pin 12 = GPIO18**, the `pps-gpio` overlay default |
+| Backup supply | V_BCKP (pin 6) ← D2 (BAT54) ← BT1 (2-pin JST-SH connector, external cell) |
+| RF front end | RF_IN (pin 11) ← C16 (10nF DC block) ← J4 (SMA edge-mount, Molex 73251-1153); VCC_RF (pin 14) → L1 (27nH, LQG18HN27NJ00D) → antenna feed = **active-antenna bias** |
+| Unused | EXTINT (5), RESET_N (9), LNA_EN (13), SAFEBOOT_N (18) all unconnected |
 | GNSS support | Concurrent GPS, GLONASS, Galileo, BeiDou (default: GPS + Galileo with QZSS/SBAS) [cite:39] |
 | Position accuracy | 1.5 m CEP (high performance mode) [cite:39] |
-| Power consumption | Less than 25 mW continuous tracking; less than 10 mW in 1 Hz cyclic power-save mode [cite:35][cite:39] |
-| Package | LCC, 9.7mm x 10.1mm x 2.5mm [cite:41] |
-| Operating temperature | -40°C to +85°C [cite:41] |
-| Notes | Cost/power-optimized variant without integrated LNA/SAW filter; requires external active antenna with integrated filtering [cite:39] |
+| Power | <25 mW continuous tracking; <10 mW in 1 Hz cyclic power-save [cite:35][cite:39] |
+| Package | LCC, 9.7mm × 10.1mm × 2.5mm [cite:41] |
+| Notes | Cost/power-optimised variant **without integrated LNA/SAW filter**; requires an external active antenna with integrated filtering [cite:39] |
 
-**UART, not I2C — this is a hard requirement, not a preference.** CANary's GPS path is `src/collection/gps_collector.py` (serial NMEA) or the gpsd path in `docs/time-sync.md`. gpsd requires a tty; it has no u-blox DDC/I2C transport. A GNSS module reachable only over I2C would leave both the `gps:*` telemetry channels and the chrony clock discipline with nothing to read.
+**UART, not I2C — this is a hard requirement, not a preference.** CANary's GPS
+path is `src/collection/gps_collector.py` (serial NMEA) or the gpsd path in
+`docs/time-sync.md`. gpsd requires a tty; it has no u-blox DDC/I2C transport. The
+as-built board honours this: DDC is unconnected and the module talks UART only.
 
-**Nav rate.** The roadmap requires 10 Hz (1 Hz modules are "too slow to help transients or grade"). The M10 meets this; the receiver must be configured off its default rate at bring-up.
+**Nav rate.** The roadmap requires 10 Hz (1 Hz modules are "too slow to help
+transients or grade"). The M10 meets this; the receiver must be configured off
+its default rate at bring-up.
 
-### 3.7 Power Regulation, Protection, and System Power Topology
+**Antenna bias network is now specified in hardware** (it was a gap in earlier
+revisions): the module's own VCC_RF output feeds the antenna centre conductor
+through L1 (27nH feed inductor), and C16 (10nF) DC-blocks the path into RF_IN.
+There is **no bias fuse or short-circuit protection** on that feed — a shorted
+antenna cable pulls VCC_RF down, which is the module's own supply. Consider a
+small series resistor or resettable element if the antenna is field-swappable.
 
-| Parameter | Value |
-|---|---|
-| Part number | AP63203Q |
-| Manufacturer | Diodes Incorporated |
-| Function | Synchronous buck converter, fixed 3.3V output (**3V3_BUCK** net) |
-| Input voltage range | 3.8V to 32V (fed from +12V on Power.Cu) |
-| Output voltage | Fixed 3.3V |
-| Continuous output current | 2A |
-| Switching frequency | 1100 kHz |
-| Quiescent current | 22 µA (Pulse Frequency Modulation mode) |
-| Package | TSOT26 |
-| Standards compliance | AEC-Q100 qualified, Temperature Grade 1 (-40°C to +125°C) |
-| Protection | UVLO, output overvoltage protection, cycle-by-cycle peak current limit, thermal shutdown |
+#### 3.6.1 The RF launch (reworked 2026-08-11)
 
-**12V Input Protection Chain** (upstream of buck converter and bus transceivers): reverse-blocking diode, TVS diodes, PTC fuse, bulk capacitor feeding the VSUP_12V_RAW net on Power.Cu.
+The feed is 0.20mm on F.Cu, which computes to **~45Ω** over the 0.1mm
+F.Cu→Gnd.Cu prepreg once 1oz copper thickness is included. Across the plausible
+envelope — εr 4.0–4.6 and ±10% prepreg tolerance — it stays between **42 and
+48Ω**, worst case 21dB return loss. The width is not worth retuning; 0.35mm
+would give ~32Ω and 0.18mm ~48Ω, but prepreg tolerance moves it further than
+either.
 
-#### 3.7.1 Rails
+**The problem was the SMA pad, not the trace.** J4's signal pad is
+**5.08 × 2.29mm** (X 159.64–164.72, Y 67.11–69.39 — note the footprint is rotated
+180°). Over a 0.1mm dielectric that is a **7Ω** transmission line 5mm long, and
+length is what makes a discontinuity bite: at 0.05λ it reflects hard.
+
+| Reference under the pad | Z₀ | Return loss |
+|---|---|---|
+| In1.Cu intact (0.100mm) | 7Ω | **2.9 dB** |
+| **In1.Cu voided → In2.Cu (1.375mm)** | **54Ω** | **25.3 dB** |
+| Both inner layers voided → B.Cu | *nominally 57Ω* | *fiction — see below* |
+
+**The fix, as built:** a notch in the In1.Cu zone outline spanning **X 159.65 →
+165.50, Y 66.90 → 69.60** — the full pad with ~0.21mm margin top and bottom,
+opening out to the board edge. It is a concave notch in the single zone outline,
+not a separate keepout, which is the natural shape for an edge-mount connector.
+
+**Void In1.Cu only.** Voiding both inner layers looks similar on paper but is
+wrong: B.Cu carries no copper beneath that pad, so the pad would reference
+nothing and land somewhere uncontrolled around 70–90Ω. And the obvious objection
+to using In2.Cu — that it is a *power* plane, not ground — does not survive the
+arithmetic: 65 × 56mm across a 1.24mm core is about **112pF of interplane
+capacitance, 0.9Ω at 1.575 GHz**. In2.Cu is an RF ground whatever DC sits on it.
+
+**Bias the void inward from the pad, never outward.** The trace needs its 0.1mm
+ground reference right up to where it widens into the pad — void under the trace
+and it jumps to ~150Ω. The pad has 5mm of length to spare; the trace has none.
+
+**Stitching:** five GND vias now flank the launch at (156,72), (159,75), (159,61),
+(164,75) and (164,61), bracketing the void band so the return current runs down
+each side rather than around the hole. Before this there were none within 10mm,
+and the only layer transitions were the connector's own two plated posts.
+
+**Fab dependency:** all of the above assumes the **0.1mm outer prepreg**. If the
+fabricator substitutes 0.2mm — an ordinary thing to do when unspecified — the
+0.2mm trace becomes **~66Ω**. State the outer dielectric thickness in the fab
+notes; that matters far more than εr, which the envelope above already absorbs.
+
+**Backup supply has no fallback.** V_BCKP is fed *only* from BT1 through D2. If
+the JST connector is empty the pin floats, and there is no path from +3V3, so the
+receiver cold-starts every boot — the exact cost PPS exists to avoid. Note also
+that a series Schottky from BT1 means **no charge path**: BT1 must be a primary
+cell, not a supercap. u-blox expects V_BCKP to be supplied (commonly diode-OR'd
+with the main rail) rather than left open.
+
+### 3.7 Power Input, Protection, and System Power Topology
+
+**There is no on-board regulator.** The AP63203Q buck of earlier revisions is not
+in the schematic, not in the BOM, and has no footprint on the PCB. The board
+takes 3.3V and 5V from the Pi header and 12V from the vehicle, and generates
+nothing.
+
+#### 3.7.1 12V input protection chain (sheet `OBD_IO`)
+
+| Ref | Part | Role |
+|---|---|---|
+| J2 pin 1 | terminal block | Vehicle 12V in → net `+12V_RAW` |
+| **J3** | 2-pos terminal block | Pass-through to the X1202, tapped off **`+12V_RAW`, upstream of D4** |
+| D4 | SS54 (SMB, 5A/40V Schottky) | Series reverse-blocking, `+12V_RAW` → `+12V` |
+| D1 | SMBJ24A (SMB, 600W TVS, 24V standoff) | `+12V` → GND transient clamp |
+| C2 | 100µF radial THT (D6.3mm) | Bulk on `+12V` |
+| C3 | 100nF 0603 | HF decoupling on `+12V`, at the TLIN1027 VSUP pin |
+
+**The protection chain now guards only the HAT.** As of 2026-08-10 the
+pass-through taps the raw connector node, so `+12V_RAW` fans out to J3 and to
+D4's anode in parallel. Everything downstream of D4 — the TVS, the bulk cap, the
+TLIN1027 — sees only the HAT's 12V load, which is tens of mA (VSUP quiescent,
+R4, and the K-line pull-up when the bus is dominant). The ~150 mA whole-board
+figure quoted elsewhere is almost entirely 3.3V draw and does not appear here.
+See §3.7.4 for what that buys and what it costs.
+
+**There is no PTC fuse.** Earlier revisions listed one in the protection chain;
+the as-built board has none. Decide deliberately whether the vehicle-side fuse in
+the harness is the whole story (§8.2 — decided: it is).
+
+#### 3.7.2 Rails
 
 | Rail | Source | Feeds |
 |---|---|---|
-| VSUP_12V_RAW (+12V) | Vehicle OBD 12V via terminal block + protection chain | AP63203Q input, TLIN1027-Q1 VSUP, K-line commander pull-up, 12V pass-through block |
-| 3V3_BUCK | AP63203Q from +12V | The HAT's own device supplies |
-| 3V3 (Pi) | Raspberry Pi 40-pin header | Anything that must reference the host rail: TCAN1042 VIO, the 4.7 kΩ K-line RXD pull-up, ID EEPROM + its pull-ups |
-| 5V0 | Raspberry Pi 40-pin header | TCAN1042VDRQ1 VDD (~70 mA) |
+| `+12V_RAW` | J2 pin 1, straight off the vehicle | D4's anode, **and J3 (pass-through to the X1202)** — unprotected by anything on this board |
+| `+12V` | `+12V_RAW` via D4, clamped/bulked by D1/C2 | TLIN1027 VSUP (decoupled by C3), and the K-line commander pull-up R5+D5 |
+| `+3V3` | **Raspberry Pi header pins 1 and 17** | Everything else: MCP2518FD VDD, TCAN1042 VIO, BMP384, LSM6DSOX, MAX-M10M VCC + V_IO, EEPROM, all pull-ups and straps |
+| `+5V` | Raspberry Pi header pins 2 and 4 | TCAN1042VDRQ1 VDD only (~70 mA) |
 
-The HAT does **not** generate 5V and does **not** power the Pi.
+The HAT does **not** generate 5V and does **not** power the Pi. One 3.3V domain,
+sourced from the host — which is what §3.7.5 argued for.
 
-#### 3.7.2 System topology
+#### 3.7.3 System topology
 
 ```
-Vehicle OBD 12V ──> CANary-HAT terminal block ──> protection chain ──> +12V (Power.Cu)
-                                                       │
-                                                       ├──> AP63203Q ──> 3V3_BUCK (HAT devices)
-                                                       ├──> TLIN1027-Q1 VSUP + K-line pull-up
-                                                       └──> 2-pin Phoenix pass-through
-                                                                  │
-                                                       barrel-jack pigtail
-                                                                  │
-                                                                  v
-                                                          X1202 UPS HAT ──> Raspberry Pi 5 (5V)
-                                                                  │
-                                                          (battery backup + GPIO6 PLD +
-                                                           I2C fuel gauge at 0x36)
+Vehicle OBD 12V ──> J2 (6-way block) ──> +12V_RAW ──┬──> D4 (SS54) ──> +12V ──┬──> D1 TVS / C2 / C3
+                                                    │                        ├──> TLIN1027-Q1 VSUP
+                                                    │                        └──> R5+D5 → K-line pull-up
+                                                    │
+                                                    └──> J3 (2-way block)   [unprotected tap]
+                                                             │
+                                                   barrel-jack pigtail
+                                                             │
+                                                             v
+                                                    X1202 UPS HAT ──> Raspberry Pi 5 (5V)
+                                                             │
+                                                     (battery backup + GPIO6 PLD +
+                                                      I2C fuel gauge at 0x36)
+
+Raspberry Pi 5 header ──> +3V3 (pins 1,17) ──> every logic device on this board
+                      └─> +5V  (pins 2,4)  ──> TCAN1042 VDD
 ```
 
-The X1202 remains the sole power source for the Pi and the sole owner of power-loss detection and battery-backed shutdown (`scripts/ups_shutdown_watch.py`, `systemd/ups-shutdown.service`).
+The X1202 remains the sole power source for the Pi and the sole owner of
+power-loss detection and battery-backed shutdown (`scripts/ups_shutdown_watch.py`,
+`systemd/ups-shutdown.service`).
 
-#### 3.7.3 The pass-through carries the Pi's entire supply
+#### 3.7.4 The pass-through is an unprotected tap (changed 2026-08-10)
 
-The 12V pass-through leg branches off VSUP_12V_RAW **downstream of the protection chain**, so the PTC fuse, reverse-blocking diode, TVS, and +12V copper are in series with everything the X1202 draws — the Pi 5 itself plus UPS battery charging — not just the HAT's own ~150 mA. A Pi 5 at full tilt is ~25W, so budget on the order of **3A at 12V**, worst case.
+The 12V pass-through leg (J3) branches off `+12V_RAW` **upstream of D4** — it is
+a parallel tap on the connector node, not a load on the protected rail. This is
+the alternative earlier revisions named, and taking it resolves the thermal and
+conductor problems it was weighed against:
 
-Two consequences:
+- **D4 no longer carries the Pi.** It passes only the HAT's 12V load — TLIN1027
+  VSUP plus the commander pull-up, tens of mA — so the SS54 dissipates milliwatts
+  instead of ~1.5W, and the earlier "confirm the pad can sink 1.5W in a hot
+  cabin" worry is void. The part is now generously oversized, which is fine.
+- **No diode drop in the Pi's supply.** The X1202 sees the connector voltage
+  directly, so cranking sag is not made worse by a series Schottky.
+- **The copper was widened to match, and the widening is complete.** A Pi 5 at
+  full tilt is ~25W, so budget on the order of **3A at 12V** worst case. The
+  whole J2 → J3 path is **1.3mm on B.Cu, 37.3mm end to end, with no via in it**
+  (both terminal blocks are through-hole, so their pads span all layers). 1.3mm
+  of 1oz external copper is roughly a 2.9A-at-10°C-rise / 3.9A-at-20°C-rise
+  conductor, which covers the budget with margin.
 
-- **A series reverse-blocking diode dissipates ~2W at 3A.** In a TSOT/SMA package in a hot cabin that is a thermal problem, and the forward drop also eats into the buck's and the X1202's input headroom during cranking sag. Prefer an ideal-diode controller with a P-FET, or at minimum a low-Vf Schottky sized for the full load with the pad area to sink it.
-- **Size the PTC hold current above the Pi's peak, not the HAT's.** A fuse chosen for the HAT alone will trip on a Pi 5 workload spike, and the failure looks like a random power-down rather than a fuse.
+  The narrower copper on these nets is **not** in that path: the branch from the
+  `+12V_RAW` node up to D4's anode (0.6mm, plus a ~1mm 0.4mm stub and one
+  0.9/0.5mm via) and everything on `+12V` past D4 (0.6mm) carry only the HAT's
+  own load — TLIN1027 VSUP and the K-line pull-ups, tens of mA. 0.4mm is already
+  ~1.6A of headroom there.
 
-If neither is attractive, the alternative is to branch the pass-through *upstream* of the protection chain and let the X1202 own its own input protection — at the cost of the vehicle-side protection no longer covering the pigtail.
+**What it costs: nothing on this board protects the X1202 leg.** Reverse polarity
+at the terminal block is the clearest case — D4 protects the HAT, and J3 passes
+the reversed voltage straight through to the UPS. Transients are subtler: a
+positive surge on `+12V_RAW` is clamped only indirectly, because D1 sits behind
+D4 and any clamping current has to flow through the Schottky. Two things to
+settle before this is fabricated — both since decided, see §8.2:
 
-#### 3.7.4 3.3V current budget: does the buck earn its place?
+1. **Confirm the X1202 tolerates reverse polarity and automotive transients on
+   its barrel jack**, or accept that a miswired terminal block kills the UPS and
+   possibly the Pi.
+2. **If it does not, move the protection rather than the tap** — a TVS and a
+   series element (ideal-diode controller, or a Schottky sized for 3A) on
+   `+12V_RAW` itself, ahead of the fan-out to both D4 and J3.
 
-The AP63203Q was added on the assumption that the HAT's 3.3V draw was near the limit of what the Pi can source on its header 3V3 pins. Itemising it against datasheet figures does not support that assumption.
+**There is still no fuse anywhere on the board**, so nothing on the HAT limits
+fault current on a leg that now feeds the whole system directly.
 
-| Device | 3.3V draw | Source |
-|---|---|---|
-| MCP2518FD (active, 40 MHz CAN clock) | 20 mA max | §3.1, worst case quoted at 5.5V — less at 3.3V |
-| TCAN1042VDRQ1 **VIO only** | a few mA | VDD's ~70 mA sits on **5V**, not this rail |
-| MAX-M10M (continuous tracking) | ~8 mA avg (<25 mW) | §3.6 |
-| MAX-M10M (acquisition peak) | several tens of mA, transient | confirm against the u-blox datasheet |
-| **Active antenna LNA bias** | 5–20 mA | easily the largest single item, and the one most often forgotten |
-| LSM6DSOX (combo high-performance) | 0.55 mA | §3.4 |
-| BMP384 (peak during measurement) | 0.7 mA | §3.5 |
-| 4.7 kΩ K-line RXD pull-up (when low) | 0.7 mA | §3.3.1 |
-| ID EEPROM + pull-ups | µA | — |
-| **Total** | **~35 mA typical, ~90 mA peak** | ~150 mA with generous margin |
+#### 3.7.5 Why there is one 3.3V rail (retained rationale)
 
-Against that, **there is no official Pi 3V3 limit to be near.** The Raspberry Pi HAT+ specification (RP-008281-DS) sets no maximum current for a HAT+ on the 3.3V rail, and Raspberry Pi has consistently declined to publish one for any model — the widely-cited 500 mA is an unofficial rule of thumb dating to the B+, not a spec. Even taken at face value, this board's peak is under a fifth of it.
+The reasoning that killed the buck, kept because it governs any future attempt to
+re-add a local rail.
 
-So the buck is not buying current headroom. What it does buy is a second, independently-powered 3.3V domain — and in this stack that is a **liability, not a feature**, because it creates two asymmetric power states (§3.7.5). It also puts a 1.1 MHz switcher on a board whose GNSS receiver has no SAW filter.
+**Current was never the problem.** Itemised against datasheet figures, the whole
+board is ~35 mA typical and ~90 mA peak on 3.3V (MCP2518FD ≤20 mA; TCAN1042 VIO a
+few mA — its ~70 mA VDD sits on 5V; MAX-M10M ~8 mA tracking plus the active-
+antenna LNA bias at 5–20 mA, easily the largest single item; LSM6DSOX 0.55 mA;
+BMP384 0.7 mA peak; the 4.7 kΩ K-line RXD pull-up 0.7 mA when low; EEPROM µA).
+Against that, **there is no official Pi 3V3 limit to be near** — the Raspberry Pi
+HAT+ specification (RP-008281-DS) sets no maximum current for a HAT+ on the 3.3V
+rail, and the widely-cited 500 mA is an unofficial rule of thumb dating to the
+B+, not a spec. Even taken at face value, this board's peak is under a fifth of
+it.
 
-**Recommendation:** lay out the buck footprint but **ship it depopulated**, with a 0Ω link tying the HAT's 3.3V devices to the Pi 3V3 rail. Measure the assembled board's actual draw; populate the buck only if the measurement contradicts the budget above. This keeps the option without paying for it, and the depopulated case is HAT+ compliant by construction. Nothing on the board requires a 12V-derived 3.3V rail — the TLIN1027-Q1 runs its VSUP and its commander pull-up directly off +12V.
+**A second rail was an active liability.** The HAT sits between a vehicle 12V
+feed and a UPS-backed host, so the two supplies can each outlive the other. With
+split rails, both directions are a partial-power-down case: a device is powered
+while the domain driving its I/O is not, and current flows through the parts' ESD
+clamps into the dead rail — which can also hang a shared I2C or SPI bus.
 
-#### 3.7.5 Two asymmetric power states, and why one rail avoids both
-
-The HAT sits between a vehicle 12V feed and a UPS-backed host, so the two supplies can each outlive the other. With split rails, both directions are a partial-power-down case: a device is powered while the domain driving its I/O is not, and current flows through the parts' ESD clamps into the dead rail — which can also hang a shared I2C or SPI bus for whatever survives.
-
-| State | Vehicle +12V / 3V3_BUCK | Pi 5V | Pi 3V3 | Split-rail consequence |
+| State | Vehicle +12V | Pi 5V | Pi 3V3 | With one rail (as built) |
 |---|---|---|---|---|
 | Normal run | up | up | up | fine |
-| **UPS battery run** (key off, X1202 carrying the Pi) | **down** | up | up | HAT devices die mid-run; host drives I/O into a dead 3V3_BUCK |
-| **STANDBY** (`sudo halt`, vehicle still connected) | **up** | up | **down** | HAT devices stay alive and drive I/O into an unpowered host domain |
+| **UPS battery run** (key off, X1202 carrying the Pi) | **down** | up | up | fine — only the K-line transceiver's VSUP drops, and its logic pins stay referenced to a live host |
+| **STANDBY** (`sudo halt`, vehicle still connected) | **up** | up | **down** | HAT logic dies with the host, as HAT+ requires |
 
-The STANDBY row is not hypothetical — it is a HAT+ conformance requirement: *"HAT+ boards must be electrically compatible with the STANDBY power state, where the 5V power rail is powered, but the 3.3V rail is not powered. Raspberry Pi 4 and later models support the STANDBY state,"* and *"HAT+ boards must not assume any particular sequencing timing between the 5V and 3.3V rails."* A HAT whose devices are powered from vehicle 12V violates this the moment the Pi is halted with the truck still plugged in.
+The STANDBY row is a HAT+ conformance requirement: *"HAT+ boards must be
+electrically compatible with the STANDBY power state, where the 5V power rail is
+powered, but the 3.3V rail is not powered,"* and *"HAT+ boards must not assume
+any particular sequencing timing between the 5V and 3.3V rails."* The as-built
+single-rail arrangement satisfies this by construction.
 
-Putting every 3.3V device on the Pi 3V3 rail collapses both rows: the HAT's logic domain lives and dies exactly with the host's, which is the state the HAT+ rules are written around. The one device that stays on 5V is the TCAN1042's VDD — and that is precisely what its VIO undervoltage protection exists for, so confirm that behaviour in the datasheet rather than assuming it.
+**Two residual cross-domain paths survive and must be checked:**
 
-If the buck is populated anyway, handle both rows deliberately: series resistors on every line crossing between domains, and a documented expectation that CAN and sensors drop out the instant vehicle power does.
+1. The TCAN1042's VDD stays on 5V while its VIO drops in STANDBY — that is
+   exactly what its VIO undervoltage protection exists for, so confirm the
+   behaviour in the datasheet rather than assuming it.
+2. The TLIN1027's VSUP stays on vehicle 12V while the host 3V3 domain is down. Its
+   EN and TXD then face an unpowered host — and R4 as drawn actively pulls EN up
+   toward 12V in that state — which is why R4 was changed to a pull-down (§3.3.2).
 
 #### 3.7.6 Consequences of having no power sense on this board
 
-The CANary-HAT has no ignition sense, no 12V voltage sense, and no power-loss detect of its own. Accepted consequence: **the rig is unplugged when not in use, or** the daemon infers engine-off from bus activity and commands a shutdown/suspend. The second path is software work that does not exist yet — `vehicle_state` already classifies `engine_off` / `no_data` (see `AGENTS.md`), and `RecordArmingConfig.disarm_after_seconds` already detects the quiet period, but nothing currently escalates that to a system shutdown.
+The CANary-HAT has no ignition sense, no 12V voltage sense, and no power-loss
+detect of its own. Accepted consequence: **the rig is unplugged when not in use,
+or** the daemon infers engine-off from bus activity and commands a
+shutdown/suspend. The second path is software work that does not exist yet —
+`vehicle_state` already classifies `engine_off` / `no_data` (see `AGENTS.md`), and
+`RecordArmingConfig.disarm_after_seconds` already detects the quiet period, but
+nothing currently escalates that to a system shutdown.
 
-Note the interaction with §3.7.5: a software-commanded `halt` lands the system in STANDBY with the vehicle still connected, which is exactly the row that punishes a split rail.
-
-### 3.8 HAT ID EEPROM
+### 3.8 HAT ID EEPROM — U1
 
 | Parameter | Value |
 |---|---|
-| Part number | **CAT24C32 (onsemi), e.g. CAT24C32WI-GT3** — the specific part matters, see §3.8.2; 24C02 is disqualified |
-| Function | Raspberry Pi HAT ID EEPROM, stores HAT identification data for auto-configuration |
-| Interface | I2C (100 kHz is sufficient), address 0x50 |
-| GPIO connection | GPIO0 (ID_SD), GPIO1 (ID_SC) — dedicated HAT ID EEPROM pins on Pi 40-pin header, isolated from main I2C1 bus |
+| Part number | **CAT24C256WI-GT3 (onsemi)** — 256 kbit, MPN pinned on the symbol |
+| Function | Raspberry Pi HAT ID EEPROM |
+| Interface | I2C, address **0x50** (A0/A1/A2 all left unconnected → internal pull-downs → 000) |
+| GPIO connection | ID_SD (header pin 27) / ID_SC (header pin 28), isolated from I2C1 |
 | Package | SOIC-8 |
-| Supply | **Pi 3V3 rail** — 3.3V part, not a 5V-only EEPROM |
-| Support circuitry | 3.9 kΩ pull-ups to 3.3V on GPIO0/GPIO1; WP left floating (valid for this part — §3.8.2), with an unpopulated 1 kΩ pull-up footprint |
+| Supply | **+3V3 (Pi rail)**, decoupled by C1 (100n) |
+| Pull-ups | R1, R2 = **3.9 kΩ** to +3V3 on ID_SDA / ID_SCL ✅ per HAT+ |
+| Write protect | WP (pin 7) → **JP1, a normally-open solder jumper to +3V3** |
+
+**Density changed: 24C32 → 24C256.** Both are 16-bit addressable, so the HAT+
+rule that disqualified the 24C02 is satisfied either way; the larger part simply
+leaves room for a device-tree overlay blob alongside the ID record.
 
 #### 3.8.1 HAT+ conformance rules (RP-008281-DS)
 
-The specification is prescriptive here, and two of its rules change the current design:
+- **16-bit addressing is mandatory** — *"Use 16-bit addressable EEPROM. Do not use
+  EEPROMs with 8-bit addressing."* The CAT24C256 complies. The spec notes these
+  restrictions "exclude many smaller I2C EEPROMs," so check the datasheet of
+  whatever part is actually sourced.
+- **WP guidance is a recommendation, not a requirement** — *"connect the EEPROM
+  write protect pin to a test point on the board pulled-up to 3.3V with a 1KΩ
+  resistor."* The board instead fits **JP1, an open solder jumper to +3V3**: the
+  default state is *writable* (WP low via the part's internal pull-down), and
+  bridging JP1 hard-ties WP high to protect the device. That is a defensible
+  swap — it costs less and is unambiguous — but note the difference: a soldered
+  jumper is not a probe-drivable test point, so a production programmer cannot
+  temporarily unprotect a protected board.
+- Also required: a 3.3V part (✅), a WP pin covering the **entire** memory
+  (verify), **no I2C clock stretching** (verify), and no paged EEPROM where the
+  low address bits select the page.
+- Only an EEPROM and its 3.9 kΩ pull-ups may connect to ID_SD/ID_SC — nothing
+  else, ever. ✅ as built.
 
-- **16-bit addressing is mandatory** — *"Use 16-bit addressable EEPROM. Do not use EEPROMs with 8-bit addressing."* This **disqualifies the 24C02** outright; it is an addressing rule, not a capacity judgement. The open item resolves to 24C32. The spec notes these restrictions "exclude many smaller I2C EEPROMs," so check the datasheet of whatever part is actually sourced.
-- **WP guidance is a recommendation, not a requirement** — *"connect the EEPROM write protect pin to a test point on the board pulled-up to 3.3V with a 1KΩ resistor. During board test and probe, you can write to the EEPROM by driving the write protect pin low."* This makes the default state *protected*. Leaving WP floating is also valid on the right part, and makes the default state *writable*; see §3.8.2 for why the current design is fine as drawn.
-- Also required: a 3.3V part (not 5V-only), a WP pin covering the **entire** memory, **no I2C clock stretching**, and no paged EEPROM where the low address bits select the page.
-- Only an EEPROM and its 3.9 kΩ pull-ups may connect to ID_SD/ID_SC — nothing else, ever.
+#### 3.8.2 Floating-low WP is correct — but only for onsemi CAT24Cxx
 
-#### 3.8.2 Floating WP is correct — but only for parts that specify it
+With JP1 open, WP relies on the part's internal pull-down. From the onsemi
+datasheet:
 
-The KiCad HAT template leaves WP unconnected, and for the CAT24C32 that is defined behaviour, not an oversight. From the onsemi datasheet:
+> **WP:** When pulled HIGH, the Write Protect input pin inhibits all write
+> operations. **When left floating, this pin is pulled LOW internally.**
 
-> **WP:** When pulled HIGH, the Write Protect input pin inhibits all write operations. **When left floating, this pin is pulled LOW internally.**
+> *Note 5:* When not driven, the WP, A0, A1 and A2 pins are pulled down to GND
+> internally. For improved noise immunity, the internal pull-down is relatively
+> strong; therefore the external driver must be able to supply the pull-down
+> current when attempting to drive the input HIGH.
 
-> **Hardware Write Protection.** With the WP pin held HIGH, the entire memory is protected against Write operations. **If the WP pin is left floating or is grounded, it has no impact on the Write operation.**
+The same note is why JP1 is a **hard short** rather than a resistor: `IWP` is
+**120 µA at VCC = 3.3V**, so a weak pull-up would lose to the internal pull-down.
+The same logic applies to A0/A1/A2, which are also left floating here to select
+address 0x50 — defined behaviour on this part, undefined on many others.
 
-> *Note 5:* When not driven, the WP, A0, A1 and A2 pins are pulled down to GND internally. For improved noise immunity, the internal pull-down is relatively strong; therefore the external driver must be able to supply the pull-down current when attempting to drive the input HIGH. To conserve power, as the input level exceeds the trip point of the CMOS input buffer (~0.5 × VCC), the strong pull-down reverts to a weak current source.
+**This is a BOM constraint, not a schematic one**, and it now covers *four* pins.
+Microchip's 24AA256/24LC256, the natural second source, says the opposite:
 
-So floating WP gives a **defined logic low** and a write-enabled EEPROM. The DC table puts `IWP` at **120 µA at VCC = 3.3V** (130 µA at 5.5V) — which is also why the HAT+ spec calls for a **1 kΩ** pull-up rather than a casual 10 kΩ: 1 kΩ sources 3.3 mA and swamps the strong internal pull-down, whereas a weak pull-up would lose to it.
+> **2.4 Write-Protect (WP).** This pin must be connected to either VSS or VCC.
 
-**This is a BOM constraint, not a schematic one.** The same "24C32" ordered from another vendor may have no internal pull-down at all. Microchip's 24AA32A/24LC32A, a natural second source, says the opposite:
+A drop-in substitution to that part turns four floating inputs from "defined low"
+into out-of-spec floating CMOS inputs — a corruption and mis-addressing risk that
+no schematic review would catch, because the schematic never changed. The MPN is
+pinned on the symbol for exactly this reason; keep it pinned on the BOM line,
+with the reason attached.
 
-> **2.4 Write-Protect (WP).** This pin must be connected to either VSS or VCC. If tied to VSS, write operations are enabled. If tied to VCC, write operations are inhibited, but read operations are not affected.
+**Stacking.** HAT+ explicitly supports stacking: permitted EEPROM addresses take
+the form `101_00XY`, where the `XY` suffix encodes the HAT class. Confirm the
+X1202 presents no ID EEPROM (it predates HAT+ and almost certainly does not), and
+keep 0x50 for this board.
 
-A drop-in substitution to that part turns a floating WP from "defined low" into an out-of-spec floating CMOS input — a corruption risk that no schematic review would catch, because the schematic never changed. Two ways to make that impossible rather than documented:
+**The EEPROM can carry the board's device-tree overlay name**, which firmware
+loads at boot — the cleanest way to bring up `mcp251xfd`, the GNSS UART, and
+`pps-gpio`. See §11.
 
-1. **Pin the manufacturer part number on the BOM line**, not the generic "24C32", with the reason attached: *floating WP is only valid for parts specifying an internal WP pull-down.*
-2. **Fit an unpopulated 1 kΩ pull-up to 3.3V plus a test point** on WP. Costs one 0402 footprint and one pad, keeps the board's current tested behaviour by default, and converts it to the HAT+ default-protected arrangement — or rescues a second-sourced part with no internal pull-down — without a respin.
+**Not a Power HAT+.** This board sources no 5V to the Pi, so the Power HAT+ rules
+(`hat_current_supply`, the MODE1 address that makes firmware set
+`usb_max_current_enable=1`) do not apply.
 
-**Which default is right here?** Write-enabled is more convenient for a one-off you will program in place and possibly re-flash as the overlay evolves, and the ID bus is only touched by firmware at boot, so accidental writes are unlikely. Keep it. The pull-up footprint is the hedge, not a correction.
+### 3.9 Terminal Blocks and Connectors
 
-**Stacking.** Contrary to the older HAT rules, HAT+ explicitly supports stacking: permitted EEPROM addresses take the form `101_00XY`, where the `XY` suffix encodes the HAT class. Confirm the X1202 presents no ID EEPROM (it predates HAT+ and almost certainly does not), and keep 0x50 for this board.
+| Ref | Part | Footprint | Function |
+|---|---|---|---|
+| J2 | 6-position screw terminal, 5.08mm | `TerminalBlock_Phoenix_MKDS-1,5-6-5.08_1x06_P5.08mm_Horizontal` | Vehicle side |
+| J3 | 2-position screw terminal, 5.08mm | `TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal` | +12V pass-through to the X1202 |
+| J1 | 2×20 2.54mm socket, **on B.Cu** | `PinSocket_2x20_P2.54mm_Vertical` | Pi 5 header |
+| J4 | SMA edge-mount | `SMA_Molex_73251-1153_EdgeMount_Horizontal` | GNSS active antenna |
+| BT1 | JST-SH 2-pin, 1.0mm | `JST_SH_SM02B-SRSS-TB_1x02-1MP_P1.00mm_Horizontal` | GNSS backup cell |
+| JP1 | Solder jumper, normally open | `SolderJumper-2_P1.3mm_Open_Pad1.0x1.5mm` | EEPROM write protect |
+| MH1–MH4 | Mounting holes | — | 58 × 49mm HAT pattern |
 
-**The EEPROM can carry the board's device-tree overlay name**, which firmware loads at boot. That is the cleanest way to bring up `mcp251xfd`, the GNSS UART, and `pps-gpio` — an overlay named in the EEPROM instead of hand-edited `config.txt` entries that have to be re-applied on every fresh Pi image. See §11.
+The footprint family is **Phoenix MKDS**, not the MC/MCV series earlier revisions
+named. Both are 5.08mm pitch; the BOM must say which.
 
-**Not a Power HAT+.** This board sources no 5V to the Pi, so the Power HAT+ rules (`hat_current_supply`, the MODE1 address that makes firmware set `usb_max_current_enable=1`) do not apply. They would apply if the X1202's job ever migrated onto this board.
+**J2 pin map, as wired:**
 
-### 3.9 Terminal Blocks
+| J2 pin | Net | OBD-II pin |
+|---|---|---|
+| 1 | `+12V_RAW` | 16 (battery +12V) |
+| 2 | GND | 5 (signal ground) |
+| 3 | GND | 4 (chassis ground) |
+| 4 | `KLINE_RAW` | 7 (K-line) |
+| 5 | `CANH_RAW` | 6 (CAN High) |
+| 6 | `CANL_RAW` | 14 (CAN Low) |
 
-| Parameter | Value |
-|---|---|
-| Part series | Phoenix Contact MC/MCV series |
-| Pitch | **5.08mm** |
-| Footprint source | KiCad built-in TerminalBlock_Phoenix library — the MC/MCV-G-5.08 `P5.08mm` variants |
-| Block 1 | **6-position** — vehicle side: 12V, signal ground, chassis ground, K-line, CANH, CANL |
-| Block 2 | **2-position** — +12V pass-through (12V, GND) to the X1202 via a DC barrel-jack pigtail |
-| Placement | Board edge, with protection diode cluster placed nearby |
+Note J2's *value* field still reads `Screw_Terminal_01x05` while the symbol and
+footprint are 6-position — cosmetic, but it will propagate into a BOM.
 
-Block 1 maps 1:1 onto the OBD-II connector: pin 16 (battery +12V), pin 5 (signal ground), pin 4 (chassis ground), pin 7 (K-line), pin 6 (CAN High), pin 14 (CAN Low).
+**Signal ground and chassis ground are tied together on the board** — pins 2 and
+3 are the same GND net, so the HAT is the bonding point between the two returns.
+That is fine on a vehicle where they are already bonded at the battery. The
+layout consequence: bring the 12V return in on one pin and reference the bus
+receivers to the other, joining them at a **single star point** near the
+connector rather than letting them merge across the whole Gnd.Cu pour. Otherwise
+the HAT's power-return current — including the pass-through leg feeding the X1202
+and therefore the entire Pi — shares copper with the CAN and K-line voltage
+reference. **With a board-wide solid GND pour this is a placement/stitching
+question, and it has not been explicitly resolved** (§8.3).
 
-**Signal ground and chassis ground are tied together on the board.** That makes the HAT the bonding point between the two returns, which is fine on a vehicle where they are already bonded at the battery — the offset is millivolts. The layout consequence is worth being deliberate about: bring the 12V return in on chassis ground and reference the bus receivers to signal ground, joining the two at a **single star point** near the connector rather than letting them merge across the whole Gnd.Cu pour. Otherwise the HAT's power-return current (including the pass-through leg feeding the X1202 and therefore the entire Pi) shares copper with the CAN and K-line voltage reference.
-
-The block has no spare way for an ISO 9141 **L-line**. The dev vehicle does not need one (Nissan CONSULT inits with a byte sequence, not an L-line pulse), but some pre-CAN vehicles do — a scope decision to record rather than discover later.
+The block has no spare way for an ISO 9141 **L-line**. The dev vehicle does not
+need one (Nissan CONSULT inits with a byte sequence, not an L-line pulse), but
+some pre-CAN vehicles do.
 
 ## 4. Raspberry Pi 5 GPIO Header Mapping
 
-> **Status:** several assignments below were deconflicted after the first draft and are not yet reflected here. Rows marked **TBD** must be updated from the schematic before this table is trusted.
+Read directly from the netlist, with header pin numbers taken as authoritative.
+Every net now lands on the pin its label names.
 
-| Net Label | Pi 5 GPIO / Pin Function | Connected To |
-|---|---|---|
-| UART_TXD | GPIO14 (UART0 TXD) | TLIN1027-Q1 TXD (K-line) |
-| UART_RXD | GPIO15 (UART0 RXD) | TLIN1027-Q1 RXD (via 4.7 kΩ pull-up to Pi 3V3) |
-| GPIO26_EN | GPIO26 | TLIN1027-Q1 EN pin (default low = sleep) |
-| SPI0_SCK | GPIO11 (SPI0 SCLK) | MCP2518FDT-E/SL SCK |
-| SPI0_SDO (MCP → Pi) | GPIO9 (SPI0 MISO) | MCP2518FDT-E/SL SDO |
-| SPI0_SDI (Pi → MCP) | GPIO10 (SPI0 MOSI) | MCP2518FDT-E/SL SDI |
-| SPI0_nCS | GPIO8 (SPI0 CE0) | MCP2518FDT-E/SL nCS |
-| CAN_INT | GPIO25 | MCP2518FDT-E/SL nINT |
-| I2C1_SDA | GPIO2 (I2C1 SDA) | BMP384, LSM6DSOXTR (shared bus) |
-| I2C1_SCL | GPIO3 (I2C1 SCL) | BMP384, LSM6DSOXTR (shared bus) |
-| BARO_INT | **TBD** — *was GPIO6, moved* | BMP384 INT pin |
-| IMU_INT | **TBD (verify)** — drafted as GPIO16 | LSM6DSOXTR INT1 pin |
-| GNSS_TXD / GNSS_RXD | **TBD** — a secondary Pi 5 UART | MAX-M10M-00B UART |
-| GNSS_PPS | **TBD / unassigned** | MAX-M10M-00B TIMEPULSE |
-| GPIO0 (ID_SD) | GPIO0 | 24C32 HAT ID EEPROM (dedicated ID bus) |
-| GPIO1 (ID_SC) | GPIO1 | 24C32 HAT ID EEPROM (dedicated ID bus) |
-| 3V3 (Pi) | 3.3V rail, header | TCAN1042 VIO, K-line RXD pull-up, EEPROM + ID pull-ups |
-| 3V3_BUCK | AP63203Q output (**depopulate — see §3.7.4**) | Nothing, if the recommendation is taken |
-| 5V0 | 5V rail, header | TCAN1042VDRQ1 VDD |
-| VSUP_12V_RAW | 12V input (via terminal block) | TLIN1027-Q1 VSUP, protection chain, buck input, 12V pass-through |
-| GND | Ground plane (Gnd.Cu) | All subsystems |
+| Header pin | Pi function | Net label | Connected to |
+|---|---|---|---|
+| 1, 17 | 3V3 | `+3V3` | Every logic device on the board |
+| 2, 4 | 5V | `+5V` | U4 (TCAN1042) VDD, C8 |
+| 3 | GPIO2 / SDA1 | `GPIO2/SDA1` | U5.4 (BMP384 SDI), U6.14 (LSM6DSOX SDA), R9 |
+| 5 | GPIO3 / SCL1 | `GPIO3/SCL1` | U5.2 (BMP384 SCK), U6.13 (LSM6DSOX SCL), R7 |
+| 7 | GPIO4 / `uart2` TX | `GPIO4/TXD1` | U7.3 (MAX-M10M RXD) |
+| 29 | GPIO5 / `uart2` RX | `GPIO5/RXD1` | U7.2 (MAX-M10M TXD) |
+| 8 | GPIO14 / `uart0` TX | `GPIO14/TXD0` | R6 (1 kΩ) → U2.4 (TLIN1027 TXD); R8 (4.7 kΩ pull-up to +3V3) |
+| 10 | GPIO15 / `uart0` RX | `GPIO15/RXD0` | U2.1 (TLIN1027 RXD), R3 (4.7 kΩ → +3V3) |
+| 37 | GPIO26 | `GPIO26` | U2.2 (TLIN1027 EN), R4 (4.7 kΩ pull-down to GND) |
+| 19 | GPIO10 / SPI0 MOSI | `GPIO10/SPI0.MOSI` | U3.11 (MCP2518FD SDI) |
+| 21 | GPIO9 / SPI0 MISO | `GPIO9/SPI0.MISO` | U3.12 (MCP2518FD SDO) |
+| 23 | GPIO11 / SPI0 SCLK | `GPIO11/SPI0.SCLK` | U3.10 (MCP2518FD SCK) |
+| 24 | GPIO8 / SPI0 CE0 | `GPIO8/SPI0.CE0` | U3.13 (MCP2518FD nCS) |
+| 22 | GPIO25 | `GPIO25` | U3.4 (MCP2518FD nINT) |
+| 36 | GPIO16 | `GPIO16` | U6.4 (LSM6DSOX INT1) |
+| 11 | GPIO17 | `GPIO17` | U5.7 (BMP384 INT) |
+| 12 | GPIO18 | `GPIO18/PPS` | U7.4 (MAX-M10M TIMEPULSE) |
+| 27 | ID_SD (GPIO0) | `ID_SDA` | U1.5, R1 |
+| 28 | ID_SC (GPIO1) | `ID_SCL` | U1.6, R2 |
+| 6, 9, 14, 20, 25, 30, 34, 39 | GND | `GND` | Ground pour |
 
-### 4.1 Pins that are not available
+**Unconnected header pins:** 13 (GPIO27), 15 (GPIO22), 16 (GPIO23), 18 (GPIO24),
+26 (GPIO7 / SPI0 CE1), **31 (GPIO6 — left free for the X1202)**, 32 (GPIO12), 33
+(GPIO13), 35 (GPIO19), 38 (GPIO20), 40 (GPIO21).
 
-- **GPIO6 is claimed by the X1202 UPS.** `scripts/ups_shutdown_watch.py` (`UPS_PLD_GPIO=6`) holds it as the power-loss-detect input, and `docs/roadmap/mcp-and-power-hardening.md` records that two processes claiming that line via `lgpio` collide with EBUSY. It was the draft's BMP384 INT pin; the reassignment above must be captured.
-- **GPIO0/GPIO1 are the ID bus** and may carry nothing else — this also rules out Pi 5 `uart1`, which shares those pins.
-- **GPIO14/15 (uart0) are consumed by K-line**, so GNSS must use another UART. Candidates on the Pi 5: `uart2` on GPIO4/5, or `uart4` on GPIO12/13. (`uart3` on GPIO8/9 collides with SPI0.) The serial console must be disabled on whichever UART is used.
-- **PPS** wants a plain GPIO; GPIO18 is the `pps-gpio` overlay's default and is currently free.
-- Free after the above: GPIO5, 7, 13, 17, 19, 20, 21, 22, 23, 24, 27 (subject to the UART choice). GPIO7 is SPI0 CE1 — worth reserving for a possible second CAN controller (see §10).
+### 4.1 Pin conflicts and naming hazards
+
+- **GPIO6 is claimed by the X1202 UPS and this board leaves it alone.**
+  `scripts/ups_shutdown_watch.py` (`UPS_PLD_GPIO=6`) holds it as the power-loss-
+  detect input, and `docs/roadmap/mcp-and-power-hardening.md` records that two
+  processes claiming that line via `lgpio` collide with EBUSY. The barometer INT
+  was drafted onto GPIO6 and was moved to **GPIO17 (pin 11)** on 2026-08-10.
+  GPIO17 is a plain GPIO with no alternate function, and it is also the closest
+  free header pin to U5 — 10.5mm from the INT pad against 31.4mm for pin 31, so
+  the fix shortened the route as well. GPIO7 (CE1) and GPIO12/13 (`uart4`) were
+  deliberately not used, to keep a second CAN controller and a spare UART
+  available.
+- **PPS is on header pin 12 = GPIO18** (corrected 2026-08-10; it previously landed
+  on pin 18, i.e. GPIO24). GPIO18 is the `pps-gpio` overlay's default, so the
+  overlay needs no `gpiopin=` override.
+- **The `TXD1`/`RXD1` suffixes on the GPIO4/5 labels are Pi 4-era names.** On a Pi
+  5 (RP1), GPIO4/5 is **`uart2`**. The pins are right; the labels will mislead
+  whoever writes the overlay.
+- **GPIO0/GPIO1 are the ID bus** and may carry nothing else — this also rules out
+  Pi 5 `uart1`, which shares those pins.
+- **GPIO14/15 (`uart0`) are consumed by K-line.** The serial console must be
+  disabled on `uart0` *and* on the GNSS UART.
+- **GPIO7 (pin 26, SPI0 CE1) is free**, as is its neighbourhood — the reservation
+  for a possible second CAN controller survives (§10), but no footprint was left
+  for one.
 
 ## 5. Interfaces Summary
 
 | Signal Bus | Connected To | Protocol |
 |---|---|---|
-| SPI0 | MCP2518FDT-E/SL | Up to 20 MHz |
-| CAN | MCP2518FDT-E/SL → TCAN1042VDRQ1 → bus (no on-board termination) | ISO 11898-1:2015 / ISO 11898-2:2016, CAN 2.0B / CAN FD up to 2 Mbps |
-| K-Line / LIN (uart0) | TLIN1027-Q1 | ISO 9141 (K-line), LIN 2.x — 20 kbps TX / 100 kbps RX, no dominant timeout |
-| I2C (I2C1) | BMP384 (0x76/0x77), LSM6DSOXTR (0x6A/0x6B) | Up to 3.4 MHz |
-| I2C (dedicated ID bus) | 24C32 HAT ID EEPROM (0x50) | Standard I2C, 100 kHz |
-| UART (secondary, TBD) + PPS | MAX-M10M-00B | NMEA / UBX protocol |
-| Power | Vehicle 12V → protection → +12V; AP63203Q → 3V3_BUCK; Pi header → 3V3, 5V0; 12V pass-through → X1202 | Distributed via Power.Cu |
+| SPI0 (CE0) | MCP2518FDT-E/SL | Up to 20 MHz |
+| CAN | MCP2518FDT-E/SL → TCAN1042VDRQ1 → J2 (no on-board termination) | ISO 11898-1:2015 / ISO 11898-2:2016, CAN 2.0B / CAN FD up to 2 Mbps |
+| K-Line / LIN (`uart0`) | TLIN1027DRQ1 | ISO 9141 (K-line), LIN 2.x — 20 kbps TX / 100 kbps RX, no dominant timeout |
+| I2C1 | BMP384 (**0x77**), LSM6DSOX (**0x6B**) | Standard/fast mode |
+| I2C (dedicated ID bus) | CAT24C256 (0x50) | Standard I2C, 100 kHz |
+| UART (`uart2`, GPIO4/5) + time pulse | MAX-M10M-00B | NMEA / UBX |
+| Power in | Vehicle 12V → D4/D1/C2/C3 → `+12V` → TLIN1027 VSUP + J3 pass-through | — |
+| Power in | Pi header → `+3V3` (all logic), `+5V` (CAN transceiver VDD) | — |
 
-I2C1 address check: the X1202 fuel gauge sits at 0x36 on bus 1 and does not collide with the BMP384 or LSM6DSOX. The Pi already fits 1.8 kΩ pull-ups on GPIO2/3 — do not add more on the HAT.
+**I2C1 addressing.** The X1202 fuel gauge sits at 0x36 on bus 1 and does not
+collide with 0x77 or 0x6B.
 
-## 6. KiCad Implementation Notes
+**I2C pull-ups are doubled.** R7 and R9 (4.7 kΩ to +3V3) sit on SCL and SDA — on
+top of the Pi's own 1.8 kΩ pull-ups on GPIO2/3, giving ~1.3 kΩ effective and
+~2.5 mA sink per line at VOL. Not fatal, but it is more than any device on the
+bus needs, and earlier revisions of this document explicitly said not to add
+them. Depopulating R7/R9 is a zero-risk change (§8.3).
 
-- Schematic organized hierarchically: root sheet plus six sub-sheets — Power, GPIO_Header, KLine_Transceiver, CANFD_Interface, Sensors, ID_EEPROM.
-- Board outline: 65mm x 56mm standard HAT form factor with four mounting holes at Raspberry Pi standard hole coordinates.
-- Mechanical: screw terminals mount on the **top** side, facing away from the stack. The Pi 5 active cooler sits below the HAT and does not conflict with them; stack height is therefore set by the cooler plus the X1202 below, so size the standoffs and the header extension to clear both.
-- Symbols/footprints for TLIN1027-Q1, TCAN1042VDRQ1, BMP384, and LSM6DSOXTR sourced from SnapEDA/UltraLibrarian in KiCad format; MCP2518FDT-E/SL uses a generic SOIC-14 footprint from the built-in Package_SO library with a custom symbol built from datasheet pinout if no verified listing is found.
-- Layout guidance: terminal blocks at board edge with protection diode cluster nearby; MCP2518FDT-E/SL + TCAN1042VDRQ1 + 40 MHz crystal grouped tightly near the terminal block; BMP384/LSM6DSOXTR placed away from the crystal and any regulator, over solid Gnd.Cu with stitching vias underneath.
-- TLIN1027-Q1 layout per datasheet §11: two vias minimum on GND, 100 nF at VSUP as close to the pin as possible, protection/filtering placed at the connector so ESD transients never propagate inboard.
-- GNSS placement: keep the module and its antenna feed away from the AP63203Q switching node and the 40 MHz crystal; 50Ω controlled-impedance RF trace on F.Cu referenced to Gnd.Cu, kept short, with a ground keepout under the antenna feed as the module datasheet requires.
-- Routing: wider traces on 12V, K-line, and CAN nets; standard widths elsewhere; 5V0 and 3V3 decoupling kept separate at the TCAN1042VDRQ1.
+## 6. KiCad Implementation — as built
+
+- **Hierarchy: root plus four sub-sheets** — `Sensors`, `CANFD_Interface`,
+  `KLine_Transceiver`, `OBD_IO`. The root sheet carries the 40-pin header (J1),
+  the ID EEPROM block (U1, R1, R2, JP1, C1), and the sheet interconnect. After the
+  K-line rework, `OBD_IO` holds only connectors and the 12V protection cluster
+  (J2, J3, D4, D1, C2); the whole K-line network — U2, R3–R6, R8, C3, C4, D5 —
+  now lives in `KLine_Transceiver`. Earlier
+  revisions described six sheets including separate `Power`, `GPIO_Header`, and
+  `ID_EEPROM` sheets; that structure is gone.
+- **Two orphaned files remain in the project directory**: `Power.kicad_sch` and
+  `Inputs.kicad_sch` are earlier revisions of what is now `OBD_IO.kicad_sch`.
+  They are not instantiated by the root sheet and contribute nothing to the
+  netlist, but they will confuse the next reader — delete them (housekeeping,
+  not a defect).
+- **Symbols and footprints** for TLIN1027DRQ1, TCAN1042VDRQ1, BMP384, LSM6DSOX,
+  MAX-M10M-00B, MCP2518FDT-E/SL, and BAT54 are imported from SnapEDA/
+  UltraLibrarian into date-stamped project libraries (`2026-08-09_*`,
+  `2026-08-11_*`) with footprints in a project-local `footprints` library.
+  Passives, connectors, and the EEPROM come from the KiCad standard libraries.
+- **The crystal symbol is a 12 MHz part with the 40 MHz MPN overridden**
+  (`ABLS2-12.000MHZ-D4Y-T` symbol, `MPN=ABLS2-40.000MHZ-D4YF-T`). The value field
+  reads 40MHz. Harmless electrically, but the SnapEDA metadata fields still
+  describe the 12 MHz part and will pollute a generated BOM.
+- **PCB status: fully routed.** 368 F.Cu segments, 105 B.Cu segments, 44 vias, 0
+  unconnected items. `freerouting` was used at some point
+  (`temp-freerouting.dsn` is present).
+- **DRC: 0 violations, 0 unconnected, 0 schematic-parity issues** (2026-08-11).
+  The U6 pad-to-pad clearance errors are cleared by the scoped rule in
+  `canary-hat.kicad_dru` rather than by moving copper (§2.1, §12.4).
+- **Run CLI DRC with `--refill-zones`.** `kicad-cli pcb drc` does *not* refill by
+  default, so it checks new vias against stale zone fills and reports phantom
+  clearance violations — 10 of them, the first time this bit. The GUI refills
+  automatically, which is why the two disagree.
+- **Fiducials:** FID1 (103.50, 52.50), FID2 (161.50, 54.70), FID3 (103.50, 91.25),
+  all `Fiducial_1mm_Mask2mm` on F.Cu, references on F.Fab, attributes
+  `board_only` + `exclude_from_bom`. Non-collinear, 3.5mm from the board edge,
+  clear of the mounting holes, and asymmetric under 180° rotation by ~1.95mm so
+  orientation is unambiguous. `board_only` matters: without it, *Update PCB from
+  Schematic* with "delete footprints with no symbols" would remove them.
+- **ERC: 5 warnings**, all benign — a `SolderJumper_2_Open` library mismatch, and
+  four pin-type complaints where power flags meet strapped bidirectional pins
+  (U5 SDO, U6 SDX/SCX/CS tied to rails as mode/address straps).
+- **Mechanical:** screw terminals J2 and J3 mount on the **top** side at the
+  board's lower edge (Y ≈ 94.5), facing away from the stack; the SMA (J4) is on
+  the right edge. The Pi 5 active cooler sits below the HAT; stack height is set
+  by the cooler plus the X1202 below, so size the standoffs and header extension
+  to clear both.
+- **Layout as placed:** the CAN group (U3, U4, Y1, C5–C9) sits centre-left near
+  the terminal block; the sensors (U5, U6) sit top-left, away from the crystal;
+  the GNSS module (U7) sits at the right edge with a short RF run to J4 through
+  C16/L1; the K-line transceiver (U2) and the 12V protection cluster (D4, D1, C2)
+  sit along the bottom edge near J2.
 
 ## 7. Manufacturing Notes
 
-- Gerbers generated for all 4 copper layers (F.Cu, Gnd.Cu, Power.Cu, B.Cu), soldermask, and silkscreen layers on both sides, plus Edge.Cuts board outline.
-- Drill files exported in Excellon format.
-- Minimum trace/space and drill sizes verified against standard fabrication capabilities (typically 0.127mm/5mil trace-space, 0.2mm minimum drill).
-- Gnd.Cu and Power.Cu filled as zones — Gnd.Cu solid, Power.Cu split per §2 — stitched to component pads via through-hole vias sized to meet a minimum 0.15mm annular ring requirement (0.7–0.8mm via diameter / 0.4mm drill).
-- MAX-M10M-00B requires an external active antenna with integrated SAW filter and LNA, since this variant omits onboard RF front-end filtering to reduce cost and power [cite:39].
-- Pick-and-place/centroid file to be exported alongside Gerbers if outsourcing partial assembly (e.g. PCBWay Combo sourcing) for BMP384 and LSM6DSOXTR; these two line items should be flagged in the BOM/order notes as assembly targets while other SOIC parts are self-supplied and hand-soldered.
-- EEPROM WP: left floating (defined low on the CAT24C32), with an unpopulated 1 kΩ pull-up + test point as the hedge (§3.8.2).
-- AP63203Q and its passives: footprints laid out, **depopulated by default**, with the 0Ω link to Pi 3V3 fitted instead (§3.7.4).
+- Gerbers for all 4 copper layers (F.Cu, In1.Cu/Gnd.Cu, In2.Cu/Power.Cu, B.Cu),
+  soldermask and silkscreen both sides, plus Edge.Cuts.
+- Drill files in Excellon; through-hole vias only (0.6–0.9mm diameter / 0.3–0.5mm
+  drill per net class), no blind/buried, no microvias.
+- Confirm the fabricator's actual stackup matches the 0.1mm outer prepreg
+  assumed by the GNSS RF trace (§3.6).
+- Gnd.Cu is a solid board-wide GND pour; Power.Cu is a single +3V3 pour. Stitch
+  both to component pads generously — particularly under the sensors and along
+  the RF path.
+- MAX-M10M-00B requires an **external active antenna with integrated SAW filter
+  and LNA**, since this variant omits onboard RF front-end filtering [cite:39].
+  The board supplies bias for it through L1.
+- BT1 requires an external **primary** backup cell on a JST-SH lead (no charge
+  path on the board — §3.6).
+- EEPROM WP: JP1 open at build = write-enabled. Bridge JP1 to protect.
+- Pick-and-place/centroid file to be exported alongside Gerbers if outsourcing
+  partial assembly for the LGA parts (U5 BMP384, U6 LSM6DSOX) and the module (U7);
+  the SOIC parts are hand-solderable.
+- BOM hygiene has moved to **§12**, which is now the fabrication and assembly
+  readiness checklist. The items this section used to list — the CAT24C256 part
+  pin, J2's wrong value, Y1's 12 MHz metadata, C2's voltage rating — are all
+  resolved there.
 
 ## 8. Open Items
 
-Confirm before finalizing the board for fabrication.
+### 8.1 Defects found and fixed (schematic clean as of 2026-08-10)
 
-**Must resolve (blocking)**
+**No known defects remain.** Every issue below was read out of the netlist rather
+than inferred from the drawing, and each is verified fixed in the current
+netlist. Kept as a log because several were non-obvious and the reasoning is
+worth having when someone next reads the schematic.
 
-- **§4 pin map is stale.** Capture the deconflicted BARO_INT pin from the schematic; confirm IMU_INT.
-- **GNSS UART assignment** — which secondary Pi 5 UART (uart2 GPIO4/5 or uart4 GPIO12/13), and disable the console on it.
-- **GNSS PPS** — still unaddressed. Roadmap task 2b.3 and `docs/time-sync.md` both depend on it; without a pulse chrony stays at `precision 5e-1` and sits unselected, and the truck has no NTP at boot. Route TIMEPULSE to a free GPIO (GPIO18 = `pps-gpio` default).
-- **3V3_BUCK vs Pi 3V3 device assignment**, per §3.7.4/§3.7.5 — the recommendation is one rail (Pi 3V3) with the buck laid out but depopulated. Either way this must be an explicit decision, because a split rail has to survive both the UPS-battery row and the HAT+-mandated STANDBY row.
-- **TCAN1042 S/STB pin** tied low (or driven).
-- **MCP2518FD nRESET** pull-up / RC — must not float.
-- **K-line commander termination**: 1 kΩ + series blocking diode from LIN to VSUP, plus the 200–220 pF bus capacitor.
+1. **GNSS time pulse on the wrong header pin.** TIMEPULSE landed on pin 18 =
+   GPIO24 while the net was labelled `GPIO18`; every other net on the board was
+   correct by physical pin. Now on pin 12 = GPIO18, the `pps-gpio` default, so the
+   overlay needs no `gpiopin=` override.
+2. **R4 pulled the TLIN1027 EN pin up to +12V.** An abs-max violation of the ±6V
+   `VLOGIC` rating, which also inverted the intended default — the transceiver was
+   permanently enabled rather than defaulting to low-power — and pushed ~1.8 mA
+   through the Pi's GPIO26 clamp into a rail that is down in the HAT+ STANDBY
+   state. Now a pull-down to GND, backing the part's internal pull-down (§3.3.2).
+3. **The commander termination was wired in series with the K-line bus**
+   (`J2 pin 4 → R5 → D5 → LIN`), which broke the path in *both* directions: the
+   driver could not sink the bus dominant through R5's 1 kΩ against the vehicle's
+   own pull-up, and D5 blocked the LIN pin from discharging when the ECU pulled
+   dominant, leaving the internal 45 kΩ termination holding it recessive forever.
+   Now `+12V → R5 → D5 → LIN` with J2 pin 4 direct to the pin, per §11.1 Pin 6 and
+   Figure 8-1. D5 also changed from an SS54 Schottky to a 1N4148W, because the
+   diode's job is blocking reverse current into an unpowered VSUP and Schottky
+   leakage undermines exactly that (§3.3).
+4. **R8 added** (4.7 kΩ, TXD to +3V3, Pi side of R6). Not a defect in the original
+   drawing so much as a missing guard: TXD is internally pulled to ground, so with
+   EN already raised, a collector that dies or releases the tty would leave the
+   vehicle's K-line held dominant. §3.3.2 has the placement and value reasoning.
+5. **BMP384 interrupt on GPIO6**, which `ups_shutdown_watch.py` holds as the
+   X1202's power-loss-detect input — two `lgpio` claimants collide with EBUSY.
+   Moved to **GPIO17** (§4.1).
 
-**Confirm**
+### 8.2 Decisions taken (2026-08-11)
 
-- ~~EEPROM density~~ — **resolved: 24C32**, HAT+ mandates 16-bit addressing (§3.8.1). Remaining action: **pin the manufacturer part number** (CAT24C32) on the BOM rather than a generic 24C32 — the floating WP is only valid for parts specifying an internal pull-down, and a second source such as Microchip's 24LC32A explicitly requires WP tied to a rail (§3.8.2). Also verify no clock stretching and a whole-device WP pin.
-- TCAN1042 VIO undervoltage behaviour with VDD present and VIO absent — the STANDBY row depends on it (§3.7.5).
-- MAX-M10M acquisition peak current and the active-antenna LNA bias draw, the two least-certain lines in the §3.7.4 budget.
-- SPI net naming: SDI/SDO labels vs the chip's own pin names, so MISO/MOSI don't get crossed at layout.
-- Edge budget for the two 5.08mm blocks: 6-position + 2-position is 8 ways ≈ 41mm of pitch plus end walls, against a 65mm board edge. Confirm it clears the mounting holes.
-- **Current rating of the protection chain and the pass-through leg** (see §3.7.3) — the PTC fuse, reverse-blocking diode, and +12V copper carry the Pi's entire supply, not just the HAT's.
-- Star-point placement for the signal/chassis ground bond (§3.9).
-- Specific protection component part numbers in the 12V input chain (TVS diode rated for automotive load dump, reverse-blocking diode, PTC fuse ratings).
-- Quiescent draw on +12V with the vehicle parked, if the harness ever lands on always-hot OBD pin 16.
-- BMP384 RMS noise against the grade budget; keep the BMP390 footprint option (§3.5).
-- TLIN1027-Q1 transmit ceiling (20 kbps) against the intended CONSULT baud rate.
+Recorded so they are positions rather than omissions, and so nobody re-opens them
+at fab time.
 
-**Recommended additions**
+- **The X1202 leg gets no protection on this board.** J3 taps `+12V_RAW` ahead of
+  D4 (§3.7.4). The X1202 already runs from a cigarette-lighter adapter in this
+  vehicle and is fine there — electrically, an accessory socket and OBD pin 16 are
+  the same environment, both fused in the 10–20A range off the same battery. Adding
+  a series element and TVS purely because the feed now arrives via OBD would be
+  protecting against nothing new. *Residual difference worth knowing:* a cigarette
+  plug is keyed, whereas J2 is a hand-wired terminal block, so reverse polarity is
+  possible here in a way it is not with the adapter — D4 protects the HAT, and the
+  X1202 would take it.
+- **No fuse on the board.** The harness-side/vehicle fuse is the whole story.
+- **No CAN bus protection beyond the transceiver.** The TCAN1042's own ±58V bus
+  fault rating and ±15kV IEC ESD are the defence (§3.2). Defensible for a device
+  that lives permanently inside a vehicle harness.
+- **U6 lands stay as imported** (0.3048 × 0.5334mm, ~19% under TN0018 — §12.4).
+  DRC is clean via the scoped rule; the undersized land is an accepted
+  solder-joint reliability position, not an outstanding error.
 
-- **GNSS front end.** The MAX-M10M has no SAW/LNA and will sit directly above a Pi 5 running a WiFi hotspot (`docs/pi-hotspot.md`) — a real desense risk at 1.575 GHz. Either move to the MAX-M10S (integrated SAW + LNA) or add an external SAW + LNA. Specify the active-antenna bias network (feed inductor, DC block, short-circuit protection) and the antenna connector; none is currently in the spec.
-- **GNSS V_BCKP** to a supercap, so the receiver hot-starts instead of cold-starting every boot — this directly shortens the pre-NTP window that PPS exists to close.
-- **Status LEDs** (power good, CAN TX/RX, GPS fix) and a few test points. In-vehicle debugging currently costs an SSH round trip.
-- **Second CAN channel**, or at least reserve CE1 (GPIO7) + an INT pin and leave the footprint. This board is a one-channel replacement for a two-channel Waveshare HAT; vehicles with HS-CAN and MS-CAN on separate OBD pins need both.
-- **Common-mode choke footprint** on CANH/CANL, DNP by default.
-- **Spread-spectrum buck variant**, if available in the AP63xxx family, to reduce broadband coupling into the GNSS feed.
+### 8.3 Confirm before fabrication
+- **Fit 27pF for C5/C6**, not the 22pF currently drawn — the ABLS2's standard CL
+  is 18pF (§3.1.1). The frequency effect is negligible; do it because it is
+  correct and free.
+- **Do not lose the `F` in `ABLS2-40.000MHZ-D4YF-T`** — at 40 MHz the ABLS2
+  standard product is 3rd overtone, which will not run in the MCP2518FD's Pierce
+  oscillator (§3.1.1).
+- **Rename the `KLINE_RAW` net to `KLINE`.** On this board `_RAW` means "upstream
+  of protection" (`+12V_RAW`), but this net *is* the protected, terminated bus at
+  the transceiver pin — the name implies a filtered version downstream that does
+  not exist.
+- **C4 placement.** It sits at (141.0, 77.0), out by the connector end rather than
+  at U2's LIN pin at (129.25, 77.41). Defensible under §11's "place filtering at
+  the connector", but TI's own layout example puts it at the pin — make it a
+  decision, not an accident.
+- **Depopulate R7/R9** (duplicate I2C pull-ups, §5) unless there is a measured
+  reason to keep them.
+- **V_BCKP fallback** — no path from +3V3, no charge path, floating if BT1 is
+  absent (§3.6). At minimum decide "primary cell always fitted" and record it.
+- **Antenna bias protection** on the L1 feed (§3.6).
+- **TCAN1042 VIO undervoltage behaviour** with VDD present and VIO absent — the
+  STANDBY row depends on it (§3.7.5).
+- **Star-point placement** for the signal/chassis ground bond across J2 pins 2
+  and 3 (§3.9).
+- **RF stackup** — the 0.2mm feed assumes 0.1mm to Gnd.Cu (§3.6, §7).
+- **Verify no I2C clock stretching and whole-device WP** on the CAT24C256
+  (§3.8.1).
+- **Quiescent draw on +12V** with the vehicle parked, if the harness ever lands on
+  always-hot OBD pin 16.
+- **BMP384 RMS noise** against the grade budget; the BMP390 is footprint-
+  compatible if it falls short (§3.5).
+- **TLIN1027 20 kbps transmit ceiling** against the intended CONSULT baud rate.
+
+### 8.4 Deferred / not in this revision
+
+Recorded so they are decisions rather than discoveries:
+
+- **GNSS front end.** The MAX-M10M has no SAW/LNA and sits directly above a Pi 5
+  running a WiFi hotspot (`docs/pi-hotspot.md`) — a real desense risk at 1.575
+  GHz. The board relies entirely on the active antenna's integrated filtering.
+  Moving to the MAX-M10S (integrated SAW + LNA) remains the robust option.
+- **No status LEDs and no test points.** In-vehicle debugging still costs an SSH
+  round trip.
+- **Single CAN channel.** GPIO7/CE1 is free but no second-controller footprint was
+  left. Vehicles with HS-CAN and MS-CAN on separate OBD pins need both.
+- **No common-mode choke footprint** on CANH/CANL.
+- **No L-line** way on J2 (§3.9).
 
 ## 9. What This Board Unlocks for CANary
 
-The K-line interface is the reason to build this board. Two long-standing blockers close with it:
+The K-line interface is the reason to build this board. Two long-standing
+blockers close with it:
 
-- **Commanded AFR and ignition timing are not on the CAN bus** (`docs/roadmap/engine-tuning-support.md`, `data/bindings.yaml`), and Mode 01 / Mode 22 exclusivity means a single CAN tuning capture cannot produce them. On-board K-line puts spark and commanded AFR on the *same host clock* as the CAN capture.
-- It retires the laptop-side UpRev import path (`tools/import_uprev_log.py`) and the cross-log clock alignment it requires (`src/analysis/clock_align.py`) for anything the Pi can poll itself.
+- **Commanded AFR and ignition timing are not on the CAN bus**
+  (`docs/roadmap/engine-tuning-support.md`, `data/bindings.yaml`), and Mode 01 /
+  Mode 22 exclusivity means a single CAN tuning capture cannot produce them.
+  On-board K-line puts spark and commanded AFR on the *same host clock* as the
+  CAN capture.
+- It retires the laptop-side UpRev import path (`tools/import_uprev_log.py`) and
+  the cross-log clock alignment it requires (`src/analysis/clock_align.py`) for
+  anything the Pi can poll itself.
 
-The IMU, barometer, and GNSS consolidate hardware the roadmap already committed to (`docs/roadmap/imu-gps-integration.md` Phase 2b, `docs/sensor-committees.md`) and unblock `derived:GRADE` plus four of the six declared-but-dormant sensor committees.
+The IMU, barometer, and GNSS consolidate hardware the roadmap already committed
+to (`docs/roadmap/imu-gps-integration.md` Phase 2b, `docs/sensor-committees.md`)
+and unblock `derived:GRADE` plus four of the six declared-but-dormant sensor
+committees.
 
 ## 10. Capability Delta vs the Current Rig
 
 | | Current (Waveshare 2-CH + X1202 + USB GPS) | CANary-HAT |
 |---|---|---|
-| CAN channels | 2 | 1 (see open items) |
+| CAN channels | 2 | 1 (CE1 free, no footprint) |
 | CAN FD | No (MCP2515) | Yes |
-| K-line | Laptop only (UpRev) | On-board |
-| GNSS | USB dongle, 1 Hz class | On-board M10, 10 Hz capable, PPS pending |
-| IMU / baro | None | LSM6DSOX + BMP384 |
+| K-line | Laptop only (UpRev) | On-board (TLIN1027, commander-terminated) |
+| GNSS | USB dongle, 1 Hz class | On-board M10, 10 Hz capable, SMA + active-antenna bias, backup cell |
+| Time pulse | None | TIMEPULSE on GPIO18 (`pps-gpio` default) |
+| IMU / baro | None | LSM6DSOX (0x6B) + BMP384 (0x77) |
 | Power sense | X1202 PLD + fuel gauge | Unchanged (X1202 retained) |
-| Wiring | Multiple pigtails | Single 5-way terminal block + 12V pass-through |
+| 3.3V domain | Pi rail | Pi rail (no on-board regulator) |
+| Wiring | Multiple pigtails | Single 6-way terminal block + 2-way 12V pass-through |
 
 ## 11. Software Work Implied
 
 None of this is blocking for fabrication, but none of it exists yet either.
 
-- **Overlay delivery:** write a single board overlay covering `mcp251xfd`, the GNSS UART, and `pps-gpio`, and name it in the HAT+ ID EEPROM so firmware loads it at boot (§3.8.1). That beats hand-edited `config.txt` entries, which `scripts/install_pi.sh` would otherwise have to re-apply on every fresh image.
-- **CAN:** swap the `mcp2515` overlay for `mcp251xfd` with `oscillator=40000000` and the final interrupt GPIO; `hardware.can` config (`interface: socketcan`, `channel: can0`) is unchanged.
-- **IMU:** add `lsm6dsox` to the `ImuConfig.source` Literal in `src/config.py` (currently `bno055 | mpu6050 | icm20948 | disabled`) and write `imu_collector.py` (roadmap task 2b.2). The frame-resolution math in `imu_frame.py` already covers the raw-chip case.
-- **Barometer:** no config, collector, or channel exists — only the `trainable=False` committee declarations from task 2a.8, waiting on members.
-- **GNSS:** works as-is over a tty (`gps_collector.py` / gpsd), but the receiver needs its nav rate configured and the chosen UART's console disabled. PPS needs `pps-gpio` plus the chrony refclock change in `docs/time-sync.md`.
-- **K-line:** entirely new — a source in the telemetry Literal, a `hardware.kline` config block (note `HardwareConfig` still carries a required `elm327_port`, which this is not), a CONSULT/KWP collector with EN-gating, `tMODE_CHANGE` blanking, and local-echo suppression.
-- **Shutdown on engine-off:** the software half of §3.7.6 — escalate a sustained `engine_off` / `no_data` `vehicle_state` to a system shutdown or suspend. Nothing does this today.
+- **Overlay delivery:** write a single board overlay covering `mcp251xfd`, the
+  GNSS UART, and `pps-gpio`, and name it in the HAT+ ID EEPROM so firmware loads
+  it at boot (§3.8.1). The 256 kbit EEPROM has room for it. That beats
+  hand-edited `config.txt` entries, which `scripts/install_pi.sh` would otherwise
+  have to re-apply on every fresh image.
+- **CAN:** swap the `mcp2515` overlay for
+  `dtoverlay=mcp251xfd,spi0-0,interrupt=25,oscillator=40000000`; `hardware.can`
+  config (`interface: socketcan`, `channel: can0`) is unchanged.
+- **IMU:** add `lsm6dsox` to the `ImuConfig.source` Literal in `src/config.py`
+  (currently `bno055 | mpu6050 | icm20948 | disabled`) and write
+  `imu_collector.py` (roadmap task 2b.2) against I2C address **0x6B** with INT1 on
+  **GPIO16**. The frame-resolution math in `imu_frame.py` already covers the
+  raw-chip case.
+- **Barometer:** no config, collector, or channel exists — only the
+  `trainable=False` committee declarations from task 2a.8. Address **0x77**;
+  interrupt on **GPIO17** (§4.1).
+- **GNSS:** works as-is over a tty (`gps_collector.py` / gpsd) on **`uart2`
+  (GPIO4/5)** — enable it and disable the console on it. The receiver needs its
+  nav rate raised from the default. PPS is on **GPIO18**, so a bare
+  `dtoverlay=pps-gpio` suffices, plus the chrony refclock change in
+  `docs/time-sync.md`.
+- **K-line:** entirely new — a source in the telemetry Literal, a
+  `hardware.kline` config block (note `HardwareConfig` still carries a required
+  `elm327_port`, which this is not), and a CONSULT/KWP collector on **`uart0`**.
+  The hardware imposes a specific startup order (§3.3.2):
+  1. **Disable the serial console on `uart0`.** Non-optional: a held-low RX is a
+     serial break, and with magic SysRq on a console that can kill or reboot the
+     host. Set GPIO15's bias explicitly while you are there.
+  2. **Open the tty before raising EN on GPIO26**, never the reverse — R8 makes
+     the released TXD state recessive, but only once the host is driving.
+  3. **Blank RXD for ~50 µs after raising EN** (`tMODE_CHANGE` 2–15 µs +
+     `tNOMINT` 35 µs), and 1.5 ms (`tPWR`) after power-up.
+  4. **Expect a break, not idle, on first contact.** Power-up with EN low lands
+     in *standby*, where RXD is driven low; the clean idle state needs one EN
+     high-then-low cycle to reach sleep.
+  5. **Do not read RXD-low as one thing** — dominant bit, bus wake-up request, or
+     VSUP undervoltage, depending on commanded mode.
+  6. **Drop EN before releasing the tty**, and on collector shutdown/crash paths.
+  7. **Strip the local echo** — single-wire, so everything transmitted returns.
+- **Shutdown on engine-off:** the software half of §3.7.6 — escalate a sustained
+  `engine_off` / `no_data` `vehicle_state` to a system shutdown or suspend.
+  Nothing does this today.
+
+## 12. Fabrication and Assembly Readiness
+
+Everything here is about getting boards *made*, not about whether the circuit is
+right. Worked through on 2026-08-11; the schematic edits described are done.
+
+### 12.1 What the schematic now carries
+
+Component attributes were the real gap, not part numbers. A 12V board whose
+capacitors carry no voltage rating will be built with 16V parts, and the failure
+arrives on the first load-dump clamp rather than at assembly.
+
+| Ref | Rating now specified | Why it is not the default |
+|---|---|---|
+| C2 | 50V, 105°C, 20% | D1 (SMBJ24A) clamps at ~38.9V, so a 25V part is overstressed on every transient. 105°C for a cabin. |
+| C3 | 50V X7R | Sits on +12V at the TLIN1027 VSUP pin. A 16V 0603 dies on the first clamp. |
+| C4 | **100V** C0G | On the K-line bus: ±45V fault rating, ISO 7637-2 pulses to +100V/−150V. 50V is marginal. |
+| C5, C6 | C0G/NP0, 50V | Crystal load caps. X7R shifts with temperature and pulls the 40 MHz oscillator — which `mcp251xfd` derives its bit timing from. |
+| C16 | C0G/NP0, 50V | GNSS RF DC block; X7R has poor Q at 1.575 GHz. |
+| C1, C7–C15 | X7R, 25V, 10% | Explicitly not Y5V/Z5U. C15 (10µ 1210) also carries a DC-bias derating note. |
+| R5 | **0.2W** | Dissipates **151 mW** during a stuck-dominant bus fault (14.1V rail − 0.8V diode − 1V dominant, squared over 1 kΩ). A standard 0.1W 0603 is under-rated. Normal 10.4 kbps traffic averages ~75 mW. |
+| C5, C6 | **27pF**, C0G | Currently 22pF. The ABLS2's standard CL is 18pF → C = 2·(CL − C_stray) ≈ 28pF (§3.1.1). |
+| C16 | 15pF C0G, **0402** | SRF-tuned DC block — sized so self-resonance lands at 1.575 GHz, where the series impedance nearly vanishes (§3.6). |
+| R1–R4, R6–R9 | 0.1W, 1% | Unremarkable. |
+
+MPNs are pinned on U1, U2, U4–U7, Y1, L1, D1, D2, D4, D5, J2, J3, J4 and BT1.
+U6 is `LSM6DSOXTR` (tape and reel). J1 and J5 are deliberately left without —
+they are commodity parts, and a plausible-but-wrong part number is worse than a
+blank field.
+
+**Do-not-substitute notes** are attached as schematic fields so they survive a
+BOM export, on the three parts where a substitution is silent:
+
+- **U1** — floating WP *and* A0/A1/A2 rely on onsemi's internal pull-downs
+  (§3.8.2). Microchip's 24LC256 requires WP tied to a rail.
+- **D5** — must stay silicon. A Schottky's reverse leakage defeats the whole
+  point of the blocking diode (§3.3).
+- **D2** — the **plain single-diode BAT54, marking KL1**. BAT54A/C/S are duals
+  with the common node on pin 2 and will not conduct pin 1 to pin 3 at all.
+  Note the naming trap: `BAT54-A` is the AEC-Q101-qualified *single*, while
+  `BAT54A` is the common-anode *dual*. One hyphen apart, and the wrong one gives
+  a GNSS that cold-starts every boot with no other symptom.
+
+**Y1's footprint name is still a misnomer** — `XTAL_ABLS2-12.000MHZ-D4Y-T`, from
+the imported library, while the part is the 40 MHz `ABLS2-40.000MHZ-D4YF-T`. The
+stale SnapEDA metadata fields that also named the 12 MHz part have been stripped;
+a note on the symbol now says to order by MPN and never by footprint or symbol
+name.
+
+### 12.2 Generating the BOM — one trap
+
+**Group by `Value,MPN,Voltage,Dielectric,Power,Tolerance`, not by `Value`.**
+Grouping on Value alone silently merges parts that differ only in rating: it
+collapses C3 into `C1,C3,C7-C14` with a Voltage column reading `25V,50V`, and
+merges R5's 0.2W with R6's 0.1W. Either produces one order line for two different
+parts, and the wrong one lands in the position where it matters.
+
+```
+kicad-cli sch export bom \
+  --fields 'Reference,Value,Footprint,MPN,Manufacturer,Voltage,Dielectric,Power,Tolerance,Height,Note' \
+  --group-by 'Value,MPN,Voltage,Dielectric,Power,Tolerance' \
+  -o BOM.csv canary-hat.kicad_sch
+```
+
+`BOM-offboard.md` in the project directory covers what the schematic cannot: the
+J5 shunt, the GNSS backup cell and antenna, the barrel-jack pigtail, the OBD-II
+Y-cable, ferrules, and standoffs.
+
+### 12.3 Assembly inputs
+
+- **Fiducials: done.** Three, correctly attributed — see §6 for positions and why
+  `board_only` matters.
+- **Assembly drawing with pin 1 marked, for U5, U6 and U7.** Their footprints are
+  SnapEDA/UltraLibrarian imports whose zero-rotation convention often disagrees
+  with IPC-7351 and therefore with the assembler's. Rotation error on those three
+  is the most likely assembly defect on this board.
+- **Assembly scope split** — state which parts the house places (U5, U6, U7 at
+  minimum) and which are hand-soldered, so the centroid and BOM agree.
+- **Stencil** if the LGAs are self-assembled, with paste apertures decided
+  alongside the mask expansion below.
+- **J1 is a 13mm-insulator 2×20 stacking header** — the part already proven to
+  clear the Pi 5 active cooler with the Waveshare HAT. Re-check if the X1202 ends
+  up between the Pi and this board.
+
+### 12.4 U6 land pattern and the DRC exception
+
+The imported LGA-14L footprint is **0.3048 × 0.5334 mm** — exact imperial values
+(0.012" × 0.021") on a 0.5 mm metric-pitch part, the fingerprint of a generic
+conversion. ST's TN0018 rule gives the correct land: for LGA pin spacing above
+200 µm (this part is 0.5 mm pitch with 0.25 mm pins, so 250 µm), land = pin +
+0.1 mm in each dimension:
+
+| | TN0018 | As drawn | Delta |
+|---|---|---|---|
+| Land width | 0.350 mm | 0.3048 mm | 13% narrow |
+| Land length | 0.575 mm | 0.5334 mm | 7% short |
+| Land area | 0.201 mm² | 0.163 mm² | **19% less** |
+
+This is a leadless package — the solder joint is the only mechanical attachment,
+on a board bolted into a vehicle. **Resize recommended**, and note it makes DRC
+*worse*: correct lands on 0.5 mm pitch leave a 0.15 mm pad gap rather than the
+current 0.1952 mm. Both are inside the 0.127 mm fab capability §7 assumes. Pad
+centres do not move, so no re-routing — but re-run DRC afterwards, since the
+lands grow ~0.02 mm in each direction.
+
+**Solder mask expansion: +0.025 mm per side** (openings 0.40 × 0.625, dams
+0.10 mm). ST's C/D figures imply +0.05/side, which leaves 0.05 mm dams — below
+any fab's minimum, so they would be dropped and the openings ganged. Zero
+expansion gives safe 0.15 mm dams but lets ±0.05 mm mask registration encroach on
+a 0.35 mm land and make the joint partly solder-mask-defined, a fatigue stress
+concentrator that undoes the point of the resize. Fall back to zero expansion
+only if the fab rejects 0.10 mm dams.
+
+`canary-hat.kicad_dru` carries the scoped exception at 0.14 mm with the
+derivation as a comment. It is scoped to U6 so board-wide clearance stays at
+0.2 mm — in particular around the +12V nets, which want *more* clearance, not
+less. **Verify the `insideCourtyard` predicate in Board Setup → Custom Rules**,
+which has a syntax checker.
+
+The reason to scope it rather than relax the global rule is not the solder joint:
+it is that a board permanently reporting six DRC errors trains you to skim past
+DRC output, and the next real violation gets lost in it.
+
+### 12.5 Before sending
+
+**Done**
+
+- [x] Three fiducials, correctly attributed (§6)
+- [x] SMA anti-pad and launch stitching — 2.9 dB → 25 dB return loss (§3.6.1)
+- [x] Outer-layer GND pours on F.Cu / B.Cu, with J4 solid and J1 unconnected (§2)
+- [x] C16 → 15pF C0G 0402, SRF-tuned (§3.6)
+- [x] CAN bus protection and X1202 leg protection — decided, see §8.2
+- [x] Crystal researched — CL is 18pF, so **C5/C6 → 27pF**; `F` option is
+      load-bearing (§3.1.1)
+- [x] DRC 0 violations, 0 unconnected, schematic parity clean
+- [x] **C5/C6 changed to 27pF**
+- [x] Fab notes written — `FAB-NOTES.md` in the project directory, covering the
+      0.1mm outer-prepreg requirement, ENIG, mask expansion, fiducial positions,
+      assembly scope, pin-1 warning and the do-not-substitute list
+- [x] BOM regenerated with the §12.2 grouping, now including Descriptions
+- [x] **Export hygiene for the PCBWay plugin:** `exclude_from_pos_files` on FID1–3
+      and JP1 (they were appearing in the centroid as placeable parts); Descriptions
+      added to U2–U7, the six imported symbols that had none; connector Values
+      changed from library artifacts to something an assembler can read
+      (`GPIO` → `2x20 stacking hdr 13mm`, `Conn_Coaxial` → `SMA edge mount`,
+      `Battery_Cell` → `GNSS backup cell (JST-SH)`, `Conn_01x02` →
+      `K-line PU select hdr`). CPL now exports 45 parts and nothing else
+- [x] **TN0018 copper keepout under U6** — F.Cu rule area at X 104–107, Y 56–59.25,
+      `copperpour not_allowed` only. Copper features under an LGA create
+      solder-mask topology that stops the package seating flat, and the resulting
+      die stress shows up as zero-g offset (datasheet p16). Tracks/vias/pads must
+      stay *allowed* — the area necessarily covers U6's own pads, so forbidding
+      them blocks the part's own connections
+- [x] **U2 grounding** — nearest GND via to pin 5 is now 1.33mm with a second at
+      2.54mm, satisfying TLIN1027 §11.1 via the pour stitching
+- [x] **BAT54 pin 1 confirmed as the anode** — D2.1 → BT1+, D2.3 → V_BCKP, so
+      current flows 1 → 3 as required. The last silent-failure item is closed
+- [x] Crystal, load-cap and DC-block reasoning written into the schematic `Note`
+      fields on Y1, C5, C6 and C16, so it travels with a BOM export rather than
+      living only in this document
+
+**Outstanding**
+
+- [ ] Optional: resize U6 lands to 0.35 × 0.575 with +0.025mm/side mask expansion
+      (§12.4) — a reliability improvement, not a defect
+- [ ] Assembly drawing with pin 1 marked for U5, U6, U7
+- [ ] Export gerbers, drill, centroid (PCBWay plugin)
