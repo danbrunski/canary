@@ -126,8 +126,14 @@ profiles:
   - cam_secondary_vs_command_rpm_did
   storage_prefix: _capture-tuning-did
 - name: fuel-did-research
-  description: Narrow all-DID capture to identify raw 0x1209 as the Base Fuel Schedule
-    candidate
+  # Purpose rewritten 2026-08-10. The original — "identify raw 0x1209 as the
+  # Base Fuel Schedule candidate" — was retracted on 2026-08-08 when 0x1209
+  # was identified as MAF against simultaneous UpRev rungs. BFS has now
+  # survived a full passive-CAN sweep and an all-DID sweep, so the question is
+  # no longer which field *is* BFS but whether it can be computed, and whether
+  # injector PW can do BFS's job without reproducing its value.
+  description: 'All-DID fuelling capture: derive Base Fuel Schedule from airflow
+    and validate injector PW as the fuel-edit instrument'
   experimental: true
   mode01: {}
   mode22:
@@ -146,13 +152,35 @@ profiles:
   did_continuous: true
   bus_budget_override: 160.0
   expected_total_demand_hz: 140.0
-  capacity_evidence: '2026-08-04 bench: 658 DID reads/s; 7 DIDs x 20 Hz = 140 reads/s.
-    Raw 0x1209 remains a candidate, not a decoded provider.'
-  required_tuple: []
-  min_achieved_rate_hz: null
-  requires_tune_revision: false
+  capacity_evidence: '2026-08-04 bench: 658 DID reads/s; 7 DIDs x 20 Hz = 140 reads/s
+    — less demanding than the tuning-did profile''s 165 reads/s, which achieved a
+    measured 14.93 Hz over a 25-minute capture on 2026-08-07. Batched at 3 DIDs per
+    Mode 22 request this is roughly 47 requests/s, above the 24 req/s line where the
+    storage sink dropped 2491 records on 2026-07-29; that incident predates batching
+    being relied on here and tuning-did has since run clear of it, but the capture
+    contract now reports dropped rows, so verify the verdict rather than assuming.'
+  required_tuple:
+  # BFS is a per-injection fuel time, so testing whether it can be derived needs
+  # airflow and rpm co-observed (air mass per intake event = MAF x 20 / rpm on a
+  # V6), IAT for the density correction that the g/s-only fit was missing, and
+  # injector PW as the candidate substitute. Any one of them absent and the
+  # capture cannot answer either question — which is what this tuple enforces.
+  - ECM_RPM
+  - ECM_MAF_GPS
+  - ECM_INTAKE_AIR_TEMP
+  - ECM_INJECTOR_PW_B1
+  # 20 Hz requested; a floor of 15 leaves room for scheduling jitter while still
+  # refusing the failure this exists to catch. Rungs are held ~10 s, so 15 Hz is
+  # 150 samples per rung — far more than the fit needs. Range, not rate, is the
+  # binding constraint on this experiment.
+  min_achieved_rate_hz: 15.0
+  # Injector PW and BFS both move with a fuel edit, so a capture whose
+  # calibration is unrecorded cannot be compared with any other.
+  requires_tune_revision: true
   builtin_revision: 0
-  operator_modified: false
+  # Vehicle-specific research profile naming this ECM's DIDs; the generic seed
+  # must never overwrite it.
+  operator_modified: true
   broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes:
