@@ -563,11 +563,25 @@ async def run_live_inference(
                 )
 
             scoring_allowed = True
+            vehicle_state: VehicleState | None = None
             if row is not None:
                 vehicle_state = _live_vehicle_state(source, components, now)
                 scoring_allowed = vehicle_state.state in _SCORABLE_VEHICLE_STATES
                 if not scoring_allowed:
                     components.emitter.counters.skipped_vehicle_state += 1
+
+            # Spec §3.7.6 — escalate a sustained parked-with-power state to a
+            # poweroff. Ships disabled; `idle_shutdown` is None unless the
+            # operator opted in. Classified unconditionally because the state
+            # that matters most here (`no_data`) is exactly the one where
+            # `row` is None, so the block above would never see it.
+            if components.idle_shutdown is not None:
+                if vehicle_state is None:
+                    vehicle_state = _live_vehicle_state(source, components, now)
+                if components.idle_shutdown.observe(
+                    state=vehicle_state.state, now=time.monotonic()
+                ):
+                    components.idle_shutdown.trigger()
 
             ctx = TickContext(
                 now=now,

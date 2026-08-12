@@ -193,6 +193,53 @@ class RecordArmingConfig(_Strict):
     disarm_after_seconds: float | None = 300.0
 
 
+class IdleShutdownConfig(_Strict):
+    """Escalate a sustained parked state to a system shutdown.
+
+    The software half of ``docs/CANary-HAT-Spec.md`` §3.7.6: the rig has no
+    ignition sense, so the alternative to unplugging it between drives is to
+    infer engine-off from bus activity and power down. See
+    ``src.daemon.idle_shutdown`` for the inhibits and why each exists.
+
+    **Ships disabled.** A box that powers itself off unattended is not
+    something to enable by surprise, and the same hard default applies to
+    every other config-gated background feature in this file.
+
+    Not to be confused with ``scripts/ups_shutdown_watch.py``, which is a
+    *safety* watchdog for actual input-power loss and runs standalone so it
+    survives a hung daemon. This is an idle timeout and lives in the daemon
+    because that is where the vehicle-state classifier lives.
+    """
+
+    enabled: bool = False
+    #: Vehicle states counting as parked/disconnected. ``ignition_only`` is
+    #: deliberately absent — KOEO is an operator at the wheel running
+    #: diagnostics — and so is ``unknown``: if the classifier could not
+    #: decide, neither should this.
+    idle_states: tuple[str, ...] = ("engine_off", "no_data")
+    #: Continuous seconds in an idle state before powering off. Generous by
+    #: default: the cost of waiting is a few minutes of idle draw, the cost
+    #: of firing early is a shutdown mid-drive.
+    idle_after_seconds: float = 1800.0
+    #: Command used to power down. ``systemctl suspend`` is the obvious
+    #: alternative, but the Pi 5 has no meaningful suspend state, so
+    #: poweroff is the only one that actually saves anything.
+    poweroff_command: tuple[str, ...] = ("systemctl", "poweroff")
+    #: Honour the operator hold that ``ups_shutdown_watch.py`` reads. A hold
+    #: respected by only one of the two shutdown paths is worse than none.
+    respect_keepalive: bool = True
+    keepalive_file: str = "/run/canary/ups_keepalive"
+    #: The ``ups-shutdown`` watchdog's JSON heartbeat. Its ``input_lost``
+    #: field is what distinguishes a parked vehicle (input present, shut
+    #: down) from a bench Pi on USB-C with the barrel jack out (input lost,
+    #: stay up). Read as a file — never GPIO6 directly, which the watchdog
+    #: owns and a second ``lgpio`` claimant collides with.
+    status_file: str = "/run/canary/ups_status"
+    #: Log the decision instead of acting on it. The way to try this on a
+    #: live rig without risking a surprise poweroff.
+    dry_run: bool = False
+
+
 class CollectionConfig(_Strict):
     obd_source: Literal["canable", "elm327", "disabled"] = "canable"
     obd_pids: tuple[str, ...] = ("auto",)
@@ -281,6 +328,7 @@ class CollectionConfig(_Strict):
     replay_retention_days: int = 7
     #: Operator-intent recording gate (Task 8.6). Defaults off.
     record_arming: RecordArmingConfig = RecordArmingConfig()
+    idle_shutdown: IdleShutdownConfig = IdleShutdownConfig()
 
 
 class OperatingModeSpec(_Strict):

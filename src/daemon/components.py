@@ -28,6 +28,7 @@ from src.control.monitor_state import (
 from src.control.monitor_state import MonitorState
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
+from src.daemon.idle_shutdown import IdleShutdownMonitor
 from src.dashboard.behavior_live import BehaviorLiveState
 from src.dashboard.broadcast import Broadcaster
 from src.models.health import HealthMonitor
@@ -113,6 +114,10 @@ class DaemonComponents:
     #: performance channels through the *same* writer ``run_storage_sink``
     #: uses, instead of a second Parquet-writing path.
     storage_writer: AsyncParquetTelemetryWriter | None = None
+    #: Escalates a sustained parked-with-power state to a poweroff (spec
+    #: §3.7.6). ``None`` when ``IdleShutdownConfig.enabled`` is false, which
+    #: is the shipped default — the inference tick then skips it entirely.
+    idle_shutdown: IdleShutdownMonitor | None = None
 
 
 def build_components(config: CanaryConfig) -> DaemonComponents:
@@ -180,6 +185,11 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         job_controller=_make_job_controller(config),
         gps_tracker=(
             GpsTracker(state_path=config.daemon.trip_state) if config.hardware.gps.enabled else None
+        ),
+        idle_shutdown=(
+            IdleShutdownMonitor.from_config(config.collection.idle_shutdown)
+            if config.collection.idle_shutdown.enabled
+            else None
         ),
     )
     # Needs a reference back to the assembled record (model_managers +

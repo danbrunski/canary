@@ -1197,9 +1197,32 @@ None of this is blocking for fabrication, but none of it exists yet either.
      VSUP undervoltage, depending on commanded mode.
   6. **Drop EN before releasing the tty**, and on collector shutdown/crash paths.
   7. **Strip the local echo** — single-wire, so everything transmitted returns.
-- **Shutdown on engine-off:** the software half of §3.7.6 — escalate a sustained
-  `engine_off` / `no_data` `vehicle_state` to a system shutdown or suspend.
-  Nothing does this today.
+- **Shutdown on engine-off:** the software half of §3.7.6. Decision logic,
+  Landed 2026-08-11: `src/daemon/idle_shutdown.py` (pure decider +
+  `IdleShutdownMonitor`), `IdleShutdownConfig`, wired into the
+  `run_live_inference` tick via `DaemonComponents.idle_shutdown`, with
+  `tests/test_idle_shutdown.py` (35 tests). **Ships disabled**
+  (`collection.idle_shutdown.enabled: false`); `dry_run: true` logs the
+  decision without acting, which is how to try it on a live rig.
+
+  The design point worth carrying forward: the bench case looks *identical* to
+  the parked case from `vehicle_state` alone. A Pi on USB-C at a desk with the
+  X1202's barrel jack out reads `no_data` — exactly an idle state — so a naive
+  timeout powers off the operator's bench rig. The discriminator is the X1202
+  watchdog's `input_lost` heartbeat field, read via `src/dashboard/ups.py`
+  (never GPIO6 directly — the watchdog owns that line and a second `lgpio`
+  claimant collides with EBUSY). That makes the two shutdown paths mutually
+  exclusive rather than redundant:
+
+  | X1202 input | Other evidence | Who acts |
+  |---|---|---|
+  | present | bus quiet for hours | `idle_shutdown` (this) |
+  | lost | battery discharging | `ups_shutdown_watch.py` |
+  | lost | battery idle | **nobody** — bench USB-C |
+
+  A second, independent guard requires that a live vehicle (`engine_running`
+  or `ignition_only`) has been seen this uptime, so a rig booted at a desk can
+  never arm even if the watchdog is not running to supply the power signal.
 
 ## 12. Fabrication and Assembly Readiness
 
