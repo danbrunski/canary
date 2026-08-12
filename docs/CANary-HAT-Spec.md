@@ -9,10 +9,12 @@
 > in place; §8.1 logs the defects that were found this way and have since been
 > fixed.
 >
-> Board state: **schematic complete, PCB placed and fully routed** (0
-> unconnected items), **0 DRC violations and 0 schematic-parity issues** as of
-> 2026-08-11. ERC is 0 errors / 5 benign warnings. No schematic defects remain
-> (§8.1).
+> Board state: **rev A submitted to PCBWay 2026-08-11 and locked.** Schematic and
+> PCB complete and fully routed, 0 unconnected items, 0 DRC violations, 0
+> schematic-parity issues; ERC 0 errors / 5 benign warnings. No schematic defects
+> remain (§8.1). Changes from here go to a future revision — see **§13**, which
+> stages them as bring-up measurements (§13.1), small fixes and GPIO control
+> (§13.2), and the sleep/supervisor architecture (§13.3).
 
 ## 1. Overview
 
@@ -1365,3 +1367,204 @@ DRC output, and the next real violation gets lost in it.
       (§12.4) — a reliability improvement, not a defect
 - [ ] Assembly drawing with pin 1 marked for U5, U6, U7
 - [ ] Export gerbers, drill, centroid (PCBWay plugin)
+
+## 13. Future revisions
+
+**Rev A is locked** — submitted to PCBWay 2026-08-11. Nothing here changes that
+board. The staging below separates *fixing what the first board teaches us*
+(rev B) from *adding a subsystem* (rev C), because those carry very different
+risk.
+
+### 13.1 Measure on rev A — this feeds everything below
+
+Several rev-B decisions cannot be made from datasheets and are only answerable
+with a physical board. Capture these during bring-up, while the board is new and
+the questions are still live.
+
+| # | Measurement | What it decides |
+|---|---|---|
+| 1 | **K-line commander mode against the ECU** — does polling work at all? | The reason this board exists (§9). Everything else is secondary. |
+| 2 | **Does the 1 kΩ pull-up disturb an NT510/UpRev session?** Sniff with J5 fitted, then open. | Whether §13.2's FET circuit is needed at all, or whether the jumper was a hedge against nothing. |
+| 3 | **Crystal frequency and startup** with C5/C6 = 27pF. | 27pF was derived from a CL figure, never measured. Confirm 40 MHz ±0.5% and clean start; a wrong load cap shows as a frequency offset. |
+| 4 | **GNSS TTFF and C/N₀**, and whether the WiFi hotspot desenses it. | Validates the RF launch (§3.6.1) and whether the MAX-M10**S** (integrated SAW+LNA) is needed. |
+| 5 | **V_BCKP hot start** — TTFF with and without BT1 fitted. | Whether the backup cell earns its place, and whether the no-charge-path design is acceptable. |
+| 6 | **I2C rise times** with R7/R9 plus the Pi's own 1.8 kΩ pull-ups. | Whether to depopulate R7/R9 (§8.3). |
+| 7 | **Actual 3.3V draw**, idle and with GNSS acquiring. | Confirms the budget in §3.7.5 that justified deleting the buck. |
+| 8 | **Thermals on D4 and R5** with the engine running. | D4 now passes only the HAT's load, and R5 is the 0.2W-rated part — both should be cool. Confirm rather than assume. |
+| 9 | **BMP384 RMS noise** at the intended ODR against a grade budget. | Whether the footprint-compatible BMP390 swap is needed (§3.5). |
+| 10 | **TLIN1027 at the real CONSULT baud.** | The 20 kbps *transmit* ceiling vs what the Xterra actually needs (§3.3.1). |
+| 11 | **X1202 quiescent draw** once it has cut its own output. | Feeds the rev-C supervisor architecture (§13.3). |
+
+### 13.2 Rev B — fixes and basic GPIO control
+
+Small, self-contained changes. No new subsystems, no firmware.
+
+**The one that matters most: STB on a GPIO.** The TCAN1042V's STB pin is
+hardwired to GND on rev A, which permanently forbids standby mode — see §13.3
+for what that costs. It is a one-net change and every low-power option depends on
+it. Note the pin has an internal pull-up forcing standby when floating, so a GPIO
+that is high-Z at boot gives low-power-by-default and requires software to assert
+normal mode; the daemon must drive it low at startup or CAN silently will not
+work.
+
+Also queued for rev B:
+
+- **Rename the `KLINE_RAW` net to `KLINE`** — on this board `_RAW` means
+  "upstream of protection", but this net *is* the protected, terminated bus.
+- **U6 land pattern to ST TN0018** (0.350 × 0.575mm, mask +0.025mm/side). Rev A
+  ships ~19% under-size — a solder-joint reliability position, not a defect
+  (§12.4).
+- **Depopulate R7/R9** if measurement 6 confirms the Pi's own pull-ups suffice.
+- **12V sense** — a divider into an ADC or a comparator, so the daemon can
+  distinguish engine-running (~14V) from key-off (~12.4V) from cranking. Cheap,
+  and a prerequisite for any voltage-based wake in rev C.
+- **Status LEDs and test points** (§8.4) — power good, CAN activity, GPS fix, plus
+  probe points on LIN, RXD and EN. In-vehicle debugging currently costs an SSH
+  round trip.
+- **Whatever rev A's bring-up turns up.**
+
+#### GPIO-controlled K-line pull-up (replaces the J5 jumper)
+
+*Gated on measurement 2 in §13.1 — if the fitted jumper turns out not to disturb
+an NT510 session, none of this is needed.*
+
+J5 selects commander mode (pull-up fitted) vs passive sniff (open). Changing it
+means unstacking the HAT from the Pi under the dash, which is exactly the
+friction that stops the mode being switched when it should be. A level-shifted
+high-side switch makes it a GPIO:
+
+```
++12V ──┬── Ra 100k ──┬── gate ── Q1 (P-FET, BSS84)
+       │             │           source = +12V
+       └─────────────┴───────────drain ──> R5 (1k) ──> D5 ──> LIN
+                     │
+                  Rb 10k
+                     │
+                  Q2 drain (N-FET, BSS138), source = GND
+                  Q2 gate ── GPIOxx, 100k pulldown to GND
+```
+
+- GPIO low **or floating** → Q2 off → Q1 gate at +12V → Vgs = 0 → pull-up
+  disconnected → **sniff mode is the safe default**, so a Pi that is off,
+  booting or crashed cannot perturb an NT510 session.
+- GPIO high → Q2 on → Q1 gate at ~1.1V → Vgs ≈ −11V → pull-up active.
+
+Numbers: Vgs −11V is inside BSS84's ±20V limit; the divider wastes ~110 µA;
+Q1's ~10Ω Rds(on) is a 1% error on a 1 kΩ pull-up; D5 still blocks bus-side
+leakage when Q1 is off.
+
+**Two approaches that do not work**, recorded so they are not re-attempted:
+driving the P-FET gate directly from a GPIO never turns it *off* (3.3V against a
+12V source is still Vgs = −8.7V), and a low-side N-FET cannot sit in the LIN leg
+because its source would be at bus potential, needing gate drive above the rail.
+
+**Deferred because the hedge may be unnecessary.** With 1 kΩ paralleling an
+NT510's ~510Ω, a transmitting tool sinks roughly 40 mA to reach dominant — well
+inside what a commercial scan tool drives. The first board will show whether the
+extra pull-up disturbs anything; if it does not, the five parts are never needed.
+
+### 13.3 Rev C — sleep, standby and wake-on-activity
+
+The goal: leave the rig plugged into OBD permanently without draining the
+vehicle battery.
+
+**One net change unlocks most of the HAT side.** The TCAN1042V's STB pin is
+currently hardwired to GND, which permanently forbids standby. Per its §9.4.3
+and EC table:
+
+| TCAN1042V mode | VCC (5V) | VIO (3.3V) |
+|---|---|---|
+| Normal, recessive | 1.5–2.5 mA | 90–300 µA |
+| **Standby** | **0.5 µA** — *VCC may be removed entirely* | **12–17 µA** |
+
+In standby the low-power receiver detects the ISO 11898-2 **Wake-Up Pattern** and
+signals it by driving RXD low — this is already a wake-on-CAN transceiver.
+§9.3.5 also notes STB has an internal pull-up forcing standby when floating, so
+**STB on a GPIO gives low-power-by-default** and requires software to assert
+normal mode. Combined with the TLIN1027 (8–12 µA sleep, wake-on-LIN, already on
+GPIO26), MCP2518FD (15 µA sleep), BMP384 (2 µA) and the LSM6DSOX's wake-on-motion,
+the HAT reaches roughly **50 µA**.
+
+**The Pi is the whole problem.** Against ~20 Ah of usable battery before a
+no-start becomes a risk:
+
+| State | Draw at 12V | Time to 20 Ah |
+|---|---|---|
+| Pi 5 idle | ~250 mA | **~3 days** |
+| Pi 5 halted | ~80 mA | ~10 days |
+| HAT asleep + µA supervisor | <1 mA | months |
+
+So the Pi must be genuinely **off**, and something else must turn it back on.
+
+**Proposed architecture — a load switch on the J3 pass-through leg**, reusing the
+shutdown path that already exists rather than replacing the X1202:
+
+```
++12V_RAW ──> [high-side load switch, ~3A] ──> J3 ──> X1202 ──> Pi
+                        ▲
+                 supervisor (µA)
+```
+
+- *Wake:* supervisor closes the switch → X1202 gets 12V → Pi boots.
+- *Sleep:* supervisor opens the switch → X1202 sees power loss → PLD on GPIO6 →
+  `ups_shutdown_watch.py` shuts down gracefully → Pi off.
+
+This avoids the HAT having to generate 5V for the Pi, which would make it a
+Power HAT+ (§3.8).
+
+**Wake sources, cheapest first:**
+
+1. **Alternator voltage sense.** Engine running ~13.8–14.4V vs key-off ~12.4V; a
+   comparator with hysteresis at ~13.2V is unambiguous, needs no bus activity,
+   ~6 parts, ~50 µA, no firmware. Misses key-on-engine-off, which the project
+   does use (`ignition_only`).
+2. **CAN wake via the TCAN1042.** Catches KOEO, but its low-power receiver runs
+   from **VIO = Pi 3V3**. Pi off ⇒ no VIO ⇒ no wake detector. Requires a small
+   always-on 3.3V rail from vehicle 12V — reintroducing the buck deleted in §3.7,
+   though now at a few mA and with a concrete justification rather than the
+   current-headroom argument that did not survive scrutiny.
+3. **Supervisor MCU.** All wake sources, timers, and a proper handshake letting
+   the Pi request its own shutdown. Costs firmware and a programming header.
+
+**X1202 behaviour — confirmed 2026-08-11** from `scripts/ups_shutdown_watch.py`,
+which documents the full cycle:
+
+> "The X1202 then cuts battery output, so the next time switched 12 V returns
+> (key-on) it's a fresh power-apply event and the board auto-boots."
+
+- **Auto-boot on 12V return: yes.** No button press, so the load-switch approach
+  is viable.
+- **Power-loss signalling: yes**, via PLD on GPIO6, HIGH = input OK, LOW = lost.
+- **It cuts its own battery output after shutdown**, so post-sleep draw should be
+  small. Still worth measuring, but it is no longer a blocking unknown.
+
+The historical unreliability is understood rather than mysterious: an earlier
+version had the **PLD polarity inverted**, and PLD alone cannot distinguish
+vehicle key-off from bench USB-C with the barrel jack unplugged. That second
+ambiguity is now resolved by fusing PLD with the fuel gauge's discharge rate
+(`power_truly_lost()`), so a flat SoC on bench power never trips a countdown.
+
+**Do not route routine sleep through the power-loss path.** `UPS_SHUTDOWN_DELAY`
+defaults to **300 s**, so simply cutting 12V leaves the Pi running five more
+minutes *on the UPS battery* before it powers off. Every key-off would partially
+cycle a cell whose actual job is emergency shutdown, and each sleep transition
+would take ~6 minutes. Use a handshake instead:
+
+1. Daemon sees sustained `engine_off` / `no_data` (the §3.7.6 software, still
+   unwritten).
+2. Daemon signals the supervisor "cutting in N seconds", then `systemctl poweroff`.
+3. Supervisor waits, confirms the Pi is down, opens the switch.
+4. The X1202 has nothing to hold up — the battery is never touched.
+
+`UPS_SHUTDOWN_DELAY` then remains what it should be: the emergency path for
+*unexpected* power loss, not the routine one. The handshake needs a bidirectional
+link (at least one GPIO each way), which pushes the supervisor toward an MCU
+rather than a bare comparator — a comparator alone can only cut power, not agree
+with the host about when.
+
+**Still to measure:** the X1202's quiescent draw once it has cut output, and
+whether its auto-boot is reliable enough to be the only wake mechanism.
+
+**Related software** (§3.7.6): escalating a sustained `engine_off` / `no_data`
+`vehicle_state` to a shutdown still does not exist, and is a prerequisite for any
+of this regardless of which wake source is chosen.
