@@ -196,7 +196,7 @@ class RecordArmingConfig(_Strict):
 class IdleShutdownConfig(_Strict):
     """Escalate a sustained parked state to a system shutdown.
 
-    The software half of ``docs/CANary-HAT-Spec.md`` §3.7.6: the rig has no
+    The software half of ``docs/CANary-HAT-Circuits.md`` §3.7.6: the rig has no
     ignition sense, so the alternative to unplugging it between drives is to
     infer engine-off from bus activity and power down. See
     ``src.daemon.idle_shutdown`` for the inhibits and why each exists.

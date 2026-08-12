@@ -1,7 +1,7 @@
 """Escalate a sustained *parked-in-the-vehicle* state to a system shutdown.
 
 The rig has no ignition sense and no 12 V sense of its own
-(``docs/CANary-HAT-Spec.md`` §3.7.6), so the accepted consequences were
+(``docs/CANary-HAT-Circuits.md`` §3.7.6), so the accepted consequences were
 either "unplug it when not in use" or "let the daemon infer engine-off from
 bus activity and command a shutdown". This is the second half, which did not
 exist: :func:`~src.dashboard.status.classify_vehicle_state` already names the
