@@ -2,7 +2,7 @@
 name = "canary"
 version = "0.1.0"
 description = "Early anomaly detection for vehicle telemetry via OBD-II and CAN bus monitoring."
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
@@ -91,7 +91,12 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP", "N", "W"]
 
 [tool.mypy]
-python_version = "3.11"
+# Matches the 3.12 venv that AGENTS.md mandates for everything under src/.
+# Kept in step with requires-python above: checking src/ against 3.11 would
+# constrain code that never runs there, and numpy's stubs no longer support a
+# 3.11 target. NB scripts/ups_shutdown_watch.py deliberately runs on the Pi's
+# *system* interpreter, so it is not covered by this (mypy only checks src/).
+python_version = "3.12"
 strict = true
 files = ["src"]
 

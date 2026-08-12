@@ -253,8 +253,8 @@ def evaluate_isolation_forest(
 
 
 def classification_metrics(
-    truth: pd.Series | Sequence[bool],
-    predictions: pd.Series | Sequence[bool],
+    truth: pd.Series | Sequence[bool] | np.ndarray[Any, Any],
+    predictions: pd.Series | Sequence[bool] | np.ndarray[Any, Any],
 ) -> ClassificationMetrics:
     """Compute binary metrics for anomaly labels."""
     y_true = np.asarray(pd.Series(truth).astype(bool), dtype=bool)
