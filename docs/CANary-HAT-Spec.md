@@ -298,6 +298,20 @@ highest-value new capability:
   outright. *Caveat from TI's applications team: the family is specified as*
   compatible with *ISO 9141 systems, not* compliant with *the ISO 9141
   physical-layer levels and timings.*
+
+  **Confirmed by counterexample, 2026-08-11.** The Macchina M2 — open hardware,
+  sold for exactly this job — uses the **NXP TJA1021** on both its ISO9141/LIN
+  channels, and NXP documents a TXD dominant timeout on that part: it "prevents
+  the bus line from being driven to a permanent dominant state… if pin TXD is
+  forced permanently LOW," plus a startup check that leaves the transmit path
+  disabled if TXD is LOW on entry to Normal mode. So a well-regarded automotive
+  interface board most likely *cannot* do 5-baud slow init, which is the
+  clearest evidence available that this bullet is selecting on something real.
+  The exact `t_dom` value was not obtained (NXP's datasheet URL 404s), so the
+  margin is unconfirmed — only the feature's existence. Note the scope: at
+  CONSULT's 9600 baud a byte is ~1 ms, far inside any plausible timeout, so this
+  is a **cross-vehicle** capability the TLIN1027 preserves, not an Xterra
+  requirement.
 - **RXD is an open-drain output** and requires an external pull-up to the host
   I/O supply. The datasheet's "1 kΩ to 10 kΩ" range is qualified by a footnote to
   check `IOL` for the actual VIO — at 3.3V the real floor is ~2 kΩ, not 1 kΩ.
@@ -1419,6 +1433,26 @@ the questions are still live.
 | 11 | **X1202 quiescent draw** once it has cut its own output. | Feeds the rev-C supervisor architecture (§13.3). |
 | 12 | **Power-apply to first recorded frame** — wall-clock from 12V return to `canary.service` writing row 1. | Sizes the rev-C boot-gap buffer (§13.3.3) and quantifies what every cold start currently loses. The journal in `docs/time-sync.md` shows 12 s from *kernel handoff*, which is a floor, not the number. |
 | 13 | **Does the K-line RXD break reach the host as SysRq?** Boot with the console left enabled on `uart0` and the HAT fitted. | Confirms the §11 step-1 hazard is real and worth designing out in rev C (§13.3.4), rather than a theoretical reading of Table 8-1. |
+
+**Measurement 1 does not have to wait for rev A.** The Macchina M2 (open
+hardware, `github.com/macchina/m2-hardware`) brings K-line out on OBD pin 7 and
+can answer "does this ECM respond to CONSULT over K-line at all" independently —
+de-risking §9, the entire justification for this board, before the PCBWay boards
+land.
+
+**But it must be re-terminated first, or a negative result means nothing.** Read
+off the M2-B interface schematic (`SCH-01006 R2`) on 2026-08-11: both
+ISO9141/LIN channels are a TJA1021 with a **10.0 kΩ pull-up to +12V and a 220 pF
+bus cap, and no diode anywhere on the sheet**. That is neither LIN responder
+termination (~30 kΩ) nor the commander termination a tester requires (§3.3.1:
+1 kΩ plus a series blocking diode). Fit 1 kΩ and a 1N4148W in the harness
+between +12V and pin 7 before concluding anything from a silent bus.
+
+Worth knowing while you are in there: the M2 connects essentially all 16 OBD
+pins, including **single-wire CAN on pin 1 and medium-speed CAN on pins 3/11**,
+with the four remaining discretionary pins on test points. Manufacturer-
+discretionary bus access is therefore *not* an unserved gap in the market —
+useful context for any future form-factor work.
 
 ### 13.2 Rev B — fixes and basic GPIO control
 
