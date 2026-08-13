@@ -13,7 +13,7 @@ network, and the datasheet arguments behind them.
 > | §1, §2, §4, §5, §8–§11 | [`CANary-HAT-Spec.md`](CANary-HAT-Spec.md) — what the board is: overview, stackup, pin map, open items, implied software work |
 > | §3 | [`CANary-HAT-Circuits.md`](CANary-HAT-Circuits.md) — why each part is wired this way, per subsystem |
 > | §6, §7, §12 | [`CANary-HAT-Fabrication.md`](CANary-HAT-Fabrication.md) — KiCad implementation, manufacturing notes, assembly readiness |
-> | §13 | [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md) — bring-up measurements, rev B, rev C |
+> | §13 | [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md) — bring-up measurements, rev B, rev C, lessons from prior art |
 
 ## 3. Major Components
 
@@ -65,6 +65,21 @@ Even stacked with the crystal's own ±30ppm tolerance and ±30ppm stability, the
 total is under 0.01% of a 0.5% budget. Fit 27pF because it is correct and free;
 the secondary reason is drive level, since undersized load caps raise it toward
 the ABLS2's 1000µW maximum.
+
+**C5/C6 must be C0G/NP0, and that constraint outweighs the value.** Added
+2026-08-13 from the Macchina M2's BOM, which specifies its own 22pF crystal caps
+as `22PF 50V C0G/NP0`. Nothing in the paragraph above survives an X7R part: X7R
+moves ±15% over −40 to +85°C and loses further capacitance to DC bias, which on a
+27pF part is ±3–4pF — **the entire error just corrected**, reintroduced by a
+parameter this document had never named. A C0G/NP0 part holds ±30ppm/°C with no
+bias sensitivity, so 27pF is actually 27pF. At this capacitance it costs nothing.
+
+The general defect is worth naming, because it is the same shape as the ones
+AGENTS.md already collects: **until 2026-08-13 not one capacitor in this
+document carried a dielectric or a tolerance.** A value was measured and
+recorded; the parameter that dominates its error was not. Two capacitors are
+affected — this one and C4 (§3.3). The rest are decoupling, where X7R/X5R is the
+right choice and the nominal value is not load-bearing.
 
 **The part of this BOM line that actually matters is the `F`.** The ABLS2
 frequency table makes 24.01–70.00 MHz **3rd overtone the *standard* product**, and
@@ -120,6 +135,14 @@ vehicle bus is already terminated at both ends by the vehicle's own nodes; a
 third terminator is a fault. Bench use against an unterminated bus requires an
 external terminator in the harness.
 
+That last sentence is a concession rev B can retire. The reasoning above is
+right and the Macchina M2 shows the better expression of it: **unpopulated**
+split-termination footprints (2 × 60.4Ω plus a centre cap to GND) gated by a
+solder bridge, so the vehicle case stays correct by default and the bench case
+is a rework rather than a harness accessory. Same for the common-mode choke,
+whose footprint the M2 carries bypassed by 0Ω jumpers. See §13.4 — and note
+§13.4.2 for the part of the M2's bus network *not* worth copying.
+
 **Nothing else sits on the bus pins.** CANH and CANL run from the terminal block
 to the transceiver with no series resistors, no bus TVS array, and no choke —
 the transceiver's own ±58V fault rating and ±15kV IEC ESD rating is the entire
@@ -149,7 +172,7 @@ oversight to discover at bring-up (§8.2).
 | R6 | 1 kΩ | GPIO14/TXD0 → TXD (pin 4), in series | ✅ series protection on the host drive line, per §11.1 Pin 4 |
 | **R8** | 4.7 kΩ | GPIO14/TXD0 → **+3V3**, on the **Pi side** of R6 | ✅ added 2026-08-10 — holds TXD recessive when the host stops driving (§3.3.2) |
 | R4 | 4.7 kΩ | **EN (pin 2) → GND** | ✅ corrected 2026-08-10 — external pull-down backing the internal one |
-| C4 | 220 pF | LIN (pin 6) → GND | ✅ correct — Figure 9-1 shows 220pF on the commander node too |
+| C4 | 220 pF, **NP0/C0G 5%** | LIN (pin 6) → GND | ✅ correct — Figure 9-1 shows 220pF on the commander node too. **Dielectric added 2026-08-13** (§3.1.1): an X7R part on a 12V bus loses meaningful capacitance to DC bias, changing the edge shaping this cap exists to set. The M2 specifies its equivalent as `220PF 50V 5% NP0` |
 | R5 + D5 | 1 kΩ + **1N4148W** | **+12V → R5 → D5 (anode→cathode) → LIN**, commander pull-up | ✅ corrected 2026-08-10 — see below |
 | C3 | 100 nF | +12V → GND at the VSUP pin | ✅ required by §10, and now drawn on this sheet |
 | — | — | NC pins 3 and 8 unconnected; GND pin 5 to GND | ✅ |

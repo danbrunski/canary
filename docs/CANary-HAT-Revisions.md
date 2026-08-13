@@ -13,7 +13,7 @@ everything else, rev B fixes, and the rev C supervisor MCU.
 > | §1, §2, §4, §5, §8–§11 | [`CANary-HAT-Spec.md`](CANary-HAT-Spec.md) — what the board is: overview, stackup, pin map, open items, implied software work |
 > | §3 | [`CANary-HAT-Circuits.md`](CANary-HAT-Circuits.md) — why each part is wired this way, per subsystem |
 > | §6, §7, §12 | [`CANary-HAT-Fabrication.md`](CANary-HAT-Fabrication.md) — KiCad implementation, manufacturing notes, assembly readiness |
-> | §13 | [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md) — bring-up measurements, rev B, rev C |
+> | §13 | [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md) — bring-up measurements, rev B, rev C, lessons from prior art |
 
 ## 13. Future revisions
 
@@ -32,7 +32,7 @@ the questions are still live.
 |---|---|---|
 | 1 | **K-line commander mode against the ECU** — does polling work at all? | The reason this board exists (§9). Everything else is secondary. |
 | 2 | **Does the 1 kΩ pull-up disturb an NT510/UpRev session?** Sniff with J5 fitted, then open. | Whether §13.2's FET circuit is needed at all, or whether the jumper was a hedge against nothing. |
-| 3 | **Crystal frequency and startup** with C5/C6 = 27pF. | 27pF was derived from a CL figure, never measured. Confirm 40 MHz ±0.5% and clean start; a wrong load cap shows as a frequency offset. |
+| 3 | **Crystal frequency and startup** with C5/C6 = 27pF — and **confirm the fitted parts are C0G/NP0**, not X7R (§13.4). | 27pF was derived from a CL figure, never measured. Confirm 40 MHz ±0.5% and clean start; a wrong load cap shows as a frequency offset. An X7R part of the right nominal value is the failure mode that looks correct on the BOM and drifts over temperature. |
 | 4 | **GNSS TTFF and C/N₀**, and whether the WiFi hotspot desenses it. | Validates the RF launch (§3.6.1) and whether the MAX-M10**S** (integrated SAW+LNA) is needed. |
 | 5 | **V_BCKP hot start** — TTFF with and without BT1 fitted. | Whether the backup cell earns its place, and whether the no-charge-path design is acceptable. |
 | 6 | **I2C rise times** with R7/R9 plus the Pi's own 1.8 kΩ pull-ups. | Whether to depopulate R7/R9 (§8.3). |
@@ -89,10 +89,29 @@ Also queued for rev B:
   and a prerequisite for any voltage-based wake in rev C. Put the divider where
   an MCU can also reach it: §13.3.3(b) turns the same net into crank-profile and
   alternator-ripple diagnostics once it is sampled at kHz rather than read as a
-  status bit.
+  status bit. **Start from the M2's values** (§13.4): a **10.0 kΩ / 2.20 kΩ
+  divider with a 16.2V zener clamp**, ratio 0.180, which puts 14.4V at 2.60V and
+  16V at 2.88V into a 3.3V ADC with the zener as the load-dump backstop.
 - **Status LEDs and test points** (§8.4) — power good, CAN activity, GPS fix, plus
   probe points on LIN, RXD and EN. In-vehicle debugging currently costs an SSH
   round trip.
+- **C5/C6 and C4 as C0G/NP0** — a BOM-line change, not a schematic change, and
+  the highest-value item in this list because it makes §3.1.1's existing
+  arithmetic true. See §13.4 and §3.1.1.
+- **P-FET reverse protection on `+12V_RAW`**, ahead of the fan-out to D4 and J3.
+  This is §3.7.4's own option 2 ("an ideal-diode controller, or a Schottky sized
+  for 3A"), and it protects the X1202 leg that nothing currently protects —
+  without reintroducing the diode drop that moving the tap upstream was meant to
+  escape. §13.4 has the M2's implementation.
+- **A PTC on the input.** §3.7.1 decided the harness fuse was the whole story;
+  §3.7.4 then observed that "nothing on the HAT limits fault current on a leg
+  that now feeds the whole system directly." Those two sit uneasily together and
+  the decision deserves re-taking rather than inheriting. §13.4.
+- **DNI split-termination footprints on CAN, gated by a solder bridge.** §3.2 is
+  right that a third terminator on a vehicle bus is a fault — but it then has to
+  concede that bench use "requires an external terminator in the harness." An
+  unpopulated 2 × 60.4Ω + centre-cap footprint with a solder bridge removes that
+  caveat at zero cost and zero risk. §13.4.
 - **Whatever rev A's bring-up turns up.**
 
 #### GPIO-controlled K-line pull-up (replaces the J5 jumper)
@@ -638,3 +657,157 @@ physical-layer intrusion detection, or sub-bit timing analysis. Two channels at
 10 MSa/s × 12-bit is ~30 MB/s, where a fast link starts to matter. That is
 outside anything rev A/B/C contemplates, and even then USB 3.0 carries it — the
 FPGA front end would be the hard part, not the link.
+
+### 13.4 Lessons from the Macchina M2
+
+Read out of the M2-B interface schematic (`SCH-01006 R2` / `PCB-01006 R2`, dated
+2017-01-04) and the interface-board BOM in
+[`macchina/m2-hardware`](https://github.com/macchina/m2-hardware) on 2026-08-13.
+The M2 is the closest thing to prior art for this board — an open-hardware
+OBD-port interface carrying 2× CAN, single-wire CAN, 2× LIN/K-line and J1850 —
+so it is worth reading as a second opinion on choices rev A made alone.
+
+**Two caveats on the source, both load-bearing.** The BOM in that repo is
+`BOM-PCB-01016 R1`, for the *original* M2 interface board; the schematic is
+`PCB-01006 R2`, the M2-B. They are different boards and they disagree (the BOM
+lists a TJA1027 where the M2-B schematic shows a **TJA1021**). So: topology and
+values below come from the M2-B schematic and are solid; dielectric, tolerance
+and package data comes from the older BOM and is evidence of *house style*, not
+of this board's exact BOM. Second, neither PDF renders as text with the usual
+tools — both were read by decompressing the PDF content streams and pairing text
+against its coordinates, which is how pin-to-net assignments were recovered at
+all, since Macchina's published docs do not list them.
+
+#### 13.4.1 Where rev A is wrong, or thinner than it should be
+
+**1. Capacitor dielectrics — the one that invalidates existing analysis.**
+The M2 specifies `22PF 50V C0G/NP0` for its crystal load caps and
+`220PF 50V 5% NP0` for its LIN bus caps. Rev A specified neither, for any
+capacitor. §3.1.1 now carries the correction and the general statement; the
+short version is that §3.1.1's careful 22pF → 27pF derivation is worth ±3–4pF of
+nothing if the part is X7R. **BOM-line change, no schematic impact, highest
+value per effort in this document.**
+
+**2. Reverse protection by P-FET rather than a series Schottky.** The M2's input
+stage is an ideal-diode arrangement: **Q1 `IRFTS9342` P-FET** gate-driven through
+**Q2 `MMBT3906W`** with R2/R3 = 1.00 kΩ and R4 = 10.0 kΩ. Milliohms of drop, no
+dissipation, no thermal question.
+
+Rev A uses D4, an SS54 Schottky, and §3.7.4 had to move the Pi's supply
+*upstream* of it to escape the ~0.4–0.5V drop and ~1.5W — accepting in exchange
+that "nothing on this board protects the X1202 leg," so reverse polarity at the
+terminal block reaches the UPS unimpeded. That section already named the fix as
+option 2: "a TVS and a series element (**ideal-diode controller**, or a Schottky
+sized for 3A) on `+12V_RAW` itself." The M2 is a working instance of exactly
+that. It does not work around the trade in §3.7.4 — it dissolves it, protecting
+both legs with no drop.
+
+**3. A PTC on the input.** The M2 fuses at **F1, 2.6A hold / 5.2A trip**, plus
+0.75A per 12V IO channel and 36 mA hold / 91 mA trip on small branches. Fusing
+granularity is clearly house style there. §3.7.1 decided rev A needs no fuse
+because the vehicle-side harness fuse is the whole story — but §3.7.4 then notes
+"there is still no fuse anywhere on the board, so nothing on the HAT limits fault
+current on a leg that now feeds the whole system directly." Those two statements
+sit uneasily together, and the second was written after the first. Re-take the
+decision rather than inherit it.
+
+**4. Optionality discipline — fit the footprint, gate the connection.** The M2's
+CAN bus network is the clearest example on the board:
+
+```
+TJA1051 → CANH0/CANL0 → [J6/J7 solder bridges] → R128/R129 60.4Ω 1% split term
+                                                  └── C36 4.7nF to GND
+        → R126/R127 0.0Ω jumpers ∥ L2 (90Ω @ 100MHz choke position)
+        → C31/C32 100pF (DNI) → D11 SP1002-02 → HSC_BUS+/−
+```
+
+Every option is *on the board* and off by default: the common-mode choke has a
+footprint bypassed by 0Ω jumpers, the split termination is gated by solder
+bridges, the bus caps are DNI. One rework, not one respin.
+
+Rev A is right to refuse termination (§3.2 — "a third terminator is a fault"),
+but it has no footprint either, which forces the concession that bench use
+"requires an external terminator in the harness." An unpopulated 2 × 60.4Ω plus
+centre cap behind a solder bridge costs nothing, risks nothing, and removes that
+caveat.
+
+**5. Switched rails, and the same FET topology twice.** The M2 puts `HSC_S` and
+`MSC_S` (the transceiver standby pins) on GPIOs — the change §13.2 calls "the one
+that matters most" — and then goes further: the transceivers run from **`+5V_SW`**,
+a switched rail behind **Q3/Q4 `IRLML5203`** P-FETs, gate-driven through **Q5
+`2N7002W`** with 100 kΩ pull-ups and a 470Ω series gate resistor, enabled by a
+signal named `J1850 9141 ON`.
+
+That is the *same* level-shifted high-side switch topology §13.2 sketches for the
+K-line commander pull-up (BSS84 + BSS138). Two uses, one block — worth drawing
+once and instantiating, rather than deriving twice.
+
+**6. On-board current sense with a firmware-independent trip.** `R18` = **0.01Ω
+1% 1/4W 0805** shunt → **U2 `ZXCT1109`** high-side monitor → **U3A/U3B `LM393`**
+comparator → an `OVER_CURRENT` flag *and* a **Q6 `IRFTS9342`** P-FET cutoff.
+
+Two things rev A wants this for. §13.1 measurement 7 ("actual 3.3V draw, idle and
+with GNSS acquiring") stops being a bench-supply exercise and becomes a telemetry
+channel; and §13.3.3(b)'s parasitic-draw-while-parked monitoring gets real
+hardware instead of inference. The part most worth copying is the comparator trip
+that cuts power **without firmware in the loop** — "make it impossible, not
+documented", implemented in silicon.
+
+**7. The 12V sense divider values, ready-made.** The M2's IO sense channel is
+**R32 = 10.0 kΩ / R33 = 2.20 kΩ with a V1 = 16.2V zener clamp** into an analog
+input. Ratio 0.180 puts 14.4V at 2.60V and 16V at 2.88V against a 3.3V ADC, with
+the zener as load-dump backstop. Promoted into §13.2 rather than derived again.
+
+#### 13.4.2 Where rev A is right — do not copy these
+
+**The TVS.** The M2 uses an **SMBJ14A**, 14V standoff. An automotive charging
+system runs 13.8–14.4V, so that part operates *at or above its standoff voltage
+during ordinary driving* — leakage and self-heating as a normal condition. Rev
+A's **SMBJ24A** at 24V standoff is the conventional automotive choice and is
+correct. This is the clearest case in the comparison of the M2 being wrong.
+
+**The bus ESD array.** `D11`/`D12` are **`SP1002-02`**, a 6V-standoff / 16V-clamp
+array, sitting on the vehicle CAN lines at the connector. ISO 11898-2 requires a
+bus node to survive −27V to +40V; a 6V array will conduct hard on a
+short-to-battery. Rev A's position — no bus TVS, relying on the TCAN1042's own
+±58V fault and ±15kV IEC ESD ratings (§3.2) — is defensible, and is arguably
+better than a 6V array. **If** bus ESD is ever added, the right class of part is
+an automotive CAN protector at ~24V standoff (NUP2105L / PESD2CAN family), never
+a low-voltage USB-style array.
+
+**Termination on a vehicle bus.** The split termination above is present and
+solder-bridge-gated; whether the M2 *ships* with J6/J7 bridged could not be
+determined from the schematic alone, and the repo's BOM is for a different board
+so it cannot settle it either. Flagged rather than asserted — but if bridged, it
+is the third terminator §3.2 refuses, and §3.2's reasoning stands regardless.
+
+#### 13.4.3 Deliberate divergences, recorded so they are not "fixed"
+
+- **0603 vs the M2's 0402 passives.** Rev A is a hand-assembled single research
+  board where hand-rework is routine; 0402 buys area this board does not need
+  (though §13.3.6 notes area gets tight once an MCU arrives). Keep 0603.
+- **1% as the default resistor tolerance.** The M2 uses 1% throughout and reaches
+  for E96 values wherever the value matters (60.4, 240, 374, 866, 2.00K, 6.49K,
+  8.06K, 8.87K, 22.1K, 124K), reserving 5% for 0Ω jumpers. Rev A's pull-ups and
+  dividers do not need 1%, but there is no reason to specify looser — and the
+  12V sense divider (§13.2) genuinely does want it.
+- **Test points and solder bridges everywhere.** Already wanted by §8.4 and
+  queued in §13.2; the M2 simply confirms the habit is worth the area.
+
+#### 13.4.4 Scope: rev B or rev C
+
+Taken as decisions rather than left open, since none of them blocks on
+measurement:
+
+| Item | Revision | Why |
+|---|---|---|
+| C0G/NP0 on C5/C6 and C4 | **rev B** | BOM line only; no layout impact |
+| P-FET reverse protection | **rev B** | Independent of the MCU, and it closes §3.7.4's accepted exposure |
+| PTC on the input | **rev B** | Same input stage as the P-FET — do them together, once |
+| DNI split termination + solder bridge | **rev B** | Footprints only |
+| 12V sense divider values | **rev B** | Already queued there |
+| Current sense + over-current trip | **rev C** | The shunt is nearly free, but continuous current data is only worth having when something is awake to read it — which is the supervisor MCU (§13.3.3b). If rev B is fabricated first, add the shunt and its footprints then and populate the monitor later |
+
+The input-stage items are grouped deliberately: rev C redesigns that stage anyway
+for the always-on rail and the load switch (§13.3.2, §13.3.6), so doing the P-FET
+and the PTC as one change avoids touching it twice.
