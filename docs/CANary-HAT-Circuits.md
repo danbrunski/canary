@@ -66,20 +66,26 @@ total is under 0.01% of a 0.5% budget. Fit 27pF because it is correct and free;
 the secondary reason is drive level, since undersized load caps raise it toward
 the ABLS2's 1000µW maximum.
 
-**C5/C6 must be C0G/NP0, and that constraint outweighs the value.** Added
-2026-08-13 from the Macchina M2's BOM, which specifies its own 22pF crystal caps
-as `22PF 50V C0G/NP0`. Nothing in the paragraph above survives an X7R part: X7R
+**C5/C6 must be C0G/NP0, and that constraint outweighs the value above.** X7R
 moves ±15% over −40 to +85°C and loses further capacitance to DC bias, which on a
-27pF part is ±3–4pF — **the entire error just corrected**, reintroduced by a
-parameter this document had never named. A C0G/NP0 part holds ±30ppm/°C with no
-bias sensitivity, so 27pF is actually 27pF. At this capacitance it costs nothing.
+27pF part is ±3–4pF — **the entire error the arithmetic above just corrected**.
+A C0G/NP0 part holds ±30ppm/°C with no bias sensitivity, so 27pF is actually
+27pF. At this capacitance it costs nothing.
 
-The general defect is worth naming, because it is the same shape as the ones
-AGENTS.md already collects: **until 2026-08-13 not one capacitor in this
-document carried a dielectric or a tolerance.** A value was measured and
-recorded; the parameter that dominates its error was not. Two capacitors are
-affected — this one and C4 (§3.3). The rest are decoupling, where X7R/X5R is the
-right choice and the nominal value is not load-bearing.
+**This was already specified, and the fact that it had to be re-derived is the
+actual lesson.** §12.1 has carried `C5, C6 | C0G/NP0, 50V | Crystal load caps.
+X7R shifts with temperature and pulls the 40 MHz oscillator` since 2026-08-11,
+along with dielectrics, tolerances and voltage ratings for every other capacitor
+on the board. On 2026-08-13 the constraint was "discovered" a second time from
+the Macchina M2's BOM (§13.4) by someone reading §3.1.1 — which does all the
+capacitance arithmetic and never mentions a dielectric — and grepping only this
+file.
+
+**The constraint lived one document away from the arithmetic it protects**, and
+after the four-way split those are literally different files. So: state a
+part's governing constraint where its value is derived, not only where the BOM is
+assembled. §12.1 remains the authority on ratings; the per-part sections should
+carry the constraint that makes their own reasoning true.
 
 **The part of this BOM line that actually matters is the `F`.** The ABLS2
 frequency table makes 24.01–70.00 MHz **3rd overtone the *standard* product**, and
@@ -172,7 +178,7 @@ oversight to discover at bring-up (§8.2).
 | R6 | 1 kΩ | GPIO14/TXD0 → TXD (pin 4), in series | ✅ series protection on the host drive line, per §11.1 Pin 4 |
 | **R8** | 4.7 kΩ | GPIO14/TXD0 → **+3V3**, on the **Pi side** of R6 | ✅ added 2026-08-10 — holds TXD recessive when the host stops driving (§3.3.2) |
 | R4 | 4.7 kΩ | **EN (pin 2) → GND** | ✅ corrected 2026-08-10 — external pull-down backing the internal one |
-| C4 | 220 pF, **NP0/C0G 5%** | LIN (pin 6) → GND | ✅ correct — Figure 9-1 shows 220pF on the commander node too. **Dielectric added 2026-08-13** (§3.1.1): an X7R part on a 12V bus loses meaningful capacitance to DC bias, changing the edge shaping this cap exists to set. The M2 specifies its equivalent as `220PF 50V 5% NP0` |
+| C4 | 220 pF, **100V C0G** (§12.1) | LIN (pin 6) → GND | ✅ correct — Figure 9-1 shows 220pF on the commander node too. **100V, not 50V**: the bus carries a ±45V fault rating and ISO 7637-2 pulses reach +100V/−150V, so 50V is marginal. C0G because an X7R part on a 12V bus loses capacitance to DC bias, changing the edge shaping this cap exists to set. For contrast the Macchina M2 uses `220PF 50V 5% NP0` here (§13.4) — right dielectric, **under-rated for the fault case** |
 | R5 + D5 | 1 kΩ + **1N4148W** | **+12V → R5 → D5 (anode→cathode) → LIN**, commander pull-up | ✅ corrected 2026-08-10 — see below |
 | C3 | 100 nF | +12V → GND at the VSUP pin | ✅ required by §10, and now drawn on this sheet |
 | — | — | NC pins 3 and 8 unconnected; GND pin 5 to GND | ✅ |
@@ -446,6 +452,17 @@ There is **no bias fuse or short-circuit protection** on that feed — a shorted
 antenna cable pulls VCC_RF down, which is the module's own supply. Consider a
 small series resistor or resettable element if the antenna is field-swappable.
 
+> ⚠️ **Unresolved: C16 is 10nF here and 15pF in §12.1/§12.5** — a 666× difference
+> on the RF path. §12.5 logs `C16 → 15pF C0G 0402, SRF-tuned` as a *completed*
+> change (2026-08-11), and §12.1 explains the sizing: self-resonance placed at
+> 1.575 GHz, where series impedance nearly vanishes. That reasoning is sound and
+> a 10nF 0402 has its SRF far below L-band, so **15pF is very likely the as-built
+> value and this section is stale** — but the header claims §2–§7 was read back
+> out of the netlist, so the two cannot both be current. Flagged rather than
+> silently corrected: read the schematic before trusting either number, and note
+> §13.1 measurement 4 (GNSS TTFF and C/N₀) is the test that would expose a wrong
+> DC block. Found 2026-08-13.
+
 #### 3.6.1 The RF launch (reworked 2026-08-11)
 
 The feed is 0.20mm on F.Cu, which computes to **~45Ω** over the 0.1mm
@@ -514,8 +531,46 @@ nothing.
 | **J3** | 2-pos terminal block | Pass-through to the X1202, tapped off **`+12V_RAW`, upstream of D4** |
 | D4 | SS54 (SMB, 5A/40V Schottky) | Series reverse-blocking, `+12V_RAW` → `+12V` |
 | D1 | SMBJ24A (SMB, 600W TVS, 24V standoff) | `+12V` → GND transient clamp |
-| C2 | 100µF radial THT (D6.3mm) | Bulk on `+12V` |
-| C3 | 100nF 0603 | HF decoupling on `+12V`, at the TLIN1027 VSUP pin |
+| C2 | **DNP on rev A** — footprint Ø6.3mm / 2.5mm pitch; if populated, **47µF 50V 105°C** (Panasonic `EEU-FR1H470`) | Bulk on `+12V`. **Was documented as 100µF, which does not exist in this footprint** — see below |
+| C3 | 100nF 0603 X7R, **50V minimum** | HF decoupling on `+12V`, at the TLIN1027 VSUP pin. Rating set by D1's clamp, not by the rail — see below |
+
+**C2's value and its footprint were never compatible — found 2026-08-13, when
+PCBWay asked for a part number.** 100µF at 50V does not exist in a 6.3mm can; the
+smallest standard case for that combination is 8 × 11.5mm on a 3.5mm lead pitch.
+At Ø6.3mm / 2.5mm pitch the largest standard 50V value is **47µF** — Panasonic
+`EEU-FR1H470` (6.3 × 11.2mm, 105°C, 10,000 h) or Nichicon `UPW1H470MED`. Note the
+trap this sets for anyone sourcing without the context: dropping to **25V** makes
+100µF fit the footprint, and it is the obvious move, and it fails on the first
+load dump.
+
+**Rev A ships with C2 unpopulated** (operator decision, 2026-08-13: 47µF/50V in
+a 6.3mm can was not readily sourceable through the assembler). That is
+acceptable, and the reasoning below is why — but note what it removes. C3 (100nF
+at the VSUP pin) is the part the TLIN1027 datasheet §10 actually requires, and it
+stays. D1 does the transient clamping either way. What C2 would have added is
+bulk in front of D1, which shaves the leading edge of a transient before the TVS
+conducts. **If bring-up ever shows TLIN1027 upsets or resets during cranking or
+hot-plug, populating C2 is the first thing to try** — the footprint is there, and
+33µF or 22µF at 50V in a 6.3mm can is a commodity part where 47µF is not.
+
+**Nothing much is lost at 47µF or at zero, which is why this is a bookkeeping fix
+and not a board change.** C2's capacitance is not load-bearing here. The 1 kΩ
+commander pull-up
+draws ~11 mA, so one 96 µs dominant bit at 10.4 kbps moves 1.06 µC and sags the
+rail **22 mV on 47µF against 11 mV on 100µF** — both irrelevant against VSUP's
+4–36V range. Crank sag lasts hundreds of milliseconds and is not bridgeable at
+any value that fits this board. Transient energy is D1's job, not C2's. So **rev
+B should change the documented value to match the footprint, not the footprint to
+match the value**: 6.3mm is the right size for a rail carrying tens of mA, and
+§13.3.6 notes area gets tight once an MCU arrives.
+
+**Both capacitors on this net take their voltage rating from D1's clamp, not from
+the rail — record it as a rule.** `+12V` sits at 12–14.4V in normal operation,
+which invites a 16V or 25V part and is the number printed on the schematic. The
+figure that actually governs is the SMBJ24A's **38.9V maximum clamping voltage**,
+so **50V is the floor for anything on `+12V`** — C2, C3, and whatever rev B adds
+to this net. Stated as a constraint on the net rather than as two part choices,
+because the misleading number is the one a reader sees first.
 
 **The protection chain now guards only the HAT.** As of 2026-08-10 the
 pass-through taps the raw connector node, so `+12V_RAW` fans out to J3 and to

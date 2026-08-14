@@ -254,6 +254,30 @@ DRC output, and the next real violation gets lost in it.
       fields on Y1, C5, C6 and C16, so it travels with a BOM export rather than
       living only in this document
 
+**Missed on rev A — add to this pass next time**
+
+- [ ] **Check every BOM value against the footprint it lands in, and against the
+      voltage its net can actually reach.** Rev A shipped C2 as 100µF/50V into a
+      Ø6.3mm / 2.5mm-pitch footprint; that part does not exist, and the omission
+      reached a PCBWay quote (§8.1, §3.7.1). Nothing in §12 caught it because
+      every existing check compares the schematic, the PCB and the netlist to
+      *each other* — none of them looks at whether a BOM line is a purchasable
+      part. Two questions per line, both cheap:
+      - Does a real part exist in this value, rating **and** footprint? Electrolytics
+        and any part above ~25V are where this bites; jellybean 0402/0603 ceramics
+        essentially never fail it.
+      - Is the voltage rating set by the *rail* or by what a clamp lets through?
+        On `+12V` the governing number is D1's 38.9V, not 12–14.4V, so 50V is the
+        floor (§3.7.1). A reviewer reading the schematic sees the wrong number
+        first.
+- [x] **State dielectric and tolerance on every capacitor** — §12.1 already does
+      this, and did before rev A shipped. Listed here only because it was briefly
+      recorded as a gap on 2026-08-13 and retracted the same day (§13.4.1): the
+      search behind that claim covered one file, not this one. Keep §12.1 as the
+      single authority on ratings, and cross-reference it from the sections that
+      derive values, so the next reader of §3.1.1 does not conclude the
+      constraint is missing.
+
 **Outstanding**
 
 - [ ] Optional: resize U6 lands to 0.35 × 0.575 with +0.025mm/side mask expansion

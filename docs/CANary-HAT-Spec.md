@@ -250,6 +250,26 @@ worth having when someone next reads the schematic.
    X1202's power-loss-detect input — two `lgpio` claimants collide with EBUSY.
    Moved to **GPIO17** (§4.1).
 
+**A sixth, found later and of a different kind (2026-08-13).** The five above are
+netlist defects, all fixed before submission, and the heading above still holds
+for the schematic. This one lived in the **BOM**, which is why no schematic
+review could have caught it: **C2 was specified as 100µF/50V into a Ø6.3mm /
+2.5mm-pitch footprint, and that part does not exist** — the smallest standard can
+for 100µF at 50V is 8 × 11.5mm on a 3.5mm pitch. Corrected to **47µF** in §3.7.1,
+which also records why the capacitance is not load-bearing here and why the
+obvious workaround (25V, which does fit) fails on the first load dump.
+
+It survived every review pass and reached a fab quote before anyone noticed,
+because **both halves were correct in isolation** — 100µF is a sensible bulk
+value, 6.3mm is a sensible can — and the contradiction only appears when someone
+tries to buy the part.
+
+The general form is worth keeping, because it is the same shape as the
+dielectrics gap (§3.1.1): **a value and its footprint are one constraint recorded
+in two places, with nothing checking them against each other.** §12 verifies the
+schematic against the PCB and the netlist against both; nothing verified BOM
+values against the footprints they land in. §12.5 now carries that check.
+
 ### 8.2 Decisions taken (2026-08-11)
 
 Recorded so they are positions rather than omissions, and so nobody re-opens them

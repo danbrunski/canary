@@ -95,9 +95,10 @@ Also queued for rev B:
 - **Status LEDs and test points** (§8.4) — power good, CAN activity, GPS fix, plus
   probe points on LIN, RXD and EN. In-vehicle debugging currently costs an SSH
   round trip.
-- **C5/C6 and C4 as C0G/NP0** — a BOM-line change, not a schematic change, and
-  the highest-value item in this list because it makes §3.1.1's existing
-  arithmetic true. See §13.4 and §3.1.1.
+- ~~**C5/C6 and C4 as C0G/NP0**~~ — **withdrawn 2026-08-13, already done.** §12.1
+  has specified these since 2026-08-11 (and C4 at 100V, better than the M2's
+  50V). See the retraction in §13.4.1. Nothing to change in rev B; the residual
+  action was documentation and is applied in §3.1.1.
 - **P-FET reverse protection on `+12V_RAW`**, ahead of the fan-out to D4 and J3.
   This is §3.7.4's own option 2 ("an ideal-diode controller, or a Schottky sized
   for 3A"), and it protects the X1202 leg that nothing currently protects —
@@ -680,13 +681,25 @@ all, since Macchina's published docs do not list them.
 
 #### 13.4.1 Where rev A is wrong, or thinner than it should be
 
-**1. Capacitor dielectrics — the one that invalidates existing analysis.**
-The M2 specifies `22PF 50V C0G/NP0` for its crystal load caps and
-`220PF 50V 5% NP0` for its LIN bus caps. Rev A specified neither, for any
-capacitor. §3.1.1 now carries the correction and the general statement; the
-short version is that §3.1.1's careful 22pF → 27pF derivation is worth ±3–4pF of
-nothing if the part is X7R. **BOM-line change, no schematic impact, highest
-value per effort in this document.**
+**1. Capacitor dielectrics — retracted 2026-08-13, same day it was written.**
+This item originally claimed rev A specified no dielectric for any capacitor,
+having compared the M2's `22PF 50V C0G/NP0` and `220PF 50V 5% NP0` against a
+grep of `CANary-HAT-Circuits.md` alone. **§12.1 has specified dielectric,
+tolerance and voltage for every capacitor on the board since 2026-08-11**, and
+specifies C4 at **100V** C0G against the M2's 50V — rev A is *ahead* here, not
+behind, because ISO 7637-2 pulses on the K-line reach +100V/−150V.
+
+Nothing about the M2 was wrong; the comparison was, and it was wrong in the
+direction that manufactures a finding. §3.1.1 now carries the surviving point,
+which is smaller and real: the constraint lived in the fabrication document
+while the arithmetic that depends on it lived in the circuit reference, so a
+reader of §3.1.1 sees a careful 22pF → 27pF derivation with no hint that the
+dielectric dominates its error. **State a part's governing constraint where its
+value is derived, not only where the BOM is assembled.**
+
+Logged rather than deleted because it is the exact failure AGENTS.md warns
+about — a confident conclusion from a partial search, reported as "across all
+four docs" when one file had been searched.
 
 **2. Reverse protection by P-FET rather than a series Schottky.** The M2's input
 stage is an ideal-diode arrangement: **Q1 `IRFTS9342` P-FET** gate-driven through
