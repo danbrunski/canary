@@ -1,0 +1,38 @@
+ERC report (2026-08-09T16:04:30, Encoding UTF8)
+Report includes: Errors, Warnings
+
+***** Sheet /
+[lib_symbol_mismatch]: Symbol 'SolderJumper_2_Open' doesn't match copy in library 'Jumper'
+    ; warning
+    @(3800 mils, 7100 mils): Symbol JP1 [SolderJumper_2_Open]
+
+***** Sheet /OBD_IO/
+
+***** Sheet /KLine_Transceiver/
+
+***** Sheet /CANFD_Interface/
+
+***** Sheet /Sensors/
+[pin_to_pin]: Pins of type Bidirectional and Power output are connected
+    ; warning
+    @(3250 mils, 5050 mils): Symbol U6 Pin 2 [SDX, Bidirectional, Line]
+    @(5900 mils, 4400 mils): Symbol #FLG04 Pin 1 [Power output, Line]
+[pin_to_pin]: Pins of type Bidirectional and Power output are connected
+    ; warning
+    @(3250 mils, 5150 mils): Symbol U6 Pin 3 [SCX, Bidirectional, Line]
+    @(5900 mils, 4400 mils): Symbol #FLG04 Pin 1 [Power output, Line]
+[pin_to_pin]: Pins of type Bidirectional and Power output are connected
+    ; warning
+    @(3400 mils, 2850 mils): Symbol U5 Pin 5 [SDO, Bidirectional, Line]
+    @(4450 mils, 2300 mils): Symbol #FLG03 Pin 1 [Power output, Line]
+[pin_to_pin]: Pins of type Unspecified and Power input are connected
+    ; warning
+    @(5250 mils, 5150 mils): Symbol U6 Pin 12 [CS, Unspecified, Line]
+    @(5250 mils, 5550 mils): Symbol U6 Pin 8 [VDD, Power input, Line]
+
+ ** ERC messages: 5  Errors 0  Warnings 5
+
+ ** Ignored checks:
+    - Global label only appears once in the schematic
+    - Four connection points are joined together
+    - Assigned footprint doesn't match footprint filters

@@ -97,3 +97,41 @@ models/_*/
 # chain against answers we already know. Real bytes off the wire — a
 # synthesised fixture would only prove the chain agrees with itself.
 !tests/fixtures/**/*.parquet
+
+# ── KiCad hardware project (hardware/canary-hat) ──────────────────────────
+# The board design is tracked so the claims docs/CANary-HAT-*.md make about it
+# are checkable — kicad-cli can run against any commit to regenerate a netlist
+# and diff it. Datasheets are tracked too: six rev 2.0 decisions turned on
+# reading them, and vendor PDFs get revised and pulled. What follows is churn,
+# machine-local state, or regenerable output.
+
+# VS Code local history — 66 MB of editor churn, no value here
+hardware/**/.history/
+
+# KiCad auto-backups and lock files
+hardware/**/*-backups/
+hardware/**/*.lck
+
+# Machine-local UI state, not design data
+hardware/**/*.kicad_prl
+
+# Regenerable cache
+hardware/**/fp-info-cache
+
+# Autorouter I/O — regenerated from the PCB on demand
+hardware/**/freerouting.dsn
+hardware/**/freerouting.ses
+hardware/**/temp-freerouting.dsn
+
+# Snapshot archive superseded by git history
+hardware/**/*.kicad_pcb.zip
+
+# Scratch exports from a working session. Deliberate dated snapshots such as
+# DRC-fresh.rpt stay tracked.
+hardware/**/_*.net
+hardware/**/_*.rpt
+hardware/**/_*.pdf
+
+# NTFS alternate data streams ("downloaded from the internet" marks). These
+# materialise as separate files when a Windows directory is copied into WSL.
+*:Zone.Identifier

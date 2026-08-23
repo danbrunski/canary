@@ -1,0 +1,53 @@
+CANary-HAT assembly notes
+
+SCOPE
+- Assemble all 38 SMD parts (144 pads), EXCEPT R7 and R9 - see DNP below.
+- DO NOT FIT R7 or R9. Their footprints are on the board deliberately, but
+  they are duplicate I2C pull-ups that the host board already provides.
+  Leaving them out is intended, not an omission.
+- DO NOT SOURCE OR FIT J1 (2x20 stacking header). We supply and fit it
+  ourselves. It is the only bottom-side part, so no bottom-side placement
+  operation is needed at all.
+- Remaining through-hole is 5 parts / 14 joints: J2 (6), J3 (2), J5 (2),
+  C2 (2), J4 ground posts (2). Please quote separately. C2 is operator-
+  sourced - land pattern only, do not fit.
+- J4 (SMA) is mixed technology: SMD body plus 2 through-hole ground posts.
+  PLEASE SOLDER THE J4 GROUND POSTS even if the other through-hole parts are
+  excluded - it is a board-edge connector that takes cable load, and the SMD
+  pads alone are not enough to hold it.
+
+FINE-PITCH PARTS - PLEASE CHECK PIN 1 ORIENTATION
+U5 (BMP384, LGA-10, 0.5mm pitch), U6 (LSM6DSOX, LGA-14, 0.5mm pitch) and
+U7 (MAX-M10M-00B, 18-pad LCC module) use third-party library footprints whose
+zero-rotation convention may not match IPC-7351. If the centroid rotation looks
+inconsistent with the assembly drawing, please query it rather than assume the
+position file is correct. Rotation error on these three is the most likely
+defect on this board. No BGA or QFP parts are present.
+
+DO NOT SUBSTITUTE - these three fail silently, board will look correct but not work
+1. Y1 = ABLS2-40.000MHZ-D4YF-T. The "F" specifies FUNDAMENTAL mode. At 40MHz the
+   ABLS2 standard product is 3rd overtone, which will not oscillate in this
+   circuit. Do not order by frequency/package alone. NOTE the KiCad footprint is
+   named XTAL_ABLS2-12.000MHZ-D4Y-T - that name is wrong, the part is 40MHz.
+2. U1 = CAT24C256WI-GT3 (onsemi specifically). Design relies on this part's
+   internal pin pull-downs. Microchip 24LC256 is NOT a valid substitute.
+3. D2 AND D5 = 1N4148W, SOD-123. Both must be SILICON, not Schottky. D5 blocks
+   reverse leakage into an unpowered VSUP; D2 blocks reverse current into BT1,
+   which is a NON-RECHARGEABLE primary cell with no charge path on the board.
+   Schottky leakage would trickle-charge it. These are now the same part in the
+   same package - one line item, quantity 2.
+   (D2 was a BAT54 in SOT-23 on the 2026-08-14 quote. That is superseded.)
+
+If any of the above is unavailable, please contact us before substituting.
+
+OTHER
+- Voltage and power ratings on the BOM are deliberate, not defaults. In
+  particular the 100n 0603 capacitors are ALL specified 50V (one of them sits on
+  the 12V rail), and both 1k 0603 resistors are specified 0.2W (one dissipates
+  ~150mW in a fault condition). Please do not down-rate any line to a cheaper
+  equivalent.
+- JP1 is a solder jumper (PCB feature), not a component. Leave unpopulated/open.
+- FID1-FID3 are fiducials, MH1-MH4 are mounting holes. Not components.
+- Surface finish: U5 and U6 are 0.5mm-pitch LGAs. If your process would prefer a
+  different finish than the one ordered for reliable placement on these, please
+  advise before starting.

@@ -1,0 +1,7 @@
+Assemble all 38 SMD. DO NOT source/fit J1 (2x20 header) - we fit it, no bottom-side placement needed. J4 is mixed-tech: please solder its 2 through-hole ground posts (edge connector, takes cable load).
+
+ROTATION: U5, U6, U7 are fine-pitch LGA/LCC on third-party footprints; rotation may not match IPC-7351. Please query anything inconsistent rather than trust the position file. No BGA/QFP.
+
+NO SUBSTITUTIONS on Y1, D2, U1, D5 - all four fail silently. Contact us if unavailable. Do not down-rate capacitor voltage or resistor power ratings.
+
+Full notes in attached pcbway-assembly-notes.txt

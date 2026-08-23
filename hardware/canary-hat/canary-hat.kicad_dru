@@ -1,0 +1,7 @@
+(version 1)
+(rule "U6 LGA-14L land pattern"
+	(constraint clearance (min 0.14mm))
+	(condition "A.insideCourtyard('U6') && B.insideCourtyard('U6')"))
+(rule "RF feed"
+(constraint clearance (min 0.5mm))
+(condition "(A.NetClass == 'RF' && B.Type == 'Zone') || (B.NetClass == 'RF' && A.Type == 'Zone')"))

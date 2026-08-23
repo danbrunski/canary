@@ -3,3 +3,10 @@
 # generated so a retrain doesn't flood `git diff` / GitHub with thousands of
 # lines. Run `git diff --text -- <file>` when you actually want to see changes.
 models/**/*.manifest.json linguist-generated=true -diff
+
+# The PCB layout is one huge s-expression: any reroute rewrites most of it, so
+# a textual diff is thousands of unreadable lines. Track the file but suppress
+# the diff — the same treatment models/**/*.manifest.json gets. Use
+# `git diff --text -- <file>` if you need it, or better, diff an exported
+# netlist instead.
+hardware/**/*.kicad_pcb -diff

@@ -1,0 +1,51 @@
+** Drc report for canary-hat.kicad_pcb **
+** Created on 2026-08-11T10:49:56 **
+** Report includes: Errors, Warnings **
+
+** Found 8 DRC violations **
+[starved_thermal]: Thermal relief connection to zone incomplete (layer B.Cu; zone min spoke count 2; actual 1)
+    Local override; error
+    @(99.0000 mm, 43.0000 mm): Zone [GND] on F.Cu and B.Cu, priority 2
+    @(159.1900 mm, 72.6300 mm): Pad 2 [GND] of J4 on B.Cu
+[starved_thermal]: Thermal relief connection to zone incomplete (layer B.Cu; zone min spoke count 2; actual 1)
+    Local override; error
+    @(99.0000 mm, 43.0000 mm): Zone [GND] on F.Cu and B.Cu, priority 2
+    @(159.1900 mm, 63.8700 mm): Pad 2 [GND] of J4 on B.Cu
+[starved_thermal]: Thermal relief connection to zone incomplete (layer B.Cu; 2 spokes connected to isolated island)
+    Local override; error
+    @(99.0000 mm, 43.0000 mm): Zone [GND] on F.Cu and B.Cu, priority 2
+    @(123.6100 mm, 46.2300 mm): PTH pad 14 [GND] of J1
+[starved_thermal]: Thermal relief connection to zone incomplete (layer B.Cu; 3 spokes connected to isolated island)
+    Local override; error
+    @(99.0000 mm, 43.0000 mm): Zone [GND] on F.Cu and B.Cu, priority 2
+    @(131.2300 mm, 46.2300 mm): PTH pad 20 [GND] of J1
+[starved_thermal]: Thermal relief connection to zone incomplete (layer B.Cu; 1 spokes connected to isolated island)
+    Local override; error
+    @(99.0000 mm, 43.0000 mm): Zone [GND] on F.Cu and B.Cu, priority 2
+    @(138.8500 mm, 48.7700 mm): PTH pad 25 [GND] of J1
+[starved_thermal]: Thermal relief connection to zone incomplete (layer F.Cu; zone min spoke count 2; actual 1)
+    Local override; error
+    @(99.0000 mm, 43.0000 mm): Zone [GND] on F.Cu and B.Cu, priority 2
+    @(159.1900 mm, 72.6300 mm): Pad 2 [GND] of J4 on F.Cu
+[starved_thermal]: Thermal relief connection to zone incomplete (layer F.Cu; zone min spoke count 2; actual 1)
+    Local override; error
+    @(99.0000 mm, 43.0000 mm): Zone [GND] on F.Cu and B.Cu, priority 2
+    @(159.1900 mm, 63.8700 mm): Pad 2 [GND] of J4 on F.Cu
+[starved_thermal]: Thermal relief connection to zone incomplete (layer F.Cu; zone min spoke count 2; actual 1)
+    Local override; error
+    @(99.0000 mm, 43.0000 mm): Zone [GND] on F.Cu and B.Cu, priority 2
+    @(118.5300 mm, 48.7700 mm): PTH pad 9 [GND] of J1
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** Ignored checks **
+    - Footprint has no courtyard defined
+    - Track endpoint not centered on via
+    - Tuning profile track geometries
+    - Footprint doesn't match symbol's footprint filters
+    - PTH inside courtyard
+    - NPTH inside courtyard
+
+** End of Report **
