@@ -267,14 +267,26 @@ work.
   netlist diff or datasheet check rather than by ERC/DRC. Recorded because the
   pattern generalises to any four-terminal magnetic:
 
-  1. **The KiCad generic symbol disagrees with the part.**
+  1. ~~**The KiCad generic symbol disagrees with the part.**~~ **Resolved by using
+     a part-specific symbol** (`1812CAN-513NRC`), whose pins 1 and 4 sit on the
+     same side — so the naive wiring is now the correct one and the drawing reads
+     without crossings. The constraint lives in the symbol geometry rather than in
+     a note. Kept below as the *reason*, not a live warning:
      `Device:Filter_EMI_CommonMode` puts pins 1 and 3 on one side and treats the
      windings as 1–2 / 3–4. Coilcraft's are **1–2 and 4–3 with the dots at 1 and
      4**. Wiring through the symbol as drawn puts the transceiver on pins 1 and 3,
      reversing one winding — which converts a common-mode choke into a
      **differential-mode** one: common-mode noise passes unfiltered and 51 µH
-     lands in series with the CAN signal. **The transceiver side must be pins 1
-     and 4.**
+     lands in series with the CAN signal.
+
+     **The rule stated physically, which is the version worth remembering:**
+     *both bus lines must enter at the same physical end of the part.* Pins 1 and
+     4 are the two pads **1.73mm** apart at one end; 2 and 3 are the pair at the
+     other. The windings run the length, so the **3.68mm** pairs (1–2, 4–3) *are*
+     the windings and the 1.73mm pairs are same-end neighbours. That is the same
+     statement as "dots at 1 and 4", but it survives a reader who does not recall
+     the dot convention — and it makes the failure obvious, since entering at
+     opposite ends sends the two signals through the core in opposite directions.
   2. **The UltraLibrarian footprint is wrong in one axis.** Body outline, pad
      sizes and the 3.68mm along-length spacing are all correct; the across-width
      spacing is **3.68mm where Coilcraft specifies 1.73mm**. Terminals would
