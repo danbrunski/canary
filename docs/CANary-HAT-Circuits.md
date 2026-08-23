@@ -142,13 +142,22 @@ vehicle bus is already terminated at both ends by the vehicle's own nodes; a
 third terminator is a fault. Bench use against an unterminated bus requires an
 external terminator in the harness.
 
-That last sentence is a concession rev 2.0 can retire. The reasoning above is
-right and the Macchina M2 shows the better expression of it: **unpopulated**
-split-termination footprints (2 × 60.4Ω plus a centre cap to GND) gated by a
-solder bridge, so the vehicle case stays correct by default and the bench case
-is a rework rather than a harness accessory. Same for the common-mode choke,
-whose footprint the M2 carries bypassed by 0Ω jumpers. See §13.4 — and note
-§13.4.2 for the part of the M2's bus network *not* worth copying.
+~~That last sentence is a concession rev 2.0 can retire.~~ **Re-examined and left
+alone, 2026-08-23.** The concession reads as though bench use needs a harness
+accessory someone must build. It does not: **J2 is a Phoenix MKDS screw terminal
+block**, so an external terminator is a 120Ω resistor clamped into pins 4 and 5.
+Adding split-termination footprints to retire that costs three footprints, a BOM
+line and a doc entry to replace ten seconds with a part from the drawer — and the
+*split* arrangement's advantage over a plain 120Ω is common-mode rejection on the
+**vehicle** bus, which is exactly where §3.2 refuses to terminate. See §13.2.1.
+
+**A common-mode choke is fitted**, however — Coilcraft `1812CAN-513NR`, 51 µH, in
+series in both bus lines between U4 and J2. Not a DNI footprint and not bypassed
+by 0Ω jumpers as the M2 does it: a CAN-specific choke on a CAN line is the
+ordinary automotive configuration, and gating it costs either two more series
+joints or a PCB short. If it ever needs removing, desolder one 1812 part and
+bridge two pad pairs. Note §13.4.2 for the part of the M2's bus network *not*
+worth copying — its 6V-standoff ESD array stays off this board.
 
 **Nothing else sits on the bus pins.** CANH and CANL run from the terminal block
 to the transceiver with no series resistors, no bus TVS array, and no choke —

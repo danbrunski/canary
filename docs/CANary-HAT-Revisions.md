@@ -224,12 +224,43 @@ work.
   the trigger to revisit: an actual TLIN1027 or 12V-rail capacitor failure, not a
   general worry about fusing. **The input stage is therefore three parts, not
   four.**
-- **DNI split-termination footprints on CAN, gated by a solder bridge.** §3.2 is
-  right that a third terminator on a vehicle bus is a fault — but it then has to
-  concede that bench use "requires an external terminator in the harness." An
-  unpopulated 2 × 60.4Ω + centre-cap footprint with a solder bridge removes that
-  caveat at zero cost and zero risk. Optionally the common-mode choke footprint
-  too, bypassed by 0Ω jumpers as the M2 does it. §13.4.
+- ~~**DNI split-termination footprints on CAN, gated by a solder bridge.**~~
+  **Dropped 2026-08-23. The concession it retires is not real.** §3.2 is right
+  that a third terminator on a vehicle bus is a fault, and it then concedes that
+  bench use "requires an external terminator in the harness" — which sounds like
+  a harness accessory someone has to build. **It is not: J2 is a Phoenix MKDS
+  screw terminal block.** An external terminator is a 120Ω resistor clamped into
+  two screws, ten seconds and a part from the drawer. Three footprints, a BOM
+  line and a documentation entry to replace that is a bad trade.
+
+  Two supporting reasons. The *split* arrangement's advantage over a plain 120Ω
+  is better common-mode rejection — which matters on the **vehicle** bus, exactly
+  where we deliberately do not terminate; on a bench it buys nothing. And the
+  solder bridge §13.2 specified would have made "termination enabled" reachable
+  by accident, on a board where §3.2 calls a third terminator on a live vehicle
+  bus *a fault*. Pure DNI would have been safer than the gated version, and no
+  footprints at all is safer still.
+
+  **Replaced by one line in the fab notes**: for bench use, clamp 120Ω across J2
+  pins 4 and 5. That documents the workaround better than footprints implement
+  it.
+
+- **Common-mode choke on CANH/CANL — fitted, not a DNI footprint.** Kept when the
+  split termination was dropped, and on measurement the area objection did not
+  survive: **Coilcraft `1812CAN-513NR`, 51 µH**, is 4.95 × 3.18 × 3.0mm — a
+  20 mm² courtyard, about 1.5× a SOT-23 and well under Y1's 3.3mm height. Its
+  KiCad footprint is `Inductor_SMD:L_CommonModeChoke_Coilcraft_1812CAN`, **named
+  for this exact part**, which matters more than it sounds: every third-party
+  footprint import on this board is a pin-1/rotation risk, and §12 already calls
+  that "the most likely defect on this board" for U5/U6/U7. This adds no fourth.
+
+  **Populate it rather than gating it.** An earlier sketch had 0Ω bypass jumpers
+  (the M2's approach) or a cut-trace bypass. Both were over-thought: a 51 µH
+  CAN-specific choke in a CAN line is the ordinary automotive configuration, not
+  a hedge, and the gated versions each carry their own cost — two more series
+  joints, or a PCB short that DRC would flag. If bring-up shows a problem the
+  fallback is to desolder one part and bridge two pad pairs on a 1812, which is
+  easy. §13.4.
 - **Status LEDs and test points** (§8.4) — power good, CAN activity, GPS fix, plus
   probe points on LIN, RXD and EN. In-vehicle debugging currently costs an SSH
   round trip, and on a first board that cost is paid far more often.
