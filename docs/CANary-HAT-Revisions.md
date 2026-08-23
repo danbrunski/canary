@@ -283,6 +283,62 @@ re-spin, an unpopulated footprint is free.**
   BMP384 at 0x77 and LSM6DSOX at 0x6B — check the chosen part's address strap
   against all three, and note §13.3.4's warning about what must not become flaky
   on that bus.
+
+  **Parts selected 2026-08-22 — and the M2's ready-made values do not survive
+  contact with this board.** Two of the three numbers §13.4.1 item 7 promoted
+  had to change.
+
+  | Ref | Part / value | Why |
+  |---|---|---|
+  | U8 | **TI `ADS1015IDGSR`** — 12-bit, 4-ch, I2C, **VSSOP-10 (3 × 4.9mm)** | Addresses `0x48`–`0x4B` via the ADDR pin (GND/VDD/SDA/SCL), clear of 0x36, 0x6B and 0x77. 150 µA operating, **0.5 µA powered down**. VDD 2–5.5V. Set FSR **±4.096V** — ±2.048V would clip our 2.92V full scale. LSB is 2.0 mV, i.e. **11.1 mV referred to the 12V side**. Order the **VSSOP** part: the X2QFN is 1.5 × 2mm and not hand-solderable. |
+  | R, R | **100 kΩ / 22.0 kΩ**, 1% | **Not the M2's 10.0k/2.20k.** Same ratio (0.1803 — 14.4V → 2.60V, 16V → 2.89V), ten times the impedance. See below. |
+  | — | **no clamp diode** | Also not the M2's 16.2V zener. See below. |
+
+  **Why the divider is scaled 10×: the M2's values would consume rev 3.0's entire
+  sleep budget on their own.** 10.0k/2.20k draws **~1.18 mA at 14.4V**, and this
+  divider cannot be switched off — §13.3.1's supervisor needs it live to decide
+  when to wake, so it sits ahead of the load switch permanently. That section
+  budgets **"HAT asleep + µA supervisor: <1 mA"** in total. At 100 kΩ/22.0 kΩ the
+  draw is **118 µA**, about a tenth of the budget, and the ratio is identical
+  because both resistors scaled together. The M2 has no sleep state, so its values
+  were right for it and wrong here — the same shape as its SMBJ14A TVS (§13.4.2).
+
+  **Why no clamp diode, and why the M2's zener would have been a defect.** Their
+  16.2V zener sits across the *12V input*, sized for the M2's clamp. Ours is D1 at
+  **38.9V**, which puts **7.0V** on the divider node — nearly twice the ADS1015's
+  `VDD + 0.3` = **3.6V** absolute maximum. Copying the value would have left the
+  ADC exposed to exactly the case the zener is supposed to cover. But at 100 kΩ no
+  clamp is needed at all: the ADC's own input protection holds the node at 3.6V and
+  the series resistor limits fault current to **(38.9 − 3.6)/100k ≈ 353 µA**,
+  against TI's **±10 mA continuous input-current** rating — a 28× margin, and
+  another consequence of scaling the divider up rather than a separate decision.
+
+  **Spare channels are worth having deliberately.** The ADS1015 is 4-channel and
+  we need one. §13.2.3 also lands the current-sense shunt footprints, whose
+  monitor was scoped to rev 3.0 because "continuous current data is only worth
+  having when something is awake to read it" (§13.4.4). A spare ADC channel *is*
+  something awake to read it — so populating the `ZXCT1109` becomes a rework on
+  rev 2.0 rather than waiting for the MCU. Reserve a channel for it and route the
+  net.
+
+  **This is the board's first genuine cross-domain path, and §3.7.5 is owed an
+  argument.** That section's case for a single rail was that nothing on rev 1.0 is
+  alive when the Pi's 3V3 is down. The divider breaks that: it is fed from vehicle
+  12V and drives an input whose VDD is the Pi's 3V3, so in HAT+ STANDBY it faces a
+  dead rail. The magnitude is small — the node clamps near 0.3V and draw is
+  **~141 µA**, 70× inside the ±10 mA rating and far too little to back-power
+  anything — and the 100 kΩ is doing exactly the job §13.3.2 prescribes for
+  crossing nets ("series resistance on every crossing net", R6's 1 kΩ precedent).
+  **Stated rather than assumed**, because §13.3.2 says HAT+ conformance becomes
+  something to argue rather than inherit, and this is the first place that bites.
+
+  **Rejected: `MCP3221`** (12-bit, SOT-23-5, single channel). Cheaper and smaller,
+  but it is a SAR with a sampling capacitor and Microchip's own guidance is to
+  drive it from an op-amp with "tens of ohms" output impedance. Against our
+  18.0 kΩ source impedance that would force either the 1 mA divider or an added
+  buffer. The ADS1015 is a ΔΣ with ~6 MΩ common-mode input impedance, where
+  18.0 kΩ is a **0.30% gain error** — calibrate once against a meter and it is
+  gone. Its address is also fixed at manufacture rather than pin-selectable.
 - **LSM6DSOX INT2 (pin 9) → a free Pi GPIO.** Unconnected on rev 1.0 and called
   out as free in §13.3.6 item 10. One net, no parts, and it is what motion-wake
   and parked monitoring (§13.3.3d) need to exist at all.
