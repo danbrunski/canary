@@ -13,7 +13,7 @@ network, and the datasheet arguments behind them.
 > | §1, §2, §4, §5, §8–§11 | [`CANary-HAT-Spec.md`](CANary-HAT-Spec.md) — what the board is: overview, stackup, pin map, open items, implied software work |
 > | §3 | [`CANary-HAT-Circuits.md`](CANary-HAT-Circuits.md) — why each part is wired this way, per subsystem |
 > | §6, §7, §12 | [`CANary-HAT-Fabrication.md`](CANary-HAT-Fabrication.md) — KiCad implementation, manufacturing notes, assembly readiness |
-> | §13 | [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md) — bring-up measurements, rev B, rev C, lessons from prior art |
+> | §13 | [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md) — bring-up measurements, rev 2.0, rev 3.0, lessons from prior art |
 
 ## 3. Major Components
 
@@ -141,7 +141,7 @@ vehicle bus is already terminated at both ends by the vehicle's own nodes; a
 third terminator is a fault. Bench use against an unterminated bus requires an
 external terminator in the harness.
 
-That last sentence is a concession rev B can retire. The reasoning above is
+That last sentence is a concession rev 2.0 can retire. The reasoning above is
 right and the Macchina M2 shows the better expression of it: **unpopulated**
 split-termination footprints (2 × 60.4Ω plus a centre cap to GND) gated by a
 solder bridge, so the vehicle case stays correct by default and the bench case
@@ -531,7 +531,7 @@ nothing.
 | **J3** | 2-pos terminal block | Pass-through to the X1202, tapped off **`+12V_RAW`, upstream of D4** |
 | D4 | SS54 (SMB, 5A/40V Schottky) | Series reverse-blocking, `+12V_RAW` → `+12V` |
 | D1 | SMBJ24A (SMB, 600W TVS, 24V standoff) | `+12V` → GND transient clamp |
-| C2 | **DNP on rev A** — footprint Ø6.3mm / 2.5mm pitch; if populated, **47µF 50V 105°C** (Panasonic `EEU-FR1H470`) | Bulk on `+12V`. **Was documented as 100µF, which does not exist in this footprint** — see below |
+| C2 | **DNP on rev 1.0** — footprint Ø6.3mm / 2.5mm pitch; if populated, **47µF 50V 105°C** (Panasonic `EEU-FR1H470`) | Bulk on `+12V`. **Was documented as 100µF, which does not exist in this footprint** — see below |
 | C3 | 100nF 0603 X7R, **50V minimum** | HF decoupling on `+12V`, at the TLIN1027 VSUP pin. Rating set by D1's clamp, not by the rail — see below |
 
 **C2's value and its footprint were never compatible — found 2026-08-13, when
@@ -543,7 +543,7 @@ trap this sets for anyone sourcing without the context: dropping to **25V** make
 100µF fit the footprint, and it is the obvious move, and it fails on the first
 load dump.
 
-**Rev A ships with C2 unpopulated** (operator decision, 2026-08-13: 47µF/50V in
+**Rev 1.0 would have shipped with C2 unpopulated** (operator decision, 2026-08-13: 47µF/50V in
 a 6.3mm can was not readily sourceable through the assembler). That is
 acceptable, and the reasoning below is why — but note what it removes. C3 (100nF
 at the VSUP pin) is the part the TLIN1027 datasheet §10 actually requires, and it
@@ -560,15 +560,15 @@ draws ~11 mA, so one 96 µs dominant bit at 10.4 kbps moves 1.06 µC and sags th
 rail **22 mV on 47µF against 11 mV on 100µF** — both irrelevant against VSUP's
 4–36V range. Crank sag lasts hundreds of milliseconds and is not bridgeable at
 any value that fits this board. Transient energy is D1's job, not C2's. So **rev
-B should change the documented value to match the footprint, not the footprint to
-match the value**: 6.3mm is the right size for a rail carrying tens of mA, and
+2.0 should change the documented value to match the footprint, not the footprint
+to match the value**: 6.3mm is the right size for a rail carrying tens of mA, and
 §13.3.6 notes area gets tight once an MCU arrives.
 
 **Both capacitors on this net take their voltage rating from D1's clamp, not from
 the rail — record it as a rule.** `+12V` sits at 12–14.4V in normal operation,
 which invites a 16V or 25V part and is the number printed on the schematic. The
 figure that actually governs is the SMBJ24A's **38.9V maximum clamping voltage**,
-so **50V is the floor for anything on `+12V`** — C2, C3, and whatever rev B adds
+so **50V is the floor for anything on `+12V`** — C2, C3, and whatever rev 2.0 adds
 to this net. Stated as a constraint on the net rather than as two part choices,
 because the misleading number is the one a reader sees first.
 

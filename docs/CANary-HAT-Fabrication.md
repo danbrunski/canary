@@ -2,7 +2,9 @@
 
 How the board in [`CANary-HAT-Spec.md`](CANary-HAT-Spec.md) gets made: the
 KiCad project as built, manufacturing notes, and the assembly-readiness work
-done before rev A was submitted.
+done before rev 1.0 was submitted — which is also the readiness baseline the
+**rev 2.0** change list (§13.2) is a delta against, since rev 1.0 was withdrawn
+before fabrication and rev 2.0 is now the first board built.
 
 > **Part of the CANary-HAT board documentation**, split across four files.
 > Section numbers are **stable across the split** — a bare `§3.7.5` means the
@@ -13,7 +15,7 @@ done before rev A was submitted.
 > | §1, §2, §4, §5, §8–§11 | [`CANary-HAT-Spec.md`](CANary-HAT-Spec.md) — what the board is: overview, stackup, pin map, open items, implied software work |
 > | §3 | [`CANary-HAT-Circuits.md`](CANary-HAT-Circuits.md) — why each part is wired this way, per subsystem |
 > | §6, §7, §12 | [`CANary-HAT-Fabrication.md`](CANary-HAT-Fabrication.md) — KiCad implementation, manufacturing notes, assembly readiness |
-> | §13 | [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md) — bring-up measurements, rev B, rev C, lessons from prior art |
+> | §13 | [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md) — bring-up measurements, rev 2.0, rev 3.0, lessons from prior art |
 
 ## 6. KiCad Implementation — as built
 
@@ -254,10 +256,15 @@ DRC output, and the next real violation gets lost in it.
       fields on Y1, C5, C6 and C16, so it travels with a BOM export rather than
       living only in this document
 
-**Missed on rev A — add to this pass next time**
+**Missed on rev 1.0 — and "this pass next time" is now the rev 2.0 submission**
+
+Rev 1.0 was withdrawn from PCBWay before fabrication (2026-08-22), so these are
+not retrospective notes for a future board — they are checks the rev 2.0 pass has
+to run, on a change list (§13.2) that touches the input stage, the BOM and three
+new footprints.
 
 - [ ] **Check every BOM value against the footprint it lands in, and against the
-      voltage its net can actually reach.** Rev A shipped C2 as 100µF/50V into a
+      voltage its net can actually reach.** Rev 1.0 shipped C2 as 100µF/50V into a
       Ø6.3mm / 2.5mm-pitch footprint; that part does not exist, and the omission
       reached a PCBWay quote (§8.1, §3.7.1). Nothing in §12 caught it because
       every existing check compares the schematic, the PCB and the netlist to
@@ -271,7 +278,7 @@ DRC output, and the next real violation gets lost in it.
         floor (§3.7.1). A reviewer reading the schematic sees the wrong number
         first.
 - [x] **State dielectric and tolerance on every capacitor** — §12.1 already does
-      this, and did before rev A shipped. Listed here only because it was briefly
+      this, and did before rev 1.0 shipped. Listed here only because it was briefly
       recorded as a gap on 2026-08-13 and retracted the same day (§13.4.1): the
       search behind that claim covered one file, not this one. Keep §12.1 as the
       single authority on ratings, and cross-reference it from the sections that
@@ -280,8 +287,9 @@ DRC output, and the next real violation gets lost in it.
 
 **Outstanding**
 
-- [ ] Optional: resize U6 lands to 0.35 × 0.575 with +0.025mm/side mask expansion
-      (§12.4) — a reliability improvement, not a defect
+- [ ] ~~Optional:~~ resize U6 lands to 0.35 × 0.575 with +0.025mm/side mask
+      expansion (§12.4) — **no longer optional; scheduled in rev 2.0** (§13.2.1).
+      It was optional only because rev 1.0 was locked
 - [ ] Assembly drawing with pin 1 marked for U5, U6, U7
 - [ ] Export gerbers, drill, centroid (PCBWay plugin)
 

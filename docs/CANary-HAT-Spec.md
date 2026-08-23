@@ -9,12 +9,18 @@
 > in place; §8.1 logs the defects that were found this way and have since been
 > fixed.
 >
-> Board state: **rev A submitted to PCBWay 2026-08-11 and locked.** Schematic and
-> PCB complete and fully routed, 0 unconnected items, 0 DRC violations, 0
-> schematic-parity issues; ERC 0 errors / 5 benign warnings. No schematic defects
-> remain (§8.1). Changes from here go to a future revision — see **§13**, which
-> stages them as bring-up measurements (§13.1), small fixes and GPIO control
-> (§13.2), and the sleep/supervisor architecture (§13.3).
+> Board state: **rev 1.0 was submitted to PCBWay 2026-08-11 and never
+> fabricated** — the quote stalled, and the submission was withdrawn 2026-08-22
+> in favour of **rev 2.0**, which is now the board that will be built first
+> (§13.2). Rev 1.0 remains the reference design this document describes: it is
+> complete and fully routed, 0 unconnected items, 0 DRC violations, 0
+> schematic-parity issues, ERC 0 errors / 5 benign warnings, and no schematic
+> defects remain (§8.1). Rev 2.0 is a delta against it, so §2–§12 stay accurate
+> for everything rev 2.0 does not change.
+>
+> **Nothing was ever measured on a physical board.** §8.3's "confirm before
+> fabrication" list and §13.1's bring-up measurements now both land on rev 2.0,
+> which changes how several rev-2.0 items had to be decided — see §13.2.
 
 > **Part of the CANary-HAT board documentation**, split across four files.
 > Section numbers are **stable across the split** — a bare `§3.7.5` means the
@@ -25,7 +31,7 @@
 > | §1, §2, §4, §5, §8–§11 | [`CANary-HAT-Spec.md`](CANary-HAT-Spec.md) — what the board is: overview, stackup, pin map, open items, implied software work |
 > | §3 | [`CANary-HAT-Circuits.md`](CANary-HAT-Circuits.md) — why each part is wired this way, per subsystem |
 > | §6, §7, §12 | [`CANary-HAT-Fabrication.md`](CANary-HAT-Fabrication.md) — KiCad implementation, manufacturing notes, assembly readiness |
-> | §13 | [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md) — bring-up measurements, rev B, rev C, lessons from prior art |
+> | §13 | [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md) — bring-up measurements, rev 2.0, rev 3.0, lessons from prior art |
 
 ## 1. Overview
 
@@ -213,7 +219,9 @@ collide with 0x77 or 0x6B.
 top of the Pi's own 1.8 kΩ pull-ups on GPIO2/3, giving ~1.3 kΩ effective and
 ~2.5 mA sink per line at VOL. Not fatal, but it is more than any device on the
 bus needs, and earlier revisions of this document explicitly said not to add
-them. Depopulating R7/R9 is a zero-risk change (§8.3).
+them. Depopulating R7/R9 is a zero-risk change (§8.3). **Decided for rev 2.0:
+footprints kept, shipped DNP** — measurement 6 was meant to settle this against a
+physical board, and there is no longer one to measure first (§13.2.2).
 
 ## 8. Open Items
 
@@ -292,7 +300,25 @@ at fab time.
   DRC is clean via the scoped rule; the undersized land is an accepted
   solder-joint reliability position, not an outstanding error.
 
+**Two of these are reversed in rev 2.0**, and deliberately so rather than by
+drift: the **no-fuse** decision is re-taken (§3.7.4 contradicted §3.7.1, and the
+second statement was written after the first), and the **U6 lands** are corrected
+to TN0018. Both were positions taken to avoid disturbing a locked board; rev 1.0
+is no longer locked, so the reason for accepting them is gone. The X1202-leg
+decision is *also* revisited, but by being fixed rather than reversed — §13.2.1's
+P-FET protects that leg without the drop that made the original trade
+necessary.
+
 ### 8.3 Confirm before fabrication
+
+> **None of this was ever confirmed against a board.** Rev 1.0 was withdrawn from
+> PCBWay before fabrication (2026-08-22), so this list transfers wholesale to
+> **rev 2.0** and is part of that submission's checklist, not history.
+>
+> Several items also appear in §13.2 because rev 2.0 acts on them rather than
+> merely confirming them — the `KLINE_RAW` rename, R7/R9, C4's placement, the
+> antenna bias feed, and the BMP384 noise question.
+
 - **Fit 27pF for C5/C6**, not the 22pF currently drawn — the ABLS2's standard CL
   is 18pF (§3.1.1). The frequency effect is negligible; do it because it is
   correct and free.
@@ -327,7 +353,12 @@ at fab time.
 
 ### 8.4 Deferred / not in this revision
 
-Recorded so they are decisions rather than discoveries:
+Recorded so they are decisions rather than discoveries. **Three of the five are
+retired by rev 2.0** (§13.2): status LEDs and test points are added, the
+common-mode choke gets a footprint bypassed by 0Ω jumpers alongside the DNI split
+termination, and the MAX-M10S question is forced early because rev 2.0 is now the
+first board — it is the one blind item on that list that is not free. The single
+CAN channel and the missing L-line way stay deferred.
 
 - **GNSS front end.** The MAX-M10M has no SAW/LNA and sits directly above a Pi 5
   running a WiFi hotspot (`docs/pi-hotspot.md`) — a real desense risk at 1.575
