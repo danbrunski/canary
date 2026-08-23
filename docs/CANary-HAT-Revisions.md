@@ -135,7 +135,8 @@ whose §13.3.2 power-domain analysis is unwritten and whose §13.3.6 net list is
 | **12V sense: U8 + R11/R12 + C17/C18** | **done 2026-08-23** — divider on `+12V`, `V12_SENSE` → `U8.4 (AIN0)`, ADDR to GND = 0x48, **AIN1 left free and reserved** for the rev 3.0 current-sense monitor |
 | **K-line pull-up FET: Q2/Q3 + R13/R14/R15, J5 removed** | **done 2026-08-23** — `Net-(Q2-G)` is Q2.1+R13.2+R14.1 with the drain properly separate, `R5.2` moved to `KLINE_PU`, `R5.1` now direct to `D5.2`. Sniff mode is the default; commander mode needs **GPIO24 (J1 pin 18)** driven high — a new §11 item |
 | **J2 pins 4–6 re-assigned** | **operator change 2026-08-23**, for routing. Pin 4 CANH, 5 CANL, 6 K-line. Caught by netlist diff — ERC cannot see it, since every net stays connected, just to different pins. §3.9 and `FAB-NOTES.md` carry the harness table |
-|  | *57 components, 73 nets, ERC 0 errors / 3 warnings — unchanged from rev 1.0's three. **PCB still needs* Update PCB from Schematic *plus* Update Footprints from Library *for U6.*** |
+| **CAN common-mode choke: FL1** | **done 2026-08-23** — Coilcraft `1812CAN-513NRC`, 51 µH, on the stock KiCad footprint. **Took three attempts and every failure was silent** |
+|  | *57 components, 74 nets, ERC 0 errors / 3 warnings — unchanged from rev 1.0's three. **PCB still needs* Update PCB from Schematic *plus* Update Footprints from Library *for U6.*** |
 > | `KLINE_RAW` → `KLINE` | **done** — 2 hierarchical labels, 2 root sheet pins, 20 PCB net refs |
 > | R7/R9 → DNP | **done** — schematic flags, BOM line split, assembler notes |
 > | U6 lands → TN0018 | **done** in `lib/footprints.pretty/LGA-14L_STM.kicad_mod`; needs *Update Footprints from Library* + a DRC run in KiCad |
@@ -261,6 +262,37 @@ work.
   joints, or a PCB short that DRC would flag. If bring-up shows a problem the
   fallback is to desolder one part and bridge two pad pairs on a 1812, which is
   easy. §13.4.
+
+  **Three silent failure modes were hit entering this one part**, all caught by
+  netlist diff or datasheet check rather than by ERC/DRC. Recorded because the
+  pattern generalises to any four-terminal magnetic:
+
+  1. **The KiCad generic symbol disagrees with the part.**
+     `Device:Filter_EMI_CommonMode` puts pins 1 and 3 on one side and treats the
+     windings as 1–2 / 3–4. Coilcraft's are **1–2 and 4–3 with the dots at 1 and
+     4**. Wiring through the symbol as drawn puts the transceiver on pins 1 and 3,
+     reversing one winding — which converts a common-mode choke into a
+     **differential-mode** one: common-mode noise passes unfiltered and 51 µH
+     lands in series with the CAN signal. **The transceiver side must be pins 1
+     and 4.**
+  2. **The UltraLibrarian footprint is wrong in one axis.** Body outline, pad
+     sizes and the 3.68mm along-length spacing are all correct; the across-width
+     spacing is **3.68mm where Coilcraft specifies 1.73mm**. Terminals would
+     overlap their pads by ~0.17mm and the part would float or tombstone. The
+     signature is a square 3.68 × 3.68 pattern — what an IPC generator produces
+     from a "4-pad array at the body corners" assumption, where the real
+     terminals are inset to 0.865mm from the centreline. **Use the stock
+     `Inductor_SMD:L_CommonModeChoke_Coilcraft_1812CAN`**, which matches
+     Coilcraft and adds no fourth third-party import to a board where §12 already
+     calls pin-1 rotation on imports "the most likely defect".
+  3. **The value code reads as the wrong number.** `513` is EIA three-digit in
+     **nanohenries** — 51 × 10³ nH = 51 µH, not 510. Someone "correcting" it to
+     look more like 51 would order the wrong part.
+
+  None of these is visible to ERC or DRC: every net stays connected, every
+  footprint is present, and the board assembles. They surface as "CAN doesn't
+  work properly" at bring-up, where the transceiver, crystal and bit timing would
+  all be suspected first.
 - **Status LEDs and test points** (§8.4) — power good, CAN activity, GPS fix, plus
   probe points on LIN, RXD and EN. In-vehicle debugging currently costs an SSH
   round trip, and on a first board that cost is paid far more often.
