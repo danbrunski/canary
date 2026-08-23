@@ -205,11 +205,18 @@ work.
   every part rated above the clamp gives 0.70A at 85°C, and the part that passes
   2.10A at 85°C is rated 15V. That is the C2 defect shape — two sensible numbers
   that do not coexist in a purchasable part — and it is why this item was flagged
-  as the likeliest place on the list to hit it. **Fit `2920L110/60`** (1.10A,
-  60V, 0.50A at 85°C) **on the HAT leg only**, downstream of the P-FET and at
-  D4's branch, where the load is tens of mA and the margin is ~10×. The Pi leg
-  keeps the harness fuse, now as a reasoned position rather than an inherited
-  one.
+  as the likeliest place on the list to hit it.
+
+  A ~0.5A/60V 1812L part on the **HAT leg** would have worked — tens of mA of
+  load, ~10× margin, full rating against the clamp. **Operator decision
+  2026-08-23: not fitted.** So **rev 2.0 carries no fuse at all**, which is rev
+  1.0's position kept deliberately rather than inherited: on the Pi leg because
+  no suitable part exists, on the HAT leg because the area is worth more than
+  protecting a tens-of-mA branch against a fault that has never occurred. §3.7.1
+  names the exposure — D4 becomes the weak link and diodes fail short — and names
+  the trigger to revisit: an actual TLIN1027 or 12V-rail capacitor failure, not a
+  general worry about fusing. **The input stage is therefore three parts, not
+  four.**
 - **DNI split-termination footprints on CAN, gated by a solder bridge.** §3.2 is
   right that a third terminator on a vehicle bus is a fault — but it then has to
   concede that bench use "requires an external terminator in the harness." An

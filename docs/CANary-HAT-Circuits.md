@@ -652,12 +652,28 @@ that can do the job does not exist at this voltage. If on-board limiting is ever
 wanted on that leg, the right part is an eFuse with a programmable limit or a
 plain blade fuse — not a PPTC.
 
-**And §3.7.4 was right about the HAT leg**, where a PTC works comfortably: the
-HAT's own 12V load is tens of mA, so `2920L110/60` gives 0.50A at 85°C at the
-full 60V rating — roughly 10× margin — and protects D4 and its copper against a
-shorted TLIN1027 or K-line branch. That is the one place on this board where a
-PPTC is the correct device. Check the 1812L series for a smaller package; the
-same value-versus-rating check applies.
+**On the HAT leg a PTC would have worked** — the HAT's own 12V load is tens of
+mA, so a ~0.5A/60V 1812L part would carry it with ~10× margin, no nuisance-trip
+risk, and full rating against D1's clamp. **Operator decision 2026-08-23: not
+fitted.** Rev 2.0 carries no fuse anywhere, which is rev 1.0's position retained
+deliberately rather than by omission.
+
+**What that accepts, stated so it is a position and not an oversight.** A short
+on the HAT's 12V node — a cracked C3, a failed C2, a TLIN1027 damaged by an
+ISO 7637 pulse on the K-line — is limited only by the vehicle's 10–20A harness
+fuse. The path is 0.6mm copper (roughly 2A) through D4, a 5A Schottky. D4 is the
+weak link and would fail first; diodes commonly fail **short**, which then passes
+the fault to the trace, leaving the board as the current-limiting element. The
+outcome is a destroyed board rather than a hazard — FR4 chars rather than burns,
+and the harness fuse still bounds the energy — but it is worth knowing that
+nothing on the board bounds it first.
+
+**Why it was still the right call.** The branch draws tens of mA and the fault
+modes above have never occurred; the part costs area on a board where §13.3.6
+already notes area is the binding constraint; and the failure is recoverable on a
+single-operator research rig. If a TLIN1027 or a 12V-rail capacitor ever does
+fail short, refit is one 1812 footprint away — and that is the trigger to revisit
+this, not a general worry about fusing.
 
 #### 3.7.2 Rails
 
@@ -738,9 +754,10 @@ settle before this is fabricated — both since decided, see §8.2:
 
 **There is still no fuse anywhere on the board**, so nothing on the HAT limits
 fault current on a leg that now feeds the whole system directly. **Resolved
-2026-08-22 (§3.7.1): it stays that way on the Pi leg**, because no PPTC exists
-that both passes the load and survives D1's clamp — the harness fuse is the
-answer there by necessity, not by preference. The HAT leg does get one.
+2026-08-22/23 (§3.7.1): it stays that way, on both legs.** On the Pi leg by
+necessity — no PPTC exists that both passes the load and survives D1's clamp. On
+the HAT leg by choice: a ~0.5A/60V part would have worked, and the operator
+decided the area was worth more than protection for a branch drawing tens of mA.
 
 #### 3.7.5 Why there is one 3.3V rail (retained rationale)
 
