@@ -18,7 +18,8 @@ network, and the datasheet arguments behind them.
 ## 3. Major Components
 
 As-built reference designators are given for each block. Full designator list:
-U1–U7, Y1, J1–J4, JP1, BT1, L1, D1/D2/D4/D5, R1–R9, C1–C16, MH1–MH4 — 48
+U1–U7, Y1, J1–J4, JP1, BT1, L1, D1/D2/D5, R1–R9, C1–C16, MH1–MH4 — 48 as
+built for rev 1.0; rev 2.0 removes D4 and adds Q1/R10/D3
 footprints, with schematic and PCB in sync. There is no D3.
 
 ### 3.1 CAN FD Controller — U3
@@ -163,7 +164,7 @@ oversight to discover at bring-up (§8.2).
 | Part number | TLIN1027DRQ1 [cite:53][cite:56] |
 | Manufacturer | Texas Instruments [cite:56] |
 | Function | LIN physical layer transceiver, **without dominant state timeout**; also supports ISO 9141 K-line diagnostics [cite:53][cite:56] |
-| Supply voltage (VSUP) | 4V to 36V — wired to **+12V** (downstream of D4/D1), 100nF (C3) at the rail [cite:56] |
+| Supply voltage (VSUP) | 4V to 36V — wired to **+12V** (downstream of **Q1**/D1 as of rev 2.0; was D4/D1), 100nF (C3) at the rail. *Abs max is −0.3 to +45V, which is what D1's 38.9V clamp is sized against* [cite:56] |
 | Input voltage threshold (VIH) | 2V to 5.5V (supports 2.5V/3.3V/5V logic) [cite:62] |
 | Data rate | LIN **transmit up to 20 kbps**; LIN receive up to 100 kbps [cite:53][cite:56] |
 | Standards compliance | LIN 2.0/2.1/2.2/2.2A, ISO/DIS 17987-4.2, SAE J2602, AEC-Q100 (Grade 1) [cite:53][cite:56] |
@@ -193,11 +194,15 @@ commander termination across it, which is Figure 8-1:
                                     └── J2 pin 4  (vehicle K-line)
 ```
 
-The pull-up is taken from `+12V` (post-D4) rather than `+12V_RAW` so it shares the
+The pull-up is taken from `+12V` rather than `+12V_RAW` so it shares the
 receiver's reference — the LIN thresholds are ratiometric (`VBUS_CNT` = 0.5 ×
-VSUP). Two diodes sit in the pull-up path (D4 + D5), so recessive lands near
-Vbat − 1.1V against VSUP ≈ Vbat − 0.4V; Figure 8-1 annotates exactly this drop,
-and it stays far above the 0.6 × VSUP recessive threshold.
+VSUP). **Rev 2.0 improves this slightly, as a side effect of removing D4.** Rev
+1.0 had two drops in the pull-up path (D4 + D5), putting recessive near
+Vbat − 1.1V against VSUP ≈ Vbat − 0.4V. With D4 gone there is one diode (D5) and
+Q1's 38 mV, so **recessive lands near Vbat − 0.74V against VSUP ≈ Vbat − 0.04V**.
+Both sit far above the 0.6 × VSUP recessive threshold, so this changes nothing
+functionally — recorded because Figure 8-1 annotates the two-diode case and the
+arithmetic here would otherwise read as stale.
 
 D5 is a **1N4148W, not a Schottky**. Its job is blocking reverse current from a
 live bus into an unpowered VSUP (§8.3.4), and Schottky reverse leakage — tens to
@@ -562,9 +567,11 @@ nothing.
 | Ref | Part | Role |
 |---|---|---|
 | J2 pin 1 | terminal block | Vehicle 12V in → net `+12V_RAW` |
-| **J3** | 2-pos terminal block | Pass-through to the X1202, tapped off **`+12V_RAW`, upstream of D4** |
-| D4 | SS54 (SMB, 5A/40V Schottky) | Series reverse-blocking, `+12V_RAW` → `+12V` |
-| D1 | SMBJ24A (SMB, 600W TVS, 24V standoff) | `+12V` → GND transient clamp |
+| **Q1** | **SUD50P06-15** (Vishay, P-channel, −60V, 15 mΩ, TO-252) | **Series reverse-blocking, `+12V_RAW` → `+12V`.** Added rev 2.0 (§13.2.1); replaces D4 |
+| **R10 / D3** | 100 kΩ 0603 · BZT52C15 (15V Zener, SOD-123) | Q1 gate pull-down and V_GS clamp. Zero quiescent draw |
+| ~~D4~~ | ~~SS54 (SMB, 5A/40V Schottky)~~ | **Removed rev 2.0** — Q1 does the one job it had. See below |
+| **J3** | 2-pos terminal block | Pass-through to the X1202, now tapped off **`+12V`, downstream of Q1 and D1** |
+| D1 | SMBJ24A (SMB, 600W TVS, 24V standoff) | `+12V` → GND transient clamp — **now ahead of the J3 fan-out**, so it clamps the Pi's leg too |
 | C2 | **DNP on rev 1.0** — footprint Ø6.3mm / 2.5mm pitch; if populated, **47µF 50V 105°C** (Panasonic `EEU-FR1H470`) | Bulk on `+12V`. **Was documented as 100µF, which does not exist in this footprint** — see below |
 | C3 | 100nF 0603 X7R, **50V minimum** | HF decoupling on `+12V`, at the TLIN1027 VSUP pin. Rating set by D1's clamp, not by the rail — see below |
 
@@ -608,13 +615,49 @@ so **50V is the floor for anything on `+12V`** — C2, C3, and whatever rev 2.0 
 to this net. Stated as a constraint on the net rather than as two part choices,
 because the misleading number is the one a reader sees first.
 
-**The protection chain now guards only the HAT.** As of 2026-08-10 the
-pass-through taps the raw connector node, so `+12V_RAW` fans out to J3 and to
-D4's anode in parallel. Everything downstream of D4 — the TVS, the bulk cap, the
-TLIN1027 — sees only the HAT's 12V load, which is tens of mA (VSUP quiescent,
-R4, and the K-line pull-up when the bus is dominant). The ~150 mA whole-board
-figure quoted elsewhere is almost entirely 3.3V draw and does not appear here.
-See §3.7.4 for what that buys and what it costs.
+**D4 removed 2026-08-23, once Q1 landed.** Its only stated job above was series
+reverse-blocking, and Q1 does that for the whole board rather than the HAT leg
+alone — so D4 was redundant, not merely improved upon. It was briefly kept as the
+§13.2.5 fallback (bridge Q1, D4 restores rev 1.0), but that argument does not
+survive contact with the failure it would cover. **The realistic Q1 defect is a
+reversed FET**, which runs normally in both directions until reverse polarity
+arrives — and there D4 would protect the HAT leg while the X1202 and Pi take the
+hit anyway. It covers the cheap half of the failure and not the expensive half.
+The real mitigation is the bench-supply orientation check recorded on Q1's `Note`
+field, which costs nothing. Removing it also returns ~25mm² of SMB footprint on a
+board where §13.3.6 calls area the binding constraint, drops a BOM line, and
+merges what would have been a `+12V_PROT` net back into `+12V`.
+
+*Kept in mind and deliberately not treated as a reason to retain it: D4 was a 40V
+part on a rail D1 clamps at 38.9V. It is never reverse-stressed in the new
+topology, so this was never a defect — but 1.1V of margin was always tighter than
+it looked.*
+
+**D1 stays, and matters more than it did.** Q1 and D1 solve orthogonal problems:
+Q1 blocks reverse polarity, D1 clamps overvoltage, and a P-FET in reverse
+protection is fully *on* during a positive transient — it conducts a load dump
+straight through at 15 mΩ. Confirmed against the TLIN1027 datasheet 2026-08-23:
+**VSUP absolute maximum is −0.3 to +45V**, against D1's 38.9V clamp — about 6V of
+margin, a correctly matched pair. The transceiver alone might survive without it
+(it is rated for ISO 7637-2 Pulse 1 at −100V and Pulse 2 at +75V on VSUP), but C2
+and C3 are 50V parts *because* D1 clamps at 38.9V, and the X1202 now sits on the
+same net.
+
+~~**The protection chain now guards only the HAT.**~~ **True of rev 1.0, and
+reversed by rev 2.0.** As of 2026-08-10 the pass-through tapped the raw connector
+node, so `+12V_RAW` fanned out to J3 and to D4's anode in parallel, and
+everything downstream of D4 saw only the HAT's tens-of-mA load. **Rev 2.0 puts
+J3 downstream of Q1 and D1 instead, so the protection chain guards the whole
+board** — which is the point of the change, and what §3.7.4 could not achieve
+with a Schottky without paying a 0.5V drop and ~1.5W on the Pi's supply.
+
+**One consequence to carry forward: Q1 now carries the Pi's current, and D4 did
+not.** The ~150 mA whole-board figure quoted elsewhere is almost entirely 3.3V
+draw and still does not appear on this rail, but the J3 pass-through does — up to
+the **3A** budget §3.7.4 sizes the copper for. That is why Q1's R_DS(on) is
+selection-critical where D4's forward drop was not: at 15 mΩ it dissipates
+0.11W at 3A, where the SS54 in the same position would have dissipated ~1.5W.
+See §3.7.4 for the history.
 
 **There is no PTC fuse.** Earlier revisions listed one in the protection chain;
 the as-built board has none. §8.2 decided the vehicle-side harness fuse was the
@@ -679,8 +722,8 @@ this, not a general worry about fusing.
 
 | Rail | Source | Feeds |
 |---|---|---|
-| `+12V_RAW` | J2 pin 1, straight off the vehicle | D4's anode, **and J3 (pass-through to the X1202)** — unprotected by anything on this board |
-| `+12V` | `+12V_RAW` via D4, clamped/bulked by D1/C2 | TLIN1027 VSUP (decoupled by C3), and the K-line commander pull-up R5+D5 |
+| `+12V_RAW` | J2 pin 1, straight off the vehicle | **Q1's drain, and nothing else.** As of rev 2.0 the pass-through no longer taps here — J3 moved downstream of Q1 and D1 |
+| `+12V` | `+12V_RAW` via **Q1**, clamped/bulked by D1/C2 | TLIN1027 VSUP (decoupled by C3), the K-line commander pull-up R5+D5, **and J3's pass-through to the X1202** |
 | `+3V3` | **Raspberry Pi header pins 1 and 17** | Everything else: MCP2518FD VDD, TCAN1042 VIO, BMP384, LSM6DSOX, MAX-M10M VCC + V_IO, EEPROM, all pull-ups and straps |
 | `+5V` | Raspberry Pi header pins 2 and 4 | TCAN1042VDRQ1 VDD only (~70 mA) |
 
@@ -690,23 +733,34 @@ sourced from the host — which is what §3.7.5 argued for.
 #### 3.7.3 System topology
 
 ```
-Vehicle OBD 12V ──> J2 (6-way block) ──> +12V_RAW ──┬──> D4 (SS54) ──> +12V ──┬──> D1 TVS / C2 / C3
-                                                    │                        ├──> TLIN1027-Q1 VSUP
-                                                    │                        └──> R5+D5 → K-line pull-up
-                                                    │
-                                                    └──> J3 (2-way block)   [unprotected tap]
-                                                             │
-                                                   barrel-jack pigtail
-                                                             │
-                                                             v
-                                                    X1202 UPS HAT ──> Raspberry Pi 5 (5V)
-                                                             │
-                                                     (battery backup + GPIO6 PLD +
-                                                      I2C fuel gauge at 0x36)
+                              R10 100k ──> GND ;  D3 15V Zener ── Q1 gate   (rev 2.0 Vgs clamp)
+                                              │
+Vehicle OBD 12V ──> J2 (6-way block) ──> +12V_RAW ──> Q1 (D→S) ──> +12V ──┬──> D1 TVS / C2 / C3
+                                                                          ├──> TLIN1027-Q1 VSUP
+                                                                          ├──> R5+D5 → K-line pull-up
+                                                                          │
+                                                                          └──> J3 (2-way block)
+                                                                                   │
+                                                                         barrel-jack pigtail
+                                                                                   │
+                                                                                   v
+                                                                          X1202 UPS HAT ──> Pi 5 (5V)
+                                                                                   │
+                                                                           (battery backup + GPIO6 PLD +
+                                                                            I2C fuel gauge at 0x36)
 
 Raspberry Pi 5 header ──> +3V3 (pins 1,17) ──> every logic device on this board
                       └─> +5V  (pins 2,4)  ──> TCAN1042 VDD
 ```
+
+**Two things changed here in rev 2.0**, and together they close §3.7.4's accepted
+exposure. D4 (SS54) is gone, with Q1 doing the reverse blocking for the whole
+board; and **J3 moved from `+12V_RAW` to `+12V`**, so the pass-through now sits
+behind both the reverse protection and the TVS. The Pi's supply was previously
+guarded by nothing on this board — both its reverse-polarity and its transient
+case are now covered. And it costs no headroom: Q1 drops 38 mV at the 3A budget
+where the SS54 dropped ~500 mV, so the cranking-sag argument that put the tap
+upstream in the first place is satisfied rather than traded away.
 
 The X1202 remains the sole power source for the Pi and the sole owner of
 power-loss detection and battery-backed shutdown (`scripts/ups_shutdown_watch.py`,

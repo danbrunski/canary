@@ -129,6 +129,7 @@ whose §13.3.2 power-domain analysis is unwritten and whose §13.3.6 net list is
 > | Item | State |
 > |---|---|
 > | C2 → 47µF/50V + MPN | **done** — schematic, BOM, fab notes |
+| **Input stage: Q1 + R10 + D3, D4 removed** | **done 2026-08-23** — schematic entered and verified by netlist diff: `Q1.2 (D)` on `+12V_RAW`, `Q1.3 (S)` on `+12V`, D3 cathode to source, J3 moved to `+12V`. ERC unchanged at 0/3. **PCB still needs *Update PCB from Schematic*** |
 > | `KLINE_RAW` → `KLINE` | **done** — 2 hierarchical labels, 2 root sheet pins, 20 PCB net refs |
 > | R7/R9 → DNP | **done** — schematic flags, BOM line split, assembler notes |
 > | U6 lands → TN0018 | **done** in `lib/footprints.pretty/LGA-14L_STM.kicad_mod`; needs *Update Footprints from Library* + a DRC run in KiCad |
