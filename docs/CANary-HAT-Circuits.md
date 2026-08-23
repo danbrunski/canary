@@ -452,6 +452,21 @@ There is **no bias fuse or short-circuit protection** on that feed — a shorted
 antenna cable pulls VCC_RF down, which is the module's own supply. Consider a
 small series resistor or resettable element if the antenna is field-swappable.
 
+**The topology is right and one value is confirmed exactly** (Integration Manual
+UBX-22038241 §3.3, Appendix C, read 2026-08-22). u-blox's reference bias-T is the
+same shape as ours — connector node with a series cap into RF_IN and a feed
+inductor to the antenna supply — and their recommended feed inductor `L3` is
+**27 nH**, which is exactly L1. The requirement behind that number is worth
+recording because it is not a value anyone should round: the inductor is chosen
+to resonate at L1 frequency, giving **>500 Ω** series impedance so the feed point
+does not load the 50 Ω line, with a **current rating above 300 mA**. The manual
+also confirms VCC_RF is a legitimate antenna supply ("the antenna can be supplied
+by VCC_RF or an external supply"), provided it stays clean.
+
+**Do not read the M10M's "antenna supervisor" as filling the protection gap** —
+it is a host-side circuit needing switch MOSFETs, a comparator and a sense shunt,
+none of which this board has. See the retraction in §8.3.
+
 > ⚠️ **Unresolved: C16 is 10nF here and 15pF in §12.1/§12.5** — a 666× difference
 > on the RF path. §12.5 logs `C16 → 15pF C0G 0402, SRF-tuned` as a *completed*
 > change (2026-08-11), and §12.1 explains the sizing: self-resonance placed at
@@ -462,6 +477,25 @@ small series resistor or resettable element if the antenna is field-swappable.
 > silently corrected: read the schematic before trusting either number, and note
 > §13.1 measurement 4 (GNSS TTFF and C/N₀) is the test that would expose a wrong
 > DC block. Found 2026-08-13.
+>
+> **Source of the 10nF figure identified 2026-08-22 — but it does not settle the
+> as-built value.** u-blox's Appendix C gives `C14`, the RF bias-T capacitor in
+> exactly this position, as **10 nF, 10%, 16 V, X7R**. So §3.6's number is the
+> reference-design value and §12's is a deliberate divergence, not a typo on
+> either side. **The as-built value is 15pF** — confirmed directly from the
+> schematic and `BOM.csv` (`C16, 15p, C_0402_1005Metric`), which resolves the
+> "which is current" question this note raised.
+>
+> The remaining question is whether the divergence was right, and it is defensible
+> rather than obviously wrong: at 1.575 GHz a 15pF is roughly 6.7 Ω of series
+> reactance — about 23 dB return loss and ~0.02 dB insertion loss in a 50 Ω line —
+> while a 10nF 0402 sits far above its own SRF and behaves inductively at a
+> comparable magnitude. Neither is a defect. Note also that **RF_IN is DC-blocked
+> internally** (Integration Manual pin table: "the RF signal line is DC blocked
+> internally"), so this cap is belt-and-braces in the first place. **Record it as
+> a decision with its reasoning, not as an unexplained departure from the
+> reference design** — that is the §3.1.1 lesson about stating a constraint where
+> the value is derived.
 
 #### 3.6.1 The RF launch (reworked 2026-08-11)
 

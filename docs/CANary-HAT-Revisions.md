@@ -212,7 +212,22 @@ and the next board should know which it inherited.
 | **GPIO-controlled K-line pull-up FET** | Meas. 2 — does the 1 kΩ disturb an NT510/UpRev session | **Fit it** (below) | Five parts. It makes sniff mode the safe default when the Pi is off, booting or crashed — which matters more, not less, on a first board — and it turns measurement 2 itself from an under-dash unstack into a GPIO toggle. |
 | **BMP390 swap** | Meas. 9 — BMP384 RMS noise vs the grade budget | **No board change** | Footprint-compatible (§3.5). Ship the BMP384 and swap on the bench if it falls short. The gate costs nothing to leave open. |
 | **C2 populate vs DNP** | Bring-up — TLIN1027 upsets during crank or hot-plug | **No board change** | Footprint present regardless; §3.7.1 shows the capacitance is not load-bearing. |
-| **MAX-M10M → MAX-M10S** | Meas. 4 — GNSS TTFF and C/N₀ under the Pi's WiFi hotspot | **Open — needs a call before submission** | The one blind item that is *not* free. The M10S's integrated SAW+LNA is §8.4's "robust option" against a real desense risk at 1.575 GHz, and rev 1.0 relies entirely on the active antenna's filtering. It is not a drop-in, and rev 2.0 forces the decision early with no data. |
+| **MAX-M10M → MAX-M10S** | Meas. 4 — GNSS TTFF and C/N₀ under the Pi's WiFi hotspot | **Defer — keep the M10M.** *Changed 2026-08-22, see below* | Was "the one blind item that is not free", forcing a part change before fabrication with no data. The Integration Manual removes that pressure: the desense mitigation has a **configuration-only first move**, so the decision becomes measurable on rev 2.0 instead of guessed ahead of it. |
+
+**Why the M10S decision defers — Integration Manual §4.3.1.** The M10M's internal
+LNA has three gain modes, and u-blox states the thresholds plainly: "for RF
+front-end designs with **15 dB or higher total external gain, low-gain mode** can
+be used to improve immunity", and 25 dB or higher → **bypass mode**. A typical
+active GNSS antenna is 20–28 dB, so this rig almost certainly qualifies for
+low-gain and may qualify for bypass. The mode is settable at run time in BBR/RAM
+(`CFG-HW-RF_LNA_MODE` plus a software reset) or permanently in OTP.
+
+That does **not** make the M10S unnecessary — reducing internal LNA gain helps
+when the internal LNA is the stage being overloaded, whereas the M10S's SAW
+filter rejects out-of-band energy *before* any gain stage, which is the stronger
+fix. But it means measurement 4 can be run on rev 2.0 hardware against three gain
+settings before spending a part change, rather than the part change being a blind
+pre-fabrication bet. **Keep the M10M; add the LNA-mode sweep to measurement 4.**
 
 #### 13.2.3 [pulled forward] — rev-3.0 hooks that cost one net
 
@@ -673,7 +688,19 @@ closes it, and whether BT1 is fitted stops mattering.
 
 Beyond that:
 
-- The M10's 10 Hz nav rate is volatile configuration (§3.6). The MCU re-applies
+- ~~The M10's 10 Hz nav rate is volatile configuration (§3.6).~~ **Weaker than
+  stated — corrected 2026-08-22 from the Integration Manual.** Configuration has
+  three layers, not one: **RAM** (lost at power-down), **BBR** — battery-backed
+  RAM, "retained as long as the backup power supply remains", i.e. for as long as
+  BT1 holds V_BCKP — and **OTP**, a 74-byte one-time-programmable store that the
+  device applies automatically at every startup and that "cannot be reverted". So
+  the nav rate can be made to survive power cycles without any host or MCU
+  involvement, and this benefit largely evaporates. What survives is narrower: OTP
+  is irreversible and space-limited, and BBR dies with BT1 — which §8.3 now costs
+  at roughly ten months on a CR2032 at the measured 32 µA. **Losing V_BCKP
+  therefore costs more than §3.6 recorded: not just hot-start ephemeris, but any
+  configuration held in BBR.** That strengthens the V_BCKP diode-OR below rather
+  than this bullet. The MCU re-applies
   it deterministically at every power-up, before the Pi is alive.
 - Keeping the receiver tracking while the Pi is off gives a **hot fix at key-on**
   and — more usefully — gives the MCU valid *absolute* time at the instant of

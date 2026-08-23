@@ -348,16 +348,30 @@ necessary.
   actually leaves the Pi off, which is exactly when it will. This strengthens
   §13.3.4's case for diode-ORing the always-on rail into V_BCKP instead. Abs max
   on that pin is **3.6 V**, which constrains the OR leg.
-- **Antenna bias protection** on the L1 feed (§3.6). **Probably already
-  present — provisional, 2026-08-22.** The datasheet lists an "antenna supervisor
-  for active antenna control and short detection" as a device feature, and the
-  netlist confirms bias already comes from the receiver's own regulator rather
-  than the 3V3 rail: `U7.14 VCC_RF → L1 → J4.1`, with `ICC_RF` spec'd at **100 mA
-  max source**. So the feed is current-limited at source and short detection may
-  be free. **Do not close this yet**: `LNA_EN` (pin 13) is unconnected, and that
-  is the supervisor's control pin — whether detection works without it is defined
-  in the Integration Manual, which we do not have. If it does, §13.3.6 item 12
-  (antenna bias sense → MCU ADC) is redundant and rev 3.0 gets one net shorter.
+- **Antenna bias protection** on the L1 feed (§3.6) — **still open, and the
+  original wording was right.** A provisional note on 2026-08-22 guessed from the
+  datasheet's feature list that the M10M's built-in "antenna supervisor with short
+  detection" might make this free. **The Integration Manual (§3.3.1) refutes
+  that**: the supervisor is a *host-side circuit*, not an internal function. Both
+  variants need external parts — three-pin (open **and** short detection) or
+  two-pin (short only) — and each requires T1/T2 switch MOSFETs, a comparator, a
+  threshold divider, a pull-up, an `R8` current-limit/shunt resistor, plus
+  open-drain level shifters when V_ANT ≠ V_IO. This board has none of them, and
+  `LNA_EN` — which u-blox has already assigned to `ANT_OFF_N` — is unconnected.
+  So the protection genuinely does not exist.
+
+  Two details for whoever implements it. u-blox's reference value is **R8 = 10 Ω,
+  5%, 0.25 W**, and the manual requires "both R8 and L3 [to] have sufficient
+  current and power rating to withstand the short-circuit current". But **R8 alone
+  is not a fix**: 3.3 V across 10 Ω is ~330 mA against `ICC_RF`'s 100 mA max
+  source rating, so the resistor is the supervisor's *sense shunt*, not its
+  protection — the FET switch is what actually cuts the supply. Fitting R8 without
+  the rest would look like protection and provide none.
+
+  *Logged as a retraction rather than edited away: the guess was made from a
+  feature-list bullet in a product datasheet, with the document that defines the
+  feature explicitly named as missing. That is the same shape as the dielectrics
+  retraction in §13.4.1 — a confident reading of a partial source.*
 - **TCAN1042 VIO undervoltage behaviour** with VDD present and VIO absent — the
   STANDBY row depends on it (§3.7.5).
 - **Star-point placement** for the signal/chassis ground bond across J2 pins 2
