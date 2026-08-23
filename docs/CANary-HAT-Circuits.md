@@ -132,7 +132,7 @@ driver expects a level-sensitive, active-low interrupt.
 | Protection | ESD up to ±15kV (IEC), bus fault protection ±58V, undervoltage protection on VDD/VIO, thermal shutdown [cite:54] |
 | Package | SOIC-8 (footprint `D0008A_L`) [cite:54] |
 | Loop delay | 110 ns typical [cite:54] |
-| Support circuitry | CANH/CANL straight to J2 pins 5/6; **no on-board termination, no ESD array, no common-mode choke** |
+| Support circuitry | CANH/CANL straight to **J2 pins 4/5** (pins 5/6 on rev 1.0 — §3.9); **no on-board termination, no ESD array, no common-mode choke** |
 
 **STB is resolved.** Pin 8 (STB) is tied directly to GND in the schematic, so the
 transceiver is hard-wired into normal mode. The old open item is closed.
@@ -184,14 +184,14 @@ oversight to discover at bring-up (§8.2).
 | C3 | 100 nF | +12V → GND at the VSUP pin | ✅ required by §10, and now drawn on this sheet |
 | — | — | NC pins 3 and 8 unconnected; GND pin 5 to GND | ✅ |
 
-**Bus topology as built** — J2 pin 4 lands directly on the LIN pin, with the
+**Bus topology as built** — **J2 pin 6** (pin 4 on rev 1.0 — §3.9) lands directly on the LIN pin, with the
 commander termination across it, which is Figure 8-1:
 
 ```
 +12V ──> R5 (1 kΩ) ──> D5 anode
                        D5 cathode ──┬── U2.6 (LIN)
                                     ├── C4 (220 pF) ── GND
-                                    └── J2 pin 4  (vehicle K-line)
+                                    └── J2 pin 6  (vehicle K-line)
 ```
 
 The pull-up is taken from `+12V` rather than `+12V_RAW` so it shares the
@@ -960,19 +960,35 @@ loads at boot — the cleanest way to bring up `mcp251xfd`, the GNSS UART, and
 The footprint family is **Phoenix MKDS**, not the MC/MCV series earlier revisions
 named. Both are 5.08mm pitch; the BOM must say which.
 
-**J2 pin map, as wired:**
+**J2 pin map, as wired.** ⚠️ **Pins 4–6 were re-assigned in rev 2.0** (operator,
+2026-08-23, for cleaner routing at the connector). **Any harness built to the
+rev 1.0 pinout will put CAN High on the K-line pin.**
 
-| J2 pin | Net | OBD-II pin |
-|---|---|---|
-| 1 | `+12V_RAW` | 16 (battery +12V) |
-| 2 | GND | 5 (signal ground) |
-| 3 | GND | 4 (chassis ground) |
-| 4 | `KLINE_RAW` | 7 (K-line) |
-| 5 | `CANH_RAW` | 6 (CAN High) |
-| 6 | `CANL_RAW` | 14 (CAN Low) |
+| J2 pin | Net | OBD-II pin | rev 1.0 was |
+|---|---|---|---|
+| 1 | `+12V_RAW` | 16 (battery +12V) | *unchanged* |
+| 2 | GND | 5 (signal ground) | *unchanged* |
+| 3 | GND | 4 (chassis ground) | *unchanged* |
+| **4** | **`CANH_RAW`** | **6 (CAN High)** | ~~`KLINE`~~ |
+| **5** | **`CANL_RAW`** | **14 (CAN Low)** | ~~`CANH_RAW`~~ |
+| **6** | **`KLINE`** | **7 (K-line)** | ~~`CANL_RAW`~~ |
 
-Note J2's *value* field still reads `Screw_Terminal_01x05` while the symbol and
-footprint are 6-position — cosmetic, but it will propagate into a BOM.
+*(The K-line net is `KLINE`, not `KLINE_RAW` — renamed in rev 2.0, §13.2.1.)*
+
+**Electrically this is neutral to slightly favourable.** CANH/CANL stay adjacent,
+so the differential pair is unaffected. The K-line moves to the end of the block,
+which drops it from two neighbours to one — and it is the conductor carrying
+ISO 7637-2 pulses to +100V/−150V, so having fewer things beside it is the right
+direction. There is still no GND conductor between the K-line and the CAN pair,
+which was true before as well.
+
+**The risk here is procedural, not electrical.** J2 is hand-wired to the vehicle,
+and this table is the only place the mapping is written down. Label the harness
+against *this* table, and if a rev-1.0-era harness exists, re-land pins 4–6
+before plugging it in.
+
+*J2's value field now reads `Screw_Terminal_01x06`, matching the 6-position symbol
+and footprint; the `01x05` mismatch earlier revisions noted is fixed.*
 
 **Signal ground and chassis ground are tied together on the board** — pins 2 and
 3 are the same GND net, so the HAT is the bonding point between the two returns.

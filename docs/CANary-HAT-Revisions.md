@@ -133,7 +133,9 @@ whose §13.3.2 power-domain analysis is unwritten and whose §13.3.6 net list is
 | **STB → GPIO22** (J1 pin 15) | **done 2026-08-23** — `U4.8` left GND. §13.2.1's "the one that matters most". Carries a **software prerequisite**: see §11 |
 | **LSM6DSOX INT2 → GPIO23** (J1 pin 16) | **done 2026-08-23** — `U6.9` was unconnected on rev 1.0 |
 | **12V sense: U8 + R11/R12 + C17/C18** | **done 2026-08-23** — divider on `+12V`, `V12_SENSE` → `U8.4 (AIN0)`, ADDR to GND = 0x48, **AIN1 left free and reserved** for the rev 3.0 current-sense monitor |
-|  | *52 components, 70 nets, ERC 0 errors / 3 warnings — unchanged from rev 1.0's three. **PCB still needs* Update PCB from Schematic *plus* Update Footprints from Library *for U6.*** |
+| **K-line pull-up FET: Q2/Q3 + R13/R14/R15, J5 removed** | **done 2026-08-23** — `Net-(Q2-G)` is Q2.1+R13.2+R14.1 with the drain properly separate, `R5.2` moved to `KLINE_PU`, `R5.1` now direct to `D5.2`. Sniff mode is the default; commander mode needs **GPIO24 (J1 pin 18)** driven high — a new §11 item |
+| **J2 pins 4–6 re-assigned** | **operator change 2026-08-23**, for routing. Pin 4 CANH, 5 CANL, 6 K-line. Caught by netlist diff — ERC cannot see it, since every net stays connected, just to different pins. §3.9 and `FAB-NOTES.md` carry the harness table |
+|  | *57 components, 73 nets, ERC 0 errors / 3 warnings — unchanged from rev 1.0's three. **PCB still needs* Update PCB from Schematic *plus* Update Footprints from Library *for U6.*** |
 > | `KLINE_RAW` → `KLINE` | **done** — 2 hierarchical labels, 2 root sheet pins, 20 PCB net refs |
 > | R7/R9 → DNP | **done** — schematic flags, BOM line split, assembler notes |
 > | U6 lands → TN0018 | **done** in `lib/footprints.pretty/LGA-14L_STM.kicad_mod`; needs *Update Footprints from Library* + a DRC run in KiCad |

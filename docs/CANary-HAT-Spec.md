@@ -249,8 +249,10 @@ worth having when someone next reads the schematic.
    driver could not sink the bus dominant through R5's 1 kΩ against the vehicle's
    own pull-up, and D5 blocked the LIN pin from discharging when the ECU pulled
    dominant, leaving the internal 45 kΩ termination holding it recessive forever.
-   Now `+12V → R5 → D5 → LIN` with J2 pin 4 direct to the pin, per §11.1 Pin 6 and
-   Figure 8-1. D5 also changed from an SS54 Schottky to a 1N4148W, because the
+   Now `+12V → R5 → D5 → LIN` with the K-line connector pin direct to the LIN pin,
+   per §11.1 Pin 6 and Figure 8-1. *(That connector pin was **J2 pin 4** when this
+   defect was fixed; rev 2.0 moved the K-line to **J2 pin 6** — see §3.9 for the
+   current pin map, which is what a harness must be built to.)* D5 also changed from an SS54 Schottky to a 1N4148W, because the
    diode's job is blocking reverse current into an unpowered VSUP and Schottky
    leakage undermines exactly that (§3.3).
 4. **R8 added** (4.7 kΩ, TXD to +3V3, Pi side of R6). Not a defect in the original
