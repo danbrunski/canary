@@ -340,14 +340,42 @@ necessary.
   reason to keep them.
 - **V_BCKP fallback** — no path from +3V3, no charge path, floating if BT1 is
   absent (§3.6). At minimum decide "primary cell always fitted" and record it.
-- **Antenna bias protection** on the L1 feed (§3.6).
+  **Now costed, 2026-08-22 from `MAX-M10M_DataSheet_UBX-22028884.pdf`:** hardware
+  backup mode (VCC = V_IO = 0, i.e. the Pi off) draws **32 µA typ**, against the
+  "~20 µA" this document has been assuming; with the Pi up it is ~3 µA. A CR2032
+  at 225 mAh and 32 µA is roughly **10 months**, so "primary cell always fitted"
+  is a maintenance schedule, not a decision — and it only bites once rev 3.0
+  actually leaves the Pi off, which is exactly when it will. This strengthens
+  §13.3.4's case for diode-ORing the always-on rail into V_BCKP instead. Abs max
+  on that pin is **3.6 V**, which constrains the OR leg.
+- **Antenna bias protection** on the L1 feed (§3.6). **Probably already
+  present — provisional, 2026-08-22.** The datasheet lists an "antenna supervisor
+  for active antenna control and short detection" as a device feature, and the
+  netlist confirms bias already comes from the receiver's own regulator rather
+  than the 3V3 rail: `U7.14 VCC_RF → L1 → J4.1`, with `ICC_RF` spec'd at **100 mA
+  max source**. So the feed is current-limited at source and short detection may
+  be free. **Do not close this yet**: `LNA_EN` (pin 13) is unconnected, and that
+  is the supervisor's control pin — whether detection works without it is defined
+  in the Integration Manual, which we do not have. If it does, §13.3.6 item 12
+  (antenna bias sense → MCU ADC) is redundant and rev 3.0 gets one net shorter.
 - **TCAN1042 VIO undervoltage behaviour** with VDD present and VIO absent — the
   STANDBY row depends on it (§3.7.5).
 - **Star-point placement** for the signal/chassis ground bond across J2 pins 2
   and 3 (§3.9).
 - **RF stackup** — the 0.2mm feed assumes 0.1mm to Gnd.Cu (§3.6, §7).
-- **Verify no I2C clock stretching and whole-device WP** on the CAT24C256
-  (§3.8.1).
+- ~~**Verify no I2C clock stretching and whole-device WP** on the CAT24C256~~ —
+  **closed 2026-08-22 from `CAT24C256-D.PDF`.** Both halves confirmed. **There is
+  no clock stretching**: the part signals write-busy by *acknowledge polling* —
+  it NAKs its own slave address for the duration of `tWR` (5 ms) — and stretching
+  appears nowhere in the datasheet. That is the answer that mattered, because the
+  Pi's HAT ID EEPROM bus is bit-banged by firmware at boot and does not handle a
+  stretched clock. **WP is whole-device**: "With the WP pin held HIGH, the entire
+  memory is protected against Write operations", and floating or grounded WP "has
+  no impact", which is the writable state HAT+ ID programming needs. Note 6 also
+  confirms the strap design: "when not driven, the WP, A0, A1, A2 pins are pulled
+  down to GND internally", and the pull-down is deliberately strong — so the
+  floating straps give 0x50 by construction, and the do-not-substitute note
+  against Microchip's 24LC256 is justified rather than defensive.
 - **Quiescent draw on +12V** with the vehicle parked, if the harness ever lands on
   always-hot OBD pin 16.
 - **BMP384 RMS noise** against the grade budget; the BMP390 is footprint-

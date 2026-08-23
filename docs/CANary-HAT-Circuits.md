@@ -567,7 +567,9 @@ to match the value**: 6.3mm is the right size for a rail carrying tens of mA, an
 **Both capacitors on this net take their voltage rating from D1's clamp, not from
 the rail — record it as a rule.** `+12V` sits at 12–14.4V in normal operation,
 which invites a 16V or 25V part and is the number printed on the schematic. The
-figure that actually governs is the SMBJ24A's **38.9V maximum clamping voltage**,
+figure that actually governs is the SMBJ24A's **38.9V maximum clamping voltage**
+(confirmed 2026-08-22 against `datasheets/TVS-Diode-SMBJ-Datasheet.pdf`: V_WM
+24.0V, V_BR 26.70–29.50V at 1 mA, **V_C 38.9V at I_PP 15.5A**),
 so **50V is the floor for anything on `+12V`** — C2, C3, and whatever rev 2.0 adds
 to this net. Stated as a constraint on the net rather than as two part choices,
 because the misleading number is the one a reader sees first.
