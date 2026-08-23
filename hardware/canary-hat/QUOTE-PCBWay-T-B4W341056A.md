@@ -1,5 +1,20 @@
 # PCBWay quote T-B4W341056A — 5 units, 2026-08-14
 
+> ⚠️ **SUPERSEDED — historical record only.** This quote was for **rev 1.0**,
+> which was withdrawn before fabrication on 2026-08-22. It is kept because the
+> questions PCBWay asked are useful (it is what caught C2's impossible
+> footprint), but **do not work from it**: the board it prices no longer exists.
+>
+> What changed since: D4 and J5 removed; Q1/R10/D3 (input protection),
+> U8/R11/R12/C17/C18 (12V sense), Q2/Q3/R13–R15 (K-line pull-up FET), FL1 (CAN
+> common-mode choke) and D6/R16 (CAN activity LED) added; J2 pins 4–6
+> re-assigned; R7/R9 changed to DNP; C2 corrected to 47µF; U6's land pattern
+> revised to TN0018. 45 components then, **59 now**.
+>
+> **Any `OPEN` status inherited from this quote is stale.** `rev 2.0` needs a
+> fresh RFQ, and `grep -l OPEN *.kicad_sch` will report leftovers from a quote
+> that no longer applies rather than genuine gaps.
+
 Source: `Quote for T-B4W341056A-5units-BOM_canary-hat.kicad_pcb(2026-08-14).xls`.
 
 Component cost **$211.99 / 5 units** ($42.40 per board). Assembly and PCB cost

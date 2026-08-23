@@ -1,16 +1,17 @@
 CANary-HAT assembly notes
 
 SCOPE
-- Assemble all 38 SMD parts (144 pads), EXCEPT R7 and R9 - see DNP below.
+- Assemble the SMD parts, EXCEPT R7 and R9 - see DNP below. Counts come from
+  the current centroid and BOM exports, not from this note.
 - DO NOT FIT R7 or R9. Their footprints are on the board deliberately, but
   they are duplicate I2C pull-ups that the host board already provides.
   Leaving them out is intended, not an omission.
 - DO NOT SOURCE OR FIT J1 (2x20 stacking header). We supply and fit it
   ourselves. It is the only bottom-side part, so no bottom-side placement
   operation is needed at all.
-- Remaining through-hole is 5 parts / 14 joints: J2 (6), J3 (2), J5 (2),
-  C2 (2), J4 ground posts (2). Please quote separately. C2 is operator-
-  sourced - land pattern only, do not fit.
+- Remaining through-hole: J2 (6 joints), J3 (2), C2 (2) and the J4 ground
+  posts (2). Please quote separately. C2 is operator-sourced - land pattern
+  only, do not fit. (J5 was removed in rev 2.0.)
 - J4 (SMA) is mixed technology: SMD body plus 2 through-hole ground posts.
   PLEASE SOLDER THE J4 GROUND POSTS even if the other through-hole parts are
   excluded - it is a board-edge connector that takes cable load, and the SMD

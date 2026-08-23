@@ -152,7 +152,7 @@ Procurement state for every line lives in `QUOTE-PCBWay-T-B4W341056A.md` and in
 the `MPN` / `Manufacturer` / `Cost_5u` / `Quote` fields on each schematic symbol.
 `grep -l OPEN *.kicad_sch` lists what is still unresolved with the vendor.
 
-**C2, J1 and J5 are operator-sourced — do not populate at the assembler.**
+**C2 and J1 are operator-sourced — do not populate at the assembler.** *(J5 was removed in rev 2.0; the K-line mode select is now Q2/Q3 on GPIO24.)*
 
 **R7 and R9 are DNP** — the footprints are on the board deliberately, but they
 must be left unpopulated. They are duplicate I2C pull-ups; the host already
@@ -160,6 +160,7 @@ provides them. See the BOM note on that line.
 
 ## Also required, not on the board BOM
 
-See `BOM-offboard.md` — most importantly a **2.54 mm shunt for J5** (a bare
-header does nothing on its own) and a **primary cell** for BT1 (there is no
-charge path on the board).
+See `BOM-offboard.md` — most importantly a **primary cell for BT1** (there is no
+charge path on the board, so a supercap never charges and without a cell the
+receiver cold-starts every boot), and a **120 Ω resistor** to clamp across J2
+pins 4/5 for bench work, since the board carries no CAN termination by design.

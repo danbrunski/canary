@@ -4587,7 +4587,7 @@
 				)
 			)
 		)
-		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): OPEN - PCBWay asked for an exact part number; operator answered 'Samsung CL10B104KB8NNNC or equivalent spec'. Not yet priced."
+		(property "Quote" "Rev 1.0 quote PCBWay T-B4W341056A (2026-08-14) is SUPERSEDED - that board was withdrawn before fabrication. Rev 2.0 needs a fresh RFQ. Prior status, kept for provenance: PCBWay T-B4W341056A (5 units, 2026-08-14): PCBWay asked for an exact part number; operator answered 'Samsung CL10B104KB8NNNC or equivalent spec'. Not yet priced."
 			(at 67.31 177.8 0)
 			(hide yes)
 			(show_name no)

@@ -4916,7 +4916,7 @@
 				(justify left)
 			)
 		)
-		(property "Quote" "OPEN - MPN suffix varies by maker (Diodes -7-F, onsemi T1G, Nexperia ,215). Pick at the distributor."
+		(property "Quote" "MPN set to the generic Zener part number, consistent with this board's treatment of 1N4148W. Suffix varies by maker (Diodes -7-F, onsemi T1G, Nexperia ,215) and is a distributor choice at order time."
 			(at 0 0 0)
 			(hide yes)
 			(show_name no)
@@ -5209,7 +5209,7 @@
 				(justify left)
 			)
 		)
-		(property "Quote" "OPEN - MPN suffix needs a distributor lookup. Vishay uses -E3 / -GE3 style RoHS and packaging suffixes; do not guess one (see Y1)."
+		(property "Quote" "MPN set to the Vishay base part number, consistent with this board's treatment of SS54 and 1N4148W. Packaging/RoHS suffix (-E3 / -GE3 style) is a distributor choice at order time."
 			(at 0 0 0)
 			(hide yes)
 			(show_name no)

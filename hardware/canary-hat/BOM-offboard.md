@@ -8,13 +8,13 @@ KiCad-generated BOM; neither is complete on its own.
 
 | For | Item | Notes |
 |---|---|---|
-| **J5** | 2.54mm shunt / jumper link | **Order with the header.** A bare 2-pin header does nothing on its own. Fitted = K-line commander pull-up active (tester mode); open = passive sniff, HAT presents only the transceiver's internal 45 kΩ. |
 | **BT1** | JST SH 2-pin cable, 1.0mm pitch | Mates with SM02B-SRSS-TB. |
 | **BT1** | GNSS backup cell — **primary cell only** | There is **no charge path** on the board (series 1N4148W, D2, from the cell to V_BCKP), so a supercap will never charge. Without a cell fitted, V_BCKP floats and the receiver cold-starts on every boot. |
 | **J4** | Active GNSS antenna, SMA male | Must have an **integrated SAW filter ahead of its LNA** — the MAX-M10M-00B has no on-module front end. Board supplies bias via L1 from VCC_RF. Confirm the LNA's bias current against VCC_RF's rating. |
 | **J2 / J3** | Ferrules or tinned leads, 5.08mm block | 6-way vehicle side, 2-way 12V pass-through. |
-| **J3** | DC barrel-jack pigtail | Feeds the X1202 UPS. Note this leg is tapped **upstream of D4**, so nothing on this board protects it. |
-| **J2** | OBD-II Y-cable / breakout | Needed for K-line eavesdropping alongside the NT510 or UpRev cable — both tools must share pins 7, 16 and ground. |
+| **J3** | DC barrel-jack pigtail | Feeds the X1202 UPS. **Rev 2.0: this leg is now tapped downstream of Q1 and D1**, so it sits behind both the reverse-polarity protection and the transient clamp — the exposure §3.7.4 previously had to accept is closed. |
+| **J2** | OBD-II Y-cable / breakout | Needed for K-line eavesdropping alongside the NT510 or UpRev cable — both tools must share pins 7, 16 and ground. **Rev 2.0 re-assigned J2 pins 4–6** — pin 4 CAN High, 5 CAN Low, 6 K-line. A harness built to the rev 1.0 pinout puts CAN High on the K-line pin; see §3.9. |
+| **J2** | 120 Ω resistor — bench use only | The board carries no CAN termination by design; a third terminator on a vehicle bus is a fault. For bench work against an unterminated bus, clamp 120 Ω across **J2 pins 4 and 5**, and remove it before the board goes back in a vehicle. This is why the split-termination footprints were considered and dropped in rev 2.0 — J2 is a screw block, so the workaround needs no tooling. |
 
 ## Mechanical
 
@@ -45,9 +45,12 @@ KiCad-generated BOM; neither is complete on its own.
   registration encroach on the land and make the joint partly mask-defined —
   a fatigue stress concentrator. Fall back to zero expansion only if the fab
   rejects 0.10 mm dams.
-- **R5 stays 1 kΩ**, so J5 is a 2-pin header rather than a 3-pin value select.
-  R5 must be a **0.2W-rated 0603** — it dissipates 151 mW during a
-  stuck-dominant bus fault, over a standard 0603's 0.1W.
+- **R5 stays 1 kΩ.** It must be a **0.2W-rated 0603** — it dissipates 151 mW
+  during a stuck-dominant bus fault, over a standard 0603's 0.1W.
+  *(J5, the 2-pin mode-select header this note used to describe, was removed in
+  rev 2.0: the commander pull-up is now switched by Q2/Q3 from GPIO24, so the
+  mode changes in software rather than by unstacking the HAT from under the
+  dash. There is no shunt to order.)*
 - **D2 is a 1N4148W in SOD-123 — the same part as D5** (changed 2026-08-15 from
   a BAT54 in SOT-23). Silicon, *not* Schottky: it blocks reverse current into
   BT1, and BT1 is a primary cell with no charge path, so Schottky leakage would

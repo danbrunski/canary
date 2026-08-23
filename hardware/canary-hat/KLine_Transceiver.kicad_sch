@@ -2904,7 +2904,7 @@
 				)
 			)
 		)
-		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): OPEN - PCBWay asked for an exact part number; operator answered 'Panasonic ERJ-PA3F1001V or equivalent spec' (0603, 0.2W). Not yet priced."
+		(property "Quote" "Rev 1.0 quote PCBWay T-B4W341056A (2026-08-14) is SUPERSEDED - that board was withdrawn before fabrication. Rev 2.0 needs a fresh RFQ. Prior status, kept for provenance: PCBWay T-B4W341056A (5 units, 2026-08-14): PCBWay asked for an exact part number; operator answered 'Panasonic ERJ-PA3F1001V or equivalent spec' (0603, 0.2W). Not yet priced."
 			(at 172.72 74.93 0)
 			(hide yes)
 			(show_name no)
@@ -3929,7 +3929,7 @@
 				)
 			)
 		)
-		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): OPEN - PCBWay asked for an exact part number; operator answered 'Panasonic ERJ-PA3F1001V or equivalent spec' (0603, 0.2W). Not yet priced."
+		(property "Quote" "Rev 1.0 quote PCBWay T-B4W341056A (2026-08-14) is SUPERSEDED - that board was withdrawn before fabrication. Rev 2.0 needs a fresh RFQ. Prior status, kept for provenance: PCBWay T-B4W341056A (5 units, 2026-08-14): PCBWay asked for an exact part number; operator answered 'Panasonic ERJ-PA3F1001V or equivalent spec' (0603, 0.2W). Not yet priced."
 			(at 106.68 93.98 0)
 			(hide yes)
 			(show_name no)
@@ -4733,7 +4733,7 @@
 				)
 			)
 		)
-		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): OPEN - PCBWay asked for an exact part number; operator answered 'Samsung CL10B104KB8NNNC or equivalent spec'. Not yet priced."
+		(property "Quote" "Rev 1.0 quote PCBWay T-B4W341056A (2026-08-14) is SUPERSEDED - that board was withdrawn before fabrication. Rev 2.0 needs a fresh RFQ. Prior status, kept for provenance: PCBWay T-B4W341056A (5 units, 2026-08-14): PCBWay asked for an exact part number; operator answered 'Samsung CL10B104KB8NNNC or equivalent spec'. Not yet priced."
 			(at 115.57 107.95 0)
 			(hide yes)
 			(show_name no)

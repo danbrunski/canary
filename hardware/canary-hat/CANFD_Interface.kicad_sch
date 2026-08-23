@@ -3827,7 +3827,7 @@
 				)
 			)
 		)
-		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): OPEN - PCBWay asked for an exact part number; operator answered 'Samsung CL10B104KB8NNNC or equivalent spec'. Not yet priced."
+		(property "Quote" "Rev 1.0 quote PCBWay T-B4W341056A (2026-08-14) is SUPERSEDED - that board was withdrawn before fabrication. Rev 2.0 needs a fresh RFQ. Prior status, kept for provenance: PCBWay T-B4W341056A (5 units, 2026-08-14): PCBWay asked for an exact part number; operator answered 'Samsung CL10B104KB8NNNC or equivalent spec'. Not yet priced."
 			(at 72.39 80.01 0)
 			(hide yes)
 			(show_name no)
@@ -3990,7 +3990,7 @@
 				)
 			)
 		)
-		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): OPEN - PCBWay asked for an exact part number; operator answered 'Samsung CL10B104KB8NNNC or equivalent spec'. Not yet priced."
+		(property "Quote" "Rev 1.0 quote PCBWay T-B4W341056A (2026-08-14) is SUPERSEDED - that board was withdrawn before fabrication. Rev 2.0 needs a fresh RFQ. Prior status, kept for provenance: PCBWay T-B4W341056A (5 units, 2026-08-14): PCBWay asked for an exact part number; operator answered 'Samsung CL10B104KB8NNNC or equivalent spec'. Not yet priced."
 			(at 72.39 45.72 0)
 			(hide yes)
 			(show_name no)
@@ -4556,7 +4556,7 @@
 				)
 			)
 		)
-		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): OPEN - PCBWay asked for an exact part number; operator answered 'Samsung CL10B104KB8NNNC or equivalent spec'. Not yet priced."
+		(property "Quote" "Rev 1.0 quote PCBWay T-B4W341056A (2026-08-14) is SUPERSEDED - that board was withdrawn before fabrication. Rev 2.0 needs a fresh RFQ. Prior status, kept for provenance: PCBWay T-B4W341056A (5 units, 2026-08-14): PCBWay asked for an exact part number; operator answered 'Samsung CL10B104KB8NNNC or equivalent spec'. Not yet priced."
 			(at 227.33 133.35 0)
 			(hide yes)
 			(show_name no)
@@ -5093,7 +5093,7 @@
 				(justify bottom)
 			)
 		)
-		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): OPEN - PCBWay saw two part numbers on this line and asked which to quote; operator answered ABLS2-40.000MHZ-D4YF-T. Not yet priced. The stray second part number came from the SnapEDA library symbol's MP / MF / Package fields (the 12 MHz donor part) leaking into the BOM export; those have been cleared so it cannot recur."
+		(property "Quote" "Rev 1.0 quote PCBWay T-B4W341056A (2026-08-14) is SUPERSEDED - that board was withdrawn before fabrication. Rev 2.0 needs a fresh RFQ. Prior status, kept for provenance: PCBWay T-B4W341056A (5 units, 2026-08-14): PCBWay saw two part numbers on this line and asked which to quote; operator answered ABLS2-40.000MHZ-D4YF-T. Not yet priced. The stray second part number came from the SnapEDA library symbol's MP / MF / Package fields (the 12 MHz donor part) leaking into the BOM export; those have been cleared so it cannot recur."
 			(at 81.28 148.59 0)
 			(hide yes)
 			(show_name no)
