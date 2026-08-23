@@ -617,8 +617,47 @@ figure quoted elsewhere is almost entirely 3.3V draw and does not appear here.
 See §3.7.4 for what that buys and what it costs.
 
 **There is no PTC fuse.** Earlier revisions listed one in the protection chain;
-the as-built board has none. Decide deliberately whether the vehicle-side fuse in
-the harness is the whole story (§8.2 — decided: it is).
+the as-built board has none. §8.2 decided the vehicle-side harness fuse was the
+whole story; §3.7.4 then observed that nothing limits fault current on the leg
+feeding the Pi. Those two sat uneasily together and §13.2 queued the decision for
+re-taking.
+
+**Re-taken 2026-08-22 against real part data, and it splits by leg.** The
+governing constraint is the one already stated above for C2/C3: voltage rating on
+`+12V` is set by D1's 38.9V clamp, not by the 12–14.4V rail. Applied to a PPTC,
+that turns out to be disqualifying. From the Littelfuse 2920L table — the
+highest-current surface-mount PPTC family — hold current and voltage rating sit
+at opposite ends of the same series:
+
+| Part | I_hold @25°C | V_max | @60°C | @85°C |
+|---|---|---|---|---|
+| 2920L110/60 | 1.10A | **60V** | 0.73A | 0.50A |
+| 2920L150/60 | 1.50A | **60V** | 1.02A | 0.70A |
+| 2920L260/33 | 2.60A | 33V | 1.81A | 1.27A |
+| 2920L300/15 | 3.00A | 15V | 2.31A | 1.83A |
+| 2920L400/15 | 4.00A | 15V | 2.80A | 2.10A |
+
+A PTC on the **Pi leg** would have to pass the ~2.3A worst-case draw at cabin
+temperature *and* survive 38.9V. Every part rated above the clamp delivers
+**0.70A at 85°C**, five times short; the part that passes 2.10A at 85°C is rated
+**15V**, under half the clamp and below even a 16V alternator fault. **No part in
+the family satisfies both**, which is the same defect shape as C2 — two
+individually sensible numbers that do not coexist in a purchasable part. The
+radial 30R series reaches 4A but only at 30V, so it fails the same test and is
+physically large besides.
+
+**So §8.2 was right about the Pi leg**, and now for a reason rather than by
+default: the harness fuse is the whole story there because a *resettable* device
+that can do the job does not exist at this voltage. If on-board limiting is ever
+wanted on that leg, the right part is an eFuse with a programmable limit or a
+plain blade fuse — not a PPTC.
+
+**And §3.7.4 was right about the HAT leg**, where a PTC works comfortably: the
+HAT's own 12V load is tens of mA, so `2920L110/60` gives 0.50A at 85°C at the
+full 60V rating — roughly 10× margin — and protects D4 and its copper against a
+shorted TLIN1027 or K-line branch. That is the one place on this board where a
+PPTC is the correct device. Check the 1812L series for a smaller package; the
+same value-versus-rating check applies.
 
 #### 3.7.2 Rails
 
@@ -698,7 +737,10 @@ settle before this is fabricated — both since decided, see §8.2:
    `+12V_RAW` itself, ahead of the fan-out to both D4 and J3.
 
 **There is still no fuse anywhere on the board**, so nothing on the HAT limits
-fault current on a leg that now feeds the whole system directly.
+fault current on a leg that now feeds the whole system directly. **Resolved
+2026-08-22 (§3.7.1): it stays that way on the Pi leg**, because no PPTC exists
+that both passes the load and survives D1's clamp — the harness fuse is the
+answer there by necessity, not by preference. The HAT leg does get one.
 
 #### 3.7.5 Why there is one 3.3V rail (retained rationale)
 

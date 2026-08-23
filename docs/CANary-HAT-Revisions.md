@@ -170,15 +170,46 @@ work.
   This is §3.7.4's own option 2 ("an ideal-diode controller, or a Schottky sized
   for 3A"), and it protects the X1202 leg that nothing currently protects —
   without reintroducing the diode drop that moving the tap upstream was meant to
-  escape. §13.4 has the M2's implementation: **Q1 `IRFTS9342` P-FET gate-driven
-  through Q2 `MMBT3906W`, R2/R3 = 1.00 kΩ, R4 = 10.0 kΩ.** See §13.2.5 — this is
-  the one item on the list that ships untested.
-- **A PTC on the input.** §3.7.1 decided the harness fuse was the whole story;
-  §3.7.4 then observed that "nothing on the HAT limits fault current on a leg
-  that now feeds the whole system directly." Those two sit uneasily together and
-  the decision deserves re-taking rather than inheriting. §13.4. Do it *with* the
-  P-FET — same input stage, one change, and rev 3.0 redesigns that stage again
-  for the always-on rail and load switch (§13.3.2, §13.3.6).
+  escape. See §13.2.5 — this is the one item on the list that ships untested.
+
+  **Parts selected 2026-08-22.** A simple passive reverse-polarity circuit, not an
+  ideal-diode controller: a true ideal diode blocks reverse *current*, and all we
+  need is to block reverse *polarity*.
+
+  | Ref | Part | Why |
+  |---|---|---|
+  | Q1 | **ROHM `RD3L07BAT`** — P-channel, −60V, **12.7 mΩ max at V_GS = −10V**, TO-252/DPAK 6.6 × 10.0mm | At 3A that is **38 mV and 0.11W**, against D4's ~500 mV and ~1.5W — which is the entire point, since §3.7.4 moved the tap upstream precisely to keep a diode drop out of a supply that must survive cranking sag. −60V clears D1's 38.9V clamp. *Its headline "−70A" carries a `*Tc = 25°C` footnote — silicon limit with an ideal heatsink, not a board rating. Do not quote it.* |
+  | | *smaller alternative:* ROHM `RQ7G080AT`, −40V, 18.2 mΩ, TSMT8 **3.0 × 2.8mm** | A ninth the area, which matters here. −40V is defensible because the FET only sees voltage when **off**, and that is reverse polarity (−14V, ~−16V alternator fault), not a positive transient — during those it is on and conducting. Take the −60V part if the area exists. |
+  | R | 100 kΩ 0603, gate → GND | Turns Q1 on in normal polarity. |
+  | D | **15V Zener, SOD-123** (BZT52C15 class), gate–source | **Required, not optional.** When D1 clamps at 38.9V the unclamped V_GS would be −38.9V against a ±20V limit. Clamp current ≈ (38.9 − 15)/100k ≈ 240 µA, so 3.6 mW. |
+
+  **Rejected on measurement, recorded so they are not re-proposed:** `ZXMP6A16K`
+  (60V DPAK) at **85 mΩ** — 0.77W at 3A, which discards the whole reason for
+  using a FET — and `AOD407` at 115 mΩ, worse.
+
+  **Still to confirm before ordering (§12.5):** V_GS(max) on the specific part.
+  ROHM's selection guide does not list it, and "a value and its rating recorded in
+  two places with nothing checking them" is exactly what produced C2.
+
+  **Orientation is the silent-failure detail.** The body diode must conduct in the
+  *normal* direction, so the **drain faces the input (`+12V_RAW`) and the source
+  faces the protected output**. Wired the other way the part looks right, powers
+  the board, and passes reverse current straight through. Verify at bring-up
+  before trusting it: with correct polarity the board should come up with a
+  near-zero drop across Q1, and with the supply reversed on a current-limited
+  bench supply it should draw nothing.
+- ~~**A PTC on the input.**~~ **Re-taken 2026-08-22 against real part data — see
+  §3.7.1 for the table and the reasoning. Outcome: no PTC on the Pi leg, one on
+  the HAT leg.** No PPTC exists that both passes the Pi's ~2.3A worst case at
+  cabin temperature and survives D1's 38.9V clamp: in the Littelfuse 2920L family
+  every part rated above the clamp gives 0.70A at 85°C, and the part that passes
+  2.10A at 85°C is rated 15V. That is the C2 defect shape — two sensible numbers
+  that do not coexist in a purchasable part — and it is why this item was flagged
+  as the likeliest place on the list to hit it. **Fit `2920L110/60`** (1.10A,
+  60V, 0.50A at 85°C) **on the HAT leg only**, downstream of the P-FET and at
+  D4's branch, where the load is tens of mA and the margin is ~10×. The Pi leg
+  keeps the harness fuse, now as a reasoned position rather than an inherited
+  one.
 - **DNI split-termination footprints on CAN, gated by a solder bridge.** §3.2 is
   right that a third terminator on a vehicle bus is a fault — but it then has to
   concede that bench use "requires an external terminator in the harness." An
