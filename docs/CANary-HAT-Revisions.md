@@ -756,10 +756,46 @@ Fix this list before layout: a missing net is a re-spin, unused firmware is free
 | 9 | GNSS TX + TIMEPULSE → MCU (fan-out) | time base, hot fix, absolute time at wake |
 | 10 | **LSM6DSOX INT2 (pin 9 — unconnected on rev 1.0)** → MCU | motion wake. **Landed in rev 2.0** as a net to a free Pi GPIO (§13.2.3); rev 3.0 re-points it |
 | 11 | Private MCU I2C → LSM6DSOX + BMP384 | §13.3.4 — **must not be I2C1** |
-| 12 | GNSS antenna bias sense → MCU ADC | open/short antenna detection |
+| 12 | ~~GNSS antenna bias sense → MCU ADC~~ **→ u-blox two-pin antenna supervisor** | Open/short antenna detection, **but not via the MCU** — the M10M does it itself. Deferred here from rev 2.0 on 2026-08-22. See below. |
 | 13 | STB (U4) and the §13.2 pull-up FET gate → MCU | safe-state ownership. **Both exist in rev 2.0** as Pi GPIOs (§13.2.1, §13.2.4); rev 3.0 moves ownership to the MCU |
 | 14 | **A flash path from the Pi** — SWD bit-banged from Pi GPIO, or a UART bootloader with BOOT0 on a Pi-drivable pin | see below |
 | 15 | Status LEDs → MCU | §13.2, §13.3.4 |
+
+**Item 12 changed shape entirely.** It was written as an MCU ADC channel watching
+the antenna bias, because §3.6 recorded that feed as unprotected and nothing else
+could see it. The Integration Manual (read 2026-08-22) shows the receiver already
+has the function — a **two-pin antenna supervisor**, and both its signals stay on
+the module, so it costs **zero MCU pins and zero Pi GPIOs**. Corrected part count
+for our board: **four** — `T1` P-FET, `T2` N-FET, `R7` 100 kΩ pull-up, `R8` 10 Ω
+0.25 W current limiter. u-blox's `L3` is already our L1 at the same 27 nH value,
+and their open-drain buffer `U7` is unnecessary because V_ANT (VCC_RF = VCC −
+0.1 V = 3.2 V) sits in the same domain as V_IO. Wire `ANT_OFF_N` to **LNA_EN
+(pin 13)** and `ANT_SHORT_N` to a free PIO — EXTINT, SDA or SCL, none of which
+this board uses. *Confirm the PIO-index-to-package-pin mapping in the interface
+description: u-blox's reference says `ANT_SUP_SHORT_PIN 5`, but their three-pin
+design calls the I2C pins "2" and "3" where the package numbers them 16 and 17,
+so the two numbering spaces are not the same.*
+
+**Why it is worth having at all**, since rev 2.0 ships without it: `ICC_RF` = 100 mA
+is an **absolute maximum**, not an operating limit, and the module has no internal
+protection — so a shorted coax kills U7 outright. `R8` alone does not fix that
+(3.2 V across 10 Ω is ~320 mA, still over the limit); it only survives the
+detection window, and `T1` is what actually disconnects the supply. That pairing
+is also what makes the circuit **antenna-agnostic**: nothing is tuned to a
+particular antenna's operating current, so any active antenna works, and
+`ANT_OFF_N` doubles as software bias control so a *passive* antenna needs no
+hardware change either. The standing limit is unrelated to the supervisor —
+VCC_RF is 3.2 V, so 5 V-only active antennas need an external bias leg regardless.
+
+**One consequence of deferring, worth taking deliberately.** `R8` and `T1` sit
+*in series* in the antenna supply path, which on rev 2.0 runs L1 → J4 with nothing
+between. Retrofitting them in rev 3.0 therefore means breaking and re-routing that
+path inside the RF region — the most constrained area on the board. If rev 2.0
+lands the four footprints unpopulated with solder-bridge links across the `R8` and
+`T1` positions, plus the two module-side signal traces, rev 3.0 becomes a populate
+rather than an RF re-layout. That is §13.4.1 item 4's own discipline — fit the
+footprint, gate the connection — applied here. **Not adopted; recorded as the
+cheaper option if the RF area turns out to have room during layout.**
 
 **Rev 2.0 already lands items 2, 10 and 13** (§13.2.3), so this list is three
 nets shorter than it was — the point of pulling them forward. The remaining

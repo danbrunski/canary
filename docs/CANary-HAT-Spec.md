@@ -372,6 +372,17 @@ necessary.
   feature-list bullet in a product datasheet, with the document that defines the
   feature explicitly named as missing. That is the same shape as the dielectrics
   retraction in §13.4.1 — a confident reading of a partial source.*
+
+  **Decided 2026-08-22: the supervisor goes to rev 3.0, and rev 2.0 accepts the
+  exposure** — the same position rev 1.0 took, but now taken knowingly rather
+  than by omission. What is being accepted is specific: a coax that shorts centre
+  to shield drives `VCC_RF` past an **absolute maximum** rating, and u-blox states
+  the product "is not protected against overvoltage or reversed voltages", so the
+  failure mode is a dead U7 rather than a degraded fix. U7 is machine-placed, sits
+  in the RF launch region, and is the hardest part on the board to rework.
+  Mitigation until rev 3.0 is procedural: route the antenna coax so it cannot be
+  pinched or chafed, and treat a sudden total loss of GNSS as "check the cable
+  before suspecting the module".
 - **TCAN1042 VIO undervoltage behaviour** with VDD present and VIO absent — the
   STANDBY row depends on it (§3.7.5).
 - **Star-point placement** for the signal/chassis ground bond across J2 pins 2
