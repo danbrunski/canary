@@ -120,6 +120,31 @@ No MCU, no new subsystems, no firmware — the supervisor stays in rev 3.0 (§13
 whose §13.3.2 power-domain analysis is unwritten and whose §13.3.6 net list is
 15 nets onto a 65 × 56 mm board already carrying 48 footprints.
 
+> **Implementation status — updated 2026-08-22.** The KiCad project for rev 2.0
+> lives at `C:\Users\thebo\Documents\canary-hat - rev2`. Landed so far, all
+> verified by exporting the netlist with `kicad-cli` and diffing net→node sets
+> against a pre-edit baseline (67 nets, 45 components, unchanged; ERC 0 errors /
+> 3 warnings, identical before and after):
+>
+> | Item | State |
+> |---|---|
+> | C2 → 47µF/50V + MPN | **done** — schematic, BOM, fab notes |
+> | `KLINE_RAW` → `KLINE` | **done** — 2 hierarchical labels, 2 root sheet pins, 20 PCB net refs |
+> | R7/R9 → DNP | **done** — schematic flags, BOM line split, assembler notes |
+> | U6 lands → TN0018 | **done** in `lib/footprints.pretty/LGA-14L_STM.kicad_mod`; needs *Update Footprints from Library* + a DRC run in KiCad |
+>
+> Everything else in §13.2 requires placing symbols, drawing wires or moving
+> copper, and is done in the KiCad GUI.
+>
+> **Two things the project files taught us.** `Inputs.kicad_sch` and
+> `Power.kicad_sch` were orphans — superseded by `OBD_IO.kicad_sch` but still on
+> disk, still containing a `C2` with the wrong value, and not referenced by the
+> root sheet. Deleting them changed the netlist by exactly one line (the export
+> timestamp), which is how that was confirmed. And `BOM.csv` plus `FAB-NOTES.md`
+> both said the *footprint* was what had to change on C2, contradicting §3.7.1's
+> decision to change the value — the same constraint in two places with nothing
+> checking them, which is the defect that produced C2 in the first place.
+
 #### 13.2.1 [decided] — unconditional fixes
 
 **The one that matters most: STB on a GPIO.** The TCAN1042V's STB pin is

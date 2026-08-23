@@ -14,8 +14,11 @@
 > in favour of **rev 2.0**, which is now the board that will be built first
 > (§13.2). Rev 1.0 remains the reference design this document describes: it is
 > complete and fully routed, 0 unconnected items, 0 DRC violations, 0
-> schematic-parity issues, ERC 0 errors / 5 benign warnings, and no schematic
-> defects remain (§8.1). Rev 2.0 is a delta against it, so §2–§12 stay accurate
+> schematic-parity issues, ERC **0 errors / 3 benign warnings**, and no schematic
+> defects remain (§8.1). *(The "5 warnings" this document carried came from
+> `ERC-fresh.rpt` dated 2026-08-11; the schematic was revised on 2026-08-15 and
+> a fresh `kicad-cli sch erc` run on 2026-08-22 — before and after the rev-2.0
+> edits alike — reports 3. Corrected rather than re-derived next time.)* Rev 2.0 is a delta against it, so §2–§12 stay accurate
 > for everything rev 2.0 does not change.
 >
 > **Nothing was ever measured on a physical board.** §8.3's "confirm before
