@@ -472,11 +472,41 @@ None of this is blocking for fabrication, but none of it exists yet either.
 - **CAN:** swap the `mcp2515` overlay for
   `dtoverlay=mcp251xfd,spi0-0,interrupt=25,oscillator=40000000`; `hardware.can`
   config (`interface: socketcan`, `channel: can0`) is unchanged.
+- **CAN transceiver standby — new in rev 2.0, and it will look like a hardware
+  fault if missed.** The TCAN1042's STB pin moves from a hard GND tie to a GPIO
+  (§13.2.1), and **the pin has an internal pull-up that forces standby whenever it
+  floats.** A Pi GPIO is high-Z at boot, so the board comes up with the
+  transceiver in standby and **`can0` silently receives nothing** — link up, no
+  errors, no frames. Something must drive STB **low** before CAN is expected to
+  work, and it must do so on every boot.
+
+  The failure mode is what makes this worth writing down rather than leaving to
+  bring-up: it presents as "the CAN hardware is dead", which is exactly the
+  conclusion §13.1's bring-up would otherwise reach about a board whose CAN path
+  is fine. Note also that low-power-by-default is the *desired* behaviour —
+  §13.3.1 depends on it — so this is a driver requirement, not a pin to re-tie.
+
+  Cheapest correct implementation is the device tree, not the daemon: a
+  `gpio-hog` on the STB pin in the board overlay (§11, first bullet) asserts it at
+  boot before any userspace exists, and survives a daemon crash. Doing it in
+  Python instead means CAN is dead for the whole boot window and dies again
+  whenever the process does. If it *is* done in software, it belongs with the
+  overlay work, not in `can_collector.py` — the collector should be able to assume
+  a working `can0`.
+
+  Wiring detail for whoever writes it: STB is on **GPIO22 (header pin 15)**, and
+  the LSM6DSOX's INT2 lands on **GPIO23 (pin 16)**. **GPIO6 is not available**
+  despite reading as free on this header — `ups_shutdown_watch.py` claims it as
+  the X1202's power-loss-detect input, the same collision that moved the BMP384
+  interrupt to GPIO17 in §8.1.
 - **IMU:** add `lsm6dsox` to the `ImuConfig.source` Literal in `src/config.py`
   (currently `bno055 | mpu6050 | icm20948 | disabled`) and write
   `imu_collector.py` (roadmap task 2b.2) against I2C address **0x6B** with INT1 on
   **GPIO16**. The frame-resolution math in `imu_frame.py` already covers the
-  raw-chip case.
+  raw-chip case. **Rev 2.0 also brings INT2 out to GPIO23** (pin 9 was unconnected
+  on rev 1.0), which is what wake-on-motion and §13.3.3(d)'s parked monitoring
+  need. Nothing has to use it yet — it is landed now because a missing net is a
+  re-spin (§13.2.3).
 - **Barometer:** no config, collector, or channel exists — only the
   `trainable=False` committee declarations from task 2a.8. Address **0x77**;
   interrupt on **GPIO17** (§4.1).
