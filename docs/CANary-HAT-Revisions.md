@@ -135,6 +135,9 @@ whose §13.3.2 power-domain analysis is unwritten and whose §13.3.6 net list is
 | **12V sense: U8 + R11/R12 + C17/C18** | **done 2026-08-23** — divider on `+12V`, `V12_SENSE` → `U8.4 (AIN0)`, ADDR to GND = 0x48, **AIN1 left free and reserved** for the rev 3.0 current-sense monitor |
 | **K-line pull-up FET: Q2/Q3 + R13/R14/R15, J5 removed** | **done 2026-08-23** — `Net-(Q2-G)` is Q2.1+R13.2+R14.1 with the drain properly separate, `R5.2` moved to `KLINE_PU`, `R5.1` now direct to `D5.2`. Sniff mode is the default; commander mode needs **GPIO24 (J1 pin 18)** driven high — a new §11 item |
 | **J2 pins 4–6 re-assigned** | **operator change 2026-08-23**, for routing. Pin 4 CANH, 5 CANL, 6 K-line. Caught by netlist diff — ERC cannot see it, since every net stays connected, just to different pins. §3.9 and `FAB-NOTES.md` carry the harness table |
+| **CAN activity LED: D6 + R16** | **done 2026-08-23** — hardware-driven from the TCAN1042's RXD, no GPIO. Separates "the bus is dead" from "the software is not reading it" |
+| **Test points** | **dropped** — LIN, +12V and GND are all probeable at J2's screw terminals, and EN is reachable at U2 pin 2 (SOIC lead) or J1 pin 37 on the stacking header. A pad would have been convenience, not access |
+| **Field + BOM sweep** | **done 2026-08-23** — every component now carries `MPN` and `Note` except `J1` (operator-sourced) and `JP1` (a PCB feature, not a part). `BOM.csv` is now **generated from the schematic**, so the two cannot drift |
 | **CAN common-mode choke: FL1** | **done 2026-08-23** — Coilcraft `1812CAN-513NRC`, 51 µH, on the stock KiCad footprint. **Took three attempts and every failure was silent** |
 |  | *57 components, 74 nets, ERC 0 errors / 3 warnings — unchanged from rev 1.0's three. **PCB still needs* Update PCB from Schematic *plus* Update Footprints from Library *for U6.*** |
 > | `KLINE_RAW` → `KLINE` | **done** — 2 hierarchical labels, 2 root sheet pins, 20 PCB net refs |
