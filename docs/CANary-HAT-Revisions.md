@@ -431,12 +431,39 @@ re-spin, an unpopulated footprint is free.**
 - **LSM6DSOX INT2 (pin 9) → a free Pi GPIO.** Unconnected on rev 1.0 and called
   out as free in §13.3.6 item 10. One net, no parts, and it is what motion-wake
   and parked monitoring (§13.3.3d) need to exist at all.
-- **0.01Ω current-sense shunt and its monitor footprints, unpopulated.** §13.4.4
-  already anticipated exactly this case: "If rev 2.0 is fabricated first, add the
-  shunt and its footprints then and populate the monitor later." The M2's chain
-  is `R18` 0.01Ω 1% 1/4W 0805 → `ZXCT1109` high-side monitor → `LM393`
-  comparator → an `OVER_CURRENT` flag and a P-FET cutoff. Land the shunt and the
-  footprints; populating the monitor stays rev 3.0.
+- ~~**0.01Ω current-sense shunt and its monitor footprints, unpopulated.**~~
+  **Dropped entirely 2026-08-23 — shunt included.** §13.4.4 anticipated this case
+  ("if rev 2.0 is fabricated first, add the shunt and its footprints then"), and
+  §13.4.1 item 6 listed three uses from the M2. Examined one at a time, none of
+  them survives for this board.
+
+  1. **It does not close §13.1 measurement 7.** That measurement is the board's
+     *3.3V* draw, and the 3.3V rail is fed from the Pi header — a shunt on
+     `+12V_RAW` cannot see it. Closing measurement 7 needs a shunt in the `+3V3`
+     feed, a different circuit, for a figure you take once on a bench supply.
+  2. **Parked parasitic draw needs the Pi off, and then the Pi cannot read the
+     ADC.** Rev 2.0 has no sleep state: the Pi is on whenever 12V is present, so
+     "parked draw" is just its ~250 mA, which is already known. The micro-amp
+     version only exists once §13.3.1's supervisor cuts the Pi — and at that
+     point the **MCU** must read it. That is exactly why §13.4.4 scoped the
+     monitor to rev 3.0. *The argument that "a spare ADC channel is something
+     awake to read it" was wrong: the Pi is awake precisely when the measurement
+     is uninteresting.*
+  3. **The firmware-independent over-current trip contradicts the fuse
+     decision.** §3.7.1 removed the PTC on the reasoning that the branch does not
+     need fault protection. A comparator-plus-FET cutoff is the same protection
+     in a more elaborate form; re-adding it needs a new argument and there is
+     none.
+
+  **And the "a missing net is a re-spin" case does not hold here either.** The
+  shunt sits in series in the 12V path, so retrofitting means breaking that
+  path — but **rev 3.0 redesigns that stage regardless** (§13.3.2's always-on
+  rail and the load switch on the J3 leg both live there), so adding a shunt then
+  costs nothing extra. The same reasoning that kept Y1 unchanged.
+
+  **`U8` AIN1 stays free.** That costs nothing and leaves a channel if a use
+  appears — but nothing in rev 2.0 needs it, and it should not be treated as
+  reserved for a monitor that is no longer planned.
 - **Y1 → 3.2 × 2.5mm SMD crystal.** The HC49/US can is 11.4 × 4.7 × 3.3mm, and
   §3.1.1 already flags it as physically large. §13.3.6 wants the area back once
   an MCU arrives; doing it now means the MCU respin does not also have to be a
@@ -1225,7 +1252,7 @@ measurement:
 | PTC on the input | **rev 2.0** | Same input stage as the P-FET — do them together, once |
 | DNI split termination + solder bridge | **rev 2.0** | Footprints only |
 | 12V sense divider values | **rev 2.0** | Already queued there — but the divider had no destination until §13.2.3 added a small I2C ADC behind it. The M2's values transfer; the readback did not exist on rev 1.0 |
-| Current sense + over-current trip | **split — shunt in rev 2.0, monitor in rev 3.0** | Resolved by this table's own escape clause. The shunt is nearly free, but continuous current data is only worth having when something is awake to read it — the supervisor MCU (§13.3.3b). Since rev 2.0 *is* now the board being fabricated, the conditional fired: land `R18` and the `ZXCT1109`/`LM393` footprints unpopulated (§13.2.3), populate in rev 3.0 |
+| Current sense + over-current trip | ~~split — shunt in rev 2.0~~ → **all of it rev 3.0** | The escape clause fired and was then re-examined 2026-08-23. Its own premise — "continuous current data is only worth having when something is awake to read it" — is what kills the split: the thing that must be awake is the **MCU**, because the measurement that matters (parked parasitic draw) happens with the Pi off. Landing the shunt early buys nothing, and rev 3.0 re-lays-out that stage anyway. §13.2.3 |
 
 The input-stage items are grouped deliberately: rev 3.0 redesigns that stage anyway
 for the always-on rail and the load switch (§13.3.2, §13.3.6), so doing the P-FET
