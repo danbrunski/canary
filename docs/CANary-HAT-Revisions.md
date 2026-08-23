@@ -129,7 +129,11 @@ whose §13.3.2 power-domain analysis is unwritten and whose §13.3.6 net list is
 > | Item | State |
 > |---|---|
 > | C2 → 47µF/50V + MPN | **done** — schematic, BOM, fab notes |
-| **Input stage: Q1 + R10 + D3, D4 removed** | **done 2026-08-23** — schematic entered and verified by netlist diff: `Q1.2 (D)` on `+12V_RAW`, `Q1.3 (S)` on `+12V`, D3 cathode to source, J3 moved to `+12V`. ERC unchanged at 0/3. **PCB still needs *Update PCB from Schematic*** |
+| **Input stage: Q1 + R10 + D3, D4 removed** | **done 2026-08-23** — schematic entered and verified by netlist diff: `Q1.2 (D)` on `+12V_RAW`, `Q1.3 (S)` on `+12V`, D3 cathode to source, J3 moved to `+12V`. ERC unchanged at 0/3 |
+| **STB → GPIO22** (J1 pin 15) | **done 2026-08-23** — `U4.8` left GND. §13.2.1's "the one that matters most". Carries a **software prerequisite**: see §11 |
+| **LSM6DSOX INT2 → GPIO23** (J1 pin 16) | **done 2026-08-23** — `U6.9` was unconnected on rev 1.0 |
+| **12V sense: U8 + R11/R12 + C17/C18** | **done 2026-08-23** — divider on `+12V`, `V12_SENSE` → `U8.4 (AIN0)`, ADDR to GND = 0x48, **AIN1 left free and reserved** for the rev 3.0 current-sense monitor |
+|  | *52 components, 70 nets, ERC 0 errors / 3 warnings — unchanged from rev 1.0's three. **PCB still needs* Update PCB from Schematic *plus* Update Footprints from Library *for U6.*** |
 > | `KLINE_RAW` → `KLINE` | **done** — 2 hierarchical labels, 2 root sheet pins, 20 PCB net refs |
 > | R7/R9 → DNP | **done** — schematic flags, BOM line split, assembler notes |
 > | U6 lands → TN0018 | **done** in `lib/footprints.pretty/LGA-14L_STM.kicad_mod`; needs *Update Footprints from Library* + a DRC run in KiCad |
