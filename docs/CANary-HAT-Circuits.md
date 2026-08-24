@@ -1001,14 +1001,62 @@ and footprint; the `01x05` mismatch earlier revisions noted is fixed.*
 
 **Signal ground and chassis ground are tied together on the board** — pins 2 and
 3 are the same GND net, so the HAT is the bonding point between the two returns.
-That is fine on a vehicle where they are already bonded at the battery. The
-layout consequence: bring the 12V return in on one pin and reference the bus
-receivers to the other, joining them at a **single star point** near the
-connector rather than letting them merge across the whole Gnd.Cu pour. Otherwise
-the HAT's power-return current — including the pass-through leg feeding the X1202
-and therefore the entire Pi — shares copper with the CAN and K-line voltage
-reference. **With a board-wide solid GND pour this is a placement/stitching
-question, and it has not been explicitly resolved** (§8.3).
+
+**Resolved 2026-08-24, and the resolution is in the harness, not the layout.**
+
+*What the star-point advice was, and why it does not apply here.* Earlier
+revisions of this section said to bring the 12V return in on one pin, reference
+the bus receivers to the other, and join them at a single star point near the
+connector. That is correct for a two-layer board with ground *traces*. This board
+has a **solid, unbroken In1.Cu plane** — verified 2026-08-24 as a single
+`filled_polygon` spanning the whole board, the only keepout anywhere being the
+F.Cu copper-pour exclusion under U6. Forcing a star point on a solid plane means
+slotting it, and a slot stops return current mirroring its signal, increasing
+loop area and radiation. **Do not split In1.Cu.**
+
+*The on-board IR drop it would have prevented is negligible.* J3 to J2 is 34mm;
+1oz copper is 0.49 mΩ/square; at a conservative 20mm effective conduction width
+that is 1.7 squares ≈ 0.83 mΩ, so **≈2.5 mV at the 3A worst case** — against a
+CAN differential threshold of 0.5–0.9V (rejected as common mode anyway) and a
+K-line threshold ratiometric at roughly 0.5 × VSUP ≈ 6V.
+
+*But the concern was real, and the mechanism is off-board.* **J3 carries the
+Pi's entire supply — up to 3A** (§3.7.4). SAE J1962 separates the grounds
+deliberately: **pin 4 (chassis) is the power return**, heavier wire, bonded to
+chassis; **pin 5 (signal) is the diagnostic-bus reference**, sized for reference
+currents and serving as *the ECM's own analog ground*. Returning amps through
+pin 5 puts hundreds of millivolts across wiring the ECU references its sensor
+inputs to. The damage would be to the vehicle's measurements, not ours, and it
+would be near-impossible to attribute.
+
+**Decision: land OBD pin 4 (chassis) on J2 pin 3; leave OBD pin 5 unconnected.**
+Both pads stay, so this is a harness choice and reversible. Not both — bonding
+them closes a loop through the vehicle's wiring, and the return then divides by
+whatever the relative wiring impedances happen to be, putting an uncontrolled
+fraction of amps into the ECM's reference. Chassis-only costs the buses nothing:
+CAN is differential with ±12V common-mode range on the TCAN1042, and K-line
+thresholds at ~0.4/0.6 × VSUP leave volts of margin against a few hundred
+millivolts of chassis offset.
+
+*Separate grounds on the board are not achievable, and the reason is structural.*
+The HAT's logic reference **is** the Pi's ground (J1 pins 6, 9, 14, 20, 25, 30,
+34, 39), the Pi's ground **is** the X1202's ground — it is not isolated — and
+that is the node J3 pin 2 connects to. Splitting the plane leaves the split
+bridged externally through J1 → Pi → X1202 → J3: a slot with no separation. Note
+the corollary, which predates rev 2.0: J1 and J3 are *parallel* return paths from
+the X1202 to this plane, and the eight header pins are plausibly the
+lower-impedance one, so a share of the Pi's return current already flows through
+the stacking header rather than the pigtail.
+
+Real separation needs galvanic isolation on the bus side — isolated transceivers
+plus an isolated DC-DC, a different board that breaks the single-rail
+construction §3.7.5 relies on — **or simply not routing the Pi's power through
+this board.** §8.2 records that the X1202 already runs from a cigarette-lighter
+adapter and is fine there, so the J3 pass-through is a convenience (one connector
+rather than two), not a requirement. It is also what forced the 3A copper budget,
+the input-stage redesign and this question. Not changed for rev 2.0 — Q1 is sized
+around it and it works — but **rev 3.0 should weigh deleting J3**, especially
+since §13.3.1 adds a load switch to that same leg.
 
 The block has no spare way for an ISO 9141 **L-line**. The dev vehicle does not
 need one (Nissan CONSULT inits with a byte sequence, not an L-line pulse), but

@@ -387,8 +387,13 @@ necessary.
   before suspecting the module".
 - **TCAN1042 VIO undervoltage behaviour** with VDD present and VIO absent — the
   STANDBY row depends on it (§3.7.5).
-- **Star-point placement** for the signal/chassis ground bond across J2 pins 2
-  and 3 (§3.9).
+- ~~**Star-point placement** for the signal/chassis ground bond across J2 pins 2
+  and 3~~ — **closed 2026-08-24 (§3.9).** No layout change: In1.Cu is a single
+  unbroken plane and slotting it to make a star point would be worse than the
+  ≈2.5 mV of IR drop it would prevent. The real issue was off-board — J3 carries
+  the Pi's 3A, and OBD pin 5 is the ECM's own analog reference. **Land OBD pin 4
+  (chassis) on J2 pin 3 and leave pin 5 unconnected.** Both pads stay, so it is a
+  reversible harness choice.
 - **RF stackup** — the 0.2mm feed assumes 0.1mm to Gnd.Cu (§3.6, §7).
 - ~~**Verify no I2C clock stretching and whole-device WP** on the CAT24C256~~ —
   **closed 2026-08-22 from `CAT24C256-D.PDF`.** Both halves confirmed. **There is
