@@ -287,9 +287,28 @@ new footprints.
 
 **Outstanding**
 
-- [ ] ~~Optional:~~ resize U6 lands to 0.35 × 0.575 with +0.025mm/side mask
-      expansion (§12.4) — **no longer optional; scheduled in rev 2.0** (§13.2.1).
-      It was optional only because rev 1.0 was locked
-- [ ] Assembly drawing with pin 1 marked for U5, U6, U7
-- [ ] Export gerbers, drill, centroid (PCBWay plugin)
+- [x] ~~Optional:~~ resize U6 lands to 0.35 × 0.575 with +0.025mm/side mask
+      expansion (§12.4) — **done in rev 2.0**; verified in the PCB 2026-08-24,
+      all 14 pads at 0.35 × 0.575 with `solder_mask_margin 0.025`
+- [ ] **Assembly drawing with pin 1 marked for U5, U6, U7.** The last unchecked
+      item before fab, and §12.3 calls rotation error on those three the most
+      likely assembly defect on this board
+- [ ] Export gerbers, drill, centroid (PCBWay plugin) — **refill zones first,
+      see below**
+
+**Rev 2.0 board state, verified 2026-08-24 by `kicad-cli` against the in-repo
+project:** routing complete; **DRC 0 violations, 0 unconnected pads, 0 schematic
+parity issues**; ERC 0 errors / 3 warnings (the same three since rev 1.0); 59
+components, 75 nets; 79 vias of which 42 are GND, doubled from rev 1.0's 21 to
+address the sparse stitching noted in §2; board outline unchanged at 65.0 × 56.0mm.
+
+> ⚠️ **Refill zones (`B`) immediately before exporting gerbers, then re-run DRC,
+> then export — in that order, in the same session.** DRC and the gerber
+> exporter both read the *stored* zone fill, not a freshly computed one. A stale
+> fill surfaced during this sweep as a phantom clearance error: a GND stitching
+> via reported `actual 0.0000 mm` against the `+3V3` plane while visibly having
+> an anti-pad, and deleting and re-placing the via cleared it. That version is
+> merely annoying. **The dangerous version is a stale fill at export time, where
+> the gerbers carry copper that DRC never checked and nothing downstream would
+> catch it.**
 
