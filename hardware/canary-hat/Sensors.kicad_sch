@@ -5929,7 +5929,7 @@
 		(in_bom yes)
 		(on_board yes)
 		(in_pos_files yes)
-		(dnp no)
+		(dnp yes)
 		(fields_autoplaced yes)
 		(uuid "7b79f13c-7138-4a32-913d-30a67a9cd017")
 		(property "Reference" "R7"
@@ -7885,7 +7885,7 @@
 		(in_bom yes)
 		(on_board yes)
 		(in_pos_files yes)
-		(dnp no)
+		(dnp yes)
 		(fields_autoplaced yes)
 		(uuid "fba84b13-2862-4150-8132-da98db31ab2d")
 		(property "Reference" "R9"
