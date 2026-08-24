@@ -92,6 +92,23 @@ return runs through the pour to the nearest via down to In1.Cu, so an outer pour
 is only as good as its stitching. That distinction is what makes "give C4 a via"
 (§8.3) a real instruction rather than a restatement of "put it on the pour".
 
+**Adjacent vias, never via-in-pad.** Via-in-pad requires filling and capping (or
+plugging) and is a cost adder not every fab quotes cheaply — and nothing on this
+board needs it. There is no exposed thermal pad anywhere: U5 and U6 are LGAs
+without one, U8 is a plain TSSOP-10, and Q1's DPAK tab dissipates 0.11W at the 3A
+budget, so it needs no thermal via field either. Place stitching vias *beside*
+the pad with the shortest stub the annular ring and clearance allow.
+
+**The numbers say a short stub is plenty here.** A trace stub runs roughly
+1 nH/mm, so 1–2mm is 1–2 nH. Against C4's own ~10Ω at 70 MHz — where a 5 ns
+ISO 7637 edge has its content — 1 nH contributes ~0.44Ω. Immaterial. The board
+also has an unusual advantage: the **0.1mm outer prepreg** required for the RF
+launch (§7) means F.Cu to In1.Cu is a very short electrical hop, so a via's own
+contribution to reaching the ground plane is smaller here than on a typical
+4-layer stackup. Where stub length does start to matter is the 100n decoupling
+caps, which are inductance-dominated well before 70 MHz — those want the tightest
+placement, and two vias rather than one halves the inductance for free.
+
 **Stitching is thin and uneven, measured 2026-08-24 on the rev 1.0 layout: 21 GND
 vias, ~13mm average spacing, but 14 of them in the right third (x 148–164),
 leaving the left half — J2, U4, J1, the K-line and CAN region — with seven.** That
@@ -363,10 +380,13 @@ necessary.
   220pF is ~10Ω at 70 MHz, roughly where a 5 ns ISO 7637 edge has its content,
   against that pulse's 10Ω source impedance: about 6 dB, the same at either end.
 
-  Two things that *do* matter, for the layout pass: **C4's GND pad needs a via
-  straight into In1.Cu** — shunt-path inductance dominates its high-frequency
-  behaviour far more than position along the net, and landing on the F.Cu pour is
-  not the same thing (§2) — and **keep the K-line route away from the CAN pair**.
+  Two things that *do* matter, for the layout pass: **C4's GND pad needs its own
+  via to In1.Cu placed immediately beside it** — *not* via-in-pad, which means
+  filled-and-capped vias and a cost adder no fab quotes cheaply; a via adjacent to
+  the pad with the shortest stub the annular ring and clearance allow is what is
+  wanted. Shunt-path inductance dominates C4's high-frequency behaviour far more
+  than its position along the net, and landing on the F.Cu pour is not the same
+  thing (§2). And **keep the K-line route away from the CAN pair**.
   The K-line now runs from J2 pin 6 while CAN runs from pins 4/5 through FL1; not
   running them alongside each other addresses the coupling concern directly, which
   moving C4 would only have addressed indirectly.
