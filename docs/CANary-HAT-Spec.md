@@ -84,6 +84,25 @@ both were arrived at by failing DRC first:
   In1.Cu regardless, so the outer pours were never carrying that current. This
   took the fill from 15 fragments to 9.
 
+**What the outer pours are — and are not.** The primary return path is **In1.Cu**,
+a solid unbroken plane (§3.9). The F.Cu/B.Cu pours are secondary: local shielding,
+thermal spreading, and a convenient GND landing for component pads. **A pad
+touching the outer pour does not by itself have a low-inductance return** — its
+return runs through the pour to the nearest via down to In1.Cu, so an outer pour
+is only as good as its stitching. That distinction is what makes "give C4 a via"
+(§8.3) a real instruction rather than a restatement of "put it on the pour".
+
+**Stitching is thin and uneven, measured 2026-08-24 on the rev 1.0 layout: 21 GND
+vias, ~13mm average spacing, but 14 of them in the right third (x 148–164),
+leaving the left half — J2, U4, J1, the K-line and CAN region — with seven.** That
+is adequate at DC and audio but coarse for anything fast, and it is the half of
+the board where the transient-carrying nets live. **Add GND stitching during the
+rev 2.0 routing pass**, particularly at every IC's GND pad and through the
+left-hand region; vias are nearly free and this is the cheapest time to place
+them. Note the connectors themselves are unaffected — J2 and J3 are through-hole,
+so their ground pins reach In1.Cu through their own plated barrels, the same
+argument that applies to J1 above.
+
 - Board outline: **65.0mm × 56.0mm** (X 100–165, Y 44–100 in board coordinates),
   standard Raspberry Pi HAT form factor.
 - Board thickness: 1.6mm. Stackup as entered in the project:
@@ -334,14 +353,49 @@ necessary.
   of protection" (`+12V_RAW`), but this net *is* the protected, terminated bus at
   the transceiver pin — the name implies a filtered version downstream that does
   not exist.
-- **C4 placement.** It sits at (141.0, 77.0), out by the connector end rather than
-  at U2's LIN pin at (129.25, 77.41). Defensible under §11's "place filtering at
-  the connector", but TI's own layout example puts it at the pin — make it a
-  decision, not an accident.
+- ~~**C4 placement**~~ — **closed 2026-08-24: leave it where it is.** *(The
+  coordinates this item quoted were stale; C4 is at (137.25, 65.50), 11.4mm from
+  U2's LIN pad and 27.5mm from the connector — already on the transceiver side,
+  which is where TI's layout example puts it.)* Two facts make the move
+  unnecessary. **The transceiver does not need protecting**: the TLIN1027 is rated
+  for ISO 7637-2 Pulse 1 at −100V and Pulse 2 at +75V on LIN, ±45V absolute max,
+  so C4 is not what saves it. And **C4 is a modest filter wherever it sits** —
+  220pF is ~10Ω at 70 MHz, roughly where a 5 ns ISO 7637 edge has its content,
+  against that pulse's 10Ω source impedance: about 6 dB, the same at either end.
+
+  Two things that *do* matter, for the layout pass: **C4's GND pad needs a via
+  straight into In1.Cu** — shunt-path inductance dominates its high-frequency
+  behaviour far more than position along the net, and landing on the F.Cu pour is
+  not the same thing (§2) — and **keep the K-line route away from the CAN pair**.
+  The K-line now runs from J2 pin 6 while CAN runs from pins 4/5 through FL1; not
+  running them alongside each other addresses the coupling concern directly, which
+  moving C4 would only have addressed indirectly.
 - **Depopulate R7/R9** (duplicate I2C pull-ups, §5) unless there is a measured
   reason to keep them.
-- **V_BCKP fallback** — no path from +3V3, no charge path, floating if BT1 is
-  absent (§3.6). At minimum decide "primary cell always fitted" and record it.
+- ~~**V_BCKP fallback**~~ — **closed 2026-08-24: fit the cell, treat replacement
+  as maintenance, add no hardware.** Which figure applies depends on an item still
+  open below — whether the harness lands on always-hot OBD pin 16:
+
+  | Pi state | I_V_BCKP | CR2032, 225 mAh |
+  |---|---|---|
+  | running | ~3 µA | **~8.6 years** — shelf-life limited, not load limited |
+  | off (hardware backup) | 32 µA | **~9.6 months** |
+
+  Rev 2.0 has no sleep architecture, so the Pi is on whenever it has power. If the
+  feed is switched you are at ~10 months; if it is always-hot the Pi never sleeps
+  and battery drain (~3 days, §13.3.1) is the larger problem by far.
+
+  **A diode-OR from `+3V3` was considered and rejected.** It needs a diode in
+  *each* leg, and after two drops the `+3V3` path (~3.0V through a Schottky)
+  barely beats a fresh cell at 3.0–3.3V — so the cell keeps discharging and the
+  parts buy nothing. It also creates exactly the cross-domain path §3.7.5 designed
+  out. §13.3.4 has the right version for rev 3.0: OR it from the always-on rail,
+  where the source is genuinely higher than the cell.
+
+  **One free mitigation, software only.** Put the nav-rate configuration in the
+  M10's **OTP** (74 bytes, permanent, applied at every startup) rather than BBR. A
+  dead cell then costs only hot-start ephemeris, not configuration — removing the
+  worst consequence of the cell running out.
   **Now costed, 2026-08-22 from `MAX-M10M_DataSheet_UBX-22028884.pdf`:** hardware
   backup mode (VCC = V_IO = 0, i.e. the Pi off) draws **32 µA typ**, against the
   "~20 µA" this document has been assuming; with the Pi up it is ~3 µA. A CR2032
@@ -385,8 +439,23 @@ necessary.
   Mitigation until rev 3.0 is procedural: route the antenna coax so it cannot be
   pinched or chafed, and treat a sudden total loss of GNSS as "check the cable
   before suspecting the module".
-- **TCAN1042 VIO undervoltage behaviour** with VDD present and VIO absent — the
-  STANDBY row depends on it (§3.7.5).
+- ~~**TCAN1042 VIO undervoltage behaviour** with VDD present and VIO absent~~ —
+  **closed 2026-08-24 from the datasheet; the part handles it by design.** Table
+  9-2 covers exactly this row — VCC above UV_VCC, VIO below UV_VIO, which *is*
+  HAT+ STANDBY here since VDD comes from the Pi's +5V and VIO from +3V3:
+
+  > **Protected mode · bus output High Impedance · RXD High Impedance**
+
+  Precisely what STANDBY conformance requires: it cannot disturb the vehicle bus,
+  and it cannot drive into the Pi's dead 3.3V domain. Recovery is "typically
+  resumes normal operation within 50 µs" once supplies return. UV_VIO is
+  1.3–2.75V with 80 mV hysteresis. **The row carries no STB qualifier**, so rev
+  2.0 moving STB to GPIO22 does not change it.
+
+  **This is what the `V` suffix buys, and it belongs on the do-not-substitute
+  list.** `TCAN1042VDRQ1` lists "undervoltage protection on VCC and VIO (V
+  variants only)" — non-V parts have no VIO at all. The variant choice is what
+  makes §3.7.5's STANDBY argument true.
 - ~~**Star-point placement** for the signal/chassis ground bond across J2 pins 2
   and 3~~ — **closed 2026-08-24 (§3.9).** No layout change: In1.Cu is a single
   unbroken plane and slotting it to make a star point would be worse than the
