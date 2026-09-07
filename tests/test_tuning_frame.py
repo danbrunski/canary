@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -89,3 +89,53 @@ def test_a_vehicle_without_a_measured_stop_has_no_criterion(tmp_path: Path) -> N
     path = tmp_path / "providers.yaml"
     path.write_text("schema_version: 1\nproviders: []\n")
     assert load_provider_registry(path).wot_criterion is None
+
+
+def test_round_stamped_rows_are_placed_on_their_acquisition_clock(tmp_path: Path) -> None:
+    """C02.9: the tuning frame reads ``acquired_time=True``, so a round stamp
+    shared by two readings does not put them on one instant."""
+    session = tmp_path / "_capture-tuning-did-2026-09-07T000000"
+    stamp = datetime(2026, 9, 7, 0, 0, tzinfo=UTC)
+    rows = []
+    for k in range(3):
+        round_stamp = stamp + timedelta(seconds=0.25 * k)
+        for channel, value, offset in (("DID_1219", "09c4", 0.004), ("DID_1225", "01b8", 0.041)):
+            rows.append(
+                TelemetryRecord(
+                    timestamp=round_stamp,
+                    source="obd",
+                    channel=channel,
+                    value=value,
+                    metadata={
+                        "ts_schema": 2,
+                        "acquired_at": round_stamp.timestamp() + offset,
+                        "acquired_clock": "kernel",
+                        "generation": 1,
+                        "round_id": k,
+                    },
+                )
+            )
+    write_records_to_parquet(rows, session)
+    (session / "capture_profile.json").write_text(
+        json.dumps(
+            {
+                "profile": "tuning-did",
+                "started_at": stamp.isoformat(),
+                "tune_revision": None,
+                "profile_snapshot": {"corpus_eligible": False, "round_timestamps": True},
+            }
+        )
+    )
+
+    frame = build_tuning_frame(
+        session,
+        providers_path=Path("data/nissan-xterra-2008/tuning_providers.yaml"),
+        calibration=load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml")),
+    )
+    values = frame.values.set_index("timestamp")
+    rpm_times = values["rpm"].dropna().index
+    afr_times = values["measured_afr_b1"].dropna().index
+    assert len(rpm_times) == 3 and len(afr_times) == 3
+    # 37 ms apart on the acquisition clock — not merged onto the round stamp.
+    for rpm_at, afr_at in zip(rpm_times, afr_times, strict=True):
+        assert (afr_at - rpm_at).total_seconds() == pytest.approx(0.037, abs=1e-5)

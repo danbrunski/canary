@@ -217,12 +217,40 @@ export interface ObdSchedulerRequestStatus {
   last_response_age_seconds: number | null;
 }
 
+/** Open-round snapshot inside `CaptureRoundStatus` (roadmap C02). */
+export interface CaptureRoundOpenStatus {
+  round_id: number;
+  members: number;
+  attempted: number;
+  succeeded: number;
+  deadline_in_s: number;
+}
+
+/**
+ * Explicit capture rounds (roadmap C02): rounds are scheduled on monotonic
+ * deadlines and end on membership completion or deadline. `skew_max_s` is
+ * the largest measured acquisition spread inside one round — round identity
+ * never substitutes for it.
+ */
+export interface CaptureRoundStatus {
+  generation: number;
+  period_s: number | null;
+  started: number;
+  complete: number;
+  incomplete: number;
+  skipped: number;
+  skew_max_s: number;
+  last_skew_s: number;
+  open: CaptureRoundOpenStatus | null;
+}
+
 export interface ObdSchedulerStatus {
   achieved_hz_60s?: Record<string, number>;
   achieved_hz_capture?: Record<string, number>;
   capture_max_gap_seconds?: Record<string, number>;
   did_profile?: DidWindowStatus | null;
   requests?: ObdSchedulerRequestStatus[];
+  rounds?: CaptureRoundStatus | null;
 }
 
 export interface CaptureProfilesResponse {

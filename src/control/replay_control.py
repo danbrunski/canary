@@ -43,6 +43,7 @@ from pathlib import Path
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.fusion import PersistenceGate
+from src.collection import capture_generation
 from src.collection.replay import replay_session
 from src.preprocessing.live import LiveFeatureSource
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
@@ -223,6 +224,8 @@ class ReplayController:
         self._task = task
         self._stop_event = stop_event
         task.add_done_callback(self._schedule_cleanup)
+        # Live polling and the replayed rows must never share a round (C02.8).
+        capture_generation.bump(f"replay-start:{replay_id}")
         self._status = ReplayStatus(
             running=True,
             replay_id=replay_id,
@@ -284,6 +287,7 @@ class ReplayController:
             return
         self._task = None
         self._stop_event = None
+        capture_generation.bump("replay-stop")
         try:
             exc = task.exception()
         except asyncio.CancelledError:

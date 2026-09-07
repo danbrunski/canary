@@ -23,15 +23,15 @@ import asyncio
 import logging
 import threading
 import time
-from collections.abc import Callable
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from functools import partial
 
 import can
 
 from src.can_ids import parse_standard_can_id
-from src.collection import bus_budget, tuning_profile, tx_gate
+from src.collection import bus_budget, capture_generation, tuning_profile, tx_gate
 from src.collection.can_collector import (
     DEFAULT_RECONNECT_POLICY,
     RecordingResult,
@@ -57,7 +57,12 @@ from src.collection.isotp import (
     build_request_payload,
     split_batched_response,
 )
-from src.collection.obd_collector import JsonlReadingWriter, ObdReading, reading_to_record
+from src.collection.obd_collector import (
+    AcquiredClock,
+    JsonlReadingWriter,
+    ObdReading,
+    reading_to_record,
+)
 from src.collection.obd_registry import (
     lookup,
     misfire_count_channel,
@@ -74,6 +79,8 @@ from src.collection.obd_scheduler import (
     DidWindowController,
     ObdSchedulerMetrics,
     RequestFilter,
+    RoundScheduler,
+    RoundState,
     SessionControlResult,
     _bus_budget_requests_per_second,
     _count_active_requests,
@@ -90,6 +97,8 @@ from src.collection.obd_scheduler import (
     parse_did_token,
     parse_pid_token,
     resolve_did_session_spec,
+    round_members,
+    round_period_seconds,
     select_batch_companions,
 )
 from src.collection.queueing import QueueDropCounter, log_dropped_can_frame, threadsafe_enqueue
@@ -135,6 +144,11 @@ MAX_RESPONSE_PENDING_EXTENSIONS = 4
 #: ignition state, or genuinely unsupported). Once ordinary OBD contact has
 #: succeeded, retry no faster than this if discovery still returns nothing.
 MODE06_DISCOVERY_RETRY_SECONDS = 30.0
+#: A bus-driver frame stamp further than this from ``time.time()`` is not
+#: trusted as the acquisition clock (an adapter with no clock reports 0.0;
+#: a stale SocketCAN stamp after a suspend can be minutes off). The
+#: userspace receipt time is used instead and the row says so (C02.7).
+KERNEL_STAMP_MAX_SKEW_SECONDS = 5.0
 
 
 def _next_batch_size(current: int) -> int:
@@ -178,6 +192,10 @@ def run_can_obd_loop(
     from src.collection.can_obd_client import CanObdClient
 
     stats = CanObdLoopStats()
+    # Every (re)start of the loop is a new capture generation (C02.8): a bus
+    # rebuild after a fault must not let a request issued before it complete
+    # a round scheduled after it.
+    rounds = RoundScheduler(capture_generation.bump("collector-start"), stats)
     client = (
         CanObdClient(bus, timeout_seconds=spec.request_timeout_seconds)
         if client_factory is None
@@ -246,17 +264,17 @@ def run_can_obd_loop(
     # consecutive failures falls the session back to single-PID rather than
     # stalling. This doubles as the adaptive form of the startup size probe:
     # we discover what the vehicle actually accepts by using it.
-    # Wall clock at which the current burst of due requests began. Every
-    # reading issued inside it shares this stamp when the active capture
-    # profile asks for rounds, so a sample wider than one batch still reads as
-    # one row. Cleared whenever the loop runs out of due work.
-    round_wall_start: float | None = None
     batching_enabled = spec.batch_max_pids > 1
     active_batch_max = spec.batch_max_pids
     consecutive_batch_failures = 0
     stats.loop_started_at = time.monotonic()
     while not _should_stop(stop_event, deadline_monotonic):
         now = time.monotonic()
+        generation = capture_generation.current()
+        if generation != rounds.generation:
+            # Profile change, pause/resume, passive toggle or replay
+            # transition: rounds restart from zero under the new generation.
+            rounds.reset(generation, now)
         if (
             freeze_frame_indices
             and spec.freeze_frame_trigger is not None
@@ -285,6 +303,7 @@ def run_can_obd_loop(
                     stats,
                     now,
                     did_profile=controller.snapshot(now) if controller is not None else None,
+                    rounds=rounds.snapshot(now),
                 )
             )
             stats.scheduler_snapshots += 1
@@ -412,11 +431,15 @@ def run_can_obd_loop(
                 continue
             eligible = partial(controller.request_eligible, now=now)
 
+        # A round ends at its deadline even while more work is due (C02.2);
+        # this runs before any selection so no reading is ever stamped with
+        # an expired round.
+        rounds.expire(now)
         active_request_count = _count_active_requests(
             requests, request_states, now, eligible=eligible
         )
         if active_request_count == 0:
-            round_wall_start = None
+            rounds.idle(now)
             _drain_frames_until(
                 bus,
                 on_frame,
@@ -438,28 +461,45 @@ def run_can_obd_loop(
             )
             continue
 
-        selection = _select_next_due_request(requests, request_states, now, eligible=eligible)
-        if selection is None:
-            round_wall_start = None
-            next_due = _next_due_at(requests, request_states, now, eligible=eligible)
-            if controller is not None:
-                transition_at = controller.next_transition_at()
-                next_due = transition_at if next_due is None else min(next_due, transition_at)
-            if next_due is not None:
-                wait_until = next_due if next_budget_at <= now else min(next_due, next_budget_at)
+        if rounds.current is None:
+            opened, wait_until = _open_round(
+                rounds, requests, request_states, spec, now, time.time(), eligible=eligible
+            )
+            if opened is None:
+                if controller is not None:
+                    transition_at = controller.next_transition_at()
+                    wait_until = (
+                        transition_at if wait_until is None else min(wait_until, transition_at)
+                    )
+                # Never spin: with active requests but nothing to open, the
+                # bus is still received until the next chance to look again.
+                if wait_until is None:
+                    wait_until = now + ON_DEMAND_ROUND_PERIOD_SECONDS
                 _drain_frames_until(
-                    bus,
-                    on_frame,
-                    stats,
-                    stop_event,
-                    wait_until,
-                    deadline_monotonic,
+                    bus, on_frame, stats, stop_event, wait_until, deadline_monotonic
                 )
+                continue
+        current_round = rounds.current
+        assert current_round is not None
+        preferred = _preferred_members(requests, current_round)
+        selection = _select_next_due_request(
+            requests,
+            request_states,
+            now,
+            eligible=eligible,
+            among=current_round.remaining,
+            preferred=preferred,
+        )
+        if selection is None:
+            # Members remain but none is pollable any more (the DID window
+            # closed, a member got suppressed): the round cannot complete and
+            # closes incomplete rather than hanging open until its deadline.
+            rounds.close(now)
             continue
         request_index, request, request_state = selection
-        if round_wall_start is None:
-            round_wall_start = time.time()
-        round_timestamp = round_wall_start if tuning_profile.round_timestamps_enabled() else None
+        round_timestamp = (
+            current_round.wall_start if tuning_profile.round_timestamps_enabled() else None
+        )
 
         batch_indices = select_batch_companions(
             requests,
@@ -469,9 +509,11 @@ def run_can_obd_loop(
             max_pids=active_batch_max if batching_enabled else 1,
             eligible=eligible,
             ignore_tier=round_timestamp is not None,
+            members=current_round.remaining,
+            preferred=preferred,
         )
         if len(batch_indices) > 1:
-            answered = _issue_batched_request(
+            outcome = _issue_batched_request(
                 bus,
                 requests,
                 request_states,
@@ -483,8 +525,9 @@ def run_can_obd_loop(
                 stats=stats,
                 deadline_monotonic=deadline_monotonic,
                 round_timestamp=round_timestamp,
+                round_state=current_round,
             )
-            if answered:
+            if outcome.answered:
                 consecutive_batch_failures = 0
                 retry_mode06_after_contact(time.monotonic())
             else:
@@ -515,6 +558,11 @@ def run_can_obd_loop(
                 request_states[index].next_due_at = _next_request_due_at(
                     requests[index], request_states[index], spec
                 )
+                rounds.on_attempt(index)
+                observed = outcome.observed.get(index, 0)
+                if observed:
+                    rounds.on_observed(index, observed, outcome.acquired_at)
+            _close_round_if_complete(rounds, time.monotonic())
             next_budget_at = max(
                 next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
             )
@@ -541,16 +589,21 @@ def run_can_obd_loop(
             stats.bus_errors += 1
             raise
         emitted = False
+        rounds.on_attempt(request_index)
         if result.response is not None:
             readings = _response_to_reading(
                 request,
                 result.response,
                 timestamp=round_timestamp,
-                acquired_at=time.time() if round_timestamp is not None else None,
+                arrival=result.arrival,
+                response_interval_s=result.response_interval_s,
+                round_state=current_round,
             )
             if readings:
                 emitted = True
                 stats.readings_emitted += len(readings)
+                acquired_at = result.arrival.at if result.arrival is not None else None
+                rounds.on_observed(request_index, len(readings), acquired_at)
                 for reading in readings:
                     stats.record_read(reading.pid, time.monotonic())
                     on_reading(reading)
@@ -580,6 +633,7 @@ def run_can_obd_loop(
             controller.on_request_attempted(request_index)
 
         request_state.next_due_at = _next_request_due_at(request, request_state, spec)
+        _close_round_if_complete(rounds, time.monotonic())
         next_budget_at = max(
             next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
         )
@@ -595,10 +649,91 @@ def run_can_obd_loop(
                 did_profile=(
                     controller.snapshot(time.monotonic()) if controller is not None else None
                 ),
+                rounds=rounds.snapshot(time.monotonic()),
             )
         )
         stats.scheduler_snapshots += 1
+    rounds.close(time.monotonic())
     return stats
+
+
+def _open_round(
+    rounds: RoundScheduler,
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    spec: CanObdSpec,
+    now: float,
+    wall_now: float,
+    *,
+    eligible: RequestFilter | None,
+) -> tuple[RoundState | None, float | None]:
+    """Open the next round if one can start now.
+
+    Returns ``(round, None)`` when opened, else ``(None, wait_until)``: the
+    monotonic instant to drain frames until (the next round boundary, or the
+    earliest due request), or ``None`` when nothing is pollable at all.
+    """
+    period = round_period_seconds(requests, states, spec, now, eligible=eligible)
+    if period is None:
+        return _open_on_demand_round(
+            rounds, requests, states, spec, now, wall_now, eligible=eligible
+        )
+    open_at = rounds.next_open_at(now, period)
+    if open_at > now:
+        return None, open_at
+    members = round_members(requests, states, now, deadline=open_at + period, eligible=eligible)
+    if not members:
+        rounds.idle(now)
+        return None, _next_due_at(requests, states, now, eligible=eligible)
+    return rounds.open(now, wall_now, period=period, members=members), None
+
+
+#: Drain interval while only on-demand (rate 0) work is active. Nothing has a
+#: cadence to anchor rounds on, but the bus must keep being received.
+ON_DEMAND_ROUND_PERIOD_SECONDS = 0.2
+
+
+def _open_on_demand_round(
+    rounds: RoundScheduler,
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    spec: CanObdSpec,
+    now: float,
+    wall_now: float,
+    *,
+    eligible: RequestFilter | None,
+) -> tuple[RoundState | None, float | None]:
+    """Rounds when every pollable request is at rate zero.
+
+    A triggered freeze frame is un-suppressed with ``next_due_at == now`` and
+    must still go out; one that already fired sits at ``inf`` forever while
+    still counting as active. Neither has a cadence, so what is due opens a
+    round under a nominal period and anything else waits on the bus. Returning
+    ``(None, None)`` here spun the loop without a single ``recv`` while every
+    finite-rate PID was backed off (found by the C02 verifier).
+    """
+    nominal = max(spec.request_timeout_seconds, ON_DEMAND_ROUND_PERIOD_SECONDS)
+    members = round_members(requests, states, now, deadline=now + nominal, eligible=eligible)
+    if not members:
+        rounds.idle(now)
+        return None, now + ON_DEMAND_ROUND_PERIOD_SECONDS
+    return rounds.open(now, wall_now, period=nominal, members=members), None
+
+
+def _preferred_members(requests: list[_PollRequest], current: RoundState) -> frozenset[int]:
+    """Members of the active profile's ``required_tuple`` — served first (C02.5)."""
+    wanted = tuning_profile.required_tuple()
+    if not wanted:
+        return frozenset()
+    return frozenset(
+        index for index in current.members if requests[index].channel.upper() in wanted
+    )
+
+
+def _close_round_if_complete(rounds: RoundScheduler, now: float) -> None:
+    current = rounds.current
+    if current is not None and current.complete:
+        rounds.close(now)
 
 
 def _retry_mode06_discovery(
@@ -915,18 +1050,36 @@ def _response_to_reading(
     request: _PollRequest,
     response: ObdResponse,
     timestamp: float | None = None,
-    acquired_at: float | None = None,
+    *,
+    arrival: FrameArrival | None = None,
+    response_interval_s: float | None = None,
+    round_state: RoundState | None = None,
 ) -> list[ObdReading]:
-    """Decode a response, optionally re-stamping it onto a capture round.
+    """Decode a response and attach its acquisition provenance (C02.6/C02.7).
 
-    ``timestamp`` overrides the decode-time clock read; ``acquired_at``
-    records what that clock actually said, so a round stamp never destroys
-    the real timing.
+    ``arrival`` is when the (first) response frame reached us; it becomes
+    ``acquired_at`` and, unless ``timestamp`` supplies a round stamp, also the
+    presentation ``timestamp``. Without ``arrival`` the reading is legacy
+    shaped: decode-time stamp, no acquisition metadata.
+
+    Every reading decoded from one response shares that arrival instant. For
+    a batched Mode 01 response that is the *receipt* time of one payload — it
+    is not proof that the ECU sampled the PIDs it carried atomically.
     """
+    if timestamp is None and arrival is not None:
+        timestamp = arrival.at
     readings = _decode_response(request, response, timestamp)
-    if acquired_at is None:
+    if arrival is None:
         return readings
-    return [replace(reading, acquired_at=acquired_at) for reading in readings]
+    provenance: dict[str, object] = {
+        "acquired_at": arrival.at,
+        "acquired_clock": arrival.clock,
+        "response_interval_s": response_interval_s,
+    }
+    if round_state is not None:
+        provenance["generation"] = round_state.generation
+        provenance["round_id"] = round_state.round_id
+    return [replace(reading, **provenance) for reading in readings]  # type: ignore[arg-type]
 
 
 def _decode_response(
@@ -1097,6 +1250,43 @@ class QueryResult:
 
     response: ObdResponse | None = None
     negative_response_code: int | None = None
+    #: Arrival of the first response frame (C02.7); ``None`` without a response.
+    arrival: FrameArrival | None = None
+    #: Completion minus first-frame arrival for multi-frame responses, when > 0.
+    response_interval_s: float | None = None
+
+
+@dataclass(frozen=True)
+class FrameArrival:
+    """When a response frame reached the collector, and which clock says so."""
+
+    at: float
+    clock: AcquiredClock
+
+
+def _frame_arrival(msg: can.Message) -> FrameArrival:
+    """Acquisition instant for ``msg`` (C02.7).
+
+    Prefers the bus driver's own stamp (``Message.timestamp`` — the kernel
+    ``SO_TIMESTAMP`` on SocketCAN, the driver's receive-time read on slcan)
+    over a ``time.time()`` taken after ISO-TP handling, provided it agrees
+    with the wall clock to within :data:`KERNEL_STAMP_MAX_SKEW_SECONDS`.
+    Adapters with no clock report 0.0 and fall back to userspace time; the
+    row records which one it got.
+    """
+    now = time.time()
+    stamp = getattr(msg, "timestamp", None)
+    if isinstance(stamp, (int, float)) and abs(now - float(stamp)) <= KERNEL_STAMP_MAX_SKEW_SECONDS:
+        return FrameArrival(at=float(stamp), clock="kernel")
+    return FrameArrival(at=now, clock="userspace")
+
+
+def _response_interval(first: FrameArrival | None, completed: FrameArrival) -> float | None:
+    """Reassembly span of a multi-frame response; ``None`` for single-frame."""
+    if first is None:
+        return None
+    interval = completed.at - first.at
+    return interval if interval > 0 else None
 
 
 @dataclass
@@ -1110,6 +1300,20 @@ class BatchedQueryResult:
     #: True when the payload walk completed without hitting an unknown PID
     #: or a truncated tail.
     clean: bool = True
+    arrival: FrameArrival | None = None
+    response_interval_s: float | None = None
+
+
+@dataclass(frozen=True)
+class BatchOutcome:
+    """What one batched request produced, per member, for round accounting."""
+
+    answered: bool
+    #: Request index -> readings emitted for it.
+    observed: Mapping[int, int] = field(default_factory=dict)
+    #: Shared arrival instant of the batch response (receipt time, see
+    #: ``_response_to_reading``); ``None`` when the batch failed.
+    acquired_at: float | None = None
 
 
 def _batched_pid_width(pid: int) -> int | None:
@@ -1150,6 +1354,7 @@ def _query_batched_with_tap(
     # there is no single echo to match on.
     assembler = IsoTpResponseAssembler(service=0x01, identifier=None)
     pending_extensions = 0
+    first_frame: FrameArrival | None = None
 
     while not _should_stop(stop_event, request_deadline):
         remaining = max(0.001, request_deadline - time.monotonic())
@@ -1171,6 +1376,7 @@ def _query_batched_with_tap(
         if result.negative_response:
             return BatchedQueryResult(negative_response_code=result.negative_response_code)
         if result.flow_control_id is not None:
+            first_frame = _frame_arrival(msg)
             tx_gate.send(
                 bus,
                 can.Message(
@@ -1183,7 +1389,13 @@ def _query_batched_with_tap(
             continue
         if result.response is not None:
             readings, clean = split_batched_response(result.response.payload, _batched_pid_width)
-            return BatchedQueryResult(readings=readings, clean=clean)
+            completed = _frame_arrival(msg)
+            return BatchedQueryResult(
+                readings=readings,
+                clean=clean,
+                arrival=first_frame or completed,
+                response_interval_s=_response_interval(first_frame, completed),
+            )
     return BatchedQueryResult()
 
 
@@ -1200,8 +1412,13 @@ def _issue_batched_request(
     stats: CanObdLoopStats,
     deadline_monotonic: float | None,
     round_timestamp: float | None = None,
-) -> bool:
-    """Poll several Mode 01 PIDs in one round trip. True if the batch answered.
+    round_state: RoundState | None = None,
+) -> BatchOutcome:
+    """Poll several Mode 01 PIDs in one round trip; ``answered`` if the batch did.
+
+    All PIDs in the batch share the response's arrival as ``acquired_at``.
+    That is the receipt time of one payload — it is not proof that the ECU
+    sampled those PIDs atomically, and nothing downstream may read it as such.
 
     Per-member accounting is deliberate: a PID present in the response is
     credited exactly as the single-PID path would credit it, and a PID absent
@@ -1244,18 +1461,18 @@ def _issue_batched_request(
             stats.negative_responses += 1
             for index in indices:
                 states[index].last_negative_response_code = result.negative_response_code
-        return False
+        return BatchOutcome(answered=False)
     if not result.clean:
         stats.batch_desyncs += 1
 
     now = time.monotonic()
-    # One response, one instant: every PID in this batch was sampled by the
-    # ECU together, so they share a timestamp rather than each taking its own
-    # clock read while the payload is decoded.
-    arrived_at = time.time()
-    # A round stamp keeps a sample that spans several requests on one row; the
+    # One response, one arrival instant, shared by every PID it carried. A
+    # round stamp keeps a sample that spans several requests on one row; the
     # arrival instant is retained per reading so nothing is lost.
-    batch_timestamp = round_timestamp if round_timestamp is not None else arrived_at
+    arrival = (
+        result.arrival if result.arrival is not None else FrameArrival(time.time(), "userspace")
+    )
+    observed: dict[int, int] = {}
     for index in indices:
         request = requests[index]
         state = states[index]
@@ -1272,11 +1489,14 @@ def _issue_batched_request(
                     payload=payload,
                     responder_id=DEFAULT_RESPONSE_ID_MIN,
                 ),
-                timestamp=batch_timestamp,
-                acquired_at=arrived_at if round_timestamp is not None else None,
+                timestamp=round_timestamp,
+                arrival=arrival,
+                response_interval_s=result.response_interval_s,
+                round_state=round_state,
             )
             if readings:
                 emitted = True
+                observed[index] = len(readings)
                 stats.readings_emitted += len(readings)
                 for reading in readings:
                     stats.record_read(reading.pid, time.monotonic())
@@ -1295,7 +1515,7 @@ def _issue_batched_request(
                 tuning_profile.is_active() and tuning_profile.request_eligible(index, request)
             ),
         )
-    return True
+    return BatchOutcome(answered=True, observed=observed, acquired_at=arrival.at)
 
 
 def _query_with_tap(
@@ -1334,6 +1554,7 @@ def _query_with_tap(
         request_deadline = min(request_deadline, deadline_monotonic)
     assembler = IsoTpResponseAssembler(service=request.service, identifier=identifier)
     pending_extensions = 0
+    first_frame: FrameArrival | None = None
 
     while not _should_stop(stop_event, request_deadline):
         remaining = max(0.001, request_deadline - time.monotonic())
@@ -1356,6 +1577,9 @@ def _query_with_tap(
         if result.negative_response:
             return QueryResult(negative_response_code=result.negative_response_code)
         if result.flow_control_id is not None:
+            # Multi-frame response: the FIRST frame's arrival is the
+            # acquisition instant; the reassembly span is kept separately.
+            first_frame = _frame_arrival(msg)
             tx_gate.send(
                 bus,
                 can.Message(
@@ -1367,7 +1591,12 @@ def _query_with_tap(
             )
             continue
         if result.response is not None:
-            return QueryResult(response=result.response)
+            completed = _frame_arrival(msg)
+            return QueryResult(
+                response=result.response,
+                arrival=first_frame or completed,
+                response_interval_s=_response_interval(first_frame, completed),
+            )
     return QueryResult()
 
 

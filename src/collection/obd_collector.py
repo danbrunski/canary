@@ -33,13 +33,13 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import obd
 
 from src.collection.queueing import DropCallback, QueueDropCounter, threadsafe_enqueue
 from src.collection.reconnect import ReconnectPolicy, run_with_reconnect
-from src.telemetry import TelemetryRecord
+from src.telemetry import MetadataValue, TelemetryRecord
 
 log = logging.getLogger(__name__)
 
@@ -128,6 +128,12 @@ class ObdSpec:
     did_header: str = "7E0"  # request header for Mode 22 — engine ECU by default
 
 
+#: Version of the timing metadata ``reading_to_record`` persists (C02.6).
+TS_SCHEMA_VERSION = 2
+#: Clock source behind ``ObdReading.acquired_at``.
+AcquiredClock = Literal["kernel", "userspace"]
+
+
 @dataclass(frozen=True)
 class ObdReading:
     """One Mode 01 PID reading at a wall-clock timestamp.
@@ -146,12 +152,27 @@ class ObdReading:
     #: never see the wire bytes, e.g. python-obd's pint-quantity readings).
     #: Persisted to Parquet so a wrong decoder can be re-run over history.
     payload: bytes | None = None
-    #: True wire-arrival instant, set only when ``timestamp`` carries a
-    #: *round* stamp instead (capture profiles with ``round_timestamps``, so a
-    #: sample spanning several requests reads as one row). Kept so the primary
-    #: timestamp being a scheduling artifact never destroys the real timing —
-    #: scheduler drift stays diagnosable.
+    #: Wire-arrival instant of the (first) response frame — the measurement
+    #: clock. The Canable collector always sets it (``ts_schema`` 2, C02.6);
+    #: ``timestamp`` is then the *presentation* stamp: the capture round's
+    #: scheduled start when the active profile asks for ``round_timestamps``,
+    #: otherwise this same instant. ``None`` only on paths that never see the
+    #: wire (the legacy ELM327 collector), whose rows stay ``stored``-basis.
     acquired_at: float | None = None
+    #: Where ``acquired_at`` came from: ``"kernel"`` when the bus driver
+    #: stamped the frame (SocketCAN ``SO_TIMESTAMP``; python-can
+    #: ``Message.timestamp``) and it agreed with the wall clock, else
+    #: ``"userspace"`` — a ``time.time()`` read after receipt.
+    acquired_clock: AcquiredClock | None = None
+    #: Multi-frame ISO-TP responses use the FIRST frame's arrival as
+    #: ``acquired_at``; this is completion minus first frame when > 0, so the
+    #: reassembly span is kept rather than folded into the stamp (C02.7).
+    response_interval_s: float | None = None
+    #: Capture generation and round this reading was acquired in (C02.2/C02.8).
+    #: Round identity says which window scheduled the request; it is NOT
+    #: evidence that members were sampled together — compare ``acquired_at``.
+    generation: int | None = None
+    round_id: int | None = None
 
     def to_json_line(self) -> str:
         # payload intentionally omitted: the JSONL sidecar is a human-facing
@@ -394,7 +415,11 @@ def enforce_read_only(conn: Any) -> Any:
 
 
 def reading_to_record(reading: ObdReading) -> TelemetryRecord:
-    """Convert an OBD reading into the shared telemetry schema."""
+    """Convert an OBD reading into the shared telemetry schema.
+
+    Timing provenance travels in ``metadata`` (Parquet ``metadata_json``)
+    under :data:`TS_SCHEMA_VERSION`; see :func:`acquisition_metadata`.
+    """
     value = reading.value
     if not isinstance(value, (bool, int, float, str, type(None))):
         value = str(value)
@@ -404,8 +429,37 @@ def reading_to_record(reading: ObdReading) -> TelemetryRecord:
         value,
         reading.unit,
         payload=reading.payload,
-        metadata={"acquired_at": reading.acquired_at} if reading.acquired_at is not None else None,
+        metadata=acquisition_metadata(reading),
     )
+
+
+def acquisition_metadata(reading: ObdReading) -> dict[str, MetadataValue] | None:
+    """The persisted timing fields for one reading, or ``None`` for legacy paths.
+
+    Schema versions, as readers must interpret them (``docs/capture-rounds.md``):
+
+    * absent ``acquired_at`` — legacy: the stored ``timestamp`` is a
+      decode-time clock read, or a round stamp if the session manifest says
+      ``round_timestamps`` (``timestamp_basis`` ``stored`` / ``round``);
+    * ``acquired_at`` without ``ts_schema`` — v1: written only when the row
+      was round-stamped;
+    * ``ts_schema: 2`` — ``acquired_at`` is always present with its clock
+      source, plus ``generation`` / ``round_id`` when a round scheduled it.
+    """
+    if reading.acquired_at is None:
+        return None
+    metadata: dict[str, MetadataValue] = {
+        "ts_schema": TS_SCHEMA_VERSION,
+        "acquired_at": reading.acquired_at,
+        "acquired_clock": reading.acquired_clock or "userspace",
+    }
+    if reading.response_interval_s is not None:
+        metadata["response_interval_s"] = reading.response_interval_s
+    if reading.generation is not None:
+        metadata["generation"] = reading.generation
+    if reading.round_id is not None:
+        metadata["round_id"] = reading.round_id
+    return metadata
 
 
 def queue_reading_callback(

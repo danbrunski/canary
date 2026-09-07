@@ -53,6 +53,8 @@ from typing import Any
 
 import can
 
+from src.collection import capture_generation
+
 log = logging.getLogger(__name__)
 
 #: Environment variable consulted once at import so the daemon can be started
@@ -107,6 +109,8 @@ def set_passive(
         _source = source
         _expires_at = effective_now + ttl_seconds if enabled and ttl_seconds is not None else None
     if previous != bool(enabled):
+        # Polling stops or resumes: a new capture generation (C02.8).
+        capture_generation.bump("passive-on" if enabled else "passive-off")
         log.warning(
             "passive mode %s",
             "ENABLED (CAN TX suppressed)" if enabled else "disabled",

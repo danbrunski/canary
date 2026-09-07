@@ -86,11 +86,14 @@ What cannot be inferred: a stamp shared by several OBD channels is **not**
 evidence of a round stamp. A batched Mode 01 response legitimately stamps
 every PID it carried with one decode instant (the ground-truth fixture has
 201 of 350 OBD stamps shared this way, all from batching), and that is
-indistinguishable from a round stamp without `acquired_at`. Only manifest
-evidence is used; the current collectors always persist `acquired_at`
-whenever they round-stamp, so a `round` row should only arise from data
-written before that field existed. `acquired_at` is float Unix seconds in
-JSON and round-trips to the microsecond.
+indistinguishable from a round stamp without `acquired_at`. Manifest
+evidence, or a `round_id` on the row itself with no `acquired_at` beside it
+(C02), is what marks a stamp as `round`. Since C02 the Canable collector
+persists `acquired_at` on **every** reading (`ts_schema: 2`, with
+`acquired_clock`, `generation` and `round_id` — see `docs/capture-rounds.md`),
+so a `round` row should only arise from data written before that field
+existed. `acquired_at` is float Unix seconds in JSON and round-trips to the
+microsecond.
 
 ## `grid=` migration
 

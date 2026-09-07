@@ -1077,7 +1077,9 @@ def test_negative_pid_response_does_not_block_following_pids() -> None:
 
     def on_reading(reading: Any) -> None:
         readings.append(reading)
-        if reading.pid == "RPM":
+        # RPM holds the priority lane, so inside a capture round it is read
+        # before ENGINE_LOAD's refusal is even seen; stop once both were asked.
+        if reading.pid == "RPM" and len(bus.sent) >= 2:
             stop.set()
 
     spec = CanObdSpec(
@@ -1139,7 +1141,7 @@ def test_scheduler_metrics_report_rates_and_backoff_state() -> None:
     snapshots: list[ObdSchedulerMetrics] = []
 
     def on_reading(reading: Any) -> None:
-        if reading.pid == "RPM":
+        if reading.pid == "RPM" and len(bus.sent) >= 2:
             stop.set()
 
     spec = CanObdSpec(
@@ -2012,3 +2014,72 @@ def test_single_pid_readings_still_stamp_themselves() -> None:
         ObdResponse(service=0x41, pid=0x0C, payload=bytes([0x0B, 0xEA]), responder_id=0x7E8),
     )
     assert readings and before <= readings[0].timestamp <= time.time()
+
+
+def test_query_with_tap_records_the_frame_arrival_and_its_clock() -> None:
+    """C02.7: a sane bus-driver stamp is the acquisition clock; an adapter
+    reporting 0.0 falls back to userspace time and says so."""
+    from src.collection.can_obd_collector import KERNEL_STAMP_MAX_SKEW_SECONDS
+
+    class _StampedBus(_FakeBus):
+        def __init__(self, stamp: float) -> None:
+            super().__init__()
+            self._stamp = stamp
+
+        def recv(self, timeout: float = 0.0) -> can.Message | None:
+            msg = super().recv(timeout)
+            if msg is not None:
+                msg.timestamp = self._stamp
+            return msg
+
+    request = _PollRequest(
+        kind="pid", service=0x01, identifier=0x0C, request_id=0x7DF, channel="RPM"
+    )
+    kernel_stamp = time.time() - 0.010
+    for stamp, expected in ((kernel_stamp, "kernel"), (0.0, "userspace")):
+        result = _query_with_tap(
+            _StampedBus(stamp),  # type: ignore[arg-type]
+            request,
+            timeout_seconds=0.2,
+            on_frame=lambda _m: None,
+            stop_event=threading.Event(),
+            stats=CanObdLoopStats(),
+            deadline_monotonic=None,
+        )
+        assert result.response is not None and result.arrival is not None
+        assert result.arrival.clock == expected
+        assert result.response_interval_s is None, "single frame: no reassembly span"
+        if expected == "kernel":
+            assert result.arrival.at == kernel_stamp
+        else:
+            assert abs(result.arrival.at - time.time()) < KERNEL_STAMP_MAX_SKEW_SECONDS
+
+
+def test_select_next_due_request_honours_round_membership_and_the_tuple() -> None:
+    """Inside a round only members are candidates, a member may go before its
+    own due instant, and the required tuple outranks everything but the
+    priority lane."""
+    requests = [
+        _PollRequest(kind="pid", service=0x01, identifier=0x04, request_id=0x7DF, channel="LOAD"),
+        _PollRequest(kind="pid", service=0x01, identifier=0x10, request_id=0x7DF, channel="MAF"),
+        _PollRequest(
+            kind="pid",
+            service=0x01,
+            identifier=0x0C,
+            request_id=0x7DF,
+            channel="RPM",
+            priority=True,
+        ),
+    ]
+    states = [
+        _PollRequestState(next_due_at=0.0),
+        _PollRequestState(next_due_at=2.0),  # not due yet, but in the window
+        _PollRequestState(next_due_at=3.0),
+    ]
+    assert _select_next_due_request(requests, states, 1.0) is not None
+    assert _select_next_due_request(requests, states, 1.0)[0] == 0  # type: ignore[index]
+    # Round members {0, 1}: the tuple member MAF goes first despite its later due.
+    assert _select_next_due_request(requests, states, 1.0, among={0, 1}, preferred={1})[0] == 1  # type: ignore[index]
+    # The priority lane still wins over the tuple when it is a member.
+    assert _select_next_due_request(requests, states, 1.0, among={0, 1, 2}, preferred={1})[0] == 2  # type: ignore[index]
+    assert _select_next_due_request(requests, states, 1.0, among=set()) is None

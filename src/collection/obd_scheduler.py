@@ -8,8 +8,8 @@ import statistics
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Container, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -447,6 +447,22 @@ class CanObdLoopStats:
     batch_desyncs: int = 0
     #: Times the session narrowed its batch size after repeated failures.
     batch_size_narrowings: int = 0
+    #: Capture rounds (C02). A round is one scheduled sampling window: it
+    #: ends when every member has been attempted once or at its deadline,
+    #: whichever comes first, so a stamp can never span more than one period.
+    #: ``rounds_incomplete`` counts deadlines reached with members still
+    #: unattempted (budget or timeouts could not serve the window);
+    #: ``rounds_skipped`` counts whole periods that passed with no round
+    #: opened while work was pending (the loop fell behind and skipped to the
+    #: next future deadline rather than bursting catch-up samples).
+    rounds_started: int = 0
+    rounds_complete: int = 0
+    rounds_incomplete: int = 0
+    rounds_skipped: int = 0
+    #: Largest measured acquisition spread inside one round — the honest
+    #: "how simultaneous were these" number. Round identity is a scheduling
+    #: fact; this is the evidence.
+    round_skew_max_s: float = 0.0
     #: ``time.monotonic()`` when the loop started, so metrics can report an
     #: achieved rate rather than a bare count.
     loop_started_at: float | None = None
@@ -564,6 +580,243 @@ class _PollRequestState:
 #: Eligibility predicate the DID-window controller injects into request
 #: selection: ``(request_index, request) -> bool``.
 RequestFilter = Callable[[int, "_PollRequest"], bool]
+
+
+@dataclass(frozen=True)
+class RoundState:
+    """One capture round: a scheduled sampling window with explicit members.
+
+    Immutable; the scheduler replaces it on every change so a reading issued
+    under one snapshot can never be re-tagged by a later one. A round ENDS on
+    membership completion (every member attempted once) or at ``deadline``,
+    whichever is first — never "when the loop runs out of work", which is the
+    condition that let one stamp cover 875 ms of readings (C02.1).
+    """
+
+    generation: int
+    round_id: int
+    #: Monotonic window. ``deadline = scheduled_start + period_s``.
+    scheduled_start: float
+    deadline: float
+    period_s: float
+    #: Wall clock at ``scheduled_start`` — the presentation stamp when the
+    #: active profile asks for ``round_timestamps``.
+    wall_start: float
+    #: Request indices due inside this window when it opened.
+    members: tuple[int, ...]
+    attempted: frozenset[int] = frozenset()
+    #: Member -> readings emitted. Never mutated; replaced via ``with_observed``.
+    observations: Mapping[int, int] = field(default_factory=dict)
+    first_acquired_at: float | None = None
+    last_acquired_at: float | None = None
+
+    @property
+    def remaining(self) -> tuple[int, ...]:
+        return tuple(index for index in self.members if index not in self.attempted)
+
+    @property
+    def complete(self) -> bool:
+        return not self.remaining
+
+    @property
+    def succeeded(self) -> frozenset[int]:
+        return frozenset(index for index, count in self.observations.items() if count > 0)
+
+    @property
+    def skew_s(self) -> float:
+        """Measured acquisition spread across this round's readings."""
+        if self.first_acquired_at is None or self.last_acquired_at is None:
+            return 0.0
+        return max(0.0, self.last_acquired_at - self.first_acquired_at)
+
+    def with_attempt(self, index: int) -> RoundState:
+        return replace(self, attempted=self.attempted | {index})
+
+    def with_observed(self, index: int, count: int, acquired_at: float | None) -> RoundState:
+        observations = {**self.observations, index: self.observations.get(index, 0) + count}
+        first, last = self.first_acquired_at, self.last_acquired_at
+        if acquired_at is not None:
+            first = acquired_at if first is None else min(first, acquired_at)
+            last = acquired_at if last is None else max(last, acquired_at)
+        return replace(
+            self,
+            observations=observations,
+            first_acquired_at=first,
+            last_acquired_at=last,
+        )
+
+
+class RoundScheduler:
+    """Opens, tracks and closes capture rounds on monotonic deadlines (C02.2/C02.4).
+
+    Rounds are scheduled at ``anchor + k * period``. When the loop falls
+    behind, the periods it missed are counted as ``rounds_skipped`` and the
+    next round opens at the next *future* boundary — no catch-up burst. When
+    the plan has nothing due at all (passive mode, a DID lapse, everything
+    backed off) the schedule is re-anchored on the next open instead, so an
+    idle stretch is not reported as skipped rounds.
+
+    Counters are written straight onto the loop's :class:`CanObdLoopStats`
+    so ``/status`` and the stop-time sidecar see them without extra plumbing.
+    """
+
+    def __init__(self, generation: int, stats: CanObdLoopStats) -> None:
+        self.generation = generation
+        self.stats = stats
+        self.current: RoundState | None = None
+        self._next_round_id = 0
+        self._anchor: float | None = None
+        self._period: float | None = None
+        self._last_k: int | None = None
+        self.last_round_skew_s = 0.0
+        self.closed: int = 0
+
+    def reset(self, generation: int, now: float) -> None:
+        """Start a new generation: close any open round and restart numbering."""
+        self.close(now)
+        self.generation = generation
+        self._next_round_id = 0
+        self._anchor = None
+        self._last_k = None
+
+    def next_open_at(self, now: float, period: float) -> float:
+        """Earliest instant the next round may open, so two rounds never share a slot."""
+        if self._anchor is None or self._last_k is None or self._period != period:
+            return now
+        return max(now, self._anchor + (self._last_k + 1) * period)
+
+    def open(
+        self,
+        now: float,
+        wall_now: float,
+        *,
+        period: float,
+        members: Sequence[int],
+    ) -> RoundState:
+        if self.current is not None:
+            raise RuntimeError("a round is already open; close it first")
+        if self._anchor is None or self._last_k is None or self._period != period:
+            self._anchor, self._period, k = now, period, 0
+        else:
+            # ``next_open_at`` guarantees ``now`` is at or past the next
+            # boundary; the max() keeps a float rounding error at exactly
+            # that boundary from re-using the previous round's slot.
+            k = max(int((now - self._anchor) / period), self._last_k + 1)
+            missed = k - (self._last_k + 1)
+            if missed > 0:
+                self.stats.rounds_skipped += missed
+        start = self._anchor + k * period
+        state = RoundState(
+            generation=self.generation,
+            round_id=self._next_round_id,
+            scheduled_start=start,
+            deadline=start + period,
+            period_s=period,
+            wall_start=wall_now - (now - start),
+            members=tuple(members),
+        )
+        self._next_round_id += 1
+        self._last_k = k
+        self.current = state
+        self.stats.rounds_started += 1
+        return state
+
+    def expire(self, now: float) -> RoundState | None:
+        """Close the open round if its deadline has passed."""
+        if self.current is not None and now >= self.current.deadline:
+            return self.close(now)
+        return None
+
+    def idle(self, now: float) -> None:
+        """Nothing is due: close any round and re-anchor on the next open."""
+        self.close(now)
+        self._last_k = None
+
+    def on_attempt(self, index: int) -> None:
+        if self.current is not None:
+            self.current = self.current.with_attempt(index)
+
+    def on_observed(self, index: int, count: int, acquired_at: float | None) -> None:
+        if self.current is not None:
+            self.current = self.current.with_observed(index, count, acquired_at)
+
+    def close(self, now: float) -> RoundState | None:
+        del now  # the close instant is not part of the round's identity
+        state = self.current
+        if state is None:
+            return None
+        self.current = None
+        self.closed += 1
+        if state.complete:
+            self.stats.rounds_complete += 1
+        else:
+            self.stats.rounds_incomplete += 1
+        self.last_round_skew_s = state.skew_s
+        self.stats.round_skew_max_s = max(self.stats.round_skew_max_s, state.skew_s)
+        return state
+
+    def snapshot(self, now: float) -> dict[str, Any]:
+        """Round accounting for ``/status.obd_scheduler.rounds``."""
+        current = self.current
+        return {
+            "generation": self.generation,
+            "period_s": self._period,
+            "started": self.stats.rounds_started,
+            "complete": self.stats.rounds_complete,
+            "incomplete": self.stats.rounds_incomplete,
+            "skipped": self.stats.rounds_skipped,
+            "skew_max_s": round(self.stats.round_skew_max_s, 6),
+            "last_skew_s": round(self.last_round_skew_s, 6),
+            "open": None
+            if current is None
+            else {
+                "round_id": current.round_id,
+                "members": len(current.members),
+                "attempted": len(current.attempted),
+                "succeeded": len(current.succeeded),
+                "deadline_in_s": round(max(0.0, current.deadline - now), 4),
+            },
+        }
+
+
+def round_period_seconds(
+    requests: Sequence[_PollRequest],
+    states: Sequence[_PollRequestState],
+    spec: CanObdSpec,
+    now: float,
+    *,
+    eligible: RequestFilter | None = None,
+) -> float | None:
+    """The round period: the fastest configured cadence among pollable requests.
+
+    ``None`` when nothing is pollable (every eligible request is at rate zero
+    or suppressed). Slower requests join every Nth round (C02.3).
+    """
+    intervals = [
+        _request_interval_seconds(request, spec)
+        for index, (request, state) in enumerate(zip(requests, states, strict=True))
+        if not _is_request_suppressed(state, now) and (eligible is None or eligible(index, request))
+    ]
+    finite = [interval for interval in intervals if interval != float("inf")]
+    return min(finite) if finite else None
+
+
+def round_members(
+    requests: Sequence[_PollRequest],
+    states: Sequence[_PollRequestState],
+    now: float,
+    *,
+    deadline: float,
+    eligible: RequestFilter | None = None,
+) -> tuple[int, ...]:
+    """Requests due before ``deadline`` — the membership of the round opening now."""
+    return tuple(
+        index
+        for index, (request, state) in enumerate(zip(requests, states, strict=True))
+        if not _is_request_suppressed(state, now)
+        and state.next_due_at < deadline
+        and (eligible is None or eligible(index, request))
+    )
 
 
 class DidWindowController:
@@ -889,9 +1142,15 @@ class ObdSchedulerMetrics:
     #: trusting a tuning capture — a per-cell verdict is only as good as the
     #: sample count behind it.
     batching: dict[str, Any] | None = None
+    #: Capture-round accounting (C02): generation, period, started /
+    #: complete / incomplete / skipped counts and the measured in-round
+    #: acquisition skew. ``None`` only for a metrics object built without a
+    #: round scheduler.
+    rounds: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "rounds": self.rounds,
             "configured_poll_rate_hz": self.configured_poll_rate_hz,
             "bus_budget_requests_per_second": self.bus_budget_requests_per_second,
             "active_requests": self.active_requests,
@@ -1275,12 +1534,29 @@ def _select_next_due_request(
     now: float,
     *,
     eligible: RequestFilter | None = None,
+    among: Container[int] | None = None,
+    preferred: Container[int] = frozenset(),
 ) -> tuple[int, _PollRequest, _PollRequestState] | None:
+    """The due request to issue next.
+
+    ``among`` restricts the choice to the open round's unattempted members
+    (C02.3: one attempt per member per round). A member is due inside the
+    round's window by construction, so it may be issued as soon as the round
+    is open rather than at its own due instant — a one-time phase advance of
+    under one period that lets a round's members converge onto one cadence
+    (and one batch) instead of staying staggered forever; the configured
+    rate is unchanged because the next due time is still ``issued + interval``.
+    ``preferred`` — the profile's ``required_tuple`` — ranks just below the
+    priority lane, so when the budget cannot serve a whole round the tuple
+    completes first (C02.5); it never makes a request due, so it cannot
+    starve the others.
+    """
     candidates = [
         (state.next_due_at, index, request, state)
         for index, (request, state) in enumerate(zip(requests, states, strict=True))
         if not _is_request_suppressed(state, now)
-        and state.next_due_at <= now
+        and (among is not None or state.next_due_at <= now)
+        and (among is None or index in among)
         and (eligible is None or eligible(index, request))
     ]
     if not candidates:
@@ -1293,7 +1569,8 @@ def _select_next_due_request(
     # priority set is small and each member still only becomes due at its own
     # tier rate, so it can never claim more than that slice of the budget.
     _due_at, index, request, state = min(
-        candidates, key=lambda item: (not item[2].priority, item[0], item[1])
+        candidates,
+        key=lambda item: (not item[2].priority, item[1] not in preferred, item[0], item[1]),
     )
     return index, request, state
 
@@ -1318,6 +1595,8 @@ def select_batch_companions(  # noqa: PLR0913
     max_pids: int,
     eligible: RequestFilter | None = None,
     ignore_tier: bool = False,
+    members: Container[int] | None = None,
+    preferred: Container[int] = frozenset(),
 ) -> list[int]:
     """Indices to issue alongside ``leader_index`` as one batched request.
 
@@ -1330,6 +1609,16 @@ def select_batch_companions(  # noqa: PLR0913
     changes on the order of minutes) or a fast-tier one being held back.
     ``ignore_tier`` lifts it for capture rounds, where the operator's channel
     selection *is* the sample and every member is expected on the same row.
+
+    ``members`` confines companions to the open round's unattempted members
+    (C02.5: same-round companions travel together; a member is never issued
+    twice in one round). A member is due *inside this round's window* by
+    construction, so it may ride the leader's batch a little before its own
+    due instant: that is a one-time phase advance of under one period, after
+    which the batch shares one cadence — not a rate increase. ``preferred``
+    — the profile's ``required_tuple`` — fills the batch first, so the
+    tuple's members share one response when the ceiling would otherwise
+    split them across requests.
     """
     leader = requests[leader_index]
     if max_pids <= 1 or not is_batchable(leader):
@@ -1337,16 +1626,22 @@ def select_batch_companions(  # noqa: PLR0913
 
     chosen = [leader_index]
     seen_pids = {leader.identifier}
-    for index, (request, state) in enumerate(zip(requests, states, strict=True)):
+    order = sorted(range(len(requests)), key=lambda index: (index not in preferred, index))
+    for index in order:
+        request, state = requests[index], states[index]
         if len(chosen) >= max_pids:
             break
         if index == leader_index or not is_batchable(request):
+            continue
+        if members is not None and index not in members:
             continue
         if not ignore_tier and request.poll_tier != leader.poll_tier:
             continue
         if request.identifier in seen_pids:
             continue
-        if _is_request_suppressed(state, now) or state.next_due_at > now:
+        if _is_request_suppressed(state, now):
+            continue
+        if members is None and state.next_due_at > now:
             continue
         if eligible is not None and not eligible(index, request):
             continue
@@ -1361,11 +1656,14 @@ def _next_due_at(
     now: float,
     *,
     eligible: RequestFilter | None = None,
+    among: Container[int] | None = None,
 ) -> float | None:
     due_times = [
         state.next_due_at
         for index, (request, state) in enumerate(zip(requests, states, strict=True))
-        if not _is_request_suppressed(state, now) and (eligible is None or eligible(index, request))
+        if not _is_request_suppressed(state, now)
+        and (among is None or index in among)
+        and (eligible is None or eligible(index, request))
     ]
     return min(due_times) if due_times else None
 
@@ -1426,6 +1724,7 @@ def _scheduler_metrics(
     now: float,
     *,
     did_profile: dict[str, Any] | None = None,
+    rounds: dict[str, Any] | None = None,
 ) -> ObdSchedulerMetrics:
     active = _count_active_requests(requests, states, now)
     backed_off = sum(
@@ -1556,12 +1855,17 @@ def _scheduler_metrics(
         requests=request_rows,
         did_profile=did_profile,
         batching=_batching_metrics(spec, stats, now),
+        rounds=rounds,
     )
 
 
 __all__ = [
     "select_batch_companions",
     "is_batchable",
+    "RoundScheduler",
+    "RoundState",
+    "round_members",
+    "round_period_seconds",
     "AUTO_MISS_BACKOFF_SECONDS",
     "CAPTURE_MISS_BACKOFF_SECONDS",
     "AUTO_PIDS",

@@ -13,6 +13,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+from src.collection import capture_generation
 from src.collection.capture_profiles import FUEL_MAP_CHANNELS, CaptureProfile
 
 log = logging.getLogger(__name__)
@@ -83,6 +84,9 @@ def activate(
         _started_monotonic = None if profile.name == "default" else time.monotonic()
         _session_dir = session_dir
         _source = source
+    # A new profile is a new capture generation (C02.8): rounds restart, and
+    # a request issued under the old profile keeps the old tag.
+    capture_generation.bump(f"profile:{profile.name}")
     log.warning(
         "capture profile activated: %s",
         profile.name,
@@ -135,6 +139,8 @@ def set_paused(value: bool) -> bool:
     with _lock:
         previous = _paused
         _paused = value
+    if previous != value:
+        capture_generation.bump("capture-paused" if value else "capture-resumed")
     log.warning("capture %s", "paused" if value else "resumed", extra={"paused": value})
     return previous
 
@@ -148,6 +154,16 @@ def round_timestamps_enabled() -> bool:
     """Whether readings should carry their capture round's start time."""
     with _lock:
         return _profile.round_timestamps
+
+
+def required_tuple() -> frozenset[str]:
+    """Upper-cased ``required_tuple`` of the active profile; empty when none.
+
+    The scheduler serves these members of a round first and batches them
+    together (C02.5), so the tuple completes before the budget runs out.
+    """
+    with _lock:
+        return frozenset(name.upper() for name in _profile.required_tuple)
 
 
 def did_interval_override() -> float | None:
@@ -354,6 +370,7 @@ __all__ = [
     "absolute_rate_hz",
     "rate_weight",
     "request_eligible",
+    "required_tuple",
     "set_active",
     "set_session_dir",
     "snapshot",

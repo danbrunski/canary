@@ -555,3 +555,62 @@ def test_a_capture_round_puts_every_channel_on_one_row() -> None:
     stamped = [r for r in readings if r.acquired_at is not None]
     assert stamped, "round-stamped readings should retain their arrival instant"
     assert any(r.acquired_at != r.timestamp for r in stamped)
+
+
+# ---------------------------------------------------------------------------
+# C02.5 — companions are chosen from the open round's members
+# ---------------------------------------------------------------------------
+
+
+def test_companions_come_from_the_rounds_members_and_the_tuple_fills_first() -> None:
+    """A member is due inside the round's window by construction, so it may
+    ride the leader's batch before its own due instant; a non-member may not,
+    however due it is. The required tuple takes the batch's slots first."""
+    pids = ("RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS", "TIMING_ADVANCE", "MAF")
+    spec = _spec(pids=pids)
+    requests = build_poll_requests(_BatchingEcu(), spec)  # type: ignore[arg-type]
+    states = _initial_request_states(requests, spec, 0.0)
+    index = {r.channel: i for i, r in enumerate(requests)}
+    for state in states:
+        state.next_due_at = 5.0  # due later in the window, not now
+    states[index["RPM"]].next_due_at = 0.0
+
+    members = frozenset(index[c] for c in ("RPM", "SPEED", "ENGINE_LOAD", "MAF"))
+    chosen = select_batch_companions(
+        requests,
+        states,
+        1.0,
+        leader_index=index["RPM"],
+        max_pids=3,
+        members=members,
+        preferred=frozenset({index["MAF"]}),
+    )
+    assert [requests[i].channel for i in chosen] == ["RPM", "MAF", "SPEED"]
+    # Without a round, the historic rule holds: only requests due *now* ride.
+    assert select_batch_companions(
+        requests, states, 1.0, leader_index=index["RPM"], max_pids=3
+    ) == [index["RPM"]]
+
+
+def test_batch_readings_share_receipt_time_and_round_but_not_a_claim_of_atomicity() -> None:
+    """Every PID in one batched response carries the same ``acquired_at`` —
+    the payload's receipt — and the same round. That is all it says."""
+    bus = _BatchingEcu()
+    readings: list = []
+    run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _spec(pids=("RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS"), batch_max_pids=6),
+        on_frame=lambda _m: None,
+        on_reading=readings.append,
+        stop_event=threading.Event(),
+        deadline_monotonic=time.monotonic() + 0.3,
+    )
+    assert bus.batch_requests > 0
+    by_arrival: dict[float, set[str]] = {}
+    for reading in readings:
+        assert reading.acquired_at is not None and reading.round_id is not None
+        assert reading.timestamp == reading.acquired_at, "no round stamp outside a capture profile"
+        by_arrival.setdefault(reading.acquired_at, set()).add(reading.pid)
+    assert any(
+        {"RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS"} <= pids for pids in by_arrival.values()
+    )

@@ -150,16 +150,38 @@ class _Catalogs:
 #: Column added by :func:`read_channels` when ``acquired_time=True``; values
 #: are :data:`src.analysis.pairing.TimestampBasis`.
 TIMESTAMP_BASIS_COLUMN = "timestamp_basis"
+#: Round identity columns :func:`read_acquisition_frame` adds from
+#: ``metadata_json`` (``docs/capture-rounds.md``). Nullable: legacy rows and
+#: broadcast frames carry neither.
+GENERATION_COLUMN = "generation"
+ROUND_ID_COLUMN = "round_id"
+ACQUIRED_AT_COLUMN = "acquired_at"
+#: Per-round skew columns from :func:`round_skew`.
+ROUND_SKEW_COLUMNS = ("generation", "round_id", "n", "first_acquired_at", "skew_s")
 
 
-def _acquired_at(raw: object) -> float | None:
+def _metadata_number(raw: object, key: str) -> float | None:
     if not isinstance(raw, str):
         return None
     try:
-        value = json.loads(raw).get("acquired_at")
+        value = json.loads(raw).get(key)
     except (TypeError, ValueError, AttributeError):
         return None
-    return float(value) if isinstance(value, (int, float)) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _acquired_at(raw: object) -> float | None:
+    return _metadata_number(raw, "acquired_at")
+
+
+def _round_id(raw: object) -> float | None:
+    return _metadata_number(raw, "round_id")
+
+
+def _generation(raw: object) -> float | None:
+    return _metadata_number(raw, "generation")
 
 
 def _round_stamped_sessions(frame: pd.DataFrame, session: Path | pd.DataFrame) -> set[str]:
@@ -184,11 +206,18 @@ def _round_stamped_sessions(frame: pd.DataFrame, session: Path | pd.DataFrame) -
 
 
 def _timestamp_basis(frame: pd.DataFrame, session: Path | pd.DataFrame) -> pd.Series:
-    """Per-row :data:`~src.analysis.pairing.TimestampBasis`."""
+    """Per-row :data:`~src.analysis.pairing.TimestampBasis`.
+
+    ``acquired`` whenever ``acquired_at`` is present, whatever else the row
+    or manifest says. ``round`` needs either the manifest's
+    ``round_timestamps`` or a ``round_id`` on the row itself (C02.6) — with
+    no ``acquired_at`` beside it, a round-tagged stamp is a round stamp.
+    """
     if "metadata_json" not in frame:
         return pd.Series("unknown", index=frame.index, dtype="string")
     acquired = frame["metadata_json"].map(_acquired_at).notna()
     basis = pd.Series("stored", index=frame.index, dtype="string")
+    basis = basis.mask(frame["metadata_json"].map(_round_id).notna(), "round")
     round_stamped = _round_stamped_sessions(frame, session)
     if round_stamped:
         # Only polled (OBD/DID) rows are ever round-stamped; broadcast frames
@@ -221,9 +250,46 @@ def read_acquisition_frame(session: Path | pd.DataFrame) -> pd.DataFrame:
 
     For consumers that decode rows themselves (the broadcast byte sweep) but
     must still pair on the same clock, and with the same provenance rules, as
-    :func:`read_channels`.
+    :func:`read_channels`. Also carries ``acquired_at`` (float Unix seconds),
+    ``generation`` and ``round_id`` (nullable) so round membership is a column
+    rather than a JSON parse; :func:`round_skew` summarises them.
     """
-    return _long_frame(session, acquired_time=True)
+    frame = _long_frame(session, acquired_time=True)
+    if "metadata_json" not in frame:
+        for column in (ACQUIRED_AT_COLUMN, GENERATION_COLUMN, ROUND_ID_COLUMN):
+            frame[column] = pd.Series(pd.NA, index=frame.index, dtype="Float64")
+        return frame
+    metadata = frame["metadata_json"]
+    frame[ACQUIRED_AT_COLUMN] = metadata.map(_acquired_at).astype("Float64")
+    frame[GENERATION_COLUMN] = metadata.map(_generation).astype("Float64").astype("Int64")
+    frame[ROUND_ID_COLUMN] = metadata.map(_round_id).astype("Float64").astype("Int64")
+    return frame
+
+
+def round_skew(frame: pd.DataFrame) -> pd.DataFrame:
+    """Measured acquisition spread per ``(generation, round_id)``.
+
+    One row per round that has at least one round-tagged reading with an
+    ``acquired_at``: ``n`` readings, ``first_acquired_at``, and ``skew_s`` =
+    last minus first acquisition. This is the evidence a tuple check must
+    consult (C03) — sharing a ``round_id`` says the scheduler *asked* for
+    these together; ``skew_s`` says how far apart they actually arrived.
+    Rows without round identity contribute nothing; an empty result means no
+    round evidence was persisted, not that skew was zero.
+    """
+    frame = frame if ROUND_ID_COLUMN in frame else read_acquisition_frame(frame)
+    tagged = frame.dropna(subset=[GENERATION_COLUMN, ROUND_ID_COLUMN, ACQUIRED_AT_COLUMN])
+    if tagged.empty:
+        return pd.DataFrame(columns=list(ROUND_SKEW_COLUMNS))
+    grouped = tagged.groupby([GENERATION_COLUMN, ROUND_ID_COLUMN], sort=True)[ACQUIRED_AT_COLUMN]
+    out = pd.DataFrame(
+        {
+            "n": grouped.size(),
+            "first_acquired_at": grouped.min(),
+            "skew_s": grouped.max() - grouped.min(),
+        }
+    ).reset_index()
+    return out.loc[:, list(ROUND_SKEW_COLUMNS)]
 
 
 def _numeric_series(frame: pd.DataFrame, spec: ChannelSpec, source: str) -> pd.DataFrame:
