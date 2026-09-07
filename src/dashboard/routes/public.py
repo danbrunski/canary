@@ -31,6 +31,7 @@ from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.models.health import HealthMonitor
 
 if TYPE_CHECKING:  # decode.dids is imported lazily inside the route bodies
+    from src.daemon.inference_metrics import InferenceTimingRecorder
     from src.decode.dids import DidMap
 
 
@@ -55,6 +56,7 @@ def register_public_routes(
     sequence_detector_controller: SequenceDetectorController | None = None,
     accepted_baselines_path: Path = DEFAULT_ACCEPTED_BASELINES_PATH,
     storage_writer: Any = None,
+    inference_timing: InferenceTimingRecorder | None = None,
 ) -> None:
     @app.get("/status")
     def get_status() -> dict[str, Any]:
@@ -66,6 +68,7 @@ def register_public_routes(
             replay_controller=replay_controller,
             gps_tracker=gps_tracker,
             storage_writer=storage_writer,
+            inference_timing=inference_timing,
         ).to_dict()
         if replay_controller is not None:
             payload["replay"] = replay_controller.status().to_dict()

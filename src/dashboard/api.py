@@ -36,7 +36,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -92,6 +92,9 @@ from src.decode.behavior_models import (
 from src.models.health import HealthMonitor
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 
+if TYPE_CHECKING:  # annotation only — src.daemon's package __init__ imports this module
+    from src.daemon.inference_metrics import InferenceTimingRecorder
+
 log = logging.getLogger(__name__)
 
 
@@ -140,6 +143,9 @@ def create_app(
     capture_profile_store: CaptureProfileStore | None = None,
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
+    #: C08 — live-inference scheduler timing for ``/status``
+    #: ``detectors.inference`` (``None`` in tests that don't run inference).
+    inference_timing: InferenceTimingRecorder | None = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -214,6 +220,7 @@ def create_app(
         monitor_state=monitor_state,
         gps_tracker=gps_tracker,
         sequence_detector_controller=sequence_detector_controller,
+        inference_timing=inference_timing,
     )
     register_control_routes(
         app,

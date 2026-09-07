@@ -7,7 +7,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker
@@ -17,6 +17,9 @@ from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
 from src.models.health import HealthMonitor
 from src.timefmt import parse_iso_utc
+
+if TYPE_CHECKING:  # annotation only — src.daemon's package __init__ imports the dashboard
+    from src.daemon.inference_metrics import InferenceTimingRecorder
 
 VehicleStateName = Literal[
     "engine_running",
@@ -489,8 +492,16 @@ def build_status(
     replay_controller: ReplayController | None = None,
     gps_tracker: GpsTracker | None = None,
     storage_writer: Any = None,
+    inference_timing: InferenceTimingRecorder | None = None,
 ) -> StatusSnapshot:
-    """Assemble the status snapshot used by ``GET /status``."""
+    """Assemble the status snapshot used by ``GET /status``.
+
+    ``inference_timing`` (C08) folds the live-inference scheduler's stage
+    timing, loop lateness and missed-deadline counters into
+    ``detectors.inference`` — kept apart from ``health.inference_latency_ms``
+    (model scoring latency only) so clock health and model cost are never
+    read as one number.
+    """
     storage = config.collection.storage_path
     latest = _resolve_latest_session(storage)
     model_versions: dict[str, str | None] = {}
@@ -526,6 +537,8 @@ def build_status(
                 "fallback_active": health_monitor.segmenter_fallback_active,
             },
         }
+    if inference_timing is not None:
+        detectors = {**(detectors or {}), "inference": inference_timing.snapshot().to_dict()}
     return StatusSnapshot(
         storage_path=str(storage),
         free_mb=_free_mb(storage),

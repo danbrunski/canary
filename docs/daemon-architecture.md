@@ -65,14 +65,13 @@ producer, a new sink, or a new inference task, start here.
                                                        │ (segment + dev +
                                                        │  rolling features)
                                                        │
-                            ┌──────────────────────────┴───────────────┐
-                            │                                          │
-                            ▼                                          ▼
-                  run_live_inference                       run_live_inference_lstm
-                  IsolationForestInferenceEngine           LSTMInferenceEngine
-                  .observe(row)                            (schema-align + observe)
-                            │                                          │
-                            └─────────────┬────────────────────────────┘
+                                          ▼
+                  run_live_inference  (TickScheduler: deadlines start + k/hz)
+                    LiveInferencePipeline
+                      snapshot [loop]   source.tick, gate, behavior residuals
+                      compute  [worker] IsolationForestInferenceEngine.observe
+                                        SequenceInferenceEngine.observe
+                      apply    [loop]   generation check, emits, fusion
                                           │ AnomalyEvent
                                           ▼
                                 AnomalyEventEmitter (5.2a)
@@ -97,7 +96,8 @@ producer, a new sink, or a new inference task, start here.
 | **Producers** | `src/collection/can_obd_collector.py`, `src/collection/can_collector.py`, `src/collection/obd_collector.py` | Push `TelemetryRecord` onto an `asyncio.Queue`. Default current hardware path is `can_obd_collector.py`: one SocketCAN bus (Waveshare MCP2515 HAT or Canable USB) handles broadcast CAN plus read-only OBD Mode 01 / selected Mode 22 polling. `can_collector.py` is CAN-only; `obd_collector.py` is legacy ELM327/emulator fallback. |
 | **Storage** | `src/storage/parquet_writer.py` | Buffers records and flushes to dated session dirs. 1.11 session keying rotates on Engine Run Time reset; the `run_retention_sweeper` task runs periodically inside the production daemon (cadence `daemon.retention_sweep_seconds`), and on every tick — always protecting the live `.paths.root` plus pinned sessions — applies in order: an age sweep (`session_retention_days`), a byte-cap ring buffer (`collection.storage_max_mb`, oldest-first), and an emergency low-space eviction when filesystem free space falls below `collection.storage_warning_mb`. It is a periodic in-process sweep, **not** a shutdown-only pass. `warn_if_storage_low` stays the cheap log-only hot-path check; the acting logic lives only in the sweeper (see Phase 8 / `docs/storage-lifecycle-fix.md`); 1.14 atomic-write contract: `.tmp → rename` so a crash mid-flush never leaves a corrupt `.parquet` visible to the discovery glob. |
 | **Live preprocessing** | `src/preprocessing/live.py` | `LiveFeatureSource` is the row-by-row analog of `build_feature_frame`. `observe(record)` updates a `current_values` dict; `tick(now)` emits one wide row through segment + deviation + rolling features. Ring buffer holds `2 × window_seconds × resample_hz` rows. ~43 ms p95 per tick on the workstation at 16 channels × 20 CAN frames/tick, 1 Hz, full 181-row buffer (feature-only microbenchmark, `scripts/benchmark_live_pipeline.py`; see `data/analyses/2026-09-06-benchmark-live-pipeline-baseline.md`; Pi result pending C05.11). |
-| **Inference** | `src/models/inference.py` + `src/alerts/emitter.py` | `LSTMInferenceEngine` (windowed) + `IsolationForestInferenceEngine` (row-by-row wrapper around `TrainedIsolationForest.score`). `AnomalyEventEmitter` decides when a result is an event (`is_anomaly` / label==-1), dedupes per (source, model_version), counts `emitted` / `suppressed_*` for `/status`. |
+| **Inference** | `src/models/inference.py` + `src/alerts/emitter.py` | `SequenceInferenceEngine` (windowed LSTM/TCN) + `IsolationForestInferenceEngine` (row-by-row wrapper around `TrainedIsolationForest.score`). `AnomalyEventEmitter` decides when a result is an event (`is_anomaly` / label==-1), dedupes per (source, model_version), counts `emitted` / `suppressed_*` for `/status`. |
+| **Inference scheduling** | `src/daemon/inference.py` (`LiveInferencePipeline`), `src/daemon/inference_scheduling.py`, `src/daemon/inference_metrics.py` | C08: ticks run on an absolute monotonic deadline grid (`TickScheduler`), so processing time never drifts the cadence; an overrun skips to the next future deadline and is counted (`missed_ticks`), never a catch-up burst. Per tick: snapshot on the loop (`source.tick`, vehicle-state gate, behavior residuals, model generation pinned), the IF + sequence forward passes in one owned worker thread (at most one job in flight; a busy worker skips the tick), apply on the loop (generation check, `/ws/scores`, persistence, emits, fusion). Stage timing, loop lateness and overload counters land on `/status` `detectors.inference`. See `docs/inference-scheduling.md`. |
 | **Persistence + push** | `src/alerts/event_logger.py` + `src/dashboard/broadcast.py` | `AnomalyEventLogger` writes `anomalies-YYYY-MM-DD.jsonl` (daily, flushed-per-write). `Broadcaster` is the in-memory pub/sub fan-out with bounded per-subscriber queues — slow consumers drop oldest, producers never block. The `_BroadcastingLogger` wrapper writes both at one call site. |
 | **Hot-swap** | `src/models/manager.py` | `ModelManager` polls the artifact path; on a newer manifest, validates `schemas_compatible` against the running model and atomically swaps. Per-poll `SwapAttempt(kind=swapped\|no_change\|rejected\|missing)` is the observable outcome. |
 | **Dashboard + control API** | `src/dashboard/api.py` + `src/dashboard/routes/{public,control,streams}.py`, `src/control/*` | FastAPI app: `/status`, `/config`, `/anomalies?since=`, `/telemetry/latest?n=`, `/ws/telemetry`, `/ws/anomalies`, plus authenticated `/control/*` endpoints for capture windows, tags, session export, and allow-listed background jobs. `create_app(...)` is mostly stateless for read endpoints; the daemon injects broadcasters plus the control controllers. |
@@ -112,11 +112,13 @@ arrive on a single `asyncio.Queue` from the collector tasks.
 three ways: into the Parquet writer (session-keyed by Engine Run Time
 reset), onto the telemetry `Broadcaster` (which `/ws/telemetry`
 subscribers see immediately), and into the `LiveFeatureSource.observe`
-side-effect. Every `1/resample_hz` seconds, two inference tasks pull a
-one-row feature frame from the live source: `run_live_inference` calls
-`IsolationForestInferenceEngine.observe`, and `run_live_inference_lstm`
-schema-aligns the row (NaN-fills any column missing from the trained
-set) and calls `LSTMInferenceEngine.observe`. Each result that's an
+side-effect. Every `1/resample_hz` seconds — on an absolute deadline grid,
+so a slow tick delays nothing but itself — `run_live_inference` pulls a
+one-row feature frame from the live source on the loop, hands the
+schema-aligned row to `IsolationForestInferenceEngine.observe` and
+`SequenceInferenceEngine.observe` in its one worker thread, and applies the
+results back on the loop (discarding them if a model swap or replay
+transition happened meanwhile). Each result that's an
 anomaly goes through `AnomalyEventEmitter`, which dedupes by (source,
 model_version) and writes through `_BroadcastingLogger` — that one call
 appends to the JSONL *and* publishes onto the anomalies broadcaster, so
@@ -135,10 +137,10 @@ to the control audit JSONL and published on `/ws/control`.
 | Add a new producer | Subclass / wrap the existing collector pattern: an `async` function `(queue, stop) → None`. Wire into `_default_collectors` or pass via `collectors=` to `run_daemon`. |
 | Add a new dashboard endpoint | `src/dashboard/routes/public.py` (unauthenticated reads) or `routes/control.py` (bearer-auth control plane) — `create_app` in `api.py` registers both. Use the existing pure helpers (`build_status`, `read_anomalies_since`, etc.) as templates: route → helper → unit test the helper. |
 | Add a new remote operator action | Add a small controller method under `src/control/`, expose it from `src/dashboard/routes/control.py` behind bearer auth, then add the `scripts/canaryctl.py` command. Do not add an arbitrary shell endpoint. |
-| Add a new detector | Implement an inference-engine class with `observe(row) → result`. Mirror `IsolationForestInferenceEngine`'s surface. Pair with an `AnomalyEvent.from_<source>_result` adapter on `events.py` and a new `emit_<source>` method on `AnomalyEventEmitter`. Spawn a new `run_live_inference_<source>` task from `run_daemon`. |
+| Add a new detector | Implement an inference-engine class with `observe(row) → result`. Mirror `IsolationForestInferenceEngine`'s surface. Pair with an `AnomalyEvent.from_<source>_result` adapter on `events.py` and a new `emit_<source>` method on `AnomalyEventEmitter`. Add a detector to `LiveInferencePipeline` in `src/daemon/inference.py` with the `prepare` (loop) / `compute` (worker, pure) / `apply` (loop) split — never a second tick task, which would double-tick the buffer. |
 | Add a new behavior-model surface | Add a recipe to `default_recipes()` in `src/analysis/refit.py`. Pure declarative — `scripts/refit_behavior_models.py` will fit it on the next run. |
 | Change what `/status` shows | `StatusSnapshot` in `src/dashboard/status.py`. Add the field, add it to `to_dict()`, surface it from `build_status`, add a test. |
-| Tune the live-pipeline tick rate | `preprocessing.resample_hz` in `canary.yaml`. The inference tasks pick up the new cadence automatically. |
+| Tune the live-pipeline tick rate | `preprocessing.resample_hz` in `canary.yaml` sets the *model* cadence (`tick_seconds = 1/resample_hz`); it is independent of collector acquisition rates, and the deployed models were trained at 1 Hz — a new cadence needs train/serve validation (C08.8). Overload and lateness are visible on `/status` `detectors.inference`. |
 | Swap a model without restart | Drop the new artifact + manifest into `<daemon.models_dir>/<name>/`. `ModelManager.poll()` will pick it up within `daemon.model_poll_seconds` (default 30). Rejected swaps stay on `/status` as the prior version. |
 
 ## What's *not* in here

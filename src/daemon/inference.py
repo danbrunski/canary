@@ -4,6 +4,8 @@ import asyncio
 import logging
 import math
 import time
+from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,8 +50,14 @@ from src.timefmt import format_timestamp
 
 from .autotag_hook import LiveAutoTagHook
 from .components import DaemonComponents
+from .inference_metrics import MISSED_COMPUTE_BUSY, InferenceTimingRecorder
+from .inference_scheduling import GenerationToken, TickScheduler, TickSlot
 
 log = logging.getLogger(__name__)
+
+#: Thread-name prefix of the one inference worker, so a test can assert the
+#: executor was shut down and no thread leaked (C08.10).
+INFERENCE_WORKER_THREAD_PREFIX = "canary-inference"
 
 #: Vehicle states IF/LSTM are allowed to score in (Phase 1.5). ``replay``
 #: re-emits real running-vehicle data through the live pipeline, so it scores
@@ -81,6 +89,29 @@ def _live_vehicle_state(
         obd_freshness_seconds=inputs["obd_freshness_seconds"],
         can_freshness_seconds=inputs["can_freshness_seconds"],
         replay_id=replay_id,
+    )
+
+
+def _current_generation(components: DaemonComponents) -> GenerationToken:
+    """The C08.5 generation token: replay + capture state and every model
+    manager's serving version, read on the loop. Cheap (a few attribute
+    reads) so it is taken twice per tick — at snapshot and again at apply —
+    and a mismatch discards the in-flight result."""
+    replay_id: str | None = None
+    if components.replay_controller is not None:
+        replay_state = components.replay_controller.status()
+        if replay_state.running:
+            replay_id = replay_state.replay_id
+    capture_id: str | None = None
+    if components.capture_controller is not None:
+        active = components.capture_controller.active
+        capture_id = active.capture_id if active is not None else None
+    versions: list[tuple[str, str | None]] = []
+    for name, manager in sorted(components.model_managers.items()):
+        loaded = manager.current
+        versions.append((name, loaded.serving_version if loaded is not None else None))
+    return GenerationToken(
+        replay_id=replay_id, capture_id=capture_id, model_versions=tuple(versions)
     )
 
 
@@ -251,6 +282,23 @@ async def _publish_derived_channels(
             log.exception("failed to persist derived channels to storage")
 
 
+@dataclass(frozen=True)
+class _IFComputeJob:
+    """Loop-snapshotted inputs for one IF scoring pass (C08.4): the pinned
+    model bundle and the one-row feature frame."""
+
+    loaded: Any
+    row: Any
+
+
+@dataclass(frozen=True)
+class _SequenceComputeJob:
+    """Loop-snapshotted inputs for one sequence forward pass (C08.4)."""
+
+    engine: Any
+    row: Any
+
+
 class IsolationForestDetector:
     """IF per-tick scoring → per-source event → IF fusion source (Task 3.1).
 
@@ -270,17 +318,29 @@ class IsolationForestDetector:
         #: tick or while no artifact is loaded.
         self.model_version: str | None = None
 
-    def tick(self, row: Any, ctx: TickContext) -> list[FusionSource]:
+    def prepare(self, row: Any, ctx: TickContext) -> _IFComputeJob | None:
+        """Loop side (C08.4): pin the model generation and decide whether
+        this tick scores at all. ``None`` means nothing to compute."""
         loaded = self._manager.current if self._manager is not None else None
         # serving_version, not the sidecar manifest's claim — on a partial
         # deploy (stale binary + fresh manifest) the fused event's version
         # tag must name the model actually scoring.
         self.model_version = loaded.serving_version if loaded is not None else None
         if loaded is None or row is None or not ctx.scoring_allowed:
-            return []
-        if_input = _score_and_emit(
-            loaded,
-            row,
+            return None
+        return _IFComputeJob(loaded=loaded, row=row)
+
+    @staticmethod
+    def compute(job: _IFComputeJob) -> _IFComputed:
+        """Worker side: the sklearn forward pass + contributor ranking, over
+        inputs pinned by :meth:`prepare`. Touches no shared state."""
+        return _if_compute(job.loaded, job.row)
+
+    def apply(self, computed: _IFComputed, ctx: TickContext) -> list[FusionSource]:
+        """Loop side: health, ``/ws/scores``, persistence, per-source emit,
+        and the IF fusion source."""
+        if_input = _if_apply(
+            computed,
             self._components.emitter,
             self._components.health_monitor,
             scores=self._components.scores_broadcaster,
@@ -296,6 +356,13 @@ class IsolationForestDetector:
                 if_input.sustained,
             )
         ]
+
+    def tick(self, row: Any, ctx: TickContext) -> list[FusionSource]:
+        """Synchronous prepare → compute → apply, all on the caller's thread."""
+        job = self.prepare(row, ctx)
+        if job is None:
+            return []
+        return self.apply(self.compute(job), ctx)
 
 
 class SequenceDetector:
@@ -320,20 +387,35 @@ class SequenceDetector:
         #: fused event's ``lstm=...`` version tag.
         self.model_version: str | None = None
 
-    def tick(self, row: Any, ctx: TickContext) -> list[FusionSource]:
+    def prepare(self, row: Any, ctx: TickContext) -> _SequenceComputeJob | None:
+        """Loop side (C08.4): version bookkeeping and the engine hot-swap.
+        The engine is rebuilt *here*, on the loop, never while a worker
+        pass over the old one could still be running (the pipeline only
+        snapshots when no compute job is in flight)."""
         loaded = self._manager.current if self._manager is not None else None
-        # serving_version — see IsolationForestDetector.tick.
+        # serving_version — see IsolationForestDetector.prepare.
         self.model_version = loaded.serving_version if loaded is not None else None
         if loaded is None or row is None or not ctx.scoring_allowed:
-            return []
+            return None
         if self._engine_version != self.model_version:
             self._engine = _build_sequence_engine(
                 loaded, suppress_channels=_suppress_channels_for(self._components, loaded)
             )
             self._engine_version = self.model_version if self._engine is not None else None
         if self._engine is None:
-            return []
-        result = _sequence_observe(self._engine, row)
+            return None
+        return _SequenceComputeJob(engine=self._engine, row=row)
+
+    @staticmethod
+    def compute(job: _SequenceComputeJob) -> Any:
+        """Worker side: window append + torch forward pass. The engine's
+        window buffer is detector-owned and only ever advanced from here,
+        one job at a time (C08.6 bounds in-flight jobs to one)."""
+        return _sequence_observe(job.engine, job.row)
+
+    def apply(self, result: Any, ctx: TickContext) -> list[FusionSource]:
+        """Loop side: ``/ws/scores``, persistence, per-source emit, fusion
+        source. ``result`` is ``None`` until the window is full."""
         if result is None:
             return []
         _publish_score(
@@ -368,6 +450,13 @@ class SequenceDetector:
             )
         ]
 
+    def tick(self, row: Any, ctx: TickContext) -> list[FusionSource]:
+        """Synchronous prepare → compute → apply, all on the caller's thread."""
+        job = self.prepare(row, ctx)
+        if job is None:
+            return []
+        return self.apply(self.compute(job), ctx)
+
 
 class BehaviorDetector:
     """Behavior/physics-model residual overlay → first-class behavior events
@@ -389,13 +478,24 @@ class BehaviorDetector:
         self._fusion = fusion
         self._source = source
 
-    def tick(self, row: Any, ctx: TickContext) -> list[FusionSource]:
-        del row
+    def prepare(self, row: Any, ctx: TickContext) -> list[_BehaviorResidual]:
+        """Loop side (C08.4): grade every behavior model off the source's
+        ``latest_operating_point`` and feed the live overlay. This reads
+        loop-owned ``LiveFeatureSource`` state, so it stays on the loop —
+        there is no worker-side half for the behavior detector (the
+        surfaces are small interpolations, far cheaper than the feature
+        stage; see docs/inference-scheduling.md)."""
+        del row, ctx
+        return _observe_behavior(self._source, self._components.behavior_live)
+
+    def apply(self, residuals: list[_BehaviorResidual], ctx: TickContext) -> list[FusionSource]:
+        """Loop side: persistence, ``/ws/scores``, per-model emit, fusion
+        sources — one per fired model."""
         sources: list[FusionSource] = []
         warn_severity = self._components.config.models.fusion.behavior_warning_severity
         persistence = self._components.persistence_gate
         tuner = self._components.alert_tuner
-        for residual in _observe_behavior(self._source, self._components.behavior_live):
+        for residual in residuals:
             # Sibling surfaces grading the same output channel share a
             # fusion group so they count as one agreeing voice, not two.
             behavior = self._fusion.behavior_source(
@@ -455,6 +555,357 @@ class BehaviorDetector:
             )
         return sources
 
+    def tick(self, row: Any, ctx: TickContext) -> list[FusionSource]:
+        """Synchronous prepare → apply on the caller's thread."""
+        return self.apply(self.prepare(row, ctx), ctx)
+
+
+@dataclass(frozen=True)
+class _TickRequest:
+    """One tick's loop-side snapshot (C08.4): everything the worker needs,
+    pinned to the :class:`GenerationToken` current when it was taken."""
+
+    slot: TickSlot
+    ctx: TickContext
+    token: GenerationToken
+    if_job: _IFComputeJob | None
+    sequence_job: _SequenceComputeJob | None
+    behavior_residuals: tuple[_BehaviorResidual, ...]
+    #: ``perf_counter`` when the snapshot began / how long it took, for the
+    #: ``total`` and ``loop_occupancy`` stages.
+    snapshot_started: float
+    snapshot_seconds: float
+
+    @property
+    def needs_worker(self) -> bool:
+        return self.if_job is not None or self.sequence_job is not None
+
+
+@dataclass(frozen=True)
+class _TickResult:
+    """What the worker hands back: pure data plus its own stage durations
+    (seconds), recorded by the loop on apply — the recorder is loop-owned."""
+
+    if_computed: _IFComputed | None
+    sequence_result: Any
+    durations: Mapping[str, float]
+
+
+_EMPTY_RESULT = _TickResult(if_computed=None, sequence_result=None, durations={})
+
+
+def _compute_tick(request: _TickRequest) -> _TickResult:
+    """Worker-thread entry (C08.4): the IF forward pass and the sequence
+    forward pass, nothing else. No broadcaster, no asyncio primitive, no
+    ``LiveFeatureSource``, no emitter — every side effect waits for
+    :meth:`LiveInferencePipeline._apply` on the loop."""
+    durations: dict[str, float] = {}
+    started = time.perf_counter()
+    if_computed: _IFComputed | None = None
+    if request.if_job is not None:
+        stage_started = time.perf_counter()
+        if_computed = IsolationForestDetector.compute(request.if_job)
+        durations["isolation_forest"] = time.perf_counter() - stage_started
+    sequence_result: Any = None
+    if request.sequence_job is not None:
+        stage_started = time.perf_counter()
+        sequence_result = SequenceDetector.compute(request.sequence_job)
+        durations["sequence"] = time.perf_counter() - stage_started
+    durations["compute"] = time.perf_counter() - started
+    return _TickResult(
+        if_computed=if_computed, sequence_result=sequence_result, durations=durations
+    )
+
+
+class LiveInferencePipeline:
+    """The per-tick body of :func:`run_live_inference` (C08.4/C08.5/C08.6).
+
+    Three phases, two owners:
+
+    1. **snapshot** (loop) — ``source.tick(now)``, derived-channel
+       publication, vehicle-state gate, autotag, behavior residuals, and each
+       detector's ``prepare``; the result is an immutable :class:`_TickRequest`
+       tagged with the current :class:`GenerationToken`.
+    2. **compute** (the one worker thread) — :func:`_compute_tick`, pure.
+    3. **apply** (loop) — discard if the generation changed, else each
+       detector's ``apply`` (health, ``/ws/scores``, persistence, emits) and
+       fusion.
+
+    At most one compute job is ever in flight: a tick whose deadline arrives
+    while the previous job is still scoring is *skipped* and counted
+    (``missed_by_reason.compute_busy``), never queued. A tick with nothing to
+    score (no model loaded, gated vehicle state, no row) applies inline
+    without touching the worker.
+
+    ``wall_clock`` and ``executor`` are injectable for tests; production uses
+    ``datetime.now(UTC)`` and an owned single-thread executor.
+    """
+
+    def __init__(
+        self,
+        source: LiveFeatureSource,
+        components: DaemonComponents,
+        *,
+        interval_seconds: float,
+        recorder: InferenceTimingRecorder,
+        executor: ThreadPoolExecutor | None = None,
+        wall_clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._source = source
+        self._components = components
+        self._recorder = recorder
+        self._fusion = FusionScorer(components.config.models.fusion)
+        self._severity_threshold = components.config.models.fusion.severity_threshold
+        self._if = IsolationForestDetector(components)
+        self._sequence = SequenceDetector(components)
+        self._behavior = BehaviorDetector(components, self._fusion, source)
+        # Phase 2a.6 — ships config-gated off (AutoTagConfig.live_enabled
+        # defaults False); LiveAutoTagHook.tick is itself a no-op while
+        # disabled, so constructing it unconditionally costs nothing and keeps
+        # a config hot-reload flipping it on mid-session picked up next tick.
+        self._autotag_hook = LiveAutoTagHook(
+            config=components.config.autotag,
+            session_dir=lambda: (
+                components.storage_writer.paths.root
+                if components.storage_writer is not None
+                else None
+            ),
+            _tick_seconds=interval_seconds,
+        )
+        self._owns_executor = executor is None
+        self._executor = executor if executor is not None else _new_inference_executor()
+        self._wall_clock = wall_clock if wall_clock is not None else _utc_now
+        self._inflight: asyncio.Task[None] | None = None
+
+    @property
+    def inflight(self) -> asyncio.Task[None] | None:
+        """The compute→apply task for the last worker-bound tick, or ``None``."""
+        return self._inflight
+
+    @property
+    def detectors(self) -> tuple[IsolationForestDetector, SequenceDetector, BehaviorDetector]:
+        return (self._if, self._sequence, self._behavior)
+
+    async def run_tick(self, slot: TickSlot) -> None:
+        """Scheduler entry: skip if the worker is busy, else snapshot and
+        either apply inline or hand off to the worker."""
+        if self._inflight is not None and not self._inflight.done():
+            self._recorder.note_missed(MISSED_COMPUTE_BUSY)
+            log.warning(
+                "inference worker still scoring tick %d at deadline of tick %d; skipping",
+                self._inflight_index,
+                slot.index,
+            )
+            return
+        self._inflight = None
+        request = await self._snapshot(slot)
+        if not request.needs_worker:
+            self._apply(request, _EMPTY_RESULT)
+            return
+        self._inflight_index = slot.index
+        self._inflight = asyncio.create_task(
+            self._compute_and_apply(request), name=f"inference-compute-{slot.index}"
+        )
+
+    _inflight_index: int = -1
+
+    async def _snapshot(self, slot: TickSlot) -> _TickRequest:
+        """Phase 1 — everything that reads or mutates loop-owned state."""
+        import pandas as pd
+
+        source = self._source
+        components = self._components
+        recorder = self._recorder
+        snapshot_started = time.perf_counter()
+        now = self._wall_clock()
+        stage_started = time.perf_counter()
+        row = source.tick(now)
+        recorder.record_stage("feature", time.perf_counter() - stage_started)
+        timestamp_str: str | None = None
+        operating_mode: str | None = None
+        if row is not None:
+            # Canonical T-separated/Z-suffixed ISO-8601 — a bare
+            # ``str(pd.Timestamp)`` is space-separated, which broke the
+            # dashboard's lexicographic ``since`` filter for every
+            # behavior/fused event (they sorted before any 'T…' bound).
+            timestamp_str = format_timestamp(row["timestamp"].iloc[0])
+            mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
+            operating_mode = None if mode_val is None or pd.isna(mode_val) else str(mode_val)
+            stage_started = time.perf_counter()
+            await _publish_derived_channels(
+                components.telemetry_broadcaster, source, now, components.storage_writer
+            )
+            recorder.record_stage("publish_derived", time.perf_counter() - stage_started)
+            # 2a.6 — no-op while AutoTagConfig.live_enabled is False (the
+            # shipped default); reads the same raw operating point the
+            # behavior overlay reads, not the engineered feature row.
+            self._autotag_hook.tick(source.latest_operating_point, now)
+
+        # 4.7 — the segmenter falling back to constant "all" mode means
+        # every mode-gated behavior surface silently never fires; make
+        # that visible instead of nowhere, same edge-triggered pattern as
+        # IF's blind_modes (2.1).
+        newly_fallback = components.health_monitor.observe_segmenter_fallback(
+            source.last_segmenter_fallback
+        )
+        if newly_fallback:
+            log.warning(
+                "operating-mode segmenter fell back to constant %r mode — segmenter "
+                "input columns are missing from the live stream; every mode-gated "
+                "behavior surface is suppressed until it recovers. See /status "
+                "detectors.segmenter.fallback_active.",
+                ALL_MODE,
+            )
+
+        scoring_allowed = True
+        vehicle_state: VehicleState | None = None
+        if row is not None:
+            vehicle_state = _live_vehicle_state(source, components, now)
+            scoring_allowed = vehicle_state.state in _SCORABLE_VEHICLE_STATES
+            if not scoring_allowed:
+                components.emitter.counters.skipped_vehicle_state += 1
+
+        # Spec §3.7.6 — escalate a sustained parked-with-power state to a
+        # poweroff. Ships disabled; `idle_shutdown` is None unless the
+        # operator opted in. Classified unconditionally because the state
+        # that matters most here (`no_data`) is exactly the one where
+        # `row` is None, so the block above would never see it.
+        if components.idle_shutdown is not None:
+            if vehicle_state is None:
+                vehicle_state = _live_vehicle_state(source, components, now)
+            if components.idle_shutdown.observe(state=vehicle_state.state, now=time.monotonic()):
+                components.idle_shutdown.trigger()
+
+        ctx = TickContext(
+            now=now,
+            operating_mode=operating_mode,
+            timestamp_str=timestamp_str,
+            scoring_allowed=scoring_allowed,
+        )
+        token = _current_generation(components)
+        if_job = self._if.prepare(row, ctx)
+        sequence_job = self._sequence.prepare(row, ctx)
+        stage_started = time.perf_counter()
+        residuals = tuple(self._behavior.prepare(row, ctx))
+        recorder.record_stage("behavior", time.perf_counter() - stage_started)
+        snapshot_seconds = time.perf_counter() - snapshot_started
+        recorder.record_stage("snapshot", snapshot_seconds)
+        return _TickRequest(
+            slot=slot,
+            ctx=ctx,
+            token=token,
+            if_job=if_job,
+            sequence_job=sequence_job,
+            behavior_residuals=residuals,
+            snapshot_started=snapshot_started,
+            snapshot_seconds=snapshot_seconds,
+        )
+
+    async def _compute_and_apply(self, request: _TickRequest) -> None:
+        """Phase 2 on the worker, then phase 3 back on the loop. A worker
+        exception is counted and logged; the loop keeps ticking."""
+        loop = asyncio.get_running_loop()
+        submitted = time.perf_counter()
+        try:
+            result = await loop.run_in_executor(self._executor, _compute_tick, request)
+        except Exception:  # noqa: BLE001 — live inference is best-effort
+            self._recorder.note_compute_failure()
+            log.exception("live inference compute failed for tick %d", request.slot.index)
+            return
+        self._recorder.record_stage("compute_wait", time.perf_counter() - submitted)
+        try:
+            self._apply(request, result)
+        except Exception:  # noqa: BLE001 — live inference is best-effort
+            log.exception("live inference apply failed for tick %d", request.slot.index)
+
+    def _apply(self, request: _TickRequest, result: _TickResult) -> None:
+        """Phase 3 — every side effect, on the loop, exactly once per
+        accepted result, and only for the generation it was computed under."""
+        recorder = self._recorder
+        apply_started = time.perf_counter()
+        for name, seconds in result.durations.items():
+            recorder.record_stage(name, seconds)
+        if _current_generation(self._components) != request.token:
+            recorder.note_stale_discarded()
+            log.info(
+                "discarding inference result for tick %d: generation changed while scoring",
+                request.slot.index,
+            )
+            return
+        ctx = request.ctx
+        sources: list[FusionSource] = []
+        if result.if_computed is not None:
+            sources.extend(self._if.apply(result.if_computed, ctx))
+        if result.sequence_result is not None:
+            sources.extend(self._sequence.apply(result.sequence_result, ctx))
+        sources.extend(self._behavior.apply(list(request.behavior_residuals), ctx))
+        self._fuse(sources, ctx)
+        finished = time.perf_counter()
+        apply_seconds = finished - apply_started
+        recorder.record_stage("apply", apply_seconds)
+        recorder.record_stage("loop_occupancy", request.snapshot_seconds + apply_seconds)
+        recorder.record_stage("total", finished - request.snapshot_started)
+        recorder.note_tick_completed()
+
+    def _fuse(self, sources: list[FusionSource], ctx: TickContext) -> None:
+        if not (self._fusion.enabled and sources and ctx.timestamp_str is not None):
+            return
+        fused_version = (
+            f"if={self._if.model_version or '-'}|lstm={self._sequence.model_version or '-'}"
+        )
+        fused = self._fusion.fuse(
+            sources, timestamp=ctx.timestamp_str, operating_mode=ctx.operating_mode
+        )
+        _publish_score(
+            self._components.scores_broadcaster,
+            source="fused",
+            score=fused.severity,
+            threshold=self._severity_threshold,
+            operating_mode=ctx.operating_mode,
+            model_version=fused_version,
+            timestamp=ctx.timestamp_str,
+            missing_features=False,
+        )
+        self._components.emitter.emit_fused(
+            fused,
+            model_version=fused_version,
+            severity_threshold=self._severity_threshold,
+        )
+
+    async def close(self, *, timeout_seconds: float) -> None:
+        """Join the in-flight job (bounded) and shut the owned executor down.
+
+        A worker pass can't be cancelled mid-forward-pass; if it doesn't
+        return within ``timeout_seconds`` the executor is released without
+        waiting and the thread ends when the pass does — logged, so a
+        shutdown that outlives its worker is visible rather than hung.
+        """
+        inflight = self._inflight
+        if inflight is not None and not inflight.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(inflight), timeout=timeout_seconds)
+            except TimeoutError:
+                log.warning(
+                    "in-flight inference compute did not finish within %.1fs; "
+                    "releasing the worker without waiting",
+                    timeout_seconds,
+                )
+                if self._owns_executor:
+                    self._executor.shutdown(wait=False, cancel_futures=True)
+                return
+        if self._owns_executor:
+            self._executor.shutdown(wait=True, cancel_futures=True)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _new_inference_executor() -> ThreadPoolExecutor:
+    """The one owned worker (C08.4/C08.6): ``max_workers=1`` is the bound
+    on in-flight computation, not a tuning knob."""
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix=INFERENCE_WORKER_THREAD_PREFIX)
+
 
 async def run_live_inference(
     source: LiveFeatureSource,
@@ -467,10 +918,10 @@ async def run_live_inference(
 
     Caller wires record-stream → ``source.observe(record)`` somewhere else.
     Each tick (``tick_seconds``, default ``1 / preprocessing.resample_hz``)
-    pulls *one* feature row and ticks every :class:`Detector` against it
-    (Task 3.1 — ``IsolationForestDetector``, ``SequenceDetector``,
-    ``BehaviorDetector``), each owning its own observe → per-source emit →
-    persistence → fusion-source shape:
+    pulls *one* feature row and runs every detector against it (Task 3.1 —
+    ``IsolationForestDetector``, ``SequenceDetector``, ``BehaviorDetector``),
+    each owning its own observe → per-source emit → persistence →
+    fusion-source shape:
 
     * **IF** → per-source ``isolation_forest`` event (unchanged) + an IF
       fusion source from the 7.2 calibrated threshold;
@@ -487,6 +938,18 @@ async def run_live_inference(
     buffer; the standalone LSTM-only task, ``run_live_inference_lstm``, was
     production-dead by the time of Task 4.1 and was deleted).
 
+    **Scheduling (C08).** Ticks run on an absolute monotonic deadline grid
+    (:class:`~src.daemon.inference_scheduling.TickScheduler`): the period
+    is ``tick_seconds`` regardless of how long a tick's work takes, an
+    overrun skips to the next future deadline (counted, never a catch-up
+    burst), and the expensive IF/sequence forward passes run in one owned
+    worker thread while ``LiveFeatureSource``, broadcasts, persistence and
+    emits stay on the loop (:class:`LiveInferencePipeline`). Timing and
+    overload counters land in ``components.inference_timing`` (``/status``
+    ``detectors.inference``). ``tick_seconds`` is the *model* cadence — it is
+    derived from ``resample_hz`` and independent of any collection rate
+    (C08.8); see ``docs/inference-scheduling.md``.
+
     **Vehicle-state gating (Phase 1.5).** IF and the sequence detector only
     score ticks where ``_live_vehicle_state`` classifies as
     ``engine_running`` or ``replay`` — ``_SCORABLE_VEHICLE_STATES``. A
@@ -498,129 +961,21 @@ async def run_live_inference(
 
     Best-effort: every error inside the loop is caught + logged.
     """
-    import pandas as pd
-
     interval = tick_seconds or 1.0 / max(components.config.preprocessing.resample_hz, 1.0)
-    fusion = FusionScorer(components.config.models.fusion)
-    severity_threshold = components.config.models.fusion.severity_threshold
     if components.model_managers.get("isolation_forest") is None:
         log.info(
             "isolation_forest model manager absent; IF scoring disabled — the "
             "behavior overlay + fusion still run off the live feature source"
         )
-    if_detector = IsolationForestDetector(components)
-    sequence_detector = SequenceDetector(components)
-    behavior_detector = BehaviorDetector(components, fusion, source)
-    detectors: tuple[Detector, ...] = (if_detector, sequence_detector, behavior_detector)
-    # Phase 2a.6 — ships config-gated off (AutoTagConfig.live_enabled
-    # defaults False); LiveAutoTagHook.tick is itself a no-op while
-    # disabled, so constructing it unconditionally costs nothing and keeps
-    # a config hot-reload flipping it on mid-session picked up next tick.
-    autotag_hook = LiveAutoTagHook(
-        config=components.config.autotag,
-        session_dir=lambda: (
-            components.storage_writer.paths.root if components.storage_writer is not None else None
-        ),
-        _tick_seconds=interval,
+    recorder = components.inference_timing
+    pipeline = LiveInferencePipeline(
+        source, components, interval_seconds=interval, recorder=recorder
     )
-
-    while not stop_event.is_set():
-        try:
-            now = datetime.now(UTC)
-            row = source.tick(now)
-            timestamp_str: str | None = None
-            operating_mode: str | None = None
-            if row is not None:
-                # Canonical T-separated/Z-suffixed ISO-8601 — a bare
-                # ``str(pd.Timestamp)`` is space-separated, which broke the
-                # dashboard's lexicographic ``since`` filter for every
-                # behavior/fused event (they sorted before any 'T…' bound).
-                timestamp_str = format_timestamp(row["timestamp"].iloc[0])
-                mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
-                operating_mode = None if mode_val is None or pd.isna(mode_val) else str(mode_val)
-                await _publish_derived_channels(
-                    components.telemetry_broadcaster, source, now, components.storage_writer
-                )
-                # 2a.6 — no-op while AutoTagConfig.live_enabled is False (the
-                # shipped default); reads the same raw operating point the
-                # behavior overlay reads, not the engineered feature row.
-                autotag_hook.tick(source.latest_operating_point, now)
-
-            # 4.7 — the segmenter falling back to constant "all" mode means
-            # every mode-gated behavior surface silently never fires; make
-            # that visible instead of nowhere, same edge-triggered pattern as
-            # IF's blind_modes (2.1).
-            newly_fallback = components.health_monitor.observe_segmenter_fallback(
-                source.last_segmenter_fallback
-            )
-            if newly_fallback:
-                log.warning(
-                    "operating-mode segmenter fell back to constant %r mode — segmenter "
-                    "input columns are missing from the live stream; every mode-gated "
-                    "behavior surface is suppressed until it recovers. See /status "
-                    "detectors.segmenter.fallback_active.",
-                    ALL_MODE,
-                )
-
-            scoring_allowed = True
-            vehicle_state: VehicleState | None = None
-            if row is not None:
-                vehicle_state = _live_vehicle_state(source, components, now)
-                scoring_allowed = vehicle_state.state in _SCORABLE_VEHICLE_STATES
-                if not scoring_allowed:
-                    components.emitter.counters.skipped_vehicle_state += 1
-
-            # Spec §3.7.6 — escalate a sustained parked-with-power state to a
-            # poweroff. Ships disabled; `idle_shutdown` is None unless the
-            # operator opted in. Classified unconditionally because the state
-            # that matters most here (`no_data`) is exactly the one where
-            # `row` is None, so the block above would never see it.
-            if components.idle_shutdown is not None:
-                if vehicle_state is None:
-                    vehicle_state = _live_vehicle_state(source, components, now)
-                if components.idle_shutdown.observe(
-                    state=vehicle_state.state, now=time.monotonic()
-                ):
-                    components.idle_shutdown.trigger()
-
-            ctx = TickContext(
-                now=now,
-                operating_mode=operating_mode,
-                timestamp_str=timestamp_str,
-                scoring_allowed=scoring_allowed,
-            )
-            sources: list[FusionSource] = []
-            for detector in detectors:
-                sources.extend(detector.tick(row, ctx))
-
-            if fusion.enabled and sources and timestamp_str is not None:
-                fused_version = (
-                    f"if={if_detector.model_version or '-'}"
-                    f"|lstm={sequence_detector.model_version or '-'}"
-                )
-                fused = fusion.fuse(sources, timestamp=timestamp_str, operating_mode=operating_mode)
-                _publish_score(
-                    components.scores_broadcaster,
-                    source="fused",
-                    score=fused.severity,
-                    threshold=severity_threshold,
-                    operating_mode=operating_mode,
-                    model_version=fused_version,
-                    timestamp=timestamp_str,
-                    missing_features=False,
-                )
-                components.emitter.emit_fused(
-                    fused,
-                    model_version=fused_version,
-                    severity_threshold=severity_threshold,
-                )
-        except Exception:  # noqa: BLE001 — live inference is best-effort
-            log.exception("live inference tick failed")
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=interval)
-            return  # stop_event fired
-        except TimeoutError:
-            continue
+    scheduler = TickScheduler(interval, recorder=recorder)
+    try:
+        await scheduler.run(pipeline.run_tick, stop_event)
+    finally:
+        await pipeline.close(timeout_seconds=max(interval, 1.0))
 
 
 def _build_sequence_engine(loaded: Any, *, suppress_channels: tuple[str, ...] = ()) -> Any:
@@ -917,40 +1272,30 @@ def _rank_feature_contributors(
     return {name: value for name, value in ranked}, tuple(name for name, _ in ranked)
 
 
-def _score_and_emit(
-    loaded: Any,
-    row: Any,  # pd.DataFrame, one row
-    emitter: AnomalyEventEmitter,
-    health: HealthMonitor | None = None,
-    *,
-    scores: Broadcaster | None = None,
-    persistence: PersistenceGate | None = None,
-    tuner: AlertTuner | None = None,
-    now: float | None = None,
-) -> _IFFusionInput | None:
-    """Run one feature row through IF.score → emitter. Best-effort.
+@dataclass(frozen=True)
+class _IFComputed:
+    """Everything the IF worker pass produced for one tick (C08.4) — pure
+    data, applied on the loop by :func:`_if_apply`. Carries the reconciliation
+    report so the once-per-version schema warning is logged from the loop."""
 
-    Returns the IF fusion input on a trustworthy tick, or ``None`` when the
-    verdict was suppressed (missing-feature schema warmup) and so must not
-    contribute to fusion either — the per-source emit policy is unchanged.
+    engine: IsolationForestInferenceEngine
+    report: FeatureSpecReconciliation
+    scored: Any  # pd.Series
+    latency_ms: float
+    timestamp: Any
+    missing: bool
+    mode_str: str | None
+    calibrated_threshold: float | None
+    scale: float | None
+    score_val: Any
+    feature_contributors: dict[str, float]
+    affected_channels: tuple[str, ...]
 
-    ``persistence`` (when given) is advanced once per trustworthy tick with
-    the calibrated over-threshold verdict (6.3: through ``tuner``'s
-    debounce-ownership rule, see ``_persistence_sustained``); the per-source
-    event is withheld
-    until the streak is sustained. The caller reads ``persistence.active``
-    to downgrade the fusion source consistently.
 
-    The model's expected ``feature_columns`` are a subset of what the
-    live source produces; missing columns surface as NaN, which
-    ``TrainedIsolationForest.score`` flags as ``missing_features`` rather
-    than crashing. That behavior is exactly what we want during the
-    schema-warmup window immediately after startup.
-
-    When a ``HealthMonitor`` is wired, the per-tick latency / missing-feature
-    flag / score / data freshness are recorded for ``/status`` (Task 6.27) —
-    a few dict reads + a perf-counter delta, negligible against scoring.
-    """
+def _if_compute(loaded: Any, row: Any) -> _IFComputed:
+    """The worker half of :func:`_score_and_emit`: schema alignment, the
+    sklearn forward pass, threshold/scale lookup, and contributor ranking.
+    No shared state is read or written — safe off the loop (C08.4)."""
     import pandas as pd
 
     from src.models.isolation_forest import (
@@ -962,7 +1307,6 @@ def _score_and_emit(
 
     engine = IsolationForestInferenceEngine(loaded.artifact)
     aligned, report = reconcile_feature_frame_to_spec(row, _schema_for_loaded(loaded))
-    _log_schema_reconciliation_once("isolation_forest", engine.model_version, report)
     started = time.perf_counter()
     scored = engine.observe(aligned.iloc[0])
     latency_ms = (time.perf_counter() - started) * 1000.0
@@ -970,15 +1314,6 @@ def _score_and_emit(
     missing = bool(scored.get(MISSING_FEATURES_COLUMN, False))
     mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
     mode_str = None if mode_val is None or pd.isna(mode_val) else str(mode_val)
-    _record_if_health(
-        health,
-        latency_ms=latency_ms,
-        missing=missing,
-        score=scored.get(SCORE_COLUMN),
-        timestamp=timestamp,
-        mode_str=mode_str,
-        model_version=engine.model_version,
-    )
     raw_threshold = scored.get(CALIBRATED_THRESHOLD_COLUMN)
     calibrated_threshold = (
         float(raw_threshold) if raw_threshold is not None and pd.notna(raw_threshold) else None
@@ -989,15 +1324,67 @@ def _score_and_emit(
         if model_mode is not None and pd.notna(model_mode)
         else None
     )
+    # Phase 7.2a — cheap first-pass IF attribution: rank features by their
+    # distance from the scaler's training baseline (|z|), keep the top K.
+    # Skipped for a missing-feature row: its verdict is suppressed below.
+    if missing:
+        feature_contributors: dict[str, float] = {}
+        affected_channels: tuple[str, ...] = ()
+    else:
+        feature_contributors, affected_channels = _rank_feature_contributors(
+            loaded, engine, aligned
+        )
+    return _IFComputed(
+        engine=engine,
+        report=report,
+        scored=scored,
+        latency_ms=latency_ms,
+        timestamp=timestamp,
+        missing=missing,
+        mode_str=mode_str,
+        calibrated_threshold=calibrated_threshold,
+        scale=scale if scale is None else float(scale),
+        score_val=scored.get(SCORE_COLUMN),
+        feature_contributors=feature_contributors,
+        affected_channels=affected_channels,
+    )
+
+
+def _if_apply(
+    computed: _IFComputed,
+    emitter: AnomalyEventEmitter,
+    health: HealthMonitor | None = None,
+    *,
+    scores: Broadcaster | None = None,
+    persistence: PersistenceGate | None = None,
+    tuner: AlertTuner | None = None,
+    now: float | None = None,
+) -> _IFFusionInput | None:
+    """The loop half of :func:`_score_and_emit`: health bookkeeping,
+    ``/ws/scores``, the persistence gate and the per-source emit."""
+    import pandas as pd
+
+    engine = computed.engine
+    _log_schema_reconciliation_once("isolation_forest", engine.model_version, computed.report)
+    _record_if_health(
+        health,
+        latency_ms=computed.latency_ms,
+        missing=computed.missing,
+        score=computed.score_val,
+        timestamp=computed.timestamp,
+        mode_str=computed.mode_str,
+        model_version=engine.model_version,
+    )
+    calibrated_threshold = computed.calibrated_threshold
     _publish_score(
         scores,
         source="isolation_forest",
-        score=scored.get(SCORE_COLUMN),
+        score=computed.score_val,
         threshold=calibrated_threshold,  # 7.2 per-mode calibrated boundary
-        operating_mode=mode_str,
+        operating_mode=computed.mode_str,
         model_version=engine.model_version,
-        timestamp=timestamp,
-        missing_features=missing,
+        timestamp=computed.timestamp,
+        missing_features=computed.missing,
     )
     # Layer 3 fail-safe: an IF verdict computed from a feature vector with
     # missing trained columns is untrustworthy. Suppress the emit (symmetric
@@ -1006,12 +1393,9 @@ def _score_and_emit(
     # recorded above, so the degraded state is visible on /status — silent
     # but observable beats confidently wrong. The raw score still went onto
     # /ws/scores above so the live readout shows the degraded state.
-    if missing:
+    if computed.missing:
         return None
-    # Phase 7.2a — cheap first-pass IF attribution: rank features by their
-    # distance from the scaler's training baseline (|z|), keep the top K.
-    feature_contributors, affected_channels = _rank_feature_contributors(loaded, engine, aligned)
-    score_val = scored.get(SCORE_COLUMN)
+    score_val = computed.score_val
     calibrated = calibrated_threshold is not None
     suppress_emit = False
     sustained = True
@@ -1036,7 +1420,7 @@ def _score_and_emit(
             raw_fired,
             tuner=tuner,
             source="isolation_forest",
-            mode=mode_str,
+            mode=computed.mode_str,
             now=now if now is not None else time.monotonic(),
             counters=emitter.counters,
         )
@@ -1050,19 +1434,68 @@ def _score_and_emit(
     # stays observable, just non-emitting.
     if calibrated and not suppress_emit:
         emitter.emit_isolation_forest_row(
-            scored,
+            computed.scored,
             model_version=engine.model_version,
-            timestamp=format_timestamp(timestamp),
-            affected_channels=affected_channels,
-            feature_contributors=feature_contributors or None,
+            timestamp=format_timestamp(computed.timestamp),
+            affected_channels=computed.affected_channels,
+            feature_contributors=computed.feature_contributors or None,
         )
     if score_val is None or pd.isna(score_val):
         return None
     return _IFFusionInput(
         score=float(score_val),
         threshold=calibrated_threshold,
-        scale=scale if scale is None else float(scale),
+        scale=computed.scale,
         sustained=sustained,
+    )
+
+
+def _score_and_emit(
+    loaded: Any,
+    row: Any,  # pd.DataFrame, one row
+    emitter: AnomalyEventEmitter,
+    health: HealthMonitor | None = None,
+    *,
+    scores: Broadcaster | None = None,
+    persistence: PersistenceGate | None = None,
+    tuner: AlertTuner | None = None,
+    now: float | None = None,
+) -> _IFFusionInput | None:
+    """Run one feature row through IF.score → emitter, synchronously on the
+    caller's thread. Best-effort.
+
+    Composition of :func:`_if_compute` (pure scoring, what the live pipeline
+    runs in its worker) and :func:`_if_apply` (every side effect, what it
+    runs on the loop) — kept as one call for offline callers and tests.
+
+    Returns the IF fusion input on a trustworthy tick, or ``None`` when the
+    verdict was suppressed (missing-feature schema warmup) and so must not
+    contribute to fusion either — the per-source emit policy is unchanged.
+
+    ``persistence`` (when given) is advanced once per trustworthy tick with
+    the calibrated over-threshold verdict (6.3: through ``tuner``'s
+    debounce-ownership rule, see ``_persistence_sustained``); the per-source
+    event is withheld until the streak is sustained. The caller reads the
+    returned ``sustained`` flag to downgrade the fusion source consistently.
+
+    The model's expected ``feature_columns`` are a subset of what the
+    live source produces; missing columns surface as NaN, which
+    ``TrainedIsolationForest.score`` flags as ``missing_features`` rather
+    than crashing. That behavior is exactly what we want during the
+    schema-warmup window immediately after startup.
+
+    When a ``HealthMonitor`` is wired, the per-tick latency / missing-feature
+    flag / score / data freshness are recorded for ``/status`` (Task 6.27) —
+    a few dict reads + a perf-counter delta, negligible against scoring.
+    """
+    return _if_apply(
+        _if_compute(loaded, row),
+        emitter,
+        health,
+        scores=scores,
+        persistence=persistence,
+        tuner=tuner,
+        now=now,
     )
 
 
@@ -1305,4 +1738,6 @@ __all__ = [
     "_observe_behavior",
     "_publish_score",
     "_score_and_emit",
+    "INFERENCE_WORKER_THREAD_PREFIX",
+    "LiveInferencePipeline",
 ]

@@ -85,3 +85,4 @@ live-vehicle verification (2026-07-22, truck idling) — done — eval-longitudi
 C05 — done (C05.11 Pi run pending) — benchmark repaired: one scenario clock, per-tick validity, truthful workload, JSON report, baseline saved
 C01 — done — acquisition-time pairing: PairingPolicy + ordered once-only matching, timestamp provenance, grid= refused, residual (b−a) ground-truth checks; docs/analysis-pairing.md
 C07 — done — owned CanReader thread + bounded ThreadHandoff; idle-bus loop stall 590 ms → ~1 ms; 20k-record handoff 20,000 wake-ups → 1; sink source filters; can_receive health counter; docs/collection-receive-path.md
+C08 — done (C08.1 detector occupancy w/ real models and C08.12 Pi pending) — TickScheduler on absolute deadlines (drift 4 s → ~2 ms/100 ticks), one owned compute worker, generation-tagged results, timing in /status.detectors.inference, replay parity; docs/inference-scheduling.md

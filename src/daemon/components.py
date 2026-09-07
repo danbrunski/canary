@@ -29,6 +29,7 @@ from src.control.monitor_state import MonitorState
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
 from src.daemon.idle_shutdown import IdleShutdownMonitor
+from src.daemon.inference_metrics import InferenceTimingRecorder
 from src.dashboard.behavior_live import BehaviorLiveState
 from src.dashboard.broadcast import Broadcaster
 from src.models.health import HealthMonitor
@@ -118,6 +119,10 @@ class DaemonComponents:
     #: §3.7.6). ``None`` when ``IdleShutdownConfig.enabled`` is false, which
     #: is the shipped default — the inference tick then skips it entirely.
     idle_shutdown: IdleShutdownMonitor | None = None
+    #: C08 — per-tick stage timing, loop lateness and overload counters for
+    #: the live-inference scheduler; written by ``run_live_inference`` (loop
+    #: only), read by ``/status`` ``detectors.inference``.
+    inference_timing: InferenceTimingRecorder = field(default_factory=InferenceTimingRecorder)
 
 
 def build_components(config: CanaryConfig) -> DaemonComponents:
