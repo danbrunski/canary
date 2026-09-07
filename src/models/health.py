@@ -537,6 +537,40 @@ class HealthMonitor:
         state["errors"] = int(state.get("errors", 0)) + 1
         state["last_error"] = f"{type(exc).__name__}: {exc}"
 
+    def observe_receive_path(
+        self,
+        name: str,
+        *,
+        received: int,
+        parse_errors: int,
+        buffer_dropped: int,
+        buffer_high_water: int,
+        buffer_capacity: int,
+        queue_dropped: int,
+        batches: int,
+        reconnects: int = 0,
+    ) -> None:
+        """Record a collector receive path's producer-buffer pressure (C07.5).
+
+        A named entry under ``telemetry_sinks`` (e.g. ``can_receive``) so
+        loss *before* the ingest queue is attributable on its own, never
+        folded into ``storage``. ``dropped_records`` is the total explicit
+        loss at this stage; ``buffer_dropped`` (loop too slow to drain the
+        thread handoff) and ``queue_dropped`` (ingest queue full) break it
+        down by cause. Values are cumulative counters from the collector,
+        so they are assigned, not summed.
+        """
+        state = self._sink_state(name)
+        state["records_processed"] = received
+        state["parse_errors"] = parse_errors
+        state["buffer_dropped"] = buffer_dropped
+        state["buffer_high_water"] = buffer_high_water
+        state["buffer_capacity"] = buffer_capacity
+        state["queue_dropped"] = queue_dropped
+        state["dropped_records"] = buffer_dropped + queue_dropped
+        state["batches"] = batches
+        state["reconnects"] = reconnects
+
     def observe_telemetry_write(
         self,
         name: str,

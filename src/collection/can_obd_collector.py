@@ -661,11 +661,12 @@ async def collect_can_obd_from_config(
 
     async def _attempt(capture: Callable[[can.BusABC], None]) -> None:
         thread_stop.clear()
+        # One bounded, coalescing handoff per attempt (C07.4); closed once the
+        # worker has returned so a late callback can never touch the queue.
+        enqueue = threadsafe_enqueue(loop, queue, on_drop=drop_counter, name="canable-obd")
         try:
             bus = factory(spec.can)
             capture(bus)
-
-            enqueue = threadsafe_enqueue(loop, queue, on_drop=drop_counter)
 
             def on_frame(msg: can.Message) -> None:
                 enqueue(frame_to_record(msg))
@@ -690,6 +691,7 @@ async def collect_can_obd_from_config(
             )
         finally:
             thread_stop.set()
+            enqueue.close()
 
     try:
         await run_with_reconnect(

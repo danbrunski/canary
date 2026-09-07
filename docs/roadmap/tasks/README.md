@@ -40,7 +40,7 @@ No live rates, hardware capacity, or model accuracy were established.
 | C04 | [Hybrid diagnostic scheduling](04-hybrid-diagnostic-scheduling.md) | Finding 4: transition waits and end-anchored cadence | Coordinate with C02 and C06 on the collector loop |
 | C05 | [Trustworthy pipeline benchmark](05-pipeline-benchmark.md) | Finding 5: stale-data benchmark and invalid capacity claims | Can start immediately; precedes optimization claims |
 | C06 | [Lossless diagnostic discovery](06-diagnostic-discovery.md) | Finding 6: untapped frames, discovery budget/session ownership | Can start immediately; coordinate with C04 |
-| C07 | [Passive receive and queue handoff](07-passive-receive-and-queueing.md) | Finding 7: blocking passive receive; collection overhead | C05 for performance evidence; C03 for loss reporting |
+| C07 | [Passive receive and queue handoff](archive/07-passive-receive-and-queueing.md) ✅ | Finding 7: blocking passive receive; collection overhead | C05 for performance evidence; C03 for loss reporting |
 | C08 | [Inference scheduling and isolation](08-inference-scheduling.md) | Finding 7: synchronous inference and cadence drift | C05 baseline; coordinate with C07 on event-loop measurements |
 | C09 | [Polling plans and profile capacity](09-polling-plans-and-profile-capacity.md) | Mode-specific recommendations: batching, priorities, DID weights, accurate demand | C02, C04, C06; C03 for delivery acceptance |
 | C10 | [Sustained end-to-end validation](10-sustained-validation.md) | Pi benchmarks and release evidence for all modes | Baseline after C05; final validation after relevant fixes |

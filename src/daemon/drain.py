@@ -34,13 +34,37 @@ STORAGE_WRITE_BATCH_SIZE = 1024
 STORAGE_WRITE_BATCH_MAX_WAIT_SECONDS = 0.01
 
 
+#: Records the fanout moves per event-loop turn once one is available. Bounds
+#: loop occupancy per turn while amortizing the per-record ``wait_for`` (a task
+#: plus a timer handle each) that dominated fanout cost under a busy bus.
+FANOUT_MAX_BATCH = 256
+
+
 @dataclass(frozen=True)
 class TelemetrySink:
-    """One queue fed by the collector fanout."""
+    """One queue fed by the collector fanout.
+
+    ``accepts`` (C07.6) is an optional per-sink subscription filter applied
+    in the fanout: a record it rejects is never enqueued to this sink. Only
+    for sinks whose consumer would discard the record on sight anyway
+    (GPS/DTC/monitor reject by ``source`` before doing any work), so it
+    changes nothing but the wasted enqueue/dequeue; storage, broadcast and
+    live sinks take every record.
+    """
 
     name: str
     queue: asyncio.Queue[TelemetryRecord]
     overflow: TelemetryOverflowPolicy
+    accepts: Callable[[TelemetryRecord], bool] | None = None
+
+
+def accepts_source(source: str) -> Callable[[TelemetryRecord], bool]:
+    """Sink filter: only records from one telemetry ``source``."""
+
+    def _accepts(record: TelemetryRecord) -> bool:
+        return record.source == source
+
+    return _accepts
 
 
 async def run_telemetry_fanout(
@@ -64,15 +88,28 @@ async def run_telemetry_fanout(
         queue_monitor.observe(ingest_queue)
         _observe_queue(health_monitor, "ingest", ingest_queue)
         try:
-            record = await asyncio.wait_for(ingest_queue.get(), timeout=poll_interval)
+            first = await asyncio.wait_for(ingest_queue.get(), timeout=poll_interval)
         except TimeoutError:
             continue
 
+        # One awaited get, then whatever is already queued (bounded) without
+        # yielding — order is preserved, and a busy bus no longer costs one
+        # task + timer per record.
+        batch = [first]
+        while len(batch) < FANOUT_MAX_BATCH:
+            try:
+                batch.append(ingest_queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+
         try:
-            for sink in sinks:
-                _enqueue_sink(sink, record, health_monitor=health_monitor)
+            for record in batch:
+                for sink in sinks:
+                    if sink.accepts is None or sink.accepts(record):
+                        _enqueue_sink(sink, record, health_monitor=health_monitor)
         finally:
-            ingest_queue.task_done()
+            for _ in batch:
+                ingest_queue.task_done()
             queue_monitor.observe(ingest_queue)
             _observe_queue(health_monitor, "ingest", ingest_queue)
             for sink in sinks:
@@ -447,6 +484,14 @@ async def drain_queue_with_broadcast(
 
     Kept under the historical name for callers. Parquet remains the durable
     recording sink, but it is no longer the dispatcher for live inference.
+
+    Sink subscriptions (C07.6): storage, broadcast and live receive every
+    record. The GPS sink only receives ``gps`` records (``GpsTracker.observe``
+    returns on any other source), and the DTC and monitor sinks only ``obd``
+    records (``DtcState.observe`` / ``MonitorState.observe`` return on any
+    other source) — so raw CAN frames, the bulk of ingest on a live bus, are
+    not enqueued to three queues that would discard them unread. Loss
+    semantics are unchanged: the storage sink still drops newest and counts.
     """
     sink_queue_size = _sink_queue_size(queue)
     sinks: list[TelemetrySink] = []
@@ -506,7 +551,7 @@ async def drain_queue_with_broadcast(
 
     if gps_tracker is not None:
         gps_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
-        sinks.append(TelemetrySink("gps", gps_queue, "drop_oldest"))
+        sinks.append(TelemetrySink("gps", gps_queue, "drop_oldest", accepts=accepts_source("gps")))
 
         def _trip_ended() -> None:
             if on_trip_ended is not None and active_session_path is not None:
@@ -528,7 +573,7 @@ async def drain_queue_with_broadcast(
 
     if dtc_state is not None:
         dtc_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
-        sinks.append(TelemetrySink("dtc", dtc_queue, "drop_oldest"))
+        sinks.append(TelemetrySink("dtc", dtc_queue, "drop_oldest", accepts=accepts_source("obd")))
         sink_tasks.append(
             asyncio.create_task(
                 run_dtc_sink(
@@ -547,7 +592,9 @@ async def drain_queue_with_broadcast(
 
     if monitor_state is not None:
         monitor_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
-        sinks.append(TelemetrySink("monitor", monitor_queue, "drop_oldest"))
+        sinks.append(
+            TelemetrySink("monitor", monitor_queue, "drop_oldest", accepts=accepts_source("obd"))
+        )
         sink_tasks.append(
             asyncio.create_task(
                 run_monitor_sink(
@@ -740,6 +787,7 @@ def _note_error(health_monitor: HealthMonitor | None, name: str, exc: BaseExcept
 
 __all__ = [
     "TelemetrySink",
+    "accepts_source",
     "drain_queue_with_broadcast",
     "run_dtc_sink",
     "run_gps_sink",

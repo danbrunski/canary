@@ -20,7 +20,7 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 
 from src.collection import tuning_profile
-from src.collection.can_collector import collect_can_from_config
+from src.collection.can_collector import ReceiveStatsCallback, collect_can_from_config
 from src.collection.can_obd_collector import (
     CanObdSpec,
     ObdSchedulerMetrics,
@@ -54,7 +54,15 @@ def default_collectors(
     obd_scheduler_metrics_callback: Callable[[ObdSchedulerMetrics], None] | None = None,
     freeze_frame_trigger: FreezeFrameTrigger | None = None,
     force_poll_trigger: ForcePollTrigger | None = None,
+    can_receive_stats_callback: ReceiveStatsCallback | None = None,
 ) -> list[CollectorStarter]:
+    """Config -> collector starters.
+
+    ``can_receive_stats_callback`` (C07.5) receives the passive CAN receive
+    path's cumulative counters — used by the two branches that run the
+    standalone sniffer (OBD ``disabled``, and legacy ELM327 beside passive
+    CAN); the ``canable`` branch's combined collector has its own loop.
+    """
     capture_store = CaptureProfileStore(
         config.daemon.capture_profiles,
         config.collection,
@@ -158,6 +166,7 @@ def default_collectors(
             queue,
             stop,
             reconnect_policy=reconnect_policy,
+            on_receive_stats=can_receive_stats_callback,
         )
 
     if config.collection.obd_source == "disabled":

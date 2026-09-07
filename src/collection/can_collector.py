@@ -12,25 +12,34 @@ The collector NEVER calls `bus.send()` — this path is a sniffer by FR-02.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import socket
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import can
 
-from src.collection.queueing import QueueDropCounter, log_dropped_can_frame, put_nowait_or_drop
+from src.collection.queueing import (
+    DEFAULT_HANDOFF_CAPACITY,
+    DEFAULT_HANDOFF_MAX_BATCH,
+    HandoffStats,
+    QueueDropCounter,
+    ThreadHandoff,
+    log_dropped_can_frame,
+)
 from src.collection.reconnect import (
     BusReconnector,
     RebuildOutcome,
     ReconnectPolicy,
     run_with_reconnect,
+    wait_for_stop_or_timeout,
 )
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
@@ -89,6 +98,92 @@ def frame_to_record(msg: can.Message) -> TelemetryRecord:
     )
 
 
+@dataclass(frozen=True)
+class CanReceiveStats:
+    """Counters for one passive receive path (C07.5), reconcilable end to end.
+
+    ``frames`` is every frame the reader took off the bus; each one is either
+    ``handoff.accepted`` or ``handoff.dropped`` (buffer full / after close),
+    and every accepted one either reached the queue or is in
+    ``queue_dropped`` (asyncio queue full). ``parse_errors`` never became a
+    record at all. Cumulative across reconnect attempts when reported through
+    :func:`collect_can_from_config`.
+    """
+
+    frames: int
+    parse_errors: int
+    queue_dropped: int
+    handoff: HandoffStats
+    reconnects: int = 0
+
+    def __add__(self, other: CanReceiveStats) -> CanReceiveStats:
+        return CanReceiveStats(
+            frames=self.frames + other.frames,
+            parse_errors=self.parse_errors + other.parse_errors,
+            queue_dropped=self.queue_dropped + other.queue_dropped,
+            handoff=self.handoff + other.handoff,
+            reconnects=self.reconnects + other.reconnects,
+        )
+
+
+ReceiveStatsCallback = Callable[[CanReceiveStats], None]
+
+
+class CanReader(threading.Thread):
+    """The one owned receiver thread for a passive bus (C07.2).
+
+    Loops ``bus.recv(timeout)`` off the event loop and pushes each frame —
+    converted here, so the loop never pays for it — into a
+    :class:`ThreadHandoff`. It is a sniffer: it never calls ``bus.send``.
+
+    Frame-level parser errors (``ValueError``/``IndexError`` from python-can's
+    slcan parser) are counted and skipped exactly as in :func:`record`. Any
+    other exception is a bus-level failure: it ends the thread and is stored
+    in ``error`` for the owner to re-raise into the reconnect policy.
+    ``on_exit`` always fires last, from this thread, so the owner can wake
+    without polling.
+    """
+
+    def __init__(
+        self,
+        bus: can.BusABC,
+        handoff: ThreadHandoff,
+        *,
+        poll_interval: float,
+        stop: threading.Event,
+        on_exit: Callable[[], None],
+        name: str = "can-recv",
+    ) -> None:
+        super().__init__(name=name, daemon=True)
+        self._bus = bus
+        self._handoff = handoff
+        self._poll_interval = poll_interval
+        self._stop_event = stop
+        self._on_exit = on_exit
+        self.frames = 0
+        self.parse_errors = 0
+        self.error: BaseException | None = None
+
+    def run(self) -> None:
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    msg = self._bus.recv(timeout=self._poll_interval)
+                except (ValueError, IndexError) as exc:
+                    self.parse_errors += 1
+                    log_dropped_can_frame(self.parse_errors, exc)
+                    time.sleep(0.001)
+                    continue
+                if msg is None:
+                    continue
+                self.frames += 1
+                self._handoff.push(frame_to_record(msg))
+        except Exception as exc:  # noqa: BLE001 — bus-level failure, owner decides
+            self.error = exc
+        finally:
+            self._on_exit()
+
+
 async def collect_can(
     bus: can.BusABC,
     queue: asyncio.Queue[TelemetryRecord],
@@ -96,23 +191,103 @@ async def collect_can(
     *,
     poll_interval: float = 0.2,
     drop_counter: QueueDropCounter | None = None,
-) -> None:
-    """Read CAN frames and enqueue normalized telemetry records until stopped."""
+    on_receive_stats: ReceiveStatsCallback | None = None,
+    handoff_capacity: int = DEFAULT_HANDOFF_CAPACITY,
+    handoff_max_batch: int = DEFAULT_HANDOFF_MAX_BATCH,
+    join_timeout: float | None = None,
+    name: str = "can",
+) -> CanReceiveStats:
+    """Read CAN frames and enqueue normalized telemetry records until stopped.
+
+    Ownership (C07.3): this coroutine owns exactly one :class:`CanReader`
+    thread for ``bus``. Returning means the thread has been asked to stop and
+    joined (bounded by ``join_timeout``, default ``2 * poll_interval + 1``),
+    then the handoff was flushed and closed — so the caller may shut the bus
+    down or rebuild it without a reader still using it, and any late callback
+    is a no-op. A bus-level failure inside the reader is re-raised here so the
+    reconnect policy in :func:`collect_can_from_config` sees it.
+
+    ``on_receive_stats`` is called on the loop every ``poll_interval`` and once
+    on exit with cumulative :class:`CanReceiveStats` for this attempt.
+    """
+    loop = asyncio.get_running_loop()
     on_drop = QueueDropCounter("can") if drop_counter is None else drop_counter
-    parse_errors = 0
-    while not stop_event.is_set():
+    handoff = ThreadHandoff(
+        loop,
+        queue,
+        on_drop=on_drop,
+        capacity=handoff_capacity,
+        max_batch=handoff_max_batch,
+        name=name,
+    )
+    thread_stop = threading.Event()
+    finished = asyncio.Event()
+    #: Set by either "stop requested" or "reader exited" so the owner wakes
+    #: for both — waiting on ``finished`` alone would let a wedged ``recv``
+    #: outlast the bounded join below (it did, in the first cut).
+    wake = asyncio.Event()
+
+    def _thread_exited() -> None:
+        finished.set()
+        wake.set()
+
+    def _signal_finished() -> None:
         try:
-            msg = bus.recv(timeout=poll_interval)
-        except ValueError as exc:
-            parse_errors += 1
-            log_dropped_can_frame(parse_errors, exc)
-            await asyncio.sleep(0)
-            continue
-        if msg is None:
-            await asyncio.sleep(0)
-            continue
-        put_nowait_or_drop(queue, frame_to_record(msg), on_drop=on_drop)
-        await asyncio.sleep(0)
+            loop.call_soon_threadsafe(_thread_exited)
+        except RuntimeError:
+            pass  # loop already closed; the owner is gone and will not wait
+
+    reader = CanReader(
+        bus,
+        handoff,
+        poll_interval=poll_interval,
+        stop=thread_stop,
+        on_exit=_signal_finished,
+        name=f"can-recv:{name}",
+    )
+
+    def _stats() -> CanReceiveStats:
+        return CanReceiveStats(
+            frames=reader.frames,
+            parse_errors=reader.parse_errors,
+            queue_dropped=on_drop.dropped,
+            handoff=handoff.stats(),
+        )
+
+    def _report() -> None:
+        if on_receive_stats is not None:
+            on_receive_stats(_stats())
+
+    async def _mirror_stop() -> None:
+        await stop_event.wait()
+        thread_stop.set()
+        wake.set()
+
+    mirror = asyncio.create_task(_mirror_stop())
+    reader.start()
+    try:
+        while not stop_event.is_set() and not finished.is_set():
+            await wait_for_stop_or_timeout(wake, poll_interval)
+            _report()
+    finally:
+        mirror.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await mirror
+        thread_stop.set()
+        limit = 2 * poll_interval + 1.0 if join_timeout is None else join_timeout
+        await asyncio.to_thread(reader.join, limit)
+        if reader.is_alive():
+            log.warning(
+                "can reader thread did not stop within join timeout",
+                extra={"reader_thread": reader.name, "join_timeout_seconds": limit},
+            )
+        flushed = handoff.close()
+        if flushed:
+            log.debug("flushed pending can records at stop", extra={"records": flushed})
+        _report()
+    if reader.error is not None:
+        raise reader.error
+    return _stats()
 
 
 async def collect_can_from_config(
@@ -123,24 +298,63 @@ async def collect_can_from_config(
     poll_interval: float = 0.2,
     factory: Callable[[CanBusConfig], can.BusABC] = bus_factory,
     reconnect_policy: ReconnectPolicy | None = DEFAULT_RECONNECT_POLICY,
+    on_receive_stats: ReceiveStatsCallback | None = None,
 ) -> None:
-    """Own a configured Bus for the daemon queue-producer path."""
+    """Own a configured Bus for the daemon queue-producer path.
+
+    Reconnect ordering (C07.3): each attempt's :func:`collect_can` joins its
+    reader before returning, and ``run_with_reconnect`` only then tears the
+    bus down — so a rebuilt bus never has a reader still on the old one.
+    ``on_receive_stats`` sees counters cumulative across attempts.
+    """
     drop_counter = QueueDropCounter("can")
+    completed = CanReceiveStats(
+        frames=0,
+        parse_errors=0,
+        queue_dropped=0,
+        handoff=HandoffStats(0, 0, 0, 0, 0, 0),
+    )
+    attempts = 0
 
     async def _attempt(capture: Callable[[can.BusABC], None]) -> None:
+        nonlocal completed, attempts
+        attempts += 1
         bus = factory(spec)
         capture(bus)
         log.info(
             "can collection started",
             extra={"interface": spec.interface, "channel": spec.channel},
         )
-        await collect_can(
-            bus,
-            queue,
-            stop_event,
-            poll_interval=poll_interval,
-            drop_counter=drop_counter,
-        )
+        # The queue-full counter is shared across attempts, so each attempt
+        # contributes only the drops it added on top of the completed total.
+        base_queue_dropped = drop_counter.dropped
+        latest = CanReceiveStats(0, 0, 0, HandoffStats(0, 0, 0, 0, 0, 0))
+
+        def _on_stats(stats: CanReceiveStats) -> None:
+            nonlocal latest
+            latest = CanReceiveStats(
+                frames=stats.frames,
+                parse_errors=stats.parse_errors,
+                queue_dropped=stats.queue_dropped - base_queue_dropped,
+                handoff=stats.handoff,
+            )
+            if on_receive_stats is not None:
+                on_receive_stats(replace(completed + latest, reconnects=attempts - 1))
+
+        try:
+            await collect_can(
+                bus,
+                queue,
+                stop_event,
+                poll_interval=poll_interval,
+                drop_counter=drop_counter,
+                on_receive_stats=_on_stats,
+                name=spec.channel,
+            )
+        finally:
+            # collect_can reports once more in its own finally, so ``latest``
+            # is the attempt's final tally whether it stopped or failed.
+            completed = completed + latest
 
     await run_with_reconnect(
         _attempt,

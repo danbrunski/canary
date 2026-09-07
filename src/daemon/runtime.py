@@ -6,7 +6,7 @@ import os
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.collection import tuning_profile
 from src.collection.record_arming import RecordArmingGate
@@ -34,6 +34,10 @@ from .polling import (
 from .retention import _active_replay_dir, run_retention_sweeper
 from .server import serve_in_background
 
+if TYPE_CHECKING:
+    from src.collection.can_collector import CanReceiveStats
+    from src.models.health import HealthMonitor
+
 log = logging.getLogger(__name__)
 
 DRAIN_SHUTDOWN_SECONDS = 5.0
@@ -59,6 +63,25 @@ def _run_trip_end_hook(
         notifier=components.notifier,
         catalog_db=config.daemon.catalog_db,
     )
+
+
+def _can_receive_stats_observer(health: HealthMonitor) -> Callable[[CanReceiveStats], None]:
+    """Adapt the passive CAN receive counters (C07.5) into ``/status``."""
+
+    def _observe(stats: CanReceiveStats) -> None:
+        health.observe_receive_path(
+            "can_receive",
+            received=stats.frames,
+            parse_errors=stats.parse_errors,
+            buffer_dropped=stats.handoff.dropped,
+            buffer_high_water=stats.handoff.high_water,
+            buffer_capacity=stats.handoff.capacity,
+            queue_dropped=stats.queue_dropped,
+            batches=stats.handoff.drains,
+            reconnects=stats.reconnects,
+        )
+
+    return _observe
 
 
 async def run_daemon(
@@ -161,6 +184,7 @@ async def run_daemon(
             obd_scheduler_metrics_callback=components.health_monitor.observe_obd_scheduler,
             freeze_frame_trigger=components.freeze_frame_trigger,
             force_poll_trigger=components.force_poll_trigger,
+            can_receive_stats_callback=_can_receive_stats_observer(components.health_monitor),
         )
 
     # Decoded-channel persistence (config-gated): bound CAN signals at the

@@ -2610,3 +2610,144 @@ async def test_drop_logging_is_coalesced_into_bursts(caplog: pytest.LogCaptureFi
     # The burst total lands when a later, separate burst begins.
     reset_drop_bursts()
     caplog.clear()
+
+
+# ---------------------------------------------------------------------------
+# C07.6 / C07.9 / C07.5 — sink subscriptions, batched fanout, receive stats
+# ---------------------------------------------------------------------------
+
+
+async def test_telemetry_fanout_applies_per_sink_accepts_filter() -> None:
+    """C07.6 — a sink with ``accepts`` only receives records it accepts;
+    an unfiltered sink still receives everything."""
+    from src.daemon.drain import accepts_source
+
+    ingest: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    storage: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    gps: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+    records = [
+        TelemetryRecord.can(1_778_000_000.0, 0x100, b"\x01"),
+        TelemetryRecord.obd(1_778_000_001.0, "RPM", 700.0, "rpm"),
+        TelemetryRecord.gps(1_778_000_002.0, "speed", 40.0, "km/h"),
+    ]
+    for record in records:
+        await ingest.put(record)
+    stop.set()
+
+    await run_telemetry_fanout(
+        ingest,
+        [
+            TelemetrySink("storage", storage, "drop_newest"),
+            TelemetrySink("gps", gps, "drop_oldest", accepts=accepts_source("gps")),
+        ],
+        stop,
+    )
+
+    assert [storage.get_nowait() for _ in range(storage.qsize())] == records
+    assert [gps.get_nowait() for _ in range(gps.qsize())] == [records[2]]
+
+
+async def test_telemetry_fanout_preserves_order_across_batches() -> None:
+    """C07.9 — batching in the fanout must not reorder or lose records."""
+    from src.daemon.drain import FANOUT_MAX_BATCH
+
+    ingest: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    sink: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+    health = HealthMonitor()
+    n = FANOUT_MAX_BATCH * 2 + 17
+    records = [TelemetryRecord.can(1_778_000_000.0 + i, 0x100 + i, b"\x01") for i in range(n)]
+    for record in records:
+        await ingest.put(record)
+    stop.set()
+
+    await run_telemetry_fanout(
+        ingest, [TelemetrySink("live", sink, "drop_oldest")], stop, health_monitor=health
+    )
+
+    assert [sink.get_nowait() for _ in range(sink.qsize())] == records
+    assert health.snapshot()["telemetry_sinks"]["live"]["dropped_records"] == 0
+    assert ingest.empty()
+
+
+async def test_drain_does_not_feed_raw_can_to_gps_dtc_monitor_sinks(tmp_path: Path) -> None:
+    """C07.6 — end to end through ``drain_queue_with_broadcast``: the GPS
+    sink sees only ``gps`` records and the DTC/monitor sinks only ``obd``
+    records; raw ``can`` frames never reach consumers that reject them."""
+
+    class _Seen:
+        def __init__(self) -> None:
+            self.sources: list[str] = []
+
+        def observe(self, record: TelemetryRecord, **_: Any) -> bool:
+            self.sources.append(record.source)
+            return False
+
+        def persist(self) -> None:
+            pass
+
+    gps, dtc, monitor = _Seen(), _Seen(), _Seen()
+    writer = ParquetTelemetryWriter(tmp_path / "storage")
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+
+    async def _producer() -> None:
+        for i in range(20):
+            await queue.put(TelemetryRecord.can(1_778_000_000.0 + i, 0x100, b"\x01"))
+        await queue.put(TelemetryRecord.obd(1_778_000_100.0, "RPM", 700.0, "rpm"))
+        await queue.put(TelemetryRecord.gps(1_778_000_101.0, "speed", 40.0, "km/h"))
+        await asyncio.sleep(0.1)
+        stop.set()
+
+    drain_task = asyncio.create_task(
+        drain_queue_with_broadcast(
+            queue,
+            writer,
+            stop,
+            gps_tracker=gps,  # type: ignore[arg-type]
+            dtc_state=dtc,  # type: ignore[arg-type]
+            monitor_state=monitor,  # type: ignore[arg-type]
+            active_session_path=lambda: writer.paths.root,
+        )
+    )
+    await _producer()
+    await drain_task
+
+    assert gps.sources == ["gps"]
+    assert dtc.sources == ["obd"]
+    assert monitor.sources == ["obd"]
+
+
+def test_can_receive_stats_reach_health_snapshot_as_named_counter() -> None:
+    """C07.5 — passive receive losses are attributable under their own
+    ``telemetry_sinks`` entry, never folded into ``storage``."""
+    from src.collection.can_collector import CanReceiveStats
+    from src.collection.queueing import HandoffStats
+    from src.daemon import runtime as runtime_mod
+
+    health = HealthMonitor()
+    runtime_mod._can_receive_stats_observer(health)(
+        CanReceiveStats(
+            frames=1200,
+            parse_errors=3,
+            queue_dropped=7,
+            handoff=HandoffStats(
+                accepted=1195, dropped=5, high_water=900, capacity=4096, drains=40, max_batch=256
+            ),
+            reconnects=1,
+        )
+    )
+
+    sinks = health.snapshot()["telemetry_sinks"]
+    assert "storage" not in sinks
+    can_receive = sinks["can_receive"]
+    assert can_receive["records_processed"] == 1200
+    assert can_receive["parse_errors"] == 3
+    assert can_receive["buffer_dropped"] == 5
+    assert can_receive["buffer_high_water"] == 900
+    assert can_receive["buffer_capacity"] == 4096
+    assert can_receive["queue_dropped"] == 7
+    assert can_receive["dropped_records"] == 12
+    assert can_receive["batches"] == 40
+    assert can_receive["reconnects"] == 1

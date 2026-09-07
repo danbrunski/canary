@@ -191,3 +191,49 @@ async def test_default_collectors_loads_custom_pids_when_present(
     spec = captured["spec"]
     assert len(spec.custom_pids) == 1
     assert spec.custom_pids[0].name == "OIL_PRESS"
+
+
+@pytest.mark.asyncio
+async def test_default_collectors_legacy_elm327_starts_passive_can_and_obd(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """C07.9 — the legacy ELM327-plus-passive configuration still starts
+    both collectors, and the passive one receives the receive-stats hook."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = config.model_copy(
+        update={"collection": config.collection.model_copy(update={"obd_source": "elm327"})}
+    )
+    started: dict[str, object] = {}
+
+    async def fake_collect_can_from_config(
+        spec, queue, stop_event, *, reconnect_policy, on_receive_stats=None
+    ):
+        started["can"] = (spec, queue, on_receive_stats)
+
+    async def fake_collect_obd(spec, queue, stop_event, *, reconnect_policy):
+        started["obd"] = (spec, queue)
+
+    monkeypatch.setattr(
+        "src.collection.collectors.collect_can_from_config", fake_collect_can_from_config
+    )
+    monkeypatch.setattr("src.collection.collectors.collect_obd", fake_collect_obd)
+
+    def stats_hook(_stats: object) -> None:
+        pass
+
+    collectors = _default_collectors(config, can_receive_stats_callback=stats_hook)
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+
+    assert len(collectors) == 2
+    for collector in collectors:
+        await collector(queue, stop)
+
+    assert set(started) == {"can", "obd"}
+    can_spec, can_queue, hook = started["can"]  # type: ignore[misc]
+    assert can_spec == config.hardware.can
+    assert can_queue is queue
+    assert hook is stats_hook
+    obd_spec, obd_queue = started["obd"]  # type: ignore[misc]
+    assert obd_spec.port == config.hardware.elm327_port
+    assert obd_queue is queue

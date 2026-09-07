@@ -730,3 +730,368 @@ def test_record_writes_error_manifest_when_recv_raises(tmp_path: Path):
     assert manifest["stopped_by"] == "error"
     assert manifest["frames_recorded"] == 0
     assert manifest["error"] == "RuntimeError: adapter disappeared"
+
+
+# ---------------------------------------------------------------------------
+# C07 — owned receiver thread: event-loop isolation, ownership, accounting
+# ---------------------------------------------------------------------------
+
+
+class _SnifferBus:
+    """Scripted fake bus. ``recv`` hands out queued frames, then idles by
+    sleeping the full timeout (the real blocking shape). ``send`` must never
+    be called — the passive path is a sniffer (C07.9)."""
+
+    def __init__(self, frames: list[can.Message] | None = None, *, idle: bool = True) -> None:
+        self.frames = list(frames or [])
+        self.idle = idle
+        self.recv_calls = 0
+        self.recv_idents: set[int] = set()
+        self.send_calls = 0
+        self.shutdown_called = False
+        self.recv_after_shutdown = 0
+
+    def recv(self, timeout: float) -> can.Message | None:
+        self.recv_calls += 1
+        self.recv_idents.add(threading.get_ident())
+        if self.shutdown_called:
+            self.recv_after_shutdown += 1
+        if self.frames:
+            return self.frames.pop(0)
+        if self.idle:
+            time.sleep(timeout)
+        return None
+
+    def send(self, msg: can.Message, timeout: float | None = None) -> None:
+        self.send_calls += 1
+        raise AssertionError("the passive collector must never send")
+
+    def shutdown(self) -> None:
+        self.shutdown_called = True
+
+
+def _frames(n: int, start: int = 0) -> list[can.Message]:
+    return [
+        can.Message(
+            timestamp=1_778_000_000.0 + i * 0.001,
+            arbitration_id=0x100 + (i % 8),
+            data=bytes([i & 0xFF] * 8),
+            is_extended_id=False,
+        )
+        for i in range(start, start + n)
+    ]
+
+
+def _reader_threads() -> list[threading.Thread]:
+    return [t for t in threading.enumerate() if t.name.startswith("can-recv:") and t.is_alive()]
+
+
+async def _heartbeat_gaps(duration: float, period: float = 0.01) -> list[float]:
+    """Delay beyond ``period`` of an unrelated ticking task, per tick."""
+    gaps: list[float] = []
+    last = time.perf_counter()
+    end = last + duration
+    while time.perf_counter() < end:
+        await asyncio.sleep(period)
+        now = time.perf_counter()
+        gaps.append(now - last - period)
+        last = now
+    return gaps
+
+
+async def _blocking_reference_collector(
+    bus: _SnifferBus,
+    queue: asyncio.Queue,
+    stop: asyncio.Event,
+    *,
+    poll_interval: float,
+) -> None:
+    """The pre-C07 shape of ``collect_can``: blocking ``recv`` in a coroutine."""
+    while not stop.is_set():
+        msg = bus.recv(timeout=poll_interval)
+        if msg is not None:
+            queue.put_nowait(frame_to_record(msg))
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_blocking_receive_reference_stalls_event_loop_heartbeat() -> None:
+    """C07.1 — the regression being fixed: an idle blocking recv inside the
+    coroutine delays an unrelated 10 ms ticker by the whole receive timeout.
+    Kept as a reference implementation so the contrast stays measurable."""
+    bus = _SnifferBus()
+    queue: asyncio.Queue = asyncio.Queue()
+    stop = asyncio.Event()
+    task = asyncio.create_task(_blocking_reference_collector(bus, queue, stop, poll_interval=0.2))
+    gaps = await _heartbeat_gaps(0.6)
+    stop.set()
+    await asyncio.wait_for(task, timeout=2.0)
+
+    assert max(gaps) >= 0.1, f"reference did not block the loop: max gap {max(gaps):.3f}s"
+
+
+@pytest.mark.asyncio
+async def test_collect_can_idle_bus_does_not_stall_event_loop() -> None:
+    """C07.1/C07.11 — with the receiver in its own thread, an idle 200 ms
+    recv cannot delay unrelated asyncio work for the receive timeout
+    (measured ~1 ms max; the bound is loose for a loaded CI worker)."""
+    bus = _SnifferBus()
+    queue: asyncio.Queue = asyncio.Queue()
+    stop = asyncio.Event()
+    task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.2))  # type: ignore[arg-type]
+    gaps = await _heartbeat_gaps(0.6)
+    stop.set()
+    stats = await asyncio.wait_for(task, timeout=2.0)
+
+    assert max(gaps) < 0.1, f"receive thread stalled the loop: max gap {max(gaps):.3f}s"
+    assert queue.empty()
+    assert stats.frames == 0
+    assert bus.send_calls == 0
+    assert not _reader_threads()
+
+
+@pytest.mark.asyncio
+async def test_collect_can_sparse_frame_reaches_queue_promptly() -> None:
+    """C07.11 — a single frame on an otherwise idle bus does not wait for a
+    batch: handoff latency is one loop turn, not a timer."""
+
+    class _EventBus(_SnifferBus):
+        """recv blocks on an event so an injected frame returns immediately."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.arrived = threading.Event()
+
+        def recv(self, timeout: float) -> can.Message | None:
+            self.recv_calls += 1
+            if self.arrived.wait(timeout):
+                self.arrived.clear()
+                return self.frames.pop(0)
+            return None
+
+    bus = _EventBus()
+    queue: asyncio.Queue = asyncio.Queue()
+    stop = asyncio.Event()
+    task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.2))  # type: ignore[arg-type]
+    await asyncio.sleep(0.1)  # bus is idle, reader is parked inside recv
+
+    bus.frames.append(_frames(1)[0])
+    injected_at = time.perf_counter()
+    bus.arrived.set()
+    record = await asyncio.wait_for(queue.get(), timeout=1.0)
+    latency = time.perf_counter() - injected_at
+
+    stop.set()
+    await asyncio.wait_for(task, timeout=2.0)
+    assert record.channel == "0x100"
+    assert latency < 0.05, f"sparse frame waited {latency:.3f}s"
+
+
+@pytest.mark.asyncio
+async def test_collect_can_busy_bus_preserves_order_and_timestamps() -> None:
+    """C07.3/C07.9 — single producer -> FIFO: raw order and ``msg.timestamp``
+    survive the thread handoff; sniffer never sends."""
+    frames = _frames(5000)
+    bus = _SnifferBus(list(frames))
+    queue: asyncio.Queue = asyncio.Queue()
+    stop = asyncio.Event()
+    # The fake bus returns instantly and never paces, so an unpaced 5000-frame
+    # burst can outrun the loop's drain and legitimately hit the default 4096
+    # buffer bound (that bound is asserted elsewhere). This test is about
+    # order and timestamps, so size the buffer to the burst.
+    task = asyncio.create_task(
+        collect_can(bus, queue, stop, poll_interval=0.01, handoff_capacity=len(frames))  # type: ignore[arg-type]
+    )
+
+    deadline = time.perf_counter() + 5.0
+    while queue.qsize() < len(frames) and time.perf_counter() < deadline:
+        await asyncio.sleep(0.005)
+    stop.set()
+    stats = await asyncio.wait_for(task, timeout=2.0)
+
+    records = [queue.get_nowait() for _ in range(queue.qsize())]
+    assert [r.channel for r in records] == [f"0x{m.arbitration_id:X}" for m in frames]
+    assert [r.timestamp.timestamp() for r in records] == pytest.approx(
+        [m.timestamp for m in frames]
+    )
+    assert stats.frames == len(frames)
+    assert stats.handoff.accepted == len(frames)
+    assert stats.handoff.dropped == 0
+    assert stats.queue_dropped == 0
+    assert stats.handoff.high_water <= stats.handoff.capacity
+    assert bus.send_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_collect_can_stop_during_receive_joins_reader_before_returning() -> None:
+    """C07.3/C07.8 — stop while the reader is parked in a 200 ms recv: the
+    coroutine returns only after the thread exited, and no recv happens on
+    the bus afterwards."""
+    bus = _SnifferBus()
+    queue: asyncio.Queue = asyncio.Queue()
+    stop = asyncio.Event()
+    task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.2))  # type: ignore[arg-type]
+    await asyncio.sleep(0.05)  # mid-recv
+    assert _reader_threads()
+
+    stopped_at = time.perf_counter()
+    stop.set()
+    await asyncio.wait_for(task, timeout=2.0)
+    assert time.perf_counter() - stopped_at < 1.0
+
+    assert not _reader_threads()
+    calls_at_return = bus.recv_calls
+    await asyncio.sleep(0.3)
+    assert bus.recv_calls == calls_at_return, "reader kept reading after stop"
+    assert bus.send_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_collect_can_from_config_reconnect_replaces_reader_and_never_reads_closed_bus(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """C07.3/C07.8 — bus failure: the reader is joined, the bus shut down,
+    a fresh bus gets a fresh reader thread, and the dead bus is never read
+    again. Stats reported to the callback are cumulative across attempts."""
+
+    class _DyingBus(_SnifferBus):
+        def recv(self, timeout: float) -> can.Message | None:
+            if not self.frames:
+                raise OSError(5, "Input/output error")
+            return super().recv(timeout)
+
+    first = _DyingBus(_frames(3))
+    second = _SnifferBus(_frames(3, start=3))
+    buses = [first, second]
+
+    def factory(_spec: CanBusConfig) -> _SnifferBus:
+        return buses.pop(0)
+
+    reports = []
+    queue: asyncio.Queue = asyncio.Queue()
+    stop = asyncio.Event()
+    task = asyncio.create_task(
+        collect_can_from_config(
+            _virtual_spec("canary-test-c07-reconnect"),
+            queue,
+            stop,
+            poll_interval=0.01,
+            factory=factory,  # type: ignore[arg-type]
+            reconnect_policy=ReconnectPolicy(initial_delay_seconds=0.01, max_delay_seconds=0.01),
+            on_receive_stats=reports.append,
+        )
+    )
+    deadline = time.perf_counter() + 5.0
+    while queue.qsize() < 6 and time.perf_counter() < deadline:
+        await asyncio.sleep(0.005)
+    stop.set()
+    await asyncio.wait_for(task, timeout=2.0)
+
+    records = [queue.get_nowait() for _ in range(queue.qsize())]
+    assert [r.channel for r in records] == [f"0x{m.arbitration_id:X}" for m in _frames(6)]
+    assert first.shutdown_called and second.shutdown_called
+    assert first.recv_after_shutdown == 0
+    assert second.recv_after_shutdown == 0
+    assert len(first.recv_idents) == 1 and len(second.recv_idents) == 1
+    assert first.recv_idents.isdisjoint(second.recv_idents), "reader thread was not replaced"
+    assert not _reader_threads()
+    assert reports, "stats callback never fired"
+    assert reports[-1].frames == 6
+    assert reports[-1].reconnects == 1
+    assert reports[-1].handoff.accepted == 6
+
+
+@pytest.mark.asyncio
+async def test_collect_can_counts_malformed_frames_without_aborting() -> None:
+    """C07.3/C07.8 — parser errors are counted (``parse_errors``), skipped,
+    and never end the reader."""
+    bus = FlakyBus(bad_every=3, total_calls=12)
+    queue: asyncio.Queue = asyncio.Queue()
+    stop = asyncio.Event()
+    task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.01))  # type: ignore[arg-type]
+    deadline = time.perf_counter() + 5.0
+    while queue.qsize() < 8 and time.perf_counter() < deadline:
+        await asyncio.sleep(0.005)
+    stop.set()
+    stats = await asyncio.wait_for(task, timeout=2.0)
+
+    assert stats.frames == 8
+    assert stats.parse_errors == 4
+    assert queue.qsize() == 8
+
+
+@pytest.mark.asyncio
+async def test_collect_can_queue_overflow_is_counted_and_reconciles() -> None:
+    """C07.8/C07.9 — accepted + explicitly dropped == injected, at every
+    stage: frames -> handoff (accepted/dropped) -> queue (queued/queue_dropped)."""
+    frames = _frames(500)
+    bus = _SnifferBus(list(frames))
+    queue: asyncio.Queue = asyncio.Queue(maxsize=10)
+    stop = asyncio.Event()
+    task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.01))  # type: ignore[arg-type]
+    deadline = time.perf_counter() + 5.0
+    while bus.frames and time.perf_counter() < deadline:
+        await asyncio.sleep(0.005)
+    await asyncio.sleep(0.05)  # let the last drain run
+    stop.set()
+    stats = await asyncio.wait_for(task, timeout=2.0)
+
+    assert stats.frames == len(frames)
+    assert stats.handoff.accepted + stats.handoff.dropped == stats.frames
+    assert queue.qsize() + stats.queue_dropped == stats.handoff.accepted
+    assert stats.queue_dropped == len(frames) - 10
+    assert queue.qsize() == 10
+
+
+@pytest.mark.asyncio
+async def test_collect_can_late_reader_after_join_timeout_is_a_noop(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """C07.3/C07.8 — a wedged recv that outlives the bounded join: the
+    coroutine still returns (warning logged), and when the thread finally
+    produces a frame it is a counted no-op — nothing reaches the queue."""
+
+    class _WedgedBus(_SnifferBus):
+        def recv(self, timeout: float) -> can.Message | None:
+            self.recv_calls += 1
+            time.sleep(0.4)  # ignores the timeout, like a stuck USB read
+            return _frames(1)[0]
+
+    bus = _WedgedBus()
+    queue: asyncio.Queue = asyncio.Queue()
+    stop = asyncio.Event()
+    caplog.set_level("WARNING")
+    task = asyncio.create_task(
+        collect_can(bus, queue, stop, poll_interval=0.05, join_timeout=0.05)  # type: ignore[arg-type]
+    )
+    await asyncio.sleep(0.02)
+    stop.set()
+    await asyncio.wait_for(task, timeout=2.0)
+    assert "did not stop within join timeout" in caplog.text
+
+    await asyncio.sleep(0.6)  # the wedged recv returns its frame now
+    assert queue.empty(), "late frame reached the queue after shutdown"
+    assert not _reader_threads()
+
+
+@pytest.mark.asyncio
+async def test_collect_can_reports_stats_periodically_and_on_exit() -> None:
+    """C07.5 — the producer buffer's bound, high-water and drops are visible
+    through the stats callback while running and once more at exit."""
+    bus = _SnifferBus(_frames(20))
+    queue: asyncio.Queue = asyncio.Queue()
+    stop = asyncio.Event()
+    reports = []
+    task = asyncio.create_task(
+        collect_can(bus, queue, stop, poll_interval=0.02, on_receive_stats=reports.append)  # type: ignore[arg-type]
+    )
+    await asyncio.sleep(0.15)
+    stop.set()
+    final = await asyncio.wait_for(task, timeout=2.0)
+
+    assert len(reports) >= 2
+    assert reports[-1] == final
+    assert final.handoff.capacity > 0
+    assert 0 < final.handoff.high_water <= final.handoff.capacity
+    assert final.handoff.accepted == 20
+    assert final.handoff.dropped == 0
