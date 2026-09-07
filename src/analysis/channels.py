@@ -45,6 +45,7 @@ from typing import Literal
 import pandas as pd
 
 from src.analysis.afr import AfrCalibration
+from src.control.capture_manifest import read_capture_manifest
 from src.decode import bindings as bindings_decode
 from src.decode import dids as dids_decode
 from src.preprocessing.loader import read_session
@@ -146,25 +147,83 @@ class _Catalogs:
         raise ChannelSpecError(f"no DID 0x{did_id:04X} in {self.dids_path}")
 
 
+#: Column added by :func:`read_channels` when ``acquired_time=True``; values
+#: are :data:`src.analysis.pairing.TimestampBasis`.
+TIMESTAMP_BASIS_COLUMN = "timestamp_basis"
+
+
+def _acquired_at(raw: object) -> float | None:
+    if not isinstance(raw, str):
+        return None
+    try:
+        value = json.loads(raw).get("acquired_at")
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _round_stamped_sessions(frame: pd.DataFrame, session: Path | pd.DataFrame) -> set[str]:
+    """Session paths whose capture manifest says OBD rows carry round stamps.
+
+    Only manifest evidence counts. A stamp shared by several OBD channels is
+    *not* evidence on its own: a batched Mode 01 response legitimately stamps
+    every PID it carried with the one decode instant, and that is
+    indistinguishable from a round stamp without ``acquired_at``.
+    """
+    candidates: set[str] = set()
+    if isinstance(session, Path):
+        candidates.add(str(session))
+    if "session_path" in frame:
+        candidates.update(str(path) for path in frame["session_path"].dropna().unique())
+    round_stamped: set[str] = set()
+    for path in candidates:
+        manifest = read_capture_manifest(Path(path))
+        if manifest is not None and bool(manifest.profile_snapshot.get("round_timestamps")):
+            round_stamped.add(path)
+    return round_stamped
+
+
+def _timestamp_basis(frame: pd.DataFrame, session: Path | pd.DataFrame) -> pd.Series:
+    """Per-row :data:`~src.analysis.pairing.TimestampBasis`."""
+    if "metadata_json" not in frame:
+        return pd.Series("unknown", index=frame.index, dtype="string")
+    acquired = frame["metadata_json"].map(_acquired_at).notna()
+    basis = pd.Series("stored", index=frame.index, dtype="string")
+    round_stamped = _round_stamped_sessions(frame, session)
+    if round_stamped:
+        # Only polled (OBD/DID) rows are ever round-stamped; broadcast frames
+        # keep their arrival stamp whatever the profile says.
+        in_round_session = (
+            frame["session_path"].astype("string").isin(round_stamped)
+            if "session_path" in frame
+            else pd.Series(True, index=frame.index)
+        )
+        basis = basis.mask((frame["source"] == "obd") & in_round_session, "round")
+    return basis.mask(acquired, "acquired")
+
+
 def _long_frame(session: Path | pd.DataFrame, *, acquired_time: bool = False) -> pd.DataFrame:
     frame = session.copy() if isinstance(session, pd.DataFrame) else read_session(Path(session))
-    if not acquired_time or "metadata_json" not in frame:
+    if not acquired_time:
         return frame
-
-    def acquired_at(raw: object) -> object:
-        if not isinstance(raw, str):
-            return None
-        try:
-            value = json.loads(raw).get("acquired_at")
-            return value if isinstance(value, (int, float)) else None
-        except (TypeError, ValueError):
-            return None
-
-    acquired = pd.to_datetime(frame["metadata_json"].map(acquired_at), unit="s", utc=True)
+    frame[TIMESTAMP_BASIS_COLUMN] = _timestamp_basis(frame, session)
+    if "metadata_json" not in frame:
+        return frame
+    acquired = pd.to_datetime(frame["metadata_json"].map(_acquired_at), unit="s", utc=True)
     # Broadcast and legacy rows have no acquisition field; retain their stored
     # timestamp rather than dropping an otherwise valid cross-source series.
-    frame["timestamp"] = acquired.fillna(frame["timestamp"])
+    frame["timestamp"] = acquired.fillna(pd.to_datetime(frame["timestamp"], utc=True))
     return frame
+
+
+def read_acquisition_frame(session: Path | pd.DataFrame) -> pd.DataFrame:
+    """The raw session on its acquisition clock, with ``timestamp_basis`` per row.
+
+    For consumers that decode rows themselves (the broadcast byte sweep) but
+    must still pair on the same clock, and with the same provenance rules, as
+    :func:`read_channels`.
+    """
+    return _long_frame(session, acquired_time=True)
 
 
 def _numeric_series(frame: pd.DataFrame, spec: ChannelSpec, source: str) -> pd.DataFrame:
@@ -305,7 +364,10 @@ def read_channels(
     caller can tell "raw" from "engineering" without consulting the YAML.
     Set ``acquired_time=True`` for lag/cross-source work: OBD/DID rows then
     use their persisted per-reading arrival time rather than a logical round
-    timestamp, while sources without that field retain their stored time.
+    timestamp, while sources without that field retain their stored time. The
+    frame then also carries a ``timestamp_basis`` column per row
+    (:data:`src.analysis.pairing.TimestampBasis`) saying which of those
+    happened, so a comparison can refuse a tolerance the clock cannot carry.
     """
     frame = _long_frame(session, acquired_time=acquired_time)
     catalogs = _Catalogs(bindings_path=bindings_path, dids_path=dids_path)
@@ -320,6 +382,9 @@ def read_channels(
         "can": lambda s: _can_series(frame, s, catalogs),
     }
 
+    columns = ["timestamp", "spec", "value", "unit"]
+    if acquired_time:
+        columns.append(TIMESTAMP_BASIS_COLUMN)
     parts: list[pd.DataFrame] = []
     for spec in parsed:
         if spec.source == "obd" and spec.name.upper() == "COMMANDED_AFR":
@@ -327,10 +392,14 @@ def read_channels(
         else:
             part = readers[spec.source](spec)
         part = part.assign(spec=spec.text)
-        parts.append(part.loc[:, ["timestamp", "spec", "value", "unit"]])
+        if acquired_time:
+            part = part.assign(
+                **{TIMESTAMP_BASIS_COLUMN: frame.loc[part.index, TIMESTAMP_BASIS_COLUMN]}
+            )
+        parts.append(part.loc[:, columns])
 
     if not parts:
-        return pd.DataFrame(columns=["timestamp", "spec", "value", "unit"])
+        return pd.DataFrame(columns=columns)
     out = pd.concat(parts, ignore_index=True)
     out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True)
     return out.sort_values(["timestamp", "spec"], kind="stable").reset_index(drop=True)
@@ -351,6 +420,15 @@ def read_aligned(
     afr_stoich: float = 14.7,
 ) -> pd.DataFrame:
     """Put ``specs`` on one clock, refusing stale joins by default.
+
+    This is the cell-based *aligned frame* API — one row per ``grid`` cell,
+    for band averages, gating and plotting. It is **not** the comparison
+    contract: a cell holding a ``"last"`` sample from each channel does not
+    say how far apart those samples were acquired, and a ``"mean"`` cell is
+    a synthetic value that was never observed. Its output is therefore not
+    pairing evidence; a claim that two channels agree goes through
+    :func:`src.analysis.compare.compare_channels`, which pairs individual
+    observations under an explicit :class:`~src.analysis.pairing.PairingPolicy`.
 
     A row exists only where **every** requested channel has its own sample
     inside the grid cell (``require_all=True``). Nothing is forward-filled:

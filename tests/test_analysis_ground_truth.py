@@ -27,7 +27,7 @@ import pytest
 import yaml
 
 from src.analysis.broadcast_discovery import credible_fits, sweep_session
-from src.analysis.compare import compare_channels
+from src.analysis.compare import PairingPolicy, compare_channels
 from src.decode.bindings import load_bindings
 from src.preprocessing.loader import read_session
 
@@ -35,6 +35,16 @@ BINDINGS_PATH = Path("data/bindings.yaml")
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "ground_truth"
 EXPECTATIONS = yaml.safe_load((FIXTURE_ROOT / "expectations.yaml").read_text())
 SESSION = FIXTURE_ROOT / EXPECTATIONS["fixture"]
+
+#: Acquisition tolerance for pairing a ~1 Hz Mode 01 PID against the fixture's
+#: 10:1-decimated broadcast frames. Measured on the slice (2026-09-06): frames
+#: arrive every 102 ms median / 170 ms p95 / ~0.5-0.7 s max across decimation
+#: gaps, PIDs every 1.11 s median. The nearest frame to a PID reading is
+#: 26-31 ms away at the median, 50 ms at p95, 144 ms at the worst — so 250 ms
+#: admits every honest nearest-frame pairing (100 ms left one wheel-speed and
+#: one coolant reading unpaired) while staying under a quarter of the PID
+#: cadence, so no reading can be paired to a frame nearer another reading.
+POLICY = PairingPolicy.within("250ms")
 
 
 @pytest.fixture(scope="module")
@@ -76,13 +86,28 @@ def test_binding_agrees_with_its_independent_reference(
 ) -> None:
     """A correct decode and its Mode 01 counterpart must agree 1:1.
 
-    Both sides are in engineering units, so slope ~ 1.0 and offset ~ 0 is the
-    whole assertion — and it fails on a wrong byte offset, wrong endianness,
-    wrong scale, wrong offset, or wrong unit without anyone having to write
-    down what the right answer was. The PID is the answer.
-    """
-    result = compare_channels(frame, case["signal"], case["reference"], grid="1s")
+    Both sides are in engineering units, so the assertion is the 1:1
+    hypothesis itself — and it fails on a wrong byte offset, wrong
+    endianness, wrong scale, wrong offset, or wrong unit without anyone
+    having to write down what the right answer was. The PID is the answer.
 
+    Two statistics carry it. The residual of ``b - a`` per pair
+    (``difference_bias``/``difference_spread``) is the load-bearing one: it
+    is in engineering units, a wrong scale or offset shifts it directly, and
+    it does not degrade when a signal is quantised on a narrow range. The
+    fitted slope is kept as a second, scale-free check; it is weak exactly
+    where the residual is strong (see the coolant note in expectations.yaml).
+    """
+    result = compare_channels(frame, case["signal"], case["reference"], policy=POLICY)
+
+    assert abs(result.difference_bias) <= case["max_residual_bias"], (
+        f"{result.describe()} — mean b-a is {result.difference_bias:+.3f} in the "
+        "reference's units; a correct decode sits at zero"
+    )
+    assert result.difference_spread <= case["max_residual_spread"], (
+        f"{result.describe()} — b-a spread {result.difference_spread:.3f} exceeds "
+        "what sampling offset and quantisation explain on this fixture"
+    )
     assert result.r_squared >= case["min_r_squared"], result.describe()
     scale_error_pct = abs(result.slope - 1.0) * 100.0
     assert scale_error_pct <= case["max_scale_error_pct"], (
@@ -161,7 +186,7 @@ def test_the_sweep_rediscovers_a_binding_it_was_not_told_about(frame: pd.DataFra
     "stable". That is the check working, not failing — but the binding must
     never be called ``drifting``, which is asserted separately.
     """
-    fits = sweep_session(frame, ["obd:RPM"], can_ids=[0x1F9], grid="1s", min_pairs=100)
+    fits = sweep_session(frame, ["obd:RPM"], can_ids=[0x1F9], policy=POLICY, min_pairs=100)
     ranked = credible_fits(fits, min_r_squared=0.98, include_unresolved=True)
 
     assert ranked, "sweep found nothing on a frame carrying a confirmed binding"
@@ -189,6 +214,6 @@ def test_the_sweep_does_not_manufacture_bindings_from_noise(frame: pd.DataFrame)
     noise_rows["value_number"] = rng.uniform(0.0, 100.0, len(noise_rows))
     polluted = pd.concat([frame[frame["channel"] != "SPEED"], noise_rows], ignore_index=True)
 
-    fits = sweep_session(polluted, ["obd:SPEED"], can_ids=[0x1F9], grid="1s", min_pairs=100)
+    fits = sweep_session(polluted, ["obd:SPEED"], can_ids=[0x1F9], policy=POLICY, min_pairs=100)
 
     assert credible_fits(fits, min_r_squared=0.90) == []

@@ -7,11 +7,17 @@ import pandas as pd
 import pytest
 
 from src.analysis.broadcast_discovery import (
+    PairingPolicy,
     Probe,
     candidate_probes,
     credible_fits,
     sweep_session,
 )
+
+#: These hand-built frames carry no ``metadata_json``, so their stamp
+#: provenance is ``unknown`` and a sub-second tolerance would be refused;
+#: one second is the floor, and the rows are stamped on whole seconds anyway.
+POLICY = PairingPolicy.within("1s")
 
 
 def _session(frames: dict[int, list[bytes]], references: dict[str, list[float]]) -> pd.DataFrame:
@@ -69,7 +75,7 @@ def test_sweep_recovers_a_planted_two_byte_signal_with_its_scale() -> None:
     ]
     session = _session({0x1F9: payloads}, {"RPM": rpm})
 
-    fits = sweep_session(session, ["obd:RPM"], grid="1s", min_pairs=100)
+    fits = sweep_session(session, ["obd:RPM"], policy=POLICY, min_pairs=100)
     best = credible_fits(fits)[0]
 
     assert best.probe == Probe(can_id=0x1F9, byte_start=2, byte_length=2, byte_order="big")
@@ -93,7 +99,7 @@ def test_sweep_rejects_a_byte_that_only_co_varies_in_part_of_the_session() -> No
         payloads.append(bytes([(int(scaled) >> 8) & 0xFF, int(scaled) & 0xFF, 0, 0]))
     session = _session({0x233: payloads}, {"RPM": rpm})
 
-    fits = sweep_session(session, ["obd:RPM"], grid="1s", min_pairs=100)
+    fits = sweep_session(session, ["obd:RPM"], policy=POLICY, min_pairs=100)
     drifter = next(
         fit
         for fit in fits
@@ -122,7 +128,7 @@ def test_a_barely_moving_reference_is_unresolved_rather_than_drifting() -> None:
     payloads = [bytes([int(round(value + 40.0)), 0, 0, 0]) for value in coolant]
     session = _session({0x551: payloads}, {"COOLANT_TEMP": coolant})
 
-    fits = sweep_session(session, ["obd:COOLANT_TEMP"], grid="1s", min_pairs=100)
+    fits = sweep_session(session, ["obd:COOLANT_TEMP"], policy=POLICY, min_pairs=100)
     probe = Probe(can_id=0x551, byte_start=0, byte_length=1, byte_order="big")
     fit = next(f for f in fits if f.probe == probe)
 
@@ -131,13 +137,32 @@ def test_a_barely_moving_reference_is_unresolved_rather_than_drifting() -> None:
     assert any(f.probe == probe for f in credible_fits(fits, include_unresolved=True))
 
 
+def test_a_reference_that_was_never_captured_is_named_rather_than_swept_silently() -> None:
+    """A sweep against an absent reference must say so, not return nothing."""
+    from src.analysis.pairing import ComparisonRefusedError
+
+    rpm = _rpm_walk(200)
+    payloads = [bytes([0, 0, (int(v * 8) >> 8) & 0xFF, int(v * 8) & 0xFF, 0, 0, 0, 0]) for v in rpm]
+    session = _session({0x1F9: payloads}, {"RPM": rpm})
+
+    with pytest.raises(ComparisonRefusedError, match="obd:SPEED"):
+        sweep_session(session, ["obd:RPM", "obd:SPEED"], policy=POLICY, min_pairs=100)
+
+
 def test_constant_bytes_never_produce_a_fit() -> None:
     """Padding bytes correlate with nothing and must not reach the caller."""
     rpm = _rpm_walk(300)
     payloads = [bytes([0xFF, 0x00, 0xFF, 0x00]) for _ in rpm]
     session = _session({0x794: payloads}, {"RPM": rpm})
 
-    assert sweep_session(session, ["obd:RPM"], grid="1s", min_pairs=100) == []
+    assert sweep_session(session, ["obd:RPM"], policy=POLICY, min_pairs=100) == []
+
+
+def test_grid_is_refused_in_favour_of_a_pairing_policy() -> None:
+    rpm = _rpm_walk(50)
+    session = _session({0x1F9: [bytes(8) for _ in rpm]}, {"RPM": rpm})
+    with pytest.raises(TypeError, match="policy="):
+        sweep_session(session, ["obd:RPM"], grid="1s", policy=POLICY)
 
 
 def test_short_frames_are_dropped_not_zero_padded() -> None:
@@ -147,7 +172,7 @@ def test_short_frames_are_dropped_not_zero_padded() -> None:
     payloads[:20] = [b"\x00\x01" for _ in range(20)]  # a burst of 2-byte frames
     session = _session({0x1F9: payloads}, {"RPM": rpm})
 
-    fits = sweep_session(session, ["obd:RPM"], grid="1s", min_pairs=100)
+    fits = sweep_session(session, ["obd:RPM"], policy=POLICY, min_pairs=100)
     best = credible_fits(fits)[0]
 
     assert best.probe.byte_start == 2

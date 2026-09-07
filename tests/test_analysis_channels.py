@@ -14,8 +14,10 @@ import pandas as pd
 import pytest
 
 from src.analysis.channels import (
+    TIMESTAMP_BASIS_COLUMN,
     ChannelSpecError,
     parse_spec,
+    read_acquisition_frame,
     read_aligned,
     read_channels,
 )
@@ -139,6 +141,107 @@ def test_acquired_time_opt_in_uses_persisted_read_arrival(tmp_path: Path) -> Non
     )
     offset = (acquired["timestamp"].iloc[0] - logical["timestamp"].iloc[0]).total_seconds()
     assert offset == pytest.approx(0.125)
+
+
+def test_timestamp_basis_is_read_back_from_production_parquet(tmp_path: Path) -> None:
+    """Provenance survives the real writer: ``acquired_at`` in, ``acquired`` out.
+
+    Rows without the field are ``stored`` — their stamp is the decode-time
+    clock read — and broadcast frames are always ``stored``. The column only
+    exists when ``acquired_time=True`` is asked for.
+    """
+    session = _session(
+        tmp_path,
+        [
+            TelemetryRecord(
+                timestamp=T0,
+                source="obd",
+                channel="RPM",
+                value=1200.0,
+                metadata={"acquired_at": T0.timestamp() + 0.3},
+            ),
+            TelemetryRecord(timestamp=T0, source="obd", channel="MAF", value=5.0),
+            TelemetryRecord(
+                timestamp=T0, source="can", channel="0x1F9", payload=_rpm_frame(1200.0)
+            ),
+        ],
+    )
+    plain = read_channels(session, ["obd:RPM"], bindings_path=BINDINGS, dids_path=DIDS)
+    assert TIMESTAMP_BASIS_COLUMN not in plain
+
+    frame = read_channels(
+        session,
+        ["obd:RPM", "obd:MAF", "can:ECM_RPM"],
+        acquired_time=True,
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+    )
+    basis = dict(zip(frame["spec"], frame[TIMESTAMP_BASIS_COLUMN], strict=True))
+    assert basis == {"obd:RPM": "acquired", "obd:MAF": "stored", "can:ECM_RPM": "stored"}
+    acquired_stamp = frame.loc[frame["spec"] == "obd:RPM", "timestamp"].iloc[0]
+    # ``acquired_at`` is float Unix seconds in JSON; it round-trips to the
+    # microsecond, which is far inside any pairing tolerance in use.
+    assert (acquired_stamp - pd.Timestamp(T0)).total_seconds() == pytest.approx(0.3, abs=1e-5)
+
+
+def test_round_stamped_captures_are_flagged_from_the_manifest_only(tmp_path: Path) -> None:
+    """Only the sidecar proves a stamp is a round stamp; shared stamps do not.
+
+    A batched Mode 01 response legitimately stamps every PID it carried with
+    the one decode instant, so several channels sharing a stamp is normal
+    and must not be mistaken for a round stamp.
+    """
+    import json
+
+    records = [
+        TelemetryRecord(timestamp=T0, source="obd", channel="RPM", value=1200.0),
+        TelemetryRecord(timestamp=T0, source="obd", channel="MAF", value=5.0),
+        TelemetryRecord(timestamp=T0, source="can", channel="0x1F9", payload=_rpm_frame(1200.0)),
+    ]
+    session = _session(tmp_path, records)
+    specs = ["obd:RPM", "obd:MAF", "can:ECM_RPM"]
+    before = read_channels(
+        session, specs, acquired_time=True, bindings_path=BINDINGS, dids_path=DIDS
+    )
+    assert set(before[TIMESTAMP_BASIS_COLUMN]) == {"stored"}
+
+    (session / "capture_profile.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "profile": "tuning",
+                "started_at": T0.isoformat(),
+                "profile_snapshot": {"round_timestamps": True},
+            }
+        )
+    )
+    after = read_channels(
+        session, specs, acquired_time=True, bindings_path=BINDINGS, dids_path=DIDS
+    )
+    basis = dict(zip(after["spec"], after[TIMESTAMP_BASIS_COLUMN], strict=True))
+    # Polled rows become ``round``; the broadcast frame keeps its arrival stamp.
+    assert basis == {"obd:RPM": "round", "obd:MAF": "round", "can:ECM_RPM": "stored"}
+    # The raw acquisition frame carries the same verdict per row.
+    raw = read_acquisition_frame(session)
+    assert set(raw.loc[raw["source"] == "obd", TIMESTAMP_BASIS_COLUMN]) == {"round"}
+
+
+def test_a_frame_without_metadata_has_unknown_provenance() -> None:
+    frame = pd.DataFrame(
+        {
+            "timestamp": [pd.Timestamp(T0)],
+            "source": ["obd"],
+            "channel": ["RPM"],
+            "value_number": [1200.0],
+            "value_text": [None],
+            "unit": ["rpm"],
+            "payload": [None],
+        }
+    )
+    out = read_channels(
+        frame, ["obd:RPM"], acquired_time=True, bindings_path=BINDINGS, dids_path=DIDS
+    )
+    assert out[TIMESTAMP_BASIS_COLUMN].iloc[0] == "unknown"
 
 
 def test_can_specs_decode_frame_bytes_by_signal_name(tmp_path: Path) -> None:

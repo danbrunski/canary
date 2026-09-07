@@ -34,7 +34,7 @@ No live rates, hardware capacity, or model accuracy were established.
 
 | ID | Task | Review coverage | Dependencies |
 |---|---|---|---|
-| C01 | [Acquisition-time comparison](01-acquisition-time-comparison.md) | Finding 1: aggregate pairing and ignored acquisition time | Can start immediately; coordinate timestamp contract with C02 |
+| C01 | [Acquisition-time comparison](archive/01-acquisition-time-comparison.md) ✅ | Finding 1: aggregate pairing and ignored acquisition time | Can start immediately; coordinate timestamp contract with C02 |
 | C02 | [Explicit capture rounds](02-explicit-capture-rounds.md) | Finding 2: unbounded round timestamps; fuel-map tuple scheduling | Can start immediately |
 | C03 | [Capture-wide quality accounting](03-capture-quality-accounting.md) | Finding 3: trailing-window verdict, cumulative losses, false exactness | C01 pairing and C02 round contracts for final tuple validation |
 | C04 | [Hybrid diagnostic scheduling](04-hybrid-diagnostic-scheduling.md) | Finding 4: transition waits and end-anchored cadence | Coordinate with C02 and C06 on the collector loop |

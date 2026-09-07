@@ -32,8 +32,17 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from src.analysis.channels import read_channels
+from src.analysis.channels import TIMESTAMP_BASIS_COLUMN, read_acquisition_frame, read_channels
 from src.analysis.compare import STABLE_DRIFT_PCT, ScaleVerdict, regress, scale_stability
+from src.analysis.pairing import (
+    ComparisonRefusedError,
+    MatchedSamples,
+    PairingPolicy,
+    check_clock_support,
+    match_ordered,
+    to_seconds,
+    weakest_basis,
+)
 
 #: A probe must clear this to be worth a human's attention at all.
 MIN_R_SQUARED = 0.90
@@ -143,7 +152,7 @@ def _raw_values(payloads: np.ndarray, probe: Probe) -> np.ndarray:
 
 
 def _payload_matrix(frame: pd.DataFrame, can_id: int) -> tuple[pd.Series, np.ndarray] | None:
-    """Timestamps and a fixed-width byte matrix for one broadcast id.
+    """Timestamps (original row index kept) and a byte matrix for one broadcast id.
 
     Frames whose length differs from the id's modal length are dropped rather
     than zero-padded: a short frame is a different message, and padding it
@@ -160,19 +169,107 @@ def _payload_matrix(frame: pd.DataFrame, can_id: int) -> tuple[pd.Series, np.nda
     if rows.empty:
         return None
     matrix = np.frombuffer(b"".join(bytes(p) for p in rows["payload"]), dtype=np.uint8)
-    return rows["timestamp"].reset_index(drop=True), matrix.reshape(len(rows), modal)
+    # Index preserved on purpose: the sweep looks the rows' timestamp basis up by it.
+    return rows["timestamp"], matrix.reshape(len(rows), modal)
+
+
+@dataclass(frozen=True)
+class _Reference:
+    spec: str
+    times_s: np.ndarray
+    values: np.ndarray
+    basis: str
+
+
+def _references(
+    frame: pd.DataFrame,
+    references: Sequence[str],
+    *,
+    bindings_path: Path,
+    dids_path: Path,
+) -> list[_Reference]:
+    long = read_channels(
+        frame,
+        list(references),
+        bindings_path=bindings_path,
+        dids_path=dids_path,
+        acquired_time=True,
+    )
+    absent = [spec for spec in references if long[long["spec"] == spec].empty]
+    if absent:
+        raise ComparisonRefusedError(
+            "reference channel(s) with no observations in this session: "
+            + ", ".join(absent)
+            + ". A sweep against a reference that was never captured would "
+            "silently find nothing; name the missing input instead."
+        )
+    out: list[_Reference] = []
+    for spec, part in long.groupby("spec", sort=False):
+        out.append(
+            _Reference(
+                spec=str(spec),
+                times_s=to_seconds(part["timestamp"]),
+                values=part["value"].to_numpy(dtype=float),
+                basis=weakest_basis(part[TIMESTAMP_BASIS_COLUMN]),
+            )
+        )
+    return out
+
+
+def _pair_frames(
+    frame_times_s: np.ndarray,
+    frame_basis: str,
+    reference: _Reference,
+    policy: PairingPolicy,
+    can_id: int,
+) -> MatchedSamples:
+    check_clock_support(
+        policy,
+        basis_a=frame_basis,  # type: ignore[arg-type]
+        times_a=frame_times_s,
+        basis_b=reference.basis,  # type: ignore[arg-type]
+        times_b=reference.times_s,
+        label_a=f"0x{can_id:03X}",
+        label_b=reference.spec,
+    )
+    return match_ordered(frame_times_s, reference.times_s, policy)
+
+
+def _fit_probe(
+    probe: Probe,
+    payloads: np.ndarray,
+    reference: _Reference,
+    matched: MatchedSamples,
+) -> ProbeFit | None:
+    raw_values = _raw_values(payloads[matched.index_a], probe)
+    ref_values = reference.values[matched.index_b]
+    fit = regress(raw_values, ref_values)
+    if fit is None:
+        return None
+    drift_pct, verdict = scale_stability(raw_values, ref_values)
+    return ProbeFit(
+        probe=probe,
+        reference=reference.spec,
+        n_pairs=matched.n_pairs,
+        r_squared=fit.r_squared,
+        slope=fit.slope,
+        offset=fit.offset,
+        slope_drift_pct=drift_pct,
+        scale_verdict=verdict,
+    )
 
 
 def sweep_session(
     session: Path | pd.DataFrame,
     references: Sequence[str],
     *,
+    policy: PairingPolicy,
     can_ids: Sequence[int] | None = None,
-    grid: str = "200ms",
     max_byte_length: int = 2,
     min_pairs: int = MIN_PAIRS,
     bindings_path: Path = Path("data/bindings.yaml"),
     dids_path: Path = Path("data/dids.yaml"),
+    grid: object = None,
 ) -> list[ProbeFit]:
     """Regress every byte slice of every broadcast id against every reference.
 
@@ -180,30 +277,32 @@ def sweep_session(
     engineering units and the returned ``slope``/``offset`` are directly the
     scaling a binding needs.
 
-    Both sides are averaged onto a shared ``grid`` before fitting. Broadcast
-    frames run ~100 Hz against DIDs at ~15 Hz, so pairing raw nearest-neighbour
-    would weight the fit by whichever side happened to sample first; binning
-    puts them on one clock explicitly.
+    Pairing is the shared contract from :mod:`src.analysis.pairing`, not a
+    private one: frames and reference samples are matched one-to-one on the
+    acquisition clock under ``policy``, so every ``n_pairs`` here is a count
+    of real frame/reference observation pairs. The pairing depends only on
+    the id's frame times and the reference's times, so it is done once per
+    (id, reference) and every probe of that id is fitted over the same pairs.
+    Until 2026-09 both sides were averaged onto a grid first; that is the
+    aggregate substitution roadmap C01 removed, and ``grid=`` is refused by
+    name rather than reinterpreted.
 
     Results are returned unfiltered and sorted by r² — screening is
     :func:`credible_fits`'s job, kept separate so a caller can inspect the
     near-misses that ranking alone would hide.
     """
-    frame = session if isinstance(session, pd.DataFrame) else _load_session(session)
-    reference_frame = read_channels(
-        frame, list(references), bindings_path=bindings_path, dids_path=dids_path
-    )
-
-    binned_references: dict[str, pd.Series] = {}
-    for spec, part in reference_frame.groupby("spec"):
-        series = pd.Series(
-            part["value"].to_numpy(dtype=float),
-            index=pd.to_datetime(part["timestamp"], utc=True),
+    if grid is not None:
+        raise TypeError(
+            "sweep_session no longer takes grid= (roadmap C01): pass "
+            'policy=PairingPolicy.within("<tol>") — frames and references are paired '
+            "one-to-one on the acquisition clock, not averaged onto a grid"
         )
-        binned = series.resample(grid).mean().dropna()
-        if len(binned) >= min_pairs:
-            binned_references[str(spec)] = binned
-
+    frame = read_acquisition_frame(
+        session if isinstance(session, pd.DataFrame) else _load_session(session)
+    )
+    references_loaded = _references(
+        frame, references, bindings_path=bindings_path, dids_path=dids_path
+    )
     ids = list(can_ids) if can_ids is not None else _observed_can_ids(frame)
     fits: list[ProbeFit] = []
     for can_id in ids:
@@ -211,42 +310,25 @@ def sweep_session(
         if loaded is None:
             continue
         timestamps, payloads = loaded
-        index = pd.to_datetime(timestamps, utc=True)
-        for template in candidate_probes(payloads.shape[1], max_byte_length=max_byte_length):
-            probe = Probe(
+        frame_times_s = to_seconds(timestamps)
+        frame_basis = weakest_basis(frame.loc[timestamps.index, TIMESTAMP_BASIS_COLUMN])
+        probes = [
+            Probe(
                 can_id=can_id,
                 byte_start=template.byte_start,
                 byte_length=template.byte_length,
                 byte_order=template.byte_order,
             )
-            raw_series = pd.Series(_raw_values(payloads, probe), index=index)
-            binned_raw = raw_series.resample(grid).mean().dropna()
-            if len(binned_raw) < min_pairs:
+            for template in candidate_probes(payloads.shape[1], max_byte_length=max_byte_length)
+        ]
+        for reference in references_loaded:
+            matched = _pair_frames(frame_times_s, frame_basis, reference, policy, can_id)
+            if matched.n_pairs < min_pairs:
                 continue
-            for spec, reference in binned_references.items():
-                joined = pd.concat(
-                    {"raw": binned_raw, "ref": reference}, axis=1, join="inner"
-                ).dropna()
-                if len(joined) < min_pairs:
-                    continue
-                raw_values = joined["raw"].to_numpy(dtype=float)
-                ref_values = joined["ref"].to_numpy(dtype=float)
-                fit = regress(raw_values, ref_values)
-                if fit is None:
-                    continue
-                drift_pct, verdict = scale_stability(raw_values, ref_values)
-                fits.append(
-                    ProbeFit(
-                        probe=probe,
-                        reference=spec,
-                        n_pairs=len(joined),
-                        r_squared=fit.r_squared,
-                        slope=fit.slope,
-                        offset=fit.offset,
-                        slope_drift_pct=drift_pct,
-                        scale_verdict=verdict,
-                    )
-                )
+            for probe in probes:
+                fit = _fit_probe(probe, payloads, reference, matched)
+                if fit is not None:
+                    fits.append(fit)
     return sorted(fits, key=lambda fit: fit.r_squared, reverse=True)
 
 
@@ -302,6 +384,7 @@ __all__ = [
     "MIN_PAIRS",
     "MIN_R_SQUARED",
     "STABLE_DRIFT_PCT",
+    "PairingPolicy",
     "Probe",
     "ProbeFit",
     "candidate_probes",

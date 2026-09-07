@@ -99,16 +99,47 @@ catalog_pins:
     offset: 0.0
 
 # Broadcast binding vs the independent Mode 01 PID for the same quantity.
-# Both sides arrive in engineering units, so a correct decode gives slope ~ 1.
+# Both sides arrive in engineering units, so a correct decode gives b - a ~ 0
+# at every paired instant and slope ~ 1.
 #
-# Tolerances are the measured baseline on this fixture plus ~0.5% headroom, not
-# round numbers — a round 3% was measured to let a real 4% scale error through.
+# Pairing (roadmap C01, 2026-09-06): observations are paired one-to-one on the
+# acquisition clock within 250 ms (`POLICY` in the test), never averaged onto a
+# grid. Every bound below was re-measured under that estimator.
+#
+# `max_residual_bias` / `max_residual_spread` are the load-bearing checks: the
+# mean and standard deviation of b - a over the pairs, in the reference's own
+# units (ChannelComparison.difference_bias / difference_spread — the residual
+# of the 1:1 hypothesis, NOT the post-fit residual, whose mean is zero by
+# construction and which a wrong scale or offset leaves untouched). Rule:
+#   max_residual_bias   = |measured| + max(3 * spread / sqrt(n), half the PID's
+#                         own resolution: 0.125 rpm, 0.5 km/h, 0.5 degC)
+#   max_residual_spread = measured * 1.25
+# both rounded up. Verified 2026-09-06 on 0x233:0: an offset edit -50 -> -48
+# moves the bias to -2.01 degC and a scale edit 1.0 -> 1.05 to -6.97 degC,
+# against a 0.55 degC bound; the post-fit residual did not move at all.
+#
+# `max_scale_error_pct` is the measured baseline plus ~0.5% headroom, not a
+# round number — a round 3% was measured to let a real 4% scale error through.
+# Slope is scale-free and a weak statistic for a quantised signal on a narrow
+# range: coolant spans 85-92 degC here, integer on both sides, and a single
+# one-count disagreement near the end of the range moves the OLS slope by
+# ~0.5-0.7%. The 1 s mean-binned estimator this file was first measured under
+# averaged ~10 broadcast frames per bin, which suppressed that regressor
+# quantisation (errors-in-variables attenuation ~ var(quantisation)/var(signal)
+# ~ 1.8% on this range) and made the coolant slopes look tighter than raw
+# pairs can ever be: 0x23D:7 is bit-identical to 0x233:0 on the wire and lands
+# at 0.84% vs 1.36% purely from pairing to different PID readings. The three
+# coolant slope bounds were therefore re-measured under the corrected
+# estimator (2026-09-06: 0.285%, 1.357%, 0.840%) with the same headroom rule;
+# every other slope bound, r2 floor and offset bound is unchanged.
 unit_agreement:
   - signal: can:ECM_RPM
     reference: obd:RPM
     min_r_squared: 0.98
     max_scale_error_pct: 1.6
     max_offset: 60.0          # rpm, against a 725-4300 range
+    max_residual_bias: 9.0    # rpm; measured -4.08, spread 24.46, n 239
+    max_residual_spread: 31.0
     why: >
       The oldest confirmed binding and the control the project calibrates
       everything else against. If this drifts, suspect the chain, not the tool
@@ -119,6 +150,8 @@ unit_agreement:
     min_r_squared: 0.98
     max_scale_error_pct: 1.5
     max_offset: 60.0
+    max_residual_bias: 8.5    # measured -3.58, spread 24.58, n 239
+    max_residual_spread: 31.0
     why: >
       Second rpm copy found 2026-08-06 (0x23D bytes 3-4, little-endian). Also
       the only little-endian binding in the catalog, so it is the one check
@@ -129,39 +162,51 @@ unit_agreement:
     min_r_squared: 0.99
     max_scale_error_pct: 2.1
     max_offset: 3.0           # km/h
+    max_residual_bias: 0.55   # km/h; measured +0.009, spread 0.876, n 212
+    max_residual_spread: 1.1
     why: Wheel speed, found 2026-08-06. Scale pinned at 1/16 km/h per count.
   - signal: can:WHEEL_SPEED_6F7_B
     reference: obd:SPEED
     min_r_squared: 0.99
     max_scale_error_pct: 2.3
     max_offset: 3.0
+    max_residual_bias: 0.55   # measured -0.027, spread 0.856, n 212
+    max_residual_spread: 1.1
     why: Second of three wheel-speed fields on 0x6F7.
   - signal: can:WHEEL_SPEED_6F7_C
     reference: obd:SPEED
     min_r_squared: 0.99
     max_scale_error_pct: 1.6
     max_offset: 3.0
+    max_residual_bias: 0.85   # measured -0.350, spread 0.695, n 212
+    max_residual_spread: 0.9
     why: Third of three wheel-speed fields on 0x6F7.
 
   - signal: can:ECM_COOLANT_TEMP
     reference: obd:COOLANT_TEMP
     min_r_squared: 0.98
-    max_scale_error_pct: 0.9
+    max_scale_error_pct: 0.9  # measured 0.285% under acquisition pairing
     max_offset: 2.0           # degC
+    max_residual_bias: 0.5    # degC; measured 0.000, spread 0.227, n 78
+    max_residual_spread: 0.3
     why: >
       0x551:0 with offset -40. This is the anchor that settled which coolant
       offset convention is correct, so it must not move quietly.
   - signal: can:ECM_COOLANT_TEMP_233
     reference: obd:COOLANT_TEMP
     min_r_squared: 0.98
-    max_scale_error_pct: 0.8
+    max_scale_error_pct: 1.9  # was 0.8 under 1 s bins; measured 1.357% raw
     max_offset: 2.0
+    max_residual_bias: 0.55   # measured -0.013, spread 0.196, n 78; 75/78 exact
+    max_residual_spread: 0.25
     why: 0x233:0 with offset -50 — the other convention, same sensor.
   - signal: can:ECM_COOLANT_TEMP_23D
     reference: obd:COOLANT_TEMP
     min_r_squared: 0.98
-    max_scale_error_pct: 0.9
+    max_scale_error_pct: 1.4  # was 0.9 under 1 s bins; measured 0.840% raw
     max_offset: 2.0
+    max_residual_bias: 0.5    # measured 0.000, spread 0.160, n 78
+    max_residual_spread: 0.21
     why: 0x23D:7, bit-identical to 0x233:0.
 
 # Exact byte-level relationships, independent of any decode. Deliberately below
