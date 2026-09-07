@@ -85,7 +85,12 @@ confirmation step, and no automatic rescan. Task 6.5 is what adds those.
   `target_rate_hz` (Mode 01 ~1.46 Hz, DIDs ~0.90 Hz, 18.25 aggregate channel
   readings/s against 64 expected). The first DID was also delayed 26.56 s
   after arming even though Mode 01 began immediately; see
-  `docs/abs-wheel-speed-and-did-gap-protocol.md`.
+  `docs/abs-wheel-speed-and-did-gap-protocol.md`. Those rates measured the
+  pre-C04 scheduler (end-to-start windows plus two 200 ms idle drains per
+  cycle, 0.948 s per "0.25 s" cycle on the fake bus); the profile now declares
+  a start-to-start `did_cycle_seconds` and reports achieved cycle, missed
+  cycles and transition latency in `/status.obd_scheduler.did_profile.cycle` —
+  see `docs/hybrid-scheduling.md`, including the pending hardware procedure.
 - **Do not treat the hybrid digest's empty delivery section as absent data.**
   The current semantic registry does not map Mode-01 fuel status into the
   `fueling_active` role, and the fallback looks for a Mode-01 wideband PID the

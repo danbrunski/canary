@@ -115,7 +115,13 @@ async def test_default_collectors_use_canable_obd_by_default(
     captured = {}
 
     async def fake_collect_can_obd(
-        spec, queue, stop_event, *, reconnect_policy, on_scheduler_metrics=None
+        spec,
+        queue,
+        stop_event,
+        *,
+        reconnect_policy,
+        on_scheduler_metrics=None,
+        on_handoff_stats=None,
     ):
         captured["spec"] = spec
         captured["queue"] = queue
@@ -174,7 +180,13 @@ async def test_default_collectors_loads_custom_pids_when_present(
     captured = {}
 
     async def fake_collect_can_obd(
-        spec, queue, stop_event, *, reconnect_policy, on_scheduler_metrics=None
+        spec,
+        queue,
+        stop_event,
+        *,
+        reconnect_policy,
+        on_scheduler_metrics=None,
+        on_handoff_stats=None,
     ):
         captured["spec"] = spec
         stop_event.set()

@@ -2751,3 +2751,29 @@ def test_can_receive_stats_reach_health_snapshot_as_named_counter() -> None:
     assert can_receive["dropped_records"] == 12
     assert can_receive["batches"] == 40
     assert can_receive["reconnects"] == 1
+
+
+def test_obd_collector_handoff_stats_reach_health_as_obd_collect() -> None:
+    """C03.6 — the Canable collector's QueueDropCounter / ThreadHandoff
+    counters are attributable in ``/status`` instead of only in a log line,
+    with derived readings and raw responses kept apart."""
+    from src.collection.queueing import CollectorHandoffStats, HandoffStats
+    from src.daemon import runtime as runtime_mod
+
+    health = HealthMonitor()
+    stats = CollectorHandoffStats(
+        handoff=HandoffStats(
+            accepted=5000, dropped=3, high_water=120, capacity=4096, drains=80, max_batch=256
+        ),
+        queue_dropped=2,
+        derived_records=5003,
+        raw_responses=900,
+        reconnects=1,
+    )
+    runtime_mod._obd_handoff_stats_observer(health)(stats)
+    sink = health.snapshot()["telemetry_sinks"]["obd_collect"]
+    assert sink["dropped_records"] == 5
+    assert sink["buffer_dropped"] == 3 and sink["queue_dropped"] == 2
+    assert sink["derived_records"] == 5003 and sink["raw_responses"] == 900
+    assert sink["reconnects"] == 1
+    assert stats.to_dict()["accepted"] == 5000

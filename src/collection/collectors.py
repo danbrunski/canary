@@ -39,6 +39,7 @@ from src.collection.obd_scheduler import (
     parse_did_token,
 )
 from src.collection.pids import REQUIRED_PIDS
+from src.collection.queueing import CollectorHandoffStats
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig
 from src.telemetry import TelemetryRecord
@@ -55,6 +56,7 @@ def default_collectors(
     freeze_frame_trigger: FreezeFrameTrigger | None = None,
     force_poll_trigger: ForcePollTrigger | None = None,
     can_receive_stats_callback: ReceiveStatsCallback | None = None,
+    obd_handoff_stats_callback: Callable[[CollectorHandoffStats], None] | None = None,
 ) -> list[CollectorStarter]:
     """Config -> collector starters.
 
@@ -156,6 +158,7 @@ def default_collectors(
                 stop,
                 reconnect_policy=reconnect_policy,
                 on_scheduler_metrics=obd_scheduler_metrics_callback,
+                on_handoff_stats=obd_handoff_stats_callback,
             )
 
         return [canable_obd, *gps_collectors]

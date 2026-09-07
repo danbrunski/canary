@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from src.collection.capture_quality import evaluate_capture_quality
 from src.mcp_server.audit import MCPAuditLogger
 from src.mcp_server.client import DaemonClient
 from src.mcp_server.write_tools._shared import audited_post
@@ -26,28 +25,22 @@ from src.mcp_server.write_tools._shared import audited_post
 DEFAULT_VERIFY_SECONDS = 20.0
 
 
-def _rate_verification(status: dict[str, Any], requested_rate_hz: float | None) -> dict[str, Any]:
+async def _rate_verification(
+    client: DaemonClient, requested_rate_hz: float | None
+) -> dict[str, Any]:
     """Score the running capture against its profile's contract.
 
-    Delegates to :func:`src.collection.capture_quality.evaluate_capture_quality`
-    rather than re-deriving the rules, so the arm-time check and the sidecar
-    written at capture stop cannot disagree about whether a capture is sound.
-    They were separate implementations until 2026-08-10, and only the weaker
-    one ran before the drive.
+    Asks the daemon (``GET /control/capture/quality``) rather than re-deriving
+    the rules from ``/status``: the daemon holds the capture-lifetime ledger,
+    the arm-time loss epoch and the rows on disk, and it runs the same
+    evaluator that writes the sidecar at stop — so the arm-time check and
+    the stop-time verdict cannot disagree (C03.9). Until 2026-08-10 they were
+    separate implementations, and only the weaker one ran before the drive;
+    until C03 the shared one scored a trailing 60 s window.
     """
-    profile = status.get("capture_profile") or {}
-    health = status.get("health") or {}
-    scheduler = health.get("obd_scheduler") or {}
-    storage = (health.get("telemetry_sinks") or {}).get("storage") or {}
-    quality = evaluate_capture_quality(
-        profile=profile,
-        scheduler=scheduler,
-        storage=storage,
-        requested_rate_hz=requested_rate_hz,
-    )
-    payload = quality.to_dict()
-    payload["passive_broadcast_enabled"] = bool(profile.get("broadcast_decode", False))
-    return payload
+    quality = await client.get_json("/control/capture/quality")
+    quality["requested_rate_hz"] = requested_rate_hz
+    return quality
 
 
 async def arm_tuning_capture(
@@ -81,23 +74,28 @@ async def arm_tuning_capture(
     are recoverable afterwards.
 
     Per-channel ``status`` separates the ways a capture disappoints, because
-    they have opposite fixes: ``shortfall`` means demand exceeded the budget
-    (throttling working as designed — lower the rate or raise the budget),
-    ``stalled`` means the rate was fine but the channel went quiet for a
-    stretch (Mode 22 window closed, engine off, ECU stopped answering) — check
-    ``max_gap_seconds`` — and ``missing`` means the ECU never answered at all,
-    which wants the channel removed from the profile, not more budget.
+    they have opposite responses: ``shortfall`` means the achieved cadence
+    fell below the requested rate, ``gap`` means the cadence was fine but the
+    channel went quiet for a stretch (Mode 22 window closed, engine off, ECU
+    stopped answering — see ``coverage.max_gap_s``), and ``missing`` means
+    the ECU never answered at all, which wants the channel removed from the
+    profile. The verdict names the constraint that actually bound
+    (``failing_constraints``: unanswered_input, rate_shortfall,
+    acquisition_gap, tuple_incomplete, tuple_skew, persistence_loss,
+    unknown_loss_counters) with its evidence; it never prescribes a budget
+    or rate change, because an old drop incident is not proof of the
+    current limiting resource.
 
-    ``tuple_rate_bound_hz`` is the one to look at for a fuelling capture: it
-    bounds how often the profile's ``required_tuple`` can complete, and it is
-    what per-channel rates cannot tell you. A capture whose channels all read
-    healthy still yields nothing if the tuple never completes.
+    ``tuples`` is the block to read for a fuelling capture: ``complete`` is
+    the number of rounds in which every ``required_tuple`` member was
+    persisted within the profile's ``max_tuple_skew_s``, counted from the
+    rows on disk. ``tuple_rate_bound_hz`` is only a bound (the slowest
+    member's cadence). A capture whose channels all read healthy still
+    yields nothing if the tuple never completes.
 
-    ``observed_seconds`` is the window the samples were drawn from, not a
-    denominator; dividing by it re-creates the conflation that made an
-    on-target capture look broken on 2026-08-06. Pass ``verify_seconds=0`` to
-    skip the wait and return immediately — the verdict is then absent rather
-    than assumed good.
+    The verdict is scoped: ``scope: live`` covers arm to now, on what has
+    been persisted so far. Pass ``verify_seconds=0`` to skip the wait and
+    return immediately — the verdict is then absent rather than assumed good.
     """
     body: dict[str, Any] = {"profile": profile}
     if rate_hz is not None:
@@ -116,14 +114,37 @@ async def arm_tuning_capture(
         await asyncio.sleep(verify_seconds)
         status = await client.get_json("/status")
         payload["verified_after_seconds"] = verify_seconds
-        verification = _rate_verification(status, rate_hz)
+        verification = await _rate_verification(client, rate_hz)
         payload["rate_verification"] = verification
         # Hoisted to the top level so a caller cannot read the channel table
         # and miss that the contract failed.
         payload["verdict"] = verification.get("verdict")
+        payload["scope"] = verification.get("scope")
+        payload["failing_constraints"] = [
+            item.get("clause") for item in verification.get("failures") or []
+        ]
         payload["requested_rate_hz"] = rate_hz
         payload["vehicle_state"] = (status.get("vehicle_state") or {}).get("state")
     return payload
+
+
+async def get_capture_quality(
+    client: DaemonClient,
+    *,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """The capture contract verdict: live for the active capture, or recomputed.
+
+    Without ``session_id`` this is the running capture scored on what has
+    been persisted so far (``scope: live``). With one, the daemon recomputes
+    coverage and tuple yield from that session's rows without rewriting it
+    and returns the stored sidecar beside the recomputation — a v1 sidecar
+    comes back as ``scope: trailing_snapshot`` with losses unknown, which is
+    what it was. Read ``failures[].clause`` for the constraint that bound.
+    """
+    if session_id is None:
+        return await client.get_json("/control/capture/quality")
+    return await client.get_json(f"/control/capture/quality/{session_id}")
 
 
 async def disarm_tuning_capture(
@@ -157,4 +178,4 @@ async def disarm_tuning_capture(
     return {"capture": stopped, "bus_budget": budget}
 
 
-__all__ = ["arm_tuning_capture", "disarm_tuning_capture"]
+__all__ = ["arm_tuning_capture", "disarm_tuning_capture", "get_capture_quality"]

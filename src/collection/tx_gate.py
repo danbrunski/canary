@@ -53,7 +53,7 @@ from typing import Any
 
 import can
 
-from src.collection import capture_generation
+from src.collection import capture_generation, capture_lifetime
 
 log = logging.getLogger(__name__)
 
@@ -109,8 +109,10 @@ def set_passive(
         _source = source
         _expires_at = effective_now + ttl_seconds if enabled and ttl_seconds is not None else None
     if previous != bool(enabled):
-        # Polling stops or resumes: a new capture generation (C02.8).
+        # Polling stops or resumes: a new capture generation (C02.8), and a
+        # pause window in the capture-lifetime ledger (C03.4).
         capture_generation.bump("passive-on" if enabled else "passive-off")
+        capture_lifetime.mark_paused(bool(enabled), reason="passive", now=effective_now)
         log.warning(
             "passive mode %s",
             "ENABLED (CAN TX suppressed)" if enabled else "disabled",

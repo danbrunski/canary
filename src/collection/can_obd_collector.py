@@ -45,6 +45,7 @@ from src.collection.can_obd_client import (
     parse_dtc_payload,
 )
 from src.collection.custom_pids import evaluate_custom_pid
+from src.collection.hybrid_cycle import CyclePlan, WakeDecision, next_wake_at, plan_cycle
 from src.collection.isotp import (
     DEFAULT_REQUEST_ID,
     DEFAULT_RESPONSE_ID_MAX,
@@ -87,6 +88,7 @@ from src.collection.obd_scheduler import (
     _initial_request_states,
     _next_due_at,
     _next_request_due_at,
+    _next_unsuppressed_at,
     _PidDiscoveryClient,
     _PollRequest,
     _PollRequestState,
@@ -101,7 +103,13 @@ from src.collection.obd_scheduler import (
     round_period_seconds,
     select_batch_companions,
 )
-from src.collection.queueing import QueueDropCounter, log_dropped_can_frame, threadsafe_enqueue
+from src.collection.queueing import (
+    CollectorHandoffStats,
+    HandoffStats,
+    QueueDropCounter,
+    log_dropped_can_frame,
+    threadsafe_enqueue,
+)
 from src.collection.reconnect import (
     BusReconnector,
     RebuildOutcome,
@@ -275,6 +283,11 @@ def run_can_obd_loop(
             # Profile change, pause/resume, passive toggle or replay
             # transition: rounds restart from zero under the new generation.
             rounds.reset(generation, now)
+            if controller is not None:
+                # ...and any session transition in flight is completed rather
+                # than left as a stale phase the new profile polls through
+                # (C04.7); the next window is due now, not an interval later.
+                controller.on_generation_change(now)
         if (
             freeze_frame_indices
             and spec.freeze_frame_trigger is not None
@@ -319,117 +332,89 @@ def run_can_obd_loop(
             # timeout, and `_update_response_state` would escalate each one
             # into the miss-backoff. Passive mode would then hand back a
             # scheduler with every PID suppressed once it lifted.
-            _recv_and_tap(bus, on_frame, stats, timeout=0.2)
+            wake = next_wake_at(now, deadline=deadline_monotonic)
+            _drain_frames_until(bus, on_frame, stats, stop_event, wake.at, deadline_monotonic)
             continue
 
         if not requests:
-            _recv_and_tap(bus, on_frame, stats, timeout=0.2)
+            wake = next_wake_at(now, deadline=deadline_monotonic)
+            _drain_frames_until(bus, on_frame, stats, stop_event, wake.at, deadline_monotonic)
             continue
 
+        # The selected profile applies even for ``default``: the request plan
+        # is a startup superset of every saved profile, and filtering here is
+        # what keeps the seeded default byte-identical to config. Standalone
+        # recorder/tests that never initialised the catalog keep the
+        # scheduler's historical behaviour.
+        profile_gated = spec.capture_profiles_enabled or tuning_profile.is_active()
         eligible: RequestFilter | None = None
-        if spec.capture_profiles_enabled and tuning_profile.mode22() and controller is not None:
-            # DID-owning profiles explicitly accept the configured diagnostic
-            # session tradeoff. Keep the session controller involved (unlike
-            # Mode-01-only focused captures, which suspend DID windows), while
-            # intersecting its phase gate with the selected profile.
+        if controller is not None and _controller_engaged(controller, profile_gated):
+            dids_selected = True
+            if profile_gated:
+                # The startup request plan is the union of every saved
+                # profile. A DID outside the active profile must not keep
+                # this window's pending set alive until its max-duration
+                # timeout.
+                dids_selected = False
+                for did_index in did_indices:
+                    if tuning_profile.request_eligible(did_index, requests[did_index]):
+                        dids_selected = True
+                    else:
+                        controller.on_request_attempted(did_index)
+            phase_before = controller.phase
+            if not dids_selected:
+                # No DID is selected right now (profile without DIDs, Mode 22
+                # switched off, or the capture is paused), yet the controller
+                # still holds or is leaving the session: complete the
+                # transition and open nothing new — polling Mode 01 into a
+                # held session is a blackout that looks like a dead bus, and
+                # a paused capture must not churn entry/exit pairs (C04.7).
+                controller.release(now)
             controller.advance(request_states, now)
-            # The startup request plan is the union of every saved profile.
-            # A DID outside the active profile must not keep this window's
-            # pending set alive until its max-duration timeout.
-            for did_index in did_indices:
-                if not tuning_profile.request_eligible(did_index, requests[did_index]):
-                    controller.on_request_attempted(did_index)
-            if controller.session_exit_due() and now >= next_budget_at:
-                # Hand Mode 01 the bus back now instead of waiting out the S3
-                # timeout. Only a permanent refusal disables this; a busy or
-                # silent ECU is retried, so one bad moment costs one window
-                # rather than every window for the rest of the drive.
-                exit_result = _send_session_control(
-                    bus,
-                    spec.did_session,  # type: ignore[arg-type]
-                    sub_function=spec.did_session.exit_session,  # type: ignore[union-attr]
-                    request_id=spec.did_request_id,
-                    timeout_seconds=spec.request_timeout_seconds,
-                    on_frame=on_frame,
-                    stop_event=stop_event,
-                    stats=stats,
-                    deadline_monotonic=deadline_monotonic,
+            if controller.phase == "mode01" and controller.cycle_mode():
+                controller.set_plan(
+                    _cycle_plan_for(
+                        requests,
+                        request_states,
+                        spec,
+                        controller,
+                        now,
+                        profile_gated=profile_gated,
+                        batch_max_pids=active_batch_max if batching_enabled else 1,
+                    )
                 )
-                controller.on_exit_response(result=exit_result, now=time.monotonic())
-                next_budget_at = max(
-                    next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
-                )
+            budget_after = _drive_session_controller(
+                bus,
+                spec,
+                controller,
+                request_states,
+                now=now,
+                next_budget_at=next_budget_at,
+                budget_rps=budget_rps,
+                allow_entry=dids_selected,
+                on_frame=on_frame,
+                stop_event=stop_event,
+                stats=stats,
+                deadline_monotonic=deadline_monotonic,
+            )
+            if controller.phase != phase_before:
+                # A phase change is a new sampling window: the other
+                # service's round grid must not hold this one's first round
+                # back by up to a period (a DID sweep waited 0.21 s after its
+                # window opened under a shared 4 Hz target).
+                rounds.idle(now)
+            if budget_after is not None:
+                next_budget_at = budget_after
                 continue
-            if controller.session_control_due(request_states, now) and now >= next_budget_at:
-                entry_result = _send_session_control(
-                    bus,
-                    spec.did_session,  # type: ignore[arg-type]
-                    request_id=spec.did_request_id,
-                    timeout_seconds=spec.request_timeout_seconds,
-                    on_frame=on_frame,
-                    stop_event=stop_event,
-                    stats=stats,
-                    deadline_monotonic=deadline_monotonic,
-                )
-                controller.on_session_response(
-                    ok=entry_result.ok, states=request_states, now=time.monotonic()
-                )
-                next_budget_at = max(
-                    next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
-                )
-                continue
-            eligible = partial(_capture_did_request_eligible, controller, now)
-        elif spec.capture_profiles_enabled or tuning_profile.is_active():
-            # Apply the selected profile even for ``default``. The request
-            # plan is a startup superset of every saved profile, and filtering
-            # here is what keeps the seeded default byte-identical to config.
+            eligible = (
+                partial(_capture_did_request_eligible, controller, now)
+                if profile_gated
+                else partial(controller.request_eligible, now=now)
+            )
+        elif profile_gated:
             # A profile with no DIDs deliberately suspends the session
             # controller, concentrating the budget on its Mode-01 selection.
             eligible = tuning_profile.request_eligible
-        elif controller is not None:
-            # Standalone recorder/tests that did not initialize the capture
-            # catalog retain the scheduler's historical behavior.
-            controller.advance(request_states, now)
-            if controller.session_exit_due() and now >= next_budget_at:
-                # Hand Mode 01 the bus back now instead of waiting out the S3
-                # timeout. Only a permanent refusal disables this; a busy or
-                # silent ECU is retried, so one bad moment costs one window
-                # rather than every window for the rest of the drive.
-                exit_result = _send_session_control(
-                    bus,
-                    spec.did_session,  # type: ignore[arg-type]
-                    sub_function=spec.did_session.exit_session,  # type: ignore[union-attr]
-                    request_id=spec.did_request_id,
-                    timeout_seconds=spec.request_timeout_seconds,
-                    on_frame=on_frame,
-                    stop_event=stop_event,
-                    stats=stats,
-                    deadline_monotonic=deadline_monotonic,
-                )
-                controller.on_exit_response(result=exit_result, now=time.monotonic())
-                next_budget_at = max(
-                    next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
-                )
-                continue
-            if controller.session_control_due(request_states, now) and now >= next_budget_at:
-                entry_result = _send_session_control(
-                    bus,
-                    spec.did_session,  # type: ignore[arg-type]
-                    request_id=spec.did_request_id,
-                    timeout_seconds=spec.request_timeout_seconds,
-                    on_frame=on_frame,
-                    stop_event=stop_event,
-                    stats=stats,
-                    deadline_monotonic=deadline_monotonic,
-                )
-                controller.on_session_response(
-                    ok=entry_result.ok, states=request_states, now=time.monotonic()
-                )
-                next_budget_at = max(
-                    next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
-                )
-                continue
-            eligible = partial(controller.request_eligible, now=now)
 
         # A round ends at its deadline even while more work is due (C02.2);
         # this runs before any selection so no reading is ever stamped with
@@ -440,25 +425,28 @@ def run_can_obd_loop(
         )
         if active_request_count == 0:
             rounds.idle(now)
-            _drain_frames_until(
-                bus,
-                on_frame,
-                stats,
-                stop_event,
-                now + 0.2,
-                deadline_monotonic,
+            wake = _wake_for(
+                now,
+                controller,
+                request_states,
+                budget_at=next_budget_at,
+                next_due=_next_unsuppressed_at(requests, request_states, now, eligible=eligible),
+                deadline=deadline_monotonic,
+                budget_only_for_session=True,
             )
+            _drain_frames_until(bus, on_frame, stats, stop_event, wake.at, deadline_monotonic)
             continue
 
         if now < next_budget_at:
-            _drain_frames_until(
-                bus,
-                on_frame,
-                stats,
-                stop_event,
-                next_budget_at,
-                deadline_monotonic,
+            wake = _wake_for(
+                now,
+                controller,
+                request_states,
+                budget_at=next_budget_at,
+                next_due=None,
+                deadline=deadline_monotonic,
             )
+            _drain_frames_until(bus, on_frame, stats, stop_event, wake.at, deadline_monotonic)
             continue
 
         if rounds.current is None:
@@ -466,18 +454,17 @@ def run_can_obd_loop(
                 rounds, requests, request_states, spec, now, time.time(), eligible=eligible
             )
             if opened is None:
-                if controller is not None:
-                    transition_at = controller.next_transition_at()
-                    wait_until = (
-                        transition_at if wait_until is None else min(wait_until, transition_at)
-                    )
                 # Never spin: with active requests but nothing to open, the
-                # bus is still received until the next chance to look again.
-                if wait_until is None:
-                    wait_until = now + ON_DEMAND_ROUND_PERIOD_SECONDS
-                _drain_frames_until(
-                    bus, on_frame, stats, stop_event, wait_until, deadline_monotonic
+                # bus is still received until the earliest relevant deadline.
+                wake = _wake_for(
+                    now,
+                    controller,
+                    request_states,
+                    budget_at=None,
+                    next_due=wait_until,
+                    deadline=deadline_monotonic,
                 )
+                _drain_frames_until(bus, on_frame, stats, stop_event, wake.at, deadline_monotonic)
                 continue
         current_round = rounds.current
         assert current_round is not None
@@ -513,6 +500,7 @@ def run_can_obd_loop(
             preferred=preferred,
         )
         if len(batch_indices) > 1:
+            batch_started = time.monotonic()
             outcome = _issue_batched_request(
                 bus,
                 requests,
@@ -527,6 +515,10 @@ def run_can_obd_loop(
                 round_timestamp=round_timestamp,
                 round_state=current_round,
             )
+            if controller is not None:
+                controller.on_service_time("mode01", time.monotonic() - batch_started)
+                if outcome.observed:
+                    controller.on_response(request_index, time.monotonic(), outcome.acquired_at)
             if outcome.answered:
                 consecutive_batch_failures = 0
                 retry_mode06_after_contact(time.monotonic())
@@ -588,6 +580,10 @@ def run_can_obd_loop(
             request_state.bus_errors += 1
             stats.bus_errors += 1
             raise
+        if controller is not None:
+            controller.on_service_time(
+                controller.service_kind(request_index), time.monotonic() - request_started
+            )
         emitted = False
         rounds.on_attempt(request_index)
         if result.response is not None:
@@ -611,6 +607,12 @@ def run_can_obd_loop(
             request_state.responses += 1
             request_state.last_response_at = time.monotonic()
             retry_mode06_after_contact(time.monotonic())
+            if controller is not None:
+                controller.on_response(
+                    request_index,
+                    time.monotonic(),
+                    result.arrival.at if result.arrival is not None else None,
+                )
         elif result.negative_response_code is not None:
             # Formal ECU refusal, not a true timeout — counted separately
             # (see `QueryResult`) so it doesn't masquerade as bus silence.
@@ -655,6 +657,164 @@ def run_can_obd_loop(
         stats.scheduler_snapshots += 1
     rounds.close(time.monotonic())
     return stats
+
+
+def _controller_engaged(controller: DidWindowController, profile_gated: bool) -> bool:
+    """Whether this tick must drive the session controller.
+
+    Always when no profile gates requests. Under a profile: when it owns
+    DIDs, or when the controller is mid-transition — a held window, a lapse
+    or an owed exit — so no stale phase is ever polled through (C04.7).
+    """
+    if not profile_gated:
+        return True
+    return (
+        bool(tuning_profile.mode22())
+        or controller.phase != "mode01"
+        or controller.session_exit_due()
+    )
+
+
+def _wake_for(
+    now: float,
+    controller: DidWindowController | None,
+    states: list[_PollRequestState],
+    *,
+    budget_at: float | None,
+    next_due: float | None,
+    deadline: float | None,
+    budget_only_for_session: bool = False,
+) -> WakeDecision:
+    """The loop's one wake calculation, with the controller's deadlines folded in.
+
+    ``budget_only_for_session`` drops the budget slot unless the controller
+    has an exit, entry or keep-alive waiting on it: with nothing pollable the
+    budget is not a deadline, the next transition is.
+    """
+    transition_at = keepalive_at = None
+    if controller is not None:
+        transition_at = controller.next_transition_at()
+        keepalive_at = controller.next_keepalive_at()
+        if budget_only_for_session and not controller.session_work_pending(states, now):
+            budget_at = None
+    elif budget_only_for_session:
+        budget_at = None
+    return next_wake_at(
+        now,
+        budget_at=budget_at,
+        next_due=next_due,
+        transition_at=transition_at,
+        keepalive_at=keepalive_at,
+        deadline=deadline,
+    )
+
+
+def _drive_session_controller(
+    bus: can.BusABC,
+    spec: CanObdSpec,
+    controller: DidWindowController,
+    states: list[_PollRequestState],
+    *,
+    now: float,
+    next_budget_at: float,
+    budget_rps: float,
+    allow_entry: bool = True,
+    on_frame: Callable[[can.Message], None],
+    stop_event: threading.Event,
+    stats: CanObdLoopStats,
+    deadline_monotonic: float | None,
+) -> float | None:
+    """Send the exit, entry or keep-alive the controller owes, budget allowing.
+
+    ``allow_entry=False`` (no DID selected right now) still sends an owed
+    exit but never opens a window.
+
+    Returns the advanced ``next_budget_at`` when a request went out (the
+    caller restarts its tick), ``None`` when nothing was due or the budget
+    slot has not arrived. The exit is tried first: handing Mode 01 the bus
+    back beats waiting out the S3 timeout, and only a permanent refusal
+    disables it — a busy or silent ECU is retried, so one bad moment costs
+    one window rather than every window for the rest of the drive.
+    """
+    session = spec.did_session
+    if session is None or now < next_budget_at:
+        return None
+    if controller.session_exit_due():
+        controller.on_exit_sent(now)
+        started = time.monotonic()
+        exit_result = _send_session_control(
+            bus,
+            session,
+            sub_function=session.exit_session,
+            request_id=spec.did_request_id,
+            timeout_seconds=spec.request_timeout_seconds,
+            on_frame=on_frame,
+            stop_event=stop_event,
+            stats=stats,
+            deadline_monotonic=deadline_monotonic,
+        )
+        controller.on_service_time("session", time.monotonic() - started)
+        controller.on_exit_response(result=exit_result, now=time.monotonic())
+    elif allow_entry and controller.session_control_due(states, now):
+        controller.on_entry_sent(now)
+        started = time.monotonic()
+        entry_result = _send_session_control(
+            bus,
+            session,
+            request_id=spec.did_request_id,
+            timeout_seconds=spec.request_timeout_seconds,
+            on_frame=on_frame,
+            stop_event=stop_event,
+            stats=stats,
+            deadline_monotonic=deadline_monotonic,
+        )
+        controller.on_service_time("session", time.monotonic() - started)
+        controller.on_session_response(ok=entry_result.ok, states=states, now=time.monotonic())
+    else:
+        return None
+    return max(next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic())
+
+
+def _cycle_plan_for(
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    spec: CanObdSpec,
+    controller: DidWindowController,
+    now: float,
+    *,
+    profile_gated: bool,
+    batch_max_pids: int,
+) -> CyclePlan | None:
+    """What the next cycle must fit, from the currently selected work (C04.4)."""
+    session = spec.did_session
+    cycle = tuning_profile.did_cycle_override()
+    if cycle is None and session is not None:
+        cycle = session.cycle_seconds
+    if session is None or cycle is None:
+        return None
+    mode01_channels = 0
+    did_requests = 0
+    for index, (request, state) in enumerate(zip(requests, states, strict=True)):
+        if state.suppressed_until == float("inf"):
+            continue
+        if profile_gated and not tuning_profile.request_eligible(index, request):
+            continue
+        if request.kind == "did":
+            if state.suppressed_until <= now:
+                did_requests += 1
+        elif request.kind in ("pid", "dtc", "custom", "service"):
+            mode01_channels += 1
+    return plan_cycle(
+        cycle_seconds=cycle,
+        budget_rps=bus_budget.effective(_bus_budget_requests_per_second(spec)),
+        mode01_channels=mode01_channels,
+        batch_max_pids=batch_max_pids,
+        did_requests=did_requests,
+        fast_exit=controller.fast_exit_available(now),
+        exit_grace_seconds=session.exit_grace_seconds,
+        lapse_seconds=session.lapse_seconds,
+        request_timeout_seconds=spec.request_timeout_seconds,
+    )
 
 
 def _open_round(
@@ -782,11 +942,23 @@ async def collect_can_obd_from_config(
     factory: Callable[[CanBusConfig], can.BusABC] = bus_factory,
     reconnect_policy: ReconnectPolicy | None = DEFAULT_RECONNECT_POLICY,
     on_scheduler_metrics: Callable[[ObdSchedulerMetrics], None] | None = None,
+    on_handoff_stats: Callable[[CollectorHandoffStats], None] | None = None,
 ) -> None:
-    """Daemon producer for the Canable-native path."""
+    """Daemon producer for the Canable-native path.
+
+    ``on_handoff_stats`` (C03.6) receives the collector's cumulative
+    thread-handoff and ingest-queue drop counters each time scheduler metrics
+    are published, so loss between the poll thread and the ingest queue is
+    attributable in ``/status`` (``telemetry_sinks.obd_collect``) instead of
+    only in a log line.
+    """
     loop = asyncio.get_running_loop()
     drop_counter = QueueDropCounter("canable-obd")
     thread_stop = threading.Event()
+    #: Handoff counters from attempts that already ended; the live attempt's
+    #: are added on each report so the total is cumulative across reconnects.
+    finished_handoffs = HandoffStats(0, 0, 0, 0, 0, 0)
+    attempts = 0
 
     async def _mirror_stop() -> None:
         await stop_event.wait()
@@ -794,8 +966,24 @@ async def collect_can_obd_from_config(
 
     mirror_task = asyncio.create_task(_mirror_stop())
 
+    def _report_handoff(enqueue_stats: HandoffStats, metrics: ObdSchedulerMetrics) -> None:
+        if on_handoff_stats is None:
+            return
+        raw = sum(int(row.get("responses") or 0) for row in metrics.by_tier.values())
+        on_handoff_stats(
+            CollectorHandoffStats(
+                handoff=finished_handoffs + enqueue_stats,
+                queue_dropped=drop_counter.dropped,
+                derived_records=metrics.readings_emitted,
+                raw_responses=raw,
+                reconnects=max(0, attempts - 1),
+            )
+        )
+
     async def _attempt(capture: Callable[[can.BusABC], None]) -> None:
+        nonlocal finished_handoffs, attempts
         thread_stop.clear()
+        attempts += 1
         # One bounded, coalescing handoff per attempt (C07.4); closed once the
         # worker has returned so a late callback can never touch the queue.
         enqueue = threadsafe_enqueue(loop, queue, on_drop=drop_counter, name="canable-obd")
@@ -810,10 +998,15 @@ async def collect_can_obd_from_config(
                 enqueue(reading_to_record(reading))
 
             metrics_callback = None
-            if on_scheduler_metrics is not None:
+            if on_scheduler_metrics is not None or on_handoff_stats is not None:
+
+                def _publish(metrics: ObdSchedulerMetrics) -> None:
+                    if on_scheduler_metrics is not None:
+                        on_scheduler_metrics(metrics)
+                    _report_handoff(enqueue.stats(), metrics)
 
                 def metrics_callback(metrics: ObdSchedulerMetrics) -> None:
-                    loop.call_soon_threadsafe(on_scheduler_metrics, metrics)
+                    loop.call_soon_threadsafe(_publish, metrics)
 
             await asyncio.to_thread(
                 run_can_obd_loop,
@@ -827,6 +1020,7 @@ async def collect_can_obd_from_config(
         finally:
             thread_stop.set()
             enqueue.close()
+            finished_handoffs = finished_handoffs + enqueue.stats()
 
     try:
         await run_with_reconnect(
@@ -1216,6 +1410,7 @@ def _send_session_control(
         channel="UDS_SESSION_EXIT" if exiting else "UDS_SESSION_CONTROL",
     )
     stats.session_controls_sent += 1
+    started = time.monotonic()
     result = _query_with_tap(
         bus,
         request,
@@ -1225,15 +1420,21 @@ def _send_session_control(
         stats=stats,
         deadline_monotonic=deadline_monotonic,
     )
+    stats.session_control_seconds += max(0.0, time.monotonic() - started)
     if result.response is not None:
+        stats.session_control_responses += 1
         return SessionControlResult(ok=True)
     # Session control bypasses the poll-request path, so without these the
     # only trace of a failure was a bare counter — a refusal and a silent bus
     # looked identical in `/status` and neither appeared in the log at all.
+    # The shared counters keep every failure visible; the session-specific
+    # ones keep it out of the channel-read throughput (C04.8).
     if result.negative_response_code is not None:
         stats.negative_responses += 1
+        stats.session_control_negative_responses += 1
     else:
         stats.request_timeouts += 1
+        stats.session_control_timeouts += 1
     return SessionControlResult(ok=False, negative_response_code=result.negative_response_code)
 
 

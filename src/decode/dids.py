@@ -106,6 +106,10 @@ class DidAccess(_Strict):
     #: Mode-01 blackout immediately instead of waiting out the S3 timeout.
     #: Absent means "no verified fast exit" — wait for the lapse.
     exit_session: int | None = Field(default=None, ge=0, le=0xFF)
+    #: Settling time after an accepted ``exit_session`` before Mode 01 is
+    #: polled again — a measured vehicle fact (C04.6), not a shared constant.
+    #: Absent means the scheduler's default grace.
+    exit_grace_seconds: float | None = Field(default=None, ge=0)
     keepalive_seconds: float | None = None
     notes: str | None = None
 

@@ -1051,6 +1051,20 @@ def _register_write_tools(
         )
 
     @mcp.tool()
+    async def get_capture_quality(session_id: str | None = None) -> dict[str, Any]:
+        """Capture contract verdict: live for the active capture, or recomputed.
+
+        Without `session_id`: the running capture scored arm-to-now on what
+        has been persisted so far (`scope: live`). With one: coverage and
+        tuple yield recomputed from that session's rows (never rewritten),
+        with the stored sidecar beside it. `failures[].clause` names the
+        constraint that bound (unanswered_input, rate_shortfall,
+        acquisition_gap, tuple_incomplete, tuple_skew, persistence_loss,
+        unknown_loss_counters); `losses` is scoped to the capture or marked
+        unknown, never assumed zero."""
+        return await tuning_capture_write_tool.get_capture_quality(client, session_id=session_id)
+
+    @mcp.tool()
     async def disarm_tuning_capture(
         reason: str | None = None, clear_bus_budget: bool = False
     ) -> dict[str, Any]:

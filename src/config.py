@@ -263,6 +263,11 @@ class CollectionConfig(_Strict):
     #: How often a DID window opens. Each window reads every active DID once,
     #: so this is the effective per-DID sample interval.
     obd_did_window_interval_seconds: float = 60.0
+    #: Start-to-start period of one Mode 01 + Mode 22 cycle (C04.3). When
+    #: set, windows open at ``anchor + k * cycle`` and the interval above is
+    #: ignored; ``null`` (default) keeps the end-to-start interval policy.
+    #: A capture profile's ``did_cycle_seconds`` overrides either.
+    obd_did_cycle_seconds: float | None = None
     #: Hard cap on one window's duration (it normally closes much sooner,
     #: as soon as every active DID has been attempted once).
     obd_did_window_max_seconds: float = 10.0

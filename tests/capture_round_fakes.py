@@ -74,8 +74,20 @@ def isotp_frames(body: bytes) -> list[bytes]:
     return frames
 
 
+#: UDS 0x10 sub-functions that put a session-gated ECU back in the default
+#: session (the textbook 0x01 and the Nissan-verified 0x81, data/dids.yaml).
+DEFAULT_SESSION_SUBFUNCTIONS: frozenset[int] = frozenset({0x01, 0x81})
+#: NRC a session-gated ECU answers a bare Mode 22 with (``7F 22 80``).
+NRC_SERVICE_NOT_SUPPORTED_IN_SESSION = 0x80
+
+#: One scripted reply to a DiagnosticSessionControl request: an NRC byte, a
+#: silence (``None``) or ``"ok"``; the script is consumed one entry per
+#: request and answers positively once exhausted.
+SessionReply = int | None | str
+
+
 class ScriptedEcu:
-    """A Mode 01 ECU on the fake clock.
+    """A Mode 01 / Mode 22 ECU on the fake clock.
 
     Every request is answered ``latency`` seconds after it was sent (a
     multi-frame response spaces its consecutive frames ``frame_gap`` apart).
@@ -83,6 +95,15 @@ class ScriptedEcu:
     ``answer_batches=False`` ignores them silently, and ``silent_pids`` never
     answer at all — the timeout, permanent-refusal and fallback cases the
     round accounting has to stay bounded under.
+
+    ``session_gated`` models the session-exclusive ECM in data/dids.yaml
+    (C04): Mode 22 is refused ``7F 22 80`` outside a non-default UDS session,
+    Mode 01 is *silent* while one is held, the session expires after
+    ``s3_seconds`` without diagnostic traffic, and after such a lapse Mode 01
+    stays dead for ``lapse_blackout_seconds`` (measured >30 s on the Xterra;
+    zero by default so tests choose the behaviour they pin). ``session_script``
+    scripts the reply to each ``10 <sub>``; ``session_latency`` overrides the
+    reply latency for session control alone.
     """
 
     def __init__(
@@ -97,6 +118,12 @@ class ScriptedEcu:
         nrc_pids: Iterable[int] = (),
         stamp_frames: bool = True,
         values: dict[int, bytes] | None = None,
+        session_gated: bool = False,
+        session_script: dict[int, list[SessionReply]] | None = None,
+        session_latency: float | None = None,
+        s3_seconds: float = 5.0,
+        lapse_blackout_seconds: float = 0.0,
+        silent_dids: Iterable[int] = (),
     ) -> None:
         self.clock = clock
         self.latency = latency
@@ -107,11 +134,53 @@ class ScriptedEcu:
         self.nrc_pids = frozenset(nrc_pids)
         self.stamp_frames = stamp_frames
         self.values = dict(DEFAULT_VALUES if values is None else values)
+        self.session_gated = session_gated
+        self.session_script = {k: list(v) for k, v in (session_script or {}).items()}
+        self.session_latency = latency if session_latency is None else session_latency
+        self.s3_seconds = s3_seconds
+        self.lapse_blackout_seconds = lapse_blackout_seconds
+        self.silent_dids = frozenset(silent_dids)
         self.sent: list[tuple[float, can.Message]] = []
+        self.recv_calls: list[float] = []
         self.batch_requests = 0
         self.single_requests = 0
+        self.session_requests = 0
+        #: ``(time, sub-function)`` of every accepted session change.
+        self.session_changes: list[tuple[float, int]] = []
+        self.lapses = 0
         self.on_send: list[object] = []
         self._pending: list[tuple[float, bytes]] = []
+        self._session: int | None = None
+        self._last_diag_at = 0.0
+        self._blackout_until = 0.0
+
+    @property
+    def session(self) -> int | None:
+        """The ECU's current non-default session, ``None`` when in default."""
+        self._expire_session(self.clock.monotonic())
+        return self._session
+
+    def _expire_session(self, now: float) -> None:
+        if self._session is not None and now - self._last_diag_at > self.s3_seconds:
+            self._session = None
+            self.lapses += 1
+            self._blackout_until = now + self.lapse_blackout_seconds
+
+    def _handle_session_control(self, sub: int, now: float) -> None:
+        self.session_requests += 1
+        self._last_diag_at = now
+        script = self.session_script.get(sub)
+        reply: SessionReply = "ok"
+        if script:
+            reply = script.pop(0)
+        if reply is None:
+            return
+        if isinstance(reply, int):
+            self._queue([bytes([0x03, 0x7F, 0x10, reply, 0, 0, 0, 0])], now, self.session_latency)
+            return
+        self._session = None if sub in DEFAULT_SESSION_SUBFUNCTIONS else sub
+        self.session_changes.append((now, sub))
+        self._queue([bytes([0x02, 0x50, sub, 0, 0, 0, 0, 0])], now, self.session_latency)
 
     def send(self, msg: can.Message, timeout: float | None = None) -> None:
         now = self.clock.monotonic()
@@ -124,12 +193,27 @@ class ScriptedEcu:
         length, service = data[0], data[1]
         if service == 0x30:  # flow control from the collector
             return
+        self._expire_session(now)
+        if service == 0x10 and length >= 2:
+            self._handle_session_control(data[2], now)
+            return
         if service == 0x22 and length >= 3:
             self.single_requests += 1
             did = data[2:4]
+            if self.session_gated and self._session is None:
+                nrc = NRC_SERVICE_NOT_SUPPORTED_IN_SESSION
+                self._queue([bytes([0x03, 0x7F, 0x22, nrc, 0, 0, 0, 0])], now)
+                return
+            self._last_diag_at = now
+            if int.from_bytes(did, "big") in self.silent_dids:
+                return
             self._queue([bytes([0x05, 0x62, *did, 0x12, 0x34, 0, 0])], now)
             return
         if service != 0x01:
+            return
+        if self.session_gated and (self._session is not None or now < self._blackout_until):
+            # Mode 01 is silent, not refused, while the session is held (and
+            # for the measured blackout after a lapse) — data/dids.yaml.
             return
         pids = list(data[2 : 1 + length])
         if len(pids) > 1:
@@ -153,8 +237,8 @@ class ScriptedEcu:
                 body += bytes([pid]) + self.values[pid]
         self._queue(isotp_frames(bytes(body)), now)
 
-    def _queue(self, frames: list[bytes], sent_at: float) -> None:
-        due = sent_at + self.latency
+    def _queue(self, frames: list[bytes], sent_at: float, latency: float | None = None) -> None:
+        due = sent_at + (self.latency if latency is None else latency)
         for frame in frames:
             self._pending.append((due, frame))
             due += self.frame_gap
@@ -162,6 +246,7 @@ class ScriptedEcu:
     def recv(self, timeout: float | None = None) -> can.Message | None:
         wait = 0.0 if timeout is None else float(timeout)
         now = self.clock.monotonic()
+        self.recv_calls.append(now)
         if self._pending and self._pending[0][0] <= now + wait:
             due, frame = self._pending.pop(0)
             if due > now:

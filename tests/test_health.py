@@ -436,3 +436,105 @@ def test_status_exposes_segmenter_fallback_flag(tmp_path: Path) -> None:
     app = create_app(config, anomalies_dir=tmp_path / "anomalies", health_monitor=mon)
     body = TestClient(app).get("/status").json()
     assert body["detectors"]["segmenter"]["fallback_active"] is True
+
+
+# ---------------------------------------------------------------------------
+# Capture loss epochs, collector handoff, queue drain (roadmap C03.5 / C03.6 / C03.8)
+# ---------------------------------------------------------------------------
+
+
+def test_loss_counters_report_absent_can0_as_unknown_never_zero(tmp_path: Path) -> None:
+    mon = HealthMonitor(can0_stats_path=tmp_path / "no-such-can0")
+    mon.note_telemetry_drop("storage", count=3)
+    counters = mon.loss_counters()
+    assert counters["storage.dropped_records"] == 3
+    assert counters["storage.errors"] == 0
+    assert counters["can0.rx_dropped"] is None
+    assert counters["can0.rx_over_errors"] is None
+    epoch = mon.loss_epoch(now=12.0)
+    assert epoch.taken_at_monotonic == 12.0
+    assert epoch.counters == counters
+
+
+def test_loss_epochs_reconcile_per_capture_not_since_boot(tmp_path: Path) -> None:
+    from src.collection.capture_losses import reconcile_losses
+
+    stats = tmp_path / "statistics"
+    stats.mkdir()
+    for name in ("rx_over_errors", "rx_dropped", "rx_errors"):
+        (stats / name).write_text("0")
+    mon = HealthMonitor(can0_stats_path=stats)
+    mon.note_telemetry_drop("storage", count=2491)  # an earlier incident
+    start = mon.loss_epoch(now=0.0)
+    (stats / "rx_dropped").write_text("5")
+    stop = mon.loss_epoch(now=300.0)
+    deltas = reconcile_losses(start, stop)
+    assert deltas["storage.dropped_records"].delta == 0
+    assert deltas["storage.dropped_records"].status == "verified"
+    assert deltas["can0.rx_dropped"].delta == 5
+
+
+def test_collector_handoff_lands_under_its_own_sink_with_raw_and_derived_apart() -> None:
+    mon = HealthMonitor()
+    mon.observe_collector_handoff(
+        "obd_collect",
+        accepted=1000,
+        buffer_dropped=4,
+        buffer_high_water=300,
+        buffer_capacity=4096,
+        queue_dropped=6,
+        batches=50,
+        raw_responses=200,
+        derived_records=1004,
+        reconnects=1,
+    )
+    sink = mon.snapshot(now_epoch=0.0)["telemetry_sinks"]["obd_collect"]
+    assert sink["dropped_records"] == 10
+    assert sink["buffer_dropped"] == 4 and sink["queue_dropped"] == 6
+    assert sink["raw_responses"] == 200
+    assert sink["derived_records"] == 1004
+    assert "storage" not in mon.snapshot(now_epoch=0.0)["telemetry_sinks"]
+    assert mon.loss_counters()["obd_collect.dropped_records"] == 10
+
+
+async def test_wait_for_queues_idle_drains_reports_timeouts_and_unobserved() -> None:
+    import asyncio
+
+    mon = HealthMonitor()
+    ingest: asyncio.Queue[int] = asyncio.Queue()
+    storage: asyncio.Queue[int] = asyncio.Queue()
+    mon.observe_telemetry_queue("ingest", ingest)
+    mon.observe_telemetry_queue("storage", storage)
+    ingest.put_nowait(1)
+    storage.put_nowait(1)
+
+    async def consume() -> None:
+        await asyncio.sleep(0.01)
+        ingest.get_nowait()
+        ingest.task_done()
+
+    task = asyncio.create_task(consume())
+    result = await mon.wait_for_queues_idle(("ingest", "storage", "never"), timeout=0.1)
+    await task
+    assert result == {"drained": ["ingest"], "timed_out": ["storage"], "unobserved": ["never"]}
+
+
+def test_snapshot_carries_the_capture_lifetime_beside_the_trailing_scheduler() -> None:
+    from src.collection import capture_lifetime
+
+    capture_lifetime._reset_for_tests()
+    try:
+        mon = HealthMonitor()
+        mon.observe_obd_scheduler({"achieved_hz_capture": {"RPM": 4.0}})
+        assert "capture_lifetime" not in mon.snapshot(now_epoch=0.0)
+        capture_lifetime.begin(0.0, profile="fuel-map", generation=2)
+        capture_lifetime.observe("RPM", 1.0)
+        snap = mon.snapshot(now_epoch=0.0)
+        assert snap["obd_scheduler"]["achieved_hz_capture"] == {"RPM": 4.0}
+        assert snap["capture_lifetime"]["profile"] == "fuel-map"
+        assert snap["capture_lifetime"]["channels"]["RPM"]["observations"] == 1
+        inputs = mon.capture_quality_inputs(now=10.0)
+        assert inputs.lifetime is not None and inputs.lifetime["elapsed_s"] == 10.0
+        assert inputs.scheduler == {"achieved_hz_capture": {"RPM": 4.0}}
+    finally:
+        capture_lifetime._reset_for_tests()

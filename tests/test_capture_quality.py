@@ -1,37 +1,53 @@
 """The capture contract: does a capture deliver what its profile promised?
 
-Every case here is drawn from the 2026-08-10 fuel-map capture, which ran for
-24 minutes, reported nothing alarming, and yielded two usable delivery-error
-samples.
+Cases are drawn from the 2026-08-10 fuel-map capture (24 minutes, nothing
+alarming reported, two usable delivery-error samples) and from the C03 review
+counterexamples: a five-minute capture with samples only in its last minute
+that passed, an old storage-loss incident attributed to every later capture,
+and equal per-channel rates with zero joint coverage.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
+import pandas as pd
+import pytest
+
+from src.analysis.capture_coverage import count_persisted_tuples
+from src.collection.capture_lifetime import CaptureLedger, ChannelAccumulator
+from src.collection.capture_losses import (
+    RESET,
+    UNKNOWN,
+    VERIFIED,
+    LossEpoch,
+    reconcile_losses,
+    summarize_losses,
+)
 from src.collection.capture_quality import (
+    ACQUISITION_GAP,
+    PERSISTENCE_LOSS,
+    RATE_SHORTFALL,
+    SCOPE_TRAILING,
+    TUPLE_INCOMPLETE,
+    TUPLE_SKEW,
+    UNANSWERED_INPUT,
+    UNKNOWN_LOSS_COUNTERS,
     evaluate_capture_quality,
+    normalize_quality_payload,
     tuple_rate_bound_hz,
 )
+from src.telemetry import TelemetryRecord
+
+TUPLE = ["RPM", "ENGINE_LOAD", "FUEL_STATUS", "COMMANDED_EQUIV_RATIO", "O2_WR_LAMBDA_S1"]
 
 
-def _profile(**overrides: object) -> dict[str, object]:
-    base: dict[str, object] = {
+def _profile(**overrides: object) -> dict[str, Any]:
+    base: dict[str, Any] = {
         "name": "fuel-map",
-        "mode01": {
-            "RPM": 1.0,
-            "ENGINE_LOAD": 1.0,
-            "FUEL_STATUS": 1.0,
-            "COMMANDED_EQUIV_RATIO": 1.0,
-            "O2_WR_LAMBDA_S1": 1.0,
-            "COOLANT_TEMP": 0.25,
-        },
+        "mode01": {name: 1.0 for name in TUPLE} | {"COOLANT_TEMP": 0.25},
         "target_rate_hz": 4.0,
-        "required_tuple": [
-            "RPM",
-            "ENGINE_LOAD",
-            "FUEL_STATUS",
-            "COMMANDED_EQUIV_RATIO",
-            "O2_WR_LAMBDA_S1",
-        ],
+        "required_tuple": list(TUPLE),
         "min_achieved_rate_hz": 3.0,
         "round_timestamps": True,
         "broadcast_decode": True,
@@ -40,51 +56,386 @@ def _profile(**overrides: object) -> dict[str, object]:
     return base
 
 
-def _scheduler(rates: dict[str, float], *, observed: float = 20.0) -> dict[str, object]:
+def _scheduler(channels: list[str], *, trailing_hz: dict[str, float] | None = None) -> dict:
     return {
-        "capture_observed_seconds": observed,
-        "achieved_hz_capture": dict(rates),
-        "capture_samples": {name: int(hz * observed) for name, hz in rates.items()},
-        "capture_max_gap_seconds": {name: 1.0 / hz if hz else None for name, hz in rates.items()},
-        "requests": [{"channel": name, "kind": "pid", "capture_selected": True} for name in rates],
+        "capture_observed_seconds": 60.0,
+        "achieved_hz_capture": dict(trailing_hz or {}),
+        "capture_max_gap_seconds": {},
+        "requests": [{"channel": c, "kind": "pid", "capture_selected": True} for c in channels],
         "batching": {"max_pids": 6, "mean_pids_per_batch": 5.2},
     }
 
 
-def test_a_capture_meeting_its_contract_passes() -> None:
-    rates = {
-        "RPM": 4.0,
-        "ENGINE_LOAD": 4.0,
-        "FUEL_STATUS": 3.9,
-        "COMMANDED_EQUIV_RATIO": 4.0,
-        "O2_WR_LAMBDA_S1": 3.8,
-        "COOLANT_TEMP": 1.0,
+def _lifetime(
+    channels: dict[str, list[tuple[float, float, float]]],
+    *,
+    elapsed: float,
+    pauses: list[list[float]] | None = None,
+) -> dict[str, Any]:
+    """``channels`` maps a name to ``[(start, stop, period), ...]`` windows of samples."""
+    ledger = CaptureLedger()
+    ledger.begin(0.0, profile="fuel-map", generation=1, started_wall=1_700_000_000.0)
+    for name, windows in channels.items():
+        for start, stop, period in windows:
+            t = start
+            while t <= stop + 1e-9:
+                ledger.observe(name, t)
+                t += period
+    for start, end in pauses or []:
+        ledger.mark_paused(True, reason="operator", now=start)
+        ledger.mark_paused(False, reason="operator", now=end)
+    snap = ledger.snapshot(elapsed)
+    assert snap is not None
+    return snap.to_dict()
+
+
+def _healthy(elapsed: float = 300.0) -> dict[str, Any]:
+    return _lifetime(
+        {name: [(0.0, elapsed, 0.25)] for name in TUPLE} | {"COOLANT_TEMP": [(0.0, elapsed, 1.0)]},
+        elapsed=elapsed,
+    )
+
+
+def _tuples(
+    complete: int,
+    elapsed: float = 300.0,
+    *,
+    windows: list[tuple[float, float, float]] | None = None,
+    **overrides: Any,
+) -> dict[str, Any]:
+    acc = ChannelAccumulator("__tuple__")
+    if windows is None:
+        for i in range(complete):
+            acc.observe(i * 0.25)
+    else:
+        for start, stop, period in windows:
+            t = start
+            while t <= stop + 1e-9:
+                acc.observe(t)
+                t += period
+    block = {
+        "source": "persisted_rows",
+        "attempted": complete,
+        "complete": complete,
+        "persisted": complete,
+        "incomplete": 0,
+        "skew_rejected": 0,
+        "member_misses": dict.fromkeys(TUPLE, 0),
+        "skew": {"p95_s": 0.01, "max_s": 0.02},
+        "lifetime": acc.snapshot(elapsed).to_dict(),
     }
-    quality = evaluate_capture_quality(profile=_profile(), scheduler=_scheduler(rates))
+    block.update(overrides)
+    return block
+
+
+def _epoch(counters: dict[str, int | None], at: float = 0.0) -> LossEpoch:
+    return LossEpoch(taken_at_monotonic=at, taken_at_wall=at, counters=counters)
+
+
+def _verified_losses(start: dict[str, int | None], stop: dict[str, int | None]) -> dict[str, Any]:
+    return summarize_losses(reconcile_losses(_epoch(start), _epoch(stop, 300.0)))
+
+
+CLEAN = {"storage.dropped_records": 0, "storage.errors": 0, "can0.rx_dropped": 0}
+CHANNELS = [*TUPLE, "COOLANT_TEMP"]
+
+
+def _clauses(quality: Any) -> set[str]:
+    return {f["clause"] for f in quality.failures}
+
+
+# ---------------------------------------------------------------------------
+# C03.1 regression (a): five-minute capture, samples only in the last minute
+# ---------------------------------------------------------------------------
+
+
+def test_a_five_minute_capture_with_samples_only_in_the_last_minute_fails() -> None:
+    """Before C03 this reported 60 observed seconds, a 0.25 s gap, and pass."""
+    lifetime = _lifetime(
+        {name: [(240.0, 300.0, 0.25)] for name in CHANNELS},
+        elapsed=300.0,
+    )
+    trailing = _scheduler(CHANNELS, trailing_hz=dict.fromkeys(CHANNELS, 4.0))
+    trailing["capture_max_gap_seconds"] = dict.fromkeys(CHANNELS, 0.25)
+    quality = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=trailing,
+        lifetime=lifetime,
+        tuples=_tuples(240, elapsed=300.0),
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+    assert quality.verdict == "fail"
+    assert ACQUISITION_GAP in _clauses(quality)
+    gap = next(f for f in quality.failures if f["clause"] == ACQUISITION_GAP)
+    assert gap["evidence"]["RPM"]["missing_initial_s"] == pytest.approx(240.0)
+    # The trailing window is still reported — labelled as what it is.
+    assert quality.trailing["observed_seconds"] == 60.0
+    assert quality.trailing["max_gap_seconds"]["RPM"] == 0.25
+    rpm = next(row for row in quality.channels if row.channel == "RPM")
+    assert rpm.trailing_hz == 4.0
+    assert rpm.cadence["hz"] == pytest.approx(4.0)  # cadence while observing is fine
+    assert rpm.coverage["fraction"] == pytest.approx(0.2)
+
+
+# ---------------------------------------------------------------------------
+# C03.1 regression (b): an earlier storage loss must not fail a later capture
+# ---------------------------------------------------------------------------
+
+
+def test_an_earlier_storage_loss_incident_is_not_attributed_to_a_later_clean_capture() -> None:
+    before = {"storage.dropped_records": 0, "storage.errors": 0, "can0.rx_dropped": 0}
+    after_incident = {"storage.dropped_records": 2491, "storage.errors": 1, "can0.rx_dropped": 0}
+    first = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=_verified_losses(before, after_incident),
+    )
+    assert first.verdict == "fail"
+    loss = next(f for f in first.failures if f["clause"] == PERSISTENCE_LOSS)
+    assert loss["evidence"]["storage.dropped_records"]["delta"] == 2491
+
+    later = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=_verified_losses(after_incident, after_incident),
+    )
+    assert later.verdict == "pass", later.failures
+    assert later.losses["recording"]["status"] == VERIFIED
+    assert later.losses["recording"]["lost"] == 0
+    assert later.losses["recording"]["counters"]["storage.dropped_records"]["start"] == 2491
+
+
+def test_a_capture_local_loss_fails_even_with_a_clean_final_minute() -> None:
+    """The trailing window at stop was clean; the loss happened at minute two."""
+    quality = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS, trailing_hz=dict.fromkeys(CHANNELS, 4.0)),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=_verified_losses(CLEAN, {**CLEAN, "storage.dropped_records": 40}),
+    )
+    assert quality.verdict == "fail"
+    assert _clauses(quality) == {PERSISTENCE_LOSS}
+
+
+def test_unknown_or_reset_counters_never_produce_a_verified_no_loss_claim() -> None:
+    unknown = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=None,
+    )
+    assert unknown.verdict == "unverified"
+    assert _clauses(unknown) == {UNKNOWN_LOSS_COUNTERS}
+    assert unknown.losses["recording"]["status"] == UNKNOWN
+    assert unknown.losses["recording"]["lost"] is None
+
+    reset = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=_verified_losses({**CLEAN, "storage.dropped_records": 500}, CLEAN),
+    )
+    assert reset.verdict == "unverified"
+    counter = reset.losses["recording"]["counters"]["storage.dropped_records"]
+    assert counter["status"] == RESET and counter["delta"] is None
+
+    missing_can0 = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=_verified_losses(
+            {**CLEAN, "can0.rx_dropped": None}, {**CLEAN, "can0.rx_dropped": None}
+        ),
+    )
+    assert missing_can0.verdict == "unverified"
+    assert "can0.rx_dropped" in missing_can0.losses["recording"]["unverified"]
+
+
+def test_dashboard_only_drops_are_reported_beside_recording_loss_not_inside_it() -> None:
+    losses = _verified_losses(
+        {**CLEAN, "broadcast.dropped_records": 0, "live.dropped_records": 0},
+        {**CLEAN, "broadcast.dropped_records": 900, "live.dropped_records": 3},
+    )
+    quality = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=losses,
+    )
     assert quality.verdict == "pass"
-    assert quality.failures == []
-    assert quality.tuple_rate_bound_hz == 3.8
-    assert quality.tuple_bound_is_exact is True
+    assert quality.losses["dashboard"]["lost"] == 903
+    assert quality.losses["recording"]["lost"] == 0
+    assert any("dashboard-only" in note for note in quality.notes)
+
+
+# ---------------------------------------------------------------------------
+# C03.1 regression (c): equal marginal rates, disjoint rounds, zero tuples
+# ---------------------------------------------------------------------------
+
+
+def _obd(t: float, channel: str, *, generation: int = 1, round_id: int, value: float = 1.0):
+    return TelemetryRecord.obd(
+        t,
+        channel,
+        value,
+        "",
+        metadata={
+            "ts_schema": 2,
+            "acquired_at": t,
+            "acquired_clock": "kernel",
+            "generation": generation,
+            "round_id": round_id,
+        },
+    )
+
+
+def _frame(records: list[TelemetryRecord]) -> pd.DataFrame:
+    return pd.DataFrame([r.parquet_row() for r in records])
+
+
+T0 = 1_700_000_000.0
+
+
+def test_equal_per_channel_rates_with_disjoint_rounds_yield_zero_tuples() -> None:
+    """A answers in even rounds, B in odd: both 2 Hz, never together."""
+    records: list[TelemetryRecord] = []
+    for r in range(240):  # 60 s of 250 ms rounds
+        t = T0 + r * 0.25
+        records.append(_obd(t, "A" if r % 2 == 0 else "B", round_id=r))
+    tuples = count_persisted_tuples(
+        _frame(records), {"A": "A", "B": "B"}, max_skew_s=0.125, started_at=T0, ended_at=T0 + 60
+    )
+    assert tuples["attempted"] == 240
+    assert tuples["complete"] == 0
+    assert tuples["incomplete"] == 240
+    assert tuples["member_misses"] == {"A": 120, "B": 120}
+
+    lifetime = _lifetime({"A": [(0.0, 60.0, 0.5)], "B": [(0.25, 60.0, 0.5)]}, elapsed=60.0)
+    profile = _profile(mode01={"A": 1.0, "B": 1.0}, required_tuple=["A", "B"], target_rate_hz=2.0)
+    quality = evaluate_capture_quality(
+        profile=profile,
+        scheduler=_scheduler(["A", "B"]),
+        lifetime=lifetime,
+        tuples=tuples,
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+    assert quality.verdict == "fail"
+    assert _clauses(quality) == {TUPLE_INCOMPLETE}
+    a = next(row for row in quality.channels if row.channel == "A")
+    assert a.status == "ok" and a.cadence["hz"] == pytest.approx(2.0)
+    # The bound is honest about being a bound: 2 Hz possible, 0 achieved.
+    assert quality.tuple_rate_bound_hz == pytest.approx(2.0)
+    assert quality.tuples["complete"] == 0
+
+
+def test_a_partial_batch_response_is_a_member_miss_in_that_round_only() -> None:
+    records: list[TelemetryRecord] = []
+    for r in range(40):
+        t = T0 + r * 0.25
+        records.append(_obd(t, "A", round_id=r))
+        if r != 17:
+            records.append(_obd(t + 0.004, "B", round_id=r))
+    tuples = count_persisted_tuples(
+        _frame(records), {"A": "A", "B": "B"}, max_skew_s=0.125, started_at=T0, ended_at=T0 + 10
+    )
+    assert tuples["complete"] == 39
+    assert tuples["member_misses"] == {"A": 0, "B": 1}
+    assert tuples["lifetime"]["max_interarrival_s"] == pytest.approx(0.5)
+
+
+def test_members_in_one_round_but_too_far_apart_are_skew_rejected() -> None:
+    records: list[TelemetryRecord] = []
+    for r in range(40):
+        t = T0 + r * 0.25
+        records.append(_obd(t, "A", round_id=r))
+        records.append(_obd(t + 0.2, "B", round_id=r))
+    tuples = count_persisted_tuples(
+        _frame(records), {"A": "A", "B": "B"}, max_skew_s=0.125, started_at=T0, ended_at=T0 + 10
+    )
+    assert tuples["complete"] == 0
+    assert tuples["skew_rejected"] == 40
+    assert tuples["skew"]["max_s"] == pytest.approx(0.2)
+    profile = _profile(
+        mode01={"A": 1.0, "B": 1.0},
+        required_tuple=["A", "B"],
+        target_rate_hz=4.0,
+        max_tuple_skew_s=0.125,
+    )
+    quality = evaluate_capture_quality(
+        profile=profile,
+        scheduler=_scheduler(["A", "B"]),
+        lifetime=_lifetime({"A": [(0.0, 10.0, 0.25)], "B": [(0.2, 10.2, 0.25)]}, elapsed=10.0),
+        tuples=tuples,
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+    assert _clauses(quality) == {TUPLE_SKEW}
+    assert quality.tuples["max_tuple_skew_s"] == 0.125
+
+
+def test_rows_without_round_identity_are_no_evidence_not_zero_yield() -> None:
+    legacy = [TelemetryRecord.obd(T0 + i, "A", 1.0, "") for i in range(10)]
+    tuples = count_persisted_tuples(
+        _frame(legacy), {"A": "A"}, max_skew_s=0.1, started_at=T0, ended_at=T0 + 10
+    )
+    assert tuples["source"] == "no_round_evidence"
+    quality = evaluate_capture_quality(
+        profile=_profile(mode01={"A": 1.0}, required_tuple=["A"], target_rate_hz=1.0),
+        scheduler=_scheduler(["A"]),
+        lifetime=_lifetime({"A": [(0.0, 10.0, 1.0)]}, elapsed=10.0),
+        tuples=tuples,
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+    assert quality.verdict == "unverified"
+    assert quality.tuples["source"] == "no_round_evidence"
+    assert any("tuple yield unverified" in note for note in quality.notes)
+
+
+# ---------------------------------------------------------------------------
+# Cadence, coverage and yield stay separate (C03.3 / C03.11)
+# ---------------------------------------------------------------------------
+
+
+def test_the_2026_08_10_rates_fail_as_a_rate_shortfall_with_evidence() -> None:
+    slow = {
+        "RPM": 0.78,
+        "ENGINE_LOAD": 0.78,
+        "FUEL_STATUS": 0.29,
+        "COMMANDED_EQUIV_RATIO": 0.28,
+        "O2_WR_LAMBDA_S1": 0.67,
+        "COOLANT_TEMP": 0.29,
+    }
+    lifetime = _lifetime({n: [(0.0, 1434.0, 1.0 / hz)] for n, hz in slow.items()}, elapsed=1434.0)
+    quality = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=lifetime,
+        tuples=_tuples(2, elapsed=1434.0, attempted=400, incomplete=398),
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+    assert quality.verdict == "fail"
+    assert RATE_SHORTFALL in _clauses(quality)
+    shortfall = next(f for f in quality.failures if f["clause"] == RATE_SHORTFALL)
+    assert shortfall["evidence"]["COMMANDED_EQUIV_RATIO"]["cadence_hz"] == pytest.approx(0.28)
+    assert "budget" not in shortfall["detail"] and "lower" not in shortfall["detail"]
+    assert quality.tuple_rate_bound_hz == pytest.approx(0.28)
 
 
 def test_the_context_weight_is_part_of_the_promise_not_a_shortfall() -> None:
-    """A 0.25-weight channel is *asked* for a quarter rate.
-
-    Holding it to the full target would report a shortfall the profile never
-    claimed — and would have made every correctly-configured capture fail.
-    """
     quality = evaluate_capture_quality(
         profile=_profile(),
-        scheduler=_scheduler(
-            {
-                "RPM": 4.0,
-                "ENGINE_LOAD": 4.0,
-                "FUEL_STATUS": 4.0,
-                "COMMANDED_EQUIV_RATIO": 4.0,
-                "O2_WR_LAMBDA_S1": 4.0,
-                "COOLANT_TEMP": 1.0,
-            }
-        ),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=_verified_losses(CLEAN, CLEAN),
     )
     coolant = next(row for row in quality.channels if row.channel == "COOLANT_TEMP")
     assert coolant.requested_hz == 1.0
@@ -92,116 +443,174 @@ def test_the_context_weight_is_part_of_the_promise_not_a_shortfall() -> None:
     assert quality.verdict == "pass"
 
 
-def test_the_2026_08_10_capture_would_have_failed_before_the_drive() -> None:
-    """The rates that actually ran, scored against what the profile claimed.
-
-    This is the whole point: every one of these channels answered, none looked
-    dead, and the capture could not answer its own question.
-    """
-    quality = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(
-            {
-                "RPM": 0.78,
-                "ENGINE_LOAD": 0.78,
-                "FUEL_STATUS": 0.29,
-                "COMMANDED_EQUIV_RATIO": 0.28,
-                "O2_WR_LAMBDA_S1": 0.67,
-                "COOLANT_TEMP": 0.29,
-            }
-        ),
-    )
-    assert quality.verdict == "fail"
-    clauses = {failure["clause"] for failure in quality.failures}
-    assert "rate_shortfall" in clauses
-    assert "required_tuple_rate" in clauses
-    # The tuple bound is the number per-channel rates could not express.
-    assert quality.tuple_rate_bound_hz == 0.28
-
-
-def test_an_unanswered_channel_is_not_a_shortfall() -> None:
-    """PID 0x25 never answers on the dev ECM: opposite fix from throttling.
-
-    A shortfall wants budget. A channel the ECU refuses wants removing from
-    the profile — it burns a schedule slot every round and returns nothing.
-    """
-    scheduler = _scheduler(
-        {
-            "RPM": 4.0,
-            "ENGINE_LOAD": 4.0,
-            "FUEL_STATUS": 4.0,
-            "COMMANDED_EQUIV_RATIO": 4.0,
-            "O2_WR_LAMBDA_S1": 4.0,
-            "COOLANT_TEMP": 1.0,
-        }
-    )
-    scheduler["requests"] = [
-        *scheduler["requests"],  # type: ignore[misc]
-        {"channel": "O2_WR_LAMBDA_S2", "kind": "pid", "capture_selected": True},
-    ]
+def test_an_unanswered_channel_is_not_a_shortfall_and_silences_the_tuple_clause() -> None:
+    lifetime = _healthy()
     profile = _profile()
-    profile["mode01"] = {**profile["mode01"], "O2_WR_LAMBDA_S2": 1.0}  # type: ignore[dict-item]
-
-    quality = evaluate_capture_quality(profile=profile, scheduler=scheduler)
+    profile["mode01"] = {**profile["mode01"], "O2_WR_LAMBDA_S2": 1.0}
+    quality = evaluate_capture_quality(
+        profile=profile,
+        scheduler=_scheduler([*CHANNELS, "O2_WR_LAMBDA_S2"]),
+        lifetime=lifetime,
+        tuples=_tuples(1200),
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
     assert quality.verdict == "fail"
-    failure = next(f for f in quality.failures if f["clause"] == "channel_unanswered")
+    failure = next(f for f in quality.failures if f["clause"] == UNANSWERED_INPUT)
     assert failure["channels"] == ["O2_WR_LAMBDA_S2"]
-    assert "rate_shortfall" not in {f["clause"] for f in quality.failures}
+    assert RATE_SHORTFALL not in _clauses(quality)
 
-
-def test_a_missing_tuple_member_is_reported_as_missing_not_as_a_rate() -> None:
-    """Zero-because-absent and zero-because-slow demand opposite responses."""
-    rates = {
-        "RPM": 4.0,
-        "ENGINE_LOAD": 4.0,
-        "FUEL_STATUS": 4.0,
-        "O2_WR_LAMBDA_S1": 4.0,
-        "COOLANT_TEMP": 1.0,
-    }
+    # A missing *tuple member* is reported once, as unanswered, not as a rate.
+    lifetime_missing = _lifetime(
+        {n: [(0.0, 300.0, 0.25)] for n in CHANNELS if n != "COMMANDED_EQUIV_RATIO"}, elapsed=300.0
+    )
     quality = evaluate_capture_quality(
         profile=_profile(),
-        scheduler=_scheduler(rates),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=lifetime_missing,
+        tuples=_tuples(0, attempted=1200, incomplete=1200),
+        losses=_verified_losses(CLEAN, CLEAN),
     )
-    clauses = {failure["clause"] for failure in quality.failures}
-    assert "required_tuple_incomplete" in clauses
-    assert "required_tuple_rate" not in clauses
+    assert _clauses(quality) == {UNANSWERED_INPUT}
     assert quality.tuple_rate_bound_hz is None
 
 
-def test_dropped_storage_rows_fail_the_contract() -> None:
-    """The bus delivering it and the disk keeping it are different claims."""
+def test_a_pause_is_excluded_by_name_but_an_engine_off_gap_is_not() -> None:
+    windows = [(0.0, 100.0, 0.25), (160.0, 300.0, 0.25)]
+    paused = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_lifetime({n: windows for n in CHANNELS}, elapsed=300.0, pauses=[[100.0, 160.0]]),
+        tuples=_tuples(960, windows=windows),
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+    assert paused.verdict == "pass", paused.failures
+    assert paused.interval["paused_s"] == pytest.approx(60.0)
+    assert paused.interval["intended_active_s"] == pytest.approx(240.0)
+    assert paused.interval["pause_windows"] == [[100.0, 160.0]]
+
+    engine_off = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_lifetime({n: windows for n in CHANNELS}, elapsed=300.0),
+        tuples=_tuples(960, windows=windows),
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+    assert engine_off.verdict == "fail"
+    assert ACQUISITION_GAP in _clauses(engine_off)
+    rpm = next(row for row in engine_off.channels if row.channel == "RPM")
+    assert rpm.coverage["long_gaps"] == [[100.0, 160.0, 60.0]]
+
+
+def test_a_stall_older_than_the_trailing_window_and_a_missing_tail_both_fail() -> None:
+    stalled = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_lifetime(
+            {n: [(0.0, 60.0, 0.25), (150.0, 400.0, 0.25)] for n in CHANNELS}, elapsed=400.0
+        ),
+        tuples=_tuples(1200, elapsed=400.0),
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+    assert ACQUISITION_GAP in _clauses(stalled)
+    tail = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_lifetime({n: [(0.0, 100.0, 0.25)] for n in CHANNELS}, elapsed=300.0),
+        tuples=_tuples(400),
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+    gap = next(f for f in tail.failures if f["clause"] == ACQUISITION_GAP)
+    assert gap["evidence"]["RPM"]["missing_final_s"] == pytest.approx(200.0)
+
+
+def test_a_late_writer_failure_at_stop_is_a_persistence_loss() -> None:
     quality = evaluate_capture_quality(
         profile=_profile(),
-        scheduler=_scheduler(
-            {
-                "RPM": 4.0,
-                "ENGINE_LOAD": 4.0,
-                "FUEL_STATUS": 4.0,
-                "COMMANDED_EQUIV_RATIO": 4.0,
-                "O2_WR_LAMBDA_S1": 4.0,
-                "COOLANT_TEMP": 1.0,
-            }
-        ),
-        storage={"dropped_records": 2491, "queue_depth": 4096},
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=_verified_losses(CLEAN, CLEAN),
+        persistence={"flushed": False, "flush_error": "OSError: disk full", "rows_written": 9000},
     )
     assert quality.verdict == "fail"
-    assert {f["clause"] for f in quality.failures} == {"storage_dropped_records"}
+    failure = next(f for f in quality.failures if f["clause"] == PERSISTENCE_LOSS)
+    assert failure["evidence"]["flush_error"] == "OSError: disk full"
+
+    short = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=_verified_losses(CLEAN, CLEAN),
+        persistence={
+            "flushed": True,
+            "flush_error": None,
+            "rows_written": 9000,
+            "rows_on_disk": 8000,
+        },
+    )
+    assert PERSISTENCE_LOSS in _clauses(short)
 
 
-def test_too_short_a_window_is_unverified_not_a_pass() -> None:
+def test_too_short_an_interval_is_unverified_not_a_pass() -> None:
     quality = evaluate_capture_quality(
         profile=_profile(),
-        scheduler=_scheduler({"RPM": 4.0}, observed=1.0),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(elapsed=1.0),
+        tuples=_tuples(4, elapsed=1.0),
+        losses=_verified_losses(CLEAN, CLEAN),
     )
     assert quality.verdict == "unverified"
     assert any("minimum" in note for note in quality.notes)
 
 
 def test_batching_off_is_called_out() -> None:
-    scheduler = _scheduler({"RPM": 4.0, "COOLANT_TEMP": 1.0})
+    scheduler = _scheduler(["RPM", "COOLANT_TEMP"])
     scheduler["batching"] = None
-    quality = evaluate_capture_quality(profile=_profile(required_tuple=[]), scheduler=scheduler)
+    quality = evaluate_capture_quality(
+        profile=_profile(required_tuple=[]),
+        scheduler=scheduler,
+        lifetime=_lifetime(
+            {"RPM": [(0.0, 60.0, 0.25)], "COOLANT_TEMP": [(0.0, 60.0, 1.0)]}, elapsed=60.0
+        ),
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
     assert any("batching" in note for note in quality.notes)
+    assert quality.tuples["source"] == "no_required_tuple"
+
+
+def test_the_sidecar_is_versioned_and_never_claims_an_exact_bound() -> None:
+    payload = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=_verified_losses(CLEAN, CLEAN),
+        scope="stop",
+    ).to_dict()
+    assert payload["schema_version"] == 2
+    assert payload["scope"] == "stop"
+    assert "tuple_bound_is_exact" not in payload
+    assert "observed_seconds" not in payload
+    assert payload["tuples"]["rate_bound_hz"] == payload["tuple_rate_bound_hz"]
+    assert payload["tuples"]["complete"] == 1200
+
+
+def test_a_v1_sidecar_reads_back_as_a_trailing_snapshot_with_unknown_losses() -> None:
+    v1 = {
+        "schema_version": 1,
+        "verdict": "pass",
+        "profile": "fuel-map",
+        "failures": [],
+        "notes": [],
+    }
+    out = normalize_quality_payload(v1)
+    assert out["scope"] == SCOPE_TRAILING
+    assert out["verdict"] == "pass"  # preserved, with its limited scope
+    assert out["losses"]["recording"]["status"] == UNKNOWN
+    assert any("trailing 60 s" in note for note in out["notes"])
+    v2 = {"schema_version": 2, "scope": "stop", "verdict": "pass"}
+    assert normalize_quality_payload(v2) == v2
 
 
 def test_tuple_bound_is_the_slowest_member() -> None:
@@ -210,67 +619,36 @@ def test_tuple_bound_is_the_slowest_member() -> None:
     assert tuple_rate_bound_hz({"A": 4.0}, ()) is None
 
 
-def _did_scheduler() -> dict[str, object]:
-    """An all-DID capture as the scheduler actually reports one.
+# ---------------------------------------------------------------------------
+# DID captures keep their profile names and ignore DTC reads
+# ---------------------------------------------------------------------------
 
-    DIDs come back by identifier while the profile names them semantically,
-    and DTC reads are always `capture_selected` regardless of profile.
-    """
+
+def _did_scheduler() -> dict[str, Any]:
+    def did(channel: str, name: str) -> dict[str, Any]:
+        return {
+            "channel": channel,
+            "profile_channel": name,
+            "kind": "did",
+            "poll_tier": "fast",
+            "capture_selected": True,
+        }
+
     return {
-        "capture_observed_seconds": 120.0,
+        "capture_observed_seconds": 60.0,
         "achieved_hz_capture": {"DID_1209": 19.4, "DID_1208": 19.1, "DID_1219": 18.9},
-        "capture_samples": {"DID_1209": 2328, "DID_1208": 2292, "DID_1219": 2268},
-        "capture_max_gap_seconds": {"DID_1209": 0.4, "DID_1208": 0.35, "DID_1219": 0.5},
         "requests": [
-            {
-                "channel": "DID_1209",
-                "profile_channel": "ECM_MAF_GPS",
-                "kind": "did",
-                "poll_tier": "fast",
-                "capture_selected": True,
-            },
-            {
-                "channel": "DID_1208",
-                "profile_channel": "ECM_INJECTOR_PW_B1",
-                "kind": "did",
-                "poll_tier": "fast",
-                "capture_selected": True,
-            },
-            {
-                "channel": "DID_1219",
-                "profile_channel": "ECM_RPM",
-                "kind": "did",
-                "poll_tier": "fast",
-                "capture_selected": True,
-            },
-            # A catalogue alias resolving to a DID already listed.
-            {
-                "channel": "DID_1209",
-                "profile_channel": "ECM_MAF_GPS",
-                "kind": "did",
-                "poll_tier": "fast",
-                "capture_selected": True,
-            },
-            {
-                "channel": "DTC_STORED",
-                "profile_channel": None,
-                "kind": "dtc",
-                "poll_tier": "dtc",
-                "capture_selected": True,
-            },
-            {
-                "channel": "DTC_PENDING",
-                "profile_channel": None,
-                "kind": "dtc",
-                "poll_tier": "dtc",
-                "capture_selected": True,
-            },
+            did("DID_1209", "ECM_MAF_GPS"),
+            did("DID_1208", "ECM_INJECTOR_PW_B1"),
+            did("DID_1219", "ECM_RPM"),
+            did("DID_1209", "ECM_MAF_GPS"),  # a catalogue alias, listed twice
+            {"channel": "DTC_STORED", "kind": "dtc", "poll_tier": "dtc", "capture_selected": True},
         ],
         "batching": {"max_pids": 3},
     }
 
 
-def _did_profile() -> dict[str, object]:
+def _did_profile() -> dict[str, Any]:
     return {
         "name": "fuel-did-research",
         "mode01": {},
@@ -283,55 +661,25 @@ def _did_profile() -> dict[str, object]:
 
 
 def test_a_did_capture_is_scored_under_the_profiles_own_channel_names() -> None:
-    """The first live run called four answering DIDs "never answered".
-
-    The scheduler reports `DID_1209`; the profile says `ECM_MAF_GPS`. Matching
-    one against the other found nothing, so `required_tuple_incomplete` fired
-    on a capture whose channels were all healthy.
-    """
-    quality = evaluate_capture_quality(profile=_did_profile(), scheduler=_did_scheduler())
-
+    lifetime = _lifetime(
+        {c: [(0.0, 120.0, 0.05)] for c in ("DID_1209", "DID_1208", "DID_1219")}, elapsed=120.0
+    )
+    tuples = _tuples(2400, elapsed=120.0)
+    tuples["lifetime"] = ChannelAccumulator("__tuple__").snapshot(0.0).to_dict()
+    acc = ChannelAccumulator("__tuple__")
+    for i in range(2400):
+        acc.observe(i * 0.05)
+    tuples["lifetime"] = acc.snapshot(120.0).to_dict()
+    quality = evaluate_capture_quality(
+        profile=_did_profile(),
+        scheduler=_did_scheduler(),
+        lifetime=lifetime,
+        tuples=tuples,
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
     assert quality.verdict == "pass", quality.failures
-    assert quality.tuple_rate_bound_hz == 18.9
-    # Reported under the name the operator selected, not the transport's.
-    assert {row.channel for row in quality.channels} == {
-        "ECM_MAF_GPS",
-        "ECM_INJECTOR_PW_B1",
-        "ECM_RPM",
-    }
-
-
-def test_dtc_reads_are_not_capture_channels() -> None:
-    """`request_eligible` returns True for DTC reads whatever the profile.
-
-    They poll on their own slow schedule, so scoring them against a 20 Hz
-    capture reported DTC_STORED/PENDING as unanswered on the first live run.
-    """
-    quality = evaluate_capture_quality(profile=_did_profile(), scheduler=_did_scheduler())
-    assert not any(row.channel.startswith("DTC_") for row in quality.channels)
-    assert "channel_unanswered" not in {f["clause"] for f in quality.failures}
-
-
-def test_one_did_reached_by_two_requests_is_listed_once() -> None:
-    quality = evaluate_capture_quality(profile=_did_profile(), scheduler=_did_scheduler())
     names = [row.channel for row in quality.channels]
+    assert set(names) == {"ECM_MAF_GPS", "ECM_INJECTOR_PW_B1", "ECM_RPM"}
     assert len(names) == len(set(names))
-
-
-def test_sub_second_jitter_at_a_high_rate_is_not_a_stall() -> None:
-    """A 20 Hz channel was called stalled after 0.25 s of quiet.
-
-    That is ordinary scheduling jitter and it flagged every DID in the first
-    live capture. Two seconds of silence is a coverage gap; a quarter-second
-    is not, at any rate.
-    """
-    scheduler = _did_scheduler()
-    scheduler["capture_max_gap_seconds"] = {"DID_1209": 0.9, "DID_1208": 1.5, "DID_1219": 0.4}
-    quality = evaluate_capture_quality(profile=_did_profile(), scheduler=scheduler)
-    assert "channel_stalled" not in {f["clause"] for f in quality.failures}
-
-    # A genuinely long silence still fails.
-    scheduler["capture_max_gap_seconds"] = {"DID_1209": 30.0, "DID_1208": 0.3, "DID_1219": 0.4}
-    stalled = evaluate_capture_quality(profile=_did_profile(), scheduler=scheduler)
-    failure = next(f for f in stalled.failures if f["clause"] == "channel_stalled")
-    assert failure["channels"] == ["ECM_MAF_GPS"]
+    assert not any(name.startswith("DTC_") for name in names)
+    assert quality.tuple_rate_bound_hz == pytest.approx(20.0)

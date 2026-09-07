@@ -8,34 +8,48 @@ along the way looked unremarkable, and the shortfall was only visible by
 reconstructing the whole chain afterwards from the Parquet.
 
 So the promise becomes a contract with a verdict, evaluated in one place and
-consumed twice:
+consumed three times: **live** (arm-time, ~20 s in, while the operator can
+still fix it), at **stop** (persisted beside the data as
+``capture_quality.json``) and on **recompute** over a historic session's rows.
 
-* **at arm time**, ~20 s in, while the operator can still fix it — the point of
-  the exercise is to fail *before* the drive, not after;
-* **at capture stop**, persisted beside the data as ``capture_quality.json``,
-  because whether the capture was sound is a property of the capture and has to
-  survive it. Nothing in the 2026-08-10 session directory recorded the achieved
-  rates, the gaps, or even whether request batching was on, so the post-mortem
-  could not distinguish "batching was off" from "the budget was binding".
+The first version of this evaluator (sidecar ``schema_version`` 1) had three
+defects, each a way of quoting the wrong number (roadmap C03):
 
-**Per-channel rates are not the contract.** They were all that was ever
-reported, and they are exactly what hid this failure: every channel in that
-capture answered, none looked dead, and the analysis still had nothing to work
-with, because delivery error needs five channels in the *same* poll round and
-the scarcest of them set the yield. ``required_tuple`` makes the joint
-requirement first-class, and :func:`tuple_rate_bound_hz` reports it.
+* it scored the *trailing 60 s* and called it the capture — a five-minute
+  capture with samples only in its last minute passed;
+* it described the daemon's *cumulative* storage-drop counter as loss during
+  this capture — an old incident failed every later capture, and a capture
+  that lost rows itself could hide behind a clean final minute;
+* it marked the slowest member's rate as "exact" tuple coverage whenever the
+  profile round-stamped — a shared stamp is not a complete tuple.
 
-The bound is a bound, named as one. The exact count of complete tuples needs
-the written rows, which the scheduler does not have and which is why the
-digest — where the session is already being read — computes the real figure.
-Reporting an upper bound as if it were the yield would repeat the original
-mistake in a new place.
+Version 2 keeps three questions apart, with three separate numbers:
+
+* **cadence** — median interarrival while observing; never a count divided
+  by wall time (that conflates rate with duty cycle: on 2026-08-06 an
+  on-target 14.93 Hz channel read 11.25 Hz because the window opened late);
+* **coverage** — observed versus eligible duration: missing start, missing
+  tail, long gaps, with intentional pauses excluded *explicitly*;
+* **yield** — complete tuples actually persisted, counted per capture round
+  from the rows on disk with the profile's declared acquisition skew.
+
+Loss is scoped by epoch (``capture_losses``): a counter is ``verified`` only
+when both readings exist and it did not reset; ``unknown`` is reported as
+unknown, never as zero. A failing verdict names the observed constraint
+(``unanswered_input``, ``rate_shortfall``, ``acquisition_gap``,
+``tuple_incomplete``, ``tuple_skew``, ``persistence_loss``) with the evidence
+behind it, instead of advice about budgets and rates that an old drop
+incident could trigger.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
+
+from src.collection.capture_lifetime import LONG_GAP_SECONDS, subtract_windows
+from src.collection.capture_losses import RECORDING, VERIFIED, unknown_losses
 
 #: Fraction of the requested rate a channel may fall to before it counts as a
 #: shortfall. Loose enough to absorb round scheduling jitter, tight enough that
@@ -62,41 +76,82 @@ MIN_STALL_SECONDS = 2.0
 EXCLUDED_KINDS = frozenset({"dtc"})
 EXCLUDED_TIERS = frozenset({"dtc", "on_demand"})
 
-#: Minimum verification window. Below this the sample is too short to separate
-#: a slow channel from an unlucky one, and a "pass" would be noise. Returned as
-#: ``unverified`` rather than as a pass, because those are different claims.
+#: Minimum verification interval. Below this the sample is too short to
+#: separate a slow channel from an unlucky one, and a "pass" would be noise.
+#: Returned as ``unverified`` rather than as a pass, because those are
+#: different claims.
 MIN_VERIFY_SECONDS = 5.0
 
-SCHEMA_VERSION = 1
+#: Default acquisition skew a complete tuple may span when the profile does
+#: not declare ``max_tuple_skew_s`` and has no target rate to derive it from.
+DEFAULT_MAX_TUPLE_SKEW_S = 0.25
+
+SCHEMA_VERSION = 2
+
+#: Scopes a verdict can carry. ``trailing_snapshot`` is what a v1 sidecar is
+#: read back as: a 60 s window at stop time, not the capture.
+SCOPE_LIVE = "live"
+SCOPE_STOP = "stop"
+SCOPE_RECOMPUTE = "recompute"
+SCOPE_TRAILING = "trailing_snapshot"
+
+#: The constraint vocabulary (C03.10). Each failure names exactly one.
+UNANSWERED_INPUT = "unanswered_input"
+RATE_SHORTFALL = "rate_shortfall"
+ACQUISITION_GAP = "acquisition_gap"
+TUPLE_INCOMPLETE = "tuple_incomplete"
+TUPLE_SKEW = "tuple_skew"
+PERSISTENCE_LOSS = "persistence_loss"
+UNKNOWN_LOSS_COUNTERS = "unknown_loss_counters"
+
+#: Clauses that make the verdict ``fail``; the rest make it ``unverified``.
+HARD_CLAUSES = frozenset(
+    {
+        UNANSWERED_INPUT,
+        RATE_SHORTFALL,
+        ACQUISITION_GAP,
+        TUPLE_INCOMPLETE,
+        TUPLE_SKEW,
+        PERSISTENCE_LOSS,
+    }
+)
+
+TUPLE_CHANNEL = "__tuple__"
+
+Windows = list[tuple[float, float]]
 
 
 @dataclass(frozen=True)
 class ChannelQuality:
-    """One channel's side of the contract."""
+    """One channel's side of the contract: cadence and coverage, separately."""
 
     channel: str
+    transport_channel: str
     kind: str | None
     requested_hz: float | None
-    achieved_hz: float | None
-    samples: int
-    max_gap_seconds: float | None
-    #: ``ok`` | ``missing`` | ``shortfall`` | ``stalled``. ``missing`` and
+    #: ``ok`` | ``missing`` | ``shortfall`` | ``gap``. ``missing`` and
     #: ``shortfall`` demand opposite responses — a channel the ECU never
     #: answers wants removing from the profile, a throttled one wants budget —
     #: so they are never collapsed into a single "bad".
     status: str
+    cadence: dict[str, Any]
+    coverage: dict[str, Any]
     in_required_tuple: bool = False
+    #: Trailing 60 s rate from the live scheduler, when available. Shown on
+    #: the dashboard; never the basis of the verdict.
+    trailing_hz: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "channel": self.channel,
+            "transport_channel": self.transport_channel,
             "kind": self.kind,
             "requested_hz": self.requested_hz,
-            "achieved_hz": self.achieved_hz,
-            "samples": self.samples,
-            "max_gap_seconds": self.max_gap_seconds,
             "status": self.status,
             "in_required_tuple": self.in_required_tuple,
+            "cadence": dict(self.cadence),
+            "coverage": dict(self.coverage),
+            "trailing_hz": self.trailing_hz,
         }
 
 
@@ -106,18 +161,19 @@ class CaptureQuality:
 
     verdict: str
     profile: str
-    observed_seconds: float | None
+    scope: str
+    interval: dict[str, Any]
     channels: list[ChannelQuality]
-    #: Each entry names the clause that failed and what to do about it.
+    tuples: dict[str, Any]
+    losses: dict[str, Any]
+    persistence: dict[str, Any] | None
+    trailing: dict[str, Any]
+    #: Each entry names one constraint from the vocabulary and its evidence.
     failures: list[dict[str, Any]] = field(default_factory=list)
     required_tuple: list[str] = field(default_factory=list)
-    #: Upper bound on the rate at which the required tuple can complete: the
-    #: slowest member. Exact only when the profile stamps a round's readings
-    #: with one timestamp (``round_timestamps``); otherwise genuinely a bound,
-    #: since members polled in different rounds may never share an instant.
+    #: Upper bound on how often the tuple could complete: its slowest member's
+    #: cadence. Always a bound; the count is in ``tuples``.
     tuple_rate_bound_hz: float | None = None
-    tuple_bound_is_exact: bool = False
-    storage: dict[str, Any] = field(default_factory=dict)
     batching: dict[str, Any] | None = None
     notes: list[str] = field(default_factory=list)
 
@@ -128,22 +184,25 @@ class CaptureQuality:
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
+            "scope": self.scope,
             "verdict": self.verdict,
             "profile": self.profile,
-            "observed_seconds": self.observed_seconds,
+            "interval": dict(self.interval),
             "required_tuple": list(self.required_tuple),
             "tuple_rate_bound_hz": self.tuple_rate_bound_hz,
-            "tuple_bound_is_exact": self.tuple_bound_is_exact,
+            "tuples": dict(self.tuples),
             "failures": list(self.failures),
             "channels": [row.to_dict() for row in self.channels],
-            "storage": dict(self.storage),
+            "losses": dict(self.losses),
+            "persistence": None if self.persistence is None else dict(self.persistence),
+            "trailing": dict(self.trailing),
             "batching": self.batching,
             "notes": list(self.notes),
         }
 
 
 def tuple_rate_bound_hz(
-    rates: dict[str, float | None],
+    rates: Mapping[str, float | None],
     required_tuple: list[str] | tuple[str, ...],
 ) -> float | None:
     """Upper bound on how often the whole tuple can be observed together.
@@ -165,56 +224,228 @@ def tuple_rate_bound_hz(
     return min(values) if values else None
 
 
+def effective_max_tuple_skew_s(profile: Mapping[str, Any]) -> float:
+    """The profile's declared skew, or half a target-rate period, or the default."""
+    declared = profile.get("max_tuple_skew_s")
+    if declared is not None:
+        return float(declared)
+    target = profile.get("target_rate_hz")
+    if target:
+        return 0.5 / float(target)
+    return DEFAULT_MAX_TUPLE_SKEW_S
+
+
+def profile_requests(
+    profile: Mapping[str, Any],
+    *,
+    did_channel_for: Callable[[str], str | None] | None = None,
+) -> list[dict[str, Any]]:
+    """Synthesize the scheduler's ``requests`` rows from a profile snapshot.
+
+    For the recompute path, where no live scheduler exists. ``AUTO`` cannot be
+    enumerated from the profile; the caller supplies the observed channels.
+    """
+    rows: list[dict[str, Any]] = []
+    if profile.get("mode01_enabled", True):
+        for name in profile.get("mode01") or {}:
+            upper = str(name).upper()
+            if upper == "AUTO":
+                continue
+            rows.append(
+                {
+                    "channel": upper,
+                    "profile_channel": upper,
+                    "kind": "pid",
+                    "capture_selected": True,
+                }
+            )
+    if profile.get("mode22_enabled", True):
+        for name in profile.get("mode22") or ():
+            resolved = did_channel_for(str(name)) if did_channel_for is not None else None
+            rows.append(
+                {
+                    "channel": resolved or str(name).upper(),
+                    "profile_channel": str(name),
+                    "kind": "did",
+                    "capture_selected": True,
+                }
+            )
+    return rows
+
+
+def gap_threshold_s(requested_hz: float | None, median_interarrival_s: float | None) -> float:
+    """Silence longer than this is a coverage gap, not a slow rate."""
+    if requested_hz:
+        return max(STALL_PERIODS / float(requested_hz), MIN_STALL_SECONDS)
+    if median_interarrival_s:
+        return max(STALL_PERIODS * float(median_interarrival_s), MIN_STALL_SECONDS)
+    return MIN_STALL_SECONDS
+
+
+def coverage_from_lifetime(
+    row: Mapping[str, Any],
+    *,
+    elapsed_s: float,
+    eligible_s: float,
+    pause_windows: Windows,
+    threshold_s: float,
+) -> dict[str, Any]:
+    """Pause-aware coverage for one channel's lifetime row.
+
+    Intentional pauses are subtracted from every gap — that is the one
+    exclusion the contract makes, and it is made here, explicitly. An
+    engine-off stretch with no pause recorded is a gap like any other.
+    """
+    observations = int(row.get("observations") or 0)
+    first = row.get("first_observed_at")
+    last = row.get("last_observed_at")
+    gaps: list[tuple[float, float]] = []
+    if first is None:
+        gaps.append((0.0, elapsed_s))
+    else:
+        gaps.append((0.0, float(first)))
+        if last is not None:
+            gaps.append((float(last), elapsed_s))
+    long_gaps = [(float(a), float(b)) for a, b in (row.get("long_gaps") or [])]
+    adjusted_long = [(a, b, subtract_windows(a, b, pause_windows)) for a, b in long_gaps]
+    adjusted_initial = subtract_windows(gaps[0][0], gaps[0][1], pause_windows)
+    adjusted_final = (
+        subtract_windows(gaps[1][0], gaps[1][1], pause_windows) if len(gaps) > 1 else 0.0
+    )
+    over = [(a, b, s) for a, b, s in adjusted_long if s > threshold_s]
+    uncovered = (
+        (adjusted_initial if adjusted_initial > threshold_s else 0.0)
+        + (adjusted_final if adjusted_final > threshold_s else 0.0)
+        + sum(s for _a, _b, s in over)
+    )
+    # Interarrivals under LONG_GAP_SECONDS are not individually recorded (the
+    # ledger keeps only their maximum); anything longer is in ``long_gaps``
+    # and has been pause-adjusted above, so the raw maximum must not be
+    # re-introduced unadjusted.
+    max_interarrival = row.get("max_interarrival_s")
+    sub_threshold = (
+        [float(max_interarrival)]
+        if max_interarrival is not None and float(max_interarrival) < LONG_GAP_SECONDS
+        else []
+    )
+    max_gap = max(
+        [adjusted_initial, adjusted_final, *(s for _a, _b, s in adjusted_long), *sub_threshold]
+    )
+    return {
+        "observations": observations,
+        "first_observed_at": first,
+        "last_observed_at": last,
+        "missing_initial_s": round(adjusted_initial, 3),
+        "missing_final_s": round(adjusted_final, 3),
+        "max_gap_s": round(max_gap, 3),
+        "long_gaps": [[round(a, 3), round(b, 3), round(s, 3)] for a, b, s in over],
+        "gap_threshold_s": round(threshold_s, 3),
+        "uncovered_s": round(uncovered, 3),
+        "eligible_s": round(eligible_s, 3),
+        "fraction": None if eligible_s <= 0 else round(max(0.0, 1.0 - uncovered / eligible_s), 4),
+        "clock_regressions": int(row.get("clock_regressions") or 0),
+    }
+
+
+def cadence_from_lifetime(row: Mapping[str, Any]) -> dict[str, Any]:
+    median = row.get("median_interarrival_s")
+    hz = None if not median else round(1.0 / float(median), 3)
+    return {
+        "median_interarrival_s": median,
+        "p95_interarrival_s": row.get("p95_interarrival_s"),
+        "hz": hz,
+        "samples": int(row.get("interarrival_samples") or 0),
+    }
+
+
 def _channel_status(
-    achieved: float | None,
-    requested: float | None,
-    max_gap: float | None,
-    samples: int,
+    requested: float | None, cadence: Mapping[str, Any], coverage: Mapping[str, Any]
 ) -> str:
-    if achieved is None or samples == 0:
+    if int(coverage.get("observations") or 0) == 0:
         return "missing"
-    if requested is not None and float(achieved) < float(requested) * RATE_TOLERANCE:
+    hz = cadence.get("hz")
+    if hz is not None and requested is not None and float(hz) < float(requested) * RATE_TOLERANCE:
         return "shortfall"
-    if max_gap is not None and requested is not None and requested > 0:
-        if float(max_gap) > max(STALL_PERIODS / float(requested), MIN_STALL_SECONDS):
-            return "stalled"
+    if float(coverage.get("max_gap_s") or 0.0) > float(coverage.get("gap_threshold_s") or 0.0):
+        return "gap"
     return "ok"
 
 
-def evaluate_capture_quality(  # noqa: PLR0912
+def _requested_hz(
+    request: Mapping[str, Any], upper: str, weights: Mapping[str, float], target: float | None
+) -> float | None:
+    # The weight is part of the promise: under a target rate a 0.25-weight
+    # context channel is *asked* for a quarter of it, so holding it to the
+    # full target would report a shortfall the profile never claimed.
+    if target is not None and upper in weights:
+        return float(target) * weights[upper]
+    if target is not None and request.get("kind") == "did":
+        return float(target)
+    rate = request.get("configured_rate_hz")
+    return None if rate is None else float(rate)
+
+
+def _interval(lifetime: Mapping[str, Any] | None) -> tuple[dict[str, Any], float, float, Windows]:
+    if lifetime is None:
+        return (
+            {
+                "source": "unavailable",
+                "elapsed_s": None,
+                "intended_active_s": None,
+                "paused_s": None,
+                "pause_windows": [],
+            },
+            0.0,
+            0.0,
+            [],
+        )
+    elapsed = float(lifetime.get("elapsed_s") or 0.0)
+    windows: Windows = [
+        (float(a), float(b if b is not None else elapsed))
+        for a, b in (lifetime.get("pause_windows") or [])
+    ]
+    paused = sum(b - a for a, b in windows)
+    active = float(lifetime.get("intended_active_s") or max(0.0, elapsed - paused))
+    started_wall = lifetime.get("started_wall")
+    ended_wall = lifetime.get("ended_wall")
+    if ended_wall is None and started_wall is not None:
+        ended_wall = float(started_wall) + elapsed
+    return (
+        {
+            "source": lifetime.get("source", "live"),
+            # The declared interval on the wall clock, persisted so a later
+            # recompute scores the same interval instead of guessing the end
+            # from the last row (which cannot see a missing tail).
+            "started_wall": None if started_wall is None else float(started_wall),
+            "ended_wall": None if ended_wall is None else float(ended_wall),
+            "elapsed_s": round(elapsed, 3),
+            "intended_active_s": round(active, 3),
+            "paused_s": round(paused, 3),
+            "pause_windows": [[round(a, 3), round(b, 3)] for a, b in windows],
+            "pause_reasons": list(lifetime.get("pause_reasons") or []),
+            "generation_at_start": lifetime.get("generation_at_start"),
+        },
+        elapsed,
+        active,
+        windows,
+    )
+
+
+def _build_channels(  # noqa: PLR0913
+    requests: list[Mapping[str, Any]],
     *,
-    profile: dict[str, Any],
-    scheduler: dict[str, Any],
-    storage: dict[str, Any] | None = None,
-    requested_rate_hz: float | None = None,
-) -> CaptureQuality:
-    """Score a running or finished capture against its profile's promises.
-
-    ``profile`` is a ``tuning_profile.snapshot()`` payload and ``scheduler`` a
-    ``/status`` ``health.obd_scheduler`` payload, so the same function serves
-    the MCP arm-time check (which has only HTTP) and the daemon's stop-time
-    sidecar (which has the objects). Plain dicts on purpose: a shared
-    evaluator that only one caller could construct arguments for would drift
-    back into two implementations.
-    """
-    name = str(profile.get("name") or "unknown")
-    weights = {str(k).upper(): float(v) for k, v in (profile.get("mode01") or {}).items()}
-    target = profile.get("target_rate_hz")
-    required = [str(item).upper() for item in (profile.get("required_tuple") or [])]
-    floor = profile.get("min_achieved_rate_hz")
-    round_timestamps = bool(profile.get("round_timestamps", False))
-
-    rates = scheduler.get("achieved_hz_capture") or {}
-    samples_by_channel = scheduler.get("capture_samples") or {}
-    gaps = scheduler.get("capture_max_gap_seconds") or {}
-    observed_seconds = scheduler.get("capture_observed_seconds")
-
-    effective_target = requested_rate_hz if requested_rate_hz is not None else target
-
+    lifetime_channels: Mapping[str, Mapping[str, Any]],
+    weights: Mapping[str, float],
+    target: float | None,
+    required: list[str],
+    elapsed: float,
+    active: float,
+    windows: Windows,
+    trailing_hz: Mapping[str, Any],
+) -> list[ChannelQuality]:
     channels: list[ChannelQuality] = []
-    achieved_by_channel: dict[str, float | None] = {}
     seen: set[str] = set()
-    for request in scheduler.get("requests") or []:
+    for request in requests:
         if not request.get("capture_selected", False):
             continue
         if request.get("kind") in EXCLUDED_KINDS or request.get("poll_tier") in EXCLUDED_TIERS:
@@ -225,198 +456,506 @@ def evaluate_capture_quality(  # noqa: PLR0912
         if channel.upper() in seen:
             continue
         seen.add(channel.upper())
-        # The profile's own name for this request, resolved by the scheduler.
-        # Falling back to the raw channel keeps older payloads working.
         profile_channel = str(request.get("profile_channel") or channel)
         upper = profile_channel.upper()
-        # The weight is part of the promise: under a target rate a 0.25-weight
-        # context channel is *asked* for a quarter of it, so holding it to the
-        # full target would report a shortfall the profile never claimed.
-        if effective_target is not None and upper in weights:
-            requested_hz: float | None = float(effective_target) * weights[upper]
-        elif effective_target is not None and request.get("kind") == "did":
-            requested_hz = float(effective_target)
-        else:
-            requested_hz = request.get("configured_rate_hz")
-
-        achieved = rates.get(channel)
-        samples = int(samples_by_channel.get(channel, 0) or 0)
-        max_gap = gaps.get(channel)
-        achieved_by_channel[upper] = None if achieved is None else float(achieved)
+        requested = _requested_hz(request, upper, weights, target)
+        row = lifetime_channels.get(channel) or lifetime_channels.get(channel.upper()) or {}
+        cadence = cadence_from_lifetime(row)
+        coverage = coverage_from_lifetime(
+            row,
+            elapsed_s=elapsed,
+            eligible_s=active,
+            pause_windows=windows,
+            threshold_s=gap_threshold_s(requested, cadence.get("median_interarrival_s")),
+        )
         channels.append(
             ChannelQuality(
                 # Reported under the profile's name, not the transport's:
                 # "ECM_INJECTOR_PW_B1" is what the operator selected,
                 # "DID_1208" is what they then have to look up.
                 channel=profile_channel,
+                transport_channel=channel,
                 kind=request.get("kind"),
-                requested_hz=requested_hz,
-                achieved_hz=achieved,
-                samples=samples,
-                max_gap_seconds=max_gap,
-                status=_channel_status(achieved, requested_hz, max_gap, samples),
+                requested_hz=requested,
+                status=_channel_status(requested, cadence, coverage),
+                cadence=cadence,
+                coverage=coverage,
                 in_required_tuple=upper in required,
+                trailing_hz=trailing_hz.get(channel),
             )
         )
+    return channels
 
+
+def _channel_failures(channels: list[ChannelQuality], floor: float | None) -> list[dict[str, Any]]:
     failures: list[dict[str, Any]] = []
-    notes: list[str] = []
-
-    unanswered = [row.channel for row in channels if row.status == "missing"]
-    if unanswered:
+    missing = [row for row in channels if row.status == "missing"]
+    if missing:
         failures.append(
             {
-                "clause": "channel_unanswered",
-                "channels": unanswered,
-                "detail": (
-                    "requested but never answered — these consume a schedule slot every "
-                    "round and return nothing. Remove them from this vehicle's profile, or "
-                    "confirm the PID/DID is supported before re-arming."
-                ),
+                "clause": UNANSWERED_INPUT,
+                "channels": [row.channel for row in missing],
+                "evidence": {row.channel: {"observations": 0} for row in missing},
+                "detail": "requested for the whole interval, never answered",
             }
         )
-
-    shortfalls = [row.channel for row in channels if row.status == "shortfall"]
-    if shortfalls:
-        failures.append(
-            {
-                "clause": "rate_shortfall",
-                "channels": shortfalls,
-                "detail": (
-                    "below the profile's requested rate. Demand and budget are separate "
-                    "knobs and both bind: raise bus_budget_override, or lower target_rate_hz."
-                ),
-            }
-        )
-
-    stalled = [row.channel for row in channels if row.status == "stalled"]
-    if stalled:
-        failures.append(
-            {
-                "clause": "channel_stalled",
-                "channels": stalled,
-                "detail": (
-                    "on-rate overall but silent for a long stretch — a coverage problem "
-                    "(window closed, engine off, ECU stopped answering), not a slow rate."
-                ),
-            }
-        )
-
-    missing_tuple = [item for item in required if achieved_by_channel.get(item) is None]
-    bound = tuple_rate_bound_hz(achieved_by_channel, required)
-    if required and missing_tuple:
-        failures.append(
-            {
-                "clause": "required_tuple_incomplete",
-                "channels": missing_tuple,
-                "detail": (
-                    "this profile's headline analysis needs every required_tuple channel "
-                    "observed together; these never answered, so the tuple can never "
-                    "complete and the capture cannot answer its own question."
-                ),
-            }
-        )
-    elif required and bound is not None and floor is not None and bound < float(floor):
-        failures.append(
-            {
-                "clause": "required_tuple_rate",
-                "channels": list(required),
-                "observed_hz": bound,
-                "required_hz": float(floor),
-                "detail": (
-                    f"the required tuple can complete at most {bound:.2f} Hz (its slowest "
-                    f"member), below the profile's {float(floor):.2f} Hz floor. Per-channel "
-                    "rates can pass while this fails — that is what it is here to catch."
-                ),
-            }
-        )
-
+    short = [row for row in channels if row.status == "shortfall"]
     if floor is not None:
-        below = [
-            row.channel
+        short += [
+            row
             for row in channels
-            if row.achieved_hz is not None
+            if row.status == "ok"
             and row.requested_hz is not None
             and row.requested_hz >= float(floor)
-            and float(row.achieved_hz) < float(floor)
+            and row.cadence.get("hz") is not None
+            and float(row.cadence["hz"]) < float(floor)
         ]
-        if below:
-            failures.append(
-                {
-                    "clause": "below_rate_floor",
-                    "channels": below,
-                    "required_hz": float(floor),
-                    "detail": "channels asked for at or above the floor did not reach it.",
-                }
-            )
-
-    storage_payload = dict(storage or {})
-    dropped = storage_payload.get("dropped_records") or storage_payload.get("records_dropped")
-    if dropped:
+    if short:
         failures.append(
             {
-                "clause": "storage_dropped_records",
-                "dropped_records": dropped,
-                "detail": (
-                    "the storage sink dropped rows during this capture — telemetry is missing "
-                    "from disk regardless of what the bus delivered. Lower the request rate; "
-                    "25 req/s dropped 2491 records on 2026-07-29 with the cause never found."
-                ),
+                "clause": RATE_SHORTFALL,
+                "channels": [row.channel for row in short],
+                "evidence": {
+                    row.channel: {
+                        "requested_hz": row.requested_hz,
+                        "floor_hz": floor,
+                        "cadence_hz": row.cadence.get("hz"),
+                        "median_interarrival_s": row.cadence.get("median_interarrival_s"),
+                        "p95_interarrival_s": row.cadence.get("p95_interarrival_s"),
+                    }
+                    for row in short
+                },
+                "detail": "median interarrival below the requested cadence while observing",
             }
         )
+    gapped = [row for row in channels if row.status == "gap"]
+    if gapped:
+        failures.append(
+            {
+                "clause": ACQUISITION_GAP,
+                "channels": [row.channel for row in gapped],
+                "evidence": {
+                    row.channel: {
+                        "max_gap_s": row.coverage.get("max_gap_s"),
+                        "gap_threshold_s": row.coverage.get("gap_threshold_s"),
+                        "missing_initial_s": row.coverage.get("missing_initial_s"),
+                        "missing_final_s": row.coverage.get("missing_final_s"),
+                        "long_gaps": row.coverage.get("long_gaps"),
+                        "coverage_fraction": row.coverage.get("fraction"),
+                    }
+                    for row in gapped
+                },
+                "detail": "on-cadence while observing, but silent for longer than the threshold",
+            }
+        )
+    return failures
+
+
+def _tuple_block(  # noqa: PLR0913
+    tuples: Mapping[str, Any] | None,
+    *,
+    required: list[str],
+    max_skew_s: float,
+    bound: float | None,
+    elapsed: float,
+    active: float,
+    windows: Windows,
+    floor: float | None,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[str]]:
+    """The yield block and its failures. Counts, never a bound in disguise."""
+    notes: list[str] = []
+    block: dict[str, Any] = {
+        "required": list(required),
+        "max_tuple_skew_s": max_skew_s,
+        "rate_bound_hz": bound,
+        "source": "unavailable",
+        "scheduled": None,
+        "attempted": None,
+        "complete": None,
+        "persisted": None,
+        "incomplete": None,
+        "skew_rejected": None,
+        "member_misses": {},
+        "cadence": {},
+        "coverage": {},
+        "skew": {},
+    }
+    if not required:
+        block["source"] = "no_required_tuple"
+        return block, [], notes
+    if tuples is None or tuples.get("source") in (None, "unavailable", "no_round_evidence"):
+        reason = (tuples or {}).get("reason") or "no persisted round evidence was available"
+        block["source"] = (tuples or {}).get("source") or "unavailable"
+        block["reason"] = reason
+        notes.append(f"tuple yield unverified: {reason}")
+        return block, [], notes
+
+    for key in (
+        "scheduled",
+        "attempted",
+        "complete",
+        "persisted",
+        "incomplete",
+        "skew_rejected",
+        "member_misses",
+        "skew",
+        "reason",
+    ):
+        if key in tuples:
+            block[key] = tuples[key]
+    block["source"] = tuples.get("source")
+    lifetime_row = tuples.get("lifetime") or {}
+    cadence = cadence_from_lifetime(lifetime_row)
+    threshold = gap_threshold_s(floor, cadence.get("median_interarrival_s"))
+    coverage = coverage_from_lifetime(
+        lifetime_row,
+        elapsed_s=elapsed,
+        eligible_s=active,
+        pause_windows=windows,
+        threshold_s=threshold,
+    )
+    block["cadence"] = cadence
+    block["coverage"] = coverage
+    failures: list[dict[str, Any]] = []
+    attempted = int(tuples.get("attempted") or 0)
+    complete = int(tuples.get("complete") or 0)
+    skew_rejected = int(tuples.get("skew_rejected") or 0)
+    by_members = max(0, attempted - complete - skew_rejected)
+    evidence = {
+        "attempted": attempted,
+        "complete": complete,
+        "persisted": tuples.get("persisted"),
+        "incomplete": tuples.get("incomplete"),
+        "skew_rejected": skew_rejected,
+        "member_misses": tuples.get("member_misses"),
+        "max_tuple_skew_s": max_skew_s,
+        "skew": tuples.get("skew"),
+    }
+    if attempted > 0 and skew_rejected > 0 and skew_rejected >= max(complete, by_members):
+        failures.append(
+            {
+                "clause": TUPLE_SKEW,
+                "channels": list(required),
+                "evidence": evidence,
+                "detail": "members answered in the same round but further apart than the "
+                "declared acquisition skew",
+            }
+        )
+    elif attempted > 0 and complete == 0:
+        failures.append(
+            {
+                "clause": TUPLE_INCOMPLETE,
+                "channels": list(required),
+                "evidence": evidence,
+                "detail": "every round missed at least one member; no complete tuple persisted",
+            }
+        )
+    elif attempted == 0:
+        failures.append(
+            {
+                "clause": TUPLE_INCOMPLETE,
+                "channels": list(required),
+                "evidence": evidence,
+                "detail": "no round contained any required member",
+            }
+        )
+    if complete > 0:
+        if floor is not None and cadence.get("hz") is not None and float(cadence["hz"]) < floor:
+            failures.append(
+                {
+                    "clause": RATE_SHORTFALL,
+                    "channels": [TUPLE_CHANNEL],
+                    "evidence": {"floor_hz": floor, **cadence, **evidence},
+                    "detail": "complete tuples recur below the profile's floor",
+                }
+            )
+        if float(coverage["max_gap_s"]) > threshold:
+            failures.append(
+                {
+                    "clause": ACQUISITION_GAP,
+                    "channels": [TUPLE_CHANNEL],
+                    "evidence": {**coverage, **evidence},
+                    "detail": "complete tuples absent for longer than the threshold",
+                }
+            )
+    return block, failures, notes
+
+
+def _loss_failures(losses: Mapping[str, Any]) -> list[dict[str, Any]]:
+    recording = losses.get(RECORDING) or {}
+    failures: list[dict[str, Any]] = []
+    counters = recording.get("counters") or {}
+    lost = {
+        name: row
+        for name, row in counters.items()
+        if row.get("status") == VERIFIED and row["delta"]
+    }
+    if lost:
+        failures.append(
+            {
+                "clause": PERSISTENCE_LOSS,
+                "channels": sorted(lost),
+                "evidence": lost,
+                "detail": "recording-path counters advanced during this capture",
+            }
+        )
+    if recording.get("status") != VERIFIED:
+        failures.append(
+            {
+                "clause": UNKNOWN_LOSS_COUNTERS,
+                "channels": list(recording.get("unverified") or []),
+                "evidence": {
+                    name: row for name, row in counters.items() if row.get("status") != VERIFIED
+                },
+                "detail": "no verified no-loss claim: these counters are unknown or reset",
+            }
+        )
+    return failures
+
+
+def _persistence_failures(persistence: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    if persistence is None:
+        return []
+    evidence: dict[str, Any] = {}
+    if persistence.get("flush_error"):
+        evidence["flush_error"] = persistence["flush_error"]
+    timed_out = list(persistence.get("drain_timed_out") or [])
+    if timed_out:
+        evidence["drain_timed_out"] = timed_out
+    written = persistence.get("rows_written")
+    on_disk = persistence.get("rows_on_disk")
+    if written is not None and on_disk is not None and int(on_disk) < int(written):
+        evidence["rows_written"] = written
+        evidence["rows_on_disk"] = on_disk
+    failures: list[dict[str, Any]] = []
+    if evidence:
+        failures.append(
+            {
+                "clause": PERSISTENCE_LOSS,
+                "channels": [],
+                "evidence": evidence,
+                "detail": "the final records' persistence outcome is not a clean flush",
+            }
+        )
+    unobserved = list(persistence.get("drain_unobserved") or [])
+    if unobserved:
+        # A queue the finalizer could not watch is not a queue known to be
+        # empty: the outcome is unverified, never a clean pass.
+        failures.append(
+            {
+                "clause": UNKNOWN_LOSS_COUNTERS,
+                "channels": unobserved,
+                "evidence": {"drain_unobserved": unobserved},
+                "detail": "these queues were never registered with health, so their "
+                "drain at stop could not be observed",
+            }
+        )
+    return failures
+
+
+def _verdict(
+    *,
+    elapsed: float,
+    channels: list[ChannelQuality],
+    failures: list[dict[str, Any]],
+    notes: list[str],
+) -> str:
+    if elapsed < MIN_VERIFY_SECONDS:
+        notes.append(
+            f"observed for {elapsed:.1f}s, under the {MIN_VERIFY_SECONDS:g}s minimum — too "
+            "short to tell a slow channel from an unlucky one."
+        )
+        return "unverified"
+    if not channels:
+        notes.append("no capture-selected requests were reported, so nothing could be checked.")
+        return "unverified"
+    if any(f["clause"] in HARD_CLAUSES for f in failures):
+        return "fail"
+    if failures or any(note.startswith("tuple yield unverified") for note in notes):
+        return "unverified"
+    return "pass"
+
+
+def evaluate_capture_quality(  # noqa: PLR0913
+    *,
+    profile: Mapping[str, Any],
+    scheduler: Mapping[str, Any] | None = None,
+    lifetime: Mapping[str, Any] | None = None,
+    tuples: Mapping[str, Any] | None = None,
+    losses: Mapping[str, Any] | None = None,
+    persistence: Mapping[str, Any] | None = None,
+    requests: list[Mapping[str, Any]] | None = None,
+    scope: str = SCOPE_LIVE,
+    requested_rate_hz: float | None = None,
+) -> CaptureQuality:
+    """Score a capture against its profile's promises.
+
+    * ``profile`` — a ``tuning_profile.snapshot()`` / manifest snapshot.
+    * ``scheduler`` — the live ``/status`` ``health.obd_scheduler`` payload:
+      the request table and the *trailing* rates. Trailing numbers are
+      reported, never scored.
+    * ``lifetime`` — ``capture_lifetime.CaptureLifetime.to_dict()`` (live)
+      or the same shape rebuilt from persisted rows (recompute). This is what
+      the verdict is scored on.
+    * ``tuples`` — persisted round-level tuple counts
+      (``src.analysis.capture_coverage.count_persisted_tuples``).
+    * ``losses`` — ``capture_losses.summarize_losses`` output; ``None`` means
+      no epochs, which is reported as unknown.
+    * ``persistence`` — the finalization outcome (flush, drain, rows).
+    * ``requests`` — overrides ``scheduler["requests"]`` for the recompute
+      path, where no scheduler exists.
+    """
+    name = str(profile.get("name") or "unknown")
+    weights = {str(k).upper(): float(v) for k, v in (profile.get("mode01") or {}).items()}
+    target = requested_rate_hz if requested_rate_hz is not None else profile.get("target_rate_hz")
+    target_f = None if target is None else float(target)
+    required = [str(item).upper() for item in (profile.get("required_tuple") or [])]
+    floor = (
+        None
+        if profile.get("min_achieved_rate_hz") is None
+        else float(profile["min_achieved_rate_hz"])
+    )
+    scheduler = scheduler or {}
+    interval, elapsed, active, windows = _interval(lifetime)
+    lifetime_channels = (lifetime or {}).get("channels") or {}
+    trailing_hz = scheduler.get("achieved_hz_capture") or {}
+
+    channels = _build_channels(
+        list(requests if requests is not None else scheduler.get("requests") or []),
+        lifetime_channels=lifetime_channels,
+        weights=weights,
+        target=target_f,
+        required=required,
+        elapsed=elapsed,
+        active=active,
+        windows=windows,
+        trailing_hz=trailing_hz,
+    )
+    cadence_by_profile = {
+        row.channel.upper(): (None if row.status == "missing" else row.cadence.get("hz"))
+        for row in channels
+    }
+    bound = tuple_rate_bound_hz(cadence_by_profile, required)
+    max_skew = effective_max_tuple_skew_s(profile)
+
+    failures = _channel_failures(channels, floor)
+    tuple_block, tuple_failures, notes = _tuple_block(
+        tuples,
+        required=required,
+        max_skew_s=max_skew,
+        bound=bound,
+        elapsed=elapsed,
+        active=active,
+        windows=windows,
+        floor=floor,
+    )
+    # A member the ECU never answered is already an unanswered_input; the
+    # tuple could never complete and saying so twice adds nothing.
+    missing_members = {row.channel.upper() for row in channels if row.status == "missing"}
+    if not (set(required) & missing_members):
+        failures += tuple_failures
+    loss_summary = dict(losses) if losses is not None else unknown_losses()
+    failures += _loss_failures(loss_summary)
+    failures += _persistence_failures(persistence)
 
     batching = scheduler.get("batching")
-    if batching is None:
+    if scheduler and batching is None:
         notes.append(
             "request batching was off or unreported. Unbatched, one request carries one PID, "
             "so the bus budget binds far sooner than the ECM does."
         )
-
     if not required:
         notes.append(
-            "this profile declares no required_tuple, so only per-channel rates were checked "
-            "— which cannot tell whether any joint analysis has usable samples."
+            "this profile declares no required_tuple, so only per-channel cadence and coverage "
+            "were checked — which cannot tell whether any joint analysis has usable samples."
         )
-    if required and not round_timestamps:
+    dashboard = loss_summary.get("dashboard") or {}
+    if dashboard.get("lost"):
         notes.append(
-            "round_timestamps is off, so tuple_rate_bound_hz is a strict upper bound: members "
-            "polled in different rounds need not share an instant."
+            f"dashboard-only sinks dropped {dashboard['lost']} records during the capture; "
+            "the freshest state wins there by design and nothing on disk is affected."
+        )
+    if interval.get("paused_s"):
+        notes.append(
+            f"{interval['paused_s']:.1f}s of intentional pause excluded from coverage; "
+            "engine-off time without a pause is not excluded."
         )
 
-    if observed_seconds is not None and float(observed_seconds) < MIN_VERIFY_SECONDS:
-        verdict = "unverified"
-        notes.append(
-            f"observed for {float(observed_seconds):.1f}s, under the {MIN_VERIFY_SECONDS:g}s "
-            "minimum — too short to tell a slow channel from an unlucky one."
-        )
-    elif not channels:
-        verdict = "unverified"
-        notes.append("no capture-selected requests were reported, so nothing could be checked.")
-    else:
-        verdict = "fail" if failures else "pass"
-
+    verdict = _verdict(elapsed=elapsed, channels=channels, failures=failures, notes=notes)
     return CaptureQuality(
         verdict=verdict,
         profile=name,
-        observed_seconds=observed_seconds,
+        scope=scope,
+        interval=interval,
         channels=channels,
+        tuples=tuple_block,
+        losses=loss_summary,
+        persistence=None if persistence is None else dict(persistence),
+        trailing={
+            "window_s": scheduler.get("trailing_window_s", 60.0),
+            "observed_seconds": scheduler.get("capture_observed_seconds"),
+            "hz": dict(trailing_hz),
+            "max_gap_seconds": dict(scheduler.get("capture_max_gap_seconds") or {}),
+        },
         failures=failures,
         required_tuple=required,
         tuple_rate_bound_hz=bound,
-        tuple_bound_is_exact=bool(required) and round_timestamps,
-        storage=storage_payload,
         batching=batching,
         notes=notes,
     )
 
 
+def normalize_quality_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Read any sidecar version with its scope made explicit.
+
+    A v1 sidecar scored the trailing 60 s at stop and described cumulative
+    loss counters; it is returned as written plus ``scope: trailing_snapshot``
+    and ``losses`` marked unknown, so nothing downstream can mistake it for a
+    capture-wide verdict. v2 payloads pass through unchanged.
+    """
+    version = int(payload.get("schema_version") or 1)
+    if version >= SCHEMA_VERSION:
+        return dict(payload)
+    out = dict(payload)
+    out["scope"] = SCOPE_TRAILING
+    out["losses"] = unknown_losses()
+    out.setdefault("notes", [])
+    out["notes"] = [
+        *out["notes"],
+        "schema_version 1 sidecar: the verdict covers the trailing 60 s at stop, not the "
+        "capture; its storage counter was cumulative and loss inside the capture is unknown.",
+    ]
+    return out
+
+
 __all__ = [
+    "ACQUISITION_GAP",
+    "DEFAULT_MAX_TUPLE_SKEW_S",
+    "HARD_CLAUSES",
+    "MIN_STALL_SECONDS",
     "MIN_VERIFY_SECONDS",
+    "PERSISTENCE_LOSS",
+    "RATE_SHORTFALL",
     "RATE_TOLERANCE",
     "SCHEMA_VERSION",
+    "SCOPE_LIVE",
+    "SCOPE_RECOMPUTE",
+    "SCOPE_STOP",
+    "SCOPE_TRAILING",
     "STALL_PERIODS",
+    "TUPLE_CHANNEL",
+    "TUPLE_INCOMPLETE",
+    "TUPLE_SKEW",
+    "UNANSWERED_INPUT",
+    "UNKNOWN_LOSS_COUNTERS",
     "CaptureQuality",
     "ChannelQuality",
+    "cadence_from_lifetime",
+    "coverage_from_lifetime",
+    "effective_max_tuple_skew_s",
     "evaluate_capture_quality",
+    "gap_threshold_s",
+    "normalize_quality_payload",
+    "profile_requests",
     "tuple_rate_bound_hz",
 ]

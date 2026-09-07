@@ -1055,6 +1055,17 @@ def compute_tuning_digest(
             "no capture_quality.json in this session, so whether the capture met its "
             "profile's rate contract is unknown — not verified, and not a pass."
         )
+    elif capture_quality.get("scope") == "trailing_snapshot":
+        clauses = ", ".join(
+            str(item.get("clause")) for item in capture_quality.get("failures") or []
+        )
+        notes.append(
+            f"capture contract verdict: {capture_quality.get('verdict')}"
+            + (f" ({clauses})" if clauses else "")
+            + " — scored on the trailing 60 s at stop only (schema_version 1), not the "
+            "capture; loss inside the capture is unknown. Recompute from the rows before "
+            "trusting it."
+        )
     elif capture_quality.get("verdict") != "pass":
         clauses = ", ".join(
             str(item.get("clause")) for item in capture_quality.get("failures") or []

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -10,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from src.collection import bus_budget, tuning_profile
+from src.collection import bus_budget, capture_lifetime, tuning_profile
 from src.collection.capture_profiles import (
     BUILTIN_REVISION,
     STORAGE_SAFE_REQUESTS_PER_SECOND,
@@ -27,6 +28,7 @@ from src.control.sessions import list_sessions
 from src.dashboard.api import create_app
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import ParquetTelemetryWriter
+from src.telemetry import TelemetryRecord
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -35,9 +37,11 @@ EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 @pytest.fixture(autouse=True)
 def _reset_runtime() -> Iterator[None]:
     bus_budget.reset()
+    capture_lifetime._reset_for_tests()
     yield
     bus_budget.reset()
     tuning_profile.set_active(False, source="test")
+    capture_lifetime._reset_for_tests()
 
 
 def _store(tmp_path: Path, config: CanaryConfig) -> CaptureProfileStore:
@@ -88,6 +92,9 @@ def test_vehicle_hybrid_profile_keeps_its_experimental_fast_exit_plan() -> None:
     assert hybrid.experimental is True
     assert hybrid.target_rate_hz == 4.0
     assert hybrid.did_interval_seconds == 0.25
+    # C04.3: the 4 Hz intent is a start-to-start cycle; the end-to-start
+    # interval is retained with its old meaning, not reinterpreted.
+    assert hybrid.did_cycle_seconds == 0.25
     assert hybrid.did_continuous is False
     assert hybrid.bus_budget_override == 90.0
     assert "COMMANDED_EQUIV_RATIO" in hybrid.mode01
@@ -170,15 +177,82 @@ def test_a_tuning_capture_starts_without_a_tune_revision(tmp_path: Path) -> None
     assert sidecar["tune_revision"] is None
 
 
-def test_capture_stop_writes_a_quality_sidecar_beside_the_data(tmp_path: Path) -> None:
-    """Whether a capture was sound is a property of that capture.
+class _Clock:
+    """Monotonic + wall clock that only moves when told to (arm-to-stop is
+    simulated, so a five-minute capture takes no five minutes)."""
 
-    The 2026-08-10 session directory held only the profile and the DTC list, so
-    the post-mortem could not establish the achieved rates, the gaps, or even
-    whether request batching was on.
+    def __init__(self) -> None:
+        self.mono = 1000.0
+        self.wall = 1_700_000_000.0
+
+    def monotonic(self) -> float:
+        return self.mono
+
+    def time(self) -> float:
+        return self.wall
+
+    def perf_counter(self) -> float:
+        return self.mono
+
+    def advance(self, seconds: float) -> None:
+        self.mono += seconds
+        self.wall += seconds
+
+
+def _round_record(t: float, channel: str, *, generation: int, round_id: int) -> TelemetryRecord:
+    return TelemetryRecord.obd(
+        t,
+        channel,
+        1.0,
+        "",
+        metadata={
+            "ts_schema": 2,
+            "acquired_at": t,
+            "acquired_clock": "kernel",
+            "generation": generation,
+            "round_id": round_id,
+        },
+    )
+
+
+def _capture_rows(
+    profile: CaptureProfile, clock: _Clock, *, seconds: float, skip: set[str] = frozenset()
+) -> list[TelemetryRecord]:
+    """Every profile channel at its requested rate, round-tagged, for ``seconds``.
+
+    Also feeds the capture-lifetime ledger exactly as ``record_read`` would,
+    since no collector loop runs here — the ledger is what the verdict scores
+    cadence and coverage on, the rows are what it scores yield on.
     """
+    from src.collection import capture_generation
+
+    generation = capture_generation.current()
+    target = profile.target_rate_hz or 1.0
+    period = 1.0 / target
+    records: list[TelemetryRecord] = []
+    rounds = int(seconds * target)
+    for r in range(rounds):
+        offset = r * period + 0.002
+        for channel, weight in profile.mode01.items():
+            if channel in skip:
+                continue
+            every = max(1, int(round(1.0 / weight)))
+            if r % every == 0:
+                records.append(
+                    _round_record(clock.wall + offset, channel, generation=generation, round_id=r)
+                )
+                capture_lifetime.observe(channel, clock.mono + offset)
+    return records
+
+
+def _capture_app(tmp_path: Path, clock: _Clock, monkeypatch: pytest.MonkeyPatch):
+    """An app whose capture clocks are ``clock`` and whose can0 counters exist."""
+    import src.collection.tuning_profile as tuning_profile_mod
+    import src.models.health as health_mod
     from src.models.health import HealthMonitor
 
+    monkeypatch.setattr(tuning_profile_mod, "time", clock)
+    monkeypatch.setattr(health_mod, "time", clock)
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     config = config.model_copy(
         update={
@@ -194,45 +268,17 @@ def test_capture_stop_writes_a_quality_sidecar_beside_the_data(tmp_path: Path) -
             session_started_at=datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
         )
     )
-    health = HealthMonitor()
-    health.observe_obd_scheduler(
-        {
-            # The rates the 2026-08-10 capture actually ran at.
-            "capture_observed_seconds": 60.0,
-            "achieved_hz_capture": {
-                "RPM": 0.78,
-                "ENGINE_LOAD": 0.78,
-                "O2_WR_LAMBDA_S1": 0.67,
-                "FUEL_STATUS": 0.29,
-                "COMMANDED_EQUIV_RATIO": 0.28,
-            },
-            "capture_samples": {
-                "RPM": 47,
-                "ENGINE_LOAD": 47,
-                "O2_WR_LAMBDA_S1": 40,
-                "FUEL_STATUS": 17,
-                "COMMANDED_EQUIV_RATIO": 17,
-            },
-            "capture_max_gap_seconds": {
-                "RPM": 1.3,
-                "ENGINE_LOAD": 1.3,
-                "O2_WR_LAMBDA_S1": 1.4,
-                "FUEL_STATUS": 6.2,
-                "COMMANDED_EQUIV_RATIO": 6.2,
-            },
-            "requests": [
-                {"channel": name, "kind": "pid", "capture_selected": True}
-                for name in (
-                    "RPM",
-                    "ENGINE_LOAD",
-                    "O2_WR_LAMBDA_S1",
-                    "FUEL_STATUS",
-                    "COMMANDED_EQUIV_RATIO",
-                )
-            ],
-            "batching": None,
-        }
-    )
+    stats = tmp_path / "can0-statistics"
+    stats.mkdir()
+    for name in ("rx_over_errors", "rx_dropped", "rx_errors"):
+        (stats / name).write_text("0")
+    health = HealthMonitor(can0_stats_path=stats)
+    health.observe_obd_scheduler({"achieved_hz_capture": {}, "requests": [], "batching": {}})
+    # The daemon's sinks register their queues with health when they start
+    # (drain.py); the finalizer treats an unregistered queue as unobserved,
+    # which is an unverified verdict, not a pass. Mirror the daemon here.
+    for name in ("ingest", "storage"):
+        health.observe_telemetry_queue(name, asyncio.Queue())
     client = TestClient(
         create_app(
             config,
@@ -243,26 +289,160 @@ def test_capture_stop_writes_a_quality_sidecar_beside_the_data(tmp_path: Path) -
             health_monitor=health,
         )
     )
+    return client, writer, store, health, stats
+
+
+def test_capture_stop_writes_a_v2_sidecar_from_the_rows_it_persisted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Boundary, drain, flush, then judge — on real writer-produced Parquet.
+
+    The 2026-08-10 session directory held only the profile and the DTC list,
+    so the post-mortem could not establish the achieved rates or the gaps.
+    The v1 sidecar that followed scored a trailing 60 s window; this one
+    covers arm to stop and counts persisted tuples per round.
+    """
+    clock = _Clock()
+    client, writer, store, health, _stats = _capture_app(tmp_path, clock, monkeypatch)
     headers = {"Authorization": "Bearer secret"}
-    client.post(
-        "/control/capture",
-        headers=headers,
-        json={"profile": "fuel-map", "tune_revision": "ZS44A-k106"},
+    started = client.post(
+        "/control/capture", headers=headers, json={"profile": "fuel-map", "tune_revision": "k106"}
     )
+    assert started.status_code == 200
     capture_dir = writer.paths.root
+    assert (capture_dir / "capture_epoch.json").exists()
+    profile = store.load().by_name("fuel-map")
+    assert profile is not None
+
+    writer.wrapped.write_many(_capture_rows(profile, clock, seconds=60.0))
+    clock.advance(60.0)
 
     stopped = client.post("/control/capture/stop", headers=headers)
     assert stopped.status_code == 200
+    sidecar = json.loads((capture_dir / "capture_quality.json").read_text())
+    assert sidecar["schema_version"] == 2
+    assert sidecar["scope"] == "stop"
+    assert sidecar["verdict"] == "pass", sidecar["failures"]
+    assert sidecar["interval"]["elapsed_s"] == pytest.approx(60.0)
+    assert sidecar["tuples"]["source"] == "persisted_rows"
+    assert sidecar["tuples"]["complete"] == 240
+    assert sidecar["tuples"]["max_tuple_skew_s"] == pytest.approx(0.125)
+    assert sidecar["losses"]["recording"]["status"] == "verified"
+    assert sidecar["losses"]["recording"]["lost"] == 0
+    assert sidecar["persistence"]["flushed"] is True
+    assert sidecar["persistence"]["generation_boundary"] >= 1
+    assert sidecar["persistence"]["rows_on_disk"] == sidecar["persistence"]["rows_written"]
+    rpm = next(row for row in sidecar["channels"] if row["channel"] == "RPM")
+    assert rpm["status"] == "ok" and rpm["cadence"]["hz"] == pytest.approx(4.0)
+    assert "tuple_bound_is_exact" not in sidecar
+    assert stopped.json()["capture_quality"]["verdict"] == "pass"
 
+    # Reopened later, the stop-time scope is explicit and recompute agrees.
+    recomputed = client.get(f"/control/capture/quality/{capture_dir.name}", headers=headers)
+    assert recomputed.status_code == 200
+    body = recomputed.json()
+    assert body["stored"]["scope"] == "stop"
+    assert body["recomputed"]["scope"] == "recompute"
+    assert body["recomputed"]["tuples"]["complete"] == 240
+    assert body["recomputed"]["losses"]["recording"]["status"] == "verified"
+
+
+def test_the_four_minute_missing_data_case_fails_at_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Samples only in the last minute of five: acquisition_gap, not pass."""
+    clock = _Clock()
+    client, writer, store, _health, _stats = _capture_app(tmp_path, clock, monkeypatch)
+    headers = {"Authorization": "Bearer secret"}
+    client.post("/control/capture", headers=headers, json={"profile": "fuel-map"})
+    capture_dir = writer.paths.root
+    profile = store.load().by_name("fuel-map")
+    assert profile is not None
+    clock.advance(240.0)
+    writer.wrapped.write_many(_capture_rows(profile, clock, seconds=60.0))
+    clock.advance(60.0)
+
+    stopped = client.post("/control/capture/stop", headers=headers).json()
+    sidecar = json.loads((capture_dir / "capture_quality.json").read_text())
+    assert stopped["capture_quality"]["verdict"] == "fail"
+    gap = next(f for f in sidecar["failures"] if f["clause"] == "acquisition_gap")
+    assert gap["evidence"]["RPM"]["missing_initial_s"] == pytest.approx(240.0, abs=0.01)
+    assert sidecar["tuples"]["complete"] == 240
+
+
+def test_a_late_writer_failure_at_stop_is_recorded_not_hidden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = _Clock()
+    client, writer, store, _health, _stats = _capture_app(tmp_path, clock, monkeypatch)
+    headers = {"Authorization": "Bearer secret"}
+    client.post("/control/capture", headers=headers, json={"profile": "fuel-map"})
+    capture_dir = writer.paths.root
+    profile = store.load().by_name("fuel-map")
+    assert profile is not None
+    writer.wrapped.write_many(_capture_rows(profile, clock, seconds=60.0))
+    clock.advance(60.0)
+
+    async def failing_flush() -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(writer, "flush", failing_flush)
+    stopped = client.post("/control/capture/stop", headers=headers)
+    assert stopped.status_code == 200
     sidecar = json.loads((capture_dir / "capture_quality.json").read_text())
     assert sidecar["verdict"] == "fail"
-    assert sidecar["profile"] == "fuel-map"
-    # The rates that actually ran are preserved, not just the verdict.
-    assert sidecar["tuple_rate_bound_hz"] == 0.28
-    assert "required_tuple_rate" in {f["clause"] for f in sidecar["failures"]}
-    assert "RPM" in {row["channel"] for row in sidecar["channels"]}
-    assert any("batching" in note for note in sidecar["notes"])
-    assert stopped.json()["capture_quality"]["verdict"] == "fail"
+    loss = next(f for f in sidecar["failures"] if f["clause"] == "persistence_loss")
+    assert "No space left on device" in loss["evidence"]["flush_error"]
+    assert sidecar["persistence"]["flushed"] is False
+
+
+def test_live_capture_quality_is_scoped_live_and_refused_when_inactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = _Clock()
+    client, writer, store, _health, stats = _capture_app(tmp_path, clock, monkeypatch)
+    headers = {"Authorization": "Bearer secret"}
+    assert client.get("/control/capture/quality", headers=headers).status_code == 409
+    client.post("/control/capture", headers=headers, json={"profile": "fuel-map"})
+    profile = store.load().by_name("fuel-map")
+    assert profile is not None
+    writer.wrapped.write_many(_capture_rows(profile, clock, seconds=20.0))
+    clock.advance(20.0)
+    # A kernel receive drop during the capture is attributed to it.
+    (stats / "rx_dropped").write_text("7")
+
+    live = client.get("/control/capture/quality", headers=headers)
+    assert live.status_code == 200
+    body = live.json()
+    assert body["scope"] == "live"
+    assert body["verdict"] == "fail"
+    assert {f["clause"] for f in body["failures"]} == {"persistence_loss"}
+    assert body["losses"]["recording"]["counters"]["can0.rx_dropped"]["delta"] == 7
+    assert body["tuples"]["complete"] == 80
+    client.delete("/control/capture", headers=headers)
+
+
+def test_max_tuple_skew_must_fit_inside_a_round() -> None:
+    with pytest.raises(ValueError, match="exceeds the round period"):
+        CaptureProfile(
+            name="x",
+            mode01={"A": 1.0},
+            target_rate_hz=4.0,
+            max_tuple_skew_s=0.5,
+            storage_prefix="_capture-x",
+        )
+    ok = CaptureProfile(
+        name="x",
+        mode01={"A": 1.0},
+        target_rate_hz=4.0,
+        max_tuple_skew_s=0.2,
+        storage_prefix="_capture-x",
+    )
+    assert ok.max_tuple_skew_s == 0.2
+    assert (
+        CaptureProfile(name="y", mode01={"A": 1.0}, storage_prefix="_capture-y").max_tuple_skew_s
+        is None
+    )
 
 
 def test_capture_lifecycle_rotates_writes_sidecar_and_reverts(tmp_path: Path) -> None:

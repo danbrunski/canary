@@ -497,13 +497,36 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     mocks.stopProfileCapture.mockResolvedValue({
       capture_profile: { ...status(null), active: false, name: "default", paused: false },
       capture_quality: {
+        schema_version: 2,
+        scope: "stop",
         verdict: "fail",
         profile: "fuel-map",
-        observed_seconds: 1434,
+        interval: {
+          source: "live",
+          elapsed_s: 1434,
+          intended_active_s: 1434,
+          paused_s: 0,
+          pause_windows: [],
+        },
         required_tuple: ["RPM", "COMMANDED_EQUIV_RATIO"],
         tuple_rate_bound_hz: 0.28,
-        tuple_bound_is_exact: true,
-        failures: [{ clause: "required_tuple_rate", channels: ["COMMANDED_EQUIV_RATIO"] }],
+        tuples: {
+          required: ["RPM", "COMMANDED_EQUIV_RATIO"],
+          max_tuple_skew_s: 0.125,
+          rate_bound_hz: 0.28,
+          source: "persisted_rows",
+          scheduled: null,
+          attempted: 1120,
+          complete: 2,
+          persisted: 2,
+          incomplete: 1118,
+          skew_rejected: 0,
+        },
+        failures: [{ clause: "rate_shortfall", channels: ["COMMANDED_EQUIV_RATIO"] }],
+        channels: [],
+        losses: {},
+        persistence: null,
+        trailing: { window_s: 60, observed_seconds: 60, hz: {} },
         notes: [],
       },
     });
@@ -512,8 +535,10 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
 
     const verdict = await screen.findByTestId("capture-verdict");
     expect(verdict).toHaveTextContent("contract fail");
-    expect(verdict).toHaveTextContent("required_tuple_rate");
-    expect(verdict).toHaveTextContent("0.28 Hz");
+    expect(verdict).toHaveTextContent("scope: stop");
+    expect(verdict).toHaveTextContent("rate_shortfall");
+    expect(verdict).toHaveTextContent("2 complete tuples of 1120 rounds");
+    expect(verdict).toHaveTextContent("0.28 Hz (bound)");
   });
 
   it("says whether the editor is on a saved profile or an unsaved new one", async () => {

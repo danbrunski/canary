@@ -746,14 +746,16 @@ class _SnifferBus:
         self.frames = list(frames or [])
         self.idle = idle
         self.recv_calls = 0
-        self.recv_idents: set[int] = set()
+        # Thread objects, not idents: an ident is reused once a thread exits,
+        # which made "reader replaced" flaky across a reconnect.
+        self.recv_threads: set[threading.Thread] = set()
         self.send_calls = 0
         self.shutdown_called = False
         self.recv_after_shutdown = 0
 
     def recv(self, timeout: float) -> can.Message | None:
         self.recv_calls += 1
-        self.recv_idents.add(threading.get_ident())
+        self.recv_threads.add(threading.current_thread())
         if self.shutdown_called:
             self.recv_after_shutdown += 1
         if self.frames:
@@ -992,8 +994,8 @@ async def test_collect_can_from_config_reconnect_replaces_reader_and_never_reads
     assert first.shutdown_called and second.shutdown_called
     assert first.recv_after_shutdown == 0
     assert second.recv_after_shutdown == 0
-    assert len(first.recv_idents) == 1 and len(second.recv_idents) == 1
-    assert first.recv_idents.isdisjoint(second.recv_idents), "reader thread was not replaced"
+    assert len(first.recv_threads) == 1 and len(second.recv_threads) == 1
+    assert first.recv_threads.isdisjoint(second.recv_threads), "reader thread was not replaced"
     assert not _reader_threads()
     assert reports, "stats callback never fired"
     assert reports[-1].frames == 6

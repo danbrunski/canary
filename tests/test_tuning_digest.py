@@ -545,4 +545,7 @@ def test_a_failed_capture_contract_is_carried_into_the_digest(
     assert digest is not None
     assert digest.capture_quality is not None
     assert digest.capture_quality["verdict"] == "fail"
-    assert any("required_tuple_rate" in note for note in digest.notes)
+    # A v1 sidecar keeps its limited scope: the note says so beside the clause.
+    assert digest.capture_quality["scope"] == "trailing_snapshot"
+    note = next(note for note in digest.notes if "required_tuple_rate" in note)
+    assert "trailing 60 s" in note

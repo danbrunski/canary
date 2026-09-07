@@ -125,6 +125,39 @@ class HandoffStats:
         )
 
 
+@dataclass(frozen=True)
+class CollectorHandoffStats:
+    """A polling collector's cumulative handoff accounting (C03.6).
+
+    ``handoff`` is the :class:`ThreadHandoff` view (loss before the ingest
+    queue), ``queue_dropped`` the ingest-queue-full drops counted by the
+    collector's :class:`QueueDropCounter`. ``derived_records`` is what the
+    loop emitted as telemetry (one batched Mode 01 response -> N readings ->
+    N records); ``raw_responses`` is the ECU responses behind them, when the
+    loop reports them, so a derived expansion is never mistaken for a raw
+    count. All cumulative across reconnect attempts.
+    """
+
+    handoff: HandoffStats
+    queue_dropped: int
+    derived_records: int
+    raw_responses: int | None
+    reconnects: int = 0
+
+    def to_dict(self) -> dict[str, int | None]:
+        return {
+            "accepted": self.handoff.accepted,
+            "buffer_dropped": self.handoff.dropped,
+            "buffer_high_water": self.handoff.high_water,
+            "buffer_capacity": self.handoff.capacity,
+            "batches": self.handoff.drains,
+            "queue_dropped": self.queue_dropped,
+            "derived_records": self.derived_records,
+            "raw_responses": self.raw_responses,
+            "reconnects": self.reconnects,
+        }
+
+
 class ThreadHandoff:
     """Bounded producer buffer that hops records onto the event loop in chunks.
 

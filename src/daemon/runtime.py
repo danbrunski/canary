@@ -36,6 +36,7 @@ from .server import serve_in_background
 
 if TYPE_CHECKING:
     from src.collection.can_collector import CanReceiveStats
+    from src.collection.queueing import CollectorHandoffStats
     from src.models.health import HealthMonitor
 
 log = logging.getLogger(__name__)
@@ -63,6 +64,28 @@ def _run_trip_end_hook(
         notifier=components.notifier,
         catalog_db=config.daemon.catalog_db,
     )
+
+
+def _obd_handoff_stats_observer(
+    health: HealthMonitor,
+) -> Callable[[CollectorHandoffStats], None]:
+    """Adapt the Canable collector's handoff counters (C03.6) into ``/status``."""
+
+    def _observe(stats: CollectorHandoffStats) -> None:
+        health.observe_collector_handoff(
+            "obd_collect",
+            accepted=stats.handoff.accepted,
+            buffer_dropped=stats.handoff.dropped,
+            buffer_high_water=stats.handoff.high_water,
+            buffer_capacity=stats.handoff.capacity,
+            queue_dropped=stats.queue_dropped,
+            batches=stats.handoff.drains,
+            raw_responses=stats.raw_responses,
+            derived_records=stats.derived_records,
+            reconnects=stats.reconnects,
+        )
+
+    return _observe
 
 
 def _can_receive_stats_observer(health: HealthMonitor) -> Callable[[CanReceiveStats], None]:
@@ -185,6 +208,7 @@ async def run_daemon(
             freeze_frame_trigger=components.freeze_frame_trigger,
             force_poll_trigger=components.force_poll_trigger,
             can_receive_stats_callback=_can_receive_stats_observer(components.health_monitor),
+            obd_handoff_stats_callback=_obd_handoff_stats_observer(components.health_monitor),
         )
 
     # Decoded-channel persistence (config-gated): bound CAN signals at the

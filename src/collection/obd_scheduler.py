@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import math
 import statistics
 import threading
 import time
@@ -14,8 +15,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-from src.collection import bus_budget
+from src.collection import bus_budget, capture_lifetime
 from src.collection.can_obd_client import DEFAULT_REQUEST_ID, PID_DECODERS
+from src.collection.hybrid_cycle import (
+    CycleAccounting,
+    CyclePlan,
+    ServiceKind,
+    next_wake_at,
+)
 from src.collection.isotp import PERMANENT_REFUSAL_NRCS, nrc_name
 from src.collection.obd_registry import PollTier, lookup
 from src.config import DEFAULT_PRIORITY_CHANNELS, CanBusConfig, CollectionConfig
@@ -270,6 +277,12 @@ class DidSessionSpec:
 
     session: int
     keepalive_seconds: float = 2.0
+    #: **End-to-start** gap: seconds from one window closing to the next
+    #: opening (the historic meaning, unchanged). Sweep duration, the exit,
+    #: its grace and Mode 01 all sit *outside* this number, so it is not a
+    #: cycle period — a 0.25 s interval measured as a 0.95 s cycle on the
+    #: fake bus (docs/hybrid-scheduling.md). Ignored when ``cycle_seconds``
+    #: (or the profile's ``did_cycle_seconds``) is set.
     window_interval_seconds: float = 60.0
     window_max_seconds: float = 10.0
     lapse_seconds: float = 5.0
@@ -278,7 +291,15 @@ class DidSessionSpec:
     #: wait out ``lapse_seconds`` instead.
     exit_session: int | None = None
     #: Settling time after a successful fast exit, in place of the lapse.
+    #: Vehicle-scoped: resolved from the dids.yaml access block when it
+    #: states one (the Xterra measured recovery on the *next* request).
     exit_grace_seconds: float = 0.05
+    #: **Start-to-start** period of one Mode 01 + Mode 22 cycle (C04.3):
+    #: windows open at ``anchor + k * cycle_seconds`` on monotonic deadlines,
+    #: with the sweep, exit, grace and the Mode 01 phase all inside the
+    #: period. ``None`` keeps the end-to-start ``window_interval_seconds``
+    #: schedule, so existing config and saved profiles are not reinterpreted.
+    cycle_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -328,13 +349,20 @@ def resolve_did_session_spec(collection: CollectionConfig) -> DidSessionSpec | N
             if access is not None and access.keepalive_seconds
             else DidSessionSpec.keepalive_seconds
         )
+    exit_grace = (
+        access.exit_grace_seconds
+        if access is not None and access.exit_grace_seconds is not None
+        else DidSessionSpec.exit_grace_seconds
+    )
     return DidSessionSpec(
         session=session,
         keepalive_seconds=keepalive,
         exit_session=access.exit_session if access is not None else None,
+        exit_grace_seconds=exit_grace,
         window_interval_seconds=collection.obd_did_window_interval_seconds,
         window_max_seconds=collection.obd_did_window_max_seconds,
         lapse_seconds=collection.obd_did_session_lapse_seconds,
+        cycle_seconds=collection.obd_did_cycle_seconds,
     )
 
 
@@ -434,6 +462,14 @@ class CanObdLoopStats:
     bus_errors: int = 0
     scheduler_snapshots: int = 0
     session_controls_sent: int = 0
+    #: Session-control (UDS 0x10) traffic, kept apart from channel-read
+    #: throughput (C04.8). ``requests_sent`` still counts every frame on the
+    #: wire; ``ObdSchedulerMetrics.session_control`` reports these and the
+    #: channel-only remainder side by side.
+    session_control_responses: int = 0
+    session_control_timeouts: int = 0
+    session_control_negative_responses: int = 0
+    session_control_seconds: float = 0.0
     #: Multi-PID requests issued, and the PIDs they carried. The ratio is the
     #: round-trip saving, which is the whole point of batching.
     batched_requests: int = 0
@@ -481,7 +517,12 @@ class CanObdLoopStats:
         Assumes ``now`` is non-decreasing per channel, which holds because
         this is called as readings arrive. That is what lets eviction be a
         left-pop rather than a scan.
+
+        The same read also feeds the capture-lifetime ledger (C03.2): the
+        trailing window here is what the dashboard shows, the ledger is what
+        the capture verdict is scored on, and they must see identical events.
         """
+        capture_lifetime.observe(channel, now)
         window = self.recent_reads.get(channel)
         if window is None:
             window = deque()
@@ -503,7 +544,14 @@ class CanObdLoopStats:
         return out
 
     def capture_rates(self, now: float, started_at: float) -> tuple[dict[str, ChannelRate], float]:
-        """Per-channel sampling rate and stall exposure since capture arm.
+        """Per-channel sampling rate and stall exposure over the **trailing** window.
+
+        **Trailing, not lifetime.** This looks back at most ACHIEVED_HZ_WINDOW
+        seconds and is the live "is it working right now" number the dashboard
+        shows. It must never be the capture's verdict: with samples only in the
+        last minute of a five-minute capture it reports 60 observed seconds and
+        a 0.25 s maximum gap (roadmap C03). ``capture_lifetime`` keeps the
+        arm-to-stop statistics that ``capture_quality`` scores.
 
         Rate comes from the *median inter-sample interval*, not from dividing
         the sample count by wall-clock.  Dividing by wall-clock conflates rate
@@ -824,16 +872,22 @@ class DidWindowController:
 
     Drives three phases inside ``run_can_obd_loop``:
 
-    * ``mode01`` — normal polling; DID requests are ineligible. At
-      ``window_interval_seconds`` cadence (and only while at least one DID
-      isn't backed off) the loop sends ``10 <session>`` to open a window.
+    * ``mode01`` — normal polling; DID requests are ineligible. When the
+      next window is due (and at least one DID isn't backed off) the loop
+      sends ``10 <session>`` to open a window.
     * ``window`` — only DIDs are eligible; each active DID is read once.
       ``10 <session>`` is re-sent every ``keepalive_seconds``. The window
       closes when every pending DID was attempted, on keep-alive failure,
       or at ``window_max_seconds``.
     * ``lapse`` — nothing diagnostic is sent so the ECM's session expires
-      (S3 timeout) and Mode 01 answers again. Broadcast capture continues
-      throughout — only the request side pauses.
+      (S3 timeout) and Mode 01 answers again — or, with a fast exit, the
+      short post-exit grace. Broadcast capture continues throughout — only
+      the request side pauses.
+
+    Two timing policies (C04.3): with a ``cycle_seconds`` (spec or profile)
+    windows open **start-to-start** at ``anchor + k * cycle`` and the Mode 01
+    phase is reserved a share of each cycle; without one the historic
+    **end-to-start** ``window_interval_seconds`` applies unchanged.
 
     Mode 01 misses are *prevented* (requests deferred, not timed out), so
     the 30 s auto-miss backoff never punishes channels for a DID window.
@@ -847,7 +901,7 @@ class DidWindowController:
         now: float,
     ) -> None:
         self._spec = spec
-        self._did_indices = tuple(did_indices)
+        self._did_indices = frozenset(did_indices)
         self.phase: Literal["mode01", "window", "lapse"] = "mode01"
         self._next_window_at = now + self._interval()
         self._window_deadline = 0.0
@@ -860,7 +914,11 @@ class DidWindowController:
         self.keepalives_sent = 0
         self.fast_exits = 0
         self.fast_exit_failures = 0
-        self._exit_due = False
+        #: A (re)connect cannot know whether the ECU is still holding the
+        #: session a previous loop opened — the Mode 01 blackout outlives an
+        #: S3 lapse by >30 s on the Xterra — so a vehicle with a verified fast
+        #: exit is returned to the default session first (C04.7 reconnect).
+        self._exit_due = spec.exit_session is not None
         #: Consecutive *permanent* refusals (serviceNotSupported and friends).
         #: Any success resets it — a busy ECU must not accumulate toward being
         #: declared incapable.
@@ -872,6 +930,13 @@ class DidWindowController:
         self._exit_retry_backoff = FAST_EXIT_RETRY_MIN_SECONDS
         #: NRC of the most recent failed exit, for `/status` and the log.
         self.last_exit_nrc: int | None = None
+        #: Cycle schedule (C04.3/C04.5): windows open at ``anchor + k*cycle``.
+        self._cycle_anchor: float | None = None
+        self._cycle_k = 0
+        self._next_cycle_k = 0
+        self._plan: CyclePlan | None = None
+        self._infeasible_logged: CyclePlan | None = None
+        self.cycle = CycleAccounting()
 
     def advance(self, states: Sequence[_PollRequestState], now: float) -> None:
         """Apply phase transitions that don't require bus I/O."""
@@ -888,7 +953,12 @@ class DidWindowController:
                 self._close_window(now)
         elif self.phase == "lapse" and now >= self._lapse_until:
             self.phase = "mode01"
-            if self._next_window_at <= now:
+            if self._cycle() is not None:
+                # Mode 01 gets its planned share of the cycle before the next
+                # window may open, however overdue that window is (C04.5).
+                share = self._plan.mode01_share_seconds if self._plan is not None else 0.0
+                self._schedule_next_window(now, earliest=now + share)
+            elif self._next_window_at <= now:
                 # The lapse ate the whole inter-window gap, so the next window
                 # is already overdue and would reopen before a single Mode 01
                 # request could be issued — starving Mode 01 to *exactly* zero
@@ -916,19 +986,104 @@ class DidWindowController:
         override = tuning_profile.did_interval_override()
         return override if override is not None else self._spec.window_interval_seconds
 
+    def _cycle(self) -> float | None:
+        """Start-to-start cycle period, profile first; ``None`` = legacy interval."""
+        from src.collection import tuning_profile
+
+        override = tuning_profile.did_cycle_override()
+        return override if override is not None else self._spec.cycle_seconds
+
+    def cycle_mode(self) -> bool:
+        return self._cycle() is not None
+
+    def set_plan(self, plan: CyclePlan | None) -> None:
+        """Record what the next cycle must fit; log an infeasible plan once."""
+        self._plan = plan
+        if plan is None or plan.feasible or plan == self._infeasible_logged:
+            return
+        self._infeasible_logged = plan
+        log.warning(
+            "hybrid cycle of %.3fs is infeasible: %d Mode 01 + %d DID + %d session requests "
+            "at %.1f req/s plus %.3fs grace need %.3fs (short by %.3fs); reporting "
+            "cycle_feasible=false rather than promising the target",
+            plan.cycle_seconds,
+            plan.mode01_requests,
+            plan.did_requests,
+            plan.session_requests,
+            plan.budget_rps,
+            plan.grace_seconds,
+            plan.required_seconds,
+            plan.shortfall_seconds,
+            extra={"cycle_plan": plan.to_dict()},
+        )
+
+    def _schedule_next_window(self, now: float, *, earliest: float) -> None:
+        """Next window at the first cycle boundary at or after ``earliest``.
+
+        Boundaries that cannot be met are skipped and counted as missed
+        cycles — never issued late as a catch-up burst (C04.5).
+        """
+        cycle = self._cycle()
+        if cycle is None or self._cycle_anchor is None:
+            self._next_window_at = max(now + self._interval(), earliest)
+            return
+        k_next = max(self._next_cycle_k, self._cycle_k + 1)
+        boundary = self._cycle_anchor + k_next * cycle
+        if boundary < earliest:
+            k_needed = math.ceil((earliest - self._cycle_anchor) / cycle - 1e-9)
+            k_needed = max(k_needed, k_next)
+            self.cycle.on_missed(k_needed - k_next)
+            k_next = k_needed
+            boundary = self._cycle_anchor + k_next * cycle
+        self._next_cycle_k = k_next
+        self._next_window_at = boundary
+
     def session_control_due(self, states: Sequence[_PollRequestState], now: float) -> bool:
         """Whether the loop should send ``10 <session>`` now."""
         if self.phase == "mode01":
             if now < self._next_window_at:
                 return False
             if all(states[i].suppressed_until > now for i in self._did_indices):
-                # Every DID is backed off; don't burn a window on them.
-                self._next_window_at = now + self._interval()
+                # Every DID is backed off; don't burn a window on them. With
+                # nothing to schedule the cycle re-anchors on the next open
+                # rather than reporting idle time as missed cycles.
+                self._cycle_anchor = None
+                self._next_window_at = now + (self._cycle() or self._interval())
                 return False
             return True
         if self.phase == "window":
             return now - self._last_session_sent >= self._spec.keepalive_seconds
         return False
+
+    def session_work_pending(self, states: Sequence[_PollRequestState], now: float) -> bool:
+        """Side-effect-free: is an exit, entry or keep-alive waiting on the budget?"""
+        if self._exit_due:
+            return True
+        if self.phase == "mode01":
+            return now >= self._next_window_at and any(
+                states[i].suppressed_until <= now for i in self._did_indices
+            )
+        if self.phase == "window":
+            return now - self._last_session_sent >= self._spec.keepalive_seconds
+        return False
+
+    def on_entry_sent(self, now: float) -> None:
+        """The loop is about to send ``10 <session>``: a cycle begins (or a keep-alive)."""
+        if self.phase != "mode01":
+            return
+        cycle = self._cycle()
+        missed = 0
+        if cycle is None or self._cycle_anchor is None:
+            self._cycle_anchor, self._cycle_k, self._next_cycle_k = now, 0, 0
+        else:
+            k_actual = max(self._next_cycle_k, int((now - self._cycle_anchor) / cycle + 1e-9))
+            missed = k_actual - self._next_cycle_k
+            self._cycle_k = k_actual
+        self.cycle.begin_cycle(now, self._plan, missed=missed)
+        self.cycle.on_entry_sent(now)
+
+    def on_exit_sent(self, now: float) -> None:
+        self.cycle.on_exit_sent(now)
 
     def on_session_response(
         self,
@@ -949,7 +1104,7 @@ class DidWindowController:
                     states[i].next_due_at = now
             else:
                 self.session_failures += 1
-                self._next_window_at = now + self._interval()
+                self._schedule_next_window(now, earliest=now)
         elif self.phase == "window":
             if ok:
                 self.keepalives_sent += 1
@@ -1033,8 +1188,28 @@ class DidWindowController:
         # exists yet, see custom_pids.example.yaml).
         return request.kind in ("pid", "dtc", "custom", "service", "freeze_frame")
 
+    def service_kind(self, index: int) -> ServiceKind:
+        return "mode22" if index in self._did_indices else "mode01"
+
     def on_request_attempted(self, index: int) -> None:
-        self._pending.discard(index)
+        if index in self._did_indices:
+            if index in self._pending:
+                self.cycle.on_attempt("mode22")
+            self._pending.discard(index)
+        else:
+            self.cycle.on_attempt("mode01")
+
+    def on_service_time(self, kind: ServiceKind, seconds: float) -> None:
+        self.cycle.on_service_time(kind, seconds)
+
+    def on_response(self, index: int, now: float, acquired_at: float | None) -> None:
+        """A request answered with readings — the only recovery evidence there is."""
+        kind = self.service_kind(index)
+        self.cycle.on_acquired(kind, acquired_at)
+        if kind == "mode22":
+            self.cycle.on_did_answered(now)
+        else:
+            self.cycle.on_mode01_answered(now)
 
     def next_transition_at(self) -> float:
         if self.phase == "window":
@@ -1051,19 +1226,57 @@ class DidWindowController:
             return self._lapse_until
         return self._next_window_at
 
+    def next_keepalive_at(self) -> float | None:
+        """When the held session next needs ``10 <session>`` re-sent."""
+        if self.phase != "window":
+            return None
+        return self._last_session_sent + self._spec.keepalive_seconds
+
+    def release(self, now: float) -> None:
+        """Close an open window so the session transition completes (C04.7).
+
+        Used when the profile drops its DIDs, on a generation change, and
+        when passive TX gating lifts: a window left in ``window`` phase would
+        keep the ECU in the diagnostic session (Mode 01 dead) while the loop
+        polls as if it were not.
+        """
+        if self.phase == "window":
+            self._close_window(now)
+
+    def on_generation_change(self, now: float) -> None:
+        """New capture generation: finish any transition and re-plan promptly.
+
+        The next window is due now (not ``interval`` after the previous
+        close), so a DID profile armed mid-drive starts within a budget slot
+        instead of up to a config interval later — the 26.56 s first-DID
+        delay recorded on 2026-08-07.
+        """
+        self.release(now)
+        self.cycle.abandon(now)
+        self.cycle.reset()
+        self._plan = None
+        self._infeasible_logged = None
+        self._cycle_anchor = None
+        if self.phase == "mode01":
+            self._next_window_at = now
+
     def _close_window(self, now: float) -> None:
+        self.cycle.on_window_closed(unattempted=len(self._pending))
         self.phase = "lapse"
         self._lapse_until = now + self._spec.lapse_seconds
         # Prefer handing the bus back explicitly. The lapse exists only
         # because the session has to expire on its own; when the ECU accepts a
         # return-to-default it is seconds of Mode-01 blackout for nothing.
         self._exit_due = self.fast_exit_available(now)
-        self._next_window_at = now + self._interval()
+        if not self._exit_due:
+            self.cycle.on_lapse_started()
+        self._schedule_next_window(now, earliest=now)
         self.windows_completed += 1
         self._pending.clear()
 
     def snapshot(self, now: float) -> dict[str, Any]:
         """DID profile state for ``/status.obd_scheduler.did_profile``."""
+        cycle = self._cycle()
         return {
             "phase": self.phase,
             "session": f"0x{self._spec.session:02X}",
@@ -1091,6 +1304,15 @@ class DidWindowController:
             "windows_completed": self.windows_completed,
             "session_failures": self.session_failures,
             "keepalives_sent": self.keepalives_sent,
+            # Hybrid cycle (C04.8): the target and the achieved values share
+            # one definition — start-to-start between session entries.
+            "cycle": {
+                "timing_policy": "cycle" if cycle is not None else "interval",
+                "cycle_seconds": cycle,
+                "cycle_feasible": self._plan.feasible if self._plan is not None else None,
+                "plan": self._plan.to_dict() if self._plan is not None else None,
+                **self.cycle.snapshot(now),
+            },
         }
 
 
@@ -1147,10 +1369,15 @@ class ObdSchedulerMetrics:
     #: acquisition skew. ``None`` only for a metrics object built without a
     #: round scheduler.
     rounds: dict[str, Any] | None = None
+    #: Session-control (UDS 0x10) traffic beside the channel-read remainder
+    #: (C04.8), so a hybrid capture's throughput is not padded by entries,
+    #: exits and keep-alives.
+    session_control: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "rounds": self.rounds,
+            "session_control": self.session_control,
             "configured_poll_rate_hz": self.configured_poll_rate_hz,
             "bus_budget_requests_per_second": self.bus_budget_requests_per_second,
             "active_requests": self.active_requests,
@@ -1668,6 +1895,27 @@ def _next_due_at(
     return min(due_times) if due_times else None
 
 
+def _next_unsuppressed_at(
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    now: float,
+    *,
+    eligible: RequestFilter | None = None,
+) -> float | None:
+    """Earliest instant a currently backed-off eligible request re-arms.
+
+    The wake deadline when nothing is pollable *yet*: without it the loop
+    idled on its flat tick and noticed a lifted backoff up to a tick late.
+    Requests parked at ``inf`` (rate zero) never count.
+    """
+    ends = [
+        state.suppressed_until
+        for index, (request, state) in enumerate(zip(requests, states, strict=True))
+        if _is_request_backed_off(state, now) and (eligible is None or eligible(index, request))
+    ]
+    return min(ends) if ends else None
+
+
 def _is_request_suppressed(state: _PollRequestState, now: float) -> bool:
     return state.suppressed_until > now
 
@@ -1856,7 +2104,23 @@ def _scheduler_metrics(
         did_profile=did_profile,
         batching=_batching_metrics(spec, stats, now),
         rounds=rounds,
+        session_control=_session_control_metrics(stats),
     )
+
+
+def _session_control_metrics(stats: CanObdLoopStats) -> dict[str, Any]:
+    channel_requests = max(0, stats.requests_sent - stats.session_controls_sent)
+    return {
+        "sent": stats.session_controls_sent,
+        "responses": stats.session_control_responses,
+        "timeouts": stats.session_control_timeouts,
+        "negative_responses": stats.session_control_negative_responses,
+        "seconds": round(stats.session_control_seconds, 4),
+        "channel_requests_sent": channel_requests,
+        "channel_response_rate": (
+            round(stats.readings_emitted / channel_requests, 4) if channel_requests else None
+        ),
+    }
 
 
 __all__ = [
@@ -1872,6 +2136,7 @@ __all__ = [
     "DEFAULT_DID_REQUEST_ID",
     "DEFAULT_PRIORITY_CHANNELS",
     "MAX_MISS_BACKOFF_SECONDS",
+    "next_wake_at",
     "CanObdLoopStats",
     "CanObdSpec",
     "DidSessionSpec",

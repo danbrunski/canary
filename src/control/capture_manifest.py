@@ -9,8 +9,15 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from src.atomic_write import atomic_write_text
+from src.collection.capture_quality import normalize_quality_payload
+
 CAPTURE_MANIFEST_FILENAME = "capture_profile.json"
 CAPTURE_QUALITY_FILENAME = "capture_quality.json"
+#: Written at arm time: the loss-counter epoch and generation the capture
+#: started under (C03.5), so a stop — or a later recompute — can reconcile
+#: against the counters as they were, not as they are.
+CAPTURE_EPOCH_FILENAME = "capture_epoch.json"
 
 
 class CaptureManifest(BaseModel):
@@ -72,18 +79,48 @@ def read_capture_quality(session_dir: Path) -> dict[str, Any] | None:
     ``None`` means the sidecar is absent — an older capture, a daemon without a
     health monitor, or a stop that failed to write it. That is *unknown*, not a
     pass, and every caller must render it as such.
+
+    A ``schema_version`` 1 sidecar is returned with ``scope:
+    "trailing_snapshot"`` and its losses marked unknown: it scored the trailing
+    60 s at stop against a cumulative drop counter, and nothing downstream may
+    read it as a capture-wide verdict (C03.9).
     """
     try:
         payload = json.loads((Path(session_dir) / CAPTURE_QUALITY_FILENAME).read_text())
     except (OSError, ValueError):
         return None
+    return normalize_quality_payload(payload) if isinstance(payload, dict) else None
+
+
+def write_capture_quality(session_dir: Path, payload: dict[str, Any]) -> Path:
+    path = Path(session_dir) / CAPTURE_QUALITY_FILENAME
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return path
+
+
+def read_capture_epoch(session_dir: Path) -> dict[str, Any] | None:
+    """The arm-time loss epoch, or ``None`` (a pre-C03 capture: counters unknown)."""
+    try:
+        payload = json.loads((Path(session_dir) / CAPTURE_EPOCH_FILENAME).read_text())
+    except (OSError, ValueError):
+        return None
     return payload if isinstance(payload, dict) else None
 
 
+def write_capture_epoch(session_dir: Path, payload: dict[str, Any]) -> Path:
+    path = Path(session_dir) / CAPTURE_EPOCH_FILENAME
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return path
+
+
 __all__ = [
+    "CAPTURE_EPOCH_FILENAME",
     "CAPTURE_MANIFEST_FILENAME",
     "CAPTURE_QUALITY_FILENAME",
     "CaptureManifest",
+    "read_capture_epoch",
     "read_capture_manifest",
     "read_capture_quality",
+    "write_capture_epoch",
+    "write_capture_quality",
 ]

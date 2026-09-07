@@ -167,6 +167,15 @@ class CaptureProfile(_Strict):
     #: DID in ~1.5 ms, so a slow default belongs in config, never in the
     #: scheduler.
     did_interval_seconds: float | None = None
+    #: Start-to-start period of one Mode 01 + Mode 22 cycle (C04.3): the
+    #: session entry, DID sweep, exit, its grace and the Mode 01 phase all
+    #: fit inside it, and the next window opens at ``anchor + k * cycle``.
+    #: ``did_interval_seconds`` is the *end-to-start* gap between windows
+    #: (its historic meaning, kept) and cannot express a cycle rate — a
+    #: 0.25 s interval ran as a ~0.95 s cycle. Setting this field is the
+    #: migration; ``None`` leaves an existing profile on the interval policy
+    #: exactly as saved. Ignored by ``did_continuous`` (no cycle exists).
+    did_cycle_seconds: float | None = None
     #: Stamp every channel polled in one round with the round's start time, so
     #: a sample spanning several requests reads as one row. The true arrival
     #: instant is kept per reading (``acquired_at`` metadata), so this changes
@@ -219,6 +228,13 @@ class CaptureProfile(_Strict):
     #: Per-channel floor the capture contract enforces. ``None`` means the
     #: profile makes no rate promise and the contract only reports.
     min_achieved_rate_hz: float | None = Field(default=None, gt=0)
+    #: Largest acquisition spread (seconds, first to last member arrival) a
+    #: round may show and still count as one complete tuple (C03.7). A shared
+    #: round stamp says the members were *asked for* together; this is the
+    #: bound on how far apart they actually *arrived*. ``None`` derives half a
+    #: target-rate period, or ``capture_quality.DEFAULT_MAX_TUPLE_SKEW_S``
+    #: without a target rate. Must fit inside one round period.
+    max_tuple_skew_s: float | None = Field(default=None, gt=0)
     #: Prompt for a named calibration, without requiring one. **Advisory by
     #: operator decision 2026-08-10** — an earlier version refused to arm and
     #: that got in the way more than it helped. Nothing is silently lost: the
@@ -284,6 +300,22 @@ class CaptureProfile(_Strict):
             raise ValueError("did_interval_seconds must be positive")
         return value
 
+    @field_validator("did_cycle_seconds")
+    @classmethod
+    def _valid_did_cycle(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0:
+            raise ValueError("did_cycle_seconds must be positive")
+        return value
+
+    @model_validator(mode="after")
+    def _cycle_needs_windows(self) -> CaptureProfile:
+        if self.did_cycle_seconds is not None and self.did_continuous:
+            raise ValueError(
+                "did_cycle_seconds schedules Mode-22 windows; did_continuous holds the "
+                "session open and has no cycle"
+            )
+        return self
+
     @model_validator(mode="after")
     def _continuous_requires_did_only(self) -> CaptureProfile:
         """A pinned session and Mode-01 expectations are incompatible.
@@ -324,6 +356,20 @@ class CaptureProfile(_Strict):
                 f"{MAX_BUDGET_REQUESTS_PER_SECOND:g} requests/s"
             )
         return value
+
+    @model_validator(mode="after")
+    def _tuple_skew_fits_a_round(self) -> CaptureProfile:
+        """A skew bound wider than the round period admits readings from two
+        different rounds' worth of time and means nothing as a tuple check."""
+        if self.max_tuple_skew_s is None or self.target_rate_hz is None:
+            return self
+        period = 1.0 / self.target_rate_hz
+        if self.max_tuple_skew_s > period:
+            raise ValueError(
+                f"max_tuple_skew_s ({self.max_tuple_skew_s}s) exceeds the round period "
+                f"({period:.4g}s at {self.target_rate_hz} Hz)"
+            )
+        return self
 
     @model_validator(mode="after")
     def _required_tuple_is_polled(self) -> CaptureProfile:

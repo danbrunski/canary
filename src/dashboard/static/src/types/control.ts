@@ -164,39 +164,163 @@ export interface CaptureProfileState {
   bus_budget_override: number | null;
 }
 
-/** One clause of the capture contract that a finished capture failed. */
+/**
+ * One constraint the capture failed (C03.10). `clause` is one of
+ * `unanswered_input` | `rate_shortfall` | `acquisition_gap` |
+ * `tuple_incomplete` | `tuple_skew` | `persistence_loss` |
+ * `unknown_loss_counters`; `evidence` is the measurement behind it.
+ */
 export interface CaptureQualityFailure {
   clause: string;
   channels?: string[];
   detail?: string;
-  observed_hz?: number | null;
-  required_hz?: number | null;
+  evidence?: Record<string, unknown>;
+}
+
+/** Cadence (median interarrival) for one channel — never count / wall time. */
+export interface CaptureChannelCadence {
+  median_interarrival_s: number | null;
+  p95_interarrival_s: number | null;
+  hz: number | null;
+  samples: number;
+}
+
+/** Coverage for one channel: observed versus eligible duration, pauses excluded. */
+export interface CaptureChannelCoverage {
+  observations: number;
+  first_observed_at: number | null;
+  last_observed_at: number | null;
+  missing_initial_s: number;
+  missing_final_s: number;
+  max_gap_s: number;
+  /** `[start_s, end_s, uncovered_s]` on the capture clock. */
+  long_gaps: number[][];
+  gap_threshold_s: number;
+  uncovered_s: number;
+  eligible_s: number;
+  fraction: number | null;
+}
+
+export interface CaptureChannelQuality {
+  channel: string;
+  transport_channel: string;
+  kind: string | null;
+  requested_hz: number | null;
+  /** `ok` | `missing` | `shortfall` | `gap`. */
+  status: string;
+  in_required_tuple: boolean;
+  cadence: CaptureChannelCadence;
+  coverage: CaptureChannelCoverage;
+  /** Trailing 60 s rate from the live scheduler; shown, never scored. */
+  trailing_hz: number | null;
+}
+
+/** Persisted complete-tuple yield, counted per capture round from the rows. */
+export interface CaptureTupleQuality {
+  required: string[];
+  max_tuple_skew_s: number | null;
+  /** Always a bound: the slowest member's cadence. */
+  rate_bound_hz: number | null;
+  /** `persisted_rows` | `no_round_evidence` | `unavailable` | `no_required_tuple`. */
+  source: string;
+  scheduled: number | null;
+  attempted: number | null;
+  complete: number | null;
+  persisted: number | null;
+  incomplete: number | null;
+  skew_rejected: number | null;
+  reason?: string;
+}
+
+/** One loss counter reconciled across the capture (C03.5). */
+export interface CaptureLossCounter {
+  scope: string;
+  start: number | null;
+  stop: number | null;
+  delta: number | null;
+  /** `verified` | `unknown` | `reset` — unknown is never zero. */
+  status: string;
+}
+
+export interface CaptureLossScope {
+  counters: Record<string, CaptureLossCounter>;
+  /** Verified loss in this scope; null when any counter is unverified. */
+  lost: number | null;
+  unverified: string[];
+  status: string;
 }
 
 /**
- * The verdict scored when a capture stops. Returned by the stop call and
- * persisted beside the data as `capture_quality.json`.
+ * The capture contract verdict (sidecar `schema_version` 2). Returned by the
+ * stop call, `GET /control/capture/quality`, and persisted beside the data
+ * as `capture_quality.json`.
  *
- * `verdict` is `pass` | `fail` | `unverified`. Absent (`null`) means no
- * sidecar was written — that is *unknown*, never a pass, and the UI must not
- * render it as success.
+ * `verdict` is `pass` | `fail` | `unverified`. `scope` says what interval
+ * it covers: `live` (arm to now), `stop` (the whole capture, after drain and
+ * flush), `recompute` (from the rows), or `trailing_snapshot` (a v1 sidecar:
+ * 60 s at stop, not the capture). Absent (`null`) means no sidecar was
+ * written — that is *unknown*, never a pass, and the UI must not render it
+ * as success.
  */
 export interface CaptureQuality {
+  schema_version: number;
+  scope: string;
   verdict: string;
   profile: string;
-  observed_seconds: number | null;
+  interval: {
+    source: string;
+    elapsed_s: number | null;
+    intended_active_s: number | null;
+    paused_s: number | null;
+    pause_windows: number[][];
+  };
   required_tuple: string[];
   /** Slowest member of the required tuple: the ceiling on how often the whole
-   *  tuple can complete, which per-channel rates cannot express. */
+   *  tuple can complete. A bound — `tuples.complete` is the count. */
   tuple_rate_bound_hz: number | null;
-  tuple_bound_is_exact: boolean;
+  tuples: CaptureTupleQuality;
   failures: CaptureQualityFailure[];
+  channels: CaptureChannelQuality[];
+  losses: Record<string, CaptureLossScope>;
+  persistence: Record<string, unknown> | null;
+  trailing: { window_s: number; observed_seconds: number | null; hz: Record<string, number> };
   notes: string[];
+}
+
+/** Summary of a bounded per-cycle history (roadmap C04.8). */
+export interface HybridCycleSummary {
+  n: number;
+  median: number;
+  p95: number;
+  max: number;
+}
+
+/** Hybrid Mode 01 / Mode 22 cycle state inside `DidWindowStatus` (roadmap C04). */
+export interface HybridCycleStatus {
+  timing_policy: "cycle" | "interval";
+  /** Target start-to-start period; null on the legacy interval policy. */
+  cycle_seconds: number | null;
+  cycle_feasible: boolean | null;
+  plan: Record<string, number | boolean> | null;
+  cycles_started: number;
+  cycles_missed: number;
+  mode01_shortfall: number;
+  did_shortfall: number;
+  cycle_duration_s: HybridCycleSummary | null;
+  occupancy_s: { mode01: number; mode22: number; session: number } | null;
+  transition_latency_s: {
+    exit_to_mode01: HybridCycleSummary | null;
+    entry_to_did: HybridCycleSummary | null;
+  };
+  cross_mode_separation_s: HybridCycleSummary | null;
+  mode01_recovery_pending: boolean;
+  mode01_recovered_age_s: number | null;
 }
 
 export interface DidWindowStatus {
   phase: "mode01" | "window" | "lapse";
   window_interval_seconds?: number;
+  cycle?: HybridCycleStatus;
   fast_exits: number;
   fast_exit_failures: number;
   fast_exit_supported: boolean;

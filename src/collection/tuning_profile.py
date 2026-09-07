@@ -13,7 +13,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from src.collection import capture_generation
+from src.collection import capture_generation, capture_lifetime
 from src.collection.capture_profiles import FUEL_MAP_CHANNELS, CaptureProfile
 
 log = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ def configure_default(profile: CaptureProfile) -> None:
         _source = "startup"
         _configured = True
         _paused = False
+    capture_lifetime.end()
 
 
 def is_configured() -> bool:
@@ -86,7 +87,17 @@ def activate(
         _source = source
     # A new profile is a new capture generation (C02.8): rounds restart, and
     # a request issued under the old profile keeps the old tag.
-    capture_generation.bump(f"profile:{profile.name}")
+    generation = capture_generation.bump(f"profile:{profile.name}")
+    # The capture-lifetime ledger (C03.2) starts and ends with the profile.
+    if _started_monotonic is None:
+        capture_lifetime.end()
+    else:
+        capture_lifetime.begin(
+            _started_monotonic,
+            profile=profile.name,
+            generation=generation,
+            started_wall=time.time(),
+        )
     log.warning(
         "capture profile activated: %s",
         profile.name,
@@ -141,6 +152,9 @@ def set_paused(value: bool) -> bool:
         _paused = value
     if previous != value:
         capture_generation.bump("capture-paused" if value else "capture-resumed")
+        # Recorded as a pause window (C03.4) so coverage can exclude it by
+        # name rather than by guessing from a gap.
+        capture_lifetime.mark_paused(value, reason="operator", now=time.monotonic())
     log.warning("capture %s", "paused" if value else "resumed", extra={"paused": value})
     return previous
 
@@ -170,6 +184,12 @@ def did_interval_override() -> float | None:
     """Profile's Mode-22 window cadence, or ``None`` to use the config default."""
     with _lock:
         return _profile.did_interval_seconds
+
+
+def did_cycle_override() -> float | None:
+    """Profile's start-to-start hybrid cycle (C04.3), or ``None`` for the config policy."""
+    with _lock:
+        return _profile.did_cycle_seconds
 
 
 def broadcast_decode_enabled() -> bool:
@@ -362,6 +382,7 @@ __all__ = [
     "channels",
     "capture_started_monotonic",
     "did_continuous_enabled",
+    "did_cycle_override",
     "configure_default",
     "configure_did_aliases",
     "is_active",

@@ -212,6 +212,10 @@ profiles:
   mode01_enabled: true
   mode22_enabled: true
   did_interval_seconds: 0.25
+  # C04.3: the 4 Hz intent as a start-to-start cycle. did_interval_seconds is
+  # an end-to-start gap and measured as a ~0.95 s cycle on the fake bus; it is
+  # kept unchanged for readers of older sidecars and ignored while this is set.
+  did_cycle_seconds: 0.25
   round_timestamps: true
   target_rate_hz: 4.0
   did_continuous: false

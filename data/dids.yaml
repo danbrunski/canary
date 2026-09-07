@@ -26,6 +26,7 @@ access:
   ecu_response_id: 0x7E8
   session: 0xC0               # UDS 0x10 sub-function that unlocks Mode 22
   exit_session: 0x81          # return to default session — ends the Mode-01 blackout
+  exit_grace_seconds: 0.05    # Mode 01 answered on the *next request* after 10 81 (2026-08-04)
   keepalive_seconds: 2.0      # re-send 10 C0; 0x81/0x85 open but don't unlock 0x22
   notes: |
     The 2008 Nissan ECM refuses service 0x22 in the default session

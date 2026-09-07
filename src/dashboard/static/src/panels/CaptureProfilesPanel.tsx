@@ -401,9 +401,16 @@ export function CaptureProfilesPanel({
             <span className="font-semibold">
               Capture ended — contract {lastVerdict.verdict}
             </span>
+            <span className="text-xs text-fg-dim">scope: {lastVerdict.scope}</span>
+            {lastVerdict.tuples?.complete != null && (
+              <span className="text-xs">
+                {lastVerdict.tuples.complete} complete tuples
+                {lastVerdict.tuples.attempted != null ? ` of ${lastVerdict.tuples.attempted} rounds` : ""}
+              </span>
+            )}
             {lastVerdict.tuple_rate_bound_hz != null && (
               <span className="text-xs">
-                required tuple ≤ {lastVerdict.tuple_rate_bound_hz.toFixed(2)} Hz
+                required tuple ≤ {lastVerdict.tuple_rate_bound_hz.toFixed(2)} Hz (bound)
               </span>
             )}
             <button

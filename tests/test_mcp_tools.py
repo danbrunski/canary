@@ -428,3 +428,64 @@ async def test_record_vehicle_event_audits_failure(tmp_path: Path) -> None:
     entry = json.loads((tmp_path / "audit.jsonl").read_text().splitlines()[0])
     assert entry["action"] == "mcp.record_vehicle_event"
     assert entry["result"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# Tuning capture — arm-time verification and the capture quality tool (C03.9)
+# ---------------------------------------------------------------------------
+
+
+async def test_arm_tuning_capture_verifies_through_the_daemons_quality_route(
+    tmp_path: Path,
+) -> None:
+    """The arm-time check asks the daemon for the same verdict the sidecar
+    gets — never re-derives it from a trailing /status window."""
+    from src.mcp_server.write_tools import tuning_capture as tuning_capture_tool
+
+    quality = {
+        "schema_version": 2,
+        "scope": "live",
+        "verdict": "fail",
+        "failures": [{"clause": "tuple_incomplete", "channels": ["RPM"]}],
+        "tuples": {"complete": 0},
+    }
+    client = await _fake_daemon(
+        {
+            "POST /control/capture": {"capture_profile": {"name": "fuel-map"}},
+            "GET /status": {"vehicle_state": {"state": "engine_running"}},
+            "GET /control/capture/quality": quality,
+        }
+    )
+    audit = MCPAuditLogger(tmp_path / "audit.jsonl")
+    result = await tuning_capture_tool.arm_tuning_capture(
+        client, audit, profile="fuel-map", rate_hz=4.0, verify_seconds=0.001
+    )
+    await client.aclose()
+    assert result["verdict"] == "fail"
+    assert result["scope"] == "live"
+    assert result["failing_constraints"] == ["tuple_incomplete"]
+    assert result["rate_verification"]["requested_rate_hz"] == 4.0
+    assert result["vehicle_state"] == "engine_running"
+
+
+async def test_get_capture_quality_is_live_or_recomputed_by_session() -> None:
+    from src.mcp_server.write_tools import tuning_capture as tuning_capture_tool
+
+    client = await _fake_daemon(
+        {
+            "GET /control/capture/quality": {"scope": "live", "verdict": "pass"},
+            "GET /control/capture/quality/_capture-fuel-map-2026-08-10T120000": {
+                "session_id": "_capture-fuel-map-2026-08-10T120000",
+                "recomputed": {"scope": "recompute"},
+                "stored": {"scope": "trailing_snapshot"},
+            },
+        }
+    )
+    live = await tuning_capture_tool.get_capture_quality(client)
+    assert live == {"scope": "live", "verdict": "pass"}
+    historic = await tuning_capture_tool.get_capture_quality(
+        client, session_id="_capture-fuel-map-2026-08-10T120000"
+    )
+    await client.aclose()
+    assert historic["stored"]["scope"] == "trailing_snapshot"
+    assert historic["recomputed"]["scope"] == "recompute"

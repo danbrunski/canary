@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from collections.abc import Callable
@@ -23,10 +22,8 @@ from src.alerts.tuning import (
     save_tuning_config,
 )
 from src.analysis.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore
-from src.atomic_write import atomic_write_text
 from src.collection import bus_budget, tuning_profile, tx_gate
 from src.collection.capture_profiles import CaptureProfileStore
-from src.collection.capture_quality import evaluate_capture_quality
 from src.collection.custom_pids import (
     CustomPid,
     CustomPidSet,
@@ -61,6 +58,12 @@ from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.can_activity import CanActivityBusError, capture_can_activity
 from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
+from src.control.capture_finalize import (
+    StartEpoch,
+    finalize_capture,
+    live_capture_quality,
+    record_capture_start,
+)
 from src.control.capture_manifest import read_capture_manifest
 from src.control.classification import (
     classify_one_session,
@@ -206,49 +209,10 @@ def register_control_routes(
         config.daemon.behavior_models,
     )
 
-    def _write_capture_quality(
-        session_dir: Path,
-        profile_snapshot: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        """Persist the capture contract's verdict beside the data it scores.
-
-        Whether a capture was sound is a property of *that capture*, so it has
-        to survive the daemon: the 2026-08-10 fuel-map session directory held
-        only the profile and the DTC list, and the post-mortem could not
-        establish the achieved rates, the gaps, or even whether request
-        batching was on. Reconstructing that from Parquet is possible for rates
-        and impossible for the rest.
-
-        Never raises. A capture that recorded good data must not fail to stop
-        because its report card could not be written; the failure is logged and
-        the sidecar is simply absent, which the digest reads as unknown rather
-        than as a pass.
-        """
-        if health_monitor is None:
-            return None
-        try:
-            scheduler, storage = health_monitor.capture_quality_inputs()
-            quality = evaluate_capture_quality(
-                profile=profile_snapshot,
-                scheduler=scheduler,
-                storage=storage,
-            )
-            payload = quality.to_dict()
-            atomic_write_text(
-                session_dir / "capture_quality.json",
-                json.dumps(payload, indent=2, sort_keys=True) + "\n",
-            )
-        except Exception:
-            log.exception("failed to write capture quality sidecar for %s", session_dir)
-            return None
-        if not quality.passed:
-            log.warning(
-                "capture %s ended with verdict %s",
-                session_dir.name,
-                quality.verdict,
-                extra={"capture_verdict": quality.verdict, "failures": quality.failures},
-            )
-        return payload
+    #: Loss-counter epoch and generation recorded when the active capture
+    #: armed (C03.5); the stop reconciles against it. Process state, like the
+    #: active profile; ``capture_epoch.json`` is the durable copy.
+    capture_start_epoch: StartEpoch | None = None
 
     def require_control_auth(
         request: Request,
@@ -734,6 +698,10 @@ def register_control_routes(
                 failed_step = "profile_activation"
                 tuning_profile.activate(profile, session_dir=str(storage_writer.paths.root))
                 last_ended_capture = None
+                nonlocal capture_start_epoch
+                capture_start_epoch = record_capture_start(
+                    Path(storage_writer.paths.root), health_monitor
+                )
                 budget_before_capture = (
                     {**previous_budget, "_capture_started_monotonic": time.monotonic()}
                     if requested_budget is not None
@@ -812,13 +780,20 @@ def register_control_routes(
                 if last_ended_capture is not None:
                     return {**last_ended_capture, "idempotent": True}
                 raise HTTPException(status_code=409, detail="default collection is already active")
-            nonlocal budget_before_capture
+            nonlocal budget_before_capture, capture_start_epoch
             ended_capture_dir = str(storage_writer.paths.root)
-            # Scored and written *before* the writer rotates away: after
-            # exit_capture_mode the scheduler's capture-scoped counters are
-            # about to be reset and `paths.root` no longer names the session
-            # this data belongs to.
-            quality = _write_capture_quality(Path(ended_capture_dir), tuning_profile.snapshot())
+            # Boundary, drain, flush, judge, write — *before* the writer
+            # rotates away and the profile resets the lifetime ledger (C03.8):
+            # after exit_capture_mode `paths.root` no longer names the session
+            # this data belongs to, and after activate(default) the ledger is
+            # gone.
+            quality = await finalize_capture(
+                Path(ended_capture_dir),
+                health=health_monitor,
+                writer=storage_writer,
+                start=capture_start_epoch,
+            )
+            capture_start_epoch = None
             await storage_writer.exit_capture_mode()
             default_profile = profile_store.load().by_name("default")
             assert default_profile is not None
@@ -844,6 +819,54 @@ def register_control_routes(
             last_ended_capture = dict(payload)
         publish_control_event("capture_profile.stop", "ok", payload)
         return payload
+
+    @app.get("/control/capture/quality")
+    async def get_live_capture_quality(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """The active capture scored on what has been persisted so far.
+
+        Same evaluator and same tuple arithmetic as the stop-time sidecar
+        (``scope: live`` rather than ``stop``), so the arm-time check the MCP
+        tool runs cannot disagree with the verdict written at stop. Flushes
+        the writer first so the rows read back include the last few seconds.
+        """
+        if storage_writer is None or health_monitor is None:
+            raise HTTPException(status_code=503, detail="capture quality is not available")
+        if not tuning_profile.is_active():
+            raise HTTPException(status_code=409, detail="no capture is active")
+        quality = await live_capture_quality(
+            Path(storage_writer.paths.root),
+            health=health_monitor,
+            writer=storage_writer,
+            start=capture_start_epoch,
+        )
+        return quality.to_dict()
+
+    @app.get("/control/capture/quality/{session_id}")
+    def get_recomputed_capture_quality(
+        session_id: str,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """Recompute a historic capture's coverage and tuple yield from its rows.
+
+        Never rewrites the session: the stored sidecar (any version) is
+        returned beside the recomputation under ``stored``, with its scope
+        explicit. Loss counters are unknown unless the session recorded
+        epochs (``capture_epoch.json`` / a v2 sidecar).
+        """
+        from src.analysis.capture_coverage import read_quality_with_scope, recompute_capture_quality
+
+        session = _resolve_session(session_id)
+        try:
+            quality = recompute_capture_quality(session)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "session_id": session_id,
+            "recomputed": quality.to_dict(),
+            "stored": read_quality_with_scope(session),
+        }
 
     @app.post("/control/tuning-mode")
     async def post_control_tuning_mode(

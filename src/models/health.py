@@ -24,6 +24,7 @@ enough to fire a "retrain me" warning.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import subprocess
@@ -34,10 +35,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from src.collection import capture_lifetime
+from src.collection.capture_losses import CAN0_LOSS_FIELDS, LOSS_FIELDS, LossEpoch
+
 log = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_CAN0_STATS_PATH",
+    "CaptureQualityInputs",
     "HealthMonitor",
     "can0_counters",
     "feature_drift",
@@ -319,6 +324,23 @@ def reconstruction_error_drift(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class CaptureQualityInputs:
+    """What a capture verdict is scored on, taken at one instant (C03.5).
+
+    ``scheduler`` is the latest live scheduler payload (request table and
+    *trailing* rates), ``lifetime`` the capture-lifetime ledger (arm to now)
+    or ``None`` when no capture is active, and ``loss_epoch`` every loss
+    counter as it reads right now — to be reconciled against the epoch taken
+    at arm time, never quoted on its own.
+    """
+
+    scheduler: dict[str, Any]
+    lifetime: dict[str, Any] | None
+    loss_epoch: LossEpoch
+    sinks: dict[str, dict[str, Any]]
+
+
 @dataclass
 class _Rolling:
     latencies_ms: deque[float] = field(default_factory=lambda: deque(maxlen=512))
@@ -369,6 +391,10 @@ class HealthMonitor:
         #: a second daemon to remember the counter's value at boot.
         self._can0_stats_path = can0_stats_path
         self._can0_baseline: dict[str, int] | None = None
+        #: The queue objects the sinks report on, so a capture stop can wait
+        #: for the ingest and storage queues to drain (C03.8) without a
+        #: second plumbing path to the daemon's queues.
+        self._queues: dict[str, Any] = {}
 
     #: How long a cached power_status() reading stays fresh (seconds).
     _POWER_TTL_SECONDS = 5.0
@@ -501,30 +527,84 @@ class HealthMonitor:
         else:
             self._obd_scheduler = dict(metrics)
 
-    def capture_quality_inputs(
-        self, storage_sink: str = "storage"
-    ) -> tuple[
-        dict[str, Any],
-        dict[str, Any],
-    ]:
-        """The scheduler and storage state a capture contract is scored on.
+    def capture_quality_inputs(self, *, now: float | None = None) -> CaptureQualityInputs:
+        """Everything a capture verdict is scored on, at one instant.
 
         Separate from :meth:`snapshot` because that one needs model/scaler
-        arguments a control route has no business assembling, and because the
-        capture sidecar wants exactly these two payloads. ``dropped_records``
-        here is what makes "the bus delivered it" and "it reached the disk"
-        distinguishable after the fact — a distinction the 2026-07-29 incident
-        cost 2491 records to learn.
+        arguments a control route has no business assembling. The loss
+        counters come back as an *epoch*, not as totals: the 2026-07-29
+        incident's 2491 dropped records stayed in the cumulative counter and
+        were described as loss inside every later capture until C03.
         """
-        scheduler = dict(self._obd_scheduler or {})
-        storage = dict(self._telemetry_sinks.get(storage_sink, {}))
-        return scheduler, storage
+        monotonic = time.monotonic() if now is None else now
+        lifetime = capture_lifetime.snapshot(monotonic)
+        return CaptureQualityInputs(
+            scheduler=dict(self._obd_scheduler or {}),
+            lifetime=None if lifetime is None else lifetime.to_dict(),
+            loss_epoch=self.loss_epoch(now=monotonic),
+            sinks={name: dict(state) for name, state in self._telemetry_sinks.items()},
+        )
+
+    def loss_counters(self) -> dict[str, int | None]:
+        """Every attributable loss counter, cumulative, ``None`` = unavailable.
+
+        Keys are ``<sink>.<field>``; :mod:`src.collection.capture_losses`
+        assigns each a scope. The kernel's ``can0`` counters are included so
+        a receive overrun during a capture is visible, and reported as
+        ``None`` (unknown) on a host without the interface — never as zero.
+        """
+        counters: dict[str, int | None] = {}
+        for sink, state in self._telemetry_sinks.items():
+            for field_name in LOSS_FIELDS:
+                value = state.get(field_name)
+                counters[f"{sink}.{field_name}"] = None if value is None else int(value)
+        can0 = can0_counters(self._can0_stats_path)
+        for field_name in CAN0_LOSS_FIELDS:
+            counters[f"can0.{field_name}"] = None if can0 is None else can0.get(field_name)
+        return counters
+
+    def loss_epoch(self, *, now: float | None = None) -> LossEpoch:
+        """Snapshot every loss counter (C03.5). Take one at arm, one at stop."""
+        return LossEpoch(
+            taken_at_monotonic=time.monotonic() if now is None else now,
+            taken_at_wall=_now(),
+            counters=self.loss_counters(),
+        )
 
     def observe_telemetry_queue(self, name: str, queue: Any) -> None:
         """Record queue depth for one telemetry sink."""
         state = self._sink_state(name)
         state["queue_depth"] = int(queue.qsize())
         state["queue_max_size"] = int(queue.maxsize)
+        self._queues[name] = queue
+
+    async def wait_for_queues_idle(
+        self, names: Sequence[str] = ("ingest", "storage"), *, timeout: float
+    ) -> dict[str, Any]:
+        """Wait, bounded, for the named queues to be fully consumed (C03.8).
+
+        Uses ``asyncio.Queue.join`` — every ``get`` must be matched by
+        ``task_done``, which the fanout and the storage sink do. Returns which
+        queues drained and which timed out or were never observed; a queue
+        that never reported is *unknown*, not drained.
+        """
+        drained: list[str] = []
+        timed_out: list[str] = []
+        unobserved: list[str] = []
+        deadline = time.monotonic() + max(0.0, timeout)
+        for name in names:
+            queue = self._queues.get(name)
+            if queue is None or not hasattr(queue, "join"):
+                unobserved.append(name)
+                continue
+            remaining = max(0.0, deadline - time.monotonic())
+            try:
+                await asyncio.wait_for(queue.join(), timeout=remaining)
+            except TimeoutError:
+                timed_out.append(name)
+            else:
+                drained.append(name)
+        return {"drained": drained, "timed_out": timed_out, "unobserved": unobserved}
 
     def note_telemetry_drop(self, name: str, *, count: int = 1) -> None:
         """Record explicit data loss at a telemetry sink."""
@@ -570,6 +650,45 @@ class HealthMonitor:
         state["dropped_records"] = buffer_dropped + queue_dropped
         state["batches"] = batches
         state["reconnects"] = reconnects
+
+    def observe_collector_handoff(  # noqa: PLR0913
+        self,
+        name: str,
+        *,
+        accepted: int,
+        buffer_dropped: int,
+        buffer_high_water: int,
+        buffer_capacity: int,
+        queue_dropped: int,
+        batches: int,
+        raw_responses: int | None,
+        derived_records: int,
+        reconnects: int = 0,
+    ) -> None:
+        """Record a polling collector's thread handoff (C03.6, ``obd_collect``).
+
+        The Canable collector's ``QueueDropCounter`` and ``ThreadHandoff``
+        counters used to be logged and never reached ``/status``, so a record
+        dropped between the poll thread and the ingest queue vanished from the
+        capture verdict. ``derived_records`` counts what the collector pushed
+        (a batched Mode 01 response producing N readings is N records);
+        ``raw_responses`` counts ECU responses, when the loop reports them, so
+        the two are never confused.
+        """
+        self.observe_receive_path(
+            name,
+            received=accepted + buffer_dropped,
+            parse_errors=0,
+            buffer_dropped=buffer_dropped,
+            buffer_high_water=buffer_high_water,
+            buffer_capacity=buffer_capacity,
+            queue_dropped=queue_dropped,
+            batches=batches,
+            reconnects=reconnects,
+        )
+        state = self._sink_state(name)
+        state["raw_responses"] = raw_responses
+        state["derived_records"] = derived_records
 
     def observe_telemetry_write(
         self,
@@ -677,6 +796,11 @@ class HealthMonitor:
         snap["system"]["cpu_percent"] = self._cpu_percent()
         if self._obd_scheduler is not None:
             snap["obd_scheduler"] = dict(self._obd_scheduler)
+        lifetime = capture_lifetime.snapshot(time.monotonic())
+        if lifetime is not None:
+            # Arm-to-now statistics for the active capture (C03.2), beside —
+            # never inside — the scheduler's trailing 60 s numbers.
+            snap["capture_lifetime"] = lifetime.to_dict()
         if self._telemetry_sinks:
             snap["telemetry_sinks"] = {
                 name: dict(state) for name, state in sorted(self._telemetry_sinks.items())
