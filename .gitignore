@@ -135,3 +135,8 @@ hardware/**/_*.pdf
 # NTFS alternate data streams ("downloaded from the internet" marks). These
 # materialise as separate files when a Windows directory is copied into WSL.
 *:Zone.Identifier
+
+# Live-pipeline microbenchmark reports (scripts/benchmark_live_pipeline.py
+# --report default). Underscore-prefixed so session discovery skips it; the
+# curated baselines live under data/analyses/ instead.
+data/_benchmarks/

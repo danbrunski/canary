@@ -1,0 +1,130 @@
+{
+  "valid": true,
+  "invalid_reasons": [],
+  "host": {
+    "hostname": "CorsairDesktop",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "git_revision": "2726beb"
+  },
+  "provenance": {
+    "config_path": "canary.example.yaml",
+    "config_sha256": "cb841942ef5e0986f1072c54604977a35a5f097f4237de900b048fc101c5bd7a",
+    "bindings_path": "data/bindings.yaml",
+    "bindings_sha256": "1707dce3bc95cb0685fdf10be07ac19c626defdf5dad0fed2a2223c8b089b93b",
+    "models_dir": "models",
+    "model_manifests": [
+      {
+        "path": "models/nissan-xterra-2008/isolation_forest/model.manifest.json",
+        "model_type": "isolation_forest",
+        "model_version": "isolation_forest_2026-07-27T045036.161167Z"
+      },
+      {
+        "path": "models/nissan-xterra-2008/lstm_autoencoder/model.manifest.json",
+        "model_type": "lstm_autoencoder",
+        "model_version": "lstm_autoencoder_2026-07-27T045351.620955Z"
+      }
+    ],
+    "behavior_models": null
+  },
+  "workload": {
+    "kind": "synthetic",
+    "profile": "steady",
+    "seed": 0,
+    "warmup_ticks": 120,
+    "measured_ticks": 600,
+    "resample_hz": 1.0,
+    "tick_period_seconds": 1.0,
+    "channels": [
+      "RPM",
+      "SPEED",
+      "THROTTLE_POS",
+      "COOLANT_TEMP",
+      "ENGINE_LOAD",
+      "INTAKE_TEMP",
+      "INTAKE_PRESSURE",
+      "MAF",
+      "TIMING_ADVANCE",
+      "SHORT_FUEL_TRIM_1",
+      "LONG_FUEL_TRIM_1",
+      "SHORT_FUEL_TRIM_2",
+      "LONG_FUEL_TRIM_2",
+      "O2_B1S1",
+      "O2_B2S1",
+      "BAROMETRIC_PRESSURE"
+    ],
+    "can_ids": [
+      "0x2",
+      "0x1F9",
+      "0x231",
+      "0x233",
+      "0x23D",
+      "0x280",
+      "0x284",
+      "0x285",
+      "0x29E",
+      "0x2D1",
+      "0x354",
+      "0x358",
+      "0x385",
+      "0x551",
+      "0x590",
+      "0x625",
+      "0x6F7"
+    ],
+    "can_frames_per_tick": 20,
+    "observations_per_tick": 36,
+    "observations_measured": 21600,
+    "scenario_start": "2026-05-13T12:00:00+00:00",
+    "scenario_end": "2026-05-13T12:11:59+00:00",
+    "scenario_seconds": 719.0,
+    "observation_epoch_offset_seconds": 0.0
+  },
+  "results": {
+    "buffer_size_after_warmup": 120,
+    "buffer_size_at_end": 181,
+    "warmup_completed_ticks": 120,
+    "completed_ticks": 600,
+    "empty_ticks": 0,
+    "feature_rows": 600,
+    "feature_columns": 312,
+    "operating_modes": {
+      "city": 236,
+      "highway": 184,
+      "idle_transient": 180
+    },
+    "segmenter_fallback_ticks": 0,
+    "quality_gate_rejects": {},
+    "timings_ms": {
+      "observe": {
+        "count": 600,
+        "mean_ms": 0.104848097738189,
+        "median_ms": 0.09966199286282063,
+        "p95_ms": 0.1316775451414287,
+        "p99_ms": 0.20629882812499997,
+        "max_ms": 0.4071460571140051
+      },
+      "tick": {
+        "count": 600,
+        "mean_ms": 39.12991879779535,
+        "median_ms": 39.247157459612936,
+        "p95_ms": 43.22387331048957,
+        "p99_ms": 54.47373299859464,
+        "max_ms": 61.1529789166525
+      },
+      "total": {
+        "count": 600,
+        "mean_ms": 39.23476689553354,
+        "median_ms": 39.352512976620346,
+        "p95_ms": 43.339325836859636,
+        "p99_ms": 54.563068862771615,
+        "max_ms": 61.3020429154858
+      }
+    },
+    "microbenchmark_hz_at_p95": 23.073732244111437,
+    "microbenchmark_hz_note": "1000 / p95(total_ms): microbenchmark estimate for the feature stage alone; excludes untimed components and is not a sustainable daemon collection rate"
+  },
+  "generated_at": "2026-09-07T04:25:10.875169+00:00",
+  "benchmark": "live_feature_pipeline_microbenchmark",
+  "scope": "feature-only microbenchmark: LiveFeatureSource.observe() + tick(); detector scoring, collectors, network and disk paths are untimed (full pipeline: C10)"
+}
