@@ -5,13 +5,13 @@ with C02 round state and C06 diagnostic-work eligibility.
 
 ## Problem and code entry points
 
-In [can_obd_collector.py](../../../src/collection/can_obd_collector.py), the
+In [can_obd_collector.py](../../../../src/collection/can_obd_collector.py), the
 `active_request_count == 0` branch drains frames for 200 ms without honoring
 the next controller transition. A successful session exit defaults to a
 50 ms grace in `DidSessionSpec`, so this branch adds avoidable waiting.
 
 `DidWindowController._close_window()` in
-[obd_scheduler.py](../../../src/collection/obd_scheduler.py) schedules the next
+[obd_scheduler.py](../../../../src/collection/obd_scheduler.py) schedules the next
 window from the end of the current window. A 0.25-second interval therefore
 does not describe a complete 4 Hz hybrid cycle: sweep duration and transition
 costs extend the period. Historical hybrid rates are evidence of a previous
@@ -67,14 +67,7 @@ run, not a verified result of the current code.
 - [x] C04.11 Run controller/collector and profile tests, including an
   end-to-end fake-bus mixed capture with measured request ordering.
   _done: controller/collector/profile tests plus an end-to-end fake-bus mixed capture asserting per-cycle request order (entry, DIDs, exit, Mode 01) and wake reasons._
-- [~] C04.12 On the Pi, record vehicle state and compare equivalent captures
-  using cadence, gaps, complete tuples, and transition timing. Do not claim
-  4 Hz until it is achieved and persisted. Keep the profile experimental until
-  its declared contract is met.
-  _pending hardware 2026-09-08: Pi still unreachable. Procedure in `docs/hybrid-scheduling.md` (read `vehicle_state`, compare cadence, gaps, complete tuples and transition timing between the interval and cycle policies); `tuning-hybrid-research` stays experimental until 4 Hz is achieved and persisted._
-  _software half measured on the synthetic bus (C10, `hybrid-mode01-mode22`): cycle duration 0.250 s median and p95, 0 missed of 20, entry→DID 12 ms and exit→Mode 01 63 ms median, both services progressing, and the honest cross-mode pairing bound (153 ms median separation → ±43 rpm at a 470 rpm/s slew)._
-  _policy comparison done 2026-09-08: `hybrid-interval-policy` is the same scenario with `did_cycle_seconds` dropped and nothing else changed, which selects the older end-anchored interval policy. Under the identical workload the cycle policy meets 4.0 Hz on every DID; the interval policy misses it by 26 % (2.953 / 4.0) with the bus 27 % used and zero timeouts — neither the budget nor the ECU, but the schedule. That comparison also surfaced and fixed finding 13 (`limiting_stage` blamed `ecu_response_time` for it). Table in `docs/sustained-validation.md` ("Diagnostic policy comparison")._
-  _the 4 Hz claim itself is untouched by all of this: the synthetic ECU answers in a fixed 5 ms sleep, and the real ECM's response time is what decides whether the cycle plan is feasible on the truck._
+- **C04.12 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H3.** On the Pi, record vehicle state and compare equivalent captures using cadence, gaps, complete tuples, and transition timing. Do not claim 4 Hz until it is achieved and persisted. Keep the profile experimental until its declared contract is met. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
 - [x] C04.13 Acceptance: the loop wakes at the earliest relevant deadline,
   both service phases progress, and cycle targets and achieved values use the
   same definition.

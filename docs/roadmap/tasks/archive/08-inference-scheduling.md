@@ -5,13 +5,13 @@ pipeline workload. Coordinate event-loop measurements with C07.
 
 ## Problem and code entry points
 
-`run_live_inference()` in [inference.py](../../../src/daemon/inference.py) invokes
+`run_live_inference()` in [inference.py](../../../../src/daemon/inference.py) invokes
 `source.tick()` and detector processing synchronously on the event loop, then
 waits a full configured interval. Actual tick separation is processing time
 plus that interval. Raising the resampling rate makes the discrepancy more
 important and can interfere with collection queues.
 
-[live.py](../../../src/preprocessing/live.py) reconstructs and featurizes the
+[live.py](../../../../src/preprocessing/live.py) reconstructs and featurizes the
 rolling buffer each tick. That may be acceptable at 1 Hz; no current benchmark
 establishes its full Pi cost. State mutation, model swaps, broadcasts, and
 writer operations mean wrapping the entire loop in a thread is not a correct
@@ -70,11 +70,7 @@ ownership design.
   gap flags, operating modes, sequence inputs, and emitted results. Read
   `vehicle_state`; do not interpret live engine-off silence as regression.
   _done: slow parity test on `tests/fixtures/ground_truth/drive-slice` — identical feature rows, `__gap` flags, operating modes, value columns and operating point between the synchronous path and the scheduled pipeline._
-- [~] C08.12 Measure Pi CPU, memory, event-loop delay, processing latency,
-  and capture losses under the same workload before/after. Include 1 Hz and
-  a higher supported test cadence without changing deployed model defaults.
-  _workstation half done 2026-09-08: `scripts/sustained_validation.py run --inference-tick-s` (added for this; touches no deployed default) at 1 Hz and 2 Hz on `fuel-map` and `tuning-did` with the real IF artifact. Zero missed deadlines, zero record loss and unchanged RSS at both; doubling the cadence costs +8 to +10 points of one core, not 2×, because the feature stage's per-tick cost is flat (51 / 72 ms either way). The visible cost is loop-holding — `tuning-did` heartbeat p99 35 → 58 ms. Table in `docs/sustained-validation.md` ("Model-cadence comparison")._
-  _pending hardware 2026-09-08: Pi unplugged (operator-confirmed). The Pi's CPU, memory, thermal/power and event-loop delay under the same workload are what remains; procedure in `docs/inference-scheduling.md` ("Left for hardware")._
+- **C08.12 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H5.** Measure Pi CPU, memory, event-loop delay, processing latency, and capture losses under the same workload before/after. Include 1 Hz and a higher supported test cadence without changing deployed model defaults. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
 - [x] C08.13 Acceptance: processing time does not accumulate as cadence drift,
   shared state has one owner, and computational overload remains observable
   without corrupting measurement chronology or filling an unbounded queue.

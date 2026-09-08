@@ -1,6 +1,6 @@
 # Sustained collection validation — bus receipt through analysis (C10)
 
-Roadmap task C10 (`docs/roadmap/tasks/10-sustained-validation.md`). This is
+Roadmap task C10 (`docs/roadmap/tasks/archive/10-sustained-validation.md`). This is
 the handoff record for the synthetic-bus harness under `src/validation/`,
 the before/after evidence it produced for the C09 polling-plan work, the
 defects it surfaced on the way, and the exact Pi procedure that is still

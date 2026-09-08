@@ -1,6 +1,6 @@
 # Live-inference scheduling and isolation (C08)
 
-Roadmap task C08 (`docs/roadmap/tasks/08-inference-scheduling.md`). Code:
+Roadmap task C08 (`docs/roadmap/tasks/archive/08-inference-scheduling.md`). Code:
 `src/daemon/inference_scheduling.py` (deadline scheduler, generation token),
 `src/daemon/inference_metrics.py` (bounded timing recorder, `/status`
 snapshot), `src/daemon/inference.py` (`LiveInferencePipeline`, detector

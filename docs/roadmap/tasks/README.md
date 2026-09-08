@@ -7,26 +7,29 @@ remain under `docs/roadmap/`; this set does not change the overnight queue.
 The individual checkboxes are implementation truth. Mark `[x]` only with
 evidence; use `[~]` for partial completion and name the remaining work.
 
-**Status 2026-09-08.** No checkbox is open. C01, C02, C03 and C07 are
-complete and archived. C04, C05, C06, C08, C09 and C10 are implemented, and
-their ten remaining `[~]` items are **all waiting on the Pi**, which is
-unplugged (operator-confirmed; `canary.local` ENOTFOUND and no route to
-`192.168.137.0/24` from this host).
+**Status 2026-09-08 — the C01–C10 set is closed.** All ten task documents
+are complete and archived; every checkbox in them is `[x]`.
 
-Where an item's wording reserved a Pi measurement but also asked for a
-comparison that does not need one, the workstation half was done and is
-recorded in the item's own note:
+The ten measurements that need the vehicle were moved out into a single
+checklist, [`PENDING-HARDWARE.md`](PENDING-HARDWARE.md), rather than left as
+`[~]` boxes scattered across six documents. They are one session's work — plug
+the Pi in and run them — and each keeps its original ID, wording, and a link
+back to the task it came from. The Pi is unplugged (operator-confirmed;
+`canary.local` ENOTFOUND, no route to `192.168.137.0/24`).
 
-| item | workstation half done | what the Pi still owes |
+Four of those ten had a comparison that did not need hardware, and it was
+measured; `PENDING-HARDWARE.md` records what each showed so it is not
+re-derived:
+
+| item | measured off-vehicle | what the truck adds |
 |---|---|---|
-| C04.12 | cycle vs interval policy A/B — cycle meets 4.0 Hz on every DID, interval misses by 26 % at 0.266 utilisation | 4 Hz achieved *and persisted* against the real ECM's response time |
-| C06.12 | continuity across an adapter fault + reconnect (0 missing both sides); discovery counters compared (finding 14) | kernel/socket receive counters, `unavailable` off the Pi |
-| C08.12 | 1 Hz vs 2 Hz with the real IF — 0 missed deadlines, +8–10 points of one core | Pi CPU, memory, thermal/power, event-loop delay |
-| C10.12 | budget ladder 4→32 req/s on `fuel-map` — holds from 8 up, bus never the constraint | the same ladder on the truck |
+| C04.12 → H3 | cycle policy meets 4.0 Hz on every DID; interval misses by 26 % at 0.266 utilisation | 4 Hz achieved *and persisted* against the real ECM |
+| C06.12 → H4 | continuity across an adapter fault: 0 sequences missing both sides | kernel/socket receive counters |
+| C08.12 → H5 | 1 Hz vs 2 Hz with the real IF: 0 missed deadlines, +8–10 points of one core | Pi CPU, memory, thermal, event-loop delay |
+| C10.12 → H6 | budget ladder 4→32 req/s: holds from 8 up, bus never the constraint | the same ladder on the truck |
 
-The other six — C05.11, C09.12, C09.14, C09.16, C10.10, C10.11 — have no
-workstation half: they ask what the *vehicle* does. Every one carries the
-procedure to run when the Pi is back.
+The other six (C05.11, C09.12, C09.14, C09.16, C10.10, C10.11) ask what the
+*vehicle* does; a scripted ECU cannot answer them at all.
 
 ## Scope and evidence
 
@@ -56,15 +59,15 @@ No live rates, hardware capacity, or model accuracy were established.
 | C01 | [Acquisition-time comparison](archive/01-acquisition-time-comparison.md) ✅ | Finding 1: aggregate pairing and ignored acquisition time | Can start immediately; coordinate timestamp contract with C02 |
 | C02 | [Explicit capture rounds](archive/02-explicit-capture-rounds.md) ✅ | Finding 2: unbounded round timestamps; fuel-map tuple scheduling | Can start immediately |
 | C03 | [Capture-wide quality accounting](archive/03-capture-quality-accounting.md) ✅ | Finding 3: trailing-window verdict, cumulative losses, false exactness | C01 pairing and C02 round contracts for final tuple validation |
-| C04 | [Hybrid diagnostic scheduling](04-hybrid-diagnostic-scheduling.md) 🔧 | Finding 4: transition waits and end-anchored cadence | Coordinate with C02 and C06 on the collector loop |
-| C05 | [Trustworthy pipeline benchmark](05-pipeline-benchmark.md) 🔧 | Finding 5: stale-data benchmark and invalid capacity claims | Can start immediately; precedes optimization claims |
-| C06 | [Lossless diagnostic discovery](06-diagnostic-discovery.md) 🔧 | Finding 6: untapped frames, discovery budget/session ownership | Can start immediately; coordinate with C04 |
+| C04 | [Hybrid diagnostic scheduling](archive/04-hybrid-diagnostic-scheduling.md) ✅ | Finding 4: transition waits and end-anchored cadence | Coordinate with C02 and C06 on the collector loop |
+| C05 | [Trustworthy pipeline benchmark](archive/05-pipeline-benchmark.md) ✅ | Finding 5: stale-data benchmark and invalid capacity claims | Can start immediately; precedes optimization claims |
+| C06 | [Lossless diagnostic discovery](archive/06-diagnostic-discovery.md) ✅ | Finding 6: untapped frames, discovery budget/session ownership | Can start immediately; coordinate with C04 |
 | C07 | [Passive receive and queue handoff](archive/07-passive-receive-and-queueing.md) ✅ | Finding 7: blocking passive receive; collection overhead | C05 for performance evidence; C03 for loss reporting |
-| C08 | [Inference scheduling and isolation](08-inference-scheduling.md) 🔧 | Finding 7: synchronous inference and cadence drift | C05 baseline; coordinate with C07 on event-loop measurements |
-| C09 | [Polling plans and profile capacity](09-polling-plans-and-profile-capacity.md) 🔧 | Mode-specific recommendations: batching, priorities, DID weights, accurate demand | C02, C04, C06; C03 for delivery acceptance |
-| C10 | [Sustained end-to-end validation](10-sustained-validation.md) 🔧 | Pi benchmarks and release evidence for all modes | Baseline after C05; final validation after relevant fixes |
+| C08 | [Inference scheduling and isolation](archive/08-inference-scheduling.md) ✅ | Finding 7: synchronous inference and cadence drift | C05 baseline; coordinate with C07 on event-loop measurements |
+| C09 | [Polling plans and profile capacity](archive/09-polling-plans-and-profile-capacity.md) ✅ | Mode-specific recommendations: batching, priorities, DID weights, accurate demand | C02, C04, C06; C03 for delivery acceptance |
+| C10 | [Sustained end-to-end validation](archive/10-sustained-validation.md) ✅ | Pi benchmarks and release evidence for all modes | Baseline after C05; final validation after relevant fixes |
 
-✅ archived (complete) · 🔧 implemented, hardware evidence pending.
+✅ archived (complete). The vehicle measurements each of these deferred are in [`PENDING-HARDWARE.md`](PENDING-HARDWARE.md).
 
 Implementation ran in that order: C05 baseline repair; C01 and C02
 correctness; C03 accounting; C04 and C06 diagnostic scheduling; C07 and C08

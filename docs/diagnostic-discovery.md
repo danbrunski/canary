@@ -1,6 +1,6 @@
 # Lossless diagnostic discovery and request eligibility
 
-Roadmap task C06 (`docs/roadmap/tasks/06-diagnostic-discovery.md`). This is
+Roadmap task C06 (`docs/roadmap/tasks/archive/06-diagnostic-discovery.md`). This is
 the contract for *who receives frames* on the daemon's OBD bus, how support
 discovery (Mode 01 PID groups, Mode 06 MID groups) is scheduled, cached and
 reported, and which diagnostic request kinds may go out under which capture

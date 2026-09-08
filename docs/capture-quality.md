@@ -1,6 +1,6 @@
 # Capture quality: cadence, coverage, yield and attributable loss
 
-Roadmap task C03 (`docs/roadmap/tasks/03-capture-quality-accounting.md`).
+Roadmap task C03 (`docs/roadmap/tasks/archive/03-capture-quality-accounting.md`).
 This is the contract for what `capture_quality.json` claims about a capture,
 how the claim is scored, and what a reader may and may not infer from a
 sidecar of each version. It builds on `docs/capture-rounds.md` (C02: round

@@ -1,6 +1,6 @@
 # Sustained collection validation on the synthetic bus — before/after C09 (2026-09-07)
 
-Roadmap task C10 (`docs/roadmap/tasks/10-sustained-validation.md`); harness
+Roadmap task C10 (`docs/roadmap/tasks/archive/10-sustained-validation.md`); harness
 and method in [`docs/sustained-validation.md`](../../docs/sustained-validation.md).
 Per-scenario JSON: [`sustained-validation/before/`](sustained-validation/before/)
 (commit `2257b53`, pre-C09, run from a read-only worktree) and

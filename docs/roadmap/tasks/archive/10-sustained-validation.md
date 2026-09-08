@@ -10,11 +10,11 @@ Short dedicated-bus probes, workstation microbenchmarks, and configured rate
 targets are different measurements. This task joins acquisition, storage,
 tuple quality, and inference observations without conflating them.
 
-Entry points: [collector](../../../src/collection/can_obd_collector.py),
-[fanout and sinks](../../../src/daemon/drain.py),
-[writer](../../../src/storage/parquet_writer.py),
-[health](../../../src/models/health.py),
-[inference](../../../src/daemon/inference.py), and existing benchmark/replay tools.
+Entry points: [collector](../../../../src/collection/can_obd_collector.py),
+[fanout and sinks](../../../../src/daemon/drain.py),
+[writer](../../../../src/storage/parquet_writer.py),
+[health](../../../../src/models/health.py),
+[inference](../../../../src/daemon/inference.py), and existing benchmark/replay tools.
 
 ## Harness and report checklist
 
@@ -71,21 +71,9 @@ Entry points: [collector](../../../src/collection/can_obd_collector.py),
   isolated replay path to validate feature/detector behavior. Label replay
   results; they do not measure physical CAN transport or ECU service capacity.
   _done: `replay-drive-slice` replays `tests/fixtures/ground_truth/drive-slice` at 2× through `replay_session` → the real fanout → the bindings decoder → the inference loop into `_replay-validation-*`; 49/49 ticks at 0.5 s, and the C01 pairs re-read from the replayed Parquet still agree 1:1. Labelled `replay` everywhere — it measures no CAN transport or ECU capacity._
-- [~] C10.10 Run sustained Pi scenarios covering several flush/keepalive and
-  diagnostic periods. Use at least a representative 20–30 minute capture for
-  final supported profiles, with enough varied operation for the intended
-  analysis. Do not call an eight-second burst sustained drive validation.
-  _pending hardware 2026-09-08: Pi unreachable (`canary.local` ENOTFOUND, MCP server failed to connect). Synthetic scenarios are 10–60 s by construction and are not offered as sustained drive validation. Procedure in `docs/sustained-validation.md` (“Pi procedure”, steps 1–4): 20–30 minute captures per supported profile covering several flush intervals, DID keep-alives and hundreds of hybrid cycles._
-- [~] C10.11 Read `/status.vehicle_state` and raw freshness fields before
-  every live interpretation. Record phase-specific vehicle state; distinguish
-  KOEO, running, engine off, disconnected, and replay results.
-  _pending hardware 2026-09-08: no live interpretation was made, so no vehicle state was read. Every synthetic report is labelled `hardware.adapter: synthetic` and the replay scenario is labelled `replay`; the Pi procedure requires `/status.vehicle_state` and the raw freshness fields per phase (KOEO, running, engine off) beside each number._
-- [~] C10.12 Compare candidate budgets incrementally under the same workload.
-  Stop increasing when a requested contract fails, identify the constraint,
-  and fix its source. Do not hide data loss with larger queues or relaxed
-  quality thresholds. No automatic runtime kill-switch is required.
-  _local half done 2026-09-08: `scripts/sustained_validation.py sweep` walks candidate budgets under one fixed workload (only `bus_budget_override` changes between rungs, asserted by test). Measured on `fuel-map` over 8 rungs from 4 to 32 req/s: the contract fails at 4 and 6, holds from **8 req/s** up, and every holding rung is limited by the inference feature stage — the bus is never the constraint above 8. No queue was widened, no threshold relaxed, and no default changed. Two design rules were learned by getting them wrong first (baseline at maximum headroom, not minimum; a ceiling is a failure above a rung that held) and one source defect was found and fixed: starvation was being reported as `ecu_unsupported_channel` (finding 11). Table, rules and caveats in `docs/sustained-validation.md` ("Incremental budget comparison"); JSON + markdown in `data/analyses/sustained-validation/sweep/`._
-  _pending hardware 2026-09-08: the same ladder on the truck. The synthetic ECU answers in a fixed `sleep`, so it cannot say where the floor sits against the real ECM's response time; procedure in `docs/sustained-validation.md` step 5._
+- **C10.10 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H1.** Run sustained Pi scenarios covering several flush/keepalive and diagnostic periods. Use at least a representative 20–30 minute capture for final supported profiles, with enough varied operation for the intended analysis. Do not call an eight-second burst sustained drive validation. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
+- **C10.11 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H0.** Read `/status.vehicle_state` and raw freshness fields before every live interpretation. Record phase-specific vehicle state; distinguish KOEO, running, engine off, disconnected, and replay results. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
+- **C10.12 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H6.** Compare candidate budgets incrementally under the same workload. Stop increasing when a requested contract fails, identify the constraint, and fix its source. Do not hide data loss with larger queues or relaxed quality thresholds. No automatic runtime kill-switch is required. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
 - [x] C10.13 Keep capture artifacts under `_`-prefixed isolated paths and
   leave unrelated sessions intact. If hardware is unavailable, finish local
   work and mark Pi evidence pending rather than substituting extrapolation.

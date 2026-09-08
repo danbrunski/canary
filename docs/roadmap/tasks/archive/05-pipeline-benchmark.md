@@ -4,9 +4,9 @@ Priority: high prerequisite for performance claims. Dependencies: none.
 
 ## Problem and code entry points
 
-[benchmark_live_pipeline.py](../../../scripts/benchmark_live_pipeline.py) observes
+[benchmark_live_pipeline.py](../../../../scripts/benchmark_live_pipeline.py) observes
 records at `float(i)` Unix seconds, then ticks at a 2026 datetime. Freshness
-checks in [live.py](../../../src/preprocessing/live.py) reject every observation.
+checks in [live.py](../../../../src/preprocessing/live.py) reject every observation.
 A 30-tick run reported about 27,600 Hz with buffer size zero. Warmup and
 measurement also restart the same timestamp sequence.
 
@@ -61,11 +61,7 @@ replacement capacity measurement or a Pi estimate.
   configuration and raw summary. Verify the feature transformation executes;
   elapsed duration alone is not sufficient evidence.
   _done: `data/analyses/2026-09-06-benchmark-live-pipeline-baseline.md` (+ smoke/steady JSON); feature rows verified > 0 (60 and 600 rows × 312 columns)._
-- [~] C05.11 Run the same workload on the Pi when available, identifying
-  hardware, power/thermal state, runtime, and model versions. Do not fill the
-  missing Pi result with an extrapolation.
-  _pending hardware 2026-09-08: Pi still unreachable (`canary.local` ENOTFOUND). Run `scripts/benchmark_live_pipeline.py --profile steady --report ...` on the Pi and record hardware, power/thermal state, runtime, and model versions next to the workstation baseline._
-  _note: the Pi's `models_dir` holds real detector artifacts, so its run measures real per-detector occupancy by default. The workstation baseline did not — see C08.1: a stubbed IF understated its stage by ~8×. Compare the Pi against the real-artifact figures in `docs/inference-scheduling.md`, not the model-less table above them._
+- **C05.11 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H2.** Run the same workload on the Pi when available, identifying hardware, power/thermal state, runtime, and model versions. Do not fill the missing Pi result with an extrapolation. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
 - [x] C05.12 Acceptance: a reported valid feature benchmark has actual
   feature rows, a warmed buffer, monotonic scenario time, and truthful workload
   counts. The previous zero-row 27,600 Hz result must be impossible to accept.

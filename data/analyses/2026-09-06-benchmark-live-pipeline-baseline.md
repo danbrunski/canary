@@ -1,6 +1,6 @@
 # Live-pipeline feature-stage microbenchmark — workstation baseline (2026-09-06)
 
-Roadmap task C05 (`docs/roadmap/tasks/05-pipeline-benchmark.md`), items
+Roadmap task C05 (`docs/roadmap/tasks/archive/05-pipeline-benchmark.md`), items
 C05.10 / C05.12. Raw reports:
 [smoke JSON](2026-09-06-benchmark-live-pipeline-smoke.json),
 [steady JSON](2026-09-06-benchmark-live-pipeline-steady.json).

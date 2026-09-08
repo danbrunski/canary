@@ -1,6 +1,6 @@
 # Hybrid Mode 01 / Mode 22 scheduling
 
-Roadmap task C04 (`docs/roadmap/tasks/04-hybrid-diagnostic-scheduling.md`).
+Roadmap task C04 (`docs/roadmap/tasks/archive/04-hybrid-diagnostic-scheduling.md`).
 This is the contract for how the Canable collector alternates standard OBD
 (Mode 01 and its siblings) with session-gated Mode 22 windows on an ECU where
 the two are mutually exclusive, what a *cycle* is, when a cycle is declared

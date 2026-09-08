@@ -1,6 +1,6 @@
 # Passive CAN receive path and thread handoff (C07)
 
-Handoff record for roadmap task C07 (`docs/roadmap/tasks/07-passive-receive-and-queueing.md`).
+Handoff record for roadmap task C07 (`docs/roadmap/tasks/archive/07-passive-receive-and-queueing.md`).
 Scope: the *standalone* passive sniffer (`src/collection/can_collector.py`,
 used when `obd_source` is `disabled` or the legacy ELM327 collector runs
 beside passive CAN), the thread-to-loop handoff every threaded collector

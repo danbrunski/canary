@@ -6,14 +6,14 @@ eligibility with C04 and scoped loss reporting with C03.
 ## Problem and code entry points
 
 `CanObdClient._request_many()` in
-[can_obd_client.py](../../../src/collection/can_obd_client.py) receives unrelated
+[can_obd_client.py](../../../../src/collection/can_obd_client.py) receives unrelated
 broadcast frames and discards them. `build_poll_requests()` performs startup
 discovery through this client, and the active collector can retry Mode 06
 discovery synchronously after ECU contact. These paths bypass the collector's
 normal `on_frame` tap and scheduled request budget.
 
 Diagnostic eligibility also spans two gates: `DidWindowController` and
-[tuning_profile.py](../../../src/collection/tuning_profile.py). Focused Mode 01
+[tuning_profile.py](../../../../src/collection/tuning_profile.py). Focused Mode 01
 profiles explicitly admit DTCs but can filter monitor and freeze-frame
 requests by telemetry channel selection. Audit and make this policy explicit.
 
@@ -71,12 +71,7 @@ requests by telemetry channel selection. Audit and make this policy explicit.
 - [x] C06.11 Extend collector/client/trigger-poll/control tests; verify service
   requests retain their identifiers and per-ECU response provenance.
   _done: collector/client/trigger-poll/control tests extended; `ObdReading.responder_id` persisted in metadata for per-ECU provenance._
-- [~] C06.12 On hardware, compare frame continuity and discovery counters
-  around startup/recovery. Read vehicle state first; no received-byte count
-  alone proves no frames were lost upstream.
-  _pending hardware 2026-09-08: Pi still unreachable. Procedure in `docs/diagnostic-discovery.md` (read `vehicle_state`; compare raw-frame continuity and discovery counters around startup and recovery; a received-byte count alone does not prove no upstream loss)._
-  _workstation half done 2026-09-08: `discovery-recovery` (added for this) is `normal-monitoring` plus an adapter fault at 7 s, so continuity and discovery counters can be read across a recovery, not just a clean startup. Frame continuity holds — the sequence ledger reconciles with **0 missing** on both sides and the push identity holds — which is exactly the claim a received-byte count cannot make. The counters do not: both runs report discovery `requests_spent: 3`, but the ECU counted **6** support probes after the reconnect (`cache_version` 2 → 4), so discovery's declared bus cost is per-walk while its actual cost is per-walk × generations. Recorded as finding 14 and deliberately **not** fixed — making the counters cumulative crosses the registry's intended reset semantics. Table in `docs/sustained-validation.md` ("Discovery across startup and recovery")._
-  _pending hardware 2026-09-08: Pi unplugged (operator-confirmed). Kernel counters are `unavailable` on this host, and the upstream loss layer the item is about is precisely what only hardware can show; procedure in `docs/diagnostic-discovery.md`._
+- **C06.12 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H4.** On hardware, compare frame continuity and discovery counters around startup/recovery. Read vehicle state first; no received-byte count alone proves no frames were lost upstream. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
 - [x] C06.13 Acceptance: discovery cannot silently consume raw capture data
   or bypass session/budget policy, and deferred diagnostics are visible.
   _done: single tapped receive site, budget wait reason, and matrix phase gate make silent consumption or policy bypass unrepresentable; deferred diagnostics visible in `/status`._

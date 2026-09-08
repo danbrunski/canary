@@ -1,6 +1,6 @@
 # Capture rounds and acquisition clocks
 
-Roadmap task C02 (`docs/roadmap/tasks/02-explicit-capture-rounds.md`).
+Roadmap task C02 (`docs/roadmap/tasks/archive/02-explicit-capture-rounds.md`).
 This is the contract for *when* a polled OBD/DID reading was taken, how the
 scheduler groups readings into rounds, and what a reader may and may not
 infer from the persisted fields. Pairing rules for analysis live in
