@@ -336,6 +336,34 @@ SCENARIOS: tuple[ScenarioSpec, ...] = (
         "unanswered by the synthetic ECU (a timeout, counted).",
     ),
     ScenarioSpec(
+        name="discovery-recovery",
+        kind="canable",
+        table_row="Normal monitoring with discovery",
+        profile=DEFAULT_PROFILE,
+        duration_s=14.0,
+        spec_overrides={
+            "pids": ("auto",),
+            "poll_rate_hz": 1.0,
+            "batch_max_pids": 6,
+            "dtc_poll_interval_seconds": 5.0,
+        },
+        ecu={"latency": 0.005, "supports_mode01_map": True},
+        broadcast=STEADY,
+        # The adapter faults mid-run and the reconnect policy brings it back,
+        # so discovery's counters and the raw-frame ledger can be read across
+        # a recovery rather than only across a clean startup.
+        fault_at_elapsed_s=7.0,
+        required_evidence=(
+            "raw-frame continuity across a reconnect",
+            "discovery counters across startup and recovery",
+        ),
+        notes=(
+            "normal-monitoring plus an adapter fault at 7 s. C06.12's workstation half: "
+            "a received-byte count alone does not prove no upstream loss, so the sequence "
+            "ledger is what carries continuity across the reconnect."
+        ),
+    ),
+    ScenarioSpec(
         name="fuel-map",
         kind="canable",
         table_row="Fuel-map",

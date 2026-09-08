@@ -133,6 +133,7 @@ basis per row kind, session dirs), `evidence` (below) and a `headline`.
 | `fuel-did-research` | Fuel DID research | single vs batched Mode 22 demand, known widths, persisted tuple yield |
 | `hybrid-mode01-mode22` | Hybrid Mode 01/22 | both services at rate, cycle plan/feasibility, transition latency, cross-mode pairing bound |
 | `passive-sniffer` | Passive / legacy ELM327 companion | receive-loop responsiveness, completeness, `sent == []`; ELM327 declared not exercised |
+| `discovery-recovery` | Normal monitoring with discovery | raw-frame continuity and discovery counters across an adapter fault + reconnect (C06.12) |
 | `fault-channels` | Fault cases | silent PID → `unanswered_input`, refused PID omitted from batches, 60 ms ECU |
 | `transitions` | Transition cases | pause window, profile change (ledger snapshot kept), adapter fault → reconnect, final flush |
 | `overload-storage-stall` | Overload | counted loss at the storage sink, `persistence_loss`, identities intact |
@@ -264,6 +265,32 @@ until 4 Hz is achieved *and persisted* on the truck, against the real ECM's
 response time — the synthetic ECU answers in a fixed 5 ms `sleep`, which is
 the one number that decides whether the cycle plan is feasible there.
 
+## Discovery across startup and recovery (C06.12, workstation half)
+
+`discovery-recovery` is `normal-monitoring` with an adapter fault at 7 s and
+nothing else changed, so the reconnect policy brings the bus back mid-run and
+discovery's counters can be read across a recovery rather than only across a
+clean startup:
+
+| | startup (`normal-monitoring`) | recovery (`discovery-recovery`) |
+|---|---:|---:|
+| reconnects | 0 | 1 |
+| sequence reconciliation | reconciled, **0 missing** | reconciled, **0 missing** |
+| push identity | holds | holds |
+| discovery `requests_spent` / `seconds_spent` | 3 / 0.166 s | 3 / 0.166 s |
+| discovery `supported_count`, `complete` | 18, true | 18, true |
+| **support probes counted by the ECU** | 3 | **6** |
+| discovery `cache_version` | 2 | 4 |
+| deferred diagnostics visible | 0 | 8 |
+
+**Continuity holds across the reconnect** — every adapter-delivered sequence
+number is on disk exactly once on both sides, which is the thing the item
+says a received-byte count cannot establish. (The C06 tap identity is
+deliberately not evaluated after a reconnect, so the sequence ledger is what
+carries the claim.)
+
+The counters do not. See finding 14.
+
 ## Findings the harness surfaced
 
 These are defects or facts found while building the harness, each with its
@@ -394,6 +421,22 @@ source fix in their owning task.
    `scheduling_policy_idle_bus` when a rate shortfall coincides with an idle
    bus and no timeouts. Same shape as finding 11: the classifier reached for
    a vehicle-side explanation of a scheduler-side fact.
+
+14. **Discovery's own counters understate its bus cost across a recovery.**
+   Startup and recovery both report `requests_spent: 3` and
+   `seconds_spent: 0.166` for a completed Mode 01 bitmap walk — but the ECU
+   counted **6** support probes in the recovery run, and `cache_version` went
+   2 → 4. The registry is rebuilt on reconnect (deliberate: it is vehicle-keyed
+   and resettable), and its counters are scoped to the current generation, so
+   the declared cost of discovery is per-walk while the actual cost on the wire
+   is per-walk × generations. Anything budgeting for discovery from
+   `requests_spent` — a live budget calculation on the truck, say — would
+   halve it after one reconnect. **Not fixed here**: making the counters
+   cumulative crosses the C06 registry's deliberate reset semantics, and
+   guessing at that is worse than naming it. The reproduction is
+   `discovery-recovery` against `normal-monitoring`; the two numbers to compare
+   are `scheduler_last_attempt.discovery.requests_spent` and
+   `service_accounting.ecu.support_probes`.
 
 ## Replay (C10.9)
 
