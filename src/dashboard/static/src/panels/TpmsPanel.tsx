@@ -8,14 +8,12 @@ interface TpmsPanelProps {
 
 /** TPMS panel (Task 5.13).
  *
- *  Stub for now — the Xterra's TPMS signals haven't been decoded in
- *  `data/bindings.yaml` yet, so the channel keys this panel would render
- *  (decoded:TPMS_FL_PRESSURE etc.) don't exist on the wire. When they do,
- *  this panel will pick them up automatically — the rendering is keyed off
- *  the decoded channel set, so no change is needed here beyond filling in
- *  the TPMS_CHANNELS list. Until then, surface the "not decoded" state
- *  honestly so an operator doesn't think the tires are reporting fine
- *  when in reality the dashboard has no data.
+ *  Stub for now — `data/bindings.yaml` records four 0x385 pressure candidates,
+ *  but they remain below dashboard-visible confidence until a controlled
+ *  one-tire pressure change validates the Xterra scale and corner order.
+ *  When promoted, this panel will pick them up automatically. Until then,
+ *  surface the unvalidated state honestly so an operator doesn't mistake
+ *  hypothesis-level values for measurements.
  */
 const TPMS_CHANNELS = [
   "decoded:TPMS_FL_PRESSURE",
@@ -30,9 +28,9 @@ export function TpmsPanel({ channels }: TpmsPanelProps) {
     <Panel title="TPMS">
       {found.length === 0 ? (
         <p className={placeholderClass}>
-          TPMS bindings not yet pinned — see <code>data/bindings.yaml</code>.
-          Once the four per-tire pressure signals are decoded with
-          confidence ≥ medium, they'll appear here automatically.
+          TPMS bindings hypothesized from CAN ID 0x385 but not yet validated —
+          see <code>data/bindings.yaml</code>. Once the four per-tire pressure
+          signals reach confidence ≥ medium, they'll appear here automatically.
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-2">{/* future: per-corner cards */}</div>

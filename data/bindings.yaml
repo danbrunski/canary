@@ -861,41 +861,110 @@ signals:
       anomaly detection on stalled-while-driving scenarios — if this
       byte reverts to 157 mid-drive, the engine has died.
 
-  - name: ODOMETER_ACCUMULATOR_385
-    module: unknown        # 100ms body bus, 0x385
+  # 0x385 bytes 2-5 are a strong TPMS candidate. A 2016 reverse-engineered
+  # Renault Samsung QM5 / Renault Koleos implementation maps these exact
+  # positions to four tire pressures at 0.25 psi/count:
+  # https://whoisit.tistory.com/523
+  #
+  # This supersedes the former ODOMETER_ACCUMULATOR_385 binding. That claim
+  # grouped bytes 2-6 from per-window aggregates. Four independently encoded
+  # pressures waking together were therefore mistaken for one 40-bit value;
+  # byte 6 is not part of the published pressure layout. The Xterra observations
+  # fit the TPMS scale unusually well (36.9-38.8 psi), but vehicle-specific
+  # corner order and scale still require a controlled one-tire pressure change.
+
+  - name: TPMS_FR_PRESSURE
+    module: BCM
     can_id: 0x385
     byte_start: 2
-    byte_length: 5  # bytes 2-6 all spike together during driving
+    byte_length: 1
     byte_order: big
-    scale: null
-    offset: null
-    unit: unknown  # bytes likely encode trip distance or odometer ticks
-    confidence: high  # promoted — "holds value when stopped" confirms accumulator
+    scale: 0.25
+    offset: 0.0
+    unit: psi
+    confidence: hypothesized
+    plausible_min: 0.0
+    plausible_max: 80.0
     evidence:
       - session: 2026-05-11T211240
-        method: byte_vs_tag_differential
+        method: external_layout_reinterpretation
         finding: >
-          Bytes 2-6 of 0x385 are uniformly 0 across all engine-off,
-          stationary-engine-on, and gear-reverse windows, then climb in
-          unison during coming_to_stop (active driving). Byte 6 reaches
-          225.8, byte 3 reaches 155.2, byte 5 reaches 150.0, byte 4
-          reaches 153.7, byte 2 reaches 147.7. Same pattern, multiple
-          bytes — strongly suggests a multi-byte accumulator.
-      - session: 2026-05-11T222447
-        method: byte_vs_tag_differential
+          In the `coming_to_stop` active-forward-driving window, mean raw byte
+          2 was 147.7, or 36.9 psi at the published 0.25 psi/count scale. It
+          was zero before forward driving, consistent with a sleeping wheel
+          sensor that wakes after motion. The FR corner assignment comes from
+          the QM5/Koleos mapping, not Xterra ground truth.
+    notes: &tpms_385_notes |
+      Candidate layout from a working QM5/Koleos CAN display: byte 2 FR,
+      byte 3 FL, byte 4 RR, byte 5 RL, each raw x 0.25 psi. CAN IDs and layouts
+      are vehicle-specific despite the Renault-Nissan relationship, so do not
+      promote or display these as measured Xterra pressures until a controlled
+      test changes one known tire by a measured amount. A 4 psi change should
+      move exactly one candidate byte by 16 counts. Byte 6 remains unidentified.
+      External source: https://whoisit.tistory.com/523
+
+  - name: TPMS_FL_PRESSURE
+    module: BCM
+    can_id: 0x385
+    byte_start: 3
+    byte_length: 1
+    byte_order: big
+    scale: 0.25
+    offset: 0.0
+    unit: psi
+    confidence: hypothesized
+    plausible_min: 0.0
+    plausible_max: 80.0
+    evidence:
+      - session: 2026-05-11T211240
+        method: external_layout_reinterpretation
         finding: >
-          During the `stopped` window the values HOLD (byte 6 = 240 in
-          both `driving` and the following `stopped`), they do NOT decay
-          toward zero. That's accumulator/odometer behavior, not a speed
-          signal (which would drop to 0 when stationary). Zero across all
-          engine-off and reverse windows; only ticks during forward motion.
-    notes: |
-      Trip distance / accumulated odometer ticks. The "holds when stopped"
-      property in the 222447 session distinguishes it definitively from a
-      speed-style signal. Decoding the byte range as a single unsigned
-      integer is the next step — and a sustained-highway capture (long
-      enough to roll a byte over) would let us derive the meters-per-tick
-      scale without ELM327.
+          In the `coming_to_stop` active-forward-driving window, mean raw byte
+          3 was 155.2, or 38.8 psi at the published scale. The FL assignment
+          is imported and remains unverified.
+    notes: *tpms_385_notes
+
+  - name: TPMS_RR_PRESSURE
+    module: BCM
+    can_id: 0x385
+    byte_start: 4
+    byte_length: 1
+    byte_order: big
+    scale: 0.25
+    offset: 0.0
+    unit: psi
+    confidence: hypothesized
+    plausible_min: 0.0
+    plausible_max: 80.0
+    evidence:
+      - session: 2026-05-11T211240
+        method: external_layout_reinterpretation
+        finding: >
+          In the `coming_to_stop` active-forward-driving window, mean raw byte
+          4 was 153.7, or 38.4 psi at the published scale. The RR assignment
+          is imported and remains unverified.
+    notes: *tpms_385_notes
+
+  - name: TPMS_RL_PRESSURE
+    module: BCM
+    can_id: 0x385
+    byte_start: 5
+    byte_length: 1
+    byte_order: big
+    scale: 0.25
+    offset: 0.0
+    unit: psi
+    confidence: hypothesized
+    plausible_min: 0.0
+    plausible_max: 80.0
+    evidence:
+      - session: 2026-05-11T211240
+        method: external_layout_reinterpretation
+        finding: >
+          In the `coming_to_stop` active-forward-driving window, mean raw byte
+          5 was 150.0, or 37.5 psi at the published scale. The RL assignment
+          is imported and remains unverified.
+    notes: *tpms_385_notes
 
   - name: STEERING_RATE_002
     module: unknown      # same 0x002 frame as STEERING_ANGLE_002

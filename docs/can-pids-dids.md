@@ -102,7 +102,12 @@ Byte positions are zero-based. A range such as bytes 2-3 includes both endpoints
 0x002 byte 1 - STEERING_ANGLE_002 - part of the suspected 16-bit steering-angle field at bytes 0-1 - scale unpinned - low confidence
 0x625 byte 1 - AC_COMPRESSOR_STATE - commanded A/C compressor state - zero off and approximately 128 engaged - high confidence
 0x625 byte 3 - POWER_STATE_625_3 - ignition or vehicle power-state candidate - raw value - medium confidence
-0x385 bytes 2-6 - ODOMETER_ACCUMULATOR_385 - accumulated trip-distance or odometer ticks - unsigned 40-bit value with scale unpinned - high confidence
+The `0x385` hypothesis below imports its layout from a working [QM5/Koleos TPMS decoder](https://whoisit.tistory.com/523); the matching CAN ID and plausible Xterra values are not substitutes for a controlled vehicle-specific validation.
+0x385 byte 2 - TPMS_FR_PRESSURE - candidate front-right tire pressure - raw times 0.25 psi - hypothesized; corner order and scale imported from QM5/Koleos and not yet validated on the Xterra
+0x385 byte 3 - TPMS_FL_PRESSURE - candidate front-left tire pressure - raw times 0.25 psi - hypothesized; observed Xterra mean decodes to 38.8 psi
+0x385 byte 4 - TPMS_RR_PRESSURE - candidate rear-right tire pressure - raw times 0.25 psi - hypothesized; observed Xterra mean decodes to 38.4 psi
+0x385 byte 5 - TPMS_RL_PRESSURE - candidate rear-left tire pressure - raw times 0.25 psi - hypothesized; observed Xterra mean decodes to 37.5 psi
+0x385 byte 6 - unidentified - previously grouped with bytes 2-5 in the retracted 40-bit odometer interpretation; not part of the published QM5/Koleos TPMS layout
 0x002 byte 2 - STEERING_RATE_002 - steering-rate candidate associated with bytes 0-1 - sign and scale unpinned - low confidence
 0x29E byte 5 - MOTION_29E_5 - engine-load or torque-request-related candidate - scale and identity unpinned - high confidence
 0x29E byte 3 - BRAKE_PRESSURE_29E_3 - brake application or pressure magnitude - approximately zero released and 64 firmly applied, pressure scale unpinned - high confidence

@@ -87,7 +87,10 @@ BO_ 856 M_358: 8 Vector__XXX
  SG_ HVAC_BLOWER_LIGHTING_358_1 : 15|8@0+ (1,0) [0|0] "" Vector__XXX
 
 BO_ 901 M_385: 8 Vector__XXX
- SG_ ODOMETER_ACCUMULATOR_385 : 23|40@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ TPMS_RL_PRESSURE : 47|8@0+ (0.25,0.0) [0.0|80.0] "psi" Vector__XXX
+ SG_ TPMS_RR_PRESSURE : 39|8@0+ (0.25,0.0) [0.0|80.0] "psi" Vector__XXX
+ SG_ TPMS_FL_PRESSURE : 31|8@0+ (0.25,0.0) [0.0|80.0] "psi" Vector__XXX
+ SG_ TPMS_FR_PRESSURE : 23|8@0+ (0.25,0.0) [0.0|80.0] "psi" Vector__XXX
 
 BO_ 1361 M_551: 8 Vector__XXX
  SG_ ECM_COOLANT_TEMP : 7|8@0+ (1,-40) [-10.0|130.0] "degC" Vector__XXX
@@ -147,7 +150,10 @@ CM_ SG_ 852 MOTION_SIGNAL_354_1 "confidence=hypothesized; 37ms cadence is unusua
 CM_ BO_ 856 "Xterra 0x358 (draft from bindings.yaml)";
 CM_ SG_ 856 HVAC_BLOWER_LIGHTING_358_1 "confidence=medium; Bit-packed HVAC-blower + exterior-lighting status byte (not a scalar):";
 CM_ BO_ 901 "Xterra 0x385 (draft from bindings.yaml)";
-CM_ SG_ 901 ODOMETER_ACCUMULATOR_385 "confidence=high; Trip distance / accumulated odometer ticks. The \"holds when stopped\"";
+CM_ SG_ 901 TPMS_RL_PRESSURE "confidence=hypothesized; Candidate layout from a working QM5/Koleos CAN display: byte 2 FR,";
+CM_ SG_ 901 TPMS_RR_PRESSURE "confidence=hypothesized; Candidate layout from a working QM5/Koleos CAN display: byte 2 FR,";
+CM_ SG_ 901 TPMS_FL_PRESSURE "confidence=hypothesized; Candidate layout from a working QM5/Koleos CAN display: byte 2 FR,";
+CM_ SG_ 901 TPMS_FR_PRESSURE "confidence=hypothesized; Candidate layout from a working QM5/Koleos CAN display: byte 2 FR,";
 CM_ BO_ 1361 "Xterra 0x551 (draft from bindings.yaml)";
 CM_ SG_ 1361 ECM_COOLANT_TEMP "confidence=confirmed; Strong candidate. ELM327 Mode 01 PID 0x05 (engine coolant temp) will";
 CM_ BO_ 1424 "Xterra 0x590 (draft from bindings.yaml)";

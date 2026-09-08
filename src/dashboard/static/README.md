@@ -214,7 +214,10 @@ renders the per-detector fired/score-vs-threshold report inline.
 
 ## What's not built yet
 
-* Tire-pressure panel: stub until `decoded:TPMS_*_PRESSURE` are confirmed bindings.
+* Tire-pressure panel: stub while the `0x385` pressure bindings remain
+  hypotheses. Bytes 2-5 plausibly decode at 0.25 psi/count using an external
+  QM5/Koleos layout, but the Xterra scale and corner order need a controlled
+  one-tire pressure-change capture before promotion to dashboard-visible confidence.
 * Behavior-model deviation heatmaps (Task 4.E.9): waiting on the backend feed.
 * PWA offline cache + service worker: not needed yet — the Pi is the only origin and it's local.
 
