@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import sys
 import tempfile
@@ -44,6 +45,7 @@ except ImportError:
 from src.validation.harness import harness_config, run_scenario_clean
 from src.validation.report import build_report, summarize_markdown, write_report
 from src.validation.scenarios import SCENARIOS, scenario
+from src.validation.sweep import run_budget_sweep, summarize_sweep
 
 log = logging.getLogger("sustained_validation")
 
@@ -79,6 +81,23 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "unless this points at real artifacts; the Pi needs no override."
         ),
     )
+
+    sweep = sub.add_parser(
+        "sweep",
+        help="walk candidate bus budgets under one fixed workload, stopping at the first "
+        "failed contract (C10.12)",
+    )
+    sweep.add_argument("--label", required=True, help="run tag")
+    sweep.add_argument("--scenario", default="fuel-map", help="scenario to hold fixed")
+    sweep.add_argument(
+        "--budgets",
+        required=True,
+        help="comma-separated candidate budgets in req/s, walked in the order given",
+    )
+    sweep.add_argument("--out", type=Path, default=None, help="write JSON + markdown here")
+    sweep.add_argument("--sessions-root", type=Path, default=DEFAULT_SESSIONS_ROOT)
+    sweep.add_argument("--scratch", type=Path, default=None)
+    sweep.add_argument("--no-inference", action="store_true")
 
     summarize = sub.add_parser("summarize", help="diff two report directories into markdown")
     summarize.add_argument("--before", type=Path, required=True)
@@ -133,6 +152,41 @@ async def _run_all(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+async def _run_sweep(args: argparse.Namespace) -> int:
+    budgets = [float(token) for token in args.budgets.split(",") if token.strip()]
+    if not budgets:
+        print("no budgets given", file=sys.stderr)
+        return 2
+    scratch = (
+        args.scratch
+        if args.scratch is not None
+        else Path(tempfile.mkdtemp(prefix=f"c10-sweep-{args.label}-"))
+    )
+    spec = scenario(args.scenario)
+    print(
+        f"[{args.label}] sweeping {args.scenario} over {budgets} req/s "
+        f"({spec.duration_s:.0f}s each) ...",
+        flush=True,
+    )
+    result = await run_budget_sweep(
+        spec,
+        budgets,
+        label=args.label,
+        sessions_root=args.sessions_root,
+        scratch=scratch,
+        enable_inference=not args.no_inference,
+    )
+    text = summarize_sweep(result)
+    print(text)
+    if args.out is not None:
+        args.out.mkdir(parents=True, exist_ok=True)
+        (args.out / f"{args.scenario}-sweep.json").write_text(
+            json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n"
+        )
+        (args.out / f"{args.scenario}-sweep.md").write_text(text + "\n")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
     args = parse_args(argv)
@@ -149,6 +203,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(text)
         return 0
     assert _REPO_ROOT.exists()
+    if args.command == "sweep":
+        return asyncio.run(_run_sweep(args))
     return asyncio.run(_run_all(args))
 
 

@@ -402,6 +402,11 @@ See `docs/sustained-validation.md` for reproductions. In short:
 8. **Derived-channel persistence couples the inference loop to the writer
    lock**: under the storage stall `publish_derived` took 2.53 s and the
    loop missed four deadlines (`overrun`), with heartbeat max 97 ms.
+(Sweep addendum 2026-09-08: an incremental budget ladder for `fuel-map`,
+4→32 req/s under one fixed workload, is in
+[`sustained-validation/sweep/`](sustained-validation/sweep/) — contract holds
+from 8 req/s up, limited by the inference feature stage, never the bus.)
+
 9. **A saturated sink queue reported depth 0** — the storage sink dropped
    3506 records behind a 256-deep queue whose `queue_depth` read 0 by the
    time anything looked. Fixed: `telemetry_sinks.<sink>.queue_high_water`
@@ -416,3 +421,9 @@ kernel receive drops, Pi CPU/thermal/power, chrony behaviour, the 20–30
 minute captures per profile (C10.10), vehicle-state-phased interpretation
 (C10.11), incremental budget comparison on the truck (C10.12), and every
 rate a profile names.
+
+10. **Starvation was reported as an unsupported channel** — at 4 req/s
+   against ~41 req/s demand, three channels never reached the wire (zero
+   timeouts) and `limiting_stage` blamed the ECU. Fixed: a saturated budget
+   with no timeouts is now reported as `bus_budget_request_pacing`. Found by
+   the C10.12 sweep, which is the only thing that runs a budget that low.

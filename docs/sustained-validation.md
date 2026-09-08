@@ -136,7 +136,7 @@ basis per row kind, session dirs), `evidence` (below) and a `headline`.
 | `fault-channels` | Fault cases | silent PID → `unanswered_input`, refused PID omitted from batches, 60 ms ECU |
 | `transitions` | Transition cases | pause window, profile change (ledger snapshot kept), adapter fault → reconnect, final flush |
 | `overload-storage-stall` | Overload | counted loss at the storage sink, `persistence_loss`, identities intact |
-| `overload-rate` | Overload | `rate_shortfall` by name, priority-lane starvation |
+| `overload-rate` | Overload | starvation named (`rate_shortfall` or `unanswered_input`), priority-lane starvation |
 | `replay-drive-slice` | Replay (C10.9) | feature/detector behaviour on the committed slice; C01 pairs re-read from the replayed Parquet |
 
 Every armed scenario warms up for `ARMED_WARMUP_S` (5 s) before the
@@ -168,6 +168,54 @@ git worktree remove --force $SCRATCH/wt-before
 
 Raw sessions land under `data/_validation/<label>/<scenario>/` (a
 `_`-prefixed root; Parquet is gitignored). Nothing was committed there.
+
+## Incremental budget comparison (C10.12)
+
+`scripts/sustained_validation.py sweep` walks candidate budgets under **one
+fixed workload** — only `bus_budget_override` changes between rungs; members,
+target rate, duration, ECU, queue sizes and quality thresholds are carried
+through unchanged (`spec_at_budget`, asserted by test). Nothing is ever
+retried with a looser setting.
+
+Two rules make the answer trustworthy, both learned by getting them wrong
+first:
+
+- **The baseline is the rung with the most headroom, not the least.** The
+  first version anchored on the lowest budget and stopped at its opening step,
+  because `acquisition_gap` fires at every budget (finding 3). Anchoring low
+  would also fold genuine starvation into the baseline the moment the ladder
+  started below demand, after which no ceiling could ever be reported. A
+  failure seen at maximum headroom is not about pacing; that is the only rung
+  where that statement is sound.
+- **A ceiling is a failure *above* a rung that held.** A failure below every
+  holding rung is a floor — the budget is under the workload's demand. The
+  sweep runs every rung (the ladder is explicit and bounded) and reports both
+  edges rather than stopping at the first failure, which would report the
+  floor as though it were the ceiling.
+
+Measured 2026-09-08, `fuel-map` (16 channels, up to 4 Hz, ~41 req/s demand),
+8 rungs from 4 to 32 req/s, full markdown and JSON in
+[`sustained-validation/sweep/`](../data/analyses/sustained-validation/sweep/):
+
+| budget req/s | contract | limiting stage | worst achieved/requested | named failures |
+|---:|---|---|---:|---|
+| 4 | **failed** | `bus_budget_request_pacing` | 0.985 (13 of 16 channels ever seen) | `unanswered_input` |
+| 6 | **failed** | `bus_budget_request_pacing` | 0.250 | `rate_shortfall` |
+| 8 | held | `inference_feature_stage_on_loop` | 0.998 | — |
+| 12–32 | held | `inference_feature_stage_on_loop` | 1.000 | — |
+
+**The minimum sufficient budget for this workload is 8 req/s, and above it the
+bus is never the constraint** — every holding rung is limited by the inference
+feature stage on the loop (finding 6), not by pacing or storage. The deployed
+`fuel-map` override of 20 req/s therefore carries ~2.5× headroom *against this
+workload on this bus*. The ladder found no ceiling: past the workload's own
+request demand, more budget cannot fail, so a ceiling would have to be sought
+by raising demand — which would no longer be the same workload, and is not
+what this item asks for.
+
+None of that is a statement about the truck. The synthetic ECU answers in a
+fixed `sleep`; the ECM's real response time is the thing that decides where
+the floor actually sits, and it is unmeasured. **No default was changed.**
 
 ## Findings the harness surfaced
 
@@ -265,6 +313,31 @@ source fix in their owning task.
    forward pass is ~4.7 ms of the 44) and the caveats are in
    `docs/inference-scheduling.md` (C08.1). Nothing was optimised — at 1 Hz
    the tick is 8–11 % of the period with zero missed deadlines.
+
+11. **Starvation was reported as an unsupported channel (fixed).** At
+   4 req/s against ~41 req/s of demand the scheduler never got three of
+   sixteen `fuel-map` channels onto the wire at all — zero timeouts, only 13
+   channels observed — and `limiting_stage` called it
+   `ecu_unsupported_channel`. On the truck that reads as "the ECM does not
+   serve this PID" about a PID it serves fine one rung up, and it is the
+   ECU-binding mistake this project has retracted most often. An unsupported
+   channel answers with a negative response or times out; a starved one does
+   neither. The classifier now requires headroom before blaming the ECU: a
+   saturated budget with zero timeouts is reported as
+   `bus_budget_request_pacing` with a note saying why. Found by the C10.12
+   sweep, which is the only thing that runs a budget low enough to see it.
+
+12. **Starvation has two names, and the overload scenario sat on the
+   boundary.** A channel answering too slowly yields `rate_shortfall`; one
+   that never reaches the wire yields `unanswered_input`. The C10.12 sweep
+   located the boundary for `fuel-map` between 4 and 6 req/s — and
+   `overload-rate`'s budget is 4, so which name appeared depended on host
+   timing, making both its regression test and its own
+   `expected_failures_met` flag flaky. `ScenarioSpec` now has
+   `expected_failures_any` (at least one of these must appear) beside
+   `expected_failures` (all of these must), and the scenario declares both
+   names. The test asserts the invariant instead: starvation is named and the
+   constraint is pacing.
 
 ## Replay (C10.9)
 

@@ -1,0 +1,335 @@
+{
+  "baseline_budget_req_s": 32.0,
+  "baseline_failures": [
+    "acquisition_gap",
+    "acquisition_gap"
+  ],
+  "budgets_requested": [
+    4.0,
+    6.0,
+    8.0,
+    12.0,
+    16.0,
+    20.0,
+    24.0,
+    32.0
+  ],
+  "ceiling_at_budget_req_s": null,
+  "constraint": null,
+  "constraint_failures": [],
+  "highest_holding_budget_req_s": 32.0,
+  "lowest_holding_budget_req_s": 8.0,
+  "report": "bus_budget_sweep",
+  "scenario": "fuel-map",
+  "steps": [
+    {
+      "achieved_vs_requested": {
+        "polled_channels_measured": 13,
+        "worst_achieved_over_requested": 0.9848,
+        "worst_channel": "TIMING_ADVANCE"
+      },
+      "batch_occupancy": {
+        "batched_requests": 49,
+        "mean_pids_per_batch": 5.88
+      },
+      "budget_req_s": 4.0,
+      "contract_failures": [
+        "unanswered_input",
+        "acquisition_gap"
+      ],
+      "contract_held": false,
+      "failures": [
+        "unanswered_input",
+        "acquisition_gap",
+        "unknown_loss_counters"
+      ],
+      "limiting_evidence": {
+        "budget_rps": 4.0,
+        "failures": [
+          "unanswered_input",
+          "acquisition_gap",
+          "unknown_loss_counters"
+        ],
+        "note": "unanswered channels with a saturated budget and no timeouts are starved, not unsupported",
+        "requests_sent": 56,
+        "utilisation": 0.912
+      },
+      "limiting_stage": "bus_budget_request_pacing",
+      "loss_identity_holds": true,
+      "new_failures_vs_baseline": [
+        "unanswered_input"
+      ],
+      "sequence_missing": 0,
+      "storage_dropped": 0,
+      "tuple_skew_max_s": 0.0,
+      "tuples_attempted": 40,
+      "tuples_complete": 33,
+      "verdict": "fail",
+      "verdict_with_adapter_ledger": "fail"
+    },
+    {
+      "achieved_vs_requested": {
+        "polled_channels_measured": 16,
+        "worst_achieved_over_requested": 0.25,
+        "worst_channel": "MAF"
+      },
+      "batch_occupancy": {
+        "batched_requests": 67,
+        "mean_pids_per_batch": 5.67
+      },
+      "budget_req_s": 6.0,
+      "contract_failures": [
+        "rate_shortfall"
+      ],
+      "contract_held": false,
+      "failures": [
+        "rate_shortfall",
+        "unknown_loss_counters"
+      ],
+      "limiting_evidence": {
+        "budget_rps": 6.0,
+        "failures": [
+          "rate_shortfall",
+          "unknown_loss_counters"
+        ],
+        "requests_sent": 76,
+        "utilisation": 0.825
+      },
+      "limiting_stage": "bus_budget_request_pacing",
+      "loss_identity_holds": true,
+      "new_failures_vs_baseline": [
+        "rate_shortfall"
+      ],
+      "sequence_missing": 0,
+      "storage_dropped": 0,
+      "tuple_skew_max_s": 0.0,
+      "tuples_attempted": 40,
+      "tuples_complete": 33,
+      "verdict": "fail",
+      "verdict_with_adapter_ledger": "fail"
+    },
+    {
+      "achieved_vs_requested": {
+        "polled_channels_measured": 16,
+        "worst_achieved_over_requested": 0.998,
+        "worst_channel": "SPEED"
+      },
+      "batch_occupancy": {
+        "batched_requests": 84,
+        "mean_pids_per_batch": 4.98
+      },
+      "budget_req_s": 8.0,
+      "contract_failures": [],
+      "contract_held": true,
+      "failures": [
+        "unknown_loss_counters"
+      ],
+      "limiting_evidence": {
+        "feature_stage_p95_ms": 50.367,
+        "heartbeat_max_ms": 67.107,
+        "heartbeat_p99_ms": 30.725,
+        "note": "no record was lost; the loop was held for this long per inference tick (C08: the feature stage runs on the loop by design)"
+      },
+      "limiting_stage": "inference_feature_stage_on_loop",
+      "loss_identity_holds": true,
+      "new_failures_vs_baseline": [],
+      "sequence_missing": 0,
+      "storage_dropped": 0,
+      "tuple_skew_max_s": 0.0,
+      "tuples_attempted": 41,
+      "tuples_complete": 34,
+      "verdict": "unverified",
+      "verdict_with_adapter_ledger": "pass"
+    },
+    {
+      "achieved_vs_requested": {
+        "polled_channels_measured": 16,
+        "worst_achieved_over_requested": 1.0,
+        "worst_channel": "COMMANDED_EQUIV_RATIO"
+      },
+      "batch_occupancy": {
+        "batched_requests": 90,
+        "mean_pids_per_batch": 4.69
+      },
+      "budget_req_s": 12.0,
+      "contract_failures": [
+        "acquisition_gap",
+        "acquisition_gap"
+      ],
+      "contract_held": true,
+      "failures": [
+        "acquisition_gap",
+        "acquisition_gap",
+        "unknown_loss_counters"
+      ],
+      "limiting_evidence": {
+        "feature_stage_p95_ms": 49.103,
+        "heartbeat_max_ms": 57.323,
+        "heartbeat_p99_ms": 31.23,
+        "note": "no record was lost; the loop was held for this long per inference tick (C08: the feature stage runs on the loop by design)"
+      },
+      "limiting_stage": "inference_feature_stage_on_loop",
+      "loss_identity_holds": true,
+      "new_failures_vs_baseline": [],
+      "sequence_missing": 0,
+      "storage_dropped": 0,
+      "tuple_skew_max_s": 0.0,
+      "tuples_attempted": 40,
+      "tuples_complete": 32,
+      "verdict": "fail",
+      "verdict_with_adapter_ledger": "fail"
+    },
+    {
+      "achieved_vs_requested": {
+        "polled_channels_measured": 16,
+        "worst_achieved_over_requested": 0.9998,
+        "worst_channel": "MAF"
+      },
+      "batch_occupancy": {
+        "batched_requests": 92,
+        "mean_pids_per_batch": 4.72
+      },
+      "budget_req_s": 16.0,
+      "contract_failures": [
+        "acquisition_gap",
+        "acquisition_gap"
+      ],
+      "contract_held": true,
+      "failures": [
+        "acquisition_gap",
+        "acquisition_gap",
+        "unknown_loss_counters"
+      ],
+      "limiting_evidence": {
+        "feature_stage_p95_ms": 54.018,
+        "heartbeat_max_ms": 68.412,
+        "heartbeat_p99_ms": 29.581,
+        "note": "no record was lost; the loop was held for this long per inference tick (C08: the feature stage runs on the loop by design)"
+      },
+      "limiting_stage": "inference_feature_stage_on_loop",
+      "loss_identity_holds": true,
+      "new_failures_vs_baseline": [],
+      "sequence_missing": 0,
+      "storage_dropped": 0,
+      "tuple_skew_max_s": 0.0,
+      "tuples_attempted": 41,
+      "tuples_complete": 33,
+      "verdict": "fail",
+      "verdict_with_adapter_ledger": "fail"
+    },
+    {
+      "achieved_vs_requested": {
+        "polled_channels_measured": 16,
+        "worst_achieved_over_requested": 1.0,
+        "worst_channel": "COMMANDED_EQUIV_RATIO"
+      },
+      "batch_occupancy": {
+        "batched_requests": 91,
+        "mean_pids_per_batch": 4.7
+      },
+      "budget_req_s": 20.0,
+      "contract_failures": [
+        "acquisition_gap",
+        "acquisition_gap"
+      ],
+      "contract_held": true,
+      "failures": [
+        "acquisition_gap",
+        "acquisition_gap",
+        "unknown_loss_counters"
+      ],
+      "limiting_evidence": {
+        "feature_stage_p95_ms": 54.723,
+        "heartbeat_max_ms": 64.471,
+        "heartbeat_p99_ms": 27.484,
+        "note": "no record was lost; the loop was held for this long per inference tick (C08: the feature stage runs on the loop by design)"
+      },
+      "limiting_stage": "inference_feature_stage_on_loop",
+      "loss_identity_holds": true,
+      "new_failures_vs_baseline": [],
+      "sequence_missing": 0,
+      "storage_dropped": 0,
+      "tuple_skew_max_s": 0.0,
+      "tuples_attempted": 41,
+      "tuples_complete": 33,
+      "verdict": "fail",
+      "verdict_with_adapter_ledger": "fail"
+    },
+    {
+      "achieved_vs_requested": {
+        "polled_channels_measured": 16,
+        "worst_achieved_over_requested": 1.0,
+        "worst_channel": "COOLANT_TEMP"
+      },
+      "batch_occupancy": {
+        "batched_requests": 90,
+        "mean_pids_per_batch": 4.69
+      },
+      "budget_req_s": 24.0,
+      "contract_failures": [
+        "acquisition_gap",
+        "acquisition_gap"
+      ],
+      "contract_held": true,
+      "failures": [
+        "acquisition_gap",
+        "acquisition_gap",
+        "unknown_loss_counters"
+      ],
+      "limiting_evidence": {
+        "feature_stage_p95_ms": 47.572,
+        "heartbeat_max_ms": 54.311,
+        "heartbeat_p99_ms": 29.359,
+        "note": "no record was lost; the loop was held for this long per inference tick (C08: the feature stage runs on the loop by design)"
+      },
+      "limiting_stage": "inference_feature_stage_on_loop",
+      "loss_identity_holds": true,
+      "new_failures_vs_baseline": [],
+      "sequence_missing": 0,
+      "storage_dropped": 0,
+      "tuple_skew_max_s": 0.0,
+      "tuples_attempted": 40,
+      "tuples_complete": 32,
+      "verdict": "fail",
+      "verdict_with_adapter_ledger": "fail"
+    },
+    {
+      "achieved_vs_requested": {
+        "polled_channels_measured": 16,
+        "worst_achieved_over_requested": 1.0,
+        "worst_channel": "COMMANDED_EQUIV_RATIO"
+      },
+      "batch_occupancy": {
+        "batched_requests": 92,
+        "mean_pids_per_batch": 4.72
+      },
+      "budget_req_s": 32.0,
+      "contract_failures": [
+        "acquisition_gap",
+        "acquisition_gap"
+      ],
+      "contract_held": true,
+      "failures": [
+        "acquisition_gap",
+        "acquisition_gap",
+        "unknown_loss_counters"
+      ],
+      "limiting_evidence": {
+        "feature_stage_p95_ms": 51.66,
+        "heartbeat_max_ms": 78.409,
+        "heartbeat_p99_ms": 34.989,
+        "note": "no record was lost; the loop was held for this long per inference tick (C08: the feature stage runs on the loop by design)"
+      },
+      "limiting_stage": "inference_feature_stage_on_loop",
+      "loss_identity_holds": true,
+      "new_failures_vs_baseline": [],
+      "sequence_missing": 0,
+      "storage_dropped": 0,
+      "tuple_skew_max_s": 0.0,
+      "tuples_attempted": 41,
+      "tuples_complete": 33,
+      "verdict": "fail",
+      "verdict_with_adapter_ledger": "fail"
+    }
+  ]
+}

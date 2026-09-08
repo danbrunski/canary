@@ -233,6 +233,14 @@ class ScenarioSpec:
     fault_at_elapsed_s: float | None = None
     required_evidence: tuple[str, ...] = ()
     expected_failures: tuple[str, ...] = ()
+    #: Names of which **at least one** must appear, for a scenario whose
+    #: outcome has more than one legitimate name. Starvation is the case that
+    #: forced this: a channel answering too slowly yields ``rate_shortfall``,
+    #: one never reaching the wire at all yields ``unanswered_input``, and the
+    #: C10.12 sweep measured the boundary between them sitting right at the
+    #: overload scenario's budget. Declaring one name made the scenario's own
+    #: "expected failure met" flag depend on host timing.
+    expected_failures_any: tuple[str, ...] = ()
     notes: str = ""
     known_answer: bool = True
 
@@ -257,6 +265,7 @@ class ScenarioSpec:
             "fault_at_elapsed_s": self.fault_at_elapsed_s,
             "required_evidence": list(self.required_evidence),
             "expected_failures": list(self.expected_failures),
+            "expected_failures_any": list(self.expected_failures_any),
             "notes": self.notes,
         }
 
@@ -464,7 +473,7 @@ SCENARIOS: tuple[ScenarioSpec, ...] = (
         ecu={"latency": 0.005},
         broadcast=QUIET,
         required_evidence=("requested contract fails by name",),
-        expected_failures=("rate_shortfall",),
+        expected_failures_any=("rate_shortfall", "unanswered_input"),
         notes="Sixteen channels at 4 Hz on a 4 req/s budget with batching off.",
     ),
     ScenarioSpec(

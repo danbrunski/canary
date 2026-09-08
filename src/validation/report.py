@@ -156,11 +156,20 @@ def build_report(artifacts: RunArtifacts) -> dict[str, Any]:
         "git_rev": git_revision(Path.cwd()).get("short"),
         "provenance": provenance(artifacts),
         "evidence": evidence,
-        "headline": headline(artifacts.scenario.expected_failures, evidence),
+        "headline": headline(
+            artifacts.scenario.expected_failures,
+            evidence,
+            expected_any=artifacts.scenario.expected_failures_any,
+        ),
     }
 
 
-def headline(expected_failures: tuple[str, ...], evidence: Mapping[str, Any]) -> dict[str, Any]:
+def headline(
+    expected_failures: tuple[str, ...],
+    evidence: Mapping[str, Any],
+    *,
+    expected_any: tuple[str, ...] = (),
+) -> dict[str, Any]:
     quality = evidence.get("quality") or {}
     adapter = quality.get("with_adapter_ledger") or {}
     inference = (evidence.get("timing") or {}).get("inference")
@@ -178,6 +187,7 @@ def headline(expected_failures: tuple[str, ...], evidence: Mapping[str, Any]) ->
         inference_summary = str(inference)
     failures = list(quality.get("failures") or [])
     expected_seen = [name for name in expected_failures if name in failures]
+    any_seen = [name for name in expected_any if name in failures]
     tuples = (adapter.get("tuples") or (quality.get("stop_sidecar") or {}).get("tuples")) or {}
     batching = (evidence.get("transport") or {}).get("batch_occupancy") or {}
     scheduler = batching.get("scheduler")
@@ -191,8 +201,13 @@ def headline(expected_failures: tuple[str, ...], evidence: Mapping[str, Any]) ->
         "quality_failures": failures,
         "quality_verdict_with_adapter_ledger": adapter.get("verdict"),
         "expected_failures": list(expected_failures),
-        "expected_failures_seen": expected_seen,
-        "expected_failures_met": sorted(expected_seen) == sorted(expected_failures),
+        "expected_failures_any": list(expected_any),
+        "expected_failures_seen": sorted({*expected_seen, *any_seen}),
+        # Every named failure must appear; of the "any" set, at least one must.
+        "expected_failures_met": (
+            sorted(expected_seen) == sorted(expected_failures)
+            and (bool(any_seen) or not expected_any)
+        ),
         "tuples_complete": tuples.get("complete"),
         "tuples_attempted": tuples.get("attempted"),
         "tuple_skew_max_s": (tuples.get("skew") or {}).get("max_s"),

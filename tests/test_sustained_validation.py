@@ -242,7 +242,14 @@ def test_scenario_table_covers_the_task_rows() -> None:
     ):
         assert required in rows, required
     assert scenario("overload-storage-stall").expected_failures == ("persistence_loss",)
-    assert scenario("overload-rate").expected_failures == ("rate_shortfall",)
+    # Starvation has two legitimate names and the overload budget sits on the
+    # boundary the C10.12 sweep measured, so the scenario declares both and
+    # requires one — not one name, and not both.
+    assert scenario("overload-rate").expected_failures == ()
+    assert scenario("overload-rate").expected_failures_any == (
+        "rate_shortfall",
+        "unanswered_input",
+    )
     assert all(spec.duration_s <= 60.0 for spec in SCENARIOS)
 
 
@@ -325,17 +332,31 @@ async def test_overloaded_storage_yields_persistence_loss_never_pass(tmp_path: P
     assert storage_queue["queue_high_water"] <= storage_queue["queue_max_size"], storage_queue
 
 
+#: Starvation has two legitimate names depending on how deep it is: a channel
+#: that answers too slowly yields ``rate_shortfall``, one that never reaches
+#: the wire at all yields ``unanswered_input``. The C10.12 sweep measured the
+#: boundary — ``fuel-map`` reports ``unanswered_input`` at 4 req/s and
+#: ``rate_shortfall`` at 6 — and the overload scenario's 4 req/s budget sits
+#: on it, so asserting one name made the test depend on host timing. What is
+#: invariant, and what the item actually asks for, is that starvation is
+#: named and attributed to pacing rather than to the ECU.
+_STARVATION_FAILURES = ("rate_shortfall", "unanswered_input")
+
+
 @pytest.mark.slow
-async def test_rate_overload_yields_rate_shortfall(tmp_path: Path) -> None:
+async def test_rate_overload_names_starvation_and_blames_pacing(tmp_path: Path) -> None:
     """C10.14 — sixteen channels at 4 Hz on a 4 req/s budget with batching
-    off cannot meet the contract; the verdict says so by name and nothing is
-    silently dropped to make the numbers look better."""
+    off cannot meet the contract; the verdict says so by name, the constraint
+    is pacing (never the ECU), and nothing is silently dropped to make the
+    numbers look better."""
     artifacts = await _run(scenario("overload-rate"), tmp_path, inference=False)
     report = build_report(artifacts)
     evidence = report["evidence"]
     quality = evidence["quality"]
     assert quality["verdict"] == "fail"
-    assert "rate_shortfall" in quality["failures"], quality["failures"]
+    named = [name for name in quality["failures"] if name in _STARVATION_FAILURES]
+    assert named, quality["failures"]
+    assert report["headline"]["expected_failures_met"] is True
     assert evidence["losses"]["storage_dropped"] == 0
     assert evidence["sequence_reconciliation"]["status"] == "reconciled"
     assert evidence["limiting_stage"]["stage"] == "bus_budget_request_pacing"
@@ -394,3 +415,232 @@ def test_models_dir_override_is_profile_scoped_like_the_daemon(tmp_path: Path) -
     assert overridden.daemon.models_dir.is_relative_to(tmp_path / "artifacts")
     # The profile slug the daemon scopes with is appended, not dropped.
     assert overridden.daemon.models_dir.name == default.daemon.models_dir.name
+
+
+def _sweep_report(*, failures: list[str], limiting: str, cadence_worst: float) -> dict[str, Any]:
+    return {
+        "headline": {
+            "quality_failures": failures,
+            "quality_verdict": "fail" if failures else "pass",
+            "quality_verdict_with_adapter_ledger": "fail" if failures else "pass",
+            "limiting_stage": limiting,
+            "tuples_complete": 40,
+            "tuples_attempted": 40,
+            "tuple_skew_max_s": 0.0,
+            "storage_dropped": 0,
+            "sequence_missing": 0,
+            "loss_identity_holds": True,
+            "batch_occupancy": None,
+        },
+        "evidence": {
+            "limiting_stage": {"stage": limiting, "evidence": {}},
+            "transport": {
+                "channel_cadence": [
+                    {
+                        "channel": "0X6A0",
+                        "kind": "broadcast",
+                        "requested_hz": 100,
+                        "achieved_hz": 1,
+                    },
+                    {
+                        "channel": "RPM",
+                        "kind": "pid",
+                        "requested_hz": 4.0,
+                        "achieved_hz": 4.0 * cadence_worst,
+                    },
+                ]
+            },
+        },
+    }
+
+
+def test_budget_sweep_changes_only_the_budget_between_rungs() -> None:
+    """C10.12 — a ladder whose rungs differ in more than one input measures
+    nothing, so ``spec_at_budget`` must carry every other field through."""
+    from dataclasses import asdict
+
+    from src.validation.sweep import spec_at_budget
+
+    base = scenario("fuel-map")
+    raised = spec_at_budget(base, 32.0)
+
+    assert raised.profile["bus_budget_override"] == 32.0
+    assert base.profile["bus_budget_override"] != 32.0, "the base spec was mutated"
+    before, after = asdict(base), asdict(raised)
+    before_profile = before.pop("profile")
+    after_profile = after.pop("profile")
+    assert before == after, "a field other than the profile changed between rungs"
+    assert {
+        key: value for key, value in before_profile.items() if key != "bus_budget_override"
+    } == {key: value for key, value in after_profile.items() if key != "bus_budget_override"}
+
+
+async def test_budget_sweep_reports_a_ceiling_only_above_a_rung_that_held(
+    monkeypatch: Any,
+) -> None:
+    """A failure below the workload's demand is a floor, not a ceiling. Only a
+    failure that appears *after* the contract has already held at a lower
+    budget is the thing C10.12 is looking for."""
+    from src.validation import sweep as sweep_mod
+
+    unknown = ["unknown_loss_counters"]
+    reports = {
+        # 8 is starved (below demand) — a floor, not the ceiling.
+        8.0: _sweep_report(
+            failures=[*unknown, "rate_shortfall"],
+            limiting="bus_budget_request_pacing",
+            cadence_worst=0.4,
+        ),
+        12.0: _sweep_report(failures=unknown, limiting="none_reached", cadence_worst=1.0),
+        16.0: _sweep_report(failures=unknown, limiting="none_reached", cadence_worst=1.0),
+        # 20 breaks again, this time after the contract held — a real ceiling.
+        20.0: _sweep_report(
+            failures=[*unknown, "persistence_loss"],
+            limiting="storage_sink",
+            cadence_worst=1.0,
+        ),
+        24.0: _sweep_report(failures=unknown, limiting="none_reached", cadence_worst=1.0),
+    }
+    seen: list[float] = []
+
+    async def fake_run(spec: Any, **kwargs: Any) -> Any:
+        seen.append(float(spec.profile["bus_budget_override"]))
+        return spec
+
+    monkeypatch.setattr(sweep_mod, "run_scenario_clean", fake_run)
+    monkeypatch.setattr(
+        sweep_mod, "build_report", lambda spec: reports[float(spec.profile["bus_budget_override"])]
+    )
+
+    result = await sweep_mod.run_budget_sweep(
+        scenario("fuel-map"),
+        [8.0, 12.0, 16.0, 20.0, 24.0],
+        label="t",
+        sessions_root=Path("unused"),
+        scratch=Path("unused"),
+    )
+
+    # 24 runs first as the max-headroom baseline and is never run twice.
+    assert seen == [24.0, 8.0, 12.0, 16.0, 20.0]
+    assert result.baseline_budget_req_s == 24.0
+    assert result.baseline_failures == []
+    assert result.lowest_holding == 12.0, "the starved 8 req/s rung must not count as holding"
+    assert result.ceiling_at == 20.0, "the ceiling is the failure above a rung that held"
+    assert result.constraint == "storage_sink"
+    assert result.constraint_failures == ["persistence_loss"]
+    text = sweep_mod.summarize_sweep(result)
+    assert "storage_sink" in text
+    assert "No queue was widened and no threshold relaxed" in text
+
+
+async def test_budget_sweep_never_blames_the_budget_for_a_baseline_failure(
+    monkeypatch: Any,
+) -> None:
+    """The real fuel-map sweep stopped at its opening rung because
+    ``acquisition_gap`` fires at *every* budget — a capture-start artefact
+    (members keep the previous profile's due time across activation), nothing
+    to do with pacing. Reporting "8 req/s is the ceiling" about that is the
+    shape of every retracted finding in this project. A failure the lowest
+    rung already has is baseline, and the ladder keeps climbing."""
+    from src.validation import sweep as sweep_mod
+
+    # acquisition_gap fires at every budget (capture-start artefact);
+    # rate_shortfall only where the budget is genuinely below demand.
+    gap = ["acquisition_gap", "acquisition_gap", "unknown_loss_counters"]
+    reports = {
+        8.0: _sweep_report(
+            failures=[*gap, "rate_shortfall"],
+            limiting="bus_budget_request_pacing",
+            cadence_worst=0.4,
+        ),
+        12.0: _sweep_report(failures=gap, limiting="feature_stage", cadence_worst=1.0),
+        16.0: _sweep_report(failures=gap, limiting="feature_stage", cadence_worst=1.0),
+    }
+
+    async def fake_run(spec: Any, **kwargs: Any) -> Any:
+        return spec
+
+    monkeypatch.setattr(sweep_mod, "run_scenario_clean", fake_run)
+    monkeypatch.setattr(
+        sweep_mod, "build_report", lambda spec: reports[float(spec.profile["bus_budget_override"])]
+    )
+
+    result = await sweep_mod.run_budget_sweep(
+        scenario("fuel-map"),
+        [8.0, 12.0, 16.0],
+        label="t",
+        sessions_root=Path("unused"),
+        scratch=Path("unused"),
+    )
+
+    assert result.baseline_failures == ["acquisition_gap", "acquisition_gap"]
+    assert result.baseline_budget_req_s == 16.0, "the baseline must be the most headroom"
+    # 8 is starved; 12 and 16 hold *despite* carrying the same two
+    # acquisition_gaps, because those are baseline and not about pacing.
+    assert [step.contract_held for step in result.steps] == [False, True, True]
+    assert result.steps[0].new_failures == ["rate_shortfall"]
+    assert result.lowest_holding == 12.0
+    assert result.ceiling_at is None, "a failure below every holding rung is a floor"
+    text = sweep_mod.summarize_sweep(result)
+    assert "the most headroom any rung" in text
+    assert "ran out of rungs" in text
+    assert "license no" in text or "licenses no" in text
+
+
+def test_starved_channels_are_not_reported_as_unsupported_by_the_ecu() -> None:
+    """C10.12 — at a budget far below demand the scheduler never gets some
+    channels onto the wire at all. The classifier used to call that
+    ``ecu_unsupported_channel``, which on the truck reads as "the ECM does not
+    serve this PID" about a PID it serves fine one rung up. A saturated budget
+    with zero timeouts means starved, not unsupported."""
+    from types import SimpleNamespace
+
+    from src.validation.evidence import limiting_stage
+
+    quality = {"failures": ["unanswered_input", "acquisition_gap"]}
+
+    def classify(budget: float) -> dict[str, Any]:
+        artifacts = SimpleNamespace(
+            started_wall=0.0,
+            ended_wall=10.0,
+            writer_stalls=0,
+            finalize={},
+            scheduler_metrics={
+                "bus_budget_requests_per_second": budget,
+                "requests_sent": 39,
+                "request_timeouts": 0,
+            },
+        )
+        return limiting_stage(artifacts, {}, quality, {})
+
+    # 39 requests in 10 s against a 4 req/s budget is saturated.
+    starved = classify(4.0)
+    assert starved["stage"] == "bus_budget_request_pacing", starved
+    assert "starved, not unsupported" in starved["evidence"]["note"]
+
+    # With headroom the same failure really is the ECU's answer.
+    supported = classify(40.0)
+    assert supported["stage"] == "ecu_unsupported_channel", supported
+
+
+def test_expected_failures_any_accepts_either_legitimate_name() -> None:
+    """A scenario whose outcome has two legitimate names must be able to say
+    so. Declaring one made ``expected_failures_met`` depend on host timing;
+    declaring both under ``expected_failures`` would have demanded *both*."""
+    from src.validation.report import headline
+
+    def met(failures: list[str]) -> bool:
+        return bool(
+            headline(
+                (),
+                {"quality": {"failures": failures}},
+                expected_any=("rate_shortfall", "unanswered_input"),
+            )["expected_failures_met"]
+        )
+
+    assert met(["rate_shortfall"]) is True
+    assert met(["unanswered_input"]) is True
+    assert met(["rate_shortfall", "unanswered_input"]) is True
+    assert met(["persistence_loss"]) is False
+    # An empty "any" set must not make every run vacuously met-or-unmet.
+    assert headline((), {"quality": {"failures": []}})["expected_failures_met"] is True

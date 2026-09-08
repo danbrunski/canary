@@ -667,9 +667,31 @@ def limiting_stage(
             "evidence": {"timeouts": timeouts, "utilisation": utilisation, "failures": failures},
         }
     if "unanswered_input" in failures:
+        # A saturated budget starves channels off the wire entirely, and a
+        # channel that was never *requested* cannot be evidence that the ECU
+        # does not serve it. An unsupported channel answers with a negative
+        # response or times out; a starved one does neither. Measured in the
+        # C10.12 sweep: fuel-map at 4 req/s (demand ~41) reported three
+        # channels unanswered, zero timeouts, and only 13 of 16 channels
+        # observed at all — attributing that to the ECU would have "proved"
+        # the ECM does not serve three PIDs it serves fine at 8 req/s.
+        if utilisation is not None and utilisation >= 0.8 and timeouts == 0:
+            return {
+                "stage": "bus_budget_request_pacing",
+                "evidence": {
+                    "budget_rps": budget,
+                    "requests_sent": sent,
+                    "utilisation": utilisation,
+                    "failures": failures,
+                    "note": (
+                        "unanswered channels with a saturated budget and no timeouts are "
+                        "starved, not unsupported"
+                    ),
+                },
+            }
         return {
             "stage": "ecu_unsupported_channel",
-            "evidence": {"failures": failures, "timeouts": timeouts},
+            "evidence": {"failures": failures, "timeouts": timeouts, "utilisation": utilisation},
         }
     heartbeat = timing.get("event_loop_heartbeat_overshoot") or {}
     p99 = heartbeat.get("p99_ms")
