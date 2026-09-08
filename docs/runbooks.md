@@ -3,7 +3,7 @@
 Task-oriented "how do I…" recipes. Each gives the **dashboard path** and the
 equivalent **CLI / `canaryctl`** command. `canaryctl` talks to the Pi's
 authenticated control plane over HTTP (no SSH); it reads the host + token from
-`~/.canary/env` or `--host` / `--token`. Read-only telemetry needs no token.
+`~/.canary/env` or `--host` / `--token`. Public telemetry GETs need no token.
 
 Honesty note: some flows are backend-complete but their dashboard panel or
 live-ECU path is still pending — that's called out per runbook rather than
@@ -66,7 +66,7 @@ confirmation step, and no automatic rescan. Task 6.5 is what adds those.
 
 - **Tooling (works today):**
   `scripts/record.py --obd-source canable --obd-dids 1208,F190 --obd-did-header 7E0`
-  issues read-only Mode 22 reads over the Canable into `pids.jsonl`.
+  issues Mode 22 diagnostic requests over the Canable into `pids.jsonl`.
   `tools/scan_constant_dids.py --session C0` sweeps the `10 C0` DID space;
   `data/dids.yaml` + `src/decode/dids.py` decode known DIDs.
 - **First-class live DID telemetry profiles + dashboard switching:** available

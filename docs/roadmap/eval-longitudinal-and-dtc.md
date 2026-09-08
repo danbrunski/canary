@@ -587,7 +587,7 @@ so").
 | DTC transport | `src/collection/can_obd_client.py:112 query_mode_03`, `:564 parse_dtc_payload` (03/07 same shape; 07/0A not yet implemented) |
 | DTC catalog/report | `src/decode/dtc_catalog.py:117 describe_dtc`, `:147 build_dtc_report`, `:132 DtcReport` — currently zero callers |
 | DTC service metadata | `src/collection/obd_registry.py:1193 SERVICE_REGISTRY` (0x02/03/06/07/0A, all `on_demand=True`); PID 0x01 MIL/count decoder `:379` |
-| Read-only guard | `src/collection/obd_collector.py:55 WRITE_COMMAND_MODES` {0x04,0x2E,0x2F}; `custom_pids.py:59 READ_ONLY_MODES` |
+| Legacy ELM guard | `src/collection/obd_collector.py:55 WRITE_COMMAND_MODES` {0x04,0x2E,0x2F}; `custom_pids.py:59 READ_ONLY_MODES` — path-local legacy restriction, not the active Canable policy |
 | OBD poll plan | `src/collection/obd_scheduler.py:398 build_poll_requests` (pid/did only today); tiers `:24` (`on_demand: 0.0` unused) |
 | FE placeholder | `nav.ts:24` (`diag-dtc`, `placeholder: true`); `Workbench.tsx:143-150` case; `PlaceholderPanel.tsx` |
 | Fault library | `src/preprocessing/anomaly_injection.py:60 AnomalyInjector` (spike/drift/dropout/stuck/scale), `InjectionWindow.labels():93` |

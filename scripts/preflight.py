@@ -21,9 +21,10 @@ Exit status is 0 only if every CRITICAL check passes, so it composes:
   .venv/bin/python scripts/preflight.py && \\
     .venv/bin/python scripts/record.py --obd-source canable ...
 
-It is read-only on the bus (only standard OBD read requests, the normal
-`obd_source: canable` traffic). With --bring-up it will (re)configure can0
-via `sudo ip link` using the documented bitrate before checking.
+Its probe sends only standard OBD data requests—the normal
+`obd_source: canable` traffic—and never modifies ECU non-volatile memory. With
+`--bring-up` it will (re)configure `can0` via `sudo ip link` using the
+documented bitrate before checking.
 """
 
 from __future__ import annotations

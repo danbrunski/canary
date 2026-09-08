@@ -140,8 +140,8 @@ hand if desired — never by automation.
 
 ## Explicitly out of scope
 
-- Anything on the vehicle's bus or a driven tune (that's UpRev + the
-  read-only roadmaps).
+- Anything on the vehicle's bus or a driven tune (that's UpRev + the main
+  CANary roadmaps).
 - Distribution of tools, keys, or extracted factory code.
 - Linking write capability into the `canary` monitoring daemon.
 - Any overnight/automated execution of the above.
@@ -155,5 +155,5 @@ hand if desired — never by automation.
   depends on skunkworks.
 - `AGENTS.md` / NFR-06 — no ECU non-volatile writes from `canary`. The
   constraint `canary-rw` must never violate by leaking into `canary`.
-  (NFR-06 formerly said "read-only bus", which was over-broad: ordinary
-  diagnostics transmit. Only the no-reflash half survives.)
+  (NFR-06 formerly prohibited all bus transmission, which was over-broad:
+  ordinary diagnostics transmit. Only the no-reflash boundary survives.)

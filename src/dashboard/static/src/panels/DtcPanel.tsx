@@ -9,8 +9,8 @@ import { formatTimestamp } from "../util/time";
 
 /** Trouble codes (Task 1.9): stored/pending/permanent DTCs from the daemon's
  *  periodic Mode 03/07/0A poll (Task 1.3), with lamp state and a staleness
- *  indicator. Read-only — there is no clear-codes control here or anywhere
- *  in the dashboard; that's an intentional design decision, not a gap.
+ *  indicator. This reporting panel has no dedicated clear-codes control; the
+ *  authenticated generic diagnostic-request path is a separate surface.
  *
  *  The lamp banner reads "MIL / CEL": MIL is the OBD-II spec name (and what
  *  the wire format, `mil_on`, and the `MIL_STATUS` channel are called), CEL

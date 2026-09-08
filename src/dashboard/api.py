@@ -1,34 +1,10 @@
-"""Read-only REST surface for the dashboard (Task 5.3).
+"""Dashboard, public observation, and authenticated control API.
 
-Four endpoints, all read-only, all backed by files the daemon already
-writes — no live producer wiring yet (the WebSocket layer in Task 5.4
-will do that). The goal here is to unblock the frontend so the dashboard
-can be built against a real backend without depending on Phase 5's full
-inference loop landing first.
-
-* ``GET /status`` — service health: storage path, free disk, the most
-  recent session directory observed under ``collection.storage_path``,
-  loaded model versions (best-effort: reads JSON model manifests if a
-  models directory is configured), and the loaded config's vehicle line.
-* ``GET /config`` — read-only echo of the loaded ``canary.yaml`` with
-  internal-only paths surfaced. Useful for "what is this Pi actually
-  running" diagnostics.
-* ``GET /anomalies?since=...`` — reads the ``AnomalyEventLogger``'s
-  ``anomalies-YYYY-MM-DD.jsonl`` files under a configured anomalies
-  directory; filters by ``since`` ISO-8601 timestamp.
-* ``GET /telemetry/latest?n=...`` — the most recent ``n`` rows from the
-  newest Parquet chunk in the newest session, as a list of
-  ``{timestamp, source, channel, value, unit}`` dicts. Pure file read;
-  no daemon coupling.
-
-The factory ``create_app(config, *, anomalies_dir, models_dir)`` keeps the
-app stateless — every request re-reads from disk (cheap for v1; if the
-anomalies file ever grows large enough to matter, the dashboard can ask
-with a ``since=`` filter to bound the work).
-
-Bind-host policy (Task 5.5) is enforced at the entry point that runs
-``uvicorn.run`` — not here, since the app itself doesn't know where it's
-mounted.
+The route packages separate unauthenticated status/telemetry/analysis GETs,
+authenticated ``/control/*`` operations, and live WebSocket streams. Control
+operations include capture and replay management, jobs, model publishing,
+diagnostic requests, and volatile vehicle actions; CANary never writes ECU
+non-volatile memory or performs a reflash.
 """
 
 from __future__ import annotations

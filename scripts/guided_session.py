@@ -86,7 +86,7 @@ PROTOCOL_REV: list[Step] = [
 ]
 
 # NT510-active protocol: drive the Foxwell NT510 (or similar) through its
-# read-only inventory + ABS live data + ECU/ABS actuator tests, tagging each
+# diagnostic inventory + ABS live data + ECU/ABS actuator tests, tagging each
 # action so the byte-vs-tag differential can find the signal(s) each test
 # moves. Many steps are tool/vehicle-specific — type `s` + Enter to skip any
 # your NT510 doesn't offer. Run record.py CAN-only (no --obd-port) so there's

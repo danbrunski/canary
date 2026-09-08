@@ -54,7 +54,7 @@ hardware:
     mount_orientation: auto
 
 collection:
-  # canable = one Canable does broadcast CAN + read-only OBD ISO-TP.
+  # canable = one Canable does broadcast CAN + active OBD/UDS ISO-TP.
   # elm327 = legacy python-obd path through hardware.elm327_port.
   # disabled = CAN frames only.
   obd_source: canable

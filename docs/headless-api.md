@@ -4,8 +4,8 @@ The Raspberry Pi runs one CANary daemon. That daemon collects telemetry,
 writes Parquet, runs model polling/inference, serves the dashboard, and owns
 the authenticated control API used from a laptop.
 
-The read-only dashboard endpoints are unauthenticated in v1. The `/control/*`
-endpoints require a bearer token from `CANARY_CONTROL_TOKEN`.
+The public dashboard GET endpoints are unauthenticated in v1. The
+`/control/*` endpoints require a bearer token from `CANARY_CONTROL_TOKEN`.
 
 This API is only reachable while the Pi is powered. The offline workflow for
 syncing sessions to a laptop/tablet, reviewing data while the truck is off,
@@ -182,7 +182,7 @@ Control endpoints:
 `GET /control/sessions?captures=true` lists only `_capture-*` sessions and
 tags each from its `capture_profile.json` sidecar; the default listing remains
 normal drive sessions only.
-| `POST /control/obd_request` | one-shot read-only OBD/UDS request — `{service, identifier?, header?, timeout_seconds?}`, whitelisted to Mode 01/02/03/06/07/09/0A/22 |
+| `POST /control/obd_request` | one-shot OBD/UDS request — `{service, identifier?, header?, timeout_seconds?}`; `service` accepts any byte, including state-changing and actuation services. CANary must never use it to write ECU non-volatile memory or reflash a module |
 | `GET /control/tuning-mode` / `POST /control/tuning-mode` | inspect / arm the focused high-rate tuning poll profile (narrows Mode 01 to a tuning channel set, suspends DID windows) |
 | `GET /control/feedback` / `POST /control/feedback` | read / record anomaly-feedback verdicts |
 | `GET /control/training-runs` | training-run ledger |
@@ -258,8 +258,8 @@ Vite proxies `/status`, `/config`, `/telemetry`, `/anomalies`, and `/ws/*` to
 
 ## Passive mode
 
-CANary's broadcast capture is listen-only by design (FR-02 / NFR-06), but the
-OBD side is not: the scheduler transmits tester requests (Mode 01/03/06/07/09/
+CANary's broadcast capture path is a pure sniffer, but the OBD side actively
+transmits tester requests (Mode 01/03/06/07/09/
 0A polls, Mode 22 DID reads, diagnostic session control) and ISO-TP flow
 control. That is normally harmless — an ECU answers diagnostic requests all
 day.

@@ -178,7 +178,7 @@ session-death quirk).
   0x23D verdicts (pedal `stable`, airflow `unstable` despite r ≈ 0.98).
 - [x] **2.5 — CLI + MCP surface.** `scripts/tuning_report.py
   --delivery-error --compare A B ...` for the laptop; MCP
-  `get_delivery_error` / `compare_tuning_sessions` (read-only) for agents,
+  `get_delivery_error` / `compare_tuning_sessions` (analysis-only) for agents,
   following the `get_behavior_deviations` local-tool pattern (requires
   `CANARY_CONFIG`, no daemon round-trip). Docs: `docs/mcp-server.md` table
   + a "tuning analysis" subsection in `docs/headless-api.md` cross-linking

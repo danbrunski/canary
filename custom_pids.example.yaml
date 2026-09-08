@@ -11,7 +11,7 @@
 #   mode          request service — 0x01 (Mode 01), 0x09 (Mode 09), or
 #                 0x22 (UDS ReadDataByIdentifier). Write services (0x04,
 #                 0x2E, 0x2F) are rejected at load time: custom PIDs are
-#                 read-only by construction.
+#                 limited to diagnostic data-query services by construction.
 #   pid           the PID/DID identifier (0-0xFFFF) requested under `mode`
 #   formula       a sandboxed expression over the response bytes, Torque's
 #                 convention: A, B, C... bind to payload[0], payload[1],

@@ -11,6 +11,19 @@ procedure.
 
 ## Results, 2026-08-07 (supersedes Phases 1-4 below)
 
+### 2011 Xterra DBC lead reviewed 2026-09-08
+
+An operator-supplied 2011 Xterra DBC labels `0x284`/`0x285` as two wheel
+speeds each. It is useful hypothesis evidence but does not overturn the 2008
+result below: its second signal overlaps the first at Intel start bit 15, so
+strict DBC parsing rejects it, and the existing 2008 cornering analysis does
+not show four-corner behavior in the aligned byte fields. It also gets known
+2008 RPM endianness and coolant decode constants wrong. Do not import or
+promote those wheel labels without a 2008 same-instant yaw validation. Full
+cross-check and the genuinely useful new candidates (`0x231`, `0x23E`,
+`0x280`, `0x354`) are recorded in
+`data/analyses/2026-09-08-2011-xterra-dbc-review.md`.
+
 ### Factory topology: ABS on CAN, with a separate K-line diagnostic path
 
 The factory manuals remove the ambiguity left by the capture:
@@ -157,10 +170,10 @@ updated. Do not repeat it. The remaining discriminating observation is pin 7:
    would leave passive CAN decoding as the explanation and make the bit/delta
    search the primary next step.
 
-If pin-7 activity is confirmed, the useful engineering target is a passive or
-read-only DDL2/K-line capture path and protocol decode. If pin 7 is quiet, the
-stored passive-CAN search takes priority. Continuing to guess UDS CAN headers
-is lower value in either case.
+If pin-7 activity is confirmed, the useful engineering target is a passive
+sniffer or active diagnostic DDL2/K-line client and protocol decode. If pin 7
+is quiet, the stored passive-CAN search takes priority. Continuing to guess UDS
+CAN headers is lower value in either case.
 
 ### Tooling defect found
 
@@ -214,7 +227,7 @@ manual later showed that ABS diagnosis is DDL2 K-line instead.
 
 `tools/scan_constant_dids.py` already supports this — `--header` is documented
 with the historical guess "7E0 = engine; trans 7E1, ABS 7E2, …". That mapping
-is not an Xterra FSM fact. The tool is read-only and service 0x22 only.
+is not an Xterra FSM fact. This scanner issues service 0x22 requests only.
 
 ```bash
 # Try the default session FIRST. The ECM's 0xC0 gate is an ECM quirk; most
@@ -522,9 +535,8 @@ tool.
 ## What this cannot answer
 
 Whether the ABS module's internal circumference or track-width constants can
-be *changed*. Nothing here writes: the OBD client's allowlist is Modes
-01/02/03/06/07/09/0A/22, enforced at `CanObdClient.query`, and the write
-services (0x2E, 0x2F, 0x31) are outside it by design. This protocol
-establishes what the module measures, which is the prerequisite for deciding
-whether the SLIP behaviour is geometry or a fault — a tone ring disturbed
-during the swap presents similarly and is a mechanical fix.
+be *changed*. This protocol only invokes diagnostic reads even though the
+shared Canable request path accepts any service byte. It establishes what the
+module measures, which is the prerequisite for deciding whether the SLIP
+behaviour is geometry or a fault — a tone ring disturbed during the swap
+presents similarly and is a mechanical fix.

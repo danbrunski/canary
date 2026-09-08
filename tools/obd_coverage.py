@@ -10,8 +10,10 @@ Usage:
   tools/obd_coverage.py --port /dev/ttyUSB0
   tools/obd_coverage.py --port /dev/ttyUSB0 --compare record-default
 
-Read-only (the ``enforce_read_only`` wrapper still applies — no Mode 04
-writes are possible). Exits with rc 1 if the adapter doesn't connect.
+This legacy ELM tool only queries PID support; its path-local
+``enforce_read_only`` wrapper means Mode 04 is unavailable here. Exits with rc
+1 if the adapter doesn't connect. The active Canable request path is not
+restricted this way.
 """
 
 from __future__ import annotations

@@ -1,10 +1,11 @@
-"""Ad-hoc read-only OBD/UDS diagnostic request (``obd_request`` tool).
+"""Ad-hoc OBD/UDS diagnostic or control request (``obd_request`` tool).
 
-Backs ``POST /control/obd_request``. Every field trip so far that needed a
-one-off diagnostic read (a Mode 06 MID, a calibration-ID Mode 09 InfoType, an
-unbound Mode 22 DID) meant arming passive mode, SSHing to the Pi, and
-hand-writing a script against :class:`~src.collection.can_obd_client.CanObdClient`.
-This module is that script, made callable.
+Backs ``POST /control/obd_request``. The service byte is intentionally
+unfiltered: routine reads, session control, security access, memory reads, and
+volatile control/actuation requests all use this path. CANary's boundary is no
+ECU non-volatile-memory writes or reflashing. This module makes the same
+one-shot client previously hand-written during field work callable through the
+authenticated control plane.
 
 Bus access model: rather than reach into the daemon's own collector thread
 (which owns one long-lived ``Bus`` handle across its whole poll loop), each

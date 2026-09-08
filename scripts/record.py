@@ -14,7 +14,7 @@ Output (per session):
 Default CAN-only recording never transmits on the bus.
 
 With --obd-source canable, the same Canable records broadcast frames and issues
-read-only OBD ISO-TP requests, writing decoded readings to pids.jsonl. With
+active OBD ISO-TP requests, writing decoded readings to pids.jsonl. With
 --obd-port / --obd-source elm327, the legacy ELM327 path runs in a supervised
 daemon thread.
 """
@@ -115,7 +115,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help=(
             "OBD sidecar source. `canable` uses the same CAN adapter for "
-            "read-only ISO-TP Mode 01/22 requests. `elm327` uses the legacy "
+            "ISO-TP Mode 01/22 requests. `elm327` uses the legacy "
             "python-obd path. Default: elm327 when --obd-port is set, "
             "otherwise collection.obd_source from the config."
         ),

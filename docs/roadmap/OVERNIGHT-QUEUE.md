@@ -213,9 +213,10 @@ backend features), plus the unchecked tail of
   a scheduled retrain can never auto-`active`.
 - **6.38 Tauri/Electron packaging: not queued** — heavy new dependency
   surface; the repo-runner stays. Revisit interactively.
-- **6.5 Mode 04 clear-DTC: not queued** — it is a deliberate write-path
-  exception to read-only CANary and needs an explicit operator decision
-  plus the truck. Leave unchecked; do not implement overnight.
+- **6.5 Mode 04 clear-DTC: not queued** — the generic authenticated request
+  path can already send Mode 04; this task is the dedicated UI/confirmation/
+  rescan workflow and needs the truck. Leave unchecked; do not implement
+  overnight.
 - **All IMU work targets `source: disabled` default** and must be fully
   testable with synthetic data (BNO055 is the assumed sensor per the
   doc). New committees land `trainable=False` compute-but-exclude.

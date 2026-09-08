@@ -8,24 +8,23 @@ version now that a full hypothesis loop has closed (`ECM_RPM`).
 ## The rig
 
 The current baseline rig is the Canable on the OBD-II port. It handles
-broadcast CAN capture plus read-only OBD Mode 01 and selected Mode 22 DID
-polling. Add the NT510 when the session needs human-driven diagnostic stimulus.
+broadcast CAN capture plus active OBD Mode 01 and selected Mode 22 DID polling.
+Add the NT510 when the session needs human-driven diagnostic stimulus.
 The ELM327 path remains only as legacy fallback/emulator coverage.
 
 - **Canable** (knockoff USB-CAN-FD, CANable2 **candleLight/gs_usb** firmware) —
   the primary interface. The Pi opens it via python-can's `socketcan` backend
   on the native `can0` interface at 500 kbps classic CAN for broadcast capture.
-  `tools/can_obd_probe.py` also uses it as a read-only ISO-TP OBD requester for
+  `tools/can_obd_probe.py` also uses it as an ISO-TP OBD requester for
   Mode 01 / 03 / 09. The streaming Canable-native OBD collector
   (`record.py --obd-source canable`) interleaves Mode 01 and selected Mode 22
   DID polling while writing the same `pids.jsonl` sidecar the legacy ELM path
   used. (The adapter was originally flashed with slcan firmware; that is
   superseded — slcan exposes only `/dev/ttyACM0` and breaks the headless
   `can0.service` automation. See `docs/canable-firmware.md`.)
-  In the default active read-only OBD mode the recorder transmits diagnostic
-  read requests and the adapter emits per-frame ACK bits, so this is not silent
-  bus-monitoring — but ACK + read-only OBD on a multi-node vehicle bus is benign
-  and is exactly what every scan tool on the port already does. For true passive
+  In the default active-diagnostics mode the recorder transmits diagnostic
+  requests and the adapter emits per-frame ACK bits, so this is not silent bus
+  monitoring. That traffic is normal scan-tool operation. For true passive
   capture, gs_usb supports kernel `listen-only` (see `docs/can-setup.md`). See
   `can_collector.bus_factory`.
 - **ELM327** (CH340 clone) — legacy automatable tester. It previously polled
@@ -116,7 +115,7 @@ load* — on-road drives, not just no-load revs in neutral. See
      `RPM × (1 + STFT/100)`).
    - `tools/scan_constant_dids.py --port …`: sweep Mode 22 DID space over ≥2
      engine states; splits varying (candidate live signals) from constant
-     (calibration). Read-only — service 0x22 only. This currently uses the
+     (calibration). This scanner issues service 0x22 requests only. It currently uses the
      legacy ELM327 path; selected live DID polling is already available through
      `record.py --obd-source canable --obd-dids`.
 4. **FSM cross-reference** — `tools/decode_isotp.py` uses `data/fsm/signals.json`

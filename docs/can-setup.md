@@ -2,17 +2,18 @@
 
 CANary has two SocketCAN operating modes:
 
-- Active read-only OBD + CAN capture: `collection.obd_source: canable`
-  (default). CANary transmits standard diagnostic read requests for Mode 01 /
-  configured Mode 22 data and passively observes broadcast CAN frames. Do not
-  set SocketCAN `listen-only` in this mode or OBD polling cannot work.
+- Active diagnostics + CAN capture: `collection.obd_source: canable`
+  (default). CANary transmits diagnostic requests, ISO-TP flow-control frames,
+  and any ad-hoc diagnostic/control request submitted through the control API,
+  while also observing broadcast CAN frames. Do not set SocketCAN
+  `listen-only` in this mode or active diagnostics cannot work.
 - Passive CAN-only capture: `collection.obd_source: disabled`. CANary never
   sends frames in this mode, so SocketCAN `listen-only` is the right kernel
   guardrail.
 
 ## Bring Up `can0`
 
-Default active read-only OBD + CAN mode:
+Default active diagnostics + CAN capture mode:
 
 ```bash
 sudo ip link set can0 down

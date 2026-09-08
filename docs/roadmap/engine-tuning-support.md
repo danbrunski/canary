@@ -70,19 +70,19 @@ find another route to the same quantity rather than accepting the
 dependency.
 
 **Division of labor — current state, 2026-08-10, not a fixed
-assignment.** UpRev owns flashing and every write to the ECU. It also
+assignment.** UpRev owns calibration flashing and every ECU non-volatile-memory
+write. It also
 still owns some consult-protocol logging (Cipher: knock strength, base
 fuel schedule), though that half is actively migrating: injector pulse
 width, cam angle and A/F sensor voltage are already CANary-native via
 Mode 22, and only **base fuel schedule** remains without a CANary route
 (see the BFS note in 3.3).
 
-CANary is presently read-only with respect to the calibration — it logs
-every drive, aggregates AFR error and fuel trims into binned correction
-surfaces, and guards against post-flash regressions. No tuning action
-flows through it **today**, and NFR-06 stands as written; that is a
-description of where the project is, not a permanent ceiling on what it
-may become.
+CANary does not modify the calibration: it logs every drive, aggregates AFR
+error and fuel trims into binned correction surfaces, and guards against
+post-flash regressions. Diagnostic requests, session control, security access,
+memory reads, and volatile control actions remain normal CANary operations;
+only ECU non-volatile-memory writes and reflashing belong outside this daemon.
 
 **Vehicle mod state** (profile-level facts for the dev vehicle — keep
 out of shared code paths):
@@ -130,8 +130,9 @@ volumetrically.
 - Whole-repo gate before every commit: `ruff check . && ruff format
   --check . && mypy src && pytest` (+ `pnpm test` / `pnpm typecheck`
   for FE work).
-- **Read-only on the bus (NFR-06), permanently.** Mode 01/02/06/09/22
-  reads only. UpRev hardware is the sole writer, on its own cable.
+- **No ECU non-volatile-memory writes from CANary (NFR-06), permanently.**
+  Diagnostic reads, session control, security access, and volatile control
+  actions are in scope. UpRev remains the calibration/reflash tool.
 - Nothing Xterra-specific in shared code: capture profiles, PID sets,
   and bin axes are config/profile data, not constants.
 - **Tuning drives are not "normal" telemetry.** Flat-AFR-target test

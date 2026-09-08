@@ -16,7 +16,7 @@ at idle, pass 2 while revving / moving): DIDs whose value differs between passes
 are "varying" (candidate live signals — injector PW, timing, etc.), DIDs that
 answer in every pass but never change are "constant" (calibration / config).
 
-READ-ONLY — only UDS service 0x22 (ReadDataByIdentifier) is sent. Whatever
+This scanner sends only UDS service 0x22 (ReadDataByIdentifier). Whatever
 adapter is used here is request-only; don't run this alongside a broadcast
 recording on the same single-consumer device (e.g. one slcan node).
 
@@ -54,7 +54,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         prog="scan_constant_dids",
         description=(
             "Sweep Mode 22 DIDs and classify varying vs. constant across passes "
-            "taken at different engine states. Read-only (service 0x22)."
+            "taken at different engine states. Sends service 0x22 only."
         ),
     )
     transport = parser.add_mutually_exclusive_group(required=True)

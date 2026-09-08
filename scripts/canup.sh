@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Idempotent SocketCAN bring-up for the Canable, for the active read-only
+# Idempotent SocketCAN bring-up for the Canable, for the active-diagnostics
 # OBD + CAN capture mode (docs/can-setup.md). Safe to re-run; safe to run
 # after a mid-drive USB re-enumeration to recover the link by hand.
 #

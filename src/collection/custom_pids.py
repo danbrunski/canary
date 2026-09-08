@@ -2,14 +2,14 @@
 
 Torque Pro's headline extensibility feature is custom PIDs: the operator
 points the tool at an arbitrary Mode 01 / 09 / 22 request and writes a
-formula over the response bytes. This module is the read-only,
-safety-bounded equivalent:
+formula over the response bytes. This module is the data-query,
+formula-sandboxed equivalent:
 
 * :class:`CustomPid` — a strict, typed definition (name, request, formula,
-  unit, bounds, category, dashboard hint, poll tier). Only the read-only
-  services 0x01 / 0x09 / 0x22 are accepted; a write mode (0x04 / 0x2E /
-  0x2F) raises at validation time, so a malicious or fat-fingered CSV
-  can't smuggle a command past CANary's read-only default.
+  unit, bounds, category, dashboard hint, poll tier). This feature accepts
+  only the data-query services 0x01 / 0x09 / 0x22 because its schema describes
+  a polled value, not an action. General diagnostic/control requests use the
+  separate authenticated `obd_request` path.
 * :func:`evaluate_formula` — an AST-walking evaluator with a node and call
   allow-list. No attribute access, indexing, comprehensions, lambdas,
   imports, or arbitrary calls: the only callables are a fixed safe set
@@ -58,9 +58,9 @@ __all__ = [
 
 DEFAULT_CUSTOM_PIDS_PATH = Path("data/custom_pids.yaml")
 
-#: Services CANary may request for a custom PID. Read-only by construction —
-#: 0x04 (clear DTC), 0x2E (write data), 0x2F (IO control) are *not* here, so
-#: a custom PID can never become a write.
+#: Services that can define a custom *polled value*. The legacy public name is
+#: retained for compatibility; 0x04 (clear DTC), 0x2E (write data), and 0x2F
+#: (IO control) are actions rather than PIDs and use the general request path.
 READ_ONLY_MODES: frozenset[int] = frozenset({0x01, 0x09, 0x22})
 
 
@@ -238,7 +238,7 @@ class _Strict(BaseModel):
 
 
 class CustomPid(_Strict):
-    """One user-defined read-only request + decode formula."""
+    """One user-defined data request plus decode formula."""
 
     name: str  # canonical channel name (telemetry key)
     display_name: str

@@ -63,7 +63,10 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
 - [x] **1.1 — PID registry.** `src/collection/pids.py` — declarative list of
 - [x] **1.2 — Async collector.** `src/collection/obd_collector.py` using
 - [x] **1.3 — Reconnect logic.** Detect adapter disconnect, retry with
-- [x] **1.4 — Read-only enforcement.** `src/collection/obd_collector.py` —
+- [x] **1.4 — Legacy ELM command guard.** `src/collection/obd_collector.py` —
+  the legacy adapter path still blocks Mode 04/2E/2F. This is a path-local
+  restriction, not CANary's bus policy; the active Canable path accepts any
+  service byte.
 - [x] **1.5 — Integration tests with ELM327-emulator.** `tests/test_obd_emulator.py`
 
 ### 1B. CAN collector (FR-02)
@@ -226,8 +229,9 @@ ignition surface, VE proxy, coolant warmup curve, idle stability, etc. —
 from runtime observation rather than from ECU flash. These models then
 feed anomaly detection (deviation features) and the dashboard's
 performance panel (task 5.12). Approach, scope guardrails, and rationale
-documented in `docs/behavior-model-inference.md`. Strictly read-only —
-no Mode 23 / Mode 27 / flash dumps / writes.
+documented in `docs/behavior-model-inference.md`. Fitting is observational and
+does not modify ECU non-volatile memory; deep reads, session control, and
+security access remain in scope for acquiring inputs.
 
 - [x] **4.E.1 — Behavior-model schema.** `src/decode/behavior_models.py`
 - [x] **4.E.2 — 1D surface inferer.** `src/analysis/surface_1d.py` —
@@ -299,7 +303,8 @@ no Mode 23 / Mode 27 / flash dumps / writes.
 
 ### 5B. FastAPI backend (FR-08)
 
-- [x] **5.3 — REST endpoints.** `src/dashboard/api.py` — read-only
+- [x] **5.3 — REST endpoints.** `src/dashboard/api.py` — public observation
+  endpoints plus the authenticated `/control/*` surface
 - [x] **5.4 — WebSocket stream.** `src/dashboard/broadcast.py` (in-memory
 - [x] **5.5 — Bind-host entry point.** `scripts/serve_dashboard.py` is
 
@@ -411,9 +416,9 @@ training/model-health visualization, and Torque Pro parity.
   plus the new DTC-reader tests in Q8/Q14. (FR-08)
 - [ ] **6.5 — Parked-only clear-DTC action.** Implement optional Mode 04 behind
   the authenticated control plane, a parked interlock, explicit browser/CLI
-  confirmation, audit logging, and an automatic post-clear rescan. This is a
-  deliberate exception to CANary's read-only default because Torque parity
-  requires it; it must never be available while driving.
+  confirmation, audit logging, and an automatic post-clear rescan. The generic
+  `POST /control/obd_request` path can already send Mode 04; this task is the
+  dedicated operator workflow, not an exception to the platform's bus policy.
 - [x] **6.6 — Trip, fuel, and performance calculations.** `src/analysis/derived.py`
 - [~] **6.7 — GPS and route logging.** *Largely shipped:*
   `src/collection/gps_collector.py` + `gps_nmea.py`, `GpsConfig`,
@@ -485,7 +490,7 @@ training/model-health visualization, and Torque Pro parity.
   `/status.obd_scheduler.did_profile`. Decoding to `did:<NAME>` channels
   was already wired end-to-end (`src/decode/dids.py` + preprocessing/live).
 - [~] **6.16 — DID map dashboard/workbench.** Backend `GET /dids` serves
-  the read-only `data/dids.yaml` catalog (+tests); `DidWorkbenchPanel`
+  the display-only `data/dids.yaml` catalog (+tests); `DidWorkbenchPanel`
   (Diagnostics▸Nissan DIDs) renders it — hex id, name, confidence
   (coloured), unit, scale/offset, plausible range, evidence notes. The
   parked-only live sweep launcher + candidate-DID capture is gated on the
@@ -496,11 +501,11 @@ training/model-health visualization, and Torque Pro parity.
   exchanges, tag screen/actions, compare against `data/fsm/signals.json`, and
   generate candidate DID/control maps with evidence. This should produce data
   review artifacts, not immediately publish unreviewed commands.
-- [ ] **6.18 — Safe diagnostic test executor.** Implement allowlisted,
-  parked-only proprietary diagnostic tests and actuator commands with module,
+- [ ] **6.18 — Guided diagnostic test executor.** Implement catalogued
+  proprietary diagnostic tests and actuator commands with module,
   service, payload, expected response, preconditions, countdown, audit log,
-  timeout, post-test restore, and post-test rescan. Do not expose an arbitrary
-  raw CAN/UDS send endpoint in the dashboard or API.
+  timeout, post-test restore, and post-test rescan. The generic authenticated
+  OBD/UDS request endpoint remains available for ad-hoc work.
 - [x] **6.19 — Proprietary protocol regression corpus.** Landed:
   `tests/test_protocol_regression_corpus.py` built entirely from real
   captured bytes in `data/sessions/*/frames.log` (per-fixture
@@ -513,7 +518,7 @@ training/model-health visualization, and Torque Pro parity.
   exchange exists anywhere in the corpus — manual trans, no TCM
   responses). IO-control identification uses a constructed fixture,
   verified as the only option — no real Mode 0x2F exchange exists
-  anywhere in this repo's captured data (read-only collection layer).
+  anywhere in this repo's captured data.
 
 ### 6D. Data export, training operations, and anomaly tuning
 
@@ -1241,8 +1246,7 @@ voltage sag in hardware. The watchdog re-arms when the bus returns.
   polkit rule or a tight sudoers entry) via `scripts/install_pi.sh` +
   `docs/pi-setup.md`. Confirm systemd stops `canary.service` through the
   existing SIGTERM/graceful path as part of poweroff so shutdown isn't
-  double-handled. Document this as the *one* outward action the otherwise
-  read-only daemon is permitted, scoped to poweroff only. (Effort: S)
+  double-handled. (Effort: S)
 
 - [ ] **10.4 — `power` config block + safe defaults (P1).** Add to
   `src/config.py` and every `canary*.yaml`: `auto_shutdown_enabled`

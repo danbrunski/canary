@@ -56,9 +56,12 @@ detecting subtle signs of trouble before they become failures.
 - **MCP server** — the daemon's read/control surface exposed to MCP-speaking
   agents (Claude Code and others), including ad-hoc SQL over the Parquet
   store.
-- **Transmits on the bus** — active OBD polling sends diagnostic requests,
-  and the ad-hoc request path accepts any service, including write and
-  actuation commands. Broadcast capture itself is sniff-only.
+- **Active diagnostics** — OBD polling, ISO-TP flow control, session control,
+  security access, memory reads, and ad-hoc diagnostic/control requests all
+  transmit on the bus. The request path accepts any service byte, including
+  state-changing and actuation commands. CANary's hard boundary is narrower:
+  it never writes ECU non-volatile memory or reflashes a module. Broadcast CAN
+  capture itself remains sniff-only.
 
 See [`docs/CANary-overview.md`](docs/CANary-overview.md) for the full architecture,
 requirements, and development phases.
@@ -69,7 +72,7 @@ requirements, and development phases.
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - For on-vehicle use: Raspberry Pi 5 plus a SocketCAN adapter — Waveshare
   2-CH CAN HAT (current in-vehicle rig) or Canable USB. OBD reads run through
   the CAN-native client; no ELM327 is required.
@@ -96,11 +99,13 @@ overrides, and verification commands.
 ### Configure
 
 ```bash
-cp canary.example.yaml canary.yaml
+cp canary.dev.example.yaml canary.yaml
 # edit canary.yaml — vehicle, hardware ports, storage path, model settings
 ```
 
-`canary.yaml` is gitignored; commit changes to `canary.example.yaml` instead.
+`canary.yaml` is gitignored; commit shared development-template changes to
+`canary.dev.example.yaml` and deployment-template changes to
+`canary.pi.example.yaml` instead.
 
 ### Run
 
@@ -128,8 +133,9 @@ sudo nano /etc/canary/canary.yaml
 sudo systemctl start canary
 ```
 
-The daemon serves the read-only API and browser dashboard on the configured
-LAN address, defaulting to `http://<pi-hostname-or-ip>:8000/`. A companion
+The daemon serves the browser dashboard, public observation endpoints, and an
+authenticated control API on the configured LAN address, defaulting to
+`http://<pi-hostname-or-ip>:8000/`. A companion
 **MCP server** (Model Context Protocol) runs as a separate systemd unit at
 `http://<pi-hostname-or-ip>:8001/mcp` and exposes the same surface — plus
 ad-hoc Parquet SQL — to Claude Code, Qwen-Agent, and other MCP-speaking
@@ -141,7 +147,7 @@ From a laptop, `scripts/canaryctl.py` drives the authenticated control API:
 
 ```bash
 export CANARY_HOST=http://192.168.0.230:8000
-export CANARY_TOKEN='<token from /etc/canary/control.token>'
+export CANARY_CONTROL_TOKEN='<token from /etc/canary/control.token>'
 scripts/canaryctl.py preflight
 scripts/canaryctl.py capture start --purpose "next drive" --protocol drive
 scripts/canaryctl.py tag highway_cruise
@@ -151,9 +157,8 @@ scripts/canaryctl.py jobs start corpus_report
 
 ### Test / lint / typecheck
 
-**Before every commit run the one-command CI-parity gate** — it runs exactly
-what CI (`.github/workflows/ci.yml`) runs, in the same order, so "green
-locally" means "green in CI":
+**Before every commit run the backend CI-parity gate** — it runs the same
+lint, format, type, and pytest commands as CI's Python job, in the same order:
 
 ```bash
 scripts/check.sh          # ruff check . → ruff format --check . → mypy → pytest -v
@@ -179,6 +184,22 @@ commands, if you need them individually:
 .venv/bin/pytest
 ```
 
+For dashboard changes, also run the frontend checks used by CI:
+
+```bash
+cd src/dashboard/static
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test
+pnpm e2e
+```
+
+Playwright's Chromium browser must be installed once before `pnpm e2e`; see
+[`src/dashboard/static/README.md`](src/dashboard/static/README.md) for the
+frontend development workflow. During Python iteration, use
+`.venv/bin/python -m pytest -m "not integration and not slow"`; reserve bare
+pytest for the commit gate.
+
 Do not wrap FastAPI/Starlette `TestClient` tests in GNU `timeout` inside the
 Codex sandbox. `timeout 90s .venv/bin/pytest ...` can deadlock AnyIO's blocking
 portal and make simple in-process API tests look hung even though
@@ -191,7 +212,7 @@ the same pytest command directly before debugging app code.
 
 ```
 canary/
-├── canary.example.yaml       # Template config (copy → canary.yaml)
+├── canary.dev.example.yaml   # Development template (copy → canary.yaml)
 ├── canary.pi.example.yaml    # Pi/systemd deployment template
 ├── pyproject.toml
 ├── docs/
@@ -226,16 +247,19 @@ canary/
 
 ## Status
 
-The software stack is well past the original Phase 1 collection milestone:
-preprocessing, per-mode Isolation Forest, the GRU-D masking-aware LSTM
-autoencoder (TCN selectable), behavior residuals fused into a calibrated
-severity score, sensor committees, GPS ingestion, bindings decode,
-behavior-model surfaces, per-VIN vehicle profiles, dashboard, alert logging,
-and model hot-swap are all implemented. The CAN-native OBD collector is the
-default hardware path and the in-vehicle Pi deployment is live. Active
-workstreams — ML correctness hardening, a fault-injection detector benchmark,
-the DTC reader, longitudinal drift tracking, and the engine-analysis
-buildout — are tracked as checklist docs in [`docs/roadmap/`](docs/roadmap/).
+The software stack is well past the original collection milestone. The
+CAN-native collector and in-vehicle Pi deployment are live, with per-mode
+Isolation Forest, the GRU-D masking-aware LSTM autoencoder (TCN selectable),
+behavior residuals, sensor committees, GPS, per-VIN profiles, runtime replay,
+DTC and Mode 06 monitor reads, longitudinal trends, configurable capture
+profiles, and historical analysis surfaced through the dashboard and control
+plane. Model evaluation includes held-out false-positive checks, synthetic
+fault injection, and a committed real-drive ground-truth fixture.
+
+Open data-collection, model-validation, diagnostic-discovery, and engine
+analysis work is tracked as checkbox-level task truth in
+[`docs/roadmap/`](docs/roadmap/); the roadmap documents, rather than this
+summary, are authoritative for current completion state.
 
 See [`docs/implementation-tasks.md`](docs/implementation-tasks.md) for the historical
 task breakdown and [`docs/roadmap/data-collection-plan.md`](docs/roadmap/data-collection-plan.md)

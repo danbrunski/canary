@@ -341,7 +341,7 @@ New channels go in `compute_derived_channels` (performance) or
   gate to a clean single bin rather than crashing.
 - [x] **5.2 — Ad-hoc map view.** Landed: new `ExplorePanel.tsx`
   (diagnostics group) — value/x/y/bins/agg/session/date-range form,
-  reuses `Heatmap.tsx`, read-only, backed by 5.1.
+  reuses `Heatmap.tsx`, display-only, backed by 5.1.
 - [x] **5.3 — Historical session charting.** Landed: new time-series
   read endpoint (native per-channel timestamps by default, one shared
   resampled grid only when `resample_hz` requested — doesn't force
@@ -406,7 +406,7 @@ New channels go in `compute_derived_channels` (performance) or
 | Mode 09 decoders (VIN-only use) | `obd_registry.py:1157-1186`; probe `src/profiles.py:193` |
 | DID catalog | `data/dids.yaml` (13 identified; access `:24-37`); decode `src/decode/dids.py:110-201` |
 | DID window scheduler | `obd_scheduler.py:194-328 DidWindowController`; knobs `src/config.py:108-121`; Pi set `canary.pi.example.yaml:33-37` |
-| Custom-PID engine (unwired) | `src/collection/custom_pids.py` (read-only modes `:59`; deferred note `:22-24`) |
+| Custom-PID engine (unwired) | `src/collection/custom_pids.py` (legacy permitted-service set `:59`; deferred note `:22-24`) |
 | Surface recipes (14) | `src/analysis/refit.py:133-473 default_recipes` |
 | Heatmap/curve viewer | `panels/BehaviorModelsPanel.tsx:47`; `components/Heatmap.tsx:88-129`; `Curve.tsx` |
 | Live-only charting | `panels/ChartsPanel.tsx:20-56`; `components/MultiSeriesChart.tsx:53-77` (self-normalized series) |

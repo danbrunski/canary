@@ -11,7 +11,7 @@ OBD-II Mode 09 PID 0x02 on functional addressing (``0x7DF`` → ``0x7E8``). That
 is standard OBD-II and does *not* need the UDS ``C0`` session that gates the
 Mode 22 DIDs, so the probe never clashes with Mode 01 polling. Reading it is
 request/response polling — the same class of operation the daemon already does
-for RPM — not actuation, consistent with the read-only invariant.
+for RPM. It is an ordinary active diagnostic request.
 
 Two identifiers per profile:
 

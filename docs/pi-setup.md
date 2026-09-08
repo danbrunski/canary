@@ -105,7 +105,7 @@ firmware so it appears as a native `can0` (slcan firmware exposes only
 `/dev/ttyACM0` and breaks the headless automation) — if `can0` does not
 appear on plug-in, reflash per **`docs/canable-firmware.md`**.
 
-Once `can0` exists, bring it up for the default active read-only
+Once `can0` exists, bring it up for the default active-diagnostics
 OBD + CAN mode:
 
 ```bash

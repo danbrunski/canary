@@ -2,7 +2,7 @@
 
 ``can_obd_client.PID_DECODERS`` is the minimal "PID number → (name, decoder)"
 table the streaming collector polls. This module is the *metadata* layer on top
-of it: every public, read-only PID/service CANary can safely request, with the
+of it: every public observation PID/service exposed by the scheduled poller, with the
 information the dashboard and coverage views (Task 6.3) need to explain *why* a
 supported PID is or isn't a usable telemetry channel.
 
@@ -19,9 +19,10 @@ Design:
 * Mode 03 / 07 / 0A (DTC reads) and Mode 06 (on-board monitor results) and
   Mode 09 (vehicle info) are described as services with their own parsers.
 
-Read-only by construction: every entry is a request the J1979 spec defines as a
-read. No Mode 04 / 2E / 2F entry exists here, so a caller that drives the
-registry can't synthesize a write.
+This registry is deliberately narrower than the general diagnostic request
+path: every entry is a J1979 data query. Mode 04 / 2E / 2F do not belong in a
+telemetry metadata catalog, while `POST /control/obd_request` remains free to
+send those or any other service byte.
 """
 
 from __future__ import annotations
@@ -97,7 +98,7 @@ Decoder = Callable[[bytes], DecodeResult]
 
 @dataclass(frozen=True)
 class PidDefinition:
-    """One read-only PID, with everything the dashboard/coverage view needs.
+    """One data-query PID, with everything the dashboard/coverage view needs.
 
     ``decoder is None`` means "this PID is real and CANary may request it, but
     we deliberately don't translate the bytes into an engineering value yet" —

@@ -16,8 +16,8 @@ errors, and `tools/can_obd_probe.py` successfully walked 41 supported Mode 01
 PIDs and read Mode 03 DTCs over the Canable-native OBD client.
 
 The streaming layer is now in place: `src/collection/can_obd_collector.py`
-owns one Canable Bus, records broadcast CAN frames, interleaves read-only Mode
-01 / Mode 22 requests, and emits the same `TelemetryRecord` / `pids.jsonl`
+owns one Canable Bus, records broadcast CAN frames, interleaves active Mode 01
+/ Mode 22 requests, and emits the same `TelemetryRecord` / `pids.jsonl`
 shape as the legacy ELM path. Captured sessions remain insufficient for model
 validation: a handful of short/parked sessions, one 18-minute drive, three
 2026-05-13 rig sessions, and the 2026-05-16 stationary binding sweep.
@@ -156,8 +156,9 @@ cross-reference → more decoded signals become ML features), so it compounds.
   session that gates 0x22; early-returns on negative responses.
 - [x] `scripts/record.py --obd-dids` — logs selected Mode 22 DIDs alongside
   Mode 01 during a legacy ELM-backed drive.
-- [x] `src/collection/can_obd_client.py` + `tools/can_obd_probe.py` — read-only
-  Canable-native Mode 01 / 03 / 09 one-shot client.
+- [x] `src/collection/can_obd_client.py` + `tools/can_obd_probe.py` —
+  Canable-native Mode 01 / 03 / 09 one-shot client. The shared client itself
+  accepts any service byte.
 - [x] `src/collection/can_obd_collector.py` — one-bus Canable streaming
   producer for broadcast CAN + OBD Mode 01 + Mode 22 DIDs.
 - [x] Config/daemon/recorder wiring: `collection.obd_source: canable` is the

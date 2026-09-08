@@ -11,7 +11,7 @@ exactly one sweep and writes one JSON snapshot, so that two job runs (one
 per engine/load state, each with its own ``--label``) can be compared after
 the fact — see the ``diff_did_snapshots`` MCP tool.
 
-READ-ONLY: only UDS service 0x22 (ReadDataByIdentifier) and, when
+This tool sends only UDS service 0x22 (ReadDataByIdentifier) and, when
 ``--session`` resolves to something, 0x10 (DiagnosticSessionControl — no
 memory write, no actuation) are ever sent.
 

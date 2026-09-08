@@ -35,7 +35,7 @@ access:
     the session is kept alive by re-sending 10 C0 every ~2 s (S3 ≈ a few
     s). Session 0xC0 is MUTUALLY EXCLUSIVE with standard OBD Mode 01 — the
     ECM stops answering Mode 01 while a non-default session is held.
-    Read-only: only 0x10 (session control) + 0x22 (read) are issued.
+    This polling profile issues only 0x10 (session control) + 0x22 (read).
     See data/analyses/2026-05-16T214006.md and T223328.md.
 
     `exit_session: 0x81` ends a DID window by returning to the default

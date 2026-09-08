@@ -66,16 +66,16 @@ some Mode 22 DIDs expose those directly without security. See the
 
 What we will do:
 
-- Listen-only CAN capture (Canable in slcan mode, application-level read-only)
+- Passive broadcast-CAN capture
 - Standard Mode 22 ReadDataByIdentifier requests (the *intended* diagnostic
   interface; what every workshop scanner uses)
 - Mode 01 PID polling via the Canable-native client or the legacy ELM327 path
 - Fit statistical models to the captured data
 - Persist the fitted models, version them, evaluate drift between versions
 
-What we explicitly won't do:
+What this modeling workflow explicitly won't do:
 
-- ECU writes of any kind
+- Write ECU non-volatile memory or reflash a module
 - Mode 23 / Mode 27 / flash dumps / EEPROM read-back
 - Bypassing security access
 - Anything that modifies engine behavior

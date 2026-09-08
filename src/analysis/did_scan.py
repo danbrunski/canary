@@ -6,9 +6,10 @@ bytes back"; the response parsing and the constant-vs-varying classification —
 the bits worth getting right — are transport-agnostic and unit-tested. A serial
 ELM327 implementation is provided (`Elm327Mode22Transport`).
 
-READ-ONLY: only UDS service 0x22 (ReadDataByIdentifier) is ever sent. No 0x2E
-(WriteDataByIdentifier), no 0x2F (InputOutputControlByIdentifier), no security
-access — and the Canable, if attached, must be in its sniffing role only.
+This scanner sends only UDS service 0x22 (ReadDataByIdentifier). It does not
+invoke 0x2E (WriteDataByIdentifier), 0x2F
+(InputOutputControlByIdentifier), or security access. That is the scanner's
+scope, not a restriction on CANary's general diagnostic request path.
 """
 
 from __future__ import annotations
@@ -310,9 +311,9 @@ class CanableMode22Transport:
     so periodic ``10 <sf>`` is the keep-alive). With ``session=None`` it
     behaves as a plain pass-through (ECUs that don't gate 0x22).
 
-    Read-only by construction: only ``query_mode_22`` (0x22) and, when a
-    session is requested, ``enter_diagnostic_session`` (0x10 session
-    control — no memory write, no actuation) are invoked. ``client`` is
+    This transport invokes only ``query_mode_22`` (0x22) and, when a session
+    is requested, ``enter_diagnostic_session`` (0x10 session control).
+    ``client`` is
     duck-typed so this analysis module stays import-decoupled from the
     collection layer at runtime.
     """

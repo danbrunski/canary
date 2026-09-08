@@ -8,9 +8,9 @@
 
 CANary is an on-vehicle software system that continuously reads telemetry from
 a 2008 Nissan Xterra (and broadly any OBD-II compliant vehicle) via raw CAN bus
-capture and standardized OBD-II diagnostic reads. The hardware interface is a
+capture and standardized OBD-II diagnostics. The hardware interface is a
 single SocketCAN device (`can0`) used for both broadcast CAN capture and
-read-only ISO-TP OBD requests. Two SocketCAN adapters are supported
+active ISO-TP OBD/UDS requests. Two SocketCAN adapters are supported
 first-class: the Waveshare 2-CH CAN HAT (MCP2515/SPI, the current in-vehicle
 rig) and the Canable USB (gs_usb/candleLight). The original ELM327 path
 remains in the repo as a legacy fallback.
@@ -179,7 +179,7 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 
 | Layer | Technology |
 |---|---|
-| Language | Python 3.11+ |
+| Language | Python 3.12+ |
 | OBD-II interface | `python-can` ISO-TP client over Canable; legacy `python-obd` fallback |
 | CAN bus interface | `python-can` + SocketCAN (`can0`) |
 | Data storage | Apache Parquet via `pandas` / `pyarrow` |

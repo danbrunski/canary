@@ -99,7 +99,7 @@ Diagnostic controls need explicit safeguards:
 
 - require parked/maintenance mode
 - require explicit confirmation for every action
-- separate read-only diagnostics from write/control actions
+- separate observation and analysis from state-changing control actions
 - log every request and response
 - keep controls disabled unless the relevant protocol binding is confirmed
 

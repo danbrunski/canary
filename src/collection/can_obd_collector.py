@@ -1,7 +1,7 @@
 """Canable-native OBD streaming collector.
 
 This is the replacement path for the dead ELM327 adapter. It owns one
-``python-can`` Bus, records every received CAN frame, and interleaves read-only
+``python-can`` Bus, records every received CAN frame, and interleaves active
 OBD requests on that same bus. That matters for slcan/USB Canables: opening the
 same serial adapter twice is not reliable, and two independent ``recv`` loops
 would race each other for diagnostic response frames.
@@ -1729,9 +1729,8 @@ def _send_session_control(
 
     Opens or keeps alive the Mode-22 gating session, or — with
     ``sub_function`` — hands the bus back by returning to the default
-    session. Session *control* only: no memory write, no actuation; the
-    read-only posture of the collector is unchanged. Returns True on a
-    positive response.
+    session. This helper performs session control only—no memory write or
+    actuation—and returns True on a positive response.
     """
     exiting = sub_function is not None
     request = _PollRequest(
