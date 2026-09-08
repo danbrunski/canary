@@ -131,6 +131,50 @@ def test_default_cannot_be_deleted_and_profile_crud_round_trips(tmp_path: Path) 
         store.delete("default")
 
 
+def test_mode22_rate_weights_are_backward_compatible_and_strict() -> None:
+    legacy = CaptureProfile(
+        name="did-legacy",
+        mode22=("ECM_RPM",),
+        corpus_eligible=False,
+        storage_prefix="_capture-did-legacy",
+    )
+    assert legacy.mode22_rate_weights == {}
+
+    weighted = legacy.model_copy(update={"mode22_rate_weights": {"ECM_RPM": 1.0}})
+    # Re-validate because model_copy deliberately trusts its update payload.
+    assert CaptureProfile.model_validate(weighted.model_dump()).mode22_rate_weights == {
+        "ECM_RPM": 1.0
+    }
+    for bad in (0.0, -1.0, float("inf"), float("nan")):
+        with pytest.raises(ValidationError, match="finite and positive"):
+            CaptureProfile(
+                name="did-bad-weight",
+                mode22=("ECM_RPM",),
+                mode22_rate_weights={"ECM_RPM": bad},
+                corpus_eligible=False,
+                storage_prefix="_capture-did-bad-weight",
+            )
+    with pytest.raises(ValidationError, match="not selected"):
+        CaptureProfile(
+            name="did-unknown-weight",
+            mode22=("ECM_RPM",),
+            mode22_rate_weights={"ECM_COOLANT_TEMP": 0.25},
+            corpus_eligible=False,
+            storage_prefix="_capture-did-unknown-weight",
+        )
+    with pytest.raises(ValidationError, match="weighted demand is below"):
+        CaptureProfile(
+            name="did-tuple-too-slow",
+            mode22=("ECM_RPM",),
+            mode22_rate_weights={"ECM_RPM": 0.25},
+            target_rate_hz=20.0,
+            min_achieved_rate_hz=15.0,
+            required_tuple=("ECM_RPM",),
+            corpus_eligible=False,
+            storage_prefix="_capture-did-tuple-too-slow",
+        )
+
+
 def test_a_tuning_capture_starts_without_a_tune_revision(tmp_path: Path) -> None:
     """`requires_tune_revision` prompts; it must never block a capture.
 

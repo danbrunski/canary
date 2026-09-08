@@ -1070,12 +1070,26 @@ class DidWindowController:
         if self.phase == "mode01":
             if now < self._next_window_at:
                 return False
-            if all(states[i].suppressed_until > now for i in self._did_indices):
-                # Every DID is backed off; don't burn a window on them. With
-                # nothing to schedule the cycle re-anchors on the next open
-                # rather than reporting idle time as missed cycles.
-                self._cycle_anchor = None
-                self._next_window_at = now + (self._cycle() or self._interval())
+            due = self._due_dids(states, now)
+            if not due:
+                # Every DID is backed off or on a slower cadence; don't burn a
+                # diagnostic-session transition on an empty window. Slower
+                # weighted members remain aligned to cycle boundaries.
+                next_due = min(
+                    (
+                        max(states[i].next_due_at, states[i].suppressed_until)
+                        for i in self._did_indices
+                    ),
+                    default=now + (self._cycle() or self._interval()),
+                )
+                if all(states[i].suppressed_until > now for i in self._did_indices):
+                    # Nothing schedulable: retain the historical idle re-anchor.
+                    self._cycle_anchor = None
+                    self._next_window_at = now + (self._cycle() or self._interval())
+                elif self._cycle() is not None and self._cycle_anchor is not None:
+                    self._schedule_next_window(now, earliest=next_due)
+                else:
+                    self._next_window_at = max(now + self._interval(), next_due)
                 return False
             return True
         if self.phase == "window":
@@ -1087,12 +1101,18 @@ class DidWindowController:
         if self._exit_due:
             return True
         if self.phase == "mode01":
-            return now >= self._next_window_at and any(
-                states[i].suppressed_until <= now for i in self._did_indices
-            )
+            return now >= self._next_window_at and bool(self._due_dids(states, now))
         if self.phase == "window":
             return now - self._last_session_sent >= self._spec.keepalive_seconds
         return False
+
+    def _due_dids(self, states: Sequence[_PollRequestState], now: float) -> frozenset[int]:
+        """DIDs whose own cadence is due at this window boundary."""
+        return frozenset(
+            i
+            for i in self._did_indices
+            if states[i].suppressed_until <= now and states[i].next_due_at <= now
+        )
 
     def on_entry_sent(self, now: float) -> None:
         """The loop is about to send ``10 <session>``: a cycle begins (or a keep-alive)."""
@@ -1125,10 +1145,7 @@ class DidWindowController:
                 self.phase = "window"
                 self.windows_opened += 1
                 self._window_deadline = now + self._spec.window_max_seconds
-                self._pending = {i for i in self._did_indices if states[i].suppressed_until <= now}
-                # Every pending DID is due "this window" regardless of tier.
-                for i in self._pending:
-                    states[i].next_due_at = now
+                self._pending = set(self._due_dids(states, now))
             else:
                 self.session_failures += 1
                 self._schedule_next_window(now, earliest=now)
@@ -1785,6 +1802,7 @@ def _request_rate_hz(request: _PollRequest, spec: CanObdSpec) -> float:
         absolute = tuning_profile.absolute_rate_hz(request.channel)
         if absolute is not None:
             return absolute
+        rate *= tuning_profile.did_rate_weight(request.channel)
     if request.kind == "pid":
         # A weight is a relative share within the selected profile; 1.0 is
         # byte-for-byte the historic tier cadence.

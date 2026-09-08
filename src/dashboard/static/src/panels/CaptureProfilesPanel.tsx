@@ -72,6 +72,7 @@ const blankProfile = (): CaptureProfile => {
     experimental: false,
     mode01: {},
     mode22: [],
+    mode22_rate_weights: {},
     mode01_enabled: true,
     mode22_enabled: true,
     did_interval_seconds: null,
@@ -270,11 +271,15 @@ export function CaptureProfilesPanel({
     setDraft({ ...draft, mode01: next });
   };
   const toggleDid = (name: string) => {
+    const selected = mode22Set.has(name);
+    const weights = { ...draft.mode22_rate_weights };
+    if (selected) delete weights[name];
     setDraft({
       ...draft,
-      mode22: mode22Set.has(name)
+      mode22: selected
         ? draft.mode22.filter((item) => item !== name)
         : [...draft.mode22, name],
+      mode22_rate_weights: weights,
     });
   };
 
@@ -628,7 +633,11 @@ export function CaptureProfilesPanel({
           // Leaving the picker resets weights to 1 so a half-finished
           // experiment can't silently skew a later capture.
           if (!event.target.checked) {
-            setDraft({ ...draft, mode01: Object.fromEntries(Object.keys(draft.mode01).map((key) => [key, 1])) });
+            setDraft({
+              ...draft,
+              mode01: Object.fromEntries(Object.keys(draft.mode01).map((key) => [key, 1])),
+              mode22_rate_weights: {},
+            });
           }
         }} /> per-channel rate weights (advanced)</label>
         <label><input type="checkbox" checked={draft.corpus_eligible} disabled={draft.name === "default"} onChange={(event) => setDraft({ ...draft, corpus_eligible: event.target.checked, storage_prefix: event.target.checked ? "" : `_capture-${draft.name}` })} /> eligible for training corpus</label>
@@ -636,7 +645,7 @@ export function CaptureProfilesPanel({
 
       <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
         <ChannelPicker title="OBD PIDs (Mode 01)" hint="Standard SAE J1979 parameters. Polled 6 per request; a selection larger than that spans more than one request." showWeights={showWeights} items={pids} selected={mode01Set} onToggle={togglePid} weights={draft.mode01} onWeight={(channel, weight) => setDraft({ ...draft, mode01: { ...draft.mode01, [channel]: weight } })} enabled={draft.mode01_enabled} onEnabled={(value) => setDraft({ ...draft, mode01_enabled: value })} />
-        <ChannelPicker title="Manufacturer DIDs (Mode 22)" hint="UDS ReadDataByIdentifier, from this vehicle's DID map." items={dids} selected={mode22Set} onToggle={toggleDid} enabled={draft.mode22_enabled} onEnabled={(value) => setDraft({ ...draft, mode22_enabled: value })} />
+        <ChannelPicker title="Manufacturer DIDs (Mode 22)" hint="UDS ReadDataByIdentifier, from this vehicle's DID map." showWeights={showWeights} items={dids} selected={mode22Set} onToggle={toggleDid} weights={draft.mode22_rate_weights} onWeight={(channel, weight) => setDraft({ ...draft, mode22_rate_weights: { ...draft.mode22_rate_weights, [channel]: weight } })} enabled={draft.mode22_enabled} onEnabled={(value) => setDraft({ ...draft, mode22_enabled: value })} />
       </div>
 
       {draft.mode22_enabled && draft.mode22.length > 0 && (

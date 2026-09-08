@@ -24,6 +24,7 @@ const DEFAULT_PROFILE: CaptureProfile = {
   experimental: false,
   mode01: { AUTO: 1 },
   mode22: [],
+  mode22_rate_weights: {},
   mode01_enabled: true,
   mode22_enabled: true,
   did_interval_seconds: null,
@@ -50,6 +51,7 @@ const FUEL_MAP: CaptureProfile = {
   experimental: false,
   mode01: { RPM: 1, ENGINE_LOAD: 1 },
   mode22: [],
+  mode22_rate_weights: {},
   mode01_enabled: true,
   mode22_enabled: true,
   did_interval_seconds: null,
@@ -80,6 +82,7 @@ const HYBRID: CaptureProfile = {
     TIMING_ADVANCE: 1,
   },
   mode22: ["ECM_AF_SENSOR_V_B1", "ECM_BASE_FUEL_SCHEDULE_CANDIDATE"],
+  mode22_rate_weights: { ECM_BASE_FUEL_SCHEDULE_CANDIDATE: 0.25 },
   mode01_enabled: true,
   mode22_enabled: true,
   did_interval_seconds: 0.25,
@@ -118,6 +121,7 @@ function status(activeName: string | null): StatusResponse {
           channels: [],
           mode01: { RPM: 1, ENGINE_LOAD: 1 },
           mode22: [],
+          mode22_rate_weights: {},
           rows_written: 12345,
           mode01_enabled: true,
           mode22_enabled: true,
@@ -181,6 +185,10 @@ function renderPanel(activeName: string | null = null, extra: Record<string, unk
     capture_profile: { ...status(null), active: false, name: "default", paused: false },
     capture_quality: null,
   });
+  mocks.saveCaptureProfile.mockImplementation(async (_token, profile) => ({
+    profile,
+    warnings: [],
+  }));
   return render(
     createElement(CaptureProfilesPanel, {
       token: "secret",
@@ -417,6 +425,27 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
 
     fireEvent.click(screen.getByLabelText(/per-channel rate weights/));
     expect(screen.getByLabelText("RPM rate weight")).toBeInTheDocument();
+  });
+
+  it("edits persisted DID weights under the selected profile name", async () => {
+    renderPanel();
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "tuning-hybrid-research" },
+    });
+    fireEvent.click(screen.getByLabelText(/per-channel rate weights/));
+
+    const weight = screen.getByLabelText(
+      "ECM_BASE_FUEL_SCHEDULE_CANDIDATE rate weight",
+    );
+    expect(weight).toHaveValue(0.25);
+    fireEvent.change(weight, { target: { value: "0.5" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+
+    await waitFor(() => expect(mocks.saveCaptureProfile).toHaveBeenCalled());
+    expect(mocks.saveCaptureProfile.mock.calls.at(-1)?.[1].mode22_rate_weights).toEqual({
+      ECM_BASE_FUEL_SCHEDULE_CANDIDATE: 0.5,
+    });
   });
 
   it("pauses and resumes a running capture", async () => {

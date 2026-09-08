@@ -806,7 +806,14 @@ def evaluate_capture_quality(  # noqa: PLR0913
       path, where no scheduler exists.
     """
     name = str(profile.get("name") or "unknown")
-    weights = {str(k).upper(): float(v) for k, v in (profile.get("mode01") or {}).items()}
+    weights = {
+        str(k).upper(): float(v)
+        for source in (
+            profile.get("mode01") or {},
+            profile.get("mode22_rate_weights") or {},
+        )
+        for k, v in source.items()
+    }
     target = requested_rate_hz if requested_rate_hz is not None else profile.get("target_rate_hz")
     target_f = None if target is None else float(target)
     required = [str(item).upper() for item in (profile.get("required_tuple") or [])]

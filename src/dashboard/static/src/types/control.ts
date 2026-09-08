@@ -101,6 +101,8 @@ export interface CaptureProfile {
   mode01: Record<string, number>;
   /** Manufacturer DIDs (Mode 22 / UDS ReadDataByIdentifier). */
   mode22: string[];
+  /** Selected DID name -> relative cadence weight; absent members use 1. */
+  mode22_rate_weights: Record<string, number>;
   mode01_enabled: boolean;
   mode22_enabled: boolean;
   did_interval_seconds: number | null;
@@ -144,6 +146,7 @@ export interface CaptureProfileState {
   channels: string[];
   mode01: Record<string, number>;
   mode22: string[];
+  mode22_rate_weights: Record<string, number>;
   mode01_enabled: boolean;
   mode22_enabled: boolean;
   did_interval_seconds: number | null;

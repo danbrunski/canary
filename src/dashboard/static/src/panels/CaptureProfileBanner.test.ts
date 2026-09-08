@@ -16,6 +16,7 @@ const ACTIVE: CaptureProfileState = {
   channels: ["RPM", "ENGINE_LOAD"],
   mode01: { RPM: 1, ENGINE_LOAD: 1 },
   mode22: [],
+  mode22_rate_weights: {},
   mode01_enabled: true,
   mode22_enabled: true,
   did_interval_seconds: null,

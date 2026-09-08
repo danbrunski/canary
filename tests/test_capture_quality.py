@@ -683,3 +683,33 @@ def test_a_did_capture_is_scored_under_the_profiles_own_channel_names() -> None:
     assert len(names) == len(set(names))
     assert not any(name.startswith("DTC_") for name in names)
     assert quality.tuple_rate_bound_hz == pytest.approx(20.0)
+
+
+def test_did_context_weight_changes_only_its_own_rate_promise() -> None:
+    profile = _did_profile() | {
+        "mode22_rate_weights": {
+            "ECM_MAF_GPS": 0.25,
+        },
+        "required_tuple": ["ECM_INJECTOR_PW_B1", "ECM_RPM"],
+    }
+    lifetime = _lifetime(
+        {
+            "DID_1209": [(0.0, 20.0, 0.2)],  # requested 5 Hz, context only
+            "DID_1208": [(0.0, 20.0, 0.05)],
+            "DID_1219": [(0.0, 20.0, 0.05)],
+        },
+        elapsed=20.0,
+    )
+    quality = evaluate_capture_quality(
+        profile=profile,
+        scheduler=_did_scheduler(),
+        lifetime=lifetime,
+        tuples=_tuples(100, elapsed=20.0),
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+    by_name = {row.channel: row for row in quality.channels}
+    assert by_name["ECM_MAF_GPS"].requested_hz == pytest.approx(5.0)
+    assert by_name["ECM_MAF_GPS"].status == "ok"
+    assert by_name["ECM_INJECTOR_PW_B1"].requested_hz == pytest.approx(20.0)
+    rate_failure = next(f for f in quality.failures if f["clause"] == RATE_SHORTFALL)
+    assert "ECM_MAF_GPS" not in rate_failure["channels"]

@@ -363,6 +363,28 @@ def test_did_window_closes_when_every_did_was_read(monkeypatch: pytest.MonkeyPat
     assert ctrl.phase == "lapse"
 
 
+def test_windowed_did_controller_only_schedules_members_whose_cadence_is_due(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow context DID must not ride every fast window (C09.6)."""
+    from src.collection.obd_scheduler import DidSessionSpec, DidWindowController, _PollRequestState
+
+    monkeypatch.setattr(tuning_profile, "did_continuous_enabled", lambda: False)
+    ctrl = DidWindowController(
+        DidSessionSpec(session=0xC0, window_interval_seconds=0.25),
+        (0, 1),
+        now=0.0,
+    )
+    states = [
+        _PollRequestState(next_due_at=0.25),
+        _PollRequestState(next_due_at=1.0),
+    ]
+    assert ctrl.session_control_due(states, 0.25)
+    ctrl.on_session_response(ok=True, states=states, now=0.25)
+    assert ctrl.did_pending(0)
+    assert not ctrl.did_pending(1)
+
+
 def test_continuous_capture_holds_the_session_open(monkeypatch: pytest.MonkeyPatch) -> None:
     """An all-DID capture must not close the window, and must re-arm its DIDs.
 
@@ -462,6 +484,34 @@ def test_target_rate_applies_to_dids_not_just_pids() -> None:
     )
     assert tuning_profile.absolute_rate_hz("DID_1226") is None
     assert _request_rate_hz(other, _spec(poll_rate_hz=1.0)) == pytest.approx(1.0 / 3.0)
+
+
+def test_did_rate_weight_resolves_saved_name_to_scheduler_alias() -> None:
+    from src.collection.obd_scheduler import _PollRequest, _request_rate_hz
+
+    tuning_profile.configure_did_aliases({"ECM_AF_SENSOR_V_B1": "DID_1225"})
+    profile = CaptureProfile(
+        name="weighted-did",
+        mode01={},
+        mode01_enabled=False,
+        mode22=("ECM_AF_SENSOR_V_B1",),
+        mode22_rate_weights={"ECM_AF_SENSOR_V_B1": 0.25},
+        did_continuous=True,
+        target_rate_hz=20.0,
+        corpus_eligible=False,
+        storage_prefix="_capture-weighted-did",
+    )
+    tuning_profile.activate(profile, source="test")
+    request = _PollRequest(
+        kind="did",
+        service=0x22,
+        identifier=0x1225,
+        request_id=0x7E0,
+        channel="DID_1225",
+        poll_tier="medium",
+    )
+    assert tuning_profile.did_rate_weight("DID_1225") == pytest.approx(0.25)
+    assert _request_rate_hz(request, _spec(poll_rate_hz=1.0)) == pytest.approx(5.0)
 
 
 def test_achieved_hz_reports_a_trailing_window_not_a_lifetime_average() -> None:

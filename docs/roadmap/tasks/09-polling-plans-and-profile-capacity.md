@@ -49,15 +49,23 @@ the actual path, not a capability available only in a probe tool.
 
 ## Implementation checklist: DID cadence and batch integration
 
-- [ ] C09.6 Add a backward-compatible per-DID cadence field, such as
+- [x] C09.6 Add a backward-compatible per-DID cadence field, such as
   `mode22_rate_weights` alongside the existing DID selection list. Missing
   weights default to 1. Validate finite positive values and selected-member
   keys, resolving aliases consistently. Define rate semantics for continuous
   and windowed profiles explicitly.
-- [ ] C09.7 Propagate DID cadence through absolute-rate resolution, due-time
+  _done: `CaptureProfile.mode22_rate_weights`; old YAML loads with `{}` and
+  therefore weight 1. Continuous sessions scale each member's scheduler rate;
+  windowed sessions open only for members due at that cycle boundary. Runtime
+  lookup resolves the persisted profile name through the shared DID alias map._
+- [~] C09.7 Propagate DID cadence through absolute-rate resolution, due-time
   scheduling, profile editors, API/MCP models, demand calculation, quality
   floors, and manifest snapshots. Preserve operator-modified profiles during
   seed upgrades. Separate context rates from required fast-tuple floors.
+  _partial: absolute rates, due-time scheduling, dashboard editor/types,
+  strict API schema, manifest snapshots, backward-compatible seed loading, and
+  capture-quality promises/floors are wired and tested. The shared resolved
+  demand calculation does not exist until C09.1/C09.2 and remains._
 - [ ] C09.8 Integrate existing multi-DID builders/splitters into the tapped
   scheduler request path. Scope capability by ECU/session, group only eligible
   same-round DIDs, and enforce the single-frame request limit of three DIDs.

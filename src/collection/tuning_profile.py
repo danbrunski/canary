@@ -342,6 +342,25 @@ def rate_weight(channel: str) -> float:
         return _profile.mode01.get(channel.upper(), 1.0)
 
 
+def did_rate_weight(channel: str) -> float:
+    """Relative cadence for one selected DID, resolving profile aliases.
+
+    Profiles key weights by the name they persist (for example
+    ``ECM_AF_SENSOR_V_B1``), while the scheduler uses ``DID_1225``. Resolve
+    through the same alias table as selection and profile-channel reporting so
+    a renamed DID cannot silently lose its configured cadence.
+    """
+    upper = channel.upper()
+    stripped = channel.removeprefix("DID_").upper()
+    with _lock:
+        for item in _profile.mode22:
+            item_upper = item.upper()
+            resolved = _did_channels.get(item_upper, item_upper)
+            if upper in {resolved, item_upper} or stripped in {resolved, item_upper}:
+                return _profile.mode22_rate_weights.get(item_upper, 1.0)
+    return 1.0
+
+
 def did_continuous_enabled() -> bool:
     """Whether the active profile pins the Mode-22 session open."""
     with _lock:
@@ -368,8 +387,7 @@ def absolute_rate_hz(channel: str) -> float | None:
 
     Covers Mode-22 DIDs as well as Mode-01 PIDs: an all-DID capture is
     exactly the case where the rate has to be sayable, and DID names are
-    matched through the same alias resolution ``request_eligible`` uses. DIDs
-    carry no weight, so they take the target unscaled.
+    matched through the same alias resolution ``request_eligible`` uses.
     """
     with _lock:
         target = _profile.target_rate_hz
@@ -379,10 +397,12 @@ def absolute_rate_hz(channel: str) -> float | None:
         weight = _profile.mode01.get(name)
         if weight is not None:
             return target * weight
-        requested = {item.upper() for item in _profile.mode22}
-        resolved = {_did_channels.get(item, item) for item in requested}
-        if name in resolved or channel.removeprefix("DID_").upper() in resolved:
-            return target
+        stripped = channel.removeprefix("DID_").upper()
+        for item in _profile.mode22:
+            item_upper = item.upper()
+            resolved = _did_channels.get(item_upper, item_upper)
+            if name in {resolved, item_upper} or stripped in {resolved, item_upper}:
+                return target * _profile.mode22_rate_weights.get(item_upper, 1.0)
         return None
 
 
@@ -432,6 +452,7 @@ __all__ = [
     "capture_started_monotonic",
     "did_continuous_enabled",
     "did_cycle_override",
+    "did_rate_weight",
     "configure_default",
     "configure_did_aliases",
     "is_active",

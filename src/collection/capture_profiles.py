@@ -8,6 +8,7 @@ small enough to reload on every API operation.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -157,6 +158,12 @@ class CaptureProfile(_Strict):
     experimental: bool = False
     mode01: dict[str, float] = Field(default_factory=dict)
     mode22: tuple[str, ...] = ()
+    #: Relative cadence for selected Mode-22 members. Missing entries are 1.0,
+    #: preserving every pre-C09 profile byte-for-byte at load. In a continuous
+    #: DID session the weight scales the member's ordinary/absolute scheduler
+    #: rate. In a windowed profile it controls which cycle windows the member
+    #: is due in; it never changes the window cadence itself.
+    mode22_rate_weights: dict[str, float] = Field(default_factory=dict)
     #: Whether each service is polled at all. Disabling keeps the selection
     #: intact so re-enabling doesn't mean rebuilding it — "off for this
     #: capture" and "not of interest" are different statements.
@@ -272,8 +279,21 @@ class CaptureProfile(_Strict):
             name = channel.strip().upper()
             if not name:
                 raise ValueError("Mode-01 channel names must not be blank")
-            if weight <= 0:
-                raise ValueError(f"Mode-01 rate weight for {name} must be positive")
+            if not math.isfinite(weight) or weight <= 0:
+                raise ValueError(f"Mode-01 rate weight for {name} must be finite and positive")
+            cleaned[name] = float(weight)
+        return cleaned
+
+    @field_validator("mode22_rate_weights")
+    @classmethod
+    def _valid_did_weights(cls, value: dict[str, float]) -> dict[str, float]:
+        cleaned: dict[str, float] = {}
+        for channel, weight in value.items():
+            name = channel.strip().upper()
+            if not name:
+                raise ValueError("Mode-22 rate-weight keys must not be blank")
+            if not math.isfinite(weight) or weight <= 0:
+                raise ValueError(f"Mode-22 rate weight for {name} must be finite and positive")
             cleaned[name] = float(weight)
         return cleaned
 
@@ -284,6 +304,16 @@ class CaptureProfile(_Strict):
         if len(cleaned) != len(value):
             raise ValueError("Mode-22 DIDs must be non-blank and unique")
         return cleaned
+
+    @model_validator(mode="after")
+    def _did_weights_are_selected(self) -> CaptureProfile:
+        selected = {item.upper() for item in self.mode22}
+        unknown = sorted(set(self.mode22_rate_weights) - selected)
+        if unknown:
+            raise ValueError(
+                "mode22_rate_weights names DIDs not selected by mode22: " + ", ".join(unknown)
+            )
+        return self
 
     @field_validator("behavior_model_recipes")
     @classmethod
@@ -389,6 +419,24 @@ class CaptureProfile(_Strict):
         if unpolled:
             raise ValueError(
                 "required_tuple names channels this profile does not poll: " + ", ".join(unpolled)
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _required_tuple_weights_meet_floor(self) -> CaptureProfile:
+        """Context weights cannot silently weaken a required tuple's floor."""
+        if self.target_rate_hz is None or self.min_achieved_rate_hz is None:
+            return self
+        below: list[str] = []
+        for channel in self.required_tuple:
+            upper = channel.upper()
+            weight = self.mode01.get(upper, self.mode22_rate_weights.get(upper, 1.0))
+            if self.target_rate_hz * weight < self.min_achieved_rate_hz:
+                below.append(upper)
+        if below:
+            raise ValueError(
+                "required_tuple weighted demand is below min_achieved_rate_hz: "
+                + ", ".join(sorted(below))
             )
         return self
 
