@@ -103,23 +103,34 @@ the actual path, not a capability available only in a probe tool.
 
 ## Implementation checklist: profile updates
 
-- [ ] C09.12 For normal monitoring, measure useful critical-channel coverage,
+- [~] C09.12 For normal monitoring, measure useful critical-channel coverage,
   probe overhead, and batching before changing the default budget. Reuse
   validated passive providers explicitly where appropriate; preserve source
   provenance and the model inputs they actually supply.
-- [ ] C09.13 For fuel-map, make the required fueling tuple the scheduling and
+  _blocked on a live normal-monitoring capture; no default budget was changed._
+- [x] C09.13 For fuel-map, make the required fueling tuple the scheduling and
   acceptance unit. Retain vehicle-specific unsupported-PID exclusions and
   record tuple rate and skew, not just aggregate channel throughput.
-- [ ] C09.14 For continuous DID profiles, identify fast dynamics and slow
+  _done through C02/C03 plus the vehicle profile: unsupported PID 0x25 is
+  excluded, required tuple members schedule first, and persisted quality
+  records tuple completion/rate/skew._
+- [~] C09.14 For continuous DID profiles, identify fast dynamics and slow
   context from experiment requirements, lower context demand, and measure the
   resulting fast-channel coverage. Do not prescribe one vehicle's cadence to
   all vehicles.
-- [ ] C09.15 For hybrid profiles, use C04's measured cycle capacity and retain
+  _blocked on an experiment-specific live capture to classify dynamics and
+  measure released capacity; the schema/runtime cadence control is complete._
+- [x] C09.15 For hybrid profiles, use C04's measured cycle capacity and retain
   cross-mode timing limits. Keep unsupported targets visibly experimental.
-- [ ] C09.16 Correct capacity notes to state active transport, measured test
+  _done: the vehicle profile retains C04's 0.25 s start-to-start cycle,
+  measured 0.341 s cross-mode separation and achieved shortfall, and remains
+  explicitly experimental._
+- [~] C09.16 Correct capacity notes to state active transport, measured test
   duration/conditions, and actual request counts. Retain the old storage-loss
   incident as history, not a universal 24 request/s ceiling. Do not raise
   deployed rate defaults until C10 supplies sustained evidence.
+  _partial: misleading DID batching/24 req/s claims are corrected and no
+  defaults were raised. Exact sustained request/frame counts remain C10 work._
 
 ## Regression and acceptance checklist
 

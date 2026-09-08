@@ -112,7 +112,12 @@ profiles:
   did_continuous: true
   bus_budget_override: 180.0
   expected_total_demand_hz: 165.0
-  capacity_evidence: '2026-08-04 bench: 658 DID reads/s; 11 DIDs x 15 Hz = 165 reads/s.'
+  capacity_evidence: 'Active transport is single-DID (`obd_did_batch_max_dids: 1`):
+    11 DIDs x 15 Hz = 165 diagnostic requests/s fallback demand. 2026-08-04
+    KOEO bench: a four-DID single-request rotation ran 8 s at 658 reads/s,
+    zero failures, p50 1.09 ms. The 2026-08-07 25-minute drive achieved 14.93
+    Hz/channel; its exact request/frame accounting predates C09 and remains
+    unverified until C10.'
   required_tuple: []
   min_achieved_rate_hz: 12.0
   requires_tune_revision: true
@@ -152,13 +157,13 @@ profiles:
   did_continuous: true
   bus_budget_override: 160.0
   expected_total_demand_hz: 140.0
-  capacity_evidence: '2026-08-04 bench: 658 DID reads/s; 7 DIDs x 20 Hz = 140 reads/s
-    — less demanding than the tuning-did profile''s 165 reads/s, which achieved a
-    measured 14.93 Hz over a 25-minute capture on 2026-08-07. Batched at 3 DIDs per
-    Mode 22 request this is roughly 47 requests/s, above the 24 req/s line where the
-    storage sink dropped 2491 records on 2026-07-29; that incident predates batching
-    being relied on here and tuning-did has since run clear of it, but the capture
-    contract now reports dropped rows, so verify the verdict rather than assuming.'
+  capacity_evidence: 'Active transport is single-DID (`obd_did_batch_max_dids: 1`):
+    7 DIDs x 20 Hz = 140 diagnostic requests/s fallback demand. Best-case three-DID
+    batching would be 47 requests/s, but is not active or sustained-verified. 2026-08-04
+    KOEO bench: a four-DID single-request rotation ran 8 s at 658 reads/s, zero failures,
+    p50 1.09 ms. The old 2026-07-29 storage-loss incident (2491 dropped records at
+    25 requests/s) is retained as history, not treated as a universal ceiling; C10 must
+    reconcile persisted rows before this profile earns a non-experimental rate claim.'
   required_tuple:
   # BFS is a per-injection fuel time, so testing whether it can be derived needs
   # airflow and rpm co-observed (air mass per intake event = MAF x 20 / rpm on a
