@@ -137,6 +137,75 @@ boundaries, buffer eviction and model updates for every rolling feature —
 measurement (C08.12) shows the feature stage approaching the period, and then
 with the parity test below extended to the incremental path.
 
+## Per-detector occupancy with real artifacts (C08.1)
+
+The table above was taken **without models** — it is the loop-side cost of
+feature construction alone. Only manifests are committed under `models/`
+(binaries travel by `scp`), so the C10 harness installs a declared IF stub by
+default and the sequence detector is `absent`; every stub-based figure
+understates detector occupancy.
+
+Measured 2026-09-08 with a **real IF artifact** — same hyperparameters as the
+deployed manifest (`n_estimators: 200`, contamination 0.01, 84 feature
+columns), trained from `tests/fixtures/ground_truth/drive-slice` into a
+scratch directory and loaded via
+`scripts/sustained_validation.py run --models-dir <dir>`:
+
+| stage | scenario | median | p95 |
+|---|---|---:|---:|
+| `isolation_forest` (worker) | `fuel-map` | 44.09 ms | 52.07 ms |
+| `isolation_forest` (worker) | `replay-drive-slice` | 33.11 ms | 38.62 ms |
+| `compute` (worker total) | `fuel-map` | 44.09 ms | 52.07 ms |
+| `compute_wait` (loop awaits the worker) | `fuel-map` | 44.48 ms | 52.32 ms |
+| `loop_occupancy` (snapshot + apply) | `fuel-map` | 43.38 ms | 55.81 ms |
+| `total` (tick wall) | `fuel-map` | 81.00 ms | 110.89 ms |
+
+The same two scenarios with the declared stub (`c10-stub`, a constant score;
+`data/analyses/sustained-validation/after/`) put the `isolation_forest` stage
+at 4.57 ms median / 5.82 ms p95 (`fuel-map`) and 4.41 / 5.92 ms
+(`replay-drive-slice`) — so **a stub-based stage table understates IF
+occupancy by roughly 8×**, which is why C08.1 held for a real artifact.
+(The stub's few ms are the harness's own schema work, not a model.)
+
+Where the 44 ms goes, timed directly rather than by subtraction:
+
+| step | median |
+|---|---:|
+| `IsolationForestInferenceEngine.__init__` | 0.00 ms |
+| `TrainedIsolationForest.score` (1-row frame) | 20.15 ms |
+| — of which sklearn `score_samples` (200 trees, 84 features, 1 row) | 4.7 ms |
+| `IsolationForestInferenceEngine.observe` | 20.79 ms |
+
+**The sklearn forward pass is ~11 % of the stage.** The rest is per-tick
+pandas work on a one-row frame — `reconcile_feature_frame_to_spec` plus the
+DataFrame construction, scaling and per-mode selection inside
+`TrainedIsolationForest.score`, which is a batch-shaped API called once per
+row. At the deployed 1 Hz cadence the whole tick is 8–11 % of the period and
+zero deadlines were missed, so **nothing is changed here**; this is the stage
+to attack first if the model cadence rises, and it is a loop-*wait*, not loop
+occupancy — `loop_occupancy` (43 ms) stays below `total` (81 ms) because C08
+already moved the forward pass into the worker.
+
+Caveats, stated: WSL2 workstation, not the Pi (C08.12 still holds the Pi
+numbers). The artifact was trained on a 7-minute slice, so its per-mode
+`max_samples_` is 97 against the deployed 256 — deeper trees on the Pi's
+model make the sklearn 4.7 ms somewhat larger, and none of the surrounding
+pandas cost depends on it. The synthetic stream is missing trained feature
+columns, so the run was in `blind_modes` and skipped
+`_rank_feature_contributors`; a healthy stream does that work too, making
+these figures a **lower** bound on the stage. The sequence detector remains
+`absent` — no torch artifact exists locally, and its occupancy is unmeasured.
+
+Reproduce:
+
+```
+.venv/bin/python scripts/train_anomaly_model.py \
+    tests/fixtures/ground_truth/drive-slice --config <cfg with models_dir=$SCRATCH/models>
+.venv/bin/python scripts/sustained_validation.py run --label real-models \
+    --out $SCRATCH/reports --sessions-root data/_validation \
+    --models-dir $SCRATCH/models --scenario fuel-map --scenario replay-drive-slice
+```
+
 ## Collection cadence vs model cadence (C08.8)
 
 `tick_seconds` is the model cadence. It defaults to

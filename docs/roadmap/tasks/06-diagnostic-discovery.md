@@ -74,7 +74,8 @@ requests by telemetry channel selection. Audit and make this policy explicit.
 - [~] C06.12 On hardware, compare frame continuity and discovery counters
   around startup/recovery. Read vehicle state first; no received-byte count
   alone proves no frames were lost upstream.
-  _pending hardware 2026-09-07: Pi unreachable. Procedure in `docs/diagnostic-discovery.md` (read `vehicle_state`; compare raw-frame continuity and discovery counters around startup and recovery; a received-byte count alone does not prove no upstream loss)._
+  _pending hardware 2026-09-08: Pi still unreachable. Procedure in `docs/diagnostic-discovery.md` (read `vehicle_state`; compare raw-frame continuity and discovery counters around startup and recovery; a received-byte count alone does not prove no upstream loss)._
+  _software half measured on the synthetic bus (C10): every adapter-delivered sequence number is accounted for in all eleven scenarios, including across the `transitions` reconnect, and the C06 tap identity `collector_pushed − readings_emitted == adapter_delivered_frames` holds wherever there was no reconnect. Kernel counters were `unavailable` there and say so — the upstream layer the item is about is exactly what only hardware can show._
 - [x] C06.13 Acceptance: discovery cannot silently consume raw capture data
   or bypass session/budget policy, and deferred diagnostics are visible.
   _done: single tapped receive site, budget wait reason, and matrix phase gate make silent consumption or policy bypass unrepresentable; deferred diagnostics visible in `/status`._

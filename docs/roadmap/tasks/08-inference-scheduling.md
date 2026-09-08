@@ -19,10 +19,11 @@ ownership design.
 
 ## Implementation checklist
 
-- [~] C08.1 Measure feature construction, each detector, result publication,
+- [x] C08.1 Measure feature construction, each detector, result publication,
   and total tick occupancy with the repaired benchmark. Add loop scheduling
   delay and missed-deadline metrics separate from model scoring latency.
-  _metrics done 2026-09-07: `InferenceTimingRecorder` (bounded per-stage occupancy: feature/publish/behavior/IF/sequence/compute/apply/total, plus lateness and missed-by-reason kept separate) exposed at `/status.detectors.inference`. Remaining: per-detector occupancy with real model artifacts under the C10 full-pipeline workload (workstation stage table in `docs/inference-scheduling.md` was taken without models)._
+  _metrics done 2026-09-07: `InferenceTimingRecorder` (bounded per-stage occupancy: feature/publish/behavior/IF/sequence/compute/apply/total, plus lateness and missed-by-reason kept separate) exposed at `/status.detectors.inference`._
+  _measured 2026-09-08 with a real IF artifact under the C10 full-pipeline workload (`scripts/sustained_validation.py run --models-dir`, added for this): `isolation_forest` 44.09 ms median / 52.07 ms p95 on `fuel-map` against the stub's 4.57 / 5.82 — an **8× understatement** by the model-less table. Timed directly, the sklearn forward pass is only ~4.7 ms of it; the rest is per-tick pandas on a one-row frame. Loop occupancy (43 ms) stays below tick total (81 ms), so C08's worker isolation holds. Table, breakdown, caveats and reproduction in `docs/inference-scheduling.md` ("Per-detector occupancy with real artifacts"). The sequence detector stays unmeasured — no torch artifact exists off the Pi — and the Pi numbers remain C08.12._
 - [x] C08.2 Schedule ticks from an absolute monotonic deadline. Timestamp the
   actual observation snapshot, record lateness, and advance deadlines without
   adding processing duration to every period.

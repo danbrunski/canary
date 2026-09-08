@@ -1,5 +1,12 @@
 """Sustained end-to-end validation harness (roadmap task C10).
 
+These ``slow`` tests drive whole scenarios on the **real clock**, so a host
+that is otherwise busy can starve them into a false failure (observed
+2026-09-08: a contended ``-n auto`` run took 2.4x as long and failed the
+storage-overload case, which passed serially and in the next uncontended full
+run). Re-run a failure with ``-n0`` on an idle host before treating it as a
+regression.
+
 The fast tests run a ~1 s synthetic-bus scenario through the *real*
 collector thread, fanout, Parquet writer and finalize path and assert the
 accounting identities that every report must satisfy (C10.14/C10.15). The
@@ -370,3 +377,20 @@ async def test_replay_of_the_drive_slice_reproduces_the_known_answer(tmp_path: P
     inference = evidence["timing"]["inference"]
     assert inference["ticks_completed"] >= 20
     assert report["provenance"]["hardware"]["adapter"] == "replay (none)"
+
+
+def test_models_dir_override_is_profile_scoped_like_the_daemon(tmp_path: Path) -> None:
+    """C08.1 — only manifests are committed under ``models/``, so a workstation
+    run installs the declared IF stub. ``--models-dir`` points the harness at
+    real artifacts, and must be scoped by vehicle profile exactly as the
+    daemon scopes its own ``models_dir`` — otherwise the override silently
+    looks one directory above the artifact and the stub comes back."""
+    from src.validation.harness import harness_config
+
+    default = harness_config(tmp_path / "a")
+    overridden = harness_config(tmp_path / "b", models_dir=tmp_path / "artifacts")
+
+    assert overridden.daemon.models_dir != default.daemon.models_dir
+    assert overridden.daemon.models_dir.is_relative_to(tmp_path / "artifacts")
+    # The profile slug the daemon scopes with is appended, not dropped.
+    assert overridden.daemon.models_dir.name == default.daemon.models_dir.name

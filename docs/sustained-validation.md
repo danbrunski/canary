@@ -43,6 +43,16 @@ samples `time.time() - time.monotonic()` at 100 Hz, records steps
 `run_scenario_clean` reruns it (bounded). No report in `after/` or
 `before/` is from a stepped run unless its `valid` flag says so.
 
+**Running the scenario tests.** The `slow` tests in
+`tests/test_sustained_validation.py` drive whole scenarios on the real clock,
+so they need a host that is not otherwise busy. Observed 2026-09-08: a
+`pytest -n auto` run competing with a second scenario run took 476 s instead
+of 198 s and failed `test_overloaded_storage_yields_persistence_loss_never_pass`
+and an unrelated real-clock batching test; both passed serially and the
+uncontended full run was green. Treat a failure in these as a regression only
+after re-running it on an idle host (`-n0`) — the same convention the repo
+already applies to `TuningFeedback.test.ts`.
+
 ### The synthetic bus
 
 - Numbered broadcast frames on `0x6A0` (an id bound nowhere in
@@ -243,6 +253,18 @@ source fix in their owning task.
    and asserted end-to-end in the storage-stall scenario test. **The
    before/after tables above predate the fix** (their JSON has no
    `queue_high_water` key); a re-run at HEAD carries it.
+
+10. **A stub detector understates the stage it stands in for by ~8×.**
+   Only manifests are committed under `models/`, so every workstation run
+   here installed the declared IF stub and reported the `isolation_forest`
+   stage at 4.4–4.6 ms median. With a real artifact of the deployed shape
+   (200 estimators, 84 features, trained from the drive-slice fixture) the
+   same stage is 44 ms median / 52 ms p95 on `fuel-map`. `harness_config`
+   and `scripts/sustained_validation.py run` now take `--models-dir` so the
+   measurement is reproducible; the numbers, the breakdown (the sklearn
+   forward pass is ~4.7 ms of the 44) and the caveats are in
+   `docs/inference-scheduling.md` (C08.1). Nothing was optimised — at 1 Hz
+   the tick is 8–11 % of the period with zero missed deadlines.
 
 ## Replay (C10.9)
 

@@ -64,7 +64,8 @@ replacement capacity measurement or a Pi estimate.
 - [~] C05.11 Run the same workload on the Pi when available, identifying
   hardware, power/thermal state, runtime, and model versions. Do not fill the
   missing Pi result with an extrapolation.
-  _pending hardware 2026-09-06: Pi unreachable (`canary.local` ENOTFOUND). Run `scripts/benchmark_live_pipeline.py --profile steady --report ...` on the Pi and record hardware, power/thermal state, runtime, and model versions next to the workstation baseline._
+  _pending hardware 2026-09-08: Pi still unreachable (`canary.local` ENOTFOUND). Run `scripts/benchmark_live_pipeline.py --profile steady --report ...` on the Pi and record hardware, power/thermal state, runtime, and model versions next to the workstation baseline._
+  _note: the Pi's `models_dir` holds real detector artifacts, so its run measures real per-detector occupancy by default. The workstation baseline did not — see C08.1: a stubbed IF understated its stage by ~8×. Compare the Pi against the real-artifact figures in `docs/inference-scheduling.md`, not the model-less table above them._
 - [x] C05.12 Acceptance: a reported valid feature benchmark has actual
   feature rows, a warmed buffer, monotonic scenario time, and truthful workload
   counts. The previous zero-row 27,600 Hz result must be impossible to accept.

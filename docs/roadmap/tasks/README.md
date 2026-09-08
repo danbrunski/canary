@@ -4,10 +4,17 @@ Created 2026-09-06 from the collection, tuning, and diagnostic-mode review.
 These documents live in `docs/roadmap/tasks/` as requested. Existing roadmap documents
 remain under `docs/roadmap/`; this set does not change the overnight queue.
 
-The individual checkboxes are implementation truth. All implementation is
-pending. Mark `[x]` only with evidence; use `[~]` for partial completion and
-name the remaining work. The requested deliverable was these checklists, not
-implementation or deployment.
+The individual checkboxes are implementation truth. Mark `[x]` only with
+evidence; use `[~]` for partial completion and name the remaining work.
+
+**Status 2026-09-08.** C01, C02, C03 and C07 are complete and archived. C04,
+C05, C06, C08, C09 and C10 are implemented and their remaining `[~]` items
+are **all hardware-blocked** — the Pi has been unreachable
+(`canary.local` ENOTFOUND) since 2026-09-06, and each of those items needs a
+measurement on the truck that no workstation run can substitute. They are:
+C04.12, C05.11, C06.12, C08.12, C09.12, C09.14, C09.16, C10.10, C10.11 and
+C10.12. Every one carries the procedure to run when the Pi is back. Nothing
+else is open.
 
 ## Scope and evidence
 
@@ -37,19 +44,21 @@ No live rates, hardware capacity, or model accuracy were established.
 | C01 | [Acquisition-time comparison](archive/01-acquisition-time-comparison.md) ✅ | Finding 1: aggregate pairing and ignored acquisition time | Can start immediately; coordinate timestamp contract with C02 |
 | C02 | [Explicit capture rounds](archive/02-explicit-capture-rounds.md) ✅ | Finding 2: unbounded round timestamps; fuel-map tuple scheduling | Can start immediately |
 | C03 | [Capture-wide quality accounting](archive/03-capture-quality-accounting.md) ✅ | Finding 3: trailing-window verdict, cumulative losses, false exactness | C01 pairing and C02 round contracts for final tuple validation |
-| C04 | [Hybrid diagnostic scheduling](04-hybrid-diagnostic-scheduling.md) | Finding 4: transition waits and end-anchored cadence | Coordinate with C02 and C06 on the collector loop |
-| C05 | [Trustworthy pipeline benchmark](05-pipeline-benchmark.md) | Finding 5: stale-data benchmark and invalid capacity claims | Can start immediately; precedes optimization claims |
-| C06 | [Lossless diagnostic discovery](06-diagnostic-discovery.md) | Finding 6: untapped frames, discovery budget/session ownership | Can start immediately; coordinate with C04 |
+| C04 | [Hybrid diagnostic scheduling](04-hybrid-diagnostic-scheduling.md) 🔧 | Finding 4: transition waits and end-anchored cadence | Coordinate with C02 and C06 on the collector loop |
+| C05 | [Trustworthy pipeline benchmark](05-pipeline-benchmark.md) 🔧 | Finding 5: stale-data benchmark and invalid capacity claims | Can start immediately; precedes optimization claims |
+| C06 | [Lossless diagnostic discovery](06-diagnostic-discovery.md) 🔧 | Finding 6: untapped frames, discovery budget/session ownership | Can start immediately; coordinate with C04 |
 | C07 | [Passive receive and queue handoff](archive/07-passive-receive-and-queueing.md) ✅ | Finding 7: blocking passive receive; collection overhead | C05 for performance evidence; C03 for loss reporting |
-| C08 | [Inference scheduling and isolation](08-inference-scheduling.md) | Finding 7: synchronous inference and cadence drift | C05 baseline; coordinate with C07 on event-loop measurements |
-| C09 | [Polling plans and profile capacity](09-polling-plans-and-profile-capacity.md) | Mode-specific recommendations: batching, priorities, DID weights, accurate demand | C02, C04, C06; C03 for delivery acceptance |
-| C10 | [Sustained end-to-end validation](10-sustained-validation.md) | Pi benchmarks and release evidence for all modes | Baseline after C05; final validation after relevant fixes |
+| C08 | [Inference scheduling and isolation](08-inference-scheduling.md) 🔧 | Finding 7: synchronous inference and cadence drift | C05 baseline; coordinate with C07 on event-loop measurements |
+| C09 | [Polling plans and profile capacity](09-polling-plans-and-profile-capacity.md) 🔧 | Mode-specific recommendations: batching, priorities, DID weights, accurate demand | C02, C04, C06; C03 for delivery acceptance |
+| C10 | [Sustained end-to-end validation](10-sustained-validation.md) 🔧 | Pi benchmarks and release evidence for all modes | Baseline after C05; final validation after relevant fixes |
 
-Suggested implementation order: C05 baseline repair; C01 and C02 correctness;
-C03 accounting; C04 and C06 diagnostic scheduling; C07 and C08 event-loop
-work; C09 profile optimization; C10 final validation. This is sequencing
-guidance, not an instruction to launch parallel agents or reorder the
-operator's overnight queue.
+✅ archived (complete) · 🔧 implemented, hardware evidence pending.
+
+Implementation ran in that order: C05 baseline repair; C01 and C02
+correctness; C03 accounting; C04 and C06 diagnostic scheduling; C07 and C08
+event-loop work; C09 profile optimization; C10 final validation. What remains
+is one Pi session, not a sequence — the ten hardware items above are
+independent of each other and each names its own procedure.
 
 ## Shared implementation rules
 

@@ -41,7 +41,7 @@ try:
 except ImportError:
     from scripts._cli import _REPO_ROOT  # type: ignore[no-redef]
 
-from src.validation.harness import run_scenario_clean
+from src.validation.harness import harness_config, run_scenario_clean
 from src.validation.report import build_report, summarize_markdown, write_report
 from src.validation.scenarios import SCENARIOS, scenario
 
@@ -69,6 +69,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="scenario name (repeatable); default: all",
     )
     run.add_argument("--no-inference", action="store_true", help="skip the live inference loop")
+    run.add_argument(
+        "--models-dir",
+        type=Path,
+        default=None,
+        help=(
+            "detector artifact root (profile-scoped like the daemon). Only manifests are "
+            "committed under models/, so a workstation run installs the declared IF stub "
+            "unless this points at real artifacts; the Pi needs no override."
+        ),
+    )
 
     summarize = sub.add_parser("summarize", help="diff two report directories into markdown")
     summarize.add_argument("--before", type=Path, required=True)
@@ -98,6 +108,11 @@ async def _run_all(args: argparse.Namespace) -> int:
                 label=args.label,
                 sessions_root=args.sessions_root,
                 scratch=scratch / name,
+                config=(
+                    None
+                    if args.models_dir is None
+                    else harness_config(scratch / name, models_dir=args.models_dir)
+                ),
                 enable_inference=not args.no_inference,
             )
             report = build_report(artifacts)

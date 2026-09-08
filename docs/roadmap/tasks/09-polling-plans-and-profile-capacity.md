@@ -143,7 +143,14 @@ the actual path, not a capability available only in a probe tool.
   incident as history, not a universal 24 request/s ceiling. Do not raise
   deployed rate defaults until C10 supplies sustained evidence.
   _partial: misleading DID batching/24 req/s claims are corrected and no
-  defaults were raised. Exact sustained request/frame counts remain C10 work._
+  defaults were raised._
+  _C10 supplied request counts under measured conditions **on the synthetic
+  bus only** (e.g. `tuning-did` 148 batched + 1093 single Mode 22 in ~10 s
+  against 1613 single before C09; fuel-DID 199 batched + 990 single; hybrid
+  40 batched), with the ECU-side count agreeing with the scheduler's every
+  time. On that bus the budget was never the constraint, so batching bought
+  request count, not rate. None of it licenses a capacity note about the
+  truck's transport or a raised default — that is C10.10 on the Pi._
 
 ## Regression and acceptance checklist
 

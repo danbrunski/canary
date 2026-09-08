@@ -235,10 +235,24 @@ def harness_config(
     *,
     base: Path = Path("canary.example.yaml"),
     models_enabled: bool = True,
+    models_dir: Path | None = None,
 ) -> CanaryConfig:
     """The example daemon config, profile-scoped like the daemon, with every
-    control/state path redirected under ``scratch``."""
+    control/state path redirected under ``scratch``.
+
+    ``models_dir`` overrides where detector artifacts are looked up (it is
+    profile-scoped afterwards, exactly as the daemon scopes it). Only
+    manifests are committed under ``models/``, so a workstation run installs
+    the declared IF stub by default; point this at a directory holding a real
+    ``model.joblib``/``model.pt`` to measure per-detector occupancy against
+    real artifacts (C08.1). On the Pi the deployed ``models_dir`` already
+    holds them and needs no override.
+    """
     config = CanaryConfig.from_yaml(base)
+    if models_dir is not None:
+        config = config.model_copy(
+            update={"daemon": config.daemon.model_copy(update={"models_dir": models_dir})}
+        )
     config = scope_config(config, resolve_profile_for_tooling(config, None))
     known = set(type(config.daemon).model_fields)
     daemon_update = {
