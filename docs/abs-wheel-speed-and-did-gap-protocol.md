@@ -24,6 +24,25 @@ cross-check and the genuinely useful new candidates (`0x231`, `0x23E`,
 `0x280`, `0x354`) are recorded in
 `data/analyses/2026-09-08-2011-xterra-dbc-review.md`.
 
+### Nissan Leaf DBC cross-check reviewed 2026-09-08
+
+An operator-supplied AZE0 Leaf CAR-CAN DBC provides the non-overlapping layout
+the 2011 Xterra file lacked: big-endian fields at bytes 0-1 and 2-3 in each of
+`0x284` and `0x285`, labelled as front and rear wheel pairs at
+`0.005 km/h/count`. This strengthens the hypothesis that Nissan commonly uses
+this message pair for ABS speed data, but it does **not** overturn the 2008
+Xterra result below. CANary already tested those aligned fields; their yaw
+response looks like aggregate vehicle speed, and their fitted scale is about
+153 rather than the Leaf's 200 counts/(km/h).
+
+If the original full-drive frames are available, reproduce the exact Leaf
+four-field mapping and retain the individual scale/yaw coefficients as a
+compact result. Do not repeat the broad correlation search or promote corner
+names without direction-changing left/right separation. The same Leaf file
+also independently corroborates `0x385` TPMS bytes and supplies useful
+`0x5C5`, `0x60D`, and `0x358` body candidates. Full review:
+`data/analyses/2026-09-08-leaf-dbc-review.md`.
+
 ### Factory topology: ABS on CAN, with a separate K-line diagnostic path
 
 The factory manuals remove the ambiguity left by the capture:

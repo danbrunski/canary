@@ -97,6 +97,21 @@ minimum set `--vehicle-state`.
      VVT `0x1110`, A/F-heater `0x1107..0A`. The structured map is
      `data/dids.yaml`; see `data/analyses/2026-05-16T223328.md` and
      `docs/abs-wheel-speed-and-did-gap-protocol.md` for evidence and limits.
+9. **Body / TPMS candidate capture** — validate the reusable Nissan leads from
+   the 2011 Xterra and AZE0 Leaf DBCs with isolated physical actions, without
+   promoting either donor vehicle's labels directly:
+   - Parked, change one thing per tag: parking brake (`0x5C5` byte 0), each
+     door / locks / exterior lamps / turn signals (`0x60D`), then headlights
+     and indicators with the HVAC blower off (`0x358`).
+   - Record `0x5C5` bytes 1-3 before and after a GPS-measured drive; use only
+     the delta to determine the candidate odometer's units and scale.
+   - Change exactly one tire by a measured 4 psi, then roll far enough to wake
+     the TPMS sensors. The proposed 0.25 psi/count scale predicts a 16-count
+     change in exactly one of `0x385` bytes 2-5 and will resolve the conflicting
+     Leaf versus QM5/Koleos corner orders.
+   Preserve the raw before/after frames and physical-action tags. See
+   `data/analyses/2026-09-08-leaf-dbc-review.md` for the field-level evidence
+   and the tests that would promote each candidate.
 
 Opportunistic extras: towing / heavy load (pushes into the high-load corner an
 empty truck on flat ground can't reach); a tagged drive specifically for

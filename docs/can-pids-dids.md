@@ -92,27 +92,32 @@ Byte positions are zero-based. A range such as bytes 2-3 includes both endpoints
 0x231 byte 3 - ECM_ENGINE_STATE_B - duplicate engine-state-related enum or bit field - raw value - high confidence
 0x29E byte 0 - ECM_ENGINE_STATE_C - duplicate engine-state-related enum or bit field - raw value - high confidence
 0x2D1 byte 1 - MOTION_SIGNAL_2D1_1 - motion-correlated value, possibly vehicle speed - scale and identity unknown - hypothesized
-0x280 byte 5 - MOTION_SIGNAL_280_5 - motion-correlated value - scale and identity unknown - hypothesized
+0x280 bytes 4-5 - cluster-speed candidate - Leaf and 2011 Xterra DBCs agree on the field and 0.01 km/h/count but disagree on endianness; the 2008 byte-5 motion result is consistent but not a scale validation - hypothesized
 0x590 byte 2 - MOTION_SIGNAL_590_2 - slow body-bus motion or accumulated-value candidate - scale and identity unknown - hypothesized
 0x590 byte 5 - MOTION_SIGNAL_590_5 - second slow body-bus motion or accumulated-value candidate - scale and identity unknown - hypothesized
-0x354 byte 1 - MOTION_SIGNAL_354_1 - motion-correlated drivetrain or transfer-case candidate - scale and identity unknown - hypothesized
+0x354 bytes 0-1 - ABS/vehicle-speed candidate - Leaf and 2011 Xterra DBCs agree on a big-endian field; the Xterra file proposes 0.0066 mph/count, while the Leaf calls it unscaled pulses - hypothesized
+0x354 byte 4 mask 0x40 - ESP/TCS-off candidate independently present in the Leaf and 2011 Xterra DBCs - hypothesized
 0x284 bytes 1-2 - WHEEL_SPEED_PAIR_A - invalid legacy extraction - interpretation retracted, do not use as a wheel-speed signal
 0x285 bytes 1-2 - WHEEL_SPEED_PAIR_B - invalid legacy extraction - interpretation retracted, do not use as a wheel-speed signal
 0x002 byte 0 - STEERING_002_LOW - part of the suspected 16-bit steering-angle field at bytes 0-1 - scale unpinned - low confidence
 0x002 byte 1 - STEERING_ANGLE_002 - part of the suspected 16-bit steering-angle field at bytes 0-1 - scale unpinned - low confidence
 0x625 byte 1 - AC_COMPRESSOR_STATE - commanded A/C compressor state - zero off and approximately 128 engaged - high confidence
 0x625 byte 3 - POWER_STATE_625_3 - ignition or vehicle power-state candidate - raw value - medium confidence
-The `0x385` hypothesis below imports its layout from a working [QM5/Koleos TPMS decoder](https://whoisit.tistory.com/523); the matching CAN ID and plausible Xterra values are not substitutes for a controlled vehicle-specific validation.
-0x385 byte 2 - TPMS_FR_PRESSURE - candidate front-right tire pressure - raw times 0.25 psi - hypothesized; corner order and scale imported from QM5/Koleos and not yet validated on the Xterra
-0x385 byte 3 - TPMS_FL_PRESSURE - candidate front-left tire pressure - raw times 0.25 psi - hypothesized; observed Xterra mean decodes to 38.8 psi
-0x385 byte 4 - TPMS_RR_PRESSURE - candidate rear-right tire pressure - raw times 0.25 psi - hypothesized; observed Xterra mean decodes to 38.4 psi
-0x385 byte 5 - TPMS_RL_PRESSURE - candidate rear-left tire pressure - raw times 0.25 psi - hypothesized; observed Xterra mean decodes to 37.5 psi
+The `0x385` hypothesis below is now independently supported by a working [QM5/Koleos TPMS decoder](https://whoisit.tistory.com/523) and an [AZE0 Leaf CAR-CAN DBC](https://github.com/dalathegreat/leaf_can_bus_messages/blob/main/CAR-can_AZE0.dbc). Both use bytes 2-5 at 0.25 psi/count. Their tentative corner orders disagree, and matching CAN IDs plus plausible Xterra values are not substitutes for a controlled one-tire validation.
+0x385 byte 2 - TPMS_FR_PRESSURE - candidate tire pressure - raw times 0.25 psi - hypothesized; QM5/Koleos and Leaf sources support the byte and scale but conflict on the corner, while the observed Xterra mean decodes to 36.9 psi
+0x385 byte 3 - TPMS_FL_PRESSURE - candidate tire pressure - raw times 0.25 psi - hypothesized; corner unpinned and observed Xterra mean decodes to 38.8 psi
+0x385 byte 4 - TPMS_RR_PRESSURE - candidate tire pressure - raw times 0.25 psi - hypothesized; corner unpinned and observed Xterra mean decodes to 38.4 psi
+0x385 byte 5 - TPMS_RL_PRESSURE - candidate tire pressure - raw times 0.25 psi - hypothesized; corner unpinned and observed Xterra mean decodes to 37.5 psi
 0x385 byte 6 - unidentified - previously grouped with bytes 2-5 in the retracted 40-bit odometer interpretation; not part of the published QM5/Koleos TPMS layout
 0x002 byte 2 - STEERING_RATE_002 - steering-rate candidate associated with bytes 0-1 - sign and scale unpinned - low confidence
 0x29E byte 5 - MOTION_29E_5 - engine-load or torque-request-related candidate - scale and identity unpinned - high confidence
 0x29E byte 3 - BRAKE_PRESSURE_29E_3 - brake application or pressure magnitude - approximately zero released and 64 firmly applied, pressure scale unpinned - high confidence
 0x29E byte 7 - BRAKE_ACTIVITY_29E_7 - brake-dominant driver-demand or pedal-activity composite - raw value - high confidence
-0x358 byte 1 - HVAC_BLOWER_LIGHTING_358_1 - bit-packed HVAC blower and exterior-lighting status - individual bits not yet separated - medium confidence
+0x358 byte 1 - HVAC_BLOWER_LIGHTING_358_1 - bit-packed status - medium confidence for the composite channel; Xterra evidence pins blower active to mask 0x40, while the Leaf DBC proposes headlights at independent mask 0x80 - headlight bit remains hypothesized pending an isolated off/on/off check
+0x358 byte 2 - turn-signal candidate - Leaf DBC proposes 0=off, 4=left, 8=right, 12=hazards - hypothesized
+0x5C5 bytes 1-3 - 24-bit big-endian odometer candidate - 2011 Xterra DBC names this message MILEAGE and Leaf DBC supplies the field; units/scale unpinned - hypothesized
+0x5C5 byte 0 mask 0x04 - parking-brake candidate from Leaf DBC - hypothesized
+0x60D bytes 0-2 - BCM body-state candidates from Leaf DBC: doors, locks, exterior lamps, turn-signal command/feedback, and vehicle state - all require isolated Xterra physical-action tags
 0x1F9 byte 0 - COOLING_FAN_1F9_0 - cooling-fan and A/C clutch status flags - base 0x20, fan low adds 0x40, fan high adds 0x80, A/C clutch adds 0x08 - high confidence
 0x6F7 bytes 0-1 - WHEEL_SPEED_6F7_A - aggregate vehicle-speed variant A, not an individual wheel - raw times 0.0625 km/h - high confidence - reports zero below approximately 4 km/h
 0x6F7 bytes 2-3 - WHEEL_SPEED_6F7_B - aggregate vehicle-speed variant B, not an individual wheel - raw times 0.0625 km/h - high confidence
@@ -127,3 +132,4 @@ The three 0x6F7 speed fields are vehicle-speed variants, not individual wheel sp
 The 0x6F7 speeds agree with Mode 01 PID 0x0D but inherit that PID's approximately 8 percent under-read relative to measured ground speed on this vehicle. Do not use them for absolute distance or true road-speed calculations.
 The 0x233 byte 0 and 0x23D byte 7 coolant copies use a minus-50 offset, while 0x551 byte 0 uses a minus-40 offset.
 The names WHEEL_SPEED_PAIR_A and WHEEL_SPEED_PAIR_B remain only for compatibility with old model manifests; their wheel-speed interpretation was retracted.
+Cross-vehicle evidence review for the body, TPMS, steering, and ABS candidates is in `data/analyses/2026-09-08-leaf-dbc-review.md`. No confidence was promoted from that evidence alone.

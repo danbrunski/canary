@@ -84,6 +84,13 @@ profile leads for another vehicle, not 2008 bindings. `0x35D` and `0x5C5` are
 present on the 2008 bus, but the supplied DBC gives them no signals, so it adds
 no decode knowledge for those IDs.
 
+A subsequent AZE0 Leaf DBC cross-check supplies a useful missing detail for
+`0x5C5`: bytes 1-3 are a big-endian 24-bit odometer candidate and byte 0 mask
+`0x04` is a parking-brake candidate. Combined with this file's `MILEAGE`
+message name, that is strong enough to warrant a measured-distance and
+parking-brake test, but not to copy the Leaf scale or units. See
+`data/analyses/2026-09-08-leaf-dbc-review.md`.
+
 ## The four-wheel-speed claim
 
 The supplied DBC labels two 16-bit wheel speeds in each of `0x284` and `0x285`,
@@ -102,6 +109,13 @@ However, it cannot be accepted as written:
 3. The supplied file is for a different model year and appears to include an
    automatic-transmission TCU absent from the development vehicle. An ID match
    is not proof that payload semantics survived the year/powertrain change.
+
+A later Leaf CAR-CAN DBC removes the overlap defect by declaring aligned,
+big-endian fields at bytes 0-1 and 2-3 of both messages, at
+`0.005 km/h/count`. That is useful evidence for the message-pair hypothesis,
+but the exact layout was already inside CANary's byte-aligned Xterra sweep and
+did not produce four yaw-separated corners. Cross-vehicle agreement does not
+supersede that vehicle-specific negative result.
 
 So this DBC does **not** fill the 2008 per-corner wheel-speed gap. It does give
 a precise hypothesis to retest if a suitable 2008 raw drive is available:

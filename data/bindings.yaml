@@ -862,9 +862,11 @@ signals:
       byte reverts to 157 mid-drive, the engine has died.
 
   # 0x385 bytes 2-5 are a strong TPMS candidate. A 2016 reverse-engineered
-  # Renault Samsung QM5 / Renault Koleos implementation maps these exact
-  # positions to four tire pressures at 0.25 psi/count:
+  # Renault Samsung QM5 / Renault Koleos implementation and an AZE0 Leaf
+  # CAR-CAN DBC both map these exact positions to four tire pressures at
+  # 0.25 psi/count:
   # https://whoisit.tistory.com/523
+  # https://github.com/dalathegreat/leaf_can_bus_messages/blob/main/CAR-can_AZE0.dbc
   #
   # This supersedes the former ODOMETER_ACCUMULATOR_385 binding. That claim
   # grouped bytes 2-6 from per-window aggregates. Four independently encoded
@@ -896,12 +898,16 @@ signals:
           the QM5/Koleos mapping, not Xterra ground truth.
     notes: &tpms_385_notes |
       Candidate layout from a working QM5/Koleos CAN display: byte 2 FR,
-      byte 3 FL, byte 4 RR, byte 5 RL, each raw x 0.25 psi. CAN IDs and layouts
-      are vehicle-specific despite the Renault-Nissan relationship, so do not
-      promote or display these as measured Xterra pressures until a controlled
-      test changes one known tire by a measured amount. A 4 psi change should
-      move exactly one candidate byte by 16 counts. Byte 6 remains unidentified.
-      External source: https://whoisit.tistory.com/523
+      byte 3 FL, byte 4 RR, byte 5 RL, each raw x 0.25 psi. An independent
+      AZE0 Leaf DBC corroborates bytes 2-5 and the same scale, but calls them
+      TirePressure1-4 and gives only question-marked corner comments whose
+      left/right order is opposite the QM5/Koleos mapping. CAN IDs and layouts
+      are vehicle-specific, so do not promote or display these as measured
+      Xterra pressures until a controlled test changes one known tire by a
+      measured amount. A 4 psi change should move exactly one candidate byte
+      by 16 counts. Byte 6 remains unidentified.
+      External sources: https://whoisit.tistory.com/523 and
+      https://github.com/dalathegreat/leaf_can_bus_messages/blob/main/CAR-can_AZE0.dbc
 
   - name: TPMS_FL_PRESSURE
     module: BCM
