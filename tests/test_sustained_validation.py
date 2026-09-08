@@ -644,3 +644,40 @@ def test_expected_failures_any_accepts_either_legitimate_name() -> None:
     assert met(["persistence_loss"]) is False
     # An empty "any" set must not make every run vacuously met-or-unmet.
     assert headline((), {"quality": {"failures": []}})["expected_failures_met"] is True
+
+
+def test_an_idle_bus_missing_its_rate_blames_the_schedule_not_the_ecu() -> None:
+    """C04.12 — the interval policy missed 4.0 Hz by 26 % with the bus 27 %
+    used and zero timeouts, where the cycle policy hit it exactly under the
+    identical workload. Neither the budget nor the ECM was the constraint; the
+    schedule was. Reporting ``ecu_response_time`` there blames the ECM for an
+    end-anchored schedule."""
+    from types import SimpleNamespace
+
+    from src.validation.evidence import limiting_stage
+
+    def classify(sent: int, timeouts: int) -> dict[str, Any]:
+        artifacts = SimpleNamespace(
+            started_wall=0.0,
+            ended_wall=10.0,
+            writer_stalls=0,
+            finalize={},
+            scheduler_metrics={
+                "bus_budget_requests_per_second": 90.0,
+                "requests_sent": sent,
+                "request_timeouts": timeouts,
+            },
+        )
+        return limiting_stage(artifacts, {}, {"failures": ["rate_shortfall"]}, {})
+
+    idle = classify(sent=239, timeouts=0)  # utilisation 0.266
+    assert idle["stage"] == "scheduling_policy_idle_bus", idle
+    assert idle["evidence"]["utilisation"] < 0.5
+
+    # Timeouts on an idle bus really are the ECU taking too long.
+    slow_ecu = classify(sent=239, timeouts=12)
+    assert slow_ecu["stage"] == "ecu_response_time", slow_ecu
+
+    # A saturated bus is still pacing.
+    saturated = classify(sent=860, timeouts=0)
+    assert saturated["stage"] == "bus_budget_request_pacing", saturated

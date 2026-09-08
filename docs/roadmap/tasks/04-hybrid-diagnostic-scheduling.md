@@ -72,7 +72,9 @@ run, not a verified result of the current code.
   4 Hz until it is achieved and persisted. Keep the profile experimental until
   its declared contract is met.
   _pending hardware 2026-09-08: Pi still unreachable. Procedure in `docs/hybrid-scheduling.md` (read `vehicle_state`, compare cadence, gaps, complete tuples and transition timing between the interval and cycle policies); `tuning-hybrid-research` stays experimental until 4 Hz is achieved and persisted._
-  _software half measured on the synthetic bus (C10, `hybrid-mode01-mode22`): cycle duration 0.250 s median and p95, 0 missed of 20, entry→DID 12 ms and exit→Mode 01 63 ms median, both services progressing, and the honest cross-mode pairing bound (153 ms median separation → ±43 rpm at a 470 rpm/s slew). That bounds the scheduler, not the ECM — no rate on the truck is established by it._
+  _software half measured on the synthetic bus (C10, `hybrid-mode01-mode22`): cycle duration 0.250 s median and p95, 0 missed of 20, entry→DID 12 ms and exit→Mode 01 63 ms median, both services progressing, and the honest cross-mode pairing bound (153 ms median separation → ±43 rpm at a 470 rpm/s slew)._
+  _policy comparison done 2026-09-08: `hybrid-interval-policy` is the same scenario with `did_cycle_seconds` dropped and nothing else changed, which selects the older end-anchored interval policy. Under the identical workload the cycle policy meets 4.0 Hz on every DID; the interval policy misses it by 26 % (2.953 / 4.0) with the bus 27 % used and zero timeouts — neither the budget nor the ECU, but the schedule. That comparison also surfaced and fixed finding 13 (`limiting_stage` blamed `ecu_response_time` for it). Table in `docs/sustained-validation.md` ("Diagnostic policy comparison")._
+  _the 4 Hz claim itself is untouched by all of this: the synthetic ECU answers in a fixed 5 ms sleep, and the real ECM's response time is what decides whether the cycle plan is feasible on the truck._
 - [x] C04.13 Acceptance: the loop wakes at the earliest relevant deadline,
   both service phases progress, and cycle targets and achieved values use the
   same definition.

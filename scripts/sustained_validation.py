@@ -35,6 +35,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 try:
@@ -71,6 +72,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="scenario name (repeatable); default: all",
     )
     run.add_argument("--no-inference", action="store_true", help="skip the live inference loop")
+    run.add_argument(
+        "--inference-tick-s",
+        type=float,
+        default=None,
+        help=(
+            "override the model cadence for this run (C08.12 asks for 1 Hz and a higher "
+            "supported test cadence). Does not touch any deployed default."
+        ),
+    )
     run.add_argument(
         "--models-dir",
         type=Path,
@@ -119,6 +129,8 @@ async def _run_all(args: argparse.Namespace) -> int:
     failures = 0
     for name in names:
         spec = scenario(name)
+        if args.inference_tick_s is not None:
+            spec = replace(spec, inference_tick_s=float(args.inference_tick_s))
         started = time.monotonic()
         print(f"[{args.label}] {name}: running {spec.duration_s:.0f}s ...", flush=True)
         try:

@@ -217,6 +217,53 @@ None of that is a statement about the truck. The synthetic ECU answers in a
 fixed `sleep`; the ECM's real response time is the thing that decides where
 the floor actually sits, and it is unmeasured. **No default was changed.**
 
+## Model-cadence comparison (C08.12, workstation half)
+
+`scripts/sustained_validation.py run --inference-tick-s` overrides the model
+cadence for one run without touching any deployed default. Measured
+2026-09-08 with the **real IF artifact** (see C08.1), same workload each side:
+
+| scenario | cadence | ticks | missed | lateness p95 | feature p95 | heartbeat p99 | CPU (1 core) | RSS | storage drops | seq missing |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `fuel-map` | 1 Hz | 16/16 | 0 | 1.0 ms | 51.1 ms | 32.9 ms | 16.1 % | 764 MB | 0 | 0 |
+| `fuel-map` | 2 Hz | 31/31 | 0 | 1.7 ms | 51.3 ms | 41.4 ms | 24.4 % | 762 MB | 0 | 0 |
+| `tuning-did` | 1 Hz | 16/16 | 0 | 0.7 ms | 71.2 ms | 35.2 ms | 27.4 % | 807 MB | 0 | 0 |
+| `tuning-did` | 2 Hz | 31/31 | 0 | 1.9 ms | 72.7 ms | 57.7 ms | 37.2 % | 803 MB | 0 | 0 |
+
+Doubling the cadence costs **+8 to +10 points of one core**, not 2×: the
+feature stage's per-tick cost is flat (51 / 72 ms at both cadences) and it is
+the buffer work, not the tick rate, that dominates. No deadline was missed at
+either cadence, no record was lost, and RSS is unchanged (the torch import
+dominates it). The visible cost is loop-holding: `tuning-did`'s heartbeat p99
+goes 35 → 58 ms at 2 Hz.
+
+CPU is process-wide and includes the harness itself. **This is the workstation
+half of C08.12** — the Pi's CPU, thermal and power behaviour, and its
+event-loop delay under the same workload, are what that item still holds for.
+
+## Diagnostic policy comparison (C04.12, workstation half)
+
+`hybrid-interval-policy` is `hybrid-mode01-mode22` with `did_cycle_seconds`
+dropped and nothing else changed, which selects the older end-anchored
+interval policy (`capture_profiles` resolves cycle → interval → collection
+default). Both run the identical workload:
+
+| policy | worst DID achieved / requested | quality failures | limiting stage | bus utilisation | timeouts |
+|---|---:|---|---|---:|---:|
+| **cycle** (`did_cycle_seconds: 0.25`) | 4.000 / 4.0 Hz | `acquisition_gap` | `inference_feature_stage_on_loop` | — | 0 |
+| **interval** (`did_interval_seconds: 0.25`) | 2.953 / 4.0 Hz | **`rate_shortfall`** | `scheduling_policy_idle_bus` | 0.266 | 0 |
+
+The cycle policy meets the requested 4 Hz on every DID; the interval policy
+misses it by **26 %** — with the bus only 27 % used and every request
+answered. Neither the budget nor the ECU was the constraint: the end-anchored
+schedule simply did not ask often enough. That is the C04 change, measured
+against its predecessor under one workload.
+
+**It is not the 4 Hz claim.** `tuning-hybrid-research` stays experimental
+until 4 Hz is achieved *and persisted* on the truck, against the real ECM's
+response time — the synthetic ECU answers in a fixed 5 ms `sleep`, which is
+the one number that decides whether the cycle plan is feasible there.
+
 ## Findings the harness surfaced
 
 These are defects or facts found while building the harness, each with its
@@ -338,6 +385,15 @@ source fix in their owning task.
    `expected_failures` (all of these must), and the scenario declares both
    names. The test asserts the invariant instead: starvation is named and the
    constraint is pacing.
+
+13. **A missed rate on an idle bus was blamed on the ECU (fixed).** The
+   interval-policy run missed its requested rate at 0.266 bus utilisation
+   with zero timeouts, and `limiting_stage` reported `ecu_response_time` —
+   the ECM answering everything it was asked, promptly, being named as the
+   constraint for a schedule that did not ask. `limiting_stage` now reports
+   `scheduling_policy_idle_bus` when a rate shortfall coincides with an idle
+   bus and no timeouts. Same shape as finding 11: the classifier reached for
+   a vehicle-side explanation of a scheduler-side fact.
 
 ## Replay (C10.9)
 

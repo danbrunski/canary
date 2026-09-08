@@ -174,6 +174,18 @@ HYBRID_PROFILE = _capture(
     target_rate_hz=4.0,
     bus_budget_override=90.0,
 )
+#: The same hybrid workload on the **interval** policy instead of the cycle
+#: policy: ``did_cycle_seconds`` takes precedence wherever it is set
+#: (``capture_profiles`` resolves cycle → interval → collection defaults), so
+#: dropping it — and nothing else — selects the older end-anchored behaviour.
+#: C04.12 asks for equivalent captures compared across the two policies; this
+#: is the workstation half of that comparison.
+HYBRID_INTERVAL_PROFILE = {
+    **{k: v for k, v in HYBRID_PROFILE.items() if k != "did_cycle_seconds"},
+    "name": "tuning-hybrid-interval",
+    "storage_prefix": "_capture-tuning-hybrid-interval",
+}
+
 RATE_OVERLOAD_PROFILE = _capture(
     "fuel-map-overload",
     mode01=FUEL_MAP_MODE01,
@@ -384,6 +396,25 @@ SCENARIOS: tuple[ScenarioSpec, ...] = (
             "entry/exit delays",
             "cycle deadlines",
             "cross-mode pairing limits",
+        ),
+    ),
+    ScenarioSpec(
+        name="hybrid-interval-policy",
+        kind="canable",
+        table_row="Hybrid Mode 01/22",
+        profile=HYBRID_INTERVAL_PROFILE,
+        duration_s=10.0,
+        spec_overrides={"batch_max_pids": 6, "did_batch_max_dids": 3},
+        ecu={"latency": 0.005, "session_gated": True},
+        broadcast=STEADY,
+        required_evidence=(
+            "cadence and gaps under the interval policy",
+            "transition timing",
+            "complete tuples",
+        ),
+        notes=(
+            "The hybrid workload with did_cycle_seconds dropped, so the interval policy "
+            "schedules the Mode 22 windows. Paired with hybrid-mode01-mode22 for C04.12."
         ),
     ),
     ScenarioSpec(

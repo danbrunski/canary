@@ -662,6 +662,26 @@ def limiting_stage(
                     "failures": failures,
                 },
             }
+        if timeouts == 0 and utilisation is not None and utilisation < 0.5:
+            # The rate was missed with the bus mostly idle and every request
+            # answered: neither the budget nor the ECU was the constraint, so
+            # the schedule simply did not ask often enough. Measured in the
+            # C04.12 policy comparison — the interval policy missed 4.0 Hz by
+            # 26 % at 0.266 utilisation with zero timeouts, where the cycle
+            # policy hit it exactly under the identical workload. Calling that
+            # `ecu_response_time` blames the ECM for an end-anchored schedule.
+            return {
+                "stage": "scheduling_policy_idle_bus",
+                "evidence": {
+                    "timeouts": timeouts,
+                    "utilisation": utilisation,
+                    "failures": failures,
+                    "note": (
+                        "requested rate missed with an idle bus and no timeouts — the "
+                        "schedule, not the budget or the ECU"
+                    ),
+                },
+            }
         return {
             "stage": "ecu_response_time",
             "evidence": {"timeouts": timeouts, "utilisation": utilisation, "failures": failures},
