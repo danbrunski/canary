@@ -257,6 +257,24 @@ def did_access() -> DidAccess | None:
     return None if did_map is None else did_map.access
 
 
+def did_response_widths() -> tuple[dict[int, int], dict[int, str]]:
+    """Provenance-backed full Mode-22 payload widths, keyed by DID."""
+    did_map = _load_did_map()
+    if did_map is None:
+        return {}, {}
+    widths = {
+        entry.did: entry.response_length
+        for entry in did_map.dids
+        if entry.response_length is not None
+    }
+    sources = {
+        entry.did: entry.response_length_source
+        for entry in did_map.dids
+        if entry.response_length_source is not None
+    }
+    return widths, sources
+
+
 class _PidDiscoveryClient(Protocol):
     """Synchronous discovery, for standalone ``build_poll_requests`` callers."""
 
@@ -429,6 +447,11 @@ class CanObdSpec:
     #: single-PID requests happily may ignore or refuse a batched one. Opt in
     #: per install, or let ``probe_batch_size`` establish it at startup.
     batch_max_pids: int = 1
+    #: Mode-22 batching is independently scoped: support for Mode 01 batches
+    #: says nothing about a UDS session. 1 disables it.
+    did_batch_max_dids: int = 1
+    did_response_widths: Mapping[int, int] = field(default_factory=dict)
+    did_response_width_sources: Mapping[int, str] = field(default_factory=dict)
     #: User-defined custom PIDs (Task 2.6) loaded once at daemon startup via
     #: ``custom_pids.load_custom_pids`` and threaded straight through — the
     #: scheduler never re-reads the YAML itself. Empty by default (no
@@ -500,6 +523,11 @@ class CanObdLoopStats:
     batch_desyncs: int = 0
     #: Times the session narrowed its batch size after repeated failures.
     batch_size_narrowings: int = 0
+    did_batched_requests: int = 0
+    did_batched_members_requested: int = 0
+    did_batch_failures: int = 0
+    did_batch_desyncs: int = 0
+    did_batch_size_narrowings: int = 0
     #: Support discovery as scheduler work (C06.8). ``requests_sent`` still
     #: counts every frame on the wire; these separate the probes from channel
     #: reads, and count the raw frames tapped *while* a probe was waiting —
@@ -1986,6 +2014,48 @@ def select_batch_companions(  # noqa: PLR0913
     return chosen
 
 
+def select_did_batch_companions(  # noqa: PLR0913
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    now: float,
+    *,
+    leader_index: int,
+    max_dids: int,
+    response_widths: Mapping[int, int],
+    eligible: RequestFilter | None = None,
+    members: Container[int] | None = None,
+    preferred: Container[int] = frozenset(),
+) -> list[int]:
+    """Same-round Mode-22 companions with known full payload boundaries."""
+    leader = requests[leader_index]
+    if max_dids <= 1 or leader.kind != "did" or leader.identifier not in response_widths:
+        return [leader_index]
+    chosen = [leader_index]
+    seen = {leader.identifier}
+    order = sorted(range(len(requests)), key=lambda index: (index not in preferred, index))
+    for index in order:
+        request, state = requests[index], states[index]
+        if len(chosen) >= min(max_dids, 3):
+            break
+        if index == leader_index or request.kind != "did":
+            continue
+        if request.service != leader.service or request.request_id != leader.request_id:
+            continue
+        if request.identifier in seen or request.identifier not in response_widths:
+            continue
+        if members is not None and index not in members:
+            continue
+        if _is_request_suppressed(state, now):
+            continue
+        if members is None and state.next_due_at > now:
+            continue
+        if eligible is not None and not eligible(index, request):
+            continue
+        chosen.append(index)
+        seen.add(request.identifier)
+    return chosen
+
+
 def _next_due_at(
     requests: list[_PollRequest],
     states: list[_PollRequestState],
@@ -2045,7 +2115,12 @@ def _batching_metrics(
     sample count behind it, and at the default 8 req/s a whole drive yields
     roughly ten samples per rpm x load cell.
     """
-    if spec.batch_max_pids <= 1 and stats.batched_requests == 0:
+    if (
+        spec.batch_max_pids <= 1
+        and stats.batched_requests == 0
+        and spec.did_batch_max_dids <= 1
+        and stats.did_batched_requests == 0
+    ):
         return None
     mean_pids = (
         round(stats.batched_pids_requested / stats.batched_requests, 2)
@@ -2070,6 +2145,26 @@ def _batching_metrics(
         # `obd_scheduler.achieved_hz_60s` is the trailing-window answer.
         "channel_reads_per_second_lifetime": achieved_hz,
         "channel_reads_per_second": achieved_hz,
+        "mode22": {
+            "max_dids": spec.did_batch_max_dids,
+            "known_response_widths": {
+                f"0x{did:04X}": {
+                    "bytes": width,
+                    "source": spec.did_response_width_sources.get(did),
+                }
+                for did, width in sorted(spec.did_response_widths.items())
+            },
+            "batched_requests": stats.did_batched_requests,
+            "members_requested": stats.did_batched_members_requested,
+            "mean_dids_per_batch": (
+                round(stats.did_batched_members_requested / stats.did_batched_requests, 2)
+                if stats.did_batched_requests
+                else None
+            ),
+            "failures": stats.did_batch_failures,
+            "desyncs": stats.did_batch_desyncs,
+            "fallbacks": stats.did_batch_size_narrowings,
+        },
     }
 
 
@@ -2242,6 +2337,7 @@ __all__ = [
     "apply_mode01_support",
     "mode06_requests",
     "select_batch_companions",
+    "select_did_batch_companions",
     "is_batchable",
     "RoundScheduler",
     "RoundState",

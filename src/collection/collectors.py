@@ -36,6 +36,7 @@ from src.collection.obd_collector import ObdSpec, collect_obd
 from src.collection.obd_scheduler import (
     ForcePollTrigger,
     FreezeFrameTrigger,
+    did_response_widths,
     known_did_names,
     parse_did_token,
 )
@@ -90,6 +91,7 @@ def default_collectors(
             )
         }
     )
+    did_widths, did_width_sources = did_response_widths()
     reconnect_policy = ReconnectPolicy(
         initial_delay_seconds=config.collection.reconnect_initial_delay_seconds,
         max_delay_seconds=config.collection.reconnect_max_delay_seconds,
@@ -140,6 +142,9 @@ def default_collectors(
             dids=request_dids,
             capture_profiles_enabled=True,
             batch_max_pids=config.collection.obd_batch_max_pids,
+            did_batch_max_dids=config.collection.obd_did_batch_max_dids,
+            did_response_widths=did_widths,
+            did_response_width_sources=did_width_sources,
             did_request_id=config.collection.obd_did_request_id,
             request_timeout_seconds=config.collection.obd_request_timeout_seconds,
             did_session=resolve_did_session_spec(config.collection),

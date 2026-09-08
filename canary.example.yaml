@@ -87,6 +87,8 @@ collection:
   # rows instead of interleaved samples — and it roughly doubles throughput.
   # The collector narrows 6 -> 4 -> 2 -> off by itself if the ECU refuses.
   obd_batch_max_pids: 6
+  # Mode 22 batching is a separate ECU/session capability. 1 disables it.
+  obd_did_batch_max_dids: 1
   obd_did_request_id: 0x7E0
   # auto = take the gating session (0xC0) + keep-alive cadence from
   # data/dids.yaml's access block; null = force bare polling; int = override.

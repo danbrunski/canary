@@ -259,6 +259,9 @@ class CollectionConfig(_Strict):
     #: Batched PIDs share one request *and one timestamp*, which is what makes
     #: a capture read as synchronous rows instead of interleaved samples.
     obd_batch_max_pids: int = Field(default=6, ge=1, le=6)
+    #: Maximum DIDs per Mode-22 request. Independent from Mode 01 capability;
+    #: 1 is off. Only DIDs with provenance-backed full response widths batch.
+    obd_did_batch_max_dids: int = Field(default=1, ge=1, le=3)
     obd_did_session_keepalive_seconds: float | None = None
     #: How often a DID window opens. Each window reads every active DID once,
     #: so this is the effective per-DID sample interval.

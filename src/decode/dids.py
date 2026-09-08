@@ -127,6 +127,12 @@ class DidEntry(_Strict):
     name: str
     byte_start: int = Field(ge=0, le=63)
     byte_length: int = Field(ge=1, le=8)
+    #: Full bytes after the ``62 <did>`` echo, measured from a single-DID
+    #: response. This is deliberately distinct from ``byte_length``: the
+    #: latter is only the decoded signal slice and cannot delimit a batched
+    #: response when the payload carries additional bytes.
+    response_length: int | None = Field(default=None, ge=1, le=64)
+    response_length_source: str | None = None
     byte_order: Literal["big", "little"] = "big"
     scale: float | None = None
     offset: float | None = None
@@ -148,6 +154,17 @@ class DidEntry(_Strict):
     #: decoder ignores both.
     evidence_against: list[Evidence] = Field(default_factory=list)
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def _response_length_has_provenance(self) -> DidEntry:
+        if (self.response_length is None) != (self.response_length_source is None):
+            raise ValueError("response_length and response_length_source must be set together")
+        if (
+            self.response_length is not None
+            and self.response_length < self.byte_start + self.byte_length
+        ):
+            raise ValueError("response_length cannot be shorter than the decoded byte slice")
+        return self
 
 
 class DidMap(_Strict):

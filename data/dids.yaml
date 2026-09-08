@@ -67,6 +67,8 @@ dids:
     name: ECM_COOLANT_TEMP
     byte_start: 0
     byte_length: 1
+    response_length: 1
+    response_length_source: '2026-05-11T222447 frames.log:418 single-DID response payload'
     byte_order: big
     scale: 1.0
     offset: -50.0
@@ -151,6 +153,8 @@ dids:
     name: ECM_RPM
     byte_start: 0
     byte_length: 2
+    response_length: 2
+    response_length_source: '2026-05-16T214006 four-state single-DID capture'
     byte_order: big
     scale: 1.0
     offset: 0.0
@@ -215,6 +219,8 @@ dids:
     name: ECM_INJECTOR_PW_B1
     byte_start: 0
     byte_length: 2
+    response_length: 2
+    response_length_source: '2026-08-07T005351 single-DID capture payloads'
     byte_order: big
     scale: null          # ≈ 4e-4 ms/count; needs steady-state multi-point calibration
     offset: null

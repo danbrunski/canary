@@ -72,20 +72,34 @@ the actual path, not a capability available only in a probe tool.
   strict API schema, manifest snapshots, backward-compatible seed loading, and
   capture-quality promises/floors are wired and tested. The shared resolved
   demand calculation does not exist until C09.1/C09.2 and remains._
-- [ ] C09.8 Integrate existing multi-DID builders/splitters into the tapped
+- [x] C09.8 Integrate existing multi-DID builders/splitters into the tapped
   scheduler request path. Scope capability by ECU/session, group only eligible
   same-round DIDs, and enforce the single-frame request limit of three DIDs.
-- [ ] C09.9 Use measured full response payload widths for splitting, not a
+  _done: `did_batch_max_dids` is an independent opt-in capability; the owned
+  receive loop uses the shared builder/splitter and groups only eligible,
+  same-ECU, same-round members, capped at three._
+- [x] C09.9 Use measured full response payload widths for splitting, not a
   catalog signal's decoded slice width. Store width provenance with ECU/profile
   data. Unknown/truncated boundaries must not misattribute later bytes.
-- [ ] C09.10 Preserve per-member accounting for partial responses, ECU
+  _done: `DidEntry.response_length` is distinct from the decoded byte slice
+  and requires `response_length_source`. Only three provenance-backed widths
+  currently batch; every other DID stays single. The splitter stops at an
+  unknown/truncated boundary._
+- [x] C09.10 Preserve per-member accounting for partial responses, ECU
   responder identity, raw response bytes, acquisition time, request/round ID,
   and separate Mode 01/22 batch metrics. Shared receipt does not establish
   atomic internal ECU sampling.
-- [ ] C09.11 Add capability failure/fallback behavior using the existing
+  _done: batch members retain raw payload bytes plus shared receipt time,
+  actual responder, request/round identity, and individual response/miss
+  state. Physical requests reject another ECU's response. Mode 22 counters
+  and width provenance are separate under scheduler batching metrics._
+- [~] C09.11 Add capability failure/fallback behavior using the existing
   Mode 01 approach where appropriate. A rejected batch must not permanently
   suppress healthy individual DIDs. Recalculate effective demand and report
   quality shortfall when falling back to single requests.
+  _partial: three whole-batch failures disable Mode 22 batching for only that
+  ECU/session; members receive no false miss/backoff and resume as healthy
+  single reads. Effective-demand recalculation awaits C09.1/C09.2._
 
 ## Implementation checklist: profile updates
 

@@ -16,14 +16,21 @@ keep that impossible.
 
 from __future__ import annotations
 
+import threading
+import time
+
+import can
 import pytest
 
 from src.analysis.did_scan import sweep_dids_batched
+from src.collection.can_obd_collector import run_can_obd_loop
 from src.collection.isotp import (
     MAX_BATCHED_DIDS,
     build_batched_did_request_payload,
     split_batched_did_response,
 )
+from src.collection.obd_scheduler import CanObdSpec
+from src.config import CanBusConfig
 
 # Widths as MEASURED payload lengths, which is what the splitter needs.
 WIDTHS = {0x1101: 1, 0x1219: 2, 0x1208: 2, 0x1100: 4, 0x1103: 1}
@@ -198,3 +205,121 @@ def test_sweep_batch_size_is_capped_at_the_frame_ceiling() -> None:
     transport = _FakeTransport(values)
     sweep_dids_batched(transport, list(values), width_for, batch_size=99)
     assert all(len(g) <= MAX_BATCHED_DIDS for g in transport.batched_groups)
+
+
+def _frames(body: bytes) -> list[bytes]:
+    if len(body) <= 7:
+        return [bytes([len(body), *body]) + bytes(7 - len(body))]
+    out = [bytes([0x10 | (len(body) >> 8), len(body) & 0xFF]) + body[:6]]
+    rest, sequence = body[6:], 1
+    while rest:
+        chunk, rest = rest[:7], rest[7:]
+        out.append(bytes([0x20 | sequence, *chunk]) + bytes(7 - len(chunk)))
+        sequence += 1
+    return out
+
+
+class _SchedulerDidEcu:
+    values = {0x1101: b"\x8e", 0x1219: b"\x02\xee", 0x1208: b"\x16\xac"}
+
+    def __init__(self, *, reject_batches: bool = False, responder_id: int = 0x7E8) -> None:
+        self.channel_info = "test"
+        self.reject_batches = reject_batches
+        self.sent: list[can.Message] = []
+        self.pending: list[bytes] = []
+        self.did_batches = 0
+        self.responder_id = responder_id
+
+    def send(self, message: can.Message) -> None:
+        self.sent.append(message)
+        data = bytes(message.data)
+        if data[1] == 0x30:  # ISO-TP flow control
+            return
+        if data[1] == 0x22:
+            count = (data[0] - 1) // 2
+            dids = [(data[i] << 8) | data[i + 1] for i in range(2, 2 + count * 2, 2)]
+            if count > 1:
+                self.did_batches += 1
+                if self.reject_batches:
+                    return
+            body = b"\x62" + b"".join(
+                bytes([did >> 8, did & 0xFF]) + self.values[did] for did in dids
+            )
+            self.pending.extend(_frames(body))
+        elif data[1] == 0x01:  # keep the one explicit Mode-01 member healthy
+            self.pending.extend(_frames(b"\x41\x0c\x0b\xb8"))
+
+    def recv(self, timeout: float | None = None) -> can.Message | None:
+        if not self.pending:
+            return None
+        return can.Message(
+            arbitration_id=self.responder_id, data=self.pending.pop(0), is_extended_id=False
+        )
+
+
+def _scheduler_spec(**overrides: object) -> CanObdSpec:
+    values: dict[str, object] = {
+        "can": CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+        "poll_rate_hz": 30.0,
+        "pids": ("RPM",),
+        "dids": ("1101", "1219", "1208"),
+        "request_timeout_seconds": 0.01,
+        "did_batch_max_dids": 3,
+        "did_response_widths": WIDTHS,
+    }
+    values.update(overrides)
+    return CanObdSpec(**values)
+
+
+def test_active_scheduler_batches_known_width_dids_with_full_provenance() -> None:
+    bus = _SchedulerDidEcu()
+    readings: list = []
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _scheduler_spec(),
+        on_frame=lambda _message: None,
+        on_reading=readings.append,
+        stop_event=threading.Event(),
+        deadline_monotonic=time.monotonic() + 0.2,
+    )
+    assert bus.did_batches > 0
+    assert stats.did_batched_requests > 0
+    dids = [reading for reading in readings if reading.pid.startswith("DID_")]
+    assert {reading.pid for reading in dids} == {"DID_1101", "DID_1219", "DID_1208"}
+    assert all(reading.responder_id == 0x7E8 for reading in dids)
+    assert all(reading.acquired_at is not None and reading.round_id is not None for reading in dids)
+
+
+def test_rejected_did_batches_fall_back_without_backing_off_members() -> None:
+    bus = _SchedulerDidEcu(reject_batches=True)
+    readings: list = []
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _scheduler_spec(),
+        on_frame=lambda _message: None,
+        on_reading=readings.append,
+        stop_event=threading.Event(),
+        deadline_monotonic=time.monotonic() + 0.5,
+    )
+    assert stats.did_batch_failures >= 3
+    assert stats.did_batch_size_narrowings == 1
+    assert {reading.pid for reading in readings if reading.pid.startswith("DID_")} == {
+        "DID_1101",
+        "DID_1219",
+        "DID_1208",
+    }
+
+
+def test_physical_did_batch_rejects_a_different_ecu_responder() -> None:
+    bus = _SchedulerDidEcu(responder_id=0x7E9)
+    readings: list = []
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _scheduler_spec(request_timeout_seconds=0.005),
+        on_frame=lambda _message: None,
+        on_reading=readings.append,
+        stop_event=threading.Event(),
+        deadline_monotonic=time.monotonic() + 0.15,
+    )
+    assert stats.did_batch_failures > 0
+    assert not any(reading.pid.startswith("DID_") for reading in readings)

@@ -64,8 +64,10 @@ from src.collection.isotp import (
     RESPONSE_PENDING_NRC,
     IsoTpResponseAssembler,
     ObdResponse,
+    build_batched_did_request_payload,
     build_batched_request_payload,
     build_request_payload,
+    split_batched_did_response,
     split_batched_response,
 )
 from src.collection.obd_collector import (
@@ -114,6 +116,7 @@ from src.collection.obd_scheduler import (
     round_members,
     round_period_seconds,
     select_batch_companions,
+    select_did_batch_companions,
 )
 from src.collection.queueing import (
     CollectorHandoffStats,
@@ -340,6 +343,9 @@ def run_can_obd_loop(
     batching_enabled = spec.batch_max_pids > 1
     active_batch_max = spec.batch_max_pids
     consecutive_batch_failures = 0
+    did_batching_enabled = spec.did_batch_max_dids > 1
+    active_did_batch_max = min(spec.did_batch_max_dids, 3)
+    consecutive_did_batch_failures = 0
     stats.loop_started_at = time.monotonic()
     while not _should_stop(stop_event, deadline_monotonic):
         now = time.monotonic()
@@ -613,17 +619,30 @@ def run_can_obd_loop(
             current_round.wall_start if tuning_profile.round_timestamps_enabled() else None
         )
 
-        batch_indices = select_batch_companions(
-            requests,
-            request_states,
-            now,
-            leader_index=request_index,
-            max_pids=active_batch_max if batching_enabled else 1,
-            eligible=eligible,
-            ignore_tier=round_timestamp is not None,
-            members=current_round.remaining,
-            preferred=preferred,
-        )
+        if request.kind == "did":
+            batch_indices = select_did_batch_companions(
+                requests,
+                request_states,
+                now,
+                leader_index=request_index,
+                max_dids=active_did_batch_max if did_batching_enabled else 1,
+                response_widths=spec.did_response_widths,
+                eligible=eligible,
+                members=current_round.remaining,
+                preferred=preferred,
+            )
+        else:
+            batch_indices = select_batch_companions(
+                requests,
+                request_states,
+                now,
+                leader_index=request_index,
+                max_pids=active_batch_max if batching_enabled else 1,
+                eligible=eligible,
+                ignore_tier=round_timestamp is not None,
+                members=current_round.remaining,
+                preferred=preferred,
+            )
         if len(batch_indices) > 1:
             batch_started = time.monotonic()
             outcome = _issue_batched_request(
@@ -641,33 +660,51 @@ def run_can_obd_loop(
                 round_state=current_round,
             )
             if controller is not None:
-                controller.on_service_time("mode01", time.monotonic() - batch_started)
+                controller.on_service_time(
+                    "mode22" if request.kind == "did" else "mode01",
+                    time.monotonic() - batch_started,
+                )
                 if outcome.observed:
                     controller.on_response(request_index, time.monotonic(), outcome.acquired_at)
             if outcome.answered:
-                consecutive_batch_failures = 0
+                if request.kind == "did":
+                    consecutive_did_batch_failures = 0
+                else:
+                    consecutive_batch_failures = 0
                 discovery = discovery.on_contact(time.monotonic())
             else:
-                consecutive_batch_failures += 1
-                if consecutive_batch_failures >= MAX_CONSECUTIVE_BATCH_FAILURES:
-                    narrowed = _next_batch_size(active_batch_max)
-                    consecutive_batch_failures = 0
-                    if narrowed <= 1:
-                        batching_enabled = False
+                if request.kind == "did":
+                    consecutive_did_batch_failures += 1
+                    if consecutive_did_batch_failures >= MAX_CONSECUTIVE_BATCH_FAILURES:
+                        did_batching_enabled = False
+                        consecutive_did_batch_failures = 0
+                        stats.did_batch_size_narrowings += 1
                         log.warning(
-                            "multi-PID batching disabled: no batch size this ECU "
-                            "accepts; falling back to single-PID for this session",
-                            extra={"configured_batch_max_pids": spec.batch_max_pids},
+                            "multi-DID batching disabled for this ECU/session; "
+                            "falling back to healthy individual DID requests"
                         )
-                    else:
-                        log.warning(
-                            "narrowing multi-PID batch size %d -> %d after %d consecutive failures",
-                            active_batch_max,
-                            narrowed,
-                            MAX_CONSECUTIVE_BATCH_FAILURES,
-                        )
-                        active_batch_max = narrowed
-                    stats.batch_size_narrowings += 1
+                else:
+                    consecutive_batch_failures += 1
+                    if consecutive_batch_failures >= MAX_CONSECUTIVE_BATCH_FAILURES:
+                        narrowed = _next_batch_size(active_batch_max)
+                        consecutive_batch_failures = 0
+                        if narrowed <= 1:
+                            batching_enabled = False
+                            log.warning(
+                                "multi-PID batching disabled: no batch size this ECU "
+                                "accepts; falling back to single-PID for this session",
+                                extra={"configured_batch_max_pids": spec.batch_max_pids},
+                            )
+                        else:
+                            log.warning(
+                                "narrowing multi-PID batch size %d -> %d after %d "
+                                "consecutive failures",
+                                active_batch_max,
+                                narrowed,
+                                MAX_CONSECUTIVE_BATCH_FAILURES,
+                            )
+                            active_batch_max = narrowed
+                        stats.batch_size_narrowings += 1
             if controller is not None:
                 for index in batch_indices:
                     controller.on_request_attempted(index)
@@ -1789,6 +1826,7 @@ class BatchedQueryResult:
     clean: bool = True
     arrival: FrameArrival | None = None
     response_interval_s: float | None = None
+    responder_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1814,32 +1852,44 @@ def _batched_pid_width(pid: int) -> int | None:
 def _query_batched_with_tap(
     bus: can.BusABC,
     leader: _PollRequest,
-    pids: list[int],
+    identifiers: list[int],
     *,
     timeout_seconds: float,
     on_frame: Callable[[can.Message], None],
     stop_event: threading.Event,
     stats: CanObdLoopStats,
     deadline_monotonic: float | None,
+    did_response_widths: Mapping[int, int] | None = None,
 ) -> BatchedQueryResult:
-    """Issue one ``01 <pid> <pid> …`` request and split the response."""
+    """Issue one Mode-01 or Mode-22 batch through the owned receive tap."""
+    is_did = leader.kind == "did"
+    service = 0x22 if is_did else 0x01
+    payload = (
+        build_batched_did_request_payload(service, identifiers)
+        if is_did
+        else build_batched_request_payload(service, identifiers)
+    )
     message = can.Message(
         arbitration_id=leader.request_id,
-        data=build_batched_request_payload(0x01, pids),
+        data=payload,
         is_extended_id=False,
     )
-    if not tx_gate.send(bus, message, what=f"batch {len(pids)} PIDs"):
+    if not tx_gate.send(bus, message, what=f"batch {len(identifiers)} identifiers"):
         return BatchedQueryResult()
     stats.requests_sent += 1
-    stats.batched_requests += 1
-    stats.batched_pids_requested += len(pids)
+    if is_did:
+        stats.did_batched_requests += 1
+        stats.did_batched_members_requested += len(identifiers)
+    else:
+        stats.batched_requests += 1
+        stats.batched_pids_requested += len(identifiers)
 
     request_deadline = time.monotonic() + timeout_seconds
     if deadline_monotonic is not None:
         request_deadline = min(request_deadline, deadline_monotonic)
     # identifier=None: the payload is a stream of <pid> <data> pairs, so
     # there is no single echo to match on.
-    assembler = IsoTpResponseAssembler(service=0x01, identifier=None)
+    assembler = IsoTpResponseAssembler(service=service, identifier=None)
     pending_extensions = 0
     first_frame: FrameArrival | None = None
 
@@ -1849,6 +1899,11 @@ def _query_batched_with_tap(
         if msg is None:
             continue
         if not (DEFAULT_RESPONSE_ID_MIN <= msg.arbitration_id <= DEFAULT_RESPONSE_ID_MAX):
+            continue
+        # A physical request has one owning responder. Functional 0x7DF may
+        # legitimately receive 0x7E8..0x7EF, but accepting 0x7E9 for a 0x7E0
+        # DID batch would attach another module's bytes to the ECM plan.
+        if leader.request_id != 0x7DF and msg.arbitration_id != leader.request_id + 8:
             continue
         data = bytes(msg.data)
         if not data:
@@ -1875,13 +1930,22 @@ def _query_batched_with_tap(
             )
             continue
         if result.response is not None:
-            readings, clean = split_batched_response(result.response.payload, _batched_pid_width)
+            if is_did:
+                readings, clean = split_batched_did_response(
+                    result.response.payload,
+                    lambda did: (did_response_widths or {}).get(did),
+                )
+            else:
+                readings, clean = split_batched_response(
+                    result.response.payload, _batched_pid_width
+                )
             completed = _frame_arrival(msg)
             return BatchedQueryResult(
                 readings=readings,
                 clean=clean,
                 arrival=first_frame or completed,
                 response_interval_s=_response_interval(first_frame, completed),
+                responder_id=result.response.responder_id,
             )
     return BatchedQueryResult()
 
@@ -1918,7 +1982,7 @@ def _issue_batched_request(
     on what may be an ECU that simply dislikes batching. The caller counts
     consecutive failures and stops batching instead.
     """
-    pids = [requests[index].identifier for index in indices]
+    identifiers = [requests[index].identifier for index in indices]
     leader = requests[indices[0]]
     started = time.monotonic()
     for index in indices:
@@ -1929,12 +1993,13 @@ def _issue_batched_request(
         result = _query_batched_with_tap(
             bus,
             leader,
-            pids,
+            identifiers,
             timeout_seconds=spec.request_timeout_seconds,
             on_frame=on_frame,
             stop_event=stop_event,
             stats=stats,
             deadline_monotonic=deadline_monotonic,
+            did_response_widths=spec.did_response_widths,
         )
     except Exception:  # noqa: BLE001 - propagate after recording scheduler state
         for index in indices:
@@ -1943,14 +2008,20 @@ def _issue_batched_request(
         raise
 
     if result.readings is None:
-        stats.batch_failures += 1
+        if leader.kind == "did":
+            stats.did_batch_failures += 1
+        else:
+            stats.batch_failures += 1
         if result.negative_response_code is not None:
             stats.negative_responses += 1
             for index in indices:
                 states[index].last_negative_response_code = result.negative_response_code
         return BatchOutcome(answered=False)
     if not result.clean:
-        stats.batch_desyncs += 1
+        if leader.kind == "did":
+            stats.did_batch_desyncs += 1
+        else:
+            stats.batch_desyncs += 1
 
     now = time.monotonic()
     # One response, one arrival instant, shared by every PID it carried. A
@@ -1971,10 +2042,10 @@ def _issue_batched_request(
             readings = _response_to_reading(
                 request,
                 ObdResponse(
-                    service=0x41,
+                    service=0x62 if request.kind == "did" else 0x41,
                     pid=request.identifier,
                     payload=payload,
-                    responder_id=DEFAULT_RESPONSE_ID_MIN,
+                    responder_id=result.responder_id or DEFAULT_RESPONSE_ID_MIN,
                 ),
                 timestamp=round_timestamp,
                 arrival=arrival,
@@ -2049,6 +2120,8 @@ def _query_with_tap(
         if msg is None:
             continue
         if not (DEFAULT_RESPONSE_ID_MIN <= msg.arbitration_id <= DEFAULT_RESPONSE_ID_MAX):
+            continue
+        if request.request_id != 0x7DF and msg.arbitration_id != request.request_id + 8:
             continue
         data = bytes(msg.data)
         if not data:

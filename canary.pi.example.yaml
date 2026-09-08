@@ -60,6 +60,7 @@ collection:
   # rows instead of interleaved samples — and it roughly doubles throughput.
   # The collector narrows 6 -> 4 -> 2 -> off by itself if the ECU refuses.
   obd_batch_max_pids: 6
+  obd_did_batch_max_dids: 1
   obd_did_request_id: 0x7E0
   obd_request_timeout_seconds: 1.0
   obd_poll_rate_hz: 1
