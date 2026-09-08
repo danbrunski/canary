@@ -140,3 +140,9 @@ hardware/**/_*.pdf
 # --report default). Underscore-prefixed so session discovery skips it; the
 # curated baselines live under data/analyses/ instead.
 data/_benchmarks/
+
+# C10 sustained-validation raw sessions (scripts/sustained_validation.py
+# --sessions-root default). Underscore-prefixed so training discovery and the
+# retention sweep skip them; the curated reports live under
+# data/analyses/sustained-validation/ instead.
+data/_validation/

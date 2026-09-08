@@ -538,3 +538,31 @@ def test_snapshot_carries_the_capture_lifetime_beside_the_trailing_scheduler() -
         assert inputs.scheduler == {"achieved_hz_capture": {"RPM": 4.0}}
     finally:
         capture_lifetime._reset_for_tests()
+
+
+async def test_sink_queue_high_water_survives_the_drain_that_empties_it() -> None:
+    """A queue that filled and drained must still say how deep it got (C10.5).
+
+    ``queue_depth`` is the depth at the last observation, so a sink whose
+    consumer wedged, filled its queue, dropped records and then recovered
+    reported ``queue_depth: 0`` — the peak that explains the loss was gone by
+    the time anything read it. The fanout observes every sink's queue after
+    each batch, including while a consumer is blocked, so the monotonic max
+    of those samples is the high-water mark.
+    """
+    import asyncio
+
+    mon = HealthMonitor()
+    queue: asyncio.Queue[int] = asyncio.Queue(maxsize=4)
+    mon.observe_telemetry_queue("storage", queue)
+    for value in range(4):
+        queue.put_nowait(value)
+    mon.observe_telemetry_queue("storage", queue)
+    while not queue.empty():
+        queue.get_nowait()
+    mon.observe_telemetry_queue("storage", queue)
+
+    sink = mon.snapshot(now_epoch=0.0)["telemetry_sinks"]["storage"]
+    assert sink["queue_depth"] == 0
+    assert sink["queue_high_water"] == 4
+    assert sink["queue_max_size"] == 4

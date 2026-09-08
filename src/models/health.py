@@ -572,9 +572,21 @@ class HealthMonitor:
         )
 
     def observe_telemetry_queue(self, name: str, queue: Any) -> None:
-        """Record queue depth for one telemetry sink."""
+        """Record queue depth and its high-water mark for one telemetry sink.
+
+        ``queue_depth`` alone is the depth at the last observation, so a sink
+        whose consumer wedged, filled its queue, dropped records and then
+        recovered reported depth 0 — the peak that explains the loss was gone
+        before anything read it (C10.5; seen in the C10 storage-stall
+        scenario, where a 256-deep queue dropped 3,742 records and still
+        reported ``queue_depth: 0``). The fanout observes every sink's queue
+        after each batch, including while its consumer is blocked, so the
+        monotonic max over those samples is the high-water mark.
+        """
         state = self._sink_state(name)
-        state["queue_depth"] = int(queue.qsize())
+        depth = int(queue.qsize())
+        state["queue_depth"] = depth
+        state["queue_high_water"] = max(int(state.get("queue_high_water") or 0), depth)
         state["queue_max_size"] = int(queue.maxsize)
         self._queues[name] = queue
 
@@ -722,6 +734,7 @@ class HealthMonitor:
             name,
             {
                 "queue_depth": None,
+                "queue_high_water": None,
                 "queue_max_size": None,
                 "dropped_records": 0,
                 "errors": 0,

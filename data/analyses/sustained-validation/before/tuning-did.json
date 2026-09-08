@@ -1,0 +1,1918 @@
+{
+  "evidence": {
+    "decoded_expansion": {
+      "decoded_by_channel": {
+        "SYNTH_RPM": 2119,
+        "SYNTH_SPEED": 2119
+      },
+      "decoded_rows": 4238,
+      "expected_decoded_rows": 4238,
+      "identity_holds": true,
+      "note": "one-to-many expansion of persisted frames; kept apart from raw counts",
+      "persisted_broadcast_frames": 2119,
+      "signals_per_frame": 2
+    },
+    "invalid_reasons": [],
+    "known_answer": [
+      {
+        "a": "can:SYNTH_RPM",
+        "b": "obd:RPM",
+        "expectation": "unit_agreement",
+        "expected_slope": 1.0,
+        "outcome": "refused",
+        "policy_ms": 50.0,
+        "reason": "obd:RPM: no observations in this session, so there is nothing to pair. The channel was never captured (or does not decode) \u2014 this is an unavailable input, not insufficient coverage."
+      },
+      {
+        "a": "can:SYNTH_RPM_HALF",
+        "b": "obd:RPM",
+        "expectation": "known_different",
+        "expected_slope": 2.0,
+        "outcome": "refused",
+        "policy_ms": 50.0,
+        "reason": "obd:RPM: no observations in this session, so there is nothing to pair. The channel was never captured (or does not decode) \u2014 this is an unavailable input, not insufficient coverage."
+      },
+      {
+        "a": "can:SYNTH_SPEED",
+        "b": "obd:SPEED",
+        "expectation": "unit_agreement",
+        "expected_slope": 1.0,
+        "outcome": "refused",
+        "policy_ms": 50.0,
+        "reason": "obd:SPEED: no observations in this session, so there is nothing to pair. The channel was never captured (or does not decode) \u2014 this is an unavailable input, not insufficient coverage."
+      },
+      {
+        "a": "did:ECM_RPM",
+        "b": "can:SYNTH_RPM",
+        "difference_bias": -0.1888,
+        "difference_spread": 1.2183,
+        "expectation": "unit_agreement",
+        "expected_slope": 1.0,
+        "n_pairs": 147,
+        "offset": 0.0642,
+        "outcome": "agrees_1to1",
+        "policy_ms": 50.0,
+        "r_squared": 0.99999,
+        "residual_spread": 1.2162,
+        "scale_verdict": "stable",
+        "separation_max_s": 0.00495,
+        "separation_median_s": 0.002698,
+        "separation_p95_s": 0.004148,
+        "slope": 0.99982,
+        "timestamp_basis": [
+          "acquired",
+          "stored"
+        ],
+        "unmatched": [
+          0,
+          1373
+        ]
+      }
+    ],
+    "limiting_stage": {
+      "data_loss": false,
+      "evidence": {
+        "feature_stage_p95_ms": 60.663,
+        "heartbeat_max_ms": 100.289,
+        "heartbeat_p99_ms": 29.76,
+        "note": "no record was lost; the loop was held for this long per inference tick (C08: the feature stage runs on the loop by design)"
+      },
+      "stage": "inference_feature_stage_on_loop"
+    },
+    "losses": {
+      "accounted": 5432,
+      "adapter_delivered_frames": 3779,
+      "buffer_dropped": 0,
+      "collector_pushed": 5432,
+      "dashboard_subscriber": {
+        "dropped": 1010,
+        "received": 12485
+      },
+      "frames_tapped_identity": {
+        "holds": true,
+        "identity": "collector_pushed - readings_emitted == adapter_delivered_frames",
+        "lhs": 3779,
+        "rhs": 3779
+      },
+      "identity": "collector_pushed == persisted_raw_rows + buffer_dropped + queue_dropped + storage_dropped",
+      "identity_holds": true,
+      "kernel_counters": "unavailable (synthetic adapter; no can0 on this host)",
+      "persisted_raw_rows": 5432,
+      "queue_dropped": 0,
+      "queue_high_water": {
+        "broadcast": {
+          "buffer_capacity": null,
+          "buffer_high_water": null,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": 0,
+          "queue_max_size": 10000
+        },
+        "dtc": {
+          "buffer_capacity": null,
+          "buffer_high_water": null,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": 0,
+          "queue_max_size": 10000
+        },
+        "ingest": {
+          "buffer_capacity": null,
+          "buffer_high_water": null,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": 0,
+          "queue_max_size": 10000
+        },
+        "live": {
+          "buffer_capacity": null,
+          "buffer_high_water": null,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": 0,
+          "queue_max_size": 10000
+        },
+        "monitor": {
+          "buffer_capacity": null,
+          "buffer_high_water": null,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": 0,
+          "queue_max_size": 10000
+        },
+        "obd_collect": {
+          "buffer_capacity": 4096,
+          "buffer_high_water": 120,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": null,
+          "queue_max_size": null
+        },
+        "storage": {
+          "buffer_capacity": null,
+          "buffer_high_water": null,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": 0,
+          "queue_max_size": 10000
+        }
+      },
+      "readings_emitted_last_attempt": 1653,
+      "stage": "obd_collect",
+      "storage_dropped": 0
+    },
+    "quality": {
+      "failures": [
+        "unknown_loss_counters"
+      ],
+      "stop_sidecar": {
+        "batching": null,
+        "channels": [
+          {
+            "cadence": {
+              "hz": 14.998,
+              "median_interarrival_s": 0.066674,
+              "p95_interarrival_s": 0.085194,
+              "samples": 146
+            },
+            "channel": "ECM_RPM",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.005,
+              "first_observed_at": 0.091,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.964,
+              "long_gaps": [],
+              "max_gap_s": 0.099,
+              "missing_final_s": 0.041,
+              "missing_initial_s": 0.091,
+              "observations": 147,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "did",
+            "requested_hz": 15.0,
+            "status": "ok",
+            "trailing_hz": 15.0,
+            "transport_channel": "DID_1219"
+          },
+          {
+            "cadence": {
+              "hz": 15.003,
+              "median_interarrival_s": 0.066654,
+              "p95_interarrival_s": 0.085681,
+              "samples": 146
+            },
+            "channel": "ECM_AF_SENSOR_V_B1",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.005,
+              "first_observed_at": 0.096,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.974,
+              "long_gaps": [],
+              "max_gap_s": 0.099,
+              "missing_final_s": 0.031,
+              "missing_initial_s": 0.096,
+              "observations": 147,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "did",
+            "requested_hz": 15.0,
+            "status": "ok",
+            "trailing_hz": 15.0,
+            "transport_channel": "DID_1225"
+          },
+          {
+            "cadence": {
+              "hz": 15.007,
+              "median_interarrival_s": 0.066637,
+              "p95_interarrival_s": 0.082088,
+              "samples": 146
+            },
+            "channel": "ECM_AF_SENSOR_V_B2",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.005,
+              "first_observed_at": 0.102,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.977,
+              "long_gaps": [],
+              "max_gap_s": 0.102,
+              "missing_final_s": 0.028,
+              "missing_initial_s": 0.102,
+              "observations": 147,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "did",
+            "requested_hz": 15.0,
+            "status": "ok",
+            "trailing_hz": 15.01,
+            "transport_channel": "DID_1226"
+          },
+          {
+            "cadence": {
+              "hz": 15.007,
+              "median_interarrival_s": 0.066637,
+              "p95_interarrival_s": 0.08525,
+              "samples": 146
+            },
+            "channel": "ECM_INJECTOR_PW_B1",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.005,
+              "first_observed_at": 0.107,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.983,
+              "long_gaps": [],
+              "max_gap_s": 0.107,
+              "missing_final_s": 0.022,
+              "missing_initial_s": 0.107,
+              "observations": 147,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "did",
+            "requested_hz": 15.0,
+            "status": "ok",
+            "trailing_hz": 15.01,
+            "transport_channel": "DID_1208"
+          },
+          {
+            "cadence": {
+              "hz": 15.002,
+              "median_interarrival_s": 0.066656,
+              "p95_interarrival_s": 0.084576,
+              "samples": 146
+            },
+            "channel": "ECM_INTAKE_CAM_ANGLE_MEASURED",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.005,
+              "first_observed_at": 0.113,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.997,
+              "long_gaps": [],
+              "max_gap_s": 0.113,
+              "missing_final_s": 0.008,
+              "missing_initial_s": 0.113,
+              "observations": 147,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "did",
+            "requested_hz": 15.0,
+            "status": "ok",
+            "trailing_hz": 15.0,
+            "transport_channel": "DID_1135"
+          },
+          {
+            "cadence": {
+              "hz": 15.006,
+              "median_interarrival_s": 0.066641,
+              "p95_interarrival_s": 0.080934,
+              "samples": 146
+            },
+            "channel": "ECM_INTAKE_CAM_ANGLE_COMMANDED",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.005,
+              "first_observed_at": 0.118,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 10.002,
+              "long_gaps": [],
+              "max_gap_s": 0.118,
+              "missing_final_s": 0.003,
+              "missing_initial_s": 0.118,
+              "observations": 147,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "did",
+            "requested_hz": 15.0,
+            "status": "ok",
+            "trailing_hz": 15.01,
+            "transport_channel": "DID_113A"
+          },
+          {
+            "cadence": {
+              "hz": 15.003,
+              "median_interarrival_s": 0.066652,
+              "p95_interarrival_s": 0.084597,
+              "samples": 145
+            },
+            "channel": "ECM_INTAKE_CAM_ANGLE_MEASURED_B",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.005,
+              "first_observed_at": 0.124,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.927,
+              "long_gaps": [],
+              "max_gap_s": 0.124,
+              "missing_final_s": 0.078,
+              "missing_initial_s": 0.124,
+              "observations": 146,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "did",
+            "requested_hz": 15.0,
+            "status": "ok",
+            "trailing_hz": 15.0,
+            "transport_channel": "DID_1163"
+          },
+          {
+            "cadence": {
+              "hz": 15.005,
+              "median_interarrival_s": 0.066645,
+              "p95_interarrival_s": 0.081558,
+              "samples": 145
+            },
+            "channel": "ECM_INTAKE_VVT_SOLENOID_DUTY",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.005,
+              "first_observed_at": 0.129,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.932,
+              "long_gaps": [],
+              "max_gap_s": 0.129,
+              "missing_final_s": 0.073,
+              "missing_initial_s": 0.129,
+              "observations": 146,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "did",
+            "requested_hz": 15.0,
+            "status": "ok",
+            "trailing_hz": 15.0,
+            "transport_channel": "DID_1110"
+          },
+          {
+            "cadence": {
+              "hz": 15.004,
+              "median_interarrival_s": 0.066648,
+              "p95_interarrival_s": 0.080324,
+              "samples": 145
+            },
+            "channel": "ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.005,
+              "first_observed_at": 0.135,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.938,
+              "long_gaps": [],
+              "max_gap_s": 0.135,
+              "missing_final_s": 0.067,
+              "missing_initial_s": 0.135,
+              "observations": 146,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "did",
+            "requested_hz": 15.0,
+            "status": "ok",
+            "trailing_hz": 15.0,
+            "transport_channel": "DID_1139"
+          },
+          {
+            "cadence": {
+              "hz": 15.003,
+              "median_interarrival_s": 0.066653,
+              "p95_interarrival_s": 0.082141,
+              "samples": 145
+            },
+            "channel": "ECM_THROTTLE_POS_SENSOR_1",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.005,
+              "first_observed_at": 0.141,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.943,
+              "long_gaps": [],
+              "max_gap_s": 0.141,
+              "missing_final_s": 0.062,
+              "missing_initial_s": 0.141,
+              "observations": 146,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "did",
+            "requested_hz": 15.0,
+            "status": "ok",
+            "trailing_hz": 15.0,
+            "transport_channel": "DID_120F"
+          },
+          {
+            "cadence": {
+              "hz": 15.005,
+              "median_interarrival_s": 0.066646,
+              "p95_interarrival_s": 0.083168,
+              "samples": 145
+            },
+            "channel": "ECM_COOLANT_TEMP",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.005,
+              "first_observed_at": 0.146,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.959,
+              "long_gaps": [],
+              "max_gap_s": 0.146,
+              "missing_final_s": 0.046,
+              "missing_initial_s": 0.146,
+              "observations": 146,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "did",
+            "requested_hz": 15.0,
+            "status": "ok",
+            "trailing_hz": 15.0,
+            "transport_channel": "DID_1101"
+          }
+        ],
+        "failures": [
+          {
+            "channels": [
+              "can0.rx_dropped",
+              "can0.rx_over_errors"
+            ],
+            "clause": "unknown_loss_counters",
+            "detail": "no verified no-loss claim: these counters are unknown or reset",
+            "evidence": {
+              "can0.rx_dropped": {
+                "delta": null,
+                "scope": "recording",
+                "start": null,
+                "status": "unknown",
+                "stop": null
+              },
+              "can0.rx_over_errors": {
+                "delta": null,
+                "scope": "recording",
+                "start": null,
+                "status": "unknown",
+                "stop": null
+              }
+            }
+          }
+        ],
+        "interval": {
+          "elapsed_s": 10.005,
+          "ended_wall": 1788845428.9220002,
+          "generation_at_start": 13,
+          "intended_active_s": 10.005,
+          "pause_reasons": [],
+          "pause_windows": [],
+          "paused_s": 0,
+          "source": "live",
+          "started_wall": 1788845418.917
+        },
+        "losses": {
+          "dashboard": {
+            "counters": {
+              "broadcast.dropped_records": {
+                "delta": 0,
+                "scope": "dashboard",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "broadcast.errors": {
+                "delta": 0,
+                "scope": "dashboard",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "live.dropped_records": {
+                "delta": 0,
+                "scope": "dashboard",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "live.errors": {
+                "delta": 0,
+                "scope": "dashboard",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              }
+            },
+            "lost": 0,
+            "status": "verified",
+            "unverified": []
+          },
+          "derived": {
+            "counters": {
+              "dtc.dropped_records": {
+                "delta": 0,
+                "scope": "derived",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "dtc.errors": {
+                "delta": 0,
+                "scope": "derived",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "monitor.dropped_records": {
+                "delta": 0,
+                "scope": "derived",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "monitor.errors": {
+                "delta": 0,
+                "scope": "derived",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              }
+            },
+            "lost": 0,
+            "status": "verified",
+            "unverified": []
+          },
+          "recording": {
+            "counters": {
+              "can0.rx_dropped": {
+                "delta": null,
+                "scope": "recording",
+                "start": null,
+                "status": "unknown",
+                "stop": null
+              },
+              "can0.rx_over_errors": {
+                "delta": null,
+                "scope": "recording",
+                "start": null,
+                "status": "unknown",
+                "stop": null
+              },
+              "ingest.dropped_records": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "ingest.errors": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "obd_collect.dropped_records": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "obd_collect.errors": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "storage.dropped_records": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "storage.errors": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              }
+            },
+            "lost": null,
+            "status": "unknown",
+            "unverified": [
+              "can0.rx_dropped",
+              "can0.rx_over_errors"
+            ]
+          }
+        },
+        "notes": [
+          "request batching was off or unreported. Unbatched, one request carries one PID, so the bus budget binds far sooner than the ECM does.",
+          "this profile declares no required_tuple, so only per-channel cadence and coverage were checked \u2014 which cannot tell whether any joint analysis has usable samples."
+        ],
+        "persistence": {
+          "drain_timed_out": [],
+          "drain_unobserved": [],
+          "drained": [
+            "ingest",
+            "storage"
+          ],
+          "flush_error": null,
+          "flushed": true,
+          "generation_boundary": 14,
+          "loss_epoch_start": {
+            "counters": {
+              "broadcast.dropped_records": 0,
+              "broadcast.errors": 0,
+              "can0.rx_dropped": null,
+              "can0.rx_over_errors": null,
+              "dtc.dropped_records": 0,
+              "dtc.errors": 0,
+              "ingest.dropped_records": 0,
+              "ingest.errors": 0,
+              "live.dropped_records": 0,
+              "live.errors": 0,
+              "monitor.dropped_records": 0,
+              "monitor.errors": 0,
+              "obd_collect.dropped_records": 0,
+              "obd_collect.errors": 0,
+              "storage.dropped_records": 0,
+              "storage.errors": 0
+            },
+            "taken_at_monotonic": 936658.789,
+            "taken_at_wall": 1788845418.917
+          },
+          "loss_epoch_stop": {
+            "counters": {
+              "broadcast.dropped_records": 0,
+              "broadcast.errors": 0,
+              "can0.rx_dropped": null,
+              "can0.rx_over_errors": null,
+              "dtc.dropped_records": 0,
+              "dtc.errors": 0,
+              "ingest.dropped_records": 0,
+              "ingest.errors": 0,
+              "live.dropped_records": 0,
+              "live.errors": 0,
+              "monitor.dropped_records": 0,
+              "monitor.errors": 0,
+              "obd_collect.dropped_records": 0,
+              "obd_collect.errors": 0,
+              "storage.dropped_records": 0,
+              "storage.errors": 0
+            },
+            "taken_at_monotonic": 936668.829,
+            "taken_at_wall": 1788845428.957
+          },
+          "rows_on_disk": 7818,
+          "rows_on_disk_at_recompute": 7818,
+          "rows_written": 7818,
+          "scope": "stop"
+        },
+        "profile": "tuning-did",
+        "required_tuple": [],
+        "schema_version": 2,
+        "scope": "stop",
+        "trailing": {
+          "hz": {
+            "DID_1101": 15.0,
+            "DID_1110": 15.0,
+            "DID_1135": 15.0,
+            "DID_1139": 15.0,
+            "DID_113A": 15.01,
+            "DID_1163": 15.0,
+            "DID_1208": 15.01,
+            "DID_120F": 15.0,
+            "DID_1219": 15.0,
+            "DID_1225": 15.0,
+            "DID_1226": 15.01
+          },
+          "max_gap_seconds": {
+            "DID_1101": 0.146,
+            "DID_1110": 0.129,
+            "DID_1135": 0.113,
+            "DID_1139": 0.135,
+            "DID_113A": 0.118,
+            "DID_1163": 0.124,
+            "DID_1208": 0.107,
+            "DID_120F": 0.141,
+            "DID_1219": 0.099,
+            "DID_1225": 0.099,
+            "DID_1226": 0.102
+          },
+          "observed_seconds": 9.964,
+          "window_s": 60.0
+        },
+        "tuple_rate_bound_hz": null,
+        "tuples": {
+          "attempted": null,
+          "cadence": {},
+          "complete": null,
+          "coverage": {},
+          "incomplete": null,
+          "max_tuple_skew_s": 0.03333333333333333,
+          "member_misses": {},
+          "persisted": null,
+          "rate_bound_hz": null,
+          "required": [],
+          "scheduled": null,
+          "skew": {},
+          "skew_rejected": null,
+          "source": "no_required_tuple"
+        },
+        "verdict": "unverified"
+      },
+      "unverified_counters": [
+        "can0.rx_dropped",
+        "can0.rx_over_errors"
+      ],
+      "verdict": "unverified",
+      "with_adapter_ledger": {
+        "failures": [],
+        "losses_recording": {
+          "counters": {
+            "adapter.rx_dropped": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            },
+            "ingest.dropped_records": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            },
+            "ingest.errors": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            },
+            "obd_collect.dropped_records": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            },
+            "obd_collect.errors": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            },
+            "storage.dropped_records": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            },
+            "storage.errors": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            }
+          },
+          "lost": 0,
+          "status": "verified",
+          "unverified": []
+        },
+        "note": "can0.* (unknown on this host) replaced by adapter.rx_dropped from the synthetic ledger (frames queued in a faulted adapter); the kernel layer remains unobserved until the Pi run",
+        "tuples": {
+          "attempted": null,
+          "cadence": {},
+          "complete": null,
+          "coverage": {},
+          "incomplete": null,
+          "max_tuple_skew_s": 0.03333333333333333,
+          "member_misses": {},
+          "persisted": null,
+          "rate_bound_hz": null,
+          "required": [],
+          "scheduled": null,
+          "skew": {},
+          "skew_rejected": null,
+          "source": "no_required_tuple"
+        },
+        "verdict": "pass"
+      }
+    },
+    "rows": {
+      "by_source": {
+        "can": 3779,
+        "decoded": 4238,
+        "derived": 93,
+        "obd": 1653
+      },
+      "can_by_id": {
+        "0x6A0": 2119,
+        "0x7E8": 1660
+      },
+      "per_session_dir": {
+        "/home/thebo/code/canary/data/_validation/before/tuning-did/2026-09-08T053013": 1909,
+        "/home/thebo/code/canary/data/_validation/before/tuning-did/_capture-tuning-did-c10-before-1788845418": 7854
+      },
+      "raw": 5432,
+      "total": 9763
+    },
+    "sequence_reconciliation": {
+      "adapter_dropped_on_fault": 0,
+      "adapter_pending_at_stop": 4,
+      "counted_drops": 0,
+      "delivered": 2119,
+      "delivered_distinct": 2119,
+      "duplicated": [],
+      "duplicated_count": 0,
+      "foreign_count": 0,
+      "generated": 2123,
+      "identity": "present_exactly_once + missing == delivered_distinct",
+      "identity_holds": true,
+      "missing": [],
+      "missing_count": 0,
+      "persisted_rows": 2119,
+      "present_exactly_once": 2119,
+      "status": "reconciled"
+    },
+    "timing": {
+      "cpu_memory": {
+        "cpu_percent_of_one_core": 22.87,
+        "max_rss_mb": 754.9,
+        "note": "process-wide, includes the harness itself; the Pi figure is a C10.10 measurement",
+        "source": "resource.getrusage(RUSAGE_SELF)",
+        "system_cpu_s": 0.362,
+        "user_cpu_s": 2.02
+      },
+      "event_loop_heartbeat_overshoot": {
+        "count": 1360,
+        "interval_ms": 10.0,
+        "max_ms": 100.289,
+        "median_ms": 0.613,
+        "note": "delay beyond a 10 ms asyncio.sleep on the daemon loop",
+        "p95_ms": 1.17,
+        "p99_ms": 29.76,
+        "reservoir_capacity": 2048
+      },
+      "inference": {
+        "compute_failures": 0,
+        "interval_seconds": 1.0,
+        "lateness": {
+          "count": 16,
+          "last_ms": 0.856,
+          "max_ms": 1.161,
+          "median_ms": 0.736,
+          "p95_ms": 1.105
+        },
+        "missed_by_reason": {},
+        "missed_ticks": 0,
+        "stages": {
+          "apply": {
+            "count": 16,
+            "last_ms": 0.124,
+            "max_ms": 0.392,
+            "median_ms": 0.135,
+            "p95_ms": 0.277
+          },
+          "behavior": {
+            "count": 16,
+            "last_ms": 0.08,
+            "max_ms": 0.579,
+            "median_ms": 0.145,
+            "p95_ms": 0.367
+          },
+          "compute": {
+            "count": 15,
+            "last_ms": 7.14,
+            "max_ms": 7.539,
+            "median_ms": 5.766,
+            "p95_ms": 7.405
+          },
+          "compute_wait": {
+            "count": 15,
+            "last_ms": 7.606,
+            "max_ms": 7.869,
+            "median_ms": 6.301,
+            "p95_ms": 7.701
+          },
+          "feature": {
+            "count": 16,
+            "last_ms": 59.355,
+            "max_ms": 105.647,
+            "median_ms": 55.135,
+            "p95_ms": 60.663
+          },
+          "isolation_forest": {
+            "count": 15,
+            "last_ms": 7.139,
+            "max_ms": 7.538,
+            "median_ms": 5.765,
+            "p95_ms": 7.404
+          },
+          "loop_occupancy": {
+            "count": 16,
+            "last_ms": 60.22,
+            "max_ms": 107.295,
+            "median_ms": 58.412,
+            "p95_ms": 71.988
+          },
+          "publish_derived": {
+            "count": 15,
+            "last_ms": 0.42,
+            "max_ms": 17.901,
+            "median_ms": 0.945,
+            "p95_ms": 3.478
+          },
+          "snapshot": {
+            "count": 16,
+            "last_ms": 60.096,
+            "max_ms": 107.018,
+            "median_ms": 58.278,
+            "p95_ms": 71.855
+          },
+          "total": {
+            "count": 16,
+            "last_ms": 70.579,
+            "max_ms": 112.084,
+            "median_ms": 66.054,
+            "p95_ms": 78.123
+          }
+        },
+        "stale_results_discarded": 0,
+        "ticks_completed": 16,
+        "ticks_scheduled": 16,
+        "window": 300
+      },
+      "isolation_forest_stub_calls": 15,
+      "kernel_socket_counters": "unavailable (synthetic adapter)",
+      "power_thermal": "unavailable (workstation; no vcgencmd)",
+      "storage_growth": {
+        "bytes_on_disk": 143695,
+        "bytes_per_second_active": 13794.2,
+        "rows_on_disk": 9763,
+        "rows_per_second_active": 937.2
+      },
+      "storage_sink": {
+        "flushes": 5,
+        "last_write_ms": 0.326,
+        "last_write_records_per_second": 92046.6,
+        "max_batch_size": 341,
+        "max_flushing_write_ms": 17.15,
+        "max_write_ms": 22.58,
+        "records_processed": 9670,
+        "write_calls": 1059
+      },
+      "wall_clock_steps": {
+        "attempts_used": 2,
+        "count": 0,
+        "note": "a host wall-clock step during the run invalidates every wall-stamped pairing and cadence figure; such runs are rerun by run_scenario_clean",
+        "steps": [],
+        "valid": true
+      },
+      "writer_flush_ms": {
+        "count": 9,
+        "max_ms": 29.04,
+        "median_ms": 15.227,
+        "p95_ms": 29.04,
+        "p99_ms": 29.04,
+        "reservoir_capacity": 2048
+      },
+      "writer_stalls_injected": 0
+    },
+    "transport": {
+      "batch_occupancy": {
+        "ecu_side": {
+          "mode01_batched_requests_seen": 0,
+          "mode22_batched_requests_seen": 0,
+          "mode22_single_requests_seen": 1613
+        },
+        "resolved_plan_demand": "unavailable (pre-C09 tree)",
+        "scheduler": "unavailable"
+      },
+      "channel_cadence": [
+        {
+          "achieved_hz": 100.361,
+          "channel": "0X6A0",
+          "clock": "stored_timestamp (adapter handout)",
+          "interarrival": {
+            "max_s": 0.024556,
+            "median_s": 0.009964,
+            "n": 1519,
+            "p95_s": 0.010176,
+            "p99_s": 0.013987
+          },
+          "kind": "broadcast",
+          "observations": 1520,
+          "requested_hz": 100.0
+        },
+        {
+          "achieved_hz": 179.598,
+          "channel": "0X7E8",
+          "clock": "stored_timestamp (adapter handout)",
+          "interarrival": {
+            "max_s": 0.121431,
+            "median_s": 0.005568,
+            "n": 1619,
+            "p95_s": 0.013998,
+            "p99_s": 0.016096
+          },
+          "kind": "broadcast",
+          "observations": 1620,
+          "requested_hz": null
+        },
+        {
+          "achieved_hz": 15.002,
+          "channel": "DID_1101",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.1013,
+            "median_s": 0.066656,
+            "n": 145,
+            "p95_s": 0.082854,
+            "p99_s": 0.096886
+          },
+          "kind": "did",
+          "observations": 146,
+          "requested_hz": 15.0
+        },
+        {
+          "achieved_hz": 15.004,
+          "channel": "DID_1110",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.096317,
+            "median_s": 0.066649,
+            "n": 145,
+            "p95_s": 0.081212,
+            "p99_s": 0.095029
+          },
+          "kind": "did",
+          "observations": 146,
+          "requested_hz": 15.0
+        },
+        {
+          "achieved_hz": 15.001,
+          "channel": "DID_1135",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.098792,
+            "median_s": 0.066662,
+            "n": 146,
+            "p95_s": 0.083815,
+            "p99_s": 0.095736
+          },
+          "kind": "did",
+          "observations": 147,
+          "requested_hz": 15.0
+        },
+        {
+          "achieved_hz": 15.005,
+          "channel": "DID_1139",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.101039,
+            "median_s": 0.066643,
+            "n": 145,
+            "p95_s": 0.080241,
+            "p99_s": 0.095656
+          },
+          "kind": "did",
+          "observations": 146,
+          "requested_hz": 15.0
+        },
+        {
+          "achieved_hz": 15.005,
+          "channel": "DID_113A",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.098783,
+            "median_s": 0.066646,
+            "n": 146,
+            "p95_s": 0.080769,
+            "p99_s": 0.09692
+          },
+          "kind": "did",
+          "observations": 147,
+          "requested_hz": 15.0
+        },
+        {
+          "achieved_hz": 14.999,
+          "channel": "DID_1163",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.096485,
+            "median_s": 0.06667,
+            "n": 146,
+            "p95_s": 0.083875,
+            "p99_s": 0.095075
+          },
+          "kind": "did",
+          "observations": 147,
+          "requested_hz": 15.0
+        },
+        {
+          "achieved_hz": 15.006,
+          "channel": "DID_1208",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.099324,
+            "median_s": 0.06664,
+            "n": 146,
+            "p95_s": 0.084521,
+            "p99_s": 0.098144
+          },
+          "kind": "did",
+          "observations": 147,
+          "requested_hz": 15.0
+        },
+        {
+          "achieved_hz": 15.002,
+          "channel": "DID_120F",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.098439,
+            "median_s": 0.066659,
+            "n": 145,
+            "p95_s": 0.081885,
+            "p99_s": 0.09552
+          },
+          "kind": "did",
+          "observations": 146,
+          "requested_hz": 15.0
+        },
+        {
+          "achieved_hz": 15.0,
+          "channel": "DID_1219",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.098779,
+            "median_s": 0.066668,
+            "n": 146,
+            "p95_s": 0.084098,
+            "p99_s": 0.096227
+          },
+          "kind": "did",
+          "observations": 147,
+          "requested_hz": 15.0
+        },
+        {
+          "achieved_hz": 15.003,
+          "channel": "DID_1225",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.099459,
+            "median_s": 0.066654,
+            "n": 146,
+            "p95_s": 0.084885,
+            "p99_s": 0.093641
+          },
+          "kind": "did",
+          "observations": 147,
+          "requested_hz": 15.0
+        },
+        {
+          "achieved_hz": 15.006,
+          "channel": "DID_1226",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.098888,
+            "median_s": 0.06664,
+            "n": 146,
+            "p95_s": 0.081859,
+            "p99_s": 0.093905
+          },
+          "kind": "did",
+          "observations": 147,
+          "requested_hz": 15.0
+        },
+        {
+          "achieved_hz": null,
+          "channel": "MAF",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": null,
+            "median_s": null,
+            "n": 1,
+            "p95_s": null,
+            "p99_s": null
+          },
+          "kind": "pid",
+          "observations": 1,
+          "requested_hz": 1.0
+        }
+      ],
+      "generation_events": [],
+      "service_accounting": {
+        "by_tier": {
+          "fast": {
+            "active_count": 7,
+            "backed_off_count": 0,
+            "configured_rate_hz": 1.0,
+            "negative_responses": 0,
+            "request_count": 7,
+            "requests_sent": 23,
+            "response_rate": 1.0,
+            "responses": 23,
+            "timeouts": 0
+          },
+          "medium": {
+            "active_count": 23,
+            "backed_off_count": 0,
+            "configured_rate_hz": 1.0,
+            "negative_responses": 0,
+            "request_count": 23,
+            "requests_sent": 1629,
+            "response_rate": 1.0,
+            "responses": 1629,
+            "timeouts": 0
+          },
+          "on_demand": {
+            "active_count": 0,
+            "backed_off_count": 0,
+            "configured_rate_hz": 0.0,
+            "negative_responses": 0,
+            "request_count": 0,
+            "requests_sent": 0,
+            "response_rate": null,
+            "responses": 0,
+            "timeouts": 0
+          },
+          "slow": {
+            "active_count": 1,
+            "backed_off_count": 0,
+            "configured_rate_hz": 1.0,
+            "negative_responses": 0,
+            "request_count": 1,
+            "requests_sent": 1,
+            "response_rate": 1.0,
+            "responses": 1,
+            "timeouts": 0
+          }
+        },
+        "deferred": [
+          {
+            "channel": "DID_1101",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "DID_1110",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "DID_1135",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "DID_1139",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "DID_113A",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "DID_1163",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "DID_1208",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "DID_1209",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "DID_120F",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "DID_1219",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "DID_1225",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "DID_1226",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "DID_123F",
+            "kind": "did",
+            "reason": "awaiting_window",
+            "verdict": "deferred"
+          },
+          {
+            "channel": "COMMANDED_EQUIV_RATIO",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "COOLANT_TEMP",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "ENGINE_LOAD",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "EVAPORATIVE_PURGE",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "FUEL_STATUS",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "INTAKE_TEMP",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "LONG_FUEL_TRIM_1",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "LONG_FUEL_TRIM_2",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "MAF",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "O2_WR_LAMBDA_S1",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "RPM",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "RUN_TIME",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "SHORT_FUEL_TRIM_1",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "SHORT_FUEL_TRIM_2",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "SPEED",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "THROTTLE_POS",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "TIMING_ADVANCE",
+            "kind": "pid",
+            "reason": "continuous_did_capture",
+            "verdict": "ineligible"
+          }
+        ],
+        "did_profile": {
+          "cycle": {
+            "cross_mode_separation_s": null,
+            "cycle_duration_s": null,
+            "cycle_feasible": null,
+            "cycle_seconds": null,
+            "cycles_missed": 0,
+            "cycles_started": 1,
+            "did_shortfall": 0,
+            "mode01_recovered_age_s": null,
+            "mode01_recovery_pending": false,
+            "mode01_shortfall": 0,
+            "occupancy_s": null,
+            "plan": null,
+            "timing_policy": "interval",
+            "transition_latency_s": {
+              "entry_to_did": {
+                "max": 0.0082,
+                "median": 0.0082,
+                "n": 1,
+                "p95": 0.0082
+              },
+              "exit_to_mode01": null
+            }
+          },
+          "did_request_count": 13,
+          "fast_exit_failures": 0,
+          "fast_exit_retry_in_seconds": 0.0,
+          "fast_exit_supported": true,
+          "fast_exits": 1,
+          "keepalives_sent": 4,
+          "last_exit_nrc": null,
+          "last_exit_nrc_name": null,
+          "next_window_in_seconds": 0.0,
+          "phase": "window",
+          "session": "0xC0",
+          "session_failures": 0,
+          "window_interval_seconds": 60.0,
+          "window_max_seconds": 10.0,
+          "windows_completed": 0,
+          "windows_opened": 1
+        },
+        "did_profile_note": "last scheduler snapshot before the stop boundary (the boundary resets cycle accounting); may lag the stop by up to one metrics interval",
+        "ecu": {
+          "did_batch_requests": 0,
+          "did_responses": 1613,
+          "did_single_requests": 1613,
+          "lapses": 0,
+          "mode01_answered": 40,
+          "mode01_batch_requests": 0,
+          "session_changes": 7,
+          "session_requests": 7,
+          "support_probes": 0
+        },
+        "frames_delivered_by_responder": {
+          "broadcast": 2119,
+          "engine_ecu": 1660
+        },
+        "reconnect_attempts": 0,
+        "requests_on_wire_by_service": {
+          "mode01": 40,
+          "mode22": 1613,
+          "session_control": 7
+        },
+        "scheduler_last_attempt": {
+          "batching": null,
+          "bus_budget_requests_per_second": 180.0,
+          "bus_errors": 0,
+          "discovery": {
+            "cache_version": 10,
+            "deferred_reason": null,
+            "items": {},
+            "key": null,
+            "pending": [],
+            "requests_spent": 0,
+            "seconds_spent": 0
+          },
+          "negative_responses": 0,
+          "readings_emitted": 1653,
+          "request_timeouts": 0,
+          "requests_sent": 1660,
+          "resolved_plan": null,
+          "response_rate": 0.9958,
+          "rounds": {
+            "complete": 139,
+            "generation": 14,
+            "incomplete": 15,
+            "last_skew_s": 0.048848,
+            "open": null,
+            "period_s": 0.06666666666666667,
+            "skew_max_s": 0.999896,
+            "skipped": 0,
+            "started": 154
+          },
+          "session_control": {
+            "channel_requests_sent": 1653,
+            "channel_response_rate": 1.0,
+            "negative_responses": 0,
+            "responses": 7,
+            "seconds": 0.0174,
+            "sent": 7,
+            "timeouts": 0
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  "generated_at": "2026-09-08T05:30:29.805461+00:00",
+  "git_rev": "2257b53",
+  "headline": {
+    "batch_occupancy": null,
+    "ecu_batches_seen": {
+      "mode01_batched_requests_seen": 0,
+      "mode22_batched_requests_seen": 0,
+      "mode22_single_requests_seen": 1613
+    },
+    "expected_failures": [],
+    "expected_failures_met": true,
+    "expected_failures_seen": [],
+    "heartbeat_p99_ms": 29.76,
+    "inference": {
+      "feature_p95_ms": 60.663,
+      "lateness_max_ms": 1.161,
+      "lateness_p95_ms": 1.105,
+      "missed_ticks": 0,
+      "ticks_completed": 16,
+      "ticks_scheduled": 16
+    },
+    "known_answer": [
+      {
+        "outcome": "refused",
+        "pair": "can:SYNTH_RPM ~ obd:RPM",
+        "slope": null
+      },
+      {
+        "outcome": "refused",
+        "pair": "can:SYNTH_RPM_HALF ~ obd:RPM",
+        "slope": null
+      },
+      {
+        "outcome": "refused",
+        "pair": "can:SYNTH_SPEED ~ obd:SPEED",
+        "slope": null
+      },
+      {
+        "outcome": "agrees_1to1",
+        "pair": "did:ECM_RPM ~ can:SYNTH_RPM",
+        "slope": 0.99982
+      }
+    ],
+    "limiting_stage": "inference_feature_stage_on_loop",
+    "loss_identity_holds": true,
+    "quality_failures": [
+      "unknown_loss_counters"
+    ],
+    "quality_verdict": "unverified",
+    "quality_verdict_with_adapter_ledger": "pass",
+    "sequence_missing": 0,
+    "sequence_reconciliation": "reconciled",
+    "storage_dropped": 0,
+    "tuple_skew_max_s": null,
+    "tuples_attempted": null,
+    "tuples_complete": null
+  },
+  "label": "before",
+  "provenance": {
+    "collector_spec": {
+      "batch_max_pids": 1,
+      "did_batch_max_dids": "unavailable",
+      "did_response_widths_known": 0,
+      "did_session": {
+        "cycle_seconds": null,
+        "exit_grace_seconds": 0.05,
+        "exit_session": 129,
+        "keepalive_seconds": 2.0,
+        "lapse_seconds": 5.0,
+        "session": 192,
+        "window_interval_seconds": 60.0,
+        "window_max_seconds": 10.0
+      },
+      "dids": [
+        "ECM_RPM",
+        "ECM_AF_SENSOR_V_B1",
+        "ECM_AF_SENSOR_V_B2",
+        "ECM_INJECTOR_PW_B1",
+        "ECM_INTAKE_CAM_ANGLE_MEASURED",
+        "ECM_INTAKE_CAM_ANGLE_COMMANDED",
+        "ECM_INTAKE_CAM_ANGLE_MEASURED_B",
+        "ECM_INTAKE_VVT_SOLENOID_DUTY",
+        "ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2",
+        "ECM_THROTTLE_POS_SENSOR_1",
+        "ECM_COOLANT_TEMP",
+        "ECM_INTAKE_AIR_TEMP",
+        "ECM_MAF_GPS"
+      ],
+      "dtc_poll_interval_seconds": 0.0,
+      "pids": [
+        "FUEL_STATUS",
+        "ENGINE_LOAD",
+        "COOLANT_TEMP",
+        "SHORT_FUEL_TRIM_1",
+        "LONG_FUEL_TRIM_1",
+        "SHORT_FUEL_TRIM_2",
+        "LONG_FUEL_TRIM_2",
+        "RPM",
+        "SPEED",
+        "TIMING_ADVANCE",
+        "INTAKE_TEMP",
+        "MAF",
+        "THROTTLE_POS",
+        "RUN_TIME",
+        "O2_WR_LAMBDA_S1",
+        "EVAPORATIVE_PURGE",
+        "BAROMETRIC_PRESSURE",
+        "COMMANDED_EQUIV_RATIO"
+      ],
+      "poll_rate_hz": 1.0,
+      "priority_channels": [
+        "RPM",
+        "THROTTLE_POS"
+      ],
+      "request_timeout_seconds": 0.25
+    },
+    "components": {
+      "collector": "canable",
+      "dashboard_broadcast": true,
+      "decode_storage": true,
+      "derived_channels": true,
+      "dtc_sink": true,
+      "elm327": "not_exercised: needs the ELM327-emulator serial integration tier",
+      "gps": false,
+      "hardware_adapter": "synthetic",
+      "inference_loop": true,
+      "kernel_counters": "unavailable (no can0 on this host)",
+      "live_feature_source": true,
+      "monitor_sink": true
+    },
+    "duration_s": {
+      "armed_to_end": 10.417,
+      "declared": 10.0,
+      "start_to_end": 15.473
+    },
+    "git": {
+      "describe": "2257b53",
+      "sha": "2257b53d1a0ca6b952acca747808acf181fddf1c",
+      "short": "2257b53",
+      "worktree": "/tmp/claude-1000/-home-thebo-code-canary/24d37c6f-12fb-40d9-9b09-b8f6f8929404/scratchpad/wt-before"
+    },
+    "hardware": {
+      "adapter": "synthetic",
+      "bus": "SyntheticEcu on the real clock; ECU latency is a sleep"
+    },
+    "models": {
+      "isolation_forest": {
+        "reason": "artifact missing at models/nissan-xterra-2008/isolation_forest/model.joblib (manifest present: True); constant-score stub installed",
+        "status": "stub",
+        "version": "c10-stub"
+      },
+      "lstm_autoencoder": {
+        "reason": "artifact missing at models/nissan-xterra-2008/lstm_autoencoder/model.pt (manifest present: True); sequence detector not exercised",
+        "status": "absent"
+      }
+    },
+    "power_thermal": "unavailable (workstation)",
+    "profile_fields_unsupported_by_this_tree": [
+      "mode22_rate_weights"
+    ],
+    "profile_snapshot": {
+      "behavior_model_recipes": [],
+      "broadcast_decode": true,
+      "builtin_revision": 0,
+      "bus_budget_override": 180.0,
+      "capacity_evidence": "C10 synthetic-bus workload; no hardware capacity is claimed here.",
+      "corpus_eligible": false,
+      "description": "C10 synthetic workload: tuning-did",
+      "did_continuous": true,
+      "did_cycle_seconds": null,
+      "did_interval_seconds": null,
+      "expected_total_demand_hz": null,
+      "experimental": false,
+      "max_tuple_skew_s": null,
+      "min_achieved_rate_hz": 12.0,
+      "mode01": {},
+      "mode01_enabled": false,
+      "mode22": [
+        "ECM_RPM",
+        "ECM_AF_SENSOR_V_B1",
+        "ECM_AF_SENSOR_V_B2",
+        "ECM_INJECTOR_PW_B1",
+        "ECM_INTAKE_CAM_ANGLE_MEASURED",
+        "ECM_INTAKE_CAM_ANGLE_COMMANDED",
+        "ECM_INTAKE_CAM_ANGLE_MEASURED_B",
+        "ECM_INTAKE_VVT_SOLENOID_DUTY",
+        "ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2",
+        "ECM_THROTTLE_POS_SENSOR_1",
+        "ECM_COOLANT_TEMP"
+      ],
+      "mode22_enabled": true,
+      "name": "tuning-did",
+      "operator_modified": false,
+      "required_tuple": [],
+      "requires_tune_revision": false,
+      "round_timestamps": true,
+      "storage_prefix": "_capture-tuning-did",
+      "target_rate_hz": 15.0
+    },
+    "runtime": {
+      "cpu_count": 8,
+      "dependencies": {
+        "numpy": "2.5.2",
+        "pandas": "3.0.5",
+        "pyarrow": "25.0.1",
+        "pydantic": "2.13.4",
+        "python-can": "4.6.1",
+        "scikit-learn": "1.9.0",
+        "torch": "2.13.0+cu130"
+      },
+      "hostname": "CorsairDesktop",
+      "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+      "python": "3.12.3"
+    },
+    "sessions": {
+      "all_session_dirs": [
+        "/home/thebo/code/canary/data/_validation/before/tuning-did/2026-09-08T053013",
+        "/home/thebo/code/canary/data/_validation/before/tuning-did/_capture-tuning-did-c10-before-1788845418"
+      ],
+      "bindings": "/tmp/claude-1000/-home-thebo-code-canary/24d37c6f-12fb-40d9-9b09-b8f6f8929404/scratchpad/before-scratch/tuning-did/synthetic_bindings.yaml",
+      "capture_dir": "/home/thebo/code/canary/data/_validation/before/tuning-did/_capture-tuning-did-c10-before-1788845418",
+      "replay_source": null,
+      "replay_speed": null
+    },
+    "spec_fields_unsupported_by_this_tree": [
+      "did_batch_max_dids"
+    ],
+    "timestamps": {
+      "armed_wall": 1788845418.9170725,
+      "basis": {
+        "can_rows": "stored timestamp = adapter handout instant",
+        "inference": "monotonic deadline grid; rows stamped datetime.now(UTC)",
+        "obd_rows": "acquired_at (adapter handout stamp, 'kernel' when within 5 s of time.time()) with presentation timestamp = round wall_start under round_timestamps",
+        "replay": "rows rebased to emit time; acquired_at shifted by the same offset"
+      },
+      "ended_wall": 1788845429.3341353,
+      "started_wall": 1788845413.8610678
+    },
+    "vehicle": {
+      "ecu": "ScriptedEcu (tests/capture_round_fakes) extended by SyntheticEcu",
+      "make_model_year": "Nissan Xterra 2008",
+      "profile_slug": "nissan-xterra-2008"
+    },
+    "warmup_s": 5.0,
+    "workload": {
+      "broadcast": {
+        "burst_interval_s": 2.5,
+        "burst_size": 100,
+        "rate_hz": 100.0
+      },
+      "duration_s": 10.0,
+      "ecu": {
+        "latency": 0.002,
+        "session_gated": true
+      },
+      "expected_failures": [],
+      "fault_at_elapsed_s": null,
+      "inference_tick_s": 1.0,
+      "kind": "canable",
+      "name": "tuning-did",
+      "notes": "",
+      "profile": {
+        "broadcast_decode": true,
+        "bus_budget_override": 180.0,
+        "capacity_evidence": "C10 synthetic-bus workload; no hardware capacity is claimed here.",
+        "corpus_eligible": false,
+        "description": "C10 synthetic workload: tuning-did",
+        "did_continuous": true,
+        "min_achieved_rate_hz": 12.0,
+        "mode01": {},
+        "mode01_enabled": false,
+        "mode22": [
+          "ECM_RPM",
+          "ECM_AF_SENSOR_V_B1",
+          "ECM_AF_SENSOR_V_B2",
+          "ECM_INJECTOR_PW_B1",
+          "ECM_INTAKE_CAM_ANGLE_MEASURED",
+          "ECM_INTAKE_CAM_ANGLE_COMMANDED",
+          "ECM_INTAKE_CAM_ANGLE_MEASURED_B",
+          "ECM_INTAKE_VVT_SOLENOID_DUTY",
+          "ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2",
+          "ECM_THROTTLE_POS_SENSOR_1",
+          "ECM_COOLANT_TEMP"
+        ],
+        "mode22_rate_weights": {
+          "ECM_COOLANT_TEMP": 0.2,
+          "ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2": 0.5
+        },
+        "name": "tuning-did",
+        "round_timestamps": true,
+        "storage_prefix": "_capture-tuning-did",
+        "target_rate_hz": 15.0
+      },
+      "queue_max_size": 10000,
+      "required_evidence": [
+        "requested DID cadence",
+        "raw frame continuity",
+        "per-DID context weights",
+        "session continuity"
+      ],
+      "spec_overrides": {
+        "did_batch_max_dids": 3
+      },
+      "storage_stall": null,
+      "table_row": "Continuous tuning DID",
+      "timeline": [],
+      "warmup_s": 5.0
+    }
+  },
+  "report": "sustained_validation",
+  "scenario": "tuning-did",
+  "schema_version": 1,
+  "table_row": "Continuous tuning DID"
+}

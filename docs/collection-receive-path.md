@@ -117,6 +117,14 @@ is callable).
   Storage, broadcast and live sinks are **unfiltered**. Storage batching,
   the serialized async writer, atomic persistence and capture transitions
   are untouched.
+- Every sink's queue reports `queue_depth` (at the last observation) and
+  `queue_high_water` (the monotonic max over them) under
+  `telemetry_sinks.<sink>`. The fanout observes each sink's queue after
+  every batch, so the mark is taken while a wedged consumer is still
+  blocked — `queue_depth` alone reads 0 once the stall clears, which is how
+  the C10 storage-stall scenario dropped 3,742 records behind a 256-deep
+  queue that reported depth 0. Read the high-water mark, not the last
+  depth, when attributing a drop.
 - Decode/conversion dedup (the broadcast sink and storage sink both decode
   CAN frames) is **deferred**: not profiled here and ownership is shared
   between the dashboard stream and persistence; nothing in this task
