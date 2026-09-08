@@ -36,9 +36,15 @@ the actual path, not a capability available only in a probe tool.
   decoded rows/s, and complete tuples/s. Include session control and discovery
   overhead. Report best-case batched demand and single-request fallback demand
   separately; do not equate diagnostic request count with total bus load.
-- [ ] C09.3 Improve Mode 01 batch occupancy using C02 round membership and
+- [x] C09.3 Improve Mode 01 batch occupancy using C02 round membership and
   compatible deadlines. Do not pull a slow channel to fast cadence merely to
   fill a batch, and do not delay a critical tuple to wait for optional context.
+  _done in C02/Q26: `select_batch_companions` confines companions to the open
+  round's unattempted members, preserves tier boundaries outside synchronous
+  capture rounds, and orders `required_tuple` members first. Regression coverage:
+  `test_companion_selection_respects_poll_tier`,
+  `test_required_tuple_members_are_batched_first`, and the same-round batch
+  attribution cases in `test_capture_rounds.py`._
 - [ ] C09.4 Keep mode/model-critical priority channels profile-configurable.
   Verify their demanded share is feasible and expose infeasible plans rather
   than assuming a small priority list cannot starve other requests.
