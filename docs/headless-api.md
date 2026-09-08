@@ -174,6 +174,7 @@ Control endpoints:
 | `GET /control/passive` / `POST /control/passive` | inspect / arm the CAN transmit gate (receive-only mode) — see [Passive mode](#passive-mode) |
 | `POST /control/trigger_poll` | force specific channels due on the OBD scheduler's next tick — `{channels}` — instead of waiting out their tier cadence |
 | `POST /control/can_activity` | capture N seconds (capped at 30) of raw CAN traffic — `{seconds, ids?}` — per-id frame rate + which byte positions changed |
+| `GET /control/obd_discovery` / `POST /control/obd_discovery/reset` | cached OBD support-discovery state per vehicle / invalidate it so the collector re-walks the Mode 01 / Mode 06 support groups on its next budget slots — see [docs/diagnostic-discovery.md](diagnostic-discovery.md); live progress is `/status.obd_scheduler.discovery` |
 | `GET /control/capture/profiles` | list strict, vehicle-scoped capture profiles |
 | `PUT /control/capture/profiles` / `DELETE /control/capture/profiles/{name}` | save or delete a capture profile (`default` cannot be deleted) |
 | `POST /control/capture` / `DELETE /control/capture` | start a named isolated capture / return to default collection; start returns capture session path and budget state, stop returns `ended_capture_dir` and restores the exact pre-capture budget. Retrying an identical active start or immediately repeated stop returns the existing result with `idempotent: true`; that stop-response cache does not survive a daemon restart. |

@@ -173,6 +173,10 @@ class ObdReading:
     #: evidence that members were sampled together — compare ``acquired_at``.
     generation: int | None = None
     round_id: int | None = None
+    #: CAN id of the module that answered (``0x7E8`` engine, ``0x7E9`` …).
+    #: Functional requests can be answered by several ECUs; a reading keeps
+    #: which one it came from (C06.11). ``None`` on paths without the wire.
+    responder_id: int | None = None
 
     def to_json_line(self) -> str:
         # payload intentionally omitted: the JSONL sidecar is a human-facing
@@ -459,6 +463,8 @@ def acquisition_metadata(reading: ObdReading) -> dict[str, MetadataValue] | None
         metadata["generation"] = reading.generation
     if reading.round_id is not None:
         metadata["round_id"] = reading.round_id
+    if reading.responder_id is not None:
+        metadata["responder_id"] = reading.responder_id
     return metadata
 
 

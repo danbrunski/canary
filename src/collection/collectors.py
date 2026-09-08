@@ -29,6 +29,7 @@ from src.collection.can_obd_collector import (
 )
 from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.custom_pids import load_custom_pids
+from src.collection.discovery import vehicle_key
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
 from src.collection.obd_collector import ObdSpec, collect_obd
@@ -149,6 +150,13 @@ def default_collectors(
             force_poll_trigger=force_poll_trigger,
             custom_pids=tuple(custom_pids),
             priority_channels=config.collection.obd_priority_channels,
+            # Support maps cached per vehicle across reconnects (C06.6).
+            discovery_key=vehicle_key(
+                config.vehicle.vin,
+                config.vehicle.make,
+                config.vehicle.model,
+                config.vehicle.year,
+            ),
         )
 
         async def canable_obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:

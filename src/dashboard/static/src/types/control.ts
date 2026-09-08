@@ -368,6 +368,44 @@ export interface CaptureRoundStatus {
   open: CaptureRoundOpenStatus | null;
 }
 
+/** One support walk (Mode 01 PID groups or Mode 06 MID groups), roadmap C06. */
+export interface DiscoveryItemStatus {
+  service: string;
+  complete: boolean;
+  pending_group: string | null;
+  groups_answered: number;
+  attempts: number;
+  requests_spent: number;
+  seconds_spent: number;
+  last_result: "answered" | "nrc" | "timeout" | null;
+  last_nrc: string | null;
+  next_probe_in_s: number | null;
+  supported_count: number;
+  responders: string[];
+}
+
+/**
+ * Support discovery as scheduler work (roadmap C06.6): what is still pending,
+ * what it has cost, and why it is waiting if it is.
+ */
+export interface DiscoveryStatus {
+  key: string | null;
+  cache_version: number;
+  pending: string[];
+  deferred_reason: string | null;
+  requests_spent: number;
+  seconds_spent: number;
+  items: Record<string, DiscoveryItemStatus>;
+}
+
+/** A request wanted now that the eligibility matrix defers or refuses (C06.7). */
+export interface DeferredRequestStatus {
+  channel: string;
+  kind: string;
+  verdict: "deferred" | "ineligible";
+  reason: string;
+}
+
 export interface ObdSchedulerStatus {
   achieved_hz_60s?: Record<string, number>;
   achieved_hz_capture?: Record<string, number>;
@@ -375,6 +413,8 @@ export interface ObdSchedulerStatus {
   did_profile?: DidWindowStatus | null;
   requests?: ObdSchedulerRequestStatus[];
   rounds?: CaptureRoundStatus | null;
+  discovery?: DiscoveryStatus | null;
+  deferred?: DeferredRequestStatus[];
 }
 
 export interface CaptureProfilesResponse {

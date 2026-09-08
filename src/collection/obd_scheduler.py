@@ -25,10 +25,12 @@ from src.collection.hybrid_cycle import (
 )
 from src.collection.isotp import PERMANENT_REFUSAL_NRCS, nrc_name
 from src.collection.obd_registry import PollTier, lookup
+from src.collection.request_eligibility import Eligibility, SessionPhase, evaluate
 from src.config import DEFAULT_PRIORITY_CHANNELS, CanBusConfig, CollectionConfig
 
 if TYPE_CHECKING:
     from src.collection.custom_pids import CustomPid
+    from src.collection.discovery import SupportProbe
     from src.decode.dids import DidAccess, DidMap
 
 log = logging.getLogger(__name__)
@@ -256,9 +258,19 @@ def did_access() -> DidAccess | None:
 
 
 class _PidDiscoveryClient(Protocol):
+    """Synchronous discovery, for standalone ``build_poll_requests`` callers."""
+
     def query_supported_mode_01_pids(self) -> tuple[int, ...]: ...
 
     def query_supported_mode_06_mids(self) -> tuple[int, ...]: ...
+
+
+class _DiscoveryClient(Protocol):
+    """One support-group probe at a time — what the collector loop drives (C06.4)."""
+
+    def probe_support(
+        self, service: int, group: int, *, should_stop: Callable[[], bool] | None = None
+    ) -> SupportProbe: ...
 
 
 @dataclass(frozen=True)
@@ -426,6 +438,11 @@ class CanObdSpec:
     #: their tier rate instead of degrading with the rest of the plan. See
     #: ``DEFAULT_PRIORITY_CHANNELS``; empty disables the priority lane.
     priority_channels: tuple[str, ...] = DEFAULT_PRIORITY_CHANNELS
+    #: Vehicle identity the discovery cache is keyed by (C06.6): the VIN, else
+    #: make-model-year (``discovery.vehicle_key``). ``None`` — the default,
+    #: and every standalone recorder/test spec — caches nothing, so a walk
+    #: restarts with each loop.
+    discovery_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -483,6 +500,16 @@ class CanObdLoopStats:
     batch_desyncs: int = 0
     #: Times the session narrowed its batch size after repeated failures.
     batch_size_narrowings: int = 0
+    #: Support discovery as scheduler work (C06.8). ``requests_sent`` still
+    #: counts every frame on the wire; these separate the probes from channel
+    #: reads, and count the raw frames tapped *while* a probe was waiting —
+    #: the frames the old synchronous path silently consumed.
+    discovery_requests_sent: int = 0
+    discovery_responses: int = 0
+    discovery_negative_responses: int = 0
+    discovery_timeouts: int = 0
+    discovery_seconds: float = 0.0
+    discovery_frames_seen: int = 0
     #: Capture rounds (C02). A round is one scheduled sampling window: it
     #: ends when every member has been attempted once or at its deadline,
     #: whichever comes first, so a stamp can never span more than one period.
@@ -1173,20 +1200,34 @@ class DidWindowController:
 
     def request_eligible(self, index: int, request: _PollRequest, *, now: float) -> bool:
         del now  # phase state already advanced this tick
-        if self.phase == "window":
-            return request.kind == "did" and index in self._pending
-        if self.phase == "lapse":
-            return False
-        # Mode 03/07/0A (Task 1.3), Mode 06 (Task 3.1), and Mode 02 freeze
-        # frame (Task 3.3) are standard, non-Mode-22 requests just like Mode
-        # 01 — the ECM answers them in the default session, so they share
-        # Mode 01's eligibility rather than being starved for the DID
-        # controller's whole lifetime. Custom PIDs (Task 2.6) get the same
-        # treatment: most use Mode 01/09, which is correct here; a custom PID
-        # declared on Mode 22 for a session-gated ECU would need the same
-        # windowed treatment as `did` (not implemented — no such custom PID
-        # exists yet, see custom_pids.example.yaml).
-        return request.kind in ("pid", "dtc", "custom", "service", "freeze_frame")
+        return self.request_verdict(index, request).eligible
+
+    def request_verdict(self, index: int, request: _PollRequest) -> Eligibility:
+        """The session gate: the C06.7 matrix row for this phase, selection aside.
+
+        Mode 03/07/0A (Task 1.3), Mode 06 (Task 3.1), Mode 02 freeze frames
+        (Task 3.3) and custom PIDs (Task 2.6) are Mode 01-side services the
+        ECM answers in the default session, so they share Mode 01's phase
+        rather than being starved for the controller's whole lifetime; a
+        custom PID declared on Mode 22 for a session-gated ECU would need the
+        ``did`` treatment (not implemented — no such custom PID exists yet).
+        Inside a window a DID already attempted this window is deferred to
+        the next one.
+        """
+        from src.collection import tuning_profile
+
+        verdict = evaluate(request.kind, tuning_profile.profile_class(), self.phase)
+        if verdict.eligible and request.kind == "did" and index not in self._pending:
+            return Eligibility("deferred", "attempted_this_window")
+        return verdict
+
+    @property
+    def matrix_phase(self) -> SessionPhase:
+        return self.phase
+
+    def did_pending(self, index: int) -> bool:
+        """Whether this DID is still owed in the open window."""
+        return index in self._pending
 
     def service_kind(self, index: int) -> ServiceKind:
         return "mode22" if index in self._did_indices else "mode01"
@@ -1373,11 +1414,20 @@ class ObdSchedulerMetrics:
     #: (C04.8), so a hybrid capture's throughput is not padded by entries,
     #: exits and keep-alives.
     session_control: dict[str, Any] | None = None
+    #: Support discovery (C06.6): pending items, requests and time spent,
+    #: last result per item, and why it is waiting if it is. ``None`` for a
+    #: metrics object built without a loop.
+    discovery: dict[str, Any] | None = None
+    #: Requests wanted right now that the eligibility matrix defers or
+    #: refuses, each with its reason (C06.7). Bounded.
+    deferred: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "rounds": self.rounds,
             "session_control": self.session_control,
+            "discovery": self.discovery,
+            "deferred": self.deferred,
             "configured_poll_rate_hz": self.configured_poll_rate_hz,
             "bus_budget_requests_per_second": self.bus_budget_requests_per_second,
             "active_requests": self.active_requests,
@@ -1433,8 +1483,16 @@ def parse_did_token(token: str) -> int:
     )
 
 
-def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_PollRequest]:
-    """Build the round-robin request plan from config and ECU support."""
+def build_poll_requests(client: _PidDiscoveryClient | None, spec: CanObdSpec) -> list[_PollRequest]:
+    """Build the round-robin request plan from config and ECU support.
+
+    With a ``client`` (standalone callers: scripts, probe tools) support is
+    discovered synchronously through it. With ``None`` — what the collector
+    loop passes (C06.4) — nothing is sent: ``auto`` starts as the whole
+    decoded catalogue on the fast probe timeout and Mode 06 ``auto`` adds no
+    requests yet; the loop installs discovery results as its budgeted probes
+    answer (:func:`apply_mode01_support`, :func:`mode06_requests`).
+    """
     tokens = spec.pids or (AUTO_PIDS,)
     auto = False
     explicit_pids: list[int] = []
@@ -1458,7 +1516,7 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
         fast_probe_by_pid[pid] = fast_probe_by_pid.get(pid, False) and auto_probe
 
     if auto:
-        supported = client.query_supported_mode_01_pids()
+        supported = client.query_supported_mode_01_pids() if client is not None else ()
         for pid in supported:
             if pid in PID_DECODERS:
                 add_pid(pid, auto_probe=True, fast_probe=False)
@@ -1551,23 +1609,14 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
         # on the same "occasional service poll" cadence model as the DTC poll
         # above — no vehicle_state gating, the round-robin scheduler already
         # backs off an ECU that stops answering.
-        if spec.service_mids == "auto":
+        if spec.service_mids != "auto":
+            mode06_mids: tuple[int, ...] = spec.service_mids
+        elif client is None:
+            mode06_mids = ()
+        else:
             discover_mode06 = getattr(client, "query_supported_mode_06_mids", None)
             mode06_mids = tuple(discover_mode06()) if discover_mode06 is not None else (0x00,)
-        else:
-            mode06_mids = spec.service_mids
-        for service, channel in SERVICE_POLL_CHANNELS.items():
-            for mid in mode06_mids:
-                requests.append(
-                    _PollRequest(
-                        kind="service",
-                        service=service,
-                        identifier=mid,
-                        request_id=DEFAULT_REQUEST_ID,
-                        channel=channel,
-                        poll_tier="dtc",
-                    )
-                )
+        requests.extend(mode06_requests(mode06_mids))
     if spec.freeze_frame_trigger is not None:
         # Task 3.3: dormant ("on_demand" -> rate 0) until FreezeFrameTrigger
         # fires; run_can_obd_loop un-suppresses these for one shot each time.
@@ -1585,6 +1634,48 @@ def build_poll_requests(client: _PidDiscoveryClient, spec: CanObdSpec) -> list[_
                 )
             )
     return requests
+
+
+def mode06_requests(mids: Iterable[int]) -> list[_PollRequest]:
+    """Mode 06 monitor-result requests, one per MID, on the service-poll cadence.
+
+    Task 3.1: the same "occasional service poll" cadence model as the DTC
+    poll — no vehicle_state gating, the round-robin scheduler already backs
+    off an ECU that stops answering. The MID stays on the wire as the
+    request identifier (``06 <mid>``) and the response's responder id rides
+    every reading, so per-ECU provenance is never lost (C06.11).
+    """
+    return [
+        _PollRequest(
+            kind="service",
+            service=service,
+            identifier=mid,
+            request_id=DEFAULT_REQUEST_ID,
+            channel=channel,
+            poll_tier="dtc",
+        )
+        for service, channel in SERVICE_POLL_CHANNELS.items()
+        for mid in mids
+    ]
+
+
+def apply_mode01_support(
+    requests: list[_PollRequest], supported: Iterable[int]
+) -> list[_PollRequest]:
+    """A new plan with the discovered Mode 01 PIDs off the fast probe timeout.
+
+    This is the whole effect Mode 01 support discovery has on the plan: an
+    auto-probed PID the ECU claims gets the full request timeout on its
+    first miss instead of ``AUTO_PROBE_TIMEOUT_SECONDS``. The sparse-bitmap
+    fallback (every decoded PID is probed regardless) is unchanged.
+    """
+    claimed = set(supported)
+    return [
+        replace(request, fast_probe=False)
+        if request.kind == "pid" and request.auto_probe and request.identifier in claimed
+        else request
+        for request in requests
+    ]
 
 
 def _pid_channel_and_tier(pid: int) -> tuple[str, PollTier]:
@@ -1973,6 +2064,8 @@ def _scheduler_metrics(
     *,
     did_profile: dict[str, Any] | None = None,
     rounds: dict[str, Any] | None = None,
+    discovery: dict[str, Any] | None = None,
+    deferred: list[dict[str, Any]] | None = None,
 ) -> ObdSchedulerMetrics:
     active = _count_active_requests(requests, states, now)
     backed_off = sum(
@@ -2105,11 +2198,15 @@ def _scheduler_metrics(
         batching=_batching_metrics(spec, stats, now),
         rounds=rounds,
         session_control=_session_control_metrics(stats),
+        discovery=discovery,
+        deferred=list(deferred or []),
     )
 
 
 def _session_control_metrics(stats: CanObdLoopStats) -> dict[str, Any]:
-    channel_requests = max(0, stats.requests_sent - stats.session_controls_sent)
+    channel_requests = max(
+        0, stats.requests_sent - stats.session_controls_sent - stats.discovery_requests_sent
+    )
     return {
         "sent": stats.session_controls_sent,
         "responses": stats.session_control_responses,
@@ -2124,6 +2221,8 @@ def _session_control_metrics(stats: CanObdLoopStats) -> dict[str, Any]:
 
 
 __all__ = [
+    "apply_mode01_support",
+    "mode06_requests",
     "select_batch_companions",
     "is_batchable",
     "RoundScheduler",

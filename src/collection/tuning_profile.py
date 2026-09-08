@@ -15,6 +15,7 @@ from typing import Any
 
 from src.collection import capture_generation, capture_lifetime
 from src.collection.capture_profiles import FUEL_MAP_CHANNELS, CaptureProfile
+from src.collection.request_eligibility import Eligibility, ProfileClass, evaluate
 
 log = logging.getLogger(__name__)
 DEFAULT_TUNING_CHANNELS: frozenset[str] = frozenset(FUEL_MAP_CHANNELS)
@@ -237,27 +238,75 @@ def set_active(
 
 
 def request_eligible(index: int, request: Any) -> bool:
+    """The profile gate: is this request selected by the active profile right now?
+
+    A projection of the C06.7 eligibility matrix with no session knowledge
+    (phase ``none``); the Mode-22 controller supplies the phase from its
+    side and the loop combines both. Policy lives in
+    ``request_eligibility``, not here.
+    """
     del index
-    with _lock:
-        if _paused:
-            # A paused capture stops polling outright rather than discarding
-            # answers: no point spending bus budget on rows nobody wants.
-            return False
-    kind = getattr(request, "kind", None)
-    if kind == "dtc":
-        return True
+    return request_verdict(request).eligible
+
+
+def request_verdict(request: Any) -> Eligibility:
+    """The profile gate's verdict with its reason (``paused``, ``not_selected`` …)."""
+    # A request without a kind is a Mode 01 PID (the legacy shape callers
+    # still pass); nothing else is guessed.
+    kind = str(getattr(request, "kind", None) or "pid")
     channel = str(getattr(request, "channel", ""))
     with _lock:
         profile = _profile
-        if kind == "did":
-            if not profile.mode22_enabled:
-                return False
-            requested = {item.upper() for item in profile.mode22}
-            resolved = {_did_channels.get(item, item) for item in requested}
-            return channel.upper() in resolved or channel.removeprefix("DID_").upper() in resolved
-        if not profile.mode01_enabled:
-            return False
-        return channel.upper() in profile.mode01 or "AUTO" in profile.mode01
+        paused = _paused
+        aliases = _did_channels
+    return evaluate(
+        kind,
+        classify_profile(profile),
+        "none",
+        selection=_selection_exclusion(profile, aliases, kind, channel),
+        paused=paused,
+    )
+
+
+def classify_profile(profile: CaptureProfile) -> ProfileClass:
+    """Which eligibility-matrix column a profile falls in."""
+    if profile.did_continuous:
+        return "continuous_did"
+    if profile.name == "default":
+        return "default"
+    if profile.mode22 and profile.mode22_enabled:
+        return "mode22_owning"
+    return "focused_mode01"
+
+
+def profile_class() -> ProfileClass:
+    with _lock:
+        return classify_profile(_profile)
+
+
+def selection_exclusion(kind: str, channel: str) -> str | None:
+    """Why the active profile's selection excludes this channel, or ``None``."""
+    with _lock:
+        return _selection_exclusion(_profile, _did_channels, kind, channel)
+
+
+def _selection_exclusion(
+    profile: CaptureProfile, aliases: dict[str, str], kind: str, channel: str
+) -> str | None:
+    if kind == "did":
+        if not profile.mode22_enabled:
+            return "mode22_disabled"
+        requested = {item.upper() for item in profile.mode22}
+        resolved = {aliases.get(item, item) for item in requested}
+        upper = channel.upper()
+        if upper in resolved or channel.removeprefix("DID_").upper() in resolved:
+            return None
+        return "not_selected"
+    if not profile.mode01_enabled:
+        return "mode01_disabled"
+    if channel.upper() in profile.mode01 or "AUTO" in profile.mode01:
+        return None
+    return "not_selected"
 
 
 def profile_channel_for(channel: str) -> str | None:
@@ -387,10 +436,15 @@ __all__ = [
     "configure_did_aliases",
     "is_active",
     "is_configured",
+    "is_paused",
     "mode22",
     "absolute_rate_hz",
+    "classify_profile",
+    "profile_class",
     "rate_weight",
     "request_eligible",
+    "request_verdict",
+    "selection_exclusion",
     "required_tuple",
     "set_active",
     "set_session_dir",

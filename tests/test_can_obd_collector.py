@@ -350,27 +350,24 @@ def test_query_with_tap_dtc_services_remain_identifierless() -> None:
 
 
 def test_mode06_discovery_retries_after_successful_obd_contact(caplog) -> None:  # type: ignore[no-untyped-def]
+    """Mode 06 support is silent at startup, then answers once the ECU is in
+    contact. Discovery is loop-driven (C06.4): the silent probe parks the
+    walk, the first Mode 01 answer re-arms it, and the next probe installs
+    the MIDs — every probe on the bus, none through a side channel."""
     caplog.set_level("INFO")
-
-    class _Discovery:
-        calls = 0
-
-        def query_supported_mode_01_pids(self) -> tuple[int, ...]:
-            return ()
-
-        def query_supported_mode_06_mids(self) -> tuple[int, ...]:
-            self.calls += 1
-            return () if self.calls == 1 else (0xA2,)
 
     class _Bus(_SilentBus):
         def __init__(self) -> None:
             super().__init__()
             self.responses: list[can.Message] = []
+            self.mode01_answered = False
+            self.support_probes = 0
 
         def send(self, msg: can.Message) -> None:
             super().send(msg)
             data = bytes(msg.data)
             if data[:3] == bytes([0x02, 0x01, 0x0C]):
+                self.mode01_answered = True
                 self.responses.append(
                     can.Message(
                         arbitration_id=0x7E8,
@@ -378,11 +375,22 @@ def test_mode06_discovery_retries_after_successful_obd_contact(caplog) -> None: 
                         is_extended_id=False,
                     )
                 )
-            elif data[:3] == bytes([0x02, 0x06, 0xA2]):
+            elif data[:3] == bytes([0x02, 0x06, 0x00]):
+                self.support_probes += 1
+                if self.mode01_answered:
+                    bits = 1 << 31  # MID 0x01 claimed, no continuation
+                    self.responses.append(
+                        can.Message(
+                            arbitration_id=0x7E8,
+                            data=bytes([0x06, 0x46, 0x00, *bits.to_bytes(4, "big"), 0]),
+                            is_extended_id=False,
+                        )
+                    )
+            elif data[:3] == bytes([0x02, 0x06, 0x01]):
                 self.responses.append(
                     can.Message(
                         arbitration_id=0x7E8,
-                        data=bytes([0x03, 0x46, 0xA2, 0x0C, 0, 0, 0, 0]),
+                        data=bytes([0x03, 0x46, 0x01, 0x0C, 0, 0, 0, 0]),
                         is_extended_id=False,
                     )
                 )
@@ -392,7 +400,6 @@ def test_mode06_discovery_retries_after_successful_obd_contact(caplog) -> None: 
                 return self.responses.pop(0)
             return super().recv(timeout)
 
-    discovery = _Discovery()
     bus = _Bus()
     stop = threading.Event()
     readings: list[Any] = []
@@ -411,21 +418,22 @@ def test_mode06_discovery_retries_after_successful_obd_contact(caplog) -> None: 
         service_poll_interval_seconds=300.0,
         service_mids="auto",
     )
-    run_can_obd_loop(
+    stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         spec,
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 1.0,
-        client_factory=lambda _bus: discovery,
+        deadline_monotonic=time.monotonic() + 2.0,
     )
 
-    assert discovery.calls == 2
-    assert any(bytes(message.data)[:3] == bytes([0x02, 0x06, 0xA2]) for message in bus.sent)
+    assert bus.support_probes == 2, "the silent probe must be retried once contact is made"
+    assert any(bytes(message.data)[:3] == bytes([0x02, 0x06, 0x01]) for message in bus.sent)
     assert any(reading.pid == "MONITOR_RESULTS" for reading in readings)
-    assert "Mode 06 discovery returned zero MIDs" in caplog.text
-    assert "Mode 06 discovery recovered after ECU contact" in caplog.text
+    assert stats.discovery_requests_sent == 2
+    assert stats.discovery_timeouts == 1 and stats.discovery_responses == 1
+    assert "mode06 support discovery: group 0x00 silent" in caplog.text
+    assert "Mode 06 discovery complete" in caplog.text
 
 
 def test_parse_pid_token_accepts_auto_names_and_hex() -> None:

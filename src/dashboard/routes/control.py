@@ -31,6 +31,7 @@ from src.collection.custom_pids import (
     save_custom_pids,
     torque_csv_to_custom_pids,
 )
+from src.collection.discovery import registry_snapshot, reset_discovery
 from src.collection.obd_scheduler import ForcePollTrigger
 from src.companion.schemas import TrainingRunApprovalRequest
 from src.companion.services import (
@@ -533,6 +534,25 @@ def register_control_routes(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         payload = {"obd_request": result.to_dict()}
         publish_control_event("obd_request", "ok" if result.responded else "no_response", payload)
+        return payload
+
+    @app.get("/control/obd_discovery")
+    def get_control_obd_discovery(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """Cached support-discovery state per vehicle (C06.6); live progress
+        is under ``/status.obd_scheduler.discovery``."""
+        return {"obd_discovery": registry_snapshot(time.monotonic())}
+
+    @app.post("/control/obd_discovery/reset")
+    def post_control_obd_discovery_reset(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """Invalidate every cached support map; the collector re-walks them
+        on its next budget slots, in the phases the eligibility matrix admits."""
+        version = reset_discovery()
+        payload = {"obd_discovery": {"cache_version": version, "reset": True}}
+        publish_control_event("obd_discovery.reset", "ok", payload)
         return payload
 
     @app.get("/control/passive")

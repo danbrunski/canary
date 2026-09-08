@@ -250,9 +250,14 @@ def test_dtc_reads_survive_tuning_mode() -> None:
 
     assert tuning_profile.request_eligible(0, R("DTC_STORED", "dtc")) is True
     assert tuning_profile.request_eligible(0, R("DTC_PENDING", "dtc")) is True
-    # Mode 06 / freeze-frame stay excluded — those really are slow-tier bulk.
+    # Mode 06 stays excluded unless the profile names MONITOR_RESULTS (or
+    # AUTO) — a sweep is slow-tier bulk (C06.7: `service` × focused_mode01).
     assert tuning_profile.request_eligible(0, R("MONITOR_RESULTS", "service")) is False
-    assert tuning_profile.request_eligible(0, R("FREEZE_FRAME_RPM", "freeze_frame")) is False
+    assert tuning_profile.request_verdict(R("MONITOR_RESULTS", "service")).reason == "not_selected"
+    # A freeze frame is DTC-owned one-shot work: it fires only when the
+    # admitted DTC poll finds a stored code, so it rides the same admission
+    # (C06.7/C06.10) instead of being filtered by the telemetry selection.
+    assert tuning_profile.request_eligible(0, R("FREEZE_FRAME_RPM", "freeze_frame")) is True
 
 
 def test_speed_is_polled_so_operating_mode_survives() -> None:

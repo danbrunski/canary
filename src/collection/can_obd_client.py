@@ -39,6 +39,15 @@ service byte straight to the request builder, so write and actuation
 services (Mode 04, UDS 0x2E / 0x2F, ...) are reachable from this module.
 The fixed ``query_mode_*`` helpers still only cover the read services they
 are named for; ``query()`` is the general path.
+
+Receive ownership (roadmap C06): every frame this client takes off the bus
+goes through :func:`receive_frame`, which hands it to the optional
+``on_frame`` tap *before* the client decides whether it is the awaited
+response. The collector loop constructs its client with the same tap it uses
+for its own receives, so a broadcast frame arriving while a support probe or
+an ad-hoc query is waiting still reaches raw capture exactly once.
+Standalone use (``on_frame=None``: scripts, probe tools, the ad-hoc control
+request on its own bus handle) is unchanged.
 """
 
 from __future__ import annotations
@@ -52,6 +61,12 @@ from typing import Any
 import can
 
 from src.collection import tx_gate
+from src.collection.discovery import (
+    MODE01_SUPPORT_GROUPS,
+    MODE06_SUPPORT_GROUPS,
+    SupportProbe,
+    walk_support,
+)
 from src.collection.isotp import (
     DEFAULT_REQUEST_ID,
     DEFAULT_RESPONSE_ID_MAX,
@@ -66,12 +81,39 @@ from src.collection.isotp import (
     extract_service_payload,
     handle_single_frame,
     is_negative_response,
+    negative_response_code,
     pci_type,
     positive_response_service,
     split_batched_response,
 )
 
 log = logging.getLogger(__name__)
+
+#: Longest single ``bus.recv`` wait. Bounding it keeps a stop request and a
+#: capture deadline serviced within one slice, and is what the collector's
+#: own receive helper has always used.
+RECV_SLICE_SECONDS = 0.05
+
+FrameTap = Callable[[can.Message], None]
+
+
+def receive_frame(
+    bus: can.BusABC,
+    *,
+    timeout: float,
+    on_frame: FrameTap | None,
+) -> can.Message | None:
+    """The one place a frame is taken off an OBD-owning bus.
+
+    Whatever ``bus.recv`` returns is handed to ``on_frame`` first — before
+    any caller looks at its arbitration id — so raw capture sees every frame
+    exactly once regardless of which request, drain or probe was waiting.
+    Parse errors raised by the driver propagate; the collector counts them.
+    """
+    msg = bus.recv(timeout=timeout)
+    if msg is not None and on_frame is not None:
+        on_frame(msg)
+    return msg
 
 
 @dataclass(frozen=True)
@@ -101,7 +143,8 @@ class CanObdClient:
     only — the underlying ``Bus.recv`` is shared global state, so don't call
     ``query_*`` from two threads concurrently. Continuous capture uses
     ``can_obd_collector`` to multiplex raw-frame capture and diagnostic polling
-    through one Bus.
+    through one Bus; it passes its raw-capture tap as ``on_frame`` so every
+    frame this client receives is captured too (C06.2).
     """
 
     def __init__(
@@ -113,6 +156,7 @@ class CanObdClient:
         response_id_max: int = DEFAULT_RESPONSE_ID_MAX,
         timeout_seconds: float = 1.0,
         time_fn: Callable[[], float] = time.monotonic,
+        on_frame: FrameTap | None = None,
     ) -> None:
         self._bus = bus
         self._request_id = request_id
@@ -120,6 +164,12 @@ class CanObdClient:
         self._response_id_max = response_id_max
         self._timeout = timeout_seconds
         self._time_fn = time_fn
+        self._on_frame = on_frame
+
+    def _recv(self, timeout: float) -> can.Message | None:
+        return receive_frame(
+            self._bus, timeout=max(0.001, min(RECV_SLICE_SECONDS, timeout)), on_frame=self._on_frame
+        )
 
     # ------------------------------------------------------------------
     # Public API: one method per service
@@ -310,31 +360,18 @@ class CanObdClient:
         requests can be answered by multiple modules, so each probe merges
         all responder bitmasks instead of trusting whichever ECU answered
         first. The walk continues while any responder sets the continuation
-        marker, matching the SAE J1979 spec. Returns the sorted tuple of
-        supported PID numbers.
+        marker, matching the SAE J1979 spec, and stops at the first silent
+        or refused group. Returns the sorted tuple of supported PID numbers.
+
+        Synchronous, for standalone callers. The collector loop drives the
+        same walk one probe per budget slot through :meth:`probe_support`
+        (``src.collection.discovery``), so there is one support-map parser.
         """
-        supported: set[int] = set()
-        for base in (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0):
-            responses = self._request_many(service=0x01, pid=base, expect_pid_echo=True)
-            bitmasks = [
-                int.from_bytes(resp.payload[:4], byteorder="big")
-                for resp in responses
-                if len(resp.payload) >= 4
-            ]
-            if not bitmasks:
-                break
-            for bits in bitmasks:
-                for i in range(32):
-                    if bits & (1 << (31 - i)):
-                        supported.add(base + 1 + i)
-            # The lowest bit of the bitmask indicates "more PIDs available
-            # at base+32" — when no responder sets it, stop walking.
-            if not any(bits & 0x01 for bits in bitmasks):
-                break
-        # The probe PIDs themselves (0x00 / 0x20 / …) aren't telemetry; drop them.
-        for base in (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0):
-            supported.discard(base)
-        return tuple(sorted(supported))
+        return walk_support(
+            lambda group: self.probe_support(0x01, group),
+            service=0x01,
+            groups=MODE01_SUPPORT_GROUPS,
+        )
 
     def query_supported_mode_06_mids(self) -> tuple[int, ...]:
         """Enumerate Mode 06 monitor IDs using the J1979 support bitmaps.
@@ -342,26 +379,27 @@ class CanObdClient:
         Mode 06 requires a MID byte even for discovery. Walk each 0x20-wide
         support group and merge all responders, mirroring Mode 01 discovery.
         """
-        groups = (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0, 0xE0)
-        supported: set[int] = set()
-        for base in groups:
-            responses = self._request_many(service=0x06, pid=base, expect_pid_echo=True)
-            bitmasks = [
-                int.from_bytes(response.payload[:4], byteorder="big")
-                for response in responses
-                if len(response.payload) >= 4
-            ]
-            if not bitmasks:
-                break
-            for bits in bitmasks:
-                for index in range(32):
-                    if bits & (1 << (31 - index)):
-                        supported.add(base + 1 + index)
-            if not any(bits & 0x01 for bits in bitmasks):
-                break
-        for base in groups:
-            supported.discard(base)
-        return tuple(sorted(supported))
+        return walk_support(
+            lambda group: self.probe_support(0x06, group),
+            service=0x06,
+            groups=MODE06_SUPPORT_GROUPS,
+        )
+
+    def probe_support(
+        self,
+        service: int,
+        group: int,
+        *,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> SupportProbe:
+        """One support-group probe: every responder's reply, or the NRC, or silence.
+
+        ``should_stop`` is polled once per receive slice so a collector stop
+        or deadline ends the wait promptly instead of after the full timeout.
+        """
+        return self._request_many(
+            service=service, pid=group, expect_pid_echo=True, should_stop=should_stop
+        )
 
     # ------------------------------------------------------------------
     # Internal: ISO-TP framing
@@ -402,13 +440,16 @@ class CanObdClient:
         expect_pid_echo: bool,
         request_id: int | None = None,
         quiet_seconds: float = 0.05,
-    ) -> list[ObdResponse]:
+        should_stop: Callable[[], bool] | None = None,
+    ) -> SupportProbe:
         """Send a request and collect single-frame replies from all responders.
 
         Supported-PID probes are functional broadcasts, so more than one ECU
         may answer. Once the first relevant response arrives, keep listening
         for a short quiet window so slower responders are merged without
-        waiting the full timeout on every successful probe.
+        waiting the full timeout on every successful probe. A negative
+        response is reported beside any positive ones so the caller can tell
+        a refusal from a silent bus (C06.5).
         """
         request_payload = self._build_request(service=service, pid=pid)
         message = can.Message(
@@ -418,22 +459,25 @@ class CanObdClient:
         )
         try:
             if not tx_gate.send(self._bus, message, what=f"probe service=0x{service:02X}"):
-                return []
+                return SupportProbe(sent=False)
         except can.CanError:
             log.warning("CAN send failed", extra={"service": service, "pid": pid})
-            return []
+            return SupportProbe(sent=False)
 
         expected_service = positive_response_service(service)
         deadline = self._time_fn() + self._timeout
         quiet_deadline: float | None = None
         responses: dict[int, ObdResponse] = {}
+        nrc: int | None = None
 
         while True:
             now = self._time_fn()
             if now >= deadline or (quiet_deadline is not None and now >= quiet_deadline):
                 break
+            if should_stop is not None and should_stop():
+                break
             wait_until = deadline if quiet_deadline is None else min(deadline, quiet_deadline)
-            frame = self._bus.recv(timeout=max(0.001, wait_until - now))
+            frame = self._recv(wait_until - now)
             if frame is None:
                 continue
             if not (self._response_id_min <= frame.arbitration_id <= self._response_id_max):
@@ -444,6 +488,7 @@ class CanObdClient:
             if pci_type(data) != PCI_SINGLE_FRAME:
                 continue
             if is_negative_response(data, service):
+                nrc = negative_response_code(data, service)
                 quiet_deadline = self._time_fn() + quiet_seconds
                 continue
             payload = handle_single_frame(data, expected_service, pid if expect_pid_echo else None)
@@ -458,7 +503,7 @@ class CanObdClient:
             )
             quiet_deadline = self._time_fn() + quiet_seconds
 
-        return list(responses.values())
+        return SupportProbe(responses=tuple(responses.values()), negative_response_code=nrc)
 
     def _build_request(self, *, service: int, pid: int | None) -> bytes:
         """Single-frame request body. Padded to 8 bytes with 0x00."""
@@ -475,8 +520,7 @@ class CanObdClient:
         assembler = IsoTpResponseAssembler(service=service, identifier=pid_echo)
 
         while self._time_fn() < deadline:
-            remaining = max(0.001, deadline - self._time_fn())
-            frame = self._bus.recv(timeout=remaining)
+            frame = self._recv(deadline - self._time_fn())
             if frame is None:
                 continue
             if not (self._response_id_min <= frame.arbitration_id <= self._response_id_max):

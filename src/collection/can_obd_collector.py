@@ -23,15 +23,17 @@ import asyncio
 import logging
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Container, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from functools import partial
+from typing import Any
 
 import can
 
 from src.can_ids import parse_standard_can_id
 from src.collection import bus_budget, capture_generation, tuning_profile, tx_gate
+from src.collection import discovery as discovery_registry
 from src.collection.can_collector import (
     DEFAULT_RECONNECT_POLICY,
     RecordingResult,
@@ -41,13 +43,21 @@ from src.collection.can_collector import (
 from src.collection.can_collector import _write_manifest as write_recording_manifest
 from src.collection.can_obd_client import (
     PID_DECODERS,
+    CanObdClient,
+    FrameTap,
     decode_mil_on,
     parse_dtc_payload,
+    receive_frame,
 )
 from src.collection.custom_pids import evaluate_custom_pid
+from src.collection.discovery import (
+    MODE01_SUPPORT_GROUPS,
+    MODE06_SUPPORT_GROUPS,
+    DiscoveryItem,
+    DiscoveryState,
+)
 from src.collection.hybrid_cycle import CyclePlan, WakeDecision, next_wake_at, plan_cycle
 from src.collection.isotp import (
-    DEFAULT_REQUEST_ID,
     DEFAULT_RESPONSE_ID_MAX,
     DEFAULT_RESPONSE_ID_MIN,
     FLOW_CONTROL_CTS,
@@ -85,17 +95,19 @@ from src.collection.obd_scheduler import (
     SessionControlResult,
     _bus_budget_requests_per_second,
     _count_active_requests,
+    _DiscoveryClient,
     _initial_request_states,
     _next_due_at,
     _next_request_due_at,
     _next_unsuppressed_at,
-    _PidDiscoveryClient,
     _PollRequest,
     _PollRequestState,
     _scheduler_metrics,
     _select_next_due_request,
     _update_response_state,
+    apply_mode01_support,
     build_poll_requests,
+    mode06_requests,
     parse_did_token,
     parse_pid_token,
     resolve_did_session_spec,
@@ -116,6 +128,7 @@ from src.collection.reconnect import (
     ReconnectPolicy,
     run_with_reconnect,
 )
+from src.collection.request_eligibility import Eligibility, SessionPhase, evaluate
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
 from src.telemetry import TelemetryRecord
@@ -123,15 +136,67 @@ from src.telemetry import TelemetryRecord
 log = logging.getLogger(__name__)
 
 
-def _capture_did_request_eligible(
-    controller: DidWindowController,
-    now: float,
+def _loop_request_verdict(
+    controller: DidWindowController | None,
+    profile_gated: bool,
+    forced: Container[int],
+    index: int,
+    request: _PollRequest,
+) -> Eligibility:
+    """Both gates in one matrix call (C06.7): phase from the session
+    controller, selection and pause from the active profile, and the forced
+    one-shot lift for ``trigger_poll``. The DID window's own pending set is
+    the one fact the matrix cannot know."""
+    phase: SessionPhase = controller.matrix_phase if controller is not None else "none"
+    verdict = evaluate(
+        request.kind,
+        tuning_profile.profile_class(),
+        phase,
+        selection=(
+            tuning_profile.selection_exclusion(request.kind, request.channel)
+            if profile_gated
+            else None
+        ),
+        paused=tuning_profile.is_paused() if profile_gated else False,
+        forced=index in forced,
+    )
+    if (
+        verdict.eligible
+        and controller is not None
+        and request.kind == "did"
+        and not controller.did_pending(index)
+    ):
+        return Eligibility("deferred", "attempted_this_window")
+    return verdict
+
+
+def _loop_request_eligible(
+    controller: DidWindowController | None,
+    profile_gated: bool,
+    forced: Container[int],
     index: int,
     request: _PollRequest,
 ) -> bool:
-    return controller.request_eligible(index, request, now=now) and tuning_profile.request_eligible(
-        index, request
-    )
+    return _loop_request_verdict(controller, profile_gated, forced, index, request).eligible
+
+
+class _FrameTap:
+    """The loop's one raw-capture tap, shared with its client (C06.2).
+
+    Counts every frame for ``CanObdLoopStats`` and, while a discovery probe
+    is waiting, the frames that the old synchronous path silently consumed.
+    """
+
+    def __init__(self, on_frame: FrameTap, stats: CanObdLoopStats) -> None:
+        self._on_frame = on_frame
+        self._stats = stats
+        self.discovering = False
+
+    def __call__(self, msg: can.Message) -> None:
+        self._stats.frames_seen += 1
+        if self.discovering:
+            self._stats.discovery_frames_seen += 1
+        self._on_frame(msg)
 
 
 AUTO_PROBE_TIMEOUT_SECONDS = 0.25
@@ -148,10 +213,11 @@ RESPONSE_PENDING_EXTENSION_SECONDS = 0.5
 #: Cap on those extensions, so a stuck ECU cannot hold the bus indefinitely.
 #: Exceeding it is a real failure and is reported as NRC 0x78.
 MAX_RESPONSE_PENDING_EXTENSIONS = 4
-#: A zero-result Mode 06 discovery is ambiguous (passive mode, bus startup,
-#: ignition state, or genuinely unsupported). Once ordinary OBD contact has
-#: succeeded, retry no faster than this if discovery still returns nothing.
-MODE06_DISCOVERY_RETRY_SECONDS = 30.0
+#: Bound on the ``deferred`` list in the scheduler metrics (C06.7): a focused
+#: capture can leave dozens of the union plan's channels unselected.
+MAX_DEFERRED_REPORT = 64
+#: Discovery wait reasons that clear within a slot or a round on their own.
+TRANSIENT_DISCOVERY_WAITS: tuple[str, ...] = ("budget", "round_open")
 #: A bus-driver frame stamp further than this from ``time.time()`` is not
 #: trusted as the acquisition clock (an adapter with no clock reports 0.0;
 #: a stale SocketCAN stamp after a suspend can be minutes off). The
@@ -186,38 +252,55 @@ def run_can_obd_loop(
     on_reading: Callable[[ObdReading], None],
     stop_event: threading.Event,
     deadline_monotonic: float | None = None,
-    client_factory: Callable[[can.BusABC], _PidDiscoveryClient] | None = None,
+    client_factory: Callable[[can.BusABC, FrameTap], _DiscoveryClient] | None = None,
     on_scheduler_metrics: Callable[[ObdSchedulerMetrics], None] | None = None,
     scheduler_metrics_interval_seconds: float = SCHEDULER_METRICS_INTERVAL_SECONDS,
 ) -> CanObdLoopStats:
     """Run a single-bus CAN + OBD loop until stopped.
 
-    ``on_frame`` sees every received frame, including diagnostic responses.
-    ``on_reading`` sees decoded Mode 01 PID readings and raw Mode 22 DID
-    payloads. The function is synchronous by design so it can run either in the
-    foreground recorder or inside ``asyncio.to_thread`` for the daemon.
-    """
-    from src.collection.can_obd_client import CanObdClient
+    ``on_frame`` sees every received frame, including diagnostic responses
+    and the frames received while a support-discovery probe waits: the loop
+    owns the bus, and every receive — its own polls, session control, drains
+    and the client it hands its tap to — goes through ``receive_frame``
+    (C06.2). ``on_reading`` sees decoded Mode 01 PID readings and raw Mode 22
+    DID payloads. The function is synchronous by design so it can run either
+    in the foreground recorder or inside ``asyncio.to_thread`` for the daemon.
 
+    Support discovery is scheduler work (C06.4): the plan starts without it,
+    and the loop issues one support-group probe per budget slot — only in a
+    phase the eligibility matrix admits, and under an active capture profile
+    only in slots no round member needs — installing results as they arrive.
+    ``client_factory(bus, tap)`` may substitute the probe transport.
+    """
     stats = CanObdLoopStats()
     # Every (re)start of the loop is a new capture generation (C02.8): a bus
     # rebuild after a fault must not let a request issued before it complete
     # a round scheduled after it.
     rounds = RoundScheduler(capture_generation.bump("collector-start"), stats)
-    client = (
-        CanObdClient(bus, timeout_seconds=spec.request_timeout_seconds)
+    tap = _FrameTap(on_frame, stats)
+    client: _DiscoveryClient = (
+        CanObdClient(
+            bus,
+            timeout_seconds=spec.request_timeout_seconds,
+            time_fn=time.monotonic,
+            on_frame=tap,
+        )
         if client_factory is None
-        else client_factory(bus)
+        else client_factory(bus, tap)
     )
-    requests = build_poll_requests(client, spec)
-    mode06_discovery_pending = (
-        spec.service_poll_interval_seconds > 0
-        and spec.service_mids == "auto"
-        and not any(request.kind == "service" for request in requests)
-    )
-    next_mode06_discovery_at = 0.0
-    if mode06_discovery_pending:
-        log.warning("Mode 06 discovery returned zero MIDs; will retry after successful ECU contact")
+    requests = build_poll_requests(None, spec)
+    request_states = _initial_request_states(requests, spec, time.monotonic())
+    discovery = discovery_registry.recall(spec.discovery_key, _discovery_items(spec))
+    installed: set[DiscoveryItem] = set()
+    _install_discovery(discovery, requests, request_states, spec, time.monotonic(), installed)
+    discovery_wait: str | None = None
+    #: The last *structural* reason discovery waited since its last probe
+    #: (a phase, a pause, capacity). ``budget`` and ``round_open`` are
+    #: transient by nature and would make the reported reason flicker.
+    discovery_blocked: str | None = None
+    #: Request indices an operator forced due (``trigger_poll``), until served.
+    forced: set[int] = set()
+    profile_gated = spec.capture_profiles_enabled or tuning_profile.is_active()
     budget_rps = _bus_budget_requests_per_second(spec)
     did_indices = [index for index, request in enumerate(requests) if request.kind == "did"]
     freeze_frame_indices = [
@@ -244,26 +327,8 @@ def run_can_obd_loop(
                 ),
             },
         )
-    else:
+    elif not discovery.pending():
         log.warning("canable obd streaming has no PID/DID requests; recording CAN only")
-
-    request_states = _initial_request_states(requests, spec, time.monotonic())
-
-    def retry_mode06_after_contact(now: float) -> None:
-        nonlocal mode06_discovery_pending, next_mode06_discovery_at
-        if not mode06_discovery_pending or now < next_mode06_discovery_at:
-            return
-        discovered = _retry_mode06_discovery(
-            client,
-            requests,
-            request_states,
-            spec=spec,
-            now=now,
-        )
-        if discovered:
-            mode06_discovery_pending = False
-        else:
-            next_mode06_discovery_at = now + MODE06_DISCOVERY_RETRY_SECONDS
 
     next_budget_at = time.monotonic()
     next_metrics_at = time.monotonic()
@@ -307,6 +372,20 @@ def run_can_obd_loop(
                     if request.channel.upper() in forced_channels:
                         request_states[index].suppressed_until = 0.0
                         request_states[index].next_due_at = now
+                        # Kept until served: the matrix lifts the profile
+                        # selection for it but not the phase it needs (C06.7).
+                        forced.add(index)
+        if discovery.version != discovery_registry.cache_version():
+            # ``reset_discovery``: every walk restarts; results already in
+            # the plan stay (a re-walk only adds what it newly learns).
+            discovery = discovery_registry.fresh(spec.discovery_key, _discovery_items(spec))
+            installed.clear()
+        # The selected profile applies even for ``default``: the request plan
+        # is a startup superset of every saved profile, and filtering here is
+        # what keeps the seeded default byte-identical to config. Standalone
+        # recorder/tests that never initialised the catalog keep the
+        # scheduler's historical behaviour.
+        profile_gated = spec.capture_profiles_enabled or tuning_profile.is_active()
         if on_scheduler_metrics is not None and now >= next_metrics_at:
             on_scheduler_metrics(
                 _scheduler_metrics(
@@ -317,6 +396,17 @@ def run_can_obd_loop(
                     now,
                     did_profile=controller.snapshot(now) if controller is not None else None,
                     rounds=rounds.snapshot(now),
+                    discovery=discovery.snapshot(
+                        now, deferred_reason=discovery_blocked or discovery_wait
+                    ),
+                    deferred=_deferred_report(
+                        requests,
+                        request_states,
+                        partial(_loop_request_verdict, controller, profile_gated, forced),
+                        now,
+                        discovery=discovery,
+                        discovery_wait=discovery_blocked or discovery_wait,
+                    ),
                 )
             )
             stats.scheduler_snapshots += 1
@@ -336,17 +426,11 @@ def run_can_obd_loop(
             _drain_frames_until(bus, on_frame, stats, stop_event, wake.at, deadline_monotonic)
             continue
 
-        if not requests:
+        if not requests and not discovery.pending():
             wake = next_wake_at(now, deadline=deadline_monotonic)
             _drain_frames_until(bus, on_frame, stats, stop_event, wake.at, deadline_monotonic)
             continue
 
-        # The selected profile applies even for ``default``: the request plan
-        # is a startup superset of every saved profile, and filtering here is
-        # what keeps the seeded default byte-identical to config. Standalone
-        # recorder/tests that never initialised the catalog keep the
-        # scheduler's historical behaviour.
-        profile_gated = spec.capture_profiles_enabled or tuning_profile.is_active()
         eligible: RequestFilter | None = None
         if controller is not None and _controller_engaged(controller, profile_gated):
             dids_selected = True
@@ -406,20 +490,60 @@ def run_can_obd_loop(
             if budget_after is not None:
                 next_budget_at = budget_after
                 continue
-            eligible = (
-                partial(_capture_did_request_eligible, controller, now)
-                if profile_gated
-                else partial(controller.request_eligible, now=now)
-            )
+            eligible = partial(_loop_request_eligible, controller, profile_gated, forced)
         elif profile_gated:
             # A profile with no DIDs deliberately suspends the session
             # controller, concentrating the budget on its Mode-01 selection.
-            eligible = tuning_profile.request_eligible
+            eligible = partial(_loop_request_eligible, None, True, forced)
 
         # A round ends at its deadline even while more work is due (C02.2);
         # this runs before any selection so no reading is ever stamped with
         # an expired round.
         rounds.expire(now)
+
+        # Support discovery as scheduler work (C06.4/C06.6): one probe per
+        # budget slot, in a phase the matrix admits, and — under a capture
+        # profile — only in a slot no round member needs. Otherwise it waits
+        # and says why.
+        discovery_wait = None
+        discovery_item = discovery.due(now)
+        if discovery_item is None:
+            discovery_blocked = None
+        else:
+            discovery_wait = _discovery_wait_reason(
+                controller,
+                rounds,
+                requests,
+                request_states,
+                spec,
+                now,
+                eligible=eligible,
+                next_budget_at=next_budget_at,
+                budget_rps=budget_rps,
+            )
+            if discovery_wait not in (None, *TRANSIENT_DISCOVERY_WAITS):
+                discovery_blocked = discovery_wait
+            if discovery_wait is None:
+                discovery_blocked = None
+                discovery = _issue_discovery_probe(
+                    client,
+                    discovery,
+                    discovery_item,
+                    tap=tap,
+                    stats=stats,
+                    stop_event=stop_event,
+                    deadline_monotonic=deadline_monotonic,
+                )
+                _install_discovery(
+                    discovery, requests, request_states, spec, time.monotonic(), installed
+                )
+                discovery_registry.remember(discovery)
+                next_budget_at = max(
+                    next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
+                )
+                continue
+        discovery_wants_budget = discovery_wait == "budget"
+
         active_request_count = _count_active_requests(
             requests, request_states, now, eligible=eligible
         )
@@ -432,7 +556,7 @@ def run_can_obd_loop(
                 budget_at=next_budget_at,
                 next_due=_next_unsuppressed_at(requests, request_states, now, eligible=eligible),
                 deadline=deadline_monotonic,
-                budget_only_for_session=True,
+                budget_only_for_session=not discovery_wants_budget,
             )
             _drain_frames_until(bus, on_frame, stats, stop_event, wake.at, deadline_monotonic)
             continue
@@ -455,12 +579,13 @@ def run_can_obd_loop(
             )
             if opened is None:
                 # Never spin: with active requests but nothing to open, the
-                # bus is still received until the earliest relevant deadline.
+                # bus is still received until the earliest relevant deadline
+                # (or the budget slot a pending discovery probe can use).
                 wake = _wake_for(
                     now,
                     controller,
                     request_states,
-                    budget_at=None,
+                    budget_at=next_budget_at if discovery_wants_budget else None,
                     next_due=wait_until,
                     deadline=deadline_monotonic,
                 )
@@ -521,7 +646,7 @@ def run_can_obd_loop(
                     controller.on_response(request_index, time.monotonic(), outcome.acquired_at)
             if outcome.answered:
                 consecutive_batch_failures = 0
-                retry_mode06_after_contact(time.monotonic())
+                discovery = discovery.on_contact(time.monotonic())
             else:
                 consecutive_batch_failures += 1
                 if consecutive_batch_failures >= MAX_CONSECUTIVE_BATCH_FAILURES:
@@ -550,6 +675,7 @@ def run_can_obd_loop(
                 request_states[index].next_due_at = _next_request_due_at(
                     requests[index], request_states[index], spec
                 )
+                forced.discard(index)
                 rounds.on_attempt(index)
                 observed = outcome.observed.get(index, 0)
                 if observed:
@@ -606,7 +732,7 @@ def run_can_obd_loop(
         if emitted:
             request_state.responses += 1
             request_state.last_response_at = time.monotonic()
-            retry_mode06_after_contact(time.monotonic())
+            discovery = discovery.on_contact(time.monotonic())
             if controller is not None:
                 controller.on_response(
                     request_index,
@@ -633,6 +759,7 @@ def run_can_obd_loop(
         )
         if controller is not None:
             controller.on_request_attempted(request_index)
+        forced.discard(request_index)
 
         request_state.next_due_at = _next_request_due_at(request, request_state, spec)
         _close_round_if_complete(rounds, time.monotonic())
@@ -652,10 +779,22 @@ def run_can_obd_loop(
                     controller.snapshot(time.monotonic()) if controller is not None else None
                 ),
                 rounds=rounds.snapshot(time.monotonic()),
+                discovery=discovery.snapshot(
+                    time.monotonic(), deferred_reason=discovery_blocked or discovery_wait
+                ),
+                deferred=_deferred_report(
+                    requests,
+                    request_states,
+                    partial(_loop_request_verdict, controller, profile_gated, forced),
+                    time.monotonic(),
+                    discovery=discovery,
+                    discovery_wait=discovery_blocked or discovery_wait,
+                ),
             )
         )
         stats.scheduler_snapshots += 1
     rounds.close(time.monotonic())
+    discovery_registry.remember(discovery)
     return stats
 
 
@@ -896,42 +1035,188 @@ def _close_round_if_complete(rounds: RoundScheduler, now: float) -> None:
         rounds.close(now)
 
 
-def _retry_mode06_discovery(
-    client: _PidDiscoveryClient,
+def _discovery_items(spec: CanObdSpec) -> dict[DiscoveryItem, tuple[int, tuple[int, ...]]]:
+    """Which support walks this spec owes: ``item -> (service, groups)``."""
+    wanted: dict[DiscoveryItem, tuple[int, tuple[int, ...]]] = {}
+    if any(parse_pid_token(token) is None for token in (spec.pids or (AUTO_PIDS,))):
+        wanted["mode01"] = (0x01, MODE01_SUPPORT_GROUPS)
+    if spec.service_poll_interval_seconds > 0 and spec.service_mids == "auto":
+        wanted["mode06"] = (0x06, MODE06_SUPPORT_GROUPS)
+    return wanted
+
+
+def _discovery_wait_reason(
+    controller: DidWindowController | None,
+    rounds: RoundScheduler,
     requests: list[_PollRequest],
     states: list[_PollRequestState],
-    *,
     spec: CanObdSpec,
     now: float,
-) -> tuple[int, ...]:
-    """Discover and install Mode 06 requests after the bus becomes usable."""
-    discover = getattr(client, "query_supported_mode_06_mids", None)
-    mids = tuple(discover()) if discover is not None else ()
-    if not mids:
-        log.warning(
-            "Mode 06 retry returned zero MIDs; keeping discovery pending",
-            extra={"retry_seconds": MODE06_DISCOVERY_RETRY_SECONDS},
-        )
-        return ()
+    *,
+    eligible: RequestFilter | None,
+    next_budget_at: float,
+    budget_rps: float,
+) -> str | None:
+    """Why a due discovery probe cannot go out this tick, or ``None`` to issue it.
 
-    new_requests = [
-        _PollRequest(
-            kind="service",
-            service=0x06,
-            identifier=mid,
-            request_id=DEFAULT_REQUEST_ID,
-            channel="MONITOR_RESULTS",
-            poll_tier="dtc",
-        )
-        for mid in mids
-    ]
-    requests.extend(new_requests)
-    states.extend(_initial_request_states(new_requests, spec, now))
-    log.info(
-        "Mode 06 discovery recovered after ECU contact",
-        extra={"mode06_mids": [f"0x{mid:02X}" for mid in mids]},
+    The matrix gates the phase (``session_window`` / ``session_lapse`` /
+    ``continuous_did_capture`` / ``paused``); the budget slot must have
+    arrived; and under an active capture profile the probe may only take a
+    slot no round member needs (C06.6) — between rounds, with the next round
+    boundary at least one slot away — else it is ``capture_at_capacity``.
+    Without a profile it goes at the head of the line between rounds, as the
+    old synchronous discovery did before the first poll.
+    """
+    phase: SessionPhase = controller.matrix_phase if controller is not None else "none"
+    verdict = evaluate(
+        "discovery", tuning_profile.profile_class(), phase, paused=tuning_profile.is_paused()
     )
-    return mids
+    if not verdict.eligible:
+        return verdict.reason
+    if now < next_budget_at:
+        return "budget"
+    if rounds.current is not None:
+        return "round_open"
+    if not tuning_profile.is_active():
+        return None
+    period = round_period_seconds(requests, states, spec, now, eligible=eligible)
+    if period is None:
+        return None
+    slot = 1.0 / bus_budget.effective(budget_rps)
+    if rounds.next_open_at(now, period) < now + slot:
+        return "capture_at_capacity"
+    return None
+
+
+def _issue_discovery_probe(
+    client: _DiscoveryClient,
+    discovery: DiscoveryState,
+    item: DiscoveryItem,
+    *,
+    tap: _FrameTap,
+    stats: CanObdLoopStats,
+    stop_event: threading.Event,
+    deadline_monotonic: float | None,
+) -> DiscoveryState:
+    """One tapped, stop-aware support-group probe, charged and accounted."""
+    walk = discovery.walks[item]
+    group = walk.next_group
+    assert group is not None
+    tap.discovering = True
+    started = time.monotonic()
+    try:
+        probe = client.probe_support(
+            walk.service,
+            group,
+            should_stop=lambda: _should_stop(stop_event, deadline_monotonic),
+        )
+    except Exception:  # noqa: BLE001 - propagate after recording scheduler state
+        stats.bus_errors += 1
+        raise
+    finally:
+        tap.discovering = False
+    seconds = time.monotonic() - started
+    if not probe.sent:
+        return discovery
+    stats.requests_sent += 1
+    stats.discovery_requests_sent += 1
+    stats.discovery_seconds += seconds
+    if probe.result == "answered":
+        stats.discovery_responses += 1
+    elif probe.result == "nrc":
+        stats.discovery_negative_responses += 1
+        stats.negative_responses += 1
+    else:
+        stats.discovery_timeouts += 1
+        stats.request_timeouts += 1
+    advanced = walk.with_probe(probe, now=time.monotonic(), seconds=seconds)
+    if not advanced.complete and advanced.last_result != "answered":
+        log.warning(
+            "%s support discovery: group 0x%02X %s; re-probing after ECU contact or %.0fs",
+            item,
+            group,
+            "refused" if probe.result == "nrc" else "silent",
+            discovery_registry.DISCOVERY_RETRY_SECONDS,
+            extra={"service": walk.service, "group": group, "result": probe.result},
+        )
+    return discovery.with_walk(item, advanced)
+
+
+def _install_discovery(
+    discovery: DiscoveryState,
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    spec: CanObdSpec,
+    now: float,
+    installed: set[DiscoveryItem],
+) -> None:
+    """Fold every newly completed walk into the plan, in place, once."""
+    for item, walk in discovery.walks.items():
+        if not walk.complete or item in installed:
+            continue
+        installed.add(item)
+        if item == "mode01":
+            requests[:] = apply_mode01_support(requests, walk.supported)
+            log.info(
+                "Mode 01 support discovered",
+                extra={
+                    "supported": [f"0x{pid:02X}" for pid in walk.supported],
+                    "responders": [f"0x{r:03X}" for r in walk.responders],
+                    "last_result": walk.last_result,
+                },
+            )
+        elif item == "mode06":
+            present = {request.identifier for request in requests if request.kind == "service"}
+            new_requests = [
+                request
+                for request in mode06_requests(walk.supported)
+                if request.identifier not in present
+            ]
+            requests.extend(new_requests)
+            states.extend(_initial_request_states(new_requests, spec, now))
+            log.info(
+                "Mode 06 discovery complete",
+                extra={
+                    "mode06_mids": [f"0x{mid:02X}" for mid in walk.supported],
+                    "installed": len(new_requests),
+                    "responders": [f"0x{r:03X}" for r in walk.responders],
+                    "last_result": walk.last_result,
+                },
+            )
+
+
+def _deferred_report(
+    requests: list[_PollRequest],
+    states: list[_PollRequestState],
+    verdict: Callable[[int, _PollRequest], Eligibility],
+    now: float,
+    *,
+    discovery: DiscoveryState,
+    discovery_wait: str | None,
+) -> list[dict[str, Any]]:
+    """Requests wanted now that the matrix defers or refuses, with reasons (C06.7)."""
+    rows: list[dict[str, Any]] = []
+    for item in discovery.pending():
+        if discovery_wait is not None:
+            rows.append(
+                {
+                    "channel": f"discovery:{item}",
+                    "kind": "discovery",
+                    "verdict": "deferred",
+                    "reason": discovery_wait,
+                }
+            )
+    for index, (request, state) in enumerate(zip(requests, states, strict=True)):
+        if state.suppressed_until > now or state.next_due_at > now:
+            continue
+        outcome = verdict(index, request)
+        if outcome.eligible:
+            continue
+        rows.append({"channel": request.channel, "kind": request.kind, **outcome.to_dict()})
+        if len(rows) >= MAX_DEFERRED_REPORT:
+            break
+    rows.sort(key=lambda row: (row["verdict"] != "deferred", row["channel"]))
+    return rows
 
 
 async def collect_can_obd_from_config(
@@ -1269,6 +1554,7 @@ def _response_to_reading(
         "acquired_at": arrival.at,
         "acquired_clock": arrival.clock,
         "response_interval_s": response_interval_s,
+        "responder_id": response.responder_id,
     }
     if round_state is not None:
         provenance["generation"] = round_state.generation
@@ -1823,8 +2109,14 @@ def _recv_and_tap(
     *,
     timeout: float,
 ) -> can.Message | None:
+    """The collector's receive: ``receive_frame`` plus the loop's accounting.
+
+    Every receive the loop makes — polls, batches, session control, drains —
+    comes through here; the client it hands its tap to uses the same
+    ``receive_frame``. Nothing else on the loop's thread calls ``bus.recv``.
+    """
     try:
-        msg = bus.recv(timeout=timeout)
+        msg = receive_frame(bus, timeout=timeout, on_frame=on_frame)
     except (ValueError, IndexError) as exc:
         stats.parse_errors += 1
         log_dropped_can_frame(stats.parse_errors, exc)
@@ -1832,7 +2124,6 @@ def _recv_and_tap(
     if msg is None:
         return None
     stats.frames_seen += 1
-    on_frame(msg)
     return msg
 
 
