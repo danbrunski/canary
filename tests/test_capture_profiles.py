@@ -219,6 +219,9 @@ def test_a_tuning_capture_starts_without_a_tune_revision(tmp_path: Path) -> None
     # The absence is still on the record, which is what makes it safe to allow.
     sidecar = json.loads((writer.paths.root / "capture_profile.json").read_text())
     assert sidecar["tune_revision"] is None
+    assert sidecar["schema_version"] == 2
+    assert sidecar["resolved_polling_plan"]["member_count"] > 0
+    assert "diagnostic_requests_per_second" in sidecar["resolved_polling_plan"]
 
 
 class _Clock:
@@ -656,7 +659,13 @@ def test_capture_profile_api_crud_and_auth(tmp_path: Path) -> None:
     )
     assert client.get("/control/capture/profiles").status_code == 401
     headers = {"Authorization": "Bearer secret"}
-    assert client.get("/control/capture/profiles", headers=headers).status_code == 200
+    listed = client.get("/control/capture/profiles", headers=headers)
+    assert listed.status_code == 200
+    fuel_plan = listed.json()["resolved_plans"]["fuel-map"]
+    assert fuel_plan["channel_reads_per_second"] == 44.0
+    assert fuel_plan["diagnostic_requests_per_second"]["best_case_batched"] < 20.0
+    assert fuel_plan["diagnostic_requests_per_second"]["single_request_fallback"] == 44.0
+    assert fuel_plan["fallback_feasible"] is False
     profile = {
         "name": "idle-map",
         "description": "idle calibration",
@@ -801,7 +810,9 @@ def test_builtin_profiles_upgrade_but_operator_edits_are_frozen(tmp_path: Path) 
     edited = [
         profile.model_copy(
             update={
-                "target_rate_hz": 2.0,
+                # Distinct from the shipped 4 Hz while still satisfying this
+                # profile's existing 3 Hz required-tuple floor.
+                "target_rate_hz": 3.5,
                 "builtin_revision": 0,
                 "operator_modified": True,
             }
@@ -813,7 +824,7 @@ def test_builtin_profiles_upgrade_but_operator_edits_are_frozen(tmp_path: Path) 
     save_capture_profiles(path, CaptureProfileCatalog(profiles=edited))
     kept = load_capture_profiles(path, config.collection).by_name("fuel-map")
     assert kept is not None
-    assert kept.target_rate_hz == 2.0
+    assert kept.target_rate_hz == 3.5
 
 
 def test_model_input_warnings_resolve_derived_and_decoded_channels(tmp_path: Path) -> None:

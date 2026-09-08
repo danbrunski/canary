@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from src.collection.capture_profiles import CaptureProfile
 from src.session import SessionPaths
@@ -76,8 +76,15 @@ class AsyncParquetTelemetryWriter:
         profile: CaptureProfile,
         capture_id: str,
         tune_revision: str | None = None,
+        resolved_polling_plan: dict[str, Any] | None = None,
     ) -> Path | None:
-        return await self._call(self._writer.enter_capture_mode, profile, capture_id, tune_revision)
+        return await self._call(
+            self._writer.enter_capture_mode,
+            profile,
+            capture_id,
+            tune_revision,
+            resolved_polling_plan,
+        )
 
     @property
     def rows_written(self) -> int:

@@ -155,6 +155,9 @@ def default_collectors(
             force_poll_trigger=force_poll_trigger,
             custom_pids=tuple(custom_pids),
             priority_channels=config.collection.obd_priority_channels,
+            discovery_budget_requests_per_second=(
+                config.collection.obd_discovery_budget_requests_per_second
+            ),
             # Support maps cached per vehicle across reconnects (C06.6).
             discovery_key=vehicle_key(
                 config.vehicle.vin,

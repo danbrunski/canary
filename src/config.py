@@ -286,6 +286,10 @@ class CollectionConfig(_Strict):
     #: those and the segmenter can't classify a row at all. Empty disables the
     #: priority lane (uniform degradation, the pre-1.11 behavior).
     obd_priority_channels: tuple[str, ...] = DEFAULT_PRIORITY_CHANNELS
+    #: Maximum cadence for exploratory support probes. Discovery still obeys
+    #: the global bus budget, but it cannot consume every otherwise-free slot
+    #: while confirmed collection work is sparse.
+    obd_discovery_budget_requests_per_second: float = Field(default=32.0, gt=0)
     #: Cadence (s) of the Mode 03/07/0A stored/pending/permanent DTC poll
     #: (Task 1.3) on the Canable-native path. DTCs change on a minutes
     #: scale, not seconds, so this is its own knob rather than a

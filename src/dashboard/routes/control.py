@@ -612,6 +612,9 @@ def register_control_routes(
         return {
             "schema_version": catalog.schema_version,
             "profiles": [profile.model_dump(mode="json") for profile in catalog.profiles],
+            "resolved_plans": {
+                profile.name: profile_store.resolved_plan(profile) for profile in catalog.profiles
+            },
         }
 
     @app.put("/control/capture/profiles")
@@ -706,7 +709,12 @@ def register_control_routes(
             failed_step = "storage_rotation"
             nonlocal budget_before_capture
             try:
-                await storage_writer.enter_capture_mode(profile, capture_id, request.tune_revision)
+                await storage_writer.enter_capture_mode(
+                    profile,
+                    capture_id,
+                    request.tune_revision,
+                    profile_store.resolved_plan(profile),
+                )
                 entered = True
                 if requested_budget is not None:
                     failed_step = "bus_budget"

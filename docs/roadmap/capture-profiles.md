@@ -73,8 +73,16 @@ for (2026-07-31):
   protocol, others spoke common name, and the reader had to know they
   were the same thing.
 - **Budget honesty**: profiles may raise the bus budget for bounded
-  captures, but watch `storage.queue_depth` — the 25 req/s overload
-  incident (2026-05) was a writer bottleneck, not a bus fault.
+  captures. The profile API and editor expose the resolved identifier-level
+  plan, separating channel reads, diagnostic requests, raw frames, decoded
+  rows, and complete tuples; batched and single-request fallback demand are
+  reported independently. Capture manifests persist that same plan. Profiles
+  may override `priority_channels` (`null` inherits collection defaults;
+  `[]` disables the lane), and infeasible priority or total demand is visible
+  before capture. Exploratory support walks additionally obey
+  `collection.obd_discovery_budget_requests_per_second`. Watch
+  `storage.queue_depth` — the 25 req/s overload incident (2026-05) was a
+  writer bottleneck, not a bus fault.
 - **Model-input guardrail**: editing the *default* profile can starve
   the behavior models. Validation must cross-check the default
   profile's channel set against channels required by active

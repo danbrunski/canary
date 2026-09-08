@@ -16,7 +16,7 @@ beyond the support bitmap, with escalating backoff already implemented.
 weights, but selected DIDs share one target rate. Slow context such as coolant
 therefore consumes the same request cadence as fast cam/fueling channels.
 
-DID batching is absent from the active scheduler, but builders/splitters,
+DID batching is now integrated into the active scheduler using the existing builders/splitters,
 `CanObdClient.query_mode_22_batch()`, and `sweep_dids_batched()` already exist.
 [test_multi_did_batching.py](../../../tests/test_multi_did_batching.py) includes
 an observed multi-DID request. Earlier roadmap claims that the ECM refuses all
@@ -29,13 +29,19 @@ the actual path, not a capability available only in a probe tool.
 
 ## Implementation checklist: scheduling and demand
 
-- [ ] C09.1 Build one resolved polling-plan representation for scheduler,
+- [x] C09.1 Build one resolved polling-plan representation for scheduler,
   profile preview, capture manifest, and quality checks. Resolve aliases and
   deduplicate by service, ECU, and identifier before computing demand.
-- [ ] C09.2 Separate channel reads/s, diagnostic requests/s, raw frames/s,
+  _done: `ResolvedPollingPlan` is built after identifier resolution and is
+  consumed by live scheduler metrics, `/control/capture/profiles`, schema-v2
+  capture manifests, live quality, and persisted quality recomputation._
+- [x] C09.2 Separate channel reads/s, diagnostic requests/s, raw frames/s,
   decoded rows/s, and complete tuples/s. Include session control and discovery
   overhead. Report best-case batched demand and single-request fallback demand
   separately; do not equate diagnostic request count with total bus load.
+  _done: the shared payload reports all five units, explicit session/discovery
+  overhead, nested-cadence best-case batching, single-request fallback, and an
+  incomplete/lower-bound marker when response widths are unknown._
 - [x] C09.3 Improve Mode 01 batch occupancy using C02 round membership and
   compatible deadlines. Do not pull a slow channel to fast cadence merely to
   fill a batch, and do not delay a critical tuple to wait for optional context.
@@ -45,13 +51,20 @@ the actual path, not a capability available only in a probe tool.
   `test_companion_selection_respects_poll_tier`,
   `test_required_tuple_members_are_batched_first`, and the same-round batch
   attribution cases in `test_capture_rounds.py`._
-- [ ] C09.4 Keep mode/model-critical priority channels profile-configurable.
+- [x] C09.4 Keep mode/model-critical priority channels profile-configurable.
   Verify their demanded share is feasible and expose infeasible plans rather
   than assuming a small priority list cannot starve other requests.
-- [ ] C09.5 Budget exploratory probes separately from confirmed capture
+  _done: nullable `priority_channels` inherits collection defaults while an
+  explicit tuple owns the profile lane. The active selector uses it, and plan
+  preview reports priority-only feasibility against the effective budget._
+- [x] C09.5 Budget exploratory probes separately from confirmed capture
   work, retaining recovery for sparse support bitmaps and previously answering
   channels. Reuse current miss backoff; avoid permanent unsupported decisions
   based only on silence or one failed diagnostic session.
+  _done: `obd_discovery_budget_requests_per_second` independently paces
+  exploratory walks while the global budget remains authoritative. Existing
+  sparse-bitmap, silence/retry, responder recovery, and miss-backoff behavior
+  remains covered._
 
 ## Implementation checklist: DID cadence and batch integration
 
@@ -64,14 +77,13 @@ the actual path, not a capability available only in a probe tool.
   therefore weight 1. Continuous sessions scale each member's scheduler rate;
   windowed sessions open only for members due at that cycle boundary. Runtime
   lookup resolves the persisted profile name through the shared DID alias map._
-- [~] C09.7 Propagate DID cadence through absolute-rate resolution, due-time
+- [x] C09.7 Propagate DID cadence through absolute-rate resolution, due-time
   scheduling, profile editors, API/MCP models, demand calculation, quality
   floors, and manifest snapshots. Preserve operator-modified profiles during
   seed upgrades. Separate context rates from required fast-tuple floors.
-  _partial: absolute rates, due-time scheduling, dashboard editor/types,
-  strict API schema, manifest snapshots, backward-compatible seed loading, and
-  capture-quality promises/floors are wired and tested. The shared resolved
-  demand calculation does not exist until C09.1/C09.2 and remains._
+  _done: absolute rates, due-time scheduling, dashboard editor/types, strict
+  API schema, manifest snapshots, backward-compatible seed loading, quality
+  promises/floors, and resolved demand calculation are wired and tested._
 - [x] C09.8 Integrate existing multi-DID builders/splitters into the tapped
   scheduler request path. Scope capability by ECU/session, group only eligible
   same-round DIDs, and enforce the single-frame request limit of three DIDs.
@@ -93,13 +105,14 @@ the actual path, not a capability available only in a probe tool.
   actual responder, request/round identity, and individual response/miss
   state. Physical requests reject another ECU's response. Mode 22 counters
   and width provenance are separate under scheduler batching metrics._
-- [~] C09.11 Add capability failure/fallback behavior using the existing
+- [x] C09.11 Add capability failure/fallback behavior using the existing
   Mode 01 approach where appropriate. A rejected batch must not permanently
   suppress healthy individual DIDs. Recalculate effective demand and report
   quality shortfall when falling back to single requests.
-  _partial: three whole-batch failures disable Mode 22 batching for only that
+  _done: three whole-batch failures disable Mode 22 batching for only that
   ECU/session; members receive no false miss/backoff and resume as healthy
-  single reads. Effective-demand recalculation awaits C09.1/C09.2._
+  single reads. Runtime plan metrics use the narrowed effective batch size,
+  and persisted quality reports rate shortfall against the unchanged promise._
 
 ## Implementation checklist: profile updates
 
@@ -134,21 +147,46 @@ the actual path, not a capability available only in a probe tool.
 
 ## Regression and acceptance checklist
 
-- [ ] C09.17 Test alias duplicates, heterogeneous rates, critical-channel
+- [x] C09.17 Test alias duplicates, heterogeneous rates, critical-channel
   fairness, Mode 01 fallback, DID batch widths, missing members, unknown widths,
   responder mismatch, partial desynchronization, and per-service capabilities.
-- [ ] C09.18 Extend existing multi-PID/multi-DID, profile, scheduler, and
+  _done across `test_polling_plan.py`, `test_can_obd_collector.py`,
+  `test_multi_pid_batching.py`, `test_multi_did_batching.py`, and
+  `test_diagnostic_discovery.py`._
+- [x] C09.18 Extend existing multi-PID/multi-DID, profile, scheduler, and
   capture-quality tests. Verify old YAML loads identically and edited built-ins
   are not overwritten.
-- [ ] C09.19 Verify a known-answer decode through both single and batch paths
+  _done: additive profile fields default compatibly; existing old-YAML and
+  operator-modified seed-upgrade regressions pass, alongside manifest and
+  resolved-plan quality tests._
+- [x] C09.19 Verify a known-answer decode through both single and batch paths
   before interpreting novel DID results. Record real selected-DID batch
   support and sustained collection on the Pi in C10.
-- [ ] C09.20 Acceptance: requested and fallback demand match the actual
+  _done for software: the same fake ECU values decode identically through
+  scheduler batch sizes 1 and 3. Real selected-DID support/sustained evidence
+  remains explicitly owned by C10._
+- [x] C09.20 Acceptance: requested and fallback demand match the actual
   resolved plan, context rates release measurable request capacity, batching
   preserves attribution, and promised rate changes pass persisted quality.
+  _done: focused regressions cover demand arithmetic and fallback
+  recalculation, heterogeneous context cadence, per-member attribution, and
+  resolved-plan-backed live/persisted quality contracts._
 
 ## Handoff
 
-- [ ] C09.21 Record profile/schema migration, actual measured rate changes,
+- [x] C09.21 Record profile/schema migration, actual measured rate changes,
   capability evidence, and relevant roadmap checkbox updates. Apply the shared
   validation gate; leave unverified hardware targets incomplete.
+  _done: profile migration is additive (`priority_channels: null` inherits and
+  existing `mode22_rate_weights: {}` remains 1x); capture manifests advance to
+  schema v2 with `resolved_polling_plan`; no deployed rate/budget default was
+  raised. Focused C09 tests, dashboard tests/typecheck, and the repository gate
+  are recorded below. A 2026-09-07 Pi status attempt timed out, so C09.12 and
+  C09.14 remain hardware-blocked and C09.16 remains assigned to C10._
+
+## Validation evidence (2026-09-07)
+
+- C09 focused Python regression: 237 passed, including window-boundary cadence.
+- Dashboard: 238 tests passed; TypeScript typecheck passed.
+- Whole-repository gate: ruff, formatting, mypy, and 3,467 pytest tests passed
+  (9 skipped).

@@ -112,6 +112,8 @@ export interface CaptureProfile {
   /** Hold the manufacturer session open instead of alternating services. */
   did_continuous: boolean;
   bus_budget_override: number | null;
+  /** null inherits collection priority; [] explicitly disables the lane. */
+  priority_channels?: string[] | null;
   expected_total_demand_hz: number | null;
   capacity_evidence: string;
   /**
@@ -418,11 +420,39 @@ export interface ObdSchedulerStatus {
   rounds?: CaptureRoundStatus | null;
   discovery?: DiscoveryStatus | null;
   deferred?: DeferredRequestStatus[];
+  resolved_plan?: ResolvedPollingPlan | null;
+}
+
+export interface ResolvedPollingPlan {
+  member_count: number;
+  aliases_deduplicated: number;
+  channel_reads_per_second: number;
+  decoded_rows_per_second: number;
+  complete_tuples_per_second: number | null;
+  diagnostic_requests_per_second: {
+    best_case_batched: number;
+    single_request_fallback: number;
+    session_control: number;
+    discovery: number;
+  };
+  raw_frames_per_second: {
+    best_case_batched: number;
+    single_request_fallback: number;
+    estimate_complete: boolean;
+    unknown_response_width_channels: string[];
+  };
+  priority_requests_per_second_fallback: number;
+  bus_budget_requests_per_second: number;
+  priority_feasible: boolean;
+  best_case_feasible: boolean;
+  fallback_feasible: boolean;
+  priority_source: "profile" | "collection";
 }
 
 export interface CaptureProfilesResponse {
   schema_version: number;
   profiles: CaptureProfile[];
+  resolved_plans?: Record<string, ResolvedPollingPlan>;
 }
 
 export interface CaptureProfileWarning {

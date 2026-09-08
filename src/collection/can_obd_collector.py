@@ -220,7 +220,7 @@ MAX_RESPONSE_PENDING_EXTENSIONS = 4
 #: capture can leave dozens of the union plan's channels unselected.
 MAX_DEFERRED_REPORT = 64
 #: Discovery wait reasons that clear within a slot or a round on their own.
-TRANSIENT_DISCOVERY_WAITS: tuple[str, ...] = ("budget", "round_open")
+TRANSIENT_DISCOVERY_WAITS: tuple[str, ...] = ("budget", "discovery_budget", "round_open")
 #: A bus-driver frame stamp further than this from ``time.time()`` is not
 #: trusted as the acquisition clock (an adapter with no clock reports 0.0;
 #: a stale SocketCAN stamp after a suspend can be minutes off). The
@@ -334,6 +334,7 @@ def run_can_obd_loop(
         log.warning("canable obd streaming has no PID/DID requests; recording CAN only")
 
     next_budget_at = time.monotonic()
+    next_discovery_at = time.monotonic()
     next_metrics_at = time.monotonic()
     # Batching is opt-in and self-disabling. An ECU that ignores or refuses
     # multi-PID requests would otherwise fail every batch forever, so a run of
@@ -413,6 +414,8 @@ def run_can_obd_loop(
                         discovery=discovery,
                         discovery_wait=discovery_blocked or discovery_wait,
                     ),
+                    pid_batch_max=active_batch_max if batching_enabled else 1,
+                    did_batch_max=active_did_batch_max if did_batching_enabled else 1,
                 )
             )
             stats.scheduler_snapshots += 1
@@ -516,17 +519,20 @@ def run_can_obd_loop(
         if discovery_item is None:
             discovery_blocked = None
         else:
-            discovery_wait = _discovery_wait_reason(
-                controller,
-                rounds,
-                requests,
-                request_states,
-                spec,
-                now,
-                eligible=eligible,
-                next_budget_at=next_budget_at,
-                budget_rps=budget_rps,
-            )
+            if now < next_discovery_at:
+                discovery_wait = "discovery_budget"
+            else:
+                discovery_wait = _discovery_wait_reason(
+                    controller,
+                    rounds,
+                    requests,
+                    request_states,
+                    spec,
+                    now,
+                    eligible=eligible,
+                    next_budget_at=next_budget_at,
+                    budget_rps=budget_rps,
+                )
             if discovery_wait not in (None, *TRANSIENT_DISCOVERY_WAITS):
                 discovery_blocked = discovery_wait
             if discovery_wait is None:
@@ -546,6 +552,9 @@ def run_can_obd_loop(
                 discovery_registry.remember(discovery)
                 next_budget_at = max(
                     next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
+                )
+                next_discovery_at = time.monotonic() + (
+                    1.0 / spec.discovery_budget_requests_per_second
                 )
                 continue
         discovery_wants_budget = discovery_wait == "budget"

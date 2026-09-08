@@ -26,6 +26,7 @@ import type {
   CaptureProfileState,
   CaptureProfileWarning,
   CaptureQuality,
+  ResolvedPollingPlan,
   StatusResponse,
 } from "../types";
 
@@ -80,6 +81,7 @@ const blankProfile = (): CaptureProfile => {
     target_rate_hz: null,
     did_continuous: false,
     bus_budget_override: null,
+    priority_channels: null,
     expected_total_demand_hz: null,
     capacity_evidence: "",
     required_tuple: [],
@@ -105,6 +107,7 @@ export function CaptureProfilesPanel({
   channels?: Map<string, ChannelSnapshot>;
 }) {
   const [profiles, setProfiles] = useState<CaptureProfile[]>([]);
+  const [resolvedPlans, setResolvedPlans] = useState<Record<string, ResolvedPollingPlan>>({});
   const [selectedName, setSelectedName] = useState("default");
   const [draft, setDraft] = useState<CaptureProfile>(blankProfile());
   const [originalName, setOriginalName] = useState<string | undefined>();
@@ -129,6 +132,7 @@ export function CaptureProfilesPanel({
       getDids(),
     ]);
     setProfiles(catalog.profiles);
+    setResolvedPlans(catalog.resolved_plans ?? {});
     setPids(
       obd.rows
         .filter((row) => row.channel && row.status === "decoded")
@@ -212,6 +216,9 @@ export function CaptureProfilesPanel({
       : mode01Count > 0
         ? "Mode 01 / Mode 22 alternating"
         : "Mode 22 windowed";
+  const resolvedPlan = active?.active
+    ? scheduler?.resolved_plan
+    : resolvedPlans[plan.name];
 
   const togglePause = useCallback(() => {
     if (!token || !active?.active) return;
@@ -460,6 +467,19 @@ export function CaptureProfilesPanel({
               <span>{plan.behavior_model_recipes.length} behavior-model recipes allowed</span>
             )}
           </div>
+          {resolvedPlan && (
+            <div className={`mt-2 rounded border p-2 text-xs ${resolvedPlan.best_case_feasible ? "border-border" : "border-danger/60 text-danger"}`}>
+              <span>{resolvedPlan.channel_reads_per_second} channel reads/s</span>
+              {" · "}<span>{resolvedPlan.diagnostic_requests_per_second.best_case_batched} requests/s batched</span>
+              {" · "}<span>{resolvedPlan.diagnostic_requests_per_second.single_request_fallback} requests/s fallback</span>
+              {" · "}<span>{resolvedPlan.raw_frames_per_second.best_case_batched} raw frames/s{resolvedPlan.raw_frames_per_second.estimate_complete ? "" : " (lower bound; unknown widths)"}</span>
+              {" · "}<span>{resolvedPlan.decoded_rows_per_second} decoded rows/s</span>
+              {resolvedPlan.complete_tuples_per_second != null && <>{" · "}<span>{resolvedPlan.complete_tuples_per_second} complete tuples/s requested</span></>}
+              {!resolvedPlan.priority_feasible && <p className="mt-1 font-semibold">Priority demand alone exceeds the bus budget.</p>}
+              {!resolvedPlan.best_case_feasible && <p className="mt-1 font-semibold">Plan is infeasible even with configured batching.</p>}
+              {resolvedPlan.best_case_feasible && !resolvedPlan.fallback_feasible && <p className="mt-1 text-warn">Single-request fallback exceeds the budget; quality will report rate shortfall if batching falls back.</p>}
+            </div>
+          )}
           {plan.required_tuple.length > 0 && (
             /* The joint requirement, shown because it is the thing per-channel
                rates cannot express: these must land in the same poll round or
@@ -618,6 +638,19 @@ export function CaptureProfilesPanel({
                 .split(",")
                 .map((item) => item.trim())
                 .filter(Boolean),
+            })}
+          />
+        </label>
+        <label className="col-span-2 text-sm text-fg-dim max-[900px]:col-span-1">Priority channels (comma separated; blank inherits collection default)
+          <input
+            aria-label="Priority channels"
+            className={`${inputClass} mt-1 w-full`}
+            value={(draft.priority_channels ?? []).join(", ")}
+            onChange={(event) => setDraft({
+              ...draft,
+              priority_channels: event.target.value.trim() === ""
+                ? null
+                : event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
             })}
           />
         </label>

@@ -177,6 +177,32 @@ def test_a_five_minute_capture_with_samples_only_in_the_last_minute_fails() -> N
     assert rpm.coverage["fraction"] == pytest.approx(0.2)
 
 
+def test_live_quality_uses_the_shared_resolved_plan_as_its_request_truth() -> None:
+    scheduler = _scheduler([*CHANNELS, "UNSELECTED_STARTUP_MEMBER"])
+    scheduler["resolved_plan"] = {
+        "members": [
+            {
+                "channel": name,
+                "profile_channel": name,
+                "kind": "pid",
+                "capture_selected": True,
+                "configured_rate_hz": 4.0,
+            }
+            for name in CHANNELS
+        ]
+    }
+    quality = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=scheduler,
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+
+    assert "UNSELECTED_STARTUP_MEMBER" not in {row.channel for row in quality.channels}
+    assert {row.channel for row in quality.channels} == set(CHANNELS)
+
+
 # ---------------------------------------------------------------------------
 # C03.1 regression (b): an earlier storage loss must not fail a later capture
 # ---------------------------------------------------------------------------

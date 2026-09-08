@@ -25,6 +25,7 @@ from src.collection.hybrid_cycle import (
 )
 from src.collection.isotp import PERMANENT_REFUSAL_NRCS, nrc_name
 from src.collection.obd_registry import PollTier, lookup
+from src.collection.polling_plan import PlanMember, ResolvedPollingPlan
 from src.collection.request_eligibility import Eligibility, SessionPhase, evaluate
 from src.config import DEFAULT_PRIORITY_CHANNELS, CanBusConfig, CollectionConfig
 
@@ -461,6 +462,7 @@ class CanObdSpec:
     #: their tier rate instead of degrading with the rest of the plan. See
     #: ``DEFAULT_PRIORITY_CHANNELS``; empty disables the priority lane.
     priority_channels: tuple[str, ...] = DEFAULT_PRIORITY_CHANNELS
+    discovery_budget_requests_per_second: float = 32.0
     #: Vehicle identity the discovery cache is keyed by (C06.6): the VIN, else
     #: make-model-year (``discovery.vehicle_key``). ``None`` — the default,
     #: and every standalone recorder/test spec — caches nothing, so a walk
@@ -1466,6 +1468,8 @@ class ObdSchedulerMetrics:
     #: Requests wanted right now that the eligibility matrix defers or
     #: refuses, each with its reason (C06.7). Bounded.
     deferred: list[dict[str, Any]] = field(default_factory=list)
+    #: The selected, alias-deduplicated plan and its demand in distinct units.
+    resolved_plan: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1493,6 +1497,7 @@ class ObdSchedulerMetrics:
             "requests": self.requests,
             "did_profile": self.did_profile,
             "batching": self.batching,
+            "resolved_plan": self.resolved_plan,
         }
 
 
@@ -1828,9 +1833,23 @@ def _request_rate_hz(request: _PollRequest, spec: CanObdSpec) -> float:
         from src.collection import tuning_profile
 
         absolute = tuning_profile.absolute_rate_hz(request.channel)
+        weight = tuning_profile.did_rate_weight(request.channel)
+        if spec.did_session is not None and not tuning_profile.did_continuous_enabled():
+            # A window is the only opportunity to sample this DID. Weight 1
+            # therefore means every window (not the ordinary medium tier),
+            # and a fractional weight skips boundaries. More than 1 cannot
+            # create a second read inside one window.
+            window_period = (
+                tuning_profile.did_cycle_override()
+                or spec.did_session.cycle_seconds
+                or tuning_profile.did_interval_override()
+                or spec.did_session.window_interval_seconds
+            )
+            wanted = absolute if absolute is not None else weight / window_period
+            return min(wanted, 1.0 / window_period)
         if absolute is not None:
             return absolute
-        rate *= tuning_profile.did_rate_weight(request.channel)
+        rate *= weight
     if request.kind == "pid":
         # A weight is a relative share within the selected profile; 1.0 is
         # byte-for-byte the historic tier cadence.
@@ -1868,10 +1887,28 @@ def _next_request_due_at(
     state: _PollRequestState,
     spec: CanObdSpec,
 ) -> float:
+    from src.collection import tuning_profile
+
     interval = _request_interval_seconds(request, spec)
     if interval == float("inf"):
         return float("inf")
-    anchor = state.last_requested_at if state.last_requested_at is not None else time.monotonic()
+    now = time.monotonic()
+    if (
+        request.kind == "did"
+        and spec.did_session is not None
+        and not tuning_profile.did_continuous_enabled()
+    ):
+        # Windowed cadence is a boundary grid. Anchoring the next due time to
+        # actual receipt/request time adds the in-window offset every cycle:
+        # a 4 Hz plan then finds the DID a few milliseconds late at the next
+        # 250 ms boundary and silently skips every other window. Advance from
+        # the prior due boundary and skip whole missed periods instead.
+        anchor = state.next_due_at
+        next_due = anchor + interval
+        if next_due <= now:
+            next_due += (math.floor((now - next_due) / interval) + 1) * interval
+        return max(next_due, state.suppressed_until)
+    anchor = state.last_requested_at if state.last_requested_at is not None else now
     next_due = anchor + interval
     if state.suppressed_until > next_due:
         return state.suppressed_until
@@ -1925,7 +1962,10 @@ def _select_next_due_request(
     ]
     if not candidates:
         return None
-    # Priority requests (``CanObdSpec.priority_channels``) win over any other
+    from src.collection import tuning_profile
+
+    # Priority requests (the active profile's lane, or the collection default)
+    # win over any other
     # due request, however overdue that one is. Without this the plan degrades
     # *uniformly* when demand exceeds what the bus can actually serve — every
     # request, mode-critical or not, ends up at the same fraction of its
@@ -1934,7 +1974,12 @@ def _select_next_due_request(
     # tier rate, so it can never claim more than that slice of the budget.
     _due_at, index, request, state = min(
         candidates,
-        key=lambda item: (not item[2].priority, item[1] not in preferred, item[0], item[1]),
+        key=lambda item: (
+            not tuning_profile.priority_channel(item[2].channel, item[2].priority),
+            item[1] not in preferred,
+            item[0],
+            item[1],
+        ),
     )
     return index, request, state
 
@@ -2168,6 +2213,96 @@ def _batching_metrics(
     }
 
 
+def _resolved_polling_plan(
+    requests: list[_PollRequest],
+    spec: CanObdSpec,
+    *,
+    pid_batch_max: int,
+    did_batch_max: int,
+    discovery_active: bool,
+) -> dict[str, Any]:
+    """Resolve the active scheduler selection into transport demand."""
+    from src.collection import tuning_profile
+
+    required = {channel.upper() for channel in tuning_profile.required_tuple()}
+    priority_names = tuning_profile.active_profile().priority_channels
+    members: list[PlanMember] = []
+    selected_dids = False
+    for index, request in enumerate(requests):
+        if not tuning_profile.request_eligible(index, request):
+            continue
+        profile_channel = tuning_profile.profile_channel_for(request.channel)
+        effective_priority = tuning_profile.priority_channel(request.channel, request.priority)
+        width: int | None = None
+        definition = lookup(request.service, request.identifier)
+        if definition is not None and definition.byte_length > 0:
+            width = definition.byte_length
+        if request.kind == "did":
+            selected_dids = True
+            width = spec.did_response_widths.get(request.identifier)
+        rate_hz = _request_rate_hz(request, spec)
+        active_profile = tuning_profile.active_profile()
+        if (
+            request.kind == "did"
+            and spec.did_session is not None
+            and not active_profile.did_continuous
+        ):
+            window_period = (
+                active_profile.did_cycle_seconds
+                or spec.did_session.cycle_seconds
+                or active_profile.did_interval_seconds
+                or spec.did_session.window_interval_seconds
+            )
+            rate_hz = min(rate_hz, 1.0 / window_period)
+        name = (profile_channel or request.channel).upper()
+        members.append(
+            PlanMember(
+                kind=request.kind,
+                service=request.service,
+                request_id=request.request_id,
+                identifier=request.identifier,
+                channel=request.channel,
+                profile_channel=profile_channel,
+                rate_hz=rate_hz,
+                priority=effective_priority,
+                required=name in required,
+                response_payload_bytes=width,
+                decoded_rows_per_read=(
+                    2 if request.kind == "pid" and request.identifier == 0x01 else 1
+                ),
+            )
+        )
+
+    session_overhead = 0.0
+    active_profile = tuning_profile.active_profile()
+    if selected_dids and spec.did_session is not None and not active_profile.did_continuous:
+        period = (
+            active_profile.did_cycle_seconds
+            or spec.did_session.cycle_seconds
+            or active_profile.did_interval_seconds
+            or spec.did_session.window_interval_seconds
+        )
+        if period > 0:
+            session_overhead = (1 + int(spec.did_session.exit_session is not None)) / period
+    plan = ResolvedPollingPlan.build(
+        members,
+        bus_budget_requests_per_second=bus_budget.effective(_bus_budget_requests_per_second(spec)),
+        pid_batch_max=pid_batch_max,
+        did_batch_max=did_batch_max,
+        session_control_requests_per_second=session_overhead,
+        discovery_requests_per_second=(
+            min(
+                spec.discovery_budget_requests_per_second,
+                bus_budget.effective(_bus_budget_requests_per_second(spec)),
+            )
+            if discovery_active
+            else 0.0
+        ),
+    ).to_dict()
+    plan["priority_source"] = "profile" if priority_names is not None else "collection"
+    return plan
+
+
 def _scheduler_metrics(
     requests: list[_PollRequest],
     states: list[_PollRequestState],
@@ -2179,6 +2314,8 @@ def _scheduler_metrics(
     rounds: dict[str, Any] | None = None,
     discovery: dict[str, Any] | None = None,
     deferred: list[dict[str, Any]] | None = None,
+    pid_batch_max: int | None = None,
+    did_batch_max: int | None = None,
 ) -> ObdSchedulerMetrics:
     active = _count_active_requests(requests, states, now)
     backed_off = sum(
@@ -2242,7 +2379,7 @@ def _scheduler_metrics(
                 "profile_channel": tuning_profile.profile_channel_for(request.channel),
                 "capture_selected": tuning_profile.request_eligible(index, request),
                 "poll_tier": request.poll_tier,
-                "priority": request.priority,
+                "priority": tuning_profile.priority_channel(request.channel, request.priority),
                 "configured_rate_hz": round(_request_rate_hz(request, spec), 4),
                 "requests_sent": state.requests_sent,
                 "responses": state.responses,
@@ -2313,6 +2450,13 @@ def _scheduler_metrics(
         session_control=_session_control_metrics(stats),
         discovery=discovery,
         deferred=list(deferred or []),
+        resolved_plan=_resolved_polling_plan(
+            requests,
+            spec,
+            pid_batch_max=spec.batch_max_pids if pid_batch_max is None else pid_batch_max,
+            did_batch_max=spec.did_batch_max_dids if did_batch_max is None else did_batch_max,
+            discovery_active=bool((discovery or {}).get("pending")),
+        ),
     )
 
 

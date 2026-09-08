@@ -244,8 +244,31 @@ def test_silent_support_group_is_tapped_and_not_recorded_as_unsupported(
         assert walks[item]["complete"] is False, f"{item}: a timeout was persisted as proof"
         assert walks[item]["last_result"] == "timeout"
         assert walks[item]["next_probe_in_s"] is not None
-    # Every decoded PID is still probed directly (sparse-map fallback).
-    assert {r.pid for r in run.readings} >= {"RPM", "SPEED", "COOLANT_TEMP"}
+    # Every decoded PID stays in the direct-probe plan (sparse-map fallback),
+    # even though the new independent discovery cadence may shift which one
+    # answers inside this short two-second window.
+    requested = {row["channel"] for row in run.snapshots[-1].requests}
+    assert requested >= {"RPM", "SPEED", "COOLANT_TEMP"}
+
+
+def test_discovery_has_an_independent_request_budget(
+    clock: FakeClock, runtime_reset: object
+) -> None:
+    bus = ScriptedEcu(clock, mode01_support=MODE01_SUPPORT)
+    run = _run(
+        clock,
+        bus,
+        _spec(
+            pids=("auto",),
+            discovery_budget_requests_per_second=2.0,
+        ),
+        seconds=1.2,
+    )
+
+    support_probes = probes(bus, 0x01)
+    assert [group for _at, group in support_probes] == [0x00, 0x20]
+    assert support_probes[1][0] - support_probes[0][0] >= 0.5
+    assert run.stats is not None and run.stats.requests_sent > 2
 
 
 def test_refused_support_walk_ends_at_the_refusal_and_is_tapped(

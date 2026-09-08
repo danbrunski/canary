@@ -595,6 +595,41 @@ def test_build_poll_requests_priority_channels_are_configurable() -> None:
     assert {r.channel for r in reassigned if r.priority} == {"COOLANT_TEMP"}
 
 
+def test_active_profile_reassigns_the_priority_lane_used_for_selection() -> None:
+    from src.collection import tuning_profile
+    from src.collection.capture_profiles import CaptureProfile
+
+    requests = build_poll_requests(
+        _StaticDiscovery(),
+        CanObdSpec(
+            can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
+            pids=("RPM", "COOLANT_TEMP"),
+        ),
+    )
+    states = [
+        _PollRequestState(
+            next_due_at=10.0 if request.channel == "COOLANT_TEMP" else 0.0,
+            suppressed_until=(float("inf") if request.kind != "pid" else 0.0),
+        )
+        for request in requests
+    ]
+    tuning_profile.activate(
+        CaptureProfile(
+            name="coolant-priority",
+            mode01={"RPM": 1.0, "COOLANT_TEMP": 1.0},
+            priority_channels=("COOLANT_TEMP",),
+            storage_prefix="_capture-coolant-priority",
+        ),
+        source="test",
+    )
+    try:
+        selected = _select_next_due_request(requests, states, 20.0)
+        assert selected is not None
+        assert selected[1].channel == "COOLANT_TEMP"
+    finally:
+        tuning_profile.set_active(False, source="test")
+
+
 def test_priority_request_wins_a_contended_slot_over_a_more_overdue_one() -> None:
     """The fix for operating-mode flapping: when the plan asks for more than
     the bus can serve every request is permanently overdue, so plain

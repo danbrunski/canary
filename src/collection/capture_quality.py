@@ -827,8 +827,9 @@ def evaluate_capture_quality(  # noqa: PLR0913
     lifetime_channels = (lifetime or {}).get("channels") or {}
     trailing_hz = scheduler.get("achieved_hz_capture") or {}
 
+    plan_members = (scheduler.get("resolved_plan") or {}).get("members") or []
     channels = _build_channels(
-        list(requests if requests is not None else scheduler.get("requests") or []),
+        list(requests if requests is not None else plan_members or scheduler.get("requests") or []),
         lifetime_channels=lifetime_channels,
         weights=weights,
         target=target_f,

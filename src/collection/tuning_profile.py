@@ -342,6 +342,23 @@ def rate_weight(channel: str) -> float:
         return _profile.mode01.get(channel.upper(), 1.0)
 
 
+def priority_channel(channel: str, default: bool) -> bool:
+    """Return the active profile's priority decision for one request.
+
+    ``None`` inherits the scheduler/config decision. An explicit tuple,
+    including an empty one, owns the lane for the active profile.
+    """
+    profile_name = profile_channel_for(channel)
+    with _lock:
+        configured = _profile.priority_channels
+        if configured is None:
+            return default
+        candidates = {channel.upper()}
+        if profile_name is not None:
+            candidates.add(profile_name.upper())
+        return bool(candidates & set(configured))
+
+
 def did_rate_weight(channel: str) -> float:
     """Relative cadence for one selected DID, resolving profile aliases.
 
@@ -462,6 +479,7 @@ __all__ = [
     "absolute_rate_hz",
     "classify_profile",
     "profile_class",
+    "priority_channel",
     "rate_weight",
     "request_eligible",
     "request_verdict",

@@ -157,6 +157,33 @@ function renderPanel(activeName: string | null = null, extra: Record<string, unk
   mocks.getCaptureProfiles.mockResolvedValue({
     schema_version: 1,
     profiles: [DEFAULT_PROFILE, FUEL_MAP, HYBRID],
+    resolved_plans: {
+      "fuel-map": {
+        member_count: 17,
+        aliases_deduplicated: 0,
+        channel_reads_per_second: 44,
+        decoded_rows_per_second: 44,
+        complete_tuples_per_second: 4,
+        diagnostic_requests_per_second: {
+          best_case_batched: 9,
+          single_request_fallback: 44,
+          session_control: 0,
+          discovery: 0,
+        },
+        raw_frames_per_second: {
+          best_case_batched: 27,
+          single_request_fallback: 88,
+          estimate_complete: true,
+          unknown_response_width_channels: [],
+        },
+        priority_requests_per_second_fallback: 8,
+        bus_budget_requests_per_second: 20,
+        priority_feasible: true,
+        best_case_feasible: true,
+        fallback_feasible: false,
+        priority_source: "collection",
+      },
+    },
   });
   mocks.getObdCoverage.mockResolvedValue({
     rows: [
@@ -218,6 +245,16 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
 
     await waitFor(() => expect(mocks.startProfileCapture).toHaveBeenCalled());
     expect(mocks.startProfileCapture.mock.calls[0][1]).toBe("fuel-map");
+  });
+
+  it("shows resolved batched and fallback demand as distinct units", async () => {
+    renderPanel();
+    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "fuel-map" } });
+
+    expect(await screen.findByText("44 channel reads/s")).toBeInTheDocument();
+    expect(screen.getByText("9 requests/s batched")).toBeInTheDocument();
+    expect(screen.getByText("44 requests/s fallback")).toBeInTheDocument();
+    expect(screen.getByText(/Single-request fallback exceeds/)).toBeInTheDocument();
   });
 
   it("cannot launch an unsaved draft under a saved profile name", async () => {

@@ -290,9 +290,34 @@ def test_active_scheduler_batches_known_width_dids_with_full_provenance() -> Non
     assert all(reading.acquired_at is not None and reading.round_id is not None for reading in dids)
 
 
+def test_known_answer_decode_matches_single_and_batched_scheduler_paths() -> None:
+    decoded: list[dict[str, float]] = []
+    for batch_max in (1, 3):
+        readings: list = []
+        run_can_obd_loop(
+            _SchedulerDidEcu(),  # type: ignore[arg-type]
+            _scheduler_spec(did_batch_max_dids=batch_max),
+            on_frame=lambda _message: None,
+            on_reading=readings.append,
+            stop_event=threading.Event(),
+            deadline_monotonic=time.monotonic() + 0.2,
+        )
+        decoded.append(
+            {
+                reading.pid: reading.value
+                for reading in readings
+                if reading.pid in {"DID_1101", "DID_1219", "DID_1208"}
+            }
+        )
+
+    assert decoded[0] == decoded[1]
+    assert set(decoded[0]) == {"DID_1101", "DID_1219", "DID_1208"}
+
+
 def test_rejected_did_batches_fall_back_without_backing_off_members() -> None:
     bus = _SchedulerDidEcu(reject_batches=True)
     readings: list = []
+    snapshots: list = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _scheduler_spec(),
@@ -300,6 +325,8 @@ def test_rejected_did_batches_fall_back_without_backing_off_members() -> None:
         on_reading=readings.append,
         stop_event=threading.Event(),
         deadline_monotonic=time.monotonic() + 0.5,
+        on_scheduler_metrics=snapshots.append,
+        scheduler_metrics_interval_seconds=0.02,
     )
     assert stats.did_batch_failures >= 3
     assert stats.did_batch_size_narrowings == 1
@@ -308,6 +335,14 @@ def test_rejected_did_batches_fall_back_without_backing_off_members() -> None:
         "DID_1219",
         "DID_1208",
     }
+    fallback = [
+        snapshot.resolved_plan
+        for snapshot in snapshots
+        if snapshot.resolved_plan is not None and snapshot.resolved_plan["batch_max"]["mode22"] == 1
+    ]
+    assert fallback
+    demand = fallback[-1]["diagnostic_requests_per_second"]
+    assert demand["best_case_batched"] == demand["single_request_fallback"]
 
 
 def test_physical_did_batch_rejects_a_different_ecu_responder() -> None:

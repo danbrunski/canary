@@ -256,6 +256,7 @@ class ParquetTelemetryWriter:
         profile: CaptureProfile,
         capture_id: str,
         tune_revision: str | None = None,
+        resolved_polling_plan: dict[str, Any] | None = None,
     ) -> Path | None:
         """Rotate atomically into a profile-owned capture session."""
         if profile.name == "default":
@@ -266,11 +267,12 @@ class ParquetTelemetryWriter:
             prefix = profile.storage_prefix or f"_capture-{profile.name}"
             flushed = self._enter_isolated_dir(f"{prefix}-{capture_id}")
         sidecar = {
-            "schema_version": 1,
+            "schema_version": 2,
             "profile": profile.name,
             "started_at": self._clock().isoformat(),
             "tune_revision": tune_revision,
             "profile_snapshot": profile.model_dump(mode="json"),
+            "resolved_polling_plan": resolved_polling_plan,
         }
         atomic_write_text(
             self.paths.root / "capture_profile.json",

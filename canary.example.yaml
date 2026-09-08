@@ -89,6 +89,10 @@ collection:
   obd_batch_max_pids: 6
   # Mode 22 batching is a separate ECU/session capability. 1 disables it.
   obd_did_batch_max_dids: 1
+  # Exploratory support walks have their own ceiling as well as the global bus
+  # budget, so a sparse/unknown catalog cannot consume every free slot. Lower
+  # this independently when confirmed telemetry matters more than discovery.
+  obd_discovery_budget_requests_per_second: 32.0
   obd_did_request_id: 0x7E0
   # auto = take the gating session (0xC0) + keep-alive cadence from
   # data/dids.yaml's access block; null = force bare polling; int = override.

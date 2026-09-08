@@ -30,6 +30,7 @@ class CaptureManifest(BaseModel):
     started_at: datetime
     tune_revision: str | None = None
     profile_snapshot: dict[str, Any]
+    resolved_polling_plan: dict[str, Any] | None = None
 
     @property
     def corpus_eligible(self) -> bool:

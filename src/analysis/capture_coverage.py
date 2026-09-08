@@ -362,7 +362,11 @@ def recompute_capture_quality(  # noqa: PLR0913
         tuples=inputs["tuples"],
         losses=losses,
         persistence=persistence_block,
-        requests=inputs["requests"],
+        requests=(
+            list(manifest.resolved_polling_plan.get("members") or [])
+            if manifest.resolved_polling_plan is not None
+            else inputs["requests"]
+        ),
         scope=scope,
     )
     notes = list(quality.notes)
