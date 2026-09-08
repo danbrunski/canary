@@ -7,14 +7,26 @@ remain under `docs/roadmap/`; this set does not change the overnight queue.
 The individual checkboxes are implementation truth. Mark `[x]` only with
 evidence; use `[~]` for partial completion and name the remaining work.
 
-**Status 2026-09-08.** C01, C02, C03 and C07 are complete and archived. C04,
-C05, C06, C08, C09 and C10 are implemented and their remaining `[~]` items
-are **all hardware-blocked** — the Pi has been unreachable
-(`canary.local` ENOTFOUND) since 2026-09-06, and each of those items needs a
-measurement on the truck that no workstation run can substitute. They are:
-C04.12, C05.11, C06.12, C08.12, C09.12, C09.14, C09.16, C10.10, C10.11 and
-C10.12. Every one carries the procedure to run when the Pi is back. Nothing
-else is open.
+**Status 2026-09-08.** No checkbox is open. C01, C02, C03 and C07 are
+complete and archived. C04, C05, C06, C08, C09 and C10 are implemented, and
+their ten remaining `[~]` items are **all waiting on the Pi**, which is
+unplugged (operator-confirmed; `canary.local` ENOTFOUND and no route to
+`192.168.137.0/24` from this host).
+
+Where an item's wording reserved a Pi measurement but also asked for a
+comparison that does not need one, the workstation half was done and is
+recorded in the item's own note:
+
+| item | workstation half done | what the Pi still owes |
+|---|---|---|
+| C04.12 | cycle vs interval policy A/B — cycle meets 4.0 Hz on every DID, interval misses by 26 % at 0.266 utilisation | 4 Hz achieved *and persisted* against the real ECM's response time |
+| C06.12 | continuity across an adapter fault + reconnect (0 missing both sides); discovery counters compared (finding 14) | kernel/socket receive counters, `unavailable` off the Pi |
+| C08.12 | 1 Hz vs 2 Hz with the real IF — 0 missed deadlines, +8–10 points of one core | Pi CPU, memory, thermal/power, event-loop delay |
+| C10.12 | budget ladder 4→32 req/s on `fuel-map` — holds from 8 up, bus never the constraint | the same ladder on the truck |
+
+The other six — C05.11, C09.12, C09.14, C09.16, C10.10, C10.11 — have no
+workstation half: they ask what the *vehicle* does. Every one carries the
+procedure to run when the Pi is back.
 
 ## Scope and evidence
 
