@@ -252,6 +252,20 @@ models:
   # backend's own `enabled` flag below still gates whether it loads. Both
   # publish under the same anomaly source, so switching is a config change.
   sequence_detector: lstm
+  # Score IF + sequence in a child process instead of a worker thread. C08
+  # moved scoring off the event loop, which is not the same as off the CPU:
+  # on the Pi (2026-09-09) the daemon missed 48% of its 1 Hz ticks with 2.5 of
+  # 4 cores idle, because one Python process is GIL-bound to about one core
+  # and a slow forward pass starved the collector thread sharing it —
+  # collection stopped for ~100 s at a time. Costs ~0.16 ms/tick of IPC.
+  # A host where the child cannot start falls back to in-process scoring, so
+  # this is a performance knob, not a correctness one.
+  #
+  # Off by default: the child rebuilds its models from this config's artifact
+  # paths, so it only ever sees models that came from disk. Turn it on where
+  # that holds (the Pi) once D01.3 has validated it on hardware —
+  # docs/roadmap/tasks/D01-daemon-throughput.md.
+  out_of_process_scoring: false
   isolation_forest:
     enabled: true
     n_estimators: 200

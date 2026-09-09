@@ -46,6 +46,15 @@ re-derived:
 The other six (C05.11, C09.12, C09.14, C09.16, C10.10, C10.11) ask what the
 *vehicle* does; a scripted ECU cannot answer them at all.
 
+## D01 — daemon throughput (opened 2026-09-09)
+
+The H0–H6 measurements found one cause behind most of the symptoms: the daemon
+is a single GIL-bound process doing more per tick than a tick affords. That
+work is tracked separately in [`D01-daemon-throughput.md`](D01-daemon-throughput.md),
+not here — the C0x set is about collection correctness, this is about the Pi's
+capacity to run it. D01.1/D01.2 (out-of-process scoring) are implemented and
+unit-tested but **not yet validated on hardware**; D01.3 is that validation.
+
 ## Scope and evidence
 
 The review inspected the current collection, scheduling, profile, storage,

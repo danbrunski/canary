@@ -664,6 +664,23 @@ class ModelsConfig(_Strict):
     #: broadcast-latent reconstruction. TCN is documented as an NPU-export
     #: fallback, not an equal; no further bake-off gates this default.
     sequence_detector: Literal["lstm", "tcn"] = "lstm"
+    #: Score IF + sequence in a child process rather than a worker thread.
+    #: C08 moved scoring off the event loop into a thread, which is not the
+    #: same as off the CPU: measured on the Pi 2026-09-09, the daemon missed
+    #: 48 % of its 1 Hz ticks with 2.5 of 4 cores idle, because one Python
+    #: process is GIL-bound to roughly one core and a slow forward pass
+    #: starved the collector thread sharing it — collection stopped for ~100 s
+    #: at a stretch.
+    #:
+    #: **Off by default, deliberately.** The child rebuilds its models from
+    #: *this config's* artifact paths, so it only sees models that came from
+    #: disk — a parent holding an injected or in-memory model (tests, and any
+    #: caller that populates ``model_managers`` itself) would have the child
+    #: score against something else, or nothing. Deployments where the models
+    #: do come from disk opt in; nothing else changes behaviour. A host where
+    #: the child cannot start falls back to in-process scoring, so this is a
+    #: performance knob, never a correctness one.
+    out_of_process_scoring: bool = False
 
 
 class DashboardConfig(_Strict):

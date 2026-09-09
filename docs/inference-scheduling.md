@@ -282,3 +282,60 @@ in-process: read `/status.detectors.inference` and `/status.health` during a
 replay (`start_replay`) of a known-good session on the Pi, once with the
 pre-C08 build and once with this one. Do not change the deployed
 `resample_hz` for that measurement; use `tick_seconds` on a test instance.
+
+
+## Out-of-process scoring (2026-09-09)
+
+C08 moved the IF and sequence forward passes off the event loop into a worker
+*thread*. The Pi measurement above shows why that was not enough: **the GIL
+makes "off the loop" and "off the CPU" different things.** The daemon missed
+48 % of its 1 Hz ticks while `load_1m` was 1.52 on four cores and CPU sat at
+24 % — two and a half cores idle. One Python process is bound to roughly one
+core, so a slow forward pass starved the collector thread and the HTTP server
+sharing that process. That is why collection stopped for ~100 s at a stretch
+with **zero** dropped records: nothing overflowed, the collector thread simply
+never got scheduled.
+
+`src/daemon/inference_worker.py` runs the two forward passes in a child
+process. Only the one-row feature frame and two version strings cross the
+pipe; the models are loaded child-side from the same artifact paths the parent
+watches, and a hot-swap propagates as a version mismatch rather than a
+shipped artifact. Measured IPC cost: **0.16 ms per tick** steady-state, and
+~2 s once at startup while the child loads its artifacts.
+
+**Exactly one persistent worker, never a pool.** The sequence engine owns a
+rolling window advanced only by a scoring pass, so the window is state; a
+second worker would score against a different history. A restarted worker
+resumes with an empty window, which refills — `_sequence_observe` already
+returns `None` until it is full.
+
+Every side effect stays in the parent. The child touches no broadcaster,
+emitter, persistence gate or storage; it returns the same `_TickResult` the
+in-process path returned and `_apply` publishes it on the loop as before.
+`_IFComputed` carries `model_version` instead of the engine for this reason —
+sending a model back every tick to read one string would have cost more than
+the scoring it offloads.
+
+Failure is never fatal. A worker that cannot start, dies, breaks its pipe or
+answers late returns `None` and the tick is scored in-process exactly as
+before. It is a performance knob, never a correctness one.
+
+`models.out_of_process_scoring` ships **off**. The child rebuilds its models
+from the config's artifact paths, so it only ever sees models that came from
+disk: a parent holding an injected or in-memory model would have the child
+score against something else and say so nowhere. Turning it on by default made
+every `run_live_inference` end-to-end test complete zero ticks — the parent's
+stub models were invisible to the child, so tick 0 blocked and every later
+tick skipped as `compute_busy`. Deployments whose models come from disk opt
+in.
+
+### What this does *not* fix
+
+`loop_occupancy` is unchanged. The feature build (`source.tick()`, 332 ms
+median / 22 s max on the Pi) still runs on the event loop inside phase 1,
+because the ring buffer it reads is fed by `observe()` on the loop. That is
+the remaining source of `overrun` misses (177 of the 312 in the measurement
+above), as distinct from `compute_busy` misses (135), which this change
+addresses. Moving it means moving the ring buffer — and the behavior
+detector, which reads `source.latest_operating_point` — into the child too.
+That is a larger change and is not attempted here.

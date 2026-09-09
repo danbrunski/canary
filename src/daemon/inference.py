@@ -52,6 +52,7 @@ from .autotag_hook import LiveAutoTagHook
 from .components import DaemonComponents
 from .inference_metrics import MISSED_COMPUTE_BUSY, InferenceTimingRecorder
 from .inference_scheduling import GenerationToken, TickScheduler, TickSlot
+from .inference_worker import InferenceWorker, WorkerTick
 
 log = logging.getLogger(__name__)
 
@@ -650,6 +651,7 @@ class LiveInferencePipeline:
         recorder: InferenceTimingRecorder,
         executor: ThreadPoolExecutor | None = None,
         wall_clock: Callable[[], datetime] | None = None,
+        worker: InferenceWorker | None = None,
     ) -> None:
         self._source = source
         self._components = components
@@ -676,6 +678,29 @@ class LiveInferencePipeline:
         self._executor = executor if executor is not None else _new_inference_executor()
         self._wall_clock = wall_clock if wall_clock is not None else _utc_now
         self._inflight: asyncio.Task[None] | None = None
+        #: Out-of-process scoring (:mod:`src.daemon.inference_worker`).
+        #: ``None`` keeps every pass in this process — what tests get, and
+        #: any host where the child could not start.
+        self._worker = worker
+
+    def _worker_tick(self, request: _TickRequest) -> WorkerTick:
+        """The portable half of a request: the row and the two versions.
+
+        Deliberately *not* the jobs — those hold the loaded model and the
+        sequence engine, and pushing either through a pipe every tick would
+        cost more than the scoring it is meant to offload.
+        """
+        row = request.if_job.row if request.if_job is not None else None
+        if row is None and request.sequence_job is not None:
+            row = request.sequence_job.row
+        return WorkerTick(
+            index=request.slot.index,
+            row=row,
+            want_if=request.if_job is not None,
+            want_sequence=request.sequence_job is not None,
+            if_version=self._if.model_version,
+            sequence_version=self._sequence.model_version,
+        )
 
     @property
     def inflight(self) -> asyncio.Task[None] | None:
@@ -807,7 +832,7 @@ class LiveInferencePipeline:
         loop = asyncio.get_running_loop()
         submitted = time.perf_counter()
         try:
-            result = await loop.run_in_executor(self._executor, _compute_tick, request)
+            result = await loop.run_in_executor(self._executor, self._compute, request)
         except Exception:  # noqa: BLE001 — live inference is best-effort
             self._recorder.note_compute_failure()
             log.exception("live inference compute failed for tick %d", request.slot.index)
@@ -817,6 +842,22 @@ class LiveInferencePipeline:
             self._apply(request, result)
         except Exception:  # noqa: BLE001 — live inference is best-effort
             log.exception("live inference apply failed for tick %d", request.slot.index)
+
+    def _compute(self, request: _TickRequest) -> _TickResult:
+        """Score one tick out-of-process when a worker is up, here otherwise.
+
+        Runs on the pipeline's worker thread either way; what changes is
+        *where the model runs*. A worker that is down, wedged or broken
+        returns ``None`` and we score in-process instead — a briefly slower
+        detector costs far less than a stalled collector, which is the whole
+        trade the worker exists to make.
+        """
+        worker = self._worker
+        if worker is not None:
+            result = worker.compute(self._worker_tick(request))
+            if result is not None:
+                return result
+        return _compute_tick(request)
 
     def _apply(self, request: _TickRequest, result: _TickResult) -> None:
         """Phase 3 — every side effect, on the loop, exactly once per
@@ -968,14 +1009,37 @@ async def run_live_inference(
             "behavior overlay + fusion still run off the live feature source"
         )
     recorder = components.inference_timing
+    worker = _start_inference_worker(components)
     pipeline = LiveInferencePipeline(
-        source, components, interval_seconds=interval, recorder=recorder
+        source, components, interval_seconds=interval, recorder=recorder, worker=worker
     )
     scheduler = TickScheduler(interval, recorder=recorder)
     try:
         await scheduler.run(pipeline.run_tick, stop_event)
     finally:
         await pipeline.close(timeout_seconds=max(interval, 1.0))
+        if worker is not None:
+            worker.stop()
+
+
+def _start_inference_worker(components: DaemonComponents) -> InferenceWorker | None:
+    """Bring up out-of-process scoring, or return ``None`` to stay in-process.
+
+    ``None`` is a supported outcome, not an error: the pipeline then scores
+    in-process exactly as it did before.
+
+    The worker is handed ``components.config`` — the *live* object — rather
+    than a config path. ``main`` rewrites the config through ``scope_config``
+    so every vehicle-specific path sits under the active profile slug, and a
+    child that re-read the YAML would look for artifacts in an unscoped
+    ``models/`` and quietly score with nothing loaded.
+    """
+    if not components.config.models.out_of_process_scoring:
+        return None
+    worker = InferenceWorker(components.config)
+    if not worker.start():
+        return None
+    return worker
 
 
 def _build_sequence_engine(loaded: Any, *, suppress_channels: tuple[str, ...] = ()) -> Any:
@@ -1278,7 +1342,11 @@ class _IFComputed:
     data, applied on the loop by :func:`_if_apply`. Carries the reconciliation
     report so the once-per-version schema warning is logged from the loop."""
 
-    engine: IsolationForestInferenceEngine
+    #: The version that actually scored. Was the whole engine until the
+    #: scoring pass moved out-of-process: shipping a model back across a
+    #: pipe every tick to read one string defeats the point, and this
+    #: dataclass already documented itself as "pure data".
+    model_version: str
     report: FeatureSpecReconciliation
     scored: Any  # pd.Series
     latency_ms: float
@@ -1335,7 +1403,7 @@ def _if_compute(loaded: Any, row: Any) -> _IFComputed:
             loaded, engine, aligned
         )
     return _IFComputed(
-        engine=engine,
+        model_version=engine.model_version,
         report=report,
         scored=scored,
         latency_ms=latency_ms,
@@ -1364,8 +1432,8 @@ def _if_apply(
     ``/ws/scores``, the persistence gate and the per-source emit."""
     import pandas as pd
 
-    engine = computed.engine
-    _log_schema_reconciliation_once("isolation_forest", engine.model_version, computed.report)
+    model_version = computed.model_version
+    _log_schema_reconciliation_once("isolation_forest", model_version, computed.report)
     _record_if_health(
         health,
         latency_ms=computed.latency_ms,
@@ -1373,7 +1441,7 @@ def _if_apply(
         score=computed.score_val,
         timestamp=computed.timestamp,
         mode_str=computed.mode_str,
-        model_version=engine.model_version,
+        model_version=model_version,
     )
     calibrated_threshold = computed.calibrated_threshold
     _publish_score(
@@ -1382,7 +1450,7 @@ def _if_apply(
         score=computed.score_val,
         threshold=calibrated_threshold,  # 7.2 per-mode calibrated boundary
         operating_mode=computed.mode_str,
-        model_version=engine.model_version,
+        model_version=model_version,
         timestamp=computed.timestamp,
         missing_features=computed.missing,
     )
@@ -1435,7 +1503,7 @@ def _if_apply(
     if calibrated and not suppress_emit:
         emitter.emit_isolation_forest_row(
             computed.scored,
-            model_version=engine.model_version,
+            model_version=model_version,
             timestamp=format_timestamp(computed.timestamp),
             affected_channels=computed.affected_channels,
             feature_contributors=computed.feature_contributors or None,
