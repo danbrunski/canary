@@ -1470,6 +1470,16 @@ class ObdSchedulerMetrics:
     deferred: list[dict[str, Any]] = field(default_factory=list)
     #: The selected, alias-deduplicated plan and its demand in distinct units.
     resolved_plan: dict[str, Any] | None = None
+    #: Raw receive accounting for the collector loop (C06.12): every frame the
+    #: loop tapped, the frames tapped while a discovery probe was outstanding,
+    #: and parse failures. These were counted in :class:`CanObdLoopStats` from
+    #: C06 on but never serialized, so the hardware procedure's step 3
+    #: ("record ``discovery_frames_seen``") and step 7 ("compare
+    #: ``frames_seen`` against ``can0.rx_packets``") could not be run at all on
+    #: the active canable path -- where the broadcast collector, and with it
+    #: the ``can_receive`` sink, is never registered. ``None`` for a metrics
+    #: object built without a loop.
+    receive: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1498,6 +1508,7 @@ class ObdSchedulerMetrics:
             "did_profile": self.did_profile,
             "batching": self.batching,
             "resolved_plan": self.resolved_plan,
+            "receive": self.receive,
         }
 
 
@@ -2448,6 +2459,7 @@ def _scheduler_metrics(
         batching=_batching_metrics(spec, stats, now),
         rounds=rounds,
         session_control=_session_control_metrics(stats),
+        receive=_receive_metrics(stats),
         discovery=discovery,
         deferred=list(deferred or []),
         resolved_plan=_resolved_polling_plan(
@@ -2458,6 +2470,23 @@ def _scheduler_metrics(
             discovery_active=bool((discovery or {}).get("pending")),
         ),
     )
+
+
+def _receive_metrics(stats: CanObdLoopStats) -> dict[str, Any]:
+    """Frames the collector loop tapped, for upstream-continuity comparison.
+
+    ``frames_seen`` is compared against the kernel's ``can0.rx_packets`` over
+    the same window, with the ``rx_dropped`` / ``rx_over_errors`` deltas: a
+    received count alone never proves nothing was lost upstream, which is the
+    whole point of step 7 in ``docs/diagnostic-discovery.md``.
+    ``discovery_frames_seen`` is the subset tapped while a support probe was
+    outstanding -- the frames the old synchronous probe path silently ate.
+    """
+    return {
+        "frames_seen": stats.frames_seen,
+        "parse_errors": stats.parse_errors,
+        "discovery_frames_seen": stats.discovery_frames_seen,
+    }
 
 
 def _session_control_metrics(stats: CanObdLoopStats) -> dict[str, Any]:

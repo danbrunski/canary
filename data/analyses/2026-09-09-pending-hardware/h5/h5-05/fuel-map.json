@@ -1,0 +1,2552 @@
+{
+  "evidence": {
+    "decoded_expansion": {
+      "decoded_by_channel": {
+        "SYNTH_RPM": 2175,
+        "SYNTH_SPEED": 2175
+      },
+      "decoded_rows": 4350,
+      "expected_decoded_rows": 4350,
+      "identity_holds": true,
+      "note": "one-to-many expansion of persisted frames; kept apart from raw counts",
+      "persisted_broadcast_frames": 2175,
+      "signals_per_frame": 2
+    },
+    "invalid_reasons": [],
+    "known_answer": [
+      {
+        "a": "can:SYNTH_RPM",
+        "b": "obd:RPM",
+        "difference_bias": 0.4302,
+        "difference_spread": 1.7281,
+        "expectation": "unit_agreement",
+        "expected_slope": 1.0,
+        "n_pairs": 43,
+        "offset": 0.1743,
+        "outcome": "agrees_1to1",
+        "policy_ms": 50.0,
+        "r_squared": 0.99998,
+        "residual_spread": 1.7264,
+        "scale_verdict": "stable",
+        "separation_max_s": 0.01524,
+        "separation_median_s": 0.00197,
+        "separation_p95_s": 0.005877,
+        "slope": 1.00019,
+        "timestamp_basis": [
+          "stored",
+          "acquired"
+        ],
+        "unmatched": [
+          1535,
+          0
+        ]
+      },
+      {
+        "a": "can:SYNTH_RPM_HALF",
+        "b": "obd:RPM",
+        "difference_bias": 679.8721,
+        "difference_spread": 202.3791,
+        "expectation": "known_different",
+        "expected_slope": 2.0,
+        "n_pairs": 43,
+        "offset": 0.1743,
+        "outcome": "differs_as_expected",
+        "policy_ms": 50.0,
+        "r_squared": 0.99998,
+        "residual_spread": 1.7264,
+        "scale_verdict": "stable",
+        "separation_max_s": 0.01524,
+        "separation_median_s": 0.00197,
+        "separation_p95_s": 0.005877,
+        "slope": 2.00038,
+        "timestamp_basis": [
+          "stored",
+          "acquired"
+        ],
+        "unmatched": [
+          1535,
+          0
+        ]
+      },
+      {
+        "a": "can:SYNTH_SPEED",
+        "b": "obd:SPEED",
+        "expectation": "unit_agreement",
+        "expected_slope": 1.0,
+        "outcome": "refused",
+        "policy_ms": 50.0,
+        "reason": "can:SYNTH_SPEED vs obd:SPEED: only 12 aligned pairs within 50 ms (need 30; 1578 and 12 observations, 1566/0 unmatched). The series may not overlap in time, or the tolerance may be tighter than the slower channel's cadence can meet."
+      }
+    ],
+    "limiting_stage": {
+      "evidence": {
+        "lateness": {
+          "count": 32,
+          "last_ms": 273.203,
+          "max_ms": 273.203,
+          "median_ms": 0.754,
+          "p95_ms": 28.847
+        },
+        "missed_by_reason": {
+          "compute_busy": 6
+        },
+        "missed_ticks": 6
+      },
+      "stage": "inference_loop"
+    },
+    "losses": {
+      "accounted": 2886,
+      "adapter_delivered_frames": 2416,
+      "buffer_dropped": 0,
+      "collector_pushed": 2886,
+      "dashboard_subscriber": {
+        "dropped": 2303,
+        "received": 7352
+      },
+      "frames_tapped_identity": {
+        "holds": true,
+        "identity": "collector_pushed - readings_emitted == adapter_delivered_frames",
+        "lhs": 2416,
+        "rhs": 2416
+      },
+      "identity": "collector_pushed == persisted_raw_rows + buffer_dropped + queue_dropped + storage_dropped",
+      "identity_holds": true,
+      "kernel_counters": "unavailable (synthetic adapter; no can0 on this host)",
+      "persisted_raw_rows": 2886,
+      "queue_dropped": 0,
+      "queue_high_water": {
+        "broadcast": {
+          "buffer_capacity": null,
+          "buffer_high_water": null,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": 0,
+          "queue_high_water": 115,
+          "queue_max_size": 10000
+        },
+        "dtc": {
+          "buffer_capacity": null,
+          "buffer_high_water": null,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": 0,
+          "queue_high_water": 31,
+          "queue_max_size": 10000
+        },
+        "ingest": {
+          "buffer_capacity": null,
+          "buffer_high_water": null,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": 0,
+          "queue_high_water": 115,
+          "queue_max_size": 10000
+        },
+        "live": {
+          "buffer_capacity": null,
+          "buffer_high_water": null,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": 0,
+          "queue_high_water": 115,
+          "queue_max_size": 10000
+        },
+        "monitor": {
+          "buffer_capacity": null,
+          "buffer_high_water": null,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": 0,
+          "queue_high_water": 31,
+          "queue_max_size": 10000
+        },
+        "obd_collect": {
+          "buffer_capacity": 4096,
+          "buffer_high_water": 115,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": null,
+          "queue_high_water": null,
+          "queue_max_size": null
+        },
+        "storage": {
+          "buffer_capacity": null,
+          "buffer_high_water": null,
+          "dropped_records": 0,
+          "errors": 0,
+          "queue_depth_last": 0,
+          "queue_high_water": 115,
+          "queue_max_size": 10000
+        }
+      },
+      "readings_emitted_last_attempt": 470,
+      "stage": "obd_collect",
+      "storage_dropped": 0
+    },
+    "quality": {
+      "failures": [
+        "acquisition_gap",
+        "acquisition_gap"
+      ],
+      "stop_sidecar": {
+        "batching": {
+          "batched_pids_requested": 229,
+          "batched_requests": 46,
+          "channel_reads_per_second": 22.89,
+          "channel_reads_per_second_lifetime": 22.89,
+          "desyncs": 0,
+          "failures": 0,
+          "max_pids": 6,
+          "mean_pids_per_batch": 4.98,
+          "mode22": {
+            "batched_requests": 0,
+            "desyncs": 0,
+            "failures": 0,
+            "fallbacks": 0,
+            "known_response_widths": {
+              "0x1101": {
+                "bytes": 1,
+                "source": "2026-05-11T222447 frames.log:418 single-DID response payload"
+              },
+              "0x1208": {
+                "bytes": 2,
+                "source": "2026-08-07T005351 single-DID capture payloads"
+              },
+              "0x1219": {
+                "bytes": 2,
+                "source": "2026-05-16T214006 four-state single-DID capture"
+              }
+            },
+            "max_dids": 1,
+            "mean_dids_per_batch": null,
+            "members_requested": 0
+          },
+          "size_narrowings": 0
+        },
+        "channels": [
+          {
+            "cadence": {
+              "hz": 3.993,
+              "median_interarrival_s": 0.250434,
+              "p95_interarrival_s": 0.278369,
+              "samples": 39
+            },
+            "channel": "RPM",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 0.054,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.817,
+              "long_gaps": [],
+              "max_gap_s": 0.307,
+              "missing_final_s": 0.19,
+              "missing_initial_s": 0.054,
+              "observations": 40,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": true,
+            "kind": "pid",
+            "requested_hz": 4.0,
+            "status": "ok",
+            "trailing_hz": 3.99,
+            "transport_channel": "RPM"
+          },
+          {
+            "cadence": {
+              "hz": 3.998,
+              "median_interarrival_s": 0.250111,
+              "p95_interarrival_s": 0.277654,
+              "samples": 39
+            },
+            "channel": "ENGINE_LOAD",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 0.054,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.817,
+              "long_gaps": [],
+              "max_gap_s": 0.307,
+              "missing_final_s": 0.19,
+              "missing_initial_s": 0.054,
+              "observations": 40,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": true,
+            "kind": "pid",
+            "requested_hz": 4.0,
+            "status": "ok",
+            "trailing_hz": 4.0,
+            "transport_channel": "ENGINE_LOAD"
+          },
+          {
+            "cadence": {
+              "hz": 3.916,
+              "median_interarrival_s": 0.255352,
+              "p95_interarrival_s": 0.32303,
+              "samples": 39
+            },
+            "channel": "MAF",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 0.054,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.871,
+              "long_gaps": [],
+              "max_gap_s": 0.35,
+              "missing_final_s": 0.136,
+              "missing_initial_s": 0.054,
+              "observations": 40,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "pid",
+            "requested_hz": 4.0,
+            "status": "ok",
+            "trailing_hz": 3.98,
+            "transport_channel": "MAF"
+          },
+          {
+            "cadence": {
+              "hz": 3.999,
+              "median_interarrival_s": 0.250042,
+              "p95_interarrival_s": 0.326428,
+              "samples": 39
+            },
+            "channel": "TIMING_ADVANCE",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 0.054,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.817,
+              "long_gaps": [],
+              "max_gap_s": 0.333,
+              "missing_final_s": 0.19,
+              "missing_initial_s": 0.054,
+              "observations": 40,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "pid",
+            "requested_hz": 4.0,
+            "status": "ok",
+            "trailing_hz": 4.07,
+            "transport_channel": "TIMING_ADVANCE"
+          },
+          {
+            "cadence": {
+              "hz": 4.002,
+              "median_interarrival_s": 0.249888,
+              "p95_interarrival_s": 0.296388,
+              "samples": 39
+            },
+            "channel": "THROTTLE_POS",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 0.06,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.869,
+              "long_gaps": [],
+              "max_gap_s": 0.306,
+              "missing_final_s": 0.138,
+              "missing_initial_s": 0.06,
+              "observations": 40,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "pid",
+            "requested_hz": 4.0,
+            "status": "ok",
+            "trailing_hz": 4.02,
+            "transport_channel": "THROTTLE_POS"
+          },
+          {
+            "cadence": {
+              "hz": 3.998,
+              "median_interarrival_s": 0.250109,
+              "p95_interarrival_s": 0.277257,
+              "samples": 39
+            },
+            "channel": "O2_WR_LAMBDA_S1",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 0.054,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.817,
+              "long_gaps": [],
+              "max_gap_s": 0.307,
+              "missing_final_s": 0.19,
+              "missing_initial_s": 0.054,
+              "observations": 40,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": true,
+            "kind": "pid",
+            "requested_hz": 4.0,
+            "status": "ok",
+            "trailing_hz": 4.0,
+            "transport_channel": "O2_WR_LAMBDA_S1"
+          },
+          {
+            "cadence": {
+              "hz": 3.989,
+              "median_interarrival_s": 0.250662,
+              "p95_interarrival_s": 0.273271,
+              "samples": 31
+            },
+            "channel": "COMMANDED_EQUIV_RATIO",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 2.054,
+              "fraction": 0.7947,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.817,
+              "long_gaps": [],
+              "max_gap_s": 2.054,
+              "missing_final_s": 0.19,
+              "missing_initial_s": 2.054,
+              "observations": 32,
+              "uncovered_s": 2.054
+            },
+            "in_required_tuple": true,
+            "kind": "pid",
+            "requested_hz": 4.0,
+            "status": "gap",
+            "trailing_hz": 3.99,
+            "transport_channel": "COMMANDED_EQUIV_RATIO"
+          },
+          {
+            "cadence": {
+              "hz": 3.998,
+              "median_interarrival_s": 0.250111,
+              "p95_interarrival_s": 0.273279,
+              "samples": 35
+            },
+            "channel": "FUEL_STATUS",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 1.068,
+              "fraction": 1.0,
+              "gap_threshold_s": 2.0,
+              "last_observed_at": 9.817,
+              "long_gaps": [],
+              "max_gap_s": 1.068,
+              "missing_final_s": 0.19,
+              "missing_initial_s": 1.068,
+              "observations": 36,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": true,
+            "kind": "pid",
+            "requested_hz": 4.0,
+            "status": "ok",
+            "trailing_hz": 4.0,
+            "transport_channel": "FUEL_STATUS"
+          },
+          {
+            "cadence": {
+              "hz": 1.008,
+              "median_interarrival_s": 0.991671,
+              "p95_interarrival_s": 1.060432,
+              "samples": 8
+            },
+            "channel": "INTAKE_TEMP",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 2.111,
+              "fraction": 1.0,
+              "gap_threshold_s": 5.0,
+              "last_observed_at": 9.871,
+              "long_gaps": [],
+              "max_gap_s": 2.111,
+              "missing_final_s": 0.136,
+              "missing_initial_s": 2.111,
+              "observations": 9,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "pid",
+            "requested_hz": 1.0,
+            "status": "ok",
+            "trailing_hz": 1.04,
+            "transport_channel": "INTAKE_TEMP"
+          },
+          {
+            "cadence": {
+              "hz": 1.025,
+              "median_interarrival_s": 0.975543,
+              "p95_interarrival_s": 1.05294,
+              "samples": 10
+            },
+            "channel": "SPEED",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 0.054,
+              "fraction": 1.0,
+              "gap_threshold_s": 5.0,
+              "last_observed_at": 9.563,
+              "long_gaps": [],
+              "max_gap_s": 1.053,
+              "missing_final_s": 0.444,
+              "missing_initial_s": 0.054,
+              "observations": 11,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "pid",
+            "requested_hz": 1.0,
+            "status": "ok",
+            "trailing_hz": 1.02,
+            "transport_channel": "SPEED"
+          },
+          {
+            "cadence": {
+              "hz": 1.015,
+              "median_interarrival_s": 0.985466,
+              "p95_interarrival_s": 1.012124,
+              "samples": 9
+            },
+            "channel": "COOLANT_TEMP",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 1.068,
+              "fraction": 1.0,
+              "gap_threshold_s": 5.0,
+              "last_observed_at": 9.326,
+              "long_gaps": [],
+              "max_gap_s": 1.068,
+              "missing_final_s": 0.681,
+              "missing_initial_s": 1.068,
+              "observations": 10,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "pid",
+            "requested_hz": 1.0,
+            "status": "ok",
+            "trailing_hz": 1.01,
+            "transport_channel": "COOLANT_TEMP"
+          },
+          {
+            "cadence": {
+              "hz": 1.016,
+              "median_interarrival_s": 0.98444,
+              "p95_interarrival_s": 1.011697,
+              "samples": 9
+            },
+            "channel": "SHORT_FUEL_TRIM_1",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 1.068,
+              "fraction": 1.0,
+              "gap_threshold_s": 5.0,
+              "last_observed_at": 9.555,
+              "long_gaps": [],
+              "max_gap_s": 1.068,
+              "missing_final_s": 0.452,
+              "missing_initial_s": 1.068,
+              "observations": 10,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "pid",
+            "requested_hz": 1.0,
+            "status": "ok",
+            "trailing_hz": 1.01,
+            "transport_channel": "SHORT_FUEL_TRIM_1"
+          },
+          {
+            "cadence": {
+              "hz": 1.025,
+              "median_interarrival_s": 0.975479,
+              "p95_interarrival_s": 1.041633,
+              "samples": 9
+            },
+            "channel": "SHORT_FUEL_TRIM_2",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 1.079,
+              "fraction": 1.0,
+              "gap_threshold_s": 5.0,
+              "last_observed_at": 9.563,
+              "long_gaps": [],
+              "max_gap_s": 1.079,
+              "missing_final_s": 0.444,
+              "missing_initial_s": 1.079,
+              "observations": 10,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "pid",
+            "requested_hz": 1.0,
+            "status": "ok",
+            "trailing_hz": 1.03,
+            "transport_channel": "SHORT_FUEL_TRIM_2"
+          },
+          {
+            "cadence": {
+              "hz": 1.025,
+              "median_interarrival_s": 0.97548,
+              "p95_interarrival_s": 1.041644,
+              "samples": 9
+            },
+            "channel": "LONG_FUEL_TRIM_1",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 1.079,
+              "fraction": 1.0,
+              "gap_threshold_s": 5.0,
+              "last_observed_at": 9.562,
+              "long_gaps": [],
+              "max_gap_s": 1.079,
+              "missing_final_s": 0.445,
+              "missing_initial_s": 1.079,
+              "observations": 10,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "pid",
+            "requested_hz": 1.0,
+            "status": "ok",
+            "trailing_hz": 1.03,
+            "transport_channel": "LONG_FUEL_TRIM_1"
+          },
+          {
+            "cadence": {
+              "hz": 1.025,
+              "median_interarrival_s": 0.975502,
+              "p95_interarrival_s": 1.041622,
+              "samples": 9
+            },
+            "channel": "LONG_FUEL_TRIM_2",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 1.079,
+              "fraction": 1.0,
+              "gap_threshold_s": 5.0,
+              "last_observed_at": 9.563,
+              "long_gaps": [],
+              "max_gap_s": 1.079,
+              "missing_final_s": 0.444,
+              "missing_initial_s": 1.079,
+              "observations": 10,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "pid",
+            "requested_hz": 1.0,
+            "status": "ok",
+            "trailing_hz": 1.03,
+            "transport_channel": "LONG_FUEL_TRIM_2"
+          },
+          {
+            "cadence": {
+              "hz": 0.995,
+              "median_interarrival_s": 1.005347,
+              "p95_interarrival_s": 1.01794,
+              "samples": 7
+            },
+            "channel": "EVAPORATIVE_PURGE",
+            "coverage": {
+              "clock_regressions": 0,
+              "eligible_s": 10.007,
+              "first_observed_at": 2.111,
+              "fraction": 1.0,
+              "gap_threshold_s": 5.0,
+              "last_observed_at": 9.072,
+              "long_gaps": [],
+              "max_gap_s": 2.111,
+              "missing_final_s": 0.935,
+              "missing_initial_s": 2.111,
+              "observations": 8,
+              "uncovered_s": 0.0
+            },
+            "in_required_tuple": false,
+            "kind": "pid",
+            "requested_hz": 1.0,
+            "status": "ok",
+            "trailing_hz": 0.99,
+            "transport_channel": "EVAPORATIVE_PURGE"
+          }
+        ],
+        "failures": [
+          {
+            "channels": [
+              "COMMANDED_EQUIV_RATIO"
+            ],
+            "clause": "acquisition_gap",
+            "detail": "on-cadence while observing, but silent for longer than the threshold",
+            "evidence": {
+              "COMMANDED_EQUIV_RATIO": {
+                "coverage_fraction": 0.7947,
+                "gap_threshold_s": 2.0,
+                "long_gaps": [],
+                "max_gap_s": 2.054,
+                "missing_final_s": 0.19,
+                "missing_initial_s": 2.054
+              }
+            }
+          },
+          {
+            "channels": [
+              "__tuple__"
+            ],
+            "clause": "acquisition_gap",
+            "detail": "complete tuples absent for longer than the threshold",
+            "evidence": {
+              "attempted": 40,
+              "clock_regressions": 0,
+              "complete": 32,
+              "eligible_s": 10.007,
+              "first_observed_at": 2.051,
+              "fraction": 0.795,
+              "gap_threshold_s": 2.0,
+              "incomplete": 8,
+              "last_observed_at": 9.816,
+              "long_gaps": [],
+              "max_gap_s": 2.051,
+              "max_tuple_skew_s": 0.125,
+              "member_misses": {
+                "COMMANDED_EQUIV_RATIO": 8,
+                "ENGINE_LOAD": 0,
+                "FUEL_STATUS": 4,
+                "O2_WR_LAMBDA_S1": 0,
+                "RPM": 0
+              },
+              "missing_final_s": 0.191,
+              "missing_initial_s": 2.051,
+              "observations": 32,
+              "persisted": 32,
+              "skew": {
+                "max_s": 0.0,
+                "p95_s": 0.0,
+                "rounds_with_all_members": 32
+              },
+              "skew_rejected": 0,
+              "uncovered_s": 2.051
+            }
+          }
+        ],
+        "interval": {
+          "elapsed_s": 10.007,
+          "ended_wall": 1788981940.852,
+          "generation_at_start": 2,
+          "intended_active_s": 10.007,
+          "pause_reasons": [],
+          "pause_windows": [],
+          "paused_s": 0,
+          "source": "live",
+          "started_wall": 1788981930.845
+        },
+        "losses": {
+          "dashboard": {
+            "counters": {
+              "broadcast.dropped_records": {
+                "delta": 0,
+                "scope": "dashboard",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "broadcast.errors": {
+                "delta": 0,
+                "scope": "dashboard",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "live.dropped_records": {
+                "delta": 0,
+                "scope": "dashboard",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "live.errors": {
+                "delta": 0,
+                "scope": "dashboard",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              }
+            },
+            "lost": 0,
+            "status": "verified",
+            "unverified": []
+          },
+          "derived": {
+            "counters": {
+              "dtc.dropped_records": {
+                "delta": 0,
+                "scope": "derived",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "dtc.errors": {
+                "delta": 0,
+                "scope": "derived",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "monitor.dropped_records": {
+                "delta": 0,
+                "scope": "derived",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "monitor.errors": {
+                "delta": 0,
+                "scope": "derived",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              }
+            },
+            "lost": 0,
+            "status": "verified",
+            "unverified": []
+          },
+          "recording": {
+            "counters": {
+              "can0.rx_dropped": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "can0.rx_over_errors": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 403,
+                "status": "verified",
+                "stop": 403
+              },
+              "ingest.dropped_records": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "ingest.errors": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "obd_collect.dropped_records": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "obd_collect.errors": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "storage.dropped_records": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              },
+              "storage.errors": {
+                "delta": 0,
+                "scope": "recording",
+                "start": 0,
+                "status": "verified",
+                "stop": 0
+              }
+            },
+            "lost": 0,
+            "status": "verified",
+            "unverified": []
+          }
+        },
+        "notes": [],
+        "persistence": {
+          "drain_timed_out": [],
+          "drain_unobserved": [],
+          "drained": [
+            "ingest",
+            "storage"
+          ],
+          "flush_error": null,
+          "flushed": true,
+          "generation_boundary": 3,
+          "loss_epoch_start": {
+            "counters": {
+              "broadcast.dropped_records": 0,
+              "broadcast.errors": 0,
+              "can0.rx_dropped": 0,
+              "can0.rx_over_errors": 403,
+              "dtc.dropped_records": 0,
+              "dtc.errors": 0,
+              "ingest.dropped_records": 0,
+              "ingest.errors": 0,
+              "live.dropped_records": 0,
+              "live.errors": 0,
+              "monitor.dropped_records": 0,
+              "monitor.errors": 0,
+              "obd_collect.dropped_records": 0,
+              "obd_collect.errors": 0,
+              "storage.dropped_records": 0,
+              "storage.errors": 0
+            },
+            "taken_at_monotonic": 3499.872,
+            "taken_at_wall": 1788981930.845
+          },
+          "loss_epoch_stop": {
+            "counters": {
+              "broadcast.dropped_records": 0,
+              "broadcast.errors": 0,
+              "can0.rx_dropped": 0,
+              "can0.rx_over_errors": 403,
+              "dtc.dropped_records": 0,
+              "dtc.errors": 0,
+              "ingest.dropped_records": 0,
+              "ingest.errors": 0,
+              "live.dropped_records": 0,
+              "live.errors": 0,
+              "monitor.dropped_records": 0,
+              "monitor.errors": 0,
+              "obd_collect.dropped_records": 0,
+              "obd_collect.errors": 0,
+              "storage.dropped_records": 0,
+              "storage.errors": 0
+            },
+            "taken_at_monotonic": 3509.915,
+            "taken_at_wall": 1788981940.887
+          },
+          "rows_on_disk": 5293,
+          "rows_on_disk_at_recompute": 5293,
+          "rows_written": 5293,
+          "scope": "stop"
+        },
+        "profile": "fuel-map",
+        "required_tuple": [
+          "RPM",
+          "ENGINE_LOAD",
+          "FUEL_STATUS",
+          "COMMANDED_EQUIV_RATIO",
+          "O2_WR_LAMBDA_S1"
+        ],
+        "schema_version": 2,
+        "scope": "stop",
+        "trailing": {
+          "hz": {
+            "COMMANDED_EQUIV_RATIO": 3.99,
+            "COOLANT_TEMP": 1.01,
+            "ENGINE_LOAD": 4.0,
+            "EVAPORATIVE_PURGE": 0.99,
+            "FUEL_STATUS": 4.0,
+            "INTAKE_TEMP": 1.04,
+            "LONG_FUEL_TRIM_1": 1.03,
+            "LONG_FUEL_TRIM_2": 1.03,
+            "MAF": 3.98,
+            "O2_WR_LAMBDA_S1": 4.0,
+            "RPM": 3.99,
+            "SHORT_FUEL_TRIM_1": 1.01,
+            "SHORT_FUEL_TRIM_2": 1.03,
+            "SPEED": 1.02,
+            "THROTTLE_POS": 4.02,
+            "TIMING_ADVANCE": 4.07
+          },
+          "max_gap_seconds": {
+            "COMMANDED_EQUIV_RATIO": 2.054,
+            "COOLANT_TEMP": 1.068,
+            "ENGINE_LOAD": 0.28,
+            "EVAPORATIVE_PURGE": 2.111,
+            "FUEL_STATUS": 1.068,
+            "INTAKE_TEMP": 2.111,
+            "LONG_FUEL_TRIM_1": 1.079,
+            "LONG_FUEL_TRIM_2": 1.079,
+            "MAF": 0.32,
+            "O2_WR_LAMBDA_S1": 0.28,
+            "RPM": 0.28,
+            "SHORT_FUEL_TRIM_1": 1.068,
+            "SHORT_FUEL_TRIM_2": 1.079,
+            "SPEED": 1.053,
+            "THROTTLE_POS": 0.296,
+            "TIMING_ADVANCE": 0.326
+          },
+          "observed_seconds": 4.925,
+          "window_s": 60.0
+        },
+        "tuple_rate_bound_hz": 3.989,
+        "tuples": {
+          "attempted": 40,
+          "cadence": {
+            "hz": 4.0,
+            "median_interarrival_s": 0.250031,
+            "p95_interarrival_s": 0.271599,
+            "samples": 31
+          },
+          "complete": 32,
+          "coverage": {
+            "clock_regressions": 0,
+            "eligible_s": 10.007,
+            "first_observed_at": 2.051,
+            "fraction": 0.795,
+            "gap_threshold_s": 2.0,
+            "last_observed_at": 9.816,
+            "long_gaps": [],
+            "max_gap_s": 2.051,
+            "missing_final_s": 0.191,
+            "missing_initial_s": 2.051,
+            "observations": 32,
+            "uncovered_s": 2.051
+          },
+          "incomplete": 8,
+          "max_tuple_skew_s": 0.125,
+          "member_misses": {
+            "COMMANDED_EQUIV_RATIO": 8,
+            "ENGINE_LOAD": 0,
+            "FUEL_STATUS": 4,
+            "O2_WR_LAMBDA_S1": 0,
+            "RPM": 0
+          },
+          "persisted": 32,
+          "rate_bound_hz": 3.989,
+          "required": [
+            "RPM",
+            "ENGINE_LOAD",
+            "FUEL_STATUS",
+            "COMMANDED_EQUIV_RATIO",
+            "O2_WR_LAMBDA_S1"
+          ],
+          "scheduled": null,
+          "skew": {
+            "max_s": 0.0,
+            "p95_s": 0.0,
+            "rounds_with_all_members": 32
+          },
+          "skew_rejected": 0,
+          "source": "persisted_rows"
+        },
+        "verdict": "fail"
+      },
+      "unverified_counters": [],
+      "verdict": "fail",
+      "with_adapter_ledger": {
+        "failures": [
+          "acquisition_gap",
+          "acquisition_gap"
+        ],
+        "losses_recording": {
+          "counters": {
+            "adapter.rx_dropped": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            },
+            "ingest.dropped_records": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            },
+            "ingest.errors": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            },
+            "obd_collect.dropped_records": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            },
+            "obd_collect.errors": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            },
+            "storage.dropped_records": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            },
+            "storage.errors": {
+              "delta": 0,
+              "scope": "recording",
+              "start": 0,
+              "status": "verified",
+              "stop": 0
+            }
+          },
+          "lost": 0,
+          "status": "verified",
+          "unverified": []
+        },
+        "note": "can0.* (unknown on this host) replaced by adapter.rx_dropped from the synthetic ledger (frames queued in a faulted adapter); the kernel layer remains unobserved until the Pi run",
+        "tuples": {
+          "attempted": 43,
+          "cadence": {
+            "hz": 4.0,
+            "median_interarrival_s": 0.250031,
+            "p95_interarrival_s": 0.271599,
+            "samples": 34
+          },
+          "complete": 35,
+          "coverage": {
+            "clock_regressions": 0,
+            "eligible_s": 10.007,
+            "first_observed_at": 2.051,
+            "fraction": 0.795,
+            "gap_threshold_s": 2.0,
+            "last_observed_at": 10.559,
+            "long_gaps": [],
+            "max_gap_s": 2.051,
+            "missing_final_s": 0.0,
+            "missing_initial_s": 2.051,
+            "observations": 35,
+            "uncovered_s": 2.051
+          },
+          "incomplete": 8,
+          "max_tuple_skew_s": 0.125,
+          "member_misses": {
+            "COMMANDED_EQUIV_RATIO": 8,
+            "ENGINE_LOAD": 0,
+            "FUEL_STATUS": 4,
+            "O2_WR_LAMBDA_S1": 0,
+            "RPM": 0
+          },
+          "persisted": 35,
+          "rate_bound_hz": 4.0,
+          "required": [
+            "RPM",
+            "ENGINE_LOAD",
+            "FUEL_STATUS",
+            "COMMANDED_EQUIV_RATIO",
+            "O2_WR_LAMBDA_S1"
+          ],
+          "scheduled": null,
+          "skew": {
+            "max_s": 0.0,
+            "p95_s": 0.0,
+            "rounds_with_all_members": 35
+          },
+          "skew_rejected": 0,
+          "source": "persisted_rows"
+        },
+        "verdict": "fail"
+      }
+    },
+    "rows": {
+      "by_source": {
+        "can": 2416,
+        "decoded": 4350,
+        "derived": 244,
+        "obd": 470
+      },
+      "can_by_id": {
+        "0x6A0": 2175,
+        "0x7E8": 241
+      },
+      "per_session_dir": {
+        "/tmp/_h5sessions-05/pi-tick05/fuel-map/2026-09-09T192525": 1938,
+        "/tmp/_h5sessions-05/pi-tick05/fuel-map/_capture-fuel-map-c10-pi-tick05-1788981930": 5542
+      },
+      "raw": 2886,
+      "total": 7480
+    },
+    "sequence_reconciliation": {
+      "adapter_dropped_on_fault": 0,
+      "adapter_pending_at_stop": 4,
+      "counted_drops": 0,
+      "delivered": 2175,
+      "delivered_distinct": 2175,
+      "duplicated": [],
+      "duplicated_count": 0,
+      "foreign_count": 0,
+      "generated": 2179,
+      "identity": "present_exactly_once + missing == delivered_distinct",
+      "identity_holds": true,
+      "missing": [],
+      "missing_count": 0,
+      "persisted_rows": 2175,
+      "present_exactly_once": 2175,
+      "status": "reconciled"
+    },
+    "timing": {
+      "cpu_memory": {
+        "cpu_percent_of_one_core": 83.48,
+        "max_rss_mb": 486.0,
+        "note": "process-wide, includes the harness itself; the Pi figure is a C10.10 measurement",
+        "source": "resource.getrusage(RUSAGE_SELF)",
+        "system_cpu_s": 0.362,
+        "user_cpu_s": 9.128
+      },
+      "event_loop_heartbeat_overshoot": {
+        "count": 966,
+        "interval_ms": 10.0,
+        "max_ms": 607.737,
+        "median_ms": 0.845,
+        "note": "delay beyond a 10 ms asyncio.sleep on the daemon loop",
+        "p95_ms": 24.294,
+        "p99_ms": 129.918,
+        "reservoir_capacity": 2048
+      },
+      "inference": {
+        "compute_failures": 0,
+        "interval_seconds": 0.5,
+        "lateness": {
+          "count": 32,
+          "last_ms": 273.203,
+          "max_ms": 273.203,
+          "median_ms": 0.754,
+          "p95_ms": 28.847
+        },
+        "missed_by_reason": {
+          "compute_busy": 6
+        },
+        "missed_ticks": 6,
+        "stages": {
+          "apply": {
+            "count": 26,
+            "last_ms": 0.34,
+            "max_ms": 1.204,
+            "median_ms": 0.375,
+            "p95_ms": 0.839
+          },
+          "behavior": {
+            "count": 26,
+            "last_ms": 0.58,
+            "max_ms": 1.089,
+            "median_ms": 0.624,
+            "p95_ms": 0.769
+          },
+          "compute": {
+            "count": 25,
+            "last_ms": 348.103,
+            "max_ms": 631.744,
+            "median_ms": 365.466,
+            "p95_ms": 616.961
+          },
+          "compute_wait": {
+            "count": 25,
+            "last_ms": 348.287,
+            "max_ms": 643.898,
+            "median_ms": 366.158,
+            "p95_ms": 620.37
+          },
+          "feature": {
+            "count": 26,
+            "last_ms": 106.51,
+            "max_ms": 150.648,
+            "median_ms": 116.486,
+            "p95_ms": 148.205
+          },
+          "isolation_forest": {
+            "count": 25,
+            "last_ms": 124.815,
+            "max_ms": 162.588,
+            "median_ms": 129.854,
+            "p95_ms": 148.75
+          },
+          "loop_occupancy": {
+            "count": 26,
+            "last_ms": 109.261,
+            "max_ms": 152.815,
+            "median_ms": 121.545,
+            "p95_ms": 151.199
+          },
+          "publish_derived": {
+            "count": 25,
+            "last_ms": 1.257,
+            "max_ms": 11.705,
+            "median_ms": 0.82,
+            "p95_ms": 8.218
+          },
+          "sequence": {
+            "count": 25,
+            "last_ms": 223.286,
+            "max_ms": 488.056,
+            "median_ms": 238.629,
+            "p95_ms": 469.154
+          },
+          "snapshot": {
+            "count": 26,
+            "last_ms": 108.921,
+            "max_ms": 152.41,
+            "median_ms": 120.837,
+            "p95_ms": 150.716
+          },
+          "total": {
+            "count": 26,
+            "last_ms": 457.614,
+            "max_ms": 756.797,
+            "median_ms": 487.564,
+            "p95_ms": 738.405
+          }
+        },
+        "stale_results_discarded": 0,
+        "ticks_completed": 26,
+        "ticks_scheduled": 32,
+        "window": 300
+      },
+      "isolation_forest_stub_calls": null,
+      "kernel_socket_counters": "unavailable (synthetic adapter)",
+      "power_thermal": "unavailable (workstation; no vcgencmd)",
+      "storage_growth": {
+        "bytes_on_disk": 96726,
+        "bytes_per_second_active": 8507.9,
+        "rows_on_disk": 7480,
+        "rows_per_second_active": 657.9
+      },
+      "storage_sink": {
+        "flushes": 5,
+        "last_write_ms": 1.5,
+        "last_write_records_per_second": 155347.3,
+        "max_batch_size": 351,
+        "max_flushing_write_ms": 22.197,
+        "max_write_ms": 144.753,
+        "records_processed": 7236,
+        "write_calls": 576
+      },
+      "wall_clock_steps": {
+        "attempts_used": 1,
+        "count": 0,
+        "note": "a host wall-clock step during the run invalidates every wall-stamped pairing and cadence figure; such runs are rerun by run_scenario_clean",
+        "steps": [],
+        "valid": true
+      },
+      "writer_flush_ms": {
+        "count": 9,
+        "max_ms": 20.03,
+        "median_ms": 12.887,
+        "p95_ms": 20.03,
+        "p99_ms": 20.03,
+        "reservoir_capacity": 2048
+      },
+      "writer_stalls_injected": 0
+    },
+    "transport": {
+      "batch_occupancy": {
+        "ecu_side": {
+          "mode01_batched_requests_seen": 95,
+          "mode22_batched_requests_seen": 0,
+          "mode22_single_requests_seen": 0
+        },
+        "resolved_plan_demand": {
+          "best_case_batched": 9.0,
+          "discovery": 0.0,
+          "session_control": 0.0,
+          "single_request_fallback": 40.0
+        },
+        "scheduler": {
+          "batched_pids_requested": 458,
+          "batched_requests": 95,
+          "channel_reads_per_second": 29.1,
+          "channel_reads_per_second_lifetime": 29.1,
+          "desyncs": 0,
+          "failures": 0,
+          "max_pids": 6,
+          "mean_pids_per_batch": 4.82,
+          "mode22": {
+            "batched_requests": 0,
+            "desyncs": 0,
+            "failures": 0,
+            "fallbacks": 0,
+            "known_response_widths": {
+              "0x1101": {
+                "bytes": 1,
+                "source": "2026-05-11T222447 frames.log:418 single-DID response payload"
+              },
+              "0x1208": {
+                "bytes": 2,
+                "source": "2026-08-07T005351 single-DID capture payloads"
+              },
+              "0x1219": {
+                "bytes": 2,
+                "source": "2026-05-16T214006 four-state single-DID capture"
+              }
+            },
+            "max_dids": 1,
+            "mean_dids_per_batch": null,
+            "members_requested": 0
+          },
+          "size_narrowings": 0
+        }
+      },
+      "channel_cadence": [
+        {
+          "achieved_hz": 104.734,
+          "channel": "0X6A0",
+          "clock": "stored_timestamp (adapter handout)",
+          "interarrival": {
+            "max_s": 0.256853,
+            "median_s": 0.009548,
+            "n": 1577,
+            "p95_s": 0.014941,
+            "p99_s": 0.027065
+          },
+          "kind": "broadcast",
+          "observations": 1578,
+          "requested_hz": 100.0
+        },
+        {
+          "achieved_hz": 716.846,
+          "channel": "0X7E8",
+          "clock": "stored_timestamp (adapter handout)",
+          "interarrival": {
+            "max_s": 0.281302,
+            "median_s": 0.001395,
+            "n": 210,
+            "p95_s": 0.243907,
+            "p99_s": 0.272702
+          },
+          "kind": "broadcast",
+          "observations": 211,
+          "requested_hz": null
+        },
+        {
+          "achieved_hz": 3.998,
+          "channel": "COMMANDED_EQUIV_RATIO",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.295548,
+            "median_s": 0.250121,
+            "n": 34,
+            "p95_s": 0.275047,
+            "p99_s": 0.290896
+          },
+          "kind": "pid",
+          "observations": 35,
+          "requested_hz": 4.0
+        },
+        {
+          "achieved_hz": 1.015,
+          "channel": "COOLANT_TEMP",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 1.012132,
+            "median_s": 0.985118,
+            "n": 10,
+            "p95_s": 1.007993,
+            "p99_s": 1.011304
+          },
+          "kind": "pid",
+          "observations": 11,
+          "requested_hz": 1.0
+        },
+        {
+          "achieved_hz": 3.998,
+          "channel": "ENGINE_LOAD",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.295548,
+            "median_s": 0.250121,
+            "n": 42,
+            "p95_s": 0.280272,
+            "p99_s": 0.289768
+          },
+          "kind": "pid",
+          "observations": 43,
+          "requested_hz": 4.0
+        },
+        {
+          "achieved_hz": 0.999,
+          "channel": "EVAPORATIVE_PURGE",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 1.018711,
+            "median_s": 1.000543,
+            "n": 8,
+            "p95_s": 1.014285,
+            "p99_s": 1.017826
+          },
+          "kind": "pid",
+          "observations": 9,
+          "requested_hz": 1.0
+        },
+        {
+          "achieved_hz": 3.998,
+          "channel": "FUEL_STATUS",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.295548,
+            "median_s": 0.250121,
+            "n": 38,
+            "p95_s": 0.273077,
+            "p99_s": 0.290332
+          },
+          "kind": "pid",
+          "observations": 39,
+          "requested_hz": 4.0
+        },
+        {
+          "achieved_hz": 1.017,
+          "channel": "INTAKE_TEMP",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 1.036221,
+            "median_s": 0.983179,
+            "n": 8,
+            "p95_s": 1.024882,
+            "p99_s": 1.033953
+          },
+          "kind": "pid",
+          "observations": 9,
+          "requested_hz": 1.0
+        },
+        {
+          "achieved_hz": 1.022,
+          "channel": "LONG_FUEL_TRIM_1",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 1.037408,
+            "median_s": 0.97806,
+            "n": 10,
+            "p95_s": 1.029507,
+            "p99_s": 1.035828
+          },
+          "kind": "pid",
+          "observations": 11,
+          "requested_hz": 1.0
+        },
+        {
+          "achieved_hz": 1.02,
+          "channel": "LONG_FUEL_TRIM_2",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 1.037408,
+            "median_s": 0.980871,
+            "n": 10,
+            "p95_s": 1.029507,
+            "p99_s": 1.035828
+          },
+          "kind": "pid",
+          "observations": 11,
+          "requested_hz": 1.0
+        },
+        {
+          "achieved_hz": 3.984,
+          "channel": "MAF",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.349803,
+            "median_s": 0.250993,
+            "n": 42,
+            "p95_s": 0.322789,
+            "p99_s": 0.340464
+          },
+          "kind": "pid",
+          "observations": 43,
+          "requested_hz": 4.0
+        },
+        {
+          "achieved_hz": 3.998,
+          "channel": "O2_WR_LAMBDA_S1",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.295548,
+            "median_s": 0.250121,
+            "n": 42,
+            "p95_s": 0.280272,
+            "p99_s": 0.289768
+          },
+          "kind": "pid",
+          "observations": 43,
+          "requested_hz": 4.0
+        },
+        {
+          "achieved_hz": 3.998,
+          "channel": "RPM",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.295548,
+            "median_s": 0.250121,
+            "n": 42,
+            "p95_s": 0.280272,
+            "p99_s": 0.289768
+          },
+          "kind": "pid",
+          "observations": 43,
+          "requested_hz": 4.0
+        },
+        {
+          "achieved_hz": 1.018,
+          "channel": "SHORT_FUEL_TRIM_1",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 1.007862,
+            "median_s": 0.982389,
+            "n": 10,
+            "p95_s": 1.007441,
+            "p99_s": 1.007778
+          },
+          "kind": "pid",
+          "observations": 11,
+          "requested_hz": 1.0
+        },
+        {
+          "achieved_hz": 1.02,
+          "channel": "SHORT_FUEL_TRIM_2",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 1.037408,
+            "median_s": 0.980871,
+            "n": 10,
+            "p95_s": 1.029507,
+            "p99_s": 1.035828
+          },
+          "kind": "pid",
+          "observations": 11,
+          "requested_hz": 1.0
+        },
+        {
+          "achieved_hz": 1.011,
+          "channel": "SPEED",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 1.04585,
+            "median_s": 0.989553,
+            "n": 11,
+            "p95_s": 1.041629,
+            "p99_s": 1.045006
+          },
+          "kind": "pid",
+          "observations": 12,
+          "requested_hz": 1.0
+        },
+        {
+          "achieved_hz": 4.001,
+          "channel": "THROTTLE_POS",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.299108,
+            "median_s": 0.249936,
+            "n": 42,
+            "p95_s": 0.288117,
+            "p99_s": 0.296793
+          },
+          "kind": "pid",
+          "observations": 43,
+          "requested_hz": 4.0
+        },
+        {
+          "achieved_hz": 3.997,
+          "channel": "TIMING_ADVANCE",
+          "clock": "acquired_at",
+          "interarrival": {
+            "max_s": 0.335006,
+            "median_s": 0.250196,
+            "n": 42,
+            "p95_s": 0.326071,
+            "p99_s": 0.33321
+          },
+          "kind": "pid",
+          "observations": 43,
+          "requested_hz": 4.0
+        }
+      ],
+      "generation_events": [],
+      "service_accounting": {
+        "by_tier": {
+          "fast": {
+            "active_count": 7,
+            "backed_off_count": 0,
+            "configured_rate_hz": 4.0,
+            "negative_responses": 0,
+            "request_count": 7,
+            "requests_sent": 302,
+            "response_rate": 1.0,
+            "responses": 302,
+            "timeouts": 0
+          },
+          "medium": {
+            "active_count": 23,
+            "backed_off_count": 0,
+            "configured_rate_hz": 4.0,
+            "negative_responses": 0,
+            "request_count": 23,
+            "requests_sent": 167,
+            "response_rate": 1.0,
+            "responses": 167,
+            "timeouts": 0
+          },
+          "on_demand": {
+            "active_count": 0,
+            "backed_off_count": 0,
+            "configured_rate_hz": 0.0,
+            "negative_responses": 0,
+            "request_count": 0,
+            "requests_sent": 0,
+            "response_rate": null,
+            "responses": 0,
+            "timeouts": 0
+          },
+          "slow": {
+            "active_count": 1,
+            "backed_off_count": 0,
+            "configured_rate_hz": 1.0,
+            "negative_responses": 0,
+            "request_count": 1,
+            "requests_sent": 1,
+            "response_rate": 1.0,
+            "responses": 1,
+            "timeouts": 0
+          }
+        },
+        "deferred": [
+          {
+            "channel": "DID_1101",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "DID_1110",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "DID_1135",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "DID_1139",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "DID_113A",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "DID_1163",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "DID_1208",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "DID_1209",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "DID_120F",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "DID_1219",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "DID_1225",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "DID_1226",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "DID_123F",
+            "kind": "did",
+            "reason": "profile_without_mode22",
+            "verdict": "ineligible"
+          },
+          {
+            "channel": "RUN_TIME",
+            "kind": "pid",
+            "reason": "not_selected",
+            "verdict": "ineligible"
+          }
+        ],
+        "did_profile": {
+          "cycle": {
+            "cross_mode_separation_s": null,
+            "cycle_duration_s": null,
+            "cycle_feasible": null,
+            "cycle_seconds": null,
+            "cycles_missed": 0,
+            "cycles_started": 0,
+            "did_shortfall": 0,
+            "mode01_recovered_age_s": null,
+            "mode01_recovery_pending": false,
+            "mode01_shortfall": 0,
+            "occupancy_s": null,
+            "plan": null,
+            "timing_policy": "interval",
+            "transition_latency_s": {
+              "entry_to_did": null,
+              "exit_to_mode01": null
+            }
+          },
+          "did_request_count": 13,
+          "fast_exit_failures": 0,
+          "fast_exit_retry_in_seconds": 0.0,
+          "fast_exit_supported": true,
+          "fast_exits": 1,
+          "keepalives_sent": 0,
+          "last_exit_nrc": null,
+          "last_exit_nrc_name": null,
+          "next_window_in_seconds": 0.0,
+          "phase": "mode01",
+          "session": "0xC0",
+          "session_failures": 0,
+          "window_interval_seconds": 60.0,
+          "window_max_seconds": 10.0,
+          "windows_completed": 0,
+          "windows_opened": 0
+        },
+        "did_profile_note": "last scheduler snapshot before the stop boundary (the boundary resets cycle accounting); may lag the stop by up to one metrics interval",
+        "ecu": {
+          "did_batch_requests": 0,
+          "did_responses": 0,
+          "did_single_requests": 0,
+          "lapses": 0,
+          "mode01_answered": 107,
+          "mode01_batch_requests": 95,
+          "session_changes": 1,
+          "session_requests": 1,
+          "support_probes": 0
+        },
+        "frames_delivered_by_responder": {
+          "broadcast": 2175,
+          "engine_ecu": 241
+        },
+        "reconnect_attempts": 0,
+        "requests_on_wire_by_service": {
+          "flow_control": 81,
+          "mode01": 12,
+          "mode01_batched": 95,
+          "session_control": 1
+        },
+        "scheduler_last_attempt": {
+          "batching": {
+            "batched_pids_requested": 458,
+            "batched_requests": 95,
+            "channel_reads_per_second": 29.1,
+            "channel_reads_per_second_lifetime": 29.1,
+            "desyncs": 0,
+            "failures": 0,
+            "max_pids": 6,
+            "mean_pids_per_batch": 4.82,
+            "mode22": {
+              "batched_requests": 0,
+              "desyncs": 0,
+              "failures": 0,
+              "fallbacks": 0,
+              "known_response_widths": {
+                "0x1101": {
+                  "bytes": 1,
+                  "source": "2026-05-11T222447 frames.log:418 single-DID response payload"
+                },
+                "0x1208": {
+                  "bytes": 2,
+                  "source": "2026-08-07T005351 single-DID capture payloads"
+                },
+                "0x1219": {
+                  "bytes": 2,
+                  "source": "2026-05-16T214006 four-state single-DID capture"
+                }
+              },
+              "max_dids": 1,
+              "mean_dids_per_batch": null,
+              "members_requested": 0
+            },
+            "size_narrowings": 0
+          },
+          "bus_budget_requests_per_second": 20.0,
+          "bus_errors": 0,
+          "discovery": {
+            "cache_version": 2,
+            "deferred_reason": null,
+            "items": {},
+            "key": null,
+            "pending": [],
+            "requests_spent": 0,
+            "seconds_spent": 0
+          },
+          "negative_responses": 0,
+          "readings_emitted": 470,
+          "request_timeouts": 0,
+          "requests_sent": 108,
+          "resolved_plan": {
+            "aliases_deduplicated": 0,
+            "batch_max": {
+              "mode01": 6,
+              "mode22": 1
+            },
+            "best_case_feasible": true,
+            "bus_budget_requests_per_second": 20.0,
+            "channel_reads_per_second": 40.0,
+            "complete_tuples_per_second": 4.0,
+            "decoded_rows_per_second": 40.0,
+            "diagnostic_requests_per_second": {
+              "best_case_batched": 9.0,
+              "discovery": 0.0,
+              "session_control": 0.0,
+              "single_request_fallback": 40.0
+            },
+            "fallback_feasible": false,
+            "member_count": 16,
+            "members": [
+              {
+                "capture_selected": true,
+                "channel": "FUEL_STATUS",
+                "configured_rate_hz": 4.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x0003",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "FUEL_STATUS",
+                "rate_hz": 4.0,
+                "request_id": "0x7DF",
+                "required": true,
+                "response_payload_bytes": 2,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "ENGINE_LOAD",
+                "configured_rate_hz": 4.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x0004",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "ENGINE_LOAD",
+                "rate_hz": 4.0,
+                "request_id": "0x7DF",
+                "required": true,
+                "response_payload_bytes": 1,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "COOLANT_TEMP",
+                "configured_rate_hz": 1.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x0005",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "COOLANT_TEMP",
+                "rate_hz": 1.0,
+                "request_id": "0x7DF",
+                "required": false,
+                "response_payload_bytes": 1,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "SHORT_FUEL_TRIM_1",
+                "configured_rate_hz": 1.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x0006",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "SHORT_FUEL_TRIM_1",
+                "rate_hz": 1.0,
+                "request_id": "0x7DF",
+                "required": false,
+                "response_payload_bytes": 1,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "LONG_FUEL_TRIM_1",
+                "configured_rate_hz": 1.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x0007",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "LONG_FUEL_TRIM_1",
+                "rate_hz": 1.0,
+                "request_id": "0x7DF",
+                "required": false,
+                "response_payload_bytes": 1,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "SHORT_FUEL_TRIM_2",
+                "configured_rate_hz": 1.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x0008",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "SHORT_FUEL_TRIM_2",
+                "rate_hz": 1.0,
+                "request_id": "0x7DF",
+                "required": false,
+                "response_payload_bytes": 1,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "LONG_FUEL_TRIM_2",
+                "configured_rate_hz": 1.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x0009",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "LONG_FUEL_TRIM_2",
+                "rate_hz": 1.0,
+                "request_id": "0x7DF",
+                "required": false,
+                "response_payload_bytes": 1,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "RPM",
+                "configured_rate_hz": 4.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x000C",
+                "kind": "pid",
+                "priority": true,
+                "profile_channel": "RPM",
+                "rate_hz": 4.0,
+                "request_id": "0x7DF",
+                "required": true,
+                "response_payload_bytes": 2,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "SPEED",
+                "configured_rate_hz": 1.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x000D",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "SPEED",
+                "rate_hz": 1.0,
+                "request_id": "0x7DF",
+                "required": false,
+                "response_payload_bytes": 1,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "TIMING_ADVANCE",
+                "configured_rate_hz": 4.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x000E",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "TIMING_ADVANCE",
+                "rate_hz": 4.0,
+                "request_id": "0x7DF",
+                "required": false,
+                "response_payload_bytes": 1,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "INTAKE_TEMP",
+                "configured_rate_hz": 1.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x000F",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "INTAKE_TEMP",
+                "rate_hz": 1.0,
+                "request_id": "0x7DF",
+                "required": false,
+                "response_payload_bytes": 1,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "MAF",
+                "configured_rate_hz": 4.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x0010",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "MAF",
+                "rate_hz": 4.0,
+                "request_id": "0x7DF",
+                "required": false,
+                "response_payload_bytes": 2,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "THROTTLE_POS",
+                "configured_rate_hz": 4.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x0011",
+                "kind": "pid",
+                "priority": true,
+                "profile_channel": "THROTTLE_POS",
+                "rate_hz": 4.0,
+                "request_id": "0x7DF",
+                "required": false,
+                "response_payload_bytes": 1,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "O2_WR_LAMBDA_S1",
+                "configured_rate_hz": 4.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x0024",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "O2_WR_LAMBDA_S1",
+                "rate_hz": 4.0,
+                "request_id": "0x7DF",
+                "required": true,
+                "response_payload_bytes": 4,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "EVAPORATIVE_PURGE",
+                "configured_rate_hz": 1.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x002E",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "EVAPORATIVE_PURGE",
+                "rate_hz": 1.0,
+                "request_id": "0x7DF",
+                "required": false,
+                "response_payload_bytes": 1,
+                "service": "0x01"
+              },
+              {
+                "capture_selected": true,
+                "channel": "COMMANDED_EQUIV_RATIO",
+                "configured_rate_hz": 4.0,
+                "decoded_rows_per_read": 1,
+                "identifier": "0x0044",
+                "kind": "pid",
+                "priority": false,
+                "profile_channel": "COMMANDED_EQUIV_RATIO",
+                "rate_hz": 4.0,
+                "request_id": "0x7DF",
+                "required": true,
+                "response_payload_bytes": 2,
+                "service": "0x01"
+              }
+            ],
+            "priority_feasible": true,
+            "priority_requests_per_second_fallback": 8.0,
+            "priority_source": "collection",
+            "raw_frames_per_second": {
+              "best_case_batched": 32.0,
+              "estimate_complete": true,
+              "single_request_fallback": 80.0,
+              "unknown_response_width_channels": []
+            }
+          },
+          "response_rate": 4.3519,
+          "rounds": {
+            "complete": 48,
+            "generation": 3,
+            "incomplete": 0,
+            "last_skew_s": 0.007107,
+            "open": null,
+            "period_s": 0.25,
+            "skew_max_s": 0.257985,
+            "skipped": 0,
+            "started": 48
+          },
+          "session_control": {
+            "channel_requests_sent": 107,
+            "channel_response_rate": 4.3925,
+            "negative_responses": 0,
+            "responses": 1,
+            "seconds": 0.0053,
+            "sent": 1,
+            "timeouts": 0
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  "generated_at": "2026-09-09T19:25:43.183464+00:00",
+  "git_rev": "09ba604d",
+  "headline": {
+    "batch_occupancy": {
+      "batched_requests": 95,
+      "mean_pids_per_batch": 4.82
+    },
+    "ecu_batches_seen": {
+      "mode01_batched_requests_seen": 95,
+      "mode22_batched_requests_seen": 0,
+      "mode22_single_requests_seen": 0
+    },
+    "expected_failures": [],
+    "expected_failures_any": [],
+    "expected_failures_met": true,
+    "expected_failures_seen": [],
+    "heartbeat_p99_ms": 129.918,
+    "inference": {
+      "feature_p95_ms": 148.205,
+      "lateness_max_ms": 273.203,
+      "lateness_p95_ms": 28.847,
+      "missed_ticks": 6,
+      "ticks_completed": 26,
+      "ticks_scheduled": 32
+    },
+    "known_answer": [
+      {
+        "outcome": "agrees_1to1",
+        "pair": "can:SYNTH_RPM ~ obd:RPM",
+        "slope": 1.00019
+      },
+      {
+        "outcome": "differs_as_expected",
+        "pair": "can:SYNTH_RPM_HALF ~ obd:RPM",
+        "slope": 2.00038
+      },
+      {
+        "outcome": "refused",
+        "pair": "can:SYNTH_SPEED ~ obd:SPEED",
+        "slope": null
+      }
+    ],
+    "limiting_stage": "inference_loop",
+    "loss_identity_holds": true,
+    "quality_failures": [
+      "acquisition_gap",
+      "acquisition_gap"
+    ],
+    "quality_verdict": "fail",
+    "quality_verdict_with_adapter_ledger": "fail",
+    "sequence_missing": 0,
+    "sequence_reconciliation": "reconciled",
+    "storage_dropped": 0,
+    "tuple_skew_max_s": 0.0,
+    "tuples_attempted": 43,
+    "tuples_complete": 35
+  },
+  "label": "pi-tick05",
+  "provenance": {
+    "collector_spec": {
+      "batch_max_pids": 6,
+      "did_batch_max_dids": 1,
+      "did_response_widths_known": 3,
+      "did_session": {
+        "cycle_seconds": null,
+        "exit_grace_seconds": 0.05,
+        "exit_session": 129,
+        "keepalive_seconds": 2.0,
+        "lapse_seconds": 5.0,
+        "session": 192,
+        "window_interval_seconds": 60.0,
+        "window_max_seconds": 10.0
+      },
+      "dids": [
+        "ECM_RPM",
+        "ECM_AF_SENSOR_V_B1",
+        "ECM_AF_SENSOR_V_B2",
+        "ECM_INJECTOR_PW_B1",
+        "ECM_INTAKE_CAM_ANGLE_MEASURED",
+        "ECM_INTAKE_CAM_ANGLE_COMMANDED",
+        "ECM_INTAKE_CAM_ANGLE_MEASURED_B",
+        "ECM_INTAKE_VVT_SOLENOID_DUTY",
+        "ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2",
+        "ECM_THROTTLE_POS_SENSOR_1",
+        "ECM_COOLANT_TEMP",
+        "ECM_INTAKE_AIR_TEMP",
+        "ECM_MAF_GPS"
+      ],
+      "dtc_poll_interval_seconds": 0.0,
+      "pids": [
+        "FUEL_STATUS",
+        "ENGINE_LOAD",
+        "COOLANT_TEMP",
+        "SHORT_FUEL_TRIM_1",
+        "LONG_FUEL_TRIM_1",
+        "SHORT_FUEL_TRIM_2",
+        "LONG_FUEL_TRIM_2",
+        "RPM",
+        "SPEED",
+        "TIMING_ADVANCE",
+        "INTAKE_TEMP",
+        "MAF",
+        "THROTTLE_POS",
+        "RUN_TIME",
+        "O2_WR_LAMBDA_S1",
+        "EVAPORATIVE_PURGE",
+        "BAROMETRIC_PRESSURE",
+        "COMMANDED_EQUIV_RATIO"
+      ],
+      "poll_rate_hz": 1.0,
+      "priority_channels": [
+        "RPM",
+        "THROTTLE_POS"
+      ],
+      "request_timeout_seconds": 0.25
+    },
+    "components": {
+      "collector": "canable",
+      "dashboard_broadcast": true,
+      "decode_storage": true,
+      "derived_channels": true,
+      "dtc_sink": true,
+      "elm327": "not_exercised: needs the ELM327-emulator serial integration tier",
+      "gps": false,
+      "hardware_adapter": "synthetic",
+      "inference_loop": true,
+      "kernel_counters": "unavailable (no can0 on this host)",
+      "live_feature_source": true,
+      "monitor_sink": true
+    },
+    "duration_s": {
+      "armed_to_end": 11.369,
+      "declared": 10.0,
+      "start_to_end": 16.484
+    },
+    "git": {
+      "describe": "09ba604d-dirty",
+      "sha": "09ba604da2f3086440eea173e9da6faa05236134",
+      "short": "09ba604d",
+      "worktree": "/home/canary/canary"
+    },
+    "hardware": {
+      "adapter": "synthetic",
+      "bus": "SyntheticEcu on the real clock; ECU latency is a sleep"
+    },
+    "models": {
+      "isolation_forest": {
+        "status": "artifact",
+        "version": "isolation_forest_2026-07-27T045036.161167Z"
+      },
+      "lstm_autoencoder": {
+        "status": "artifact",
+        "version": "lstm_autoencoder_2026-07-27T045351.620955Z"
+      }
+    },
+    "power_thermal": "unavailable (workstation)",
+    "profile_fields_unsupported_by_this_tree": [],
+    "profile_snapshot": {
+      "behavior_model_recipes": [],
+      "broadcast_decode": true,
+      "builtin_revision": 0,
+      "bus_budget_override": 20.0,
+      "capacity_evidence": "C10 synthetic-bus workload; no hardware capacity is claimed here.",
+      "corpus_eligible": false,
+      "description": "C10 synthetic workload: fuel-map",
+      "did_continuous": false,
+      "did_cycle_seconds": null,
+      "did_interval_seconds": null,
+      "expected_total_demand_hz": null,
+      "experimental": false,
+      "max_tuple_skew_s": null,
+      "min_achieved_rate_hz": 3.0,
+      "mode01": {
+        "COMMANDED_EQUIV_RATIO": 1.0,
+        "COOLANT_TEMP": 0.25,
+        "ENGINE_LOAD": 1.0,
+        "EVAPORATIVE_PURGE": 0.25,
+        "FUEL_STATUS": 1.0,
+        "INTAKE_TEMP": 0.25,
+        "LONG_FUEL_TRIM_1": 0.25,
+        "LONG_FUEL_TRIM_2": 0.25,
+        "MAF": 1.0,
+        "O2_WR_LAMBDA_S1": 1.0,
+        "RPM": 1.0,
+        "SHORT_FUEL_TRIM_1": 0.25,
+        "SHORT_FUEL_TRIM_2": 0.25,
+        "SPEED": 0.25,
+        "THROTTLE_POS": 1.0,
+        "TIMING_ADVANCE": 1.0
+      },
+      "mode01_enabled": true,
+      "mode22": [],
+      "mode22_enabled": true,
+      "mode22_rate_weights": {},
+      "name": "fuel-map",
+      "operator_modified": false,
+      "priority_channels": null,
+      "required_tuple": [
+        "RPM",
+        "ENGINE_LOAD",
+        "FUEL_STATUS",
+        "COMMANDED_EQUIV_RATIO",
+        "O2_WR_LAMBDA_S1"
+      ],
+      "requires_tune_revision": false,
+      "round_timestamps": true,
+      "storage_prefix": "_capture-fuel-map",
+      "target_rate_hz": 4.0
+    },
+    "runtime": {
+      "cpu_count": 4,
+      "dependencies": {
+        "numpy": "2.4.5",
+        "pandas": "3.0.3",
+        "pyarrow": "24.0.0",
+        "pydantic": "2.13.4",
+        "python-can": "4.6.1",
+        "scikit-learn": "1.8.0",
+        "torch": "2.12.0+cpu"
+      },
+      "hostname": "canarypi",
+      "platform": "Linux-6.18.29+rpt-rpi-2712-aarch64-with-glibc2.41",
+      "python": "3.13.5"
+    },
+    "sessions": {
+      "all_session_dirs": [
+        "/tmp/_h5sessions-05/pi-tick05/fuel-map/2026-09-09T192525",
+        "/tmp/_h5sessions-05/pi-tick05/fuel-map/_capture-fuel-map-c10-pi-tick05-1788981930"
+      ],
+      "bindings": "/tmp/h5scratch-05/fuel-map/synthetic_bindings.yaml",
+      "capture_dir": "/tmp/_h5sessions-05/pi-tick05/fuel-map/_capture-fuel-map-c10-pi-tick05-1788981930",
+      "replay_source": null,
+      "replay_speed": null
+    },
+    "spec_fields_unsupported_by_this_tree": [],
+    "timestamps": {
+      "armed_wall": 1788981930.845103,
+      "basis": {
+        "can_rows": "stored timestamp = adapter handout instant",
+        "inference": "monotonic deadline grid; rows stamped datetime.now(UTC)",
+        "obd_rows": "acquired_at (adapter handout stamp, 'kernel' when within 5 s of time.time()) with presentation timestamp = round wall_start under round_timestamps",
+        "replay": "rows rebased to emit time; acquired_at shifted by the same offset"
+      },
+      "ended_wall": 1788981942.2140605,
+      "started_wall": 1788981925.7303834
+    },
+    "vehicle": {
+      "ecu": "ScriptedEcu (tests/capture_round_fakes) extended by SyntheticEcu",
+      "make_model_year": "Nissan Xterra 2008",
+      "profile_slug": "nissan-xterra-2008"
+    },
+    "warmup_s": 5.0,
+    "workload": {
+      "broadcast": {
+        "burst_interval_s": 2.5,
+        "burst_size": 100,
+        "rate_hz": 100.0
+      },
+      "duration_s": 10.0,
+      "ecu": {
+        "latency": 0.005
+      },
+      "expected_failures": [],
+      "expected_failures_any": [],
+      "fault_at_elapsed_s": null,
+      "inference_tick_s": 0.5,
+      "kind": "canable",
+      "name": "fuel-map",
+      "notes": "",
+      "profile": {
+        "broadcast_decode": true,
+        "bus_budget_override": 20.0,
+        "capacity_evidence": "C10 synthetic-bus workload; no hardware capacity is claimed here.",
+        "corpus_eligible": false,
+        "description": "C10 synthetic workload: fuel-map",
+        "min_achieved_rate_hz": 3.0,
+        "mode01": {
+          "COMMANDED_EQUIV_RATIO": 1.0,
+          "COOLANT_TEMP": 0.25,
+          "ENGINE_LOAD": 1.0,
+          "EVAPORATIVE_PURGE": 0.25,
+          "FUEL_STATUS": 1.0,
+          "INTAKE_TEMP": 0.25,
+          "LONG_FUEL_TRIM_1": 0.25,
+          "LONG_FUEL_TRIM_2": 0.25,
+          "MAF": 1.0,
+          "O2_WR_LAMBDA_S1": 1.0,
+          "RPM": 1.0,
+          "SHORT_FUEL_TRIM_1": 0.25,
+          "SHORT_FUEL_TRIM_2": 0.25,
+          "SPEED": 0.25,
+          "THROTTLE_POS": 1.0,
+          "TIMING_ADVANCE": 1.0
+        },
+        "name": "fuel-map",
+        "required_tuple": [
+          "RPM",
+          "ENGINE_LOAD",
+          "FUEL_STATUS",
+          "COMMANDED_EQUIV_RATIO",
+          "O2_WR_LAMBDA_S1"
+        ],
+        "round_timestamps": true,
+        "storage_prefix": "_capture-fuel-map",
+        "target_rate_hz": 4.0
+      },
+      "queue_max_size": 10000,
+      "required_evidence": [
+        "complete required fueling tuples",
+        "actual skew",
+        "mixed-rate context",
+        "batch occupancy"
+      ],
+      "spec_overrides": {
+        "batch_max_pids": 6
+      },
+      "storage_stall": null,
+      "table_row": "Fuel-map",
+      "timeline": [],
+      "warmup_s": 5.0
+    }
+  },
+  "report": "sustained_validation",
+  "scenario": "fuel-map",
+  "schema_version": 1,
+  "table_row": "Fuel-map"
+}

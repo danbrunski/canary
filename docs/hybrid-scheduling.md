@@ -229,3 +229,34 @@ Not attempted here. On the Pi, with the daemon on this commit:
    near zero **and** the persisted rows show it; record the numbers in this
    file and only then drop `experimental` from the profile. Keep it
    experimental otherwise and record what was achieved.
+
+
+## Measured on the truck (C04.12, 2026-09-09)
+
+Phase `engine_running`, warm idle (coolant 91 °C), 300 s,
+`_capture-tuning-hybrid-research-2026-09-09T190901`. Full evidence:
+[`data/analyses/2026-09-09-pending-hardware.md`](../data/analyses/2026-09-09-pending-hardware.md).
+
+**The 4 Hz claim is denied and the profile stays `experimental`.**
+
+The cycle is infeasible *by plan*, reported on arming before any timing was
+taken: 11 Mode 01 + 9 DID + 2 session requests at 90 req/s plus 0.05 s grace
+need **0.294 s** against a 0.250 s cycle — short by 0.044 s,
+`cycle_feasible=false`. Per the procedure the budget was not raised.
+
+| quantity | measured | needed for the claim |
+|---|---:|---|
+| `cycle_duration_s` median | **0.510 s** (≈1.96 Hz) | ≈ 0.25 s |
+| `cycle_duration_s` p95 / max | 0.76 / 2.09 s | – |
+| cycles started / missed | 590 / **760** | missed ≈ 0 |
+| `mode01_shortfall` / `did_shortfall` | 1,966 / 0 | – |
+| cross-mode separation median | 0.43 s | – |
+
+Persisted rows (`capture_quality.json`, verdict `fail`) — RPM 3.307 Hz at
+coverage 0.599 (max gap 45.1 s), ECM_RPM 1.953 Hz at 0.634 (max gap 26.9 s).
+Against the 2026-08-07 drive (Mode 01 1.46 Hz, DIDs 0.90 Hz, 0.341 s
+separation) that is **2.26× and 2.17×** — a real gain, still short of 4 Hz.
+
+The binding constraint on the *achieved* side is not the ECM: it answered
+97.6 % of requests. It is the daemon's inference loop holding the event loop
+(C08.12 below / H5), which also produced the 27–60 s coverage gaps.

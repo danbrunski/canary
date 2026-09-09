@@ -256,7 +256,26 @@ deliberately separate. CPU %, memory and CAN counters stay in `health.system`
 
 ## Left for hardware (C08.12 — open)
 
-Not attempted here (Pi unreachable, offline task): Pi CPU/memory, event-loop
+**Measured 2026-09-09** — see
+[`data/analyses/2026-09-09-pending-hardware.md`](../data/analyses/2026-09-09-pending-hardware.md) for the full tables.
+Isolated harness (`--inference-tick-s`, no deployed default touched): at 1 Hz
+**zero missed ticks** on `fuel-map` and `tuning-did` (feature p95 143 / 190 ms,
+lateness max ≤ 1.3 ms, zero record loss); at 2 Hz **6 and 12 missed ticks**
+with lateness max 273 ms, `limiting_stage` moving from
+`inference_feature_stage_on_loop` to `inference_loop`. The Pi's feature stage
+is 2.6–2.8× the workstation's 51 / 72 ms, and **2 Hz is not a supported
+cadence on this hardware**.
+
+The *deployed* daemon is worse still, because it also runs the sequence
+detector against a real ~3,000 frame/s bus: `total` median **863 ms** against
+a 1000 ms tick (p95 2,032 ms, max 51 s), **306 of 633 ticks missed (48 %)**,
+`loop_occupancy` median 341 ms, storage `max_write_ms` 18,475 ms and `/status`
+latency 0.7–5.1 s. That starvation stalls collection for ~100 s at a time: a
+concurrent `fuel-map` capture scored 0 of 468 complete tuples with coverage
+0.03–0.34, while its in-sample rate was a healthy 3.957 Hz. Fixing that is a
+new task, not part of C08.
+
+Originally left open here (now answered above): Pi CPU/memory, event-loop
 delay, processing latency and capture-loss counts before/after under the
 same workload, at 1 Hz and at a higher test cadence. Everything needed is now
 in-process: read `/status.detectors.inference` and `/status.health` during a

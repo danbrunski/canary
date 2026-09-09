@@ -85,7 +85,10 @@ a reconnect that resumes a half-finished walk.
 Accounting (`CanObdLoopStats`, no per-frame logging): `discovery_requests_sent`,
 `discovery_responses`, `discovery_negative_responses`, `discovery_timeouts`,
 `discovery_seconds`, `discovery_frames_seen` (frames tapped *while a probe
-waited* — the frames the old path consumed). `requests_sent` still counts
+waited* — the frames the old path consumed). The last of those, with
+`frames_seen` and `parse_errors`, reaches `/status` as
+`obd_scheduler.receive`; before that block existed they were counted but
+unreadable, and steps 3 and 7 below could not be carried out. `requests_sent` still counts
 every frame on the wire; `session_control.channel_requests_sent` now
 subtracts discovery as well as session control.
 
@@ -282,9 +285,30 @@ Mode 06 requests keep the MID on the wire (`06 <mid>`) and in the reading
   either); the DID plan comes from config, the catalogue and profiles, and
   `src/analysis/did_scan.py` remains the standalone sweep tool.
 
-## Hardware procedure (C06.12 — pending, orchestrator/operator)
+## Hardware procedure (C06.12 — measured 2026-09-09)
 
-Not attempted here. On the Pi, with the daemon on this commit:
+**Result: discovery passes, continuity does not.** Full evidence in
+[`data/analyses/2026-09-09-pending-hardware.md`](../data/analyses/2026-09-09-pending-hardware.md).
+
+Discovery is inside budget at `engine_running`, warm idle, and re-walks
+identically after a reset: **mode01 3 probes → 41 supported PIDs**, **mode06
+6 probes → 23 MIDs** (against the ≤ 7 / ≤ 8 expectation), 9 requests and
+0.49 s in total, sole responder `0x7E8`, `pending` empty by t = 10 s.
+
+Step 7 fails. Over a bracketed 60 s window the kernel's `can0` counted
+**110,327** frames and the daemon's tap **103,051** — **7,276 (6.6 %)
+unaccounted** — while `rx_dropped`, `rx_over_errors`, `rx_missed` and
+`parse_errors` were all zero. An independent `candump` over the same bus
+matched the kernel (49,262 vs 49,062 in a 30 s window) while the daemon read
+46,186, so the loss is **inside the daemon's receive path**, after the socket
+and invisible to `ip -s link`. `_drain_frames_until` only calls `recv()`
+between other work, so frames arriving during request/response handling
+overflow the socket buffer. This is pre-existing — the `receive` block added
+in the same session is what made it visible — and the fix is an
+always-draining receive path, not a larger buffer.
+
+The steps below are the procedure as run. On the Pi, with the daemon on this
+commit:
 
 1. `GET /status` — record `vehicle_state` first. `ignition_only` is enough
    for support discovery (KOEO answers Mode 01 group bitmaps); `engine_off`
@@ -293,7 +317,11 @@ Not attempted here. On the Pi, with the daemon on this commit:
    `next_probe_in_s`).
 2. Note `obd_scheduler.discovery` at rest: `pending`, `requests_spent`,
    `seconds_spent`, per-item `last_result`, `responders`, and
-   `can_receive` / `can0.rx_dropped` from `/status`.
+   `obd_scheduler.receive` / `can0.rx_dropped` from `/status`. **Not
+   `can_receive`** — that sink belongs to the broadcast `can` collector, which
+   `_default_collectors` does not register on the canable/socketcan OBD path;
+   there the frames are tapped by the OBD loop itself and counted in
+   `obd_scheduler.receive`.
 3. `POST /control/obd_discovery/reset`, then watch `discovery` every 5 s
    until `pending` is empty: expect `mode01` to complete in ≤ 7 probes and
    `mode06` in ≤ 8, at one probe per budget slot, with no `rounds_skipped`
@@ -311,9 +339,10 @@ Not attempted here. On the Pi, with the daemon on this commit:
    groups already answered (`groups_answered` unchanged, `attempts` growing
    only for the pending group).
 7. **No received-byte count alone proves no frames were lost upstream.**
-   Compare `frames_seen` against `can0.rx_packets` from `ip -s link` over the
-   same window and `rx_dropped` / `rx_over_errors` deltas; only a zero
-   kernel-side drop delta plus equal counts is continuity evidence.
+   Compare `obd_scheduler.receive.frames_seen` against `can0.rx_packets` from
+   `ip -s link` over the same window and `rx_dropped` / `rx_over_errors`
+   deltas; only a zero kernel-side drop delta plus equal counts is continuity
+   evidence.
 
 Not measured here: real SocketCAN behaviour of the 50 ms receive slice, the
 ECM's actual support bitmaps and responder set, and what a probe timeout

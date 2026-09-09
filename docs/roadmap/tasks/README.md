@@ -10,12 +10,27 @@ evidence; use `[~]` for partial completion and name the remaining work.
 **Status 2026-09-08 — the C01–C10 set is closed.** All ten task documents
 are complete and archived; every checkbox in them is `[x]`.
 
+**Status 2026-09-09 — six of the ten hardware items are measured.** The Pi
+was plugged in and the engine run at warm idle: H0, H2, H3, H4 and H5 are
+`[x]`, H6 is `[~]` (idle ladder done, drive protocol still owed), and H1, H7,
+H8, H9 need a 20–30 minute drive the operator deferred that day. Evidence:
+[`data/analyses/2026-09-09-pending-hardware.md`](../../../data/analyses/2026-09-09-pending-hardware.md).
+
+Two results outrank the checkboxes. The 4 Hz hybrid claim is **denied** — the
+cycle is infeasible by plan (0.294 s needed against 0.250 s) and measures
+0.510 s — so `tuning-hybrid-research` stays experimental. And the deployed
+daemon **cannot hold its 1 Hz inference tick on the Pi**: `total` median
+863 ms against a 1000 ms period, 48 % of ticks missed, event-loop stalls that
+left a concurrent `fuel-map` capture with 0 of 468 complete tuples and ~100 s
+gaps in every channel. The bus was never the constraint — request throughput
+is flat at ~7.9 req/s across a 4× budget ladder while the ECM answers 97.6 %.
+
 The ten measurements that need the vehicle were moved out into a single
 checklist, [`PENDING-HARDWARE.md`](PENDING-HARDWARE.md), rather than left as
 `[~]` boxes scattered across six documents. They are one session's work — plug
 the Pi in and run them — and each keeps its original ID, wording, and a link
-back to the task it came from. The Pi is unplugged (operator-confirmed;
-`canary.local` ENOTFOUND, no route to `192.168.137.0/24`).
+back to the task it came from. The Pi was reconnected on 2026-09-09 and six of the ten
+were measured; see the status note above.
 
 Four of those ten had a comparison that did not need hardware, and it was
 measured; `PENDING-HARDWARE.md` records what each showed so it is not

@@ -1,0 +1,1466 @@
+{
+  "batching": {
+    "batched_pids_requested": 3418,
+    "batched_requests": 1695,
+    "channel_reads_per_second": 5.36,
+    "channel_reads_per_second_lifetime": 5.36,
+    "desyncs": 8,
+    "failures": 65,
+    "max_pids": 6,
+    "mean_pids_per_batch": 2.02,
+    "mode22": {
+      "batched_requests": 0,
+      "desyncs": 0,
+      "failures": 0,
+      "fallbacks": 0,
+      "known_response_widths": {
+        "0x1101": {
+          "bytes": 1,
+          "source": "2026-05-11T222447 frames.log:418 single-DID response payload"
+        },
+        "0x1208": {
+          "bytes": 2,
+          "source": "2026-08-07T005351 single-DID capture payloads"
+        },
+        "0x1219": {
+          "bytes": 2,
+          "source": "2026-05-16T214006 four-state single-DID capture"
+        }
+      },
+      "max_dids": 1,
+      "mean_dids_per_batch": null,
+      "members_requested": 0
+    },
+    "size_narrowings": 3
+  },
+  "channels": [
+    {
+      "cadence": {
+        "hz": 3.957,
+        "median_interarrival_s": 0.25269,
+        "p95_interarrival_s": 0.468284,
+        "samples": 418
+      },
+      "channel": "RPM",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 6.049,
+        "fraction": 0.3161,
+        "gap_threshold_s": 2.0,
+        "last_observed_at": 328.583,
+        "long_gaps": [
+          [
+            6.877,
+            105.062,
+            98.185
+          ],
+          [
+            111.079,
+            208.974,
+            97.895
+          ],
+          [
+            213.975,
+            216.483,
+            2.508
+          ],
+          [
+            221.012,
+            223.5,
+            2.488
+          ],
+          [
+            233.275,
+            235.987,
+            2.712
+          ],
+          [
+            258.019,
+            260.491,
+            2.472
+          ],
+          [
+            262.998,
+            265.388,
+            2.39
+          ],
+          [
+            268.515,
+            271.241,
+            2.726
+          ],
+          [
+            285.035,
+            287.436,
+            2.401
+          ],
+          [
+            292.042,
+            294.537,
+            2.495
+          ],
+          [
+            306.744,
+            309.158,
+            2.414
+          ]
+        ],
+        "max_gap_s": 98.185,
+        "missing_final_s": 0.01,
+        "missing_initial_s": 6.049,
+        "observations": 419,
+        "uncovered_s": 224.735
+      },
+      "in_required_tuple": true,
+      "kind": "pid",
+      "requested_hz": 4.0,
+      "status": "gap",
+      "trailing_hz": 3.91,
+      "transport_channel": "RPM"
+    },
+    {
+      "cadence": {
+        "hz": 2.509,
+        "median_interarrival_s": 0.39858,
+        "p95_interarrival_s": 1.423658,
+        "samples": 196
+      },
+      "channel": "ENGINE_LOAD",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 106.698,
+        "fraction": 0.3008,
+        "gap_threshold_s": 2.0,
+        "last_observed_at": 327.939,
+        "long_gaps": [
+          [
+            112.489,
+            115.78,
+            3.291
+          ],
+          [
+            115.972,
+            133.801,
+            17.829
+          ],
+          [
+            133.801,
+            230.888,
+            97.087
+          ],
+          [
+            267.879,
+            269.982,
+            2.103
+          ],
+          [
+            306.641,
+            309.378,
+            2.737
+          ]
+        ],
+        "max_gap_s": 106.698,
+        "missing_final_s": 0.654,
+        "missing_initial_s": 106.698,
+        "observations": 197,
+        "uncovered_s": 229.745
+      },
+      "in_required_tuple": true,
+      "kind": "pid",
+      "requested_hz": 4.0,
+      "status": "shortfall",
+      "trailing_hz": 2.29,
+      "transport_channel": "ENGINE_LOAD"
+    },
+    {
+      "cadence": {
+        "hz": 3.133,
+        "median_interarrival_s": 0.319161,
+        "p95_interarrival_s": 7.459378,
+        "samples": 25
+      },
+      "channel": "MAF",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 0.302,
+        "fraction": 0.0294,
+        "gap_threshold_s": 2.0,
+        "last_observed_at": 116.019,
+        "long_gaps": [
+          [
+            2.205,
+            5.948,
+            3.743
+          ],
+          [
+            5.948,
+            101.087,
+            95.139
+          ],
+          [
+            108.559,
+            116.019,
+            7.46
+          ]
+        ],
+        "max_gap_s": 212.574,
+        "missing_final_s": 212.574,
+        "missing_initial_s": 0.302,
+        "observations": 26,
+        "uncovered_s": 318.916
+      },
+      "in_required_tuple": false,
+      "kind": "pid",
+      "requested_hz": 4.0,
+      "status": "shortfall",
+      "trailing_hz": null,
+      "transport_channel": "MAF"
+    },
+    {
+      "cadence": {
+        "hz": 2.533,
+        "median_interarrival_s": 0.394855,
+        "p95_interarrival_s": 27.311881,
+        "samples": 38
+      },
+      "channel": "TIMING_ADVANCE",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 0.243,
+        "fraction": 0.0475,
+        "gap_threshold_s": 2.0,
+        "last_observed_at": 220.662,
+        "long_gaps": [
+          [
+            3.288,
+            6.819,
+            3.531
+          ],
+          [
+            6.819,
+            104.816,
+            97.997
+          ],
+          [
+            109.06,
+            182.467,
+            73.407
+          ],
+          [
+            183.413,
+            210.725,
+            27.312
+          ],
+          [
+            217.841,
+            220.662,
+            2.821
+          ]
+        ],
+        "max_gap_s": 107.931,
+        "missing_final_s": 107.931,
+        "missing_initial_s": 0.243,
+        "observations": 39,
+        "uncovered_s": 312.999
+      },
+      "in_required_tuple": false,
+      "kind": "pid",
+      "requested_hz": 4.0,
+      "status": "shortfall",
+      "trailing_hz": null,
+      "transport_channel": "TIMING_ADVANCE"
+    },
+    {
+      "cadence": {
+        "hz": 3.976,
+        "median_interarrival_s": 0.251528,
+        "p95_interarrival_s": 0.580913,
+        "samples": 406
+      },
+      "channel": "THROTTLE_POS",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 104.073,
+        "fraction": 0.3441,
+        "gap_threshold_s": 2.0,
+        "last_observed_at": 328.535,
+        "long_gaps": [
+          [
+            113.414,
+            180.51,
+            67.096
+          ],
+          [
+            183.737,
+            219.361,
+            35.624
+          ],
+          [
+            251.798,
+            254.539,
+            2.741
+          ],
+          [
+            270.225,
+            272.47,
+            2.245
+          ],
+          [
+            306.798,
+            310.558,
+            3.76
+          ]
+        ],
+        "max_gap_s": 104.073,
+        "missing_final_s": 0.058,
+        "missing_initial_s": 104.073,
+        "observations": 407,
+        "uncovered_s": 215.539
+      },
+      "in_required_tuple": false,
+      "kind": "pid",
+      "requested_hz": 4.0,
+      "status": "gap",
+      "trailing_hz": 3.95,
+      "transport_channel": "THROTTLE_POS"
+    },
+    {
+      "cadence": {
+        "hz": 2.561,
+        "median_interarrival_s": 0.390527,
+        "p95_interarrival_s": 1.462568,
+        "samples": 227
+      },
+      "channel": "O2_WR_LAMBDA_S1",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 0.034,
+        "fraction": 0.3249,
+        "gap_threshold_s": 2.0,
+        "last_observed_at": 328.172,
+        "long_gaps": [
+          [
+            3.295,
+            5.612,
+            2.317
+          ],
+          [
+            6.697,
+            109.989,
+            103.292
+          ],
+          [
+            112.541,
+            115.818,
+            3.277
+          ],
+          [
+            116.069,
+            222.42,
+            106.351
+          ],
+          [
+            267.959,
+            271.333,
+            3.374
+          ],
+          [
+            305.965,
+            309.182,
+            3.217
+          ]
+        ],
+        "max_gap_s": 106.351,
+        "missing_final_s": 0.421,
+        "missing_initial_s": 0.034,
+        "observations": 228,
+        "uncovered_s": 221.828
+      },
+      "in_required_tuple": true,
+      "kind": "pid",
+      "requested_hz": 4.0,
+      "status": "shortfall",
+      "trailing_hz": 2.49,
+      "transport_channel": "O2_WR_LAMBDA_S1"
+    },
+    {
+      "cadence": {
+        "hz": 2.406,
+        "median_interarrival_s": 0.415545,
+        "p95_interarrival_s": 1.269583,
+        "samples": 220
+      },
+      "channel": "COMMANDED_EQUIV_RATIO",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 1.958,
+        "fraction": 0.3309,
+        "gap_threshold_s": 2.0,
+        "last_observed_at": 328.147,
+        "long_gaps": [
+          [
+            3.199,
+            5.798,
+            2.599
+          ],
+          [
+            6.947,
+            110.139,
+            103.192
+          ],
+          [
+            112.656,
+            115.871,
+            3.215
+          ],
+          [
+            115.871,
+            220.613,
+            104.742
+          ],
+          [
+            267.911,
+            271.282,
+            3.371
+          ],
+          [
+            306.681,
+            309.43,
+            2.749
+          ]
+        ],
+        "max_gap_s": 104.742,
+        "missing_final_s": 0.446,
+        "missing_initial_s": 1.958,
+        "observations": 221,
+        "uncovered_s": 219.868
+      },
+      "in_required_tuple": true,
+      "kind": "pid",
+      "requested_hz": 4.0,
+      "status": "shortfall",
+      "trailing_hz": 2.39,
+      "transport_channel": "COMMANDED_EQUIV_RATIO"
+    },
+    {
+      "cadence": {
+        "hz": 2.499,
+        "median_interarrival_s": 0.400167,
+        "p95_interarrival_s": 1.503191,
+        "samples": 221
+      },
+      "channel": "FUEL_STATUS",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 1.907,
+        "fraction": 0.3334,
+        "gap_threshold_s": 2.0,
+        "last_observed_at": 328.475,
+        "long_gaps": [
+          [
+            3.359,
+            5.638,
+            2.279
+          ],
+          [
+            6.646,
+            109.835,
+            103.189
+          ],
+          [
+            112.443,
+            115.724,
+            3.281
+          ],
+          [
+            115.92,
+            221.313,
+            105.393
+          ],
+          [
+            267.709,
+            269.847,
+            2.138
+          ],
+          [
+            306.58,
+            309.342,
+            2.762
+          ]
+        ],
+        "max_gap_s": 105.393,
+        "missing_final_s": 0.118,
+        "missing_initial_s": 1.907,
+        "observations": 222,
+        "uncovered_s": 219.042
+      },
+      "in_required_tuple": true,
+      "kind": "pid",
+      "requested_hz": 4.0,
+      "status": "shortfall",
+      "trailing_hz": 2.13,
+      "transport_channel": "FUEL_STATUS"
+    },
+    {
+      "cadence": {
+        "hz": 0.738,
+        "median_interarrival_s": 1.355789,
+        "p95_interarrival_s": 33.813138,
+        "samples": 31
+      },
+      "channel": "INTAKE_TEMP",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 2.745,
+        "fraction": 0.0972,
+        "gap_threshold_s": 5.0,
+        "last_observed_at": 220.93,
+        "long_gaps": [
+          [
+            2.745,
+            52.926,
+            50.181
+          ],
+          [
+            52.926,
+            92.974,
+            40.048
+          ],
+          [
+            94.995,
+            100.879,
+            5.884
+          ],
+          [
+            108.779,
+            137.192,
+            28.413
+          ],
+          [
+            137.192,
+            171.005,
+            33.813
+          ],
+          [
+            173.03,
+            180.333,
+            7.303
+          ],
+          [
+            183.709,
+            207.052,
+            23.343
+          ]
+        ],
+        "max_gap_s": 107.663,
+        "missing_final_s": 107.663,
+        "missing_initial_s": 2.745,
+        "observations": 32,
+        "uncovered_s": 296.648
+      },
+      "in_required_tuple": false,
+      "kind": "pid",
+      "requested_hz": 1.0,
+      "status": "shortfall",
+      "trailing_hz": null,
+      "transport_channel": "INTAKE_TEMP"
+    },
+    {
+      "cadence": {
+        "hz": 0.789,
+        "median_interarrival_s": 1.266854,
+        "p95_interarrival_s": 43.008612,
+        "samples": 14
+      },
+      "channel": "SPEED",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 100.883,
+        "fraction": 0.0503,
+        "gap_threshold_s": 5.0,
+        "last_observed_at": 220.716,
+        "long_gaps": [
+          [
+            109.015,
+            169.302,
+            60.287
+          ],
+          [
+            169.302,
+            212.311,
+            43.009
+          ]
+        ],
+        "max_gap_s": 107.877,
+        "missing_final_s": 107.877,
+        "missing_initial_s": 100.883,
+        "observations": 15,
+        "uncovered_s": 312.056
+      },
+      "in_required_tuple": false,
+      "kind": "pid",
+      "requested_hz": 1.0,
+      "status": "shortfall",
+      "trailing_hz": null,
+      "transport_channel": "SPEED"
+    },
+    {
+      "cadence": {
+        "hz": 0.753,
+        "median_interarrival_s": 1.32881,
+        "p95_interarrival_s": 28.436564,
+        "samples": 13
+      },
+      "channel": "COOLANT_TEMP",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 52.916,
+        "fraction": 0.0367,
+        "gap_threshold_s": 5.0,
+        "last_observed_at": 220.082,
+        "long_gaps": [
+          [
+            52.916,
+            171.104,
+            118.188
+          ],
+          [
+            173.296,
+            181.786,
+            8.49
+          ],
+          [
+            182.79,
+            211.226,
+            28.436
+          ]
+        ],
+        "max_gap_s": 118.188,
+        "missing_final_s": 108.511,
+        "missing_initial_s": 52.916,
+        "observations": 14,
+        "uncovered_s": 316.541
+      },
+      "in_required_tuple": false,
+      "kind": "pid",
+      "requested_hz": 1.0,
+      "status": "shortfall",
+      "trailing_hz": null,
+      "transport_channel": "COOLANT_TEMP"
+    },
+    {
+      "cadence": {
+        "hz": 0.572,
+        "median_interarrival_s": 1.74706,
+        "p95_interarrival_s": 33.134851,
+        "samples": 20
+      },
+      "channel": "SHORT_FUEL_TRIM_1",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 0.184,
+        "fraction": 0.0908,
+        "gap_threshold_s": 5.0,
+        "last_observed_at": 220.961,
+        "long_gaps": [
+          [
+            5.998,
+            104.317,
+            98.319
+          ],
+          [
+            108.82,
+            137.946,
+            29.126
+          ],
+          [
+            137.946,
+            171.081,
+            33.135
+          ],
+          [
+            182.933,
+            213.494,
+            30.561
+          ]
+        ],
+        "max_gap_s": 107.632,
+        "missing_final_s": 107.632,
+        "missing_initial_s": 0.184,
+        "observations": 21,
+        "uncovered_s": 298.773
+      },
+      "in_required_tuple": false,
+      "kind": "pid",
+      "requested_hz": 1.0,
+      "status": "shortfall",
+      "trailing_hz": null,
+      "transport_channel": "SHORT_FUEL_TRIM_1"
+    },
+    {
+      "cadence": {
+        "hz": 0.822,
+        "median_interarrival_s": 1.216768,
+        "p95_interarrival_s": 74.833539,
+        "samples": 19
+      },
+      "channel": "SHORT_FUEL_TRIM_2",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 0.099,
+        "fraction": 0.0783,
+        "gap_threshold_s": 5.0,
+        "last_observed_at": 222.97,
+        "long_gaps": [
+          [
+            6.498,
+            106.016,
+            99.518
+          ],
+          [
+            108.509,
+            183.343,
+            74.834
+          ],
+          [
+            183.343,
+            206.226,
+            22.883
+          ]
+        ],
+        "max_gap_s": 105.623,
+        "missing_final_s": 105.623,
+        "missing_initial_s": 0.099,
+        "observations": 20,
+        "uncovered_s": 302.858
+      },
+      "in_required_tuple": false,
+      "kind": "pid",
+      "requested_hz": 1.0,
+      "status": "shortfall",
+      "trailing_hz": null,
+      "transport_channel": "SHORT_FUEL_TRIM_2"
+    },
+    {
+      "cadence": {
+        "hz": 0.828,
+        "median_interarrival_s": 1.207018,
+        "p95_interarrival_s": 102.534515,
+        "samples": 10
+      },
+      "channel": "LONG_FUEL_TRIM_1",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 6.246,
+        "fraction": 0.0357,
+        "gap_threshold_s": 5.0,
+        "last_observed_at": 219.944,
+        "long_gaps": [
+          [
+            6.246,
+            105.668,
+            99.422
+          ],
+          [
+            108.018,
+            210.552,
+            102.534
+          ]
+        ],
+        "max_gap_s": 108.649,
+        "missing_final_s": 108.649,
+        "missing_initial_s": 6.246,
+        "observations": 11,
+        "uncovered_s": 316.851
+      },
+      "in_required_tuple": false,
+      "kind": "pid",
+      "requested_hz": 1.0,
+      "status": "shortfall",
+      "trailing_hz": null,
+      "transport_channel": "LONG_FUEL_TRIM_1"
+    },
+    {
+      "cadence": {
+        "hz": 0.825,
+        "median_interarrival_s": 1.211973,
+        "p95_interarrival_s": 22.607469,
+        "samples": 19
+      },
+      "channel": "LONG_FUEL_TRIM_2",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 101.059,
+        "fraction": 0.0677,
+        "gap_threshold_s": 5.0,
+        "last_observed_at": 219.901,
+        "long_gaps": [
+          [
+            108.264,
+            182.258,
+            73.994
+          ],
+          [
+            183.625,
+            206.232,
+            22.607
+          ]
+        ],
+        "max_gap_s": 108.692,
+        "missing_final_s": 108.692,
+        "missing_initial_s": 101.059,
+        "observations": 20,
+        "uncovered_s": 306.352
+      },
+      "in_required_tuple": false,
+      "kind": "pid",
+      "requested_hz": 1.0,
+      "status": "shortfall",
+      "trailing_hz": null,
+      "transport_channel": "LONG_FUEL_TRIM_2"
+    },
+    {
+      "cadence": {
+        "hz": 0.803,
+        "median_interarrival_s": 1.24532,
+        "p95_interarrival_s": 73.826389,
+        "samples": 21
+      },
+      "channel": "EVAPORATIVE_PURGE",
+      "coverage": {
+        "clock_regressions": 0,
+        "eligible_s": 328.593,
+        "first_observed_at": 0.144,
+        "fraction": 0.0856,
+        "gap_threshold_s": 5.0,
+        "last_observed_at": 222.723,
+        "long_gaps": [
+          [
+            5.754,
+            103.562,
+            97.808
+          ],
+          [
+            108.06,
+            181.886,
+            73.826
+          ],
+          [
+            183.193,
+            206.16,
+            22.967
+          ]
+        ],
+        "max_gap_s": 105.87,
+        "missing_final_s": 105.87,
+        "missing_initial_s": 0.144,
+        "observations": 22,
+        "uncovered_s": 300.471
+      },
+      "in_required_tuple": false,
+      "kind": "pid",
+      "requested_hz": 1.0,
+      "status": "shortfall",
+      "trailing_hz": null,
+      "transport_channel": "EVAPORATIVE_PURGE"
+    }
+  ],
+  "failures": [
+    {
+      "channels": [
+        "ENGINE_LOAD",
+        "MAF",
+        "TIMING_ADVANCE",
+        "O2_WR_LAMBDA_S1",
+        "COMMANDED_EQUIV_RATIO",
+        "FUEL_STATUS",
+        "INTAKE_TEMP",
+        "SPEED",
+        "COOLANT_TEMP",
+        "SHORT_FUEL_TRIM_1",
+        "SHORT_FUEL_TRIM_2",
+        "LONG_FUEL_TRIM_1",
+        "LONG_FUEL_TRIM_2",
+        "EVAPORATIVE_PURGE"
+      ],
+      "clause": "rate_shortfall",
+      "detail": "median interarrival below the requested cadence while observing",
+      "evidence": {
+        "COMMANDED_EQUIV_RATIO": {
+          "cadence_hz": 2.406,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 0.415545,
+          "p95_interarrival_s": 1.269583,
+          "requested_hz": 4.0
+        },
+        "COOLANT_TEMP": {
+          "cadence_hz": 0.753,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 1.32881,
+          "p95_interarrival_s": 28.436564,
+          "requested_hz": 1.0
+        },
+        "ENGINE_LOAD": {
+          "cadence_hz": 2.509,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 0.39858,
+          "p95_interarrival_s": 1.423658,
+          "requested_hz": 4.0
+        },
+        "EVAPORATIVE_PURGE": {
+          "cadence_hz": 0.803,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 1.24532,
+          "p95_interarrival_s": 73.826389,
+          "requested_hz": 1.0
+        },
+        "FUEL_STATUS": {
+          "cadence_hz": 2.499,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 0.400167,
+          "p95_interarrival_s": 1.503191,
+          "requested_hz": 4.0
+        },
+        "INTAKE_TEMP": {
+          "cadence_hz": 0.738,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 1.355789,
+          "p95_interarrival_s": 33.813138,
+          "requested_hz": 1.0
+        },
+        "LONG_FUEL_TRIM_1": {
+          "cadence_hz": 0.828,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 1.207018,
+          "p95_interarrival_s": 102.534515,
+          "requested_hz": 1.0
+        },
+        "LONG_FUEL_TRIM_2": {
+          "cadence_hz": 0.825,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 1.211973,
+          "p95_interarrival_s": 22.607469,
+          "requested_hz": 1.0
+        },
+        "MAF": {
+          "cadence_hz": 3.133,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 0.319161,
+          "p95_interarrival_s": 7.459378,
+          "requested_hz": 4.0
+        },
+        "O2_WR_LAMBDA_S1": {
+          "cadence_hz": 2.561,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 0.390527,
+          "p95_interarrival_s": 1.462568,
+          "requested_hz": 4.0
+        },
+        "SHORT_FUEL_TRIM_1": {
+          "cadence_hz": 0.572,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 1.74706,
+          "p95_interarrival_s": 33.134851,
+          "requested_hz": 1.0
+        },
+        "SHORT_FUEL_TRIM_2": {
+          "cadence_hz": 0.822,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 1.216768,
+          "p95_interarrival_s": 74.833539,
+          "requested_hz": 1.0
+        },
+        "SPEED": {
+          "cadence_hz": 0.789,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 1.266854,
+          "p95_interarrival_s": 43.008612,
+          "requested_hz": 1.0
+        },
+        "TIMING_ADVANCE": {
+          "cadence_hz": 2.533,
+          "floor_hz": 3.0,
+          "median_interarrival_s": 0.394855,
+          "p95_interarrival_s": 27.311881,
+          "requested_hz": 4.0
+        }
+      }
+    },
+    {
+      "channels": [
+        "RPM",
+        "THROTTLE_POS"
+      ],
+      "clause": "acquisition_gap",
+      "detail": "on-cadence while observing, but silent for longer than the threshold",
+      "evidence": {
+        "RPM": {
+          "coverage_fraction": 0.3161,
+          "gap_threshold_s": 2.0,
+          "long_gaps": [
+            [
+              6.877,
+              105.062,
+              98.185
+            ],
+            [
+              111.079,
+              208.974,
+              97.895
+            ],
+            [
+              213.975,
+              216.483,
+              2.508
+            ],
+            [
+              221.012,
+              223.5,
+              2.488
+            ],
+            [
+              233.275,
+              235.987,
+              2.712
+            ],
+            [
+              258.019,
+              260.491,
+              2.472
+            ],
+            [
+              262.998,
+              265.388,
+              2.39
+            ],
+            [
+              268.515,
+              271.241,
+              2.726
+            ],
+            [
+              285.035,
+              287.436,
+              2.401
+            ],
+            [
+              292.042,
+              294.537,
+              2.495
+            ],
+            [
+              306.744,
+              309.158,
+              2.414
+            ]
+          ],
+          "max_gap_s": 98.185,
+          "missing_final_s": 0.01,
+          "missing_initial_s": 6.049
+        },
+        "THROTTLE_POS": {
+          "coverage_fraction": 0.3441,
+          "gap_threshold_s": 2.0,
+          "long_gaps": [
+            [
+              113.414,
+              180.51,
+              67.096
+            ],
+            [
+              183.737,
+              219.361,
+              35.624
+            ],
+            [
+              251.798,
+              254.539,
+              2.741
+            ],
+            [
+              270.225,
+              272.47,
+              2.245
+            ],
+            [
+              306.798,
+              310.558,
+              3.76
+            ]
+          ],
+          "max_gap_s": 104.073,
+          "missing_final_s": 0.058,
+          "missing_initial_s": 104.073
+        }
+      }
+    },
+    {
+      "channels": [
+        "RPM",
+        "ENGINE_LOAD",
+        "FUEL_STATUS",
+        "COMMANDED_EQUIV_RATIO",
+        "O2_WR_LAMBDA_S1"
+      ],
+      "clause": "tuple_incomplete",
+      "detail": "every round missed at least one member; no complete tuple persisted",
+      "evidence": {
+        "attempted": 468,
+        "complete": 0,
+        "incomplete": 468,
+        "max_tuple_skew_s": 0.125,
+        "member_misses": {
+          "COMMANDED_EQUIV_RATIO": 247,
+          "ENGINE_LOAD": 271,
+          "FUEL_STATUS": 246,
+          "O2_WR_LAMBDA_S1": 240,
+          "RPM": 49
+        },
+        "persisted": 0,
+        "skew": {
+          "max_s": 0.249672,
+          "p95_s": 0.244792,
+          "rounds_with_all_members": 10
+        },
+        "skew_rejected": 10
+      }
+    },
+    {
+      "channels": [
+        "can0.rx_over_errors"
+      ],
+      "clause": "persistence_loss",
+      "detail": "recording-path counters advanced during this capture",
+      "evidence": {
+        "can0.rx_over_errors": {
+          "delta": 42,
+          "scope": "recording",
+          "start": 267,
+          "status": "verified",
+          "stop": 309
+        }
+      }
+    }
+  ],
+  "interval": {
+    "elapsed_s": 328.593,
+    "ended_wall": 1788980698.3569999,
+    "generation_at_start": 2,
+    "intended_active_s": 328.593,
+    "pause_reasons": [],
+    "pause_windows": [],
+    "paused_s": 0,
+    "source": "live",
+    "started_wall": 1788980369.764
+  },
+  "losses": {
+    "dashboard": {
+      "counters": {
+        "broadcast.dropped_records": {
+          "delta": 0,
+          "scope": "dashboard",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "broadcast.errors": {
+          "delta": 0,
+          "scope": "dashboard",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "live.dropped_records": {
+          "delta": 0,
+          "scope": "dashboard",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "live.errors": {
+          "delta": 0,
+          "scope": "dashboard",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        }
+      },
+      "lost": 0,
+      "status": "verified",
+      "unverified": []
+    },
+    "derived": {
+      "counters": {
+        "dtc.dropped_records": {
+          "delta": 0,
+          "scope": "derived",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "dtc.errors": {
+          "delta": 0,
+          "scope": "derived",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "gps.dropped_records": {
+          "delta": 0,
+          "scope": "derived",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "gps.errors": {
+          "delta": 0,
+          "scope": "derived",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "monitor.dropped_records": {
+          "delta": 0,
+          "scope": "derived",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "monitor.errors": {
+          "delta": 0,
+          "scope": "derived",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        }
+      },
+      "lost": 0,
+      "status": "verified",
+      "unverified": []
+    },
+    "recording": {
+      "counters": {
+        "can0.rx_dropped": {
+          "delta": 0,
+          "scope": "recording",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "can0.rx_over_errors": {
+          "delta": 42,
+          "scope": "recording",
+          "start": 267,
+          "status": "verified",
+          "stop": 309
+        },
+        "ingest.dropped_records": {
+          "delta": 0,
+          "scope": "recording",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "ingest.errors": {
+          "delta": 0,
+          "scope": "recording",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "obd_collect.dropped_records": {
+          "delta": 0,
+          "scope": "recording",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "obd_collect.errors": {
+          "delta": 0,
+          "scope": "recording",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "storage.dropped_records": {
+          "delta": 0,
+          "scope": "recording",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        },
+        "storage.errors": {
+          "delta": 0,
+          "scope": "recording",
+          "start": 0,
+          "status": "verified",
+          "stop": 0
+        }
+      },
+      "lost": 42,
+      "status": "verified",
+      "unverified": []
+    }
+  },
+  "notes": [],
+  "persistence": {
+    "drain_timed_out": [],
+    "drain_unobserved": [],
+    "drained": [
+      "ingest",
+      "storage"
+    ],
+    "flush_error": null,
+    "flushed": true,
+    "generation_boundary": 3,
+    "loss_epoch_start": {
+      "counters": {
+        "broadcast.dropped_records": 0,
+        "broadcast.errors": 0,
+        "can0.rx_dropped": 0,
+        "can0.rx_over_errors": 267,
+        "dtc.dropped_records": 0,
+        "dtc.errors": 0,
+        "gps.dropped_records": 0,
+        "gps.errors": 0,
+        "ingest.dropped_records": 0,
+        "ingest.errors": 0,
+        "live.dropped_records": 0,
+        "live.errors": 0,
+        "monitor.dropped_records": 0,
+        "monitor.errors": 0,
+        "obd_collect.dropped_records": 0,
+        "obd_collect.errors": 0,
+        "storage.dropped_records": 0,
+        "storage.errors": 0
+      },
+      "taken_at_monotonic": 1938.791,
+      "taken_at_wall": 1788980369.764
+    },
+    "loss_epoch_stop": {
+      "counters": {
+        "broadcast.dropped_records": 0,
+        "broadcast.errors": 0,
+        "can0.rx_dropped": 0,
+        "can0.rx_over_errors": 309,
+        "dtc.dropped_records": 0,
+        "dtc.errors": 0,
+        "gps.dropped_records": 0,
+        "gps.errors": 0,
+        "ingest.dropped_records": 0,
+        "ingest.errors": 0,
+        "live.dropped_records": 0,
+        "live.errors": 0,
+        "monitor.dropped_records": 0,
+        "monitor.errors": 0,
+        "obd_collect.dropped_records": 0,
+        "obd_collect.errors": 0,
+        "storage.dropped_records": 0,
+        "storage.errors": 0
+      },
+      "taken_at_monotonic": 2267.467,
+      "taken_at_wall": 1788980698.439
+    },
+    "rows_on_disk": 357893,
+    "rows_on_disk_at_recompute": 357893,
+    "rows_written": 357893,
+    "scope": "stop"
+  },
+  "profile": "fuel-map",
+  "required_tuple": [
+    "RPM",
+    "ENGINE_LOAD",
+    "FUEL_STATUS",
+    "COMMANDED_EQUIV_RATIO",
+    "O2_WR_LAMBDA_S1"
+  ],
+  "schema_version": 2,
+  "scope": "stop",
+  "trailing": {
+    "hz": {
+      "COMMANDED_EQUIV_RATIO": 2.39,
+      "ENGINE_LOAD": 2.29,
+      "FUEL_STATUS": 2.13,
+      "O2_WR_LAMBDA_S1": 2.49,
+      "RPM": 3.91,
+      "THROTTLE_POS": 3.95
+    },
+    "max_gap_seconds": {
+      "COMMANDED_EQUIV_RATIO": 3.372,
+      "ENGINE_LOAD": 2.737,
+      "FUEL_STATUS": 2.761,
+      "O2_WR_LAMBDA_S1": 3.374,
+      "RPM": 2.725,
+      "THROTTLE_POS": 3.76
+    },
+    "observed_seconds": 60.0,
+    "window_s": 60.0
+  },
+  "tuple_rate_bound_hz": 2.406,
+  "tuples": {
+    "attempted": 468,
+    "cadence": {
+      "hz": null,
+      "median_interarrival_s": null,
+      "p95_interarrival_s": null,
+      "samples": 0
+    },
+    "complete": 0,
+    "coverage": {
+      "clock_regressions": 0,
+      "eligible_s": 328.593,
+      "first_observed_at": null,
+      "fraction": 0.0,
+      "gap_threshold_s": 2.0,
+      "last_observed_at": null,
+      "long_gaps": [],
+      "max_gap_s": 328.593,
+      "missing_final_s": 0.0,
+      "missing_initial_s": 328.593,
+      "observations": 0,
+      "uncovered_s": 328.593
+    },
+    "incomplete": 468,
+    "max_tuple_skew_s": 0.125,
+    "member_misses": {
+      "COMMANDED_EQUIV_RATIO": 247,
+      "ENGINE_LOAD": 271,
+      "FUEL_STATUS": 246,
+      "O2_WR_LAMBDA_S1": 240,
+      "RPM": 49
+    },
+    "persisted": 0,
+    "rate_bound_hz": 2.406,
+    "required": [
+      "RPM",
+      "ENGINE_LOAD",
+      "FUEL_STATUS",
+      "COMMANDED_EQUIV_RATIO",
+      "O2_WR_LAMBDA_S1"
+    ],
+    "scheduled": null,
+    "skew": {
+      "max_s": 0.249672,
+      "p95_s": 0.244792,
+      "rounds_with_all_members": 10
+    },
+    "skew_rejected": 10,
+    "source": "persisted_rows"
+  },
+  "verdict": "fail"
+}
