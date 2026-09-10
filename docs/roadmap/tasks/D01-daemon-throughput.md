@@ -39,25 +39,6 @@ throughput was flat at ~7.9 req/s across an 8 → 16 → 32 req/s budget ladder.
   `IsolationForestInferenceEngine` and was used only for `.model_version`,
   which cannot cross a pipe every tick. Prerequisite for D01.1.
 
-## Where the tick budget actually goes (measured, 2026-09-09)
-
-Against a 1000 ms tick, on the Pi, with the worker enabled and driving:
-`feature` 311 ms (on the loop) + `compute` 350 ms (in the child) ≈ 696 ms
-`total`, with p95 above the period — which is what produces the residual
-skips. The three levers, in order of measured value:
-
-1. **D01.9 pipelining** — run those two concurrently instead of in series.
-   Costs nothing but scheduler care; would take the critical path from
-   ~696 ms to ~max(311, 350) ≈ 350 ms.
-2. **D01.8 batched rolling** — 5.4× on the rolling stage, bit-identical.
-3. **D01.4 feature off the loop** — the structural fix, and the largest
-   change.
-
-None of them is the bus: the ECM answered 97.6 % and throughput was flat
-across a 4× budget ladder.
-
-## Open
-
 - [x] D01.3 **Measured on the truck 2026-09-09.** Deployed, enabled
   (`models.out_of_process_scoring: true` in `/etc/canary/canary.yaml`), worker
   confirmed up (`inference worker started (pid 1517)`, child process present).
@@ -97,6 +78,100 @@ across a 4× budget ladder.
   Not re-measured: the ~100 s collection gaps and `/status` latency. Those
   were observed under a concurrent capture with a much longer-lived daemon;
   neither this before nor this after window reproduced those conditions.
+
+## Where the tick budget actually goes (measured, 2026-09-09)
+
+Against a 1000 ms tick, on the Pi, with the worker enabled and driving:
+`feature` 311 ms (on the loop) + `compute` 350 ms (in the child) ≈ 696 ms
+`total`, with p95 above the period — which is what produces the residual
+skips. The three levers, in order of measured value:
+
+1. **D01.9 pipelining** — run those two concurrently instead of in series.
+   Costs nothing but scheduler care; would take the critical path from
+   ~696 ms to ~max(311, 350) ≈ 350 ms.
+2. **D01.8 batched rolling** — 5.4× on the rolling stage, bit-identical.
+3. **D01.4 feature off the loop** — the structural fix, and the largest
+   change.
+
+None of them is the bus: the ECM answered 97.6 % and throughput was flat
+across a 4× budget ladder.
+
+## The plan (2026-09-09)
+
+Sequenced by measured value per unit of risk. Every number here was measured
+this session; every phase ends with a gate that can fail.
+
+**Target, stated up front:** 1 Hz inference with `missed_ticks` ≈ 0 over a
+20–30 minute drive, `/status` under 100 ms, and a `default`-profile capture
+whose per-channel `coverage` ≈ 1.0. That final drive doubles as H1 evidence,
+closing two docs with one session.
+
+### Phase 1 — D01.8: batch the per-column pandas calls
+
+*Smallest risk, no scheduler changes, workstation-verifiable.* Three
+same-shaped loops in the feature path make ~135+ single-column pandas calls
+per tick where 2–3 whole-frame calls compute the same thing:
+
+- `features.py` rolling `mean`/`std`: per-column → `windowed.mean()` /
+  `windowed.std()`. Measured 21.97 → 4.10 ms (5.4×), bit-identical.
+- `features.py` ROC: per-column `shift`/subtract/divide → one
+  `ordered[columns].shift(n_rows)` and frame-wide arithmetic.
+- `feature_pipeline.py` missing-column fill: per-column `out[col] = fill`
+  (the "highly fragmented" warning) → build once, `pd.concat`.
+
+Gate: `np.allclose(..., equal_nan=True)` old-vs-new on real session data,
+the ground-truth suite, full pytest, and **operator sign-off** — featurization
+feeds the trained IF and sequence models and parity is non-negotiable.
+Success metric: the workstation benchmark tick median (219 ms at last
+profiling) re-measured; the actual number recorded, not assumed.
+
+### Phase 2 — D01.9: pipeline `run_tick`
+
+*The missing half of D01.1, and the single largest latency win.* Today a
+tick that lands while a compute is in flight is skipped **before its
+snapshot**, so parent and child alternate instead of overlapping. Change:
+take tick N+1's snapshot while tick N scores in the child, holding at most
+one pending request; apply results strictly in tick order (the pipe is FIFO
+and the generation token already guards staleness). The sequence window's
+ordering is preserved because the child still scores one tick at a time.
+
+Expected: critical path drops from feature+compute in series (~696 ms) to
+max(feature, compute) (~350 ms); `compute_busy` misses — 48 of 50 today —
+approach zero at 1 Hz. Gate: ordering/generation unit tests, full pytest,
+then the Pi comparison below.
+
+### Phase 3 — remeasure on the truck
+
+Same protocol as D01.3 (5-min windows, `default` profile, phase recorded).
+This is also where two deferred questions get their post-fix baseline:
+
+- D01.5: is the 6.6 % receive loss still there once the loop isn't starved?
+- D01.6: do the 18.5 s storage stalls survive?
+
+Use the UPS keep-alive (`set_ups_keepalive`) so the ignition doesn't end
+the window again.
+
+### Phase 4 — what the numbers say, not before
+
+- Loss persists → D01.5 dedicated receive thread.
+- Stalls persist → D01.6 storage investigation.
+- Tick still over budget → D01.4 (feature build off the loop — the big
+  structural change, deliberately last because Phases 1–2 may make it
+  unnecessary), and only then D01.7 (sequence cadence/backbone decision).
+
+### Non-goals, determined this session
+
+- **Rust port: no.** Profiled the real feature pipeline end to end: our own
+  code is **2.1 %** of runtime, numpy 3.9 %, pandas **70.8 %** — at
+  **139,000 pandas calls per tick**. The cost is dispatch overhead inside a
+  library, not arithmetic in our code; there is no hot kernel to rewrite,
+  and the heavy detectors are already native (torch/ATen, sklearn Cython).
+  If Phase 1 is not enough, the escalation is **polars** (Rust underneath,
+  GIL-releasing, consumed as a dependency) — not a PyO3 extension and a
+  cross-compile toolchain in a solo-maintained deploy.
+- No bus-budget raises, no queue widening, no threshold relaxing.
+
+## Open
 
 - [ ] D01.9 **Pipeline `run_tick`** — the missing half of D01.1. Today the
   scheduler bounds in-flight work to one tick and returns *before* the
