@@ -58,6 +58,19 @@ scoring in its own process, but `compute_busy` misses did not — `run_tick`
 serialises parent and child, so the overlap that would pay for the change
 never happens. D01.9 (pipelining) is the missing half.
 
+## D02 — what the 2026-09-10 drive found (opened 2026-09-10)
+
+The first sustained drive on the truck closed H1, H7 and H9 and gave D01 its
+post-scoring baseline (the tick is now inside budget: 659.7 ms median, 2.14 %
+missed). What it also found is tracked in
+[`D02-drive-findings.md`](D02-drive-findings.md): batched-poll counters that
+don't reconcile on a failed batch, Mode 22 batching switched off for want of
+four response widths, MCP2515 controller overflow underneath the socket loss,
+a child-scorer fallback that stalled a minute without being counted, and an
+Isolation Forest that scored an all-missing vector for the entire drive.
+Evidence:
+[`data/analyses/2026-09-10-drive-h1-h7-h9.md`](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md).
+
 ## Scope and evidence
 
 The review inspected the current collection, scheduling, profile, storage,
