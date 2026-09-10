@@ -153,7 +153,30 @@ feeds the trained IF and sequence models and parity is non-negotiable.
 Success metric: the workstation benchmark tick median (219 ms at last
 profiling) re-measured; the actual number recorded, not assumed.
 
-### Phase 2 — D01.9: pipeline `run_tick`
+### Phase 2 — D01.9: pipeline `run_tick` — **DEFERRED pending Phase 3**
+
+Not implemented, on purpose. Phase 1 returned 3.0× on the feature stage
+rather than the modest gain it was scoped for, which changes the arithmetic:
+projecting the workstation ratio onto the Pi's measured 311 ms feature stage
+gives ~105 ms, so the serial path becomes ~105 + 350 ≈ **455 ms against a
+1000 ms tick** — most of the `compute_busy` pressure may already be gone.
+
+Pipelining also carries the sharpest risk in this doc. `SequenceDetector.
+prepare` rebuilds the engine on the loop and documents its invariant
+explicitly: *"never while a worker pass over the old one could still be
+running (the pipeline only snapshots when no compute job is in flight)"*.
+Overlapping snapshot with compute breaks that invariant for the in-process
+fallback path, so pipelining has to be worker-only, with the fallback
+excluded — extra machinery that is worth building only if the measurement
+says it is needed.
+
+**Decision rule for Phase 3:** if `missed_by_reason.compute_busy` is near
+zero and `total` p95 is comfortably under 1000 ms with Phase 1 deployed,
+close D01.9 as unnecessary. If `compute_busy` is still material, build it
+worker-only. Do not build it blind — that is how the last prediction in this
+doc failed.
+
+### Phase 2 (as planned) — pipeline `run_tick`
 
 *The missing half of D01.1, and the single largest latency win.* Today a
 tick that lands while a compute is in flight is skipped **before its
@@ -168,7 +191,17 @@ max(feature, compute) (~350 ms); `compute_busy` misses — 48 of 50 today —
 approach zero at 1 Hz. Gate: ordering/generation unit tests, full pytest,
 then the Pi comparison below.
 
-### Phase 3 — remeasure on the truck
+### Phase 3 — remeasure on the truck — **NEXT**
+
+Now the immediate next step, ahead of Phase 2. Deploy `features.py` (and the
+D01.1 files, already there) and re-run the D01.3 protocol.
+
+Cheapest first check needs no vehicle at all: `scripts/benchmark_live_pipeline.py
+--profile steady` on the Pi. Today's baseline is **smoke 122.7 ms / steady
+127.6 ms**; the workstation went 155 → 51 ms on the same change, so a
+comparable drop should show without the engine running.
+
+### Phase 3 (as planned) — remeasure on the truck
 
 Same protocol as D01.3 (5-min windows, `default` profile, phase recorded).
 This is also where two deferred questions get their post-fix baseline:
