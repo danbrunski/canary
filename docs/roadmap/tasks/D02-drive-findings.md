@@ -33,7 +33,7 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
 
 ## Data integrity
 
-- [ ] D02.1 **Reconcile per-member counters on a failed batch.**
+- [x] D02.1 **Reconcile per-member counters on a failed batch.**
   `_issue_batched_request` increments every member's `requests_sent` before
   the request goes out, then on a whole-batch failure (`result.readings is
   None`) returns early without recording a miss for any member — no
@@ -59,6 +59,16 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   status payload can show it. Add the reconciliation as an invariant the
   status builder asserts, and a test that fails a batch and checks the sum.
   Gate: targeted collector + scheduler tests, then the whole-repo gate.
+  **Done 2026-09-10.** Decision taken: the no-penalty rule stays — a
+  batch-level failure is no evidence about any member, and the docstring
+  already argued that. So the *counters* were made to agree with it instead.
+  `_PollRequestState.batch_failures` records the swallowed send,
+  `_request_accounting_error` publishes `requests_sent - (responses +
+  timeouts + batch_failures)` per request in `/status`, and `response_rate`
+  is now taken over sends there is evidence about rather than all sends, so a
+  healthy PID riding failing batches no longer reads as dead. Five tests in
+  `tests/test_d02_accounting.py`, including an end-to-end run whose published
+  payload must reconcile for every request.
 
 - [ ] D02.2 **Measure the MCP2515 controller overflow separately from the
   socket loss.** `can0 rx_over_errors` rose by **121** across the drive and
@@ -81,7 +91,7 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   decision for the operator, not a code change.
   _Blocked-overnight: needs the Pi and the truck._
 
-- [ ] D02.3 **Surface and bound the child-scorer fallback.** The parent
+- [~] D02.3 **Surface and bound the child-scorer fallback.** The parent
   waits `RESULT_TIMEOUT_SECONDS = 30.0` for the child, then scores
   in-process — and that in-process fallback has no bound of its own. At
   engine-off on 2026-09-10 the tick recorded `compute_wait` max
@@ -97,10 +107,25 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   stalling on UPS power at 2 % SOC is unknown — (a) is what would have told
   us. Gate: unit tests for each path, the `run_live_inference` end-to-end
   tests still completing ticks, then the whole-repo gate.
+  **(a) and (c) done 2026-09-10; (b) refused with a reason.**
+  (a) `InferenceWorker` counts fallbacks by reason (`timeout`, `pipe_error`,
+  `worker_down`, `bad_reply`, `worker_error`); they reach
+  `/status.detectors.inference.worker_fallbacks`. A new `slow_computes`
+  counts ticks whose compute outran the period — the count behind
+  `compute_busy`, which was previously visible only as a `compute_wait` max.
+  (c) the flat 30 s is gone: the steady-state wait is `3 x` the tick period
+  floored at 2 s, with the 30 s allowance kept **only** until the child's
+  first answer, because it loads artifacts on that tick.
+  (b) **not implementable as written.** Bounding the in-process fallback
+  means preempting a running Python thread inside sklearn/torch, which
+  CPython cannot do safely. The scheduler is already bounded — it refuses to
+  start a tick while one is in flight and counts `compute_busy` — so what was
+  actually missing was naming the overrun, which `slow_computes` now does.
+  Re-open only with a design that does not require thread cancellation.
 
 ## Capacity left switched off
 
-- [ ] D02.4 **Record the missing Mode 22 response widths.** Multi-DID
+- [x] D02.4 **Record the missing Mode 22 response widths.** Multi-DID
   batching is enabled but did nothing all drive — `batching.mode22.max_dids
   = 1`, **0 batched requests** — because a batch cannot be parsed without
   every member's payload width and only three DIDs (`0x1101`, `0x1208`,
@@ -116,17 +141,31 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   asks about, and it is a prerequisite for H8's drive being informative.
   Gate: `tests/test_analysis_ground_truth.py` unchanged, plan tests, then
   the whole-repo gate.
+  **Done 2026-09-10.** All four measure **2 bytes**, unambiguously: 497 to
+  42,600 stored payloads each across 32-55 local sessions, no other width
+  seen once. The `byte_length`-vs-response-width ambiguity the task warned
+  about is resolved rather than assumed — `_decode_response` stores
+  `response.payload` unmodified for a DID, so the stored bytes *are* the full
+  post-header response. **Known-answer check first:** the same method
+  reproduced the three already-pinned widths exactly (0x1101 → 1, 0x1208 → 2,
+  0x1219 → 2) before any novel width was trusted. Written to `data/dids.yaml`
+  with `response_length_source` naming sessions, counts and method;
+  `estimate_complete` now holds for every DID the `default` profile polls.
+  **Batching is still off, deliberately:** `obd_did_batch_max_dids` defaults
+  to 1 per install and the widths were its precondition, not its switch.
+  Turning it on is an operator decision that belongs with H8's drive.
 
-- [ ] D02.4a **Deduplicate `unknown_response_width_channels`.**
+- [x] D02.4a **Deduplicate `unknown_response_width_channels`.**
   `polling_plan.py` builds it as a list and the drive's payload repeated
   `MONITOR_RESULTS` more than twenty times (one per Mode 06 MID). Any
   capacity estimate or coverage fraction built from its length is inflated.
   Make it a sorted, unique list; one test. Fold into D02.4's commit if
   convenient.
+  **Done 2026-09-10** — sorted `set` in `polling_plan.to_dict`, one test.
 
 ## The detector that scored nothing
 
-- [ ] D02.5 **Trace why the Isolation Forest was blind for the whole drive.**
+- [~] D02.5 **Trace why the Isolation Forest was blind for the whole drive.**
   `missing_feature_rate` read **1.0** in every snapshot and every operating
   mode (`warmup`, `idle`, `idle_transient`, `city`, `highway`) against
   `isolation_forest_2026-07-27T045036.161167Z`. Not one expected feature
@@ -177,6 +216,26 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   evidence doc. Expect it to confirm the counters; if it does not, that is
   the finding.
   _Blocked until the Pi is reachable._
+
+## Status 2026-09-10
+
+Implemented on the laptop, gate green (`ruff`, `ruff format`, `mypy`,
+3549 tests passing). **Not deployed — the Pi is off; push and deploy later.**
+
+| item | state |
+|---|---|
+| D02.1 counters reconcile | done |
+| D02.4 / D02.4a DID widths | done |
+| D02.3 worker fallbacks | partial — (b) refused, see the item |
+| D02.5 IF blindness | root cause found + alarm added; retrain owed |
+| D02.2, D02.6, D02.7, D02.8 | need the Pi or the pulled session |
+
+The headline is D02.5. The Isolation Forest went blind because two broadcast
+bindings were **corrected** out of `data/bindings.yaml` on 2026-08-04/05,
+three months after the deployed artifact was trained on them — one of those
+corrections being the `ECM_CALC_LOAD_B` retraction that AGENTS.md's "never
+compare aggregates" rule exists to prevent. Fixing a bad binding silently
+blinded the detector that depended on it, and nothing connected the two.
 
 ## Order
 

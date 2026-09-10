@@ -108,6 +108,21 @@ class _FakeProc:
     pid = 1234
 
 
+def _detached_worker(*, conn: Any, proc: Any) -> InferenceWorker:
+    """A worker built through the real constructor, with a substituted pipe
+    and process.
+
+    Deliberately not ``__new__``: these tests used to hand-set the private
+    attributes, so every new field on the class (D02.3 added three) left a
+    half-built object that raised ``AttributeError`` deep inside ``compute``.
+    Going through ``__init__`` means a field added later is always initialised.
+    """
+    worker = InferenceWorker(object())
+    worker._conn = conn
+    worker._proc = proc
+    return worker
+
+
 def test_compute_returns_a_result_from_a_real_child_process() -> None:
     """End to end over a real pipe and a real second process."""
     ctx = mp.get_context("spawn")
@@ -116,11 +131,7 @@ def test_compute_returns_a_result_from_a_real_child_process() -> None:
     proc.start()
     child_conn.close()
 
-    worker = InferenceWorker.__new__(InferenceWorker)
-    worker._conn = parent_conn
-    worker._proc = proc
-    worker._failures = 0
-    worker._config_path = ""
+    worker = _detached_worker(conn=parent_conn, proc=proc)
 
     try:
         result = worker.compute(
@@ -145,11 +156,7 @@ def test_compute_returns_a_result_from_a_real_child_process() -> None:
 def test_compute_returns_none_when_the_child_is_dead() -> None:
     """A dead worker must hand the tick back, not raise — the pipeline
     scores it in-process instead."""
-    worker = InferenceWorker.__new__(InferenceWorker)
-    worker._conn = None
-    worker._proc = _FakeProc(_alive=False)
-    worker._failures = 0
-    worker._config_path = ""
+    worker = _detached_worker(conn=None, proc=_FakeProc(_alive=False))
 
     assert (
         worker.compute(
@@ -173,11 +180,7 @@ def test_compute_returns_none_when_the_pipe_is_broken() -> None:
     parent_conn.close()
     child_conn.close()
 
-    worker = InferenceWorker.__new__(InferenceWorker)
-    worker._conn = parent_conn
-    worker._proc = _FakeProc(_alive=True)
-    worker._failures = 0
-    worker._config_path = ""
+    worker = _detached_worker(conn=parent_conn, proc=_FakeProc(_alive=True))
 
     assert (
         worker.compute(
@@ -195,9 +198,7 @@ def test_compute_returns_none_when_the_pipe_is_broken() -> None:
 
 
 def test_stop_is_safe_without_a_started_worker() -> None:
-    worker = InferenceWorker.__new__(InferenceWorker)
-    worker._conn = None
-    worker._proc = None
+    worker = _detached_worker(conn=None, proc=None)
     worker._failures = 0
     worker._config_path = ""
 
@@ -300,8 +301,9 @@ def test_worker_is_handed_the_live_scoped_config_not_a_path(monkeypatch) -> None
     captured: dict[str, Any] = {}
 
     class _Recorder:
-        def __init__(self, config: Any) -> None:
+        def __init__(self, config: Any, **kwargs: Any) -> None:
             captured["config"] = config
+            captured["kwargs"] = kwargs
 
         def start(self) -> bool:
             return True

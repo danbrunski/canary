@@ -93,6 +93,14 @@ class InferenceTiming:
     missed_by_reason: Mapping[str, int]
     stale_results_discarded: int
     compute_failures: int
+    #: Out-of-process scoring fallbacks by reason, cumulative (D02.3). Empty
+    #: when no worker is configured; a non-empty `timeout` or `pipe_error`
+    #: means the child is wedged and every tick since has scored in-process.
+    worker_fallbacks: Mapping[str, int]
+    #: Ticks whose compute ran past the tick period (D02.3). Not a miss — the
+    #: result is still applied — but the loop cannot start the next tick, so
+    #: this is the count behind `missed_by_reason.compute_busy`.
+    slow_computes: int
     lateness: StageSummary
     stages: Mapping[str, StageSummary]
     window: int
@@ -106,6 +114,8 @@ class InferenceTiming:
             "missed_by_reason": dict(self.missed_by_reason),
             "stale_results_discarded": self.stale_results_discarded,
             "compute_failures": self.compute_failures,
+            "worker_fallbacks": dict(self.worker_fallbacks),
+            "slow_computes": self.slow_computes,
             "lateness": self.lateness.to_dict(),
             "stages": {name: summary.to_dict() for name, summary in self.stages.items()},
             "window": self.window,
@@ -130,6 +140,8 @@ class InferenceTimingRecorder:
     ticks_completed: int = 0
     stale_results_discarded: int = 0
     compute_failures: int = 0
+    slow_computes: int = 0
+    _worker_fallbacks: Mapping[str, int] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         if self.window < 1:
@@ -166,6 +178,18 @@ class InferenceTimingRecorder:
     def note_compute_failure(self) -> None:
         self.compute_failures += 1
 
+    def note_slow_compute(self) -> None:
+        """A tick whose compute outran the tick period (D02.3)."""
+        self.slow_computes += 1
+
+    def set_worker_fallbacks(self, fallbacks: Mapping[str, int]) -> None:
+        """Publish the scoring worker's cumulative fallback reasons.
+
+        The worker owns the counts; the recorder only carries them into the
+        snapshot, so `/status` shows why scoring left the child.
+        """
+        self._worker_fallbacks = dict(fallbacks)
+
     @property
     def missed_ticks(self) -> int:
         return sum(self._missed.values())
@@ -179,6 +203,8 @@ class InferenceTimingRecorder:
             missed_by_reason=dict(sorted(self._missed.items())),
             stale_results_discarded=self.stale_results_discarded,
             compute_failures=self.compute_failures,
+            worker_fallbacks=dict(self._worker_fallbacks),
+            slow_computes=self.slow_computes,
             lateness=StageSummary.from_samples(tuple(self._lateness)),
             stages={
                 name: StageSummary.from_samples(tuple(samples))

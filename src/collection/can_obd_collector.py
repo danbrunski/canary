@@ -1989,6 +1989,14 @@ def _issue_batched_request(
     case, and applying six misses would wrongly back off six healthy channels
     on what may be an ECU that simply dislikes batching. The caller counts
     consecutive failures and stops batching instead.
+
+    Those sends are still counted in ``requests_sent``, so they go to
+    ``batch_failures`` — otherwise the remainder is unnamed, which is how
+    three channels read as "60 sent, 0 answered, 6 timeouts" on the
+    2026-09-10 drive and looked like dead channels rather than 54 sends
+    inside failed batches. The invariant
+    ``requests_sent == responses + timeouts + batch_failures`` holds per
+    request; ``_request_accounting_error`` reports any breach in ``/status``.
     """
     identifiers = [requests[index].identifier for index in indices]
     leader = requests[indices[0]]
@@ -2020,6 +2028,12 @@ def _issue_batched_request(
             stats.did_batch_failures += 1
         else:
             stats.batch_failures += 1
+        # The send was counted above for every member; nothing below will
+        # credit or penalise them, by design. Name where those sends went so
+        # `requests_sent == responses + timeouts + batch_failures` holds and
+        # the remainder is never an unexplained bucket (D02.1).
+        for index in indices:
+            states[index].batch_failures += 1
         if result.negative_response_code is not None:
             stats.negative_responses += 1
             for index in indices:

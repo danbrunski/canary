@@ -15,6 +15,7 @@ from src.collection import bus_budget as bus_budget_gate
 from src.collection import tuning_profile, tx_gate
 from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
+from src.models.feature_spec_health import structural_blindness_snapshot
 from src.models.health import HealthMonitor
 from src.timefmt import parse_iso_utc
 
@@ -529,6 +530,12 @@ def build_status(
                     health_monitor.if_missing_feature_rate_by_mode
                 ),
             },
+            # D02.5 — `blind_modes` says a detector is scoring nothing;
+            # this says *why*, when the reason is that its feature spec
+            # cannot be satisfied by the live pipeline at all (a channel
+            # renamed or retracted out of `data/bindings.yaml` since the
+            # artifact was trained). Empty when every spec is satisfiable.
+            "structural_blindness": structural_blindness_snapshot(),
             # 4.7 — complements the load-time unknown_operating_modes warning:
             # this is the *runtime* version, when the live segmenter can't
             # run at all (its input columns are missing) rather than being

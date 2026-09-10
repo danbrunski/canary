@@ -35,6 +35,10 @@ from src.decode.behavior_models import (
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import load_did_map
+from src.models.feature_spec_health import (
+    _STRUCTURAL_BLINDNESS,
+    structural_blindness,
+)
 from src.models.health import HealthMonitor
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,
@@ -52,7 +56,12 @@ from .autotag_hook import LiveAutoTagHook
 from .components import DaemonComponents
 from .inference_metrics import MISSED_COMPUTE_BUSY, InferenceTimingRecorder
 from .inference_scheduling import GenerationToken, TickScheduler, TickSlot
-from .inference_worker import InferenceWorker, WorkerTick
+from .inference_worker import (
+    MIN_RESULT_TIMEOUT_SECONDS,
+    RESULT_TIMEOUT_TICKS,
+    InferenceWorker,
+    WorkerTick,
+)
 
 log = logging.getLogger(__name__)
 
@@ -674,6 +683,8 @@ class LiveInferencePipeline:
             ),
             _tick_seconds=interval_seconds,
         )
+        #: Tick period, for naming a compute that outran it (D02.3).
+        self._interval_seconds = interval_seconds
         self._owns_executor = executor is None
         self._executor = executor if executor is not None else _new_inference_executor()
         self._wall_clock = wall_clock if wall_clock is not None else _utc_now
@@ -837,7 +848,15 @@ class LiveInferencePipeline:
             self._recorder.note_compute_failure()
             log.exception("live inference compute failed for tick %d", request.slot.index)
             return
-        self._recorder.record_stage("compute_wait", time.perf_counter() - submitted)
+        compute_wait = time.perf_counter() - submitted
+        self._recorder.record_stage("compute_wait", compute_wait)
+        # A compute that outran the tick period is why the next tick cannot
+        # start (D02.3). Name it here rather than leaving it visible only as a
+        # `compute_wait` max nobody reads.
+        if self._interval_seconds and compute_wait > self._interval_seconds:
+            self._recorder.note_slow_compute()
+        if self._worker is not None:
+            self._recorder.set_worker_fallbacks(self._worker.fallbacks)
         try:
             self._apply(request, result)
         except Exception:  # noqa: BLE001 — live inference is best-effort
@@ -1009,7 +1028,7 @@ async def run_live_inference(
             "behavior overlay + fusion still run off the live feature source"
         )
     recorder = components.inference_timing
-    worker = _start_inference_worker(components)
+    worker = _start_inference_worker(components, tick_seconds=interval)
     pipeline = LiveInferencePipeline(
         source, components, interval_seconds=interval, recorder=recorder, worker=worker
     )
@@ -1022,7 +1041,9 @@ async def run_live_inference(
             worker.stop()
 
 
-def _start_inference_worker(components: DaemonComponents) -> InferenceWorker | None:
+def _start_inference_worker(
+    components: DaemonComponents, *, tick_seconds: float | None = None
+) -> InferenceWorker | None:
     """Bring up out-of-process scoring, or return ``None`` to stay in-process.
 
     ``None`` is a supported outcome, not an error: the pipeline then scores
@@ -1036,7 +1057,14 @@ def _start_inference_worker(components: DaemonComponents) -> InferenceWorker | N
     """
     if not components.config.models.out_of_process_scoring:
         return None
-    worker = InferenceWorker(components.config)
+    worker = InferenceWorker(
+        components.config,
+        result_timeout_seconds=(
+            None
+            if tick_seconds is None
+            else max(MIN_RESULT_TIMEOUT_SECONDS, tick_seconds * RESULT_TIMEOUT_TICKS)
+        ),
+    )
     if not worker.start():
         return None
     return worker
@@ -1146,11 +1174,37 @@ def _log_schema_reconciliation_once(
     report: FeatureSpecReconciliation,
 ) -> None:
     if not report.has_divergence:
+        _STRUCTURAL_BLINDNESS.pop(model_type, None)
         return
     key = (model_type, model_version)
     if key in _SCHEMA_RECONCILIATION_WARNED:
         return
     _SCHEMA_RECONCILIATION_WARNED.add(key)
+    blindness = structural_blindness(report)
+    if blindness is not None and blindness["scores_nothing"]:
+        # Not the same event as "schema reconciled": this model cannot score a
+        # single row until it is retrained, and the only prior symptom was a
+        # `missing_feature_rate` of 1.0 with no cause attached (D02.5).
+        log.error(
+            "model feature spec is unsatisfiable: %d of %d features are absent "
+            "from the live pipeline (%.1f%% > %.1f%% ceiling), so this detector "
+            "will withhold every row until retrained; absent: %s",
+            blindness["absent_count"],
+            blindness["expected_count"],
+            blindness["absent_fraction"] * 100.0,
+            blindness["withhold_ceiling"] * 100.0,
+            ", ".join(blindness["absent_feature_columns"][:12]),
+            extra={
+                "model_type": model_type,
+                "model_version": model_version,
+                "structural_blindness": blindness,
+            },
+        )
+        _STRUCTURAL_BLINDNESS[model_type] = {
+            "model_version": model_version,
+            **blindness,
+        }
+        return
     log.warning(
         "live feature schema reconciled to model feature spec",
         extra={

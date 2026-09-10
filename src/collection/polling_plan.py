@@ -149,9 +149,13 @@ class ResolvedPollingPlan:
 
     def to_dict(self) -> dict[str, Any]:
         members = list(self.members)
-        unknown_widths = [
-            member.channel for member in members if member.response_payload_bytes is None
-        ]
+        # Sorted and unique (D02.4a): a channel with several members — every
+        # Mode 06 MID shares the `MONITOR_RESULTS` channel — repeated once per
+        # member, so anything sized from this list (a coverage fraction, a
+        # capacity note) counted one channel twenty-plus times.
+        unknown_widths = sorted(
+            {member.channel for member in members if member.response_payload_bytes is None}
+        )
         fallback_requests = sum(member.rate_hz for member in members)
         fallback_frames = sum(
             member.rate_hz

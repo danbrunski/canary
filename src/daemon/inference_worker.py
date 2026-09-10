@@ -53,6 +53,7 @@ from __future__ import annotations
 import logging
 import multiprocessing as mp
 import time
+from collections import Counter
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 from typing import TYPE_CHECKING, Any
@@ -66,7 +67,19 @@ log = logging.getLogger(__name__)
 #: worker for this tick. Deliberately generous — the whole point is to
 #: tolerate a slow model — but bounded, so a wedged child cannot hold a tick
 #: forever. The parent skips (and counts) rather than blocking the loop.
-RESULT_TIMEOUT_SECONDS = 30.0
+#: How long to wait for the child's *first* answer. It loads artifacts on that
+#: tick (~2-7 s measured), so this cannot be tied to the tick period.
+STARTUP_RESULT_TIMEOUT_SECONDS = 30.0
+#: Steady-state ceiling when the caller gives no tick period. 30 s on a 1 s
+#: tick is thirty consecutive `compute_busy` misses before the fallback even
+#: starts (D02.3) — callers should pass `result_timeout_seconds` derived from
+#: their interval instead of relying on this.
+RESULT_TIMEOUT_SECONDS = 5.0
+#: Steady-state timeout as a multiple of the tick period, floored at
+#: `MIN_RESULT_TIMEOUT_SECONDS`. Generous enough that ordinary jitter never
+#: trips it, small enough that a wedged child is detected in seconds.
+RESULT_TIMEOUT_TICKS = 3.0
+MIN_RESULT_TIMEOUT_SECONDS = 2.0
 
 #: Grace period for the child to exit on shutdown before it is terminated.
 SHUTDOWN_TIMEOUT_SECONDS = 5.0
@@ -221,13 +234,42 @@ class InferenceWorker:
     runs* — the wait itself is a pipe read, which releases the GIL.
     """
 
-    def __init__(self, config: Any) -> None:
+    def __init__(self, config: Any, *, result_timeout_seconds: float | None = None) -> None:
         #: The parent's live, profile-scoped config — not a path. See
         #: :func:`_worker_main`.
         self._config = config
         self._proc: mp.process.BaseProcess | None = None
         self._conn: Connection | None = None
         self._failures = 0
+        self._answered_once = False
+        self._result_timeout_seconds = (
+            RESULT_TIMEOUT_SECONDS
+            if result_timeout_seconds is None
+            else max(MIN_RESULT_TIMEOUT_SECONDS, float(result_timeout_seconds))
+        )
+        #: Why the parent fell back to in-process scoring, cumulative (D02.3).
+        #: `/status` shows these: before them a wedged child was visible only
+        #: as a large `compute_wait` max, which is how a 63 s stall on
+        #: 2026-09-10 recorded `compute_failures: 0`.
+        self._fallbacks: Counter[str] = Counter()
+
+    @property
+    def fallbacks(self) -> dict[str, int]:
+        """Cumulative fallback reasons; empty while the child is answering."""
+        return dict(sorted(self._fallbacks.items()))
+
+    @property
+    def fallback_count(self) -> int:
+        return sum(self._fallbacks.values())
+
+    @property
+    def result_timeout_seconds(self) -> float:
+        """The wait in force now — the startup allowance until first answer."""
+        return (
+            self._result_timeout_seconds
+            if self._answered_once
+            else max(self._result_timeout_seconds, STARTUP_RESULT_TIMEOUT_SECONDS)
+        )
 
     @property
     def alive(self) -> bool:
@@ -261,28 +303,35 @@ class InferenceWorker:
 
         conn = self._conn
         if conn is None or not self.alive:
+            self._fallbacks["worker_down"] += 1
             return None
+        timeout = self.result_timeout_seconds
         try:
             conn.send(tick)
-            if not conn.poll(RESULT_TIMEOUT_SECONDS):
+            if not conn.poll(timeout):
                 log.warning(
-                    "inference worker did not answer tick %d within %.0fs; falling back in-process",
+                    "inference worker did not answer tick %d within %.1fs; falling back in-process",
                     tick.index,
-                    RESULT_TIMEOUT_SECONDS,
+                    timeout,
                 )
                 self._failures += 1
+                self._fallbacks["timeout"] += 1
                 return None
             reply = conn.recv()
         except (EOFError, BrokenPipeError, OSError):
             log.warning("inference worker pipe broke; falling back in-process")
             self._failures += 1
+            self._fallbacks["pipe_error"] += 1
             return None
 
         if not isinstance(reply, WorkerReply):
+            self._fallbacks["bad_reply"] += 1
             return None
         if reply.error is not None:
             log.warning("inference worker reported an error: %s", reply.error)
+            self._fallbacks["worker_error"] += 1
         self._failures = 0
+        self._answered_once = True
         return _TickResult(
             if_computed=reply.if_computed,
             sequence_result=reply.sequence_result,

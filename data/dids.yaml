@@ -425,6 +425,8 @@ dids:
     name: ECM_AF_SENSOR_V_B1
     byte_start: 0
     byte_length: 2
+    response_length: 2
+    response_length_source: '55 sessions incl. _capture-tuning-did-2026-08-06T145004 + -2026-08-07T005351: 42,563 stored Mode 22 response payloads, all 2 bytes. Payload is the full post-header response (_decode_response stores response.payload unmodified), not a byte_length slice. Method reproduced the pinned widths of 0x1101 (1), 0x1208 (2) and 0x1219 (2) exactly. D02.4, 2026-09-10.'
     byte_order: big
     scale: 0.005
     offset: 0.0
@@ -446,6 +448,8 @@ dids:
     name: ECM_AF_SENSOR_V_B2
     byte_start: 0
     byte_length: 2
+    response_length: 2
+    response_length_source: '55 sessions incl. _capture-tuning-did-2026-08-06T145004 + -2026-08-07T005351: 42,182 stored Mode 22 response payloads, all 2 bytes. Payload is the full post-header response (_decode_response stores response.payload unmodified), not a byte_length slice. Method reproduced the pinned widths of 0x1101 (1), 0x1208 (2) and 0x1219 (2) exactly. D02.4, 2026-09-10.'
     byte_order: big
     scale: 0.005
     offset: 0.0
@@ -460,6 +464,8 @@ dids:
     name: ECM_THROTTLE_POS_SENSOR_1
     byte_start: 0
     byte_length: 2
+    response_length: 2
+    response_length_source: '55 sessions incl. _capture-tuning-did-2026-08-06T145004 + -2026-08-07T005351: 42,600 stored Mode 22 response payloads, all 2 bytes. Payload is the full post-header response (_decode_response stores response.payload unmodified), not a byte_length slice. Method reproduced the pinned widths of 0x1101 (1), 0x1208 (2) and 0x1219 (2) exactly. D02.4, 2026-09-10.'
     byte_order: big
     scale: 0.005
     offset: 0.0
@@ -476,6 +482,8 @@ dids:
     name: ECM_THROTTLE_POS_SENSOR_2
     byte_start: 0
     byte_length: 2
+    response_length: 2
+    response_length_source: '32 sessions incl. _capture-tuning-did-2026-08-06T145004 + -2026-08-07T005351: 497 stored Mode 22 response payloads, all 2 bytes. Payload is the full post-header response (_decode_response stores response.payload unmodified), not a byte_length slice. Method reproduced the pinned widths of 0x1101 (1), 0x1208 (2) and 0x1219 (2) exactly. D02.4, 2026-09-10.'
     byte_order: big
     scale: 0.005
     offset: 0.0

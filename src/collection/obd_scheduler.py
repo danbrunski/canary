@@ -675,6 +675,15 @@ class _PollRequestState:
     requests_sent: int = 0
     responses: int = 0
     timeouts: int = 0
+    #: Sends that a *whole-batch* failure swallowed (D02.1). `_issue_batched_request`
+    #: credits and penalises nobody when the batch itself timed out, was refused or
+    #: desynced — we have no evidence about any individual member — but the send was
+    #: already counted. Without this bucket `requests_sent - responses - timeouts` is
+    #: an unnamed remainder, which read as "60 sent, 0 answered, 6 timeouts" on
+    #: 2026-09-10 and made a channel's `response_rate` look like a channel problem.
+    #: The invariant `requests_sent == responses + timeouts + batch_failures` is
+    #: asserted by `_request_accounting_error`; keep it true.
+    batch_failures: int = 0
     #: Formal ECU refusals for this request — see `CanObdLoopStats.negative_responses`.
     negative_responses: int = 0
     last_negative_response_code: int | None = None
@@ -1739,6 +1748,27 @@ def apply_mode01_support(
     ]
 
 
+def _request_sends_judged(state: _PollRequestState) -> int:
+    """Sends this request has evidence about: answered or missed on its own.
+
+    A send swallowed by a whole-batch failure is excluded — the batch failed,
+    not the member, and `_issue_batched_request` deliberately credits and
+    penalises nobody in that case (D02.1).
+    """
+    return state.responses + state.timeouts
+
+
+def _request_accounting_error(state: _PollRequestState) -> int:
+    """`requests_sent` minus everything that claims to explain it.
+
+    Non-zero means a send went out and no counter owns it — the defect D02.1
+    exists to make impossible. Surfaced per request in the status payload
+    rather than asserted, because a scheduler must not crash a live collector
+    over a counter; a non-zero value here is the alarm.
+    """
+    return state.requests_sent - (state.responses + state.timeouts + state.batch_failures)
+
+
 def _pid_channel_and_tier(pid: int) -> tuple[str, PollTier]:
     """Channel name + poll tier for a Mode 01 PID, both from ``MODE01_REGISTRY``.
 
@@ -2395,6 +2425,8 @@ def _scheduler_metrics(
                 "requests_sent": state.requests_sent,
                 "responses": state.responses,
                 "timeouts": state.timeouts,
+                "batch_failures": state.batch_failures,
+                "accounting_error": _request_accounting_error(state),
                 "negative_responses": state.negative_responses,
                 "last_negative_response_code": (
                     f"0x{state.last_negative_response_code:02X} "
@@ -2402,8 +2434,13 @@ def _scheduler_metrics(
                     if state.last_negative_response_code is not None
                     else None
                 ),
+                # Rate over sends we have evidence about: a send a whole-batch
+                # failure swallowed says nothing about this channel, so counting
+                # it as a non-response understates a healthy PID (D02.1).
                 "response_rate": (
-                    round(state.responses / state.requests_sent, 4) if state.requests_sent else None
+                    round(state.responses / _request_sends_judged(state), 4)
+                    if _request_sends_judged(state)
+                    else None
                 ),
                 "missed_responses": state.missed_responses,
                 "backed_off": backed,
