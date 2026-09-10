@@ -106,7 +106,35 @@ this session; every phase ends with a gate that can fail.
 whose per-channel `coverage` ≈ 1.0. That final drive doubles as H1 evidence,
 closing two docs with one session.
 
-### Phase 1 — D01.8: batch the per-column pandas calls
+### Phase 1 — D01.8: batch the per-column pandas calls ✅ DONE
+
+**Result: workstation feature tick 155 ms → 51 ms (3.0×)**, smoke and steady
+both (`steady` median 54.3 ms, was ~155). Bit-identical output, verified two
+ways: an exact old-vs-new comparison over three real resampled sessions
+(420×182 up to 263×497) across five `FeatureConfig` variants, and a permanent
+regression test (`tests/test_features_batched_parity.py`, 25 cases) that keeps
+the verbatim per-column implementation as its reference and compares with
+`array_equal(..., equal_nan=True)` — not `allclose`, because this feeds
+trained models. Ground-truth suite green.
+
+Two of the three planned sites landed; the third was measured and rejected:
+
+- ✅ `features.py` rolling `mean`/`std` → `windowed.mean()` / `windowed.std()`.
+- ✅ `features.py` ROC → one frame-wide `shift` and one `div(axis=0)`.
+- ❌ `feature_pipeline.py` `reconcile_feature_frame_to_spec` — **reverted.**
+  It costs 54.6 ms/call on a *one-row* 327-column frame, so it looked like an
+  easy win, but batching it made it **slower (62.7 ms)**. Profiling showed why:
+  the cost is block-manager churn (`iset`, `_iset_split_block`, `blocks.delete`
+  — 6,540 writes per 20 calls), and a bulk `out[cols] = frame` assignment
+  splits blocks harder than the loop did. Fixing it properly means building
+  the output frame once instead of mutating it, which is a real restructure of
+  the function that produces model input. Deferred: it runs in the child
+  process now, so its ~54 ms is ~25 % of `compute` and does not block the
+  loop. Tracked as D01.10.
+
+*Original plan text follows.*
+
+### Phase 1 (as planned) — batch the per-column pandas calls
 
 *Smallest risk, no scheduler changes, workstation-verifiable.* Three
 same-shaped loops in the feature path make ~135+ single-column pandas calls
@@ -221,6 +249,17 @@ the window again.
 - [ ] D01.6 Storage write stalls. `max_write_ms` reached **18,475 ms** with
   the queue at 7,778 / 10,000. Likely the same contention; confirm against
   D01.3 before treating it as its own defect. Do not widen the queue.
+
+- [ ] D01.10 Rebuild `reconcile_feature_frame_to_spec` instead of mutating it.
+  54.6 ms per call on a one-row 327-column frame, every tick in the serving
+  path. The naive batching is *slower* (62.7 ms) — measured, reverted — because
+  the cost is block-manager churn, not conversion: `iset` /
+  `_iset_split_block` / `blocks.delete` dominate, and a bulk column assignment
+  splits blocks harder than the per-column loop. The fix is to construct the
+  aligned output frame once from a dict of finished Series rather than
+  inserting into and mutating `out`. Moderate risk — this function produces
+  the model input — for ~25 % of `compute`, which no longer blocks the event
+  loop. Do it after Phase 2, if `compute` is still the binding constraint.
 
 - [ ] D01.7 Decide the sequence detector's place on this hardware. If D01.9,
   D01.4 and D01.8 leave the tick over budget, the honest options are a longer
