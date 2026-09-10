@@ -4,17 +4,27 @@ Created 2026-09-08 when C04, C05, C06, C08, C09 and C10 were archived. Their
 implementation is complete and their evidence is in the archived docs; what
 remains is measurement on the vehicle, which no workstation run substitutes.
 
-**Status 2026-09-09: six of ten measured** (H0, H2, H3, H4, H5 done; H6
-partial). Evidence: [`data/analyses/2026-09-09-pending-hardware.md`](../../../data/analyses/2026-09-09-pending-hardware.md).
-The Pi was reachable, engine warm at idle. H1, H7, H8 and H9 need a 20–30 min
-drive; the operator deferred driving on 2026-09-09, so they stay open with the
-reason recorded rather than guessed at.
+**Status 2026-09-10: nine of ten measured** (H0, H1, H2, H3, H4, H5, H7, H9
+done; H6 partial). Evidence:
+[`data/analyses/2026-09-09-pending-hardware.md`](../../../data/analyses/2026-09-09-pending-hardware.md)
+for the idle session, and
+[`data/analyses/2026-09-10-drive-h1-h7-h9.md`](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)
+for the 2026-09-10 drive. Only **H8** remains: it needs the continuous-DID
+profile, which disables Mode 01 and cannot share a window with the `default`
+capture the drive ran, so it wants its own 15-minute drive.
 
 **The session's headline is not a checkbox.** The deployed daemon cannot hold
 its 1 Hz inference tick on this hardware: `total` median 863 ms against a
 1000 ms period, **48 % of ticks missed**, and event-loop stalls that cost a
 concurrent `fuel-map` capture **0 of 468 complete tuples** with ~100 s gaps in
 every channel. H3's and H6's numbers are bounded by that, not by the bus.
+
+**Superseded 2026-09-10 — that headline no longer holds.** With D01.1's
+out-of-process scoring on the Pi, the same tick measured over a 24-minute drive
+runs `total` median **659.7 ms** with **31 of 1448 ticks missed (2.14 %)**, all
+of them `compute_busy`, and storage's worst write fell from 18,475 ms to
+952 ms. H3 and H6 were bounded by a constraint that has largely been removed,
+so **both are worth re-running** before their numbers are quoted again.
 
 This is one checklist rather than ten scattered `[~]` boxes because it is one
 session's work: plug the Pi in, run these, and the C0x set is closed. Each
@@ -40,7 +50,7 @@ archived task it came from.
 
 ## Sustained captures
 
-- [ ] H1 (C10.10) Run sustained Pi scenarios covering several flush/keepalive
+- [x] H1 (C10.10) Run sustained Pi scenarios covering several flush/keepalive
   and diagnostic periods. Use at least a representative 20–30 minute capture
   for final supported profiles, with enough varied operation for the intended
   analysis. Do not call an eight-second burst sustained drive validation.
@@ -48,6 +58,19 @@ archived task it came from.
   `docs/sustained-validation.md` → "Pi procedure", steps 1–4. Synthetic
   scenarios are 10–60 s by construction and are not offered as sustained
   drive validation._
+  **Measured 2026-09-10** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)): capture window
+  `843ff8eb` on session `2026-09-10T142711`, **24 min 58 s**, `default`
+  profile, every in-window sample at `engine_running`, rpm 737–3550, coolant
+  85–93 °C, 446 chunks / 46.7 MB. 1457 polling rounds started, 1386 complete,
+  70 incomplete (4.8 %), 0 skipped; 32 Mode 22 windows opened and completed
+  with 0 session failures; **0 dropped records in every sink**, 0 parse
+  errors, 0 bus errors, 0 negative responses. The operator set the acceptance
+  bar for this drive at "more than 10 minutes of data is enough"; 25 minutes
+  clears it. Unlike 2026-09-09 the capture was not starved — no counterpart to
+  that day's 0-of-468-tuples result. **Still owed:** the per-channel gap
+  analysis over the session parquet; the laptop's `eth1` link to the Pi went
+  down when the truck was unplugged, so every number above is a live daemon or
+  kernel counter, not a parquet read._
 
 - [x] H2 (C05.11) Run the same workload on the Pi, identifying hardware,
   power/thermal state, runtime, and model versions. Do not fill the missing
@@ -168,16 +191,29 @@ what it showed and what the truck adds. Do not re-derive the local half.
 
 These ask what the *vehicle* does. A scripted ECU cannot answer them at all.
 
-- [ ] H7 (C09.12) For normal monitoring, measure useful critical-channel
+- [x] H7 (C09.12) For normal monitoring, measure useful critical-channel
   coverage, probe overhead, and batching before changing the default budget.
   Reuse validated passive providers explicitly where appropriate; preserve
   source provenance and the model inputs they actually supply.
   _From [C09](archive/09-polling-plans-and-profile-capacity.md). Blocked on a
   live normal-monitoring capture. No default budget has been changed._
-  **Still blocked 2026-09-09** — operator deferred driving. Partial evidence
-  ([here](../../../data/analyses/2026-09-09-pending-hardware.md)): probe overhead is 9 requests / 0.49 s, and batching measured
-  `mean_pids_per_batch` 2.02 with 65 failures, 8 desyncs, 3 size narrowings.
-  No default budget changed._
+  **Measured 2026-09-10** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)), over the H1 drive on
+  `default`, budget left at its deployed 8.0 req/s.
+  **Probe overhead:** discovery spent **9 requests / 0.769 s**, once — the
+  counters are identical in the first and last in-window snapshot, so 25
+  minutes of driving triggered no re-walk (41 Mode 01 PIDs in 3 probes, 23
+  Mode 06 MIDs in 6, responder 0x7E8).
+  **Batching:** 5345 batched requests carrying 27,678 PIDs, **mean 5.17 of a
+  6 maximum**, 101 failures (1.9 %), 19 desyncs, **0 size narrowings**. This
+  supersedes the idle figure above: `mean_pids_per_batch` 2.02 with 3
+  narrowings was a warm-idle artifact, not the profile's behaviour under load.
+  **Useful critical-channel coverage:** 42 channels reporting — 15 fast-tier at
+  0.97 Hz (the model-input set: RPM, SPEED, ENGINE_LOAD, MAF, THROTTLE_POS,
+  TIMING_ADVANCE, ABSOLUTE_LOAD, RELATIVE_THROTTLE_POS, ACCEL_PEDAL_POS_D/E,
+  COMMANDED_THROTTLE_ACTUATOR, CONTROL_MODULE_VOLTAGE, O2_B1S2, O2_B2S2,
+  O2_WR_LAMBDA_S1), 12 medium at 0.33 Hz (fuel trims and
+  COMMANDED_EQUIV_RATIO), 9 slow at ≤ 0.07 Hz, 6 Mode 22 DIDs at 0.02 Hz.
+  **No default budget changed.**_
 
 - [ ] H8 (C09.14) For continuous DID profiles, identify fast dynamics and
   slow context from experiment requirements, lower context demand, and measure
@@ -186,8 +222,11 @@ These ask what the *vehicle* does. A scripted ECU cannot answer them at all.
   _From [C09](archive/09-polling-plans-and-profile-capacity.md). Blocked on an
   experiment-specific live capture to classify dynamics and measure released
   capacity; the schema and runtime cadence control are complete._
+  **Still open after the 2026-09-10 drive** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)): that drive ran
+  `default`, and the continuous-DID profile disables Mode 01, so the two
+  cannot share one window. H8 needs its own 15-minute drive._
 
-- [ ] H9 (C09.16) Correct capacity notes to state active transport, measured
+- [x] H9 (C09.16) Correct capacity notes to state active transport, measured
   test duration/conditions, and actual request counts. Retain the old
   storage-loss incident as history, not a universal 24 request/s ceiling. Do
   not raise deployed rate defaults until sustained evidence supports them.
@@ -198,6 +237,20 @@ These ask what the *vehicle* does. A scripted ECU cannot answer them at all.
   before C09), where the budget was never the constraint — so batching bought
   request count, not rate. None of that licenses a capacity note about the
   truck's transport or a raised default; H1 is what does._
+  **Measured 2026-09-10** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)), from the H1 drive.
+  **Active transport:** MCP2515 on SPI, `parentdev spi0.1` — the Waveshare CAN
+  HAT, not the Canable USB path — at 500 kbit/s, sample point 0.875,
+  `restart-ms` 100, `ERROR-ACTIVE` throughout with 0 bus errors, 0 arbitration
+  losses, 0 error-warn, 0 error-passive, 0 bus-off and 0 restarts.
+  **Duration and conditions:** 1449 s in-window, engine warm and running,
+  mixed idle/city/highway, CPU 51 → 61 °C, no under-voltage or throttling.
+  **Actual request counts:** 5792 requests = **4.00 req/s** against an 8.0
+  req/s budget, yielding 27,716 readings = 19.13 channel-reads/s; 54 timeouts
+  (0.93 %), 0 negative responses. Two conclusions follow. The old "24 req/s
+  ceiling" describes a storage incident on a different transport and is not a
+  property of this one. And the bus is still not the constraint — the
+  scheduler used half its allowance while the ECM answered 99.1 % of what it
+  was asked. **No deployed rate default was raised.**_
 
 ## Rules that still apply
 

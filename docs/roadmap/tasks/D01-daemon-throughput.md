@@ -191,10 +191,36 @@ max(feature, compute) (~350 ms); `compute_busy` misses — 48 of 50 today —
 approach zero at 1 Hz. Gate: ordering/generation unit tests, full pytest,
 then the Pi comparison below.
 
-### Phase 3 — remeasure on the truck — **NEXT**
+### Phase 3 — remeasure on the truck — **HALF DONE 2026-09-10**
 
-Now the immediate next step, ahead of Phase 2. Deploy `features.py` (and the
-D01.1 files, already there) and re-run the D01.3 protocol.
+Ran the D01.3 protocol over a 24-minute drive with D01.1 deployed and
+**D01.8 not deployed** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)). That is the post-D01.1 /
+pre-batching baseline; the `features.py` half is still owed.
+
+| stage | median | p95 | 2026-09-09 |
+|---|---:|---:|---:|
+| `total` | 659.7 ms | 862.0 ms | 863 ms |
+| `feature` | 296.9 ms | 396.1 ms | – |
+| `compute` | 328.8 ms | 477.3 ms | – |
+| `sequence` | 251.5 ms | 394.8 ms | – |
+| `isolation_forest` | 73.0 ms | 95.6 ms | – |
+| `loop_occupancy` | 301.9 ms | 431.4 ms | 341 ms |
+
+Ticks missed fell from **306 / 633 (48 %)** to **31 / 1448 (2.14 %)**, every
+one of them `compute_busy` and none an `overrun`; tick lateness p95 2.52 ms.
+**The tick is inside its 1000 ms budget on this hardware.** Storage's worst
+write fell from 18,475 ms to 952.3 ms with the queue never above 2003 / 10,000
+and nothing dropped.
+
+Caveat on `isolation_forest`: `missing_feature_rate` read **1.0** in every
+operating mode for the whole drive, so that 73.0 ms is time spent scoring an
+all-missing vector and is not a representative cost. `sequence` at 251.5 ms
+dominates `compute` regardless, so the conclusions above stand. The blind IF is
+its own defect, recorded in the evidence doc.
+
+Still owed: deploy `features.py` and re-read `feature` / `snapshot`. Also
+bring the Pi to a committed revision first — its tree is dirty with the
+hand-copied D01.1 files.
 
 Cheapest first check needs no vehicle at all: `scripts/benchmark_live_pipeline.py
 --profile steady` on the Pi. Today's baseline is **smoke 122.7 ms / steady
@@ -219,6 +245,26 @@ the window again.
 - Tick still over budget → D01.4 (feature build off the loop — the big
   structural change, deliberately last because Phases 1–2 may make it
   unnecessary), and only then D01.7 (sequence cadence/backbone decision).
+
+**What the 2026-09-10 numbers said** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)):
+
+- **Loss persists → D01.5 is warranted.** A 65 s warm-idle comparison put the
+  kernel at 120,599 frames and the daemon at 115,480: **4.24 % unaccounted**,
+  with `rx_dropped` flat — the same invisible-to-`ip -s link` signature as the
+  6.6 %. The two reads are not atomic and the daemon's window is the wider, so
+  4.2 % is a floor. Some of the original 6.6 % was GIL starvation and is gone.
+  D01.5 also gained a **second, distinct cause**: `can0 rx_over_errors` rose by
+  121 during the drive while `rx_dropped` stayed flat — MCP2515 controller
+  overflow (two hardware RX buffers, SPI not draining them), a driver-level
+  loss underneath the socket-level one. Do not fold them into one number.
+- **Stalls did not persist → D01.6 closes.** 18,475 ms → 952.3 ms, queue high
+  water 7778 → 2003 of 10,000, 0 dropped. It was contention from the starved
+  loop, as D01.6 suspected, not a defect of its own. Nothing was widened.
+- **Tick is under budget → D01.4 and D01.7 are not forced.** The feature build
+  still holds the event loop for 301.9 ms median, which remains the argument
+  for D01.4, but it is no longer a deadline argument.
+- **D01.9 is the highest-value item left**: all 31 misses were `compute_busy`,
+  which is exactly the serialisation it removes.
 
 ### Non-goals, determined this session
 
@@ -264,6 +310,13 @@ the window again.
   Whatever remains needs a dedicated reader thread that owns `recv()` and
   fans out to the tap and the response matcher. Not a bigger buffer — that
   only delays the overflow.
+  **Re-measured 2026-09-10 ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)): loss persists at
+  ≥ 4.24 %** (kernel 120,599 vs daemon 115,480 over 65 s at warm idle,
+  `rx_dropped` flat; non-atomic reads bias the figure low). Reduced from 6.6 %
+  but not gone, so the dedicated reader thread is still the fix. **Second
+  cause found:** `rx_over_errors` +121 across the drive with `rx_dropped` flat
+  is MCP2515 controller overflow, a driver/SPI-level loss distinct from the
+  socket overflow this task describes. Measure and fix them separately.
 
 - [ ] D01.8 Batch the per-column rolling in the feature builder.
   `src/preprocessing/features.py` builds one rolling object over all columns
@@ -279,9 +332,13 @@ the window again.
   preprocessing parity is a non-negotiable, so "bit-identical" gets proven
   on the real chain before it ships.
 
-- [ ] D01.6 Storage write stalls. `max_write_ms` reached **18,475 ms** with
+- [x] D01.6 Storage write stalls. `max_write_ms` reached **18,475 ms** with
   the queue at 7,778 / 10,000. Likely the same contention; confirm against
   D01.3 before treating it as its own defect. Do not widen the queue.
+  **Resolved 2026-09-10** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)): it was the same contention.
+  Over a 24-minute drive with D01.1 deployed, `max_write_ms` was **952.3 ms**,
+  the queue peaked at 2003 / 10,000 and 0 records were dropped. No queue was
+  widened and no threshold relaxed.
 
 - [ ] D01.10 Rebuild `reconcile_feature_frame_to_spec` instead of mutating it.
   54.6 ms per call on a one-row 327-column frame, every tick in the serving
