@@ -53,7 +53,10 @@ is a single GIL-bound process doing more per tick than a tick affords. That
 work is tracked separately in [`D01-daemon-throughput.md`](D01-daemon-throughput.md),
 not here — the C0x set is about collection correctness, this is about the Pi's
 capacity to run it. D01.1/D01.2 (out-of-process scoring) are implemented and
-unit-tested but **not yet validated on hardware**; D01.3 is that validation.
+**validated on the truck 2026-09-09** (D01.3): `compute` fell 17 % with the
+scoring in its own process, but `compute_busy` misses did not — `run_tick`
+serialises parent and child, so the overlap that would pay for the change
+never happens. D01.9 (pipelining) is the missing half.
 
 ## Scope and evidence
 

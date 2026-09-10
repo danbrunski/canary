@@ -238,3 +238,44 @@ Untouched, with the reason recorded rather than guessed at:
 
 Nothing in this session licenses raising a deployed rate default. The evidence
 points the other way: the constraint is the inference loop, not the bus.
+
+## D01.3 — out-of-process scoring, measured on the truck
+
+Deployed to the Pi the same day, enabled via
+`models.out_of_process_scoring: true`, worker confirmed up
+(`inference worker started (pid 1517)` plus the child process). Before:
+`default` profile at warm idle, worker off, 5 min. After: same profile and
+build with the worker on, over an ~13 min drive (40–91 km/h, up to 3700 rpm).
+Raw samples in `2026-09-09-pending-hardware/drive-d01/`.
+
+| | before (worker off, idle) | after (worker on, driving) |
+|---|---|---|
+| ticks missed | 52 / 437 (11.90 %) | 50 / 599 (8.35 %) |
+| — `compute_busy` | 51 | 48 |
+| — `overrun` | 1 | 2 |
+| `compute` median | 423.2 ms | **349.8 ms (−17 %)** |
+| `total` median | 759.9 ms | 696.5 ms (−8 %) |
+| `feature` median | 307.3 ms | 311.2 ms |
+| `loop_occupancy` median | 314.0 ms | 317.4 ms |
+
+**Partial success, and one prediction failed.** `feature` and
+`loop_occupancy` were predicted not to move, and did not — they are still on
+the event loop. `compute` fell 17 %, which is the child having its own core
+instead of contending for the parent's GIL. But `compute_busy` was predicted
+to fall *sharply* and did not: 48 of 50 misses are still that. `run_tick`
+counts the miss and **returns before taking the next snapshot** whenever a
+compute is in flight, so the parent idles while the child works. Moving the
+scoring to another process does not overlap it with the next tick's feature
+build, because the pipeline forbids the overlap. That is D01.9.
+
+The miss-rate row is not like-for-like — before was idle, after was driving.
+The stage timings are the trustworthy part.
+
+### Retraction
+
+An earlier reading of this session's logs recorded the Pi losing external
+power *while driving*, and treated it as a wiring or vibration fault. That was
+wrong. All three power-offs were the UPS watchdog working correctly after the
+operator switched the vehicle off (`running on battery` → 300 s grace →
+`on battery for 300s, SoC=94.0% — powering off`). The only real issue is that
+the Pi does not boot itself when power returns, which is not a CANary defect.
