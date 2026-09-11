@@ -191,7 +191,7 @@ max(feature, compute) (~350 ms); `compute_busy` misses — 48 of 50 today —
 approach zero at 1 Hz. Gate: ordering/generation unit tests, full pytest,
 then the Pi comparison below.
 
-### Phase 3 — remeasure on the truck — **HALF DONE 2026-09-10**
+### Phase 3 — remeasure on the truck — ✅ **DONE 2026-09-10**
 
 Ran the D01.3 protocol over a 24-minute drive with D01.1 deployed and
 **D01.8 not deployed** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)). That is the post-D01.1 /
@@ -218,9 +218,19 @@ all-missing vector and is not a representative cost. `sequence` at 251.5 ms
 dominates `compute` regardless, so the conclusions above stand. The blind IF is
 its own defect, recorded in the evidence doc.
 
-Still owed: deploy `features.py` and re-read `feature` / `snapshot`. Also
-bring the Pi to a committed revision first — its tree is dirty with the
-hand-copied D01.1 files.
+**Completed 2026-09-10.** `features.py` deployed and the Pi brought to a
+committed revision (`4c84ac3`, clean tree — D02.7). Post-D01.8 on hardware:
+
+| stage | pre-D01.8 drive | post-D01.8 idle | post-D01.8 under `tuning-did` |
+|---|---:|---:|---:|
+| `feature` | 296.9 ms | 164.6 ms | — |
+| `loop_occupancy` | 301.9 ms | 169.2 ms | — |
+| `total` | 659.7 ms | 439.0 ms | 320 ms |
+
+Phase 3 is closed. The event loop is now free ~83 % of each second against
+~70 % before, and the collector took up the slack: 116.8 req/s sustained on
+the H8 drive against a ~7.9 req/s idle ceiling that three earlier sessions
+had read as a hardware limit.
 
 Cheapest first check needs no vehicle at all: `scripts/benchmark_live_pipeline.py
 --profile steady` on the Pi. Today's baseline is **smoke 122.7 ms / steady
@@ -318,7 +328,7 @@ the window again.
   is MCP2515 controller overflow, a driver/SPI-level loss distinct from the
   socket overflow this task describes. Measure and fix them separately.
 
-- [ ] D01.8 Batch the per-column rolling in the feature builder.
+- [x] D01.8 Batch the per-column rolling in the feature builder.
   `src/preprocessing/features.py` builds one rolling object over all columns
   and then loops `windowed[col].mean()` / `.std()` **per column** — ~135
   pandas calls per tick, which is what the profile's 5.5 M `isinstance`,
@@ -331,6 +341,17 @@ the window again.
   suite**: featurization feeds trained IF and sequence models, and
   preprocessing parity is a non-negotiable, so "bit-identical" gets proven
   on the real chain before it ships.
+  **Done — shipped `7dfad2c`, deployed 2026-09-10, measured on the truck**
+  ([evidence](../../../data/analyses/2026-09-10-h8-continuous-did.md)).
+  Parity proven two ways before it shipped (see Phase 1 above): an exact
+  old-vs-new comparison over three real resampled sessions across five
+  `FeatureConfig` variants, plus a permanent 25-case regression test that
+  keeps the per-column implementation as its reference and compares with
+  `array_equal(..., equal_nan=True)`. On the Pi the feature stage went
+  **296.9 ms → 164.6 ms** and the tick total **659.7 ms → 439 ms** at idle;
+  under the heavier `tuning-did` load the tick held a **320 ms** median.
+  The released headroom reached the collector, which is the point: sustained
+  request rate went from ~7.9 req/s to **116.8 req/s** (H8).
 
 - [x] D01.6 Storage write stalls. `max_write_ms` reached **18,475 ms** with
   the queue at 7,778 / 10,000. Likely the same contention; confirm against
