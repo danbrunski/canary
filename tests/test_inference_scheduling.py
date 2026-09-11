@@ -553,25 +553,84 @@ async def test_forward_pass_runs_in_worker_while_source_stays_on_loop(
     assert {"feature", "snapshot", "isolation_forest", "compute", "apply", "total"} <= set(stages)
 
 
-async def test_busy_worker_skips_the_tick_instead_of_queueing(config: CanaryConfig) -> None:
+async def test_busy_worker_queues_one_tick_and_drops_the_rest(config: CanaryConfig) -> None:
+    """D01.9 — a tick arriving mid-score is snapshotted and queued, not
+    skipped whole. The queue is depth 1 and the newest row wins, so only the
+    *displaced* tick counts as a `compute_busy` miss.
+
+    Before D01.9 both ticks 1 and 2 were skipped and neither was ever scored;
+    that cost the pipeline the overlap it exists for, and on the truck every
+    miss recorded was this one reason.
+    """
     h = _make_harness(config, released=False)
     try:
         await h.tick(0)
         await h.worker_started(1)
-        await h.tick(1)  # worker still blocked → skipped, not queued
-        await h.tick(2)
+        await h.tick(1)  # queued behind tick 0
+        await h.tick(2)  # displaces tick 1; tick 1 is the only miss
         assert h.trained.calls == 1
-        assert h.recorder.snapshot().missed_by_reason == {MISSED_COMPUTE_BUSY: 2}
+        assert h.recorder.snapshot().missed_by_reason == {MISSED_COMPUTE_BUSY: 1}
         h.trained.gate.set()
-        await h.finish()
-        await h.tick(3)
+        await h.finish()  # tick 0 applies, then the queued tick 2 dispatches
         await h.finish()
     finally:
         h.trained.gate.set()
         await h.pipeline.close(timeout_seconds=1.0)
-    assert h.trained.calls == 2
+    assert h.trained.calls == 2, "the queued tick must still be scored"
     assert h.recorder.ticks_completed == 2
-    assert h.recorder.missed_ticks == 2
+    assert h.recorder.missed_ticks == 1
+
+
+async def test_only_one_compute_runs_at_a_time(config: CanaryConfig) -> None:
+    """The half that must NOT be pipelined. The sequence engine's window is
+    advanced inside `compute`, so two concurrent scores would interleave it."""
+    h = _make_harness(config, released=False)
+    try:
+        await h.tick(0)
+        await h.worker_started(1)
+        await h.tick(1)
+        await h.tick(2)
+
+        # Three ticks in, exactly one compute has been entered.
+        assert h.trained.calls == 1
+    finally:
+        h.trained.gate.set()
+        await h.pipeline.close(timeout_seconds=1.0)
+
+
+async def test_snapshot_still_runs_while_the_worker_is_busy(config: CanaryConfig) -> None:
+    """The point of D01.9: phase 1 of the next tick overlaps phase 2 of this
+    one, so the feature build is no longer serialised behind the score."""
+    h = _make_harness(config, released=False)
+    try:
+        await h.tick(0)
+        await h.worker_started(1)
+        before = h.recorder.snapshot().stages.get("feature")
+        before_n = before.count if before is not None else 0
+
+        await h.tick(1)  # worker still blocked
+
+        after = h.recorder.snapshot().stages.get("feature")
+        assert after is not None
+        assert after.count > before_n, "the snapshot must run even while scoring"
+    finally:
+        h.trained.gate.set()
+        await h.pipeline.close(timeout_seconds=1.0)
+
+
+async def test_close_does_not_dispatch_the_queued_tick(config: CanaryConfig) -> None:
+    """Shutdown must not start a fresh compute on its way out."""
+    h = _make_harness(config, released=False)
+    try:
+        await h.tick(0)
+        await h.worker_started(1)
+        await h.tick(1)  # queued
+        h.trained.gate.set()
+    finally:
+        await h.pipeline.close(timeout_seconds=1.0)
+
+    assert h.pipeline._pending is None
+    assert h.trained.calls == 1, "the queued tick must not be dispatched by close"
 
 
 async def test_model_hot_swap_mid_compute_discards_the_stale_result(

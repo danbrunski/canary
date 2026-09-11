@@ -689,6 +689,9 @@ class LiveInferencePipeline:
         self._executor = executor if executor is not None else _new_inference_executor()
         self._wall_clock = wall_clock if wall_clock is not None else _utc_now
         self._inflight: asyncio.Task[None] | None = None
+        #: Depth-1 pipeline queue (D01.9): the snapshot taken while a compute
+        #: was still in flight, waiting for the worker. Newest wins.
+        self._pending: _TickRequest | None = None
         #: Out-of-process scoring (:mod:`src.daemon.inference_worker`).
         #: ``None`` keeps every pass in this process — what tests get, and
         #: any host where the child could not start.
@@ -723,25 +726,59 @@ class LiveInferencePipeline:
         return (self._if, self._sequence, self._behavior)
 
     async def run_tick(self, slot: TickSlot) -> None:
-        """Scheduler entry: skip if the worker is busy, else snapshot and
-        either apply inline or hand off to the worker."""
-        if self._inflight is not None and not self._inflight.done():
-            self._recorder.note_missed(MISSED_COMPUTE_BUSY)
-            log.warning(
-                "inference worker still scoring tick %d at deadline of tick %d; skipping",
-                self._inflight_index,
-                slot.index,
-            )
-            return
-        self._inflight = None
+        """Scheduler entry: snapshot on the loop, then hand off or queue.
+
+        D01.9 — the snapshot runs **even while a compute is in flight**. Before
+        this, a tick whose deadline arrived mid-score was skipped whole, so the
+        feature build and the score could only ever run back to back: on the Pi
+        that summed a ~165 ms snapshot and a ~250 ms score into a ~440 ms tick,
+        and every miss the truck recorded was `compute_busy`. With scoring in a
+        child process (D01.1) the parent is idle during the score, so phase 1
+        of tick N+1 can overlap phase 2 of tick N and the tick costs roughly
+        the larger of the two instead of the sum.
+
+        What is *not* pipelined, deliberately: **one compute at a time**. The
+        sequence engine's window is state advanced only inside `compute`, so
+        two concurrent scores would interleave it. Ordering therefore still
+        holds — computes are dispatched in tick order and applied in dispatch
+        order — and the queue is depth 1.
+        """
+        busy = self._inflight is not None and not self._inflight.done()
         request = await self._snapshot(slot)
         if not request.needs_worker:
             self._apply(request, _EMPTY_RESULT)
             return
-        self._inflight_index = slot.index
+        if busy or (self._inflight is not None and not self._inflight.done()):
+            # Depth-1 queue, newest wins. A deeper queue would score rows that
+            # are already stale by the time they reach the detector and would
+            # let a slow scorer grow memory and lag without bound; dropping the
+            # older pending row is the same loss the old skip took, one tick
+            # later and with the fresher features kept.
+            if self._pending is not None:
+                self._recorder.note_missed(MISSED_COMPUTE_BUSY)
+                log.debug(
+                    "dropping queued inference tick %d for fresher tick %d",
+                    self._pending.slot.index,
+                    slot.index,
+                )
+            self._pending = request
+            return
+        self._dispatch(request)
+
+    def _dispatch(self, request: _TickRequest) -> None:
+        """Start the one compute task for ``request``."""
+        self._inflight_index = request.slot.index
         self._inflight = asyncio.create_task(
-            self._compute_and_apply(request), name=f"inference-compute-{slot.index}"
+            self._compute_and_apply(request),
+            name=f"inference-compute-{request.slot.index}",
         )
+
+    def _drain_pending(self) -> None:
+        """Dispatch the queued tick, if any, now the worker is free again."""
+        request = self._pending
+        self._pending = None
+        if request is not None:
+            self._dispatch(request)
 
     _inflight_index: int = -1
 
@@ -847,6 +884,9 @@ class LiveInferencePipeline:
         except Exception:  # noqa: BLE001 — live inference is best-effort
             self._recorder.note_compute_failure()
             log.exception("live inference compute failed for tick %d", request.slot.index)
+            # The queued tick must still go, or one compute failure stalls the
+            # pipeline until the next deadline that finds the worker free.
+            self._drain_pending()
             return
         compute_wait = time.perf_counter() - submitted
         self._recorder.record_stage("compute_wait", compute_wait)
@@ -861,6 +901,10 @@ class LiveInferencePipeline:
             self._apply(request, result)
         except Exception:  # noqa: BLE001 — live inference is best-effort
             log.exception("live inference apply failed for tick %d", request.slot.index)
+        finally:
+            # Dispatch the queued tick only after this one has been applied, so
+            # results reach the detectors in tick order (D01.9).
+            self._drain_pending()
 
     def _compute(self, request: _TickRequest) -> _TickResult:
         """Score one tick out-of-process when a worker is up, here otherwise.
@@ -940,6 +984,9 @@ class LiveInferencePipeline:
         waiting and the thread ends when the pass does — logged, so a
         shutdown that outlives its worker is visible rather than hung.
         """
+        # Drop the queue first: joining the in-flight task would otherwise
+        # dispatch it on the way out and leave a compute running past close.
+        self._pending = None
         inflight = self._inflight
         if inflight is not None and not inflight.done():
             try:
