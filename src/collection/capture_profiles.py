@@ -36,7 +36,7 @@ FUEL_MAP_PROFILE_NAME = "fuel-map"
 #: catalog written once pinned the built-in forever: the 2026-08-10 fuel-map
 #: capture ran at 0.28-0.78 Hz because a saved copy predating ``target_rate_hz``
 #: shadowed a source-level correction, and nothing in the system could say so.
-BUILTIN_REVISION = 1
+BUILTIN_REVISION = 2
 
 #: Request rate above which the storage sink has a *measured* problem: 25 req/s
 #: backed the writer up until it dropped 2491 records on 2026-07-29, and the
@@ -572,12 +572,32 @@ def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
                 mode01={},
                 mode01_enabled=False,
                 mode22=TUNING_DID_CHANNELS,
+                # Coolant is context, not dynamics, and it was taking a full
+                # eleventh of the budget to say so. Measured over 38 sessions
+                # and 10,488 adjacent-sample pairs (gaps <= 15 s, so a restart
+                # or a collection hole cannot fake a slope): coolant changes at
+                # **0.441 degC/s at p99.9**, 0.332 at p99, and the channel
+                # quantises at 1 degC. 1 Hz therefore moves at most 0.44 degC
+                # between samples and cannot miss a step, with 2.3x margin over
+                # the 0.44 Hz the measurement strictly requires.
+                #
+                # Do NOT read the H8 drive's "0.2 % of samples changed" as a
+                # licence to go slower than this: that drive was warm
+                # throughout (72 -> 94 degC over 25 min). Cold-start warmup is
+                # roughly twenty times faster, and 0.1 Hz would alias it.
+                mode22_rate_weights={"ECM_COOLANT_TEMP": 1.0 / 15.0},
                 did_continuous=True,
                 target_rate_hz=15.0,
                 bus_budget_override=180.0,
-                expected_total_demand_hz=165.0,
+                # 10 DIDs x 15 Hz + coolant x 1 Hz = 151 reads/s.
+                expected_total_demand_hz=151.0,
                 capacity_evidence=(
-                    "2026-08-04 bench: 658 DID reads/s; 11 DIDs x 15 Hz = 165 reads/s."
+                    "2026-08-04 bench: 658 DID reads/s. 10 DIDs x 15 Hz + "
+                    "ECM_COOLANT_TEMP x 1 Hz = 151 reads/s. The 2026-09-10 H8 drive "
+                    "sustained 116.8 req/s with 11 DIDs at 10.4 Hz each, 41 timeouts "
+                    "in 167,885 requests and 0 bus errors, so the ECM is not the "
+                    "binding constraint; coolant's 15 Hz share was simply wasted "
+                    "(0.2 % of its samples changed while it took 1/11 of the budget)."
                 ),
                 broadcast_decode=True,
                 corpus_eligible=False,

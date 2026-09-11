@@ -61,10 +61,33 @@ over the drive, decoded through `data/dids.yaml`:
 
 **`ECM_COOLANT_TEMP` is the whole finding.** It changed on 0.2 % of samples and
 covered 72 → 94 °C over 25 minutes, while consuming 15,748 requests — one
-eleventh of the entire bus budget — to do it. At 0.1 Hz it would have captured
-the same curve and returned **9.5 % of the profile's request budget** to the
-channels that need it. Nothing else in the set is close: the next-slowest,
-commanded cam angle, still moves on a third of its samples.
+eleventh of the entire bus budget — to do it. Nothing else in the set is close:
+the next-slowest, commanded cam angle, still moves on a third of its samples.
+
+**Corrected 2026-09-10, before acting on it.** An earlier draft of this
+document said 0.1 Hz would capture the same curve. That is true *of this
+drive* and wrong in general, and it is the mistake this repo has a rule
+about: the drive was warm throughout, and cold-start warmup is roughly twenty
+times faster. Re-measured across **38 local sessions and 10,488 adjacent-sample
+pairs**, restricted to gaps of 15 s or less so a restart or a collection hole
+cannot fake a derivative:
+
+| quantile of \|dT/dt\| | °C/s |
+|---|---:|
+| p50 | 0.000 |
+| p90 | 0.163 |
+| p99 | 0.332 |
+| p99.9 | 0.441 |
+
+The first pass over the same data reported a p99 of 0.576 and a max of 3.7 °C/s.
+Both were artifacts: the 3.7 spanned a **23,329 s** engine-off gap inside one
+session, and the next-worst spanned 126 s. Neither is a slope.
+
+The channel quantises at 1 °C, so the requirement is only that consecutive
+samples differ by less than that: at 0.441 °C/s, **0.44 Hz** suffices.
+**Set to 1 Hz**, which keeps 2.3x margin, is a conventional rate, and returns
+**8.5 % of the profile's demand** (165 → 151 reads/s) to the channels that
+need it.
 
 The two air-fuel sensors are the fast end and are the channels that would
 actually use released capacity: at 84.6 % moves and a 4.8 s autocorrelation
@@ -145,7 +168,10 @@ Closes **H8**, and with it the last of the ten pending-hardware measurements.
 
 Opens three things, none blocking:
 
-- Lower `ECM_COOLANT_TEMP` to ~0.1 Hz in the `tuning-did` profile and give the
-  released 9.5 % to the air-fuel sensors. Re-measure coverage after.
+- ~~Lower `ECM_COOLANT_TEMP` in the `tuning-did` profile~~ **done** — set to
+  **1 Hz** via `mode22_rate_weights`, `BUILTIN_REVISION` 1 → 2, declared demand
+  165 → 151 reads/s. The rate is pinned by a test against the measured slope,
+  not by a comment. Re-measure coverage on the next continuous-DID drive, and
+  check whether the air-fuel sensors actually pick up the released share.
 - Establish scale/offset for 0x1208, 0x1110 and 0x1139, or drop them.
 - Shorten the post-drop session retry so a 3 s recovery does not wait 60 s.

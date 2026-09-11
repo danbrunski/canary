@@ -455,3 +455,94 @@ def test_blindness_verdict_reaches_the_status_snapshot() -> None:
     finally:
         _STRUCTURAL_BLINDNESS.clear()
         inference_mod._SCHEMA_RECONCILIATION_WARNED.clear()
+
+
+# ---------------------------------------------------------------------------
+# tuning-did coolant rate — a measured constraint, pinned so it cannot drift
+# ---------------------------------------------------------------------------
+
+#: Coolant's fastest honest slope, pooled over 38 local sessions and 10,488
+#: adjacent-sample pairs with gaps <= 15 s (so a restart or a collection hole
+#: cannot fake a derivative): p99 0.332, p99.9 0.441 degC/s. The channel
+#: quantises at 1 degC, so a rate above ~0.44 Hz cannot miss a step.
+COOLANT_P999_DEGC_PER_S = 0.441
+COOLANT_QUANTUM_DEGC = 1.0
+
+
+def _tuning_did_profile():
+    from pathlib import Path
+
+    from src.collection.capture_profiles import seed_catalog
+    from src.config import CanaryConfig
+
+    cfg = CanaryConfig.from_yaml(Path("canary.dev.example.yaml"))
+    catalog = seed_catalog(cfg.collection)
+    return next(p for p in catalog.profiles if p.name == "tuning-did")
+
+
+def _effective_hz(profile, channel: str) -> float:
+    weight = profile.mode22_rate_weights.get(channel.upper(), 1.0)
+    return profile.target_rate_hz * weight
+
+
+def test_coolant_is_polled_as_context_not_dynamics() -> None:
+    """It was taking one eleventh of the profile's budget to change on 0.2 %
+    of its samples (H8, 2026-09-10)."""
+    p = _tuning_did_profile()
+
+    assert _effective_hz(p, "ECM_COOLANT_TEMP") == pytest.approx(1.0)
+
+
+def test_coolant_rate_still_resolves_a_one_degree_step() -> None:
+    """The constraint the rate was chosen against, asserted rather than
+    described: at its fastest measured slope, coolant must move less than one
+    quantisation step between consecutive samples."""
+    p = _tuning_did_profile()
+    hz = _effective_hz(p, "ECM_COOLANT_TEMP")
+
+    degc_between_samples = COOLANT_P999_DEGC_PER_S / hz
+
+    assert degc_between_samples < COOLANT_QUANTUM_DEGC, (
+        f"at {hz} Hz coolant moves {degc_between_samples:.2f} degC between samples, "
+        f"past the {COOLANT_QUANTUM_DEGC} degC quantum — steps would be aliased"
+    )
+
+
+def test_every_other_tuning_did_channel_keeps_full_rate() -> None:
+    """Only coolant is context. The air-fuel sensors move on 84.6 % of samples
+    and are undersampled even at the full rate, so nothing else may be traded
+    away without its own measurement."""
+    p = _tuning_did_profile()
+
+    down_weighted = {c for c in p.mode22 if _effective_hz(p, c) < p.target_rate_hz}
+
+    assert down_weighted == {"ECM_COOLANT_TEMP"}
+
+
+def test_declared_demand_matches_the_weighted_sum() -> None:
+    """`expected_total_demand_hz` is what the capacity evidence is argued
+    against, so it must be the real weighted total, not the old flat one."""
+    p = _tuning_did_profile()
+
+    total = sum(_effective_hz(p, c) for c in p.mode22)
+
+    assert total == pytest.approx(p.expected_total_demand_hz)
+    assert total < p.bus_budget_override
+
+
+def test_down_weighted_coolant_cannot_fail_the_rate_floor() -> None:
+    """The contract's per-channel floor is 12 Hz. A channel deliberately asked
+    for at 1 Hz must be exempt, or every tuning-did capture would now report a
+    false rate shortfall."""
+    from src.collection.capture_quality import _channel_failures
+
+    p = _tuning_did_profile()
+    floor = p.min_achieved_rate_hz
+
+    class _Row:
+        status = "ok"
+        channel = "ECM_COOLANT_TEMP"
+        requested_hz = 1.0
+        cadence = {"hz": 1.0}
+
+    assert _channel_failures([_Row()], floor) == []
