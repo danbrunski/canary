@@ -2,7 +2,7 @@
 
 Opened 2026-09-10 from the first sustained drive on the truck. Measurements
 and raw evidence:
-[`data/analyses/2026-09-10-drive-h1-h7-h9.md`](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)
+[`data/analyses/2026-09-10-drive-h1-h7-h9.md`](../../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)
 (24 min 58 s at `engine_running`, `default` profile, counters read live).
 
 D01 is about the Pi's capacity to run the daemon and its tick is now inside
@@ -192,7 +192,7 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   to 1 per install and the widths were its precondition, not its switch.
   Turning it on is an operator decision that belongs with H8's drive.
   **Independently re-confirmed 2026-09-10 on the H8 drive**
-  ([evidence](../../../data/analyses/2026-09-10-h8-continuous-did.md)): a
+  ([evidence](../../../../data/analyses/2026-09-10-h8-continuous-did.md)): a
   different session on a different daemon revision reproduced **every**
   recorded width exactly, 15,7xx payloads each, no other width seen once.
   Five more were measured and recorded the same way (0x1110, 0x1135, 0x1139,
@@ -241,7 +241,7 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   bank-balance / residual question. Either way the output is a rate table,
   not a threshold change. _Replay can run off-vehicle once the session is
   pulled._
-  **Measured 2026-09-11 on the bench** ([evidence](../../../data/analyses/2026-09-11-d026-replay-event-rates.md)).
+  **Measured 2026-09-11 on the bench** ([evidence](../../../../data/analyses/2026-09-11-d026-replay-event-rates.md)).
   104 events over 1,910 s = **3.27/min**, against **3.1/min** live — the
   replay reproduces the live rate, so the instrument is sound and the live
   figure was not a driving artifact. **The sequence detector dominates:**
@@ -263,7 +263,7 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
 - [ ] D02.9 **Replay grows without bound and OOM-killed the daemon.**
   A 1x replay of a 25-minute drive took the daemon to **7.7 GB resident on an
   8 GB Pi** and the kernel killed it 32 minutes in
-  ([evidence](../../../data/analyses/2026-09-11-d026-replay-event-rates.md))
+  ([evidence](../../../../data/analyses/2026-09-11-d026-replay-event-rates.md))
   (`Out of memory: Killed process 1217 (python) total-vm:15756560kB
   anon-rss:7744720kB`). systemd restarted it cleanly and it has been healthy
   since at 469 MB, so only the tail of the replay was lost.
@@ -316,7 +316,7 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   evidence doc. Expect it to confirm the counters; if it does not, that is
   the finding.
   **Done 2026-09-11 on the bench**
-  ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md), addendum).
+  ([evidence](../../../../data/analyses/2026-09-10-drive-h1-h7-h9.md), addendum).
   It confirmed the counters. The fast tier held 0.95–0.97 Hz with a 1.00 s
   median gap, a 3.67 s worst gap and **no gap over 5 s on any channel**;
   **96.3 %** of grid seconds carried the complete six-channel model input and

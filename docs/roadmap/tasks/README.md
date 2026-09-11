@@ -1,5 +1,37 @@
 # Collection and diagnostics improvement tasks
 
+**Status 2026-09-11 — the C0x, D01 and D02 sets are closed and archived.**
+Everything that was open on 2026-09-09 has either landed, been decided with a
+measurement behind it, or moved to [`D03-open-work.md`](D03-open-work.md),
+which is now the only live checklist here. Eight items remain: three need the
+truck, one needs an operator decision on the retrain corpus, and four can be
+done at a desk.
+
+What closed in the two days between:
+
+| set | outcome |
+|---|---|
+| **PENDING-HARDWARE** (H0–H9) | all ten measured across two drives; only H6 carried forward, and its premise changed |
+| **D01** (daemon throughput) | Phase 3 closed on hardware; D01.6 resolved, D01.8 shipped and measured, D01.9 implemented, D01.7 decided |
+| **D02** (drive findings) | six of ten closed; the replay that closed D02.6 opened D02.9 and D02.10 |
+
+The two results that outrank the checkboxes:
+
+- **The request-rate ceiling was never the bus.** An 8 → 16 → 32 req/s ladder
+  could not beat ~7.9 req/s at idle on 2026-09-09 and that read as a hardware
+  limit. It was the starved event loop. After D01.8 the same daemon sustained
+  **116.8 req/s** on the truck with 41 timeouts in 167,885 requests.
+- **A binding retraction is a feature-spec change.** The Isolation Forest went
+  blind because two broadcast bindings were *corrected* out of
+  `data/bindings.yaml` three weeks after it was trained on them. Fixing a
+  wrong binding silently blinded the detector that depended on it, and nothing
+  connected the two. Still owed: the retrain (D02.5).
+
+Archived documents keep their evidence and their history; read them for the
+reasoning behind anything in D03, not as live work.
+
+## History
+
 Created 2026-09-06 from the collection, tuning, and diagnostic-mode review.
 These documents live in `docs/roadmap/tasks/` as requested. Existing roadmap documents
 remain under `docs/roadmap/`; this set does not change the overnight queue.
@@ -36,7 +68,7 @@ gaps in every channel. The bus was never the constraint — request throughput
 is flat at ~7.9 req/s across a 4× budget ladder while the ECM answers 97.6 %.
 
 The ten measurements that need the vehicle were moved out into a single
-checklist, [`PENDING-HARDWARE.md`](PENDING-HARDWARE.md), rather than left as
+checklist, [`PENDING-HARDWARE.md`](archive/PENDING-HARDWARE.md), rather than left as
 `[~]` boxes scattered across six documents. They are one session's work — plug
 the Pi in and run them — and each keeps its original ID, wording, and a link
 back to the task it came from. The Pi was reconnected on 2026-09-09 and six of the ten
@@ -60,7 +92,7 @@ The other six (C05.11, C09.12, C09.14, C09.16, C10.10, C10.11) ask what the
 
 The H0–H6 measurements found one cause behind most of the symptoms: the daemon
 is a single GIL-bound process doing more per tick than a tick affords. That
-work is tracked separately in [`D01-daemon-throughput.md`](D01-daemon-throughput.md),
+work is tracked separately in [`D01-daemon-throughput.md`](archive/D01-daemon-throughput.md),
 not here — the C0x set is about collection correctness, this is about the Pi's
 capacity to run it. D01.1/D01.2 (out-of-process scoring) are implemented and
 **validated on the truck 2026-09-09** (D01.3): `compute` fell 17 % with the
@@ -73,7 +105,7 @@ never happens. D01.9 (pipelining) is the missing half.
 The first sustained drive on the truck closed H1, H7 and H9 and gave D01 its
 post-scoring baseline (the tick is now inside budget: 659.7 ms median, 2.14 %
 missed). What it also found is tracked in
-[`D02-drive-findings.md`](D02-drive-findings.md): batched-poll counters that
+[`D02-drive-findings.md`](archive/D02-drive-findings.md): batched-poll counters that
 don't reconcile on a failed batch, Mode 22 batching switched off for want of
 four response widths, MCP2515 controller overflow underneath the socket loss,
 a child-scorer fallback that stalled a minute without being counted, and an
@@ -117,7 +149,7 @@ No live rates, hardware capacity, or model accuracy were established.
 | C09 | [Polling plans and profile capacity](archive/09-polling-plans-and-profile-capacity.md) ✅ | Mode-specific recommendations: batching, priorities, DID weights, accurate demand | C02, C04, C06; C03 for delivery acceptance |
 | C10 | [Sustained end-to-end validation](archive/10-sustained-validation.md) ✅ | Pi benchmarks and release evidence for all modes | Baseline after C05; final validation after relevant fixes |
 
-✅ archived (complete). The vehicle measurements each of these deferred are in [`PENDING-HARDWARE.md`](PENDING-HARDWARE.md).
+✅ archived (complete). The vehicle measurements each of these deferred are in [`PENDING-HARDWARE.md`](archive/PENDING-HARDWARE.md).
 
 Implementation ran in that order: C05 baseline repair; C01 and C02
 correctness; C03 accounting; C04 and C06 diagnostic scheduling; C07 and C08

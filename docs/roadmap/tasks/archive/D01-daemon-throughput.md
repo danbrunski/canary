@@ -1,7 +1,7 @@
 # D01 — daemon throughput on the Pi
 
 Opened 2026-09-09 from the pending-hardware session. Measurements and their
-raw evidence: [`data/analyses/2026-09-09-pending-hardware.md`](../../../data/analyses/2026-09-09-pending-hardware.md).
+raw evidence: [`data/analyses/2026-09-09-pending-hardware.md`](../../../../data/analyses/2026-09-09-pending-hardware.md).
 
 The vehicle measurements (H0–H6) found one problem behind most of the others:
 **the daemon is a single Python process, GIL-bound to roughly one core, doing
@@ -194,7 +194,7 @@ then the Pi comparison below.
 ### Phase 3 — remeasure on the truck — ✅ **DONE 2026-09-10**
 
 Ran the D01.3 protocol over a 24-minute drive with D01.1 deployed and
-**D01.8 not deployed** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)). That is the post-D01.1 /
+**D01.8 not deployed** ([evidence](../../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)). That is the post-D01.1 /
 pre-batching baseline; the `features.py` half is still owed.
 
 | stage | median | p95 | 2026-09-09 |
@@ -256,7 +256,7 @@ the window again.
   structural change, deliberately last because Phases 1–2 may make it
   unnecessary), and only then D01.7 (sequence cadence/backbone decision).
 
-**What the 2026-09-10 numbers said** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)):
+**What the 2026-09-10 numbers said** ([evidence](../../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)):
 
 - **Loss persists → D01.5 is warranted.** A 65 s warm-idle comparison put the
   kernel at 120,599 frames and the daemon at 115,480: **4.24 % unaccounted**,
@@ -290,7 +290,7 @@ the window again.
 
 ## Open
 
-- [ ] D01.9 **Pipeline `run_tick`** — the missing half of D01.1. Today the
+- [x] D01.9 **Pipeline `run_tick`** — the missing half of D01.1. Today the
   scheduler bounds in-flight work to one tick and returns *before* the
   snapshot when a compute is outstanding, so parent and child never overlap
   and `compute_busy` dominates whatever process the scoring runs in. Allow
@@ -299,6 +299,33 @@ the window again.
   ~696 ms. The generation-token machinery that makes a late result safe to
   discard already exists (`_apply` checks it). Watch the sequence engine's
   window ordering: results must still be applied in tick order.
+  **Implemented 2026-09-11 (`c7d4684`); not yet measured on hardware** — the
+  Pi is on the bench with no vehicle, so the figure that matters waits for a
+  drive. The snapshot now runs even while a compute is in flight, and the
+  queue is **depth 1, newest wins**: only a *displaced* tick counts as a
+  `compute_busy` miss.
+
+  The window-ordering warning resolved cleanly. `SequenceDetector.compute`
+  owns the window and is the only place it advances, so keeping **one compute
+  in flight at a time** preserves ordering by construction — computes dispatch
+  in tick order and apply in dispatch order. That is why the compute itself is
+  deliberately *not* pipelined; only phase 1 overlaps.
+
+  A deeper queue was rejected: it would score rows already stale by the time
+  they reach the detector, and would let a slow scorer grow memory and lag
+  without bound. Dropping the older pending row is the same loss the old skip
+  took, one tick later, with the fresher features kept.
+
+  The test that pinned the old contract
+  (`test_busy_worker_skips_the_tick_instead_of_queueing`) was replaced by four
+  pinning the new one: the queue holds one and drops the rest, only one
+  compute runs at a time, the snapshot runs while the worker is busy, and
+  `close` does not dispatch a queued tick on the way out.
+
+  **Expected, not claimed:** on the 2026-09-10 numbers a ~165 ms snapshot and
+  a ~250 ms score should stop summing to ~440 ms and cost about the larger of
+  the two. Every miss the truck recorded was `compute_busy`, which is what
+  this removes. Measure it on the next drive before quoting a figure._
 
 - [ ] D01.4 Get the feature build off the event loop. `source.tick()` runs
   in phase 1 on the loop at **332 ms median / 22 s max**, which is
@@ -320,7 +347,7 @@ the window again.
   Whatever remains needs a dedicated reader thread that owns `recv()` and
   fans out to the tap and the response matcher. Not a bigger buffer — that
   only delays the overflow.
-  **Re-measured 2026-09-10 ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)): loss persists at
+  **Re-measured 2026-09-10 ([evidence](../../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)): loss persists at
   ≥ 4.24 %** (kernel 120,599 vs daemon 115,480 over 65 s at warm idle,
   `rx_dropped` flat; non-atomic reads bias the figure low). Reduced from 6.6 %
   but not gone, so the dedicated reader thread is still the fix. **Second
@@ -342,7 +369,7 @@ the window again.
   preprocessing parity is a non-negotiable, so "bit-identical" gets proven
   on the real chain before it ships.
   **Done — shipped `7dfad2c`, deployed 2026-09-10, measured on the truck**
-  ([evidence](../../../data/analyses/2026-09-10-h8-continuous-did.md)).
+  ([evidence](../../../../data/analyses/2026-09-10-h8-continuous-did.md)).
   Parity proven two ways before it shipped (see Phase 1 above): an exact
   old-vs-new comparison over three real resampled sessions across five
   `FeatureConfig` variants, plus a permanent 25-case regression test that
@@ -356,7 +383,7 @@ the window again.
 - [x] D01.6 Storage write stalls. `max_write_ms` reached **18,475 ms** with
   the queue at 7,778 / 10,000. Likely the same contention; confirm against
   D01.3 before treating it as its own defect. Do not widen the queue.
-  **Resolved 2026-09-10** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)): it was the same contention.
+  **Resolved 2026-09-10** ([evidence](../../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)): it was the same contention.
   Over a 24-minute drive with D01.1 deployed, `max_write_ms` was **952.3 ms**,
   the queue peaked at 2003 / 10,000 and 0 records were dropped. No queue was
   widened and no threshold relaxed.
@@ -386,7 +413,7 @@ the window again.
 
   Two measurements decided it rather than one. The budget question is answered
   above. The *worth* question is answered by D02.6
-  ([evidence](../../../data/analyses/2026-09-11-d026-replay-event-rates.md)):
+  ([evidence](../../../../data/analyses/2026-09-11-d026-replay-event-rates.md)):
   the sequence model produces **60 % of all anomaly events** (1.95/min of
   3.27/min), concentrated while driving — 45 of its 62 events in `city` and
   `highway` — where the behavior overlay contributes almost nothing. With the

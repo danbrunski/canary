@@ -6,11 +6,11 @@ remains is measurement on the vehicle, which no workstation run substitutes.
 
 **Status 2026-09-10: all ten measured; H6 partial.** (H0–H5, H7, H8, H9 done;
 H6 idle-only.) The C0x vehicle set is closed. Evidence:
-[`data/analyses/2026-09-09-pending-hardware.md`](../../../data/analyses/2026-09-09-pending-hardware.md)
+[`data/analyses/2026-09-09-pending-hardware.md`](../../../../data/analyses/2026-09-09-pending-hardware.md)
 for the idle session, and
-[`data/analyses/2026-09-10-drive-h1-h7-h9.md`](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)
+[`data/analyses/2026-09-10-drive-h1-h7-h9.md`](../../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)
 for the 2026-09-10 `default` drive, and
-[`data/analyses/2026-09-10-h8-continuous-did.md`](../../../data/analyses/2026-09-10-h8-continuous-did.md)
+[`data/analyses/2026-09-10-h8-continuous-did.md`](../../../../data/analyses/2026-09-10-h8-continuous-did.md)
 for the 2026-09-10 continuous-DID drive that closed H8. Only **H6** is still
 partial: its budget ladder was run at idle and still wants the drive protocol.
 
@@ -39,10 +39,10 @@ archived task it came from.
   engine off, disconnected, replay) beside every number below. A detector
   that looks broken at `engine_off` is behaving correctly; the same reading at
   `engine_running` is a bug. This is C10.11 and it gates everything else.
-  _From [C10](archive/10-sustained-validation.md). No live interpretation has
+  _From [C10](10-sustained-validation.md). No live interpretation has
   been made yet, so no vehicle state has been read. Every synthetic report is
   labelled `hardware.adapter: synthetic` and the replay scenario `replay`._
-  **Measured 2026-09-09** ([evidence](../../../data/analyses/2026-09-09-pending-hardware.md)): read first and re-read per item.
+  **Measured 2026-09-09** ([evidence](../../../../data/analyses/2026-09-09-pending-hardware.md)): read first and re-read per item.
   The session opened at `no_data` with `can0` ERROR-PASSIVE, 0 RX/0 TX and
   ENOBUFS on transmit — the OBD harness was unplugged, and the silent
   detectors were correct. After plugging in and starting the engine:
@@ -55,11 +55,11 @@ archived task it came from.
   and diagnostic periods. Use at least a representative 20–30 minute capture
   for final supported profiles, with enough varied operation for the intended
   analysis. Do not call an eight-second burst sustained drive validation.
-  _From [C10](archive/10-sustained-validation.md). Procedure:
+  _From [C10](10-sustained-validation.md). Procedure:
   `docs/sustained-validation.md` → "Pi procedure", steps 1–4. Synthetic
   scenarios are 10–60 s by construction and are not offered as sustained
   drive validation._
-  **Measured 2026-09-10** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)): capture window
+  **Measured 2026-09-10** ([evidence](../../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)): capture window
   `843ff8eb` on session `2026-09-10T142711`, **24 min 58 s**, `default`
   profile, every in-window sample at `engine_running`, rpm 737–3550, coolant
   85–93 °C, 446 chunks / 46.7 MB. 1457 polling rounds started, 1386 complete,
@@ -76,13 +76,13 @@ archived task it came from.
 - [x] H2 (C05.11) Run the same workload on the Pi, identifying hardware,
   power/thermal state, runtime, and model versions. Do not fill the missing
   Pi result with an extrapolation.
-  _From [C05](archive/05-pipeline-benchmark.md). Run
+  _From [C05](05-pipeline-benchmark.md). Run
   `scripts/benchmark_live_pipeline.py --profile steady --report ...` and
   record the environment next to the workstation baseline. **Compare against
   the real-artifact figures** in `docs/inference-scheduling.md`, not the
   model-less table above them — the Pi's `models_dir` holds real detector
   artifacts, and a stubbed IF understated its stage by ~8× (C08.1)._
-  **Measured 2026-09-09** ([evidence](../../../data/analyses/2026-09-09-pending-hardware.md)): Pi 5 Rev 1.1, kernel
+  **Measured 2026-09-09** ([evidence](../../../../data/analyses/2026-09-09-pending-hardware.md)): Pi 5 Rev 1.1, kernel
   6.18.29+rpt-rpi-2712, Python 3.13.5, git 09ba604, 327 feature columns.
   smoke tick median 122.7 ms / p95 149.4 ms; steady 127.6 / 165.8 ms; both
   `valid: true`, 0 empty ticks. One 2 s under-voltage event during the steady
@@ -100,7 +100,7 @@ what it showed and what the truck adds. Do not re-derive the local half.
   captures using cadence, gaps, complete tuples, and transition timing. Do not
   claim 4 Hz until it is achieved and persisted. Keep the profile experimental
   until its declared contract is met.
-  _From [C04](archive/04-hybrid-diagnostic-scheduling.md). Procedure:
+  _From [C04](04-hybrid-diagnostic-scheduling.md). Procedure:
   `docs/hybrid-scheduling.md`. **Already measured:** on the synthetic bus the
   cycle policy holds 0.250 s start-to-start (median and p95, 0 missed of 20,
   entry→DID 12 ms, exit→Mode 01 63 ms) and meets 4.0 Hz on every DID, while
@@ -109,7 +109,7 @@ what it showed and what the truck adds. Do not re-derive the local half.
   fixed 5 ms `sleep`; the real ECM's response time is the one number that
   decides whether the cycle plan is feasible. `tuning-hybrid-research` stays
   experimental until 4 Hz is achieved *and persisted*._
-  **Measured 2026-09-09, claim denied** ([evidence](../../../data/analyses/2026-09-09-pending-hardware.md)): infeasible by plan
+  **Measured 2026-09-09, claim denied** ([evidence](../../../../data/analyses/2026-09-09-pending-hardware.md)): infeasible by plan
   on arming — 11 Mode 01 + 9 DID + 2 session requests at 90 req/s need 0.294 s
   against a 0.250 s cycle (`cycle_feasible=false`); the budget was not raised
   to hide it. Over 300 s at warm idle: `cycle_duration_s` median **0.510 s**
@@ -121,7 +121,7 @@ what it showed and what the truck adds. Do not re-derive the local half.
 - [x] H4 (C06.12) On hardware, compare frame continuity and discovery
   counters around startup/recovery. Read vehicle state first; no received-byte
   count alone proves no frames were lost upstream.
-  _From [C06](archive/06-diagnostic-discovery.md). Procedure:
+  _From [C06](06-diagnostic-discovery.md). Procedure:
   `docs/diagnostic-discovery.md`. **Already measured:** `discovery-recovery`
   (an adapter fault at 7 s) reconciles the sequence ledger with 0 missing on
   both sides and the push identity holds. It also surfaced finding 14 —
@@ -131,7 +131,7 @@ what it showed and what the truck adds. Do not re-derive the local half.
   semantics) and worth confirming on the truck before choosing one.
   **What the truck adds:** kernel/socket receive counters, `unavailable` on
   the workstation, which are the upstream layer the item is actually about._
-  **Measured 2026-09-09** ([evidence](../../../data/analyses/2026-09-09-pending-hardware.md)): discovery completes in budget —
+  **Measured 2026-09-09** ([evidence](../../../../data/analyses/2026-09-09-pending-hardware.md)): discovery completes in budget —
   mode01 3 probes → 41 PIDs, mode06 6 probes → 23 MIDs, 9 requests / 0.49 s,
   responder 0x7E8, and re-walks identically after a reset. **Continuity is
   NOT clean:** over 60 s the kernel counted 110,327 frames and the daemon
@@ -148,7 +148,7 @@ what it showed and what the truck adds. Do not re-derive the local half.
   latency, and capture losses under the same workload before/after. Include
   1 Hz and a higher supported test cadence without changing deployed model
   defaults.
-  _From [C08](archive/08-inference-scheduling.md). Procedure:
+  _From [C08](08-inference-scheduling.md). Procedure:
   `docs/inference-scheduling.md` → "Left for hardware"; use
   `scripts/sustained_validation.py run --inference-tick-s` (it touches no
   deployed default). **Already measured:** 1 Hz vs 2 Hz on `fuel-map` and
@@ -157,7 +157,7 @@ what it showed and what the truck adds. Do not re-derive the local half.
   per-tick cost is flat at 51 / 72 ms), the visible cost being loop-holding
   (`tuning-did` heartbeat p99 35 → 58 ms). **What the truck adds:** the Pi's
   CPU, memory, thermal and power behaviour, and its event-loop delay._
-  **Measured 2026-09-09** ([evidence](../../../data/analyses/2026-09-09-pending-hardware.md)). Isolated harness, deployed
+  **Measured 2026-09-09** ([evidence](../../../../data/analyses/2026-09-09-pending-hardware.md)). Isolated harness, deployed
   defaults untouched: at 1 Hz **0 missed ticks** on both profiles (feature p95
   143 / 190 ms, lateness max ≤ 1.3 ms); at 2 Hz **6 and 12 missed** with
   lateness max 273 ms — the Pi's feature stage is 2.6–2.8× the workstation's
@@ -172,7 +172,7 @@ what it showed and what the truck adds. Do not re-derive the local half.
   workload. Stop increasing when a requested contract fails, identify the
   constraint, and fix its source. Do not hide data loss with larger queues or
   relaxed quality thresholds.
-  _From [C10](archive/10-sustained-validation.md). Procedure:
+  _From [C10](10-sustained-validation.md). Procedure:
   `docs/sustained-validation.md` step 5; run
   `scripts/sustained_validation.py sweep`. **Already measured:** `fuel-map`
   over 8 rungs from 4 to 32 req/s — fails at 4 and 6, holds from 8 up, and
@@ -181,13 +181,13 @@ what it showed and what the truck adds. Do not re-derive the local half.
   baseline is the rung with the **most** headroom, and a ceiling is a failure
   **above** a rung that held. **What the truck adds:** where the floor
   actually sits against the real ECM's response time._
-  **Premise changed 2026-09-10** ([evidence](../../../data/analyses/2026-09-10-h8-continuous-did.md)): the idle ladder's
+  **Premise changed 2026-09-10** ([evidence](../../../../data/analyses/2026-09-10-h8-continuous-did.md)): the idle ladder's
   conclusion ("requests actually sent were flat at ~7.9 req/s across an
   8 → 16 → 32 ladder") was a property of the starved event loop, not of the
   ECM or the bus. The same daemon with D01.8 sustained **116.8 req/s** on the
   H8 drive. Re-run the ladder before quoting any floor from it.
   **Partly measured 2026-09-09 — idle only, drive protocol still owed**
-  ([evidence](../../../data/analyses/2026-09-09-pending-hardware.md)): at warm idle on `default`, requests actually sent were
+  ([evidence](../../../../data/analyses/2026-09-09-pending-hardware.md)): at warm idle on `default`, requests actually sent were
   **flat at ~7.9 req/s across an 8 → 16 → 32 req/s ladder** (365 / 352 / 354
   per 45 s) with the ECM answering 97.6 % and 3–5 timeouts. The ECM's response
   time is **not** the floor; the daemon cannot issue more, for the reason H5
@@ -201,9 +201,9 @@ These ask what the *vehicle* does. A scripted ECU cannot answer them at all.
   coverage, probe overhead, and batching before changing the default budget.
   Reuse validated passive providers explicitly where appropriate; preserve
   source provenance and the model inputs they actually supply.
-  _From [C09](archive/09-polling-plans-and-profile-capacity.md). Blocked on a
+  _From [C09](09-polling-plans-and-profile-capacity.md). Blocked on a
   live normal-monitoring capture. No default budget has been changed._
-  **Measured 2026-09-10** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)), over the H1 drive on
+  **Measured 2026-09-10** ([evidence](../../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)), over the H1 drive on
   `default`, budget left at its deployed 8.0 req/s.
   **Probe overhead:** discovery spent **9 requests / 0.769 s**, once — the
   counters are identical in the first and last in-window snapshot, so 25
@@ -225,10 +225,10 @@ These ask what the *vehicle* does. A scripted ECU cannot answer them at all.
   slow context from experiment requirements, lower context demand, and measure
   the resulting fast-channel coverage. Do not prescribe one vehicle's cadence
   to all vehicles.
-  _From [C09](archive/09-polling-plans-and-profile-capacity.md). Blocked on an
+  _From [C09](09-polling-plans-and-profile-capacity.md). Blocked on an
   experiment-specific live capture to classify dynamics and measure released
   capacity; the schema and runtime cadence control are complete._
-  **Measured 2026-09-10** ([evidence](../../../data/analyses/2026-09-10-h8-continuous-did.md)) on its own 25-minute
+  **Measured 2026-09-10** ([evidence](../../../../data/analyses/2026-09-10-h8-continuous-did.md)) on its own 25-minute
   drive, `tuning-did` profile, daemon `4c84ac3` (clean tree, D01.1 + D01.8 +
   D02 deployed).
   **Released capacity:** 167,885 requests over 1515 s = **116.8 req/s
@@ -259,14 +259,14 @@ These ask what the *vehicle* does. A scripted ECU cannot answer them at all.
   test duration/conditions, and actual request counts. Retain the old
   storage-loss incident as history, not a universal 24 request/s ceiling. Do
   not raise deployed rate defaults until sustained evidence supports them.
-  _From [C09](archive/09-polling-plans-and-profile-capacity.md). Misleading
+  _From [C09](09-polling-plans-and-profile-capacity.md). Misleading
   DID-batching and 24 req/s claims are already corrected and no default was
   raised. C10 supplied request counts **on the synthetic bus only** (e.g.
   `tuning-did` 148 batched + 1093 single Mode 22 in ~10 s against 1613 single
   before C09), where the budget was never the constraint — so batching bought
   request count, not rate. None of that licenses a capacity note about the
   truck's transport or a raised default; H1 is what does._
-  **Measured 2026-09-10** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)), from the H1 drive.
+  **Measured 2026-09-10** ([evidence](../../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)), from the H1 drive.
   **Active transport:** MCP2515 on SPI, `parentdev spi0.1` — the Waveshare CAN
   HAT, not the Canable USB path — at 500 kbit/s, sample point 0.875,
   `restart-ms` 100, `ERROR-ACTIVE` throughout with 0 bus errors, 0 arbitration
