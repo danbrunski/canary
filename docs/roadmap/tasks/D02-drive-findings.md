@@ -90,6 +90,37 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   answer may be a controller with a real FIFO, and that is a hardware
   decision for the operator, not a code change.
   _Blocked-overnight: needs the Pi and the truck._
+  **Config audit done 2026-09-11 on the bench; the measurement still needs the
+  truck** (a bench Pi has no bus traffic, so there is nothing to overflow —
+  `can0` sits ERROR-PASSIVE at 0 RX/0 TX with no vehicle attached, which is
+  expected and is the same reading H0 caught on 2026-09-09).
+
+  In force on this Pi:
+
+  ```
+  dtparam=spi=on
+  dtoverlay=mcp2515-can1,oscillator=16000000,interrupt=25
+  dtoverlay=mcp2515-can0,oscillator=16000000,interrupt=23
+  ```
+
+  Two candidates, both to be tried one at a time and each measured against the
+  same window:
+
+  1. **No `spimaxfrequency` is set**, so the overlay's 10 MHz default applies.
+     That is the bus speed the driver drains the MCP2515's two RX buffers
+     over, and it is the most direct lever on a controller overflow. 20 MHz is
+     the conventional next rung.
+  2. **A second controller is declared that does not exist.** `mcp2515-can1`
+     probes `spi0.0` and fails every boot (`MCP251x didn't enter in conf mode
+     after reset`, `err=110`); only `spi0.1` initialises. Removing that line
+     costs nothing and stops a real failure being normal background noise.
+
+  Checked and **not** a defect: the overlay declares a 16 MHz oscillator while
+  `ip -d link` reports `clock 8000000`. That is correct — the MCP2515's CAN
+  system clock is the oscillator halved — and it should not be "fixed".
+
+  Neither change is applied: both need a reboot, and the ranking between them
+  is only decidable with bus traffic._
 
 - [~] D02.3 **Surface and bound the child-scorer fallback.** The parent
   waits `RESULT_TIMEOUT_SECONDS = 30.0` for the child, then scores
@@ -223,14 +254,23 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   at **`4c84ac3` with a clean tree**, and the H8 drive is the first
   measurement on this truck taken against a revision git can name._
 
-- [ ] D02.8 **Finish H1's continuity pass.** The drive closed H1 on the
+- [x] D02.8 **Finish H1's continuity pass.** The drive closed H1 on the
   operator's stated bar, but the per-channel gap analysis over the session
   parquet was never run because the link dropped. Pull
   `2026-09-10T142711`, run the gap/complete-tuple analysis the
   sustained-validation procedure names, and append the result to the
   evidence doc. Expect it to confirm the counters; if it does not, that is
   the finding.
-  _Blocked until the Pi is reachable._
+  **Done 2026-09-11 on the bench**
+  ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md), addendum).
+  It confirmed the counters. The fast tier held 0.95–0.97 Hz with a 1.00 s
+  median gap, a 3.67 s worst gap and **no gap over 5 s on any channel**;
+  **96.3 %** of grid seconds carried the complete six-channel model input and
+  **every incomplete second was isolated** — longest run 1 s, no holes.
+  Broadcast CAN ran 2,439,597 frames at 1,628/s with zero gaps over 1 s. The
+  slow-tier and DID gaps are the profile's own cadences, not loss. The
+  contrast that matters: the 2026-09-09 session this procedure was written
+  for had ~100 s gaps in every channel._
 
 ## Status 2026-09-10
 
@@ -244,7 +284,8 @@ Implemented on the laptop, gate green (`ruff`, `ruff format`, `mypy`,
 | D02.3 worker fallbacks | partial — (b) refused, see the item |
 | D02.5 IF blindness | root cause found + alarm added; retrain owed |
 | D02.7 Pi on a committed revision | done 2026-09-10 — Pi is at `4c84ac3`, clean |
-| D02.2, D02.6, D02.8 | still need the Pi or a pulled session |
+| D02.8 H1 continuity | done 2026-09-11 — no holes, 96.3 % complete tuples |
+| D02.2, D02.6 | still need the truck, or a baseline session |
 
 The headline is D02.5. The Isolation Forest went blind because two broadcast
 bindings were **corrected** out of `data/bindings.yaml` on 2026-08-04/05,
