@@ -10,6 +10,16 @@ evidence; use `[~]` for partial completion and name the remaining work.
 **Status 2026-09-08 — the C01–C10 set is closed.** All ten task documents
 are complete and archived; every checkbox in them is `[x]`.
 
+**Status 2026-09-10 — all ten hardware items are measured; the C0x vehicle
+set is closed.** Two drives on 2026-09-10 closed H1, H7 and H9 (`default`
+profile) and then H8 (`tuning-did`). H6 stays `[~]`: its budget ladder ran at
+idle, and its conclusion that the daemon was stuck near 7.9 req/s was a
+property of the starved event loop — the same daemon sustained **116.8 req/s**
+on the H8 drive once D01.8 shipped. Evidence:
+[`2026-09-10-drive-h1-h7-h9.md`](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)
+and
+[`2026-09-10-h8-continuous-did.md`](../../../data/analyses/2026-09-10-h8-continuous-did.md).
+
 **Status 2026-09-09 — six of the ten hardware items are measured.** The Pi
 was plugged in and the engine run at warm idle: H0, H2, H3, H4 and H5 are
 `[x]`, H6 is `[~]` (idle ladder done, drive protocol still owed), and H1, H7,

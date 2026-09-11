@@ -4,14 +4,15 @@ Created 2026-09-08 when C04, C05, C06, C08, C09 and C10 were archived. Their
 implementation is complete and their evidence is in the archived docs; what
 remains is measurement on the vehicle, which no workstation run substitutes.
 
-**Status 2026-09-10: nine of ten measured** (H0, H1, H2, H3, H4, H5, H7, H9
-done; H6 partial). Evidence:
+**Status 2026-09-10: all ten measured; H6 partial.** (H0–H5, H7, H8, H9 done;
+H6 idle-only.) The C0x vehicle set is closed. Evidence:
 [`data/analyses/2026-09-09-pending-hardware.md`](../../../data/analyses/2026-09-09-pending-hardware.md)
 for the idle session, and
 [`data/analyses/2026-09-10-drive-h1-h7-h9.md`](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)
-for the 2026-09-10 drive. Only **H8** remains: it needs the continuous-DID
-profile, which disables Mode 01 and cannot share a window with the `default`
-capture the drive ran, so it wants its own 15-minute drive.
+for the 2026-09-10 `default` drive, and
+[`data/analyses/2026-09-10-h8-continuous-did.md`](../../../data/analyses/2026-09-10-h8-continuous-did.md)
+for the 2026-09-10 continuous-DID drive that closed H8. Only **H6** is still
+partial: its budget ladder was run at idle and still wants the drive protocol.
 
 **The session's headline is not a checkbox.** The deployed daemon cannot hold
 its 1 Hz inference tick on this hardware: `total` median 863 ms against a
@@ -180,6 +181,11 @@ what it showed and what the truck adds. Do not re-derive the local half.
   baseline is the rung with the **most** headroom, and a ceiling is a failure
   **above** a rung that held. **What the truck adds:** where the floor
   actually sits against the real ECM's response time._
+  **Premise changed 2026-09-10** ([evidence](../../../data/analyses/2026-09-10-h8-continuous-did.md)): the idle ladder's
+  conclusion ("requests actually sent were flat at ~7.9 req/s across an
+  8 → 16 → 32 ladder") was a property of the starved event loop, not of the
+  ECM or the bus. The same daemon with D01.8 sustained **116.8 req/s** on the
+  H8 drive. Re-run the ladder before quoting any floor from it.
   **Partly measured 2026-09-09 — idle only, drive protocol still owed**
   ([evidence](../../../data/analyses/2026-09-09-pending-hardware.md)): at warm idle on `default`, requests actually sent were
   **flat at ~7.9 req/s across an 8 → 16 → 32 req/s ladder** (365 / 352 / 354
@@ -215,16 +221,39 @@ These ask what the *vehicle* does. A scripted ECU cannot answer them at all.
   COMMANDED_EQUIV_RATIO), 9 slow at ≤ 0.07 Hz, 6 Mode 22 DIDs at 0.02 Hz.
   **No default budget changed.**_
 
-- [ ] H8 (C09.14) For continuous DID profiles, identify fast dynamics and
+- [x] H8 (C09.14) For continuous DID profiles, identify fast dynamics and
   slow context from experiment requirements, lower context demand, and measure
   the resulting fast-channel coverage. Do not prescribe one vehicle's cadence
   to all vehicles.
   _From [C09](archive/09-polling-plans-and-profile-capacity.md). Blocked on an
   experiment-specific live capture to classify dynamics and measure released
   capacity; the schema and runtime cadence control are complete._
-  **Still open after the 2026-09-10 drive** ([evidence](../../../data/analyses/2026-09-10-drive-h1-h7-h9.md)): that drive ran
-  `default`, and the continuous-DID profile disables Mode 01, so the two
-  cannot share one window. H8 needs its own 15-minute drive._
+  **Measured 2026-09-10** ([evidence](../../../data/analyses/2026-09-10-h8-continuous-did.md)) on its own 25-minute
+  drive, `tuning-did` profile, daemon `4c84ac3` (clean tree, D01.1 + D01.8 +
+  D02 deployed).
+  **Released capacity:** 167,885 requests over 1515 s = **116.8 req/s
+  sustained** against the profile's own 180 /s budget, 167,208 readings, 41
+  timeouts (0.02 %), 0 negative responses, 0 bus errors. Eleven DIDs at
+  **10.4 Hz each**, spread across them 0.5 %. That is **14.8x** the ~7.9 req/s
+  that a 4x budget ladder could not beat at idle on 2026-09-09 — the
+  constraint was the starved event loop, not the bus, and D01.8 removed it.
+  **No rate default was raised.**
+  **Fast dynamics vs slow context, measured not assumed:** by fraction of
+  samples that change, `ECM_AF_SENSOR_V_B1`/`B2` 84.6 % (autocorrelation time
+  4.8 s), `ECM_RPM` 82.3 %, cam angle measured 63–67 %, throttle position
+  59.7 %, cam angle commanded 33.6 %, and **`ECM_COOLANT_TEMP` 0.2 %** — it
+  covered 72 → 94 °C in 25 minutes while spending 15,748 requests, one
+  eleventh of the budget. Dropping it to ~0.1 Hz returns **9.5 % of the
+  profile's requests** to the air-fuel sensors, which are undersampled at
+  10.4 Hz. The method (moves, rate of change, autocorrelation time over a real
+  drive) is what transfers to another vehicle; **the numbers are this
+  engine's**, per the task's own warning.
+  **Side findings:** the continuous session dropped 3 times in 25 min
+  (3 of 639 session-control requests timed out), each costing 23–40 s of total
+  blindness because Mode 01 is disabled, and the retry waits the profile's
+  60 s window interval. Three polled DIDs (0x1208, 0x1110, 0x1139) have
+  `scale: null` and cannot be read in engineering units despite consuming 27 %
+  of the requests._
 
 - [x] H9 (C09.16) Correct capacity notes to state active transport, measured
   test duration/conditions, and actual request counts. Retain the old

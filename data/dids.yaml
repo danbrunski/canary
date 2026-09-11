@@ -498,6 +498,8 @@ dids:
     name: ECM_INTAKE_VVT_SOLENOID_DUTY
     byte_start: 0
     byte_length: 1
+    response_length: 1
+    response_length_source: '23 local sessions (41,578 stored Mode 22 response payloads) plus _capture-tuning-did-2026-09-11T003700 (15,750 payloads on the H8 drive), all 1 byte, no other width observed. Payload is the full post-header response (_decode_response stores response.payload unmodified). The same capture independently re-confirmed every width recorded in D02.4. D02.4 / H8, 2026-09-10.'
     byte_order: big
     scale: null          # only 0 (idle) and 11 (rev) observed — scaling unpinned
     offset: null
@@ -581,6 +583,8 @@ dids:
     name: ECM_INTAKE_CAM_ANGLE_COMMANDED
     byte_start: 0
     byte_length: 1
+    response_length: 1
+    response_length_source: '6 local sessions (42,130 stored Mode 22 response payloads) plus _capture-tuning-did-2026-09-11T003700 (15,745 payloads on the H8 drive), all 1 byte, no other width observed. Payload is the full post-header response (_decode_response stores response.payload unmodified). The same capture independently re-confirmed every width recorded in D02.4. D02.4 / H8, 2026-09-10.'
     byte_order: big
     scale: 0.5
     offset: -64.0
@@ -604,6 +608,8 @@ dids:
     name: ECM_INTAKE_CAM_ANGLE_MEASURED
     byte_start: 0
     byte_length: 1
+    response_length: 1
+    response_length_source: '6 local sessions (40,609 stored Mode 22 response payloads) plus _capture-tuning-did-2026-09-11T003700 (15,699 payloads on the H8 drive), all 1 byte, no other width observed. Payload is the full post-header response (_decode_response stores response.payload unmodified). The same capture independently re-confirmed every width recorded in D02.4. D02.4 / H8, 2026-09-10.'
     byte_order: big
     scale: 0.5
     offset: -64.0
@@ -620,6 +626,8 @@ dids:
     name: ECM_INTAKE_CAM_ANGLE_MEASURED_B
     byte_start: 0
     byte_length: 1
+    response_length: 1
+    response_length_source: '6 local sessions (41,771 stored Mode 22 response payloads) plus _capture-tuning-did-2026-09-11T003700 (15,749 payloads on the H8 drive), all 1 byte, no other width observed. Payload is the full post-header response (_decode_response stores response.payload unmodified). The same capture independently re-confirmed every width recorded in D02.4. D02.4 / H8, 2026-09-10.'
     byte_order: big
     scale: 0.5
     offset: -64.0
@@ -647,6 +655,8 @@ dids:
     name: ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2
     byte_start: 0
     byte_length: 1
+    response_length: 1
+    response_length_source: '6 local sessions (40,979 stored Mode 22 response payloads) plus _capture-tuning-did-2026-09-11T003700 (15,779 payloads on the H8 drive), all 1 byte, no other width observed. Payload is the full post-header response (_decode_response stores response.payload unmodified). The same capture independently re-confirmed every width recorded in D02.4. D02.4 / H8, 2026-09-10.'
     byte_order: big
     scale: null
     offset: null

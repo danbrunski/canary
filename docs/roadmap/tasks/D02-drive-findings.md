@@ -154,6 +154,15 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   **Batching is still off, deliberately:** `obd_did_batch_max_dids` defaults
   to 1 per install and the widths were its precondition, not its switch.
   Turning it on is an operator decision that belongs with H8's drive.
+  **Independently re-confirmed 2026-09-10 on the H8 drive**
+  ([evidence](../../../data/analyses/2026-09-10-h8-continuous-did.md)): a
+  different session on a different daemon revision reproduced **every**
+  recorded width exactly, 15,7xx payloads each, no other width seen once.
+  Five more were measured and recorded the same way (0x1110, 0x1135, 0x1139,
+  0x113A, 0x1163, all 1 byte), so **every DID in both the `default` and
+  `tuning-did` profiles now has a provenance-backed width** and multi-DID
+  batching is unblocked for both. Still switched off — enabling it during the
+  drive that measured baseline DID capacity would have confounded it.
 
 - [x] D02.4a **Deduplicate `unknown_response_width_channels`.**
   `polling_plan.py` builds it as a list and the drive's payload repeated
@@ -198,7 +207,7 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
 
 ## Housekeeping the drive exposed
 
-- [ ] D02.7 **Bring the Pi to a committed revision.** Its tree is `09ba604`
+- [x] D02.7 **Bring the Pi to a committed revision.** Its tree is `09ba604`
   plus hand-copied D01.1 files (`inference_worker.py` untracked;
   `inference.py`, `obd_scheduler.py`, `config.py`, one doc modified) and
   two untracked benchmark JSONs. Every measurement since 2026-09-09 has
@@ -206,7 +215,13 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   contains D01.1 and D01.8, restart, confirm `inference worker started` in
   the journal, and record the sha in the next evidence doc. Copy the two
   benchmark JSONs back to the laptop first.
-  _Blocked-overnight: needs the Pi._
+  **Done 2026-09-10.** All five hand-copied source files were verified
+  byte-identical to commit `9d3f55a` before anything was touched, so nothing
+  was lost; the two benchmark JSONs were copied to the laptop first. Reverted
+  with explicit pathspecs only, never tree-wide. The Pi had no DNS, so the
+  revision was delivered by `git bundle` rather than `git pull`. It now sits
+  at **`4c84ac3` with a clean tree**, and the H8 drive is the first
+  measurement on this truck taken against a revision git can name._
 
 - [ ] D02.8 **Finish H1's continuity pass.** The drive closed H1 on the
   operator's stated bar, but the per-channel gap analysis over the session
@@ -228,7 +243,8 @@ Implemented on the laptop, gate green (`ruff`, `ruff format`, `mypy`,
 | D02.4 / D02.4a DID widths | done |
 | D02.3 worker fallbacks | partial — (b) refused, see the item |
 | D02.5 IF blindness | root cause found + alarm added; retrain owed |
-| D02.2, D02.6, D02.7, D02.8 | need the Pi or the pulled session |
+| D02.7 Pi on a committed revision | done 2026-09-10 — Pi is at `4c84ac3`, clean |
+| D02.2, D02.6, D02.8 | still need the Pi or a pulled session |
 
 The headline is D02.5. The Isolation Forest went blind because two broadcast
 bindings were **corrected** out of `data/bindings.yaml` on 2026-08-04/05,

@@ -229,10 +229,38 @@ def test_unknown_width_channels_are_unique_and_sorted() -> None:
 #: batched Mode 22 requests in 25 minutes.
 DEFAULT_PROFILE_DIDS = (0x1219, 0x1208, 0x1225, 0x1226, 0x120F, 0x1210)
 
+#: The `tuning-did` profile's Mode 22 set — all eleven measured on the H8 drive.
+TUNING_DID_PROFILE_DIDS = (
+    0x1219,
+    0x1225,
+    0x1226,
+    0x1208,
+    0x1135,
+    0x113A,
+    0x1163,
+    0x1110,
+    0x1139,
+    0x120F,
+    0x1101,
+)
+
 #: Measured from stored response payloads, D02.4. The first three were already
 #: pinned from single-DID captures and are the known-answer check: the method
 #: that produced the other four had to reproduce these exactly first.
-PINNED_WIDTHS = {0x1101: 1, 0x1208: 2, 0x1219: 2, 0x1225: 2, 0x1226: 2, 0x120F: 2, 0x1210: 2}
+PINNED_WIDTHS = {
+    0x1101: 1,
+    0x1110: 1,
+    0x1135: 1,
+    0x1139: 1,
+    0x113A: 1,
+    0x1163: 1,
+    0x1208: 2,
+    0x120F: 2,
+    0x1210: 2,
+    0x1219: 2,
+    0x1225: 2,
+    0x1226: 2,
+}
 
 
 def test_every_default_profile_did_has_a_width() -> None:
@@ -243,6 +271,19 @@ def test_every_default_profile_did_has_a_width() -> None:
     missing = [f"0x{did:04X}" for did in DEFAULT_PROFILE_DIDS if did not in widths]
     assert not missing, f"DIDs with no provenance-backed response width: {missing}"
     unsourced = [f"0x{did:04X}" for did in DEFAULT_PROFILE_DIDS if not sources.get(did)]
+    assert not unsourced, f"a width without a source is a guess: {unsourced}"
+
+
+def test_every_tuning_did_profile_did_has_a_width() -> None:
+    """H8 measured all eleven on the drive, so multi-DID batching is no longer
+    blocked for this profile either."""
+    from src.collection.obd_scheduler import did_response_widths
+
+    widths, sources = did_response_widths()
+
+    missing = [f"0x{did:04X}" for did in TUNING_DID_PROFILE_DIDS if did not in widths]
+    assert not missing, f"DIDs with no provenance-backed response width: {missing}"
+    unsourced = [f"0x{did:04X}" for did in TUNING_DID_PROFILE_DIDS if not sources.get(did)]
     assert not unsourced, f"a width without a source is a guess: {unsourced}"
 
 
