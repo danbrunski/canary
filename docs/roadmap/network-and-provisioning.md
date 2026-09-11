@@ -100,6 +100,21 @@ Rejected, with reasons, so they are not re-proposed:
   it is the out-of-band recovery path that makes a client-only design safe:
   with no AP, a Pi that fails to join is otherwise silent and reachable
   only by cable.
+- [ ] **N1.5 Do not let phone access depend on mDNS alone.** iOS resolves
+  `.local` natively via Bonjour, but **Android's platform resolver has
+  historically not resolved `.local` hostnames for ordinary apps**, which is
+  why Chrome on Android has long failed to open `.local` URLs. Newer Android
+  versions improved this and it varies by OEM build, so it is not a
+  dependable base. Every path that gets a phone to the dashboard therefore
+  needs a non-mDNS answer:
+  - On the optional AP (N3.1) the Pi owns DNS, so pin the name in
+    NetworkManager's shared dnsmasq (`address=/canary.local/10.42.0.1`) and
+    AP clients never use multicast at all.
+  - On a foreign LAN there is no such control, which is what makes the BLE
+    status characteristic (N1.3) load-bearing rather than a convenience.
+  - A DHCP reservation on the home router plus a bookmarked IP covers the
+    garage case on any phone. The Starlink router cannot make reservations.
+
 - [ ] **N1.4 Document the iOS limitation.** Safari implements no Web
   Bluetooth, so an iPhone needs a native client or a third-party browser
   that does. Every Bluetooth path in this design has the same hole; say so
