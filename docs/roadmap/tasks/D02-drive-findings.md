@@ -122,7 +122,7 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   Neither change is applied: both need a reboot, and the ranking between them
   is only decidable with bus traffic._
 
-- [~] D02.3 **Surface and bound the child-scorer fallback.** The parent
+- [x] D02.3 **Surface and bound the child-scorer fallback.** The parent
   waits `RESULT_TIMEOUT_SECONDS = 30.0` for the child, then scores
   in-process — and that in-process fallback has no bound of its own. At
   engine-off on 2026-09-10 the tick recorded `compute_wait` max
@@ -153,6 +153,12 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   start a tick while one is in flight and counts `compute_busy` — so what was
   actually missing was naming the overrun, which `slow_computes` now does.
   Re-open only with a design that does not require thread cancellation.
+  **Closed 2026-09-11 rather than left `[~]` forever.** Two of the three parts
+  shipped and the third is a refusal with a reason, not outstanding work —
+  carrying it as partial indefinitely would hide that a decision was taken.
+  D01.9 also removed most of what (b) was reaching for: the scheduler no
+  longer stalls behind a slow compute, it pipelines past it, so an unbounded
+  in-process fallback costs a queued tick rather than a missed deadline.
 
 ## Capacity left switched off
 
@@ -223,7 +229,7 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   quietly. That refusal is the "make it impossible" half; the trace is the
   fix. _Needs the session parquet — blocked until the Pi is reachable._
 
-- [ ] D02.6 **Measure the anomaly-event rate before touching a threshold.**
+- [x] D02.6 **Measure the anomaly-event rate before touching a threshold.**
   With the IF contributing nothing, the behaviour and sequence detectors
   emitted **76 events in 24 minutes (3.1 / min)** with 1598 more suppressed
   as duplicates and 107 by persistence. That is high for an ordinary drive,
@@ -235,6 +241,54 @@ Isolation Forest blind (D02.5); neither changes any item's premise.
   bank-balance / residual question. Either way the output is a rate table,
   not a threshold change. _Replay can run off-vehicle once the session is
   pulled._
+  **Measured 2026-09-11 on the bench** ([evidence](../../../data/analyses/2026-09-11-d026-replay-event-rates.md)).
+  104 events over 1,910 s = **3.27/min**, against **3.1/min** live — the
+  replay reproduces the live rate, so the instrument is sound and the live
+  figure was not a driving artifact. **The sequence detector dominates:**
+  `lstm_autoencoder` 62 (1.95/min, 60 %), `behavior` 30, `fused` 8,
+  `misfire` 4, `isolation_forest` **0**. Per the task text that makes this
+  D01.7's input. The two main detectors fire in **complementary regimes** —
+  the sequence model 45 of 62 while driving, the behavior overlay 25 of 30
+  while stationary — which is not one detector flooding.
+  **No threshold was changed**, and deliberately: whether 3.27/min is *too
+  high* needs a known-good comparison, and the Pi's retention has swept every
+  session the models were trained on. Per-mode rates normalised by time were
+  also not obtainable (the replay output does not persist `operating_mode` as
+  a channel), and raw per-mode counts without the denominator are the
+  aggregate comparison this repo refuses. Characterised and attributed, not
+  yet judged._
+
+## Found while closing D02.6
+
+- [ ] D02.9 **Replay grows without bound and OOM-killed the daemon.**
+  A 1x replay of a 25-minute drive took the daemon to **7.7 GB resident on an
+  8 GB Pi** and the kernel killed it 32 minutes in
+  ([evidence](../../../data/analyses/2026-09-11-d026-replay-event-rates.md))
+  (`Out of memory: Killed process 1217 (python) total-vm:15756560kB
+  anon-rss:7744720kB`). systemd restarted it cleanly and it has been healthy
+  since at 469 MB, so only the tail of the replay was lost.
+
+  The bound worth starting from: the replay wrote **5,860,000 rows in 586
+  chunks** while covering **32 %** of a source session that contains
+  **4,544,560 rows in 511 chunks** total. It produced more rows than its input
+  holds, over a third of the span. Something is amplifying rows and memory
+  grows with it; **do not guess the mechanism** — find it, then decide whether
+  the fix is at the emit path or the writer.
+
+  This matters beyond tidiness: `start_replay` is the sanctioned way to
+  evaluate detectors without the truck (see AGENTS.md), and on this hardware a
+  long replay takes the daemon down. Until it is fixed, a replay longer than
+  ~30 minutes should be treated as unsafe on the Pi.
+
+  **Pre-existing, not a D01.9 regression** — the Pi ran `3c2ae25` throughout;
+  D01.9 was committed on the laptop and never deployed.
+
+- [ ] D02.10 **Get a known-good baseline session back onto the Pi.**
+  D02.6 could characterise the event rate but not judge it, because retention
+  has swept every session the deployed models were trained on. Push one
+  (e.g. `2026-07-26T234833`) from `~/canary-data` and pin it so retention
+  cannot take it, then re-run D02.6's replay against it and compare
+  per-detector rates. Without this, "3.27 events/min" has no reference.
 
 ## Housekeeping the drive exposed
 
@@ -285,7 +339,8 @@ Implemented on the laptop, gate green (`ruff`, `ruff format`, `mypy`,
 | D02.5 IF blindness | root cause found + alarm added; retrain owed |
 | D02.7 Pi on a committed revision | done 2026-09-10 — Pi is at `4c84ac3`, clean |
 | D02.8 H1 continuity | done 2026-09-11 — no holes, 96.3 % complete tuples |
-| D02.2, D02.6 | still need the truck, or a baseline session |
+| D02.6 anomaly rate | done 2026-09-11 — sequence detector dominates |
+| D02.2 | still needs the truck |
 
 The headline is D02.5. The Isolation Forest went blind because two broadcast
 bindings were **corrected** out of `data/bindings.yaml` on 2026-08-04/05,

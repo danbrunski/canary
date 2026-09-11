@@ -372,10 +372,32 @@ the window again.
   the model input — for ~25 % of `compute`, which no longer blocks the event
   loop. Do it after Phase 2, if `compute` is still the binding constraint.
 
-- [ ] D01.7 Decide the sequence detector's place on this hardware. If D01.9,
+- [x] D01.7 Decide the sequence detector's place on this hardware. If D01.9,
   D01.4 and D01.8 leave the tick over budget, the honest options are a longer
   sequence cadence or dropping the backbone on the Pi — a measured decision,
   taken after those land, not before.
+  **Decided 2026-09-11: the sequence detector stays, at 1 Hz, unchanged.**
+  Its trigger condition never fired. D01.8 alone brought the tick to a
+  **439 ms** median at idle and **320 ms** under the far heavier `tuning-did`
+  load, both inside the 1000 ms period and both **with the sequence detector
+  running** — so neither a longer cadence nor dropping the backbone is
+  justified, and doing either would be paying a detection cost for headroom
+  that already exists.
+
+  Two measurements decided it rather than one. The budget question is answered
+  above. The *worth* question is answered by D02.6
+  ([evidence](../../../data/analyses/2026-09-11-d026-replay-event-rates.md)):
+  the sequence model produces **60 % of all anomaly events** (1.95/min of
+  3.27/min), concentrated while driving — 45 of its 62 events in `city` and
+  `highway` — where the behavior overlay contributes almost nothing. With the
+  Isolation Forest structurally blind, it is currently the **only** detector
+  covering the driving regimes at all. Dropping it would leave the truck
+  unmonitored exactly where it is being driven.
+
+  Revisit only if a future measurement puts the tick back over budget *and*
+  the sequence model's share of useful events has fallen. Its cost on the Pi
+  is ~250 ms of a ~440 ms tick, so it remains the largest single stage and
+  the first place to look if that happens._
 
 ## Not a defect — ruled out 2026-09-09
 
