@@ -499,6 +499,11 @@ committed work.
   share a VIN and profile. Training discovery must not mix them — enforced, not
   noted.
 
+**Rev 3.0 consequences** are tracked in §13.3.9 of
+[`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md): CE1 is no longer free for
+the MCU link, the ADC becomes a four-channel ratiometric set, U11 STB and U9 EN
+join the MCU's safe-state nets, and the header closes with no spare GPIO.
+
 ### 13.5.9 Open items before schematic entry
 
 | # | Item | How it closes |

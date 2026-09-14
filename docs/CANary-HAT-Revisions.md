@@ -132,7 +132,7 @@ whose §13.3.2 power-domain analysis is unwritten and whose §13.3.6 net list is
 | **Input stage: Q1 + R10 + D3, D4 removed** | **done 2026-08-23** — schematic entered and verified by netlist diff: `Q1.2 (D)` on `+12V_RAW`, `Q1.3 (S)` on `+12V`, D3 cathode to source, J3 moved to `+12V`. ERC unchanged at 0/3 |
 | **STB → GPIO22** (J1 pin 15) | **done 2026-08-23** — `U4.8` left GND. §13.2.1's "the one that matters most". Carries a **software prerequisite**: see §11 |
 | **LSM6DSOX INT2 → GPIO23** (J1 pin 16) | **done 2026-08-23** — `U6.9` was unconnected on rev 1.0 |
-| **12V sense: U8 + R11/R12 + C17/C18** | **done 2026-08-23** — divider on `+12V`, `V12_SENSE` → `U8.4 (AIN0)`, ADDR to GND = 0x48, **AIN1 left free and reserved** for the rev 3.0 current-sense monitor |
+| **12V sense: U8 + R11/R12 + C17/C18** | **done 2026-08-23** — divider on `+12V`, `V12_SENSE` → `U8.4 (AIN0)`, ADDR to GND = 0x48, **AIN1 left free** (spent by rev 2.1 on `MAP`, §13.5.3; the current-sense monitor reads an MCU ADC per §13.4.4) — originally noted as reserved for the rev 3.0 current-sense monitor |
 | **K-line pull-up FET: Q2/Q3 + R13/R14/R15, J5 removed** | **done 2026-08-23** — `Net-(Q2-G)` is Q2.1+R13.2+R14.1 with the drain properly separate, `R5.2` moved to `KLINE_PU`, `R5.1` now direct to `D5.2`. Sniff mode is the default; commander mode needs **GPIO24 (J1 pin 18)** driven high — a new §11 item |
 | **J2 pins 4–6 re-assigned** | **operator change 2026-08-23**, for routing. Pin 4 CANH, 5 CANL, 6 K-line. Caught by netlist diff — ERC cannot see it, since every net stays connected, just to different pins. §3.9 and `FAB-NOTES.md` carry the harness table |
 | **CAN activity LED: D6 + R16** | **done 2026-08-23** — hardware-driven from the TCAN1042's RXD, no GPIO. Separates "the bus is dead" from "the software is not reading it" |
@@ -564,6 +564,7 @@ speculative.
 | §13.3.6 | Nets the board must carry |
 | §13.3.7 | Deliberately out of scope |
 | §13.3.8 | Rejected: PCIe as the data transport |
+| §13.3.9 | Rev 2.1 deltas rev 3.0 inherits |
 
 #### 13.3.1 Sleep, wake, and why the Pi must be genuinely off
 
@@ -952,18 +953,18 @@ Fix this list before layout: a missing net is a re-spin, unused firmware is free
 | # | Net | For |
 |---|---|---|
 | 1 | **Always-on 3.3V** from `+12V_RAW`, nA-class-Iq regulator | MCU + TCAN1042 VIO (wake) + GNSS V_BCKP OR leg (§13.3.2) |
-| 2 | 12V divider → MCU ADC | crank/alternator/parasitic (§13.3.3b); K-line undervoltage disambiguation. **Divider lands in rev 2.0** behind a small I2C ADC (§13.2.3) — rev 3.0 re-points it at the MCU for kHz sampling |
+| 2 | 12V divider → MCU ADC | crank/alternator/parasitic (§13.3.3b); K-line undervoltage disambiguation. **Divider lands in rev 2.0** behind a small I2C ADC (§13.2.3) — rev 3.0 re-points it at the MCU for kHz sampling. **Rev 2.1 makes this four channels** (`V12_SENSE`, `MAP`, `IAT`, `5V_SENS`; §13.5.3), and MAP/IAT are ratios against `5V_SENS`, so all three must land on the *same* ADC — §13.3.9 |
 | 3 | MCU GPIO → high-side load switch on the J3 leg | §13.3.1 sleep/wake |
 | 4 | MCU ↔ Pi UART pair | handshake; works whenever the MCU is up |
-| 5 | MCU ↔ Pi on **SPI0 CE1 (GPIO7, pin 26 — free, §4.1)** | bulk buffer dump; a few hundred KB over UART is painful |
+| 5 | MCU ↔ Pi on ~~SPI0 CE1 (GPIO7, pin 26)~~ **SPI0 with a GPIO chip select on GPIO20** | bulk buffer dump; a few hundred KB over UART is painful. **CE1 is spent by rev 2.1 on CAN1** (§13.5.4); re-decided in §13.3.9 |
 | 6 | Pi 3V3 rail sense → MCU | the tri-state invariant in §13.3.2 |
-| 7 | TCAN1042 RXD → MCU (fan-out) | boot-gap capture, wake, timestamps |
+| 7 | TCAN1042 RXD → MCU (fan-out) | boot-gap capture, wake, timestamps. **Rev 2.1 adds U11 (CAN1/aux)**: its RXD fan-out is one more net and captures fuel pressure across the boot gap; wake from it is pointless (the gauge is on switched 12 V) — §13.3.9 |
 | 8 | K-line RXD / TXD / EN → MCU | §13.3.4; supersedes the Pi's `uart0` connection |
 | 9 | GNSS TX + TIMEPULSE → MCU (fan-out) | time base, hot fix, absolute time at wake |
 | 10 | **LSM6DSOX INT2 (pin 9 — unconnected on rev 1.0)** → MCU | motion wake. **Landed in rev 2.0** as a net to a free Pi GPIO (§13.2.3); rev 3.0 re-points it |
 | 11 | Private MCU I2C → LSM6DSOX + BMP384 | §13.3.4 — **must not be I2C1** |
 | 12 | ~~GNSS antenna bias sense → MCU ADC~~ **→ u-blox two-pin antenna supervisor** | Open/short antenna detection, **but not via the MCU** — the M10M does it itself. Deferred here from rev 2.0 on 2026-08-22. See below. |
-| 13 | STB (U4) and the §13.2 pull-up FET gate → MCU | safe-state ownership. **Both exist in rev 2.0** as Pi GPIOs (§13.2.1, §13.2.4); rev 3.0 moves ownership to the MCU |
+| 13 | STB (U4), **STB (U11, rev 2.1)**, **U9 sensor-rail EN (rev 2.1)** and the §13.2 pull-up FET gate → MCU | safe-state ownership. **U4 STB and the FET gate exist in rev 2.0** as Pi GPIOs (§13.2.1, §13.2.4); rev 2.1 adds U11 STB on GPIO19 and ties U9 EN to `+3V3` (§13.5.3, §13.5.4); rev 3.0 moves all of them to the MCU |
 | 14 | **A flash path from the Pi** — SWD bit-banged from Pi GPIO, or a UART bootloader with BOOT0 on a Pi-drivable pin | see below |
 | 15 | Status LEDs → MCU | §13.2, §13.3.4 |
 
@@ -1014,18 +1015,27 @@ every capability above freezes at whatever shipped.
 **Items 4, 5 and 6 are the crossing nets** that §13.3.2 governs — size their
 series resistance there, not here.
 
-Header budget: §4.1 lists GPIO27, 22, 23, 24, 7, 12, 13, 19, 20 and 21
-unconnected, so items 3–6 fit without disturbing anything, and `uart4`
-(GPIO12/13) is the natural home for item 4. Note that item 8 *frees* `uart0`
+Header budget — **re-counted 2026-09-14 against rev 2.1.** §4.1's list of ten
+unconnected GPIOs is stale: rev 2.0 spent 22, 23 and 24 (STB, INT2, K-line
+FET gate) and rev 2.1 spends 7, 27 and 19 (CAN1 CS, nINT, STB). **What remains
+for rev 3.0 is GPIO12, 13, 20 and 21 — four pins.** `uart4` (GPIO12/13) is the
+home for item 4; GPIO20 is item 5's chip select; GPIO21 is the one pin left
+for item 14's `BOOT0`/reset. That closes with **zero spare**, which is why
+§13.3.9 rules out the bit-banged SWD variant of item 14. Items 3 and 6 are
+MCU-side pins and cost no header GPIO. Note that item 8 *frees* `uart0`
 (GPIO14/15) on the Pi side — a net simplification of §11's K-line software work
 rather than an addition to it.
 
-Physical: 65 × 56mm already carries 48 footprints. An MCU, an always-on buck,
-crossing-net components and a programming header are not free there. Swapping
-Y1's HC49/US can (**11.4 × 4.7 × 3.3mm**, already flagged in §3.1.1 as
-"physically large" against a 3.2 × 2.5mm SMD equivalent) is worth doing on its
-own merits and helps here — **done in rev 2.0** (§13.2.3), so rev 3.0 inherits
-the area rather than having to spend a re-spin on it.
+Physical: 65 × 56mm carries **57 footprints as built in rev 2.0** and about
+**82 after rev 2.1** (§13.5.7), which may already push passives onto B.Cu. An
+MCU, an always-on buck, crossing-net components and a programming header are
+not free there. Swapping Y1's HC49/US can (**11.4 × 4.7 × 3.3mm**, already
+flagged in §3.1.1 as "physically large" against a 3.2 × 2.5mm SMD equivalent)
+is worth doing on its own merits and helps here — **it was listed in §13.2.3
+but did not land: the rev 2.0 PCB still carries `XTAL_ABLS2-40.000MHZ-D4YF-T`**
+(corrected 2026-09-14), and rev 2.1 adds a second one as Y2. Rev 3.0 therefore
+still owes the crystal swap — twice — with a fresh load-cap derivation per
+§3.1.1.
 
 #### 13.3.7 Deliberately out of scope for the MCU
 
@@ -1094,6 +1104,65 @@ physical-layer intrusion detection, or sub-bit timing analysis. Two channels at
 10 MSa/s × 12-bit is ~30 MB/s, where a fast link starts to matter. That is
 outside anything rev 1.0/2.0/3.0 contemplates, and even then USB 3.0 carries it — the
 FPGA front end would be the hard part, not the link.
+
+#### 13.3.9 Rev 2.1 deltas rev 3.0 inherits
+
+Rev 2.1 (`CANary-HAT-Rev2.1.md`, §13.5) was written after most of §13.3 and
+changes its starting point. Recorded here so rev 3.0 is drawn against the board
+that will actually exist, not against rev 2.0.
+
+**1. SPI0 CE1 is gone — item 5 re-decided.** Rev 2.1 puts the aux CAN
+controller (U10, CAN1) on CE1, the pin §13.3.6 item 5 had reserved for the MCU
+bulk link. Three ways out were weighed on 2026-09-14:
+
+| Option | Cost | Verdict |
+|---|---|---|
+| **(a) MCU on SPI0 with a GPIO chip select (GPIO20)** — the Pi's SPI0 overlays already drive CS through `cs-gpios`, so a third select is a small custom overlay, not a driver change | GPIO20; SPI0 shared three ways (bandwidth is a few percent at 20 MHz) | **Adopted.** Keeps every interface on the header, as §13.3.4 wanted |
+| (b) MCU as a USB device — bulk dump, DFU flashing, optional `gs_usb` channels on one cable | A USB connector on the HAT and a cable to a Pi port; frees GPIO20/21 | Fallback if (a) fails at bring-up. §13.3.4's objection (every other interface arrives through the header) is weaker now that the header is full, but it still stands |
+| (c) Fold CAN1 into the MCU and give CE1 back | Makes the aux bus depend on supervisor firmware; the §13.3.4 rejected-alternative argument applies | Rejected |
+
+Consequence of (a): the header closes with **no spare GPIO** (budget above), so
+**item 14 must be the UART-bootloader form** (`uart4` + `BOOT0` on GPIO21), not
+bit-banged SWD, which needs two pins the Pi no longer has.
+
+**2. The ADC is four channels, and three of them are a set.** Item 2 was
+written for one divider. Rev 2.1 adds `MAP`, `IAT` and `5V_SENS` on U8 and
+computes MAP and IAT as *ratios* against `5V_SENS` (§13.5.3 item 4). Re-pointing
+at the MCU means **all four dividers go to MCU ADC pins on one converter with
+one reference**, or the ratio no longer cancels what it was built to cancel. U8
+is then deleted, which also takes the ADS1015's traffic off I2C1 (§13.5.3 item
+5's bus-loading concern goes with it). The crank-voltage instrument in
+§13.3.3(b) gains MAP-at-crank for free.
+
+**3. Two transceivers, one always-on rail.** Item 1's always-on VIO is for
+wake-on-CAN on the *vehicle* bus (U4). **U11 does not need it**: the AEM gauge
+is on switched 12 V and cannot wake anything. Item 7's RXD fan-out from U11 is
+still worth one net, for fuel pressure across the boot gap (§13.3.3a).
+
+**4. Item 13 grows by two.** U11's STB (rev 2.1: GPIO19) and U9's EN (rev 2.1:
+tied to `+3V3` so the sensor rail follows the Pi) both move to the MCU. With
+the Pi off, the MCU decides whether the MAP/IAT sensor is powered; a parked
+MAP-equals-baro check is cheap, continuous sensor power is not.
+
+**5. The terminal block starts from rev 2.1's.** J2 is the two-level MKKDS
+1,5/6-5,08 with all 12 positions used and the rev 2.0 vehicle pinout frozen on
+the lower level (§13.5.5). §3.9's "rev 3.0 should weigh deleting J3" now has a
+concrete payoff: J3's ~10 mm is the only slack left on that edge.
+
+**6. Termination is decided per channel, not per revision.** CAN0 (vehicle)
+carries no termination footprint by design; CAN1 (aux) carries JP2-selectable
+120 Ω split termination (§13.5.4). §13.4.4's row assigning "DNI split
+termination + solder bridge" to rev 2.0 is superseded — it was dropped there
+(§13.2.1) and lands only on CAN1 in rev 2.1. Do not re-add it on CAN0.
+
+**7. More buses are USB, not board.** Rev 2.1 decided that additional CAN buses
+are `gs_usb` adapters under the aux-bus config role (§13.5.4). That leaves the
+§13.3.4 candleLight option exactly where it was — deferred — but the "route
+back to multi-bus" it describes now has a shipped alternative, so rev 3.0 does
+not need the MCU to carry vehicle CAN to satisfy the multi-vehicle intent.
+
+**8. Crystal.** Corrected above: Y1 is still HC49 on rev 2.0, Y2 is another in
+rev 2.1. Two swaps owed, not zero.
 
 ### 13.4 Lessons from the Macchina M2
 
@@ -1253,7 +1322,7 @@ measurement:
 | C0G/NP0 on C5/C6 and C4 | **rev 2.0** | BOM line only; no layout impact |
 | P-FET reverse protection | **rev 2.0** | Independent of the MCU, and it closes §3.7.4's accepted exposure |
 | PTC on the input | **rev 2.0** | Same input stage as the P-FET — do them together, once |
-| DNI split termination + solder bridge | **rev 2.0** | Footprints only |
+| DNI split termination + solder bridge | ~~rev 2.0~~ → **dropped in rev 2.0 (§13.2.1); CAN1-only with a jumper in rev 2.1 (§13.5.4)** | The vehicle channel never gets a termination footprint; the aux channel's is a real, fitted, jumpered terminator — §13.3.9 item 6 |
 | 12V sense divider values | **rev 2.0** | Already queued there — but the divider had no destination until §13.2.3 added a small I2C ADC behind it. The M2's values transfer; the readback did not exist on rev 1.0 |
 | Current sense + over-current trip | ~~split — shunt in rev 2.0~~ → **all of it rev 3.0** | The escape clause fired and was then re-examined 2026-08-23. Its own premise — "continuous current data is only worth having when something is awake to read it" — is what kills the split: the thing that must be awake is the **MCU**, because the measurement that matters (parked parasitic draw) happens with the Pi off. Landing the shunt early buys nothing, and rev 3.0 re-lays-out that stage anyway. §13.2.3 |
 
