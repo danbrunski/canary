@@ -366,6 +366,23 @@ in code that editorialises about hardware:
 Neither transport needs CAN FD for AEMnet (classic 2.0B, 500 kbps); both
 support it, so the aux bus is not FD-limited if a future device wants it.
 
+#### No third channel on the board (operator decision 2026-09-14)
+
+Some vehicles carry a second bus on the OBD connector (a 125 kbps medium-speed
+bus on pins 3/11; GM's single-wire CAN on pin 1 needs a different transceiver
+altogether). Rev 2.1 stays at **two** on-board channels. A third MCP2518FD
+*would* fit the Pi — SPI0 shared, GPIO20 as a `cs-gpios` chip select, GPIO21
+for nINT, STB shared with CAN1 — but it spends the last two uncommitted GPIOs,
+needs two more terminal positions J2 does not have (§13.5.5), and adds a dozen
+parts to a board that may already go double-sided (§13.5.7).
+
+**Additional buses are USB CAN adapters** (CANable / candleLight `gs_usb`),
+bound by the same config-role mechanism as the aux bus above: one socketcan
+netdev per bus, named by udev from the USB serial, no header cost. The
+principled home for three or more on-board channels is the rev 3.0 MCU, whose
+class carries two or three CAN FD controllers natively behind one link to the
+Pi.
+
 ### 13.5.5 Terminal block — `J2` goes two-level
 
 #### The space problem
