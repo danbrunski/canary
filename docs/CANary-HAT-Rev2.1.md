@@ -59,9 +59,9 @@ AEM gauge answers what the new system actually runs on first key-on.
 | 3 | IAT (NTC) input on U8 AIN2 | R19 pull-up, R20/R21 divider, C20 |
 | 4 | Sensor-supply sense on U8 AIN3 (ratiometric reference) | R22/R23 divider, C21 |
 | 5 | Un-ground AIN2/AIN3 | — (net change) |
-| 6 | Second CAN channel (CAN2) on SPI0 CE1 | U10 MCP2518FD, Y2, C22/C23, U11 TCAN1042, FL2, decoupling |
-| 7 | **Jumper-selectable 120 Ω termination on CAN2 only** (split: 2 × 60.4 Ω + 4.7 nF); CAN1 gets no termination footprint | R24/R25 60.4 Ω, C24 4.7 nF, JP2 |
-| 8 | CAN2 activity LED | D7 + R26 |
+| 6 | Second CAN channel (CAN1) on SPI0 CE1 | U10 MCP2518FD, Y2, C22/C23, U11 TCAN1042, FL2, decoupling |
+| 7 | **Jumper-selectable 120 Ω termination on CAN1 only** (split: 2 × 60.4 Ω + 4.7 nF); CAN0 gets no termination footprint | R24/R25 60.4 Ω, C24 4.7 nF, JP2 |
+| 8 | CAN1 activity LED | D7 + R26 |
 | 9 | `J2` → two-level terminal block, 12 positions | J2 MKKDS 1,5/6-5,08 |
 | 10 | Correct U8's stale schematic note | — (text) |
 
@@ -239,7 +239,7 @@ available instead:
   different air (pre-blower vs post-intercooler), and that difference is the
   interesting part.
 
-### 13.5.4 Second CAN channel (CAN2) — AEM fuel pressure gauge
+### 13.5.4 Second CAN channel (CAN1) — AEM fuel pressure gauge
 
 #### The AEMnet message (AEM `10-0301` manual, p. 8)
 
@@ -258,20 +258,22 @@ with `candump` against the gauge face on the bench before writing a decoder.**
 
 #### Termination rule (operator decision 2026-09-14)
 
-- **CAN2 (aux, Linux `can1`): jumper-selectable 120 Ω termination on board.**
+- **CAN1 (aux, Linux `can1`): jumper-selectable 120 Ω termination on board.**
   JP2 closed = terminated (the default, for the two-node AEMnet bus); JP2 open
   = unterminated, for joining a bus that already has both terminators.
-- **CAN1 (vehicle, Linux `can0`): no termination and no jumper, by design.**
+- **CAN0 (vehicle, Linux `can0`): no termination and no jumper, by design.**
   The vehicle bus is already terminated at both ends; a footprint here would
   only ever be a fault waiting for someone to populate it.
 
-The doc names channels by **board position** (CAN1 = vehicle, CAN2 = aux). The
-Linux names `can0`/`can1` follow probe order unless pinned by udev (below); the
-termination decision is per *board channel*, not per interface name.
+Board channels are numbered from 0 so one index runs through the whole stack:
+**CAN0 = vehicle = SPI0 CE0 = `spi0.0` = `can0`**, **CAN1 = aux = SPI0 CE1 =
+`spi0.1` = `can1`**. The Linux names only hold once udev pins them by SPI
+path (below); until then they follow probe order, and the termination
+decision is per *board channel*, not per interface name.
 
-#### Circuit — a copy of CAN1, with one deliberate difference
+#### Circuit — a copy of CAN0, with one deliberate difference
 
-| Block | CAN1 (rev 2.0) | CAN2 (rev 2.1) |
+| Block | CAN0 (rev 2.0) | CAN1 (rev 2.1) |
 |---|---|---|
 | Controller | U3 MCP2518FDT-E/SL, SPI0 **CE0** (GPIO8) | **U10** MCP2518FDT-E/SL, SPI0 **CE1** (GPIO7, pin 26) |
 | Interrupt | GPIO25 | **GPIO27** (pin 13) |
@@ -290,20 +292,20 @@ termination decision is per *board channel*, not per interface name.
   prefer 20/21, and 12/13 stay reserved for `uart4`.
 - **STB on a GPIO, for the same reason as U4** (§13.2.1): the pin's internal
   pull-up puts the transceiver in standby when the GPIO is high-Z, so the
-  daemon **must drive GPIO19 low** or CAN2 is silently dead.
-- **Why CAN2 terminates on board when CAN1 refuses to.** Two 60.4 Ω in
+  daemon **must drive GPIO19 low** or CAN1 is silently dead.
+- **Why CAN1 terminates on board when CAN0 refuses to.** Two 60.4 Ω in
   series present 120.8 Ω across the pair — this *is* the 120 Ω terminator, with
   the centre tap to ground for common-mode rejection. §3.2's argument is
   that a vehicle bus already has two terminators and a third is a fault. AEMnet
   here is a private two-node bus with **the HAT always at one end** and a gauge
   that has no termination of its own. Split termination (two 60.4 Ω with 4.7 nF
-  to GND at the centre) is the standard arrangement. **JP2** lets CAN2 join an
+  to GND at the centre) is the standard arrangement. **JP2** lets CAN1 join an
   already-terminated bus later without desoldering. The gauge end still needs
   **120 Ω in the harness**.
 - **`+5V` budget.** A second TCAN1042 adds up to ~70 mA dominant on the Pi's
   5 V. Negligible against the X1202.
 - **Crystal alternative.** Sharing U3's CLKO into U10's OSC1 would delete Y2,
-  but it makes CAN2 depend on U3's clock-out configuration, which the
+  but it makes CAN1 depend on U3's clock-out configuration, which the
   `mcp251xfd` driver does not manage for another chip. Rejected. If area forces
   it, a 3.2 × 2.5 mm SMD fundamental crystal needs its own CL/load-cap
   derivation per §3.1.1 — do not reuse 27 pF blindly.
@@ -315,8 +317,8 @@ termination decision is per *board channel*, not per interface name.
   fuse on pin 1). Powering it from the HAT would leave it lit with the truck
   parked.
 - **Ground reference.** Gauge power ground to chassis. The HAT is bonded to
-  chassis through J2 pin 3 (§3.9), so both CAN2 nodes share a reference; the
-  TCAN1042's ±12 V common-mode range covers the offset. No separate CAN2 ground
+  chassis through J2 pin 3 (§3.9), so both CAN1 nodes share a reference; the
+  TCAN1042's ±12 V common-mode range covers the offset. No separate CAN1 ground
   terminal.
 
 #### Linux
@@ -333,10 +335,10 @@ assume a single interface and must change.
 
 #### The aux bus is a role, not a chip
 
-**Requirement:** the AEMnet bus must work on **either** the HAT's CAN2 **or a
+**Requirement:** the AEMnet bus must work on **either** the HAT's CAN1 **or a
 USB CAN FD adapter** (CANable 2, candleLight / `gs_usb`,
 `docs/canable-firmware.md`), whichever is present — on rev 2.0 today, as a
-spare if CAN2 fails at bring-up, or on a Pi with no HAT at all. Both present
+spare if CAN1 fails at bring-up, or on a Pi with no HAT at all. Both present
 the same thing to Linux: a socketcan netdev. So:
 
 - **Software binds the aux bus to an interface name from config**, exactly as
@@ -369,7 +371,7 @@ support it, so the aux bus is not FD-limited if a future device wants it.
 #### The space problem
 
 Rev 2.1 needs **6 new positions**: `5V_SENS`, `MAP`, `IAT`, `SENS_GND`,
-`CAN2H`, `CAN2L`. From the rev 2.0 PCB:
+`CAN1H`, `CAN1L`. From the rev 2.0 PCB:
 
 - `J2` MKDS 1,5/6, pin 1 at x = 111.5 → body ≈ **x 109–139.5**
 - `J3` MKDS 1,5/2, pin 1 at x = 145.455 → body ≈ **x 143–153**
@@ -407,8 +409,8 @@ again. Columns are grouped so each one reads as a single function.
 | 1 | `+12V_RAW` (OBD 16) | `5V_SENS` — sensor supply |
 | 2 | GND (OBD 5, left unconnected per §3.9) | `MAP` — pressure signal |
 | 3 | GND (OBD 4, chassis) | `IAT` — NTC signal |
-| 4 | `CANH_RAW` (OBD 6) | `CAN2H` — AEMnet+ (white/black) |
-| 5 | `CANL_RAW` (OBD 14) | `CAN2L` — AEMnet− (green/black) |
+| 4 | `CANH_RAW` (OBD 6) | `CAN1H` — AEMnet+ (white/black) |
+| 5 | `CANL_RAW` (OBD 14) | `CAN1L` — AEMnet− (green/black) |
 | 6 | `KLINE` (OBD 7) | `SENS_GND` — sensor return |
 
 Why this arrangement:
@@ -449,7 +451,7 @@ ICs with an HC49 crystal, two SOIC-8s, an HVSSOP, two 1812 chokes, and passives.
   short high-impedance nodes; putting them on the far side of a 1.6 mm board
   from U8 adds vias and loop area for nothing. The good candidates for B.Cu
   are **digital-side passives**: decoupling for the new ICs (via-adjacent,
-  directly under their pins), pull-ups, LED resistors, the CAN2 split
+  directly under their pins), pull-ups, LED resistors, the CAN1 split
   termination.
 - **Keep-outs.** Through-hole pins of J1, J2, J3 and J4 protrude on B.Cu; no
   parts over them. Avoid the fan inlet region of the cooler.
@@ -458,7 +460,7 @@ ICs with an HC49 crystal, two SOIC-8s, an HVSSOP, two 1812 chokes, and passives.
   alternative.
 - **Planes stay solid.** Bottom-side parts must not break In1.Cu (§3.9: do not
   split it). Add GND stitching at every new IC, per §2's rev 2.0 note.
-- **Try single-sided first**, with CAN2 packed near U3 so SPI0 stays short.
+- **Try single-sided first**, with CAN1 packed near U3 so SPI0 stays short.
   Move to B.Cu only when the placement actually fails to close.
 
 ### 13.5.8 Software implied (for later, not part of the board)
@@ -468,7 +470,7 @@ committed work.
 
 - **U8 driver:** read AIN0–AIN3, publish MAP / IAT as ratios against AIN3,
   apply calibration.
-- **Aux socketcan bus as a config role** (HAT CAN2 *or* USB adapter, §13.5.4),
+- **Aux socketcan bus as a config role** (HAT CAN1 *or* USB adapter, §13.5.4),
   stable interface naming, and an AEMnet decoder producing engineering-unit
   channels. Keep raw frames out of the vehicle-bus `can:` namespace — "which
   bus" must not be lost.
