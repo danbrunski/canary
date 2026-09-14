@@ -60,7 +60,7 @@ AEM gauge answers what the new system actually runs on first key-on.
 | 4 | Sensor-supply sense on U8 AIN3 (ratiometric reference) | R22/R23 divider, C21 |
 | 5 | Un-ground AIN2/AIN3 | — (net change) |
 | 6 | Second CAN channel (CAN2) on SPI0 CE1 | U10 MCP2518FD, Y2, C22/C23, U11 TCAN1042, FL2, decoupling |
-| 7 | Switchable split termination on CAN2 only | R24/R25 60.4 Ω, C24 4.7 nF, JP2 |
+| 7 | **Jumper-selectable 120 Ω termination on CAN2 only** (split: 2 × 60.4 Ω + 4.7 nF); CAN1 gets no termination footprint | R24/R25 60.4 Ω, C24 4.7 nF, JP2 |
 | 8 | CAN2 activity LED | D7 + R26 |
 | 9 | `J2` → two-level terminal block, 12 positions | J2 MKKDS 1,5/6-5,08 |
 | 10 | Correct U8's stale schematic note | — (text) |
@@ -256,6 +256,19 @@ available instead:
 "byte 0" and marks bytes 1–7 unused. It is almost certainly bytes 0–1. **Confirm
 with `candump` against the gauge face on the bench before writing a decoder.**
 
+#### Termination rule (operator decision 2026-09-14)
+
+- **CAN2 (aux, Linux `can1`): jumper-selectable 120 Ω termination on board.**
+  JP2 closed = terminated (the default, for the two-node AEMnet bus); JP2 open
+  = unterminated, for joining a bus that already has both terminators.
+- **CAN1 (vehicle, Linux `can0`): no termination and no jumper, by design.**
+  The vehicle bus is already terminated at both ends; a footprint here would
+  only ever be a fault waiting for someone to populate it.
+
+The doc names channels by **board position** (CAN1 = vehicle, CAN2 = aux). The
+Linux names `can0`/`can1` follow probe order unless pinned by udev (below); the
+termination decision is per *board channel*, not per interface name.
+
 #### Circuit — a copy of CAN1, with one deliberate difference
 
 | Block | CAN1 (rev 2.0) | CAN2 (rev 2.1) |
@@ -278,7 +291,9 @@ with `candump` against the gauge face on the bench before writing a decoder.**
 - **STB on a GPIO, for the same reason as U4** (§13.2.1): the pin's internal
   pull-up puts the transceiver in standby when the GPIO is high-Z, so the
   daemon **must drive GPIO19 low** or CAN2 is silently dead.
-- **Why CAN2 terminates on board when CAN1 refuses to.** §3.2's argument is
+- **Why CAN2 terminates on board when CAN1 refuses to.** Two 60.4 Ω in
+  series present 120.8 Ω across the pair — this *is* the 120 Ω terminator, with
+  the centre tap to ground for common-mode rejection. §3.2's argument is
   that a vehicle bus already has two terminators and a third is a fault. AEMnet
   here is a private two-node bus with **the HAT always at one end** and a gauge
   that has no termination of its own. Split termination (two 60.4 Ω with 4.7 nF
