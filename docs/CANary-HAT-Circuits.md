@@ -108,6 +108,16 @@ Supporting numbers: ESR 40Ω max for 16–50 MHz fundamental, C0 ≤ 7pF, drive 
 2040–3060 µA/V for a 40 MHz crystal — comfortable margin. Oscillator
 stabilisation is 3ms from power-on.
 
+> **Re-read 2026-09-14: "comfortable margin" compared gm to nothing.** The
+> quantity that has to beat the ESR is the Pierce negative resistance,
+> |R_neg| ≈ gm/(ω²·C1·C2). With 27 pF caps plus ~4 pF stray each at 40 MHz
+> that is **34–50 Ω** across the gm range, against the ABLS2's **40 Ω** ESR
+> maximum — a 0.8–1.3× ratio where 3–5× is the usual target. This is a
+> datasheet result on an unpowered board, so it is §13.1 measurement 14, not
+> a defect. Rev 2.1 moves both crystals to an 8 pF 3.2 × 2.5 mm part, which
+> raises |R_neg| to >200 Ω, and adds a series-R footprint on OSC2 for drive
+> level — `CANary-HAT-Rev2.1.md` §13.5.4, *Crystals*.
+
 Two notes rather than problems: the ABLS2 is an HC49/US can, **11.4 × 4.7 ×
 3.3mm**, which is physically large for a 65 × 56mm board where a 3.2 × 2.5mm SMD
 crystal would do; and Abracon markets it as COTS commercial/industrial, not
