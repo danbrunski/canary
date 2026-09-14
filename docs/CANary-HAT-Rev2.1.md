@@ -59,12 +59,12 @@ AEM gauge answers what the new system actually runs on first key-on.
 | 3 | IAT (NTC) input on U8 AIN2 | R19 pull-up, R20/R21 divider, C20 |
 | 4 | Sensor-supply sense on U8 AIN3 (ratiometric reference) | R22/R23 divider, C21 |
 | 5 | Un-ground AIN2/AIN3 | — (net change) |
-| 6 | Second CAN channel (CAN1) on SPI0 CE1 | U10 MCP2518FD, Y2, C22/C23, U11 TCAN1042, FL2, decoupling |
+| 6 | Second CAN channel (CAN1) on SPI0 CE1 | U10 MCP2518FD, U11 TCAN1042, FL2, decoupling (clock from X1, row 11) |
 | 7 | **Jumper-selectable 120 Ω termination on CAN1 only** (split: 2 × 60.4 Ω + 4.7 nF); CAN0 gets no termination footprint | R24/R25 60.4 Ω, C24 4.7 nF, JP2 |
 | 8 | CAN1 activity LED | D7 + R26 |
 | 9 | `J2` → two-level terminal block, 12 positions | J2 MKKDS 1,5/6-5,08 |
 | 10 | Correct U8's stale schematic note | — (text) |
-| 11 | **Y1 and Y2 → 3.2 × 2.5 mm low-CL fundamental crystal**; load caps re-derived; series-R footprints on OSC2 | Y1/Y2 new part, C5/C6 + C22/C23 new value, R27/R28 (0 Ω) |
+| 11 | **One 40 MHz oscillator clocks both controllers**; Y1 + C5/C6 deleted, no Y2 | X1 MEMS oscillator, C25 100n, R27 33 Ω |
 
 Roughly **+25 components** on a 65 × 56 mm board that already carries 57 — see
 §13.5.7 for where they go.
@@ -278,7 +278,7 @@ decision is per *board channel*, not per interface name.
 |---|---|---|
 | Controller | U3 MCP2518FDT-E/SL, SPI0 **CE0** (GPIO8) | **U10** MCP2518FDT-E/SL, SPI0 **CE1** (GPIO7, pin 26) |
 | Interrupt | GPIO25 | **GPIO27** (pin 13) |
-| Crystal | ~~Y1 ABLS2-40.000MHZ-D4YF-T, 27 pF C0G~~ → **3.2 × 2.5 mm, 8 pF, fundamental** + R27 0 Ω on OSC2 (see *Crystals* below) | **Y2**, the same part, caps and R28 — one derivation for both |
+| Clock | ~~Y1 ABLS2-40.000MHZ-D4YF-T, 27 pF C0G~~ → **X1 40 MHz oscillator on OSC1, OSC2 open** (see *Clock* below) | **same X1**, second stub to U10 OSC1 — no crystal |
 | Transceiver | U4 TCAN1042VDRQ1, VDD `+5V`, VIO `+3V3` | **U11**, identical |
 | STB | GPIO22 | **GPIO19** (pin 35) |
 | CM choke | FL1 1812CAN-513NRC | **FL2**, identical |
@@ -305,35 +305,77 @@ decision is per *board channel*, not per interface name.
   **120 Ω in the harness**.
 - **`+5V` budget.** A second TCAN1042 adds up to ~70 mA dominant on the Pi's
   5 V. Negligible against the X1202.
-- **Sharing U3's CLKO into U10's OSC1** would delete Y2, but it makes CAN1
-  depend on U3's clock-out configuration, which the `mcp251xfd` driver does not
-  manage for another chip. Rejected. Both crystals go small instead — next
+- **One clock source for both chips** — an oscillator, not U3's CLKO: next
   section.
 
-#### Crystals — Y1 and Y2 go to 3.2 × 2.5 mm (operator decision 2026-09-14)
+#### Clock — one oscillator for both controllers (operator decision 2026-09-14)
 
-Rev 2.0's Y1 is the ABLS2 HC49/US can, 11.4 × 4.7 × 3.3 mm. §13.2.3 listed
-the swap to a 3.2 × 2.5 mm part for rev 2.0 and it did not land — the PCB
-still carries `XTAL_ABLS2-40.000MHZ-D4YF-T`. Rev 2.1 needs a second crystal
-and is short of area, so **both Y1 and Y2 become the same 3.2 × 2.5 mm part**,
-with one derivation serving both. §3.1.1's rules carry over unchanged; the
-numbers do not.
+Rev 2.0's Y1 is the ABLS2 HC49/US can, 11.4 × 4.7 × 3.3 mm; §13.2.3 listed a
+swap to a 3.2 × 2.5 mm crystal for rev 2.0 and it did not land. Rev 2.1 needs
+a clock for a second controller and is short of area. **A crystal cannot be
+shared** — it is a passive resonator that works inside exactly one amplifier
+loop — so the choice was two small crystals or one oscillator. **Rev 2.1 uses
+one 40 MHz oscillator (X1) driving OSC1 of both U3 and U10.** Y1 and its load
+caps C5/C6 are deleted; Y2 is never added.
 
-**Selection rules (all four are hard):**
+```
++3V3 ── X1 (40 MHz, 3.3 V, CMOS out) ── R27 33 Ω ──┬── U3 OSC1   (OSC2 open)
+         │ C25 100n                                └── U10 OSC1  (OSC2 open)
+```
 
-1. **Fundamental mode at 40 MHz.** The MCP2518FD's Pierce oscillator has no
-   tank; an overtone part runs at ~13.3 MHz and every bus bit time is wrong by
-   3× (§3.1.1). At 40 MHz many 3225 parts are fundamental as standard, but
-   confirm it on the datasheet, not the distributor listing.
-2. **−40 … +85 °C.** Cabin part. The 3225 series usually carry this as an
-   ordering option, as the ABLS2 did (`D`).
-3. **Low load capacitance — 8 pF preferred, ≤ 10 pF.** This is the change that
-   matters, see below.
-4. **Drive-level maximum read off the datasheet and then measured.** Small
-   crystals are rated 100–300 µW where the ABLS2 was 1000 µW.
+- **Mode.** The MCP2518FD accepts an external clock on OSC1 with OSC2 left
+  unconnected (datasheet: external clock input). `oscillator=40000000` in both
+  overlay lines is unchanged — the driver needs the frequency, not the source.
+  No PLL.
+- **Why an oscillator beats two crystals here.** The start-up-margin
+  arithmetic below (kept because it bears on rev 2.0) shows a 40 MHz Pierce
+  loop is the one circuit on this board that is thin on paper. An oscillator
+  has no start-up margin, no load-cap derivation, no drive level to measure
+  and no fundamental-vs-overtone trap: 3 parts replace 8, and the two
+  hardest-to-verify circuits on the board become none.
+- **Cost.** 2–4 mA on `+3V3` (a MEMS part) — the rail comes from the Pi header
+  and dies with the Pi, so nothing is added to parked draw (§13.3.1).
+  Accuracy ±25–50 ppm against the MCP2518FD's ±0.5 % — 100× margin.
+- **R27 at the source, U3 and U10 side by side.** Both controllers sit on SPI0
+  and belong next to each other anyway; the clock run is then a couple of cm.
+  R27 (22–33 Ω, at X1's output pin) damps the edge; each OSC1 is a few pF, so
+  one output driving two inputs is not a fan-out question. Route it as one
+  short trace with a stub to each OSC1, over solid ground, away from the
+  analog front-end (§13.5.3) and J4.
+- **Enable.** Tie X1's EN/ST pin to `+3V3` (or leave it per the datasheet's
+  default-on), not to a GPIO — the header has none spare (§13.3.9).
+- **MEMS preferred over quartz XO.** Rated shock/vibration, no ageing crack
+  risk, and the same footprint. Either works electrically.
+- **Footprint.** 2.5 × 2.0 mm or 3.2 × 2.5 mm 4-pad oscillator (stock KiCad
+  `Oscillator:Oscillator_SMD_*`). Pin 1 is EN/ST, so a rotation error turns
+  the part off — §12's pin-1 hazard applies here, unlike a crystal.
 
-**Why low CL, with the arithmetic.** A Pierce oscillator's start-up margin is
-its negative resistance against the crystal's ESR:
+**Candidate parts** — 40 MHz, 3.3 V, CMOS output, −40 … +85 °C. Headline
+figures from memory, **each to be confirmed on its datasheet before the BOM**:
+
+| Part | Type | Note |
+|---|---|---|
+| SiTime `SiT8008BI-…-33E-40.000000` (or `SiT8021` for lower current) | MEMS | Preferred; order code sets frequency, stability, temperature range |
+| Abracon `ASDMB-40.000MHZ-LC-T` | MEMS | 2.5 × 2.0 mm |
+| ECS `ECS-2520MV-400-BN-TR` | quartz XO | 2.5 × 2.0 mm, ±50 ppm |
+
+**Rejected: branching U3's CLKO to U10.** The mainline `mcp251xfd` driver sets
+CLKO to SYSCLK ÷ 10 at init — U10 would see 4 MHz — and it puts a chip into
+low-power mode whenever its interface is down, which stops the clock
+altogether. U10 could never probe while `can0` was down. Not a placement
+question; a driver fact.
+
+**Fallback, recorded: two 3.2 × 2.5 mm 8 pF fundamental crystals.** If X1
+fails at bring-up, the crystal design is this: NDK `NX3225GA-40.000M-STD-CRG-2`
+or ECS `ECS-400-8-36-CKM-TR` (confirm fundamental at 40 MHz, CL, ESR max,
+drive max, −40 … +85 °C), load caps 2·(CL − ~4 pF stray) = **8 pF C0G**, and
+a 0 Ω 0603 in series with each OSC2 to be sized after probing amplitude. Avoid
+18 pF parts such as `ABM8G-40.000MHZ-18-D2Y-T` — they inherit the margin
+problem below.
+
+**The arithmetic that decided it — and what it says about rev 2.0.** A Pierce
+oscillator starts only if its negative resistance beats the crystal's ESR,
+usually by 3–5×:
 
 ```
 |R_neg| ≈ gm / (ω² · C1 · C2)        C1, C2 = load caps + ~4 pF stray each
@@ -343,58 +385,14 @@ At 40 MHz (ω² ≈ 6.3 × 10¹⁶) with the MCP2518FD's datasheet gm of 2040–
 
 | Crystal CL | Fitted caps | Effective C1 = C2 | \|R_neg\| (gm min … max) | vs ESR max |
 |---|---|---|---|---|
-| 18 pF (ABLS2, rev 2.0) | 27 pF | ~31 pF | **34 … 50 Ω** | ABLS2 40 Ω → **0.8–1.3×** |
-| 10 pF | 12 pF | ~16 pF | 126 … 190 Ω | 3225 ~60 Ω → ~2–3× |
-| **8 pF** | **8 pF** | **~12 pF** | **224 … 336 Ω** | 3225 ~60 Ω → **~4–5×** |
+| 18 pF (ABLS2, rev 2.0 as built) | 27 pF | ~31 pF | **34 … 50 Ω** | ABLS2 40 Ω → **0.8–1.3×** |
+| 8 pF (fallback above) | 8 pF | ~12 pF | 224 … 336 Ω | 3225 ~60 Ω → ~4–5× |
 
-The usual rule wants 3–5× ESR. On paper **rev 2.0's Y1 has no margin at the
-gm-min corner** — §3.1.1's "comfortable margin" compared gm to nothing. This
-is a datasheet result and rev 2.0 has not been powered, so it is not yet a
-defect; it is §13.1 measurement 14 (does Y1 start, cold). Whatever that
-measurement says, an 8 pF part at 40 MHz is the standard choice for exactly
-this reason, and it is why 40 MHz 3225 crystals are mostly sold at 8–10 pF.
-
-**Drive level moves the other way, so it gets a resistor footprint.** The
-crystal current is roughly the current through C2, `I ≈ ω · C2 · V_OSC2`, and
-dissipation is `I² · ESR`. Lower C2 lowers it — the 8 pF part draws about a
-third of the ABLS2's current at the same amplitude — but the rating also
-drops tenfold, and `V_OSC2` is not known until it is probed. So:
-
-- **R27 (Y1) and R28 (Y2): 0603 in series with OSC2, fitted 0 Ω.** The
-  standard drive limiter; sized after measuring OSC2 with a ≤ 1 pF probe.
-  Fit-the-footprint discipline (§13.4.1 item 4): a missing footprint is a
-  re-spin, a 0 Ω link is free.
-- **Load caps: C5/C6 = C22/C23 = 2 · (CL − C_stray)** — **8 pF** for an 8 pF
-  part with ~4 pF stray, still **C0G/NP0** (§3.1.1: the dielectric constraint
-  outweighs the value). Re-derive if the chosen part's CL differs; do not
-  carry 27 pF across.
-- **Footprint:** stock KiCad `Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm`
-  replaces the custom ABLS2 footprint. Pads 1/3 are the crystal, 2/4 ground
-  (confirm on the part drawing). A 180° rotation swaps 1↔3 and 2↔4, which is
-  harmless — one of the few parts on the board where §12's pin-1 hazard cannot
-  bite.
-- **Keep both crystals on top, hard against their OSC pins** — 0.8 mm tall,
-  so height is no reason to move them, and the loop area is.
-
-**Candidate parts** — headline figures from memory, **every one to be confirmed
-on the datasheet against the four rules before it goes on the BOM**:
-
-| Part | CL | Range | Note |
-|---|---|---|---|
-| NDK `NX3225GA-40.000M-STD-CRG-2` | 8 pF | −40…+85 °C | Preferred: 8 pF standard, common, fundamental |
-| ECS `ECS-400-8-36-CKM-TR` | 8 pF | −40…+85 °C | Alternate, same class |
-| Abracon `ABM8G-40.000MHZ-18-D2Y-T` | 18 pF | −40…+85 °C | Same CL as the ABLS2 — **inherits the thin margin above; avoid** |
-
-**Unchanged:** `oscillator=40000000` in both overlay lines, and no PLL. A 20 MHz
-crystal with the MCP2518FD's ×2 PLL was considered and rejected: it changes the
-driver's clock path for no gain, and 40 MHz 3225 fundamentals are plentiful.
-
-**Alternative recorded, not taken:** one 3225 **oscillator** (XO) driving OSC1
-of both U3 and U10 in external-clock mode deletes both crystals, all four load
-caps and both resistors. Rejected for rev 2.1 because it makes one part a
-single point of failure for both channels, runs a 40 MHz square wave across
-the board, and leaves the crystal circuit rev 2.0 was built with unverified.
-It is the fallback if the 8 pF part fails the start-up measurement.
+§3.1.1 called the margin "comfortable" by looking at gm alone. On paper rev
+2.0's Y1 has none at the gm-min corner. Rev 2.0 has not been powered, so this
+is **§13.1 measurement 14** (does Y1 start, cold; probe OSC2 with ≤ 1 pF), not
+a defect — and if the ABLS2 starts fine, the paper figure was conservative. It
+is also the reason rev 2.1 does not build two more of them.
 
 #### Gauge wiring
 
@@ -538,9 +536,10 @@ three channels are added.
 
 ### 13.5.7 Placement — and whether parts go on the bottom
 
-The board is already dense, and rev 2.1 adds about 27 parts: two SOIC-14-class
-ICs, a second 3.2 × 2.5 mm crystal (and Y1 shrinks to match, giving back the
-HC49's ~54 mm²), two SOIC-8s, an HVSSOP, two 1812 chokes, and passives.
+The board is already dense, and rev 2.1 adds about 25 parts net: two
+SOIC-14-class ICs, two SOIC-8s, an HVSSOP, two 1812 chokes, a 2.5 × 2.0 mm
+oscillator and passives — minus Y1 and C5/C6, which gives back the HC49's
+~54 mm².
 **Components on B.Cu are likely.** The constraints:
 
 - **Clearance is set by what sits under the HAT.** J1 is the only B.Cu part
@@ -549,8 +548,8 @@ HC49's ~54 mm²), two SOIC-8s, an HVSSOP, two 1812 chokes, and passives.
   it on the rev 2.0 stack** before placing anything — add it to the §13.1
   list.
 - **Only low-profile parts on B.Cu:** 0603 passives, SOT-23, SOIC. Keep tall
-  and through-hole parts on top: C2 (electrolytic), J2/J3, the chokes. Y1/Y2
-  are low now but stay on top regardless, against their OSC pins.
+  and through-hole parts on top: C2 (electrolytic), J2/J3, the chokes. X1
+  goes on top between U3 and U10 so the clock trace stays short.
 - **Keep the analog front-end on top, next to U8.** R17–R23 and C19–C21 are
   short high-impedance nodes; putting them on the far side of a 1.6 mm board
   from U8 adds vias and loop area for nothing. The good candidates for B.Cu
@@ -604,5 +603,5 @@ join the MCU's safe-state nets, and the header closes with no spare GPIO.
 | 7 | Z1 rail port thread vs AEM sensor's NPT | Inspect rails; adapter if ORB |
 | 8 | GPIO19 / GPIO27 vs 20/21 | Placement |
 | 9 | Board area closes single-sided? | Placement attempt (§13.5.7) |
-| 10 | Crystal part for Y1/Y2: fundamental at 40 MHz, CL, ESR max, drive max, −40…+85 °C; then C5/C6 = C22/C23 | Datasheet of the chosen part |
-| 11 | Size R27/R28: OSC2 amplitude on rev 2.0's Y1 (§13.1 meas. 14) and on the first rev 2.1 board | Bench, ≤ 1 pF probe |
+| 10 | X1 part: 40 MHz, 3.3 V, CMOS out, −40…+85 °C, EN pin polarity/default, current | Datasheet of the chosen part |
+| 11 | Rev 2.0 Y1 starts cold? (§13.1 meas. 14) — informs whether the crystal fallback is ever viable | Bench, ≤ 1 pF probe on OSC2 |

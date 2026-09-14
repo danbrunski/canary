@@ -114,9 +114,9 @@ stabilisation is 3ms from power-on.
 > that is **34–50 Ω** across the gm range, against the ABLS2's **40 Ω** ESR
 > maximum — a 0.8–1.3× ratio where 3–5× is the usual target. This is a
 > datasheet result on an unpowered board, so it is §13.1 measurement 14, not
-> a defect. Rev 2.1 moves both crystals to an 8 pF 3.2 × 2.5 mm part, which
-> raises |R_neg| to >200 Ω, and adds a series-R footprint on OSC2 for drive
-> level — `CANary-HAT-Rev2.1.md` §13.5.4, *Crystals*.
+> a defect. Rev 2.1 deletes the crystal circuit entirely and clocks both
+> MCP2518FDs from one 40 MHz oscillator on OSC1 — `CANary-HAT-Rev2.1.md`
+> §13.5.4, *Clock*.
 
 Two notes rather than problems: the ABLS2 is an HC49/US can, **11.4 × 4.7 ×
 3.3mm**, which is physically large for a 65 × 56mm board where a 3.2 × 2.5mm SMD

@@ -79,7 +79,7 @@ rev-2.0 decisions had to be taken blind — see §13.2.
 | 11 | **X1202 quiescent draw** once it has cut its own output. | Feeds the rev-3.0 supervisor architecture (§13.3). |
 | 12 | **Power-apply to first recorded frame** — wall-clock from 12V return to `canary.service` writing row 1. | Sizes the rev-3.0 boot-gap buffer (§13.3.3) and quantifies what every cold start currently loses. The journal in `docs/time-sync.md` shows 12 s from *kernel handoff*, which is a floor, not the number. |
 | 13 | **Does the K-line RXD break reach the host as SysRq?** Boot with the console left enabled on `uart0` and the HAT fitted. | Confirms the §11 step-1 hazard is real and worth designing out in rev 3.0 (§13.3.4), rather than a theoretical reading of Table 8-1. |
-| 14 | **Y1 start-up margin and drive level.** Does the 40 MHz oscillator start reliably, including cold? Probe OSC2 (≤ 1 pF) for amplitude. On paper \|R_neg\| ≈ gm/(ω²·C1·C2) is only 34–50 Ω against the ABLS2's 40 Ω ESR max at CL = 18 pF (§13.5.4, *Crystals*, 2026-09-14). | Confirms or retires the paper concern for rev 2.0; sizes R27/R28 and validates the 8 pF choice for rev 2.1. |
+| 14 | **Y1 start-up margin and drive level.** Does the 40 MHz oscillator start reliably, including cold? Probe OSC2 (≤ 1 pF) for amplitude. On paper \|R_neg\| ≈ gm/(ω²·C1·C2) is only 34–50 Ω against the ABLS2's 40 Ω ESR max at CL = 18 pF (§13.5.4, *Clock*, 2026-09-14). | Confirms or retires the paper concern for rev 2.0. Rev 2.1 sidesteps it with a single oscillator (§13.5.4, *Clock*); this measurement decides whether the two-crystal fallback there is ever viable. |
 
 **Measurement 1 does not have to wait for rev 2.0 — and waiting is now more
 expensive.** Withdrawing rev 1.0 pushed the first physical board out by however
@@ -1034,9 +1034,10 @@ not free there. Swapping Y1's HC49/US can (**11.4 × 4.7 × 3.3mm**, already
 flagged in §3.1.1 as "physically large" against a 3.2 × 2.5mm SMD equivalent)
 is worth doing on its own merits and helps here — **it was listed in §13.2.3
 but did not land: the rev 2.0 PCB still carries `XTAL_ABLS2-40.000MHZ-D4YF-T`**
-(corrected 2026-09-14). **Rev 2.1 does the swap for both Y1 and Y2** — a
-3.2 × 2.5 mm 8 pF fundamental part with series-R footprints on OSC2 (§13.5.4,
-*Crystals*) — so rev 3.0 inherits the area after all.
+(corrected 2026-09-14). **Rev 2.1 deletes Y1 and C5/C6 outright**: one
+2.5 × 2.0 mm 40 MHz oscillator clocks both MCP2518FDs on their OSC1 pins
+(§13.5.4, *Clock*), so rev 3.0 inherits the area after all — and if the MCU
+wants 40 MHz too, the same X1 can feed a third stub.
 
 #### 13.3.7 Deliberately out of scope for the MCU
 
@@ -1162,11 +1163,13 @@ are `gs_usb` adapters under the aux-bus config role (§13.5.4). That leaves the
 back to multi-bus" it describes now has a shipped alternative, so rev 3.0 does
 not need the MCU to carry vehicle CAN to satisfy the multi-vehicle intent.
 
-**8. Crystal.** Y1 is still HC49 on rev 2.0 (corrected above). Rev 2.1 swaps
-both Y1 and Y2 to a 3.2 × 2.5 mm 8 pF part with R27/R28 on OSC2 (§13.5.4,
-*Crystals*), chosen on start-up-margin arithmetic that also shows rev 2.0's
-18 pF circuit thin on paper. Rev 3.0 owes nothing here; it inherits §13.1
-measurement 14's result and the R27/R28 values.
+**8. Clock.** Y1 is still HC49 on rev 2.0 (corrected above). Rev 2.1 replaces
+it with **one oscillator, X1, driving both controllers' OSC1** (§13.5.4,
+*Clock*); the start-up-margin arithmetic recorded there also shows rev 2.0's
+18 pF crystal circuit thin on paper (§13.1 measurement 14). Rev 3.0 owes
+nothing here. If the MCU's own clock needs are compatible, X1 can supply it as
+well — one clock domain for CAN and the MCU timebase is exactly what
+§13.3.3(c) wants.
 
 ### 13.4 Lessons from the Macchina M2
 
