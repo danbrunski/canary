@@ -36,6 +36,7 @@ from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import (
     ParquetTelemetryWriter,
     delete_expired_replays,
+    write_records_to_parquet,
 )
 from src.telemetry import TelemetryRecord
 
@@ -286,6 +287,64 @@ async def test_stop_returns_to_idle(tmp_path: Path) -> None:
     await controller.start("2026-05-18T120000", loop=False)
     status = await controller.stop()
     assert status.running is False
+
+
+async def test_status_reports_what_the_replay_actually_emitted(tmp_path: Path) -> None:
+    """D02.9 — ``GET /control/replay`` must publish the row accounting.
+
+    The 1.29x "amplification" premise came from inferring a row count from
+    chunk counts, because nothing reported what the emit path did. The source
+    here carries payload-bearing ``can`` rows, so the two re-derived rows are
+    skipped at the emit path (the pipeline regenerates them) and said so.
+    """
+    storage_root = tmp_path / "sessions"
+    storage_root.mkdir()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    controller = ReplayController(
+        queue=queue,
+        writer=ParquetTelemetryWriter(storage_root),
+        anomaly_logger=AnomalyEventLogger(tmp_path / "anomalies"),
+        storage_root=storage_root,
+    )
+    base = datetime(2026, 5, 18, 12, tzinfo=UTC)
+    write_records_to_parquet(
+        [
+            TelemetryRecord(timestamp=base, source="can", channel="0x1F9", payload=b"\x01\x02"),
+            TelemetryRecord(
+                timestamp=base + timedelta(seconds=0.01),
+                source="obd",
+                channel="RPM",
+                value=800.0,
+                unit="rpm",
+            ),
+            TelemetryRecord.decoded(base + timedelta(seconds=0.02), "ECM_RPM", 800.0, "rpm"),
+            TelemetryRecord.derived(base + timedelta(seconds=0.03), "FUEL_RATE_LPH", 1.2, "L/h"),
+        ],
+        storage_root / "2026-05-18T120000",
+    )
+
+    await controller.start("2026-05-18T120000", speed=10_000.0, loop=False)
+    for _ in range(200):
+        if controller.status().rows_emitted == 2:
+            break
+        await asyncio.sleep(0.01)
+
+    status = controller.status()
+    assert status.source_rows_total == 4
+    assert status.rows_emitted == 2
+    assert status.rows_skipped == 2
+    assert status.rows_dropped == 0
+    assert status.rederivable is True
+    assert status.skipped_sources == ("decoded", "derived")
+    payload = status.to_dict()
+    assert payload["skipped_sources"] == ["decoded", "derived"]
+    assert isinstance(payload["rederivable_reason"], str)
+
+    # The counters survive the end of the replay — "how many rows did that
+    # replay emit" must be answerable after it stops, not only during.
+    final = await controller.stop()
+    assert final.running is False
+    assert final.rows_emitted == 2 and final.rows_skipped == 2
 
 
 async def test_stop_without_running_raises(tmp_path: Path) -> None:

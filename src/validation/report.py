@@ -12,6 +12,7 @@ by position, so a scenario missing on one side is reported as missing.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.metadata
 import json
 import os
@@ -140,6 +141,9 @@ def provenance(artifacts: RunArtifacts) -> dict[str, Any]:
             if artifacts.replay_source is None
             else str(artifacts.replay_source),
             "replay_speed": artifacts.replay_speed,
+            "replay_emission": None
+            if artifacts.replay_emission is None
+            else dataclasses.asdict(artifacts.replay_emission),
         },
     }
 

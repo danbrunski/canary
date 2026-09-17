@@ -57,7 +57,7 @@ from src.collection.obd_scheduler import (
 )
 from src.collection.queueing import CollectorHandoffStats
 from src.collection.reconnect import ReconnectPolicy
-from src.collection.replay import replay_session
+from src.collection.replay import ReplayEmissionStats, replay_session
 from src.config import CanaryConfig
 from src.control.capture_finalize import StartEpoch, finalize_capture, record_capture_start
 from src.daemon.components import DaemonComponents, build_components
@@ -464,6 +464,10 @@ class RunArtifacts:
     if_stub_calls: int | None = None
     replay_source: Path | None = None
     replay_speed: float | None = None
+    #: What the replay emit path actually read/emitted/skipped (D02.9). The
+    #: harness is the off-vehicle instrument for replay row accounting, so the
+    #: counters land in the report beside the source it replayed.
+    replay_emission: ReplayEmissionStats | None = None
     #: Whether this tree could write the C09 resolved polling plan into the
     #: manifest (the recompute path takes requested rates from it).
     resolved_plan_written: bool = False
@@ -800,9 +804,18 @@ async def run_scenario(  # noqa: PLR0912, PLR0915
     else:
         artifacts.replay_source = DRIVE_SLICE
         artifacts.replay_speed = 2.0
+        replay_stats = ReplayEmissionStats()
+        artifacts.replay_emission = replay_stats
         await async_writer.enter_replay_mode(f"validation-{label}-{int(time.time())}")
         collector_task = asyncio.create_task(
-            replay_session(queue, DRIVE_SLICE, collector_stop, speed=2.0, loop=False),
+            replay_session(
+                queue,
+                DRIVE_SLICE,
+                collector_stop,
+                speed=2.0,
+                loop=False,
+                stats=replay_stats,
+            ),
             name="c10-replay",
         )
 

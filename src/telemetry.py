@@ -65,6 +65,29 @@ assert set(get_args(TelemetrySource)) == {
     UPREV_SOURCE,
 }
 
+#: Sources the live pipeline **re-derives from a raw row** rather than
+#: receiving from a collector: ``decoded`` comes from a raw ``can`` frame
+#: (:meth:`src.preprocessing.live.LiveFeatureSource._apply_can_decode` for the
+#: detectors, :meth:`src.decode.frame_decoder.FrameDecoder.decode` for storage)
+#: and ``derived`` from the inference tick's computed channels
+#: (:mod:`src.daemon.inference`). Anything that re-injects stored rows into the
+#: live queue (replay) must skip these or every signal is persisted twice and
+#: the detectors read whichever copy arrived last — see
+#: ``data/analyses/2026-09-17-d029-replay-amplification.md``.
+RE_DERIVED_SOURCES: Final[frozenset[TelemetrySource]] = frozenset({DECODED_SOURCE, DERIVED_SOURCE})
+#: Sources that only ever originate at a collector/importer: nothing
+#: downstream can reconstruct them, so they are always safe to re-emit.
+CAPTURED_SOURCES: Final[frozenset[TelemetrySource]] = frozenset(
+    {OBD_SOURCE, CAN_SOURCE, GPS_SOURCE, IMU_SOURCE, UPREV_SOURCE}
+)
+# Every source must be classified as one or the other. A new entry in
+# ``TelemetrySource`` therefore fails here at import time until someone
+# decides whether it is re-derived — the alternative is a future source
+# silently doubling itself through replay, which is the defect this pair
+# exists to close.
+assert RE_DERIVED_SOURCES | CAPTURED_SOURCES == set(get_args(TelemetrySource))
+assert not (RE_DERIVED_SOURCES & CAPTURED_SOURCES)
+
 TelemetryValue = bool | int | float | str | None
 MetadataValue = bool | int | float | str | None
 

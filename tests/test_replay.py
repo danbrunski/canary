@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from src.collection.replay import make_replay_collector, replay_session
+from src.collection.replay import (
+    ReplayEmissionStats,
+    make_replay_collector,
+    probe_rederivability,
+    replay_session,
+)
 from src.config import CanaryConfig
 from src.storage.parquet_writer import write_records_to_parquet
-from src.telemetry import TelemetryRecord
+from src.telemetry import RE_DERIVED_SOURCES, TelemetryRecord
 
 
 def _session(tmp_path: Path) -> Path:
@@ -38,14 +44,29 @@ def _session(tmp_path: Path) -> Path:
     return sdir
 
 
-async def _drain(sdir: Path, *, loop: bool = False) -> list[TelemetryRecord]:
+async def _drain(
+    sdir: Path,
+    *,
+    loop: bool = False,
+    expect: int = 3,
+    stats: ReplayEmissionStats | None = None,
+) -> list[TelemetryRecord]:
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
     # speed huge ⇒ no real sleeping; collect then stop.
-    task = asyncio.create_task(replay_session(queue, sdir, stop, speed=10_000.0, loop=loop))
+    task = asyncio.create_task(
+        replay_session(
+            queue,
+            sdir,
+            stop,
+            speed=10_000.0,
+            loop=loop,
+            stats=stats if stats is not None else ReplayEmissionStats(),
+        )
+    )
     got: list[TelemetryRecord] = []
     try:
-        for _ in range(3):
+        for _ in range(expect):
             got.append(await asyncio.wait_for(queue.get(), timeout=2.0))
     finally:
         stop.set()
@@ -71,7 +92,9 @@ def test_replay_missing_session_idles_then_stops(tmp_path: Path) -> None:
     async def run() -> None:
         queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
         stop = asyncio.Event()
-        task = asyncio.create_task(replay_session(queue, tmp_path / "nope", stop, loop=False))
+        task = asyncio.create_task(
+            replay_session(queue, tmp_path / "nope", stop, loop=False, stats=ReplayEmissionStats())
+        )
         await asyncio.sleep(0.05)
         assert queue.empty()
         stop.set()
@@ -162,7 +185,113 @@ def test_iter_rows_handles_nullable_bool_columns_in_the_ground_truth_slice() -> 
     The committed drive slice is exactly such a file."""
     from src.collection.replay import _iter_rows
 
-    rows = list(_iter_rows(Path("tests/fixtures/ground_truth/drive-slice")))
+    # skip nothing: this test is about value decoding, not the emit filter.
+    rows = list(
+        _iter_rows(Path("tests/fixtures/ground_truth/drive-slice"), skip_sources=frozenset())
+    )
     assert len(rows) > 100
     assert all(isinstance(fields["metadata"], dict) for _epoch, fields in rows)
     assert any(fields["value"] is not None for _epoch, fields in rows)
+
+
+# --- D02.9: re-derived sources must not be re-emitted -----------------------
+
+
+def _mixed_session(tmp_path: Path, *, can_payload: bytes | None) -> Path:
+    """A session with both captured and re-derived rows.
+
+    ``can_payload=None`` reproduces a pre-2026-07-29 recording: the raw frame
+    bytes were never stored, so nothing downstream can re-derive anything.
+    """
+    sdir = tmp_path / "2026-05-11T222447"
+    base = datetime(2026, 5, 11, 22, 24, 47, tzinfo=UTC)
+    recs = [
+        TelemetryRecord(timestamp=base, source="can", channel="0x1F9", payload=can_payload),
+        TelemetryRecord(
+            timestamp=base + timedelta(seconds=0.01),
+            source="obd",
+            channel="RPM",
+            value=812.0,
+            unit="rpm",
+        ),
+        TelemetryRecord.decoded(base + timedelta(seconds=0.02), "ECM_RPM", 812.0, "rpm"),
+        TelemetryRecord.derived(base + timedelta(seconds=0.03), "FUEL_RATE_LPH", 1.25, "L/h"),
+        TelemetryRecord(
+            timestamp=base + timedelta(seconds=0.04),
+            source="can",
+            channel="0x551",
+            payload=can_payload,
+        ),
+    ]
+    write_records_to_parquet(recs, sdir)
+    return sdir
+
+
+def test_probe_reports_payload_bearing_session_as_rederivable(tmp_path: Path) -> None:
+    probe = probe_rederivability(_mixed_session(tmp_path, can_payload=b"\x00\x01\x02\x03"))
+    assert probe.rederivable is True
+    assert probe.skip_sources == RE_DERIVED_SOURCES
+    assert "payload" in probe.reason
+
+
+def test_probe_reports_payloadless_session_as_not_rederivable(tmp_path: Path) -> None:
+    probe = probe_rederivability(_mixed_session(tmp_path, can_payload=None))
+    assert probe.rederivable is False
+    assert probe.skip_sources == frozenset()
+    assert probe.can_rows_sampled == 2
+    assert "2026-07-29" in probe.reason
+
+
+def test_replay_skips_rederived_rows_and_counts_them(tmp_path: Path) -> None:
+    """A payload-bearing session: only the captured rows go on the queue, the
+    emitted CAN rows keep their payloads (so storage/live can re-derive), and
+    the skipped rows are reported rather than vanishing."""
+    stats = ReplayEmissionStats()
+    sdir = _mixed_session(tmp_path, can_payload=b"\x00\x01\x02\x03")
+    got = asyncio.run(_drain(sdir, expect=3, stats=stats))
+    assert [(r.source, r.channel) for r in got] == [
+        ("can", "0x1F9"),
+        ("obd", "RPM"),
+        ("can", "0x551"),
+    ]
+    assert got[0].payload == b"\x00\x01\x02\x03"
+    assert got[2].payload == b"\x00\x01\x02\x03"
+    assert stats.source_rows_total == 5
+    assert stats.rows_emitted == 3
+    assert stats.rows_skipped == 2
+    assert stats.rows_dropped == 0
+    assert stats.rederivable is True
+    assert stats.skipped_sources == ("decoded", "derived")
+
+
+def test_replay_keeps_rederived_rows_when_the_source_has_no_payloads(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Regression guard for the one case where skipping loses data.
+
+    A pre-payload-persistence recording has no raw frames to re-derive from,
+    so its stored ``decoded``/``derived`` rows are the only copy and must
+    still be emitted — and the status must say why. If someone later
+    "simplifies" the skip to unconditional, this test fails.
+    """
+    stats = ReplayEmissionStats()
+    sdir = _mixed_session(tmp_path, can_payload=None)
+    with caplog.at_level(logging.INFO, logger="src.collection.replay"):
+        got = asyncio.run(_drain(sdir, expect=5, stats=stats))
+    probed = [r for r in caplog.records if r.getMessage() == "replay source probed"]
+    assert len(probed) == 1, "the behaviour switch is announced exactly once per replay"
+    assert probed[0].rederivable is False  # type: ignore[attr-defined]
+    assert [(r.source, r.channel) for r in got] == [
+        ("can", "0x1F9"),
+        ("obd", "RPM"),
+        ("decoded", "ECM_RPM"),
+        ("derived", "FUEL_RATE_LPH"),
+        ("can", "0x551"),
+    ]
+    assert stats.source_rows_total == 5
+    assert stats.rows_emitted == 5
+    assert stats.rows_skipped == 0
+    assert stats.rederivable is False
+    assert stats.skipped_sources == ()
+    assert stats.rederivable_reason is not None
+    assert "2026-07-29" in stats.rederivable_reason

@@ -39,6 +39,7 @@ from src.analysis.digest import DIGEST_FILENAME
 from src.analysis.fingerprint import read_fingerprint
 from src.analysis.session_classifier import read_classification
 from src.control.dtc_state import SIDECAR_FILENAME as DTC_FILENAME
+from src.preprocessing.loader import count_session_rows
 
 log = logging.getLogger(__name__)
 
@@ -109,27 +110,11 @@ def _dir_size(path: Path) -> int:
 
 
 def _parquet_row_count(session_dir: Path) -> int | None:
-    """Sum of row counts across ``telemetry-*.parquet`` chunks, via Parquet
-    footer metadata only (no data read). ``None`` when nothing is readable —
-    distinguishes "unknown" from "genuinely zero rows"."""
-    try:
-        import pyarrow.parquet as pq
-    except ImportError:  # pragma: no cover - pyarrow is a hard dependency elsewhere
-        return None
-    total = 0
-    seen = False
-    for chunk in sorted(session_dir.glob("telemetry-*.parquet")):
-        try:
-            if chunk.stat().st_size == 0:
-                continue
-            # pyarrow's typing of ParquetFile.__init__ varies by version (untyped
-            # in some, annotated in others) — unused-ignore keeps this line green
-            # under both, since CI and local envs can resolve different pyarrow.
-            total += pq.ParquetFile(chunk).metadata.num_rows  # type: ignore[no-untyped-call, unused-ignore]
-            seen = True
-        except Exception:  # noqa: BLE001 - a corrupt/truncated chunk just doesn't count
-            continue
-    return total if seen else None
+    """Sum of row counts across a session's Parquet chunks (footer metadata
+    only, no data read). Thin alias for
+    :func:`src.preprocessing.loader.count_session_rows` — one implementation,
+    since the replay emit path needs the same count (D02.9)."""
+    return count_session_rows(session_dir)
 
 
 def _read_dtc_sidecar(session_dir: Path) -> dict[str, Any] | None:

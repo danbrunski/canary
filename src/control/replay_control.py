@@ -36,7 +36,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -44,7 +44,7 @@ from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.fusion import PersistenceGate
 from src.collection import capture_generation
-from src.collection.replay import replay_session
+from src.collection.replay import ReplayEmissionStats, replay_session
 from src.preprocessing.live import LiveFeatureSource
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
@@ -73,7 +73,16 @@ class ReplayNotRunningError(ReplayError):
 
 @dataclass(frozen=True)
 class ReplayStatus:
-    """Snapshot of the controller state for ``GET /control/replay``."""
+    """Snapshot of the controller state for ``GET /control/replay``.
+
+    The row counters (D02.9) are live: they come from the in-flight replay's
+    :class:`~src.collection.replay.ReplayEmissionStats` every time
+    :meth:`ReplayController.status` is called. Reporting them is the point —
+    D02.9's "the replay wrote more rows than its input" was an inference from
+    chunk counts, made because nothing published what was emitted.
+    ``rederivable`` says which of the two emit policies this replay is running
+    under (see :func:`src.collection.replay.probe_rederivability`).
+    """
 
     running: bool
     replay_id: str | None = None
@@ -83,6 +92,14 @@ class ReplayStatus:
     loop: bool | None = None
     output_session_dir: str | None = None
     output_anomalies_path: str | None = None
+    source_rows_total: int | None = None
+    rows_emitted: int | None = None
+    rows_skipped: int | None = None
+    rows_dropped: int | None = None
+    passes: int | None = None
+    rederivable: bool | None = None
+    rederivable_reason: str | None = None
+    skipped_sources: tuple[str, ...] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -94,6 +111,16 @@ class ReplayStatus:
             "loop": self.loop,
             "output_session_dir": self.output_session_dir,
             "output_anomalies_path": self.output_anomalies_path,
+            "source_rows_total": self.source_rows_total,
+            "rows_emitted": self.rows_emitted,
+            "rows_skipped": self.rows_skipped,
+            "rows_dropped": self.rows_dropped,
+            "passes": self.passes,
+            "rederivable": self.rederivable,
+            "rederivable_reason": self.rederivable_reason,
+            "skipped_sources": (
+                None if self.skipped_sources is None else list(self.skipped_sources)
+            ),
         }
 
 
@@ -137,6 +164,7 @@ class ReplayController:
         self._task: asyncio.Task[None] | None = None
         self._cleanup_task: asyncio.Task[None] | None = None
         self._stop_event: asyncio.Event | None = None
+        self._stats: ReplayEmissionStats | None = None
         self._status: ReplayStatus = ReplayStatus(running=False)
 
     def _reset_in_memory_state(self) -> None:
@@ -161,9 +189,28 @@ class ReplayController:
         """Return the current status snapshot.
 
         ``running`` reflects the controller's view. Replay task cleanup is
-        scheduled on the event loop that started the replay.
+        scheduled on the event loop that started the replay. Row counters are
+        read from the in-flight replay's stats on every call, so a poller sees
+        emission progress rather than having to infer it from chunk counts.
         """
-        return self._status
+        return self._with_stats(self._status)
+
+    def _with_stats(self, status: ReplayStatus) -> ReplayStatus:
+        """Overlay the live emission counters onto a status snapshot."""
+        stats = self._stats
+        if stats is None:
+            return status
+        return replace(
+            status,
+            source_rows_total=stats.source_rows_total,
+            rows_emitted=stats.rows_emitted,
+            rows_skipped=stats.rows_skipped,
+            rows_dropped=stats.rows_dropped,
+            passes=stats.passes,
+            rederivable=stats.rederivable,
+            rederivable_reason=stats.rederivable_reason,
+            skipped_sources=stats.skipped_sources,
+        )
 
     async def start(
         self,
@@ -211,6 +258,7 @@ class ReplayController:
 
         stop_event = asyncio.Event()
         speed = speed if speed > 0 else 1.0
+        stats = ReplayEmissionStats()
         task = asyncio.create_task(
             replay_session(
                 self._queue,
@@ -218,11 +266,13 @@ class ReplayController:
                 stop_event,
                 speed=speed,
                 loop=loop,
+                stats=stats,
             ),
             name=f"replay-{replay_id}",
         )
         self._task = task
         self._stop_event = stop_event
+        self._stats = stats
         task.add_done_callback(self._schedule_cleanup)
         # Live polling and the replayed rows must never share a round (C02.8).
         capture_generation.bump(f"replay-start:{replay_id}")
@@ -245,7 +295,7 @@ class ReplayController:
                 "loop": loop,
             },
         )
-        return self._status
+        return self.status()
 
     async def stop(self) -> ReplayStatus:
         """Cancel the in-flight replay and roll the writer/logger back live."""
@@ -315,7 +365,25 @@ class ReplayController:
                 self._emitter.exit_replay_mode()
             except Exception:
                 log.exception("emitter.exit_replay_mode failed")
-        self._status = ReplayStatus(running=False)
+        # Bake the final counters into the idle status (and the log) instead of
+        # dropping them: "how many rows did that replay actually emit" is the
+        # question D02.9 had to reconstruct from chunk counts.
+        stats = self._stats
+        if stats is not None:
+            log.info(
+                "replay finished",
+                extra={
+                    "replay_id": self._status.replay_id,
+                    "rows": stats.rows_emitted,
+                    "skipped": stats.rows_skipped,
+                    "dropped": stats.rows_dropped,
+                    "source_rows": stats.source_rows_total,
+                    "passes": stats.passes,
+                    "rederivable": stats.rederivable,
+                },
+            )
+        self._status = self._with_stats(ReplayStatus(running=False))
+        self._stats = None
 
 
 __all__ = [

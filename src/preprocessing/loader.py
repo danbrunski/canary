@@ -47,6 +47,33 @@ def discover_sessions(root: Path) -> list[Path]:
     )
 
 
+def count_session_rows(session_dir: Path) -> int | None:
+    """Row count of a session's Parquet chunks from footer metadata only.
+
+    No data read, so this is cheap enough to call before a replay starts
+    (D02.9 reporting) or while indexing a session. ``None`` means "unknown"
+    (nothing readable) as distinct from a genuine zero.
+    """
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:  # pragma: no cover - pyarrow is a hard dependency elsewhere
+        return None
+    total = 0
+    seen = False
+    for chunk in sorted(session_dir.glob(PARQUET_PATTERN)):
+        try:
+            if chunk.stat().st_size == 0:
+                continue
+            # pyarrow's typing of ParquetFile.__init__ varies by version (untyped
+            # in some, annotated in others) — unused-ignore keeps this line green
+            # under both, since CI and local envs can resolve different pyarrow.
+            total += pq.ParquetFile(chunk).metadata.num_rows  # type: ignore[no-untyped-call, unused-ignore]
+            seen = True
+        except Exception:  # noqa: BLE001 - a corrupt/truncated chunk just doesn't count
+            continue
+    return total if seen else None
+
+
 def read_session(session_dir: Path) -> pd.DataFrame:
     """Read one telemetry session directory into a long-format DataFrame."""
     candidates = sorted(session_dir.glob(PARQUET_PATTERN))

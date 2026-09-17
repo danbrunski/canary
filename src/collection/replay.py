@@ -19,6 +19,22 @@ multi-hundred-MB session replays in bounded memory.
 replayed row stays internally consistent (presentation stamp and acquisition
 instant keep their original separation); ``generation`` / ``round_id`` are
 carried untouched, since they identify the *source* capture's rounds.
+
+**Only captured sources are re-emitted** (D02.9,
+``data/analyses/2026-09-17-d029-replay-amplification.md``). The stored
+``decoded``/``derived`` rows (:data:`src.telemetry.RE_DERIVED_SOURCES`) are
+regenerated downstream from the raw ``can`` frames and the inference tick, so
+re-emitting them wrote every decoded signal to Parquet twice (measured
+1.985x) *and* left the detectors reading whichever ``decoded:<channel>`` copy
+landed last — the stored one or the one freshly decoded from the frame, which
+differ exactly when ``bindings.yaml`` changed since the recording.
+
+The one session shape where skipping would lose data is a recording from
+before raw-payload persistence landed (2026-07-29): its ``can`` rows carry no
+payload, so nothing downstream can re-derive anything. That is decided once
+per session by :func:`probe_rederivability` before the first row is emitted,
+reported in the log and in ``GET /control/replay``
+(``rederivable``/``rederivable_reason``), and never switched silently.
 """
 
 from __future__ import annotations
@@ -28,6 +44,7 @@ import json
 import logging
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -36,14 +53,27 @@ import pandas as pd
 
 from src.collection.collectors import CollectorStarter
 from src.config import CanaryConfig
-from src.preprocessing.loader import PARQUET_PATTERN
-from src.telemetry import MetadataValue, TelemetryRecord, TelemetrySource, TelemetryValue
+from src.preprocessing.loader import PARQUET_PATTERN, count_session_rows
+from src.telemetry import (
+    CAN_SOURCE,
+    RE_DERIVED_SOURCES,
+    MetadataValue,
+    TelemetryRecord,
+    TelemetrySource,
+    TelemetryValue,
+)
 
 log = logging.getLogger(__name__)
 
 #: Don't sleep longer than this between rows even if the recording paused
 #: (USB drop, ignition-off gap) — keeps the replayed dashboard moving.
 _MAX_GAP_SECONDS = 0.5
+
+#: Leading chunks sampled by :func:`probe_rederivability`. A chunk holds tens
+#: of thousands of rows, so one is already decisive for any session with CAN
+#: traffic; a few cover a session whose first chunk is OBD/GPS-only without
+#: reading the whole recording.
+_PAYLOAD_PROBE_CHUNKS = 3
 
 
 def _present(value: Any) -> bool:
@@ -98,10 +128,155 @@ def rebase_metadata(metadata: dict[str, MetadataValue], shift_s: float) -> dict[
     return {**metadata, "acquired_at": float(acquired) + shift_s}
 
 
-def _iter_rows(session_dir: Path) -> Iterator[tuple[float, dict[str, object]]]:
+@dataclass(frozen=True)
+class Rederivability:
+    """Whether a source session's raw rows can regenerate its re-derived ones.
+
+    Carries the skip set rather than letting callers assemble one, so the only
+    way to obtain "which sources may replay drop" is to have asked this
+    question about this session first.
+    """
+
+    rederivable: bool
+    reason: str
+    chunks_sampled: int
+    can_rows_sampled: int
+
+    @property
+    def skip_sources(self) -> frozenset[TelemetrySource]:
+        """Sources a replay of this session must not re-emit."""
+        return RE_DERIVED_SOURCES if self.rederivable else frozenset()
+
+
+def _has_can_payload(df: pd.DataFrame) -> tuple[int, bool]:
+    """``(can_row_count, any_payload)`` for one chunk's ``source``/``payload``."""
+    if "source" not in df.columns:
+        return 0, False
+    can = df[df["source"].astype(str) == CAN_SOURCE]
+    if can.empty:
+        return 0, False
+    if "payload" not in can.columns:
+        return len(can), False
+    return len(can), any(_payload_present(p) for p in can["payload"])
+
+
+def _payload_present(value: Any) -> bool:
+    """A usable raw frame: bytes with at least one byte in them.
+
+    ``FrameDecoder.decode`` / ``LiveFeatureSource.decode_for_telemetry`` both
+    return nothing for an empty payload, so ``b""`` is not re-derivable.
+    """
+    return isinstance(value, (bytes, bytearray)) and len(value) > 0
+
+
+def probe_rederivability(
+    session_dir: Path, *, chunk_limit: int = _PAYLOAD_PROBE_CHUNKS
+) -> Rederivability:
+    """Decide, once per session, whether replay may skip re-derived sources.
+
+    Reads only the ``source``/``payload`` columns of the first few chunks
+    (footer-projected, never the whole session). ``rederivable`` is True only
+    when raw CAN payloads are actually present, because that is the input the
+    storage decoder and the live feature source both re-derive ``decoded:*``
+    from; ``derived:*`` rides the same decision since the inference tick needs
+    those same features. When it is False the stored rows are the only copy
+    that exists and replay keeps emitting them.
+    """
+    chunks = sorted(session_dir.glob(PARQUET_PATTERN))
+    if not chunks:
+        return Rederivability(
+            rederivable=False,
+            reason=f"no {PARQUET_PATTERN} chunks in the source session",
+            chunks_sampled=0,
+            can_rows_sampled=0,
+        )
+    sampled = 0
+    can_rows = 0
+    for chunk in chunks[:chunk_limit]:
+        try:
+            df = pd.read_parquet(chunk, columns=["source", "payload"])
+        except (OSError, ValueError):
+            # Missing column (pre-payload schema) or an unreadable tail chunk:
+            # fall back to the full read and let _has_can_payload judge it.
+            try:
+                df = pd.read_parquet(chunk)
+            except (OSError, ValueError):
+                continue
+        sampled += 1
+        chunk_can_rows, has_payload = _has_can_payload(df)
+        can_rows += chunk_can_rows
+        if has_payload:
+            return Rederivability(
+                rederivable=True,
+                reason=(
+                    f"can rows carry raw payloads (sampled {sampled} chunk(s), "
+                    f"{can_rows} can rows); decoded/derived are re-derived downstream"
+                ),
+                chunks_sampled=sampled,
+                can_rows_sampled=can_rows,
+            )
+    if can_rows == 0:
+        return Rederivability(
+            rederivable=False,
+            reason=(
+                f"no can rows in the first {sampled} chunk(s); nothing downstream "
+                "can re-derive decoded/derived rows"
+            ),
+            chunks_sampled=sampled,
+            can_rows_sampled=0,
+        )
+    return Rederivability(
+        rederivable=False,
+        reason=(
+            f"can rows carry no payload ({can_rows} sampled over {sampled} chunk(s)); "
+            "source predates raw-payload persistence (2026-07-29), so stored "
+            "decoded/derived rows are the only copy"
+        ),
+        chunks_sampled=sampled,
+        can_rows_sampled=can_rows,
+    )
+
+
+@dataclass
+class ReplayEmissionStats:
+    """What a replay actually put on the queue, counted as it goes (D02.9).
+
+    Mutated in place by :func:`replay_session` so ``GET /control/replay`` can
+    report real numbers. The absence of exactly these counters is what let
+    D02.9 infer a row count from chunk counts and land on a wrong premise, so
+    :func:`replay_session` requires one rather than defaulting it away.
+    """
+
+    #: Rows in the source session (Parquet footers, no data read); ``None``
+    #: when nothing was readable — "unknown", not zero.
+    source_rows_total: int | None = None
+    #: Rows handed to the queue (cumulative across loop passes).
+    rows_emitted: int = 0
+    #: Rows filtered at the emit path because they are re-derived downstream.
+    rows_skipped: int = 0
+    #: Rows dropped because the drain was behind (queue full) — never silent.
+    rows_dropped: int = 0
+    #: Completed passes over the source (``loop=True`` re-emits).
+    passes: int = 0
+    rederivable: bool | None = None
+    rederivable_reason: str | None = None
+    skipped_sources: tuple[str, ...] = field(default_factory=tuple)
+
+
+def _iter_rows(
+    session_dir: Path,
+    *,
+    skip_sources: frozenset[TelemetrySource],
+    stats: ReplayEmissionStats | None = None,
+) -> Iterator[tuple[float, dict[str, object]]]:
     """Yield ``(original_epoch, record-fields)`` in timestamp order, chunk by
     chunk (bounded memory). The record is built at emit time so its
-    timestamp is wall-clock-fresh."""
+    timestamp is wall-clock-fresh.
+
+    ``skip_sources`` is required (and normally comes from
+    :attr:`Rederivability.skip_sources`) so a caller cannot re-emit rows the
+    pipeline re-derives without having decided that it is safe to.
+    """
     for chunk in sorted(session_dir.glob(PARQUET_PATTERN)):
         try:
             df = pd.read_parquet(chunk)
@@ -109,6 +284,13 @@ def _iter_rows(session_dir: Path) -> Iterator[tuple[float, dict[str, object]]]:
             continue
         if df.empty:
             continue
+        if skip_sources:
+            keep = ~df["source"].astype(str).isin(skip_sources)
+            if stats is not None:
+                stats.rows_skipped += int((~keep).sum())
+            df = df[keep]
+            if df.empty:
+                continue
         df = df.sort_values("timestamp", kind="stable")
         ts = pd.to_datetime(df["timestamp"], utc=True)
         for (_, row), t in zip(df.iterrows(), ts, strict=True):
@@ -133,11 +315,15 @@ async def replay_session(
     *,
     speed: float = 1.0,
     loop: bool = True,
+    stats: ReplayEmissionStats,
 ) -> None:
     """Replay ``session_dir`` onto ``queue`` until ``stop_event`` is set.
 
     Best-effort: a missing/empty session logs and idles rather than
     crashing the daemon (the rest of the dashboard still works).
+
+    ``stats`` is required and mutated in place: every replay reports how many
+    rows it read, emitted, skipped and dropped (D02.9).
     """
     if not session_dir.exists():
         log.warning("replay session not found: %s", session_dir)
@@ -145,11 +331,31 @@ async def replay_session(
         return
     speed = speed if speed > 0 else 1.0
 
+    # Decide once, before the first row: per-row guessing is what would let a
+    # pre-2026-07-29 session silently lose its only copy of decoded signals.
+    probe = probe_rederivability(session_dir)
+    stats.rederivable = probe.rederivable
+    stats.rederivable_reason = probe.reason
+    stats.skipped_sources = tuple(sorted(probe.skip_sources))
+    stats.source_rows_total = count_session_rows(session_dir)
+    log.info(
+        "replay source probed",
+        extra={
+            "session": session_dir.name,
+            "rederivable": probe.rederivable,
+            "reason": probe.reason,
+            "skipped_sources": ",".join(stats.skipped_sources),
+            "source_rows": stats.source_rows_total,
+        },
+    )
+
     while not stop_event.is_set():
         emitted = 0
         first_orig: float | None = None
         wall_start = time.monotonic()
-        for orig_epoch, fields in _iter_rows(session_dir):
+        for orig_epoch, fields in _iter_rows(
+            session_dir, skip_sources=probe.skip_sources, stats=stats
+        ):
             if stop_event.is_set():
                 return
             if first_orig is None:
@@ -181,11 +387,24 @@ async def replay_session(
             try:
                 queue.put_nowait(record)
                 emitted += 1
+                stats.rows_emitted += 1
             except asyncio.QueueFull:
                 # Drain is behind; drop rather than block the replay clock —
-                # same "freshest wins" policy the broadcaster uses.
-                pass
-        log.info("replay pass complete", extra={"session": session_dir.name, "rows": emitted})
+                # same "freshest wins" policy the broadcaster uses. Counted,
+                # so "fewer rows out than in" is never a mystery.
+                stats.rows_dropped += 1
+        stats.passes += 1
+        log.info(
+            "replay pass complete",
+            extra={
+                "session": session_dir.name,
+                "rows": emitted,
+                "skipped": stats.rows_skipped,
+                "dropped": stats.rows_dropped,
+                "source_rows": stats.source_rows_total,
+                "pass": stats.passes,
+            },
+        )
         if not loop or emitted == 0:
             await stop_event.wait()
             return
@@ -203,6 +422,25 @@ def make_replay_collector(config: CanaryConfig) -> CollectorStarter:
             "replay collector starting",
             extra={"session": str(session), "speed": speed, "loop": looping},
         )
-        await replay_session(queue, session, stop_event, speed=speed, loop=looping)
+        # The YAML-knob path has no control-plane status to publish into, so
+        # the counters live and die with the log lines replay_session writes.
+        await replay_session(
+            queue,
+            session,
+            stop_event,
+            speed=speed,
+            loop=looping,
+            stats=ReplayEmissionStats(),
+        )
 
     return starter
+
+
+__all__ = [
+    "ReplayEmissionStats",
+    "Rederivability",
+    "make_replay_collector",
+    "probe_rederivability",
+    "rebase_metadata",
+    "replay_session",
+]
