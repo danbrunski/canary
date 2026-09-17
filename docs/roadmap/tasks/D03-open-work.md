@@ -181,13 +181,28 @@ of them already fixed and deployed.
   written from an async path again. Verified on the truck at 19:08:34 — the
   stop took 35 s with `/status` answering throughout (1.3–2.6 s vs 0.17 s idle)
   and zero drops.
-  **Follow-up worth its own item:** the recompute itself is ~123 s for a
-  20-minute capture, of which **115 s is `json.loads` over `metadata_json`,
-  21.1 M parses = six passes over every row**, ~94 % of them on rows the quality
-  path discards (only `source == "obd"` rows are used). Parsing once in
-  `channels._long_frame`/`read_acquisition_frame` and pushing a `source` filter
-  into the parquet read is an estimated 120 s → 1–3 s, but it edits
-  `src/analysis/channels.py`, which `compare_channels`/`read_channels` share.
+  **Follow-up — done in `7ebfa85`.** The recompute was ~123 s for a 20-minute
+  capture, of which **115 s was `json.loads` over `metadata_json`, 21.1 M parses
+  = six passes over every row**. Now parsed once into shared columns, with a
+  vectorized prefilter that skips rows whose text provably cannot carry a key
+  (no key substring **and** no backslash, since escaping is the only other way
+  to spell one): 21,120,038 parses → 199,225. `read_acquisition_frame`
+  39.8 s → 2.6 s, `recompute_capture_quality` 38.8 s → 7.1 s on a laptop (the
+  Pi is ~3.2× slower). Proven bit-identical — 18 `assert_frame_equal`
+  comparisons with `check_exact` over four real sessions and every metadata
+  edge case, identical end-to-end quality payloads on three captures, and
+  `tests/test_analysis_ground_truth.py` green.
+  **The `source == "obd"` filter half was deliberately NOT taken.** Besides
+  `rows_on_disk`, `persisted_quality_inputs` derives `ended_at` from the last
+  row of *any* source on the acquisition clock when the caller passes `None`
+  (measured 9.8 ms after the last OBD row on one capture; data-dependent and
+  unbounded), so filtering would quietly shorten `elapsed` in exactly the
+  missing-tail case the coverage clause exists to catch. Both invariants are now
+  documented at `_row_count`, where someone profiling this path would spring
+  them. Not worth reopening unless parquet I/O becomes the bottleneck — after
+  `7ebfa85` it is 4.2 s of the 7 s, and the remaining metadata cost is 0.9 s of
+  parses against 1.8 s of building the three full-length columns that
+  `read_acquisition_frame`'s per-row contract requires.
 
 - [x] **D03.2 A rejected Mode 22 batch was indistinguishable from a working
   one.** This ECM answers every multi-DID `0x22` with `7F 22 12` (measured on
