@@ -175,6 +175,18 @@ reuses a v2 sidecar's recorded end and epochs, and otherwise takes the
 interval end from the last persisted row (then a missing tail cannot be
 detected, and the notes say so) and reports losses unknown.
 
+**The scoring runs in a child process.** Reading a capture's rows back is
+pandas work that holds the GIL: run inline on the daemon's loop it froze HTTP
+and collection for ~60 s per call (2026-09-17 — one live check plus the stop
+dropped 38,600 records at the OBD handoff and made the stop-time verdict fail
+`acquisition_gap` on its own ~49 s hole). Every async caller awaits
+`capture_finalize.recompute_quality_off_loop`, which runs
+`recompute_capture_quality` in a spawned single-use process; the function
+itself refuses to run on a thread with a running event loop. A child that
+cannot start, dies or exceeds `RECOMPUTE_TIMEOUT_SECONDS` (600 s) is reported
+— `503` on the live and recompute routes, "no verdict" (`None`, logged) at
+stop — never waited on.
+
 ### Verdicts
 
 * `pass` — interval ≥ 5 s, every capture-selected channel `ok`, the tuple

@@ -19,13 +19,28 @@ flushes and reads what is on disk *so far*, which is what the arm-time
 verification and the MCP tool report. Both go through
 ``recompute_capture_quality`` so a live, a stop-time and a recomputed
 verdict cannot disagree about what a complete tuple is.
+
+**The judge never runs on the event loop.** On 2026-09-17 a 20-minute
+``tuning-did`` capture was checked live and then stopped: each recompute read
+every persisted row back and held the daemon's loop for ~60 s — HTTP went
+dark, the ``canable-obd`` handoff dropped 38,600 records, inference overran 54
+deadlines, and the stop-time verdict failed ``acquisition_gap`` on the ~49 s
+hole the *live* check had just punched in the data. A worker thread is not
+enough (the pandas work holds the GIL, the D01.4/inference-worker lesson), so
+every async caller goes through :func:`recompute_quality_off_loop`, which runs
+it in a spawned child process; ``recompute_capture_quality`` itself refuses to
+run on a thread with a running event loop.
 """
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
+import multiprocessing
 import time
 from collections.abc import Mapping
+from concurrent.futures import BrokenExecutor, Executor, ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -36,7 +51,12 @@ from src.collection.capture_losses import (
     reconcile_losses,
     summarize_losses,
 )
-from src.collection.capture_quality import SCOPE_LIVE, SCOPE_STOP, CaptureQuality
+from src.collection.capture_quality import (
+    SCOPE_LIVE,
+    SCOPE_RECOMPUTE,
+    SCOPE_STOP,
+    CaptureQuality,
+)
 from src.control.capture_manifest import (
     read_capture_epoch,
     write_capture_epoch,
@@ -49,6 +69,17 @@ log = logging.getLogger(__name__)
 #: healthy daemon drains a few hundred records in well under a second; a
 #: wedged sink is reported as ``drain_timed_out``, never waited on forever.
 DRAIN_TIMEOUT_SECONDS = 5.0
+
+#: Ceiling on one recompute in the child. A 20-minute ``tuning-did`` capture
+#: took ~60 s on the Pi (2026-09-17); this allows captures several times that
+#: long, and exists only so a wedged child cannot hold a stop forever.
+RECOMPUTE_TIMEOUT_SECONDS = 600.0
+
+
+class CaptureQualityUnavailableError(RuntimeError):
+    """The recompute produced no answer: the child failed to start, died, or
+    timed out. Distinct from the recompute's own refusals (``ValueError``),
+    which cross the process boundary unchanged."""
 
 
 class _Health(Protocol):
@@ -120,16 +151,104 @@ def losses_since(
     return summarize_losses(reconcile_losses(start_epoch, stop))
 
 
+async def recompute_quality_off_loop(  # noqa: PLR0913
+    session_dir: Path,
+    *,
+    lifetime: Mapping[str, Any] | None = None,
+    losses: Mapping[str, Any] | None = None,
+    persistence: Mapping[str, Any] | None = None,
+    scheduler: Mapping[str, Any] | None = None,
+    scope: str = SCOPE_RECOMPUTE,
+    ended_at: float | None = None,
+    executor: Executor | None = None,
+    timeout: float = RECOMPUTE_TIMEOUT_SECONDS,
+) -> CaptureQuality:
+    """``recompute_capture_quality`` in a child process, awaited without
+    holding the loop — the only way an async caller may score a capture.
+
+    With no ``executor`` a single-use ``spawn`` pool is created and torn down
+    per call (``spawn`` for the same reason as the inference worker: forking
+    a process running asyncio plus threads inherits their locks), so a large
+    capture's frame is returned to the OS with the child rather than kept
+    resident in a pool on the Pi. Tests inject an executor. A child that
+    cannot start, dies, times out or is cancelled is terminated and reported
+    as :class:`CaptureQualityUnavailableError`; the recompute's own exceptions
+    (e.g. ``ValueError`` for a non-capture directory) propagate unchanged.
+    """
+    from src.analysis import capture_coverage
+
+    kwargs: dict[str, Any] = {
+        "lifetime": None if lifetime is None else dict(lifetime),
+        "losses": None if losses is None else dict(losses),
+        "persistence": None if persistence is None else dict(persistence),
+        "scheduler": None if scheduler is None else dict(scheduler),
+        "scope": scope,
+        "ended_at": ended_at,
+    }
+    call = functools.partial(capture_coverage.recompute_capture_quality, session_dir, **kwargs)
+    owned = executor is None
+    pool: Executor = _spawn_pool() if executor is None else executor
+    finished = False
+    try:
+        try:
+            future = asyncio.get_running_loop().run_in_executor(pool, call)
+        except Exception as exc:
+            raise CaptureQualityUnavailableError(
+                f"capture quality recompute could not start: {type(exc).__name__}: {exc}"
+            ) from exc
+        try:
+            quality = await asyncio.wait_for(future, timeout)
+        except TimeoutError as exc:
+            raise CaptureQualityUnavailableError(
+                f"capture quality recompute for {session_dir.name} did not finish "
+                f"within {timeout:.0f}s"
+            ) from exc
+        except BrokenExecutor as exc:
+            raise CaptureQualityUnavailableError(
+                f"capture quality recompute process failed: {type(exc).__name__}: {exc}"
+            ) from exc
+        finished = True
+        return quality
+    finally:
+        if owned:
+            _discard_pool(pool, terminate=not finished)
+
+
+def _spawn_pool() -> ProcessPoolExecutor:
+    return ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+
+
+def _discard_pool(pool: Executor, *, terminate: bool) -> None:
+    """Release a single-use pool without waiting on the loop for its child.
+
+    On any path that did not produce a result the child is terminated: a
+    timed-out or cancelled recompute would otherwise keep a core and its
+    frame until it finished on its own.
+    """
+    processes = []
+    if terminate and isinstance(pool, ProcessPoolExecutor):
+        # No public way to reach the workers before 3.14's terminate_workers().
+        processes = list((pool._processes or {}).values())
+    pool.shutdown(wait=False, cancel_futures=True)
+    for proc in processes:
+        try:
+            proc.terminate()
+        except Exception:  # noqa: BLE001 — already gone is the goal
+            log.debug("recompute child already exited", exc_info=True)
+
+
 async def live_capture_quality(
     session_dir: Path,
     *,
     health: _Health,
     writer: _Writer | None,
     start: StartEpoch | None,
+    executor: Executor | None = None,
 ) -> CaptureQuality:
-    """Score the running capture on what has been persisted so far."""
-    from src.analysis.capture_coverage import recompute_capture_quality
+    """Score the running capture on what has been persisted so far.
 
+    Raises :class:`CaptureQualityUnavailableError` when the child cannot answer.
+    """
     flush_error = await _flush(writer)
     inputs = health.capture_quality_inputs()
     losses = losses_since(session_dir, start, inputs.loss_epoch)
@@ -139,13 +258,14 @@ async def live_capture_quality(
         "rows_written": None if writer is None else writer.rows_written,
         "scope": SCOPE_LIVE,
     }
-    return recompute_capture_quality(
+    return await recompute_quality_off_loop(
         session_dir,
         lifetime=inputs.lifetime,
         losses=losses,
         persistence=persistence,
         scheduler=inputs.scheduler,
         scope=SCOPE_LIVE,
+        executor=executor,
     )
 
 
@@ -156,6 +276,7 @@ async def finalize_capture(
     writer: _Writer | None,
     start: StartEpoch | None,
     drain_timeout: float = DRAIN_TIMEOUT_SECONDS,
+    executor: Executor | None = None,
 ) -> dict[str, Any] | None:
     """Boundary, drain, flush, then write the stop-time sidecar.
 
@@ -175,6 +296,7 @@ async def finalize_capture(
             start=start,
             boundary=boundary,
             drain_timeout=drain_timeout,
+            executor=executor,
         )
     except Exception:
         log.exception("failed to finalize capture quality for %s", session_dir)
@@ -189,9 +311,8 @@ async def _finalize(  # noqa: PLR0913
     start: StartEpoch | None,
     boundary: int,
     drain_timeout: float,
+    executor: Executor | None,
 ) -> dict[str, Any]:
-    from src.analysis.capture_coverage import recompute_capture_quality
-
     # Lifetime is read before the drain so the interval ends at the boundary,
     # not after however long the queues took.
     inputs = health.capture_quality_inputs()
@@ -214,13 +335,14 @@ async def _finalize(  # noqa: PLR0913
         "loss_epoch_start": None if start is None else start.loss_epoch.to_dict(),
         "loss_epoch_stop": stop_epoch.to_dict(),
     }
-    quality = recompute_capture_quality(
+    quality = await recompute_quality_off_loop(
         session_dir,
         lifetime=lifetime,
         losses=losses,
         persistence=persistence,
         scheduler=inputs.scheduler,
         scope=SCOPE_STOP,
+        executor=executor,
     )
     payload = quality.to_dict()
     write_capture_quality(session_dir, payload)
@@ -247,9 +369,12 @@ async def _flush(writer: _Writer | None) -> str | None:
 
 __all__ = [
     "DRAIN_TIMEOUT_SECONDS",
+    "RECOMPUTE_TIMEOUT_SECONDS",
+    "CaptureQualityUnavailableError",
     "StartEpoch",
     "finalize_capture",
     "live_capture_quality",
     "losses_since",
+    "recompute_quality_off_loop",
     "record_capture_start",
 ]

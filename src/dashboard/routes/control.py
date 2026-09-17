@@ -60,9 +60,11 @@ from src.control.audit import ControlAuditLogger
 from src.control.can_activity import CanActivityBusError, capture_can_activity
 from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
 from src.control.capture_finalize import (
+    CaptureQualityUnavailableError,
     StartEpoch,
     finalize_capture,
     live_capture_quality,
+    recompute_quality_off_loop,
     record_capture_start,
 )
 from src.control.capture_manifest import read_capture_manifest
@@ -863,16 +865,19 @@ def register_control_routes(
             raise HTTPException(status_code=503, detail="capture quality is not available")
         if not tuning_profile.is_active():
             raise HTTPException(status_code=409, detail="no capture is active")
-        quality = await live_capture_quality(
-            Path(storage_writer.paths.root),
-            health=health_monitor,
-            writer=storage_writer,
-            start=capture_start_epoch,
-        )
+        try:
+            quality = await live_capture_quality(
+                Path(storage_writer.paths.root),
+                health=health_monitor,
+                writer=storage_writer,
+                start=capture_start_epoch,
+            )
+        except CaptureQualityUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return quality.to_dict()
 
     @app.get("/control/capture/quality/{session_id}")
-    def get_recomputed_capture_quality(
+    async def get_recomputed_capture_quality(
         session_id: str,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
@@ -883,13 +888,17 @@ def register_control_routes(
         explicit. Loss counters are unknown unless the session recorded
         epochs (``capture_epoch.json`` / a v2 sidecar).
         """
-        from src.analysis.capture_coverage import read_quality_with_scope, recompute_capture_quality
+        from src.analysis.capture_coverage import read_quality_with_scope
 
         session = _resolve_session(session_id)
         try:
-            quality = recompute_capture_quality(session)
+            # A child process, not this route's threadpool: the row read-back
+            # holds the GIL and would starve the daemon's loop (2026-09-17).
+            quality = await recompute_quality_off_loop(session)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except CaptureQualityUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return {
             "session_id": session_id,
             "recomputed": quality.to_dict(),

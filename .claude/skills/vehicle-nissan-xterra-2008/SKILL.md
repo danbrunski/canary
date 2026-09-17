@@ -48,10 +48,14 @@ structured home, and it **points at** the ones that do rather than copying them.
   re-sending `10 C0` periodically instead. The textbook `0x3E`-every-1–2 s
   keep-alive does not work here — reaching for it is a known dead end.
 - The OBD scheduler runs a `10 C0` → `10 81` cycle roughly every 60 s.
-- **Batched Mode 22 works**: up to 3 DIDs per request (verified 2026-08-08 —
-  batched and unbatched sweeps returned an identical 138-DID set with zero
-  payload-width mismatches). Independently evidenced by UpRev's own tester
-  sending `05 22 11 03 04 01` — two DIDs in one frame — to this ECM.
+- **Batched Mode 22 is REJECTED — one DID per request.** Raw frames,
+  2026-09-17, engine running, `10 C0` held: `03 22 12 01` → `05 62 12 01 00
+  A2`, but `05 22 12 01 12 03` and `07 22 12 01 12 03 12 04` both → `03 7F 22
+  12`. The earlier "verified 2026-08-08" claim rested on batched and unbatched
+  sweeps returning the same 138-DID set. `sweep_dids_batched` silently re-read
+  every rejected group one DID at a time, so that match could not tell success
+  from fallback. UpRev's own two-DID `22 11 03 04 01` is rejected the same way
+  (see below). Don't plan on same-instant multi-DID sampling here.
 - **No MAP sensor.** The VQ40DE is mass-airflow based, not speed-density.
   **Mode 01 PID `0x0B` is unsupported** — never reach for it as a reference.
   `BAROMETRIC_PRESSURE` (`0x33`) and `EVAP_VAPOR_PRESSURE` (`0x32`) *are*
@@ -59,7 +63,8 @@ structured home, and it **points at** the ones that do rather than copying them.
   by construction; that mistake sat in `bindings.yaml` for three months.
 - DID space: **138 of 512 DIDs in `0x1100`–`0x12FF` answer** at idle; **27 of
   them vary** at constant idle (the live engine channels). The rest are static
-  configuration/status. Sweep cost is ~1.9 s unbatched, ~0.9 s batched.
+  configuration/status. Sweep cost is ~1.9 s over the whole range; the 138
+  answering DIDs alone take ~0.2 s at full speed, or 1.17 s paced at ~118 req/s.
 
 ## Broadcast bus
 

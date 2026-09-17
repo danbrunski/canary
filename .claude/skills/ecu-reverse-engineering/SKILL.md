@@ -137,8 +137,12 @@ ceiling for 2-byte identifiers, vs 6 for one-byte Mode 01 PIDs). Its value is
 same-instant sampling, not speed: DIDs in one request share one ECU sample, where
 sequential polls are rotation-sampled with unknown relative age. It requires
 measured payload widths (`--widths-from` a prior snapshot) because a multi-DID
-response is not self-delimiting. Support for batched `0x22` is itself per-ECU —
-verify before relying on it.
+response is not self-delimiting. Support for batched `0x22` is itself per-ECU,
+so verify it before relying on it, **on the raw response**: a positive `62` that
+carries several DID groups. A batched sweep returning the same DID set as an
+unbatched one proves nothing if the tool re-reads rejected groups one DID at a
+time. That exact check once "verified" batching on an ECU that answers every
+multi-DID request with `7F 22 12`.
 
 ## Reversing the broadcast bus
 

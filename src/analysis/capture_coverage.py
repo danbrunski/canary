@@ -21,6 +21,7 @@ result is ``no_round_evidence``, which is not a zero yield.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from datetime import datetime
@@ -298,6 +299,7 @@ def recompute_capture_quality(  # noqa: PLR0913
     scheduler: Mapping[str, Any] | None = None,
     scope: str = SCOPE_RECOMPUTE,
     ended_at: float | None = None,
+    allow_event_loop: bool = False,
 ) -> CaptureQuality:
     """Score a capture session from what is on disk.
 
@@ -308,7 +310,16 @@ def recompute_capture_quality(  # noqa: PLR0913
     previous v2 sidecar's recorded end, or the last persisted row. Loss
     counters are taken from ``losses`` or the previous v2 sidecar; a session
     with neither reports them as unknown.
+
+    Refuses to run on a thread whose event loop is running: this reads every
+    persisted row back, and inline on the daemon's loop it froze HTTP and
+    collection for ~60 s per call (2026-09-17, 38,600 records dropped). Async
+    callers use ``src.control.capture_finalize.recompute_quality_off_loop``.
+    ``allow_event_loop`` is for offline tools whose loop has nothing
+    latency-sensitive left on it; the daemon never passes it.
     """
+    if not allow_event_loop:
+        _refuse_on_running_loop()
     manifest = read_capture_manifest(session_dir)
     if manifest is None:
         raise ValueError(f"{session_dir} is not a capture session (no capture_profile.json)")
@@ -378,6 +389,18 @@ def recompute_capture_quality(  # noqa: PLR0913
     if losses is None:
         notes.append("loss counters unknown: this session recorded no capture epochs.")
     return CaptureQuality(**{**quality.__dict__, "notes": notes})
+
+
+def _refuse_on_running_loop() -> None:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise RuntimeError(
+        "recompute_capture_quality must not run on an event loop: it held the daemon's "
+        "loop ~60 s per call on 2026-09-17 (38,600 records dropped). Await "
+        "src.control.capture_finalize.recompute_quality_off_loop instead."
+    )
 
 
 def _boundary_from(lifetime: Mapping[str, Any]) -> int | None:
