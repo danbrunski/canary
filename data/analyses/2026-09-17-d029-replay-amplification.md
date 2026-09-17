@@ -143,7 +143,35 @@ payload bytes and `metadata_json`; `to_wide` (`loader.py:101-136`) then runs
 final frame for a 1,910 s session is ~1,910 × 100 cells; the intermediate pivot
 is ~4 M × 100.
 
-Measured on the laptop against a 397,385-row session: `read_session` +359 MB,
+**Measured directly at scale afterwards, on the laptop** (`digest_mem.py`,
+against the pulled `2026-08-08T214218`, 2,622,370 rows / 1,141 s / 2,298 rows
+per second):
+
+| stage | result | peak RSS |
+|---|---|---:|
+| baseline | — | 121 MB |
+| `read_session` | 2,622,370 rows × 13 cols | **1,879 MB** |
+| `to_wide` | 1,824,090 rows × 102 cols | **3,440 MB** |
+| `resample_and_segment` (the actual digest call) | **1,143 rows × 203 cols** | **5,483 MB** |
+
+**5.5 GB of peak memory to produce 1,143 rows — 0.044 % of the rows it loaded.**
+That is the whole defect in one line. Distinct timestamps are 0.696 of rows, so
+the pivot's row count is set by the raw timestamp resolution, exactly as the
+code structure implies.
+
+**Where the cliff actually is, bracketed on the Pi itself** (the earlier
+1.49 KB/row extrapolation was too crude to site it):
+- `2026-09-10T142711`, **4,544,560 rows — has a `digest.json`**, so it completed
+  on the 8 GB Pi.
+- `_replay-2026-09-11T164903`, **5,860,000 rows — no digest**, and the daemon
+  was OOM-killed computing it.
+So the limit is somewhere between **~4.5 M and ~5.9 M rows**, and it is not a
+linear extrapolation from the laptop's numbers (the laptop peaks higher per row
+than the Pi's success at 4.5 M would imply — allocator and fragmentation
+differences, so trust the bracket over the slope).
+
+The earlier small-session measurement, for the record: on a 397,385-row session
+`read_session` +359 MB,
 `to_wide` +233 MB, **592 MB peak = 1.49 KB of peak RSS per row**. At 5.86 M rows
 that extrapolates to **~8.7 GB**, against the kernel's reported 7.7 GB anon-rss
 — consistent with being killed part-way through the allocation. It is a

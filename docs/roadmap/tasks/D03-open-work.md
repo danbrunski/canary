@@ -309,11 +309,27 @@ records why the validation harness could not have caught either.
   `control/trip_end.py:60`) runs `get_or_compute_digest` **synchronously on the
   loop**, and `resample_and_segment` reads every chunk with every column
   (payload bytes, `metadata_json`), pivots on `(session, timestamp)` at **raw
-  microsecond resolution**, and only then resamples to 1 Hz. Measured: **1.49 KB
-  of peak RSS per session row** (592 MB for 397 k rows), so ~8.7 GB at 5.86 M
-  rows against the kernel's 7.7 GB kill. Confirmed one-shot, not a leak, and
-  confirmed to have fired: the replay directory has 586 chunks, `dtc.json`, and
-  **no** `digest.json`/`classification.json`/`fingerprint.json`.
+  microsecond resolution**, and only then resamples to 1 Hz. **Measured at scale
+  on the laptop** against a 2,622,370-row session: `read_session` 1,879 MB,
+  `to_wide` 3,440 MB, `resample_and_segment` **5,483 MB peak — to produce a
+  final frame of 1,143 rows × 203 cols, 0.044 % of the rows it loaded.**
+  Confirmed one-shot, not a leak, and confirmed to have fired on 09-11: the
+  replay directory has 586 chunks, `dtc.json`, and **no**
+  `digest.json`/`classification.json`/`fingerprint.json`.
+  **The cliff is bracketed on the Pi itself:** `2026-09-10T142711`
+  (4,544,560 rows) **has** a digest, so it completed; the 5,860,000-row replay
+  does not, and the daemon died computing it. So the limit sits between **~4.5 M
+  and ~5.9 M rows**, and it is not a linear extrapolation from the laptop's
+  per-row figure — trust the bracket, not the slope.
+  **Live exposure is real, today:** this drive's open session
+  `2026-09-17T205003` reached **857 chunks (~8 M rows)**, i.e. larger than the
+  replay that OOM-killed the daemon. Nothing fired only because a trip-end needs
+  5 minutes of sustained stationary and the truck kept moving (and three deploy
+  restarts rotated the earlier sessions). Of today's eleven sessions, the three
+  with a `digest.json` are the 235-, 112- and 17-chunk ones; the 425-, 551- and
+  857-chunk ones have none. **A long drive that ends in a 5-minute stop is the
+  trigger, and the consequence is a systemd restart plus no digest for the
+  session you most wanted one for.**
   Two parts, and the second is the real one:
   1. **Push the existing refusal into the shared function.** `GET` for the same
      digest already refuses `_replay-*` (`control/digest.py:30` →
