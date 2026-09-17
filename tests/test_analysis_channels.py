@@ -244,6 +244,113 @@ def test_a_frame_without_metadata_has_unknown_provenance() -> None:
     assert out[TIMESTAMP_BASIS_COLUMN].iloc[0] == "unknown"
 
 
+def _metadata_frame(metadata: list[str | None]) -> pd.DataFrame:
+    """One OBD row per raw ``metadata_json`` text, in that order."""
+    return pd.DataFrame(
+        {
+            "timestamp": [pd.Timestamp(T0) + timedelta(seconds=i) for i in range(len(metadata))],
+            "source": ["obd"] * len(metadata),
+            "channel": ["RPM"] * len(metadata),
+            "value_number": [1200.0] * len(metadata),
+            "value_text": [None] * len(metadata),
+            "unit": ["rpm"] * len(metadata),
+            "payload": [None] * len(metadata),
+            "metadata_json": metadata,
+        }
+    )
+
+
+def test_unusable_metadata_json_carries_no_round_identity() -> None:
+    """Absent, malformed and wrong-typed metadata all mean "no identity".
+
+    Each of these used to fall out of a ``json.loads``/``dict.get`` chain by a
+    different route (``TypeError``, ``ValueError``, ``AttributeError``, a type
+    check); they are pinned here because the parse now happens once, in one
+    place, and a refactor must not quietly promote any of them to a reading.
+    ``true`` is the sharp one: ``bool`` is an ``int`` subclass, so an
+    unguarded cast reads it as ``acquired_at=1.0`` — 1970, and numeric enough
+    to survive downstream.
+    """
+    unusable = [
+        None,
+        "",
+        "not json at all",
+        "{unterminated",
+        "[1, 2]",
+        "null",
+        "3",
+        "{}",
+        '{"acquired_at": null}',
+        '{"acquired_at": true}',
+        '{"acquired_at": "1.0"}',
+        '{"acquired_at": [1, 2]}',
+        '{"nested": {"acquired_at": 5.0}}',
+        '{"can_id": 1783, "dlc": 8}',
+    ]
+    frame = read_acquisition_frame(_metadata_frame(unusable))
+    assert frame["acquired_at"].isna().all()
+    assert frame["generation"].isna().all()
+    assert frame["round_id"].isna().all()
+    assert set(frame[TIMESTAMP_BASIS_COLUMN]) == {"stored"}
+    # The stored stamp is kept, not nulled, so the rows stay comparable.
+    assert frame["timestamp"].notna().all()
+
+
+def test_escaped_metadata_keys_are_parsed_not_skipped() -> None:
+    """``{"acquired_a\\u0074": …}`` names ``acquired_at`` and must be read.
+
+    The reader skips the JSON parse for rows whose text provably cannot hold
+    these keys, and the proof is "no key substring *and* no backslash" —
+    because an escape is the only way to spell a key without its literal
+    characters. Narrowing that to a plain substring test would silently drop
+    this row's acquisition time, so the escape case is pinned.
+    """
+    frame = read_acquisition_frame(
+        _metadata_frame(
+            [
+                '{"acquired_a\\u0074": 1786028252.75}',
+                '{"round_i\\u0064": 3, "generatio\\u006e": 1}',
+            ]
+        )
+    )
+    assert frame["acquired_at"].iloc[0] == pytest.approx(1786028252.75)
+    assert frame[TIMESTAMP_BASIS_COLUMN].iloc[0] == "acquired"
+    assert (int(frame["round_id"].iloc[1]), int(frame["generation"].iloc[1])) == (3, 1)
+    assert frame[TIMESTAMP_BASIS_COLUMN].iloc[1] == "round"
+
+
+def test_metadata_json_is_parsed_at_most_once_per_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The parse is per row, not per consumer.
+
+    Six ``Series.map(json.loads)`` passes over the same column cost 115 s of a
+    122 s ``recompute_capture_quality`` on a 3.5 M-row capture (2026-09-17).
+    A caller that needs no acquisition clock must pay nothing at all.
+    """
+    import src.analysis.channels as channels
+
+    calls = 0
+    real_loads = channels.json.loads
+
+    def counting_loads(text: str, /, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return real_loads(text, **kwargs)
+
+    monkeypatch.setattr(channels.json, "loads", counting_loads)
+    frame = _metadata_frame(
+        [f'{{"acquired_at": {T0.timestamp() + i}}}' for i in range(4)]
+        + ['{"can_id": 1783, "dlc": 8}'] * 6
+    )
+
+    read_channels(frame, ["obd:RPM"], bindings_path=BINDINGS, dids_path=DIDS)
+    assert calls == 0, "acquired_time=False must not parse metadata at all"
+
+    read_acquisition_frame(frame)
+    assert calls <= len(frame)
+    # The six broadcast rows cannot carry a round key, and are not parsed.
+    assert calls == 4
+
+
 def test_can_specs_decode_frame_bytes_by_signal_name(tmp_path: Path) -> None:
     """``can:`` is named by signal, not CAN id — one frame carries several."""
     session = _session(

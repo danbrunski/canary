@@ -237,6 +237,16 @@ def _requests_for(profile: Mapping[str, Any], frame: pd.DataFrame) -> list[dict[
 
 
 def _row_count(frame: pd.DataFrame) -> int:
+    """**Every** persisted row, not the rows this module goes on to use.
+
+    The tuple and cadence arithmetic below reads only ``source == "obd"``
+    rows, so filtering the read is a standing temptation. Two figures here
+    are counts over the whole session and would be silently wrong if it were
+    filtered: this one (``rows_on_disk``, compared against the writer's
+    ``rows_written`` for the ``persistence_loss`` clause — a short count
+    invents a loss) and the ``ended_at`` fallback, which takes the interval
+    end from the last row of *any* source.
+    """
     return int(len(frame))
 
 

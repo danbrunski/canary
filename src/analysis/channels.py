@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
 from src.analysis.afr import AfrCalibration
@@ -160,28 +161,104 @@ ACQUIRED_AT_COLUMN = "acquired_at"
 ROUND_SKEW_COLUMNS = ("generation", "round_id", "n", "first_acquired_at", "skew_s")
 
 
-def _metadata_number(raw: object, key: str) -> float | None:
+#: The ``metadata_json`` keys this module reads. Parsed together, once.
+_ROUND_IDENTITY_KEYS = ("acquired_at", "round_id", "generation")
+
+
+def _metadata_payload(raw: object) -> dict[str, object] | None:
+    """One row's ``metadata_json`` as a mapping, or ``None``.
+
+    Every "no usable object here" case collapses to ``None``: a missing value
+    (``None``/``NaN``), a non-string, text that is not JSON, and JSON that is
+    not an object (``"3"``, ``"[1]"``, ``"null"`` — those used to arrive as an
+    ``AttributeError`` from ``dict.get`` and are still not readings).
+    """
     if not isinstance(raw, str):
         return None
     try:
-        value = json.loads(raw).get(key)
-    except (TypeError, ValueError, AttributeError):
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
         return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _payload_number(payload: dict[str, object], key: str) -> float | None:
+    """``payload[key]`` as a float, or ``None`` unless it is a real number.
+
+    ``bool`` is rejected deliberately: it is an ``int`` subclass, so a stray
+    ``"acquired_at": true`` would otherwise read as 1.0 — 1970, and a plausible
+    enough number to survive.
+    """
+    value = payload.get(key)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
 
 
-def _acquired_at(raw: object) -> float | None:
-    return _metadata_number(raw, "acquired_at")
+@dataclass(frozen=True)
+class _MetadataFields:
+    """``metadata_json``'s round identity as columns, parsed once per row.
+
+    Six ``Series.map`` passes used to re-run ``json.loads`` over the whole
+    column — 21.1 M parses for a 3.5 M-row capture, 115 s of a 122 s
+    ``recompute_capture_quality`` (measured 2026-09-17). One parse fills all
+    three columns and every consumer reads them from here.
+
+    Float, not ``Int64``, because that is what the JSON gave: the public
+    ``generation``/``round_id`` columns do the integer cast themselves.
+    """
+
+    acquired_at: pd.Series
+    round_id: pd.Series
+    generation: pd.Series
 
 
-def _round_id(raw: object) -> float | None:
-    return _metadata_number(raw, "round_id")
+def _parse_candidates(raw: pd.Series) -> np.ndarray:
+    """Row positions whose text could possibly carry a round-identity key.
+
+    A JSON object can name ``acquired_at`` without containing that literal
+    substring only by escaping a character (``{"acquired_a\\u0074": 1}``), and
+    every JSON escape starts with a backslash. So "no key substring **and** no
+    backslash" is a proof the keys are absent rather than a guess about how the
+    writer formats things, and anything that fails the proof — including
+    non-strings and unparseable text — is handed to the parser as before.
+
+    This is the whole of the win: 94 % of a capture's rows are broadcast and
+    decoded frames whose metadata is ``{"can_id": …, "dlc": …}``, and parsing
+    them yielded nothing three times over.
+    """
+    text = raw.astype("string")
+    candidate = text.str.contains("\\", regex=False)
+    for key in _ROUND_IDENTITY_KEYS:
+        candidate |= text.str.contains(key, regex=False)
+    return candidate.fillna(True).to_numpy(dtype=bool)
 
 
-def _generation(raw: object) -> float | None:
-    return _metadata_number(raw, "generation")
+def _metadata_fields(frame: pd.DataFrame) -> _MetadataFields | None:
+    """Parse ``metadata_json`` once, into one column per round-identity key.
+
+    ``None`` when the frame carries no ``metadata_json`` column at all — the
+    single place that fact is decided, so "unknown" timestamp basis and
+    all-null identity columns cannot disagree about it.
+    """
+    if "metadata_json" not in frame:
+        return None
+    raw = frame["metadata_json"]
+    values = raw.to_numpy()
+    columns = {key: np.full(len(values), np.nan) for key in _ROUND_IDENTITY_KEYS}
+    for position in np.flatnonzero(_parse_candidates(raw)):
+        payload = _metadata_payload(values[position])
+        if payload is None:
+            continue
+        for key, column in columns.items():
+            number = _payload_number(payload, key)
+            if number is not None:
+                column[position] = number
+    return _MetadataFields(
+        acquired_at=pd.Series(columns["acquired_at"], index=frame.index, dtype="float64"),
+        round_id=pd.Series(columns["round_id"], index=frame.index, dtype="float64"),
+        generation=pd.Series(columns["generation"], index=frame.index, dtype="float64"),
+    )
 
 
 def _round_stamped_sessions(frame: pd.DataFrame, session: Path | pd.DataFrame) -> set[str]:
@@ -205,19 +282,24 @@ def _round_stamped_sessions(frame: pd.DataFrame, session: Path | pd.DataFrame) -
     return round_stamped
 
 
-def _timestamp_basis(frame: pd.DataFrame, session: Path | pd.DataFrame) -> pd.Series:
+def _timestamp_basis(
+    frame: pd.DataFrame, session: Path | pd.DataFrame, fields: _MetadataFields | None
+) -> pd.Series:
     """Per-row :data:`~src.analysis.pairing.TimestampBasis`.
 
     ``acquired`` whenever ``acquired_at`` is present, whatever else the row
     or manifest says. ``round`` needs either the manifest's
     ``round_timestamps`` or a ``round_id`` on the row itself (C02.6) — with
     no ``acquired_at`` beside it, a round-tagged stamp is a round stamp.
+
+    ``fields`` is :func:`_metadata_fields`' already-parsed columns; ``None``
+    means the frame has no ``metadata_json`` to judge by.
     """
-    if "metadata_json" not in frame:
+    if fields is None:
         return pd.Series("unknown", index=frame.index, dtype="string")
-    acquired = frame["metadata_json"].map(_acquired_at).notna()
+    acquired = fields.acquired_at.notna()
     basis = pd.Series("stored", index=frame.index, dtype="string")
-    basis = basis.mask(frame["metadata_json"].map(_round_id).notna(), "round")
+    basis = basis.mask(fields.round_id.notna(), "round")
     round_stamped = _round_stamped_sessions(frame, session)
     if round_stamped:
         # Only polled (OBD/DID) rows are ever round-stamped; broadcast frames
@@ -232,17 +314,31 @@ def _timestamp_basis(frame: pd.DataFrame, session: Path | pd.DataFrame) -> pd.Se
 
 
 def _long_frame(session: Path | pd.DataFrame, *, acquired_time: bool = False) -> pd.DataFrame:
+    return _long_frame_with_metadata(session, acquired_time=acquired_time)[0]
+
+
+def _long_frame_with_metadata(
+    session: Path | pd.DataFrame, *, acquired_time: bool = False
+) -> tuple[pd.DataFrame, _MetadataFields | None]:
+    """:func:`_long_frame` plus the metadata columns it had to parse.
+
+    Handed back rather than recomputed so :func:`read_acquisition_frame` reuses
+    the one parse. ``None`` covers both "nothing was parsed" cases: without
+    ``acquired_time`` no metadata is wanted (and no caller should pay the parse
+    for it), and a frame with no ``metadata_json`` column has none to parse.
+    """
     frame = session.copy() if isinstance(session, pd.DataFrame) else read_session(Path(session))
     if not acquired_time:
-        return frame
-    frame[TIMESTAMP_BASIS_COLUMN] = _timestamp_basis(frame, session)
-    if "metadata_json" not in frame:
-        return frame
-    acquired = pd.to_datetime(frame["metadata_json"].map(_acquired_at), unit="s", utc=True)
+        return frame, None
+    fields = _metadata_fields(frame)
+    frame[TIMESTAMP_BASIS_COLUMN] = _timestamp_basis(frame, session, fields)
+    if fields is None:
+        return frame, None
+    acquired = pd.to_datetime(fields.acquired_at, unit="s", utc=True)
     # Broadcast and legacy rows have no acquisition field; retain their stored
     # timestamp rather than dropping an otherwise valid cross-source series.
     frame["timestamp"] = acquired.fillna(pd.to_datetime(frame["timestamp"], utc=True))
-    return frame
+    return frame, fields
 
 
 def read_acquisition_frame(session: Path | pd.DataFrame) -> pd.DataFrame:
@@ -254,15 +350,14 @@ def read_acquisition_frame(session: Path | pd.DataFrame) -> pd.DataFrame:
     ``generation`` and ``round_id`` (nullable) so round membership is a column
     rather than a JSON parse; :func:`round_skew` summarises them.
     """
-    frame = _long_frame(session, acquired_time=True)
-    if "metadata_json" not in frame:
+    frame, fields = _long_frame_with_metadata(session, acquired_time=True)
+    if fields is None:
         for column in (ACQUIRED_AT_COLUMN, GENERATION_COLUMN, ROUND_ID_COLUMN):
             frame[column] = pd.Series(pd.NA, index=frame.index, dtype="Float64")
         return frame
-    metadata = frame["metadata_json"]
-    frame[ACQUIRED_AT_COLUMN] = metadata.map(_acquired_at).astype("Float64")
-    frame[GENERATION_COLUMN] = metadata.map(_generation).astype("Float64").astype("Int64")
-    frame[ROUND_ID_COLUMN] = metadata.map(_round_id).astype("Float64").astype("Int64")
+    frame[ACQUIRED_AT_COLUMN] = fields.acquired_at.astype("Float64")
+    frame[GENERATION_COLUMN] = fields.generation.astype("Float64").astype("Int64")
+    frame[ROUND_ID_COLUMN] = fields.round_id.astype("Float64").astype("Int64")
     return frame
 
 
