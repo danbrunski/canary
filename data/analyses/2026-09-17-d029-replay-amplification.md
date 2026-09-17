@@ -79,20 +79,35 @@ de-duplicate after the fact.
 safely skip channels that were already persisted". The storage sink has no
 equivalent skip and the emit path has no equivalent filter.
 
-**Open design question, not to be decided unattended.** The obvious fix — have
-`_iter_rows` skip `decoded`/`derived` — is only correct if the re-derived rows
-reach the feature builder and detectors, not just the writer. If the
-re-derivation happens downstream of the inference path, skipping replayed
-`decoded` rows would starve the detectors of exactly the features a replay
-exists to evaluate. That has to be established before either fix lands:
-- **emit-path filter** (skip re-derived sources) — right if the pipeline
-  re-derives them early enough;
-- **sink-side skip while a replay is active** — the daemon does know
-  (`status.vehicle_state.replay_id`), so this needs no per-record provenance
-  flag, but it makes the writer's behaviour mode-dependent.
-`tests/test_replay.py:56-68` pins row-for-row emission at the queue, so
-row-for-row *is* the intended contract and it holds where it is tested; the
-duplication is introduced downstream of that assertion.
+**The layer question is now answered: the emit path.** The fix depends on
+whether the detectors need the replayed `decoded` rows, and they do not.
+`LiveFeatureSource.observe` (`live.py:256+`) handles `source == "can"` by
+calling `_apply_can_decode`, which writes `decoded:<SIGNAL>` into
+`_current_values` itself (`live.py:335-344`). The live/inference path therefore
+derives its decoded features from the raw frames, independently of the storage
+sink, and a replay that emitted only captured sources would feed the detectors
+exactly what a live drive does.
+
+**And today's behaviour is worse than redundant — it is ambiguous.** A replayed
+`decoded` row falls through `observe`'s catch-all and writes *the same*
+`decoded:<channel>` key that `_apply_can_decode` writes. So during a replay the
+value the detectors see is whichever arrived last: the stored one, or the one
+freshly decoded from the frame. Those differ precisely when `bindings.yaml`
+changed since the recording — i.e. in the situation where a replay is being used
+to check a binding change. Skipping re-derived sources removes the ambiguity as
+well as the duplicate rows.
+
+**One case where skipping would lose data**, and it has to be decided per
+session rather than per row: raw CAN payload persistence only landed 2026-07-29,
+so in an older session the `can` rows have no payload and nothing downstream can
+re-derive anything. There, the stored `decoded` rows are the only decoded
+signals available and must still be emitted — with the reason reported, not
+silently.
+
+`tests/test_replay.py:56-68` pins row-for-row emission at the queue for a
+fixture of `can`/`obd`/`can`, so row-for-row *is* the intended contract for
+captured sources and it holds where it is tested; the duplication is introduced
+downstream of that assertion.
 
 ## 3. Live GPS contaminates a replay's output — a new finding
 

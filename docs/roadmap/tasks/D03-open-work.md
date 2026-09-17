@@ -72,13 +72,18 @@ records why the validation harness could not have caught either.
      (`drain.py:212-217` → `frame_decoder.py:88-118`). `derived` doubles the
      same way. The copies are not byte-identical (replay rebases timestamps), so
      de-duplication after the fact will not find them.
-     **Open question that decides the layer, and it needs answering before
-     either fix lands:** do the re-derived rows reach the feature builder and
-     detectors, or only the writer? If only the writer, then skipping replayed
-     `decoded` rows at the emit path would starve the detectors of the very
-     features a replay exists to evaluate. The alternative is a sink-side skip
-     while a replay is active (the daemon knows — `replay_id`), at the cost of
-     mode-dependent writer behaviour. Operator's call.
+     **Layer question answered 2026-09-17: the emit path.** The detectors do
+     not need the replayed `decoded` rows — `LiveFeatureSource.observe`
+     (`live.py:256+`, `335-344`) decodes raw `can` rows itself into the same
+     `decoded:<SIGNAL>` current values. Today's behaviour is in fact *ambiguous*,
+     not merely redundant: a replayed `decoded` row writes the same key as the
+     freshly decoded one, so the detectors see whichever arrived last — and the
+     two differ exactly when `bindings.yaml` changed since the recording, which
+     is when a replay is most likely being used to check that change.
+     One constraint on the fix: payload persistence landed 2026-07-29, so in an
+     older session `can` rows carry no payload, nothing can re-derive, and the
+     stored `decoded` rows must still be emitted — decided per session, up front,
+     and *reported* rather than silently switched.
   3. **Live GPS contaminates the output** — `gps` at 1.648× is ~22,800 rows that
      are not in the source: the Pi's own receiver kept writing into the active
      session directory, which during a replay is the `_replay-*` dir, at ~12
