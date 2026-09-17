@@ -70,6 +70,15 @@ export interface CaptureResponse {
   capture: CaptureState | null;
 }
 
+/** `GET /control/captures/current` — the read, which answers 200 either way.
+ *  Check `active`: a null `capture` is "no window is open", not a failure,
+ *  and `detail` names why (a daemon restart drops the in-memory window while
+ *  recording continues). The tag/stop siblings refuse with 409 instead. */
+export interface CurrentCaptureResponse extends CaptureResponse {
+  active: boolean;
+  detail: string | null;
+}
+
 export interface CaptureTagResponse {
   tag: Record<string, unknown>;
   capture: CaptureState | null;

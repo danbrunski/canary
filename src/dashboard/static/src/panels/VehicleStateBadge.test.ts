@@ -14,6 +14,7 @@ function state(overrides: Partial<VehicleState>): VehicleState {
     obd_freshness_seconds: 0.5,
     can_freshness_seconds: 0.2,
     replay_id: null,
+    derived_at: "2026-09-17T20:00:00+00:00",
     ...overrides,
   };
 }

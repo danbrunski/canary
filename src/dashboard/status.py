@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import shutil
-from dataclasses import dataclass
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -60,6 +63,14 @@ class VehicleState:
     obd_freshness_seconds: float | None = None
     can_freshness_seconds: float | None = None
     replay_id: str | None = None
+    #: Wall clock the freshness numbers above were measured against, stamped
+    #: by :func:`_derive_vehicle_state`. Deriving this state reads Parquet, so
+    #: it is the one part of ``/status`` that gets reused across requests
+    #: (:class:`VehicleStateCache`) — carrying the derivation instant *inside*
+    #: the state means no consumer can mistake a reused reading for a fresh
+    #: one, whichever view or endpoint handed it over. ``None`` only for a
+    #: state built by calling :func:`classify_vehicle_state` directly.
+    derived_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         def _round(value: float | None) -> float | None:
@@ -73,6 +84,7 @@ class VehicleState:
             "obd_freshness_seconds": _round(self.obd_freshness_seconds),
             "can_freshness_seconds": _round(self.can_freshness_seconds),
             "replay_id": self.replay_id,
+            "derived_at": self.derived_at,
         }
 
 
@@ -438,14 +450,20 @@ def _derive_vehicle_state(
         rpm = decoded_rpm * _ECM_RPM_SCALE
         rpm_from_broadcast = True
 
-    return classify_vehicle_state(
-        rpm=rpm,
-        rpm_from_broadcast=rpm_from_broadcast,
-        coolant_temp=coolant,
-        run_time=run_time,
-        obd_freshness_seconds=obd_freshness,
-        can_freshness_seconds=can_freshness,
-        replay_id=replay_id,
+    # `derived_at` is stamped here, not in the pure classifier: it is a fact
+    # about the *read*, and every path that reuses a state (the /status views
+    # share one through `VehicleStateCache`) needs the age to travel with it.
+    return replace(
+        classify_vehicle_state(
+            rpm=rpm,
+            rpm_from_broadcast=rpm_from_broadcast,
+            coolant_temp=coolant,
+            run_time=run_time,
+            obd_freshness_seconds=obd_freshness,
+            can_freshness_seconds=can_freshness,
+            replay_id=replay_id,
+        ),
+        derived_at=now_dt.isoformat(),
     )
 
 
@@ -484,6 +502,236 @@ def _active_profile(config: CanaryConfig) -> dict[str, str | None] | None:
     return {"slug": slug, "name": fallback_name, "vin": config.vehicle.vin or None}
 
 
+#: How long one derived :class:`VehicleState` may be reused across ``/status``
+#: requests. Deriving it reads the newest session's Parquet chunks and is
+#: essentially the entire cost of the payload — measured 2026-09-17 on a
+#: 486-chunk session: 390 ms of a 400 ms build on the dev laptop, and the Pi
+#: served the full payload in 1.3–2.6 s. Deliberately far below the
+#: classifier's own ``_FRESHNESS_THRESHOLD_SECONDS`` (10 s), so reuse cannot
+#: change a verdict that a single slow request would not have changed anyway,
+#: and ``VehicleState.derived_at`` reports the age regardless.
+VEHICLE_STATE_TTL_SECONDS = 2.0
+
+
+class VehicleStateCache:
+    """One derived vehicle state, shared by every ``/status`` view.
+
+    Owned by the route registration, so no caller has to remember to pass it
+    and both views necessarily read the same object: the compact poller and
+    the full payload cannot report different vehicle states. Repeat polls pay
+    one Parquet read per :data:`VEHICLE_STATE_TTL_SECONDS` instead of one per
+    request, which is what makes a 1 Hz watchdog poll affordable on the Pi.
+
+    Not used by the replay guard (``POST /control/replay``), which is a
+    one-shot decision rather than a poll and reads fresh.
+    """
+
+    def __init__(self, ttl_seconds: float = VEHICLE_STATE_TTL_SECONDS) -> None:
+        self._ttl = ttl_seconds
+        self._entry: tuple[float, VehicleState] | None = None
+        self._lock = threading.Lock()
+
+    def get(self, derive: Callable[[], VehicleState]) -> VehicleState:
+        """The cached state, or ``derive()`` when it has aged past the TTL."""
+        entry = self._entry
+        if entry is not None and time.monotonic() - entry[0] < self._ttl:
+            return entry[1]
+        state = derive()
+        with self._lock:
+            self._entry = (time.monotonic(), state)
+        return state
+
+
+#: Per-sink fields the compact view carries — the ones a watchdog acts on.
+#: ``queue_depth`` alone hides a sink that filled, dropped and recovered
+#: (C10.5), so the high-water mark travels with it.
+_COMPACT_SINK_FIELDS: tuple[str, ...] = (
+    "queue_depth",
+    "queue_high_water",
+    "dropped_records",
+)
+
+#: Scheduler fields the compact view carries: cumulative counters and the two
+#: ratios, never the per-request table or the per-channel rate maps.
+_COMPACT_SCHEDULER_FIELDS: tuple[str, ...] = (
+    "requests_sent",
+    "readings_emitted",
+    "request_timeouts",
+    "negative_responses",
+    "bus_errors",
+    "response_rate",
+)
+
+#: Inference-clock fields the compact view carries (C08) — deadline health,
+#: not stage timing.
+_COMPACT_INFERENCE_FIELDS: tuple[str, ...] = (
+    "ticks_scheduled",
+    "missed_ticks",
+    "missed_by_reason",
+)
+
+#: ``GET /status?view=`` — ``compact`` is the pollable projection described on
+#: :func:`compact_status`. A ``Literal`` so an unrecognised view is a 422 from
+#: FastAPI rather than a silent fall-back to the expensive payload.
+StatusView = Literal["full", "compact"]
+
+
+@dataclass(frozen=True)
+class StatusSources:
+    """The live objects a ``/status`` response is built from, read once.
+
+    Both views are projections of *this*: the compact view narrows these same
+    dicts and never re-reads a counter. That matters beyond tidiness — a
+    second read a second later is a different number, and telling a watchdog
+    (or a frame-loss bracket) that two views of "the same" instant disagree
+    is exactly the measurement error this endpoint exists to remove.
+    """
+
+    storage_path: Path
+    free_mb: float
+    vehicle_state: VehicleState
+    emitter_counters: dict[str, int] | None
+    #: ``HealthMonitor.snapshot()``, or ``None`` when no monitor is wired.
+    #: ``None`` means "not instrumented" and never "zero" — a watchdog has to
+    #: keep those apart.
+    health: dict[str, Any] | None
+    #: ``InferenceTimingRecorder.snapshot()`` (the full payload files it under
+    #: ``detectors.inference``), or ``None`` when no recorder is wired.
+    inference: dict[str, Any] | None
+    passive: dict[str, Any]
+    capture_profile: dict[str, Any]
+    bus_budget: dict[str, Any]
+
+
+def gather_status_sources(
+    config: CanaryConfig,
+    *,
+    emitter: AnomalyEventEmitter | None = None,
+    health_monitor: HealthMonitor | None = None,
+    replay_controller: ReplayController | None = None,
+    storage_writer: Any = None,
+    inference_timing: InferenceTimingRecorder | None = None,
+    vehicle_state_cache: VehicleStateCache | None = None,
+) -> StatusSources:
+    """Read every source both ``/status`` views need, exactly once.
+
+    ``vehicle_state_cache`` shares the Parquet-backed derivation across
+    requests; without one, every call derives fresh (what a test or a
+    standalone :func:`build_status` caller wants).
+    """
+    storage = config.collection.storage_path
+
+    def derive() -> VehicleState:
+        return _derive_vehicle_state(
+            storage,
+            replay_controller=replay_controller,
+            session_dir=_active_session_dir(storage_writer),
+        )
+
+    return StatusSources(
+        storage_path=storage,
+        free_mb=_free_mb(storage),
+        vehicle_state=derive() if vehicle_state_cache is None else vehicle_state_cache.get(derive),
+        emitter_counters=emitter.counters.to_dict() if emitter is not None else None,
+        health=health_monitor.snapshot() if health_monitor is not None else None,
+        inference=inference_timing.snapshot().to_dict() if inference_timing is not None else None,
+        passive=tx_gate.snapshot(),
+        capture_profile=_capture_snapshot(storage_writer),
+        bus_budget=bus_budget_gate.snapshot(),
+    )
+
+
+def _pick(source: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
+    """The named keys of ``source``, absent ones as ``None``."""
+    return {name: source.get(name) for name in fields}
+
+
+def _compact_scheduler(scheduler: dict[str, Any]) -> dict[str, Any]:
+    """Scheduler counters without the per-channel/per-request structures.
+
+    ``achieved_hz_60s`` is a map with one entry per polled channel — the bulk
+    of the full payload and the thing a poller must not pay for. It is summed
+    into ``achieved_hz_60s_total`` (with the channel count as its
+    denominator, since a channel dropping out of the plan moves the total on
+    its own) and named for what it is: a total of the trailing-window rates,
+    not a wire request rate. For the wire rate, difference ``requests_sent``
+    between two ``served_at`` stamps.
+    """
+    rates = scheduler.get("achieved_hz_60s") or {}
+    numeric = [value for value in rates.values() if isinstance(value, (int, float))]
+    compact = _pick(scheduler, _COMPACT_SCHEDULER_FIELDS)
+    compact["achieved_hz_60s_channels"] = len(rates)
+    compact["achieved_hz_60s_total"] = round(sum(numeric), 3) if numeric else None
+    # Three scalars, and the daemon side of the D01.5 frame-loss bracket
+    # (`receive.frames_seen` against the kernel's can0 counters).
+    compact["receive"] = scheduler.get("receive")
+    return compact
+
+
+def _compact_health(health: dict[str, Any]) -> dict[str, Any]:
+    """``health`` narrowed to the counters a watchdog acts on."""
+    scheduler = health.get("obd_scheduler")
+    sinks = health.get("telemetry_sinks") or {}
+    return {
+        "system": health.get("system"),
+        "telemetry_sinks": {
+            name: _pick(state, _COMPACT_SINK_FIELDS) for name, state in sinks.items()
+        },
+        "can0": health.get("can0"),
+        "obd_scheduler": None if scheduler is None else _compact_scheduler(scheduler),
+    }
+
+
+def compact_status(sources: StatusSources) -> dict[str, Any]:
+    """The pollable ``GET /status?view=compact`` payload.
+
+    Purely a projection of ``sources``, so it cannot disagree with the full
+    payload built from the same object. Every field sits at the path it
+    occupies in the full payload, so a poller that outgrows this view drops
+    one query parameter and keeps its accessors. The one key the full payload
+    does not also carry verbatim is
+    ``health.obd_scheduler.achieved_hz_60s_total``, which is the sum of the
+    per-channel map the full payload prints (see :func:`_compact_scheduler`).
+
+    What is left out is left out, not summarised: the per-request table,
+    discovery, per-tier and per-channel rate maps, batching, model
+    provenance, GPS/trip, and every detector block except the inference
+    clock. Nothing here builds a per-channel dict, reads Parquet, or shells
+    out — the Parquet-backed ``vehicle_state`` is shared through
+    :class:`VehicleStateCache` and reports its own
+    ``derived_at``.
+
+    ``served_at`` is stamped beside the counter reads. That is what lets a
+    bracketed measurement bound its own window rather than assuming the round
+    trip was instant: reading a kernel counter either side of a 1.7 s
+    ``/status`` was ±2,700 CAN frames of slack at 1,640 frames/s, as large as
+    the loss being measured (D01.5, 2026-09-17).
+
+    A ``None`` block means "not instrumented", never "zero".
+    """
+    health = sources.health
+    return {
+        "view": "compact",
+        "served_at": datetime.now(UTC).isoformat(),
+        "vehicle_state": sources.vehicle_state.to_dict(),
+        "free_mb": round(sources.free_mb, 1),
+        "emitter_counters": sources.emitter_counters,
+        "passive": sources.passive,
+        # Name + active only; the profile's channel lists and achieved-rate
+        # maps are the per-channel bulk this view exists to skip.
+        "capture_profile": {
+            "name": sources.capture_profile.get("name"),
+            "active": sources.capture_profile.get("active"),
+        },
+        "health": None if health is None else _compact_health(health),
+        "detectors": (
+            None
+            if sources.inference is None
+            else {"inference": _pick(sources.inference, _COMPACT_INFERENCE_FIELDS)}
+        ),
+    }
+
+
 def build_status(
     config: CanaryConfig,
     *,
@@ -494,6 +742,7 @@ def build_status(
     gps_tracker: GpsTracker | None = None,
     storage_writer: Any = None,
     inference_timing: InferenceTimingRecorder | None = None,
+    sources: StatusSources | None = None,
 ) -> StatusSnapshot:
     """Assemble the status snapshot used by ``GET /status``.
 
@@ -502,8 +751,21 @@ def build_status(
     ``detectors.inference`` — kept apart from ``health.inference_latency_ms``
     (model scoring latency only) so clock health and model cost are never
     read as one number.
+
+    ``sources`` is a pre-gathered :class:`StatusSources`; pass the same one to
+    :func:`compact_status` to serve both views of a single instant. Gathered
+    here when omitted, from the keyword arguments above.
     """
-    storage = config.collection.storage_path
+    if sources is None:
+        sources = gather_status_sources(
+            config,
+            emitter=emitter,
+            health_monitor=health_monitor,
+            replay_controller=replay_controller,
+            storage_writer=storage_writer,
+            inference_timing=inference_timing,
+        )
+    storage = sources.storage_path
     latest = _resolve_latest_session(storage)
     model_versions: dict[str, str | None] = {}
     model_provenance: dict[str, dict[str, Any] | None] = {}
@@ -544,38 +806,40 @@ def build_status(
                 "fallback_active": health_monitor.segmenter_fallback_active,
             },
         }
-    if inference_timing is not None:
-        detectors = {**(detectors or {}), "inference": inference_timing.snapshot().to_dict()}
+    if sources.inference is not None:
+        detectors = {**(detectors or {}), "inference": sources.inference}
     return StatusSnapshot(
         storage_path=str(storage),
-        free_mb=_free_mb(storage),
+        free_mb=sources.free_mb,
         latest_session=latest.name if latest else None,
         latest_session_path=str(latest) if latest else None,
         model_versions=model_versions,
         vehicle=f"{config.vehicle.year} {config.vehicle.make} {config.vehicle.model}".strip(),
-        emitter_counters=emitter.counters.to_dict() if emitter is not None else None,
-        health=health_monitor.snapshot() if health_monitor is not None else None,
-        vehicle_state=_derive_vehicle_state(
-            storage,
-            replay_controller=replay_controller,
-            session_dir=_active_session_dir(storage_writer),
-        ),
+        emitter_counters=sources.emitter_counters,
+        health=sources.health,
+        vehicle_state=sources.vehicle_state,
         gps=gps_tracker.gps_status() if gps_tracker is not None else None,
         trip=gps_tracker.trip_status() if gps_tracker is not None else None,
         profile=_active_profile(config),
         detectors=detectors,
         model_provenance=model_provenance if models_dir is not None else None,
-        passive=tx_gate.snapshot(),
+        passive=sources.passive,
         tuning_mode=tuning_profile.snapshot(),
-        bus_budget=bus_budget_gate.snapshot(),
-        capture_profile=_capture_snapshot(storage_writer),
+        bus_budget=sources.bus_budget,
+        capture_profile=sources.capture_profile,
     )
 
 
 __all__ = [
+    "VEHICLE_STATE_TTL_SECONDS",
     "StatusSnapshot",
+    "StatusSources",
+    "StatusView",
     "VehicleState",
+    "VehicleStateCache",
     "VehicleStateName",
     "build_status",
     "classify_vehicle_state",
+    "compact_status",
+    "gather_status_sources",
 ]

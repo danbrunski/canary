@@ -19,6 +19,7 @@ import type {
   CaptureQuality,
   CaptureProfileWarning,
   CaptureTagResponse,
+  CurrentCaptureResponse,
   CompanionStatusResponse,
   CustomPid,
   CustomPidImportResponse,
@@ -147,8 +148,8 @@ export function getControlVersion(
 export function getCurrentCapture(
   token: string,
   signal?: AbortSignal,
-): Promise<CaptureResponse> {
-  return controlJson<CaptureResponse>("/control/captures/current", token, { signal });
+): Promise<CurrentCaptureResponse> {
+  return controlJson<CurrentCaptureResponse>("/control/captures/current", token, { signal });
 }
 
 export function getSequenceDetector(

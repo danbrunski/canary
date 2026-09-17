@@ -136,6 +136,11 @@ export interface VehicleState {
   obd_freshness_seconds: number | null;
   can_freshness_seconds: number | null;
   replay_id: string | null;
+  /** Wall clock the freshness numbers were measured against. The derivation
+   *  reads Parquet, so the daemon shares one reading across `/status` views
+   *  for a couple of seconds — the stamp travels with the state so a reused
+   *  reading can't be mistaken for a fresh one. */
+  derived_at: string | null;
 }
 
 /** `/status.accepted_baseline_overrides` (2.3). */

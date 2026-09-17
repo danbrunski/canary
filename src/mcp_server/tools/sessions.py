@@ -62,7 +62,14 @@ async def get_training_runs(client: DaemonClient) -> dict[str, Any]:
 
 
 async def get_current_capture(client: DaemonClient) -> dict[str, Any]:
-    """Read the currently active capture window (pure read)."""
+    """Read the currently active capture window (pure read).
+
+    ``active`` is the field to check: with no window open this answers 200
+    with ``capture: null``, ``active: false`` and a ``detail`` naming the
+    cause (a daemon restart drops the in-memory window while recording
+    continues). Do not read a null ``capture`` as "the call failed" or as
+    "a window is open" — it is neither.
+    """
     return await client.get_json("/control/captures/current")
 
 

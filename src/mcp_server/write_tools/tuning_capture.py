@@ -112,7 +112,9 @@ async def arm_tuning_capture(
     payload: dict[str, Any] = {"capture": started, "bus_budget": started.get("bus_budget")}
     if verify_seconds and verify_seconds > 0:
         await asyncio.sleep(verify_seconds)
-        status = await client.get_json("/status")
+        # Only `vehicle_state` is read from it, which the compact view carries
+        # for ~1/10th the time and 1/20th the bytes of the full payload.
+        status = await client.get_json("/status", {"view": "compact"})
         payload["verified_after_seconds"] = verify_seconds
         verification = await _rate_verification(client, rate_hz)
         payload["rate_verification"] = verification

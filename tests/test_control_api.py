@@ -200,6 +200,64 @@ def test_tag_without_active_capture_conflicts(tmp_path: Path) -> None:
     assert "no active capture" in response.json()["detail"]
 
 
+def test_tag_refusal_names_the_restart_and_says_the_tag_was_lost(tmp_path: Path) -> None:
+    """A refusal has to distinguish *which* kind of empty it is.
+
+    "Nothing was ever started" and "a restart dropped the open window" want
+    opposite responses, and the second is what actually happens (2026-09-17:
+    a deploy restart dropped the drive's third window). The detail therefore
+    names the in-memory lifetime, says the tag was not recorded, and points
+    at the route that opens a new window.
+    """
+    client, _session = _client(tmp_path)
+
+    detail = (
+        client.post("/control/captures/current/tags", headers=_auth(), json={"label": "orphan"})
+        .json()["detail"]
+        .lower()
+    )
+
+    assert "not recorded" in detail
+    assert "restart" in detail
+    assert "post /control/captures" in detail
+
+
+def test_stop_without_active_capture_conflicts_with_the_same_explanation(tmp_path: Path) -> None:
+    """The sibling command shares the refusal, because it shares the cause."""
+    client, _session = _client(tmp_path)
+
+    response = client.post(
+        "/control/captures/current/stop",
+        headers=_auth(),
+        json={"reason": "nothing to stop"},
+    )
+
+    assert response.status_code == 409
+    detail = response.json()["detail"].lower()
+    assert "nothing was stopped" in detail
+    assert "restart" in detail
+
+
+def test_current_capture_read_says_which_kind_of_empty(tmp_path: Path) -> None:
+    """The read stays a 200 — "no window" is a real answer to a question —
+    but not a bare ``{"capture": null}``: ``active`` is the flag to branch on
+    and ``detail`` names the restart that usually caused it."""
+    client, _session = _client(tmp_path)
+
+    empty = client.get("/control/captures/current", headers=_auth())
+    assert empty.status_code == 200
+    body = empty.json()
+    assert body["capture"] is None
+    assert body["active"] is False
+    assert "restart" in body["detail"].lower()
+
+    client.post("/control/captures", headers=_auth(), json={})
+    live = client.get("/control/captures/current", headers=_auth()).json()
+    assert live["active"] is True
+    assert live["detail"] is None
+    assert live["capture"]["capture_id"]
+
+
 def test_session_list_detail_and_export(tmp_path: Path) -> None:
     client, session = _client(tmp_path)
     (session / "telemetry-00000.parquet").write_bytes(b"parquet-ish")

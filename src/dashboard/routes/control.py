@@ -58,7 +58,12 @@ from src.companion.services import (
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.can_activity import CanActivityBusError, capture_can_activity
-from src.control.capture import CaptureConflictError, CaptureController, NoActiveCaptureError
+from src.control.capture import (
+    CaptureConflictError,
+    CaptureController,
+    NoActiveCaptureError,
+    no_active_capture_detail,
+)
 from src.control.capture_finalize import (
     CaptureQualityUnavailableError,
     StartEpoch,
@@ -296,9 +301,25 @@ def register_control_routes(
     def get_current_capture(
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
+        """The active capture window, or an explicitly-named absence.
+
+        A read, so "there is no window" is a legitimate answer and stays a
+        200 — unlike the tag/stop siblings below, where it means a command
+        did nothing and is a 409. But the bare ``{"capture": null}`` this
+        used to return told a caller nothing about *which* kind of empty it
+        was, and "a restart dropped the window" is the one that actually
+        happens. ``active`` makes the check explicit and ``detail`` names
+        the cause, with the same wording the 409s carry.
+        """
         controller = _controller()
         capture = controller.current_capture()
-        return {"capture": None if capture is None else capture.to_dict()}
+        if capture is None:
+            return {
+                "capture": None,
+                "active": False,
+                "detail": no_active_capture_detail("there is nothing to tag or stop"),
+            }
+        return {"capture": capture.to_dict(), "active": True, "detail": None}
 
     @app.post("/control/captures/current/tags")
     def post_capture_tag(
@@ -314,6 +335,11 @@ def register_control_routes(
                 fields=request.fields,
             )
         except NoActiveCaptureError as exc:
+            # 409, never a 200 with a null `tag`: "tagged" and "there was
+            # nothing to tag" must not look alike to a caller that only
+            # checks the status code. The detail is
+            # `capture.no_active_capture_detail`, which names the restart as
+            # the usual cause.
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         capture = controller.current_capture()
         payload = {

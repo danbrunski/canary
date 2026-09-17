@@ -57,7 +57,13 @@ from src.dashboard.routes import (
     register_stream_routes,
 )
 from src.dashboard.security import _client_is_loopback, _require_control_auth
-from src.dashboard.status import StatusSnapshot, build_status
+from src.dashboard.status import (
+    StatusSnapshot,
+    StatusSources,
+    build_status,
+    compact_status,
+    gather_status_sources,
+)
 from src.dashboard.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
 from src.dashboard.version import _canary_version
 from src.dashboard.websockets import _publish_on_app_loop
@@ -253,9 +259,12 @@ __all__ = [
     "DEFAULT_STATIC_DIR",
     "DEFAULT_TEST_PROFILES_DIR",
     "StatusSnapshot",
+    "StatusSources",
     "build_status",
+    "compact_status",
     "create_app",
     "echo_config",
+    "gather_status_sources",
     "_client_is_loopback",
     "_require_control_auth",
     "read_accepted_baselines",

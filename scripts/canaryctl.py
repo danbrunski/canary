@@ -116,7 +116,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
 
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("status", help="Fetch /status.")
+    status = sub.add_parser("status", help="Fetch /status.")
+    status.add_argument(
+        "--compact",
+        action="store_true",
+        help=(
+            "Fetch the pollable projection (GET /status?view=compact): "
+            "vehicle_state plus the loss/queue/tick/OBD counters and a "
+            "served_at stamp, ~1/10th the time and 1/20th the bytes. Use it "
+            "for a watchdog loop or to bracket a counter measurement."
+        ),
+    )
     sub.add_parser("preflight", help="Run control-plane preflight checks.")
     sub.add_parser("version", help="Fetch control API version/build info.")
 
@@ -221,7 +231,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
     host = _base_url(args.host)
     if args.command == "status":
-        return _request_json(host, "GET", "/status", token=None)
+        path = "/status?view=compact" if args.compact else "/status"
+        return _request_json(host, "GET", path, token=None)
     if args.command == "preflight":
         return _request_json(host, "GET", "/control/preflight", token=args.token)
     if args.command == "version":

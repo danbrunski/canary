@@ -247,9 +247,16 @@ def _register_read_tools(
     """Register all read tools as MCP tools."""
 
     @mcp.tool()
-    async def get_status() -> dict[str, Any]:
-        """Daemon liveness, loaded models, storage, anomaly emitter counters."""
-        return await status_tool.get_status(client)
+    async def get_status(view: status_tool.StatusView = "full") -> dict[str, Any]:
+        """Daemon liveness, loaded models, storage, anomaly emitter counters.
+
+        `view="compact"` is the cheap projection (~4 ms / 1.3 KB against
+        ~42 ms / 26 KB; the full payload costs 1.3-2.6 s on the Pi):
+        `vehicle_state` plus the loss/queue/tick/OBD counters a watchdog
+        acts on, each at the same path as in the full payload, with a
+        `served_at` stamp for bracketing a measurement. Poll that one.
+        """
+        return await status_tool.get_status(client, view=view)
 
     @mcp.tool()
     async def get_config() -> dict[str, Any]:
@@ -739,15 +746,28 @@ def _register_write_tools(
 
     @mcp.tool()
     async def stop_capture(reason: str | None = None) -> dict[str, Any]:
-        """Stop the active profile capture, otherwise close the tag window."""
-        status = await client.get_json("/status")
-        if status.get("capture_profile", {}).get("active"):
+        """Stop the active profile capture, otherwise close the tag window.
+
+        Raises when there is no tag window to close (HTTP 409) rather than
+        answering with a null capture — a restart drops the in-memory window,
+        so "stopped" and "there was nothing to stop" are genuinely different
+        answers. The refusal names that cause.
+        """
+        # `view=compact` carries `capture_profile.active`, which is all this
+        # branch needs; the full payload costs 1.3-2.6 s on the Pi.
+        status = await status_tool.get_status(client, view="compact")
+        if (status.get("capture_profile") or {}).get("active"):
             return await capture_profiles_write_tool.stop_capture(client, audit)
         return await captures_tool.stop_capture(client, audit, reason=reason)
 
     @mcp.tool()
     async def get_current_capture() -> dict[str, Any]:
-        """Read the currently active capture window."""
+        """Read the currently active capture window.
+
+        Check `active`: a null `capture` with `active: false` means no window
+        is open (a daemon restart drops it while recording continues), and
+        `detail` says so. It is not a failed call.
+        """
         return await sessions_tool.get_current_capture(client)
 
     @mcp.tool()

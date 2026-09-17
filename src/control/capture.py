@@ -29,6 +29,27 @@ class NoActiveCaptureError(RuntimeError):
     """Raised when a command requires an active capture window."""
 
 
+def no_active_capture_detail(outcome: str) -> str:
+    """Why a capture command found nothing, and what to do about it.
+
+    Phrased once, here, because the interesting part is never "no active
+    capture" — it is *which kind of empty*. The window lives only in this
+    process's memory, so a daemon restart silently ends it while telemetry
+    recording carries on; that is what happened on 2026-09-17, when a deploy
+    restart dropped the drive's third window and a later tag had nothing to
+    attach to. Every caller (both control routes, the MCP write tools, the
+    CLI) surfaces this string, so the explanation cannot be attached at one
+    call site and missed at another.
+    """
+    return (
+        f"no active capture window, so {outcome}. The window is held in daemon "
+        "memory only: a daemon restart (deploy, crash, power cycle) ends it "
+        "while telemetry recording continues, and it is not resumed. Check "
+        "GET /control/captures/current and open a new window with "
+        "POST /control/captures."
+    )
+
+
 @dataclass(frozen=True)
 class CaptureState:
     """In-memory state for the active remote capture window."""
@@ -130,7 +151,7 @@ class CaptureController:
         """Append a tag to the active capture's session."""
         with self._lock:
             if self._active is None:
-                raise NoActiveCaptureError("no active capture")
+                raise NoActiveCaptureError(no_active_capture_detail("the tag was not recorded"))
             tag_fields = {
                 "capture_id": self._active.capture_id,
                 "session_id": self._active.session_id,
@@ -153,7 +174,7 @@ class CaptureController:
         """Stop the active capture window and write a durable stop tag."""
         with self._lock:
             if self._active is None:
-                raise NoActiveCaptureError("no active capture")
+                raise NoActiveCaptureError(no_active_capture_detail("nothing was stopped"))
             state = self._active
             tag_fields: dict[str, Any] = {
                 "capture_id": state.capture_id,
@@ -189,4 +210,5 @@ __all__ = [
     "CaptureController",
     "CaptureState",
     "NoActiveCaptureError",
+    "no_active_capture_detail",
 ]

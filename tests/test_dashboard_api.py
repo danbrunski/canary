@@ -1417,3 +1417,67 @@ def test_telemetry_latest_without_did_catalog_is_unchanged(
     )
     rows = client.get("/telemetry/latest", params={"per_channel": True}).json()["rows"]
     assert rows and all(r["source"] == "obd" for r in rows)
+
+
+def test_status_compact_view_carries_the_pollable_fields(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    """The compact view exists so a watchdog can poll cheaply: the full payload
+    costs 1.3-2.6 s on the Pi, which capped health resolution at ~20 s and put
+    +/-2,700 CAN frames of slack into D01.5's frame-loss bracket (2026-09-17).
+    """
+    _make_session_with_parquet(config.collection.storage_path, "2026-05-13T120000")
+    response = _client(config, anomalies_dir).get("/status", params={"view": "compact"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["view"] == "compact"
+    # served_at is what lets a bracketed measurement bound its own window.
+    assert body["served_at"]
+    for key in ("vehicle_state", "free_mb", "emitter_counters", "passive", "capture_profile"):
+        assert key in body, key
+    # vehicle_state is the field AGENTS.md says to read before interpreting
+    # anything, so it must arrive whole rather than summarised.
+    assert "state" in body["vehicle_state"]
+    assert set(body["capture_profile"]) == {"name", "active"}
+
+
+def test_status_compact_view_omits_the_per_channel_bulk(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    """What is left out is left out, not summarised — the per-channel maps and
+    the request table are the cost this view exists to avoid."""
+    client = _client(config, anomalies_dir)
+    compact = client.get("/status", params={"view": "compact"}).json()
+    scheduler = ((compact.get("health") or {}).get("obd_scheduler")) or {}
+    for absent in ("requests", "achieved_hz_60s", "by_tier", "discovery", "deferred"):
+        assert absent not in scheduler, absent
+    assert "model_provenance" not in compact
+    assert "trip" not in compact
+    # The per-channel map is gone, but its total survives as one number.
+    if scheduler:
+        assert "achieved_hz_60s_total" in scheduler
+
+
+def test_status_compact_and_full_agree_on_shared_fields(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    """Both views are projections of one StatusSources, so they must never
+    report different numbers for the same instant."""
+    _make_session_with_parquet(config.collection.storage_path, "2026-05-13T120000")
+    client = _client(config, anomalies_dir)
+    full = client.get("/status").json()
+    compact = client.get("/status", params={"view": "compact"}).json()
+    assert compact["vehicle_state"]["state"] == full["vehicle_state"]["state"]
+    assert compact["emitter_counters"] == full["emitter_counters"]
+    assert compact["passive"] == full["passive"]
+    assert compact["capture_profile"]["name"] == full["capture_profile"]["name"]
+    assert compact["free_mb"] == full["free_mb"]
+
+
+def test_status_view_rejects_an_unknown_projection(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    """A typo'd view must not silently serve the expensive payload a poller was
+    trying to avoid."""
+    response = _client(config, anomalies_dir).get("/status", params={"view": "brief"})
+    assert response.status_code == 422

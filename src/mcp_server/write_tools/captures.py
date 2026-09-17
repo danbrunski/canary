@@ -62,6 +62,12 @@ async def tag_current_capture(
 
     Tags are append-only events in ``tags.jsonl`` — used to mark transitions
     ("entered city", "started towing") so downstream analysis can slice.
+
+    Raises :class:`~src.mcp_server.client.DaemonError` when no capture window
+    is open (HTTP 409) — the tag was *not* recorded. The window is in-memory
+    only, so a daemon restart ends it while recording continues; the refusal
+    says so. Never returns a success with a null tag: a lost tag cannot be
+    recovered after the drive, so it has to fail loudly at the call.
     """
     body: dict[str, Any] = {"label": label}
     if fields:
@@ -81,7 +87,12 @@ async def stop_capture(
     *,
     reason: str | None = None,
 ) -> dict[str, Any]:
-    """Close the active capture. ``reason`` is recorded for later review."""
+    """Close the active capture. ``reason`` is recorded for later review.
+
+    Raises :class:`~src.mcp_server.client.DaemonError` when no window is open
+    (HTTP 409), naming the restart that usually dropped it, rather than
+    reporting a stop that did not happen.
+    """
     body: dict[str, Any] = {}
     if reason is not None:
         body["reason"] = reason

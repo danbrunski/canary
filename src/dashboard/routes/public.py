@@ -26,7 +26,13 @@ from src.dashboard.readers import (
     read_latest_telemetry_rows,
     read_obd_coverage,
 )
-from src.dashboard.status import build_status
+from src.dashboard.status import (
+    StatusView,
+    VehicleStateCache,
+    build_status,
+    compact_status,
+    gather_status_sources,
+)
 from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.models.health import HealthMonitor
 
@@ -58,8 +64,37 @@ def register_public_routes(
     storage_writer: Any = None,
     inference_timing: InferenceTimingRecorder | None = None,
 ) -> None:
+    # Owned here rather than passed in, so the vehicle-state derivation is
+    # shared by both /status views of every app without any caller having to
+    # remember to wire it (and never shared *between* apps, which would leak
+    # one test's truck state into the next).
+    vehicle_state_cache = VehicleStateCache()
+
     @app.get("/status")
-    def get_status() -> dict[str, Any]:
+    def get_status(view: StatusView = "full") -> dict[str, Any]:
+        """Daemon snapshot. ``view=compact`` is the pollable projection.
+
+        The full payload costs 1.3–2.6 s on the Pi and carries the whole
+        ``obd_scheduler`` block (per-channel achieved rates, every request's
+        state, discovery), so polling it capped health resolution at ~20 s and
+        put ±2,700 CAN frames of slack into D01.5's frame-loss bracket. The
+        compact view answers "is it healthy, and what are the counters right
+        now" from the *same* source objects — see
+        :func:`src.dashboard.status.compact_status`. Both views are built from
+        one :class:`~src.dashboard.status.StatusSources`, so they can never
+        report different numbers for the same instant.
+        """
+        sources = gather_status_sources(
+            config,
+            emitter=emitter,
+            health_monitor=health_monitor,
+            replay_controller=replay_controller,
+            storage_writer=storage_writer,
+            inference_timing=inference_timing,
+            vehicle_state_cache=vehicle_state_cache,
+        )
+        if view == "compact":
+            return compact_status(sources)
         payload = build_status(
             config,
             models_dir=models_dir,
@@ -69,6 +104,7 @@ def register_public_routes(
             gps_tracker=gps_tracker,
             storage_writer=storage_writer,
             inference_timing=inference_timing,
+            sources=sources,
         ).to_dict()
         if replay_controller is not None:
             payload["replay"] = replay_controller.status().to_dict()
