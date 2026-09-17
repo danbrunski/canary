@@ -17,7 +17,11 @@ a decision from the operator. Four can be done at a desk today.
 ([log](../../../data/analyses/2026-09-17-drive-log.md)): D01.5's premise was
 re-measured and its headline figure is in doubt, D02.2 gained a controlled pair
 and a third candidate fix, and five new items (D03.1–D03.5) were opened, three
-of them already fixed and deployed.
+of them already fixed and deployed. Afterwards, at the desk, **D02.9 was
+root-caused** ([evidence](../../../data/analyses/2026-09-17-d029-replay-amplification.md)):
+its 4× row amplification is really 1.29× plus a wall-time-versus-rows
+arithmetic error, and its OOM belongs to the trip-end digest, now D03.6. D03.7
+records why the validation harness could not have caught either.
 
 ## Rules that still apply
 
@@ -25,24 +29,70 @@ of them already fixed and deployed.
 - Never widen a queue or relax a threshold to make a contract pass — stop at
   the first failure, name the constraint, fix its source.
 - No bus-budget raises; no rate default raised without sustained evidence.
-- **Long replays are currently unsafe on the Pi** — see D02.9.
+- **Long replays are currently unsafe on the Pi** — but not for the reason
+  D02.9 originally gave. The kill was the trip-end digest loading the whole
+  output at raw resolution (D03.6), not the replay itself. Until D03.6 lands, a
+  replay whose output exceeds roughly 2.5–3 M rows will OOM an 8 GB Pi when the
+  trip ends, and so will a long enough live drive.
 
 ---
 
 ## Can be done at a desk
 
-- [ ] **D02.9 Replay grows without bound and OOM-killed the daemon.**
-  A 1x replay of a 25-minute drive took the daemon to **7.7 GB resident on an
-  8 GB Pi** and the kernel killed it 32 minutes in
-  ([evidence](../../../data/analyses/2026-09-11-d026-replay-event-rates.md)).
-  It wrote **5,860,000 rows in 586 chunks** while covering **32 %** of a
-  source session holding **4,544,560 rows in 511 chunks** — more rows than its
-  input contains, over a third of the span. Something amplifies rows and
-  memory grows with it. **Do not guess the mechanism**; find it, then decide
-  whether the fix belongs at the emit path or the writer.
-  This is load-bearing: `start_replay` is the sanctioned way to evaluate
-  detectors without the truck (AGENTS.md), and today a long one takes the
-  daemon down. Pre-existing, not a D01.9 regression.
+- [~] **D02.9 Replay writes 1.29× its input, and the OOM was never the replay.**
+  **Root-caused 2026-09-17, read-only, no replay run**
+  ([evidence](../../../data/analyses/2026-09-17-d029-replay-amplification.md)).
+  The original framing was wrong in both halves: nothing grows without bound, and
+  memory did not grow with rows. Measured per `source` against the real source
+  session (counted, not estimated from chunk counts):
+
+  | source | source | replay | ratio |
+  |---|---:|---:|---:|
+  | `can` | 3,133,682 | 3,110,773 | **0.993** |
+  | `obd` | 36,715 | 36,461 | **0.993** |
+  | `decoded` | 1,319,681 | 2,620,062 | **1.985** |
+  | `derived` | 19,248 | 34,624 | 1.799 |
+  | `gps` | 35,234 | 58,080 | 1.648 |
+  | total | 4,544,560 | 5,860,000 | **1.289** |
+
+  Three separate things, only one of which is a row amplifier:
+  1. **It consumed ~99 % of the source, not 32 %.** `can`/`obd` at 0.993× prove
+     it read the whole session; the missing 0.7 % is the chunk in flight at the
+     kill. "32 % of the span" was a **wall-time** fraction (1,910 s of clock
+     against a 5,889 s recording) multiplied against a row count. A "1x" replay
+     outruns its recording because `_MAX_GAP_SECONDS = 0.5`
+     (`replay.py:46,160-167`) clamps the *sleep*, so any recorded gap costs at
+     most 0.5 s — 18.9× effective on one real local session, 3.08× here — while
+     the API, status and log all still say `speed: 1.0`. **Report
+     `rows_emitted`/`source_rows_total` and the effective speed; do not add a
+     throttle** — the clamp is deliberate, the silence about it is the defect.
+  2. **`decoded` is persisted twice, at the emit path.** `_iter_rows`
+     (`replay.py:101-126`) re-emits the stored `decoded` rows *and* replayed
+     `can` rows keep their payload, so the storage sink re-derives them
+     (`drain.py:212-217` → `frame_decoder.py:88-118`). `derived` doubles the
+     same way. The copies are not byte-identical (replay rebases timestamps), so
+     de-duplication after the fact will not find them.
+     **Open question that decides the layer, and it needs answering before
+     either fix lands:** do the re-derived rows reach the feature builder and
+     detectors, or only the writer? If only the writer, then skipping replayed
+     `decoded` rows at the emit path would starve the detectors of the very
+     features a replay exists to evaluate. The alternative is a sink-side skip
+     while a replay is active (the daemon knows — `replay_id`), at the cost of
+     mode-dependent writer behaviour. Operator's call.
+  3. **Live GPS contaminates the output** — `gps` at 1.648× is ~22,800 rows that
+     are not in the source: the Pi's own receiver kept writing into the active
+     session directory, which during a replay is the `_replay-*` dir, at ~12
+     rows/s. `can`/`obd` escaped only because that replay ran parked. So a
+     replay output is the replay **plus whatever the live sensors produced
+     meanwhile**, and any comparison of its GPS or derived-speed channels against
+     the source is comparing two different drives. New; not previously recorded.
+
+  What remains of D02.9 itself is items 1 and 2 above. The memory half is a
+  different defect and is now D03.6.
+
+  Evidence preserved before the 7-day replay sweep: source `2026-09-10T142711`
+  **pinned** on the Pi, and both directories copied to
+  `~/canary-data/_d029-evidence/`.
   _From D02._
 
 - [ ] **D02.10 Get a known-good baseline session back onto the Pi.**
@@ -169,6 +219,17 @@ of them already fixed and deployed.
 
 ## Opened 2026-09-17 on the drive
 
+- [ ] **D03.7 The sustained-validation harness cannot see replay row
+  duplication.** It wires replay through the storage decode
+  (`src/validation/harness.py:617-690`), so it is the right instrument — but its
+  fixture `tests/fixtures/ground_truth/drive-slice` holds `gps 1682 / can 19122 /
+  obd 953` and **no `decoded` rows**, so the expansion it records
+  (`decoded_rows: 3080` beside `can: 2189`) is a correct one-to-many for that
+  fixture and structurally blind to D02.9's doubling. A regression test needs a
+  fixture whose source already contains `decoded:` rows. The harness already
+  measures `max_rss_mb`, so it can cover D03.6 too once pointed at a big enough
+  session, off the vehicle.
+
 - [x] **D03.1 Capture-quality scoring ran on the event loop.** A live
   `GET /control/capture/quality` against a running 20-minute, 127 req/s capture
   held the daemon's loop for **60 s**, and the `DELETE` that stopped it held it
@@ -234,6 +295,36 @@ of them already fixed and deployed.
   0.90 Hz DID / 0.341 s skew, from before D01.8 and D01.9). Left alone
   deliberately: editing a saved profile mid-drive is how the `fuel-map` freeze
   incident happened.
+
+- [ ] **D03.6 The trip-end digest loads a whole session at raw resolution, on
+  the event loop.** This, not the replay, is what took the daemon to 7.7 GB and
+  got it OOM-killed on 2026-09-11
+  ([evidence](../../../data/analyses/2026-09-17-d029-replay-amplification.md)).
+  The trip-end hook (`drain.py:556-558` → `runtime.py:249` →
+  `control/trip_end.py:60`) runs `get_or_compute_digest` **synchronously on the
+  loop**, and `resample_and_segment` reads every chunk with every column
+  (payload bytes, `metadata_json`), pivots on `(session, timestamp)` at **raw
+  microsecond resolution**, and only then resamples to 1 Hz. Measured: **1.49 KB
+  of peak RSS per session row** (592 MB for 397 k rows), so ~8.7 GB at 5.86 M
+  rows against the kernel's 7.7 GB kill. Confirmed one-shot, not a leak, and
+  confirmed to have fired: the replay directory has 586 chunks, `dtc.json`, and
+  **no** `digest.json`/`classification.json`/`fingerprint.json`.
+  Two parts, and the second is the real one:
+  1. **Push the existing refusal into the shared function.** `GET` for the same
+     digest already refuses `_replay-*` (`control/digest.py:30` →
+     `control/sessions.py:166-178`); the trip-end hook is the one caller that
+     bypasses it. Cheap, and it names the incident — but it only moves the cliff.
+  2. **Fix the order of operations.** Peak memory is O(rows × channels) because
+     the pivot precedes the resample, so a long *live* drive OOMs the same way:
+     2.6 M rows already needs ~3.9 GB on an 8 GB Pi. Select only the columns the
+     digest needs and reduce each channel onto the resample grid **before** the
+     pivot (~1,900 × 100 instead of ~4 M × 100), and run it off the loop. Every
+     real drive so far has a `digest.json`, so this has never fired live; the
+     replay was simply the first session big enough. Do not treat "it has not
+     happened on a drive yet" as headroom — it is ~2× away.
+  Measure, don't extrapolate: re-run `resample_and_segment` against the pulled
+  2.6 M-row `2026-08-08T214218` under `ru_maxrss` **on the laptop**. That needs
+  ~4 GB and must never be run on the Pi.
 
 - [ ] **D03.5 The Pi cannot pull from GitHub.** `git pull` on the Pi fails with
   "Please make sure you have the correct access rights" — no deploy key for
