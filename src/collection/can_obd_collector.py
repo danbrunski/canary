@@ -848,7 +848,7 @@ def run_can_obd_loop(
     discovery_registry.remember(discovery)
     # The loop owned the bus: a parse-error burst that ran to the end of it is
     # summarized here or never (one forced line, at a once-per-loop boundary).
-    flush_dropped_can_frame_log(stats.parse_errors, owner=_PARSE_ERROR_OWNER, force=True)
+    flush_dropped_can_frame_log(owner=_PARSE_ERROR_OWNER, force=True)
     return stats
 
 
@@ -2222,11 +2222,11 @@ def _recv_and_tap(
         msg = receive_frame(bus, timeout=timeout, on_frame=on_frame)
     except (ValueError, IndexError) as exc:
         stats.parse_errors += 1
-        log_dropped_can_frame(stats.parse_errors, exc, owner=_PARSE_ERROR_OWNER)
+        log_dropped_can_frame(exc, owner=_PARSE_ERROR_OWNER)
         return None
     if msg is None:
         return None
-    flush_dropped_can_frame_log(stats.parse_errors, owner=_PARSE_ERROR_OWNER)
+    flush_dropped_can_frame_log(owner=_PARSE_ERROR_OWNER)
     stats.frames_seen += 1
     return msg
 

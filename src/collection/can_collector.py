@@ -172,12 +172,12 @@ class CanReader(threading.Thread):
                     msg = self._bus.recv(timeout=self._poll_interval)
                 except (ValueError, IndexError) as exc:
                     self.parse_errors += 1
-                    log_dropped_can_frame(self.parse_errors, exc, owner=self.name)
+                    log_dropped_can_frame(exc, owner=self.name)
                     time.sleep(0.001)
                     continue
                 if msg is None:
                     continue
-                flush_dropped_can_frame_log(self.parse_errors, owner=self.name)
+                flush_dropped_can_frame_log(owner=self.name)
                 self.frames += 1
                 self._handoff.push(frame_to_record(msg))
         except Exception as exc:  # noqa: BLE001 — bus-level failure, owner decides
@@ -185,7 +185,7 @@ class CanReader(threading.Thread):
         finally:
             # The thread is the only producer of these errors; its last burst
             # is summarized here or nowhere.
-            flush_dropped_can_frame_log(self.parse_errors, owner=self.name, force=True)
+            flush_dropped_can_frame_log(owner=self.name, force=True)
             self._on_exit()
 
 
@@ -503,7 +503,7 @@ def record(
                     # zero reconnects, frames stopped 5 min in. A small sleep
                     # keeps even legit storms of parse errors from burning CPU.
                     parse_errors += 1
-                    log_dropped_can_frame(parse_errors, exc, owner=parse_error_owner)
+                    log_dropped_can_frame(exc, owner=parse_error_owner)
                     time.sleep(0.001)
                     continue
                 except Exception as exc:
@@ -533,7 +533,7 @@ def record(
                 if msg is None:
                     continue
 
-                flush_dropped_can_frame_log(parse_errors, owner=parse_error_owner)
+                flush_dropped_can_frame_log(owner=parse_error_owner)
                 try:
                     writer.on_message_received(msg)
                     count += 1
@@ -561,7 +561,7 @@ def record(
         ended_at = datetime.now(UTC)
         # The recording is over: a parse-error burst that ran to the end is
         # summarized here or never.
-        flush_dropped_can_frame_log(parse_errors, owner=parse_error_owner, force=True)
+        flush_dropped_can_frame_log(owner=parse_error_owner, force=True)
         # The bus may have been rebuilt during reconnect; the caller's
         # reference is stale. Close whatever we're currently holding so
         # we don't leak a USB handle even on the disk-error path. The

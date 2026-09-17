@@ -306,12 +306,12 @@ def test_drop_log_first_line_is_immediate_then_one_per_interval(caplog) -> None:
     throttle = DropLogThrottle("dropped", clock=clock, interval=1.0)
     caplog.set_level(logging.WARNING)
 
-    assert throttle.record("obd:RPM", dropped_total=1) is True
-    assert throttle.record("obd:RPM", dropped_total=2) is False
+    assert throttle.record("obd:RPM") is True
+    assert throttle.record("obd:RPM") is False
     clock.advance(0.99)
-    assert throttle.record("obd:RPM", dropped_total=3) is False
+    assert throttle.record("obd:RPM") is False
     clock.advance(0.01)
-    assert throttle.record("obd:RPM", dropped_total=4) is True
+    assert throttle.record("obd:RPM") is True
     assert len(_lines(caplog, "dropped")) == 2
 
 
@@ -323,14 +323,14 @@ def test_drop_log_volume_does_not_grow_with_drop_volume(caplog) -> None:
     caplog.set_level(logging.WARNING)
 
     small = DropLogThrottle("dropped", clock=clock)
-    for i in range(10):
-        small.record("can:0x100", dropped_total=i + 1)
+    for _ in range(10):
+        small.record("can:0x100")
     ten = len(_lines(caplog, "dropped"))
 
     caplog.clear()
     huge = DropLogThrottle("dropped", clock=clock)
-    for i in range(150_114):
-        huge.record("can:0x100", dropped_total=i + 1)
+    for _ in range(150_114):
+        huge.record("can:0x100")
     many = len(_lines(caplog, "dropped"))
 
     assert ten == many == 1
@@ -347,11 +347,11 @@ def test_drop_log_breakdown_is_bounded_and_counts_add_up(caplog) -> None:
     for channel in range(9):
         for _ in range(channel + 1):
             total += 1
-            throttle.record(f"obd:CH{channel}", dropped_total=total)
+            throttle.record(f"obd:CH{channel}")
     assert total == 45
     assert len(_lines(caplog, "dropped")) == 1  # clock frozen: one line so far
 
-    assert throttle.flush(dropped_total=total, force=True) is True
+    assert throttle.flush(force=True) is True
     lines = _lines(caplog, "dropped")
     assert len(lines) == 2
     first, last = lines
@@ -373,8 +373,8 @@ def test_drop_log_breakdown_is_bounded_and_counts_add_up(caplog) -> None:
 def test_drop_log_flush_is_a_no_op_without_a_pending_tail(caplog) -> None:
     caplog.set_level(logging.WARNING)
     throttle = DropLogThrottle("dropped", clock=_FakeClock())
-    assert throttle.flush(dropped_total=0) is False
-    assert throttle.flush(dropped_total=0, force=True) is False
+    assert throttle.flush() is False
+    assert throttle.flush(force=True) is False
     assert _lines(caplog, "dropped") == []
 
 
@@ -502,13 +502,13 @@ def test_can_frame_parse_error_storm_is_bounded_and_keeps_the_tail(caplog) -> No
     caplog.set_level(logging.WARNING)
     owner = "test-storm"
     errors = 10_000
-    for i in range(errors):
-        log_dropped_can_frame(i + 1, ValueError("bad slcan line"), owner=owner)
+    for _ in range(errors):
+        log_dropped_can_frame(ValueError("bad slcan line"), owner=owner)
     # Real monotonic clock here (the registry owns it); a second boundary
     # inside the loop may allow one extra line, never one per 100 errors.
     assert len(_lines(caplog, _CAN_PARSE_MESSAGE)) <= 2
 
-    flush_dropped_can_frame_log(errors, owner=owner, force=True)
+    flush_dropped_can_frame_log(owner=owner, force=True)
     lines = _lines(caplog, _CAN_PARSE_MESSAGE)
     assert sum(line.dropped_since_last for line in lines) == errors
     assert lines[-1].dropped_total == errors
@@ -520,8 +520,8 @@ def test_can_frame_parse_error_throttles_are_per_owner(caplog) -> None:
     """Two live buses must not suppress each other's lines — a shared
     throttle would also make ``dropped_total`` flip between two counters."""
     caplog.set_level(logging.WARNING)
-    log_dropped_can_frame(1, ValueError("a"), owner="test-bus-a")
-    log_dropped_can_frame(1, IndexError("b"), owner="test-bus-b")
+    log_dropped_can_frame(ValueError("a"), owner="test-bus-a")
+    log_dropped_can_frame(IndexError("b"), owner="test-bus-b")
 
     lines = _lines(caplog, _CAN_PARSE_MESSAGE)
     assert [line.owner for line in lines] == ["test-bus-a", "test-bus-b"]
@@ -530,5 +530,32 @@ def test_can_frame_parse_error_throttles_are_per_owner(caplog) -> None:
 
 def test_flush_can_frame_parse_error_log_is_a_no_op_for_an_unknown_owner(caplog) -> None:
     caplog.set_level(logging.WARNING)
-    flush_dropped_can_frame_log(0, owner="never-logged", force=True)
+    flush_dropped_can_frame_log(owner="never-logged", force=True)
     assert _lines(caplog, _CAN_PARSE_MESSAGE) == []
+
+
+def test_dropped_total_accumulates_across_a_collector_restart(caplog) -> None:
+    """Found by verification, 2026-09-17. A ``CanReader`` is rebuilt on every
+    reconnect attempt with ``parse_errors`` back at 0, and
+    ``run_can_obd_loop`` gets a fresh ``CanObdLoopStats`` per attempt, while
+    the throttle registry is keyed by an owner string that outlives both.
+    Echoing the owner's counter therefore undercounted: 5,000 drops then
+    3,000 more reported a total of 5,000. ``dropped_total`` must equal the sum
+    of the lines' own ``dropped_since_last`` values.
+    """
+    clock = _FakeClock()
+    caplog.set_level(logging.WARNING)
+    throttle = DropLogThrottle("dropped", clock=clock, interval=1.0)
+
+    for _ in range(5000):
+        throttle.record("ValueError")
+    throttle.flush(force=True)
+    clock.advance(5.0)
+    # the reconnect: the owner's own counter restarts at zero here
+    for _ in range(3000):
+        throttle.record("ValueError")
+    throttle.flush(force=True)
+
+    lines = _lines(caplog, "dropped")
+    assert sum(line.dropped_since_last for line in lines) == 8000
+    assert lines[-1].dropped_total == 8000

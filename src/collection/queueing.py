@@ -53,8 +53,11 @@ class DropLogThrottle:
     Every drop is *counted* here; only lines are rate-limited. The first drop
     of a burst logs immediately (loss starting is the signal), then at most one
     line per ``interval``, each carrying what happened since the previous line:
-    ``dropped_since_last``, the owner's exact cumulative ``dropped_total``, and
-    a breakdown over at most ``breakdown_limit`` keys plus an ``others`` count.
+    ``dropped_since_last``, a cumulative ``dropped_total`` that is always
+    exactly the sum of this owner's ``dropped_since_last`` values (so it keeps
+    accumulating across a collector restart, where the owner's own counter goes
+    back to zero), and a breakdown over at most ``breakdown_limit`` keys plus
+    an ``others`` count.
     Nothing here may become the source of truth for how much was lost — the
     owner's counter stays exact and is what ``/status`` reports.
 
@@ -104,20 +107,18 @@ class DropLogThrottle:
         self,
         key: str,
         *,
-        dropped_total: int,
         extra: Mapping[str, object] | None = None,
     ) -> bool:
         """Count one drop; return True when it was summarized in a line now."""
         with self._lock:
             self._pending += 1
             self._pending_by_key[key] += 1
-            payload = self._due_locked(dropped_total, extra, force=False)
+            payload = self._due_locked(extra, force=False)
         return self._emit(payload)
 
     def flush(
         self,
         *,
-        dropped_total: int,
         extra: Mapping[str, object] | None = None,
         force: bool = False,
     ) -> bool:
@@ -125,12 +126,11 @@ class DropLogThrottle:
         if not self._pending:
             return False
         with self._lock:
-            payload = self._due_locked(dropped_total, extra, force=force)
+            payload = self._due_locked(extra, force=force)
         return self._emit(payload)
 
     def _due_locked(
         self,
-        dropped_total: int,
         extra: Mapping[str, object] | None,
         *,
         force: bool,
@@ -141,9 +141,17 @@ class DropLogThrottle:
         if not force and self._last_emit is not None and now - self._last_emit < self._interval:
             return None
         self._last_emit = now
-        # The owner's counter is authoritative, but it is read without its own
-        # lock at flush time; never let the reported total walk backwards.
-        self._total = max(self._total, dropped_total)
+        # Accumulate what this throttle has actually summarized, rather than
+        # echoing the owner's counter. The owners are long-lived strings whose
+        # counters are not: a CanReader is rebuilt per reconnect attempt with
+        # parse_errors back at 0, and run_can_obd_loop gets a fresh
+        # CanObdLoopStats per attempt, so echoing that counter made
+        # dropped_total undercount after a reconnect (found by verification
+        # 2026-09-17: 5,000 + 3,000 drops reported a total of 5,000). This way
+        # dropped_total is always exactly sum(dropped_since_last) for the owner,
+        # across restarts, which is also what CanReceiveStats.parse_errors
+        # accumulates.
+        self._total += self._pending
         payload: dict[str, object] = dict(extra or {})
         payload["dropped_since_last"] = self._pending
         payload["dropped_total"] = self._total
@@ -194,12 +202,11 @@ class QueueDropCounter:
         self.dropped += 1
         self._throttle.record(
             channel_key(record.source, record.channel),
-            dropped_total=self.dropped,
             extra={"queue": self.name},
         )
 
     def flush_drop_log(self, *, force: bool = False) -> None:
-        self._throttle.flush(dropped_total=self.dropped, extra={"queue": self.name}, force=force)
+        self._throttle.flush(extra={"queue": self.name}, force=force)
 
 
 #: Every production call site passes its own ``on_drop``; this is the
@@ -231,15 +238,15 @@ def _can_frame_drop_log(owner: str) -> DropLogThrottle:
         return throttle
 
 
-def log_dropped_can_frame(count: int, exc: Exception, *, owner: str) -> None:
+def log_dropped_can_frame(exc: Exception, *, owner: str) -> None:
     """Rate-limited warning for a malformed CAN frame parse error (Task 4.7).
 
     Shared by the three read loops that hand-rolled this warning identically
     (``can_collector.py``'s slcan reader thread and socketcan recorder loop,
-    ``can_obd_collector.py``'s frame-read helper). ``count`` is the caller's
-    own running total (already incremented) — each site keeps its own counter
-    storage (a thread attribute, a local ``int``, a ``CanObdLoopStats`` field),
-    so this owns only the logging policy: one line per ``owner`` per
+    ``can_obd_collector.py``'s frame-read helper). Each site keeps its own
+    exact counter (a thread attribute, a local ``int``, a ``CanObdLoopStats``
+    field) and that is what ``/status`` reports; this owns only the logging
+    policy: one line per ``owner`` per
     :data:`DROP_LOG_INTERVAL_SECONDS`, summarizing the interval by exception
     type. Parse-error storms are proportional to a failure rate (63M errors in
     27 minutes, session 2026-05-15T020322), which is exactly the shape that
@@ -248,17 +255,16 @@ def log_dropped_can_frame(count: int, exc: Exception, *, owner: str) -> None:
     """
     _can_frame_drop_log(owner).record(
         type(exc).__name__,
-        dropped_total=count,
         extra={"owner": owner, "error": f"{type(exc).__name__}: {exc}"},
     )
 
 
-def flush_dropped_can_frame_log(count: int, *, owner: str, force: bool = False) -> None:
+def flush_dropped_can_frame_log(*, owner: str, force: bool = False) -> None:
     """Emit ``owner``'s final parse-error summary once frames read cleanly."""
     throttle = _CAN_FRAME_DROP_LOGS.get(owner)
     if throttle is None or not throttle.pending:
         return
-    throttle.flush(dropped_total=count, extra={"owner": owner}, force=force)
+    throttle.flush(extra={"owner": owner}, force=force)
 
 
 @dataclass
@@ -442,7 +448,7 @@ class ThreadHandoff:
                 schedule = not self._scheduled
                 self._scheduled = True
         if dropped_total:
-            self._log_drop(dropped_total, record)
+            self._log_drop(record)
             return False
         # An accepted record is the drop-free observation that closes a burst:
         # emit its final summary rather than let the tail of the story sit in
@@ -514,10 +520,9 @@ class ThreadHandoff:
             # and covers the ingest-queue counter's tail too.
             self._flush_drop_logs()
 
-    def _log_drop(self, dropped_total: int, record: TelemetryRecord) -> None:
+    def _log_drop(self, record: TelemetryRecord) -> None:
         self._drop_log.record(
             channel_key(record.source, record.channel),
-            dropped_total=dropped_total,
             extra=self._drop_log_extra(),
         )
 
@@ -528,7 +533,7 @@ class ThreadHandoff:
         ingest-queue-full in the ``on_drop`` counter — and a summary that is
         never emitted is how "it dropped 150k records" becomes invisible.
         """
-        self._drop_log.flush(dropped_total=self._dropped, extra=self._drop_log_extra(), force=force)
+        self._drop_log.flush(extra=self._drop_log_extra(), force=force)
         on_drop = _drop_callback(self._on_drop)
         if isinstance(on_drop, SupportsDropFlush):
             on_drop.flush_drop_log(force=force)

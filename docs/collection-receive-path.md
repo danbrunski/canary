@@ -93,7 +93,10 @@ is callable).
 - **Drop logging is time-limited, not count-limited** (`DropLogThrottle`).
   One line per handoff per `DROP_LOG_INTERVAL_SECONDS` (1.0), the first drop
   of a burst immediate, each line summarizing its interval:
-  `dropped_since_last`, the exact cumulative `dropped_total`, and a
+  `dropped_since_last`, a cumulative `dropped_total` that is always exactly the
+  sum of that owner's `dropped_since_last` values — it keeps accumulating
+  across a collector restart, where the owner's own counter goes back to zero,
+  and a
   `dropped_by` breakdown of `source:channel` pairs capped at
   `DROP_LOG_BREAKDOWN_LIMIT` (5) plus `dropped_by_others`. The old
   every-100th-drop rule made log volume proportional to *loss* volume: the
