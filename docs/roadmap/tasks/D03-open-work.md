@@ -100,13 +100,32 @@ records why the validation harness could not have caught either.
   `~/canary-data/_d029-evidence/`.
   _From D02._
 
-- [ ] **D02.10 Get a known-good baseline session back onto the Pi.**
+- [~] **D02.10 Known-good baseline sessions are back on the Pi and pinned.**
   D02.6 characterised the anomaly-event rate (3.27/min, sequence detector 60 %
-  of it) but could not **judge** it, because retention has swept every session
-  the deployed models were trained on. Push one from `~/canary-data` (e.g.
-  `2026-07-26T234833`), **pin it** so retention cannot take it, re-run D02.6's
-  replay against it, and compare per-detector rates. Until then "3.27 events
-  per minute" has no reference. Blocked behind D02.9 for anything long.
+  of it) but could not **judge** it, because retention had swept every session
+  the deployed models were trained on.
+  **Done 2026-09-17: four sessions pushed from `~/canary-data` and pinned**, so
+  retention cannot take them. Which sessions was verified against the deployed
+  manifests rather than assumed — `models/nissan-xterra-2008/*/model.manifest.json`
+  on the Pi:
+  - `2026-07-26T234833` (80 chunks) — in `training_sessions` of **both** the
+    deployed IF (18 sessions) and LSTM (19). The task's own suggestion, now
+    confirmed to be training data for the artifacts actually serving.
+  - `2026-07-22T163917` (33), `2026-07-26T162332` (243), `2026-07-27T010704`
+    (261) — the **`calibration_sessions`** of both models. These are the better
+    reference for an event *rate*: they are the sessions the thresholds were
+    calibrated on, so the designed false-positive rate is what a replay of them
+    should reproduce. Worth using instead of a training session for the
+    comparison.
+  **What remains is the replay comparison.** It is no longer blocked by D02.9 in
+  the way this task assumed: the OOM was never the replay (D03.6 — it is the
+  trip-end digest), and the cliff sits between ~4.5 M and ~5.9 M rows in the
+  *output*. These sessions are 700 k–2.5 M rows, so their replays land well
+  under it and are safe to run today. Two things to do first: deploy `c15f66a`
+  (replay now emits only captured sources — otherwise the output is inflated
+  1.29× and the detectors read whichever `decoded` copy landed last), and use a
+  calibration session rather than the training one. Do not run it while the
+  truck is collecting: a replay replaces live collection.
   _From D02._
 
 - [ ] **D01.10 Rebuild `reconcile_feature_frame_to_spec` instead of mutating
