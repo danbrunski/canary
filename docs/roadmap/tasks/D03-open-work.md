@@ -13,6 +13,12 @@ Mark `[x]` only with the measurement in hand, and link the artifact.
 **Three of the eight need the truck, and no bench run substitutes.** One needs
 a decision from the operator. Four can be done at a desk today.
 
+**Updated 2026-09-17** by an autonomous run during a 5-hour drive
+([log](../../../data/analyses/2026-09-17-drive-log.md)): D01.5's premise was
+re-measured and its headline figure is in doubt, D02.2 gained a controlled pair
+and a third candidate fix, and five new items (D03.1–D03.5) were opened, three
+of them already fixed and deployed.
+
 ## Rules that still apply
 
 - Read `/status.vehicle_state` before interpreting anything (H0).
@@ -90,7 +96,19 @@ a decision from the operator. Four can be done at a desk today.
   are not atomic and the daemon's window is the wider, which biases it low.
   The fix is a dedicated reader thread that owns `recv()` and fans out to the
   tap and the response matcher. **Not a bigger buffer** — that only delays the
-  overflow. Re-measure against the same 65 s bracketed protocol.
+  overflow.
+  **Re-measured 2026-09-17 at driving load, and the premise needs re-stating**
+  ([evidence](../../../data/analyses/2026-09-17-drive-log.md)): over 300 s on the
+  `default` profile at ~2,950 rpm, daemon `receive.frames_seen` +491,083 against a
+  kernel `rx_packets` bracket of 490,919 (narrowest) to 496,570 (widest), i.e.
+  **loss of −0.03 % … 1.10 %**, midpoint 0.54 %, with `rx_dropped` flat.
+  The 65 s protocol above reads the kernel counter once per end, and a `/status`
+  read on this Pi takes ~1.7 s ≈ 2,700 frames, so its window error is **as large
+  as the 4.24 % it reported**. The tighter protocol reads the kernel counter
+  immediately before *and* after each daemon read, making each end's uncertainty
+  explicit. **Do not quote 4.24 % again without re-measuring it that way**, and
+  re-measure at warm idle too before sizing this fix — at driving load the loss
+  may already be under 1 %.
   _From D01._
 
 - [ ] **D02.2 Measure the MCP2515 controller overflow, separately from the
@@ -112,6 +130,26 @@ a decision from the operator. Four can be done at a desk today.
   `ip -d link` reports `clock 8000000`. The MCP2515 halves it. Do not "fix"
   this.
   Both changes need a reboot, and ranking them needs bus traffic.
+  **Progressed 2026-09-17 on the drive** — overflow tracks *burstiness*, not our
+  average request rate ([evidence](../../../data/analyses/2026-09-17-drive-log.md)).
+  `rx_over_errors` per minute, `rx_dropped` flat throughout, broadcast ~1,640
+  frames/s in every case: `default` 8 req/s in rounds **0.4**; `tuning-did`
+  127 req/s one-at-a-time **0.05**; `did_log` 118 req/s paced **1.5**;
+  `tuning-hybrid-research` **47 req/s in rounds 5.2**; `did_log` **45.8 req/s
+  paced 1.7**; `did_log` ~650 req/s back-to-back **36**. The middle two are a
+  controlled pair 40 minutes apart on the same road at the same rate:
+  **bursty is 3× worse than paced**, and paced 118 req/s is no worse than paced
+  46 req/s. Two hardware RX buffers overflow when several frames arrive faster
+  than SPI drains them, which is what a round of 8–11 simultaneous requests
+  produces and what the same requests spread over the same second do not.
+  So there is now a **third candidate that needs no reboot: stagger the
+  scheduler's round instead of firing it as a burst.** It is not free —
+  spreading a round widens intra-round acquisition skew, which is exactly what
+  the capture-quality contract's `max_tuple_skew_s` and same-instant DID pairing
+  depend on, so it trades frame loss against pairing tightness. That trade is
+  the operator's call, not something to land unattended. Caveat on the table:
+  each row is one window and driving differed between them, so treat the
+  ordering as a lead and the controlled pair as the finding.
   _From D02._
 
 - [~] **H6 (C10.12) Compare candidate budgets incrementally under the same
@@ -128,6 +166,68 @@ a decision from the operator. Four can be done at a desk today.
   rung with the **most** headroom, and a ceiling is a failure **above** a rung
   that held.
   _From PENDING-HARDWARE (originally C10)._
+
+## Opened 2026-09-17 on the drive
+
+- [x] **D03.1 Capture-quality scoring ran on the event loop.** A live
+  `GET /control/capture/quality` against a running 20-minute, 127 req/s capture
+  held the daemon's loop for **60 s**, and the `DELETE` that stopped it held it
+  another **55 s**: no HTTP, no collection, 38,600 records dropped at the
+  `canable-obd` handoff, 108 inference deadlines overrun. The stop verdict then
+  failed on `acquisition_gap` with `missing_final_s ≈ 49 s` — a hole the stall
+  had punched in the data it was judging. Fixed in `f2093489`: the recompute
+  runs in a spawn child process behind one async helper and now **refuses** to
+  run on a thread with a running event loop, so the unsafe call cannot be
+  written from an async path again. Verified on the truck at 19:08:34 — the
+  stop took 35 s with `/status` answering throughout (1.3–2.6 s vs 0.17 s idle)
+  and zero drops.
+  **Follow-up worth its own item:** the recompute itself is ~123 s for a
+  20-minute capture, of which **115 s is `json.loads` over `metadata_json`,
+  21.1 M parses = six passes over every row**, ~94 % of them on rows the quality
+  path discards (only `source == "obd"` rows are used). Parsing once in
+  `channels._long_frame`/`read_acquisition_frame` and pushing a `source` filter
+  into the parquet read is an estimated 120 s → 1–3 s, but it edits
+  `src/analysis/channels.py`, which `compare_channels`/`read_channels` share.
+
+- [x] **D03.2 A rejected Mode 22 batch was indistinguishable from a working
+  one.** This ECM answers every multi-DID `0x22` with `7F 22 12` (measured on
+  raw frames 2026-09-17, session 0xC0 held), but `sweep_dids_batched` re-read
+  each rejected group one DID at a time and recorded nothing about it — so a
+  batched and an unbatched sweep return the same DID set with the same widths
+  whether the ECU batches or not. That match is the whole evidence base for the
+  2026-08-08 "batched Mode 22 verified" claim, now retracted in the vehicle
+  skill. Fixed in `4a68252`. **Consequence: no same-instant multi-DID sampling
+  on this truck**, and the daemon's single-DID transport is the correct one.
+
+- [x] **D03.3 Drop logging amplified overload.** The handoff warning fired every
+  100 dropped records, so a 150,114-record burst produced **1,502 synchronous
+  journald writes from the producer path**, competing with the consumer that was
+  already behind. Fixed in `de5f0fd`: first line immediate, then at most one per
+  second carrying the interval's count, the exact cumulative total and a bounded
+  per-channel breakdown, with the burst's final line never lost. Counters stay
+  exact; nothing widened.
+
+- [ ] **D03.4 `tuning-hybrid-research` requests a cycle it cannot meet.** The
+  scheduler logs `hybrid cycle of 0.250s is infeasible: 11 Mode 01 + 8-9 DID +
+  2 session requests at 90.0 req/s` whenever the profile runs, and every stop
+  verdict reads `rate_shortfall` because all DIDs get 2.0 Hz against a
+  `requested_hz: 4.0` — structural, since Mode 01 and Mode 22 alternate. The
+  profile delivers well (3.98 Hz Mode 01 / 2.01 Hz DID at 47 req/s, 20 minutes
+  with zero drops, DID↔DID skew 0.094 s); it is the *request* that is wrong.
+  `mode22_rate_weights: 0.5` or a 2 Hz DID target makes it honest. Its
+  `capacity_evidence` is also stale by ~2.7× (recorded 1.46 Hz Mode 01 /
+  0.90 Hz DID / 0.341 s skew, from before D01.8 and D01.9). Left alone
+  deliberately: editing a saved profile mid-drive is how the `fuel-map` freeze
+  incident happened.
+
+- [ ] **D03.5 The Pi cannot pull from GitHub.** `git pull` on the Pi fails with
+  "Please make sure you have the correct access rights" — no deploy key for
+  `git@github.com:danbrunski/canary.git`. The first deploy attempt of the day
+  therefore restarted the *same* code while reporting success. Worked around
+  with `git bundle create <file> <pi-HEAD>..main main` + `scp` +
+  `git pull --ff-only /tmp/<file> main`, which is a real fast-forward and keeps
+  history. A read-only deploy key, or a scripted bundle path, removes a silent
+  failure mode from every future deploy.
 
 ## Deferred by decision, not blocked
 
