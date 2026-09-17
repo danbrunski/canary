@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import threading
 import time
 from functools import partial
@@ -11,9 +12,14 @@ from functools import partial
 import pytest
 
 from src.collection.queueing import (
+    DROP_LOG_BREAKDOWN_LIMIT,
+    DROP_LOG_INTERVAL_SECONDS,
+    DropLogThrottle,
     QueueDepthMonitor,
     QueueDropCounter,
     ThreadHandoff,
+    flush_dropped_can_frame_log,
+    log_dropped_can_frame,
     put_nowait_or_drop,
     threadsafe_enqueue,
 )
@@ -22,6 +28,27 @@ from src.telemetry import TelemetryRecord
 
 def _record() -> TelemetryRecord:
     return TelemetryRecord.obd(1_778_000_000.0, "RPM", 700.0, "rpm")
+
+
+class _FakeClock:
+    """Injected monotonic clock: the rate limiters are never tested with sleep."""
+
+    def __init__(self, now: float = 0.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _lines(caplog: pytest.LogCaptureFixture, message: str) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.getMessage() == message]
+
+
+_HANDOFF_DROP_MESSAGE = "telemetry handoff buffer full; dropping record"
+_QUEUE_DROP_MESSAGE = "telemetry queue full; dropping record"
 
 
 def test_put_nowait_or_drop_counts_full_queue() -> None:
@@ -265,3 +292,243 @@ async def test_thread_handoff_benchmark_reduces_loop_callbacks_from_a_thread() -
     )
     assert per_record_callbacks == n
     assert chunked_callbacks <= (1 - _HANDOFF_MIN_CALLBACK_REDUCTION) * per_record_callbacks
+
+
+# ---------------------------------------------------------------------------
+# Drop-log rate limiting — the log volume must not track the loss volume
+# ---------------------------------------------------------------------------
+
+
+def test_drop_log_first_line_is_immediate_then_one_per_interval(caplog) -> None:
+    """The first drop of a burst is the signal that loss started, so it logs
+    at once; after that the interval — not the drop count — sets the rate."""
+    clock = _FakeClock()
+    throttle = DropLogThrottle("dropped", clock=clock, interval=1.0)
+    caplog.set_level(logging.WARNING)
+
+    assert throttle.record("obd:RPM", dropped_total=1) is True
+    assert throttle.record("obd:RPM", dropped_total=2) is False
+    clock.advance(0.99)
+    assert throttle.record("obd:RPM", dropped_total=3) is False
+    clock.advance(0.01)
+    assert throttle.record("obd:RPM", dropped_total=4) is True
+    assert len(_lines(caplog, "dropped")) == 2
+
+
+def test_drop_log_volume_does_not_grow_with_drop_volume(caplog) -> None:
+    """The 2026-09-17 defect: 150,114 dropped records produced 1,502 warning
+    lines (one per 100 drops) from inside the producer path. Within one
+    interval, any number of drops is one line."""
+    clock = _FakeClock()
+    caplog.set_level(logging.WARNING)
+
+    small = DropLogThrottle("dropped", clock=clock)
+    for i in range(10):
+        small.record("can:0x100", dropped_total=i + 1)
+    ten = len(_lines(caplog, "dropped"))
+
+    caplog.clear()
+    huge = DropLogThrottle("dropped", clock=clock)
+    for i in range(150_114):
+        huge.record("can:0x100", dropped_total=i + 1)
+    many = len(_lines(caplog, "dropped"))
+
+    assert ten == many == 1
+
+
+def test_drop_log_breakdown_is_bounded_and_counts_add_up(caplog) -> None:
+    """Each line carries the interval's shape — distinct source/channel pairs
+    with counts — capped so the line itself cannot grow without bound."""
+    clock = _FakeClock()
+    throttle = DropLogThrottle("dropped", clock=clock)
+    caplog.set_level(logging.WARNING)
+
+    total = 0
+    for channel in range(9):
+        for _ in range(channel + 1):
+            total += 1
+            throttle.record(f"obd:CH{channel}", dropped_total=total)
+    assert total == 45
+    assert len(_lines(caplog, "dropped")) == 1  # clock frozen: one line so far
+
+    assert throttle.flush(dropped_total=total, force=True) is True
+    lines = _lines(caplog, "dropped")
+    assert len(lines) == 2
+    first, last = lines
+
+    assert first.dropped_since_last == 1
+    assert first.dropped_by == {"obd:CH0": 1}
+
+    assert len(last.dropped_by) == DROP_LOG_BREAKDOWN_LIMIT
+    assert last.dropped_by == {"obd:CH8": 9, "obd:CH7": 8, "obd:CH6": 7, "obd:CH5": 6, "obd:CH4": 5}
+    assert last.dropped_by_others == 2 + 3 + 4  # CH1..CH3; CH0's single drop is in line 1
+    assert last.dropped_by_others_keys == 3
+    assert sum(last.dropped_by.values()) + last.dropped_by_others == last.dropped_since_last
+    # Every drop is accounted for in exactly one line, and the cumulative
+    # total on the last line is the exact number dropped.
+    assert sum(line.dropped_since_last for line in lines) == total
+    assert last.dropped_total == total
+
+
+def test_drop_log_flush_is_a_no_op_without_a_pending_tail(caplog) -> None:
+    caplog.set_level(logging.WARNING)
+    throttle = DropLogThrottle("dropped", clock=_FakeClock())
+    assert throttle.flush(dropped_total=0) is False
+    assert throttle.flush(dropped_total=0, force=True) is False
+    assert _lines(caplog, "dropped") == []
+
+
+def test_drop_log_rejects_nonpositive_bounds() -> None:
+    with pytest.raises(ValueError):
+        DropLogThrottle("dropped", interval=0)
+    with pytest.raises(ValueError):
+        DropLogThrottle("dropped", breakdown_limit=0)
+
+
+def test_queue_drop_counter_stays_exact_under_rate_limiting(caplog) -> None:
+    """Requirement 2: only lines are rate-limited. ``dropped`` is what
+    ``/status`` and the loss reconciliation read, and it counts every drop."""
+    clock = _FakeClock()
+    counter = QueueDropCounter("gps", clock=clock)
+    caplog.set_level(logging.WARNING)
+
+    for _ in range(1000):
+        counter(_record())
+
+    assert counter.dropped == 1000
+    assert len(_lines(caplog, _QUEUE_DROP_MESSAGE)) == 1
+    clock.advance(DROP_LOG_INTERVAL_SECONDS)
+    counter.flush_drop_log()
+    lines = _lines(caplog, _QUEUE_DROP_MESSAGE)
+    assert sum(line.dropped_since_last for line in lines) == 1000
+    assert lines[-1].dropped_total == 1000
+    assert lines[-1].queue == "gps"
+
+
+async def test_handoff_drop_burst_is_bounded_and_fully_accounted(caplog) -> None:
+    """A 3-second burst at 100 drops/s: at most one line per interval (plus
+    the immediate first), the counts sum to the exact number dropped, and
+    ``HandoffStats.dropped`` is untouched by any of it."""
+    clock = _FakeClock()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    handoff = ThreadHandoff(
+        asyncio.get_running_loop(),
+        queue,
+        capacity=1,
+        clock=clock,
+        log_interval_seconds=1.0,
+    )
+    caplog.set_level(logging.WARNING)
+
+    # Pushing from the loop thread without yielding: the drain cannot run, so
+    # the buffer stays full and every further push is a drop.
+    assert handoff.push(_can(0)) is True
+    assert handoff.push(_can(1)) is False
+    assert len(_lines(caplog, _HANDOFF_DROP_MESSAGE)) == 1  # immediate
+
+    drops = 300
+    window = 3.0
+    for i in range(drops - 1):
+        clock.advance(window / drops)
+        assert handoff.push(_can(i)) is False
+
+    lines = _lines(caplog, _HANDOFF_DROP_MESSAGE)
+    assert len(lines) <= 1 + math.ceil(window / 1.0)
+    assert lines[0].handoff == "handoff"
+    assert lines[0].capacity == 1
+
+    # Loss stops: the buffer drains on the next loop turn and the burst's
+    # final summary is emitted there — losing the tail is how "it dropped
+    # 150k records" becomes invisible.
+    clock.advance(1.0)
+    await asyncio.sleep(0)
+    lines = _lines(caplog, _HANDOFF_DROP_MESSAGE)
+    assert sum(line.dropped_since_last for line in lines) == drops
+    assert lines[-1].dropped_total == drops
+    assert handoff.stats().dropped == drops
+
+
+async def test_handoff_close_forces_the_final_drop_summary(caplog) -> None:
+    """The producer can die mid-burst before any drain: close() is the last
+    chance to emit the tail, and it ignores the interval."""
+    clock = _FakeClock()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    handoff = ThreadHandoff(asyncio.get_running_loop(), queue, capacity=1, clock=clock)
+    caplog.set_level(logging.WARNING)
+
+    handoff.push(_can(0))
+    for i in range(50):
+        handoff.push(_can(i))
+    assert len(_lines(caplog, _HANDOFF_DROP_MESSAGE)) == 1
+
+    handoff.close()  # same instant: no interval has elapsed
+    lines = _lines(caplog, _HANDOFF_DROP_MESSAGE)
+    assert len(lines) == 2
+    assert sum(line.dropped_since_last for line in lines) == 50
+    assert lines[-1].dropped_total == 50
+    assert lines[-1].closed is True
+
+
+async def test_handoff_flushes_the_queue_drop_counters_tail_too(caplog) -> None:
+    """Both loss causes on this path hold a tail: buffer-full in the handoff,
+    ingest-queue-full in the ``on_drop`` counter. Draining flushes both."""
+    clock = _FakeClock()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=1)
+    counter = QueueDropCounter("c07", clock=clock)
+    handoff = ThreadHandoff(asyncio.get_running_loop(), queue, on_drop=counter, clock=clock)
+    caplog.set_level(logging.WARNING)
+
+    for i in range(5):
+        handoff.push(_can(i))
+    await asyncio.sleep(0)  # drain: 1 record lands, 4 hit the full queue
+    assert counter.dropped == 4
+    assert len(_lines(caplog, _QUEUE_DROP_MESSAGE)) == 1
+
+    clock.advance(DROP_LOG_INTERVAL_SECONDS)
+    handoff.push(_can(9))  # a drop-free observation closes out the burst
+    await asyncio.sleep(0)
+    lines = _lines(caplog, _QUEUE_DROP_MESSAGE)
+    assert sum(line.dropped_since_last for line in lines) == counter.dropped
+    assert lines[-1].dropped_total == counter.dropped
+
+
+_CAN_PARSE_MESSAGE = "dropped malformed CAN frame"
+
+
+def test_can_frame_parse_error_storm_is_bounded_and_keeps_the_tail(caplog) -> None:
+    """A parse-error storm is proportional to a failure rate too (63M errors
+    in 27 minutes, session 2026-05-15T020322): 10k errors inside one second
+    are one line, not 100, and the final summary still lands."""
+    caplog.set_level(logging.WARNING)
+    owner = "test-storm"
+    errors = 10_000
+    for i in range(errors):
+        log_dropped_can_frame(i + 1, ValueError("bad slcan line"), owner=owner)
+    # Real monotonic clock here (the registry owns it); a second boundary
+    # inside the loop may allow one extra line, never one per 100 errors.
+    assert len(_lines(caplog, _CAN_PARSE_MESSAGE)) <= 2
+
+    flush_dropped_can_frame_log(errors, owner=owner, force=True)
+    lines = _lines(caplog, _CAN_PARSE_MESSAGE)
+    assert sum(line.dropped_since_last for line in lines) == errors
+    assert lines[-1].dropped_total == errors
+    assert lines[-1].owner == owner
+    assert lines[0].dropped_by == {"ValueError": 1}
+
+
+def test_can_frame_parse_error_throttles_are_per_owner(caplog) -> None:
+    """Two live buses must not suppress each other's lines — a shared
+    throttle would also make ``dropped_total`` flip between two counters."""
+    caplog.set_level(logging.WARNING)
+    log_dropped_can_frame(1, ValueError("a"), owner="test-bus-a")
+    log_dropped_can_frame(1, IndexError("b"), owner="test-bus-b")
+
+    lines = _lines(caplog, _CAN_PARSE_MESSAGE)
+    assert [line.owner for line in lines] == ["test-bus-a", "test-bus-b"]
+    assert [line.dropped_total for line in lines] == [1, 1]
+
+
+def test_flush_can_frame_parse_error_log_is_a_no_op_for_an_unknown_owner(caplog) -> None:
+    caplog.set_level(logging.WARNING)
+    flush_dropped_can_frame_log(0, owner="never-logged", force=True)
+    assert _lines(caplog, _CAN_PARSE_MESSAGE) == []

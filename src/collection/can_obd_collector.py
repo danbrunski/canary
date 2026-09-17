@@ -122,6 +122,7 @@ from src.collection.queueing import (
     CollectorHandoffStats,
     HandoffStats,
     QueueDropCounter,
+    flush_dropped_can_frame_log,
     log_dropped_can_frame,
     threadsafe_enqueue,
 )
@@ -226,6 +227,10 @@ TRANSIENT_DISCOVERY_WAITS: tuple[str, ...] = ("budget", "discovery_budget", "rou
 #: a stale SocketCAN stamp after a suspend can be minutes off). The
 #: userspace receipt time is used instead and the row says so (C02.7).
 KERNEL_STAMP_MAX_SKEW_SECONDS = 5.0
+#: Identity of this loop's parse-error log throttle (one line per
+#: ``DROP_LOG_INTERVAL_SECONDS``). Distinct from the passive sniffer's owners
+#: so a storm on one live bus never suppresses the other's warning lines.
+_PARSE_ERROR_OWNER = "canable-obd"
 
 
 def _next_batch_size(current: int) -> int:
@@ -841,6 +846,9 @@ def run_can_obd_loop(
         stats.scheduler_snapshots += 1
     rounds.close(time.monotonic())
     discovery_registry.remember(discovery)
+    # The loop owned the bus: a parse-error burst that ran to the end of it is
+    # summarized here or never (one forced line, at a once-per-loop boundary).
+    flush_dropped_can_frame_log(stats.parse_errors, owner=_PARSE_ERROR_OWNER, force=True)
     return stats
 
 
@@ -2214,10 +2222,11 @@ def _recv_and_tap(
         msg = receive_frame(bus, timeout=timeout, on_frame=on_frame)
     except (ValueError, IndexError) as exc:
         stats.parse_errors += 1
-        log_dropped_can_frame(stats.parse_errors, exc)
+        log_dropped_can_frame(stats.parse_errors, exc, owner=_PARSE_ERROR_OWNER)
         return None
     if msg is None:
         return None
+    flush_dropped_can_frame_log(stats.parse_errors, owner=_PARSE_ERROR_OWNER)
     stats.frames_seen += 1
     return msg
 

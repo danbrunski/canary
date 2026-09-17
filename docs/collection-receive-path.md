@@ -56,7 +56,9 @@ below), so the extra path buys nothing measurable.
   `ValueError`/`IndexError`) ends the thread, is re-raised from
   `collect_can`, and lands in the existing reconnect policy. Parser errors
   are counted (`parse_errors`), logged at bounded rate via
-  `log_dropped_can_frame`, and skipped — identical to `record()`.
+  `log_dropped_can_frame` (one line per read loop per
+  `DROP_LOG_INTERVAL_SECONDS`, keyed by an `owner` so two live buses never
+  suppress each other), and skipped — identical to `record()`.
 - Sniffer invariant: `CanReader` has no send path. A test fake whose
   `send` raises is driven through busy, idle, stop and reconnect cases.
 
@@ -88,6 +90,20 @@ is callable).
   `capacity`, `drains`, `max_batch`. `accepted + dropped` equals every
   record pushed. Queue-full drops stay with the `on_drop` counter
   (`QueueDropCounter`) — a different cause, kept attributable.
+- **Drop logging is time-limited, not count-limited** (`DropLogThrottle`).
+  One line per handoff per `DROP_LOG_INTERVAL_SECONDS` (1.0), the first drop
+  of a burst immediate, each line summarizing its interval:
+  `dropped_since_last`, the exact cumulative `dropped_total`, and a
+  `dropped_by` breakdown of `source:channel` pairs capped at
+  `DROP_LOG_BREAKDOWN_LIMIT` (5) plus `dropped_by_others`. The old
+  every-100th-drop rule made log volume proportional to *loss* volume: the
+  2026-09-17 window (19:24:50–19:28:10Z) dropped 150,114 records and wrote
+  1,502 synchronous journald lines from inside the producer path, competing
+  with the consumer that was already behind. Counters are untouched by this
+  — `/status` loss numbers are exact — and the tail is never lost: the
+  burst's last summary is flushed at the next drop-free observation (an
+  accepted push, a drained buffer, a good frame) and forced at
+  `ThreadHandoff.close()`.
 - The passive path reports `CanReceiveStats` (`frames`, `parse_errors`,
   `queue_dropped`, `handoff`, `reconnects`, cumulative across reconnects)
   through `collect_can_from_config(on_receive_stats=...)`, wired by

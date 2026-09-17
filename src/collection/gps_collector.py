@@ -164,6 +164,9 @@ async def collect_gps(
             timestamp = now_fn()
             for record in reading_to_records(reading, timestamp):
                 put_nowait_or_drop(queue, record, on_drop=on_drop)
+            # Once per epoch (~1 Hz): closes out a drop burst's rate-limited
+            # log so its final summary is never the line that got suppressed.
+            on_drop.flush_drop_log()
             reading = GpsReading()
         await asyncio.sleep(0)
 

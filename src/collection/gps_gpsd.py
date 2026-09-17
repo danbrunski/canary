@@ -240,6 +240,9 @@ async def collect_gpsd(
             timestamp = now_fn()
             for record in reading_to_records(reading, timestamp):
                 put_nowait_or_drop(queue, record, on_drop=on_drop)
+            # Once per fix report (~1 Hz): closes out a drop burst's
+            # rate-limited log, mirroring the NMEA path.
+            on_drop.flush_drop_log()
             reading = _carry_fix_health(reading)
         await asyncio.sleep(0)
 
