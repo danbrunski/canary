@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from src.analysis.did_scan import (
+    BatchRead,
     CanableMode22Transport,
     DidSnapshot,
     Mode22Transport,
@@ -12,6 +13,7 @@ from src.analysis.did_scan import (
     classify_dids,
     parse_mode22_response,
     sweep_dids,
+    sweep_dids_batched,
 )
 
 # ---------------------------------------------------------------------------
@@ -79,6 +81,47 @@ def test_snapshot_to_dict_is_json_friendly() -> None:
     d = snap.to_dict()
     assert d["label"] == "pass1"
     assert d["values"] == {"0x12AB": "dead"}
+
+
+def test_sweep_dids_records_that_it_was_unbatched() -> None:
+    """An unbatched sweep says so, rather than leaving the reader to assume."""
+    snap = sweep_dids(_FakeTransport({0x1100: b"\x01"}), [0x1100])
+    assert (snap.batch_requested, snap.batch_effective, snap.batch_rejections) == (1, 1, 0)
+    assert snap.batch_nrc is None
+    assert snap.batched_reads == 0
+    assert snap.batch_unsupported is False
+
+
+def test_snapshot_round_trips_batch_fields() -> None:
+    snap = DidSnapshot(
+        values={0x1201: b"\x0a\x1b"},
+        captured_at=2.0,
+        label="drive",
+        batch_requested=3,
+        batch_effective=1,
+        batch_rejections=4,
+        batch_nrc=0x12,
+        batched_reads=0,
+    )
+    d = snap.to_dict()
+    assert d["batch_nrc"] == "0x12"
+    assert d["batch_nrc_name"] == "subFunctionNotSupported"
+    assert DidSnapshot.from_dict(d) == snap
+    assert snap.batch_unsupported is True
+
+
+def test_snapshot_from_dict_leaves_old_snapshots_batch_fields_unknown() -> None:
+    """A pre-2026-09-17 snapshot did not record how it was read. Loading it must
+    not invent ``batch_requested=1`` — "not recorded" and "unbatched" are
+    different answers."""
+    snap = DidSnapshot.from_dict(
+        {"label": "control", "captured_at": 1.0, "values": {"0x1201": "0a1b"}}
+    )
+    assert snap.values == {0x1201: b"\x0a\x1b"}
+    assert snap.batch_requested is None
+    assert snap.batch_effective is None
+    assert snap.batch_rejections is None
+    assert snap.batch_unsupported is False
 
 
 def test_classify_splits_varying_constant_intermittent() -> None:
@@ -218,3 +261,195 @@ def test_canable_transport_drives_sweep_and_classify() -> None:
     assert cls.constant == frozenset({0x1100})  # same both passes
     assert cls.varying == frozenset({0x1101})  # 0x10 → 0x20
     assert cls.intermittent == frozenset({0x1102})  # only answered at idle
+
+
+# ---------------------------------------------------------------------------
+# sweep_dids_batched — an ECU that refuses multi-DID reads
+#
+# Measured on the truck 2026-09-17 (engine running, session 0xC0 held):
+#   03 22 12 01             -> 05 62 12 01 00 A2
+#   05 22 12 01 12 03       -> 03 7F 22 12   (subFunctionNotSupported)
+# Re-reading each DID individually is the right recovery, but a sweep that
+# does it silently returns exactly the DIDs and widths a batched sweep would,
+# which is how 21,788 refused batches were once recorded as "batched Mode 22
+# verified".
+# ---------------------------------------------------------------------------
+
+WIDTHS = {0x1201: 2, 0x1203: 1, 0x1204: 1, 0x1207: 2}
+BATCH_VALUES = {0x1201: b"\x0a\x1b", 0x1203: b"\x7f", 0x1204: b"\x01", 0x1207: b"\x00\x10"}
+
+
+def _width_for(did: int) -> int | None:
+    return WIDTHS.get(did)
+
+
+class _RejectingBatchTransport:
+    """Answers single reads; refuses every multi-DID request with an NRC."""
+
+    def __init__(self, values: dict[int, bytes], *, nrc: int | None = 0x12) -> None:
+        self._values = values
+        self._nrc = nrc
+        self.batch_calls: list[list[int]] = []
+        self.single_calls: list[int] = []
+
+    def read_did(self, did: int) -> bytes | None:
+        self.single_calls.append(did)
+        return self._values.get(did)
+
+    def read_dids(self, dids, byte_length_for):  # type: ignore[no-untyped-def]
+        self.batch_calls.append(list(dids))
+        return BatchRead(readings={}, clean=False, rejected=True, negative_response_code=self._nrc)
+
+
+class _BatchingTransport:
+    """Accepts multi-DID requests (an ECU that really does batch)."""
+
+    def __init__(self, values: dict[int, bytes]) -> None:
+        self._values = values
+        self.batch_calls: list[list[int]] = []
+        self.single_calls: list[int] = []
+
+    def read_did(self, did: int) -> bytes | None:
+        self.single_calls.append(did)
+        return self._values.get(did)
+
+    def read_dids(self, dids, byte_length_for):  # type: ignore[no-untyped-def]
+        self.batch_calls.append(list(dids))
+        return BatchRead(
+            readings={d: self._values[d] for d in dids if d in self._values}, clean=True
+        )
+
+
+def test_batched_sweep_stops_batching_once_the_ecu_refuses() -> None:
+    transport = _RejectingBatchTransport(BATCH_VALUES)
+    snap = sweep_dids_batched(transport, list(WIDTHS), _width_for, batch_size=3, label="control")
+    # The values are all there — read one at a time.
+    assert snap.values == BATCH_VALUES
+    # Exactly ONE batch was attempted; the second group was not paid for.
+    assert transport.batch_calls == [[0x1201, 0x1203, 0x1204]]
+    assert transport.single_calls == [0x1201, 0x1203, 0x1204, 0x1207]
+    assert snap.batch_requested == 3
+    assert snap.batch_effective == 1
+    assert snap.batch_rejections == 1
+    assert snap.batch_nrc == 0x12
+    assert snap.batched_reads == 0
+    assert snap.batch_unsupported is True
+
+
+def test_batched_sweep_records_a_silent_rejection_without_an_nrc() -> None:
+    transport = _RejectingBatchTransport(BATCH_VALUES, nrc=None)
+    snap = sweep_dids_batched(transport, list(WIDTHS), _width_for, batch_size=2)
+    assert snap.values == BATCH_VALUES
+    assert snap.batch_rejections == 1
+    assert snap.batch_nrc is None  # silence is a different empty from a refusal
+    assert snap.batch_unsupported is True
+
+
+def test_batched_sweep_keeps_batching_when_an_ecu_really_batches() -> None:
+    transport = _BatchingTransport(BATCH_VALUES)
+    snap = sweep_dids_batched(transport, list(WIDTHS), _width_for, batch_size=3)
+    assert snap.values == BATCH_VALUES
+    assert transport.batch_calls == [[0x1201, 0x1203, 0x1204], [0x1207]]
+    assert transport.single_calls == []
+    assert snap.batch_effective == 3
+    assert snap.batch_rejections == 0
+    assert snap.batched_reads == 4
+    assert snap.batch_unsupported is False
+
+
+def test_batched_sweep_does_not_condemn_batching_when_singles_fail_too() -> None:
+    """A refused batch whose DIDs also do not answer singly says nothing about
+    batching — the ECU may be busy or the session lapsed. Keep batching, but
+    count the rejection so the snapshot is not silent about it."""
+    transport = _RejectingBatchTransport({})
+    snap = sweep_dids_batched(transport, list(WIDTHS), _width_for, batch_size=3)
+    assert snap.values == {}
+    assert len(transport.batch_calls) == 2  # still attempted the second group
+    assert snap.batch_effective == 3
+    assert snap.batch_rejections == 2
+    assert snap.batch_nrc == 0x12
+    assert snap.batch_unsupported is False
+
+
+class _FlippingTransport(_BatchingTransport):
+    """Batches until ``after`` groups, then refuses — mid-run session change."""
+
+    def __init__(self, values: dict[int, bytes], *, after: int) -> None:
+        super().__init__(values)
+        self._after = after
+
+    def read_dids(self, dids, byte_length_for):  # type: ignore[no-untyped-def]
+        if len(self.batch_calls) >= self._after:
+            self.batch_calls.append(list(dids))
+            return BatchRead(readings={}, clean=False, rejected=True, negative_response_code=0x12)
+        return super().read_dids(dids, byte_length_for)
+
+
+def test_batched_sweep_abandons_batching_mid_sweep() -> None:
+    transport = _FlippingTransport(BATCH_VALUES, after=1)
+    snap = sweep_dids_batched(transport, list(WIDTHS), _width_for, batch_size=2)
+    assert snap.values == BATCH_VALUES
+    assert transport.batch_calls == [[0x1201, 0x1203], [0x1204, 0x1207]]
+    assert snap.batch_effective == 1
+    assert snap.batched_reads == 2  # only the first group shares a sample instant
+    assert snap.batch_unsupported is True
+
+
+def test_batched_sweep_reports_unbatched_when_no_width_is_known() -> None:
+    transport = _BatchingTransport(BATCH_VALUES)
+    snap = sweep_dids_batched(transport, list(WIDTHS), lambda _did: None, batch_size=3)
+    assert transport.batch_calls == []
+    assert snap.batch_requested == 3
+    assert snap.batch_effective == 1
+    assert snap.batch_rejections == 0
+    # Not the ECU's fault: nothing to distinguish from a refusal.
+    assert snap.batch_unsupported is False
+
+
+# ---------------------------------------------------------------------------
+# CanableMode22Transport.read_dids — the NRC must reach the sweep
+# ---------------------------------------------------------------------------
+
+
+class _FakeBatchReply:
+    def __init__(self, response: object, nrc: int | None = None, sent: bool = True) -> None:
+        self.response = response
+        self.negative_response_code = nrc
+        self.sent = sent
+
+
+class _BatchClient:
+    def __init__(self, reply: _FakeBatchReply) -> None:
+        self._reply = reply
+        self.calls: list[tuple[tuple[int, ...], int | None]] = []
+
+    def query_mode_22_batch(
+        self, dids: list[int], *, request_id: int | None = None
+    ) -> _FakeBatchReply:
+        self.calls.append((tuple(dids), request_id))
+        return self._reply
+
+    def read_did(self, did: int) -> bytes | None:  # pragma: no cover - unused
+        return None
+
+
+def test_canable_transport_read_dids_surfaces_the_nrc() -> None:
+    client = _BatchClient(_FakeBatchReply(response=None, nrc=0x12))
+    transport = CanableMode22Transport(client, request_id=0x7E0)  # type: ignore[arg-type]
+    result = transport.read_dids([0x1201, 0x1203], _width_for)
+    assert result.rejected is True
+    assert result.negative_response_code == 0x12
+    assert result.readings == {}
+    assert result.clean is False
+    assert client.calls == [((0x1201, 0x1203), 0x7E0)]
+
+
+def test_canable_transport_read_dids_splits_a_positive_batch() -> None:
+    payload = bytes([0x12, 0x01, 0x0A, 0x1B, 0x12, 0x03, 0x7F])
+    client = _BatchClient(_FakeBatchReply(response=_FakeObdResponse(payload)))
+    transport = CanableMode22Transport(client, request_id=0x7E0)  # type: ignore[arg-type]
+    result = transport.read_dids([0x1201, 0x1203], _width_for)
+    assert result.rejected is False
+    assert result.negative_response_code is None
+    assert result.readings == {0x1201: b"\x0a\x1b", 0x1203: b"\x7f"}
+    assert result.clean is True

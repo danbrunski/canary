@@ -15,6 +15,13 @@ This tool sends only UDS service 0x22 (ReadDataByIdentifier) and, when
 ``--session`` resolves to something, 0x10 (DiagnosticSessionControl — no
 memory write, no actuation) are ever sent.
 
+Exit status: 0 on success, 1 on bad arguments, 3 when ``--batch > 1`` was
+asked for but the reads were not batched — most importantly when the ECU
+rejects multi-DID requests (the 2008 Nissan ECM answers ``7F 22 12``) while
+answering the same DIDs singly. The snapshot is still written in that case,
+with ``batch_effective``/``batch_rejections``/``batch_nrc`` saying what
+happened; a job that ran it is recorded as failed.
+
 Usage (normally invoked by ``start_job(kind="did_sweep", params={...})``,
 not run by hand):
   tools/did_sweep.py --start 0x1100 --end 0x12FF --label control --out snap.json
@@ -29,10 +36,15 @@ import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from src.analysis.did_scan import CanableMode22Transport, sweep_dids, sweep_dids_batched
+from src.analysis.did_scan import (
+    CanableMode22Transport,
+    DidSnapshot,
+    sweep_dids,
+    sweep_dids_batched,
+)
 from src.collection.can_collector import bus_factory
 from src.collection.can_obd_client import CanObdClient
-from src.collection.isotp import MAX_BATCHED_DIDS
+from src.collection.isotp import MAX_BATCHED_DIDS, nrc_name
 from src.collection.obd_scheduler import did_access
 from src.config import CanaryConfig
 
@@ -235,7 +247,58 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"did_sweep: {hits}/{len(dids)} DIDs answered in {elapsed:.1f}s", file=sys.stderr)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(snapshot.to_dict(), indent=2, sort_keys=True))
+    if snapshot.batch_rejections:
+        print(
+            f"did_sweep: {snapshot.batch_rejections} batched request(s) rejected "
+            f"(NRC {'none' if snapshot.batch_nrc is None else f'0x{snapshot.batch_nrc:02X}'}); "
+            f"{snapshot.batched_reads} of {len(snapshot.values)} values came from "
+            "accepted batches",
+            file=sys.stderr,
+        )
+    problem = _batch_problem(snapshot, requested=args.batch, out=args.out)
+    if problem is not None:
+        # The snapshot is still written above — the values are real, they just
+        # do not share a sample instant — but the run did not do what was asked,
+        # so it must not report success.
+        print(f"error: {problem}", file=sys.stderr)
+        return BATCH_NOT_HONOURED_EXIT
     return 0
+
+
+#: Exit status when ``--batch > 1`` was asked for but the reads were not
+#: batched. Distinct from 1 (bad arguments): the sweep ran and its snapshot
+#: was written.
+BATCH_NOT_HONOURED_EXIT = 3
+
+
+def _batch_problem(snapshot: DidSnapshot, *, requested: int, out: Path) -> str | None:
+    """Why a ``--batch > 1`` sweep did not batch, or None if it did (or wasn't asked)."""
+    if requested <= 1 or snapshot.batch_effective is None:
+        return None
+    if snapshot.batch_effective >= requested:
+        return None
+    batched = snapshot.batched_reads or 0
+    tail = (
+        f"batch_effective=1; {batched} of {len(snapshot.values)} values came from "
+        f"accepted batches, the rest were read unbatched. Snapshot written to {out}."
+    )
+    if snapshot.batch_unsupported:
+        if snapshot.batch_nrc is not None:
+            cause = (
+                f"NRC 0x{snapshot.batch_nrc:02X} ({nrc_name(snapshot.batch_nrc)}) to "
+                "multi-DID ReadDataByIdentifier"
+            )
+        else:
+            cause = "no response to multi-DID ReadDataByIdentifier"
+        return (
+            f"batching is unsupported by this ECU: {snapshot.batch_rejections} batched "
+            f"request(s) rejected ({cause}) while the same DIDs answered singly. "
+            f"Batching was abandoned; {tail}"
+        )
+    return (
+        "nothing was batched: no DID in range has a measured width in --widths-from, "
+        f"so every DID was read individually; {tail}"
+    )
 
 
 if __name__ == "__main__":

@@ -131,6 +131,27 @@ class BatchedMode01Response:
     responder_id: int
 
 
+@dataclass(frozen=True)
+class BatchedMode22Reply:
+    """What came back for one multi-DID Mode 22 request — including a refusal.
+
+    A batched request has two failure shapes that look identical once reduced
+    to "no payload": the ECU *rejected the whole request* (``7F 22 <NRC>``,
+    e.g. ``0x12`` on an ECM that does not accept multi-DID ReadDataByIdentifier)
+    or nothing answered. A caller that cannot tell those apart from "the ECU
+    omitted one DID" will re-read individually and report a batched sweep that
+    never batched anything (2026-08-08, 2026-09-17). So the NRC is carried
+    here, not swallowed.
+    """
+
+    #: The positive response (payload after the ``62`` echo), or ``None``.
+    response: ObdResponse | None
+    #: The NRC byte when the ECU answered ``7F 22 <NRC>``; ``None`` otherwise.
+    negative_response_code: int | None = None
+    #: False when the request never went out (passive mode, send error).
+    sent: bool = True
+
+
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
@@ -271,17 +292,22 @@ class CanObdClient:
 
     def query_mode_22_batch(
         self, dids: Sequence[int], *, request_id: int | None = None
-    ) -> ObdResponse | None:
+    ) -> BatchedMode22Reply:
         """UDS Mode 22 ReadDataByIdentifier for several DIDs in one request.
 
-        Returns the raw payload after the ``62`` echo — a stream of
-        ``<did_hi> <did_lo> <data…>`` groups. Split it with
+        ``.response.payload`` is the raw payload after the ``62`` echo — a
+        stream of ``<did_hi> <did_lo> <data…>`` groups. Split it with
         :func:`~src.collection.isotp.split_batched_did_response`, which needs
         each DID's width because the response is not self-delimiting.
 
         Every DID in one request is sampled by the ECU at the same instant,
         which is the reason to use this over repeated ``query_mode_22``.
         Capped at :data:`~src.collection.isotp.MAX_BATCHED_DIDS` per request.
+
+        Not every ECU accepts more than one DID per request: the 2008 Nissan
+        ECM answers ``7F 22 12`` (subFunctionNotSupported) to any multi-DID
+        read while answering the same DIDs singly. That refusal is returned as
+        ``negative_response_code`` rather than collapsed into "no response".
         """
         payload = build_batched_did_request_payload(0x22, dids)
         message = can.Message(
@@ -291,13 +317,14 @@ class CanObdClient:
         )
         try:
             if not tx_gate.send(self._bus, message, what="request service=0x22 (batched)"):
-                return None
+                return BatchedMode22Reply(response=None, sent=False)
         except can.CanError:
             log.warning("CAN send failed", extra={"service": 0x22, "batch": len(dids)})
-            return None
+            return BatchedMode22Reply(response=None, sent=False)
         # identifier=None: the assembler must not try to match one DID echo,
         # because the response carries several.
-        return self._collect_response(service=0x22, pid_echo=None)
+        response, nrc = self._collect_response_or_nrc(service=0x22, pid_echo=None)
+        return BatchedMode22Reply(response=response, negative_response_code=nrc)
 
     def query(
         self,
@@ -516,6 +543,19 @@ class CanObdClient:
         pid_echo: int | None,
     ) -> ObdResponse | None:
         """Read frames until a matching response is assembled or we time out."""
+        return self._collect_response_or_nrc(service=service, pid_echo=pid_echo)[0]
+
+    def _collect_response_or_nrc(
+        self,
+        *,
+        service: int,
+        pid_echo: int | None,
+    ) -> tuple[ObdResponse | None, int | None]:
+        """:meth:`_collect_response`, plus the NRC when the ECU refused.
+
+        Returns ``(response, None)`` on a positive answer, ``(None, nrc)`` on
+        a definitive ``7F <service> <NRC>``, and ``(None, None)`` on timeout.
+        """
         deadline = self._time_fn() + self._timeout
         assembler = IsoTpResponseAssembler(service=service, identifier=pid_echo)
 
@@ -536,7 +576,7 @@ class CanObdClient:
                 # DID sweeps — an absent DID otherwise costs a full timeout
                 # each (hours over a 0x0000–0xFFFF range). Same return value
                 # (None) as before, just immediate.
-                return None
+                return None, result.negative_response_code
             if result.flow_control_id is not None:
                 # Send flow control: continue, block-size=0, STmin=0.
                 # ECUs typically address flow control to the requester's
@@ -559,9 +599,9 @@ class CanObdClient:
                     log.warning("CAN flow-control send failed", extra={"responder": responder})
                 continue
             if result.response is not None:
-                return result.response
+                return result.response, None
             # Flow-control frames from another transfer are not ours; ignore.
-        return None
+        return None, None
 
     @staticmethod
     def _handle_single_frame(

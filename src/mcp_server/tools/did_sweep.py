@@ -38,15 +38,7 @@ async def _load_snapshot(client: DaemonClient, job_id: str) -> tuple[DidSnapshot
     if result_path is None or not result_path.exists():
         raise ValueError(f"did_sweep result not found for job {job_id} (expected at {result_path})")
     data = json.loads(result_path.read_text())
-    values = {
-        int(did_hex, 16): bytes.fromhex(raw_hex) for did_hex, raw_hex in data["values"].items()
-    }
-    snapshot = DidSnapshot(
-        values=values,
-        captured_at=float(data["captured_at"]),
-        label=str(data.get("label", "")),
-    )
-    return snapshot, job
+    return DidSnapshot.from_dict(data), job
 
 
 async def diff_did_snapshots(client: DaemonClient, *, job_a: str, job_b: str) -> dict[str, Any]:

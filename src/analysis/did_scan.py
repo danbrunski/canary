@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 # Pure protocol helpers — stdlib-only, no python-can, so importing them at
 # runtime does not couple this analysis module to the CAN stack (which is why
 # CanObdClient below stays behind TYPE_CHECKING and duck-typed).
-from src.collection.isotp import MAX_BATCHED_DIDS, split_batched_did_response
+from src.collection.isotp import MAX_BATCHED_DIDS, nrc_name, split_batched_did_response
 
 if TYPE_CHECKING:
     from src.collection.can_obd_client import CanObdClient
@@ -51,24 +51,123 @@ def parse_mode22_response(did: int, raw: bytes) -> bytes | None:
     return bytes(raw[3:])
 
 
+class BatchedMode22Transport(Mode22Transport, Protocol):
+    """A transport that can also read several DIDs in ONE request.
+
+    Declared so the batched contract is a type, not a convention: ``read_dids``
+    must report a refusal (:class:`BatchRead.rejected`) rather than return an
+    empty reading, because "the ECU refused every batch" and "the ECU batches
+    fine" are otherwise indistinguishable in the result.
+    """
+
+    def read_dids(
+        self, dids: Sequence[int], byte_length_for: Callable[[int], int | None]
+    ) -> BatchRead: ...
+
+
+@dataclass(frozen=True)
+class BatchRead:
+    """One multi-DID request's outcome, as a transport's ``read_dids`` reports it.
+
+    ``rejected`` separates "the ECU refused the whole request" (``7F 22 <NRC>``,
+    or nothing answered) from "the ECU answered but left a DID out". Both leave
+    DIDs missing from ``readings``, and both get re-read individually — but only
+    the first says anything about whether this ECU batches at all. Folding them
+    together is how a sweep in which every batch was refused came back looking
+    exactly like a batched one.
+    """
+
+    readings: dict[int, bytes]
+    #: False when the payload walk stopped early (unknown width, truncation).
+    clean: bool
+    #: The whole request was refused (NRC) or went unanswered.
+    rejected: bool = False
+    #: The NRC byte when ``rejected`` by a negative response; None on silence.
+    negative_response_code: int | None = None
+
+
 @dataclass(frozen=True)
 class DidSnapshot:
-    """One sweep: DID → raw data bytes, for the DIDs that answered positively."""
+    """One sweep: DID → raw data bytes, for the DIDs that answered positively.
+
+    The ``batch_*`` fields say how the values were actually read. They are
+    ``None`` only on snapshots that predate them (not recorded), never on a
+    sweep this module produced:
+
+    * ``batch_requested`` — DIDs per request asked for (after the frame cap).
+    * ``batch_effective`` — DIDs per request the sweep ended up using: equal to
+      ``batch_requested`` when batching held, 1 when it was abandoned (the ECU
+      rejected a batch whose DIDs then answered singly), the transport could
+      not batch, or no DID had a known width.
+    * ``batch_rejections`` — batched requests refused outright (NRC/silence).
+    * ``batch_nrc`` — the NRC of the most recent rejection, if it had one.
+    * ``batched_reads`` — values that came from an accepted batched response
+      (the ones that actually share a sample instant).
+    """
 
     values: Mapping[int, bytes]
     captured_at: float  # time.time()
     label: str = ""
+    batch_requested: int | None = None
+    batch_effective: int | None = None
+    batch_rejections: int | None = None
+    batch_nrc: int | None = None
+    batched_reads: int | None = None
 
     @property
     def dids(self) -> frozenset[int]:
         return frozenset(self.values)
+
+    @property
+    def batch_unsupported(self) -> bool:
+        """Batching was asked for and abandoned because the ECU refused it."""
+        return (
+            self.batch_requested is not None
+            and self.batch_effective is not None
+            and self.batch_effective < self.batch_requested
+            and bool(self.batch_rejections)
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "label": self.label,
             "captured_at": self.captured_at,
             "values": {f"0x{did:04X}": data.hex() for did, data in sorted(self.values.items())},
+            "batch_requested": self.batch_requested,
+            "batch_effective": self.batch_effective,
+            "batch_rejections": self.batch_rejections,
+            "batch_nrc": None if self.batch_nrc is None else f"0x{self.batch_nrc:02X}",
+            "batch_nrc_name": None if self.batch_nrc is None else nrc_name(self.batch_nrc),
+            "batched_reads": self.batched_reads,
         }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> DidSnapshot:
+        """Inverse of :meth:`to_dict`. Snapshots written before the ``batch_*``
+        fields existed load with them as ``None`` (not recorded) rather than
+        as a claim that the sweep was unbatched."""
+
+        def _opt_int(key: str) -> int | None:
+            raw = data.get(key)
+            if raw is None:
+                return None
+            if isinstance(raw, str):
+                return int(raw, 16)
+            return int(raw)
+
+        return cls(
+            values={
+                int(did_hex, 16): bytes.fromhex(raw_hex)
+                for did_hex, raw_hex in (data.get("values") or {}).items()
+            },
+            captured_at=float(data["captured_at"]),
+            label=str(data.get("label", "")),
+            batch_requested=_opt_int("batch_requested"),
+            batch_effective=_opt_int("batch_effective"),
+            batch_rejections=_opt_int("batch_rejections"),
+            batch_nrc=_opt_int("batch_nrc"),
+            batched_reads=_opt_int("batched_reads"),
+        )
 
 
 def sweep_dids(
@@ -89,7 +188,15 @@ def sweep_dids(
             values[did] = data
         if delay_seconds > 0:
             time.sleep(delay_seconds)
-    return DidSnapshot(values=dict(values), captured_at=time.time(), label=label)
+    return DidSnapshot(
+        values=dict(values),
+        captured_at=time.time(),
+        label=label,
+        batch_requested=1,
+        batch_effective=1,
+        batch_rejections=0,
+        batched_reads=0,
+    )
 
 
 def sweep_dids_batched(
@@ -110,14 +217,27 @@ def sweep_dids_batched(
     safe to point at a mixed list: nothing is silently misattributed, it just
     loses the same-instant guarantee for the unknown ones.
 
-    ``transport`` needs a ``read_dids`` method to batch at all; a plain
+    ``transport`` needs to be a :class:`BatchedMode22Transport` (i.e. have a
+    ``read_dids`` returning :class:`BatchRead`) to batch at all; a plain
     :class:`Mode22Transport` degrades to single reads throughout.
+
+    A batch the ECU *rejects* outright (NRC, or silence) is counted separately
+    from a DID the ECU merely omitted. When a rejected group's DIDs then answer
+    individually, the ECU has shown it does not accept multi-DID requests
+    (the 2008 Nissan ECM answers ``7F 22 12``): the sweep stops batching for
+    the rest of the run instead of paying a refused request per group, and the
+    snapshot records ``batch_effective=1`` with the NRC. A sweep in which no
+    value shares a sample instant cannot come back looking like one where they
+    all do.
     """
     batch_size = max(1, min(batch_size, MAX_BATCHED_DIDS))
     read_dids = getattr(transport, "read_dids", None)
     values: dict[int, bytes] = {}
+    rejections = 0
+    last_nrc: int | None = None
+    batched_reads = 0
 
-    def _single(did: int) -> None:
+    def _single(did: int) -> bytes | None:
         data = transport.read_did(did)
         if on_progress is not None:
             on_progress(did, data)
@@ -125,37 +245,65 @@ def sweep_dids_batched(
             values[did] = data
         if delay_seconds > 0:
             time.sleep(delay_seconds)
+        return data
+
+    def _snapshot(effective: int) -> DidSnapshot:
+        return DidSnapshot(
+            values=dict(values),
+            captured_at=time.time(),
+            label=label,
+            batch_requested=batch_size,
+            batch_effective=effective,
+            batch_rejections=rejections,
+            batch_nrc=last_nrc,
+            batched_reads=batched_reads,
+        )
 
     requested = list(dids)
     batchable = [d for d in requested if (byte_length_for(d) or 0) > 0]
     unknown = [d for d in requested if (byte_length_for(d) or 0) <= 0]
 
-    if read_dids is None or batch_size == 1:
+    if read_dids is None or batch_size == 1 or not batchable:
         for did in requested:
             _single(did)
-        return DidSnapshot(values=dict(values), captured_at=time.time(), label=label)
+        return _snapshot(1)
 
+    batching = True
     for start in range(0, len(batchable), batch_size):
         group = batchable[start : start + batch_size]
-        readings, clean = read_dids(group, byte_length_for)
+        if not batching:
+            for did in group:
+                _single(did)
+            continue
+        result: BatchRead = read_dids(group, byte_length_for)
+        if result.rejected:
+            rejections += 1
+            if result.negative_response_code is not None:
+                last_nrc = result.negative_response_code
+            answered = [did for did in group if _single(did) is not None]
+            if answered:
+                # The same DIDs answer one at a time but not together: this
+                # ECU does not batch. Every further batch would be refused too.
+                batching = False
+            continue
         for did in group:
-            data = readings.get(did)
+            data = result.readings.get(did)
             if data is None:
                 # Either the ECU omitted it or the walk desynced before
                 # reaching it — re-read individually rather than guess.
                 _single(did)
                 continue
             values[did] = data
+            batched_reads += 1
             if on_progress is not None:
                 on_progress(did, data)
-        del clean  # every gap is already re-read individually above
         if delay_seconds > 0:
             time.sleep(delay_seconds)
 
     for did in unknown:
         _single(did)
 
-    return DidSnapshot(values=dict(values), captured_at=time.time(), label=label)
+    return _snapshot(batch_size if batching else 1)
 
 
 @dataclass(frozen=True)
@@ -352,16 +500,24 @@ class CanableMode22Transport:
 
     def read_dids(
         self, dids: Sequence[int], byte_length_for: Callable[[int], int | None]
-    ) -> tuple[dict[int, bytes], bool]:
+    ) -> BatchRead:
         """Read up to ``MAX_BATCHED_DIDS`` DIDs in one same-instant request.
 
-        Returns ``(readings, clean)`` — ``clean`` is False if the response
-        could not be walked to the end, which means a width was unknown or
-        the payload was short. Callers must fall back to single-DID reads for
-        anything missing rather than treat a partial walk as complete.
+        ``clean`` is False if the response could not be walked to the end,
+        which means a width was unknown or the payload was short. Callers must
+        fall back to single-DID reads for anything missing rather than treat a
+        partial walk as complete. ``rejected`` (with the NRC when there was
+        one) means the ECU refused or ignored the request as a whole — not
+        that it left a DID out.
         """
         self._ensure_session()
-        response = self._client.query_mode_22_batch(dids, request_id=self._request_id)
-        if response is None:
-            return {}, False
-        return split_batched_did_response(response.payload, byte_length_for)
+        reply = self._client.query_mode_22_batch(dids, request_id=self._request_id)
+        if reply.response is None:
+            return BatchRead(
+                readings={},
+                clean=False,
+                rejected=True,
+                negative_response_code=reply.negative_response_code,
+            )
+        readings, clean = split_batched_did_response(reply.response.payload, byte_length_for)
+        return BatchRead(readings=readings, clean=clean)

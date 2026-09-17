@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from src.analysis.did_scan import BatchRead
 from src.collection.isotp import split_batched_did_response
 from tools import did_log
 from tools.did_log import PassiveStatus
@@ -24,11 +25,28 @@ DISARMED = PassiveStatus(False, None, "passive mode is off")
 
 class FakeTransport:
     """Answers from a fixed DID table; ``drop_from_batch`` DIDs never appear in a
-    batched reading (but do answer individually)."""
+    batched reading (but do answer individually).
 
-    def __init__(self, values: dict[int, bytes], *, drop_from_batch: set[int] | None = None):
+    ``reject_batches`` models the 2008 Nissan ECM: every multi-DID request is
+    refused with ``7F 22 12`` while each DID answers on its own. Set
+    ``reject_after`` to start refusing partway through a run (a session that
+    lapsed mid-drive).
+    """
+
+    def __init__(
+        self,
+        values: dict[int, bytes],
+        *,
+        drop_from_batch: set[int] | None = None,
+        reject_batches: bool = False,
+        reject_after: int | None = None,
+        reject_nrc: int | None = 0x12,
+    ):
         self.values = values
         self.drop_from_batch = drop_from_batch or set()
+        self.reject_batches = reject_batches
+        self.reject_after = reject_after
+        self.reject_nrc = reject_nrc
         self.single_calls: list[int] = []
         self.batch_calls: list[list[int]] = []
 
@@ -38,8 +56,18 @@ class FakeTransport:
 
     def read_dids(
         self, dids: Sequence[int], byte_length_for: Callable[[int], int | None]
-    ) -> tuple[dict[int, bytes], bool]:
+    ) -> BatchRead:
         self.batch_calls.append(list(dids))
+        refusing = self.reject_batches or (
+            self.reject_after is not None and len(self.batch_calls) > self.reject_after
+        )
+        if refusing:
+            return BatchRead(
+                readings={},
+                clean=False,
+                rejected=True,
+                negative_response_code=self.reject_nrc,
+            )
         # Build a real concatenated response and walk it with the production
         # splitter, so a width mismatch would actually desync like on the bus.
         payload = b""
@@ -48,8 +76,9 @@ class FakeTransport:
                 continue
             payload += bytes([(did >> 8) & 0xFF, did & 0xFF]) + self.values[did]
         if not payload:
-            return {}, False
-        return split_batched_did_response(payload, byte_length_for)
+            return BatchRead(readings={}, clean=False)
+        readings, clean = split_batched_did_response(payload, byte_length_for)
+        return BatchRead(readings=readings, clean=clean)
 
 
 class FakeClock:
@@ -134,6 +163,10 @@ def test_run_writes_wellformed_header_read_pass_summary() -> None:
     assert summary["reads_ok"] == sum(len(r["values"]) for r in reads)
     assert summary["reads_missing"] == 0
     assert summary["elapsed_s"] >= 3.0
+    assert summary["batch_requested"] == 3
+    assert summary["batch_effective"] == 3  # the ECU accepted every batch
+    assert summary["batch_rejections"] == 0
+    assert summary["batch_nrc"] is None
     # Every request was batched: all four DIDs have measured widths.
     assert transport.single_calls == []
 
@@ -397,8 +430,10 @@ def test_main_armed_runs_and_uses_widths_from_snapshot(
     lines = _lines(io.StringIO((tmp_path / "log.jsonl").read_text()))
     assert lines[0]["widths"] == {"0x1201": 2}
     assert lines[0]["daemon_checked"] is True
-    # --widths-from skipped discovery: no unbatched sweep over the range.
-    assert len(fake_bus.single_calls) < 0x200
+    # --widths-from skipped discovery: no sweep over the range, so the only DID
+    # ever read is the one the snapshot measured (reads are single: --batch
+    # defaults to 1).
+    assert set(fake_bus.single_calls) == {0x1201}
     assert lines[-1]["reason"] == "duration"
 
 
@@ -450,3 +485,152 @@ def test_http_checker_unreachable_reads_as_not_armed(monkeypatch: pytest.MonkeyP
     status = did_log.http_passive_checker("http://127.0.0.1:8000", None)()
     assert status.armed is False
     assert "connection refused" in status.detail
+
+
+# ---------------------------------------------------------------------------
+# batching an ECU that refuses multi-DID reads
+#
+# Measured on the truck 2026-09-17: `05 22 12 01 12 03` -> `03 7F 22 12` while
+# `03 22 12 01` -> `05 62 12 01 00 A2`. A run that just re-reads each DID
+# individually looks identical to a batched run, and reaches several times the
+# intended request rate (21,788 refused batches on 2026-09-17).
+# ---------------------------------------------------------------------------
+
+
+def test_batch_default_is_one_did_per_request() -> None:
+    """Batching is opt-in: it is not supported on every ECU, and the reason to
+    use it (a shared sample instant) is not what a default should assume."""
+    args = did_log.parse_args(["--duration", "1", "--out", "x.jsonl"])
+    assert args.batch == 1
+
+
+def test_probe_batching_flags_an_ecu_that_refuses_batches() -> None:
+    transport = FakeTransport(VALUES, reject_batches=True)
+    probe = did_log.probe_batching(transport, {d: len(v) for d, v in VALUES.items()}, 3)
+    assert probe is not None
+    assert probe.unsupported is True
+    assert probe.negative_response_code == 0x12
+    assert probe.singles_ok == 3
+    # One batch attempted, then its DIDs one at a time — nothing more.
+    assert len(transport.batch_calls) == 1
+    message = probe.refusal()
+    assert "0x12" in message and "subFunctionNotSupported" in message
+
+
+def test_probe_batching_passes_an_ecu_that_batches() -> None:
+    transport = FakeTransport(VALUES)
+    probe = did_log.probe_batching(transport, {d: len(v) for d, v in VALUES.items()}, 3)
+    assert probe is not None
+    assert probe.rejected is False
+    assert probe.unsupported is False
+    assert transport.single_calls == []
+
+
+def test_probe_batching_does_not_condemn_when_singles_fail_too() -> None:
+    """A refused batch whose DIDs also stay silent says nothing about batching."""
+    transport = FakeTransport({}, reject_batches=True)
+    probe = did_log.probe_batching(transport, {d: len(v) for d, v in VALUES.items()}, 3)
+    assert probe is not None
+    assert probe.rejected is True
+    assert probe.singles_ok == 0
+    assert probe.unsupported is False
+
+
+def test_probe_batching_skips_a_group_that_is_not_a_multi_did_request() -> None:
+    transport = FakeTransport(VALUES)
+    assert did_log.probe_batching(transport, {0x1101: 1}, 3) is None
+    assert did_log.probe_batching(transport, {d: len(v) for d, v in VALUES.items()}, 1) is None
+    assert transport.batch_calls == []
+
+
+def test_run_switches_to_single_reads_when_the_ecu_starts_refusing() -> None:
+    # Six DIDs, batch 3 → two genuine multi-DID groups per pass; the ECU
+    # accepts the first and refuses the second (a session that lapsed).
+    values = dict(VALUES) | {0x1208: bytes([0x02]), 0x1209: bytes([0x03])}
+    transport = FakeTransport(values, reject_after=1)
+    clock = FakeClock(step=0.05)
+    buf = io.StringIO()
+    summary = did_log.run(
+        transport,
+        {d: len(v) for d, v in values.items()},
+        buf,
+        duration_seconds=2.0,
+        batch=3,
+        monotonic=clock.monotonic,
+        wall_clock=clock.wall,
+    )
+    lines = _lines(buf)
+    rejected_reads = [line for line in lines if line["kind"] == "read" and line.get("rejected")]
+    assert len(rejected_reads) == 1
+    assert rejected_reads[0]["nrc"] == "0x12"
+    assert rejected_reads[0]["values"] == {}
+    notices = [line for line in lines if line["kind"] == "batch_rejected"]
+    assert len(notices) == 1
+    assert notices[0]["nrc_name"] == "subFunctionNotSupported"
+    assert notices[0]["dids"] == ["0x1207", "0x1208", "0x1209"]
+    assert "single reads" in notices[0]["detail"]
+    # Exactly two batched requests were ever sent: the accepted one and the
+    # refused one. A known-bad batch is never retried.
+    assert len(transport.batch_calls) == 2
+    assert summary["batch_requested"] == 3
+    assert summary["batch_effective"] == 1
+    assert summary["batch_rejections"] == 1
+    assert summary["batch_nrc"] == "0x12"
+    # A refusal is not a gap: the ECU did not omit a DID, it refused the request.
+    assert summary["batch_gaps"] == 0
+    # The values still arrive, one at a time.
+    assert set(values) <= set(transport.single_calls)
+
+
+def test_run_keeps_batching_when_a_refusal_is_not_batch_specific() -> None:
+    """Refused batch + silent singles = busy/lapsed session, not "no batching"."""
+    transport = FakeTransport({}, reject_batches=True)
+    clock = FakeClock(step=0.05)
+    buf = io.StringIO()
+    summary = did_log.run(
+        transport,
+        {d: len(v) for d, v in VALUES.items()},
+        buf,
+        duration_seconds=0.5,
+        batch=3,
+        monotonic=clock.monotonic,
+        wall_clock=clock.wall,
+    )
+    assert [line for line in _lines(buf) if line["kind"] == "batch_rejected"] == []
+    assert summary["batch_effective"] == 3
+    assert summary["batch_rejections"] >= 1
+
+
+def test_main_refuses_a_batched_run_on_an_ecu_that_rejects_batches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    transport = FakeTransport(VALUES, reject_batches=True)
+
+    @contextmanager
+    def _open(config_path: Path, **kwargs: Any) -> Iterator[FakeTransport]:
+        yield transport
+
+    monkeypatch.setattr(did_log, "_open_transport", _open)
+    rc = did_log.main(
+        _main_args(tmp_path, "--no-daemon", "--batch", "3", "--start", "0x1200", "--end", "0x1210")
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "refusing" in err
+    assert "0x12" in err and "subFunctionNotSupported" in err
+    assert "--batch 1" in err
+    # Nothing logged: the run never started.
+    assert not (tmp_path / "log.jsonl").exists()
+
+
+def test_main_runs_batched_when_the_ecu_accepts_the_probe(
+    tmp_path: Path, fake_bus: FakeTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rc = did_log.main(
+        _main_args(tmp_path, "--no-daemon", "--batch", "3", "--start", "0x1200", "--end", "0x1210")
+    )
+    assert rc == 0
+    lines = _lines(io.StringIO((tmp_path / "log.jsonl").read_text()))
+    assert lines[0]["batch"] == 3
+    assert lines[-1]["batch_effective"] == 3
+    assert lines[-1]["batch_rejections"] == 0

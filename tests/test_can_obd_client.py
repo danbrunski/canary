@@ -35,6 +35,7 @@ from src.collection.can_obd_client import (
     read_pid,
     read_pids,
 )
+from src.collection.isotp import split_batched_did_response
 
 # ---------------------------------------------------------------------------
 # Pure decoder tests — fast, no bus
@@ -757,6 +758,103 @@ def test_query_mode_0a_single_frame_drops_null_filler() -> None:
         ecu.shutdown()
     assert resp is not None
     assert parse_dtc_payload(resp.payload) == ["P0420"]
+
+
+def test_query_mode_22_batch_reports_the_rejection_nrc() -> None:
+    """An ECM that refuses multi-DID reads must be distinguishable from silence.
+
+    The 2008 Nissan ECM answers ``7F 22 12`` to ``05 22 12 01 12 03`` while
+    answering each DID singly. Collapsing that into ``None`` is what let a
+    "batched" sweep report the same DIDs it would have read one at a time.
+    """
+    tester, ecu = _make_pair()
+    stop = threading.Event()
+
+    def _rejecting_ecu() -> None:
+        while not stop.is_set():
+            frame = ecu.recv(timeout=0.1)
+            if frame is None:
+                continue
+            data = bytes(frame.data)
+            if frame.arbitration_id != 0x7E0 or data[1] != 0x22:
+                continue
+            ecu.send(
+                can.Message(
+                    arbitration_id=DEFAULT_RESPONSE_ID_MIN,
+                    data=bytes([0x03, 0x7F, 0x22, 0x12, 0x00, 0x00, 0x00, 0x00]),
+                    is_extended_id=False,
+                )
+            )
+            return
+
+    t = threading.Thread(target=_rejecting_ecu, daemon=True)
+    t.start()
+    try:
+        client = CanObdClient(tester, timeout_seconds=1.0)
+        reply = client.query_mode_22_batch([0x1201, 0x1203], request_id=0x7E0)
+    finally:
+        stop.set()
+        t.join(timeout=1.0)
+        tester.shutdown()
+        ecu.shutdown()
+
+    assert reply.response is None
+    assert reply.sent is True
+    assert reply.negative_response_code == 0x12
+
+
+def test_query_mode_22_batch_silence_has_no_nrc() -> None:
+    """Nothing answered is a different empty from a refusal — and says so."""
+    tester, ecu = _make_pair()
+    try:
+        client = CanObdClient(tester, timeout_seconds=0.05)
+        reply = client.query_mode_22_batch([0x1201, 0x1203], request_id=0x7E0)
+    finally:
+        tester.shutdown()
+        ecu.shutdown()
+    assert reply.response is None
+    assert reply.negative_response_code is None
+    assert reply.sent is True
+
+
+def test_query_mode_22_batch_splits_a_positive_response() -> None:
+    tester, ecu = _make_pair()
+    stop = threading.Event()
+
+    def _batching_ecu() -> None:
+        while not stop.is_set():
+            frame = ecu.recv(timeout=0.1)
+            if frame is None:
+                continue
+            data = bytes(frame.data)
+            if frame.arbitration_id != 0x7E0 or data[1] != 0x22:
+                continue
+            body = bytes([0x62, 0x12, 0x01, 0x0A, 0x12, 0x03, 0xBB])
+            ecu.send(
+                can.Message(
+                    arbitration_id=DEFAULT_RESPONSE_ID_MIN,
+                    data=bytes([len(body), *body]),
+                    is_extended_id=False,
+                )
+            )
+            return
+
+    t = threading.Thread(target=_batching_ecu, daemon=True)
+    t.start()
+    try:
+        client = CanObdClient(tester, timeout_seconds=1.0)
+        reply = client.query_mode_22_batch([0x1201, 0x1203], request_id=0x7E0)
+    finally:
+        stop.set()
+        t.join(timeout=1.0)
+        tester.shutdown()
+        ecu.shutdown()
+
+    assert reply.negative_response_code is None
+    assert reply.response is not None
+    readings, clean = split_batched_did_response(reply.response.payload, {0x1201: 1, 0x1203: 1}.get)
+    assert clean is True
+    assert readings == {0x1201: b"\x0a", 0x1203: b"\xbb"}
 
 
 def test_query_mode_22_single_frame_with_physical_request_id() -> None:

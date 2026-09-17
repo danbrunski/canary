@@ -22,7 +22,7 @@ import time
 import can
 import pytest
 
-from src.analysis.did_scan import sweep_dids_batched
+from src.analysis.did_scan import BatchRead, sweep_dids_batched
 from src.collection.can_obd_collector import run_can_obd_loop
 from src.collection.isotp import (
     MAX_BATCHED_DIDS,
@@ -155,7 +155,8 @@ class _FakeTransport:
         payload = b"".join(
             bytes([d >> 8, d & 0xFF]) + self._values[d] for d in dids if d in self._values
         )
-        return split_batched_did_response(payload, byte_length_for)
+        readings, clean = split_batched_did_response(payload, byte_length_for)
+        return BatchRead(readings=readings, clean=clean)
 
 
 def test_sweep_batches_known_widths_and_falls_back_for_unknown() -> None:

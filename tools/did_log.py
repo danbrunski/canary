@@ -29,11 +29,25 @@ Output (``--out``) is JSONL, line-buffered so a killed run keeps its data:
 - ``read`` — one per request: t_send, t_recv, batch, values (hex), missing.
   A DID missing from a *batched* reading is listed in that record's
   ``missing`` and then re-read individually as its own record (never guessed).
+  A batched request the ECU refused outright additionally carries
+  ``"rejected": true`` and ``nrc`` (hex, or null when nothing answered).
+- ``batch_rejected`` — written once, when a refused batch's DIDs then answer
+  singly: t, dids, nrc, nrc_name, detail. Every later request is a single read.
 - ``pass`` — one per complete pass over the DID list
 - ``summary`` — reason (``duration`` | ``passive_disarmed`` | ``signal``, or
   ``no_dids`` for an empty DID list), passes, requests, reads_ok,
-  reads_missing, elapsed_s. ``reads_missing`` counts DIDs with no value after
-  the individual re-read; ``batch_gaps`` counts DIDs a batched reading omitted.
+  reads_missing, batch_gaps, batch_rejections, batch_requested,
+  batch_effective, batch_nrc, elapsed_s. ``reads_missing`` counts DIDs with no
+  value after the individual re-read; ``batch_gaps`` counts DIDs an *accepted*
+  batched reading omitted; ``batch_rejections`` counts batched requests the ECU
+  refused as a whole; ``batch_effective`` is 1 whenever batching was abandoned.
+
+Batching (``--batch > 1``) is not something every ECU does: the 2008 Nissan ECM
+answers any multi-DID ReadDataByIdentifier with ``7F 22 12`` while answering
+the same DIDs one at a time. So before logging, one batched group is probed; if
+it is refused while its DIDs answer singly the tool refuses (exit 2) and names
+the NRC, instead of silently re-reading every DID individually at several
+times the intended request rate.
 
 Run on the Pi from the repo root (daemon passive mode armed first):
   .venv/bin/python -m tools.did_log --config /etc/canary/canary.yaml \\
@@ -57,10 +71,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, TextIO
 
-from src.analysis.did_scan import CanableMode22Transport, sweep_dids
+from src.analysis.did_scan import BatchRead, CanableMode22Transport, sweep_dids
 from src.collection.can_collector import bus_factory
 from src.collection.can_obd_client import CanObdClient
-from src.collection.isotp import MAX_BATCHED_DIDS
+from src.collection.isotp import MAX_BATCHED_DIDS, nrc_name
 from src.collection.obd_scheduler import did_access
 from src.config import CanaryConfig
 
@@ -78,7 +92,7 @@ class LogTransport(Protocol):
 
     def read_dids(
         self, dids: Sequence[int], byte_length_for: Callable[[int], int | None]
-    ) -> tuple[dict[int, bytes], bool]: ...
+    ) -> BatchRead: ...
 
 
 @dataclass(frozen=True)
@@ -93,6 +107,16 @@ PassiveChecker = Callable[[], PassiveStatus]
 
 def _did_key(did: int) -> str:
     return f"0x{did:04X}"
+
+
+def _nrc_hex(nrc: int | None) -> str | None:
+    return None if nrc is None else f"0x{nrc:02X}"
+
+
+def _describe_rejection(nrc: int | None) -> str:
+    if nrc is None:
+        return "no response to multi-DID ReadDataByIdentifier"
+    return f"NRC 0x{nrc:02X} ({nrc_name(nrc)}) to multi-DID ReadDataByIdentifier"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -137,8 +161,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--batch",
         type=int,
-        default=3,
-        help=f"DIDs per request, 1-{MAX_BATCHED_DIDS} (default 3).",
+        default=1,
+        help=(
+            f"DIDs per request, 1-{MAX_BATCHED_DIDS} (default 1). Values > 1 are probed "
+            "first and refused (exit 2) if the ECU rejects multi-DID requests."
+        ),
     )
     parser.add_argument(
         "--widths-from",
@@ -259,6 +286,68 @@ def discover_widths(
     return {did: len(data) for did, data in snapshot.values.items()}
 
 
+def _batch_groups(widths: dict[int, int], batch: int) -> list[list[int]]:
+    batchable = [d for d in sorted(widths) if widths[d] > 0]
+    return [batchable[i : i + batch] for i in range(0, len(batchable), batch)]
+
+
+@dataclass(frozen=True)
+class BatchProbe:
+    """One batched group sent before logging, to learn whether the ECU batches."""
+
+    dids: tuple[int, ...]
+    rejected: bool
+    negative_response_code: int | None
+    #: How many of ``dids`` answered when then read one at a time (only read
+    #: after a rejection; 0 otherwise).
+    singles_ok: int
+
+    @property
+    def unsupported(self) -> bool:
+        """Refused together, answered apart: this ECU does not batch."""
+        return self.rejected and self.singles_ok > 0
+
+    def refusal(self) -> str:
+        return (
+            f"refusing: --batch > 1 but this ECU rejects batched Mode 22 requests: "
+            f"{_describe_rejection(self.negative_response_code)} for "
+            f"[{', '.join(_did_key(d) for d in self.dids)}], while "
+            f"{self.singles_ok} of those DIDs answered singly. Every DID would be "
+            "re-read individually, so nothing would share a sample instant. Rerun "
+            "with --batch 1."
+        )
+
+
+def probe_batching(
+    transport: LogTransport, widths: dict[int, int], batch: int
+) -> BatchProbe | None:
+    """Send the first batched group once; ``None`` when there is nothing to batch.
+
+    A group of fewer than two DIDs is not a multi-DID request, so it proves
+    nothing about batching and is not probed.
+    """
+    batch = max(1, min(batch, MAX_BATCHED_DIDS))
+    groups = _batch_groups(widths, batch) if batch > 1 else []
+    if not groups or len(groups[0]) < 2:
+        return None
+    group = groups[0]
+
+    def width_for(did: int) -> int | None:
+        width = widths.get(did)
+        return width if width is not None and width > 0 else None
+
+    result = transport.read_dids(group, width_for)
+    singles_ok = 0
+    if result.rejected:
+        singles_ok = sum(1 for did in group if transport.read_did(did) is not None)
+    return BatchProbe(
+        dids=tuple(group),
+        rejected=result.rejected,
+        negative_response_code=result.negative_response_code,
+        singles_ok=singles_ok,
+    )
+
+
 class _Writer:
     def __init__(self, out: TextIO) -> None:
         self._out = out
@@ -295,11 +384,10 @@ def run(
     writer = _Writer(out)
     batch = max(1, min(batch, MAX_BATCHED_DIDS))
     dids = sorted(widths)
-    batchable = [d for d in dids if widths[d] > 0]
     unbatchable = [d for d in dids if widths[d] <= 0]
     groups: list[tuple[list[int], bool]] = []
     if batch > 1:
-        groups += [(batchable[i : i + batch], True) for i in range(0, len(batchable), batch)]
+        groups += [(group, True) for group in _batch_groups(widths, batch)]
         groups += [([d], False) for d in unbatchable]
     else:
         groups += [([d], False) for d in dids]
@@ -323,7 +411,18 @@ def run(
         }
     )
 
-    counts = {"passes": 0, "requests": 0, "reads_ok": 0, "reads_missing": 0, "batch_gaps": 0}
+    counts = {
+        "passes": 0,
+        "requests": 0,
+        "reads_ok": 0,
+        "reads_missing": 0,
+        "batch_gaps": 0,
+        "batch_rejections": 0,
+    }
+    # Flipped off, for the rest of the run, the first time a refused batch's
+    # DIDs answer singly: a batch this ECU is known to refuse is never re-sent.
+    batching = any(batched for _, batched in groups)
+    last_nrc: int | None = None
     t0 = monotonic()
     last_check: float | None = None
     reason: str | None = None
@@ -348,7 +447,7 @@ def run(
                 return True
         return False
 
-    def single(did: int) -> None:
+    def single(did: int) -> bytes | None:
         t_send = wall_clock()
         data = transport.read_did(did)
         t_recv = wall_clock()
@@ -369,6 +468,7 @@ def run(
         )
         if delay_seconds > 0:
             sleep(delay_seconds)
+        return data
 
     if not groups:
         reason, detail = "no_dids", "no DIDs to log"
@@ -380,13 +480,55 @@ def run(
             if should_stop():
                 completed = False
                 break
-            if not batched:
-                single(group[0])
+            if not batched or not batching:
+                for did in group:
+                    single(did)
                 continue
             t_send = wall_clock()
-            readings, _clean = transport.read_dids(group, width_for)
+            result = transport.read_dids(group, width_for)
             t_recv = wall_clock()
             counts["requests"] += 1
+            if result.rejected:
+                counts["batch_rejections"] += 1
+                if result.negative_response_code is not None:
+                    last_nrc = result.negative_response_code
+                writer.write(
+                    {
+                        "kind": "read",
+                        "t_send": t_send,
+                        "t_recv": t_recv,
+                        "batch": True,
+                        "values": {},
+                        "missing": [_did_key(d) for d in group],
+                        "rejected": True,
+                        "nrc": _nrc_hex(result.negative_response_code),
+                    }
+                )
+                if delay_seconds > 0:
+                    sleep(delay_seconds)
+                answered = [did for did in group if single(did) is not None]
+                if answered:
+                    batching = False
+                    writer.write(
+                        {
+                            "kind": "batch_rejected",
+                            "t": wall_clock(),
+                            "dids": [_did_key(d) for d in group],
+                            "nrc": _nrc_hex(result.negative_response_code),
+                            "nrc_name": (
+                                None
+                                if result.negative_response_code is None
+                                else nrc_name(result.negative_response_code)
+                            ),
+                            "detail": (
+                                f"{_describe_rejection(result.negative_response_code)}, while "
+                                f"{len(answered)} of {len(group)} DIDs answered singly; "
+                                "switching to single reads for the rest of the run"
+                            ),
+                        }
+                    )
+                continue
+            readings = result.readings
             gaps = [d for d in group if readings.get(d) is None]
             present = {d: readings[d] for d in group if readings.get(d) is not None}
             counts["reads_ok"] += len(present)
@@ -422,6 +564,9 @@ def run(
         "kind": "summary",
         "reason": reason,
         **counts,
+        "batch_requested": batch,
+        "batch_effective": batch if batching else 1,
+        "batch_nrc": _nrc_hex(last_nrc),
         "elapsed_s": round(monotonic() - t0, 3),
     }
     if detail is not None:
@@ -538,6 +683,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 return 1
+            if args.batch > 1:
+                probe = probe_batching(transport, widths, args.batch)
+                if probe is not None and probe.unsupported:
+                    print(probe.refusal(), file=sys.stderr)
+                    return 2
             print(
                 f"did_log: logging {len(widths)} DIDs batch={args.batch} for "
                 f"{args.duration:g}s -> {args.out}",
@@ -567,9 +717,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(
         f"did_log: stopped ({summary['reason']}) after {summary['passes']} passes, "
         f"{summary['requests']} requests, {summary['reads_ok']} ok / "
-        f"{summary['reads_missing']} missing",
+        f"{summary['reads_missing']} missing, batch_effective={summary['batch_effective']}",
         file=sys.stderr,
     )
+    if summary["batch_effective"] < summary["batch_requested"]:
+        print(
+            f"did_log: WARNING batching was abandoned mid-run after "
+            f"{summary['batch_rejections']} rejected batch(es) "
+            f"(NRC {summary['batch_nrc']}); later reads are unbatched — see the "
+            "batch_rejected record",
+            file=sys.stderr,
+        )
     return 0
 
 
