@@ -10,7 +10,12 @@ _Earlier today: `2026-09-18-drive-log.md` (AM), `2026-09-18-pm-drive-log.md` (PM
 
 ## For the operator
 1. **The tuning provider `injector_pw_b1` still maps to 0x1208 (air charge) at `confirmed`.** You said to fix mislabels and then "we'll fix those later". The plan is in D03.9 (`9b1c788`). Nothing to decide now; it's listed so it isn't lost.
-2. Carried over: D03.21 memory cgroup (reboot).
+2. **IF retrain corpus (D02.5): which sessions train the new Isolation Forest?** The deployed IF (2026-07-27) scores nothing: 6 of its 88 features were retracted from bindings after it was trained. That's verified live tonight as exactly those 6.
+   - **Option A (my suggestion):** every corpus-eligible `default` session after 2026-08-05 (the last retraction), `_`-prefixed captures excluded as always, with thresholds calibrated out-of-sample (leave-one-session-out, per memory). Cost: that corpus mixes pre- and post-batching-fix sample rates (key-off boots ran ~8 reads/s vs ~19.5), and spans 63–80 kPa, where today's OOD firing lives.
+   - **Option B:** only sessions from 2026-09-18 onward (batching fixed, current names). Clean, but likely too few hours to train.
+   - **Option C:** keep it blind until a planned corpus-collection week. Cost: zero IF coverage meanwhile (0 of 104 events on D02.6).
+   - I won't start a retrain without your pick.
+3. Carried over: D03.21 memory cgroup (reboot).
 
 ## Preconditions
 | precondition | state |
@@ -152,3 +157,4 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
 - 23:08Z **`ad0a0bb` committed** (implementer; I re-ran 84 tests): structural blindness = the intersection of absent sets over ≥ 120 s and ≥ 10 reports, `pending` until then, with transient absences listed separately.
 - 23:11:30Z **Deployed `2f66a1a4`** (carrying `03e9d51` and `ad0a0bb`). Profiles-file dirt (the daemon's rev-3 upgrade) was backed up to `/tmp/capture_profiles.pre-2f66a1a.yaml` and reset. Restart; back 23:11:44Z; window `a5bf8506…` on `2026-09-18T231144`; keepalive 150 min; 0 errors. **Prediction:** after 120 s the IF verdict is `established` with exactly the 6 retracted columns (scores_nothing still true; retrain still owed), and no baro/coolant/IAT/gps.
 - 23:16:05Z **Blindness fix verified live, as predicted:** IF `status: established` after 257 s / 259 reports. It has **exactly the 6 retracted columns** (ECM_AIRFLOW_PROXY_23D ×4, ECM_CALC_LOAD_B ×2), and transient is empty. `scores_nothing` true (6/88 = 6.8 % > 5 %), so **the IF retrain (D02.5) is the remaining fix.** Health: 0 drops, 19.05 reads/s, inference p95 39 ms.
+- 23:18Z Pi `/etc/canary/canary.yaml` line 41 comment corrected to "air charge per intake event (0x1208)" (sudo; root ownership kept). Two implementers dispatched in parallel: a manifest-producibility CI check (a binding change can't silently blind a deployed model again; allowlist = the 6 known retracted columns) and a measured-width guard for Mode 01 batching.
