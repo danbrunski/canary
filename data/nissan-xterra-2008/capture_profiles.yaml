@@ -432,3 +432,51 @@ profiles:
   corpus_eligible: false
   behavior_model_recipes: []
   storage_prefix: _capture-fuel-pw-research-2
+# D03.9 injector dead time, saved live on the Pi 2026-09-18 ~20:40Z and mirrored
+# here field-for-field. Module voltage beside 0x1206/0x1207/0x1208 at idle while
+# electrical loads are stepped. Deliberately WITHOUT PID 0x44: adding 0x42/0x33
+# to fuel-pw-research made 0x44 time out (fuel-pw-research-2, same day).
+- name: injector-deadtime-idle
+  description: 'Research (2026-09-18 eve): injector dead time at idle. Module voltage (0x42)
+    beside 0x1206/0x1207 (injected-pulse) and 0x1208 (air charge) while electrical loads are
+    stepped at constant air charge. No PID 0x44 (it desyncs in mixed batches: fuel-pw-research-2).'
+  experimental: true
+  mode01:
+    RPM: 1.0
+    MAF: 1.0
+    O2_WR_LAMBDA_S1: 1.0
+    FUEL_STATUS: 1.0
+    CONTROL_MODULE_VOLTAGE: 1.0
+  mode22:
+  - ECM_RPM
+  - ECM_INJECTOR_PW_B1
+  - ECM_INTAKE_PRESSURE_1206
+  - ECM_INTAKE_PRESSURE_1207
+  mode22_rate_weights:
+    ECM_RPM: 0.5
+    ECM_INJECTOR_PW_B1: 0.5
+    ECM_INTAKE_PRESSURE_1206: 0.5
+    ECM_INTAKE_PRESSURE_1207: 0.5
+  mode01_enabled: true
+  mode22_enabled: true
+  did_interval_seconds: null
+  did_cycle_seconds: 0.5
+  round_timestamps: true
+  target_rate_hz: 4.0
+  did_continuous: false
+  bus_budget_override: 90.0
+  priority_channels: null
+  expected_total_demand_hz: 28.0
+  capacity_evidence: 5 Mode 01 PIDs x 4 Hz + 4 DIDs x 2 Hz = 28 channel reads/s, a subset
+    of fuel-pw-research (42/s, clean 2026-09-18) with 0x42 added. Replace with this revision
+    own evidence.
+  required_tuple: []
+  min_achieved_rate_hz: null
+  max_tuple_skew_s: null
+  requires_tune_revision: true
+  builtin_revision: 0
+  operator_modified: true
+  broadcast_decode: true
+  corpus_eligible: false
+  behavior_model_recipes: []
+  storage_prefix: _capture-injector-deadtime-idle
