@@ -68,7 +68,7 @@ from src.collection.isotp import (
     build_batched_request_payload,
     build_request_payload,
     split_batched_did_response,
-    split_batched_response,
+    walk_batched_response,
 )
 from src.collection.obd_collector import (
     AcquiredClock,
@@ -77,7 +77,6 @@ from src.collection.obd_collector import (
     reading_to_record,
 )
 from src.collection.obd_registry import (
-    lookup,
     misfire_count_channel,
     misfire_counts_from_results,
     parse_mode06_response,
@@ -90,6 +89,7 @@ from src.collection.obd_scheduler import (
     CanObdSpec,
     DidSessionSpec,
     DidWindowController,
+    Mode01WidthLedger,
     ObdSchedulerMetrics,
     RequestFilter,
     RoundScheduler,
@@ -109,6 +109,8 @@ from src.collection.obd_scheduler import (
     _update_response_state,
     apply_mode01_support,
     build_poll_requests,
+    is_batchable,
+    mode01_registry_width,
     mode06_requests,
     parse_did_token,
     parse_pid_token,
@@ -682,6 +684,7 @@ def run_can_obd_loop(
                 ignore_tier=round_timestamp is not None,
                 members=current_round.remaining,
                 preferred=preferred,
+                widths=stats.mode01_widths,
             )
         if len(batch_indices) > 1:
             batch_started = time.monotonic()
@@ -823,6 +826,11 @@ def run_can_obd_loop(
             )
         emitted = False
         rounds.on_attempt(request_index)
+        if result.response is not None and is_batchable(request):
+            # The single-PID payload is bounded by the ISO-TP length, so its
+            # size *is* this vehicle's width for the PID — the measurement the
+            # batch walk otherwise takes on trust from the registry.
+            stats.mode01_widths.observe_single(request.identifier, len(result.response.payload))
         if result.response is not None:
             readings = _response_to_reading(
                 request,
@@ -1911,6 +1919,8 @@ class BatchedQueryResult:
     arrival: FrameArrival | None = None
     response_interval_s: float | None = None
     responder_id: int | None = None
+    #: Mode 01 only: the PID the walk blames for a desync (``BatchWalk.suspect``).
+    suspect: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1929,12 +1939,17 @@ class BatchOutcome:
     negative_response_code: int | None = None
 
 
-def _batched_pid_width(pid: int) -> int | None:
-    """Mode 01 payload width for splitting a batched response."""
-    definition = lookup(0x01, pid)
-    if definition is None or definition.byte_length <= 0:
-        return None
-    return definition.byte_length
+def _batched_pid_width(pid: int, widths: Mode01WidthLedger | None = None) -> int | None:
+    """Mode 01 payload width for splitting a batched response.
+
+    The registry width, unless ``widths`` has measured this PID answering with
+    a different one — then ``None``, so a walk that meets it stops rather than
+    slicing by a width the vehicle has contradicted. (Such a PID is never put
+    in a batch; this is the walk's own refusal, not the batching rule.)
+    """
+    if widths is not None:
+        return widths.batch_width(pid)
+    return mode01_registry_width(pid)
 
 
 def _query_batched_with_tap(
@@ -1948,6 +1963,7 @@ def _query_batched_with_tap(
     stats: CanObdLoopStats,
     deadline_monotonic: float | None,
     did_response_widths: Mapping[int, int] | None = None,
+    mode01_widths: Mode01WidthLedger | None = None,
 ) -> BatchedQueryResult:
     """Issue one Mode-01 or Mode-22 batch through the owned receive tap."""
     is_did = leader.kind == "did"
@@ -2018,15 +2034,19 @@ def _query_batched_with_tap(
             )
             continue
         if result.response is not None:
+            suspect: int | None = None
             if is_did:
                 readings, clean = split_batched_did_response(
                     result.response.payload,
                     lambda did: (did_response_widths or {}).get(did),
                 )
             else:
-                readings, clean = split_batched_response(
-                    result.response.payload, _batched_pid_width
+                walk = walk_batched_response(
+                    result.response.payload,
+                    lambda pid: _batched_pid_width(pid, mode01_widths),
+                    expected=frozenset(identifiers),
                 )
+                readings, clean, suspect = walk.readings, walk.clean, walk.suspect
             completed = _frame_arrival(msg)
             return BatchedQueryResult(
                 readings=readings,
@@ -2034,6 +2054,7 @@ def _query_batched_with_tap(
                 arrival=first_frame or completed,
                 response_interval_s=_response_interval(first_frame, completed),
                 responder_id=result.response.responder_id,
+                suspect=suspect,
             )
     return BatchedQueryResult()
 
@@ -2096,6 +2117,7 @@ def _issue_batched_request(
             stats=stats,
             deadline_monotonic=deadline_monotonic,
             did_response_widths=spec.did_response_widths,
+            mode01_widths=stats.mode01_widths,
         )
     except Exception:  # noqa: BLE001 - propagate after recording scheduler state
         for index in indices:
@@ -2119,11 +2141,28 @@ def _issue_batched_request(
             for index in indices:
                 states[index].last_negative_response_code = result.negative_response_code
         return BatchOutcome(answered=False, negative_response_code=result.negative_response_code)
+    # Mode 01 members the desynced walk never reached (or the blamed PID,
+    # whose slice is suspect). They were not answered-and-missing — the walk
+    # lost the boundary before them — so they take no timeout: that charged a
+    # miss to every later member on every batch, forever (batch044). They go
+    # back to a single read on their next slot instead, which measures them.
+    unparsed: set[int] = set()
     if not result.clean:
         if leader.kind == "did":
             stats.did_batch_desyncs += 1
         else:
             stats.batch_desyncs += 1
+            if result.suspect is not None:
+                result.readings.pop(result.suspect, None)
+            unparsed = {pid for pid in identifiers if pid not in result.readings}
+            stats.mode01_widths.on_desync(unparsed, result.suspect)
+            log.debug(
+                "multi-PID batch desynced; re-measuring single on next slot",
+                extra={
+                    "suspect": None if result.suspect is None else f"0x{result.suspect:02X}",
+                    "unparsed": [f"0x{pid:02X}" for pid in sorted(unparsed)],
+                },
+            )
 
     now = time.monotonic()
     # One response, one arrival instant, shared by every PID it carried. A
@@ -2136,6 +2175,11 @@ def _issue_batched_request(
     for index in indices:
         request = requests[index]
         state = states[index]
+        if request.identifier in unparsed:
+            # Same accounting as a whole-batch failure: the send is named, no
+            # response state moves (C02/D02.1 invariant holds).
+            state.batch_failures += 1
+            continue
         payload = result.readings.get(request.identifier)
         emitted = False
         if payload is not None:

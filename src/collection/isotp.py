@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Container, Sequence
 from dataclasses import dataclass
 
 DEFAULT_REQUEST_ID = 0x7DF
@@ -122,19 +122,56 @@ def split_batched_response(
     returned before a desync is still trustworthy; everything after is not,
     which is why the flag is returned rather than swallowed.
     """
+    walk = walk_batched_response(payload, byte_length_for)
+    return walk.readings, walk.clean
+
+
+@dataclass(frozen=True)
+class BatchWalk:
+    """A batched Mode 01 walk, with where it broke when it did."""
+
+    #: ``{pid: data}`` in walk order, up to the break.
+    readings: dict[int, bytes]
+    clean: bool
+    #: The PID whose width most plausibly broke the walk, or ``None`` when the
+    #: payload gives no candidate (the very first byte was not a member).
+    #: A truncated tail blames the PID at the break (its width runs past the
+    #: end); a byte at a boundary that is not a member blames the PID parsed
+    #: just before it (its width landed the walk off a boundary). A heuristic
+    #: attribution, not proof — which is why the caller re-measures it.
+    suspect: int | None = None
+
+
+def walk_batched_response(
+    payload: bytes,
+    byte_length_for: Callable[[int], int | None],
+    *,
+    expected: Container[int] | None = None,
+) -> BatchWalk:
+    """``split_batched_response`` that also says where a desync happened.
+
+    ``expected`` is the set of PIDs the request carried. With it, a byte at a
+    boundary that is not a requested PID — or a PID seen twice — ends the walk
+    as a desync: the ECU cannot answer a PID nobody asked for, so the previous
+    width was wrong and every byte after it is misattributed. Without it, only
+    an unknown PID or a truncated tail stops the walk.
+    """
     readings: dict[int, bytes] = {}
+    last: int | None = None
     index = 0
     while index < len(payload):
         pid = payload[index]
-        width = byte_length_for(pid)
+        stray = expected is not None and (pid not in expected or pid in readings)
+        width = None if stray else byte_length_for(pid)
         if width is None or width <= 0:
-            return readings, False
+            return BatchWalk(readings, False, last)
         start, end = index + 1, index + 1 + width
         if end > len(payload):
-            return readings, False
+            return BatchWalk(readings, False, pid)
         readings.setdefault(pid, payload[start:end])
+        last = pid
         index = end
-    return readings, True
+    return BatchWalk(readings, True)
 
 
 #: UDS service 0x22 allows several DIDs in one ReadDataByIdentifier request.
@@ -400,6 +437,8 @@ class IsoTpResponseAssembler:
 
 __all__ = [
     "split_batched_response",
+    "walk_batched_response",
+    "BatchWalk",
     "MAX_BATCHED_PIDS",
     "DEFAULT_REQUEST_ID",
     "DEFAULT_RESPONSE_ID_MAX",

@@ -480,6 +480,129 @@ class CanObdSpec:
     discovery_key: str | None = None
 
 
+#: Desyncs the batch walk may attribute to one PID whose single-read width
+#: agrees with the registry before that PID stops batching anyway. A width
+#: contradiction excludes a PID at once; this bounds the case a single read
+#: cannot explain (an ECU that answers a PID alone but mangles it in a batch),
+#: so no attribution can keep ``batch_desyncs`` growing forever.
+MODE01_DESYNC_BLAME_LIMIT = 3
+
+
+def mode01_registry_width(pid: int) -> int | None:
+    """The registry's Mode 01 payload width for ``pid``, or ``None``."""
+    definition = lookup(0x01, pid)
+    if definition is None or definition.byte_length <= 0:
+        return None
+    return definition.byte_length
+
+
+@dataclass
+class Mode01WidthLedger:
+    """Measured Mode 01 payload widths, and which PIDs may therefore batch.
+
+    The Mode 01 counterpart of Mode 22's ``did_response_widths`` rule (only a
+    measured width batches), adapted to what Mode 01 has: a registry width
+    checked against J1979 (``tests/test_mode01_widths.py``) that a particular
+    vehicle can still contradict — a 2-bank ECU sending one byte for 0x55-0x58
+    where J1979 gives two. A batched walk slices by width, so one wrong width
+    desyncs every batch holding that PID and loses every member after it.
+
+    **Policy: the registry width is trusted until contradicted.** A PID with no
+    single read yet may batch, because the registry is pinned to the standard
+    and requiring a measurement first would cost every PID a single request at
+    each loop start for a mismatch the J1979 test already makes rare. A
+    contradiction is caught either way: every single-PID response is measured
+    here (its payload is bounded by the ISO-TP length, so it *is* the width),
+    and a desynced batch sends its unparsed members — and the PID blamed for the
+    break — back to a single read on their next slot, which measures them.
+
+    A PID whose measured width disagrees with the registry never batches again
+    for this loop (the state lives in ``CanObdLoopStats`` and restarts with it;
+    nothing is persisted — a restart re-measures in one single read).
+    """
+
+    #: pid -> payload width of the most recent single-PID response.
+    observed: dict[int, int] = field(default_factory=dict)
+    #: pid -> (registry width, observed width); sticky once recorded.
+    mismatches: dict[int, tuple[int, int]] = field(default_factory=dict)
+    #: PIDs whose next slot is a single read (after a batch desync).
+    remeasure: set[int] = field(default_factory=set)
+    #: pid -> desyncs the walk attributed to it.
+    blamed: dict[int, int] = field(default_factory=dict)
+    #: Members sent back to a single read by a desync (lifetime count).
+    remeasures_requested: int = 0
+
+    def batch_width(self, pid: int) -> int | None:
+        """Width to slice a batched response by; ``None`` refuses the PID."""
+        if pid in self.mismatches:
+            return None
+        return mode01_registry_width(pid)
+
+    def batchable(self, pid: int) -> bool:
+        """Whether ``pid`` may ride (or lead) a multi-PID batch right now."""
+        return (
+            self.batch_width(pid) is not None
+            and pid not in self.remeasure
+            and self.blamed.get(pid, 0) < MODE01_DESYNC_BLAME_LIMIT
+        )
+
+    def observe_single(self, pid: int, width: int) -> None:
+        """Record the payload width of a single-PID Mode 01 response."""
+        self.observed[pid] = width
+        self.remeasure.discard(pid)
+        registry = mode01_registry_width(pid)
+        if registry is None or width == registry or pid in self.mismatches:
+            return
+        self.mismatches[pid] = (registry, width)
+        log.warning(
+            "Mode 01 PID 0x%02X answers %d byte(s) but the registry says %d; "
+            "polling it single-PID only for this session (a batch would desync on it)",
+            pid,
+            width,
+            registry,
+            extra={"pid": f"0x{pid:02X}", "registry_width": registry, "observed_width": width},
+        )
+
+    def on_desync(self, unparsed: Iterable[int], suspect: int | None) -> None:
+        """A batch walk broke: re-measure what it could not parse, and blame."""
+        pending = set(unparsed)
+        if suspect is not None:
+            pending.add(suspect)
+            blamed = self.blamed.get(suspect, 0) + 1
+            self.blamed[suspect] = blamed
+            if blamed == MODE01_DESYNC_BLAME_LIMIT and suspect not in self.mismatches:
+                log.warning(
+                    "Mode 01 PID 0x%02X broke %d batched walks without its single-read "
+                    "width contradicting the registry; polling it single-PID only for "
+                    "this session",
+                    suspect,
+                    blamed,
+                    extra={"pid": f"0x{suspect:02X}"},
+                )
+        self.remeasures_requested += len(pending - self.remeasure)
+        self.remeasure |= pending
+
+    def metrics(self) -> dict[str, Any]:
+        """The ``/status`` batching view of the ledger."""
+        return {
+            "width_mismatches": {
+                f"0x{pid:02X}": {"registry": registry, "observed": observed}
+                for pid, (registry, observed) in sorted(self.mismatches.items())
+            },
+            "desync_blame": {f"0x{pid:02X}": n for pid, n in sorted(self.blamed.items())},
+            "desync_excluded": [
+                f"0x{pid:02X}"
+                for pid, n in sorted(self.blamed.items())
+                if n >= MODE01_DESYNC_BLAME_LIMIT
+            ],
+            "remeasure_pending": [f"0x{pid:02X}" for pid in sorted(self.remeasure)],
+            "desync_remeasures": self.remeasures_requested,
+            "measured_widths": {
+                f"0x{pid:02X}": width for pid, width in sorted(self.observed.items())
+            },
+        }
+
+
 @dataclass(frozen=True)
 class ChannelRate:
     """What a capture achieved for one channel: rate and coverage, separately.
@@ -582,6 +705,8 @@ class CanObdLoopStats:
     #: through a rate change, which read as "the change did nothing". Deques
     #: bounded by ACHIEVED_HZ_WINDOW keep this O(reads in the window).
     recent_reads: dict[str, deque[float]] = field(default_factory=dict)
+    #: Measured Mode 01 widths and which PIDs may batch (see the ledger).
+    mode01_widths: Mode01WidthLedger = field(default_factory=Mode01WidthLedger)
 
     def record_read(self, channel: str, now: float) -> None:
         """Note one reading of ``channel`` for the trailing-window rate.
@@ -2098,15 +2223,19 @@ def _select_next_due_request(
     return index, request, state
 
 
-def is_batchable(request: _PollRequest) -> bool:
+def is_batchable(request: _PollRequest, widths: Mode01WidthLedger | None = None) -> bool:
     """Whether a request can ride along in a multi-PID Mode 01 batch.
 
     Only plain Mode 01 PIDs. Custom PIDs are excluded even when they sit on
     Mode 01: they decode through their own formula against a payload this
     module doesn't know the width of, so they can't be split back out of a
-    batched response reliably.
+    batched response reliably. With ``widths``, a PID whose measured width
+    contradicts the registry, or that is owed a single re-measure after a
+    desync, is excluded too (``Mode01WidthLedger.batchable``).
     """
-    return request.kind == "pid" and request.service == 0x01 and 0 <= request.identifier <= 0xFF
+    if not (request.kind == "pid" and request.service == 0x01 and 0 <= request.identifier <= 0xFF):
+        return False
+    return widths is None or widths.batchable(request.identifier)
 
 
 def select_batch_companions(  # noqa: PLR0913
@@ -2120,6 +2249,7 @@ def select_batch_companions(  # noqa: PLR0913
     ignore_tier: bool = False,
     members: Container[int] | None = None,
     preferred: Container[int] = frozenset(),
+    widths: Mode01WidthLedger | None,
 ) -> list[int]:
     """Indices to issue alongside ``leader_index`` as one batched request.
 
@@ -2141,10 +2271,12 @@ def select_batch_companions(  # noqa: PLR0913
     which the batch shares one cadence — not a rate increase. ``preferred``
     — the profile's ``required_tuple`` — fills the batch first, so the
     tuple's members share one response when the ceiling would otherwise
-    split them across requests.
+    split them across requests. ``widths`` (the loop's measured-width ledger)
+    keeps a width-contradicted or re-measure-owed PID out of every batch, as
+    leader or companion.
     """
     leader = requests[leader_index]
-    if max_pids <= 1 or not is_batchable(leader):
+    if max_pids <= 1 or not is_batchable(leader, widths):
         return [leader_index]
 
     chosen = [leader_index]
@@ -2154,7 +2286,7 @@ def select_batch_companions(  # noqa: PLR0913
         request, state = requests[index], states[index]
         if len(chosen) >= max_pids:
             break
-        if index == leader_index or not is_batchable(request):
+        if index == leader_index or not is_batchable(request, widths):
             continue
         if members is not None and index not in members:
             continue
@@ -2299,6 +2431,9 @@ def _batching_metrics(
         "desyncs": stats.batch_desyncs,
         "size_narrowings": stats.batch_size_narrowings,
         "failures_while_ecu_silent": stats.batch_failures_ecu_silent,
+        # Measured-width guard: PIDs whose single-read width contradicts the
+        # registry (never batched), desync attribution, and pending re-reads.
+        **stats.mode01_widths.metrics(),
         # Lifetime average since the loop started. Explicitly named: read as
         # a current rate it is misleading, and was — on 2026-08-04 it barely
         # moved through a real rate change because hours of history dominated.
@@ -2631,6 +2766,9 @@ __all__ = [
     "select_batch_companions",
     "select_did_batch_companions",
     "is_batchable",
+    "Mode01WidthLedger",
+    "MODE01_DESYNC_BLAME_LIMIT",
+    "mode01_registry_width",
     "RoundScheduler",
     "RoundState",
     "round_members",

@@ -309,7 +309,9 @@ def test_companion_selection_respects_poll_tier() -> None:
         state.next_due_at = 0.0
     leader = next(i for i, r in enumerate(requests) if r.channel == "RPM")
 
-    chosen = select_batch_companions(requests, states, 1.0, leader_index=leader, max_pids=6)
+    chosen = select_batch_companions(
+        requests, states, 1.0, leader_index=leader, max_pids=6, widths=None
+    )
 
     tiers = {requests[i].poll_tier for i in chosen}
     assert tiers == {"fast"}
@@ -321,7 +323,9 @@ def test_companion_selection_is_a_noop_when_batching_disabled() -> None:
     requests = build_poll_requests(_BatchingEcu(), spec)  # type: ignore[arg-type]
     states = _initial_request_states(requests, spec, 0.0)
 
-    assert select_batch_companions(requests, states, 1.0, leader_index=0, max_pids=1) == [0]
+    assert select_batch_companions(
+        requests, states, 1.0, leader_index=0, max_pids=1, widths=None
+    ) == [0]
 
 
 def test_only_plain_mode01_pids_are_batchable() -> None:
@@ -587,11 +591,12 @@ def test_companions_come_from_the_rounds_members_and_the_tuple_fills_first() -> 
         max_pids=3,
         members=members,
         preferred=frozenset({index["MAF"]}),
+        widths=None,
     )
     assert [requests[i].channel for i in chosen] == ["RPM", "MAF", "SPEED"]
     # Without a round, the historic rule holds: only requests due *now* ride.
     assert select_batch_companions(
-        requests, states, 1.0, leader_index=index["RPM"], max_pids=3
+        requests, states, 1.0, leader_index=index["RPM"], max_pids=3, widths=None
     ) == [index["RPM"]]
 
 
@@ -824,3 +829,172 @@ def test_a_capture_round_with_baro_walks_every_member(
     for reading in readings:
         by_stamp.setdefault(reading.timestamp, set()).add(reading.pid)
     assert any(set(channels) <= got for got in by_stamp.values())
+
+
+# ---------------------------------------------------------------------------
+# Measured-width guard: a vehicle that contradicts the registry (batch044 #4)
+# ---------------------------------------------------------------------------
+
+
+class _OneBankEcu(_BaroEcu):
+    """An ECU answering 0x06 with two bytes (bank 1, bank 3 — the layout J1979
+    gives 0x55-0x58) where the registry says one. Any batch holding 0x06
+    desyncs on it: the walk lands on the second byte as if it were a PID."""
+
+    VALUES = {**_BaroEcu.VALUES, 0x06: b"\x90\x80"}
+
+    def __init__(self, *, silent_after_desync: bool = False) -> None:
+        super().__init__()
+        self.silent_after_desync = silent_after_desync
+        self.silent = False
+        self.single_pids: list[int] = []
+
+    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
+        data = bytes(msg.data)
+        pids = tuple(data[2 : 1 + data[0]])
+        if data[1] == 0x01 and len(pids) == 1:
+            self.single_pids.append(pids[0])
+        if self.silent:
+            self.sent.append(msg)
+            return
+        super().send(msg, timeout)
+        # The key goes off right after the ECU answered the desyncing batch.
+        self.silent = self.silent_after_desync and len(pids) > 1 and 0x06 in pids
+
+
+def _run_capture(bus: _BatchingEcu, channels: tuple[str, ...], seconds: float):  # type: ignore[no-untyped-def]
+    from src.collection import tuning_profile
+    from src.collection.capture_profiles import CaptureProfile
+
+    readings: list = []
+    try:
+        tuning_profile.activate(
+            CaptureProfile(
+                name="onebank",
+                mode01=dict.fromkeys(channels, 1.0),
+                priority_channels=("RPM",),
+                round_timestamps=True,
+                corpus_eligible=False,
+                storage_prefix="_capture-onebank",
+            ),
+            source="test",
+        )
+        spec = _spec(pids=channels, batch_max_pids=6, request_timeout_seconds=0.02)
+        stats = run_can_obd_loop(
+            bus,  # type: ignore[arg-type]
+            spec,
+            on_frame=lambda _m: None,
+            on_reading=readings.append,
+            stop_event=threading.Event(),
+            deadline_monotonic=time.monotonic() + seconds,
+        )
+    finally:
+        tuning_profile.set_active(False, source="test")
+    return spec, stats, readings
+
+
+@pytest.mark.parametrize(
+    "channels",
+    [
+        ("RPM", "SHORT_FUEL_TRIM_1", "SPEED", "ENGINE_LOAD"),  # a member follows the stray byte
+        ("RPM", "SPEED", "ENGINE_LOAD", "SHORT_FUEL_TRIM_1"),  # the stray byte is the tail
+    ],
+    ids=["mismatch-middle", "mismatch-last"],
+)
+def test_a_pid_whose_measured_width_contradicts_the_registry_leaves_batches(
+    channels: tuple[str, ...], caplog: pytest.LogCaptureFixture
+) -> None:
+    """One desync, then 0x06 is read single, measured at 2 bytes, and never
+    batched again; the members the desync cost are re-read, not timed out."""
+    import logging
+
+    from src.collection.obd_scheduler import _batching_metrics
+
+    bus = _OneBankEcu()
+    with caplog.at_level(logging.WARNING, logger="src.collection.obd_scheduler"):
+        spec, stats, readings = _run_capture(bus, channels, 1.0)
+
+    holding = [i for i, order in enumerate(bus.batch_orders) if 0x06 in order]
+    assert holding, f"0x06 never batched: {bus.batch_orders}"
+    assert stats.batch_desyncs == 1, "the desync must not recur once 0x06 is measured"
+    assert len(holding) == 1, f"0x06 batched again after the desync: {bus.batch_orders}"
+    # The correct-width members keep batching after the desync.
+    after = bus.batch_orders[holding[0] + 1 :]
+    assert any(set(order) == {0x0C, 0x0D, 0x04} for order in after), bus.batch_orders
+    assert 0x06 in bus.single_pids
+    # The fake answers only Mode 01, so the DTC polls are the only timeouts.
+    other_services = sum(1 for m in bus.sent if m.data[0] < 0x10 and m.data[1] != 0x01)
+    assert stats.request_timeouts == other_services, "unparsed members were charged a timeout"
+    by_channel: dict[str, set[float]] = {}
+    for reading in readings:
+        by_channel.setdefault(reading.pid, set()).add(reading.value)
+    assert set(channels) <= set(by_channel), f"a member was lost: {sorted(by_channel)}"
+    assert by_channel["RPM"] == {750.0} and by_channel["SPEED"] == {50.0}
+    assert by_channel["SHORT_FUEL_TRIM_1"] == {12.5}, "a mis-sliced 0x06 value leaked"
+
+    block = _batching_metrics(spec, stats, time.monotonic())
+    assert block is not None
+    assert block["width_mismatches"] == {"0x06": {"registry": 1, "observed": 2}}
+    assert block["desync_blame"] == {"0x06": 1}
+    assert block["measured_widths"]["0x06"] == 2
+    assert block["remeasure_pending"] == []
+    warnings = [r for r in caplog.records if "0x06" in r.getMessage()]
+    assert len(warnings) == 1, [r.getMessage() for r in warnings]
+
+
+def test_a_desync_followed_by_silence_does_not_storm() -> None:
+    """Re-measures ride each member's own next slot: an ECU that goes quiet
+    after the desync sees no more than one request per member per round."""
+    channels = ("RPM", "SHORT_FUEL_TRIM_1", "SPEED", "ENGINE_LOAD")
+    bus = _OneBankEcu(silent_after_desync=True)
+    _spec_, stats, _readings = _run_capture(bus, channels, 0.8)
+
+    assert stats.batch_desyncs == 1
+    assert stats.rounds_started >= 2
+    assert len(bus.sent) <= stats.rounds_started * len(channels)
+    assert bus.single_pids.count(0x06) <= stats.rounds_started
+    # A silent single measures nothing: the re-measure stays owed.
+    assert 0x06 in stats.mode01_widths.remeasure
+    assert not stats.mode01_widths.mismatches
+
+
+def test_a_matching_single_read_keeps_the_pid_batchable() -> None:
+    from src.collection.obd_scheduler import Mode01WidthLedger
+
+    ledger = Mode01WidthLedger()
+    assert ledger.batchable(0x55), "registry width is trusted until contradicted"
+    ledger.on_desync({0x0D}, suspect=0x55)
+    assert not ledger.batchable(0x55) and not ledger.batchable(0x0D)
+    ledger.observe_single(0x55, 2)
+    ledger.observe_single(0x0D, 1)
+    assert ledger.batchable(0x55) and ledger.batchable(0x0D)
+    assert ledger.mismatches == {}
+    ledger.observe_single(0x55, 1)
+    assert not ledger.batchable(0x55)
+    assert ledger.batch_width(0x55) is None
+
+
+def test_repeated_blame_without_a_width_contradiction_stops_batching() -> None:
+    from src.collection.obd_scheduler import MODE01_DESYNC_BLAME_LIMIT, Mode01WidthLedger
+
+    ledger = Mode01WidthLedger()
+    for _ in range(MODE01_DESYNC_BLAME_LIMIT):
+        ledger.on_desync((), suspect=0x0C)
+        ledger.observe_single(0x0C, 2)
+    assert not ledger.batchable(0x0C)
+    assert ledger.metrics()["desync_excluded"] == ["0x0C"]
+
+
+def test_walk_blames_the_pid_before_a_stray_boundary_byte() -> None:
+    from src.collection.isotp import walk_batched_response
+
+    registry = {0x0C: 2, 0x55: 2, 0x0D: 1}
+    # 0C 0B B8 | 55 90 | 0D 32 — 0x55 sliced as 2 bytes lands on 0x32.
+    walk = walk_batched_response(
+        bytes.fromhex("0C0BB855900D32"), registry.get, expected={0x0C, 0x55, 0x0D}
+    )
+    assert not walk.clean and walk.suspect == 0x55
+    # Truncated tail: the PID at the break is blamed.
+    walk = walk_batched_response(bytes.fromhex("0C0BB85590"), registry.get, expected={0x0C, 0x55})
+    assert not walk.clean and walk.suspect == 0x55
+    assert walk.readings == {0x0C: b"\x0b\xb8"}
