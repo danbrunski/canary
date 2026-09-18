@@ -456,6 +456,7 @@ def quality_verdicts(artifacts: RunArtifacts) -> dict[str, Any]:
             persistence=stop_sidecar.get("persistence"),
             scheduler=artifacts.scheduler_metrics,
             scope="recompute",
+            batching_start=artifacts.start_epoch.batching,
             # Scored after the run has stopped; nothing on this loop is
             # waiting on it (the daemon path goes through a child process).
             allow_event_loop=True,

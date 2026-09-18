@@ -33,6 +33,7 @@ from src.collection.capture_quality import (
     TUPLE_SKEW,
     UNANSWERED_INPUT,
     UNKNOWN_LOSS_COUNTERS,
+    batching_baseline,
     evaluate_capture_quality,
     normalize_quality_payload,
     tuple_rate_bound_hz,
@@ -603,6 +604,112 @@ def test_batching_off_is_called_out() -> None:
     )
     assert any("batching" in note for note in quality.notes)
     assert quality.tuples["source"] == "no_required_tuple"
+
+
+def _batching(*, desyncs: int, failures: int, requests: int, loop: float = 12.5) -> dict:
+    """The scheduler's cumulative batching block, as ``/status`` reports it."""
+    return {
+        "max_pids": 6,
+        "batched_requests": requests,
+        "batched_pids_requested": requests * 5,
+        "mean_pids_per_batch": 5.0,
+        "failures": failures,
+        "desyncs": desyncs,
+        "size_narrowings": 1,
+        "failures_while_ecu_silent": 0,
+        "channel_reads_per_second_lifetime": 40.0,
+        "channel_reads_per_second": 40.0,
+        "loop_started_monotonic": loop,
+        "mode22": {
+            "max_dids": 4,
+            "known_response_widths": {"0x1208": {"bytes": 2, "source": "measured"}},
+            "batched_requests": requests,
+            "members_requested": requests * 3,
+            "mean_dids_per_batch": 3.0,
+            "failures": failures,
+            "desyncs": desyncs,
+            "fallbacks": 0,
+            "failures_while_ecu_silent": 0,
+        },
+    }
+
+
+def _scored_with_batching(start: dict[str, Any] | None, now: dict[str, Any] | None) -> Any:
+    scheduler = _scheduler(TUPLE)
+    scheduler["batching"] = now
+    return evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=scheduler,
+        lifetime=_healthy(elapsed=100.0),
+        tuples=_tuples(400, elapsed=100.0),
+        losses=_verified_losses(CLEAN, CLEAN),
+        batching_start=start,
+    ).to_dict()["batching"]
+
+
+def test_desyncs_from_an_earlier_capture_are_not_this_captures() -> None:
+    """2026-09-18: a capture reported 102 desyncs, 99 of them from the capture
+    before it on the same daemon — the lifetime block was copied verbatim."""
+    at_arm = {**_scheduler(TUPLE), "batching": _batching(desyncs=99, failures=40, requests=1000)}
+    now = _batching(desyncs=102, failures=41, requests=1400)
+    block = _scored_with_batching(batching_baseline(at_arm), now)
+    assert block["scope"] == "capture"
+    assert block["status"] == VERIFIED
+    assert block["desyncs"] == 3
+    assert block["failures"] == 1
+    assert block["batched_requests"] == 400
+    assert block["mean_pids_per_batch"] == 5.0
+    assert block["channel_reads_per_second"] == 20.0  # 2000 pids / 100 s, not the lifetime 40
+    assert block["mode22"]["desyncs"] == 3
+    assert block["mode22"]["batched_requests"] == 400
+    # Settings are current values, apart from the counters.
+    assert block["config"]["max_pids"] == 6
+    assert block["config"]["mode22_max_dids"] == 4
+    assert "0x1208" in block["config"]["known_response_widths"]
+    # The cumulative totals survive only under a name that says so.
+    assert block["lifetime"]["desyncs"] == 102
+
+
+def test_batching_off_at_arm_is_a_zero_baseline() -> None:
+    at_arm = {**_scheduler(TUPLE), "batching": None}
+    block = _scored_with_batching(
+        batching_baseline(at_arm), _batching(desyncs=2, failures=0, requests=50)
+    )
+    assert block["status"] == VERIFIED
+    assert block["desyncs"] == 2
+
+
+def test_a_counter_reset_mid_capture_is_flagged_never_negative() -> None:
+    at_arm = {**_scheduler(TUPLE), "batching": _batching(desyncs=99, failures=40, requests=1000)}
+    # The daemon restarted: every counter began again from zero.
+    now = _batching(desyncs=2, failures=1, requests=30, loop=900.0)
+    block = _scored_with_batching(batching_baseline(at_arm), now)
+    assert block["status"] == "reset"
+    assert "desyncs" in block["reset_counters"]
+    assert block["desyncs"] is None
+    assert block["mode22"]["desyncs"] is None
+    for name in ("batched_requests", "failures", "size_narrowings"):
+        assert block[name] is None
+    assert block["lifetime"]["desyncs"] == 2
+
+
+def test_a_restart_that_regrew_past_the_baseline_is_still_a_reset() -> None:
+    """Counters higher than at arm are not a delta if their loop is new."""
+    at_arm = {**_scheduler(TUPLE), "batching": _batching(desyncs=1, failures=1, requests=10)}
+    now = _batching(desyncs=5, failures=3, requests=900, loop=900.0)
+    block = _scored_with_batching(batching_baseline(at_arm), now)
+    assert block["status"] == "reset"
+    assert block["reset_counters"] == ["loop_started_monotonic"]
+    assert block["desyncs"] is None
+
+
+def test_no_arm_time_reading_is_unknown_not_the_lifetime_total() -> None:
+    now = _batching(desyncs=102, failures=41, requests=1400)
+    for start in (None, batching_baseline({})):
+        block = _scored_with_batching(start, now)
+        assert block["status"] == UNKNOWN
+        assert block["desyncs"] is None
+        assert block["lifetime"]["desyncs"] == 102
 
 
 def test_the_sidecar_is_versioned_and_never_claims_an_exact_bound() -> None:

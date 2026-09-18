@@ -2305,6 +2305,13 @@ def _batching_metrics(
         # `obd_scheduler.achieved_hz_60s` is the trailing-window answer.
         "channel_reads_per_second_lifetime": achieved_hz,
         "channel_reads_per_second": achieved_hz,
+        # Identity of the counters above: every counter here restarts with
+        # the loop, so a capture comparing an arm-time reading against a
+        # later one needs to know whether it is the same loop's (a restart
+        # followed by regrowth would otherwise read as a small delta).
+        "loop_started_monotonic": (
+            None if stats.loop_started_at is None else round(stats.loop_started_at, 3)
+        ),
         "mode22": {
             "max_dids": spec.did_batch_max_dids,
             "known_response_widths": {

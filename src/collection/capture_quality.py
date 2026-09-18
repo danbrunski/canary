@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.collection.capture_lifetime import LONG_GAP_SECONDS, subtract_windows
-from src.collection.capture_losses import RECORDING, VERIFIED, unknown_losses
+from src.collection.capture_losses import RECORDING, RESET, UNKNOWN, VERIFIED, unknown_losses
 
 #: Fraction of the requested rate a channel may fall to before it counts as a
 #: shortfall. Loose enough to absorb round scheduling jitter, tight enough that
@@ -199,6 +199,152 @@ class CaptureQuality:
             "batching": self.batching,
             "notes": list(self.notes),
         }
+
+
+# ---------------------------------------------------------------------------
+# Batching counters, scoped to the capture
+# ---------------------------------------------------------------------------
+
+#: What the capture report's ``batching`` block is about. The scheduler's own
+#: ``batching`` counters are cumulative since its collector loop started; on
+#: 2026-09-18 a capture reported 102 desyncs of which 99 had happened in an
+#: earlier capture on the same daemon, because the block was copied verbatim.
+BATCHING_SCOPE_CAPTURE = "capture"
+
+#: Cumulative counters in the scheduler's ``batching`` block (Mode 01 level).
+BATCHING_COUNTERS: tuple[str, ...] = (
+    "batched_requests",
+    "batched_pids_requested",
+    "failures",
+    "desyncs",
+    "size_narrowings",
+    "failures_while_ecu_silent",
+)
+#: Cumulative counters in ``batching.mode22``.
+MODE22_BATCHING_COUNTERS: tuple[str, ...] = (
+    "batched_requests",
+    "members_requested",
+    "failures",
+    "desyncs",
+    "fallbacks",
+    "failures_while_ecu_silent",
+)
+#: Identity of the counters' owner (the collector loop's start instant). A
+#: different value at arm and now means the counters restarted in between,
+#: even if they have since climbed past their arm-time values.
+BATCHING_LOOP_KEY = "loop_started_monotonic"
+
+
+def batching_baseline(scheduler: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The arm-time reading the capture's batching deltas are taken against.
+
+    ``recorded`` is False when the scheduler had not reported yet (an empty
+    payload): its batching counters were *unknown* at arm, not zero. A
+    reported payload whose ``batching`` is ``None`` means batching was off
+    with nothing sent, which is a genuine zero baseline.
+    """
+    if not scheduler:
+        return {"recorded": False, "batching": None}
+    block = scheduler.get("batching")
+    return {"recorded": True, "batching": None if block is None else dict(block)}
+
+
+def _counter_values(block: Mapping[str, Any] | None) -> dict[str, int]:
+    block = block or {}
+    mode22 = block.get("mode22") or {}
+    out = {name: int(block.get(name) or 0) for name in BATCHING_COUNTERS}
+    out |= {f"mode22.{name}": int(mode22.get(name) or 0) for name in MODE22_BATCHING_COUNTERS}
+    return out
+
+
+def _ratio(num: int | None, den: int | None) -> float | None:
+    if num is None or not den:
+        return None
+    return round(num / den, 2)
+
+
+def scope_batching(
+    current: Mapping[str, Any] | None,
+    baseline: Mapping[str, Any] | None,
+    *,
+    elapsed_s: float | None = None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """The capture's batching block: arm-to-now deltas, never lifetime totals.
+
+    Returns ``(block, notes)``. Counters are top-level and capture-scoped;
+    ``status`` says whether they are ``verified`` (both readings, no restart),
+    ``reset`` (a counter went backwards or the collector loop restarted — the
+    capture's share is unknowable, so every counter is ``None``, never
+    negative) or ``unknown`` (no arm-time reading). Current settings live under
+    ``config``; the scheduler's cumulative block is kept verbatim under
+    ``lifetime`` and is never the answer to "what happened in this capture".
+    ``None`` means batching was off throughout.
+    """
+    recorded = bool(baseline and baseline.get("recorded"))
+    start_block = (baseline or {}).get("batching") if recorded else None
+    if current is None and start_block is None:
+        return None, []
+    now_values = _counter_values(current)
+    start_values = _counter_values(start_block)
+    notes: list[str] = []
+    reset_counters: list[str] = []
+    if not recorded:
+        status = UNKNOWN
+        notes.append(
+            "batching counters have no arm-time reading, so how many batch failures and "
+            "desyncs fell inside this capture is unknown; batching.lifetime is cumulative "
+            "since the collector started and is not this capture's count."
+        )
+    else:
+        reset_counters = [name for name, value in now_values.items() if value < start_values[name]]
+        loop_then = (start_block or {}).get(BATCHING_LOOP_KEY)
+        loop_now = (current or {}).get(BATCHING_LOOP_KEY)
+        restarted = loop_then is not None and loop_now is not None and loop_then != loop_now
+        if restarted and BATCHING_LOOP_KEY not in reset_counters:
+            reset_counters.append(BATCHING_LOOP_KEY)
+        status = RESET if reset_counters else VERIFIED
+        if status == RESET:
+            notes.append(
+                "batching counters restarted during this capture (a daemon or collector "
+                f"restart: {', '.join(reset_counters)}); the capture's batch failures and "
+                "desyncs are unknowable from the pair and are reported as null."
+            )
+    deltas: dict[str, int | None] = {
+        name: (value - start_values[name] if status == VERIFIED else None)
+        for name, value in now_values.items()
+    }
+    top = {name: deltas[name] for name in BATCHING_COUNTERS}
+    mode22 = {name: deltas[f"mode22.{name}"] for name in MODE22_BATCHING_COUNTERS}
+    pids = top["batched_pids_requested"]
+    reads_hz = (
+        round(pids / elapsed_s, 2)
+        if pids is not None and elapsed_s is not None and elapsed_s > 0
+        else None
+    )
+    current_mode22 = (current or {}).get("mode22") or {}
+    block: dict[str, Any] = {
+        "scope": BATCHING_SCOPE_CAPTURE,
+        "status": status,
+        "reset_counters": reset_counters,
+        **top,
+        "mean_pids_per_batch": _ratio(pids, top["batched_requests"]),
+        # Batched channel reads over the capture interval (pauses included).
+        "channel_reads_per_second": reads_hz,
+        "mode22": {
+            **mode22,
+            "mean_dids_per_batch": _ratio(mode22["members_requested"], mode22["batched_requests"]),
+        },
+        # Current settings, not counters: what the scheduler is configured
+        # with now. Nothing here is a count.
+        "config": {
+            "max_pids": (current or {}).get("max_pids"),
+            "mode22_max_dids": current_mode22.get("max_dids"),
+            "known_response_widths": dict(current_mode22.get("known_response_widths") or {}),
+        },
+        "baseline": None if start_block is None else dict(start_block),
+        "lifetime": None if current is None else dict(current),
+    }
+    return block, notes
 
 
 def tuple_rate_bound_hz(
@@ -787,6 +933,7 @@ def evaluate_capture_quality(  # noqa: PLR0913
     requests: list[Mapping[str, Any]] | None = None,
     scope: str = SCOPE_LIVE,
     requested_rate_hz: float | None = None,
+    batching_start: Mapping[str, Any] | None = None,
 ) -> CaptureQuality:
     """Score a capture against its profile's promises.
 
@@ -804,6 +951,10 @@ def evaluate_capture_quality(  # noqa: PLR0913
     * ``persistence`` — the finalization outcome (flush, drain, rows).
     * ``requests`` — overrides ``scheduler["requests"]`` for the recompute
       path, where no scheduler exists.
+    * ``batching_start`` — :func:`batching_baseline` taken at arm. The
+      scheduler's ``batching`` counters are cumulative; the report carries
+      their arm-to-now delta (:func:`scope_batching`), and without a baseline
+      says the capture's share is unknown rather than quoting the total.
     """
     name = str(profile.get("name") or "unknown")
     weights = {
@@ -866,8 +1017,10 @@ def evaluate_capture_quality(  # noqa: PLR0913
     failures += _loss_failures(loss_summary)
     failures += _persistence_failures(persistence)
 
-    batching = scheduler.get("batching")
-    if scheduler and batching is None:
+    raw_batching = scheduler.get("batching")
+    batching, batching_notes = scope_batching(raw_batching, batching_start, elapsed_s=elapsed)
+    notes += batching_notes
+    if scheduler and raw_batching is None:
         notes.append(
             "request batching was off or unreported. Unbatched, one request carries one PID, "
             "so the bus budget binds far sooner than the ECM does."
@@ -938,10 +1091,13 @@ def normalize_quality_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "ACQUISITION_GAP",
+    "BATCHING_COUNTERS",
+    "BATCHING_SCOPE_CAPTURE",
     "DEFAULT_MAX_TUPLE_SKEW_S",
     "HARD_CLAUSES",
     "MIN_STALL_SECONDS",
     "MIN_VERIFY_SECONDS",
+    "MODE22_BATCHING_COUNTERS",
     "PERSISTENCE_LOSS",
     "RATE_SHORTFALL",
     "RATE_TOLERANCE",
@@ -958,6 +1114,7 @@ __all__ = [
     "UNKNOWN_LOSS_COUNTERS",
     "CaptureQuality",
     "ChannelQuality",
+    "batching_baseline",
     "cadence_from_lifetime",
     "coverage_from_lifetime",
     "effective_max_tuple_skew_s",
@@ -965,5 +1122,6 @@ __all__ = [
     "gap_threshold_s",
     "normalize_quality_payload",
     "profile_requests",
+    "scope_batching",
     "tuple_rate_bound_hz",
 ]

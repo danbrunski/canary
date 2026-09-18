@@ -58,6 +58,7 @@ from src.collection.capture_quality import (
     SCOPE_RECOMPUTE,
     SCOPE_STOP,
     CaptureQuality,
+    batching_baseline,
 )
 from src.control.capture_manifest import (
     read_capture_epoch,
@@ -120,6 +121,10 @@ class StartEpoch:
     loss_epoch: LossEpoch
     generation: int
     started_wall: float
+    #: ``capture_quality.batching_baseline`` at arm: the scheduler's
+    #: cumulative batching counters, so the report can quote this capture's
+    #: share. ``None`` = not recorded (an epoch written before 2026-09-18).
+    batching: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -127,17 +132,20 @@ class StartEpoch:
             "generation": self.generation,
             "started_wall": round(self.started_wall, 3),
             "loss_epoch": self.loss_epoch.to_dict(),
+            "batching_baseline": self.batching,
         }
 
 
 def record_capture_start(session_dir: Path, health: _Health | None) -> StartEpoch | None:
-    """Snapshot the loss counters at arm and persist them beside the manifest."""
+    """Snapshot the loss and batching counters at arm and persist them beside
+    the manifest."""
     if health is None:
         return None
     epoch = StartEpoch(
         loss_epoch=health.loss_epoch(),
         generation=capture_generation.current(),
         started_wall=time.time(),
+        batching=batching_baseline(health.capture_quality_inputs().scheduler),
     )
     try:
         write_capture_epoch(session_dir, epoch.to_dict())
@@ -152,6 +160,19 @@ def _start_epoch_from_disk(session_dir: Path) -> LossEpoch | None:
         return None
     raw = payload.get("loss_epoch")
     return LossEpoch.from_dict(raw) if isinstance(raw, Mapping) else None
+
+
+def batching_baseline_for(session_dir: Path, start: StartEpoch | None) -> dict[str, Any] | None:
+    """The arm-time batching baseline: from memory, else ``capture_epoch.json``.
+
+    ``None`` (never recorded) makes the report's batching counters unknown —
+    never the scheduler's lifetime totals.
+    """
+    if start is not None:
+        return start.batching
+    payload = read_capture_epoch(session_dir)
+    raw = None if payload is None else payload.get("batching_baseline")
+    return dict(raw) if isinstance(raw, Mapping) else None
 
 
 def losses_since(
@@ -176,6 +197,7 @@ async def recompute_quality_off_loop(  # noqa: PLR0913
     scheduler: Mapping[str, Any] | None = None,
     scope: str = SCOPE_RECOMPUTE,
     ended_at: float | None = None,
+    batching_start: Mapping[str, Any] | None = None,
     executor: Executor | None = None,
     timeout: float = RECOMPUTE_TIMEOUT_SECONDS,
 ) -> CaptureQuality:
@@ -198,6 +220,7 @@ async def recompute_quality_off_loop(  # noqa: PLR0913
         "scheduler": None if scheduler is None else dict(scheduler),
         "scope": scope,
         "ended_at": ended_at,
+        "batching_start": None if batching_start is None else dict(batching_start),
     }
     loop = asyncio.get_running_loop()
     state = _recompute_state(loop)
@@ -361,6 +384,7 @@ async def live_capture_quality(
         persistence=persistence,
         scheduler=inputs.scheduler,
         scope=SCOPE_LIVE,
+        batching_start=batching_baseline_for(session_dir, start),
         executor=executor,
     )
 
@@ -438,6 +462,7 @@ async def _finalize(  # noqa: PLR0913
         persistence=persistence,
         scheduler=inputs.scheduler,
         scope=SCOPE_STOP,
+        batching_start=batching_baseline_for(session_dir, start),
         executor=executor,
     )
     payload = quality.to_dict()
@@ -468,6 +493,7 @@ __all__ = [
     "RECOMPUTE_TIMEOUT_SECONDS",
     "CaptureQualityUnavailableError",
     "StartEpoch",
+    "batching_baseline_for",
     "finalize_capture",
     "live_capture_quality",
     "losses_since",

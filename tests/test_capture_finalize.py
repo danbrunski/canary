@@ -49,6 +49,21 @@ class _Health:
         return {"drained": [], "timed_out": [], "unobserved": []}
 
 
+class _BatchingHealth(_Health):
+    """A daemon whose scheduler has already counted an earlier capture's desyncs."""
+
+    def __init__(self, desyncs: int) -> None:
+        self.desyncs = desyncs
+
+    def capture_quality_inputs(self, *, now: float | None = None) -> Any:
+        batching = {"max_pids": 6, "desyncs": self.desyncs, "loop_started_monotonic": 1.0}
+        return SimpleNamespace(
+            lifetime=None,
+            scheduler={"requests": [], "batching": batching},
+            loss_epoch=self.loss_epoch(),
+        )
+
+
 class _Writer:
     rows_written = 480
 
@@ -250,3 +265,37 @@ async def test_a_wedged_child_times_out_and_is_terminated(
         proc.join(timeout=10)
         # Killed, not left to finish on its own (a clean worker exit is 0).
         assert proc.exitcode == -signal.SIGTERM
+
+
+async def test_the_arm_time_batching_baseline_reaches_the_judge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recorded at arm (memory and ``capture_epoch.json``) and handed to the
+    judge, so the report quotes the capture's desyncs, not the daemon's."""
+    seen: list[Any] = []
+
+    def fake(session_dir: Path, **kwargs: Any) -> Any:
+        seen.append(kwargs.get("batching_start"))
+        return SimpleNamespace(
+            to_dict=lambda: {"verdict": "pass"}, passed=True, verdict="pass", failures=[]
+        )
+
+    monkeypatch.setattr(capture_coverage, "recompute_capture_quality", fake)
+    health = _BatchingHealth(desyncs=99)
+    start = capture_finalize.record_capture_start(tmp_path, health)
+    assert start is not None
+    assert start.batching == {
+        "recorded": True,
+        "batching": {"max_pids": 6, "desyncs": 99, "loop_started_monotonic": 1.0},
+    }
+    health.desyncs = 102
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        await finalize_capture(
+            tmp_path, health=health, writer=_Writer(), start=start, executor=pool
+        )
+        # A daemon restarted mid-capture has no StartEpoch in memory: the
+        # baseline is read back from the epoch sidecar.
+        await live_capture_quality(
+            tmp_path, health=health, writer=_Writer(), start=None, executor=pool
+        )
+    assert seen == [start.batching, start.batching]

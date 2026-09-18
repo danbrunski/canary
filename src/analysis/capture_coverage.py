@@ -309,6 +309,7 @@ def recompute_capture_quality(  # noqa: PLR0913
     scheduler: Mapping[str, Any] | None = None,
     scope: str = SCOPE_RECOMPUTE,
     ended_at: float | None = None,
+    batching_start: Mapping[str, Any] | None = None,
     allow_event_loop: bool = False,
 ) -> CaptureQuality:
     """Score a capture session from what is on disk.
@@ -319,7 +320,9 @@ def recompute_capture_quality(  # noqa: PLR0913
     interval comes from the manifest's start and either ``ended_at``, the
     previous v2 sidecar's recorded end, or the last persisted row. Loss
     counters are taken from ``losses`` or the previous v2 sidecar; a session
-    with neither reports them as unknown.
+    with neither reports them as unknown. ``batching_start`` is the arm-time
+    batching baseline (``capture_quality.batching_baseline``); the scheduler's
+    cumulative batching counters are reported as their delta against it.
 
     Refuses to run on a thread whose event loop is running: this reads every
     persisted row back, and inline on the daemon's loop it froze HTTP and
@@ -389,6 +392,7 @@ def recompute_capture_quality(  # noqa: PLR0913
             else inputs["requests"]
         ),
         scope=scope,
+        batching_start=batching_start,
     )
     notes = list(quality.notes)
     if inputs["ended_at_source"] == "last_row":

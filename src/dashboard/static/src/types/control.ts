@@ -298,7 +298,29 @@ export interface CaptureQuality {
   losses: Record<string, CaptureLossScope>;
   persistence: Record<string, unknown> | null;
   trailing: { window_s: number; observed_seconds: number | null; hz: Record<string, number> };
+  /** Batching counters for this capture only (arm-to-now delta). Counters are
+   *  null unless `status` is `verified`; `lifetime` is the scheduler's
+   *  cumulative block and never this capture's count. Null = batching off. */
+  batching?: CaptureBatchingQuality | null;
   notes: string[];
+}
+
+export interface CaptureBatchingQuality {
+  scope: "capture";
+  status: "verified" | "reset" | "unknown";
+  reset_counters: string[];
+  batched_requests: number | null;
+  batched_pids_requested: number | null;
+  failures: number | null;
+  desyncs: number | null;
+  size_narrowings: number | null;
+  failures_while_ecu_silent: number | null;
+  mean_pids_per_batch: number | null;
+  channel_reads_per_second: number | null;
+  mode22: Record<string, number | null>;
+  config: Record<string, unknown>;
+  baseline: Record<string, unknown> | null;
+  lifetime: Record<string, unknown> | null;
 }
 
 /** Summary of a bounded per-cycle history (roadmap C04.8). */

@@ -111,6 +111,48 @@ previously only reached a log line. `derived_records` (a batched Mode 01
 response producing N readings is N records) and `raw_responses` (ECU
 responses) are kept apart.
 
+## Batching counters (capture-scoped)
+
+The scheduler's `batching` block in `/status.obd_scheduler` is cumulative
+since its collector loop started. Until 2026-09-18 the capture report copied
+it verbatim, so a capture reported 102 desyncs of which 99 had happened in an
+earlier capture on the same daemon — the loss-epoch defect again, on a
+different counter. The report's `batching` block is now a start/stop delta:
+
+* at arm, `record_capture_start` stores `capture_quality.batching_baseline`
+  (the scheduler's batching block as it read then) in the `StartEpoch` and
+  in `capture_epoch.json` (`batching_baseline`), so a restarted daemon can
+  still reconcile against it;
+* the live and stop judges pass it as `batching_start`, and
+  `capture_quality.scope_batching` returns this capture's share.
+
+```json
+"batching": {
+  "scope": "capture", "status": "verified", "reset_counters": [],
+  "batched_requests": 400, "batched_pids_requested": 2000, "failures": 1, "desyncs": 3,
+  "size_narrowings": 0, "failures_while_ecu_silent": 0,
+  "mean_pids_per_batch": 5.0, "channel_reads_per_second": 20.0,
+  "mode22": {"batched_requests": 400, "members_requested": 1200, "failures": 1, "desyncs": 3,
+             "fallbacks": 0, "failures_while_ecu_silent": 0, "mean_dids_per_batch": 3.0},
+  "config": {"max_pids": 6, "mode22_max_dids": 4, "known_response_widths": {"0x1208": {"bytes": 2, "source": "measured"}}},
+  "baseline": {"...": "the arm-time scheduler block"},
+  "lifetime": {"...": "the scheduler block now, cumulative — never this capture's count"}
+}
+```
+
+| `status` | meaning |
+|---|---|
+| `verified` | arm-time reading present, no counter went backwards, same collector loop (`loop_started_monotonic`); the top-level and `mode22` counters are this capture's |
+| `reset` | a counter went backwards, or the loop restarted (a restart that has since regrown past the baseline is still a reset); every counter is `null`, never negative, and `reset_counters` names the evidence |
+| `unknown` | no arm-time reading (an epoch from before this change, or the scheduler had not reported yet at arm); every counter is `null` |
+
+`channel_reads_per_second` is batched reads over the capture interval (pauses
+included). `config` holds current settings, not counts. The block is `null`
+when batching was off throughout, and a recompute from rows (no scheduler)
+carries none. The arm-time reading is the last published scheduler snapshot,
+so it may lag the arm by up to one metrics interval. None of this affects the
+verdict; a `reset` or `unknown` status adds a note.
+
 ## Finalization order (stop)
 
 `src/control/capture_finalize.py`: **boundary** (bump the capture

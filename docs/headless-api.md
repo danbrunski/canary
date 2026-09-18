@@ -144,7 +144,7 @@ Control endpoints:
 | `GET /control/version` | return control API version, package version, git SHA, and token env name |
 | `POST /control/captures` | start a labeled capture window on the active daemon session |
 | `GET /control/captures/current` | inspect the active capture window |
-| `GET /control/capture/quality` | capture-quality v2 verdict for the running capture profile, scored arm-to-now on what has persisted (`scope: live`); `failing_constraints` names what bound. Scored in a child process (it reads the rows back); `503` if that child cannot answer |
+| `GET /control/capture/quality` | capture-quality v2 verdict for the running capture profile, scored arm-to-now on what has persisted (`scope: live`); `batching` counters are arm-to-now deltas (`batching.scope: capture`), never the scheduler's lifetime totals; `failing_constraints` names what bound. Scored in a child process (it reads the rows back); `503` if that child cannot answer |
 | `GET /control/capture/quality/{session_id}` | recompute coverage and tuple yield from a stored capture session's rows (never rewritten), returned beside its stored sidecar (`scope: stop`, or `trailing_snapshot` for v1 files); also scored in a child process (`503` if it cannot answer); see `docs/capture-quality.md` |
 | `POST /control/captures/current/tags` | append a tag to the active capture's `tags.jsonl` |
 | `POST /control/captures/current/stop` | stop the active capture window |
