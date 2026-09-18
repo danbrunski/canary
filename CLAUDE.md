@@ -45,3 +45,13 @@ order comes from `docs/roadmap/OVERNIGHT-QUEUE.md`.
   gate; never commits) and `verifier` (adversarial per-task check;
   write-less). Keep them separate — the orchestrator owns commits,
   checkboxes, and blocked calls.
+
+## Drive sessions (`/drive`)
+
+Autonomous sessions against the live Pi while the operator drives run as
+`/loop /drive` followed by that drive's OUTCOME and DRIVE FACTS. The
+standing protocol (reaching the Pi, first-wake-up checks, health line,
+capture mechanics, hard rules, wrap-up) is `.claude/commands/drive.md`;
+the experiment itself is the newest `data/analyses/*-deploy-plan.md`. When
+a drive teaches something durable about running drives, edit `drive.md` —
+don't grow the pasted prompt.
