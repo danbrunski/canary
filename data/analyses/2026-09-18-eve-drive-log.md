@@ -9,7 +9,7 @@ _Earlier today: `2026-09-18-drive-log.md` (AM), `2026-09-18-pm-drive-log.md` (PM
   - **0x1134 is NOT commanded φ:** it holds 64 while 0x44 sits at 1.06 for 3.5 s and at 0.87 lean. Its raw/64 scale matches when it does move.
   - 0x1208 = air charge (per g air +0.5 %).
   - D04.3 has no minimum at this resolution.
-- Back on `default`. **Next maneuver: at your next parked stop, tell me "parked" and leave it idling for ~2 min.** I start `injector-deadtime-idle`, then you switch headlights + blower + rear defrost on for 20 s and off for 20 s, twice. Optional while driving: in-gear coasts in 3rd and 4th from ~3,000 rpm (D04.2).
+- Back on `default` for the corpus. **No parked stop for ~3 h (operator, ~20:42Z), so the idle dead-time step is deferred to a future drive.** Optional while driving: in-gear coasts in 3rd and 4th from ~3,000 rpm (D04.2).
 - Health: 0 drops. 16 stalls of 2.3–2.5 s plus **three of exactly 5.0 s (new)**, 0 inside holds. A key-off stop from 20:27 to 20:33Z.
 
 ## For the operator
@@ -94,3 +94,9 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
   - **D04.3:** 78 tip-in and 49 lift pairs at the best lag. **No clear minimum in either direction** (near-minimum lags scattered, 200–450 ms tip-in, 200–2,700 ms lift). The PM "tip-in 500 ms" **doesn't replicate**. Unresolved: it needs 0x44/0x24 in separate batches.
   - **D04.2:** 41 coasts, 34 with ≥ 2 floor samples; floor 52–57 counts (next value 141). Untagged; gear assignment is desk work.
 - 20:40Z `injector-deadtime-idle` saved live and mirrored (`c309688`, 90 profile tests green, file restored after the test rewrite). It's Mode 01 RPM/MAF/0x24/FUEL_STATUS/**0x42** at 4 Hz plus DIDs ECM_RPM/0x1208/0x1206/0x1207 at 2 Hz, **without 0x44**. The dead-time prediction is already written (Added predictions). Storage high-water reached 2,185 around the block switch and my pull (0 drops); watch it.
+- ~20:42Z Operator: "not going to park for 3 hours". Dead-time deferred; `injector-deadtime-idle` stays saved for next time. Desk subagent started on the new 5.0 s stall shape (vs D03.18's 2.4 s), using pulled data only.
+- ~21:00Z **Desk: D03.18 re-diagnosed** (subagent, pulled data only; `~/canary-data/scripts-0918b/out/stall5s.md`).
+  - The 2.4 s stalls are a silent session **entry** (`10 C0`) that sends the next Mode 01 batch into the held session. They are not a timed-out DID read.
+  - The 5.0 s stalls are a silent fast **exit** (`10 81`) waiting out the 5.0 s session lapse.
+  - **Live check:** `/status` shows `fast_exit_failures` = 3 since boot, equal to the three 5.0 s gaps. Session control: 212 timeouts, 0 NRCs.
+  - D03.18 task text updated with both mechanisms and the minimal fixes. This is desk code work; not deploying from the road.

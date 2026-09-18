@@ -858,6 +858,30 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
   `did_session_windows` (fast exit / `10 C0` re-entry) serialises the cycle and
   bound it at one cycle; don't miss-back-off a profile-selected DID on one
   timeout. [September 18 drive log](../../../data/analyses/2026-09-18-drive-log.md).
+  **2026-09-18 evening ([September 18 evening drive log](../../../data/analyses/2026-09-18-eve-drive-log.md)): the mechanism is corrected. It's two session-control
+  failures, not a timed-out DID read.** Desk report:
+  `~/canary-data/scripts-0918b/out/stall5s.md`; sims in `stall_sim.py`.
+  - **~2.4 s gaps (AM 12, PM 6, eve 16):** a silent `10 C0` entry, where the ECM
+    entered but the reply was lost or late.
+    - The row pattern is Mode 01, Mode 01, one empty round, then the DID sweep.
+    - `on_session_response`'s not-ok branch (phase `mode01`) assumes the ECM
+      stayed in the default session. It then sends the Mode 01 batch into the
+      held session, where Mode 01 is silent, and eats a second 1.0 s timeout.
+    - A `ScriptedEcu` sim reproduces a 2.16 s gap with exactly 1 counted timeout.
+  - **5.0 s gaps (new, eve 3):** a silent `10 81` fast exit after a complete DID
+    sweep. `DidWindowController._close_window` then waits out the full
+    `obd_did_session_lapse_seconds` = 5.0 (`on_exit_response` returns early on
+    timeout).
+    - Verified live: `fast_exit_failures` = **3** since boot, exactly the three
+      gaps. Session control shows 212 timeouts and **0 NRCs**.
+  - **Minimal fixes:**
+    - (1) a silent entry failure means "session state unknown": send the fast
+      exit (or retry the entry once) before any Mode 01;
+    - (2) retry a silent fast exit once before falling back to the lapse;
+    - (3) optional: a shorter, measured session-control timeout.
+    - `test_transient_exit_failure_costs_one_lapse_and_is_retried` pins today's
+      5 s behaviour and must change with fix 2.
+  - The "0x1208 benched 30–48 s" part didn't appear in these three captures.
 
 - [x] **D03.19 A key-off boot disabled multi-PID batching for the whole session.**
   Silent timeouts from a sleeping ECM counted as batch rejections (6→4→2→off in
