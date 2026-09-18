@@ -564,8 +564,19 @@ promote unverified bindings or to change a tune.
     `behavior_models.yaml` recipe output, `validation/scenarios.py`), and
     **re-pointing the tuning provider role `injector_pw_b1`**, which still
     maps to 0x1208 at `confirmed` in
-    `data/nissan-xterra-2008/tuning_providers.yaml`. That's a tuning-toolkit
-    semantic change, so it needs its own decision.
+    `data/nissan-xterra-2008/tuning_providers.yaml`.
+  - **Decision made (operator, 2026-09-18): fix the mislabels properly, and
+    don't preserve naming consistency in the tools for its own sake.**
+    Deferred to a desk session. Plan:
+    - rename 0x1208 → `ECM_AIR_CHARGE` and 0x1206/0x1207 →
+      `ECM_INJECTOR_PULSE_B{1,2}_CANDIDATE`, keeping the old names in
+      `aliases`;
+    - add ONE catalog canonicalization applied where stored sessions are read
+      and where manifest/recipe/provider feature names are resolved, so old
+      sessions and deployed IF/LSTM models keep working without a retrain;
+    - re-point role `injector_pw_b1` to the 0x1206 candidate at `candidate`;
+    - sweep built-in and vehicle profiles, the behavior recipe, `refit.py`,
+      `scenarios.py` and the tests.
 
 - [ ] **D03.10 Capture the missing UpRev instrument reference.** Today's two
   CANary paths already show a rich-side discrepancy: bank-1 voltage converted
