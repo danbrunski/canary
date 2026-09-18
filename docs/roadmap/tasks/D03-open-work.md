@@ -854,7 +854,36 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
 
 ---
 
-## Suggested order for the 2026-09-18 drive
+## Suggested order for the next drive (written 2026-09-18)
+
+The 2026-09-18 order ran as far as a slow offroad drive allowed; what it
+produced is in the [drive log](../../../data/analyses/2026-09-18-drive-log.md).
+The next drive's order, its written-down predictions and the desk work that
+must precede it live in
+[`2026-09-18-next-drive-deploy-plan.md`](../../../data/analyses/2026-09-18-next-drive-deploy-plan.md).
+In short:
+
+1. **Desk first:** the two operator decisions (D03.21; 0x1208 / 0x1206–0x1207
+   catalog text), then **D03.18**, because a 2.4 s stall can erase a 4 s pull.
+   Then `analyze_fuel_blocks.py` into `tools/` with a known-answer fixture, and
+   a 3 Hz minimal pull profile if it resolves feasible at 90 req/s.
+2. **Boot check:** 0 "batching disabled" lines on a key-off boot (D03.19's last
+   unverified path).
+3. **One capture on `fuel-pw-research`, warm, paved:**
+   - closed-loop plateaus;
+   - ≥30 s of held enrichment across ≥3 independent pulls (D03.8, D03.9);
+   - tip-ins/lifts held ≥5 s (D04.3);
+   - in-gear and neutral coasts from ~3,000 rpm (D04.2, using 0x1206's floor as
+     the fuel-cut marker).
+4. **Restart ≤10 min before parking** so D03.11's small-session `digest.json`
+   can be observed (unless D03.6 has landed).
+5. **Any drive with a ≥10 kPa elevation change, on `default`:** D04.8 and
+   0x1208-vs-baro in one session, and altitude data for D03.20.
+6. D03.14–D03.17, D02.2 and D01.5 wait until the fuel workflow closes.
+
+<details><summary>The 2026-09-18 order, as written before the drive</summary>
+
+
 
 1. **Before departure:** D03.11 deployment/evidence checks and D03.13 UPS check;
    prepare D03.4's feasible candidate profile and D03.8's provisional channel.
@@ -890,3 +919,5 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
    evidence and restore the normal profile. D02.9/D03.7 and D02.10 replay
    evaluation belong before/after live collection, once isolation is proven.
    D02.5 still needs the operator's corpus choice; D01.10/D01.4 remain last.
+
+</details>
