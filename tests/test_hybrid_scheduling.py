@@ -588,37 +588,190 @@ def test_lapse_is_not_recovery_until_mode01_actually_answers(clock: FakeClock) -
     assert recovered, "the backed-off channels never re-probed"
 
 
-@pytest.mark.parametrize(
-    ("reply", "counter"),
-    [(0x21, "negative_responses"), (None, "timeouts")],
-    ids=["busy", "silent"],
+TRANSIENT_EXIT_FAILURES = pytest.mark.parametrize(
+    ("reply", "counter", "reply_cost"),
+    [(0x21, "negative_responses", LATENCY), (None, "timeouts", 0.2), ("lost", "timeouts", 0.2)],
+    ids=["busy", "silent", "exited-reply-lost"],
 )
-def test_transient_exit_failure_costs_one_lapse_and_is_retried(
-    clock: FakeClock, reply: int | None, counter: str
+
+
+@TRANSIENT_EXIT_FAILURES
+def test_transient_exit_failure_is_retried_once_instead_of_the_lapse(
+    clock: FakeClock, reply: object, counter: str, reply_cost: float
 ) -> None:
+    """D03.18: one failed ``10 81`` used to cost the whole lapse — 5.0 s of
+    Mode-01 blackout on the truck (three all-channel gaps of 5.003–5.011 s on
+    2026-09-18). It is re-sent at the next budget slot instead, and the lapse
+    shrinks to the grace when the retry is answered."""
     bus = ScriptedEcu(
-        clock, session_gated=True, s3_seconds=0.1, session_script={EXIT: ["ok", reply]}
+        clock, session_gated=True, s3_seconds=5.0, session_script={EXIT: ["ok", reply]}
     )
-    session = _session(cycle_seconds=CYCLE, lapse_seconds=0.3)
+    session = _session(cycle_seconds=CYCLE, lapse_seconds=5.0)
     _readings, _stats, snaps = _run(
         clock, bus, _spec(did_session=session), seconds=3.0, metrics_every=0.5
     )
     log = request_log(bus)
     exits = [s.at for s in log if s.kind == "exit"]
     assert len(exits) >= 4
-    failed = exits[1]  # [0] connect-time exit, [1] first window's exit
-    # The failed exit's window waits the lapse out (counted from the window
-    # close, one slot before the exit): no Mode 01 inside it...
-    lapse_end = failed - BUDGET_SLOT + 0.3
-    assert kinds_between(log, failed + LATENCY, lapse_end - EPS).count("mode01") == 0
-    assert kinds_between(log, lapse_end - EPS, lapse_end + BUDGET_SLOT).count("mode01") >= 1
-    # ...and it is a retry, not a disable.
+    failed, retry = exits[1], exits[2]  # [0] connect-time exit, [1] first window's exit
+    assert kinds_between(log, failed + EPS, retry) == []
+    assert retry - failed <= reply_cost + BUDGET_SLOT + EPS
+    # Mode 01 is back one grace after the answered retry, not after 5 s.
+    resumed = next(s.at for s in log if s.kind == "mode01" and s.at > retry)
+    assert resumed - retry <= LATENCY + 0.05 + BUDGET_SLOT + EPS
     profile = snaps[-1].did_profile
     assert profile is not None
     assert profile["fast_exit_supported"] is True
     assert profile["fast_exit_failures"] == 1
+    assert profile["fast_exit_retries"] == 1
     assert snaps[-1].to_dict()["session_control"][counter] == 1
+    assert len([s for s in log if s.kind == "mode01" and s.at > resumed]) > 4
+
+
+@TRANSIENT_EXIT_FAILURES
+def test_transient_exit_failing_twice_costs_one_lapse_and_is_retried_next_window(
+    clock: FakeClock, reply: object, counter: str, reply_cost: float
+) -> None:
+    """The retry is bounded to one per window: a second failure waits that
+    window's lapse out (no Mode 01 inside it, no third exit), and the next
+    window tries the exit again — a retry, not a disable."""
+    del reply_cost
+    bus = ScriptedEcu(
+        clock, session_gated=True, s3_seconds=0.1, session_script={EXIT: ["ok", reply, reply]}
+    )
+    session = _session(cycle_seconds=CYCLE, lapse_seconds=1.0)
+    _readings, _stats, snaps = _run(
+        clock, bus, _spec(did_session=session), seconds=3.0, metrics_every=0.5
+    )
+    log = request_log(bus)
+    exits = [s.at for s in log if s.kind == "exit"]
+    assert len(exits) >= 4
+    failed, retry = exits[1], exits[2]
+    # The lapse is counted from the window close, one slot before the exit.
+    lapse_end = failed - BUDGET_SLOT + 1.0
+    assert exits[3] > lapse_end
+    assert kinds_between(log, failed + EPS, retry) == []
+    assert kinds_between(log, retry + EPS, lapse_end - EPS) == []
+    assert kinds_between(log, lapse_end - EPS, lapse_end + BUDGET_SLOT).count("mode01") >= 1
+    profile = snaps[-1].did_profile
+    assert profile is not None
+    assert profile["fast_exit_supported"] is True
+    assert profile["fast_exit_failures"] == 2
+    assert profile["fast_exit_retries"] == 1
+    assert snaps[-1].to_dict()["session_control"][counter] == 2
     assert len([s for s in log if s.kind == "mode01" and s.at > lapse_end]) > 4
+
+
+def _gap_around(readings: list[ObdReading], at: float) -> float:
+    """The all-channel reading gap spanning ``at`` (acquisition time)."""
+    stamps = sorted(float(r.acquired_at) for r in readings if r.acquired_at is not None)
+    before = max(t for t in stamps if t <= at)
+    after = min(t for t in stamps if t > at)
+    return after - before
+
+
+def test_lost_entry_reply_sends_the_exit_before_any_mode01(clock: FakeClock) -> None:
+    """D03.18's 2.4 s stall: the ECM enters 0xC0 but its ``50 C0`` is lost.
+    The loop used to assume the default session and send the next Mode 01
+    batch into the held session, where Mode 01 is silent — a second full
+    timeout. A silent entry now means "state unknown": ``10 81`` goes out
+    first, so the gap is one timeout plus one exit, not two timeouts."""
+    pids = ("RPM", "SPEED", "ENGINE_LOAD", "MAF", "TIMING_ADVANCE", "COOLANT_TEMP")
+    bus = ScriptedEcu(
+        clock, session_gated=True, s3_seconds=5.0, session_script={SESSION: ["ok", "lost"]}
+    )
+    session = _session(cycle_seconds=0.5, lapse_seconds=5.0)
+    spec = _spec(did_session=session, pids=pids, batch_max_pids=6, request_timeout_seconds=1.0)
+    readings, stats, snaps = _run(clock, bus, spec, seconds=6.0, metrics_every=0.5)
+    log = request_log(bus)
+    lost = entries(log)[1]
+    after = [s for s in log if s.at > lost]
+    assert after[0].kind == "exit"
+    assert after[0].at - lost <= 1.0 + BUDGET_SLOT + EPS
+    assert after[1].kind == "mode01"
+    gap = _gap_around(readings, lost + clock.time() - clock.monotonic())
+    # One entry timeout + the exit + its grace; before the fix 2.16 s.
+    assert gap < 1.0 + 0.3, f"{gap:.3f}s gap: Mode 01 went into the held session"
+    assert stats.request_timeouts == 1
+    assert stats.batch_failures == 0
+    profile = snaps[-1].did_profile
+    assert profile is not None
+    assert profile["unknown_session_exits"] == 1
+    assert profile["fast_exit_failures"] == 0
+    assert profile["windows_opened"] >= 4
+
+
+def test_refused_entry_is_not_an_unknown_session(clock: FakeClock) -> None:
+    """An NRC proves the ECM stayed in the default session: Mode 01 resumes
+    directly, no exit is spent."""
+    bus = ScriptedEcu(
+        clock, session_gated=True, s3_seconds=5.0, session_script={SESSION: ["ok", 0x22]}
+    )
+    session = _session(cycle_seconds=0.5)
+    _readings, _stats, snaps = _run(
+        clock, bus, _spec(did_session=session), seconds=2.0, metrics_every=0.5
+    )
+    log = request_log(bus)
+    refused = entries(log)[1]
+    after = [s for s in log if s.at > refused]
+    assert after[0].kind == "mode01"
+    profile = snaps[-1].did_profile
+    assert profile is not None
+    assert profile["unknown_session_exits"] == 0
+
+
+class _KeyOffEcu(ScriptedEcu):
+    """Answers nothing at all inside ``[off_from, off_until)`` — key out."""
+
+    off_from = float("inf")
+    off_until = float("inf")
+
+    def send(self, msg: object, timeout: float | None = None) -> None:
+        now = self.clock.monotonic()
+        if self.off_from <= now < self.off_until:
+            self.sent.append((now, msg))  # type: ignore[arg-type]
+            return
+        super().send(msg, timeout)  # type: ignore[arg-type]
+
+
+def test_silent_ecu_gets_one_extra_exit_per_silence_not_a_storm(clock: FakeClock) -> None:
+    """Key off: every entry is silent. The exit a silent entry schedules is
+    spent once per silence (the ECU must answer something before another),
+    is never retried, and costs no lapse — so the request pattern is today's
+    plus one request, batching stays intact, and a key-on is picked up as
+    quickly as before."""
+    pids = ("RPM", "SPEED", "ENGINE_LOAD", "MAF", "TIMING_ADVANCE", "COOLANT_TEMP")
+    bus = _KeyOffEcu(clock, session_gated=True, s3_seconds=5.0)
+    session = _session(cycle_seconds=0.5, lapse_seconds=5.0)
+    spec = _spec(did_session=session, pids=pids, batch_max_pids=6, request_timeout_seconds=1.0)
+    start = clock.monotonic()
+    wall_offset = clock.time() - start
+    bus.off_from, bus.off_until = start + 3.0, start + 33.0
+    readings: list[ObdReading] = []
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        spec,
+        on_frame=lambda _m: None,
+        on_reading=readings.append,
+        stop_event=threading.Event(),
+        deadline_monotonic=start + 40.0,
+    )
+    log = request_log(bus)
+    silent = kinds_between(log, start + 3.0, start + 33.0)
+    # 1 s timeouts: at most one request per second of silence, one exit total.
+    assert silent.count("exit") == 1
+    assert len(silent) <= 31
+    assert stats.batch_size_narrowings == 0
+    # Key on is picked up within the request in flight plus one more.
+    woke = min(
+        float(r.acquired_at) - wall_offset
+        for r in readings
+        if r.acquired_at is not None and float(r.acquired_at) - wall_offset >= start + 33.0
+    )
+    assert woke - (start + 33.0) <= 2.0 + BUDGET_SLOT
+    later = [s for s in log if s.at >= start + 34.0]
+    assert "did" in [s.kind for s in later]
+    assert "mode01" in [s.kind for s in later]
 
 
 def test_permanent_refusal_disables_the_exit_and_recovery_is_observed(

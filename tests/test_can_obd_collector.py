@@ -1766,7 +1766,7 @@ def _controller(**overrides: object) -> tuple[Any, list[Any]]:
 def test_fast_exit_hands_mode_01_back_without_waiting_out_the_session() -> None:
     """The lapse exists so the session expires; an accepted `10 81` ends it now."""
     controller, states = _controller(exit_session=0x81, exit_grace_seconds=0.05)
-    controller.on_session_response(ok=True, states=states, now=100.0)
+    controller.on_session_response(result=SessionControlResult(ok=True), states=states, now=100.0)
     assert controller.phase == "window"
 
     # Window closes; the exit is now owed.
@@ -1790,7 +1790,7 @@ def test_a_transient_exit_failure_is_retried_on_the_next_window() -> None:
     zero for the remainder of the capture.
     """
     controller, states = _controller(exit_session=0x81)
-    controller.on_session_response(ok=True, states=states, now=100.0)
+    controller.on_session_response(result=SessionControlResult(ok=True), states=states, now=100.0)
     controller.advance(states, now=110.0)
     controller.on_exit_response(result=SessionControlResult(ok=False), now=110.0)
 
@@ -1803,7 +1803,7 @@ def test_a_transient_exit_failure_is_retried_on_the_next_window() -> None:
 
     # ...but the next window tries again.
     assert controller.fast_exit_available(now=115.01) is True
-    controller.on_session_response(ok=True, states=states, now=200.0)
+    controller.on_session_response(result=SessionControlResult(ok=True), states=states, now=200.0)
     controller.advance(states, now=210.0)
     assert controller.session_exit_due() is True
     assert controller.snapshot(now=210.0)["fast_exit_supported"] is True
@@ -1990,7 +1990,7 @@ def test_a_lapse_always_leaves_mode_01_a_share_of_the_bus() -> None:
     states = [_PollRequestState(), _PollRequestState()]
     controller = DidWindowController(spec, [1], now=0.0)
 
-    controller.on_session_response(ok=True, states=states, now=100.0)
+    controller.on_session_response(result=SessionControlResult(ok=True), states=states, now=100.0)
     controller.on_request_attempted(1)
     controller.advance(states, now=100.01)
     assert controller.phase == "lapse"
@@ -2003,7 +2003,7 @@ def test_a_lapse_always_leaves_mode_01_a_share_of_the_bus() -> None:
 
 def test_no_exit_configured_keeps_the_historic_lapse() -> None:
     controller, states = _controller()
-    controller.on_session_response(ok=True, states=states, now=100.0)
+    controller.on_session_response(result=SessionControlResult(ok=True), states=states, now=100.0)
     controller.advance(states, now=110.0)
     assert controller.session_exit_due() is False
     assert controller.phase == "lapse"
@@ -2032,7 +2032,9 @@ def test_capture_profile_sets_the_did_window_cadence() -> None:
 
         # A 0.5 s cadence is only reachable because the fast exit ends the
         # blackout; the 5 s lapse alone would swallow it whole.
-        controller.on_session_response(ok=True, states=states, now=100.0)
+        controller.on_session_response(
+            result=SessionControlResult(ok=True), states=states, now=100.0
+        )
         controller.on_request_attempted(1)  # the window's only DID was read
         controller.advance(states, now=100.2)
         controller.on_exit_response(result=SessionControlResult(ok=True), now=100.2)

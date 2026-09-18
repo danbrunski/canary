@@ -352,6 +352,16 @@ class SessionControlResult:
         """True only for NRCs that no amount of retrying will change."""
         return self.negative_response_code in PERMANENT_REFUSAL_NRCS
 
+    @property
+    def silent(self) -> bool:
+        """No reply at all — unlike an NRC, the ECU's session state is unknown.
+
+        A lost or late ``50 <session>`` looks exactly like this while the ECU
+        *did* switch sessions (D03.18), so a silent entry must not be read as
+        "still in the default session".
+        """
+        return not self.ok and self.negative_response_code is None
+
 
 def resolve_did_session_spec(collection: CollectionConfig) -> DidSessionSpec | None:
     """Resolve the Mode-22 session policy from config + data/dids.yaml.
@@ -1001,6 +1011,19 @@ class DidWindowController:
         self._exit_retry_backoff = FAST_EXIT_RETRY_MIN_SECONDS
         #: NRC of the most recent failed exit, for `/status` and the log.
         self.last_exit_nrc: int | None = None
+        #: One immediate re-send of a transiently failed exit per window
+        #: (D03.18): a lost ``50 81`` otherwise costs the full ``lapse_seconds``
+        #: of Mode-01 blackout. Armed by `_close_window` only.
+        self._exit_retry_armed = False
+        #: Whether the ECU has answered anything since the last exit sent for a
+        #: silent entry. A key-off ECU answers nothing, so this bounds the
+        #: extra exit to one per silence rather than one per window attempt —
+        #: the same "ECU answered since" gate batching uses (D03.19).
+        self._answered_since_unknown_exit = True
+        #: The owed exit was scheduled by a silent entry, not a window close.
+        self._unknown_exit_pending = False
+        self.unknown_session_exits = 0
+        self.fast_exit_retries = 0
         #: Cycle schedule (C04.3/C04.5): windows open at ``anchor + k*cycle``.
         self._cycle_anchor: float | None = None
         self._cycle_k = 0
@@ -1179,11 +1202,14 @@ class DidWindowController:
     def on_session_response(
         self,
         *,
-        ok: bool,
+        result: SessionControlResult,
         states: Sequence[_PollRequestState],
         now: float,
     ) -> None:
         self._last_session_sent = now
+        ok = result.ok
+        if result.negative_response_code is not None or ok:
+            self._answered_since_unknown_exit = True
         if self.phase == "mode01":
             if ok:
                 self.phase = "window"
@@ -1193,6 +1219,23 @@ class DidWindowController:
             else:
                 self.session_failures += 1
                 self._schedule_next_window(now, earliest=now)
+                if (
+                    result.silent
+                    and self.fast_exit_available(now)
+                    and self._answered_since_unknown_exit
+                ):
+                    # A silent entry leaves the session state unknown: the ECM
+                    # may have entered and lost its reply, and Mode 01 sent
+                    # into a held session is silent — a second full timeout
+                    # (the 2.4 s D03.18 stall). Hand the bus back first. Only
+                    # an NRC proves the ECM stayed in the default session.
+                    self._answered_since_unknown_exit = False
+                    self.unknown_session_exits += 1
+                    self.phase = "lapse"
+                    self._lapse_until = now + self._spec.lapse_seconds
+                    self._exit_due = True
+                    self._exit_retry_armed = False
+                    self._unknown_exit_pending = True
         elif self.phase == "window":
             if ok:
                 self.keepalives_sent += 1
@@ -1214,11 +1257,22 @@ class DidWindowController:
 
         Only an NRC that means "never" disables the fast exit, and only after
         `FAST_EXIT_REFUSALS_BEFORE_DISABLE` of them in a row. Everything else —
-        busy, conditions-not-correct, or silence — costs this window's lapse
-        and is retried on the next one. Even a disable is provisional: it
+        busy, conditions-not-correct, or silence — is re-sent once at the next
+        budget slot (D03.18: a lost ``50 81`` cost the full 5 s lapse); a
+        second failure in the same window costs that window's lapse and the
+        exit is tried again on the next one. Even a disable is provisional: it
         expires, so the capture heals mid-drive without a restart.
+
+        The exit sent after a silent entry is not retried: if it is silent too
+        the ECU is most likely off, and Mode 01 resumes exactly as it did
+        before that exit existed.
         """
         self._exit_due = False
+        after_silent_entry = self._unknown_exit_pending
+        retry_armed = self._exit_retry_armed
+        self._unknown_exit_pending = self._exit_retry_armed = False
+        if result.ok or result.negative_response_code is not None:
+            self._answered_since_unknown_exit = True
         if result.ok:
             self.fast_exits += 1
             if self._exit_retry_at:
@@ -1236,7 +1290,14 @@ class DidWindowController:
         self.fast_exit_failures += 1
         self.last_exit_nrc = result.negative_response_code
         if not result.permanently_refused:
-            # Transient: wait this window's lapse out and try again next time.
+            if retry_armed:
+                # Transient: re-send once now rather than wait the lapse out.
+                self._exit_due = True
+                self.fast_exit_retries += 1
+            elif after_silent_entry:
+                # The exit after a silent entry failed as well: nothing says a
+                # session is held, so resume Mode 01 as before that exit existed.
+                self._lapse_until = min(self._lapse_until, now)
             return
         self._exit_refusals += 1
         if self._exit_refusals < FAST_EXIT_REFUSALS_BEFORE_DISABLE:
@@ -1306,6 +1367,7 @@ class DidWindowController:
 
     def on_response(self, index: int, now: float, acquired_at: float | None) -> None:
         """A request answered with readings — the only recovery evidence there is."""
+        self._answered_since_unknown_exit = True
         kind = self.service_kind(index)
         self.cycle.on_acquired(kind, acquired_at)
         if kind == "mode22":
@@ -1370,6 +1432,8 @@ class DidWindowController:
         # because the session has to expire on its own; when the ECU accepts a
         # return-to-default it is seconds of Mode-01 blackout for nothing.
         self._exit_due = self.fast_exit_available(now)
+        self._exit_retry_armed = self._exit_due
+        self._unknown_exit_pending = False
         if not self._exit_due:
             self.cycle.on_lapse_started()
         self._schedule_next_window(now, earliest=now)
@@ -1389,6 +1453,10 @@ class DidWindowController:
             "window_interval_seconds": self._interval(),
             "fast_exits": self.fast_exits,
             "fast_exit_failures": self.fast_exit_failures,
+            #: Immediate re-sends of a transiently failed exit (D03.18).
+            "fast_exit_retries": self.fast_exit_retries,
+            #: Exits sent because a silent entry left the session unknown.
+            "unknown_session_exits": self.unknown_session_exits,
             "fast_exit_supported": self.fast_exit_available(now),
             #: Seconds until the fast exit is re-probed; 0.0 when it is live.
             #: Non-zero means Mode 01 is running at the reduced lapse-path

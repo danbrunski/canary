@@ -33,6 +33,7 @@ from src.collection.obd_scheduler import (
     DidWindowController,
     FreezeFrameTrigger,
     ObdSchedulerMetrics,
+    SessionControlResult,
     _PollRequest,
     _PollRequestState,
 )
@@ -701,7 +702,11 @@ def test_both_gates_are_projections_of_the_matrix(runtime_reset: object) -> None
     # Session gate: phase, no selection.
     assert ctrl.request_verdict(0, requests[0]).eligible
     assert ctrl.request_verdict(2, requests[2]).reason == "awaiting_window"
-    ctrl.on_session_response(ok=True, states=[_PollRequestState() for _ in requests], now=1.0)
+    ctrl.on_session_response(
+        result=SessionControlResult(ok=True),
+        states=[_PollRequestState() for _ in requests],
+        now=1.0,
+    )
     assert ctrl.request_verdict(2, requests[2]).eligible
     assert ctrl.request_verdict(0, requests[0]).reason == "session_window"
     ctrl.on_request_attempted(2)

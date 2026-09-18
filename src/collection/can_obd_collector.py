@@ -1030,7 +1030,7 @@ def _drive_session_controller(
             deadline_monotonic=deadline_monotonic,
         )
         controller.on_service_time("session", time.monotonic() - started)
-        controller.on_session_response(ok=entry_result.ok, states=states, now=time.monotonic())
+        controller.on_session_response(result=entry_result, states=states, now=time.monotonic())
     else:
         return None
     return max(next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic())

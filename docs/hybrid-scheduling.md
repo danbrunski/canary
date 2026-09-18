@@ -153,7 +153,8 @@ pending flag through 30 s of miss backoff until Mode 01 actually answers.
 | capture generation change (profile, pause/resume, passive toggle, replay) | `on_generation_change`: release, cycle accounting reset, next window due *now* — a DID profile armed mid-drive opens its first window within a slot, not up to a config interval later (the 26.56 s first-DID delay of 2026-08-07) |
 | paused | owed exit sent, no window opened, raw CAN received; resume opens the next window immediately |
 | passive TX gating lifted | the held window is released, exit first, then both services |
-| exit failure | transient: this window lapses, next window retries; permanent ×2: lapse path until the re-probe |
+| exit failure | transient: re-sent once at the next budget slot (D03.18: a lost `50 81` cost the whole 5 s lapse); a second failure lapses this window and the next window retries; permanent ×2: lapse path until the re-probe |
+| silent entry (no reply, no NRC) | session state unknown — the ECM may have entered and lost its `50 C0`, and Mode 01 into a held session is silent (the D03.18 2.4 s stall). With a fast exit available, `10 81` goes out before any Mode 01; it is not retried, and if it is silent too Mode 01 resumes at once. Spent once per silence (the ECU must answer something before the next), so a key-off ECU costs one extra request, not one per window. An NRC'd entry still means "not entered" |
 | (re)connect | a vehicle with a verified `exit_session` is returned to the default session by the first request, so a previous loop's held session cannot black out Mode 01 |
 
 Under a capture profile the controller is driven whenever the profile owns
@@ -198,7 +199,9 @@ renders it yet.
 | 0.1 s cycle (needs 0.2375 s) | reported infeasible, shortfall 0.1375 s, one warning, still progresses |
 | 0.25 s cycle, 100 ms ECU | 0.75 s median, ≥ 2 missed per cycle, Mode 01 both channels every cycle |
 | grace 0.4 s > cycle | infeasible, every other boundary missed, both services progress |
-| busy / silent exit | one lapse, retried next window, `fast_exit_supported` stays true |
+| busy / silent / reply-lost exit | retried once at the next slot, Mode 01 back one grace later (5.005 s → 1.087 s gap with a 1 s timeout); failing twice costs one lapse, retried next window, `fast_exit_supported` stays true |
+| entry reply lost, ECM in session | exit before Mode 01: 2.160 s → 1.183 s all-channel gap, 1 timeout, 0 batch failures |
+| ECU silent 40 s (key off) | 20 entries + 19 Mode 01 + **1** exit (was 20 + 20 + 0); batching not narrowed |
 | `subFunctionNotSupported` ×2 | exit disabled 30 s with no probe, re-probe accepted, recovery observed |
 | no fast exit, ECU blackout 1 s | `mode01_recovery_pending` true through 30 s of backoff until Mode 01 answers |
 | silent DIDs | one window, no further entries, Mode 01 at rate, idle not counted as missed |

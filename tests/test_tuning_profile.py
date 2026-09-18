@@ -20,7 +20,7 @@ from pydantic import ValidationError
 from src.collection import tuning_profile, tx_gate
 from src.collection.can_obd_collector import run_can_obd_loop
 from src.collection.capture_profiles import CaptureProfile
-from src.collection.obd_scheduler import CanObdSpec
+from src.collection.obd_scheduler import CanObdSpec, SessionControlResult
 from src.config import CanBusConfig
 
 
@@ -349,7 +349,7 @@ def _did_controller(monkeypatch: pytest.MonkeyPatch, *, continuous: bool):
     spec = DidSessionSpec(session=0xC0, window_max_seconds=10.0, lapse_seconds=5.0)
     ctrl = DidWindowController(spec, (0, 1), now=0.0)
     states = [_PollRequestState(), _PollRequestState()]
-    ctrl.on_session_response(ok=True, states=states, now=0.0)
+    ctrl.on_session_response(result=SessionControlResult(ok=True), states=states, now=0.0)
     assert ctrl.phase == "window"
     return ctrl, states
 
@@ -380,7 +380,7 @@ def test_windowed_did_controller_only_schedules_members_whose_cadence_is_due(
         _PollRequestState(next_due_at=1.0),
     ]
     assert ctrl.session_control_due(states, 0.25)
-    ctrl.on_session_response(ok=True, states=states, now=0.25)
+    ctrl.on_session_response(result=SessionControlResult(ok=True), states=states, now=0.25)
     assert ctrl.did_pending(0)
     assert not ctrl.did_pending(1)
 
@@ -416,7 +416,7 @@ def test_continuous_capture_does_not_spin_the_poll_loop(monkeypatch: pytest.Monk
     # Hold the window well past `window_max_seconds` (10 s), with a keep-alive
     # sent recently — the state a long capture is actually in.
     ctrl.advance(states, 500.0)
-    ctrl.on_session_response(ok=True, states=states, now=500.0)
+    ctrl.on_session_response(result=SessionControlResult(ok=True), states=states, now=500.0)
 
     monkeypatch.setattr(tuning_profile, "did_continuous_enabled", lambda: False)
     windowed = ctrl.next_transition_at()

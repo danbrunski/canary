@@ -81,8 +81,10 @@ DEFAULT_SESSION_SUBFUNCTIONS: frozenset[int] = frozenset({0x01, 0x81})
 NRC_SERVICE_NOT_SUPPORTED_IN_SESSION = 0x80
 
 #: One scripted reply to a DiagnosticSessionControl request: an NRC byte, a
-#: silence (``None``) or ``"ok"``; the script is consumed one entry per
-#: request and answers positively once exhausted.
+#: silence (``None``, the ECU ignores the request), ``"ok"``, or ``"lost"`` —
+#: the ECU *performs* the change but its ``50 <sub>`` never arrives (D03.18).
+#: The script is consumed one entry per request and answers positively once
+#: exhausted.
 SessionReply = int | None | str
 
 
@@ -250,6 +252,8 @@ class ScriptedEcu:
             return
         self._session = None if sub in DEFAULT_SESSION_SUBFUNCTIONS else sub
         self.session_changes.append((now, sub))
+        if reply == "lost":
+            return
         self._queue([bytes([0x02, 0x50, sub, 0, 0, 0, 0, 0])], now, self.session_latency)
 
     def send(self, msg: can.Message, timeout: float | None = None) -> None:
