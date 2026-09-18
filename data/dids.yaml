@@ -675,3 +675,67 @@ dids:
   # actuator is exposed but its position is not -- extend the next sweep past
   # 0x1400. Not blocking: the ROM Cam Phasing table is a single table, not
   # per-bank, so commanded + one measured + both duties is a working set.
+
+  # D03.8 — a CANDIDATE, not a binding. Catalogued only so a research capture
+  # (`fuel-target-research`) can poll it beside Mode 01 PID 0x44 and settle the
+  # decode by 1:1 agreement. No corpus-eligible profile selects it, so default
+  # collection and every trained feature spec are unchanged by this entry.
+  - did: 0x1134
+    name: ECM_TARGET_EQUIV_RATIO_CANDIDATE
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'data/analyses/did-sweep-20260804-koeo-baseline.json (KOEO single-DID sweep) and all 13 data/analyses/did-drive-sweeps-20260805/*.json snapshots: payload "40", 1 byte, no other width observed. The 2026-09-17 block-5 did_log survey (1,546 passes) decoded it as a single byte (raw 64..75).'
+    byte_order: big
+    # Candidate decode phi = raw / 64 (AFR = 14.7 * 64 / raw). 1/64 is exact in
+    # binary, so raw = value * 64 is recovered exactly — and the undecoded
+    # payload is stored on every DID_1134 row regardless.
+    scale: 0.015625
+    offset: 0.0
+    unit: phi
+    confidence: hypothesized
+    evidence:
+      - session: 2026-09-17 block 5 did_log survey (18:13-18:43 UTC)
+        method: within_instrument_baseline_census
+        finding: >
+          Holds raw 64 in 98 % of a 30-minute survey; left it 37 times, 26 in
+          the top-5 % throttle regime and 0 during decel, reaching 65, 66,
+          68, 74, 75. Never left 64 in block 3b (same tool, no WOT). See
+          data/analyses/2026-09-17-drive-log.md, block 5.
+      - session: 2026-09-17 block 5 did_log survey (18:13-18:43 UTC)
+        method: within_instrument_ordering_vs_af_sensor_voltage
+        finding: >
+          Bank-1 and bank-2 A/F voltage (0x1225/0x1226, lower = richer) fall
+          monotonically as raw rises across five distinct values: 2.145 V at
+          64 to 1.210 V at 75. Same did_log pass, no cross-source alignment.
+      - session: 2026-09-17 blocks 5 and 6 (two different pulls)
+        method: cross_drive_magnitude_vs_pid_0x44
+        finding: >
+          Raw 74/75 (phi 1.156-1.172 if raw/64) at ~1.21 V A/F, against PID
+          0x44 commanding phi 1.195-1.242 in block 6's harder pull at the same
+          voltage. Agrees to ~5 %, but across two pulls and two instruments —
+          NOT a same-capture pairing, so it cannot establish the scale.
+      - session: ROM Fuel Targets decode, settled 2026-08-03
+        method: rom_convention_match
+        finding: >
+          The ROM Fuel Targets table decodes as AFR = 14.7 * 128 / N (0x80 =
+          stoich); 0x1134 with a 64 baseline is the same form at half scale.
+          Its WOT values read 12.54-12.71 AFR at 3,400-3,800 rpm against ROM
+          cells of 12.30-12.63 for that rpm.
+    evidence_against:
+      - session: 2026-09-17 block 5 did_log survey (18:13-18:43 UTC)
+        method: fuel_mass_balance_pw_and_maf
+        finding: >
+          PW (914,943 counts/g) + MAF imply phi 1.013-1.052 on the raw 74/75
+          samples, not 1.16-1.17. Block 6 later showed that constant is ~15 %
+          low at WOT (fit in closed loop), so this counts against the decode
+          only as far as the mass balance can be trusted there — which is not
+          far. Recorded so it is not re-derived as a refutation.
+    notes: >
+      CANDIDATE, NOT A BINDING — roadmap D03.8. Promote only after
+      compare_channels on same-capture acquired pairs (this DID vs PID 0x44,
+      both in phi) shows 1:1 agreement within measured uncertainty across
+      independent enriched pulls, then pin the exact decode in the ground-truth
+      fixture. A flat stoichiometric window cannot identify the scale. Polled
+      only by the `fuel-target-research` capture profile; single-DID transport
+      (`obd_did_batch_max_dids: 1`) on this ECM.

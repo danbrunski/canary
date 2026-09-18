@@ -245,3 +245,67 @@ profiles:
   - cam_primary_vs_command_rpm_did
   - cam_secondary_vs_command_rpm_did
   storage_prefix: _capture-tuning-hybrid-research
+- name: fuel-target-research
+  # D03.8 + D03.4, prepared 2026-09-18. tuning-hybrid-research narrowed to the
+  # fuel-target question (D03.8/D03.9/D04.3/D04.4) plus the target-AFR
+  # candidate 0x1134. Cam angles, bank-2 A/F voltage and INTAKE_TEMP are
+  # dropped to buy cycle headroom; the parent profile is left untouched.
+  description: 'Research: target-AFR candidate DID 0x1134 held in one capture with
+    Mode 01 PID 0x44 commanded phi and PID 0x24 measured lambda (D03.8)'
+  experimental: true
+  mode01:
+    RPM: 1.0
+    MAF: 1.0
+    COMMANDED_EQUIV_RATIO: 1.0
+    O2_WR_LAMBDA_S1: 1.0
+    FUEL_STATUS: 1.0
+    ENGINE_LOAD: 1.0
+    TIMING_ADVANCE: 1.0
+  mode22:
+  - ECM_TARGET_EQUIV_RATIO_CANDIDATE
+  - ECM_RPM
+  - ECM_AF_SENSOR_V_B1
+  - ECM_INJECTOR_PW_B1
+  - ECM_MAF_GPS
+  - ECM_THROTTLE_POS_SENSOR_1
+  # D03.4: Mode 01 and Mode 22 alternate on this ECM, so a DID is read at most
+  # once per cycle. A 0.5 s cycle with every DID at weight 0.5 asks for exactly
+  # what the cycle can give (4.0 x 0.5 = 2.0 Hz = 1 / 0.5 s), in the scheduler,
+  # the resolved plan and the capture contract alike.
+  mode22_rate_weights:
+    ECM_TARGET_EQUIV_RATIO_CANDIDATE: 0.5
+    ECM_RPM: 0.5
+    ECM_AF_SENSOR_V_B1: 0.5
+    ECM_INJECTOR_PW_B1: 0.5
+    ECM_MAF_GPS: 0.5
+    ECM_THROTTLE_POS_SENSOR_1: 0.5
+  mode01_enabled: true
+  mode22_enabled: true
+  did_interval_seconds: null
+  did_cycle_seconds: 0.5
+  round_timestamps: true
+  target_rate_hz: 4.0
+  did_continuous: false
+  bus_budget_override: 90.0
+  expected_total_demand_hz: 40.0
+  capacity_evidence: 'Demand: 7 Mode 01 PIDs x 4 Hz + 6 DIDs x 2 Hz = 40 channel reads/s,
+    plus 2 session requests per 0.5 s cycle (~44 req/s unbatched) against the 90 req/s
+    budget. Parent evidence, not yet this revision: tuning-hybrid-research on 2026-09-17
+    delivered 3.98 Hz Mode 01 / 2.01 Hz per DID at 47 req/s for 20 min with zero drops
+    and DID-DID skew 0.094 s, while requesting an infeasible 0.25 s cycle. The DID
+    rate is structural (one read per cycle; Mode 01 and Mode 22 alternate), which is
+    why this profile requests 2 Hz rather than 4. Cycle plan at 90 req/s, batching
+    off (worst case): (10 Mode 01-side + 6 DID + 2 session) / 90 + 0.05 s grace = 0.25
+    s of a 0.5 s cycle. Replace this text with the first 20-minute capture of this exact
+    revision (per-channel cadence, pairing skew, loss deltas, quality verdict).'
+  required_tuple: []
+  min_achieved_rate_hz: null
+  requires_tune_revision: true
+  builtin_revision: 0
+  # Vehicle-specific research profile naming this ECM's DIDs; the generic seed
+  # must never overwrite it.
+  operator_modified: true
+  broadcast_decode: true
+  corpus_eligible: false
+  behavior_model_recipes: []
+  storage_prefix: _capture-fuel-target-research
