@@ -9,7 +9,7 @@ _Earlier today: `2026-09-18-drive-log.md` (AM), `2026-09-18-pm-drive-log.md` (PM
   - **0x1134 is NOT commanded φ:** it holds 64 while 0x44 sits at 1.06 for 3.5 s and at 0.87 lean. Its raw/64 scale matches when it does move.
   - 0x1208 = air charge (per g air +0.5 %).
   - D04.3 has no minimum at this resolution.
-- Back on `default`. **Next maneuver (optional): tagged in-gear coasts in 3rd and 4th from ~3,000 rpm, and one in neutral (D04.2).** At a parked stop, the idle lights/blower step.
+- Back on `default`. **Next maneuver: at your next parked stop, tell me "parked" and leave it idling for ~2 min.** I start `injector-deadtime-idle`, then you switch headlights + blower + rear defrost on for 20 s and off for 20 s, twice. Optional while driving: in-gear coasts in 3rd and 4th from ~3,000 rpm (D04.2).
 - Health: 0 drops. 16 stalls of 2.3–2.5 s plus **three of exactly 5.0 s (new)**, 0 inside holds. A key-off stop from 20:27 to 20:33Z.
 
 ## For the operator
@@ -63,6 +63,7 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
 |---|---|---|---|---|---|---|---|---|---|
 | 20:05:06 | engine_running (default, 3 min after boot) | 0 | 1/**1320** | 7 | 18.34 | 0 | 39.0 | 2 | 1,982 |
 | 20:13:08 | engine_running (fuel-pw-research) | 0 | 1/1320 | 51 | — | 0 | 42.6 | 10 | 2,085 |
+| 20:38:55 | engine_running (default) | 0 | 1/**2185** | 128 | 18.12 | 0 | 39.6 | 36 | 2,170 |
 
 ## Work notes
 - 20:01Z Pi booted (key-on). 20:04Z operator: "new drive is starting now" (4 h).
@@ -92,3 +93,4 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
   - **D03.9 0x1208 = air charge.** Per g air: closed loop 63,778 vs enriched 64,068 (**+0.5 %**, band ±2): **pass**. Rich residual vs the closed-loop refit: **−13.0 %**, 1.0 pp **outside** the −14..−18 band. At this φ (1.164) pure air charge predicts −14.1 %. The falsifier ("tracks the enrichment") didn't fire: enrichment is +16.4 %, the register moved +0.5 % per g air. So: first clause narrowly missed, second passed; the identification stands (4th session).
   - **D04.3:** 78 tip-in and 49 lift pairs at the best lag. **No clear minimum in either direction** (near-minimum lags scattered, 200–450 ms tip-in, 200–2,700 ms lift). The PM "tip-in 500 ms" **doesn't replicate**. Unresolved: it needs 0x44/0x24 in separate batches.
   - **D04.2:** 41 coasts, 34 with ≥ 2 floor samples; floor 52–57 counts (next value 141). Untagged; gear assignment is desk work.
+- 20:40Z `injector-deadtime-idle` saved live and mirrored (`c309688`, 90 profile tests green, file restored after the test rewrite). It's Mode 01 RPM/MAF/0x24/FUEL_STATUS/**0x42** at 4 Hz plus DIDs ECM_RPM/0x1208/0x1206/0x1207 at 2 Hz, **without 0x44**. The dead-time prediction is already written (Added predictions). Storage high-water reached 2,185 around the block switch and my pull (0 drops); watch it.
