@@ -105,12 +105,19 @@ def test_real_did_map_entries_are_self_consistent() -> None:
             assert e.plausible_min <= e.plausible_max, f"{e.name}: bounds inverted"
 
 
-def test_injector_pw_is_present_and_unscaled() -> None:
-    """0x1208 identification is firm but its scale constant is still
-    outstanding — guard that it stays unscaled until calibrated."""
+def test_0x1208_is_air_charge_and_cannot_present_as_injector_milliseconds() -> None:
+    """0x1208 is air charge per intake event, not injected fuel (2026-09-18:
+    it ignores a measured 20 % enrichment and does not drop in DFCO; relabel
+    approved by the operator). The name ECM_INJECTOR_PW_B1 survives only as a
+    stored column / model input until a desk rename with aliases + retrain.
+
+    Until then it must never be scaled or unit-labelled as pulse width, or a
+    consumer reading the catalog would get injector milliseconds that are air.
+    """
     inj = next(e for e in load_did_map(DIDS_PATH).dids if e.did == 0x1208)
     assert inj.name == "ECM_INJECTOR_PW_B1"
-    assert inj.scale is None, "0x1208 scale was pinned — update the calibration evidence"
+    assert inj.scale is None, "0x1208 was scaled — it is air charge, not a pulse width"
+    assert inj.unit != "ms", "0x1208 labelled as ms — it is air charge, not a pulse width"
 
 
 def test_0x1209_is_airflow_not_base_fuel_schedule() -> None:

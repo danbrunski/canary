@@ -556,6 +556,16 @@ promote unverified bindings or to change a tune.
   - **Next:** closed-loop holds that overlap WOT air charge in one session, plus
     0x42/0x0F/0x33/0x06/0x07 and an idle electrical-load step for dead time.
     Desk report: `~/canary-data/scripts-0918b/out/shift1206.md`.
+  - **Operator approved the relabel (2026-09-18 ~19:00Z).** `data/dids.yaml`
+    now describes 0x1208 as air charge (unit no longer `ms`; a test refuses
+    `ms` or a scale) and 0x1206/0x1207 as injector-pulse candidates at
+    `hypothesized`. **Names were deliberately kept.** Still owed at the desk:
+    the rename via `aliases` plus a retrain (IF/LSTM manifests,
+    `behavior_models.yaml` recipe output, `validation/scenarios.py`), and
+    **re-pointing the tuning provider role `injector_pw_b1`**, which still
+    maps to 0x1208 at `confirmed` in
+    `data/nissan-xterra-2008/tuning_providers.yaml`. That's a tuning-toolkit
+    semantic change, so it needs its own decision.
 
 - [ ] **D03.10 Capture the missing UpRev instrument reference.** Today's two
   CANary paths already show a rich-side discrepancy: bank-1 voltage converted

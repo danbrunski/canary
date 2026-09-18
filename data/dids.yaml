@@ -222,11 +222,28 @@ dids:
     response_length: 2
     response_length_source: '2026-08-07T005351 single-DID capture payloads'
     byte_order: big
-    scale: null          # ≈ 4e-4 ms/count; needs steady-state multi-point calibration
+    scale: null          # air charge per intake event, ~63,850 counts per g air; NOT injected fuel
     offset: null
-    unit: ms
-    confidence: high
+    unit: unknown        # was "ms" (injector PW); the register is air charge, see evidence 2026-09-18
+    confidence: high     # identification: air charge. The NAME is historical; see notes before renaming
     evidence:
+      - session: _capture-fuel-pw-research-2026-09-18T140805 + _capture-fuel-pw-research-2026-09-18T174742 (+ 09-17 blocks 6/7/9, desk)
+        method: rich_row_and_dfco_mass_balance
+        finding: >
+          RE-IDENTIFIED 2026-09-18 as air charge per intake event, not injected
+          fuel; relabelling approved by the operator the same day. Three
+          independent tests, each written before its data: (1) 09-17 desk
+          refits leave -14..-18 % in every rich cell, because the register
+          ignores a measured ~20 % enrichment; (2) 09-18 AM block B: in DFCO it
+          reads 63,984 counts per g air against 63,466 fuelled, so it does not
+          drop in fuel cut (injected-fuel candidate 0x1206 floors); (3) 09-18
+          PM: rich rows -16.6 % against the closed-loop refit (pre-registered
+          band -14..-18) and counts per g air 63,972 closed loop vs 64,457
+          enriched (+0.8 %, band +/-2 %), n 6 gated / 38 ungated. It does not
+          scale with baro across 63-80 kPa. Reports:
+          data/analyses/2026-09-18-maf-did-and-injector-mass-balance.md,
+          2026-09-18-fuel-blocks-capture-fuel-pw-research-*.md,
+          2026-09-18-pm-drive-log.md.
       - session: 2026-05-16T223328
         method: nt510_blip_signature
         finding: >
@@ -261,7 +278,20 @@ dids:
           ~220 cc/min, which is right for a VQ40DE — two independent methods
           agreeing, so both the scale and this constant gain support.
     notes: >
-      Phase 4.E.4 fuel-surface enabler. DID identification firm. The register
+      2026-09-18: THIS REGISTER IS AIR CHARGE, NOT INJECTED FUEL (evidence
+      above). The NT510 blip match and the closed-loop 914,943 counts/g
+      constant both held only because air and fuel move together at
+      stoichiometry; neither can separate the two, and enrichment and DFCO
+      both can. Do not use it as injector pulse width or fuel mass: the
+      constant below is valid only as "fuel at phi = 1", i.e. as air charge.
+      The channel NAME ECM_INJECTOR_PW_B1 is kept for now because it is a
+      stored column name and a model/recipe/provider input (IF and LSTM
+      manifests, behavior_models.yaml, tuning_providers.yaml role
+      injector_pw_b1, validation scenarios). Renaming it needs the aliases
+      mechanism plus a retrain; that is a desk task. The injected-fuel
+      candidate is 0x1206/0x1207.
+      Historical note (pre-2026-09-18), superseded as to identity: Phase 4.E.4
+      fuel-surface enabler. DID identification firm. The register
       is an *effective* (dead-time-excluded) injection quantity: any fuel
       model built on it must add injector dead time separately, or it will
       under-fuel at short pulse widths. Scale left null because the two
@@ -518,13 +548,30 @@ dids:
     scale: null
     offset: null
     unit: unknown
-    confidence: medium
+    confidence: hypothesized   # injector pulse B1 CANDIDATE (2026-09-18); was intake pressure, medium
     evidence:
+      - session: _capture-fuel-pw-research-2026-09-18T140805 + _capture-fuel-pw-research-2026-09-18T174742
+        method: dfco_floor_and_enrichment_tracking
+        finding: >
+          INJECTED-FUEL CANDIDATE (injector pulse, presumably bank 1),
+          catalogued 2026-09-18 with operator approval; replaces the
+          intake-pressure reading (this engine has no MAP sensor). It floors at
+          ~52-58 counts in every DFCO (lambda on the 2.0 rail, FUEL_STATUS 4;
+          replicated AM and PM) and rises with enrichment. Against fuel per
+          injection, closed-loop rows fit 27,747 counts/g + 41 (AM,
+          idle-dominated), but the relation is CONVEX in air charge (~+7 %
+          idle to cruise; one curve 51.6 + 25,284 f + 133,653 f^2 fits both
+          sessions), so no straight-line constant is valid across operating
+          regions. 0.01 ms/count is a hypothesis (implies ~260-290 cc/min).
+          Rich-side validation is unresolved: enriched rows exceed the
+          closed-loop fuel range. Name kept (stored column / profile input).
+          Screen: data/analyses/2026-09-18-injected-fuel-did-screen.md.
       - session: 2026-05-16T214006
         method: four_state_classification
         finding: >
           ~atmospheric-ish at KOEO, drops running, lower at rev (manifold
           vacuum). Pairs with 0x1207. MAP/intake-pressure candidate; scale TBD.
+          SUPERSEDED 2026-09-18: that pattern is also injected fuel's.
 
   - did: 0x1207
     name: ECM_INTAKE_PRESSURE_1207
@@ -534,11 +581,17 @@ dids:
     scale: null
     offset: null
     unit: unknown
-    confidence: medium
+    confidence: hypothesized   # injector pulse B2 CANDIDATE (2026-09-18); was intake pressure, medium
     evidence:
+      - session: _capture-fuel-pw-research-2026-09-18T174742
+        method: dfco_floor_and_enrichment_tracking
+        finding: >
+          Bank-2 twin of 0x1206 (injected-fuel candidate, catalogued
+          2026-09-18 with operator approval): same DFCO floor (~56 counts),
+          closed-loop and rich residuals within ~1 % of 0x1206's. See 0x1206.
       - session: 2026-05-16T214006
         method: four_state_classification
-        finding: Mirrors 0x1206 (pressure pair); scale TBD.
+        finding: Mirrors 0x1206 (pressure pair); scale TBD. SUPERSEDED 2026-09-18.
 
   - did: 0x1201
     name: ECM_RPM_LOAD_CORRELATED_1201
