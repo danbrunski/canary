@@ -740,7 +740,7 @@ _MODE01_SPEC: tuple[
         "Barometric Pressure",
         "pressure",
         "kPa",
-        2,
+        1,  # J1979: A = kPa. Was 2 — desynced every batch containing it.
         "slow",
         "gauge",
         _pd(0x33),
@@ -1061,7 +1061,7 @@ _MODE01_SPEC: tuple[
         "Short-Term Sec O2 Trim B1",
         "o2",
         "%",
-        1,
+        2,  # J1979: A = this bank, B = bank 3 (unused; decoder reads A)
         "medium",
         "graph",
         decode_percent_b_minus_128,
@@ -1072,7 +1072,7 @@ _MODE01_SPEC: tuple[
         "Long-Term Sec O2 Trim B1",
         "o2",
         "%",
-        1,
+        2,  # J1979: A = this bank, B = bank 3 (unused; decoder reads A)
         "medium",
         "graph",
         decode_percent_b_minus_128,
@@ -1083,7 +1083,7 @@ _MODE01_SPEC: tuple[
         "Short-Term Sec O2 Trim B2",
         "o2",
         "%",
-        1,
+        2,  # J1979: A = this bank, B = bank 4 (unused; decoder reads A)
         "medium",
         "graph",
         decode_percent_b_minus_128,
@@ -1094,7 +1094,7 @@ _MODE01_SPEC: tuple[
         "Long-Term Sec O2 Trim B2",
         "o2",
         "%",
-        1,
+        2,  # J1979: A = this bank, B = bank 4 (unused; decoder reads A)
         "medium",
         "graph",
         decode_percent_b_minus_128,

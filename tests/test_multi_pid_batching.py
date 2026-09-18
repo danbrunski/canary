@@ -733,3 +733,94 @@ def test_an_ecu_that_refuses_batches_with_an_nrc_narrows_regardless() -> None:
     assert sizes[:3] == [6, 6, 6], "no single probe needed between NRC refusals"
     assert _mode01_sizes(bus)[-5:] == [1] * 5
     assert {r.pid for r in readings} >= set(_SIX_FAST)
+
+
+# ---------------------------------------------------------------------------
+# Registry widths are what the batch walk trusts (2026-09-18, batch044)
+# ---------------------------------------------------------------------------
+
+
+class _BaroEcu(_BatchingEcu):
+    """The fuel-pw-research-2 members that desynced: baro answers with the one
+    byte J1979 gives it, the way the Xterra ECM does."""
+
+    VALUES = {**_BatchingEcu.VALUES, 0x33: b"\x51", 0x44: b"\x80\x00"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.batch_orders: list[tuple[int, ...]] = []
+
+    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
+        data = bytes(msg.data)
+        pids = tuple(data[2 : 1 + data[0]])
+        if data[1] == 0x01 and len(pids) > 1:
+            self.batch_orders.append(pids)
+        super().send(msg, timeout)
+
+
+@pytest.mark.parametrize(
+    ("channels", "leader", "expected_order"),
+    # The priority lane picks the leader; companions follow request order.
+    [
+        (
+            ("RPM", "COMMANDED_EQUIV_RATIO", "BAROMETRIC_PRESSURE"),
+            "BAROMETRIC_PRESSURE",
+            (0x33, 0x0C, 0x44),
+        ),
+        (("BAROMETRIC_PRESSURE", "COMMANDED_EQUIV_RATIO", "RPM"), "RPM", (0x0C, 0x33, 0x44)),
+        (("RPM", "COMMANDED_EQUIV_RATIO", "BAROMETRIC_PRESSURE"), "RPM", (0x0C, 0x44, 0x33)),
+    ],
+    ids=["baro-first", "baro-middle", "baro-last"],
+)
+def test_a_capture_round_with_baro_walks_every_member(
+    channels: tuple[str, ...], leader: str, expected_order: tuple[int, ...]
+) -> None:
+    """PID 0x33 was registered 2 bytes wide; J1979 and the ECM send 1. In a
+    batch the walk then swallowed the next PID's id byte and desynced, and
+    every member after baro timed out (0x44: 37/228 live). Baro is slow tier,
+    so only a capture round (``ignore_tier``) ever batched it with fast PIDs —
+    which is why no test here saw it."""
+    from src.collection import tuning_profile
+    from src.collection.capture_profiles import CaptureProfile
+
+    bus = _BaroEcu()
+    readings: list = []
+    try:
+        tuning_profile.activate(
+            CaptureProfile(
+                name="baro",
+                mode01=dict.fromkeys(channels, 1.0),
+                priority_channels=(leader,),
+                round_timestamps=True,
+                corpus_eligible=False,
+                storage_prefix="_capture-baro",
+            ),
+            source="test",
+        )
+        stats = run_can_obd_loop(
+            bus,  # type: ignore[arg-type]
+            _spec(pids=channels, batch_max_pids=6),
+            on_frame=lambda _m: None,
+            on_reading=readings.append,
+            stop_event=threading.Event(),
+            deadline_monotonic=time.monotonic() + 0.5,
+        )
+    finally:
+        tuning_profile.set_active(False, source="test")
+
+    assert bus.batch_orders, "the round never batched — the regression is not exercised"
+    assert bus.batch_orders[0] == expected_order, bus.batch_orders[0]
+    assert stats.batch_desyncs == 0, "the walk lost the payload boundary after baro"
+    assert set(bus.batch_orders) == {expected_order}, bus.batch_orders
+    by_channel: dict[str, list[float]] = {}
+    for reading in readings:
+        by_channel.setdefault(reading.pid, []).append(reading.value)
+    assert set(channels) <= set(by_channel), f"a member was lost: {sorted(by_channel)}"
+    assert set(by_channel["BAROMETRIC_PRESSURE"]) == {81.0}
+    assert set(by_channel["COMMANDED_EQUIV_RATIO"]) == {1.0}  # 0x8000 / 32768
+    assert set(by_channel["RPM"]) == {750.0}
+    # Every batch put all three members on one row.
+    by_stamp: dict[float, set[str]] = {}
+    for reading in readings:
+        by_stamp.setdefault(reading.timestamp, set()).add(reading.pid)
+    assert any(set(channels) <= got for got in by_stamp.values())

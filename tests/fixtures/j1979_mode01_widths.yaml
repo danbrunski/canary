@@ -1,0 +1,110 @@
+# SAE J1979 / ISO 15031-5 Mode 01 data-byte counts (the bytes after the PID
+# id in a positive 0x41 response), written from the standard — NOT derived
+# from src/collection/obd_registry.py. tests/test_mode01_widths.py pins every
+# registry PID's byte_length against this table.
+#
+# Why it exists (2026-09-18, batch044): the registry gave 0x33 baro 2 bytes.
+# A single-PID read never notices a wrong width; a batched read slices the
+# shared payload by it, so baro swallowed the next PID's id byte and every
+# later member of the batch timed out. The table is the independent source
+# the registry was never checked against.
+#
+# Bank-pair PIDs: 0x06-0x09 (fuel trims) and 0x55-0x58 (secondary O2 trims)
+# both carry A = bank 1/2 and B = bank 3/4 in the standard. The common
+# encoding tables give 0x06-0x09 as 1 byte (B only on >2-bank engines) and
+# 0x55-0x58 as 2 bytes; that is what is recorded here. Registry decoders for
+# all eight read byte A only.
+#
+# Width 0 would mean "not fixed-width"; none of the registry's PIDs are.
+0x01: 4   # monitor status since DTCs cleared
+0x03: 2   # fuel system status (A = system 1, B = system 2)
+0x04: 1   # calculated engine load
+0x05: 1   # engine coolant temperature
+0x06: 1   # short term fuel trim bank 1
+0x07: 1   # long term fuel trim bank 1
+0x08: 1   # short term fuel trim bank 2
+0x09: 1   # long term fuel trim bank 2
+0x0A: 1   # fuel pressure (gauge)
+0x0B: 1   # intake manifold absolute pressure
+0x0C: 2   # engine speed
+0x0D: 1   # vehicle speed
+0x0E: 1   # timing advance
+0x0F: 1   # intake air temperature
+0x10: 2   # MAF air flow rate
+0x11: 1   # throttle position
+0x12: 1   # commanded secondary air status
+0x13: 1   # oxygen sensors present (2 banks)
+0x14: 2   # O2 B1S1 voltage + STFT
+0x15: 2
+0x16: 2
+0x17: 2
+0x18: 2
+0x19: 2
+0x1A: 2
+0x1B: 2   # O2 B2S4 voltage + STFT
+0x1C: 1   # OBD standards this vehicle conforms to
+0x1D: 1   # oxygen sensors present (4 banks)
+0x1E: 1   # auxiliary input status
+0x1F: 2   # run time since engine start
+0x21: 2   # distance traveled with MIL on
+0x22: 2   # fuel rail pressure (relative to manifold vacuum)
+0x23: 2   # fuel rail gauge pressure (diesel / GDI)
+0x24: 4   # O2 S1 wide-range: equivalence ratio + voltage
+0x25: 4
+0x26: 4
+0x27: 4
+0x28: 4
+0x29: 4
+0x2A: 4
+0x2B: 4   # O2 S8 wide-range: equivalence ratio + voltage
+0x2C: 1   # commanded EGR
+0x2D: 1   # EGR error
+0x2E: 1   # commanded evaporative purge
+0x2F: 1   # fuel tank level input
+0x30: 1   # warm-ups since codes cleared
+0x31: 2   # distance traveled since codes cleared
+0x32: 2   # evap system vapor pressure (signed)
+0x33: 1   # absolute barometric pressure (A = kPa)
+0x34: 4   # O2 S1 wide-range: equivalence ratio + current
+0x35: 4
+0x36: 4
+0x37: 4
+0x38: 4
+0x39: 4
+0x3A: 4
+0x3B: 4   # O2 S8 wide-range: equivalence ratio + current
+0x3C: 2   # catalyst temperature B1S1
+0x3D: 2   # catalyst temperature B2S1
+0x3E: 2   # catalyst temperature B1S2
+0x3F: 2   # catalyst temperature B2S2
+0x41: 4   # monitor status this drive cycle
+0x42: 2   # control module voltage
+0x43: 2   # absolute load value
+0x44: 2   # commanded equivalence ratio
+0x45: 1   # relative throttle position
+0x46: 1   # ambient air temperature
+0x47: 1   # absolute throttle position B
+0x48: 1   # absolute throttle position C
+0x49: 1   # accelerator pedal position D
+0x4A: 1   # accelerator pedal position E
+0x4B: 1   # accelerator pedal position F
+0x4C: 1   # commanded throttle actuator
+0x4D: 2   # time run with MIL on
+0x4E: 2   # time since trouble codes cleared
+0x51: 1   # fuel type
+0x52: 1   # ethanol fuel %
+0x53: 2   # absolute evap system vapor pressure
+0x54: 2   # evap system vapor pressure (wide range, signed)
+0x55: 2   # short term secondary O2 trim, A = bank 1, B = bank 3
+0x56: 2   # long term secondary O2 trim, A = bank 1, B = bank 3
+0x57: 2   # short term secondary O2 trim, A = bank 2, B = bank 4
+0x58: 2   # long term secondary O2 trim, A = bank 2, B = bank 4
+0x59: 2   # fuel rail absolute pressure
+0x5A: 1   # relative accelerator pedal position
+0x5B: 1   # hybrid battery pack remaining life
+0x5C: 1   # engine oil temperature
+0x5D: 2   # fuel injection timing
+0x5E: 2   # engine fuel rate
+0x61: 1   # driver's demand engine percent torque
+0x62: 1   # actual engine percent torque
+0x63: 2   # engine reference torque
