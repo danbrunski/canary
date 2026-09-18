@@ -29,16 +29,65 @@ Role = Literal[
     "cam_command",
     "cam_measured",
     "cam_measured_b",
+    #: Nissan Base Fuel Schedule (Tp), ms — the load axis of the fuel-target
+    #: map (``TargetAfrMap.load_axis_name``). See tuning_providers.yaml for the
+    #: provider and the envelope it holds in.
+    "base_fuel_schedule",
 ]
 
 
 class Provider(BaseModel):
+    """One semantic role bound to one channel spec.
+
+    ``transform: scale`` multiplies a raw register into engineering units. A
+    scale is a measured number, so the schema makes it carry what a number
+    needs: ``factor`` and ``unit`` always, and — while the provider is only a
+    ``candidate`` — the operating envelope it was derived in (``conditions``)
+    and where the derivation lives (``evidence``). A bare candidate factor is
+    the shape of every retracted finding in this project (AGENTS.md, "a
+    measured constraint belongs in a schema, not a comment"), so it is
+    refused at load rather than discouraged in a comment.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     role: Role
     spec: str
-    transform: Literal["identity", "voltage_afr"] = "identity"
+    transform: Literal["identity", "voltage_afr", "scale"] = "identity"
     confidence: Literal["confirmed", "candidate"] = "confirmed"
+    #: Multiplier for ``transform: scale`` (engineering = raw * factor).
+    factor: float | None = None
+    #: Engineering unit produced by ``transform: scale``.
+    unit: str | None = None
+    #: Operating envelope the provider holds in, and outside which it must
+    #: not be used.
+    conditions: str | None = None
+    #: Where the derivation is recorded (report paths, session names).
+    evidence: str | None = None
+
+    @model_validator(mode="after")
+    def _scale_carries_its_provenance(self) -> Provider:
+        if self.transform == "scale":
+            if self.factor is None or not self.factor > 0:
+                raise ValueError(
+                    f"{self.role}: transform 'scale' requires a positive factor (got {self.factor})"
+                )
+            if not self.unit:
+                raise ValueError(f"{self.role}: transform 'scale' requires a unit")
+            if self.confidence == "candidate":
+                missing = [name for name in ("conditions", "evidence") if not getattr(self, name)]
+                if missing:
+                    raise ValueError(
+                        f"{self.role}: a candidate scale provider must state "
+                        f"{' and '.join(missing)} — a candidate factor without its "
+                        "envelope and derivation invites being quoted outside them"
+                    )
+        elif self.factor is not None:
+            raise ValueError(
+                f"{self.role}: factor is only meaningful with transform 'scale' "
+                f"(transform is {self.transform!r})"
+            )
+        return self
 
 
 class WotCriterion(BaseModel):
@@ -102,15 +151,24 @@ def build_tuning_frame(
     *,
     providers_path: Path,
     calibration: AfrCalibration | None = None,
+    allow_candidates: bool = False,
 ) -> TuningFrame:
-    """Resolve semantic roles without embedding vehicle DID names in callers."""
+    """Resolve semantic roles without embedding vehicle DID names in callers.
+
+    ``candidate`` providers are skipped (reported unavailable) unless the
+    caller opts in with ``allow_candidates=True``. Automatic analysis never
+    does; the opt-in is for an operator deliberately working inside a
+    candidate's stated envelope, and the capability entry then carries the
+    provider's ``confidence``, ``conditions`` and ``evidence`` so the result
+    cannot travel without them.
+    """
     registry = load_provider_registry(providers_path)
     manifest = read_capture_manifest(session_dir)
     parts: list[pd.DataFrame] = []
     capability: dict[str, dict[str, str | bool | None]] = {}
     for provider in registry.providers:
         role = provider.role
-        if provider.confidence != "confirmed":
+        if provider.confidence != "confirmed" and not allow_candidates:
             capability[role] = {
                 "available": False,
                 "provider": provider.spec,
@@ -155,7 +213,19 @@ def build_tuning_frame(
             values[f"{role}_censored"] = values[role].le(transfer.censored_floor_afr) | values[
                 role
             ].ge(transfer.censored_ceiling_afr)
+        elif provider.transform == "scale":
+            assert provider.factor is not None  # guaranteed by Provider's validator
+            values[f"{role}_raw"] = values[role]
+            values[role] = pd.to_numeric(values[role], errors="coerce") * provider.factor
         capability[role] = {"available": True, "provider": provider.spec, "reason": None}
+        if provider.confidence != "confirmed":
+            capability[role].update(
+                {
+                    "confidence": provider.confidence,
+                    "conditions": provider.conditions,
+                    "evidence": provider.evidence,
+                }
+            )
         parts.append(values)
     frame = pd.DataFrame(columns=["timestamp"])
     for part in parts:

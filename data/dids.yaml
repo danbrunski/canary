@@ -222,11 +222,36 @@ dids:
     response_length: 2
     response_length_source: '2026-08-07T005351 single-DID capture payloads'
     byte_order: big
-    scale: null          # counts; ~63,800 counts per g air per intake event (closed loop and enriched)
+    scale: null          # counts; ~63,800 counts per g air per intake event at K 1.06 (steps with tune K)
     offset: null
-    unit: unknown        # air charge counts — not ms, not fuel mass
+    unit: unknown        # air charge x K counts — not injector ms, not fuel mass; BFS ms scale lives in tuning_providers.yaml
     confidence: high
     evidence:
+      - session: >-
+          UpRev K-line logs 2026-07-26..08-08 (stock, K 1.07, K 1.06 eras) vs
+          0x1208 warm-idle rows from the same eras (desk, 2026-09-18);
+          ~/canary-data/scripts-0918b/out/bfs1208.md
+        method: era_ratio_vs_uprev_bfs
+        constant: 2040.0
+        constant_unit: raw counts per ms of Base Fuel Schedule (BFS_ms = raw / 2040)
+        conditions: >
+          Steady state only (BFS trails MAF ~0.15 s; transients p5 -6..-7 %).
+          Derived transitively through per-era ratios across a K change, NOT
+          same-instant paired with UpRev B-FUEL SCHDL (no stored session
+          overlaps). +-1.5 %; 2048 is within error. Validated to ~17 ms on
+          July K 1.07 logs, current tune only to 13.9 ms; baro untested away
+          from home altitude (~80 kPa).
+        finding: >
+          Behaves as air per event x K (Nissan Tp/BFS), not bare air. Warm-idle
+          counts per g air per event step 58.5k (stock, n 13) -> 62.8k (K 1.06,
+          n 15), +7.5 %, at the 07-27 reflash; UpRev BFS/air steps 28.7 ->
+          30.8 ms per g at the same time. Plain air cannot step against MAF
+          from the same ECU; K can. Everything else that read as "air charge"
+          is shared by BFS: proportional to air through zero (+0.06 ms
+          offset), ignores enrichment, holds in DFCO, and idle+A/C moves BFS
+          +30 % vs air +31 %. Scale: 58,537/28.7 = 2040 (stock),
+          62,774/30.8 = 2038 (K 1.06). Name kept ECM_AIR_CHARGE until a
+          same-instant compare_channels window against UpRev BFS confirms it.
       - session: _capture-fuel-pw-research-2026-09-18T140805 + _capture-fuel-pw-research-2026-09-18T174742 + _capture-fuel-pw-research-2026-09-18T200809 (+ 09-17 blocks 6/7/9, desk)
         method: rich_row_and_dfco_mass_balance
         finding: >
@@ -272,14 +297,18 @@ dids:
           with air charge at stoichiometry, so this is consistent with air
           charge; it is not an ms scale for this register.
     notes: >
-      Air charge per intake event, re-identified 2026-09-18 with operator
-      approval; renamed from ECM_INJECTOR_PW_B1 the same day (no alias — stored
-      artifacts are migrated by tools/migrate_channel_names.py). NOT injected
-      fuel: it ignores enrichment and does not drop in DFCO. Do not use it as
-      injector pulse width or fuel mass. The injected pulse is 0x1206/0x1207.
-      Scale left null: counts per g air is stable (~62,200-64,500 across
-      sessions and gates) but no independent air-charge instrument pins an
-      engineering unit. 0x1209 is mass airflow (g/s), a separate register.
+      Air charge x tune K (behaves as Nissan Tp/BFS candidate), re-identified
+      2026-09-18 with operator approval; renamed from ECM_INJECTOR_PW_B1 the
+      same day (no alias — stored artifacts are migrated by
+      tools/migrate_channel_names.py). NOT injected fuel: it ignores
+      enrichment and does not drop in DFCO. Do not use it as injector pulse
+      width or fuel mass. The injected pulse is 0x1206/0x1207. Counts per g
+      air are stable within a tune (~62,200-64,500 across sessions and gates
+      on K 1.06) but step with K, so they are not a fixed air-mass scale.
+      Scale left null here: the candidate BFS scale (raw/2040 ms) lives in
+      the vehicle's tuning_providers.yaml (role base_fuel_schedule,
+      confidence candidate) with its envelope. 0x1209 is mass airflow (g/s),
+      a separate register.
 
   - did: 0x1209
     name: ECM_MAF_GPS
@@ -319,7 +348,7 @@ dids:
           Two-byte value changed with cold enrichment and engine load
           (676 cold, 359 warm idle, 984 at the rev hold), giving it the
           expected broad fuel/air signature (airflow, per the evidence
-          above; neighbouring 0x1208 is air charge per intake event).
+          above; neighbouring 0x1208 is air charge x tune K per intake event).
       - session: data/analyses/bfs-provider-search-20260805.md
         method: evidence_gap_review
         finding: >

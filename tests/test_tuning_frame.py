@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from src.analysis.afr import load_afr_calibration
 from src.analysis.tuning_frame import (
+    Provider,
     build_tuning_frame,
     load_provider_registry,
     section_capabilities,
@@ -139,3 +140,94 @@ def test_round_stamped_rows_are_placed_on_their_acquisition_clock(tmp_path: Path
     # 37 ms apart on the acquisition clock — not merged onto the round stamp.
     for rpm_at, afr_at in zip(rpm_times, afr_times, strict=True):
         assert (afr_at - rpm_at).total_seconds() == pytest.approx(0.037, abs=1e-5)
+
+
+# --- base_fuel_schedule: a candidate scale provider carries its provenance ---
+
+PROVIDERS = Path("data/nissan-xterra-2008/tuning_providers.yaml")
+
+
+def test_a_candidate_scale_provider_cannot_omit_its_envelope_or_evidence() -> None:
+    """The 0x1208 -> BFS scale is transitive and steady-state only; a bare
+    candidate factor would be quoted against transients and WOT edges."""
+    base = {
+        "role": "base_fuel_schedule",
+        "spec": "did:ECM_AIR_CHARGE",
+        "transform": "scale",
+        "factor": 1 / 2040,
+        "unit": "ms",
+        "confidence": "candidate",
+    }
+    with pytest.raises(ValidationError, match="conditions and evidence"):
+        Provider.model_validate(base)
+    with pytest.raises(ValidationError, match="evidence"):
+        Provider.model_validate({**base, "conditions": "steady state"})
+    with pytest.raises(ValidationError, match="conditions"):
+        Provider.model_validate({**base, "evidence": "report.md"})
+    ok = Provider.model_validate({**base, "conditions": "steady state", "evidence": "report.md"})
+    assert ok.factor == pytest.approx(1 / 2040)
+
+
+@pytest.mark.parametrize("factor", [None, 0.0, -0.001])
+def test_scale_requires_a_positive_factor(factor: float | None) -> None:
+    with pytest.raises(ValidationError, match="positive factor"):
+        Provider(role="rpm", spec="did:ECM_RPM", transform="scale", factor=factor, unit="rpm")
+
+
+def test_scale_requires_a_unit_and_factor_requires_scale() -> None:
+    with pytest.raises(ValidationError, match="requires a unit"):
+        Provider(role="rpm", spec="did:ECM_RPM", transform="scale", factor=2.0)
+    with pytest.raises(ValidationError, match="only meaningful"):
+        Provider(role="rpm", spec="did:ECM_RPM", factor=2.0)
+
+
+def test_the_shipped_registry_declares_bfs_as_a_candidate_with_its_envelope() -> None:
+    registry = load_provider_registry(PROVIDERS)
+    bfs = next(p for p in registry.providers if p.role == "base_fuel_schedule")
+    assert bfs.spec == "did:ECM_AIR_CHARGE"
+    assert bfs.transform == "scale"
+    assert bfs.confidence == "candidate"
+    assert bfs.unit == "ms"
+    assert bfs.factor == pytest.approx(1 / 2040, rel=1e-5)
+    assert bfs.conditions and "steady state" in bfs.conditions.lower()
+    assert bfs.evidence and "bfs1208.md" in bfs.evidence
+
+
+def _air_charge_session(tmp_path: Path) -> Path:
+    session = tmp_path / "_capture-fuel-pw-research-2026-09-18T200000"
+    stamp = datetime(2026, 9, 18, 20, 0, tzinfo=UTC)
+    rows = [
+        TelemetryRecord(
+            timestamp=stamp + timedelta(seconds=k),
+            source="obd",
+            channel="DID_1208",
+            value=f"{raw:04x}",
+        )
+        for k, raw in enumerate((6000, 20400, 40800))
+    ]
+    rows.append(TelemetryRecord(timestamp=stamp, source="obd", channel="DID_1219", value="09c4"))
+    write_records_to_parquet(rows, session)
+    return session
+
+
+def test_bfs_is_raw_air_charge_over_2040_only_when_candidates_are_allowed(
+    tmp_path: Path,
+) -> None:
+    session = _air_charge_session(tmp_path)
+    calibration = load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml"))
+
+    default = build_tuning_frame(session, providers_path=PROVIDERS, calibration=calibration)
+    assert default.capability["base_fuel_schedule"]["available"] is False
+    assert "candidate" in str(default.capability["base_fuel_schedule"]["reason"])
+    assert "base_fuel_schedule" not in default.values.columns
+
+    opted = build_tuning_frame(
+        session, providers_path=PROVIDERS, calibration=calibration, allow_candidates=True
+    )
+    cap = opted.capability["base_fuel_schedule"]
+    assert cap["available"] is True
+    assert cap["confidence"] == "candidate"
+    assert cap["conditions"] and cap["evidence"]
+    got = opted.values.dropna(subset=["base_fuel_schedule"])
+    assert list(got["base_fuel_schedule_raw"]) == [6000, 20400, 40800]
+    assert list(got["base_fuel_schedule"]) == pytest.approx([6000 / 2040, 10.0, 20.0], rel=1e-5)
