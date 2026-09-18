@@ -295,7 +295,7 @@ def _discard_pool(pool: Executor, *, terminate: bool) -> None:
 #: ``digest.json``, but that check only covers a *finished* computation —
 #: without this, a shutdown landing mid-digest would start a second child
 #: over the same multi-gigabyte session.
-_IN_FLIGHT: set[Path] = set()
+_IN_FLIGHT: dict[Path, asyncio.Task[dict[str, Any] | None]] = {}
 
 
 def digest_in_flight(session_dir: Path) -> bool:
@@ -330,15 +330,19 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
         emitter.reset_notification_count()
     if read_digest(session_dir) is not None:
         return None
-    if session_dir in _IN_FLIGHT:
-        log.debug("digest for %s already in flight; not starting a second", session_dir.name)
+    current_task = asyncio.current_task()
+    existing = _IN_FLIGHT.get(session_dir)
+    if existing is not None and existing is not current_task:
+        log.debug("digest for %s already in flight; awaiting shared result", session_dir.name)
+        await asyncio.shield(existing)
         return None
     skipped = digest_preflight(session_dir, config, now=now)
     if skipped is not None:
         write_digest_skipped(session_dir, skipped)
         return None
 
-    _IN_FLIGHT.add(session_dir)
+    if current_task is not None:
+        _IN_FLIGHT[session_dir] = current_task
     try:
         digest = await compute_digest_off_loop(
             session_dir,
@@ -385,7 +389,8 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
         )
         return None
     finally:
-        _IN_FLIGHT.discard(session_dir)
+        if _IN_FLIGHT.get(session_dir) is current_task:
+            _IN_FLIGHT.pop(session_dir, None)
 
     payload = persist_digest(session_dir, digest, catalog_db=catalog_db)
     if payload is None:

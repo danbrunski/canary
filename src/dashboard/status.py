@@ -467,6 +467,47 @@ def _derive_vehicle_state(
     )
 
 
+def _derive_vehicle_state_live(
+    live_source: Any,
+    *,
+    replay_controller: ReplayController | None,
+    now: datetime | None = None,
+) -> VehicleState:
+    """Classify from the daemon's in-memory observations, without Parquet I/O."""
+    now_dt = datetime.now(UTC) if now is None else now
+    replay_id: str | None = None
+    if replay_controller is not None:
+        replay_state = replay_controller.status()
+        if replay_state.running:
+            replay_id = replay_state.replay_id
+    inputs = live_source.vehicle_state_inputs(now_dt)
+    rpm = inputs.get("rpm")
+    obd_freshness = inputs.get("obd_freshness_seconds")
+    can_freshness = inputs.get("can_freshness_seconds")
+    decoded_rpm = inputs.get("decoded_rpm")
+    rpm_from_broadcast = False
+    if (
+        (rpm is None or obd_freshness is None or obd_freshness > _FRESHNESS_THRESHOLD_SECONDS)
+        and decoded_rpm is not None
+        and can_freshness is not None
+        and can_freshness <= _FRESHNESS_THRESHOLD_SECONDS
+    ):
+        rpm = decoded_rpm * _ECM_RPM_SCALE
+        rpm_from_broadcast = True
+    return replace(
+        classify_vehicle_state(
+            rpm=rpm,
+            rpm_from_broadcast=rpm_from_broadcast,
+            coolant_temp=inputs.get("coolant_temp"),
+            run_time=inputs.get("run_time"),
+            obd_freshness_seconds=obd_freshness,
+            can_freshness_seconds=can_freshness,
+            replay_id=replay_id,
+        ),
+        derived_at=now_dt.isoformat(),
+    )
+
+
 def _active_session_dir(storage_writer: Any) -> Path | None:
     """The directory the writer is *currently* filling, if it can be read.
 
@@ -536,8 +577,16 @@ class VehicleStateCache:
         entry = self._entry
         if entry is not None and time.monotonic() - entry[0] < self._ttl:
             return entry[1]
-        state = derive()
+        # Derivation reads and combines recent Parquet chunks.  Keep it under
+        # the refresh lock so simultaneous compact/full status requests after
+        # expiry share one disk scan rather than all starting the same costly
+        # work.  Recheck after acquiring because another request may have
+        # refreshed while this thread waited.
         with self._lock:
+            entry = self._entry
+            if entry is not None and time.monotonic() - entry[0] < self._ttl:
+                return entry[1]
+            state = derive()
             self._entry = (time.monotonic(), state)
         return state
 
@@ -612,6 +661,7 @@ def gather_status_sources(
     storage_writer: Any = None,
     inference_timing: InferenceTimingRecorder | None = None,
     vehicle_state_cache: VehicleStateCache | None = None,
+    live_source: Any = None,
 ) -> StatusSources:
     """Read every source both ``/status`` views need, exactly once.
 
@@ -622,6 +672,11 @@ def gather_status_sources(
     storage = config.collection.storage_path
 
     def derive() -> VehicleState:
+        if live_source is not None:
+            return _derive_vehicle_state_live(
+                live_source,
+                replay_controller=replay_controller,
+            )
         return _derive_vehicle_state(
             storage,
             replay_controller=replay_controller,

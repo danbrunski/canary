@@ -128,6 +128,7 @@ def create_app(
     #: C08 — live-inference scheduler timing for ``/status``
     #: ``detectors.inference`` (``None`` in tests that don't run inference).
     inference_timing: InferenceTimingRecorder | None = None,
+    live_source: Any = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -203,6 +204,7 @@ def create_app(
         gps_tracker=gps_tracker,
         sequence_detector_controller=sequence_detector_controller,
         inference_timing=inference_timing,
+        live_source=live_source,
     )
     register_control_routes(
         app,

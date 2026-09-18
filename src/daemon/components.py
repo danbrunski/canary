@@ -5,7 +5,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
@@ -36,6 +36,9 @@ from src.models.health import HealthMonitor
 from src.models.manager import ModelManager, manager_for_artifact
 from src.models.sequence_registry import resolve_sequence_backend
 from src.storage.async_writer import AsyncParquetTelemetryWriter
+
+if TYPE_CHECKING:
+    from src.preprocessing.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
 
@@ -115,6 +118,9 @@ class DaemonComponents:
     #: performance channels through the *same* writer ``run_storage_sink``
     #: uses, instead of a second Parquet-writing path.
     storage_writer: AsyncParquetTelemetryWriter | None = None
+    #: Shared live telemetry state used by inference and the dashboard's
+    #: no-I/O vehicle-state classification.
+    live_source: LiveFeatureSource | None = None
     #: Escalates a sustained parked-with-power state to a poweroff (spec
     #: §3.7.6). ``None`` when ``IdleShutdownConfig.enabled`` is false, which
     #: is the shipped default — the inference tick then skips it entirely.

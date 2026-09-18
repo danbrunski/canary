@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from src.config import CanaryConfig, OperatingModeSpec
+from src.preprocessing.imu_decimation import decimate_imu_wide
 from src.preprocessing.loader import (
     channel_key,
     discover_sessions,
@@ -18,6 +19,8 @@ from src.preprocessing.loader import (
     resample_and_segment,
     to_wide,
 )
+from src.preprocessing.resampler import ResampleConfig, resample_wide
+from src.preprocessing.segmenter import segment_operating_modes
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
@@ -162,6 +165,51 @@ def test_resample_and_segment_handles_no_numeric_channels(tmp_path: Path) -> Non
 
     assert "session" in segmented.columns
     assert "timestamp" in segmented.columns
+
+
+def test_long_resampler_matches_legacy_wide_chain_with_imu(tmp_path: Path) -> None:
+    """The memory fix must preserve the established IMU and gap semantics."""
+    start = 1_778_000_000.0
+    records = [
+        TelemetryRecord.imu(start + i * 0.01, "ACCEL_LON", (i % 17 - 8) / 10, "g")
+        for i in range(200)
+    ]
+    records += [
+        TelemetryRecord.imu(start + i * 0.01, "ACCEL_LAT", (i % 11 - 5) / 20, "g")
+        for i in range(200)
+    ]
+    records += [TelemetryRecord.obd(start + i * 0.5, "RPM", 800.0 + i, "rpm") for i in range(4)]
+    session = _write_session(tmp_path, "2026-05-11T120000", records, max_rows=37)
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+
+    long = read_sessions([session])
+    wide = decimate_imu_wide(
+        to_wide(long, value="value_number"), hz=config.preprocessing.resample_hz
+    )
+    legacy = resample_wide(
+        wide,
+        config=ResampleConfig(
+            hz=config.preprocessing.resample_hz,
+            max_gap_factor=config.preprocessing.max_gap_factor,
+            slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+            session_gap_seconds=config.preprocessing.session_gap_seconds,
+        ),
+        value_columns=numeric_value_columns(wide),
+    )
+    legacy = segment_operating_modes(
+        legacy,
+        config.preprocessing.operating_modes,
+        mode_dwell_ticks=config.preprocessing.mode_dwell_ticks,
+    )
+    reduced = resample_and_segment([session], config)
+
+    pd.testing.assert_frame_equal(
+        reduced.reindex(sorted(reduced.columns), axis=1),
+        legacy.reindex(sorted(legacy.columns), axis=1),
+        check_dtype=False,
+        rtol=1e-5,
+        atol=1e-6,
+    )
 
 
 # ---------------------------------------------------------------------------

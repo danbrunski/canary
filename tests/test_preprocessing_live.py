@@ -584,6 +584,7 @@ def test_vehicle_state_inputs_empty_before_any_observation(config: CanaryConfig)
     inputs = src.vehicle_state_inputs(datetime(2026, 5, 13, 12, 0, tzinfo=UTC))
     assert inputs == {
         "rpm": None,
+        "decoded_rpm": None,
         "coolant_temp": None,
         "run_time": None,
         "obd_freshness_seconds": None,
@@ -615,6 +616,7 @@ def test_reset_clears_current_values_and_buffer(config: CanaryConfig) -> None:
     assert src.tick(now) is None  # nothing observed since reset
     assert src.vehicle_state_inputs(now) == {
         "rpm": None,
+        "decoded_rpm": None,
         "coolant_temp": None,
         "run_time": None,
         "obd_freshness_seconds": None,

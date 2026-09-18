@@ -601,6 +601,7 @@ class LiveFeatureSource:
         )
         return {
             "rpm": self._current_values.get(channel_key(OBD_SOURCE, "RPM")),
+            "decoded_rpm": self._current_values.get(channel_key(DECODED_SOURCE, "ECM_RPM")),
             "coolant_temp": self._current_values.get(channel_key(OBD_SOURCE, "COOLANT_TEMP")),
             "run_time": self._current_values.get(channel_key(OBD_SOURCE, "RUN_TIME")),
             "obd_freshness_seconds": _freshest_age(f"{OBD_SOURCE}{SOURCE_SEP}"),

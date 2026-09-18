@@ -1091,7 +1091,7 @@ def register_control_routes(
         return {"classification": payload}
 
     @app.get("/control/sessions/{session_id}/digest")
-    def get_session_digest_route(
+    async def get_session_digest_route(
         session_id: str,
         _auth: None = Depends(require_control_auth),
     ) -> dict[str, Any]:
@@ -1103,9 +1103,29 @@ def register_control_routes(
         # public-XOR-authenticated posture per route. Computed on first
         # request if the trip-end hook (Task 5.4) hasn't already written
         # digest.json for this session.
-        from src.control.digest import get_session_digest, get_session_digest_refusal
+        from src.analysis.digest import read_digest
+        from src.control.digest import get_session_digest_refusal
+        from src.control.trip_end import handle_trip_end_off_loop
 
-        result = get_session_digest(config, session_id, catalog_db=config.daemon.catalog_db)
+        try:
+            session_dir = resolve_session(config.collection.storage_path, session_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail=f"no digest for session {session_id!r}"
+            ) from exc
+
+        digest = read_digest(session_dir)
+        if digest is None:
+            # Use the same bounded child, row preflight, and in-flight task as
+            # automatic trip end. A request can no longer run multi-gigabyte
+            # pandas work inside the daemon's FastAPI thread pool.
+            await handle_trip_end_off_loop(
+                session_dir,
+                config,
+                catalog_db=config.daemon.catalog_db,
+            )
+            digest = read_digest(session_dir)
+        result = digest
         if result is None:
             # A refused digest is 409, never 404 and never a 200 carrying a
             # refusal payload: "this session is over the row budget" is an

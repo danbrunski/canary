@@ -130,7 +130,12 @@ class SessionFingerprint:
         )
 
 
-def compute_fingerprint(session_dir: Path, config: CanaryConfig) -> dict[str, float]:
+def compute_fingerprint(
+    session_dir: Path,
+    config: CanaryConfig,
+    *,
+    segmented: pd.DataFrame | None = None,
+) -> dict[str, float]:
     """Compute the per-drive stat vector for one recorded session.
 
     Raises ``FileNotFoundError`` when the session has no telemetry parquet
@@ -142,7 +147,11 @@ def compute_fingerprint(session_dir: Path, config: CanaryConfig) -> dict[str, fl
     if not chunks:
         raise FileNotFoundError(f"no telemetry parquet under {session_dir}")
 
-    frame = resample_and_segment([session_dir], config, value="value_number")
+    frame = (
+        resample_and_segment([session_dir], config, value="value_number")
+        if segmented is None
+        else segmented.copy()
+    )
     if frame.empty:
         return {}
     frame = frame.reset_index(drop=True)

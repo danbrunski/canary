@@ -42,7 +42,7 @@ from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig
 from src.control.dtc_state import SIDECAR_FILENAME as DTC_SIDECAR_FILENAME
-from src.preprocessing.loader import count_session_rows
+from src.preprocessing.loader import count_session_rows, resample_and_segment
 from src.timefmt import format_timestamp as _format_timestamp
 from src.timefmt import parse_iso_utc
 
@@ -423,15 +423,16 @@ def compute_digest(
     end = datetime.now(UTC) if now is None else now
     start = _session_start(session_dir) or end
 
+    segmented = resample_and_segment([session_dir], config, value="value_number")
     try:
-        classification = classify_session(session_dir, config)
+        classification = classify_session(session_dir, config, segmented=segmented)
         duration_seconds = classification.duration_seconds
         mode_seconds = dict(classification.mode_seconds)
     except FileNotFoundError:
         duration_seconds = 0.0
         mode_seconds = {}
 
-    stats = compute_fingerprint(session_dir, config)
+    stats = compute_fingerprint(session_dir, config, segmented=segmented)
     reference = read_reference_epoch(config.daemon.reference_epoch)
     reference_stats = dict(reference.stats) if reference is not None else {}
 

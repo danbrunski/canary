@@ -63,6 +63,7 @@ def register_public_routes(
     accepted_baselines_path: Path = DEFAULT_ACCEPTED_BASELINES_PATH,
     storage_writer: Any = None,
     inference_timing: InferenceTimingRecorder | None = None,
+    live_source: Any = None,
 ) -> None:
     # Owned here rather than passed in, so the vehicle-state derivation is
     # shared by both /status views of every app without any caller having to
@@ -92,6 +93,7 @@ def register_public_routes(
             storage_writer=storage_writer,
             inference_timing=inference_timing,
             vehicle_state_cache=vehicle_state_cache,
+            live_source=live_source,
         )
         if view == "compact":
             return compact_status(sources)

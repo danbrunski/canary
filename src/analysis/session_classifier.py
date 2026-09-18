@@ -192,6 +192,7 @@ def classify_session(
         EventDetectorCallable  # forward ref — defined below
     ]
     | None = None,
+    segmented: pd.DataFrame | None = None,
 ) -> SessionClassification:
     """Classify one recorded session into modes + events + disposition.
 
@@ -205,7 +206,8 @@ def classify_session(
     if not chunks:
         raise FileNotFoundError(f"no telemetry parquet under {session_dir}")
 
-    segmented = resample_and_segment([session_dir], config, value="value_number")
+    if segmented is None:
+        segmented = resample_and_segment([session_dir], config, value="value_number")
     if segmented.empty:
         return _empty_classification(session_dir.name, now)
 

@@ -7,15 +7,25 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
 from src.config import CanaryConfig
-from src.preprocessing.imu_decimation import decimate_imu_wide
+from src.preprocessing.imu_decimation import (
+    ACCEL_LAT_COLUMN,
+    ACCEL_LAT_MAX_COLUMN,
+    ACCEL_LON_COLUMN,
+    ACCEL_LON_MAX_COLUMN,
+    ACCEL_LON_RMS_COLUMN,
+    JERK_MAX_COLUMN,
+    decimate_imu_wide,
+)
 from src.preprocessing.resampler import (
     GAP_SUFFIX,
     SESSION_COLUMN,
     TIMESTAMP_COLUMN,
     ResampleConfig,
+    resample_long,
     resample_wide,
 )
 from src.preprocessing.segmenter import MODE_COLUMN, segment_operating_modes
@@ -126,6 +136,90 @@ def read_sessions(session_dirs: Iterable[Path]) -> pd.DataFrame:
     )
 
 
+def _read_session_numeric(session_dir: Path) -> pd.DataFrame:
+    """Read only columns needed by the numeric batch resampler."""
+    candidates = sorted(session_dir.glob(PARQUET_PATTERN))
+    if not candidates:
+        raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
+    frames: list[pd.DataFrame] = []
+    for path in candidates:
+        if path.stat().st_size == 0:
+            continue
+        try:
+            frames.append(
+                pd.read_parquet(path, columns=["timestamp", "source", "channel", "value_number"])
+            )
+        except (OSError, ValueError, pd.errors.ParserError):
+            continue
+    if not frames:
+        raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
+    frame = pd.concat(frames, ignore_index=True)
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
+    frame["session"] = session_dir.name
+    frame["source_channel"] = (
+        frame["source"].astype(str) + SOURCE_SEP + frame["channel"].astype(str)
+    )
+    return frame[["session", "timestamp", "source_channel", "value_number"]]
+
+
+def _decimate_imu_long(frame: pd.DataFrame, *, hz: float) -> pd.DataFrame:
+    """Long-form equivalent of :func:`decimate_imu_wide` without a raw pivot."""
+    raw_channels = {ACCEL_LON_COLUMN, ACCEL_LAT_COLUMN}
+    if frame.empty or not bool(frame["source_channel"].isin(raw_channels).any()):
+        return frame
+    tick = pd.Timedelta(seconds=1.0 / hz)
+    work = frame.copy()
+    work["_tick"] = work["timestamp"].dt.floor(tick)
+    # Wide decimation broadcasts each aggregate over every raw timestamp in
+    # its tick; resample_wide then observes it at that tick's final timestamp.
+    grouped_timestamps = work.groupby("_tick", sort=True)["timestamp"]
+    observed_first = grouped_timestamps.min()
+    observed_last = grouped_timestamps.max()
+    synthetic: list[pd.DataFrame] = []
+
+    def append_metric(values: pd.Series, channel: str) -> None:
+        starts = observed_first.reindex(values.index)
+        ends = observed_last.reindex(values.index)
+        # Two observations reproduce the wide path's broadcast without one
+        # synthetic row per raw sample: the first controls whether the value
+        # exists at this grid edge, and the last controls age at the next.
+        timestamps = pd.concat([starts, ends]).drop_duplicates()
+        repeated = values.reindex(timestamps.index)
+        synthetic.append(
+            pd.DataFrame(
+                {
+                    "session": frame["session"].iloc[0],
+                    "timestamp": timestamps.to_numpy(),
+                    "source_channel": channel,
+                    "value_number": repeated.to_numpy(),
+                }
+            )
+        )
+
+    lon = work.loc[work["source_channel"] == ACCEL_LON_COLUMN].copy()
+    if not lon.empty:
+        lon = lon.sort_values("timestamp", kind="stable").drop_duplicates("timestamp", keep="last")
+        values = pd.to_numeric(lon["value_number"], errors="coerce")
+        grouped = values.groupby(lon["_tick"])
+        append_metric(grouped.apply(lambda series: series.abs().max()), ACCEL_LON_MAX_COLUMN)
+        append_metric(
+            grouped.apply(lambda series: np.sqrt((series**2).mean())),
+            ACCEL_LON_RMS_COLUMN,
+        )
+        dt = lon["timestamp"].groupby(lon["_tick"]).diff().dt.total_seconds()
+        jerk = (values.groupby(lon["_tick"]).diff() / dt.replace(0.0, np.nan)).abs()
+        append_metric(jerk.groupby(lon["_tick"]).max(), JERK_MAX_COLUMN)
+
+    lat = work.loc[work["source_channel"] == ACCEL_LAT_COLUMN].copy()
+    if not lat.empty:
+        lat = lat.sort_values("timestamp", kind="stable").drop_duplicates("timestamp", keep="last")
+        values = pd.to_numeric(lat["value_number"], errors="coerce")
+        append_metric(values.abs().groupby(lat["_tick"]).max(), ACCEL_LAT_MAX_COLUMN)
+
+    ordinary = work.loc[~work["source_channel"].isin(raw_channels), frame.columns]
+    return pd.concat([ordinary, *synthetic], ignore_index=True)
+
+
 def to_wide(
     telemetry: pd.DataFrame,
     *,
@@ -228,6 +322,32 @@ def resample_and_segment(
     result means for them (skip, quarantine, raise).
     """
     sessions = [Path(path) for path in session_dirs]
+    resample_config = ResampleConfig(
+        hz=config.preprocessing.resample_hz,
+        max_gap_factor=config.preprocessing.max_gap_factor,
+        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+        session_gap_seconds=config.preprocessing.session_gap_seconds,
+    )
+    if value == "value_number":
+        # Process one session at a time and concatenate only the reduced grids.
+        # The previous chain pivoted millions of mostly-unique raw timestamps
+        # before reducing them to 1 Hz, creating a multi-gigabyte sparse frame.
+        reduced = [
+            resample_long(
+                _decimate_imu_long(
+                    _read_session_numeric(session), hz=config.preprocessing.resample_hz
+                ),
+                config=resample_config,
+            )
+            for session in sessions
+        ]
+        resampled = pd.concat(reduced, ignore_index=True) if reduced else pd.DataFrame()
+        return segment_operating_modes(
+            resampled,
+            config.preprocessing.operating_modes,
+            mode_dwell_ticks=config.preprocessing.mode_dwell_ticks,
+        )
+
     long = read_sessions(sessions)
     wide = to_wide(long, value=value)
     # 2a.3 — collapse any raw-rate imu:ACCEL_LON/LAT into per-resample-tick
@@ -239,12 +359,7 @@ def resample_and_segment(
     if value_columns:
         resampled = resample_wide(
             wide,
-            config=ResampleConfig(
-                hz=config.preprocessing.resample_hz,
-                max_gap_factor=config.preprocessing.max_gap_factor,
-                slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
-                session_gap_seconds=config.preprocessing.session_gap_seconds,
-            ),
+            config=resample_config,
             value_columns=value_columns,
         )
     else:

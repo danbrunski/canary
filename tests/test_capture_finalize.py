@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import signal
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
@@ -130,6 +131,46 @@ async def test_live_quality_keeps_the_loop_running_while_it_judges(
     assert quality.verdict == "pass"
     assert calls == [False]
     assert ticks >= 20
+
+
+async def test_equivalent_recomputes_share_one_in_flight_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[bool] = []
+    monkeypatch.setattr(capture_coverage, "recompute_capture_quality", _slow_recompute(0.1, calls))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = await asyncio.gather(
+            recompute_quality_off_loop(tmp_path, executor=pool),
+            recompute_quality_off_loop(tmp_path, executor=pool),
+        )
+    assert first is second
+    assert calls == [False]
+
+
+async def test_distinct_recomputes_do_not_compete_for_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    active = 0
+    high_water = 0
+    lock = threading.Lock()
+
+    def tracked(_session_dir: Path, **_: Any) -> Any:
+        nonlocal active, high_water
+        with lock:
+            active += 1
+            high_water = max(high_water, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        return SimpleNamespace(to_dict=dict, passed=True, verdict="pass", failures=[])
+
+    monkeypatch.setattr(capture_coverage, "recompute_capture_quality", tracked)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        await asyncio.gather(
+            recompute_quality_off_loop(tmp_path / "one", executor=pool),
+            recompute_quality_off_loop(tmp_path / "two", executor=pool),
+        )
+    assert high_water == 1
 
 
 async def test_the_recompute_refuses_to_run_inline_on_a_loop(tmp_path: Path) -> None:

@@ -68,6 +68,27 @@ def test_compute_digest_duration_and_mode_seconds(tmp_path: Path) -> None:
     assert sum(digest.mode_seconds.values()) == pytest.approx(digest.duration_seconds)
 
 
+def test_compute_digest_resamples_session_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Classification and fingerprinting share the same reduced frame."""
+    import src.analysis.digest as digest_mod
+
+    session = _session(tmp_path)
+    calls = 0
+    real_resample = digest_mod.resample_and_segment
+
+    def counted(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        return real_resample(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(digest_mod, "resample_and_segment", counted)
+    compute_digest(session, _config(tmp_path), now=SESSION_END)
+
+    assert calls == 1
+
+
 def test_compute_digest_gated_anomaly_counts_by_source_windowed(tmp_path: Path) -> None:
     session = _session(tmp_path)
     config = _config(tmp_path)

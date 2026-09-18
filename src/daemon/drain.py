@@ -272,6 +272,13 @@ async def run_telemetry_broadcast_sink(
             continue
 
         try:
+            # The stream is live-only: there is no backlog to preserve for a
+            # future subscriber.  Avoid serialising every raw record and
+            # decoding CAN/DID rows when nobody has the dashboard open.  At
+            # bus rate that otherwise duplicates work already performed by
+            # the storage and live-feature sinks for no observable result.
+            if broadcaster.subscriber_count == 0:
+                continue
             broadcaster.publish(_record_to_dict(record))
             if live_source is not None:
                 for decoded in live_source.decode_for_telemetry(record):

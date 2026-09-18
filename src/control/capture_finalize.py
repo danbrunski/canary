@@ -38,7 +38,9 @@ import asyncio
 import functools
 import logging
 import multiprocessing
+import threading
 import time
+import weakref
 from collections.abc import Mapping
 from concurrent.futures import BrokenExecutor, Executor, ProcessPoolExecutor
 from dataclasses import dataclass
@@ -74,6 +76,20 @@ DRAIN_TIMEOUT_SECONDS = 5.0
 #: took ~60 s on the Pi (2026-09-17); this allows captures several times that
 #: long, and exists only so a wedged child cannot hold a stop forever.
 RECOMPUTE_TIMEOUT_SECONDS = 600.0
+
+
+@dataclass
+class _RecomputeLoopState:
+    """One daemon-loop coordinator for memory-heavy capture judges."""
+
+    limit: asyncio.Semaphore
+    in_flight: dict[tuple[Any, ...], asyncio.Task[CaptureQuality]]
+
+
+_recompute_states_lock = threading.Lock()
+_recompute_states: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _RecomputeLoopState] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 class CaptureQualityUnavailableError(RuntimeError):
@@ -175,8 +191,6 @@ async def recompute_quality_off_loop(  # noqa: PLR0913
     as :class:`CaptureQualityUnavailableError`; the recompute's own exceptions
     (e.g. ``ValueError`` for a non-capture directory) propagate unchanged.
     """
-    from src.analysis import capture_coverage
-
     kwargs: dict[str, Any] = {
         "lifetime": None if lifetime is None else dict(lifetime),
         "losses": None if losses is None else dict(losses),
@@ -185,6 +199,88 @@ async def recompute_quality_off_loop(  # noqa: PLR0913
         "scope": scope,
         "ended_at": ended_at,
     }
+    loop = asyncio.get_running_loop()
+    state = _recompute_state(loop)
+    key = (
+        str(session_dir.resolve()),
+        _freeze_recompute_value(kwargs),
+        id(executor),
+        float(timeout),
+    )
+    with _recompute_states_lock:
+        task = state.in_flight.get(key)
+        if task is None:
+            task = loop.create_task(
+                _coordinated_recompute(
+                    state,
+                    key,
+                    session_dir,
+                    kwargs=kwargs,
+                    executor=executor,
+                    timeout=timeout,
+                )
+            )
+            state.in_flight[key] = task
+    # One HTTP client going away must not cancel a recompute another caller is
+    # awaiting. The coordinator task owns child cleanup and removes itself.
+    return await asyncio.shield(task)
+
+
+def _recompute_state(loop: asyncio.AbstractEventLoop) -> _RecomputeLoopState:
+    """Return loop-local primitives; asyncio locks cannot cross test/daemon loops."""
+    with _recompute_states_lock:
+        state = _recompute_states.get(loop)
+        if state is None:
+            state = _RecomputeLoopState(limit=asyncio.Semaphore(1), in_flight={})
+            _recompute_states[loop] = state
+        return state
+
+
+def _freeze_recompute_value(value: Any) -> Any:
+    """Turn JSON-like judge inputs into a stable exact-work identity."""
+    if isinstance(value, Mapping):
+        return tuple(
+            sorted((str(key), _freeze_recompute_value(item)) for key, item in value.items())
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_recompute_value(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted(_freeze_recompute_value(item) for item in value))
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return repr(value)
+
+
+async def _coordinated_recompute(
+    state: _RecomputeLoopState,
+    key: tuple[Any, ...],
+    session_dir: Path,
+    *,
+    kwargs: dict[str, Any],
+    executor: Executor | None,
+    timeout: float,
+) -> CaptureQuality:
+    try:
+        async with state.limit:
+            return await _run_recompute(
+                session_dir, kwargs=kwargs, executor=executor, timeout=timeout
+            )
+    finally:
+        with _recompute_states_lock:
+            current = state.in_flight.get(key)
+            if current is asyncio.current_task():
+                state.in_flight.pop(key, None)
+
+
+async def _run_recompute(
+    session_dir: Path,
+    *,
+    kwargs: dict[str, Any],
+    executor: Executor | None,
+    timeout: float,
+) -> CaptureQuality:
+    from src.analysis import capture_coverage
+
     call = functools.partial(capture_coverage.recompute_capture_quality, session_dir, **kwargs)
     owned = executor is None
     pool: Executor = _spawn_pool() if executor is None else executor

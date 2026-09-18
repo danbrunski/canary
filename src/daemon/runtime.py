@@ -216,6 +216,7 @@ async def run_daemon(
     # Built before the ReplayController below so 7.1's in-memory reset can
     # reach it (and the shared persistence gate / emitter) on replay boundaries.
     live_source = build_live_feature_source(components) if enable_live_inference else None
+    components.live_source = live_source
     components.replay_controller = ReplayController(
         queue=queue,
         writer=storage_writer,

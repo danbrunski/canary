@@ -282,3 +282,30 @@ async def test_broadcast_sink_without_did_map_publishes_raw_only() -> None:
         published.append(sub.queue.get_nowait())
     assert len(published) == 1
     assert published[0]["source"] == "obd"
+
+
+async def test_broadcast_sink_skips_decode_without_subscribers() -> None:
+    """A closed dashboard must add no decode work to the collection path."""
+    from src.daemon.drain import run_telemetry_broadcast_sink
+    from src.dashboard.broadcast import Broadcaster
+
+    class _DecodeSpy:
+        def decode_for_telemetry(self, _record: TelemetryRecord) -> list[TelemetryRecord]:
+            raise AssertionError("CAN decode ran with no dashboard subscriber")
+
+        def decode_did_for_telemetry(self, _record: TelemetryRecord) -> None:
+            raise AssertionError("DID decode ran with no dashboard subscriber")
+
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+    await queue.put(TelemetryRecord.obd(1_778_000_000.0, "RPM", 700.0, "rpm"))
+    stop.set()
+
+    await run_telemetry_broadcast_sink(
+        queue,
+        Broadcaster(),
+        stop,
+        live_source=_DecodeSpy(),  # type: ignore[arg-type]
+        poll_interval=0.01,
+    )
+    assert queue.empty()

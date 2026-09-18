@@ -1,11 +1,31 @@
 # Collection and diagnostics improvement tasks
 
-**Status 2026-09-11 — the C0x, D01 and D02 sets are closed and archived.**
+**Status 2026-09-18 — performance fixes and tomorrow's drive are queued.**
+[`D03-open-work.md`](D03-open-work.md) remains the only live checklist. Its
+[September 18 drive order](D03-open-work.md#suggested-order-for-the-2026-09-18-drive)
+prioritizes deployed-fix verification, a bracketed receive-loss measurement,
+and 0x1134 paired with commanded AFR. **September 18 is CAN-only:** D03.14–17
+add calculated-load/BFS reconstruction, a discriminating DID search, known
+Mode 21 block tests and a controlled CAN memory-read experiment. UpRev/K-line
+reference work is deferred. Secondary DID candidates follow if time permits.
+Preparation, data needed, acceptance evidence and desk-only work are specified
+in each task.
+
+The digest now reduces projected long-form telemetry before pivoting, shares
+one reduced frame between classification and fingerprinting, and routes HTTP
+requests through the bounded single-flight child. Live status uses in-memory
+telemetry, idle dashboard decoding is skipped, and capture-quality workers are
+single-flighted/serialized. D03.6 remains partial until the real large session
+is remeasured and shutdown cancellation is fixed; D03.13 remains partial only
+for the UPS heartbeat. The latest Pi deployment is to be verified, not inferred
+from the local checkout. No new hardware measurements were made in this review.
+
+**Status 2026-09-11 — the C0x, D01 and D02 sets were closed and archived.**
 Everything that was open on 2026-09-09 has either landed, been decided with a
 measurement behind it, or moved to [`D03-open-work.md`](D03-open-work.md),
-which is now the only live checklist here. Eight items remain: three need the
-truck, one needs an operator decision on the retrain corpus, and four can be
-done at a desk.
+which became the only live checklist here. Eight items remained: three needed
+the truck, one needed an operator decision on the retrain corpus, and four
+could be done at a desk.
 
 What closed in the two days between:
 

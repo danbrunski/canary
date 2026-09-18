@@ -156,6 +156,22 @@ async def test_trip_end_digest_keeps_the_loop_running_while_it_computes(
     assert (session / DIGEST_FILENAME).exists()
 
 
+async def test_concurrent_trip_end_requests_share_the_running_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = _session(tmp_path)
+    calls: list[bool] = []
+    monkeypatch.setattr(trip_end, "compute_digest_under_limit", _slow_digest(0.1, calls))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        owner, follower = await asyncio.gather(
+            handle_trip_end_off_loop(session, _config(tmp_path), executor=pool),
+            handle_trip_end_off_loop(session, _config(tmp_path), executor=pool),
+        )
+    assert sum(result is not None for result in (owner, follower)) == 1
+    assert calls == [False]
+    assert read_digest(session) is not None
+
+
 # --- 2. the row budget refuses before anything is started ------------------
 
 

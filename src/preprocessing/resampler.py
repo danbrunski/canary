@@ -114,6 +114,102 @@ def resample_wide(
     return pd.concat(frames, ignore_index=True)
 
 
+def resample_long(
+    long: pd.DataFrame,
+    *,
+    config: ResampleConfig | None = None,
+    value_column: str = "value_number",
+    channel_column: str = "source_channel",
+) -> pd.DataFrame:
+    """Resample long telemetry before constructing a wide frame.
+
+    Unlike :func:`resample_wide`, memory scales with the final time grid,
+    not ``raw timestamps × channels``. This is the batch path for persisted
+    telemetry, where bus-rate timestamps are mostly unique and a raw pivot
+    creates an enormous sparse intermediate.
+    """
+    cfg = ResampleConfig() if config is None else config
+    _require_columns(long, [SESSION_COLUMN, TIMESTAMP_COLUMN, channel_column, value_column])
+    if long.empty:
+        return _empty_resampled([], cfg)
+
+    frames: list[pd.DataFrame] = []
+    ordered = long.sort_values([SESSION_COLUMN, TIMESTAMP_COLUMN], kind="stable").copy()
+    ordered[TIMESTAMP_COLUMN] = pd.to_datetime(ordered[TIMESTAMP_COLUMN], utc=True)
+    for session, group in ordered.groupby(SESSION_COLUMN, sort=True, dropna=False):
+        timestamps = group[TIMESTAMP_COLUMN]
+        segment_ids = timestamps.diff().gt(pd.Timedelta(seconds=cfg.session_gap_seconds)).cumsum()
+        segment_count = int(segment_ids.max()) + 1 if len(segment_ids) else 0
+        for segment_id, segment in group.groupby(segment_ids, sort=True):
+            logical_session = str(session)
+            if segment_count > 1:
+                logical_session = f"{session}#segment-{int(segment_id) + 1:03d}"
+            frames.append(
+                _resample_one_long(
+                    logical_session,
+                    segment,
+                    cfg,
+                    value_column=value_column,
+                    channel_column=channel_column,
+                )
+            )
+    nonempty = [frame for frame in frames if not frame.empty]
+    return pd.concat(nonempty, ignore_index=True) if nonempty else _empty_resampled([], cfg)
+
+
+def _resample_one_long(
+    session: str,
+    group: pd.DataFrame,
+    config: ResampleConfig,
+    *,
+    value_column: str,
+    channel_column: str,
+) -> pd.DataFrame:
+    numeric = group.loc[group[value_column].notna()].copy()
+    if numeric.empty:
+        return _empty_resampled([], config)
+    numeric[value_column] = pd.to_numeric(numeric[value_column], errors="coerce").astype("float32")
+    numeric = numeric.loc[numeric[value_column].notna()]
+    if numeric.empty:
+        return _empty_resampled([], config)
+
+    channels = sorted(str(channel) for channel in numeric[channel_column].unique())
+    start = numeric[TIMESTAMP_COLUMN].min().floor(config.interval)
+    end = numeric[TIMESTAMP_COLUMN].max().floor(config.interval)
+    sampled_times = pd.Series(pd.date_range(start=start, end=end, freq=config.interval))
+    fast = set(_fast_channels(channels, config))
+    values: dict[str, np.ndarray] = {}
+    gaps: dict[str, np.ndarray] = {}
+    for channel in channels:
+        rows = numeric.loc[numeric[channel_column].astype(str) == channel]
+        series = pd.Series(
+            rows[value_column].to_numpy(),
+            index=pd.DatetimeIndex(rows[TIMESTAMP_COLUMN]),
+            dtype="float32",
+        )
+        # Match pivot_table(..., aggfunc="last") for duplicate observations.
+        series = series.groupby(level=0, sort=True).last()
+        sampled = series.resample(config.interval).last().reindex(sampled_times.array).ffill()
+        max_gap = config.max_gap if channel in fast else config.slow_channel_max_gap
+        stale = _gap_flags(series, sampled_times, max_gap).to_numpy()
+        values[channel] = sampled.where(~stale, np.nan).to_numpy(dtype="float32")
+        gaps[gap_column(channel)] = stale
+
+    return pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    SESSION_COLUMN: session,
+                    TIMESTAMP_COLUMN: sampled_times,
+                }
+            ),
+            pd.DataFrame(values),
+            pd.DataFrame(gaps),
+        ],
+        axis=1,
+    )
+
+
 def gap_column(channel: str) -> str:
     """Return the boolean gap-flag column name for a channel."""
     return f"{channel}{GAP_SUFFIX}"
