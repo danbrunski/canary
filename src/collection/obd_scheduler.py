@@ -525,11 +525,16 @@ class CanObdLoopStats:
     batch_desyncs: int = 0
     #: Times the session narrowed its batch size after repeated failures.
     batch_size_narrowings: int = 0
+    #: Of ``batch_failures``, those not counted toward narrowing because the
+    #: ECU had shown no sign of life since the previous failure (asleep, key
+    #: off). Silence from a sleeping ECU says nothing about batching.
+    batch_failures_ecu_silent: int = 0
     did_batched_requests: int = 0
     did_batched_members_requested: int = 0
     did_batch_failures: int = 0
     did_batch_desyncs: int = 0
     did_batch_size_narrowings: int = 0
+    did_batch_failures_ecu_silent: int = 0
     #: Support discovery as scheduler work (C06.8). ``requests_sent`` still
     #: counts every frame on the wire; these separate the probes from channel
     #: reads, and count the raw frames tapped *while* a probe was waiting —
@@ -2225,6 +2230,7 @@ def _batching_metrics(
         "failures": stats.batch_failures,
         "desyncs": stats.batch_desyncs,
         "size_narrowings": stats.batch_size_narrowings,
+        "failures_while_ecu_silent": stats.batch_failures_ecu_silent,
         # Lifetime average since the loop started. Explicitly named: read as
         # a current rate it is misleading, and was — on 2026-08-04 it barely
         # moved through a real rate change because hours of history dominated.
@@ -2250,6 +2256,7 @@ def _batching_metrics(
             "failures": stats.did_batch_failures,
             "desyncs": stats.did_batch_desyncs,
             "fallbacks": stats.did_batch_size_narrowings,
+            "failures_while_ecu_silent": stats.did_batch_failures_ecu_silent,
         },
     }
 

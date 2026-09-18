@@ -212,7 +212,10 @@ def test_client_batch_transmits_nothing_in_passive_mode() -> None:
 import threading  # noqa: E402
 import time  # noqa: E402
 
-from src.collection.can_obd_collector import run_can_obd_loop  # noqa: E402
+from src.collection.can_obd_collector import (  # noqa: E402
+    MAX_CONSECUTIVE_BATCH_FAILURES,
+    run_can_obd_loop,
+)
 from src.collection.obd_scheduler import (  # noqa: E402
     CanObdSpec,
     _initial_request_states,
@@ -614,3 +617,119 @@ def test_batch_readings_share_receipt_time_and_round_but_not_a_claim_of_atomicit
     assert any(
         {"RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS"} <= pids for pids in by_arrival.values()
     )
+
+
+# ---------------------------------------------------------------------------
+# A sleeping ECU is not evidence about batching (2026-09-18)
+# ---------------------------------------------------------------------------
+
+_SIX_FAST = ("RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS", "TIMING_ADVANCE", "MAF")
+
+
+class _SleepyEcu(_BatchingEcu):
+    """Silent to every request until ``wake_after`` sends, then a healthy
+    batching ECU — the Pi booting with the key off, then the engine starting."""
+
+    def __init__(self, wake_after: int) -> None:
+        super().__init__()
+        self.wake_after = wake_after
+        self.sends = 0
+        self.awake_batch_sizes: list[int] = []
+
+    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
+        self.sends += 1
+        data = bytes(msg.data)
+        pids = list(data[2 : 1 + data[0]])
+        if self.sends <= self.wake_after:
+            self.sent.append(msg)
+            if len(pids) > 1:
+                self.batch_requests += 1
+            return
+        if data[1] == 0x01 and len(pids) > 1:
+            self.awake_batch_sizes.append(len(pids))
+        super().send(msg, timeout)
+
+
+class _NrcBatchEcu(_BatchingEcu):
+    """Answers singles; refuses every batch with a negative response."""
+
+    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
+        data = bytes(msg.data)
+        pids = list(data[2 : 1 + data[0]])
+        if data[1] == 0x01 and len(pids) > 1:
+            self.sent.append(msg)
+            self.batch_requests += 1
+            self._pending.append(bytes([0x03, 0x7F, 0x01, 0x12, 0, 0, 0, 0]))
+            return
+        super().send(msg, timeout)
+
+
+def _mode01_sizes(bus: _BatchingEcu) -> list[int]:
+    return [len(bytes(m.data)[2 : 1 + m.data[0]]) for m in bus.sent if bytes(m.data)[1] == 0x01]
+
+
+def test_batch_silence_from_a_sleeping_ecu_does_not_narrow() -> None:
+    """Key off at boot: every request times out. That silence must not cost the
+    drive its batching — before the fix it narrowed 6 -> 4 -> 2 -> off."""
+    bus = _SleepyEcu(wake_after=3 * MAX_CONSECUTIVE_BATCH_FAILURES * 2 + 2)
+    readings: list = []
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _spec(pids=_SIX_FAST, batch_max_pids=6, request_timeout_seconds=0.02),
+        on_frame=lambda _m: None,
+        on_reading=readings.append,
+        stop_event=threading.Event(),
+        deadline_monotonic=time.monotonic() + 1.2,
+    )
+
+    assert stats.batch_failures >= 3 * MAX_CONSECUTIVE_BATCH_FAILURES
+    assert stats.batch_failures_ecu_silent == stats.batch_failures
+    assert stats.batch_size_narrowings == 0
+    assert bus.awake_batch_sizes, "batching must survive the ECU waking up"
+    assert max(bus.awake_batch_sizes) == 6, "and at the full configured size"
+    assert {r.pid for r in readings} >= set(_SIX_FAST)
+
+
+def test_an_awake_ecu_that_ignores_batches_still_disables_batching() -> None:
+    """The protection the gate must keep: singles answer, batches are silent,
+    so each silent batch is bracketed by proof of life and counts."""
+    bus = _BatchingEcu(answer_batches=False)
+    readings: list = []
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _spec(pids=_SIX_FAST, batch_max_pids=6, request_timeout_seconds=0.02),
+        on_frame=lambda _m: None,
+        on_reading=readings.append,
+        stop_event=threading.Event(),
+        deadline_monotonic=time.monotonic() + 1.0,
+    )
+
+    assert stats.batch_size_narrowings == 3  # 6 -> 4 -> 2 -> off
+    assert stats.batch_failures - stats.batch_failures_ecu_silent == (
+        3 * MAX_CONSECUTIVE_BATCH_FAILURES
+    )
+    assert _mode01_sizes(bus)[-5:] == [1] * 5, "must have fallen back to single-PID"
+    assert {r.pid for r in readings} >= set(_SIX_FAST)
+
+
+def test_an_ecu_that_refuses_batches_with_an_nrc_narrows_regardless() -> None:
+    """A negative response is an answer from an awake ECU, so it is evidence
+    about batching even with no other contact in between."""
+    bus = _NrcBatchEcu()
+    readings: list = []
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _spec(pids=_SIX_FAST, batch_max_pids=6, request_timeout_seconds=0.02),
+        on_frame=lambda _m: None,
+        on_reading=readings.append,
+        stop_event=threading.Event(),
+        deadline_monotonic=time.monotonic() + 0.6,
+    )
+
+    assert stats.batch_size_narrowings == 3
+    assert stats.batch_failures == 3 * MAX_CONSECUTIVE_BATCH_FAILURES
+    assert stats.batch_failures_ecu_silent == 0
+    sizes = [s for s in _mode01_sizes(bus) if s > 1]
+    assert sizes[:3] == [6, 6, 6], "no single probe needed between NRC refusals"
+    assert _mode01_sizes(bus)[-5:] == [1] * 5
+    assert {r.pid for r in readings} >= set(_SIX_FAST)

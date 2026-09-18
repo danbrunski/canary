@@ -346,12 +346,27 @@ def run_can_obd_loop(
     # consecutive failures falls the session back to single-PID rather than
     # stalling. This doubles as the adaptive form of the startup size probe:
     # we discover what the vehicle actually accepts by using it.
+    #
+    # But a silent batch is only evidence about batching when the ECU is
+    # awake. The Pi boots with the key off (ECM asleep, every request times
+    # out), and counting that silence narrowed 6 -> 4 -> 2 -> off within
+    # seconds and cost the whole drive its batching (2026-09-18). So a failed
+    # batch counts only when the ECU answered *something* since the previous
+    # failure (or refused the batch with an NRC, which is itself an answer).
+    # Otherwise it is not counted, and the next request of that service goes
+    # out single as a probe: an awake ECU that ignores batches answers the
+    # probe, and its next batch failure then counts; an asleep ECU keeps
+    # producing silence and nothing narrows.
     batching_enabled = spec.batch_max_pids > 1
     active_batch_max = spec.batch_max_pids
     consecutive_batch_failures = 0
     did_batching_enabled = spec.did_batch_max_dids > 1
     active_did_batch_max = min(spec.did_batch_max_dids, 3)
     consecutive_did_batch_failures = 0
+    ecu_answered_since_pid_batch_failure = False
+    ecu_answered_since_did_batch_failure = False
+    probe_single_pid = False
+    probe_single_did = False
     stats.loop_started_at = time.monotonic()
     while not _should_stop(stop_event, deadline_monotonic):
         now = time.monotonic()
@@ -542,6 +557,9 @@ def run_can_obd_loop(
                 discovery_blocked = discovery_wait
             if discovery_wait is None:
                 discovery_blocked = None
+                discovery_answers_before = (
+                    stats.discovery_responses + stats.discovery_negative_responses
+                )
                 discovery = _issue_discovery_probe(
                     client,
                     discovery,
@@ -555,6 +573,12 @@ def run_can_obd_loop(
                     discovery, requests, request_states, spec, time.monotonic(), installed
                 )
                 discovery_registry.remember(discovery)
+                if (
+                    stats.discovery_responses + stats.discovery_negative_responses
+                    > discovery_answers_before
+                ):
+                    ecu_answered_since_pid_batch_failure = True
+                    ecu_answered_since_did_batch_failure = True
                 next_budget_at = max(
                     next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
                 )
@@ -639,7 +663,9 @@ def run_can_obd_loop(
                 request_states,
                 now,
                 leader_index=request_index,
-                max_dids=active_did_batch_max if did_batching_enabled else 1,
+                max_dids=(
+                    active_did_batch_max if did_batching_enabled and not probe_single_did else 1
+                ),
                 response_widths=spec.did_response_widths,
                 eligible=eligible,
                 members=current_round.remaining,
@@ -651,7 +677,7 @@ def run_can_obd_loop(
                 request_states,
                 now,
                 leader_index=request_index,
-                max_pids=active_batch_max if batching_enabled else 1,
+                max_pids=active_batch_max if batching_enabled and not probe_single_pid else 1,
                 eligible=eligible,
                 ignore_tier=round_timestamp is not None,
                 members=current_round.remaining,
@@ -680,6 +706,9 @@ def run_can_obd_loop(
                 )
                 if outcome.observed:
                     controller.on_response(request_index, time.monotonic(), outcome.acquired_at)
+            if outcome.answered or outcome.negative_response_code is not None:
+                ecu_answered_since_pid_batch_failure = True
+                ecu_answered_since_did_batch_failure = True
             if outcome.answered:
                 if request.kind == "did":
                     consecutive_did_batch_failures = 0
@@ -687,7 +716,31 @@ def run_can_obd_loop(
                     consecutive_batch_failures = 0
                 discovery = discovery.on_contact(time.monotonic())
             else:
+                # Silence (not an NRC) means the next request of this service
+                # must re-establish that the ECU is awake before another
+                # silent batch can count.
+                silent = outcome.negative_response_code is None
                 if request.kind == "did":
+                    counts = ecu_answered_since_did_batch_failure
+                    ecu_answered_since_did_batch_failure = False
+                    probe_single_did = silent
+                else:
+                    counts = ecu_answered_since_pid_batch_failure
+                    ecu_answered_since_pid_batch_failure = False
+                    probe_single_pid = silent
+                if not counts:
+                    # Debug only: a key-off ECU produces one of these per
+                    # budget slot for as long as it sleeps.
+                    if request.kind == "did":
+                        stats.did_batch_failures_ecu_silent += 1
+                    else:
+                        stats.batch_failures_ecu_silent += 1
+                    log.debug(
+                        "%s batch failure not counted toward narrowing: no ECU "
+                        "answer since the previous failure; probing single",
+                        "multi-DID" if request.kind == "did" else "multi-PID",
+                    )
+                elif request.kind == "did":
                     consecutive_did_batch_failures += 1
                     if consecutive_did_batch_failures >= MAX_CONSECUTIVE_BATCH_FAILURES:
                         did_batching_enabled = False
@@ -743,6 +796,13 @@ def run_can_obd_loop(
         request_started = time.monotonic()
         request_state.last_requested_at = request_started
         request_state.requests_sent += 1
+        # This single is the liveness probe a silent batch asked for.
+        if request.kind == "did":
+            liveness_probe = probe_single_did
+            probe_single_did = False
+        else:
+            liveness_probe = probe_single_pid
+            probe_single_pid = False
         try:
             result = _query_with_tap(
                 bus,
@@ -780,6 +840,9 @@ def run_can_obd_loop(
                 for reading in readings:
                     stats.record_read(reading.pid, time.monotonic())
                     on_reading(reading)
+        if emitted or result.negative_response_code is not None:
+            ecu_answered_since_pid_batch_failure = True
+            ecu_answered_since_did_batch_failure = True
         if emitted:
             request_state.responses += 1
             request_state.last_response_at = time.monotonic()
@@ -799,15 +862,20 @@ def run_can_obd_loop(
         else:
             request_state.timeouts += 1
             stats.request_timeouts += 1
-        _update_response_state(
-            request_state,
-            emitted=emitted,
-            now=time.monotonic(),
-            focused_capture=(
-                tuning_profile.is_active()
-                and tuning_profile.request_eligible(request_index, request)
-            ),
-        )
+        if not (liveness_probe and not emitted and result.negative_response_code is None):
+            # A silent liveness probe is the ECU still asleep, like the batch
+            # before it: no evidence about this channel, so no miss backoff.
+            # Otherwise a key-off boot would back every channel off (doubling
+            # to 15 minutes for never-answered ones) one probe at a time.
+            _update_response_state(
+                request_state,
+                emitted=emitted,
+                now=time.monotonic(),
+                focused_capture=(
+                    tuning_profile.is_active()
+                    and tuning_profile.request_eligible(request_index, request)
+                ),
+            )
         if controller is not None:
             controller.on_request_attempted(request_index)
         forced.discard(request_index)
@@ -1855,6 +1923,10 @@ class BatchOutcome:
     #: Shared arrival instant of the batch response (receipt time, see
     #: ``_response_to_reading``); ``None`` when the batch failed.
     acquired_at: float | None = None
+    #: Set when the whole batch was refused with a negative response. An NRC
+    #: is an answer from an awake ECU, so unlike silence it is always
+    #: evidence about batching.
+    negative_response_code: int | None = None
 
 
 def _batched_pid_width(pid: int) -> int | None:
@@ -2046,7 +2118,7 @@ def _issue_batched_request(
             stats.negative_responses += 1
             for index in indices:
                 states[index].last_negative_response_code = result.negative_response_code
-        return BatchOutcome(answered=False)
+        return BatchOutcome(answered=False, negative_response_code=result.negative_response_code)
     if not result.clean:
         if leader.kind == "did":
             stats.did_batch_desyncs += 1

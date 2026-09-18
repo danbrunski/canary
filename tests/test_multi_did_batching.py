@@ -359,3 +359,44 @@ def test_physical_did_batch_rejects_a_different_ecu_responder() -> None:
     )
     assert stats.did_batch_failures > 0
     assert not any(reading.pid.startswith("DID_") for reading in readings)
+
+
+class _SleepyDidEcu(_SchedulerDidEcu):
+    """Silent to every request until ``wake_after`` sends (key off at boot)."""
+
+    def __init__(self, wake_after: int) -> None:
+        super().__init__()
+        self.wake_after = wake_after
+        self.sends = 0
+        self.awake_did_batches = 0
+
+    def send(self, message: can.Message) -> None:
+        self.sends += 1
+        if self.sends <= self.wake_after:
+            self.sent.append(message)
+            return
+        before = self.did_batches
+        super().send(message)
+        self.awake_did_batches += self.did_batches - before
+
+
+def test_did_batch_silence_from_a_sleeping_ecu_does_not_disable_batching() -> None:
+    bus = _SleepyDidEcu(wake_after=14)
+    readings: list = []
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _scheduler_spec(),
+        on_frame=lambda _message: None,
+        on_reading=readings.append,
+        stop_event=threading.Event(),
+        deadline_monotonic=time.monotonic() + 0.8,
+    )
+    assert stats.did_batch_failures >= 3
+    assert stats.did_batch_failures_ecu_silent == stats.did_batch_failures
+    assert stats.did_batch_size_narrowings == 0
+    assert bus.awake_did_batches > 0, "DID batching must survive the ECU waking up"
+    assert {reading.pid for reading in readings if reading.pid.startswith("DID_")} == {
+        "DID_1101",
+        "DID_1219",
+        "DID_1208",
+    }
