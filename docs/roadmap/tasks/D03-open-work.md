@@ -882,6 +882,14 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
     - `test_transient_exit_failure_costs_one_lapse_and_is_retried` pins today's
       5 s behaviour and must change with fix 2.
   - The "0x1208 benched 30–48 s" part didn't appear in these three captures.
+  **Fixed in `530398e`, deployed 21:27Z, validated live ([September 18 evening drive log](../../../data/analyses/2026-09-18-eve-drive-log.md)).**
+  - A 10.6-min `fuel-pw-research` block had **0 all-channel stalls ≥ 2 s**,
+    against ~6 expected from the same evening's baseline (16 in 27.5 min).
+  - All 6 session failures were silent entries, and all 6 were handled by the
+    new exit-first path (`unknown_session_exits` 6).
+  - **Still open:** the exit-retry path didn't fire live (`fast_exit_failures`
+    0), so it's verified by sims and tests only. The "0x1208 benched" symptom
+    was never reproduced. Close this after one live exit retry is observed.
 
 - [x] **D03.19 A key-off boot disabled multi-PID batching for the whole session.**
   Silent timeouts from a sleeping ECM counted as batch rejections (6→4→2→off in

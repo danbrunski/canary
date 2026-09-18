@@ -4,13 +4,9 @@ _State file for the third /loop drive of the day. Resume from here; don't redo w
 _Earlier today: `2026-09-18-drive-log.md` (AM), `2026-09-18-pm-drive-log.md` (PM). Plans: `2026-09-18-next-drive-deploy-plan.md` (criteria, per the operator, unchanged) and `2026-09-18-pm-next-drive-deploy-plan.md` (the added tests below)._
 
 ## Glance
-- **Block 1 decided most of the fuel workflow.**
-  - **0x1206/0x1207 = injected pulse: PASS** on the matched-air-charge test (+1.0 % / −0.5 %, n 184).
-  - **0x1134 is NOT commanded φ:** it holds 64 while 0x44 sits at 1.06 for 3.5 s and at 0.87 lean. Its raw/64 scale matches when it does move.
-  - 0x1208 = air charge (per g air +0.5 %).
-  - D04.3 has no minimum at this resolution.
-- Back on `default` for the corpus. **No parked stop for ~3 h (operator, ~20:42Z), so the idle dead-time step is deferred to a future drive.** Optional while driving: in-gear coasts in 3rd and 4th from ~3,000 rpm (D04.2).
-- Health: 0 drops. 16 stalls of 2.3–2.5 s plus **three of exactly 5.0 s (new)**, 0 inside holds. A key-off stop from 20:27 to 20:33Z.
+- **D03.18 fixed, deployed and validated live** (`530398e`, 21:27Z): 10.6 min on `fuel-pw-research` with 0 all-channel stalls, where ~6 were expected. Six silent entries were handled by the new path.
+- Earlier: 0x1206/0x1207 = injected pulse PASS (matched air); 0x1134 is not commanded φ; 0x1208 = air charge. D04.3 unresolved at this resolution.
+- Back on `default` for the corpus. No maneuvers needed. Health clean.
 
 ## For the operator
 1. **The tuning provider `injector_pw_b1` still maps to 0x1208 (air charge) at `confirmed`.** You said to fix mislabels and then "we'll fix those later". The plan is in D03.9 (`9b1c788`). Nothing to decide now; it's listed so it isn't lost.
@@ -107,3 +103,17 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
   - The journal shows nothing at 20:46:45, and no pull was running. Cause unattributed; an SD write-latency spike is plausible, not shown.
   - The 1 Hz live logger was stopped at 20:57Z (no more captures planned; one less load).
   - **Watching:** if the high-water passes ~7,000, or any drop appears, it's a regression to act on (memory: the storage-writer overload).
+- 21:19Z Operator: "feel free to implement fixes for performance issues and deploy them."
+- 21:25Z **D03.18 fix committed: `530398e`** (implementer subagent; I reviewed the diff and re-ran 418 targeted tests; ruff/format/mypy clean). A silent session entry now exits first; a silent fast exit is retried once. Both are bounded by the D03.19 "answered since" gate. Sims: 2.16 → 1.18 s and 5.005 → 1.087 s.
+- 21:26:55Z **Deployed**: Pi `capture_profiles.yaml` backed up to `/tmp/capture_profiles.pre-530398e.yaml` (the diff was only the daemon's built-in upgrade; both live-saved profiles already matched git) and reset. `git pull --ff-only` gave `a48f30c9` = pushed HEAD. Restarted; HTTP back in 20 s. Window reopened as `7f81cdea…` on `2026-09-18T212710`. Keepalive 240 min.
+  - Healthy at 21:27:22Z: 0 drops, 0 errors, 0 "batching disabled", max_pids 6, 0 narrowings. The new `/status` fields are present.
+  - **What the restart proves:** the new code runs and `default` is healthy. **What it can't prove:** the fix, because `default` opens few DID windows (1 session failure in 25 min before the deploy).
+- **Validation block, prediction written before the data.** 10 min on `fuel-pw-research` (0.5 s DID cycle). Baseline on the same profile this evening: 16 all-channel stalls of 2.25–2.5 s plus 3 of 5.0 s in 27.5 min (≈ 5.8 + 1.1 expected in 10 min).
+  - **Pass:** 0 all-channel gaps ≥ 2.0 s other than key-off, AND `unknown_session_exits` + `fast_exit_retries` > 0 (i.e. the paths fired and bounded the gaps).
+  - **Unresolved:** the counters stay at 0 (no silent session control happened, so nothing to prove).
+  - **Falsified:** ≥ 2 gaps in 2.2–2.5 s or any 5.0 s gap while those counters advance.
+- 21:38:09Z **Validation block stopped** (`_capture-fuel-pw-research-2026-09-18T212740`, 10.6 min; isolated total now ~40 of 80 min).
+  - **PASS by the pre-written criteria:** 0 all-channel gaps ≥ 2.0 s, and `unknown_session_exits` 6 = `session_failures` 6 (session control: 6 timeouts, 0 NRCs).
+  - `fast_exit_failures` 0 and `fast_exit_retries` 0: the exit-retry path wasn't exercised live.
+  - Verdict fail on two clauses, both explained. `acquisition_gap` is **0x44 alone** for 2.49 s at +298 s: a single-PID miss, not a session stall; watch whether 0x44 misses recur (compare `fuel-pw-research-2`). `persistence_loss` is can0 overflow +88 (broadcast path, known).
+  - One 8.5 s enrichment hold, 0 stalls inside it.
