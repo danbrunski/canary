@@ -345,7 +345,7 @@ estimated signal; they cannot establish how UpRev calculates its display.
   per-channel breakdown, with the burst's final line never lost. Counters stay
   exact; nothing widened.
 
-- [ ] **D03.4 `tuning-hybrid-research` requests a cycle it cannot meet.** The
+- [~] **D03.4 `tuning-hybrid-research` requests a cycle it cannot meet.** The
   scheduler logs `hybrid cycle of 0.250s is infeasible: 11 Mode 01 + 8-9 DID +
   2 session requests at 90.0 req/s` whenever the profile runs, and every stop
   verdict reads `rate_shortfall` because all DIDs get 2.0 Hz against a
@@ -366,6 +366,13 @@ estimated signal; they cannot establish how UpRev calculates its display.
   deltas and the complete quality verdict. Update capacity evidence only from
   that exact profile revision. Controller overflow can still independently
   fail persistence quality after the rate request is corrected.
+  **2026-09-18 ([September 18 drive log](../../../data/analyses/2026-09-18-drive-log.md)):** the new `fuel-target-research` / `fuel-pw-research`
+  profiles (`e7d2168`, `21b4fb6`) request an honest cycle: DIDs weighted 0.5 on a
+  0.5 s cycle. The resolved plan needs 0.25 s of 0.5 s at the unchanged 90 req/s,
+  there's no `infeasible` warning on the Pi, and they delivered 3.78 Hz Mode 01 /
+  1.90–1.97 Hz DIDs, so `rate_shortfall` is gone. `tuning-hybrid-research` itself
+  is untouched. Remaining: its own request, plus a new stall (D03.18) that now
+  fails every long research capture on `acquisition_gap`.
 
 - [~] **D03.6 Trip-end digest isolation and memory-order fix landed; large-session
   measurement and shutdown behavior remain.** The original synchronous digest, not the replay, took the daemon
@@ -441,7 +448,7 @@ estimated signal; they cannot establish how UpRev calculates its display.
   is measured and the budget is revised from evidence, an oversized session
   should still produce a named refusal while collection and HTTP continue.
 
-- [ ] **D03.5 The Pi cannot pull from GitHub.** `git pull` on the Pi fails with
+- [x] **D03.5 The Pi cannot pull from GitHub.** `git pull` on the Pi fails with
   "Please make sure you have the correct access rights" — no deploy key for
   `git@github.com:danbrunski/canary.git`. The first deploy attempt of the day
   therefore restarted the *same* code while reporting success. Worked around
@@ -449,6 +456,9 @@ estimated signal; they cannot establish how UpRev calculates its display.
   `git pull --ff-only /tmp/<file> main`, which is a real fast-forward and keeps
   history. A read-only deploy key, or a scripted bundle path, removes a silent
   failure mode from every future deploy.
+  **Resolved 2026-09-18:** the operator `git pull`ed `7df58f0` from origin on the
+  Pi (reflog `pull: Fast-forward`, `~/.ssh/id_ed25519` present); `e7d2168` and
+  `63d5e51` were deployed the same way. The bundle recipe stays as a fallback.
 
 ## Added by the evening review — next drive and its preparation
 
@@ -457,7 +467,7 @@ Evidence for D03.8–D03.10 and D03.12 is the
 blocks 2, 5, 6 and 9. These are measurements to resolve, not permission to
 promote unverified bindings or to change a tune.
 
-- [ ] **D03.8 Pair target-AFR candidate 0x1134 with PID 0x44 in one capture.**
+- [~] **D03.8 Pair target-AFR candidate 0x1134 with PID 0x44 in one capture.**
   This is the highest-value new driving experiment. Yesterday's raw 64 baseline
   and 74–75 under load support candidate **φ = raw / 64**, equivalently
   **AFR = 14.7 × 64 / raw**, but none of the evidence compares the candidate
@@ -477,8 +487,18 @@ promote unverified bindings or to change a tune.
   enriched pairs, flat signal, or excessive skew is an unresolved result.
   Promote only after 1:1 agreement within measured uncertainty, then pin the
   exact decode and a ground-truth fixture. No cross-block mean comparison.
+  **2026-09-18 ([September 18 drive log](../../../data/analyses/2026-09-18-drive-log.md)): the capture ran, but the scale is unresolved.** 0x1134 is
+  catalogued at confidence `hypothesized` (`e7d2168`) and was held beside PID 0x44
+  for 39 min, but the drive was slow offroad with no enrichment. 0x1134 = 64 on
+  all 4,630 samples, and in 493 gated pairs with 0x44 in the stoich band it is
+  always 64: the necessary baseline, confirmed on two blocks. `compare_channels`
+  correctly refuses (constant side). **Newly observed:** in closed loop PID 0x44
+  steps 0.9796 ↔ 1.0204 and never reads 1.000, so the enrichment gate is
+  0x44 > 1.05, not 1.02. Still needs one warm WOT/enrichment window on
+  `fuel-pw-research`; the script is `analyze_fuel_blocks.py` (preserved in
+  `~/canary-data/scripts-0918/`).
 
-- [ ] **D03.9 Re-evaluate the injector fuel-mass calibration using today's
+- [~] **D03.9 Re-evaluate the injector fuel-mass calibration using today's
   open-loop data; collect only missing coverage tomorrow.** Blocks 6 and 9
   report command and bank-1 λ agreeing at φ ≈ 1.21 while PW+MAF gives ≈ 1.03.
   The 914,943 counts/gram value in `data/dids.yaml` was measured in steady
@@ -496,6 +516,23 @@ promote unverified bindings or to change a tune.
   enforce them at consumers; outside-domain use must refuse, not silently
   extrapolate. Update the stale provenance text and ground-truth expectations
   only after reproducing the result. No tune changes are part of this task.
+  **2026-09-18 ([September 18 drive log](../../../data/analyses/2026-09-18-drive-log.md)): the premise changed. 0x1208 is not injected fuel.**
+  - A desk fit on the 09-17 blocks 6/7/9 shows `ECM_INJECTOR_PW_B1` (0x1208)
+    tracks air per intake event (~63,850 counts/g air). It doesn't move with a
+    measured 20 % enrichment or with fuel cut, and every refit leaves −14..−18 %
+    in the rich cells, so no constant fixes it
+    (`2026-09-18-maf-did-and-injector-mass-balance.md`).
+  - Replicated on today's independent block B: in DFCO, 0x1208 reads 63,984
+    counts per g air vs 63,466 fuelled.
+  - A same-pass screen of the 138-DID surveys finds **0x1206/0x1207** (catalogued
+    as "intake pressure"; this engine has no MAP) with the injected-fuel
+    signature (`2026-09-18-injected-fuel-did-screen.md`). Today they floored in
+    DFCO (51.5 counts, 910 per g air vs 2,259 fuelled). The closed-loop line is
+    27,747 counts per g fuel + 41 counts, i.e. 0.41 ms dead time and ~290 cc/min
+    at a hypothesised 0.01 ms/count
+    (`2026-09-18-fuel-blocks-capture-fuel-pw-research-*.md`).
+  - **Remaining:** validate that line on enriched rows (0 today), then operator
+    sign-off to re-describe 0x1208 and catalogue 0x1206/0x1207 properly.
 
 - [ ] **D03.10 Capture the missing UpRev instrument reference.** Today's two
   CANary paths already show a rich-side discrepancy: bank-1 voltage converted
@@ -733,6 +770,41 @@ to `data/analyses/2026-09-18-drive-log.md` when run. Close a task with evidence
 even if its hypothesis was rejected; leave unexecuted/dependency-blocked work
 open. A failed finite search is not proof that K-line exposes something CAN
 cannot, and an estimator matching BFS cannot identify where UpRev computes it.
+
+## Opened 2026-09-18 on the drive
+
+- [ ] **D03.18 One request timeout stalls the whole hybrid cycle ~2.4 s, and
+  benches the DID for 30–48 s.** `fuel-pw-research` recorded 12 all-channel,
+  both-mode gaps of 2.28–2.62 s in 34 min (≈1.5 % of the capture). It fails
+  `acquisition_gap` on every long research capture. Block A tied one to exactly
+  one timeout, with no NRC and HTTP responsive. The same timeout put 0x1208 into
+  `auto_miss_backoff` for ~48 s. **Desk:** find where a timed-out read inside
+  `did_session_windows` (fast exit / `10 C0` re-entry) serialises the cycle and
+  bound it at one cycle; don't miss-back-off a profile-selected DID on one
+  timeout. [September 18 drive log](../../../data/analyses/2026-09-18-drive-log.md).
+
+- [x] **D03.19 A key-off boot disabled multi-PID batching for the whole session.**
+  Silent timeouts from a sleeping ECM counted as batch rejections (6→4→2→off in
+  6 s), so `default` ran ~8 reads/s instead of ~19.5 on every drive where the Pi
+  boots before the engine. Fixed in `63d5e51`: a failure counts only as an NRC
+  or after the ECU has answered since the previous failure; a silent probe single
+  takes no miss backoff. **Verified live** on an unplanned key-off at ~15:25Z:
+  `failures_while_ecu_silent 32`, `size_narrowings 0`, still 6 PIDs per batch.
+  [September 18 drive log](../../../data/analyses/2026-09-18-drive-log.md).
+
+- [ ] **D03.20 Detectors fire out-of-distribution at altitude.** At 63–73 kPa
+  (2,870–3,880 m) the anomaly rate rose ~4×. The LSTM's top feature was
+  BAROMETRIC_PRESSURE on every event, and the behavior surfaces flagged
+  TIMING_ADVANCE and AIR_MASS_PER_CYCLE. The corpus is ~80 kPa. **Desk:**
+  condition the surfaces on baro or air density, or add high-altitude sessions to
+  the corpus; don't raise thresholds. [September 18 drive log](../../../data/analyses/2026-09-18-drive-log.md).
+
+- [ ] **D03.21 The Pi's memory limits are not enforced.** The kernel cmdline
+  has `cgroup_disable=memory`, so `MemoryMax=6G` / `MemorySwapMax=0` exist only in
+  `systemctl show`, and 2 GB of swap is live. **Operator decision:**
+  `cgroup_enable=memory` + reboot (or swap off). Until then D03.6's digest guards
+  (child + RLIMIT_AS + row budget) are the only protection. Also verify with
+  `/sys/fs/cgroup/.../memory.max`, not `systemctl show`. [September 18 drive log](../../../data/analyses/2026-09-18-drive-log.md).
 
 ## Deferred by decision, not blocked
 

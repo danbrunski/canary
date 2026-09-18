@@ -103,7 +103,7 @@ opportunistic on any sustained climb.
   it implies (how many samples after a step before "steady" is honest). Put
   the number in `afr_calibration.yaml` next to the skew caveats it explains.
 
-- [ ] **D04.4 Where is `ECM_MAF_GPS` linear against Mode 01 MAF?** Block 6
+- [x] **D04.4 Where is `ECM_MAF_GPS` linear against Mode 01 MAF?** Block 6
   gave the whole-session answer — slope 0.934, r² 0.909, `drifting`, with the
   DID reading ~5 % low at high flow — but not *where* the drift lives, and
   D03.9 needs that to separate a MAF-scale error from a PW-constant error.
@@ -120,6 +120,15 @@ opportunistic on any sustained climb.
   over which the ×0.01 g/s decode may be used at ±2 %. That range belongs in
   `data/dids.yaml` as a `conditions` field on 0x1209 — a measured constraint
   goes in the schema, not a note.
+  **Done at the desk 2026-09-18** (`data/analyses/2026-09-18-maf-did-and-injector-mass-balance.md`,
+  09-17 blocks 6/7/9). There's no scale error and no nonlinearity: block 6's
+  slope of 0.934 / r² 0.909 reproduces exactly, and it's acquisition skew. The
+  DID is read ~115 ms after Mode 01, so rising flow reads high and falling flow
+  reads low. With |dMAF/dt| ≤ 5 %/s the median DID/Mode 01 ratio is
+  1.000 ± 0.007 in every band from 3 to 134 g/s. The ×0.01 g/s decode holds to
+  ±2 % over 3–134 g/s: firm at 20–90 g/s, thin above 90 g/s (81 pairs). **Still
+  owed:** the `conditions` field on 0x1209 in `data/dids.yaml` (a catalog edit
+  left for the desk).
 
 ## Desk work on data that already exists (tomorrow adds coverage)
 
@@ -168,7 +177,7 @@ opportunistic on any sustained climb.
 
 ## Opportunistic
 
-- [ ] **D04.8 `BAROMETRIC_PRESSURE` against GPS altitude.** A free physics
+- [~] **D04.8 `BAROMETRIC_PRESSURE` against GPS altitude.** A free physics
   check with a known answer: the barometric formula predicts ~−11.5 Pa per
   metre near 80 kPa, so a 300 m climb is ~3.5 kPa, against GPS altitude noise
   of ±10–30 m (≈0.1–0.3 kPa). `obd:BAROMETRIC_PRESSURE` polls at 0.05 Hz, so a
@@ -181,6 +190,13 @@ opportunistic on any sustained climb.
   ground-truth pair the vehicle carries, and it has never been run.
   **Accept:** slope, offset, verdict, n_pairs, elevation span. Belongs in
   `tests/fixtures/ground_truth/expectations.yaml` if it holds.
+  **2026-09-18** (`data/analyses/2026-09-18-altitude.md`): offroad at
+  2,870–3,882 m, baro 63–73 kPa. It's consistent but the slope isn't confirmed.
+  One sea-level p0 (~102.8 kPa) fits two sessions within 0.45 kPa, with a
+  residual of 0 ± 0.47 kPa over 512 m. In-session spans are only 5 kPa and
+  2 kPa, so the slope reads 0.91 `drifting` (a range problem), and nothing goes
+  into `expectations.yaml`. One continuous ≥10 kPa climb in a single session
+  closes it.
 
 ## Not included, and why
 
