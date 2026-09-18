@@ -1,0 +1,98 @@
+{
+ "session": "/home/dan/canary-data/sessions-0918/2026-09-18T134345",
+ "gps": {
+  "n": 2170,
+  "alt_min": 2869.3,
+  "alt_max": 2948.6,
+  "fix_quality_counts": {
+   "1.0": 2170
+  }
+ },
+ "baro": {
+  "n": 52,
+  "min": 71.0,
+  "max": 73.0,
+  "census": {
+   "71.0": 14,
+   "72.0": 18,
+   "73.0": 20
+  },
+  "median_interval_s": 17.786749,
+  "first": "2026-09-18 13:45:39.264901+00:00",
+  "last": "2026-09-18 14:01:39.228070+00:00"
+ },
+ "pairs": {
+  "n": 52,
+  "elev_span_m": [
+   2872.700000000001,
+   2947.5999999999985
+  ],
+  "p0_implied_median": 103.36474158131722,
+  "p0_p10": 101.33918531217273,
+  "p0_p90": 103.82945532661601,
+  "p0_by_alt_bin": [
+   {
+    "alt_bin": "(2750, 3000]",
+    "size": 52,
+    "median": 103.365,
+    "min": 101.101,
+    "max": 103.832
+   }
+  ],
+  "resid_b_minus_a_kpa_by_alt_bin": [
+   {
+    "alt_bin": "(2750, 3000]",
+    "size": 52,
+    "median": 1.421
+   }
+  ]
+ },
+ "free_p0_fit": {
+  "p0_kpa": 102.99383849241933,
+  "resid_mean": -0.0007731424006768551,
+  "resid_sd": 0.6641524769956905,
+  "resid_by_alt_bin": [
+   {
+    "alt_bin": "(2750, 3000]",
+    "size": 52,
+    "median": 0.258
+   }
+  ],
+  "quantisation_sd_kpa": 0.2886751345948129
+ },
+ "compare": {
+  "whole_session": {
+   "a": "gps:baro_pred_std_kpa",
+   "b": "obd:BAROMETRIC_PRESSURE",
+   "n_pairs": 52,
+   "r_squared": 0.37494345544573826,
+   "slope": 1.6043506505658707,
+   "offset": -41.70950636077934,
+   "slope_drift_pct": null,
+   "scale_verdict": "unresolved",
+   "policy": {
+    "max_separation_s": 1.0,
+    "reference": "b",
+    "tie_break": "earlier"
+   },
+   "reference": "b",
+   "timestamp_basis_a": "stored",
+   "timestamp_basis_b": "acquired",
+   "unmatched_a": 2118,
+   "unmatched_b": 0,
+   "separation_median_s": 0.27658557891845703,
+   "separation_p95_s": 0.44769852161407464,
+   "separation_max_s": 0.5742847919464111,
+   "residual_bias": -3.8533279131605435e-14,
+   "residual_spread": 0.6327472314154352,
+   "difference_bias": 1.167745496706408,
+   "difference_spread": 0.6591267118571367
+  }
+ },
+ "x1208": {
+  "n_pw_samples": 16,
+  "n_with_maf_rpm_baro": 0,
+  "n_dfco": 0,
+  "n_gated": 0
+ }
+}
