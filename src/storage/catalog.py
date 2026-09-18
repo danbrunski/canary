@@ -35,7 +35,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.analysis.digest import DIGEST_FILENAME
+from src.analysis.digest import DIGEST_FILENAME, DIGEST_SKIPPED_FILENAME
 from src.analysis.fingerprint import read_fingerprint
 from src.analysis.session_classifier import read_classification
 from src.control.dtc_state import SIDECAR_FILENAME as DTC_FILENAME
@@ -49,7 +49,8 @@ __all__ = [
     "SessionCatalog",
 ]
 
-SCHEMA_VERSION = 1
+#: 2 added ``sessions.digest_skipped`` (D03.6) — see ``_migrate``.
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     fingerprint         TEXT,  -- JSON
     dtc                 TEXT,  -- JSON
     digest              TEXT,  -- JSON
+    digest_skipped      TEXT,  -- JSON
     updated_at          TEXT NOT NULL
 );
 """
@@ -137,6 +139,16 @@ def _read_digest_sidecar(session_dir: Path) -> dict[str, Any] | None:
         return None
 
 
+def _read_digest_skipped_sidecar(session_dir: Path) -> dict[str, Any] | None:
+    path = session_dir / DIGEST_SKIPPED_FILENAME
+    if not path.exists():
+        return None
+    try:
+        return dict(json.loads(path.read_text()))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 @dataclass(frozen=True)
 class CatalogSessionRow:
     session_id: str
@@ -154,6 +166,12 @@ class CatalogSessionRow:
     fingerprint: dict[str, float] | None
     dtc: dict[str, Any] | None
     digest: dict[str, Any] | None
+    #: Why no digest exists (D03.6) — ``None`` when one was computed OR when
+    #: none was ever attempted; those two are told apart by ``digest``. A
+    #: refused digest must not read as a session nobody has digested yet:
+    #: the whole reason the sidecar exists is that an OOM-killed digest and
+    #: an un-run one looked identical on disk.
+    digest_skipped: dict[str, Any] | None
     updated_at: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -173,6 +191,7 @@ class CatalogSessionRow:
             "fingerprint": self.fingerprint,
             "dtc": self.dtc,
             "digest": self.digest,
+            "digest_skipped": self.digest_skipped,
             "updated_at": self.updated_at,
         }
 
@@ -194,6 +213,7 @@ class CatalogSessionRow:
             fingerprint=json.loads(row["fingerprint"]) if row["fingerprint"] else None,
             dtc=json.loads(row["dtc"]) if row["dtc"] else None,
             digest=json.loads(row["digest"]) if row["digest"] else None,
+            digest_skipped=(json.loads(row["digest_skipped"]) if row["digest_skipped"] else None),
             updated_at=row["updated_at"],
         )
 
@@ -224,13 +244,20 @@ class SessionCatalog:
 
     def _migrate(self) -> None:
         self._conn.executescript(_SCHEMA)
-        cur = self._conn.execute("SELECT value FROM meta WHERE key = 'schema_version'")
-        if cur.fetchone() is None:
-            self._conn.execute(
-                "INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
-                (str(SCHEMA_VERSION),),
-            )
-            self._conn.commit()
+        # Additive columns on a catalog created by an older build. Nothing is
+        # backfilled here and nothing needs to be: every column is
+        # reconstructable from the sidecars on disk, so an unmigrated value is
+        # NULL until the next ``record_session`` / ``rebuild`` reads the files.
+        existing = {str(col["name"]) for col in self._conn.execute("PRAGMA table_info(sessions)")}
+        for column, ddl in (("digest_skipped", "TEXT"),):
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE sessions ADD COLUMN {column} {ddl}")
+        self._conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(SCHEMA_VERSION),),
+        )
+        self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
@@ -266,6 +293,9 @@ class SessionCatalog:
         fingerprint = read_fingerprint(session_dir)
         dtc = _read_dtc_sidecar(session_dir)
         digest = _read_digest_sidecar(session_dir)
+        # A written digest wins: ``persist_digest`` deletes the refusal, but a
+        # catalog row must not depend on that delete having succeeded.
+        digest_skipped = None if digest is not None else _read_digest_skipped_sidecar(session_dir)
 
         duration_s = classification.duration_seconds if classification is not None else None
         row = CatalogSessionRow(
@@ -286,6 +316,7 @@ class SessionCatalog:
             fingerprint=dict(fingerprint.stats) if fingerprint is not None else None,
             dtc=dtc,
             digest=digest,
+            digest_skipped=digest_skipped,
             updated_at=_now(),
         )
         self._upsert(row)
@@ -297,8 +328,8 @@ class SessionCatalog:
                 """INSERT INTO sessions
                    (session_id, path, started_at, duration_s, row_count, size_bytes,
                     pinned, disposition, classifier_version, mode_seconds, event_counts,
-                    quality, fingerprint, dtc, digest, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    quality, fingerprint, dtc, digest, digest_skipped, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(session_id) DO UPDATE SET
                      path=excluded.path, started_at=excluded.started_at,
                      duration_s=excluded.duration_s, row_count=excluded.row_count,
@@ -307,7 +338,9 @@ class SessionCatalog:
                      classifier_version=excluded.classifier_version,
                      mode_seconds=excluded.mode_seconds, event_counts=excluded.event_counts,
                      quality=excluded.quality, fingerprint=excluded.fingerprint,
-                     dtc=excluded.dtc, digest=excluded.digest, updated_at=excluded.updated_at""",
+                     dtc=excluded.dtc, digest=excluded.digest,
+                     digest_skipped=excluded.digest_skipped,
+                     updated_at=excluded.updated_at""",
                 (
                     row.session_id,
                     row.path,
@@ -324,6 +357,7 @@ class SessionCatalog:
                     json.dumps(row.fingerprint) if row.fingerprint is not None else None,
                     json.dumps(row.dtc) if row.dtc is not None else None,
                     json.dumps(row.digest) if row.digest is not None else None,
+                    json.dumps(row.digest_skipped) if row.digest_skipped is not None else None,
                     row.updated_at,
                 ),
             )

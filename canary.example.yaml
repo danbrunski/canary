@@ -414,6 +414,21 @@ dashboard:
 #   lstm_artifact: lstm_autoencoder/model.pt                  # relative to models_dir
 #   model_poll_seconds: 30.0
 #   retention_sweep_seconds: 3600.0
+#   # Trip-end digest guards (D03.6). A digest loads the whole session twice
+#   # and peaks at O(rows x channels): 5,483 MB measured for 2,622,370 rows,
+#   # to emit 1,143. Twice in one day that took the daemon out -- once
+#   # OOM-killed, once wedged for 38 minutes because the Pi has swap.
+#   # The digest now runs in a child process whose address space is capped, so
+#   # an over-large one raises MemoryError in the child instead of letting the
+#   # kernel pick a victim. digest_address_space_mb unset derives the cap from
+#   # physical RAM (half, clamped to 1-4 GiB) -> 4 GiB on the 8 GB Pi.
+#   # digest_row_budget unset derives the row limit from that cap and the
+#   # measured 2,200 bytes/row (~1.95 M rows on the Pi), so the two cannot
+#   # state different limits; a session over it is refused with a
+#   # digest_skipped.json naming the count and the budget. 0 disables the row
+#   # check but keeps the cap.
+#   digest_row_budget: null
+#   digest_address_space_mb: null
 #   broadcaster_queue_size: 100
 #   control_token_env: CANARY_CONTROL_TOKEN
 

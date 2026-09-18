@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from datetime import timedelta as _timedelta
@@ -41,6 +42,7 @@ from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig
 from src.control.dtc_state import SIDECAR_FILENAME as DTC_SIDECAR_FILENAME
+from src.preprocessing.loader import count_session_rows
 from src.timefmt import format_timestamp as _format_timestamp
 from src.timefmt import parse_iso_utc
 
@@ -48,6 +50,27 @@ log = logging.getLogger(__name__)
 
 DIGEST_FILENAME = "digest.json"
 SCHEMA_VERSION = 1
+
+#: Refusal sidecar (D03.6). A digest that did not run leaves this instead of
+#: nothing, so a reader can tell the three states apart: ``digest.json``
+#: present = computed; ``digest_skipped.json`` present = refused/failed, with
+#: the reason; neither = never attempted. Before this existed, a session the
+#: daemon was OOM-killed computing looked exactly like a session nobody had
+#: got round to.
+DIGEST_SKIPPED_FILENAME = "digest_skipped.json"
+SKIP_SCHEMA_VERSION = 1
+
+#: The directory is replay output / quarantine / scratch, not a recording of
+#: this vehicle (``src.control.sessions.is_session_dir_name``).
+REASON_NOT_A_SESSION = "not_a_session"
+#: More rows than ``daemon.digest_row_budget`` allows to be loaded at once.
+REASON_OVER_ROW_BUDGET = "over_row_budget"
+#: The child hit its ``RLIMIT_AS`` ceiling (or the machine's own limit).
+REASON_CHILD_OUT_OF_MEMORY = "child_out_of_memory"
+#: The child was still working when the timeout expired and was terminated.
+REASON_CHILD_TIMED_OUT = "child_timed_out"
+#: The child could not start, or died without answering.
+REASON_CHILD_FAILED = "child_failed"
 
 #: How many entries to keep in the compact "top movers" / "top deviations"
 #: lists — a digest is meant to be skimmed (and pushed through a
@@ -98,6 +121,152 @@ class SessionDigest:
             "new_ledger_events": list(self.new_ledger_events),
             "tuning": self.tuning,
         }
+
+
+@dataclass(frozen=True)
+class DigestSkipped:
+    """Why a digest was *not* produced for a session.
+
+    Written whenever the computation is refused up front or fails in the
+    child, so "the digest was skipped: 6,400,000 rows over the 4,000,000-row
+    budget" and "the digest was never attempted" are different things on
+    disk. ``row_count`` is the Parquet footer count (no data read), ``None``
+    when nothing readable was there to count.
+    """
+
+    schema_version: int
+    session_id: str
+    #: Machine-readable kind — one of the ``REASON_*`` constants above.
+    reason: str
+    #: Human-readable one-liner naming the numbers behind ``reason``.
+    detail: str
+    recorded_at: str
+    row_count: int | None
+    row_budget: int | None
+    #: Which digest code refused, mirroring ``classification.json``'s
+    #: ``classifier_version``: a later schema may compute what this one
+    #: declined, and a reader must be able to see the refusal is stale.
+    digest_schema_version: int = SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "session_id": self.session_id,
+            "reason": self.reason,
+            "detail": self.detail,
+            "recorded_at": self.recorded_at,
+            "row_count": self.row_count,
+            "row_budget": self.row_budget,
+            "digest_schema_version": self.digest_schema_version,
+        }
+
+
+def _skipped(
+    session_dir: Path,
+    reason: str,
+    detail: str,
+    *,
+    row_count: int | None,
+    row_budget: int | None,
+    now: datetime | None = None,
+) -> DigestSkipped:
+    return DigestSkipped(
+        schema_version=SKIP_SCHEMA_VERSION,
+        session_id=session_dir.name,
+        reason=reason,
+        detail=detail,
+        recorded_at=_format_timestamp(datetime.now(UTC) if now is None else now),
+        row_count=row_count,
+        row_budget=row_budget,
+    )
+
+
+def digest_preflight(
+    session_dir: Path,
+    config: CanaryConfig,
+    *,
+    now: datetime | None = None,
+) -> DigestSkipped | None:
+    """The gate every digest computation passes, or ``None`` to go ahead.
+
+    Two refusals, both cheap (a name match and Parquet footer metadata — no
+    data read), and both here rather than at a call site because the caller
+    that forgot them is the one that took the daemon down:
+
+    * the directory is not a session (``_replay-*`` and friends) — the HTTP
+      read has always refused those via ``resolve_session``; the trip-end
+      hook did not, and computed a digest over 5.9 M replayed rows;
+    * the session holds more rows than ``daemon.digest_row_budget``. Peak
+      memory is O(rows x channels) because the pivot runs before the
+      resample: 5,483 MB measured for 2,622,370 rows, and the 8 GB Pi's
+      cliff is bracketed between ~4.5 M rows (completed) and ~5.9 M rows
+      (OOM-killed). The budget refuses instead of trying and dying.
+    """
+    from src.control.sessions import is_session_dir_name
+    from src.control.trip_end import digest_row_budget
+
+    # Derived from the child's address-space ceiling when unset, so the budget
+    # and the ceiling cannot state different limits (see digest_row_budget).
+    budget = digest_row_budget(config)
+    if not is_session_dir_name(session_dir.name):
+        return _skipped(
+            session_dir,
+            REASON_NOT_A_SESSION,
+            f"{session_dir.name!r} is not a live session or capture directory",
+            row_count=None,
+            row_budget=budget or None,
+            now=now,
+        )
+    rows = count_session_rows(session_dir)
+    if budget > 0 and rows is not None and rows > budget:
+        return _skipped(
+            session_dir,
+            REASON_OVER_ROW_BUDGET,
+            f"{rows:,} rows over the {budget:,}-row digest budget",
+            row_count=rows,
+            row_budget=budget,
+            now=now,
+        )
+    return None
+
+
+def write_digest_skipped(session_dir: Path, skipped: DigestSkipped) -> Path:
+    """Persist the refusal sidecar (atomic tmp+rename, like every sibling)."""
+    path = session_dir / DIGEST_SKIPPED_FILENAME
+    atomic_write_text(
+        path,
+        json.dumps(skipped.to_dict(), indent=2, sort_keys=True, default=_json_default) + "\n",
+    )
+    log.warning(
+        "digest skipped for %s: %s (%s)",
+        skipped.session_id,
+        skipped.detail,
+        skipped.reason,
+        extra={"digest_skip_reason": skipped.reason, "digest_row_count": skipped.row_count},
+    )
+    return path
+
+
+def read_digest_skipped(session_dir: Path) -> dict[str, Any] | None:
+    """Load the refusal sidecar, or ``None`` if absent / unreadable."""
+    path = session_dir / DIGEST_SKIPPED_FILENAME
+    if not path.exists():
+        return None
+    try:
+        return dict(json.loads(path.read_text()))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def clear_digest_skipped(session_dir: Path) -> None:
+    """Drop a stale refusal once a digest has actually been written.
+
+    A directory must never hold both: "computed" and "refused" are mutually
+    exclusive answers, and a leftover refusal beside a real ``digest.json``
+    is the contradiction a reader would have to arbitrate.
+    """
+    with suppress(OSError):
+        (session_dir / DIGEST_SKIPPED_FILENAME).unlink(missing_ok=True)
 
 
 def _session_start(session_dir: Path) -> datetime | None:
@@ -312,6 +481,24 @@ def read_digest(session_dir: Path) -> dict[str, Any] | None:
         return None
 
 
+def persist_digest(
+    session_dir: Path,
+    digest: SessionDigest,
+    *,
+    catalog_db: Path | None = None,
+) -> dict[str, Any] | None:
+    """Write a freshly-computed digest and everything that rides along.
+
+    The single write path for both the in-process and the off-loop
+    (child-process) computation, so a digest produced either way lands
+    byte-identically and clears any earlier refusal.
+    """
+    write_digest(session_dir, digest)
+    clear_digest_skipped(session_dir)
+    _update_catalog(catalog_db, session_dir)
+    return read_digest(session_dir)
+
+
 def get_or_compute_digest(
     session_dir: Path,
     config: CanaryConfig,
@@ -330,6 +517,11 @@ def get_or_compute_digest(
     ``catalog_db`` (Task 6.3), when given, re-indexes the session into the
     catalog right after a freshly-computed digest is written; ``None`` (the
     default) skips the catalog entirely.
+
+    Returns ``None`` both when there is nothing to digest and when
+    :func:`digest_preflight` refuses — but a refusal is not silent: it lands
+    in ``digest_skipped.json`` (:func:`read_digest_skipped`), which is what
+    separates "over the row budget" from "never attempted".
     """
     if not session_dir.is_dir():
         return None
@@ -337,13 +529,15 @@ def get_or_compute_digest(
         cached = read_digest(session_dir)
         if cached is not None:
             return cached
+    skipped = digest_preflight(session_dir, config, now=now)
+    if skipped is not None:
+        write_digest_skipped(session_dir, skipped)
+        return None
     try:
         digest = compute_digest(session_dir, config, now=now)
     except FileNotFoundError:
         return None
-    write_digest(session_dir, digest)
-    _update_catalog(catalog_db, session_dir)
-    return read_digest(session_dir)
+    return persist_digest(session_dir, digest, catalog_db=catalog_db)
 
 
 def _update_catalog(catalog_db: Path | None, session_dir: Path) -> None:
@@ -362,10 +556,23 @@ def _update_catalog(catalog_db: Path | None, session_dir: Path) -> None:
 
 __all__ = [
     "DIGEST_FILENAME",
+    "DIGEST_SKIPPED_FILENAME",
+    "REASON_CHILD_FAILED",
+    "REASON_CHILD_OUT_OF_MEMORY",
+    "REASON_CHILD_TIMED_OUT",
+    "REASON_NOT_A_SESSION",
+    "REASON_OVER_ROW_BUDGET",
     "SCHEMA_VERSION",
+    "SKIP_SCHEMA_VERSION",
+    "DigestSkipped",
     "SessionDigest",
+    "clear_digest_skipped",
     "compute_digest",
+    "digest_preflight",
     "get_or_compute_digest",
+    "persist_digest",
     "read_digest",
+    "read_digest_skipped",
     "write_digest",
+    "write_digest_skipped",
 ]

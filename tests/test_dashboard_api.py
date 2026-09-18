@@ -21,6 +21,7 @@ from src.dashboard.api import (
     read_anomalies_since,
     read_latest_telemetry_rows,
 )
+from src.dashboard.status import compact_status, gather_status_sources
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
 
 # ---------------------------------------------------------------------------
@@ -1246,6 +1247,37 @@ def test_get_session_digest_404_for_missing_session(
     assert response.status_code == 404
 
 
+def test_get_session_digest_409s_with_the_reason_when_refused(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    """D03.6: a digest refused for a named reason is 409 with that reason,
+    not 404 (which means "no such session / nothing recorded") and never a
+    200 carrying a refusal payload a caller could read as a digest."""
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    session_id = "2026-07-19T120000"
+    session = config.collection.storage_path / session_id
+    records = [TelemetryRecord.obd(1_779_400_000.0 + i, "SPEED", 60.0, "km/h") for i in range(10)]
+    write_records_to_parquet(records, session, max_rows=10_000)
+    tight = config.model_copy(
+        update={"daemon": config.daemon.model_copy(update={"digest_row_budget": 1})}
+    )
+
+    app = create_app(tight, anomalies_dir=anomalies_dir, control_token="secret")
+    client = TestClient(app)
+    response = client.get(
+        f"/control/sessions/{session_id}/digest", headers={"Authorization": "Bearer secret"}
+    )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["error"] == "digest_refused"
+    assert detail["digest_skipped"]["reason"] == "over_row_budget"
+    assert detail["digest_skipped"]["row_count"] == 10
+    assert detail["digest_skipped"]["row_budget"] == 1
+    assert not (session / "digest.json").exists()
+
+
 def test_get_session_digest_route_updates_the_catalog(tmp_path: Path) -> None:
     """Task 6.3: the on-demand digest route is a real sidecar-write site too
     (not just the trip-end hook), so it must thread ``catalog_db`` through
@@ -1461,8 +1493,15 @@ def test_status_compact_view_omits_the_per_channel_bulk(
 def test_status_compact_and_full_agree_on_shared_fields(
     config: CanaryConfig, anomalies_dir: Path
 ) -> None:
-    """Both views are projections of one StatusSources, so they must never
-    report different numbers for the same instant."""
+    """Both views agree on the fields a poller reads across them.
+
+    Asserted over two requests, so only fields stable between two instants
+    belong here — ``free_mb`` is a fresh ``disk_usage`` sample per request and
+    legitimately differs in the last decimal (it flaked at
+    ``815246.3 != 815246.4``). The "one instant, one snapshot" invariant is the
+    projection test below, where both views come from a single
+    ``StatusSources``.
+    """
     _make_session_with_parquet(config.collection.storage_path, "2026-05-13T120000")
     client = _client(config, anomalies_dir)
     full = client.get("/status").json()
@@ -1471,7 +1510,21 @@ def test_status_compact_and_full_agree_on_shared_fields(
     assert compact["emitter_counters"] == full["emitter_counters"]
     assert compact["passive"] == full["passive"]
     assert compact["capture_profile"]["name"] == full["capture_profile"]["name"]
+
+
+def test_status_views_of_one_snapshot_cannot_disagree(config: CanaryConfig) -> None:
+    """The real invariant: both views are projections of the *same*
+    ``StatusSources``, so for one gathered instant every shared field is equal
+    — including ``free_mb``, which two separate requests each re-sample.
+    """
+    sources = gather_status_sources(config)
+    full = build_status(config, sources=sources).to_dict()
+    compact = compact_status(sources)
     assert compact["free_mb"] == full["free_mb"]
+    assert compact["vehicle_state"] == full["vehicle_state"]
+    assert compact["emitter_counters"] == full["emitter_counters"]
+    assert compact["passive"] == full["passive"]
+    assert compact["capture_profile"]["name"] == full["capture_profile"]["name"]
 
 
 def test_status_view_rejects_an_unknown_projection(

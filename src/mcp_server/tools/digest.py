@@ -15,9 +15,17 @@ async def get_session_digest(client: DaemonClient, *, session_id: str) -> dict[s
 
     Written by the trip-end hook (Task 5.4 — sustained GPS stop, or daemon
     shutdown as a fallback); computed on demand and cached if that hook
-    hasn't fired yet for this session. 404 (raised as
-    :class:`~src.mcp_server.client.DaemonError`) when the session id doesn't
-    resolve or has no telemetry recorded.
+    hasn't fired yet for this session. Two distinct failures, both raised as
+    :class:`~src.mcp_server.client.DaemonError` — read the status, they mean
+    opposite things:
+
+    * **404** — the session id doesn't resolve, or has no telemetry
+      recorded. Nothing was attempted.
+    * **409** — the digest was *refused*, and the body's ``digest_skipped``
+      block says why (D03.6): more rows than ``daemon.digest_row_budget``,
+      a directory that is not a session (``_replay-*``), or a child that hit
+      its address-space ceiling. That is a fact about the session, not a
+      missing sidecar — do not retry it expecting a different answer.
 
     Authenticated (auth-consistency follow-up to Task 5.6): the digest
     aggregates the vehicle ledger and per-session fingerprint z-scores,

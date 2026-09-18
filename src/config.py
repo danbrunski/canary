@@ -752,6 +752,36 @@ class DaemonConfig(_Strict):
     #: (``scripts/catalog.py rebuild``); never a second source of truth.
     #: Profile-scoped like the sibling ledger paths.
     catalog_db: Path = Path("data/control/catalog.db")
+    #: Ceiling on the row count a trip-end digest will load (D03.6). Peak
+    #: memory for a digest is O(rows x channels) because the wide pivot runs
+    #: at raw timestamp resolution *before* the 1 Hz resample: 5,483 MB
+    #: measured for a 2,622,370-row session, to produce 1,143 final rows. On
+    #: the 8 GB Pi the cliff is bracketed between ~4.5 M rows (a session that
+    #: completed) and ~5.9 M rows (the daemon OOM-killed), so 4 M sits just
+    #: inside the known-good side. A session over the budget gets a
+    #: ``digest_skipped.json`` naming the count and the budget instead of an
+    #: attempt; ``0`` disables the check.
+    #:
+    #: ``None`` (the default) **derives** the budget from the child's
+    #: address-space ceiling and the measured per-row peak, rather than
+    #: stating a second number that can drift out of step with the first. A
+    #: hand-picked 4 M sat against a 4 GiB ceiling that only covers ~2 M rows,
+    #: so sessions in between passed the budget, spawned a child and died of
+    #: ``MemoryError`` — safe, but it reported a memory anomaly where the
+    #: honest answer was "this is simply larger than what fits". One number,
+    #: one place to change when the O(rows x channels) cost is fixed.
+    digest_row_budget: int | None = Field(default=None, ge=0)
+    #: Hard ``RLIMIT_AS`` ceiling, in MiB, applied inside the digest child
+    #: process before it touches any data. This is the backstop that holds
+    #: even if the row budget is raised or the memory cost regresses: an
+    #: over-budget digest then raises ``MemoryError`` *in the child*, which
+    #: the parent reports, instead of the kernel picking an OOM victim (twice
+    #: that victim was the daemon). ``None`` derives it from physical RAM —
+    #: half of total, clamped to [1 GiB, 4 GiB] — which on the 8 GB Pi gives
+    #: a 4 GiB child that still fits, beside the daemon's normal 150-650 MB,
+    #: inside the unit's ``MemoryMax=6G``; the rlimit is the *catchable* half
+    #: of that pair, since a cgroup kill is not an exception anyone can name.
+    digest_address_space_mb: int | None = Field(default=None, gt=0)
     isolation_forest_artifact: str = "isolation_forest/model.joblib"
     lstm_artifact: str = "lstm_autoencoder/model.pt"
     tcn_artifact: str = "tcn_autoencoder/model.pt"

@@ -13,7 +13,7 @@ from src.collection.record_arming import RecordArmingGate
 from src.config import CanaryConfig
 from src.control.capture import CaptureController
 from src.control.replay_control import ReplayController
-from src.control.trip_end import handle_trip_end
+from src.control.trip_end import handle_trip_end_off_loop
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.decode.frame_decoder import FrameDecoder
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
@@ -43,27 +43,71 @@ log = logging.getLogger(__name__)
 
 DRAIN_SHUTDOWN_SECONDS = 5.0
 
+#: How long shutdown waits for a trip-end digest started at the GPS edge to
+#: finish before cancelling it (which terminates its child). Bounded so a
+#: multi-gigabyte session cannot hold the unit in `deactivating` — the digest
+#: is on-demand anyway, so a cancelled one is recomputed by the next read.
+TRIP_END_SHUTDOWN_SECONDS = 30.0
+
 __all__ = [
     "DRAIN_SHUTDOWN_SECONDS",
+    "TRIP_END_SHUTDOWN_SECONDS",
     "run_daemon",
     "run_retention_sweeper",
     "serve_in_background",
 ]
+
+#: Strong references to in-flight trip-end digests. ``create_task`` alone
+#: only weakly references its task, so without this the GC may collect a
+#: digest mid-computation.
+_TRIP_END_TASKS: set[asyncio.Task[Any]] = set()
 
 
 def _run_trip_end_hook(
     session_dir: Path, config: CanaryConfig, components: DaemonComponents
 ) -> None:
     """``on_trip_ended`` callback shape (``Callable[[Path], None]``) around
-    :func:`handle_trip_end`, which returns the digest dict — the GPS sink
-    doesn't need it, only the fact that trip-end was handled."""
-    handle_trip_end(
-        session_dir,
-        config,
-        emitter=components.emitter,
-        notifier=components.notifier,
-        catalog_db=config.daemon.catalog_db,
+    :func:`handle_trip_end_off_loop`.
+
+    Returns as soon as the digest is *scheduled*, not when it finishes. This
+    callback runs inside the GPS sink, and a digest is a full-session load —
+    measured at 5,483 MB peak for a 2,622,370-row session, minutes of CPU.
+    Computed inline it wedged the daemon twice (OOM-killed 2026-09-11,
+    unresponsive for 38 minutes 2026-09-17), so it goes to a tracked
+    background task which awaits a capped child process; the GPS sink is not
+    made to wait on it either. ``handle_trip_end_off_loop`` never raises and
+    records its own refusals, so nothing here has a result to inspect.
+    """
+    task = asyncio.create_task(
+        handle_trip_end_off_loop(
+            session_dir,
+            config,
+            emitter=components.emitter,
+            notifier=components.notifier,
+            catalog_db=config.daemon.catalog_db,
+        )
     )
+    _TRIP_END_TASKS.add(task)
+    task.add_done_callback(_TRIP_END_TASKS.discard)
+
+
+async def _settle_trip_end_tasks(timeout: float = TRIP_END_SHUTDOWN_SECONDS) -> None:
+    """Let in-flight trip-end digests finish, bounded; cancel the rest.
+
+    Cancelling propagates into ``compute_digest_off_loop``'s single-use pool,
+    which terminates the child — otherwise a several-GB worker would outlive
+    the daemon that spawned it.
+    """
+    pending = set(_TRIP_END_TASKS)
+    if not pending:
+        return
+    done, still_running = await asyncio.wait(pending, timeout=timeout)
+    del done
+    for task in still_running:
+        task.cancel()
+    if still_running:
+        log.warning("cancelled %d in-flight trip-end digest(s) at shutdown", len(still_running))
+        await asyncio.gather(*still_running, return_exceptions=True)
 
 
 def _obd_handoff_stats_observer(
@@ -365,11 +409,15 @@ async def run_daemon(
                     await drain_task
             # Task 5.4 fallback trip-end trigger: the drive can end because
             # the daemon stopped (Pi shutdown) rather than a clean
-            # GPS-detected stop. handle_trip_end is idempotent (skips a
-            # session that already has a digest.json), so this is a no-op
-            # when the GPS edge already fired for the active session.
+            # GPS-detected stop. Settle whatever the GPS edge already
+            # started first — the fallback is idempotent against a *written*
+            # digest.json, and `_IN_FLIGHT` against one still computing, so
+            # this is a no-op when the edge already fired for the active
+            # session. Off-loop like the edge path: a capped child, never a
+            # multi-gigabyte load inside the shutdown sequence itself.
             try:
-                handle_trip_end(
+                await _settle_trip_end_tasks()
+                await handle_trip_end_off_loop(
                     storage_writer.paths.root,
                     config,
                     emitter=components.emitter,

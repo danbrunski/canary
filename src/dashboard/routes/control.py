@@ -1103,10 +1103,24 @@ def register_control_routes(
         # public-XOR-authenticated posture per route. Computed on first
         # request if the trip-end hook (Task 5.4) hasn't already written
         # digest.json for this session.
-        from src.control.digest import get_session_digest
+        from src.control.digest import get_session_digest, get_session_digest_refusal
 
         result = get_session_digest(config, session_id, catalog_db=config.daemon.catalog_db)
         if result is None:
+            # A refused digest is 409, never 404 and never a 200 carrying a
+            # refusal payload: "this session is over the row budget" is an
+            # answer about the session, distinct from "no such session /
+            # nothing recorded yet", and must not be readable as a digest.
+            refusal = get_session_digest_refusal(config, session_id)
+            if refusal is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "digest_refused",
+                        "session_id": session_id,
+                        "digest_skipped": refusal,
+                    },
+                )
             raise HTTPException(status_code=404, detail=f"no digest for session {session_id!r}")
         return result
 

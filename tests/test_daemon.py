@@ -867,19 +867,23 @@ async def test_run_daemon_fires_trip_end_fallback_on_shutdown(
 ) -> None:
     """Task 5.4's daemon-shutdown fallback trigger: run_daemon must call the
     trip-end hook for the active session when it stops, independent of
-    whether GPS ever fired its own sustained-stop edge."""
+    whether GPS ever fired its own sustained-stop edge.
+
+    Awaited, not called inline (D03.6): the fallback goes through the same
+    capped child process as the GPS-edge path, so a multi-gigabyte session
+    cannot be loaded inside the shutdown sequence."""
     from src.daemon import runtime as runtime_mod
 
     calls: list[Path] = []
 
-    def _spy(
+    async def _spy(
         session_dir: Path,
         cfg: CanaryConfig,
         **kwargs: object,
     ) -> None:
         calls.append(session_dir)
 
-    monkeypatch.setattr(runtime_mod, "handle_trip_end", _spy)
+    monkeypatch.setattr(runtime_mod, "handle_trip_end_off_loop", _spy)
 
     components = build_components(config)
     writer = ParquetTelemetryWriter(config.collection.storage_path)

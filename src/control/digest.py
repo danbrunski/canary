@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.analysis.digest import get_or_compute_digest
+from src.analysis.digest import get_or_compute_digest, read_digest_skipped
 from src.config import CanaryConfig
 from src.control.sessions import resolve_session
 
@@ -22,9 +22,10 @@ def get_session_digest(
     """Return the digest sidecar for one session, computing it on first
     request if the trip-end hook (Task 5.4) hasn't already written it.
     ``None`` when the session id doesn't resolve to a real live-session
-    directory, or the session has no telemetry recorded yet. ``catalog_db``
-    (Task 6.3) re-indexes the session into the catalog on a freshly-computed
-    digest, matching the trip-end hook's own wiring."""
+    directory, the session has no telemetry recorded yet, or the digest was
+    *refused* — ask :func:`get_session_digest_refusal` which of those it was.
+    ``catalog_db`` (Task 6.3) re-indexes the session into the catalog on a
+    freshly-computed digest, matching the trip-end hook's own wiring."""
     storage_path: Path = config.collection.storage_path
     try:
         session_dir = resolve_session(storage_path, session_id)
@@ -33,4 +34,19 @@ def get_session_digest(
     return get_or_compute_digest(session_dir, config, catalog_db=catalog_db)
 
 
-__all__ = ["get_session_digest"]
+def get_session_digest_refusal(config: CanaryConfig, session_id: str) -> dict[str, Any] | None:
+    """The ``digest_skipped.json`` payload for one session, if there is one.
+
+    Lets the route answer "refused, here is why" instead of the bare 404 a
+    missing digest would otherwise get — a refusal (over the row budget, or
+    the child ran out of address space) is an answer about the session, not
+    an absence of one."""
+    storage_path: Path = config.collection.storage_path
+    try:
+        session_dir = resolve_session(storage_path, session_id)
+    except FileNotFoundError:
+        return None
+    return read_digest_skipped(session_dir)
+
+
+__all__ = ["get_session_digest", "get_session_digest_refusal"]

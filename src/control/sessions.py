@@ -163,9 +163,28 @@ def filter_sessions(
     return selected[-limit:] if limit is not None else selected
 
 
+def is_session_dir_name(name: str) -> bool:
+    """True for directory names that are *this vehicle's own recording* — a
+    plain live session (``2026-09-10T142711``) or a capture
+    (``_capture-tuning-did-2026-09-17T231700``).
+
+    The one predicate for "may a post-hoc sidecar be computed over this
+    directory?". Replay output (``_replay-*``), quarantine (``_archive``) and
+    scratch directories are deliberately not sessions: their rows are
+    re-emitted or condemned data, so a digest/classification over them
+    describes nothing real. ``resolve_session`` has enforced this for every
+    HTTP read since it was written — which is exactly why the trip-end hook,
+    the one caller that bypassed it, computed a digest over a 5.9 M-row
+    ``_replay-*`` directory and got the daemon OOM-killed (D03.6 item 1). The
+    predicate lives here so a non-HTTP caller gets the same refusal without
+    having to remember it.
+    """
+    return bool(_SESSION_DIR_RE.match(name) or _CAPTURE_DIR_RE.match(name))
+
+
 def resolve_session(root: Path, session_id: str) -> Path:
     """Resolve a session id under root, rejecting traversal and unknown ids."""
-    if not (_SESSION_DIR_RE.match(session_id) or _CAPTURE_DIR_RE.match(session_id)):
+    if not is_session_dir_name(session_id):
         raise FileNotFoundError(f"session not found: {session_id}")
     session = root / session_id
     try:
@@ -314,6 +333,7 @@ __all__ = [
     "SessionSummary",
     "delete_session",
     "filter_sessions",
+    "is_session_dir_name",
     "is_session_pinned",
     "list_sessions",
     "pin_session",
