@@ -39,6 +39,29 @@ deploy earlier today.
 | `3d45680` | `GET /status?view=compact`; capture tag/stop 409 instead of a silent null | low, but **the tag/stop refusal is a behaviour change** any script that ignored the null body will now see as an error. That is the point |
 | `2dfa0aa` | already applied (above) | — |
 | `dcde580` | trip-end digest off-loop, address-space-capped, row-budgeted, refusals recorded | **read the behaviour change below** |
+| (next) | `tools/batch_probe.py` + `CanObdClient.query_raw` — the same-instant-read probe for tomorrow's block B | low — a tool, not a daemon change; sends only 0x10/0x21/0x23/0x27 requestSeed/0x2A |
+
+### Running the batch probe (block B of the drive prompt)
+
+Engine idling, truck parked, ~2 minutes of bus time. It refuses to start
+unless the daemon is passive, and it sends a `2A 04` stop after any positive
+periodic answer so the ECM is never left streaming.
+
+```bash
+# on the laptop: arm passive for 10 minutes
+curl -s -X POST http://192.168.137.2:8000/control/passive \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"enabled": true, "ttl_seconds": 600}'
+# on the Pi
+cd ~/canary && PYTHONPATH=. .venv/bin/python tools/batch_probe.py \
+  --config /etc/canary/canary.yaml --out /data/canary/re/batch_probe-$(date +%Y%m%dT%H%M%S).json
+# then disarm passive
+```
+
+Read the `summary` block: each of `0x21` / `0x23` / `0x2A` is `works`,
+`gated`, `unsupported` or `silent` — four different empties with four
+different next steps. `same_instant_candidates` lists any that answered. A
+`0x27` seed, if returned, is evidence only; the tool cannot build a key.
 
 ## The behaviour change to expect after `dcde580`
 

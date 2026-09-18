@@ -131,6 +131,35 @@ class BatchedMode01Response:
     responder_id: int
 
 
+#: The read services :meth:`CanObdClient.query_raw` may send, and nothing
+#: else: session control, the three "many values in one request" candidates
+#: (ReadDataByLocalIdentifier, ReadMemoryByAddress, ReadDataByPeriodicIdentifier),
+#: requestSeed, and TesterPresent. Batched ``0x22`` is refused by the 2008
+#: Nissan ECM (``7F 22 12``), so these are the routes left to a same-instant
+#: multi-value read. Every write/reflash service (``0x2E``, ``0x3B``,
+#: ``0x3D``, ``0x31``, ``0x34``–``0x37``) is absent by construction.
+RAW_QUERY_SERVICES: frozenset[int] = frozenset({0x10, 0x21, 0x23, 0x27, 0x2A, 0x3E})
+
+
+@dataclass(frozen=True)
+class RawReply:
+    """What one :meth:`CanObdClient.query_raw` probe got back.
+
+    Three distinct empties, never collapsed: ``sent=False`` (the transmit
+    gate or the bus refused to send), ``negative_response_code`` set (the ECU
+    answered ``7F <service> <NRC>``), and both ``None`` (silence within the
+    timeout). ``payload`` is the bytes after the positive service byte.
+    """
+
+    sent: bool
+    payload: bytes | None = None
+    negative_response_code: int | None = None
+
+    @property
+    def positive(self) -> bool:
+        return self.payload is not None
+
+
 @dataclass(frozen=True)
 class BatchedMode22Reply:
     """What came back for one multi-DID Mode 22 request — including a refusal.
@@ -325,6 +354,58 @@ class CanObdClient:
         # because the response carries several.
         response, nrc = self._collect_response_or_nrc(service=0x22, pid_echo=None)
         return BatchedMode22Reply(response=response, negative_response_code=nrc)
+
+    def query_raw(
+        self,
+        service: int,
+        body: bytes,
+        *,
+        request_id: int | None = None,
+    ) -> RawReply:
+        """One single-frame request with an arbitrary body, for read probes.
+
+        ``body`` is everything after the service byte: a local identifier for
+        ``0x21``, ``<mode> <pdid…>`` for ``0x2A``, an address and size for
+        ``0x23``, a sub-function for ``0x27``. Multi-frame responses are
+        reassembled like every other query; a ``7F`` comes back as
+        ``negative_response_code`` so "refused" is never mistaken for "silent".
+
+        Only the probe services in :data:`RAW_QUERY_SERVICES` may be sent
+        here, and ``0x27`` only with an odd sub-function (requestSeed). This
+        is where the vehicle skill's line is enforced rather than documented:
+        nothing that writes non-volatile memory, and no ``sendKey``, can be
+        built through this method whatever a caller asks for.
+        """
+        if service not in RAW_QUERY_SERVICES:
+            raise ValueError(
+                f"service 0x{service:02X} is not a probe read service; query_raw sends only "
+                + ", ".join(f"0x{s:02X}" for s in sorted(RAW_QUERY_SERVICES))
+            )
+        if service == 0x27 and (not body or body[0] % 2 == 0):
+            raise ValueError(
+                "0x27 through query_raw is requestSeed only (odd sub-function); a sendKey "
+                "must never be built here"
+            )
+        if len(body) > 6:
+            raise ValueError(f"body of {len(body)} bytes does not fit a single frame")
+        frame = bytes([1 + len(body), service]) + body
+        message = can.Message(
+            arbitration_id=self._request_id if request_id is None else request_id,
+            data=frame + bytes(8 - len(frame)),
+            is_extended_id=False,
+        )
+        try:
+            if not tx_gate.send(self._bus, message, what=f"probe service=0x{service:02X}"):
+                return RawReply(sent=False)
+        except can.CanError:
+            log.warning("CAN send failed", extra={"service": service, "body": body.hex()})
+            return RawReply(sent=False)
+        response, nrc = self._collect_response_or_nrc(service=service, pid_echo=None)
+        return RawReply(
+            sent=True,
+            payload=None if response is None else bytes(response.payload),
+            negative_response_code=nrc,
+        )
 
     def query(
         self,
@@ -1005,6 +1086,8 @@ def read_pids(client: CanObdClient, pids: Iterable[int]) -> list[DecodedPid]:
 
 
 __all__ = [
+    "RAW_QUERY_SERVICES",
+    "RawReply",
     "DEFAULT_REQUEST_ID",
     "DEFAULT_RESPONSE_ID_MAX",
     "DEFAULT_RESPONSE_ID_MIN",
