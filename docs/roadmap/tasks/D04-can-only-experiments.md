@@ -123,6 +123,9 @@ opportunistic on any sustained climb.
     250 ms get pairs.
   - A 50 ms answer needs the two PIDs in separate batches, or a faster cycle.
   - Script: `~/canary-data/scripts-0918b/lag_scan.py`.
+  **2026-09-18 evening ([September 18 evening drive log](../../../data/analyses/2026-09-18-eve-drive-log.md)):** 13 holds. **No clear minimum in either
+  direction** (78/49 pairs at best lag), so the PM "500 ms tip-in" doesn't
+  replicate. This is blocked on splitting 0x44 and 0x24 into separate batches.
 
 - [x] **D04.4 Where is `ECM_MAF_GPS` linear against Mode 01 MAF?** Block 6
   gave the whole-session answer — slope 0.934, r² 0.909, `drifting`, with the

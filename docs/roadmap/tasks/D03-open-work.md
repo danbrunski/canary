@@ -504,6 +504,15 @@ promote unverified bindings or to change a tune.
   quantum. The stoich band has 70 pairs, all 0x1134 = 64. The falsifier (stays 64
   while 0x44 > 1.10) didn't fire. The pre-registered bar is ≥ 30 pairs from ≥ 3
   pulls, so this is **unresolved**: roughly three more ≥ 10 s holds.
+  **2026-09-18 evening ([September 18 evening drive log](../../../data/analyses/2026-09-18-eve-drive-log.md)): "0x1134 = commanded φ" is FALSIFIED; the raw/64
+  decode survives.** 203 enriched pairs over 14 holds.
+  - Where 0x1134 moves it equals floor(0x44 × 64): 74 ↔ 1.1641 ×196, 76 ↔ 1.186.
+  - **Counterexamples:** 0x44 held 1.06 for 3.5 s (6 pairs, ≤ 0.17 s
+    separation) with 0x1134 = 64, and 0x44 = 0.87 lean on 293 samples with
+    0x1134 = 64. The pre-registered slope is 1.52 (`unresolved`, two levels).
+  - **Reading:** a rich-side (power-enrichment) target that 0x44 follows when
+    it's the active source, not the final command.
+  - **Remaining (desk):** re-describe and rename the candidate accordingly.
 
 - [~] **D03.9 Re-evaluate the injector fuel-mass calibration using today's
   open-loop data; collect only missing coverage tomorrow.** Blocks 6 and 9
@@ -556,6 +565,16 @@ promote unverified bindings or to change a tune.
   - **Next:** closed-loop holds that overlap WOT air charge in one session, plus
     0x42/0x0F/0x33/0x06/0x07 and an idle electrical-load step for dead time.
     Desk report: `~/canary-data/scripts-0918b/out/shift1206.md`.
+  **2026-09-18 evening ([September 18 evening drive log](../../../data/analyses/2026-09-18-eve-drive-log.md)): 0x1206/0x1207 = injected pulse PASSES** the
+  pre-registered matched-air-charge test. 184 of 188 enriched rows each had
+  ≥ 20 closed-loop rows at ±5 % the same 0x1208 air charge. The φ-scaled
+  prediction residual is **+1.0 %** (p10–p90 −0.6..+3.5); 0x1207 is **−0.5 %**.
+  The fixed straight-line criterion gave +7.4 % (unresolved, the known
+  ill-posed extrapolation). 0x1208: per g air +0.5 % (pass), rich residual
+  −13.0 % vs the −14..−18 band (narrow miss; −14.1 % expected at φ 1.164).
+  Air charge confirmed a fourth time. **Remaining:** dead time/voltage
+  (`fuel-pw-research-2` broke 0x44 batching; see the log), then the rename per
+  the operator's decision above.
   - **Operator approved the relabel (2026-09-18 ~19:00Z).** `data/dids.yaml`
     now describes 0x1208 as air charge (unit no longer `ms`; a test refuses
     `ms` or a scale) and 0x1206/0x1207 as injector-pulse candidates at

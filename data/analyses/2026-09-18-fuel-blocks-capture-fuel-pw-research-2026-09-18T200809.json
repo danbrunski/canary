@@ -1,0 +1,850 @@
+{
+ "session": "/home/dan/canary-data/sessions-0918/_capture-fuel-pw-research-2026-09-18T200809",
+ "channels": {
+  "RPM": 4566,
+  "O2_WR_LAMBDA_S1": 4566,
+  "FUEL_STATUS": 4566,
+  "ENGINE_LOAD": 4566,
+  "MAF": 4566,
+  "TIMING_ADVANCE": 4557,
+  "COMMANDED_EQUIV_RATIO": 4523,
+  "DID_120F": 2337,
+  "DID_1134": 2337,
+  "DID_1225": 2337,
+  "DID_1207": 2331,
+  "DID_1206": 2319,
+  "DID_1208": 2304,
+  "DID_1219": 2290,
+  "DTC_STORED": 5,
+  "DTC_PENDING": 5
+ },
+ "known_answer_ok": true,
+ "known_answer": {
+  "a": "obd:RPM",
+  "b": "did:ECM_RPM",
+  "n_pairs": 2290,
+  "r_squared": 0.9975822111179526,
+  "slope": 0.9991603400584519,
+  "offset": 6.094157848899854,
+  "slope_drift_pct": 0.6917002525890555,
+  "scale_verdict": "stable",
+  "policy": {
+   "max_separation_s": 0.35,
+   "reference": "auto",
+   "tie_break": "earlier"
+  },
+  "reference": "b",
+  "timestamp_basis_a": "acquired",
+  "timestamp_basis_b": "acquired",
+  "unmatched_a": 2276,
+  "unmatched_b": 0,
+  "separation_median_s": 0.11990928649902344,
+  "separation_p95_s": 0.13021100759506227,
+  "separation_max_s": 0.27265191078186035,
+  "residual_bias": -5.320941164630046e-13,
+  "residual_spread": 24.764516776569756,
+  "difference_bias": 4.1117903930131,
+  "difference_spread": 24.768124515009195,
+  "stability_windows": [
+   {
+    "n": 764,
+    "rpm_min": 1537.5,
+    "rpm_max": 3312.5,
+    "slope": 0.9993055594942161,
+    "slope_se": 0.0021606038147448684
+   },
+   {
+    "n": 763,
+    "rpm_min": 1875.0,
+    "rpm_max": 3737.5,
+    "slope": 0.9924250063351634,
+    "slope_se": 0.0019488456890611825
+   },
+   {
+    "n": 763,
+    "rpm_min": 0.0,
+    "rpm_max": 4450.0,
+    "slope": 0.9993213776177947,
+    "slope_se": 0.0018574032682936396
+   }
+  ]
+ },
+ "known_answer_overridden": false,
+ "target_vs_commanded": {
+  "census_0x1134_raw": {
+   "64": 2102,
+   "65": 1,
+   "69": 1,
+   "74": 225,
+   "75": 4,
+   "76": 4
+  },
+  "cmd_0x44_distinct": 241,
+  "cmd_0x44_min_step": 0.0001220703125,
+  "cmd_0x44_census_top": {
+   "0.000000": 569,
+   "1.164062": 388,
+   "0.870728": 293,
+   "1.000000": 237,
+   "0.992096": 208,
+   "1.020386": 205,
+   "0.994965": 98,
+   "0.979584": 87,
+   "0.998749": 55,
+   "0.999573": 53,
+   "1.001068": 52,
+   "1.000519": 50
+  },
+  "comparison_gated": {
+   "a": "obd:COMMANDED_EQUIV_RATIO",
+   "b": "did:ECM_TARGET_EQUIV_RATIO_CANDIDATE",
+   "n_pairs": 875,
+   "r_squared": 0.2600006283062297,
+   "slope": 0.06898067347204745,
+   "offset": 0.9864777100965656,
+   "slope_drift_pct": 114.84764042444897,
+   "scale_verdict": "drifting",
+   "policy": {
+    "max_separation_s": 0.35,
+    "reference": "auto",
+    "tie_break": "earlier"
+   },
+   "reference": "a",
+   "timestamp_basis_a": "acquired",
+   "timestamp_basis_b": "acquired",
+   "unmatched_a": 715,
+   "unmatched_b": 1399,
+   "separation_median_s": 0.15267586708068848,
+   "separation_p95_s": 0.24745950698852529,
+   "separation_max_s": 0.34940004348754883,
+   "residual_bias": 8.800579312914384e-16,
+   "residual_spread": 0.05620471938458319,
+   "difference_bias": 0.328689208984375,
+   "difference_spread": 0.453150086944714
+  },
+  "comparison_ungated": {
+   "a": "obd:COMMANDED_EQUIV_RATIO",
+   "b": "did:ECM_TARGET_EQUIV_RATIO_CANDIDATE",
+   "n_pairs": 2336,
+   "r_squared": 0.07400880901888462,
+   "slope": 0.037460567324559796,
+   "offset": 0.9826108109447739,
+   "slope_drift_pct": 103.55376515468744,
+   "scale_verdict": "drifting",
+   "policy": {
+    "max_separation_s": 0.35,
+    "reference": "auto",
+    "tie_break": "earlier"
+   },
+   "reference": "b",
+   "timestamp_basis_a": "acquired",
+   "timestamp_basis_b": "acquired",
+   "unmatched_a": 2187,
+   "unmatched_b": 1,
+   "separation_median_s": 0.08197462558746338,
+   "separation_p95_s": 0.12707310914993286,
+   "separation_max_s": 0.24542617797851562,
+   "residual_bias": -5.272798940240298e-15,
+   "residual_spread": 0.04532319149618799,
+   "difference_bias": 0.13225750073994677,
+   "difference_spread": 0.33233770869907764
+  },
+  "n_pairs_gated": 875,
+  "n_pairs_enriched": 203,
+  "n_pairs_0x44_gt_1.02": 240,
+  "agree_within_quantisation": 0.352,
+  "quantisation_tolerance": 0.00787353515625,
+  "closed_loop_check": {
+   "n_pairs_0x44_in_stoich_band": 272,
+   "n_pairs_0x44_exactly_1": 42,
+   "n_0x1134_eq_64": 272,
+   "other_0x1134_raw": {}
+  },
+  "by_regime": {
+   "enriched>1.05": {
+    "n": 203,
+    "mean": -0.00867,
+    "median": -0.00781,
+    "p10": -0.00781,
+    "p90": -0.00781
+   },
+   "other": {
+    "n": 128,
+    "mean": 0.12927,
+    "median": 0.12927,
+    "p10": 0.12927,
+    "p90": 0.12927
+   },
+   "stoich band \u00b10.025": {
+    "n": 272,
+    "mean": 0.003,
+    "median": 0.00504,
+    "p10": -0.02039,
+    "p90": 0.01917
+   },
+   "zero(DFCO/n.a.)": {
+    "n": 272,
+    "mean": 1.0,
+    "median": 1.0,
+    "p10": 1.0,
+    "p90": 1.0
+   }
+  },
+  "enriched_fit": {
+   "r_squared": 0.9785782039167368,
+   "slope": 1.5238849959073573,
+   "offset": -0.6166194589906656,
+   "slope_se": 0.015903193220729053
+  },
+  "verdict": "203 enriched pairs"
+ },
+ "target_vs_measured": {
+  "n_pairs_steady": 1763,
+  "n_pairs_target_enriched": 198,
+  "target_eq_1": {
+   "n": 1565,
+   "median_phi_meas/target": 1.0001526111772425,
+   "p10": 0.9759061314111898,
+   "p90": 1.047650735705745
+  },
+  "target_enriched": {
+   "n": 198,
+   "median_phi_meas/target": 0.9970760311090137,
+   "p10": 0.9720089138390688,
+   "p90": 1.0111278682707254
+  },
+  "enriched_fit": {
+   "r_squared": 0.0032420373758577092,
+   "slope": 0.477159373918388,
+   "offset": 0.5969269683493996,
+   "slope_se": 0.5976147013460471,
+   "drift_pct": null,
+   "scale_verdict": "unresolved"
+  },
+  "verdict": "see enriched stats"
+ },
+ "fuel_test": {
+  "0x1206": {
+   "n_register_samples": 2290,
+   "n_dfco": 309,
+   "n_steady": 419,
+   "n_closed_loop": 222,
+   "n_enriched": 188,
+   "dfco_register_median": 55.0,
+   "dfco_register_per_g_air": 930.4249291784703,
+   "register_per_g_air_by_regime": {
+    "closed_loop": 2094.521227694815,
+    "enriched": 2412.0841313858555
+   },
+   "fit_closed_loop": {
+    "a_counts_per_g": 29664.95769432201,
+    "b_counts": 30.123863103623243,
+    "r2": 0.9948512060468538,
+    "drift_pct": 8.903025207116487,
+    "scale_verdict": "drifting",
+    "b_ms_if_0.01ms_per_count": 0.30123863103623244,
+    "implied_flow_cc_min_if_0.01ms": 271.48837892019964
+   },
+   "residual_by_regime": [
+    {
+     "regime": "closed_loop",
+     "n": 228,
+     "median": 0.52,
+     "p10": -2.53,
+     "p90": 3.23
+    },
+    {
+     "regime": "enriched",
+     "n": 188,
+     "median": 1.38,
+     "p10": -0.46,
+     "p90": 3.97
+    },
+    {
+     "regime": "open_loop_other",
+     "n": 3,
+     "median": -100.0,
+     "p10": -100.0,
+     "p90": -100.0
+    }
+   ],
+   "residual_by_fuel_bin": [
+    {
+     "fuel_bin": "(0.0, 0.01]",
+     "regime": "closed_loop",
+     "n": 62,
+     "median": 2.58,
+     "p10": -0.34,
+     "p90": 4.22
+    },
+    {
+     "fuel_bin": "(0.01, 0.015]",
+     "regime": "closed_loop",
+     "n": 9,
+     "median": -0.02,
+     "p10": -3.97,
+     "p90": 6.31
+    },
+    {
+     "fuel_bin": "(0.01, 0.015]",
+     "regime": "enriched",
+     "n": 2,
+     "median": -1.25,
+     "p10": -1.78,
+     "p90": -0.72
+    },
+    {
+     "fuel_bin": "(0.015, 0.02]",
+     "regime": "closed_loop",
+     "n": 8,
+     "median": -6.53,
+     "p10": -12.22,
+     "p90": 2.6
+    },
+    {
+     "fuel_bin": "(0.02, 0.025]",
+     "regime": "closed_loop",
+     "n": 8,
+     "median": -2.49,
+     "p10": -13.22,
+     "p90": 7.35
+    },
+    {
+     "fuel_bin": "(0.025, 0.03]",
+     "regime": "closed_loop",
+     "n": 30,
+     "median": -1.37,
+     "p10": -5.5,
+     "p90": 0.63
+    },
+    {
+     "fuel_bin": "(0.03, 0.035]",
+     "regime": "closed_loop",
+     "n": 88,
+     "median": 0.45,
+     "p10": -0.63,
+     "p90": 1.87
+    },
+    {
+     "fuel_bin": "(0.035, 0.04]",
+     "regime": "closed_loop",
+     "n": 23,
+     "median": 0.19,
+     "p10": -0.92,
+     "p90": 0.76
+    },
+    {
+     "fuel_bin": "(0.035, 0.04]",
+     "regime": "enriched",
+     "n": 45,
+     "median": 3.66,
+     "p10": 1.9,
+     "p90": 4.83
+    },
+    {
+     "fuel_bin": "(0.04, 0.05]",
+     "regime": "enriched",
+     "n": 141,
+     "median": 0.94,
+     "p10": -0.47,
+     "p90": 2.65
+    }
+   ],
+   "residual_by_rpm_bin": [
+    {
+     "rpm_bin": "(0.0, 900.0]",
+     "regime": "closed_loop",
+     "n": 54,
+     "median": 2.51,
+     "p10": -0.28,
+     "p90": 4.01
+    },
+    {
+     "rpm_bin": "(0.0, 900.0]",
+     "regime": "enriched",
+     "n": 2,
+     "median": -1.25,
+     "p10": -1.78,
+     "p90": -0.72
+    },
+    {
+     "rpm_bin": "(2000.0, 2500.0]",
+     "regime": "closed_loop",
+     "n": 74,
+     "median": 0.4,
+     "p10": -2.8,
+     "p90": 3.65
+    },
+    {
+     "rpm_bin": "(2000.0, 2500.0]",
+     "regime": "enriched",
+     "n": 68,
+     "median": 2.75,
+     "p10": 0.97,
+     "p90": 4.63
+    },
+    {
+     "rpm_bin": "(2500.0, 3000.0]",
+     "regime": "closed_loop",
+     "n": 100,
+     "median": 0.1,
+     "p10": -3.45,
+     "p90": 1.25
+    },
+    {
+     "rpm_bin": "(2500.0, 3000.0]",
+     "regime": "enriched",
+     "n": 108,
+     "median": 0.57,
+     "p10": -0.7,
+     "p90": 2.2
+    },
+    {
+     "rpm_bin": "(3000.0, 3500.0]",
+     "regime": "enriched",
+     "n": 9,
+     "median": 2.5,
+     "p10": 1.05,
+     "p90": 4.41
+    },
+    {
+     "rpm_bin": "(3500.0, 4000.0]",
+     "regime": "enriched",
+     "n": 1,
+     "median": 2.62,
+     "p10": 2.62,
+     "p90": 2.62
+    }
+   ],
+   "verdict": "enriched median residual +1.4 %"
+  },
+  "0x1207": {
+   "n_register_samples": 2290,
+   "n_dfco": 311,
+   "n_steady": 422,
+   "n_closed_loop": 223,
+   "n_enriched": 187,
+   "dfco_register_median": 55.0,
+   "dfco_register_per_g_air": 928.9056603773585,
+   "register_per_g_air_by_regime": {
+    "closed_loop": 2105.6569889254715,
+    "enriched": 2408.1839460278125
+   },
+   "fit_closed_loop": {
+    "a_counts_per_g": 29799.079558053527,
+    "b_counts": 23.24604288354011,
+    "r2": 0.9910389237941376,
+    "drift_pct": 18.507770855667687,
+    "scale_verdict": "drifting",
+    "b_ms_if_0.01ms_per_count": 0.2324604288354011,
+    "implied_flow_cc_min_if_0.01ms": 270.26644428657147
+   },
+   "residual_by_regime": [
+    {
+     "regime": "closed_loop",
+     "n": 232,
+     "median": 1.47,
+     "p10": -5.41,
+     "p90": 5.49
+    },
+    {
+     "regime": "enriched",
+     "n": 187,
+     "median": 1.29,
+     "p10": -0.38,
+     "p90": 3.71
+    },
+    {
+     "regime": "open_loop_other",
+     "n": 3,
+     "median": -100.0,
+     "p10": -100.0,
+     "p90": -100.0
+    }
+   ],
+   "residual_by_fuel_bin": [
+    {
+     "fuel_bin": "(0.0, 0.01]",
+     "regime": "closed_loop",
+     "n": 65,
+     "median": 3.61,
+     "p10": 0.47,
+     "p90": 9.08
+    },
+    {
+     "fuel_bin": "(0.01, 0.015]",
+     "regime": "closed_loop",
+     "n": 8,
+     "median": 0.89,
+     "p10": -2.24,
+     "p90": 6.17
+    },
+    {
+     "fuel_bin": "(0.01, 0.015]",
+     "regime": "enriched",
+     "n": 2,
+     "median": -0.15,
+     "p10": -0.18,
+     "p90": -0.12
+    },
+    {
+     "fuel_bin": "(0.015, 0.02]",
+     "regime": "closed_loop",
+     "n": 8,
+     "median": -5.73,
+     "p10": -19.7,
+     "p90": 1.68
+    },
+    {
+     "fuel_bin": "(0.02, 0.025]",
+     "regime": "closed_loop",
+     "n": 9,
+     "median": -5.96,
+     "p10": -12.82,
+     "p90": 2.54
+    },
+    {
+     "fuel_bin": "(0.025, 0.03]",
+     "regime": "closed_loop",
+     "n": 28,
+     "median": -2.76,
+     "p10": -12.18,
+     "p90": 2.22
+    },
+    {
+     "fuel_bin": "(0.03, 0.035]",
+     "regime": "closed_loop",
+     "n": 90,
+     "median": 0.9,
+     "p10": -2.14,
+     "p90": 2.52
+    },
+    {
+     "fuel_bin": "(0.035, 0.04]",
+     "regime": "closed_loop",
+     "n": 24,
+     "median": 1.69,
+     "p10": 0.31,
+     "p90": 2.3
+    },
+    {
+     "fuel_bin": "(0.035, 0.04]",
+     "regime": "enriched",
+     "n": 45,
+     "median": 2.92,
+     "p10": 1.24,
+     "p90": 4.25
+    },
+    {
+     "fuel_bin": "(0.04, 0.05]",
+     "regime": "enriched",
+     "n": 140,
+     "median": 0.95,
+     "p10": -0.51,
+     "p90": 3.02
+    }
+   ],
+   "residual_by_rpm_bin": [
+    {
+     "rpm_bin": "(0.0, 900.0]",
+     "regime": "closed_loop",
+     "n": 55,
+     "median": 3.6,
+     "p10": 0.73,
+     "p90": 9.08
+    },
+    {
+     "rpm_bin": "(0.0, 900.0]",
+     "regime": "enriched",
+     "n": 2,
+     "median": -0.15,
+     "p10": -0.18,
+     "p90": -0.12
+    },
+    {
+     "rpm_bin": "(2000.0, 2500.0]",
+     "regime": "closed_loop",
+     "n": 75,
+     "median": -0.43,
+     "p10": -7.68,
+     "p90": 2.62
+    },
+    {
+     "rpm_bin": "(2000.0, 2500.0]",
+     "regime": "enriched",
+     "n": 67,
+     "median": 1.92,
+     "p10": -0.08,
+     "p90": 3.98
+    },
+    {
+     "rpm_bin": "(2500.0, 3000.0]",
+     "regime": "closed_loop",
+     "n": 100,
+     "median": 1.57,
+     "p10": -3.61,
+     "p90": 2.9
+    },
+    {
+     "rpm_bin": "(2500.0, 3000.0]",
+     "regime": "enriched",
+     "n": 108,
+     "median": 1.02,
+     "p10": -0.5,
+     "p90": 2.98
+    },
+    {
+     "rpm_bin": "(3000.0, 3500.0]",
+     "regime": "enriched",
+     "n": 9,
+     "median": 3.86,
+     "p10": 2.38,
+     "p90": 4.85
+    },
+    {
+     "rpm_bin": "(3500.0, 4000.0]",
+     "regime": "enriched",
+     "n": 1,
+     "median": 2.39,
+     "p10": 2.39,
+     "p90": 2.39
+    },
+    {
+     "rpm_bin": "(900.0, 1500.0]",
+     "regime": "closed_loop",
+     "n": 2,
+     "median": -9.47,
+     "p10": -10.31,
+     "p90": -8.64
+    }
+   ],
+   "verdict": "enriched median residual +1.3 %"
+  },
+  "0x1208": {
+   "n_register_samples": 2290,
+   "n_dfco": 318,
+   "n_steady": 454,
+   "n_closed_loop": 257,
+   "n_enriched": 183,
+   "dfco_register_median": 3889.5,
+   "dfco_register_per_g_air": 64003.32643911068,
+   "register_per_g_air_by_regime": {
+    "closed_loop": 63777.68329718004,
+    "enriched": 64068.459503160375
+   },
+   "fit_closed_loop": {
+    "a_counts_per_g": 941363.1986520356,
+    "b_counts": -32.347900005088384,
+    "r2": 0.9985080154093995,
+    "drift_pct": 1.1753104904051372,
+    "scale_verdict": "stable",
+    "b_ms_if_0.01ms_per_count": -0.32347900005088387,
+    "implied_flow_cc_min_if_0.01ms": 8.555349610756075
+   },
+   "residual_by_regime": [
+    {
+     "regime": "closed_loop",
+     "n": 268,
+     "median": -0.23,
+     "p10": -2.29,
+     "p90": 1.48
+    },
+    {
+     "regime": "enriched",
+     "n": 183,
+     "median": -13.04,
+     "p10": -14.97,
+     "p90": -10.54
+    },
+    {
+     "regime": "open_loop_other",
+     "n": 3,
+     "median": -100.0,
+     "p10": -100.0,
+     "p90": -24.16
+    }
+   ],
+   "residual_by_fuel_bin": [
+    {
+     "fuel_bin": "(0.0, 0.01]",
+     "regime": "closed_loop",
+     "n": 79,
+     "median": -1.28,
+     "p10": -13.97,
+     "p90": 1.19
+    },
+    {
+     "fuel_bin": "(0.01, 0.015]",
+     "regime": "closed_loop",
+     "n": 7,
+     "median": 0.21,
+     "p10": -0.88,
+     "p90": 1.93
+    },
+    {
+     "fuel_bin": "(0.01, 0.015]",
+     "regime": "enriched",
+     "n": 2,
+     "median": -7.14,
+     "p10": -7.33,
+     "p90": -6.94
+    },
+    {
+     "fuel_bin": "(0.01, 0.015]",
+     "regime": "open_loop_other",
+     "n": 1,
+     "median": -5.2,
+     "p10": -5.2,
+     "p90": -5.2
+    },
+    {
+     "fuel_bin": "(0.015, 0.02]",
+     "regime": "closed_loop",
+     "n": 11,
+     "median": 1.0,
+     "p10": -0.71,
+     "p90": 5.84
+    },
+    {
+     "fuel_bin": "(0.02, 0.025]",
+     "regime": "closed_loop",
+     "n": 15,
+     "median": 1.04,
+     "p10": -3.38,
+     "p90": 6.57
+    },
+    {
+     "fuel_bin": "(0.025, 0.03]",
+     "regime": "closed_loop",
+     "n": 37,
+     "median": 0.08,
+     "p10": -1.56,
+     "p90": 1.89
+    },
+    {
+     "fuel_bin": "(0.03, 0.035]",
+     "regime": "closed_loop",
+     "n": 97,
+     "median": -0.01,
+     "p10": -0.98,
+     "p90": 0.86
+    },
+    {
+     "fuel_bin": "(0.035, 0.04]",
+     "regime": "closed_loop",
+     "n": 22,
+     "median": -0.43,
+     "p10": -0.82,
+     "p90": 0.25
+    },
+    {
+     "fuel_bin": "(0.035, 0.04]",
+     "regime": "enriched",
+     "n": 53,
+     "median": -11.83,
+     "p10": -13.33,
+     "p90": -9.96
+    },
+    {
+     "fuel_bin": "(0.04, 0.05]",
+     "regime": "enriched",
+     "n": 128,
+     "median": -13.6,
+     "p10": -15.12,
+     "p90": -11.39
+    }
+   ],
+   "residual_by_rpm_bin": [
+    {
+     "rpm_bin": "(0.0, 900.0]",
+     "regime": "closed_loop",
+     "n": 56,
+     "median": -1.62,
+     "p10": -9.42,
+     "p90": 0.19
+    },
+    {
+     "rpm_bin": "(0.0, 900.0]",
+     "regime": "enriched",
+     "n": 2,
+     "median": -7.14,
+     "p10": -7.33,
+     "p90": -6.94
+    },
+    {
+     "rpm_bin": "(0.0, 900.0]",
+     "regime": "open_loop_other",
+     "n": 1,
+     "median": -5.2,
+     "p10": -5.2,
+     "p90": -5.2
+    },
+    {
+     "rpm_bin": "(1500.0, 2000.0]",
+     "regime": "closed_loop",
+     "n": 3,
+     "median": 0.45,
+     "p10": 0.32,
+     "p90": 1.47
+    },
+    {
+     "rpm_bin": "(2000.0, 2500.0]",
+     "regime": "closed_loop",
+     "n": 86,
+     "median": 0.05,
+     "p10": -1.27,
+     "p90": 1.36
+    },
+    {
+     "rpm_bin": "(2000.0, 2500.0]",
+     "regime": "enriched",
+     "n": 64,
+     "median": -12.35,
+     "p10": -14.16,
+     "p90": -11.14
+    },
+    {
+     "rpm_bin": "(2500.0, 3000.0]",
+     "regime": "closed_loop",
+     "n": 119,
+     "median": -0.05,
+     "p10": -1.64,
+     "p90": 1.83
+    },
+    {
+     "rpm_bin": "(2500.0, 3000.0]",
+     "regime": "enriched",
+     "n": 108,
+     "median": -13.64,
+     "p10": -15.12,
+     "p90": -10.94
+    },
+    {
+     "rpm_bin": "(3000.0, 3500.0]",
+     "regime": "enriched",
+     "n": 8,
+     "median": -10.38,
+     "p10": -11.92,
+     "p90": -8.9
+    },
+    {
+     "rpm_bin": "(3500.0, 4000.0]",
+     "regime": "enriched",
+     "n": 1,
+     "median": -11.36,
+     "p10": -11.36,
+     "p90": -11.36
+    },
+    {
+     "rpm_bin": "(900.0, 1500.0]",
+     "regime": "closed_loop",
+     "n": 4,
+     "median": -14.18,
+     "p10": -18.29,
+     "p90": -3.82
+    }
+   ],
+   "verdict": "enriched median residual -13.0 %"
+  }
+ }
+}

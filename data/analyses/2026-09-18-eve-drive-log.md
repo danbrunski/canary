@@ -4,9 +4,13 @@ _State file for the third /loop drive of the day. Resume from here; don't redo w
 _Earlier today: `2026-09-18-drive-log.md` (AM), `2026-09-18-pm-drive-log.md` (PM). Plans: `2026-09-18-next-drive-deploy-plan.md` (criteria, per the operator, unchanged) and `2026-09-18-pm-next-drive-deploy-plan.md` (the added tests below)._
 
 ## Glance
-- **Next: 3+ WOT holds ≥ 10 s** (3rd/4th, uphill), full lift after each, **and 20-s part-throttle closed-loop holds in 3rd at 2,500–3,500 rpm uphill**. Say "wot"/"lift" and I tag them. At a parked stop: the 1-min idle lights/blower/defrost on-off step.
-- `fuel-pw-research-2` capture running since 20:06:03Z (4 h drive, so the ⅓ budget is 80 min). Warm (ECT 91 °C), 1,980 m.
-- D03.18 is NOT fixed: holds, not pulls; stalls inside holds are counted.
+- **Block 1 decided most of the fuel workflow.**
+  - **0x1206/0x1207 = injected pulse: PASS** on the matched-air-charge test (+1.0 % / −0.5 %, n 184).
+  - **0x1134 is NOT commanded φ:** it holds 64 while 0x44 sits at 1.06 for 3.5 s and at 0.87 lean. Its raw/64 scale matches when it does move.
+  - 0x1208 = air charge (per g air +0.5 %).
+  - D04.3 has no minimum at this resolution.
+- Back on `default`. **Next maneuver (optional): tagged in-gear coasts in 3rd and 4th from ~3,000 rpm, and one in neutral (D04.2).** At a parked stop, the idle lights/blower step.
+- Health: 0 drops. 16 stalls of 2.3–2.5 s plus **three of exactly 5.0 s (new)**, 0 inside holds. A key-off stop from 20:27 to 20:33Z.
 
 ## For the operator
 1. **The tuning provider `injector_pw_b1` still maps to 0x1208 (air charge) at `confirmed`.** You said to fix mislabels and then "we'll fix those later". The plan is in D03.9 (`9b1c788`). Nothing to decide now; it's listed so it isn't lost.
@@ -58,9 +62,33 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
 | time (Z) | state | drops | q/hw | rx_over | reads/s | narrow | inf p95 | emitted | alt m |
 |---|---|---|---|---|---|---|---|---|---|
 | 20:05:06 | engine_running (default, 3 min after boot) | 0 | 1/**1320** | 7 | 18.34 | 0 | 39.0 | 2 | 1,982 |
+| 20:13:08 | engine_running (fuel-pw-research) | 0 | 1/1320 | 51 | — | 0 | 42.6 | 10 | 2,085 |
 
 ## Work notes
 - 20:01Z Pi booted (key-on). 20:04Z operator: "new drive is starting now" (4 h).
 - 20:05Z Storage high-water 1,320 within 3 min of boot, 0 drops: a boot-time backlog. Watch it.
-- 20:05Z `fuel-pw-research-2` saved live (PUT, no warnings). All added channels are in the ECU's supported Mode 01 set. **Still to do: mirror it into the repo's profiles file within the hour.**
+- 20:05Z `fuel-pw-research-2` saved live (PUT, no warnings). All added channels are in the ECU's supported Mode 01 set. Mirrored into the repo as `dd5e098` (field-for-field; 79 profile tests green; the test rewrite of the file was restored).
 - 20:06:03Z capture started; truck already moving at 60 km/h, so the idle step is deferred.
+- 20:07Z **`fuel-pw-research-2` defect, seen live at 90 s:** `acquisition_gap` on 6 Mode 01 channels. Single-PID gaps of 2.8–16 s, NOT all-channel stalls. Per-request timeouts in ~2 min: **0x44 37/228**, CONTROL_MODULE_VOLTAGE 31/326, BAROMETRIC_PRESSURE 21/91, 0x24 11/451, MAF 4, IAT 3; RPM/LOAD/TIMING/FUEL_STATUS/trims 0; DIDs ~0. 0x44 got fewer than half of RPM's requests (228 vs 522). Batching: 73 desyncs, 21 failures in the 5 min since boot. **Cause (hypothesis):** adding 5 PIDs changes the 6-PID batch composition, and batches holding 0x44/0x42/0x33 come back partial or desynced. That's the known batch-desync class, now hitting the one channel D03.8 needs.
+- 20:08:06Z **Stopped it** (`_capture-fuel-pw-research-2-2026-09-18T200606`, 121 s, verdict fail: acquisition_gap on 7 channels + persistence_loss can0 +16) and **started `fuel-pw-research`** (clean on 0x44 this afternoon) at 20:08:08Z. Tag `switch_to_fuel_pw_research_after_0x44_timeouts`. The dead-time step will get a voltage-only variant at a parked stop, if one comes. **Desk task:** which batch compositions desync on this ECM (the D03.17 batch_probe territory).
+- 20:08:40Z **Confirmed on `fuel-pw-research`:** over 7.3 s, 0x44 had +20 requests and +0 timeouts (RPM +20/+0), with 0 new desyncs. The 0x44 timeouts are specific to `-2`'s composition, so the hypothesis stands. **`fuel-pw-research-2` must not be used again until the batch probe says which PIDs can share a batch with 0x44.** (It stays saved; a comment in the repo file should say so, at the desk.)
+- 20:35:27Z **Block 1 stopped** (`_capture-fuel-pw-research-2026-09-18T200809`, 27.5 min; the wake-up was 7 min late because the laptop suspended). Isolated time so far 29.4 of 80 min. Verdict **fail**, both clauses explained: `acquisition_gap` on 14 channels (the stalls below, plus the key-off), and `persistence_loss` can0 overflow (the broadcast path, known). Pulled (34 MB).
+- **Block 1 analysis** (report `data/analyses/2026-09-18-fuel-blocks-capture-fuel-pw-research-2026-09-18T200809.{md,json}`; scripts `~/canary-data/scripts-0918b/{d038_enriched,matched_air}.py`).
+  - **Known answer PASS:** DID RPM vs Mode 01 RPM, n_pairs 2290, slope 0.9992, r² 0.998, `stable`.
+  - **Stalls (this drive's rule):** 20 all-channel gaps ≥ 2 s. One is **not a stall**: 20:27:13–20:33:40Z (386 s) was a key-off (poller: `engine_off`/`no_data`, OBD freshness to 380 s). The rest are 16 of 2.25–2.5 s (the D03.18 shape) and **3 of exactly 5.0 s** (20:08:24, 20:11:52, 20:15:24Z). Those are a new shape, longer than D03.18's; D03.18 should cover them or they need a task. **13 holds (0x44 > 1.05 ≥ 3 s), 119.4 enriched s, stalls inside holds 0, enriched s lost 0.**
+  - **D03.8, 0x1134 = commanded φ × 64: the claim as written is FALSIFIED; the raw/64 decode survives.**
+    - 203 enriched pairs over 14 independent holds (gaps > 3 s). 0x44 values: 1.1641 ×180, 1.1548 ×16, 1.06 ×6, 1.186 ×1. 0x1134 raw: 74 ×196, 64 ×6, 76 ×1.
+    - Pre-registered slope: **1.524** (r² 0.979, se 0.016), outside 0.95–1.05, with `scale_stability` **unresolved** (two levels, not a range). On its own the slope clause wouldn't be decisive.
+    - **The decisive evidence is a counterexample, not the slope.** In hold 10, 0x44 stayed at 1.060–1.068 for 3.5 s (6 pairs, separation ≤ 0.17 s, not onset lag) while 0x1134 stayed **64**. Separately, 0x44 = 0.8707 (a lean command) on 293 samples with 0x1134 = 64.
+    - The other falsifier ("64 while 0x44 > 1.10") didn't fire (0 pairs).
+    - Where 0x1134 moves, it's floor(0x44 × 64) on 88.7 % of enriched pairs: 74 ↔ 1.1641 (74/64 = 1.15625, residual exactly −1/128) and 76 ↔ 1.1859.
+    - **Reading:** 0x1134 is a *rich-side target* (power-enrichment φ, raw/64) that 0x44 follows when that enrichment is the active source. It's not the final command: other sources, like the 1.06 hold and the lean 0.87, bypass it. **Candidate rename, desk:** `ECM_TARGET_EQUIV_RATIO_CANDIDATE` → a power-enrichment-target candidate.
+  - **D03.9 0x1206 = injected pulse.**
+    - (a) The operator-plan criterion (fixed 27,747 + 41 line): enriched **+7.4 %** (n 188), between pass (±5) and fail (±8), so **unresolved**. It's the known ill-posed extrapolation; closed loop is also +5–6 % off that line.
+    - (b) **The added pre-registered matched-air-charge test: PASS.** 184 of 188 enriched rows each have ≥ 20 closed-loop rows within ±5 % 0x1208 air charge (median 64 rows). Predicted by the φ-scaled closed-loop median: residual **+1.0 %** (p10–p90 −0.6..+3.5; +1.4 % with a 30-count offset).
+    - 0x1207: **−0.5 %** (p10–p90 −1.9..+3.2), PASS.
+    - The closed-loop air-charge range covers the enriched band (CL p95 33,052; enriched 31,845–33,935), so nothing is extrapolated.
+    - Own-session refit: enriched +1.4 % (n 188). DFCO floor 52–57 counts.
+  - **D03.9 0x1208 = air charge.** Per g air: closed loop 63,778 vs enriched 64,068 (**+0.5 %**, band ±2): **pass**. Rich residual vs the closed-loop refit: **−13.0 %**, 1.0 pp **outside** the −14..−18 band. At this φ (1.164) pure air charge predicts −14.1 %. The falsifier ("tracks the enrichment") didn't fire: enrichment is +16.4 %, the register moved +0.5 % per g air. So: first clause narrowly missed, second passed; the identification stands (4th session).
+  - **D04.3:** 78 tip-in and 49 lift pairs at the best lag. **No clear minimum in either direction** (near-minimum lags scattered, 200–450 ms tip-in, 200–2,700 ms lift). The PM "tip-in 500 ms" **doesn't replicate**. Unresolved: it needs 0x44/0x24 in separate batches.
+  - **D04.2:** 41 coasts, 34 with ≥ 2 floor samples; floor 52–57 counts (next value 141). Untagged; gear assignment is desk work.
