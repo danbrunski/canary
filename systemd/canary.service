@@ -18,6 +18,26 @@ Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
 
+# Bound the service tree's memory, because the failure mode without a bound is
+# far worse than a restart. Measured twice: on 2026-09-11 the trip-end digest
+# grew to 7.7 GB on this 8 GB Pi and the kernel killed the daemon; on
+# 2026-09-17 the same path reached 7.36 GB and — because the Pi has 2 GB of
+# swap — the kernel thrashed instead of killing, leaving the daemon wedged and
+# unresponsive for 38 minutes, with no HTTP and no collection, until it was
+# restarted by hand. A collector that cannot answer is worse than one that
+# restarts in 5 s.
+#
+# MemorySwapMax=0: never swap. Paging out a real-time telemetry collector
+# trades a fast, visible failure for a slow, invisible one.
+# MemoryMax=6G: ~10x the daemon's normal 150-650 MB resident, so it bounds a
+# runaway (the digest's peak is O(rows x channels)) without touching ordinary
+# operation, and leaves ~2 GB for the MCP server, gpsd and the system.
+# This covers the whole service tree, including the out-of-process scorer and
+# the digest child; the digest additionally sets its own RLIMIT_AS so it fails
+# as a catchable MemoryError inside the child rather than as a cgroup kill.
+MemoryMax=6G
+MemorySwapMax=0
+
 # Opening SocketCAN raw sockets as a non-root service needs CAP_NET_RAW on
 # many Linux builds. CAN interface configuration still happens outside this
 # service through docs/can-setup.md or a separate boot-time network unit.

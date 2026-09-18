@@ -340,6 +340,25 @@ records why the validation harness could not have caught either.
   does not, and the daemon died computing it. So the limit sits between **~4.5 M
   and ~5.9 M rows**, and it is not a linear extrapolation from the laptop's
   per-row figure — trust the bracket, not the slope.
+  **It recurred live at 23:17 UTC the same day, on an ordinary capture, and the
+  failure mode was worse than a kill.** A 638-chunk (~6.4 M row)
+  `_capture-tuning-hybrid-research-2026-09-17T224717` hit the trip-end edge; the
+  daemon climbed to **7.36 GB of 8 GB and wedged — unresponsive for 38 minutes**,
+  no HTTP and no collection, until it was restarted by hand. **Because the Pi has
+  2 GB of swap, the kernel thrashed instead of killing**, so `Restart=on-failure`
+  never got the chance to recover the service. It produced no digest.
+  Two safeguards are now in place, and neither is the cost fix:
+  - `systemd/canary.service` sets **`MemoryMax=6G` and `MemorySwapMax=0`**
+    (installed on the Pi 2026-09-18 00:0x UTC). A runaway is now killed promptly
+    and restarted in 5 s instead of paging a real-time collector out to swap. 6 G
+    is ~10× the daemon's normal 150–650 MB and leaves ~2 GB for the MCP server,
+    gpsd and the system.
+  - the digest itself is being moved into a child process with its own
+    `RLIMIT_AS` plus a row-count budget and a **refusal sidecar**, so an
+    over-budget session records "skipped: N rows over budget M" rather than
+    either taking the daemon down or looking like a session nobody got to.
+  The cost fix below is still the real answer; these only bound the damage.
+
   **Live exposure is real, today:** this drive's open session
   `2026-09-17T205003` reached **857 chunks (~8 M rows)**, i.e. larger than the
   replay that OOM-killed the daemon. Nothing fired only because a trip-end needs
