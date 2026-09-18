@@ -58,10 +58,22 @@ cd ~/canary && PYTHONPATH=. .venv/bin/python tools/batch_probe.py \
 # then disarm passive
 ```
 
-Read the `summary` block: each of `0x21` / `0x23` / `0x2A` is `works`,
-`gated`, `unsupported` or `silent` — four different empties with four
-different next steps. `same_instant_candidates` lists any that answered. A
-`0x27` seed, if returned, is evidence only; the tool cannot build a key.
+Read the `summary` block: each of `0x21` / `0x23` / `0x2A` is `works` (a
+payload came back), `answered` (exists, refused the argument), `gated`,
+`unsupported` or `silent` — five different empties with five different next
+steps. `same_instant_candidates` lists only the `works` ones. A `0x27` seed,
+if returned, is evidence only; the tool cannot build a key.
+
+For D03.17's recorded form (`23 00 08 00 00 00 10` under session `10 FB`), run
+it a second time as `--session FB --address 0x00080000 --length 16`; the
+`kwp32` entry in the `0x23` results is that exact request. `0x2A` is already
+closed in `multi-pid-polling.md`; the one request the tool sends just records
+the NRC for the file.
+
+**The CAN-only experiments for the day are in
+`docs/roadmap/tasks/D04-can-only-experiments.md`** — a separate file because
+D03 is mid-edit by another session; it slots into that review's drive order
+without adding a block.
 
 ## The behaviour change to expect after `dcde580`
 

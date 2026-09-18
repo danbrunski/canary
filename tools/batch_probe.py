@@ -19,9 +19,11 @@ serves:
   and **stops**: no key is ever built (:data:`RAW_QUERY_SERVICES` and
   ``query_raw`` make a sendKey unconstructible, not merely un-sent).
 
-Every result is classified as one of ``works`` / ``gated`` / ``unsupported`` /
-``silent`` — four different empties that demand different next steps — and
-written to a JSON snapshot beside a human summary.
+Every result is classified as ``works`` (a payload came back) / ``answered``
+(the service exists but refused the argument) / ``gated`` / ``unsupported`` /
+``silent`` — five different empties that demand different next steps — and
+written to a JSON snapshot beside a human summary. Only ``works`` makes a
+service a same-instant-read candidate.
 
 Like ``did_log``, this holds the diagnostic session the ECM gates its reads
 behind, so the daemon must be in passive mode for the run (its scheduler's
@@ -69,7 +71,18 @@ _ARGUMENT_NRCS = frozenset({0x13, 0x31})
 #: Re-send the session prime at least this often during a sweep.
 _SESSION_REFRESH_SECONDS = 1.5
 
-WORKS, GATED, UNSUPPORTED, SILENT = "works", "gated", "unsupported", "silent"
+#: ``works`` means a positive payload came back — nothing less. ``answered``
+#: means the service exists but refused the argument (``0x13``/``0x31``): a
+#: fact about the service, never a same-instant-read candidate.
+WORKS, ANSWERED, GATED, UNSUPPORTED, SILENT = (
+    "works",
+    "answered",
+    "gated",
+    "unsupported",
+    "silent",
+)
+#: Summary ranking when several request forms were tried for one service.
+_RANK = (WORKS, GATED, ANSWERED, UNSUPPORTED, SILENT)
 
 
 class RawQuerier(Protocol):
@@ -116,7 +129,7 @@ def classify(reply: RawReply) -> tuple[str, str]:
     if nrc in _GATED_NRCS:
         return GATED, f"NRC 0x{nrc:02X} — exists but gated (security/session/conditions)"
     if nrc in _ARGUMENT_NRCS:
-        return WORKS, f"NRC 0x{nrc:02X} — the service answered; the argument was refused"
+        return ANSWERED, f"NRC 0x{nrc:02X} — the service answered; the argument was refused"
     if nrc in _UNSUPPORTED_NRCS:
         return UNSUPPORTED, f"NRC 0x{nrc:02X} — service or form not supported"
     return UNSUPPORTED, f"NRC 0x{nrc:02X}"
@@ -192,8 +205,13 @@ def probe_local_identifiers(
         detail = f"{len(hits)} of {total} local identifiers answered"
     elif nrcs:
         top = max(nrcs.items(), key=lambda kv: kv[1])[0]
-        gated = any(int(k, 16) in _GATED_NRCS for k in nrcs)
-        verdict = GATED if gated else UNSUPPORTED
+        codes = {int(k, 16) for k in nrcs}
+        if codes & _GATED_NRCS:
+            verdict = GATED
+        elif codes & _ARGUMENT_NRCS:
+            verdict = ANSWERED
+        else:
+            verdict = UNSUPPORTED
         detail = f"no positive answer in {total}; NRCs {nrcs} (most common {top})"
     else:
         verdict = SILENT
@@ -247,12 +265,23 @@ def probe_periodic(client: RawQuerier, session: _Session, *, request_id: int) ->
 def probe_memory(
     client: RawQuerier, session: _Session, *, request_id: int, address: int, length: int
 ) -> list[ProbeResult]:
-    """``0x23`` in the KWP2000 3-byte form, then the UDS ALFID form."""
+    """``0x23`` in three request forms, because the ECM only answers one.
+
+    ``kwp24``: 3-byte address + 1-byte size (ISO 14230). ``kwp32``: 4-byte
+    address + 2-byte size, no format byte — the form D03.17 records as
+    having answered ``23 00 08 00 00 00 10`` under session ``10 FB`` on this
+    ECM. ``uds``: ISO 14229 with ALFID ``0x14`` (1-byte size, 4-byte
+    address). A form the ECM does not parse comes back ``0x13``
+    (incorrectMessageLengthOrInvalidFormat), which :func:`classify` counts as
+    the service *answering* — so one positive form beside two ``0x13``\\ s is
+    the expected shape of success, not a contradiction.
+    """
     forms = [
         (
-            "kwp",
+            "kwp24",
             bytes([(address >> 16) & 0xFF, (address >> 8) & 0xFF, address & 0xFF, length & 0xFF]),
         ),
+        ("kwp32", address.to_bytes(4, "big") + (length & 0xFFFF).to_bytes(2, "big")),
         ("uds", bytes([0x14]) + address.to_bytes(4, "big") + bytes([length & 0xFF])),
     ]
     results: list[ProbeResult] = []
@@ -330,16 +359,8 @@ def run(
             client, session, request_id=request_id, address=address, length=length
         )
         probes["0x23"] = [r.to_dict() for r in memory]
-        verdicts = [r.verdict for r in memory]
-        summary["0x23"] = (
-            WORKS
-            if WORKS in verdicts
-            else GATED
-            if GATED in verdicts
-            else UNSUPPORTED
-            if UNSUPPORTED in verdicts
-            else SILENT
-        )
+        verdicts = {r.verdict for r in memory}
+        summary["0x23"] = next(v for v in _RANK if v in verdicts)
     if "0x27" not in skip:
         seed = probe_seed(client, session, request_id=request_id)
         probes["0x27"] = seed.to_dict()

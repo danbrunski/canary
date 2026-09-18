@@ -17,7 +17,7 @@ import pytest
 
 from src.collection.can_obd_client import RAW_QUERY_SERVICES, RawReply
 from tools import batch_probe
-from tools.batch_probe import GATED, SILENT, UNSUPPORTED, WORKS, classify, run
+from tools.batch_probe import ANSWERED, GATED, SILENT, UNSUPPORTED, WORKS, classify, run
 from tools.did_log import PassiveStatus
 
 
@@ -64,8 +64,28 @@ def test_classify_names_each_kind_of_empty() -> None:
     assert classify(RawReply(sent=True, negative_response_code=0x33))[0] == GATED
     assert classify(RawReply(sent=True))[0] == SILENT
     assert classify(RawReply(sent=False))[0] == SILENT
-    # requestOutOfRange means the service answered — a positive fact about it.
-    assert classify(RawReply(sent=True, negative_response_code=0x31))[0] == WORKS
+    # requestOutOfRange means the service answered — a fact about the service,
+    # but not a payload, so it is never `works`.
+    assert classify(RawReply(sent=True, negative_response_code=0x31))[0] == ANSWERED
+    assert classify(RawReply(sent=True, negative_response_code=0x13))[0] == ANSWERED
+
+
+def test_an_argument_refusal_is_not_a_same_instant_candidate() -> None:
+    """0x23 answering 0x13 to every form proves the service exists and nothing
+    else; listing it as a candidate would send someone building on a refusal."""
+    ecm = FakeEcm(
+        {
+            (0x23, body): RawReply(sent=True, negative_response_code=0x13)
+            for body in (
+                bytes([0xFF, 0x80, 0x00, 0x08]),
+                bytes([0xFF, 0xFF, 0x80, 0x00, 0x00, 0x08]),
+                bytes([0x14, 0xFF, 0xFF, 0x80, 0x00, 0x08]),
+            )
+        }
+    )
+    snap = _run(ecm, skip=frozenset({"0x21", "0x2A", "0x27"}))
+    assert snap["summary"]["0x23"] == ANSWERED
+    assert snap["same_instant_candidates"] == []
 
 
 # --- 0x21 sweep --------------------------------------------------------------
@@ -142,24 +162,36 @@ def test_periodic_refusal_sends_no_stop() -> None:
 # --- 0x23 and 0x27: gated is reported, no key is ever built --------------------
 
 
-def test_memory_read_tries_both_forms_and_gated_shows_through() -> None:
-    kwp = bytes([0xFF, 0x80, 0x00, 0x08])
+def test_memory_read_tries_all_three_forms_and_gated_shows_through() -> None:
+    kwp24 = bytes([0xFF, 0x80, 0x00, 0x08])
+    kwp32 = bytes([0xFF, 0xFF, 0x80, 0x00, 0x00, 0x08])
     uds = bytes([0x14, 0xFF, 0xFF, 0x80, 0x00, 0x08])
     ecm = FakeEcm(
         {
-            (0x23, kwp): RawReply(sent=True, negative_response_code=0x12),
+            (0x23, kwp24): RawReply(sent=True, negative_response_code=0x12),
+            (0x23, kwp32): RawReply(sent=True, negative_response_code=0x13),
             (0x23, uds): RawReply(sent=True, negative_response_code=0x33),
             (0x27, b"\x01"): RawReply(sent=True, payload=b"\x01\xde\xad\xbe\xef"),
         }
     )
     snap = _run(ecm, skip=frozenset({"0x21", "0x2A"}))
-    assert [r["extra"]["form"] for r in snap["probes"]["0x23"]] == ["kwp", "uds"]
+    assert [r["extra"]["form"] for r in snap["probes"]["0x23"]] == ["kwp24", "kwp32", "uds"]
+    # 0x33 on one form outranks 0x13 (answered, wrong form) and 0x12 elsewhere.
     assert snap["summary"]["0x23"] == GATED
     assert snap["summary"]["0x27"] == WORKS
     assert "no key sent" in snap["probes"]["0x27"]["detail"]
     assert snap["probes"]["0x27"]["payload_hex"] == "01deadbeef"
     # The only 0x27 ever sent is requestSeed.
     assert [body for svc, body in ecm.sent if svc == 0x27] == [b"\x01"]
+
+
+def test_the_d03_17_memory_read_form_is_sent_byte_for_byte() -> None:
+    """D03.17 records `23 00 08 00 00 00 10` (4-byte address, 2-byte size)
+    answering under session 10 FB. That exact body must go on the wire."""
+    ecm = FakeEcm({})
+    _run(ecm, skip=frozenset({"0x21", "0x2A", "0x27"}), address=0x00080000, length=16)
+    bodies = [body for svc, body in ecm.sent if svc == 0x23]
+    assert bytes([0x00, 0x08, 0x00, 0x00, 0x00, 0x10]) in bodies
 
 
 def test_a_send_key_cannot_be_built_through_the_client() -> None:
