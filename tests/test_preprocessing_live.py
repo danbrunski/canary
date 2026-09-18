@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import pickle
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -13,7 +14,7 @@ import pytest
 from src.config import CanaryConfig, OperatingModeSpec
 from src.decode.bindings import Bindings, load_bindings
 from src.preprocessing.feature_pipeline import build_feature_frame
-from src.preprocessing.live import LiveFeatureSource
+from src.preprocessing.live import LiveFeatureSource, build_prepared_live_tick
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
@@ -31,6 +32,35 @@ def config() -> CanaryConfig:
 def test_tick_returns_none_before_any_observation(config: CanaryConfig) -> None:
     src = LiveFeatureSource(config=config)
     assert src.tick(datetime(2026, 5, 13, 12, 0, tzinfo=UTC)) is None
+
+
+def test_prepared_tick_is_pickle_safe_and_preserves_canonical_result(
+    config: CanaryConfig,
+) -> None:
+    """D01.4: the process payload round-trip preserves the feature result."""
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    for channel, value, unit in (
+        ("RPM", 750.0, "rpm"),
+        ("SPEED", 0.0, "km/h"),
+        ("THROTTLE_POS", 10.0, "%"),
+        ("COOLANT_TEMP", 85.0, "C"),
+    ):
+        src.observe(TelemetryRecord.obd(now.timestamp(), channel, value, unit))
+    prepared = src.prepare_tick(now)
+    assert prepared is not None
+
+    expected = build_prepared_live_tick(prepared)
+    restored_prepared = pickle.loads(pickle.dumps(prepared))
+    actual = pickle.loads(pickle.dumps(build_prepared_live_tick(restored_prepared)))
+
+    pd.testing.assert_series_equal(
+        pd.Series(actual.operating_point), pd.Series(expected.operating_point)
+    )
+    assert actual.segmenter_fell_back is expected.segmenter_fell_back
+    assert actual.feature_row is not None
+    assert expected.feature_row is not None
+    pd.testing.assert_frame_equal(actual.feature_row, expected.feature_row)
 
 
 def test_obd_observation_appears_in_emitted_row(config: CanaryConfig) -> None:
@@ -622,6 +652,25 @@ def test_reset_clears_current_values_and_buffer(config: CanaryConfig) -> None:
         "obd_freshness_seconds": None,
         "can_freshness_seconds": None,
     }
+
+
+def test_reset_discards_feature_result_built_from_previous_generation(
+    config: CanaryConfig,
+) -> None:
+    """D01.4: an in-flight child result cannot cross a replay reset."""
+    src = LiveFeatureSource(config=config)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    src.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 1500.0, "rpm"))
+    prepared = src.prepare_tick(now)
+    assert prepared is not None
+    built = build_prepared_live_tick(prepared)
+
+    src.reset()
+
+    assert src.apply_built_tick(prepared, built) is None
+    assert src.latest_operating_point is None
+    assert src.latest_derived_channels is None
+    assert src.last_segmenter_fallback is False
 
 
 def test_reset_is_reusable_source_observes_normally_afterward(config: CanaryConfig) -> None:

@@ -64,6 +64,16 @@ def test_sequence_detector_default_is_lstm():
     assert ModelsConfig.model_fields["sequence_detector"].default == "lstm"
 
 
+def test_feature_build_process_is_the_production_default():
+    """D01.4: new and Pi configs keep pandas off the collection loop."""
+    from src.config import ModelsConfig
+
+    assert ModelsConfig.model_fields["out_of_process_feature_build"].default is True
+    assert CanaryConfig.from_yaml(PI_EXAMPLE_YAML).models.out_of_process_feature_build is True
+    # The general example remains a deterministic single-process fixture.
+    assert CanaryConfig.from_yaml(EXAMPLE_YAML).models.out_of_process_feature_build is False
+
+
 def test_pi_example_yaml_loads():
     config = CanaryConfig.from_yaml(PI_EXAMPLE_YAML)
     assert config.hardware.can.interface == "socketcan"

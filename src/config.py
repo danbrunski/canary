@@ -681,6 +681,13 @@ class ModelsConfig(_Strict):
     #: the child cannot start falls back to in-process scoring, so this is a
     #: performance knob, never a correctness one.
     out_of_process_scoring: bool = False
+    #: Build the live rolling feature row in one persistent spawned process.
+    #: Unlike model scoring, this worker needs no artifact paths and is safe
+    #: for every deployment: each request carries the exact config and
+    #: behavior-model snapshot for that tick. Enabled by default so pandas'
+    #: Python/GIL-heavy transform cannot starve collection or HTTP on the Pi.
+    #: Set false for deterministic single-process debugging and unit fixtures.
+    out_of_process_feature_build: bool = True
 
 
 class DashboardConfig(_Strict):

@@ -142,6 +142,9 @@ preprocessing:
   mode_dwell_ticks: 3
 
 models:
+  # Keep pandas feature construction off the daemon event loop. One
+  # persistent spawned child receives a bounded rolling snapshot per tick.
+  out_of_process_feature_build: true
   # Active sequence-detector backbone ("lstm" = GRU-D today). The selected
   # backend's own `enabled` flag still gates loading.
   sequence_detector: lstm

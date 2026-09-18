@@ -736,12 +736,28 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
 
 ## Deferred by decision, not blocked
 
-- [ ] **D01.4 Get the feature build off the event loop.** `source.tick()` runs
-  in phase 1 on the loop and holds it for **169 ms** median (was 332 ms before
-  D01.8). It cannot simply move to a thread — it is Python-level pandas and
-  holds the GIL. Moving it means moving the ring buffer that `observe()` feeds,
-  and the behavior detector that reads `source.latest_operating_point`, into
-  the child as well.
+- [~] **D01.4 Get the feature build off the event loop — implemented; Pi
+  measurement remains.** `source.tick()` ran in phase 1 on the loop and held
+  it for **169 ms** median (was 332 ms before D01.8). The live source now
+  separates a cheap, serialized `prepare_tick` from the pure pandas transform
+  and `apply_built_tick`: the daemon retains ownership of observations, the
+  bounded ring and trip-integral side effects; one persistent spawned process
+  runs the exact shared `featurize_wide_frame` transform and returns only the
+  newest feature row, operating point and fallback verdict. This avoids a
+  thread's GIL contention without duplicating the training transform or
+  sending one IPC message per telemetry record. A source generation attached
+  to each request makes an in-flight pre-reset/replay result unapplyable.
+
+  `models.out_of_process_feature_build` defaults on and is explicitly on in
+  the Pi example; the general example disables it for deterministic
+  single-process development. The timing recorder now separates `feature_wait`
+  from `loop_occupancy`, so elapsed worker time is not falsely reported as
+  event-loop occupation. Spawn-process parity and reset-race tests pin the two
+  load-bearing contracts. **Still owed:** deploy and compare `feature_wait`,
+  `loop_occupancy`, request rate, HTTP latency and missed ticks over a matched
+  live window before closing the checkbox. The worker still recomputes the
+  bounded rolling frame; this change removes collection-loop starvation, not
+  the transform's total CPU cost.
   **No longer a deadline argument.** The tick fits its budget: 439 ms median at
   idle, 320 ms under the heavier `tuning-did` load, and D01.9 now overlaps the
   snapshot with the score. What remains is that the loop is occupied ~17 % of

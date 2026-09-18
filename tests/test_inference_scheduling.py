@@ -100,6 +100,7 @@ preprocessing:
       rpm_min: 400
       speed_min: 60
 models:
+  out_of_process_feature_build: false
   isolation_forest:
     enabled: false
     n_estimators: 100
@@ -916,3 +917,46 @@ async def test_replay_parity_between_synchronous_path_and_scheduled_pipeline(
                     assert pd.isna(b)
                 else:
                     assert a == b
+
+
+async def test_feature_builder_runs_in_spawned_process_without_blocking_loop(
+    config: CanaryConfig,
+) -> None:
+    """D01.4 production boundary: spawned execution is pickle-safe and awaited."""
+    from src.daemon.inference import _start_feature_executor
+    from src.preprocessing.live import build_prepared_live_tick
+
+    config.models.out_of_process_feature_build = True
+    components = build_components(config)
+    source = build_live_feature_source(components)
+    now = datetime.now(UTC)
+    for channel, value, unit in (
+        ("RPM", 750.0, "rpm"),
+        ("SPEED", 0.0, "km/h"),
+        ("THROTTLE_POS", 10.0, "%"),
+        ("COOLANT_TEMP", 85.0, "C"),
+    ):
+        source.observe(TelemetryRecord.obd(now.timestamp(), channel, value, unit))
+    prepared = source.prepare_tick(now)
+    assert prepared is not None
+    expected = build_prepared_live_tick(prepared)
+
+    executor = _start_feature_executor(components)
+    assert executor is not None
+    try:
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(executor, build_prepared_live_tick, prepared)
+        heartbeat = asyncio.Event()
+        loop.call_later(0.01, heartbeat.set)
+        await asyncio.wait_for(heartbeat.wait(), timeout=1.0)
+        actual = await asyncio.wait_for(future, timeout=15.0)
+    finally:
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    assert actual.segmenter_fell_back is expected.segmenter_fell_back
+    pd.testing.assert_series_equal(
+        pd.Series(actual.operating_point), pd.Series(expected.operating_point)
+    )
+    assert actual.feature_row is not None
+    assert expected.feature_row is not None
+    pd.testing.assert_frame_equal(actual.feature_row, expected.feature_row)

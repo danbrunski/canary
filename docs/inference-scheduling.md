@@ -42,17 +42,22 @@ same run: median 1.27 ms, p95 2.24 ms, max 2.73 ms; zero missed deadlines.
   shows as a genuine gap (`__gap` flags, GRU-D Δt, persistence timing), not a
   synthesized fill. Processing that lands exactly on the deadline is on time.
 
-## Ownership (C08.4 / C08.5) — snapshot on the loop, compute in one worker, apply on the loop
+## Ownership (C08.4 / C08.5 / D01.4) — loop-owned state, process-built features
 
-Decision implemented: the "snapshot → owned worker → apply" option, not a
-single actor. `LiveFeatureSource` has one owner (the loop) and is never
-touched from the worker thread (`test_forward_pass_runs_in_worker_while_source_stays_on_loop`
-asserts `source.tick` only ever runs on the main thread while the forward
-pass runs on the `canary-inference` thread).
+`LiveFeatureSource` has one mutable-state owner: the event loop. D01.4 splits
+its tick into `prepare_tick` (snapshot and bounded-ring append), the pure
+`build_prepared_live_tick` transform, and `apply_built_tick` (operating point
+and trip-integral state). Production runs the pure transform in one persistent
+spawned process; the synchronous `tick` composition remains the exact debug,
+test and parity reference. The request carries the config, behavior-model
+snapshot and source generation for that tick, so hot reload is coherent and a
+result that finishes across a replay reset is discarded.
 
 | phase | thread | what runs |
 |---|---|---|
-| **snapshot** (`LiveInferencePipeline._snapshot`) | loop | `source.tick(now)` (feature construction), derived-channel broadcast + Parquet write, autotag hook, segmenter-fallback health edge, vehicle-state gate, idle-shutdown observe, `GenerationToken` read, `IsolationForestDetector.prepare` (pin `loaded`), `SequenceDetector.prepare` (version bookkeeping and engine hot-swap/rebuild), `BehaviorDetector.prepare` (`_observe_behavior`: every surface graded off `latest_operating_point`, live overlay updated) |
+| **prepare** (`LiveFeatureSource.prepare_tick`) | loop | Stamp the newest observation snapshot, derive gaps, append the bounded ring and copy its frame |
+| **feature build** (`build_prepared_live_tick`) | spawned process by default | Exact shared `featurize_wide_frame` transform; returns only the newest feature row, operating point and segmenter-fallback verdict |
+| **snapshot continuation** (`LiveInferencePipeline._snapshot`) | loop | Apply the feature result, derived-channel broadcast + Parquet write, autotag hook, segmenter-fallback health edge, vehicle-state gate, idle-shutdown observe, `GenerationToken` read, detector prepares and behavior residuals |
 | **compute** (`_compute_tick`) | worker | `_if_compute`: schema align, `IsolationForestInferenceEngine.observe` (sklearn), threshold/scale lookup, contributor ranking. `_sequence_observe`: schema align, window append, torch forward pass. Pure — returns data and its own stage durations |
 | **apply** (`_apply`) | loop | generation check → `_if_apply` (health, `/ws/scores`, persistence gate, IF emit), `SequenceDetector.apply` (`/ws/scores`, gate, LSTM emit), `BehaviorDetector.apply` (gate, `/ws/scores`, behavior emits), fusion + fused emit, timing bookkeeping |
 
@@ -77,16 +82,21 @@ folded into the token.
 ## Bounded computation (C08.6)
 
 Exactly one `ThreadPoolExecutor(max_workers=1)` is owned per
-`run_live_inference` task, and at most one compute job is in flight. If a job
-is still running when the next deadline arrives, that tick is skipped
-(`missed_by_reason.compute_busy`) — never queued. A worker exception is
+`run_live_inference` task, and at most one scoring job is in flight. If a job
+is still running when the next deadline arrives, the new snapshot is retained
+in a depth-one newest-wins queue; displacing an older pending snapshot counts
+`missed_by_reason.compute_busy`. A worker exception is
 logged, counted (`compute_failures`), and the loop continues. On stop the
 in-flight job is awaited for up to `max(interval, 1 s)`, then the executor is
 shut down; the shutdown test asserts no `canary-inference` thread survives.
 If a forward pass outlives that bound the executor is released without
 waiting and a warning names it — a thread cannot be cancelled mid-pass.
 
-A `compute_busy` skip skips the whole tick, including `source.tick()`, so the ring buffer receives no row for that period. That is the same effective cadence loss the pre-C08 loop suffered as drift, now counted and reported rather than silently accumulated; the next tick's row carries a real time gap.
+Feature construction has its own persistent
+`ProcessPoolExecutor(max_workers=1)`. A process failure or timeout disables
+that executor and recomputes the affected tick in a thread, preserving state
+progression while keeping the failure non-fatal. Normal shutdown joins both
+owned executors.
 
 ### GIL note — thread offload is not CPU parallelism
 
@@ -244,7 +254,7 @@ interval_seconds, ticks_scheduled, ticks_completed,
 missed_ticks, missed_by_reason{overrun, compute_busy},
 stale_results_discarded, compute_failures,
 lateness{count, median_ms, p95_ms, max_ms, last_ms},
-stages{feature, publish_derived, behavior, snapshot, isolation_forest,
+stages{feature, feature_wait, publish_derived, behavior, snapshot, isolation_forest,
        sequence, compute, compute_wait, apply, loop_occupancy, total}
 ```
 
@@ -329,13 +339,12 @@ stub models were invisible to the child, so tick 0 blocked and every later
 tick skipped as `compute_busy`. Deployments whose models come from disk opt
 in.
 
-### What this does *not* fix
+### What feature-process isolation does *not* fix
 
-`loop_occupancy` is unchanged. The feature build (`source.tick()`, 332 ms
-median / 22 s max on the Pi) still runs on the event loop inside phase 1,
-because the ring buffer it reads is fed by `observe()` on the loop. That is
-the remaining source of `overrun` misses (177 of the 312 in the measurement
-above), as distinct from `compute_busy` misses (135), which this change
-addresses. Moving it means moving the ring buffer — and the behavior
-detector, which reads `source.latest_operating_point` — into the child too.
-That is a larger change and is not attempted here.
+The child still recomputes the bounded rolling frame. D01.4 removes that
+Python/pandas work from event-loop occupancy; it does not reduce total feature
+CPU or the cost of copying the bounded snapshot into the child. Hardware
+validation therefore compares both `feature_wait` (elapsed transform/IPC) and
+`loop_occupancy` (parent work), plus collection rate and HTTP latency. A later
+incremental feature engine is justified only if worker CPU becomes the measured
+constraint; it must preserve the shared train/serve transform contract.

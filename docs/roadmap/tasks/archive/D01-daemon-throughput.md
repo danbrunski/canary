@@ -327,15 +327,17 @@ the window again.
   the two. Every miss the truck recorded was `compute_busy`, which is what
   this removes. Measure it on the next drive before quoting a figure._
 
-- [ ] D01.4 Get the feature build off the event loop. `source.tick()` runs
-  in phase 1 on the loop at **332 ms median / 22 s max**, which is
-  `loop_occupancy` almost entirely and the source of the `overrun` misses
-  D01.1 does not address. It cannot simply move to a thread — it is
-  Python-level pandas (hence the `DataFrame is highly fragmented` warning)
-  and holds the GIL. Moving it means moving the ring buffer that `observe()`
-  feeds, and the behavior detector that reads
-  `source.latest_operating_point`, into the child as well. Design it before
-  building it; this is the larger half of the problem.
+- [~] D01.4 Get the feature build off the event loop — implemented 2026-09-18;
+  hardware measurement remains. `LiveFeatureSource` now splits loop-owned
+  snapshot/apply state from the pure shared transform. One persistent spawned
+  process runs `featurize_wide_frame` over the bounded snapshot and returns
+  only the newest feature row and operating point; replay resets invalidate an
+  in-flight old-generation result. This preserves train/serve parity and keeps
+  `observe`, trip integrals and behavior side effects serialized without a
+  per-record IPC path. `feature_wait` is recorded separately and excluded from
+  `loop_occupancy`. See the canonical D03 task for the remaining matched Pi
+  measurement; total transform CPU is unchanged because the rolling window is
+  still recomputed in the child.
 
 - [ ] D01.5 Always-draining CAN receive path. The daemon loses **6.6 %** of
   broadcast frames at its socket (kernel counted 110,327 in 60 s, the daemon

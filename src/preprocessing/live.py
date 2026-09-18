@@ -65,7 +65,7 @@ from src.decode.dids import (
     DidMap,
     decode_raw_did_reading,
 )
-from src.preprocessing.feature_pipeline import featurize_wide_frame
+from src.preprocessing.feature_pipeline import FeaturizedFrame, featurize_wide_frame
 from src.preprocessing.features import FeatureConfig
 from src.preprocessing.quality_gate import is_physically_valid
 from src.preprocessing.resampler import ResampleConfig, gap_column, is_slow_channel
@@ -81,6 +81,58 @@ from src.telemetry import (
 )
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PreparedLiveTick:
+    """Immutable input to the expensive, pure live feature transform.
+
+    Constructed on the event loop after one telemetry snapshot is appended.
+    It captures the exact config/model references for this tick so a hot reload
+    cannot make preparation and computation observe different generations.
+    """
+
+    now: datetime
+    wide: pd.DataFrame
+    config: CanaryConfig
+    behavior_models: BehaviorModels | None
+    feature_config: FeatureConfig
+    generation: int
+
+
+@dataclass(frozen=True)
+class BuiltLiveTick:
+    """Compact result returned by the feature worker process."""
+
+    feature_row: pd.DataFrame | None
+    operating_point: dict[str, Any]
+    segmenter_fell_back: bool
+
+
+def build_prepared_live_tick(prepared: PreparedLiveTick) -> BuiltLiveTick:
+    """Run the train-identical transform, returning only its newest rows.
+
+    Module-level and side-effect-free so ``spawn`` can import and execute it
+    in a persistent process. The full rolling frames never cross back to the
+    daemon; only the two newest rows needed by inference and behavior do.
+    """
+    result: FeaturizedFrame = featurize_wide_frame(
+        prepared.wide,
+        prepared.config,
+        behavior_models=prepared.behavior_models,
+        feature_config=prepared.feature_config,
+    )
+    operating_point = {
+        str(key): value for key, value in result.operating_frame.iloc[-1].to_dict().items()
+    }
+    feature_row = (
+        None if result.features.empty else result.features.iloc[[-1]].reset_index(drop=True)
+    )
+    return BuiltLiveTick(
+        feature_row=feature_row,
+        operating_point=operating_point,
+        segmenter_fell_back=result.segmenter_fell_back,
+    )
 
 
 @dataclass
@@ -131,6 +183,10 @@ class LiveFeatureSource:
     #: threshold since slow sensors (coolant/IAT/baro) legitimately update
     #: far less often.
     _slow_max_gap_seconds: float = field(init=False)
+    #: Replay/session reset generation. A feature process can finish after a
+    #: reset because the loop remains responsive while it works; tagging the
+    #: snapshot makes that stale result impossible to apply to the new run.
+    _generation: int = field(init=False, default=0)
 
     #: Last wide-row operating point (raw channels + ``operating_mode`` +
     #: ``deviation:*``) from :meth:`tick`. The daemon reads this to compute
@@ -414,6 +470,18 @@ class LiveFeatureSource:
         downstream detector. The returned frame's index is reset; row index
         0 is the only row.
         """
+        prepared = self.prepare_tick(now)
+        if prepared is None:
+            return None
+        return self.apply_built_tick(prepared, build_prepared_live_tick(prepared))
+
+    def prepare_tick(self, now: datetime) -> PreparedLiveTick | None:
+        """Snapshot loop-owned state and append one row to the ring buffer.
+
+        This is deliberately cheap and contains every mutation that must stay
+        serialized with :meth:`observe`. The returned value is self-contained
+        and safe to pickle to the persistent feature process.
+        """
         if not self._current_values:
             self.latest_operating_point = None
             return None
@@ -439,40 +507,41 @@ class LiveFeatureSource:
 
         wide = pd.DataFrame(list(self._buffer))
         wide["timestamp"] = pd.to_datetime(wide["timestamp"], utc=True)
-
-        # Identical transform to the offline batch path — same
-        # segment_or_constant → append_deviation_columns → compute_features —
-        # via the one shared builder so the two can never schema-diverge by
-        # hand (7.1). The segmenter falls back to a constant "all" mode when
-        # the operating-mode signal columns aren't present yet, matching the
-        # offline pipeline's behavior on no-OBD captures.
-        result = featurize_wide_frame(
-            wide,
-            self.config,
+        return PreparedLiveTick(
+            now=now_utc,
+            wide=wide,
+            config=self.config,
             behavior_models=self.behavior_models,
             feature_config=self._feature_config,
+            generation=self._generation,
         )
-        self.last_segmenter_fallback = result.segmenter_fell_back
+
+    def apply_built_tick(
+        self, prepared: PreparedLiveTick, built: BuiltLiveTick
+    ) -> pd.DataFrame | None:
+        """Apply a worker result to loop-owned state and return its feature row."""
+        if prepared.generation != self._generation:
+            log.info(
+                "discarding live feature result from generation %d; current generation is %d",
+                prepared.generation,
+                self._generation,
+            )
+            return None
+        self.last_segmenter_fallback = built.segmenter_fell_back
 
         # Stash the row the behavior decoder consumes (raw input channels +
         # operating_mode + deviation:*) from the pre-feature operating frame,
         # so the live overlay still updates on ticks where compute_features
         # yields nothing yet (warmup window not full).
-        self.latest_operating_point = {
-            str(k): v for k, v in result.operating_frame.iloc[-1].to_dict().items()
-        }
+        self.latest_operating_point = built.operating_point
         # Session-scoped trip integrals (Task 1.3) — accumulated here, not
         # via a cumsum over ``framed``/``featured`` (those are windows of the
         # ring buffer, not the whole session; see the docstring on
         # ``_trip_distance_km`` above).
         self.latest_derived_channels = self._accumulate_derived_integrals(
-            now_utc, self.latest_operating_point
+            prepared.now, self.latest_operating_point
         )
-
-        featured = result.features
-        if featured.empty:
-            return None
-        return featured.iloc[[-1]].reset_index(drop=True)
+        return built.feature_row
 
     def _accumulate_derived_integrals(
         self, now: datetime, point: dict[str, Any]
@@ -630,6 +699,7 @@ class LiveFeatureSource:
         so the source is immediately usable again after this call — it just
         starts from an empty history, same as a freshly constructed one.
         """
+        self._generation += 1
         self._current_values = {}
         self._last_observed_at = {}
         self._reject_counts = {}
@@ -705,4 +775,9 @@ def _decode_signal_raw(signal: Signal, payload: bytes) -> int | None:
     return int.from_bytes(payload[signal.byte_start : end], byteorder=signal.byte_order)
 
 
-__all__ = ["LiveFeatureSource"]
+__all__ = [
+    "BuiltLiveTick",
+    "LiveFeatureSource",
+    "PreparedLiveTick",
+    "build_prepared_live_tick",
+]

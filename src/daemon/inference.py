@@ -5,7 +5,7 @@ import logging
 import math
 import time
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,7 +46,7 @@ from src.preprocessing.feature_pipeline import (
     FeatureSpecReconciliation,
     reconcile_feature_frame_to_spec,
 )
-from src.preprocessing.live import LiveFeatureSource
+from src.preprocessing.live import LiveFeatureSource, build_prepared_live_tick
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, TelemetryRecord, channel_key, channel_of
@@ -68,6 +68,9 @@ log = logging.getLogger(__name__)
 #: Thread-name prefix of the one inference worker, so a test can assert the
 #: executor was shut down and no thread leaked (C08.10).
 INFERENCE_WORKER_THREAD_PREFIX = "canary-inference"
+FEATURE_BUILD_TIMEOUT_TICKS = 3.0
+FEATURE_BUILD_MIN_TIMEOUT_SECONDS = 2.0
+FEATURE_BUILD_STARTUP_TIMEOUT_SECONDS = 15.0
 
 #: Vehicle states IF/LSTM are allowed to score in (Phase 1.5). ``replay``
 #: re-emits real running-vehicle data through the live pipeline, so it scores
@@ -585,6 +588,10 @@ class _TickRequest:
     #: ``total`` and ``loop_occupancy`` stages.
     snapshot_started: float
     snapshot_seconds: float
+    #: Time actually spent executing Python on the daemon loop. When feature
+    #: construction runs in its child, ``snapshot_seconds`` includes the
+    #: await but this value deliberately does not.
+    snapshot_loop_seconds: float
 
     @property
     def needs_worker(self) -> bool:
@@ -630,14 +637,17 @@ def _compute_tick(request: _TickRequest) -> _TickResult:
 class LiveInferencePipeline:
     """The per-tick body of :func:`run_live_inference` (C08.4/C08.5/C08.6).
 
-    Three phases, two owners:
+    Four phases, three execution contexts:
 
-    1. **snapshot** (loop) — ``source.tick(now)``, derived-channel
+    1. **prepare** (loop) — snapshot observations into the bounded ring.
+    2. **feature** (persistent spawned process in production) — run the exact
+       shared pandas transform, then apply its compact result on the loop.
+    3. **snapshot** (loop) — derived-channel
        publication, vehicle-state gate, autotag, behavior residuals, and each
        detector's ``prepare``; the result is an immutable :class:`_TickRequest`
        tagged with the current :class:`GenerationToken`.
-    2. **compute** (the one worker thread) — :func:`_compute_tick`, pure.
-    3. **apply** (loop) — discard if the generation changed, else each
+    4. **compute/apply** — :func:`_compute_tick` in the scoring worker, then
+       discard on the loop if the generation changed, else each
        detector's ``apply`` (health, ``/ws/scores``, persistence, emits) and
        fusion.
 
@@ -647,8 +657,9 @@ class LiveInferencePipeline:
     score (no model loaded, gated vehicle state, no row) applies inline
     without touching the worker.
 
-    ``wall_clock`` and ``executor`` are injectable for tests; production uses
-    ``datetime.now(UTC)`` and an owned single-thread executor.
+    ``wall_clock`` and both executors are injectable for tests; production
+    uses ``datetime.now(UTC)``, an owned scoring thread and one owned feature
+    process.
     """
 
     def __init__(
@@ -661,6 +672,8 @@ class LiveInferencePipeline:
         executor: ThreadPoolExecutor | None = None,
         wall_clock: Callable[[], datetime] | None = None,
         worker: InferenceWorker | None = None,
+        feature_executor: Executor | None = None,
+        own_feature_executor: bool = False,
     ) -> None:
         self._source = source
         self._components = components
@@ -696,6 +709,9 @@ class LiveInferencePipeline:
         #: ``None`` keeps every pass in this process — what tests get, and
         #: any host where the child could not start.
         self._worker = worker
+        self._feature_executor = feature_executor
+        self._owns_feature_executor = own_feature_executor
+        self._feature_executor_ready = False
 
     def _worker_tick(self, request: _TickRequest) -> WorkerTick:
         """The portable half of a request: the row and the two versions.
@@ -792,7 +808,47 @@ class LiveInferencePipeline:
         snapshot_started = time.perf_counter()
         now = self._wall_clock()
         stage_started = time.perf_counter()
-        row = source.tick(now)
+        feature_wait_seconds = 0.0
+        if self._feature_executor is None:
+            # Exact legacy path for single-process debugging and tests that
+            # instrument/replace ``tick`` as their public seam.
+            row = source.tick(now)
+        else:
+            prepared = source.prepare_tick(now)
+            if prepared is None:
+                row = None
+            if prepared is not None:
+                loop = asyncio.get_running_loop()
+                wait_started = time.perf_counter()
+                try:
+                    future = loop.run_in_executor(
+                        self._feature_executor, build_prepared_live_tick, prepared
+                    )
+                    built = await asyncio.wait_for(
+                        future,
+                        timeout=(
+                            max(
+                                FEATURE_BUILD_MIN_TIMEOUT_SECONDS,
+                                self._interval_seconds * FEATURE_BUILD_TIMEOUT_TICKS,
+                            )
+                            if self._feature_executor_ready
+                            else FEATURE_BUILD_STARTUP_TIMEOUT_SECONDS
+                        ),
+                    )
+                    self._feature_executor_ready = True
+                except Exception:  # noqa: BLE001 — live inference is best-effort
+                    log.exception(
+                        "live feature worker failed for tick %d; falling back to a thread",
+                        slot.index,
+                    )
+                    self._disable_feature_executor()
+                    # A degraded tick must still preserve state progression. This
+                    # fallback is rare; it stays off the event loop, though Python
+                    # GIL contention may make it slower than the process path.
+                    built = await asyncio.to_thread(build_prepared_live_tick, prepared)
+                feature_wait_seconds = time.perf_counter() - wait_started
+                recorder.record_stage("feature_wait", feature_wait_seconds)
+                row = source.apply_built_tick(prepared, built)
         recorder.record_stage("feature", time.perf_counter() - stage_started)
         timestamp_str: str | None = None
         operating_mode: str | None = None
@@ -862,6 +918,7 @@ class LiveInferencePipeline:
         residuals = tuple(self._behavior.prepare(row, ctx))
         recorder.record_stage("behavior", time.perf_counter() - stage_started)
         snapshot_seconds = time.perf_counter() - snapshot_started
+        snapshot_loop_seconds = max(0.0, snapshot_seconds - feature_wait_seconds)
         recorder.record_stage("snapshot", snapshot_seconds)
         return _TickRequest(
             slot=slot,
@@ -872,6 +929,7 @@ class LiveInferencePipeline:
             behavior_residuals=residuals,
             snapshot_started=snapshot_started,
             snapshot_seconds=snapshot_seconds,
+            snapshot_loop_seconds=snapshot_loop_seconds,
         )
 
     async def _compute_and_apply(self, request: _TickRequest) -> None:
@@ -947,7 +1005,7 @@ class LiveInferencePipeline:
         finished = time.perf_counter()
         apply_seconds = finished - apply_started
         recorder.record_stage("apply", apply_seconds)
-        recorder.record_stage("loop_occupancy", request.snapshot_seconds + apply_seconds)
+        recorder.record_stage("loop_occupancy", request.snapshot_loop_seconds + apply_seconds)
         recorder.record_stage("total", finished - request.snapshot_started)
         recorder.note_tick_completed()
 
@@ -999,9 +1057,28 @@ class LiveInferencePipeline:
                 )
                 if self._owns_executor:
                     self._executor.shutdown(wait=False, cancel_futures=True)
+                self._disable_feature_executor()
                 return
         if self._owns_executor:
             self._executor.shutdown(wait=True, cancel_futures=True)
+        if self._owns_feature_executor and self._feature_executor is not None:
+            self._feature_executor.shutdown(wait=True, cancel_futures=True)
+            self._feature_executor = None
+
+    def _disable_feature_executor(self) -> None:
+        """Drop a failed owned feature process without blocking the loop."""
+        executor = self._feature_executor
+        self._feature_executor = None
+        if executor is None or not self._owns_feature_executor:
+            return
+        process_map = getattr(executor, "_processes", None)
+        processes = list((process_map or {}).values())
+        executor.shutdown(wait=False, cancel_futures=True)
+        for process in processes:
+            try:
+                process.terminate()
+            except Exception:  # noqa: BLE001 — already gone is the goal
+                log.debug("feature worker already exited", exc_info=True)
 
 
 def _utc_now() -> datetime:
@@ -1050,8 +1127,9 @@ async def run_live_inference(
     is ``tick_seconds`` regardless of how long a tick's work takes, an
     overrun skips to the next future deadline (counted, never a catch-up
     burst), and the expensive IF/sequence forward passes run in one owned
-    worker thread while ``LiveFeatureSource``, broadcasts, persistence and
-    emits stay on the loop (:class:`LiveInferencePipeline`). Timing and
+    worker thread while the GIL-heavy feature transform runs in a persistent
+    spawned process. ``LiveFeatureSource`` mutation, broadcasts, persistence
+    and emits stay on the loop (:class:`LiveInferencePipeline`). Timing and
     overload counters land in ``components.inference_timing`` (``/status``
     ``detectors.inference``). ``tick_seconds`` is the *model* cadence — it is
     derived from ``resample_hz`` and independent of any collection rate
@@ -1076,8 +1154,15 @@ async def run_live_inference(
         )
     recorder = components.inference_timing
     worker = _start_inference_worker(components, tick_seconds=interval)
+    feature_executor = _start_feature_executor(components)
     pipeline = LiveInferencePipeline(
-        source, components, interval_seconds=interval, recorder=recorder, worker=worker
+        source,
+        components,
+        interval_seconds=interval,
+        recorder=recorder,
+        worker=worker,
+        feature_executor=feature_executor,
+        own_feature_executor=feature_executor is not None,
     )
     scheduler = TickScheduler(interval, recorder=recorder)
     try:
@@ -1115,6 +1200,19 @@ def _start_inference_worker(
     if not worker.start():
         return None
     return worker
+
+
+def _start_feature_executor(components: DaemonComponents) -> Executor | None:
+    """Create the one persistent process that owns pandas feature builds."""
+    if not components.config.models.out_of_process_feature_build:
+        return None
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    return ProcessPoolExecutor(
+        max_workers=1,
+        mp_context=multiprocessing.get_context("spawn"),
+    )
 
 
 def _build_sequence_engine(loaded: Any, *, suppress_channels: tuple[str, ...] = ()) -> Any:

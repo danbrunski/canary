@@ -266,6 +266,11 @@ models:
   # that holds (the Pi) once D01.3 has validated it on hardware —
   # docs/roadmap/tasks/D01-daemon-throughput.md.
   out_of_process_scoring: false
+  # Production defaults this to true: the rolling pandas feature transform
+  # runs in one persistent child so it cannot occupy the collection loop.
+  # This example keeps it false for simple single-process development; the Pi
+  # should omit the key or set it true.
+  out_of_process_feature_build: false
   isolation_forest:
     enabled: true
     n_estimators: 200
