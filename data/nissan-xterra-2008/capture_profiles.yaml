@@ -370,3 +370,65 @@ profiles:
   corpus_eligible: false
   behavior_model_recipes: []
   storage_prefix: _capture-fuel-pw-research
+# D03.8 + D03.9 matched-air-charge test and injector dead time, saved live on
+# the Pi 2026-09-18 20:05Z from the road and mirrored here (field-for-field the
+# PUT body). fuel-pw-research plus module voltage (4 Hz) for the idle
+# electrical-load step and IAT/baro/fuel trims for the 0x1206 curvature question
+# (2026-09-18-pm-next-drive-deploy-plan.md).
+- name: fuel-pw-research-2
+  description: 'Research (2026-09-18 eve): fuel-pw-research plus module voltage (0x42, 4 Hz,
+    idle dead-time step), IAT/baro/LTFT (1 Hz) and STFT (2 Hz) for the 0x1206 matched-air-charge
+    test (D03.9) beside 0x1134 vs 0x44 (D03.8)'
+  experimental: true
+  mode01:
+    RPM: 1.0
+    MAF: 1.0
+    COMMANDED_EQUIV_RATIO: 1.0
+    O2_WR_LAMBDA_S1: 1.0
+    FUEL_STATUS: 1.0
+    ENGINE_LOAD: 1.0
+    TIMING_ADVANCE: 1.0
+    CONTROL_MODULE_VOLTAGE: 1.0
+    INTAKE_TEMP: 0.25
+    BAROMETRIC_PRESSURE: 0.25
+    SHORT_FUEL_TRIM_1: 0.5
+    LONG_FUEL_TRIM_1: 0.25
+  mode22:
+  - ECM_TARGET_EQUIV_RATIO_CANDIDATE
+  - ECM_RPM
+  - ECM_AF_SENSOR_V_B1
+  - ECM_INJECTOR_PW_B1
+  - ECM_INTAKE_PRESSURE_1206
+  - ECM_INTAKE_PRESSURE_1207
+  - ECM_THROTTLE_POS_SENSOR_1
+  mode22_rate_weights:
+    ECM_TARGET_EQUIV_RATIO_CANDIDATE: 0.5
+    ECM_RPM: 0.5
+    ECM_AF_SENSOR_V_B1: 0.5
+    ECM_INJECTOR_PW_B1: 0.5
+    ECM_INTAKE_PRESSURE_1206: 0.5
+    ECM_INTAKE_PRESSURE_1207: 0.5
+    ECM_THROTTLE_POS_SENSOR_1: 0.5
+  mode01_enabled: true
+  mode22_enabled: true
+  did_interval_seconds: null
+  did_cycle_seconds: 0.5
+  round_timestamps: true
+  target_rate_hz: 4.0
+  did_continuous: false
+  bus_budget_override: 90.0
+  priority_channels: null
+  expected_total_demand_hz: 51.0
+  capacity_evidence: 'Derived from fuel-pw-research (2026-09-18 PM, 18.8 min, 0 drops): 8
+    Mode 01 PIDs x 4 Hz + 4 slow PIDs (5 Hz total) + 7 DIDs x 2 Hz = 51 channel reads/s at
+    unchanged 90 req/s budget. Replace with this revision own evidence.'
+  required_tuple: []
+  min_achieved_rate_hz: null
+  max_tuple_skew_s: null
+  requires_tune_revision: true
+  builtin_revision: 0
+  operator_modified: true
+  broadcast_decode: true
+  corpus_eligible: false
+  behavior_model_recipes: []
+  storage_prefix: _capture-fuel-pw-research-2
