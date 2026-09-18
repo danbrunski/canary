@@ -3,10 +3,43 @@
 _State file for the second /loop drive of the day. Resume from here; don't redo work._
 _Morning drive: `2026-09-18-drive-log.md`. Plan: `2026-09-18-next-drive-deploy-plan.md`._
 
+## Summary
+
+**Run: 2026-09-18, 17:45Z to ~18:55Z, ~75 min of driving from 2,880 m up to 3,354 m and down to ~2,000 m.** Wrap-up requested by the operator at ~18:51Z. One isolated capture block (18.8 min, 1/4 of driving), two planned restarts, **0 dropped records all drive**. No code deployed.
+
+### The OUTCOME: advanced, not closed
+| claim | state | evidence |
+|---|---|---|
+| D03.9 0x1208 = air charge | **PASS** (pre-registered), 3rd independent replication | rich rows −16.6 % vs closed-loop refit (band −14..−18); per g air +0.8 % (band ±2); n 6 gated / 38 ungated |
+| D03.8 0x1134 = φ × 64 | **unresolved, consistent**; falsifier did not fire | first values off 64 (raw 73–79); 10 enriched pairs, residual −0.0078 (½ quantum); bar is ≥ 30 pairs from ≥ 3 holds and only 2 holds happened |
+| D03.9 0x1206/0x1207 = injected pulse | **unresolved: the pre-registered test was ill-posed** | the straight line was fit on idle rows and extrapolated. Closed loop and rich both land +6.2 % off it. Desk: the relation is convex in air charge, and one curve fits both sessions. Post hoc against that curve: rich −3.4 %, still extrapolated |
+| D04.3 transport delay | tip-in **~500 ms ± 250** (one clear minimum); lift unresolved | 5+5 untagged transients; resolution limited by the shared Mode 01 batch |
+| D04.2 DFCO boundary | table produced, analysis partial | 32 coasts; the floor is 0x1206 at 54–58 counts (the task text was corrected); gear groups visible, not yet assigned |
+| D04.8 baro vs altitude (free) | 9 kPa span in one session (bar 10) | `2026-09-18T180630`, 70 → 79 kPa, pulled |
+| THIS DRIVE: stalls inside holds | **0 of 6 stalls** fell inside the 2 holds; 0 enriched s lost | luck at ~1.3 % stall time; D03.18 is still owed |
+
+### Beliefs verified or falsified
+- **Falsified:** "the Pi was powered off after the morning drive". The keepalive held it up on battery (For the operator 1).
+- **Falsified:** "the 0x1206 closed-loop line is 27,747 counts/g + 41". That's valid only near idle; the relation is convex in air charge.
+- **Falsified (mine, mid-drive):** "no enrichment yet" at 17:56Z/18:01Z. My live view started after both holds. `drive.md` now says a live view is steering only.
+- **Verified:** batching healthy after two warm restarts (max_pids 6, 0 narrowings). The key-off *boot* is still unobserved.
+
+### Commits
+`f401053` (log, block analysis, roadmap D03.8/D03.9/D04.2/D04.3/D04.8, next-drive plan, `drive.md` lessons), plus the final wrap-up commit.
+
+### Candidates (not bindings)
+Unchanged: 0x1134 = target φ (raw/64); 0x1206/0x1207 = injector pulse B1/B2. The "0x1208 = air charge" re-description awaits operator sign-off.
+
+### Next drive
+`data/analyses/2026-09-18-pm-next-drive-deploy-plan.md`: ≥ 3 WOT holds ≥ 10 s **plus closed-loop holds at WOT-level air charge in the same capture**; a split-batch profile with 0x42/0x0F/0x33/0x06/0x07; an idle electrical-load step; tagged coasts. D03.18 first.
+
+### Preserved
+Sessions: `~/canary-data/sessions-0918/` (all of today's closed sessions, both captures). Pollers and scripts: `~/canary-data/drive-0918pm/`, `~/canary-data/scripts-0918b/`.
+
 ## Glance
-- **Still driving past the stated 60 min (18:37Z, 86 km/h).** The 18:28Z restart covers the digest only if you park by ~18:42Z. **Say "parking in 10"** and I'll restart once more.
-- **Block 1 results:** 0x1208 = air charge **PASSES** (3rd replication). 0x1134 is consistent but short (10/30 pairs). 0x1206 is unresolved (the pre-registered line was ill-posed; one convex curve fits both sessions). D04.3 tip-in ~500 ± 250 ms. 32 coasts for D04.2. The descent gave a 9 kPa baro span in one session (the bar is 10).
-- Health clean all drive: 0 drops, 0 stalls inside holds. Every closed session from today is on the laptop.
+- **Drive wrapping up (operator, 18:51Z).** Restarted at 18:51:06Z so the final session (`2026-09-18T185113`) is small enough for its trip-end digest. Keepalive is 25 min (expires ~19:16Z), so the Pi shuts down on its own after parking.
+- **Results:** 0x1208 = air charge PASSES; 0x1134 is consistent (10/30 pairs); 0x1206 is unresolved (ill-posed line; the next plan fixes the test); D04.3 tip-in ~500 ± 250 ms.
+- Next drive: `2026-09-18-pm-next-drive-deploy-plan.md`. Decisions for you are below.
 
 ## For the operator
 1. **The Pi was never powered off after the morning drive.** The 330-min keepalive
@@ -18,6 +51,7 @@ _Morning drive: `2026-09-18-drive-log.md`. Plan: `2026-09-18-next-drive-deploy-p
    - **Change:** disarm the keepalive at the end of a drive (I'll do it at wrap-up
      when you say you're parking). It costs nothing, and the UPS then shuts down
      cleanly on input loss.
+   - **Done at wrap-up:** keepalive cut to 25 min at 18:51Z instead of disarmed, so the digest runs after parking.
    - Consequence: the key-off **boot** check (D03.19's last unverified path) can't
      run today. There's been no boot since the fix.
 3. **One more short capture past the ⅓ budget?** Block 1 used 18.8 min of a 60-min drive. D03.8 needs ≥ 30 enriched pairs from ≥ 3 pulls and has 10 from 2. Three more 10-s holds would likely close it.
@@ -131,3 +165,6 @@ to them. That counts D03.18's cost against this experiment directly.
 - 18:30Z Pulled `2026-09-18T180630` (32 MB). **Baro in that one session: 70 → 79 kPa (9 kPa, 67 samples)** over 3,079 → 2,104 m.
 - 18:32Z Roadmap updated: D03.8 and D03.9 notes; D04.2 `[ ]`→`[~]` (the text's fuel-cut register corrected to 0x1206); D04.3 `[ ]`→`[~]`; D04.8 note.
 - 18:40Z Next-drive plan written: `data/analyses/2026-09-18-pm-next-drive-deploy-plan.md`. It replaces the 0x1206 straight-line criterion with a matched-air-charge test (written before any such data), and adds a split-batch profile for D04.3 plus an idle dead-time step. `drive.md` gained three lessons: the keepalive holds the Pi up after key-off, the stale drive window, and a live view is steering only.
+- 18:51:06Z **Operator: "drive's over soon, wrap everything up."** Restart #2 (`sudo -n systemctl restart canary`), healthy in 7 s. Window reopened as `b61e7d16374e4a8fbfa53e3982ba3875` on `2026-09-18T185113`; keepalive 25 min. Batching 6 / 0 narrowings.
+- 18:52Z Pulled `2026-09-18T182827` (35 MB). Pollers and live JSONL, scripts and status snapshots copied to `~/canary-data/drive-0918pm/`. Stopped the Pi live logger. The status poller keeps running until parking (it's in `/tmp` and dies at shutdown).
+- Not done, and why: **the drive window on `185113` is still open.** Stopping it before parking would cut the window short. It's in-memory and dies with the Pi at keepalive expiry, which loses nothing: tags are persisted as they're written.
