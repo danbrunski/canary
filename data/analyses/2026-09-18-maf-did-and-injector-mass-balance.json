@@ -1,0 +1,5503 @@
+{
+ "generated": "2026-09-18",
+ "sessions": {
+  "b6": "_capture-tuning-hybrid-research-2026-09-17T184821",
+  "b7": "_capture-tuning-hybrid-research-2026-09-17T191712",
+  "b9": "_capture-tuning-hybrid-research-2026-09-17T201000"
+ },
+ "scripts": "/tmp/claude-1000/-home-dan-code-canary/c7235908-8433-44cd-982a-a4e2eb64b56b/scratchpad/{stepA,stepB,skew,medians,joinC,cell,semantics,stepC,uprev}.py",
+ "stepA_rpm_known_answer": {
+  "b6_300ms": {
+   "a": "obd:RPM",
+   "b": "did:ECM_RPM",
+   "n_pairs": 2377,
+   "r_squared": 0.9955012564128346,
+   "slope": 1.0072314009687147,
+   "offset": -13.716795486464166,
+   "slope_drift_pct": 0.786114574746428,
+   "scale_verdict": "stable",
+   "policy": {
+    "max_separation_s": 0.3,
+    "reference": "auto",
+    "tie_break": "earlier"
+   },
+   "reference": "b",
+   "timestamp_basis_a": "acquired",
+   "timestamp_basis_b": "acquired",
+   "unmatched_a": 2202,
+   "unmatched_b": 49,
+   "separation_median_s": 0.10860443115234375,
+   "separation_p95_s": 0.14242420196533204,
+   "separation_max_s": 0.28884124755859375,
+   "residual_bias": -9.212603568337264e-13,
+   "residual_spread": 23.16669665284974,
+   "difference_bias": 4.368742111905764,
+   "difference_spread": 23.298442800144766
+  },
+  "b6_150ms": {
+   "a": "obd:RPM",
+   "b": "did:ECM_RPM",
+   "n_pairs": 2307,
+   "r_squared": 0.9963983597461067,
+   "slope": 1.0069132812773616,
+   "offset": -12.623592857458783,
+   "slope_drift_pct": 0.7841038917683676,
+   "scale_verdict": "stable",
+   "policy": {
+    "max_separation_s": 0.15,
+    "reference": "auto",
+    "tie_break": "earlier"
+   },
+   "reference": "b",
+   "timestamp_basis_a": "acquired",
+   "timestamp_basis_b": "acquired",
+   "unmatched_a": 2272,
+   "unmatched_b": 119,
+   "separation_median_s": 0.10715484619140625,
+   "separation_p95_s": 0.1387195348739624,
+   "separation_max_s": 0.14989161491394043,
+   "residual_bias": 1.8124845649766092e-12,
+   "residual_spread": 20.61994899337073,
+   "difference_bias": 4.647811009969658,
+   "difference_spread": 20.753967731803574
+  },
+  "b7_300ms": {
+   "a": "obd:RPM",
+   "b": "did:ECM_RPM",
+   "n_pairs": 2616,
+   "r_squared": 0.9989325296629886,
+   "slope": 1.0001059038864797,
+   "offset": 3.3946633294595983,
+   "slope_drift_pct": 0.41820054987920086,
+   "scale_verdict": "stable",
+   "policy": {
+    "max_separation_s": 0.3,
+    "reference": "auto",
+    "tie_break": "earlier"
+   },
+   "reference": "b",
+   "timestamp_basis_a": "acquired",
+   "timestamp_basis_b": "acquired",
+   "unmatched_a": 2467,
+   "unmatched_b": 63,
+   "separation_median_s": 0.10238397121429443,
+   "separation_p95_s": 0.1496477723121643,
+   "separation_max_s": 0.29933834075927734,
+   "residual_bias": 2.63165907686169e-12,
+   "residual_spread": 24.33478325722872,
+   "difference_bias": 3.65730122324159,
+   "difference_spread": 24.33491093300355
+  },
+  "b7_150ms": {
+   "a": "obd:RPM",
+   "b": "did:ECM_RPM",
+   "n_pairs": 2486,
+   "r_squared": 0.9989446490437472,
+   "slope": 1.0004281622650202,
+   "offset": 2.52689647460849,
+   "slope_drift_pct": 0.36284985275459847,
+   "scale_verdict": "stable",
+   "policy": {
+    "max_separation_s": 0.15,
+    "reference": "auto",
+    "tie_break": "earlier"
+   },
+   "reference": "b",
+   "timestamp_basis_a": "acquired",
+   "timestamp_basis_b": "acquired",
+   "unmatched_a": 2597,
+   "unmatched_b": 193,
+   "separation_median_s": 0.10141575336456299,
+   "separation_p95_s": 0.1394326090812683,
+   "separation_max_s": 0.14966654777526855,
+   "residual_bias": 1.3678090572218566e-13,
+   "residual_spread": 24.289422468515184,
+   "difference_bias": 3.586886564762671,
+   "difference_spread": 24.2915279811314
+  },
+  "b9_300ms": {
+   "a": "obd:RPM",
+   "b": "did:ECM_RPM",
+   "n_pairs": 4664,
+   "r_squared": 0.9981806067512329,
+   "slope": 0.9950586086525569,
+   "offset": 15.943335620477365,
+   "slope_drift_pct": 0.7220225127664751,
+   "scale_verdict": "stable",
+   "policy": {
+    "max_separation_s": 0.3,
+    "reference": "auto",
+    "tie_break": "earlier"
+   },
+   "reference": "b",
+   "timestamp_basis_a": "acquired",
+   "timestamp_basis_b": "acquired",
+   "unmatched_a": 933,
+   "unmatched_b": 74,
+   "separation_median_s": 0.1157827377319336,
+   "separation_p95_s": 0.2172508120536804,
+   "separation_max_s": 0.2983376979827881,
+   "residual_bias": 3.1986367052275604e-12,
+   "residual_spread": 23.174932702207883,
+   "difference_bias": 4.473949399656947,
+   "difference_spread": 23.331179331511617
+  },
+  "b9_150ms": {
+   "a": "obd:RPM",
+   "b": "did:ECM_RPM",
+   "n_pairs": 4079,
+   "r_squared": 0.9987032812826657,
+   "slope": 0.9969670197071002,
+   "offset": 11.453448176908713,
+   "slope_drift_pct": 0.6778589537888582,
+   "scale_verdict": "stable",
+   "policy": {
+    "max_separation_s": 0.15,
+    "reference": "auto",
+    "tie_break": "earlier"
+   },
+   "reference": "b",
+   "timestamp_basis_a": "acquired",
+   "timestamp_basis_b": "acquired",
+   "unmatched_a": 1518,
+   "unmatched_b": 659,
+   "separation_median_s": 0.10547566413879395,
+   "separation_p95_s": 0.14237077236175538,
+   "separation_max_s": 0.14982056617736816,
+   "residual_bias": -1.5154993383458867e-12,
+   "residual_spread": 20.091694421292946,
+   "difference_bias": 4.412968864917872,
+   "difference_spread": 20.163174168126673
+  }
+ },
+ "stepB_unbanded_reference_auto": {
+  "b6": {
+   "a": "obd:MAF",
+   "b": "did:ECM_MAF_GPS",
+   "n_pairs": 2398,
+   "r_squared": 0.9094065914512354,
+   "slope": 0.9337644879211392,
+   "offset": 1.8902468833897095,
+   "slope_drift_pct": 6.979198761604362,
+   "scale_verdict": "drifting",
+   "policy": {
+    "max_separation_s": 0.3,
+    "reference": "auto",
+    "tie_break": "earlier"
+   },
+   "reference": "b",
+   "timestamp_basis_a": "acquired",
+   "timestamp_basis_b": "acquired",
+   "unmatched_a": 1522,
+   "unmatched_b": 14,
+   "separation_median_s": 0.11268484592437744,
+   "separation_p95_s": 0.17935211658477787,
+   "separation_max_s": 0.2991790771484375,
+   "residual_bias": -3.934948928646427e-15,
+   "residual_spread": 4.9198986069862904,
+   "difference_bias": -0.16156797331109188,
+   "difference_spread": 5.042617619241689
+  },
+  "b7": {
+   "a": "obd:MAF",
+   "b": "did:ECM_MAF_GPS",
+   "n_pairs": 2631,
+   "r_squared": 0.9610936079222923,
+   "slope": 0.9768385748936775,
+   "offset": 0.8562952445003672,
+   "slope_drift_pct": 0.07996565302914842,
+   "scale_verdict": "stable",
+   "policy": {
+    "max_separation_s": 0.3,
+    "reference": "auto",
+    "tie_break": "earlier"
+   },
+   "reference": "b",
+   "timestamp_basis_a": "acquired",
+   "timestamp_basis_b": "acquired",
+   "unmatched_a": 1758,
+   "unmatched_b": 52,
+   "separation_median_s": 0.11159825325012207,
+   "separation_p95_s": 0.1695948839187622,
+   "separation_max_s": 0.29140400886535645,
+   "residual_bias": -7.172943771109184e-15,
+   "residual_spread": 5.034346784156419,
+   "difference_bias": -0.009973394146711502,
+   "difference_spread": 5.069183946453959
+  },
+  "b9": {
+   "a": "obd:MAF",
+   "b": "did:ECM_MAF_GPS",
+   "n_pairs": 4892,
+   "r_squared": 0.9545214616547845,
+   "slope": 0.9816674737605106,
+   "offset": 0.5173698824690592,
+   "slope_drift_pct": 0.5746962629314136,
+   "scale_verdict": "stable",
+   "policy": {
+    "max_separation_s": 0.3,
+    "reference": "auto",
+    "tie_break": "earlier"
+   },
+   "reference": "b",
+   "timestamp_basis_a": "acquired",
+   "timestamp_basis_b": "acquired",
+   "unmatched_a": 681,
+   "unmatched_b": 104,
+   "separation_median_s": 0.10046696662902832,
+   "separation_p95_s": 0.18039027452468873,
+   "separation_max_s": 0.29695892333984375,
+   "residual_bias": -5.228850876403027e-16,
+   "residual_spread": 3.8140955443148936,
+   "difference_bias": -0.028593622240391813,
+   "difference_spread": 3.828029166889862
+  }
+ },
+ "stepB_banded_quasi_steady_and_plateaus": {
+  "b6": {
+   "unbanded_all": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 2381,
+    "r_squared": 0.8732758603592826,
+    "slope": 0.9286789577338227,
+    "offset": 2.26063276342836,
+    "slope_drift_pct": 2.736211844366722,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 1539,
+    "unmatched_b": 31,
+    "separation_median_s": 0.13023638725280762,
+    "separation_p95_s": 0.2833240032196045,
+    "separation_max_s": 0.29923319816589355,
+    "residual_bias": 2.0071862413785946e-14,
+    "residual_spread": 5.825024999944718,
+    "difference_bias": 0.06417051658966895,
+    "difference_spread": 5.942222127821139,
+    "label": "all rows",
+    "ratio_mean": 1.0214777241942958,
+    "ratio_p10": 0.9256180266900023,
+    "ratio_p90": 1.095617529880478,
+    "a_min": 4.43,
+    "a_max": 144.42
+   },
+   "unbanded_steady": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 950,
+    "r_squared": 0.9516386323359743,
+    "slope": 0.9701663982181641,
+    "offset": 0.8955639437738163,
+    "slope_drift_pct": 4.686824265328903,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 347,
+    "unmatched_b": 1462,
+    "separation_median_s": 0.13312554359436035,
+    "separation_p95_s": 0.27166281938552855,
+    "separation_max_s": 0.29919958114624023,
+    "residual_bias": 1.2864563215867078e-15,
+    "residual_spread": 3.590016184935207,
+    "difference_bias": -0.12568421052631507,
+    "difference_spread": 3.623263185417714,
+    "label": "quasi-steady |dlnMAF/dt|<=0.05/s",
+    "ratio_mean": 1.0002384294656155,
+    "ratio_p10": 0.9799807108358387,
+    "ratio_p90": 1.0204387552925345,
+    "a_min": 6.16,
+    "a_max": 141.75
+   },
+   "lag_rising": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 652,
+    "r_squared": 0.8369210846953915,
+    "slope": 0.9244446253031953,
+    "offset": 2.8307817516507816,
+    "slope_drift_pct": 3.357692854426528,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 182,
+    "unmatched_b": 1760,
+    "separation_median_s": 0.131117582321167,
+    "separation_p95_s": 0.2611308813095092,
+    "separation_max_s": 0.29804205894470215,
+    "residual_bias": 5.514334728444949e-15,
+    "residual_spread": 6.526406039400799,
+    "difference_bias": 0.7888803680981601,
+    "difference_spread": 6.637329813961925,
+    "label": "rising >10%/s",
+    "ratio_mean": 1.066866707488046,
+    "ratio_p10": 0.8642254481877124,
+    "ratio_p90": 1.296568078133132,
+    "a_min": 4.43,
+    "a_max": 133.88
+   },
+   "lag_falling": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 562,
+    "r_squared": 0.7680009746671441,
+    "slope": 0.8256639506637623,
+    "offset": 3.9696677153245696,
+    "slope_drift_pct": 15.27436748660488,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 154,
+    "unmatched_b": 1850,
+    "separation_median_s": 0.12550032138824463,
+    "separation_p95_s": 0.2456069946289059,
+    "separation_max_s": 0.29885005950927734,
+    "residual_bias": 2.022897468356157e-16,
+    "residual_spread": 7.885970642968352,
+    "difference_bias": -0.8089857651245546,
+    "difference_spread": 8.447878539509354,
+    "label": "falling >10%/s",
+    "ratio_mean": 0.9987596566086636,
+    "ratio_p10": 0.7798180314309346,
+    "ratio_p90": 1.195901627030032,
+    "a_min": 4.48,
+    "a_max": 144.42
+   },
+   "band_3_10": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 105,
+    "r_squared": 0.08077492492325111,
+    "slope": 1.9688881937897293,
+    "offset": -6.886442972009033,
+    "slope_drift_pct": 102.1354396202101,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 27,
+    "unmatched_b": 2307,
+    "separation_median_s": 0.13624143600463867,
+    "separation_p95_s": 0.25156407356262206,
+    "separation_max_s": 0.2919933795928955,
+    "residual_bias": -7.308439567818173e-15,
+    "residual_spread": 4.429256355301642,
+    "difference_bias": 0.4760000000000001,
+    "difference_spread": 4.47613430157254,
+    "label": "steady band 3-10",
+    "ratio_mean": 1.0560651775790584,
+    "ratio_p10": 0.9720962948634534,
+    "ratio_p90": 1.028160178329751,
+    "a_min": 6.16,
+    "a_max": 9.76
+   },
+   "band_10_20": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 44,
+    "r_squared": 0.23381713072588428,
+    "slope": 1.1826861686612182,
+    "offset": -1.9204901288325118,
+    "slope_drift_pct": 41.028203906326226,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 2,
+    "unmatched_b": 2368,
+    "separation_median_s": 0.13334500789642334,
+    "separation_p95_s": 0.21372723579406738,
+    "separation_max_s": 0.24084830284118652,
+    "residual_bias": -2.34156128830033e-15,
+    "residual_spread": 6.120582275110637,
+    "difference_bias": 0.9875,
+    "difference_spread": 6.142825129220416,
+    "label": "steady band 10-20",
+    "ratio_mean": 1.0571505448504963,
+    "ratio_p10": 0.8300476244656471,
+    "ratio_p90": 1.2332354707763116,
+    "a_min": 10.02,
+    "a_max": 19.88
+   },
+   "band_20_40": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 567,
+    "r_squared": 0.7081902616844991,
+    "slope": 0.9820173226546833,
+    "offset": 0.5126769901562273,
+    "slope_drift_pct": 2.0122815736299584,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 214,
+    "unmatched_b": 1845,
+    "separation_median_s": 0.1331021785736084,
+    "separation_p95_s": 0.27581918239593495,
+    "separation_max_s": 0.2969493865966797,
+    "residual_bias": -1.8346288627033274e-14,
+    "residual_spread": 2.568203274054942,
+    "difference_bias": -0.0731393298059958,
+    "difference_spread": 2.569248070399951,
+    "label": "steady band 20-40",
+    "ratio_mean": 0.9981317577351385,
+    "ratio_p10": 0.9813731310883782,
+    "ratio_p90": 1.0176929755286266,
+    "a_min": 20.06,
+    "a_max": 39.96
+   },
+   "band_40_60": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 197,
+    "r_squared": 0.864144737988128,
+    "slope": 1.0474637771284876,
+    "offset": -2.2981652499480267,
+    "slope_drift_pct": 14.68229130776471,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 85,
+    "unmatched_b": 2215,
+    "separation_median_s": 0.13300442695617676,
+    "separation_p95_s": 0.2817047119140625,
+    "separation_max_s": 0.29919958114624023,
+    "residual_bias": -8.27764253080929e-15,
+    "residual_spread": 2.1829372198453743,
+    "difference_bias": -0.07329949238578594,
+    "difference_spread": 2.1971459975772647,
+    "label": "steady band 40-60",
+    "ratio_mean": 0.9979523503288783,
+    "ratio_p10": 0.9838093211321558,
+    "ratio_p90": 1.0133665631884061,
+    "a_min": 40.0,
+    "a_max": 59.93
+   },
+   "band_60_90": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 33,
+    "r_squared": 0.9016865954890616,
+    "slope": 0.9100056900905079,
+    "offset": 5.721818921403013,
+    "slope_drift_pct": 125.13449919261154,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 10,
+    "unmatched_b": 2379,
+    "separation_median_s": 0.12502121925354004,
+    "separation_p95_s": 0.23330717086791988,
+    "separation_max_s": 0.24586844444274902,
+    "residual_bias": -4.973799150320701e-14,
+    "residual_spread": 1.8031991542709653,
+    "difference_bias": -0.4490909090909078,
+    "difference_spread": 1.8823347263541006,
+    "label": "steady band 60-90",
+    "ratio_mean": 0.9940214510086209,
+    "ratio_p10": 0.9821985678117474,
+    "ratio_p90": 1.010053895472451,
+    "a_min": 60.66,
+    "a_max": 84.89
+   },
+   "band_90_200": {
+    "label": "steady band 90-200",
+    "refused": "obd:MAF vs did:ECM_MAF_GPS: only 10 aligned pairs within 300 ms (need 30; 13 and 2412 observations, 3/2402 unmatched). The series may not overlap in time, or the tolerance may be tighter than the slow"
+   },
+   "plateaus": [
+    {
+     "t0": 1789670910.880919,
+     "t1": 1789670925.268626,
+     "dur": 14.387706995010376,
+     "maf_med": 38.14,
+     "maf_lo": 36.94,
+     "maf_hi": 40.91,
+     "n": 50
+    },
+    {
+     "t0": 1789670945.428923,
+     "t1": 1789670960.123436,
+     "dur": 14.694513082504272,
+     "maf_med": 31.56,
+     "maf_lo": 30.32,
+     "maf_hi": 33.94,
+     "n": 47
+    },
+    {
+     "t0": 1789671023.439065,
+     "t1": 1789671034.867345,
+     "dur": 11.428280115127563,
+     "maf_med": 7.48,
+     "maf_lo": 7.12,
+     "maf_hi": 8.34,
+     "n": 36
+    },
+    {
+     "t0": 1789671180.255911,
+     "t1": 1789671191.914655,
+     "dur": 11.658743858337402,
+     "maf_med": 34.035,
+     "maf_lo": 32.47,
+     "maf_hi": 35.56,
+     "n": 40
+    },
+    {
+     "t0": 1789671208.194353,
+     "t1": 1789671229.906448,
+     "dur": 21.71209478378296,
+     "maf_med": 33.69,
+     "maf_lo": 30.94,
+     "maf_hi": 35.73,
+     "n": 76
+    },
+    {
+     "t0": 1789671413.539805,
+     "t1": 1789671424.394289,
+     "dur": 10.85448408126831,
+     "maf_med": 38.8,
+     "maf_lo": 37.74,
+     "maf_hi": 39.5,
+     "n": 37
+    }
+   ],
+   "plateau_band_3_10": {
+    "label": "plateaus 3-10",
+    "refused": "obd:MAF vs did:ECM_MAF_GPS: only 23 aligned pairs within 300 ms (need 30; 37 and 23 observations, 14/0 unmatched). The series may not overlap in time, or the tolerance may be tighter than the slower c",
+    "n_plateaus": 1,
+    "secs": 11.428280115127563
+   },
+   "plateau_band_20_40": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 153,
+    "r_squared": 0.9750621521573444,
+    "slope": 0.9935071650473102,
+    "offset": 0.2589409243607016,
+    "slope_drift_pct": 13.835648665345992,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 100,
+    "unmatched_b": 0,
+    "separation_median_s": 0.12677478790283203,
+    "separation_p95_s": 0.2801366329193115,
+    "separation_max_s": 0.2968316078186035,
+    "residual_bias": 1.683475436032917e-14,
+    "residual_spread": 0.4402611220840685,
+    "difference_bias": 0.03163398692810555,
+    "difference_spread": 0.4406285728786157,
+    "label": "plateaus 20-40",
+    "ratio_mean": 1.0009608471435094,
+    "ratio_p10": 0.9858584561505911,
+    "ratio_p90": 1.0167075984655511,
+    "a_min": 30.6,
+    "a_max": 40.91,
+    "n_plateaus": 5,
+    "secs": 73.30754280090332
+   },
+   "per_plateau": [
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 30,
+     "r_squared": 0.8132324273963881,
+     "slope": 0.95292759738628,
+     "offset": 1.9652400225926963,
+     "slope_drift_pct": 24.68178943170107,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 21,
+     "unmatched_b": 0,
+     "separation_median_s": 0.12744855880737305,
+     "separation_p95_s": 0.28629018068313594,
+     "separation_max_s": 0.29561901092529297,
+     "residual_bias": 9.473903143468002e-15,
+     "residual_spread": 0.4363481214488491,
+     "difference_bias": 0.16800000000000162,
+     "difference_spread": 0.43866008100426324,
+     "label": "plateau 38.1",
+     "ratio_mean": 1.0044331444850398,
+     "ratio_p10": 0.9908928189069108,
+     "ratio_p90": 1.0187892830575236,
+     "a_min": 36.41,
+     "a_max": 40.91,
+     "maf_med": 38.14,
+     "dur": 14.387706995010376
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 31,
+     "r_squared": 0.7426980594221233,
+     "slope": 0.9084762578042416,
+     "offset": 3.0173944224949496,
+     "slope_drift_pct": 61.75808131884464,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 17,
+     "unmatched_b": 0,
+     "separation_median_s": 0.1278831958770752,
+     "separation_p95_s": 0.18880963325500488,
+     "separation_max_s": 0.22691822052001953,
+     "residual_bias": -5.500976018787872e-15,
+     "residual_spread": 0.41214514334190094,
+     "difference_bias": 0.11290322580645253,
+     "difference_spread": 0.41813868318620173,
+     "label": "plateau 31.6",
+     "ratio_mean": 1.0036122731124413,
+     "ratio_p10": 0.9911336288790374,
+     "ratio_p90": 1.0193221412733608,
+     "a_min": 30.6,
+     "a_max": 33.94,
+     "maf_med": 31.56,
+     "dur": 14.694513082504272
+    },
+    {
+     "label": "plateau 7.5",
+     "refused": "obd:MAF vs did:ECM_MAF_GPS: only 23 aligned pairs within 300 ms (need 30; 37 and 23 observations, 14/0 unmatched). The series may not overlap in time, or the tolerance may be tighter than the slower c",
+     "maf_med": 7.48,
+     "dur": 11.428280115127563
+    },
+    {
+     "label": "plateau 34.0",
+     "refused": "obd:MAF vs did:ECM_MAF_GPS: only 25 aligned pairs within 300 ms (need 30; 40 and 25 observations, 15/0 unmatched). The series may not overlap in time, or the tolerance may be tighter than the slower c",
+     "maf_med": 34.035,
+     "dur": 11.658743858337402
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 44,
+     "r_squared": 0.7860888029089317,
+     "slope": 0.82733548677967,
+     "offset": 5.798027350551316,
+     "slope_drift_pct": 57.35844441404505,
+     "scale_verdict": "drifting",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 32,
+     "unmatched_b": 0,
+     "separation_median_s": 0.13069725036621094,
+     "separation_p95_s": 0.289951765537262,
+     "separation_max_s": 0.2968316078186035,
+     "residual_bias": 0.0,
+     "residual_spread": 0.4599126739912305,
+     "difference_bias": -0.02704545454545409,
+     "difference_spread": 0.49535377415565096,
+     "label": "plateau 33.7",
+     "ratio_mean": 0.9993719680937414,
+     "ratio_p10": 0.9833829834128445,
+     "ratio_p90": 1.0177689607824798,
+     "a_min": 30.94,
+     "a_max": 35.73,
+     "maf_med": 33.69,
+     "dur": 21.71209478378296
+    },
+    {
+     "label": "plateau 38.8",
+     "refused": "obd:MAF vs did:ECM_MAF_GPS: only 23 aligned pairs within 300 ms (need 30; 38 and 23 observations, 15/0 unmatched). The series may not overlap in time, or the tolerance may be tighter than the slower c",
+     "maf_med": 38.8,
+     "dur": 10.85448408126831
+    }
+   ]
+  },
+  "b7": {
+   "unbanded_all": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 2627,
+    "r_squared": 0.9270237388387341,
+    "slope": 0.9627902521836822,
+    "offset": 1.4849514654466816,
+    "slope_drift_pct": 1.7454041765944932,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 1762,
+    "unmatched_b": 56,
+    "separation_median_s": 0.1362004280090332,
+    "separation_p95_s": 0.2810334205627441,
+    "separation_max_s": 0.2999551296234131,
+    "residual_bias": 6.448168565101176e-15,
+    "residual_spread": 6.892440922801594,
+    "difference_bias": 0.09596497906357125,
+    "difference_spread": 6.957522312003894,
+    "label": "all rows",
+    "ratio_mean": 1.0362612131489417,
+    "ratio_p10": 0.8886633207264371,
+    "ratio_p90": 1.1541826923076923,
+    "a_min": 1.18,
+    "a_max": 135.77
+   },
+   "unbanded_steady": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 910,
+    "r_squared": 0.9893868120348841,
+    "slope": 0.9961114223096386,
+    "offset": 0.1530577632824864,
+    "slope_drift_pct": 2.9900023279106342,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 304,
+    "unmatched_b": 1773,
+    "separation_median_s": 0.13311505317687988,
+    "separation_p95_s": 0.2440367937088012,
+    "separation_max_s": 0.2987079620361328,
+    "residual_bias": 5.3720154088236144e-15,
+    "residual_spread": 3.085808548838312,
+    "difference_bias": -0.02479120879120799,
+    "difference_spread": 3.0879996922382253,
+    "label": "quasi-steady |dlnMAF/dt|<=0.05/s",
+    "ratio_mean": 1.0019243768457426,
+    "ratio_p10": 0.9781931311852649,
+    "ratio_p90": 1.0275393257600383,
+    "a_min": 1.18,
+    "a_max": 134.6
+   },
+   "lag_rising": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 823,
+    "r_squared": 0.8502679365915327,
+    "slope": 0.9461701992805006,
+    "offset": 2.8535870721487573,
+    "slope_drift_pct": 8.013073258164493,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 245,
+    "unmatched_b": 1860,
+    "separation_median_s": 0.13316726684570312,
+    "separation_p95_s": 0.24767377376556393,
+    "separation_max_s": 0.29701948165893555,
+    "residual_bias": -6.872320992284809e-15,
+    "residual_spread": 7.430708117065818,
+    "difference_bias": 1.1676063183475098,
+    "difference_spread": 7.49868578071967,
+    "label": "rising >10%/s",
+    "ratio_mean": 1.0828947085046559,
+    "ratio_p10": 0.8725818160987902,
+    "ratio_p90": 1.3107747868532187,
+    "a_min": 3.35,
+    "a_max": 122.59
+   },
+   "lag_falling": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 815,
+    "r_squared": 0.8777492550153432,
+    "slope": 0.9115125897944651,
+    "offset": 1.5948725117538731,
+    "slope_drift_pct": 7.478368055612025,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 232,
+    "unmatched_b": 1868,
+    "separation_median_s": 0.1338520050048828,
+    "separation_p95_s": 0.25499074459075927,
+    "separation_max_s": 0.29802727699279785,
+    "residual_bias": 1.7375603341961714e-14,
+    "residual_spread": 7.221197192326878,
+    "difference_bias": -1.2206503067484655,
+    "difference_spread": 7.461505609290207,
+    "label": "falling >10%/s",
+    "ratio_mean": 0.982243727794202,
+    "ratio_p10": 0.7805359487810097,
+    "ratio_p90": 1.137805514208852,
+    "a_min": 3.74,
+    "a_max": 135.77
+   },
+   "band_3_10": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 208,
+    "r_squared": 0.9518897907494434,
+    "slope": 1.0302629093671911,
+    "offset": -0.12429066928024396,
+    "slope_drift_pct": 6.659193286981384,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 69,
+    "unmatched_b": 2475,
+    "separation_median_s": 0.13213980197906494,
+    "separation_p95_s": 0.2600134134292601,
+    "separation_max_s": 0.29866743087768555,
+    "residual_bias": -1.1828145300814167e-15,
+    "residual_spread": 0.39761451735760445,
+    "difference_bias": 0.022836538461538564,
+    "difference_spread": 0.400994115882806,
+    "label": "steady band 3-10",
+    "ratio_mean": 1.0025292365121243,
+    "ratio_p10": 0.9849578707724083,
+    "ratio_p90": 1.0125270111116802,
+    "a_min": 3.26,
+    "a_max": 9.91
+   },
+   "band_10_20": {
+    "label": "steady band 10-20",
+    "refused": "obd:MAF vs did:ECM_MAF_GPS: only 29 aligned pairs within 300 ms (need 30; 30 and 2683 observations, 1/2654 unmatched). The series may not overlap in time, or the tolerance may be tighter than the slow"
+   },
+   "band_20_40": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 97,
+    "r_squared": 0.5082457012458093,
+    "slope": 0.9115706083725745,
+    "offset": 3.4385817973013837,
+    "slope_drift_pct": 47.827253870710194,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 7,
+    "unmatched_b": 2586,
+    "separation_median_s": 0.13423681259155273,
+    "separation_p95_s": 0.20821552276611324,
+    "separation_max_s": 0.2888627052307129,
+    "residual_bias": -3.332958193513872e-15,
+    "residual_spread": 4.773323235063932,
+    "difference_bias": 0.48195876288659895,
+    "difference_spread": 4.796479946230169,
+    "label": "steady band 20-40",
+    "ratio_mean": 1.0177791004835857,
+    "ratio_p10": 0.9025266442862983,
+    "ratio_p90": 1.192703754270587,
+    "a_min": 21.48,
+    "a_max": 39.97
+   },
+   "band_40_60": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 270,
+    "r_squared": 0.8619121989703945,
+    "slope": 0.9989210485036456,
+    "offset": 0.13886661896890581,
+    "slope_drift_pct": 12.352674785021343,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 90,
+    "unmatched_b": 2413,
+    "separation_median_s": 0.1331392526626587,
+    "separation_p95_s": 0.24215524196624735,
+    "separation_max_s": 0.29830455780029297,
+    "residual_bias": 3.5263972811797564e-15,
+    "residual_spread": 2.258268759352556,
+    "difference_bias": 0.08433333333333425,
+    "difference_spread": 2.2582769816667585,
+    "label": "steady band 40-60",
+    "ratio_mean": 1.0016475986102646,
+    "ratio_p10": 0.978528189459158,
+    "ratio_p90": 1.0352252140597322,
+    "a_min": 40.09,
+    "a_max": 59.92
+   },
+   "band_60_90": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 259,
+    "r_squared": 0.7398589915234286,
+    "slope": 1.0340733549931087,
+    "offset": -2.788388918829785,
+    "slope_drift_pct": 4.151408239748327,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 104,
+    "unmatched_b": 2424,
+    "separation_median_s": 0.13310670852661133,
+    "separation_p95_s": 0.22464222908020018,
+    "separation_max_s": 0.2972095012664795,
+    "residual_bias": -1.8024192177389414e-14,
+    "residual_spread": 4.18487041081441,
+    "difference_bias": -0.4310810810810801,
+    "difference_spread": 4.19132672082296,
+    "label": "steady band 60-90",
+    "ratio_mean": 0.9933930267689858,
+    "ratio_p10": 0.9834909601358642,
+    "ratio_p90": 1.017419671468576,
+    "a_min": 60.16,
+    "a_max": 89.66
+   },
+   "band_90_200": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 51,
+    "r_squared": 0.9814294786644987,
+    "slope": 1.0084686269263805,
+    "offset": -0.9368874759109979,
+    "slope_drift_pct": 0.8143831728382791,
+    "scale_verdict": "stable",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 20,
+    "unmatched_b": 2632,
+    "separation_median_s": 0.12388181686401367,
+    "separation_p95_s": 0.18608713150024414,
+    "separation_max_s": 0.2868809700012207,
+    "residual_bias": -9.947598300641403e-14,
+    "residual_spread": 1.9096068694318242,
+    "difference_bias": 0.026078431372551492,
+    "difference_spread": 1.9131619228042689,
+    "label": "steady band 90-200",
+    "ratio_mean": 1.0000500975604663,
+    "ratio_p10": 0.9796142784638809,
+    "ratio_p90": 1.0215452608318207,
+    "a_min": 90.48,
+    "a_max": 134.6
+   },
+   "plateaus": [
+    {
+     "t0": 1789672656.878483,
+     "t1": 1789672668.155987,
+     "dur": 11.277503967285156,
+     "maf_med": 3.43,
+     "maf_lo": 3.27,
+     "maf_hi": 5.16,
+     "n": 38
+    },
+    {
+     "t0": 1789672673.452936,
+     "t1": 1789672686.142115,
+     "dur": 12.689179182052612,
+     "maf_med": 3.35,
+     "maf_lo": 3.31,
+     "maf_hi": 3.43,
+     "n": 42
+    },
+    {
+     "t0": 1789673611.605973,
+     "t1": 1789673630.655278,
+     "dur": 19.049304962158203,
+     "maf_med": 3.35,
+     "maf_lo": 3.25,
+     "maf_hi": 4.01,
+     "n": 63
+    },
+    {
+     "t0": 1789673860.4143,
+     "t1": 1789673878.205427,
+     "dur": 17.79112696647644,
+     "maf_med": 63.32,
+     "maf_lo": 61.13,
+     "maf_hi": 67.06,
+     "n": 60
+    },
+    {
+     "t0": 1789674056.365346,
+     "t1": 1789674066.924703,
+     "dur": 10.559356927871704,
+     "maf_med": 56.965,
+     "maf_lo": 54.8,
+     "maf_hi": 60.48,
+     "n": 36
+    }
+   ],
+   "plateau_band_3_10": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 89,
+    "r_squared": 0.9545638778683851,
+    "slope": 0.9203913098468496,
+    "offset": 0.2661646265994337,
+    "slope_drift_pct": 4.85921222531067,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 56,
+    "unmatched_b": 0,
+    "separation_median_s": 0.1403038501739502,
+    "separation_p95_s": 0.2894883632659912,
+    "separation_max_s": 0.29866743087768555,
+    "residual_bias": 1.2624108999108522e-15,
+    "residual_spread": 0.08539904024293668,
+    "difference_bias": -0.012134831460674103,
+    "difference_spread": 0.09186545988212119,
+    "label": "plateaus 3-10",
+    "ratio_mean": 0.9974113868990158,
+    "ratio_p10": 0.9890839682614799,
+    "ratio_p90": 1.0090361445783134,
+    "a_min": 3.26,
+    "a_max": 5.16,
+    "n_plateaus": 3,
+    "secs": 43.01598811149597
+   },
+   "plateau_band_40_60": {
+    "label": "plateaus 40-60",
+    "refused": "obd:MAF vs did:ECM_MAF_GPS: only 21 aligned pairs within 300 ms (need 30; 36 and 21 observations, 15/0 unmatched). The series may not overlap in time, or the tolerance may be tighter than the slower c",
+    "n_plateaus": 1,
+    "secs": 10.559356927871704
+   },
+   "plateau_band_60_90": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 35,
+    "r_squared": 0.9322596421732483,
+    "slope": 0.960777979438027,
+    "offset": 2.524873736675609,
+    "slope_drift_pct": 74.71250347270725,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 27,
+    "unmatched_b": 0,
+    "separation_median_s": 0.1427757740020752,
+    "separation_p95_s": 0.23157131671905504,
+    "separation_max_s": 0.2919480800628662,
+    "residual_bias": -2.4970501856712092e-14,
+    "residual_spread": 0.45383731966807295,
+    "difference_bias": 0.028571428571429382,
+    "difference_spread": 0.4590122491807381,
+    "label": "plateaus 60-90",
+    "ratio_mean": 1.0004798539293611,
+    "ratio_p10": 0.9928691789013028,
+    "ratio_p90": 1.009394886472124,
+    "a_min": 61.13,
+    "a_max": 67.06,
+    "n_plateaus": 1,
+    "secs": 17.79112696647644
+   },
+   "per_plateau": [
+    {
+     "label": "plateau 3.4",
+     "refused": "obd:MAF vs did:ECM_MAF_GPS: only 23 aligned pairs within 300 ms (need 30; 39 and 23 observations, 16/0 unmatched). The series may not overlap in time, or the tolerance may be tighter than the slower c",
+     "maf_med": 3.43,
+     "dur": 11.277503967285156
+    },
+    {
+     "label": "plateau 3.4",
+     "refused": "obd:MAF vs did:ECM_MAF_GPS: only 27 aligned pairs within 300 ms (need 30; 43 and 27 observations, 16/0 unmatched). The series may not overlap in time, or the tolerance may be tighter than the slower c",
+     "maf_med": 3.35,
+     "dur": 12.689179182052612
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 39,
+     "r_squared": 0.9454331167845017,
+     "slope": 0.9245283018867932,
+     "offset": 0.25062893081760845,
+     "slope_drift_pct": 10.423803683100392,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 24,
+     "unmatched_b": 0,
+     "separation_median_s": 0.1449728012084961,
+     "separation_p95_s": 0.29228174686431885,
+     "separation_max_s": 0.29866743087768555,
+     "residual_bias": -1.1842378929335002e-15,
+     "residual_spread": 0.03731515211447273,
+     "difference_bias": -0.0048717948717948364,
+     "difference_spread": 0.03941051498839145,
+     "label": "plateau 3.4",
+     "ratio_mean": 0.9987182155563925,
+     "ratio_p10": 0.9905322942808082,
+     "ratio_p90": 1.0065783596192832,
+     "a_min": 3.26,
+     "a_max": 4.01,
+     "maf_med": 3.35,
+     "dur": 19.049304962158203
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 35,
+     "r_squared": 0.9322596421732483,
+     "slope": 0.960777979438027,
+     "offset": 2.524873736675609,
+     "slope_drift_pct": 74.71250347270725,
+     "scale_verdict": "drifting",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 27,
+     "unmatched_b": 0,
+     "separation_median_s": 0.1427757740020752,
+     "separation_p95_s": 0.23157131671905504,
+     "separation_max_s": 0.2919480800628662,
+     "residual_bias": -2.4970501856712092e-14,
+     "residual_spread": 0.45383731966807295,
+     "difference_bias": 0.028571428571429382,
+     "difference_spread": 0.4590122491807381,
+     "label": "plateau 63.3",
+     "ratio_mean": 1.0004798539293611,
+     "ratio_p10": 0.9928691789013028,
+     "ratio_p90": 1.009394886472124,
+     "a_min": 61.13,
+     "a_max": 67.06,
+     "maf_med": 63.32,
+     "dur": 17.79112696647644
+    },
+    {
+     "label": "plateau 57.0",
+     "refused": "obd:MAF vs did:ECM_MAF_GPS: only 21 aligned pairs within 300 ms (need 30; 36 and 21 observations, 15/0 unmatched). The series may not overlap in time, or the tolerance may be tighter than the slower c",
+     "maf_med": 56.965,
+     "dur": 10.559356927871704
+    }
+   ]
+  },
+  "b9": {
+   "unbanded_all": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 4888,
+    "r_squared": 0.9361960437940362,
+    "slope": 0.9776109647718362,
+    "offset": 0.6913426468311751,
+    "slope_drift_pct": 0.1496842424256092,
+    "scale_verdict": "stable",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 685,
+    "unmatched_b": 108,
+    "separation_median_s": 0.1402684450149536,
+    "separation_p95_s": 0.2711200714111328,
+    "separation_max_s": 0.2999303340911865,
+    "residual_bias": 6.989135584154177e-15,
+    "residual_spread": 4.517614676789519,
+    "difference_bias": 0.026186579378069397,
+    "difference_spread": 4.534964851297528,
+    "label": "all rows",
+    "ratio_mean": 1.0134245565806592,
+    "ratio_p10": 0.9639891891891893,
+    "ratio_p90": 1.041607313399505,
+    "a_min": 1.18,
+    "a_max": 134.32
+   },
+   "unbanded_steady": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 2358,
+    "r_squared": 0.9933527562285259,
+    "slope": 0.9971213051344839,
+    "offset": 0.05310920581483453,
+    "slope_drift_pct": 0.41457063146156786,
+    "scale_verdict": "stable",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 140,
+    "unmatched_b": 2638,
+    "separation_median_s": 0.11808907985687256,
+    "separation_p95_s": 0.2167019605636597,
+    "separation_max_s": 0.2994194030761719,
+    "residual_bias": 4.229883807272462e-14,
+    "residual_spread": 1.3668087819860837,
+    "difference_bias": -0.04243002544529184,
+    "difference_spread": 1.3676597236057846,
+    "label": "quasi-steady |dlnMAF/dt|<=0.05/s",
+    "ratio_mean": 0.9998448136012279,
+    "ratio_p10": 0.9843517977991849,
+    "ratio_p90": 1.0156918079306998,
+    "a_min": 1.18,
+    "a_max": 133.38
+   },
+   "lag_rising": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 794,
+    "r_squared": 0.8948157244526934,
+    "slope": 0.9434105760889544,
+    "offset": 1.8444704776991605,
+    "slope_drift_pct": 3.2961753125112647,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 33,
+    "unmatched_b": 4202,
+    "separation_median_s": 0.11794030666351318,
+    "separation_p95_s": 0.2370458245277404,
+    "separation_max_s": 0.2995791435241699,
+    "residual_bias": 3.0694730272759994e-15,
+    "residual_spread": 5.582576042624839,
+    "difference_bias": 0.4440931989924437,
+    "difference_spread": 5.667371124458562,
+    "label": "rising >10%/s",
+    "ratio_mean": 1.0552002794139497,
+    "ratio_p10": 0.8821575721033061,
+    "ratio_p90": 1.2190078190926863,
+    "a_min": 3.01,
+    "a_max": 122.01
+   },
+   "lag_falling": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 722,
+    "r_squared": 0.8437479694097811,
+    "slope": 0.9582757848143405,
+    "offset": 0.6360044069248937,
+    "slope_drift_pct": 9.061724356994318,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 36,
+    "unmatched_b": 4274,
+    "separation_median_s": 0.11167716979980469,
+    "separation_p95_s": 0.24556424617767306,
+    "separation_max_s": 0.2987189292907715,
+    "residual_bias": 3.0704893844480782e-15,
+    "residual_spread": 7.38415653478197,
+    "difference_bias": -0.3357340720221601,
+    "difference_spread": 7.421856942316969,
+    "label": "falling >10%/s",
+    "ratio_mean": 1.0011155657987976,
+    "ratio_p10": 0.8418412600783771,
+    "ratio_p90": 1.0887062923598274,
+    "a_min": 1.18,
+    "a_max": 134.32
+   },
+   "band_3_10": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 290,
+    "r_squared": 0.9481975073262959,
+    "slope": 1.026975746679149,
+    "offset": -0.11766498418442482,
+    "slope_drift_pct": 16.380102654506278,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 9,
+    "unmatched_b": 4706,
+    "separation_median_s": 0.11896789073944092,
+    "separation_p95_s": 0.22307608127593995,
+    "separation_max_s": 0.296189546585083,
+    "residual_bias": 1.1852587876687877e-15,
+    "residual_spread": 0.41235719747861305,
+    "difference_bias": 0.039448275862069074,
+    "difference_spread": 0.41495289190102935,
+    "label": "steady band 3-10",
+    "ratio_mean": 1.0052920349014103,
+    "ratio_p10": 0.9747001644259599,
+    "ratio_p90": 1.033913720149798,
+    "a_min": 3.01,
+    "a_max": 9.9
+   },
+   "band_10_20": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 105,
+    "r_squared": 0.8063016677013316,
+    "slope": 0.951102810549004,
+    "offset": 1.002635778527214,
+    "slope_drift_pct": 28.56932914763433,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 1,
+    "unmatched_b": 4891,
+    "separation_median_s": 0.09542536735534668,
+    "separation_p95_s": 0.21125602722167963,
+    "separation_max_s": 0.2397289276123047,
+    "residual_bias": -1.3026616822268502e-15,
+    "residual_spread": 1.2550406543532266,
+    "difference_bias": 0.1921904761904764,
+    "difference_spread": 1.2619259513045777,
+    "label": "steady band 10-20",
+    "ratio_mean": 1.013695588721496,
+    "ratio_p10": 0.9718186348637935,
+    "ratio_p90": 1.0744894145443369,
+    "a_min": 10.02,
+    "a_max": 19.89
+   },
+   "band_20_40": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 1481,
+    "r_squared": 0.9299360568343645,
+    "slope": 0.9841386090340656,
+    "offset": 0.4840203779230024,
+    "slope_drift_pct": 5.893886802409149,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 95,
+    "unmatched_b": 3515,
+    "separation_median_s": 0.11878800392150879,
+    "separation_p95_s": 0.21191644668579102,
+    "separation_max_s": 0.2994194030761719,
+    "residual_bias": -8.074567348306878e-15,
+    "residual_spread": 1.121502771502707,
+    "difference_bias": -0.05174206617150493,
+    "difference_spread": 1.1234344063063835,
+    "label": "steady band 20-40",
+    "ratio_mean": 0.9986885861805253,
+    "ratio_p10": 0.9859900373599005,
+    "ratio_p90": 1.0138635534476468,
+    "a_min": 20.1,
+    "a_max": 39.94
+   },
+   "band_40_60": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 411,
+    "r_squared": 0.786556646469017,
+    "slope": 0.9748345867655751,
+    "offset": 1.0820927139112093,
+    "slope_drift_pct": 12.141968339788894,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 28,
+    "unmatched_b": 4585,
+    "separation_median_s": 0.11975526809692383,
+    "separation_p95_s": 0.24178874492645264,
+    "separation_max_s": 0.2939739227294922,
+    "residual_bias": 2.7280691898526474e-14,
+    "residual_spread": 2.2187906209216997,
+    "difference_bias": -0.13180048661800375,
+    "difference_spread": 2.221513407358864,
+    "label": "steady band 40-60",
+    "ratio_mean": 0.9974683703569058,
+    "ratio_p10": 0.9857272315360217,
+    "ratio_p90": 1.0143870713441072,
+    "a_min": 40.02,
+    "a_max": 59.91
+   },
+   "band_60_90": {
+    "label": "steady band 60-90",
+    "refused": "obd:MAF vs did:ECM_MAF_GPS: only 19 aligned pairs within 300 ms (need 30; 20 and 4996 observations, 1/4977 unmatched). The series may not overlap in time, or the tolerance may be tighter than the slow"
+   },
+   "band_90_200": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 30,
+    "r_squared": 0.9051871839104254,
+    "slope": 1.0678243656210737,
+    "offset": -8.305315932465243,
+    "slope_drift_pct": 4.656421436566309,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 1,
+    "unmatched_b": 4966,
+    "separation_median_s": 0.09725534915924072,
+    "separation_p95_s": 0.16006009578704833,
+    "separation_max_s": 0.17436432838439941,
+    "residual_bias": -1.2789769243681804e-14,
+    "residual_spread": 2.3567741173298566,
+    "difference_bias": 0.03233333333333519,
+    "difference_spread": 2.4017322683615037,
+    "label": "steady band 90-200",
+    "ratio_mean": 1.0000275086688926,
+    "ratio_p10": 0.9731265012568844,
+    "ratio_p90": 1.025955887188378,
+    "a_min": 107.48,
+    "a_max": 133.38
+   },
+   "plateaus": [
+    {
+     "t0": 1789675810.555941,
+     "t1": 1789675825.2465,
+     "dur": 14.690558910369873,
+     "maf_med": 38.385000000000005,
+     "maf_lo": 37.07,
+     "maf_hi": 40.5,
+     "n": 60
+    },
+    {
+     "t0": 1789675898.004807,
+     "t1": 1789675914.008614,
+     "dur": 16.003807067871094,
+     "maf_med": 35.855000000000004,
+     "maf_lo": 34.21,
+     "maf_hi": 37.54,
+     "n": 64
+    },
+    {
+     "t0": 1789675915.685652,
+     "t1": 1789675929.842383,
+     "dur": 14.156730890274048,
+     "maf_med": 37.504999999999995,
+     "maf_lo": 35.5,
+     "maf_hi": 38.39,
+     "n": 56
+    },
+    {
+     "t0": 1789676114.097009,
+     "t1": 1789676126.017439,
+     "dur": 11.920429944992065,
+     "maf_med": 38.87,
+     "maf_lo": 37.45,
+     "maf_hi": 39.81,
+     "n": 47
+    },
+    {
+     "t0": 1789676168.010999,
+     "t1": 1789676178.244565,
+     "dur": 10.233566045761108,
+     "maf_med": 33.7,
+     "maf_lo": 32.48,
+     "maf_hi": 34.69,
+     "n": 40
+    },
+    {
+     "t0": 1789676337.007274,
+     "t1": 1789676347.253158,
+     "dur": 10.24588418006897,
+     "maf_med": 38.03,
+     "maf_lo": 37.51,
+     "maf_hi": 40.08,
+     "n": 38
+    },
+    {
+     "t0": 1789676375.602877,
+     "t1": 1789676390.25546,
+     "dur": 14.652583122253418,
+     "maf_med": 50.74,
+     "maf_lo": 49.14,
+     "maf_hi": 52.93,
+     "n": 54
+    },
+    {
+     "t0": 1789676427.78184,
+     "t1": 1789676443.335257,
+     "dur": 15.553416967391968,
+     "maf_med": 36.39,
+     "maf_lo": 34.69,
+     "maf_hi": 38.06,
+     "n": 55
+    },
+    {
+     "t0": 1789676446.254102,
+     "t1": 1789676460.273199,
+     "dur": 14.019097089767456,
+     "maf_med": 36.239999999999995,
+     "maf_lo": 34.78,
+     "maf_hi": 37.07,
+     "n": 52
+    },
+    {
+     "t0": 1789676486.006275,
+     "t1": 1789676513.022961,
+     "dur": 27.016685962677002,
+     "maf_med": 36.19,
+     "maf_lo": 34.53,
+     "maf_hi": 38.69,
+     "n": 95
+    },
+    {
+     "t0": 1789676514.495502,
+     "t1": 1789676525.286516,
+     "dur": 10.791013956069946,
+     "maf_med": 37.405,
+     "maf_lo": 35.42,
+     "maf_hi": 38.09,
+     "n": 38
+    },
+    {
+     "t0": 1789676551.255904,
+     "t1": 1789676583.584578,
+     "dur": 32.32867407798767,
+     "maf_med": 36.0,
+     "maf_lo": 31.41,
+     "maf_hi": 37.87,
+     "n": 112
+    },
+    {
+     "t0": 1789676673.256943,
+     "t1": 1789676683.272054,
+     "dur": 10.015110969543457,
+     "maf_med": 34.04,
+     "maf_lo": 32.86,
+     "maf_hi": 35.02,
+     "n": 34
+    },
+    {
+     "t0": 1789676685.006882,
+     "t1": 1789676698.219711,
+     "dur": 13.212829113006592,
+     "maf_med": 32.27,
+     "maf_lo": 31.15,
+     "maf_hi": 33.25,
+     "n": 43
+    },
+    {
+     "t0": 1789677459.599423,
+     "t1": 1789677478.254842,
+     "dur": 18.65541911125183,
+     "maf_med": 3.18,
+     "maf_lo": 3.15,
+     "maf_hi": 3.41,
+     "n": 69
+    }
+   ],
+   "plateau_band_3_10": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 63,
+    "r_squared": 0.6602615517654354,
+    "slope": 0.9572194199243386,
+    "offset": 0.14006651954602536,
+    "slope_drift_pct": 899.3360287681554,
+    "scale_verdict": "drifting",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 6,
+    "unmatched_b": 0,
+    "separation_median_s": 0.14550566673278809,
+    "separation_p95_s": 0.21875593662261963,
+    "separation_max_s": 0.2953011989593506,
+    "residual_bias": 5.145795606199139e-16,
+    "residual_spread": 0.027451550809860094,
+    "difference_bias": 0.003650793650793672,
+    "difference_spread": 0.027504780958236996,
+    "label": "plateaus 3-10",
+    "ratio_mean": 1.0011527812066343,
+    "ratio_p10": 0.99375,
+    "ratio_p90": 1.0094339622641508,
+    "a_min": 3.15,
+    "a_max": 3.41,
+    "n_plateaus": 1,
+    "secs": 18.65541911125183
+   },
+   "plateau_band_20_40": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 654,
+    "r_squared": 0.9615004567469773,
+    "slope": 0.982287381123406,
+    "offset": 0.6308474351404575,
+    "slope_drift_pct": 2.2085913445309275,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 85,
+    "unmatched_b": 11,
+    "separation_median_s": 0.1479557752609253,
+    "separation_p95_s": 0.21091022491455078,
+    "separation_max_s": 0.29695892333984375,
+    "residual_bias": -2.819355350607737e-15,
+    "residual_spread": 0.38516772686871764,
+    "difference_bias": -0.010366972477063358,
+    "difference_spread": 0.3867284405599475,
+    "label": "plateaus 20-40",
+    "ratio_mean": 0.9997652682305151,
+    "ratio_p10": 0.9861041996565335,
+    "ratio_p90": 1.0136306304258897,
+    "a_min": 31.15,
+    "a_max": 40.5,
+    "n_plateaus": 13,
+    "secs": 200.18780517578125
+   },
+   "plateau_band_40_60": {
+    "a": "obd:MAF",
+    "b": "did:ECM_MAF_GPS",
+    "n_pairs": 45,
+    "r_squared": 0.7862227520402527,
+    "slope": 0.8581750201039151,
+    "offset": 7.250902120744158,
+    "slope_drift_pct": 69.59426286831076,
+    "scale_verdict": "unresolved",
+    "policy": {
+     "max_separation_s": 0.3,
+     "reference": "a",
+     "tie_break": "earlier"
+    },
+    "reference": "a",
+    "timestamp_basis_a": "acquired",
+    "timestamp_basis_b": "acquired",
+    "unmatched_a": 9,
+    "unmatched_b": 1,
+    "separation_median_s": 0.14502406120300293,
+    "separation_p95_s": 0.20445585250854492,
+    "separation_max_s": 0.2507619857788086,
+    "residual_bias": -4.894849957458468e-15,
+    "residual_spread": 0.4443720026884739,
+    "difference_bias": 0.029111111111112108,
+    "difference_spread": 0.4661560169071784,
+    "label": "plateaus 40-60",
+    "ratio_mean": 1.0006267276441039,
+    "ratio_p10": 0.9905971676837941,
+    "ratio_p90": 1.0125769474123028,
+    "a_min": 49.14,
+    "a_max": 52.93,
+    "n_plateaus": 1,
+    "secs": 14.652583122253418
+   },
+   "per_plateau": [
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 59,
+     "r_squared": 0.7876792779117419,
+     "slope": 0.888630707291744,
+     "offset": 4.2803820354636475,
+     "slope_drift_pct": 69.98365246511553,
+     "scale_verdict": "drifting",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 1,
+     "unmatched_b": 1,
+     "separation_median_s": 0.1621077060699463,
+     "separation_p95_s": 0.1711620569229126,
+     "separation_max_s": 0.21506619453430176,
+     "residual_bias": 1.3247406937900172e-14,
+     "residual_spread": 0.397887965358286,
+     "difference_bias": -0.0030508474576261503,
+     "difference_spread": 0.40931631395799895,
+     "label": "plateau 38.4",
+     "ratio_mean": 0.9999782374776875,
+     "ratio_p10": 0.9875645174535539,
+     "ratio_p90": 1.0117056298577884,
+     "a_min": 37.07,
+     "a_max": 40.5,
+     "maf_med": 38.385000000000005,
+     "dur": 14.690558910369873
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 57,
+     "r_squared": 0.805605065128562,
+     "slope": 0.9308136143866735,
+     "offset": 2.450269655743267,
+     "slope_drift_pct": 46.922892276210014,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 8,
+     "unmatched_b": 1,
+     "separation_median_s": 0.16268420219421387,
+     "separation_p95_s": 0.19695248603820795,
+     "separation_max_s": 0.2888362407684326,
+     "residual_bias": 5.858861154513107e-15,
+     "residual_spread": 0.38369227984495446,
+     "difference_bias": -0.040877192982455735,
+     "difference_spread": 0.38805986471502923,
+     "label": "plateau 35.9",
+     "ratio_mean": 0.9989006686245605,
+     "ratio_p10": 0.9845021764871172,
+     "ratio_p90": 1.0125051134396927,
+     "a_min": 34.43,
+     "a_max": 37.54,
+     "maf_med": 35.855000000000004,
+     "dur": 16.003807067871094
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 53,
+     "r_squared": 0.5592078439612045,
+     "slope": 0.814888641937576,
+     "offset": 6.8537930955182205,
+     "slope_drift_pct": 92.39078937951484,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 4,
+     "unmatched_b": 0,
+     "separation_median_s": 0.16182422637939453,
+     "separation_p95_s": 0.21984391212463372,
+     "separation_max_s": 0.2963247299194336,
+     "residual_bias": -1.340646671245472e-14,
+     "residual_spread": 0.4482720585763303,
+     "difference_bias": -0.07094339622641319,
+     "difference_spread": 0.46271252802195195,
+     "label": "plateau 37.5",
+     "ratio_mean": 0.9981538705053339,
+     "ratio_p10": 0.984536254100356,
+     "ratio_p90": 1.011525188067445,
+     "a_min": 35.62,
+     "a_max": 38.39,
+     "maf_med": 37.504999999999995,
+     "dur": 14.156730890274048
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 40,
+     "r_squared": 0.6416681825064743,
+     "slope": 0.7585066852365434,
+     "offset": 9.347859093462782,
+     "slope_drift_pct": 99.34863751408604,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 7,
+     "unmatched_b": 1,
+     "separation_median_s": 0.1487489938735962,
+     "separation_p95_s": 0.19263383150100707,
+     "separation_max_s": 0.19940638542175293,
+     "residual_bias": -5.329070518200751e-15,
+     "residual_spread": 0.3138525504249333,
+     "difference_bias": -0.013749999999999929,
+     "difference_spread": 0.3411501685475182,
+     "label": "plateau 38.9",
+     "ratio_mean": 0.9996947082011924,
+     "ratio_p10": 0.9861375445746307,
+     "ratio_p90": 1.0105584997228203,
+     "a_min": 37.45,
+     "a_max": 39.81,
+     "maf_med": 38.87,
+     "dur": 11.920429944992065
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 35,
+     "r_squared": 0.5974382284237709,
+     "slope": 0.7861153681883281,
+     "offset": 7.2726512448810015,
+     "slope_drift_pct": 45.89066465344973,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 6,
+     "unmatched_b": 0,
+     "separation_median_s": 0.16005492210388184,
+     "separation_p95_s": 0.2061300039291382,
+     "separation_max_s": 0.25702500343322754,
+     "residual_bias": 1.8880135550196947e-14,
+     "residual_spread": 0.3892735700041946,
+     "difference_bias": 0.07800000000000051,
+     "difference_spread": 0.41009963946060013,
+     "label": "plateau 33.7",
+     "ratio_mean": 1.002388068344441,
+     "ratio_p10": 0.9901357061503613,
+     "ratio_p90": 1.0164812939417205,
+     "a_min": 32.48,
+     "a_max": 34.69,
+     "maf_med": 33.7,
+     "dur": 10.233566045761108
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 34,
+     "r_squared": 0.8256735600422743,
+     "slope": 0.9754011713389356,
+     "offset": 0.9801382916274514,
+     "slope_drift_pct": 166.36945857466205,
+     "scale_verdict": "drifting",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 4,
+     "unmatched_b": 1,
+     "separation_median_s": 0.1450495719909668,
+     "separation_p95_s": 0.20092108249664306,
+     "separation_max_s": 0.28679895401000977,
+     "residual_bias": 4.388646309106501e-15,
+     "residual_spread": 0.296607754899486,
+     "difference_bias": 0.040000000000001444,
+     "difference_spread": 0.29705416420341296,
+     "label": "plateau 38.0",
+     "ratio_mean": 1.00105463228285,
+     "ratio_p10": 0.9911747282005086,
+     "ratio_p90": 1.011729170564807,
+     "a_min": 37.51,
+     "a_max": 40.08,
+     "maf_med": 38.03,
+     "dur": 10.24588418006897
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 45,
+     "r_squared": 0.7862227520402527,
+     "slope": 0.8581750201039151,
+     "offset": 7.250902120744158,
+     "slope_drift_pct": 69.59426286831076,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 9,
+     "unmatched_b": 1,
+     "separation_median_s": 0.14502406120300293,
+     "separation_p95_s": 0.20445585250854492,
+     "separation_max_s": 0.2507619857788086,
+     "residual_bias": -4.894849957458468e-15,
+     "residual_spread": 0.4443720026884739,
+     "difference_bias": 0.029111111111112108,
+     "difference_spread": 0.4661560169071784,
+     "label": "plateau 50.7",
+     "ratio_mean": 1.0006267276441039,
+     "ratio_p10": 0.9905971676837941,
+     "ratio_p90": 1.0125769474123028,
+     "a_min": 49.14,
+     "a_max": 52.93,
+     "maf_med": 50.74,
+     "dur": 14.652583122253418
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 47,
+     "r_squared": 0.7939571706299519,
+     "slope": 0.8856299078224563,
+     "offset": 4.226461201481673,
+     "slope_drift_pct": 51.52002129322171,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 8,
+     "unmatched_b": 1,
+     "separation_median_s": 0.14036917686462402,
+     "separation_p95_s": 0.20606729984283448,
+     "separation_max_s": 0.21664714813232422,
+     "residual_bias": -1.330377888231677e-14,
+     "residual_spread": 0.3922814823413137,
+     "difference_bias": 0.07468085106383096,
+     "difference_spread": 0.40468980011135647,
+     "label": "plateau 36.4",
+     "ratio_mean": 1.0021232033021867,
+     "ratio_p10": 0.9909030052402453,
+     "ratio_p90": 1.0145885208991101,
+     "a_min": 34.69,
+     "a_max": 38.06,
+     "maf_med": 36.39,
+     "dur": 15.553416967391968
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 43,
+     "r_squared": 0.7769219440667721,
+     "slope": 0.8814387936364199,
+     "offset": 4.3235348057313745,
+     "slope_drift_pct": 89.83398561771628,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 9,
+     "unmatched_b": 1,
+     "separation_median_s": 0.14382386207580566,
+     "separation_p95_s": 0.2045189380645752,
+     "separation_max_s": 0.24367213249206543,
+     "residual_bias": -1.8176674635723494e-15,
+     "residual_spread": 0.25788883362457826,
+     "difference_bias": 0.04162790697674483,
+     "difference_spread": 0.26588973263154564,
+     "label": "plateau 36.2",
+     "ratio_mean": 1.0011798301724846,
+     "ratio_p10": 0.993208779259922,
+     "ratio_p90": 1.011296276349559,
+     "a_min": 34.78,
+     "a_max": 37.07,
+     "maf_med": 36.239999999999995,
+     "dur": 14.019097089767456
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 82,
+     "r_squared": 0.8337296279401814,
+     "slope": 0.8886369304767849,
+     "offset": 4.028976083924975,
+     "slope_drift_pct": 53.21851482151375,
+     "scale_verdict": "drifting",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 13,
+     "unmatched_b": 2,
+     "separation_median_s": 0.1392427682876587,
+     "separation_p95_s": 0.22211447954177857,
+     "separation_max_s": 0.2942695617675781,
+     "residual_bias": 7.018775804459526e-15,
+     "residual_spread": 0.3975725937278823,
+     "difference_bias": -0.016219512195121064,
+     "difference_spread": 0.4129301607633603,
+     "label": "plateau 36.2",
+     "ratio_mean": 0.999638184780448,
+     "ratio_p10": 0.9849282720789665,
+     "ratio_p90": 1.0149202113081373,
+     "a_min": 34.53,
+     "a_max": 38.69,
+     "maf_med": 36.19,
+     "dur": 27.016685962677002
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 35,
+     "r_squared": 0.8852883402883445,
+     "slope": 1.0856054661657806,
+     "offset": -3.2754116449030373,
+     "slope_drift_pct": 68.19622017401437,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 3,
+     "unmatched_b": 1,
+     "separation_median_s": 0.09039831161499023,
+     "separation_p95_s": 0.20050897598266598,
+     "separation_max_s": 0.20942425727844238,
+     "residual_bias": 1.3398805874333318e-14,
+     "residual_spread": 0.2600920818944653,
+     "difference_bias": -0.08971428571428491,
+     "difference_spread": 0.2662596553772882,
+     "label": "plateau 37.4",
+     "ratio_mean": 0.9975600468857374,
+     "ratio_p10": 0.988440995771713,
+     "ratio_p90": 1.006131000656548,
+     "a_min": 35.42,
+     "a_max": 38.09,
+     "maf_med": 37.405,
+     "dur": 10.791013956069946
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 98,
+     "r_squared": 0.9463186665809543,
+     "slope": 0.9671896492918349,
+     "offset": 1.148987788397542,
+     "slope_drift_pct": 9.262029284350959,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 15,
+     "unmatched_b": 2,
+     "separation_median_s": 0.14651215076446533,
+     "separation_p95_s": 0.22621223926544173,
+     "separation_max_s": 0.2838125228881836,
+     "residual_bias": 5.582835780972216e-15,
+     "residual_spread": 0.39942080789743806,
+     "difference_bias": -0.008571428571427663,
+     "difference_spread": 0.40345194185646827,
+     "label": "plateau 36.0",
+     "ratio_mean": 0.9998394230303633,
+     "ratio_p10": 0.9863117842270168,
+     "ratio_p90": 1.0139030040885064,
+     "a_min": 31.41,
+     "a_max": 37.87,
+     "maf_med": 36.0,
+     "dur": 32.32867407798767
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 32,
+     "r_squared": 0.5834847314456526,
+     "slope": 0.8633490536198165,
+     "offset": 4.571612041575994,
+     "slope_drift_pct": 57.15327994698273,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 3,
+     "unmatched_b": 0,
+     "separation_median_s": 0.1514354944229126,
+     "separation_p95_s": 0.25332425832748406,
+     "separation_max_s": 0.2939178943634033,
+     "residual_bias": -6.661338147750939e-16,
+     "residual_spread": 0.4012371439495288,
+     "difference_bias": -0.08656249999999965,
+     "difference_spread": 0.408217232112695,
+     "label": "plateau 34.0",
+     "ratio_mean": 0.9974953260518052,
+     "ratio_p10": 0.984494638075834,
+     "ratio_p90": 1.0131251290634806,
+     "a_min": 33.07,
+     "a_max": 35.02,
+     "maf_med": 34.04,
+     "dur": 10.015110969543457
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 39,
+     "r_squared": 0.7002514458838727,
+     "slope": 0.9173020072555055,
+     "offset": 2.6292934423594625,
+     "slope_drift_pct": 78.59424443592442,
+     "scale_verdict": "unresolved",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 4,
+     "unmatched_b": 0,
+     "separation_median_s": 0.09741592407226562,
+     "separation_p95_s": 0.21824779510498055,
+     "separation_max_s": 0.29695892333984375,
+     "residual_bias": -4.190380236533924e-15,
+     "residual_spread": 0.3355053493517819,
+     "difference_bias": -0.032564102564101825,
+     "difference_spread": 0.33867553452490906,
+     "label": "plateau 32.3",
+     "ratio_mean": 0.9990122566466716,
+     "ratio_p10": 0.9875085664781913,
+     "ratio_p90": 1.011101969194475,
+     "a_min": 31.15,
+     "a_max": 33.25,
+     "maf_med": 32.27,
+     "dur": 13.212829113006592
+    },
+    {
+     "a": "obd:MAF",
+     "b": "did:ECM_MAF_GPS",
+     "n_pairs": 63,
+     "r_squared": 0.6602615517654354,
+     "slope": 0.9572194199243386,
+     "offset": 0.14006651954602536,
+     "slope_drift_pct": 899.3360287681554,
+     "scale_verdict": "drifting",
+     "policy": {
+      "max_separation_s": 0.3,
+      "reference": "a",
+      "tie_break": "earlier"
+     },
+     "reference": "a",
+     "timestamp_basis_a": "acquired",
+     "timestamp_basis_b": "acquired",
+     "unmatched_a": 6,
+     "unmatched_b": 0,
+     "separation_median_s": 0.14550566673278809,
+     "separation_p95_s": 0.21875593662261963,
+     "separation_max_s": 0.2953011989593506,
+     "residual_bias": 5.145795606199139e-16,
+     "residual_spread": 0.027451550809860094,
+     "difference_bias": 0.003650793650793672,
+     "difference_spread": 0.027504780958236996,
+     "label": "plateau 3.2",
+     "ratio_mean": 1.0011527812066343,
+     "ratio_p10": 0.99375,
+     "ratio_p90": 1.0094339622641508,
+     "a_min": 3.15,
+     "a_max": 3.41,
+     "maf_med": 3.18,
+     "dur": 18.65541911125183
+    }
+   ]
+  }
+ },
+ "stepB_band_ratio_medians": {
+  "b6": [
+   {
+    "band": "(3, 10]",
+    "n": "88",
+    "median": "1.001333371260338",
+    "p10": "0.9755089717584647",
+    "p90": "1.025551189317012",
+    "within2": "0.6704545454545454"
+   },
+   {
+    "band": "(10, 20]",
+    "n": "35",
+    "median": "1.0173548773189707",
+    "p10": "0.8487864092562046",
+    "p90": "1.2675062271536248",
+    "within2": "0.3142857142857143"
+   },
+   {
+    "band": "(20, 40]",
+    "n": "525",
+    "median": "1.0",
+    "p10": "0.9829356507427722",
+    "p90": "1.0161514179306237",
+    "within2": "0.8571428571428571"
+   },
+   {
+    "band": "(40, 60]",
+    "n": "190",
+    "median": "0.9995786962714642",
+    "p10": "0.9851781519698101",
+    "p90": "1.0136518812259232",
+    "within2": "0.9052631578947369"
+   },
+   {
+    "band": "(60, 90]",
+    "n": "30",
+    "median": "1.0018464509045386",
+    "p10": "0.9842651557429705",
+    "p90": "1.0151143888099812",
+    "within2": "0.9"
+   },
+   {
+    "band": "(90, 200]",
+    "n": "8",
+    "median": "0.9855954404603208",
+    "p10": "0.9686342673248162",
+    "p90": "1.0186456913505058",
+    "within2": "0.5"
+   }
+  ],
+  "b7": [
+   {
+    "band": "(3, 10]",
+    "n": "197",
+    "median": "1.0",
+    "p10": "0.985527490416426",
+    "p90": "1.0120845921450152",
+    "within2": "0.868020304568528"
+   },
+   {
+    "band": "(10, 20]",
+    "n": "21",
+    "median": "0.9988577955454027",
+    "p10": "0.9699903194578896",
+    "p90": "1.0901315789473685",
+    "within2": "0.5714285714285714"
+   },
+   {
+    "band": "(20, 40]",
+    "n": "63",
+    "median": "1.001751313485114",
+    "p10": "0.9399289160586739",
+    "p90": "1.1287904940016267",
+    "within2": "0.5555555555555556"
+   },
+   {
+    "band": "(40, 60]",
+    "n": "236",
+    "median": "1.0010484469823664",
+    "p10": "0.9832441794794741",
+    "p90": "1.0330606244607077",
+    "within2": "0.7754237288135594"
+   },
+   {
+    "band": "(60, 90]",
+    "n": "255",
+    "median": "1.000546672133388",
+    "p10": "0.98544325836713",
+    "p90": "1.0173613007876299",
+    "within2": "0.8705882352941177"
+   },
+   {
+    "band": "(90, 200]",
+    "n": "47",
+    "median": "1.0030771540078054",
+    "p10": "0.986440289118183",
+    "p90": "1.025333188338946",
+    "within2": "0.7659574468085106"
+   }
+  ],
+  "b9": [
+   {
+    "band": "(3, 10]",
+    "n": "309",
+    "median": "1.0",
+    "p10": "0.9714761969285205",
+    "p90": "1.031572915120632",
+    "within2": "0.6796116504854369"
+   },
+   {
+    "band": "(10, 20]",
+    "n": "108",
+    "median": "1.0002783964365256",
+    "p10": "0.9676693682412145",
+    "p90": "1.0356505911357412",
+    "within2": "0.6388888888888888"
+   },
+   {
+    "band": "(20, 40]",
+    "n": "1592",
+    "median": "1.0",
+    "p10": "0.9858119798961851",
+    "p90": "1.0141453727195844",
+    "within2": "0.9082914572864321"
+   },
+   {
+    "band": "(40, 60]",
+    "n": "442",
+    "median": "1.0002310264495824",
+    "p10": "0.9856104810360466",
+    "p90": "1.0143766065501711",
+    "within2": "0.8981900452488688"
+   },
+   {
+    "band": "(60, 90]",
+    "n": "23",
+    "median": "1.0044153720359772",
+    "p10": "0.9805868859057042",
+    "p90": "1.01235029653041",
+    "within2": "0.9565217391304348"
+   },
+   {
+    "band": "(90, 200]",
+    "n": "26",
+    "median": "1.006488401141302",
+    "p10": "0.9837453895720591",
+    "p90": "1.0266423244403455",
+    "within2": "0.7307692307692307"
+   }
+  ]
+ },
+ "stepC_mass_balance": {
+  "current (K=914943, c=0)": {
+   "model": {
+    "K": 914943.0,
+    "c": 0.0
+   },
+   "blocks": {
+    "b6": {
+     "by_regime": {
+      "CL": {
+       "size": 625,
+       "median": 2.69
+      },
+      "rich": {
+       "size": 2,
+       "median": -15.15
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "3",
+       "median": "5.57",
+       "p10": "1.46",
+       "p90": "7.65"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "27",
+       "median": "3.3",
+       "p10": "0.59",
+       "p90": "5.46"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "318",
+       "median": "2.72",
+       "p10": "1.41",
+       "p90": "4.22"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "178",
+       "median": "2.65",
+       "p10": "1.43",
+       "p90": "3.69"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "60",
+       "median": "2.59",
+       "p10": "1.39",
+       "p90": "4.07"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "23",
+       "median": "2.41",
+       "p10": "1.63",
+       "p90": "4.15"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "16",
+       "median": "2.64",
+       "p10": "1.99",
+       "p90": "3.65"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-15.15",
+       "p10": "-15.37",
+       "p90": "-14.92"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "8",
+       "median": "1.2",
+       "p10": "-6.06",
+       "p90": "6.35"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "204",
+       "median": "2.7",
+       "p10": "1.39",
+       "p90": "4.21"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "340",
+       "median": "2.69",
+       "p10": "1.43",
+       "p90": "4.02"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "39",
+       "median": "2.63",
+       "p10": "1.45",
+       "p90": "4.92"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "34",
+       "median": "2.77",
+       "p10": "1.8",
+       "p90": "4.14"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-15.15",
+       "p10": "-15.37",
+       "p90": "-14.92"
+      }
+     ]
+    },
+    "b7": {
+     "by_regime": {
+      "CL": {
+       "size": 447,
+       "median": 2.67
+      },
+      "OL_stoich": {
+       "size": 24,
+       "median": 0.09
+      },
+      "rich": {
+       "size": 50,
+       "median": -13.14
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "58",
+       "median": "1.8",
+       "p10": "-10.54",
+       "p90": "3.92"
+      },
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "0.09",
+       "p10": "-1.45",
+       "p90": "1.5"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "4",
+       "median": "7.8",
+       "p10": "4.27",
+       "p90": "10.81"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "17",
+       "median": "3.89",
+       "p10": "1.75",
+       "p90": "7.4"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "66",
+       "median": "2.55",
+       "p10": "0.96",
+       "p90": "4.05"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "76",
+       "median": "2.69",
+       "p10": "1.54",
+       "p90": "4.87"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "221",
+       "median": "2.8",
+       "p10": "1.5",
+       "p90": "4.21"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "rich",
+       "n": "3",
+       "median": "-0.29",
+       "p10": "-1.49",
+       "p90": "-0.02"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "5",
+       "median": "1.99",
+       "p10": "0.37",
+       "p90": "3.85"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "rich",
+       "n": "16",
+       "median": "-6.8",
+       "p10": "-8.9",
+       "p90": "-0.81"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "31",
+       "median": "-15.39",
+       "p10": "-18.41",
+       "p90": "-12.45"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "59",
+       "median": "1.81",
+       "p10": "-10.5",
+       "p90": "3.91"
+      },
+      {
+       "lb": "(0, 30]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "0.09",
+       "p10": "-1.45",
+       "p90": "1.5"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "10",
+       "median": "3.47",
+       "p10": "-0.18",
+       "p90": "9.56"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "78",
+       "median": "2.67",
+       "p10": "1.08",
+       "p90": "4.79"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "90",
+       "median": "2.67",
+       "p10": "1.61",
+       "p90": "3.88"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "210",
+       "median": "2.82",
+       "p10": "1.47",
+       "p90": "4.29"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "50",
+       "median": "-13.14",
+       "p10": "-17.93",
+       "p90": "-1.45"
+      }
+     ]
+    },
+    "b9": {
+     "by_regime": {
+      "CL": {
+       "size": 1689,
+       "median": 2.6
+      },
+      "rich": {
+       "size": 19,
+       "median": -15.86
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "61",
+       "median": "-0.17",
+       "p10": "-10.2",
+       "p90": "3.54"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "94",
+       "median": "2.42",
+       "p10": "0.04",
+       "p90": "4.74"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "455",
+       "median": "2.72",
+       "p10": "1.48",
+       "p90": "4.01"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "794",
+       "median": "2.55",
+       "p10": "1.31",
+       "p90": "3.87"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "96",
+       "median": "2.88",
+       "p10": "1.43",
+       "p90": "4.3"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "189",
+       "median": "2.64",
+       "p10": "1.42",
+       "p90": "4.09"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-15.86",
+       "p10": "-17.62",
+       "p90": "-14.32"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "87",
+       "median": "0.48",
+       "p10": "-7.33",
+       "p90": "4.74"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "263",
+       "median": "2.56",
+       "p10": "1.08",
+       "p90": "3.87"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "1032",
+       "median": "2.62",
+       "p10": "1.34",
+       "p90": "3.96"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "104",
+       "median": "2.72",
+       "p10": "1.29",
+       "p90": "3.99"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "203",
+       "median": "2.69",
+       "p10": "1.45",
+       "p90": "4.3"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-15.86",
+       "p10": "-17.62",
+       "p90": "-14.32"
+      }
+     ]
+    }
+   }
+  },
+  "gain fit on b6": {
+   "model": {
+    "K": 939388.0410372523,
+    "c": 0.0
+   },
+   "blocks": {
+    "b6": {
+     "by_regime": {
+      "CL": {
+       "size": 625,
+       "median": 0.02
+      },
+      "rich": {
+       "size": 2,
+       "median": -17.35
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "3",
+       "median": "2.82",
+       "p10": "-1.18",
+       "p90": "4.84"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "27",
+       "median": "0.62",
+       "p10": "-2.03",
+       "p90": "2.72"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "318",
+       "median": "0.05",
+       "p10": "-1.23",
+       "p90": "1.5"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "178",
+       "median": "-0.03",
+       "p10": "-1.21",
+       "p90": "1.0"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "60",
+       "median": "-0.08",
+       "p10": "-1.25",
+       "p90": "1.36"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "23",
+       "median": "-0.25",
+       "p10": "-1.02",
+       "p90": "1.44"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "16",
+       "median": "-0.03",
+       "p10": "-0.67",
+       "p90": "0.96"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-17.35",
+       "p10": "-17.57",
+       "p90": "-17.14"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "8",
+       "median": "-1.43",
+       "p10": "-8.5",
+       "p90": "3.58"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "204",
+       "median": "0.03",
+       "p10": "-1.25",
+       "p90": "1.5"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "340",
+       "median": "0.01",
+       "p10": "-1.21",
+       "p90": "1.31"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "39",
+       "median": "-0.04",
+       "p10": "-1.19",
+       "p90": "2.19"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "34",
+       "median": "0.1",
+       "p10": "-0.85",
+       "p90": "1.43"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-17.35",
+       "p10": "-17.57",
+       "p90": "-17.14"
+      }
+     ]
+    },
+    "b7": {
+     "by_regime": {
+      "CL": {
+       "size": 447,
+       "median": -0.01
+      },
+      "OL_stoich": {
+       "size": 24,
+       "median": -2.51
+      },
+      "rich": {
+       "size": 50,
+       "median": -15.4
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "58",
+       "median": "-0.85",
+       "p10": "-12.86",
+       "p90": "1.21"
+      },
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "-2.51",
+       "p10": "-4.02",
+       "p90": "-1.14"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "4",
+       "median": "4.99",
+       "p10": "1.56",
+       "p90": "7.93"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "17",
+       "median": "1.19",
+       "p10": "-0.9",
+       "p90": "4.61"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "66",
+       "median": "-0.12",
+       "p10": "-1.66",
+       "p90": "1.34"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "76",
+       "median": "0.02",
+       "p10": "-1.1",
+       "p90": "2.14"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "221",
+       "median": "0.13",
+       "p10": "-1.14",
+       "p90": "1.5"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "rich",
+       "n": "3",
+       "median": "-2.89",
+       "p10": "-4.06",
+       "p90": "-2.62"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "5",
+       "median": "-0.66",
+       "p10": "-2.24",
+       "p90": "1.15"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "rich",
+       "n": "16",
+       "median": "-9.23",
+       "p10": "-11.27",
+       "p90": "-3.39"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "31",
+       "median": "-17.59",
+       "p10": "-20.54",
+       "p90": "-14.72"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "59",
+       "median": "-0.84",
+       "p10": "-12.83",
+       "p90": "1.21"
+      },
+      {
+       "lb": "(0, 30]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "-2.51",
+       "p10": "-4.02",
+       "p90": "-1.14"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "10",
+       "median": "0.78",
+       "p10": "-2.77",
+       "p90": "6.71"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "78",
+       "median": "0.0",
+       "p10": "-1.55",
+       "p90": "2.06"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "90",
+       "median": "0.0",
+       "p10": "-1.03",
+       "p90": "1.17"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "210",
+       "median": "0.14",
+       "p10": "-1.17",
+       "p90": "1.58"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "50",
+       "median": "-15.4",
+       "p10": "-20.07",
+       "p90": "-4.01"
+      }
+     ]
+    },
+    "b9": {
+     "by_regime": {
+      "CL": {
+       "size": 1689,
+       "median": -0.07
+      },
+      "rich": {
+       "size": 19,
+       "median": -18.05
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "61",
+       "median": "-2.77",
+       "p10": "-12.54",
+       "p90": "0.84"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "94",
+       "median": "-0.25",
+       "p10": "-2.56",
+       "p90": "2.01"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "455",
+       "median": "0.05",
+       "p10": "-1.16",
+       "p90": "1.3"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "794",
+       "median": "-0.12",
+       "p10": "-1.32",
+       "p90": "1.17"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "96",
+       "median": "0.2",
+       "p10": "-1.21",
+       "p90": "1.58"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "189",
+       "median": "-0.03",
+       "p10": "-1.22",
+       "p90": "1.38"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-18.05",
+       "p10": "-19.76",
+       "p90": "-16.55"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "87",
+       "median": "-2.14",
+       "p10": "-9.74",
+       "p90": "2.02"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "263",
+       "median": "-0.11",
+       "p10": "-1.55",
+       "p90": "1.17"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "1032",
+       "median": "-0.05",
+       "p10": "-1.3",
+       "p90": "1.25"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "104",
+       "median": "0.04",
+       "p10": "-1.34",
+       "p90": "1.28"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "203",
+       "median": "0.02",
+       "p10": "-1.19",
+       "p90": "1.58"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-18.05",
+       "p10": "-19.76",
+       "p90": "-16.55"
+      }
+     ]
+    }
+   }
+  },
+  "gain+offset fit on b6": {
+   "model": {
+    "K": 925976.2270980269,
+    "c": 264.05330316706727
+   },
+   "blocks": {
+    "b6": {
+     "by_regime": {
+      "CL": {
+       "size": 625,
+       "median": 0.05
+      },
+      "rich": {
+       "size": 2,
+       "median": -16.78
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "3",
+       "median": "1.33",
+       "p10": "-2.63",
+       "p90": "3.35"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "27",
+       "median": "0.06",
+       "p10": "-3.03",
+       "p90": "2.24"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "318",
+       "median": "-0.09",
+       "p10": "-1.35",
+       "p90": "1.38"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "178",
+       "median": "0.06",
+       "p10": "-1.07",
+       "p90": "1.13"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "60",
+       "median": "0.26",
+       "p10": "-0.87",
+       "p90": "1.74"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "23",
+       "median": "0.37",
+       "p10": "-0.46",
+       "p90": "2.08"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "16",
+       "median": "0.63",
+       "p10": "-0.02",
+       "p90": "1.62"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-16.78",
+       "p10": "-17.0",
+       "p90": "-16.56"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "8",
+       "median": "-2.57",
+       "p10": "-9.5",
+       "p90": "2.09"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "204",
+       "median": "-0.21",
+       "p10": "-1.46",
+       "p90": "1.29"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "340",
+       "median": "0.13",
+       "p10": "-1.11",
+       "p90": "1.33"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "39",
+       "median": "0.43",
+       "p10": "-0.8",
+       "p90": "2.58"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "34",
+       "median": "0.73",
+       "p10": "-0.25",
+       "p90": "2.07"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-16.78",
+       "p10": "-17.0",
+       "p90": "-16.56"
+      }
+     ]
+    },
+    "b7": {
+     "by_regime": {
+      "CL": {
+       "size": 447,
+       "median": 0.37
+      },
+      "OL_stoich": {
+       "size": 24,
+       "median": -5.83
+      },
+      "rich": {
+       "size": 50,
+       "median": -14.84
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "58",
+       "median": "-3.97",
+       "p10": "-15.98",
+       "p90": "-1.9"
+      },
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "-5.83",
+       "p10": "-7.35",
+       "p90": "-4.48"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "4",
+       "median": "3.99",
+       "p10": "0.34",
+       "p90": "7.15"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "17",
+       "median": "1.15",
+       "p10": "-1.14",
+       "p90": "4.48"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "66",
+       "median": "0.03",
+       "p10": "-1.48",
+       "p90": "1.52"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "76",
+       "median": "0.51",
+       "p10": "-0.74",
+       "p90": "2.53"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "221",
+       "median": "0.68",
+       "p10": "-0.57",
+       "p90": "2.1"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "rich",
+       "n": "3",
+       "median": "-2.3",
+       "p10": "-3.48",
+       "p90": "-2.05"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "5",
+       "median": "-0.03",
+       "p10": "-1.62",
+       "p90": "1.81"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "rich",
+       "n": "16",
+       "median": "-8.67",
+       "p10": "-10.72",
+       "p90": "-2.76"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "31",
+       "median": "-17.05",
+       "p10": "-20.02",
+       "p90": "-14.17"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "59",
+       "median": "-3.94",
+       "p10": "-15.94",
+       "p90": "-1.7"
+      },
+      {
+       "lb": "(0, 30]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "-5.83",
+       "p10": "-7.35",
+       "p90": "-4.48"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "10",
+       "median": "0.48",
+       "p10": "-2.96",
+       "p90": "5.78"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "78",
+       "median": "0.16",
+       "p10": "-1.33",
+       "p90": "2.25"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "90",
+       "median": "0.5",
+       "p10": "-0.69",
+       "p90": "1.67"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "210",
+       "median": "0.72",
+       "p10": "-0.62",
+       "p90": "2.2"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "50",
+       "median": "-14.84",
+       "p10": "-19.55",
+       "p90": "-3.39"
+      }
+     ]
+    },
+    "b9": {
+     "by_regime": {
+      "CL": {
+       "size": 1689,
+       "median": -0.0
+      },
+      "rich": {
+       "size": 19,
+       "median": -17.52
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "61",
+       "median": "-6.23",
+       "p10": "-16.09",
+       "p90": "-1.94"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "94",
+       "median": "-1.39",
+       "p10": "-3.92",
+       "p90": "0.83"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "455",
+       "median": "-0.12",
+       "p10": "-1.38",
+       "p90": "1.24"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "794",
+       "median": "0.03",
+       "p10": "-1.2",
+       "p90": "1.31"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "96",
+       "median": "0.63",
+       "p10": "-0.75",
+       "p90": "2.02"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "189",
+       "median": "0.54",
+       "p10": "-0.74",
+       "p90": "1.94"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-17.52",
+       "p10": "-19.24",
+       "p90": "-16.0"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "87",
+       "median": "-5.05",
+       "p10": "-12.52",
+       "p90": "0.49"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "263",
+       "median": "-0.45",
+       "p10": "-2.03",
+       "p90": "0.79"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "1032",
+       "median": "0.03",
+       "p10": "-1.23",
+       "p90": "1.34"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "104",
+       "median": "0.44",
+       "p10": "-1.0",
+       "p90": "1.68"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "203",
+       "median": "0.59",
+       "p10": "-0.65",
+       "p90": "2.14"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-17.52",
+       "p10": "-19.24",
+       "p90": "-16.0"
+      }
+     ]
+    }
+   }
+  },
+  "gain fit on b6 CL only": {
+   "model": {
+    "K": 939909.7288373252,
+    "c": 0.0
+   },
+   "blocks": {
+    "b6": {
+     "by_regime": {
+      "CL": {
+       "size": 625,
+       "median": -0.04
+      },
+      "rich": {
+       "size": 2,
+       "median": -17.4
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "3",
+       "median": "2.77",
+       "p10": "-1.24",
+       "p90": "4.79"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "27",
+       "median": "0.56",
+       "p10": "-2.08",
+       "p90": "2.66"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "318",
+       "median": "-0.0",
+       "p10": "-1.29",
+       "p90": "1.45"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "178",
+       "median": "-0.08",
+       "p10": "-1.27",
+       "p90": "0.94"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "60",
+       "median": "-0.14",
+       "p10": "-1.31",
+       "p90": "1.31"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "23",
+       "median": "-0.31",
+       "p10": "-1.07",
+       "p90": "1.38"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "16",
+       "median": "-0.09",
+       "p10": "-0.72",
+       "p90": "0.9"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-17.4",
+       "p10": "-17.62",
+       "p90": "-17.18"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "8",
+       "median": "-1.48",
+       "p10": "-8.55",
+       "p90": "3.52"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "204",
+       "median": "-0.02",
+       "p10": "-1.3",
+       "p90": "1.44"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "340",
+       "median": "-0.04",
+       "p10": "-1.27",
+       "p90": "1.26"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "39",
+       "median": "-0.1",
+       "p10": "-1.25",
+       "p90": "2.14"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "34",
+       "median": "0.04",
+       "p10": "-0.91",
+       "p90": "1.37"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-17.4",
+       "p10": "-17.62",
+       "p90": "-17.18"
+      }
+     ]
+    },
+    "b7": {
+     "by_regime": {
+      "CL": {
+       "size": 447,
+       "median": -0.06
+      },
+      "OL_stoich": {
+       "size": 24,
+       "median": -2.57
+      },
+      "rich": {
+       "size": 50,
+       "median": -15.45
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "58",
+       "median": "-0.91",
+       "p10": "-12.91",
+       "p90": "1.16"
+      },
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "-2.57",
+       "p10": "-4.07",
+       "p90": "-1.2"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "4",
+       "median": "4.93",
+       "p10": "1.5",
+       "p90": "7.87"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "17",
+       "median": "1.13",
+       "p10": "-0.95",
+       "p90": "4.55"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "66",
+       "median": "-0.17",
+       "p10": "-1.72",
+       "p90": "1.29"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "76",
+       "median": "-0.03",
+       "p10": "-1.16",
+       "p90": "2.08"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "221",
+       "median": "0.07",
+       "p10": "-1.2",
+       "p90": "1.45"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "rich",
+       "n": "3",
+       "median": "-2.94",
+       "p10": "-4.11",
+       "p90": "-2.68"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "5",
+       "median": "-0.72",
+       "p10": "-2.29",
+       "p90": "1.09"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "rich",
+       "n": "16",
+       "median": "-9.28",
+       "p10": "-11.32",
+       "p90": "-3.45"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "31",
+       "median": "-17.63",
+       "p10": "-20.58",
+       "p90": "-14.77"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "59",
+       "median": "-0.89",
+       "p10": "-12.88",
+       "p90": "1.15"
+      },
+      {
+       "lb": "(0, 30]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "-2.57",
+       "p10": "-4.07",
+       "p90": "-1.2"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "10",
+       "median": "0.72",
+       "p10": "-2.83",
+       "p90": "6.65"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "78",
+       "median": "-0.05",
+       "p10": "-1.61",
+       "p90": "2.0"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "90",
+       "median": "-0.05",
+       "p10": "-1.09",
+       "p90": "1.12"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "210",
+       "median": "0.09",
+       "p10": "-1.23",
+       "p90": "1.52"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "50",
+       "median": "-15.45",
+       "p10": "-20.11",
+       "p90": "-4.07"
+      }
+     ]
+    },
+    "b9": {
+     "by_regime": {
+      "CL": {
+       "size": 1689,
+       "median": -0.12
+      },
+      "rich": {
+       "size": 19,
+       "median": -18.09
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "61",
+       "median": "-2.82",
+       "p10": "-12.59",
+       "p90": "0.79"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "94",
+       "median": "-0.3",
+       "p10": "-2.62",
+       "p90": "1.95"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "455",
+       "median": "-0.01",
+       "p10": "-1.22",
+       "p90": "1.25"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "794",
+       "median": "-0.18",
+       "p10": "-1.38",
+       "p90": "1.11"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "96",
+       "median": "0.15",
+       "p10": "-1.26",
+       "p90": "1.53"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "189",
+       "median": "-0.08",
+       "p10": "-1.28",
+       "p90": "1.32"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-18.09",
+       "p10": "-19.81",
+       "p90": "-16.59"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "87",
+       "median": "-2.19",
+       "p10": "-9.79",
+       "p90": "1.96"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "263",
+       "median": "-0.17",
+       "p10": "-1.61",
+       "p90": "1.11"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "1032",
+       "median": "-0.1",
+       "p10": "-1.35",
+       "p90": "1.2"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "104",
+       "median": "-0.01",
+       "p10": "-1.4",
+       "p90": "1.23"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "203",
+       "median": "-0.03",
+       "p10": "-1.24",
+       "p90": "1.53"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-18.09",
+       "p10": "-19.81",
+       "p90": "-16.59"
+      }
+     ]
+    }
+   }
+  },
+  "gain fit on b7": {
+   "model": {
+    "K": 924447.0367591141,
+    "c": 0.0
+   },
+   "blocks": {
+    "b6": {
+     "by_regime": {
+      "CL": {
+       "size": 625,
+       "median": 1.63
+      },
+      "rich": {
+       "size": 2,
+       "median": -16.02
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "3",
+       "median": "4.49",
+       "p10": "0.41",
+       "p90": "6.54"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "27",
+       "median": "2.24",
+       "p10": "-0.44",
+       "p90": "4.38"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "318",
+       "median": "1.67",
+       "p10": "0.37",
+       "p90": "3.15"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "178",
+       "median": "1.59",
+       "p10": "0.38",
+       "p90": "2.63"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "60",
+       "median": "1.53",
+       "p10": "0.34",
+       "p90": "3.0"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "23",
+       "median": "1.36",
+       "p10": "0.58",
+       "p90": "3.07"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "16",
+       "median": "1.58",
+       "p10": "0.94",
+       "p90": "2.59"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-16.02",
+       "p10": "-16.24",
+       "p90": "-15.8"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "8",
+       "median": "0.16",
+       "p10": "-7.02",
+       "p90": "5.26"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "204",
+       "median": "1.65",
+       "p10": "0.35",
+       "p90": "3.14"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "340",
+       "median": "1.63",
+       "p10": "0.38",
+       "p90": "2.95"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "39",
+       "median": "1.57",
+       "p10": "0.4",
+       "p90": "3.84"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "34",
+       "median": "1.71",
+       "p10": "0.75",
+       "p90": "3.07"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-16.02",
+       "p10": "-16.24",
+       "p90": "-15.8"
+      }
+     ]
+    },
+    "b7": {
+     "by_regime": {
+      "CL": {
+       "size": 447,
+       "median": 1.61
+      },
+      "OL_stoich": {
+       "size": 24,
+       "median": -0.94
+      },
+      "rich": {
+       "size": 50,
+       "median": -14.03
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "58",
+       "median": "0.75",
+       "p10": "-11.45",
+       "p90": "2.85"
+      },
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "-0.94",
+       "p10": "-2.47",
+       "p90": "0.46"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "4",
+       "median": "6.69",
+       "p10": "3.2",
+       "p90": "9.67"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "17",
+       "median": "2.83",
+       "p10": "0.7",
+       "p90": "6.3"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "66",
+       "median": "1.5",
+       "p10": "-0.08",
+       "p90": "2.98"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "76",
+       "median": "1.64",
+       "p10": "0.49",
+       "p90": "3.79"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "221",
+       "median": "1.75",
+       "p10": "0.45",
+       "p90": "3.14"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "rich",
+       "n": "3",
+       "median": "-1.32",
+       "p10": "-2.5",
+       "p90": "-1.05"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "5",
+       "median": "0.94",
+       "p10": "-0.66",
+       "p90": "2.78"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "rich",
+       "n": "16",
+       "median": "-7.76",
+       "p10": "-9.83",
+       "p90": "-1.83"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "31",
+       "median": "-16.26",
+       "p10": "-19.25",
+       "p90": "-13.35"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "59",
+       "median": "0.76",
+       "p10": "-11.42",
+       "p90": "2.84"
+      },
+      {
+       "lb": "(0, 30]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "-0.94",
+       "p10": "-2.47",
+       "p90": "0.46"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "10",
+       "median": "2.4",
+       "p10": "-1.2",
+       "p90": "8.43"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "78",
+       "median": "1.62",
+       "p10": "0.04",
+       "p90": "3.71"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "90",
+       "median": "1.62",
+       "p10": "0.57",
+       "p90": "2.81"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "210",
+       "median": "1.76",
+       "p10": "0.42",
+       "p90": "3.22"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "50",
+       "median": "-14.03",
+       "p10": "-18.78",
+       "p90": "-2.46"
+      }
+     ]
+    },
+    "b9": {
+     "by_regime": {
+      "CL": {
+       "size": 1689,
+       "median": 1.55
+      },
+      "rich": {
+       "size": 19,
+       "median": -16.72
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "61",
+       "median": "-1.2",
+       "p10": "-11.12",
+       "p90": "2.47"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "94",
+       "median": "1.36",
+       "p10": "-0.99",
+       "p90": "3.66"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "455",
+       "median": "1.66",
+       "p10": "0.44",
+       "p90": "2.94"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "794",
+       "median": "1.49",
+       "p10": "0.27",
+       "p90": "2.8"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "96",
+       "median": "1.82",
+       "p10": "0.39",
+       "p90": "3.22"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "189",
+       "median": "1.59",
+       "p10": "0.38",
+       "p90": "3.01"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-16.72",
+       "p10": "-18.47",
+       "p90": "-15.2"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "87",
+       "median": "-0.56",
+       "p10": "-8.29",
+       "p90": "3.67"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "263",
+       "median": "1.5",
+       "p10": "0.04",
+       "p90": "2.8"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "1032",
+       "median": "1.57",
+       "p10": "0.3",
+       "p90": "2.89"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "104",
+       "median": "1.66",
+       "p10": "0.25",
+       "p90": "2.92"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "203",
+       "median": "1.64",
+       "p10": "0.41",
+       "p90": "3.23"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-16.72",
+       "p10": "-18.47",
+       "p90": "-15.2"
+      }
+     ]
+    }
+   }
+  },
+  "gain+offset fit on b7": {
+   "model": {
+    "K": 925027.7272062275,
+    "c": -10.778750634696934
+   },
+   "blocks": {
+    "b6": {
+     "by_regime": {
+      "CL": {
+       "size": 625,
+       "median": 1.62
+      },
+      "rich": {
+       "size": 2,
+       "median": -16.05
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "3",
+       "median": "4.54",
+       "p10": "0.47",
+       "p90": "6.6"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "27",
+       "median": "2.26",
+       "p10": "-0.4",
+       "p90": "4.39"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "318",
+       "median": "1.67",
+       "p10": "0.37",
+       "p90": "3.14"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "178",
+       "median": "1.58",
+       "p10": "0.38",
+       "p90": "2.62"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "60",
+       "median": "1.52",
+       "p10": "0.32",
+       "p90": "2.98"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "23",
+       "median": "1.33",
+       "p10": "0.55",
+       "p90": "3.04"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "16",
+       "median": "1.55",
+       "p10": "0.91",
+       "p90": "2.55"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-16.05",
+       "p10": "-16.27",
+       "p90": "-15.83"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "8",
+       "median": "0.21",
+       "p10": "-6.99",
+       "p90": "5.31"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "204",
+       "median": "1.65",
+       "p10": "0.36",
+       "p90": "3.14"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "340",
+       "median": "1.62",
+       "p10": "0.37",
+       "p90": "2.94"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "39",
+       "median": "1.55",
+       "p10": "0.38",
+       "p90": "3.82"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "34",
+       "median": "1.68",
+       "p10": "0.72",
+       "p90": "3.04"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-16.05",
+       "p10": "-16.27",
+       "p90": "-15.83"
+      }
+     ]
+    },
+    "b7": {
+     "by_regime": {
+      "CL": {
+       "size": 447,
+       "median": 1.6
+      },
+      "OL_stoich": {
+       "size": 24,
+       "median": -0.81
+      },
+      "rich": {
+       "size": 50,
+       "median": -14.06
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "58",
+       "median": "0.86",
+       "p10": "-11.33",
+       "p90": "2.96"
+      },
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "-0.81",
+       "p10": "-2.33",
+       "p90": "0.59"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "4",
+       "median": "6.72",
+       "p10": "3.24",
+       "p90": "9.7"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "17",
+       "median": "2.82",
+       "p10": "0.71",
+       "p90": "6.3"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "66",
+       "median": "1.49",
+       "p10": "-0.09",
+       "p90": "2.97"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "76",
+       "median": "1.61",
+       "p10": "0.47",
+       "p90": "3.77"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "221",
+       "median": "1.72",
+       "p10": "0.43",
+       "p90": "3.11"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "rich",
+       "n": "3",
+       "median": "-1.35",
+       "p10": "-2.53",
+       "p90": "-1.08"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "5",
+       "median": "0.91",
+       "p10": "-0.69",
+       "p90": "2.75"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "rich",
+       "n": "16",
+       "median": "-7.79",
+       "p10": "-9.86",
+       "p90": "-1.86"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "31",
+       "median": "-16.28",
+       "p10": "-19.28",
+       "p90": "-13.37"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "59",
+       "median": "0.87",
+       "p10": "-11.3",
+       "p90": "2.95"
+      },
+      {
+       "lb": "(0, 30]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "-0.81",
+       "p10": "-2.33",
+       "p90": "0.59"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "10",
+       "median": "2.41",
+       "p10": "-1.2",
+       "p90": "8.46"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "78",
+       "median": "1.61",
+       "p10": "0.02",
+       "p90": "3.7"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "90",
+       "median": "1.59",
+       "p10": "0.55",
+       "p90": "2.78"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "210",
+       "median": "1.73",
+       "p10": "0.4",
+       "p90": "3.19"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "50",
+       "median": "-14.06",
+       "p10": "-18.8",
+       "p90": "-2.49"
+      }
+     ]
+    },
+    "b9": {
+     "by_regime": {
+      "CL": {
+       "size": 1689,
+       "median": 1.54
+      },
+      "rich": {
+       "size": 19,
+       "median": -16.75
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "61",
+       "median": "-1.06",
+       "p10": "-10.98",
+       "p90": "2.6"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "94",
+       "median": "1.4",
+       "p10": "-0.94",
+       "p90": "3.71"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "455",
+       "median": "1.67",
+       "p10": "0.44",
+       "p90": "2.94"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "794",
+       "median": "1.48",
+       "p10": "0.26",
+       "p90": "2.79"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "96",
+       "median": "1.8",
+       "p10": "0.36",
+       "p90": "3.2"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "189",
+       "median": "1.56",
+       "p10": "0.35",
+       "p90": "2.99"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-16.75",
+       "p10": "-18.49",
+       "p90": "-15.23"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "87",
+       "median": "-0.42",
+       "p10": "-8.19",
+       "p90": "3.72"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "263",
+       "median": "1.5",
+       "p10": "0.06",
+       "p90": "2.81"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "1032",
+       "median": "1.56",
+       "p10": "0.29",
+       "p90": "2.88"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "104",
+       "median": "1.64",
+       "p10": "0.23",
+       "p90": "2.9"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "203",
+       "median": "1.61",
+       "p10": "0.38",
+       "p90": "3.2"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-16.75",
+       "p10": "-18.49",
+       "p90": "-15.23"
+      }
+     ]
+    }
+   }
+  },
+  "gain fit on b7 CL only": {
+   "model": {
+    "K": 937633.0840295786,
+    "c": 0.0
+   },
+   "blocks": {
+    "b6": {
+     "by_regime": {
+      "CL": {
+       "size": 625,
+       "median": 0.2
+      },
+      "rich": {
+       "size": 2,
+       "median": -17.2
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "3",
+       "median": "3.02",
+       "p10": "-1.0",
+       "p90": "5.04"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "27",
+       "median": "0.8",
+       "p10": "-1.84",
+       "p90": "2.91"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "318",
+       "median": "0.24",
+       "p10": "-1.05",
+       "p90": "1.69"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "178",
+       "median": "0.16",
+       "p10": "-1.03",
+       "p90": "1.19"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "60",
+       "median": "0.11",
+       "p10": "-1.07",
+       "p90": "1.55"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "23",
+       "median": "-0.07",
+       "p10": "-0.83",
+       "p90": "1.63"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "16",
+       "median": "0.16",
+       "p10": "-0.48",
+       "p90": "1.14"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-17.2",
+       "p10": "-17.42",
+       "p90": "-16.98"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "8",
+       "median": "-1.25",
+       "p10": "-8.33",
+       "p90": "3.78"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "204",
+       "median": "0.22",
+       "p10": "-1.06",
+       "p90": "1.69"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "340",
+       "median": "0.2",
+       "p10": "-1.03",
+       "p90": "1.5"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "39",
+       "median": "0.14",
+       "p10": "-1.01",
+       "p90": "2.38"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "34",
+       "median": "0.28",
+       "p10": "-0.66",
+       "p90": "1.62"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "2",
+       "median": "-17.2",
+       "p10": "-17.42",
+       "p90": "-16.98"
+      }
+     ]
+    },
+    "b7": {
+     "by_regime": {
+      "CL": {
+       "size": 447,
+       "median": 0.18
+      },
+      "OL_stoich": {
+       "size": 24,
+       "median": -2.33
+      },
+      "rich": {
+       "size": 50,
+       "median": -15.24
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "58",
+       "median": "-0.67",
+       "p10": "-12.7",
+       "p90": "1.4"
+      },
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "-2.33",
+       "p10": "-3.84",
+       "p90": "-0.96"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "4",
+       "median": "5.19",
+       "p10": "1.75",
+       "p90": "8.13"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "17",
+       "median": "1.38",
+       "p10": "-0.71",
+       "p90": "4.8"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "66",
+       "median": "0.07",
+       "p10": "-1.48",
+       "p90": "1.53"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "76",
+       "median": "0.21",
+       "p10": "-0.92",
+       "p90": "2.33"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "221",
+       "median": "0.32",
+       "p10": "-0.96",
+       "p90": "1.69"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "rich",
+       "n": "3",
+       "median": "-2.71",
+       "p10": "-3.88",
+       "p90": "-2.44"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "CL",
+       "n": "5",
+       "median": "-0.48",
+       "p10": "-2.06",
+       "p90": "1.34"
+      },
+      {
+       "fb": "(0.035, 0.04]",
+       "reg": "rich",
+       "n": "16",
+       "median": "-9.06",
+       "p10": "-11.1",
+       "p90": "-3.21"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "31",
+       "median": "-17.43",
+       "p10": "-20.39",
+       "p90": "-14.56"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "59",
+       "median": "-0.65",
+       "p10": "-12.66",
+       "p90": "1.4"
+      },
+      {
+       "lb": "(0, 30]",
+       "reg": "OL_stoich",
+       "n": "24",
+       "median": "-2.33",
+       "p10": "-3.84",
+       "p90": "-0.96"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "10",
+       "median": "0.96",
+       "p10": "-2.59",
+       "p90": "6.91"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "78",
+       "median": "0.19",
+       "p10": "-1.37",
+       "p90": "2.25"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "90",
+       "median": "0.19",
+       "p10": "-0.85",
+       "p90": "1.36"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "210",
+       "median": "0.33",
+       "p10": "-0.99",
+       "p90": "1.77"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "50",
+       "median": "-15.24",
+       "p10": "-19.92",
+       "p90": "-3.83"
+      }
+     ]
+    },
+    "b9": {
+     "by_regime": {
+      "CL": {
+       "size": 1689,
+       "median": 0.12
+      },
+      "rich": {
+       "size": 19,
+       "median": -17.9
+      }
+     },
+     "by_fuel": [
+      {
+       "fb": "(0.0, 0.01]",
+       "reg": "CL",
+       "n": "61",
+       "median": "-2.59",
+       "p10": "-12.37",
+       "p90": "1.03"
+      },
+      {
+       "fb": "(0.01, 0.015]",
+       "reg": "CL",
+       "n": "94",
+       "median": "-0.06",
+       "p10": "-2.38",
+       "p90": "2.2"
+      },
+      {
+       "fb": "(0.015, 0.02]",
+       "reg": "CL",
+       "n": "455",
+       "median": "0.23",
+       "p10": "-0.98",
+       "p90": "1.49"
+      },
+      {
+       "fb": "(0.02, 0.025]",
+       "reg": "CL",
+       "n": "794",
+       "median": "0.07",
+       "p10": "-1.14",
+       "p90": "1.36"
+      },
+      {
+       "fb": "(0.025, 0.03]",
+       "reg": "CL",
+       "n": "96",
+       "median": "0.39",
+       "p10": "-1.02",
+       "p90": "1.77"
+      },
+      {
+       "fb": "(0.03, 0.035]",
+       "reg": "CL",
+       "n": "189",
+       "median": "0.16",
+       "p10": "-1.04",
+       "p90": "1.57"
+      },
+      {
+       "fb": "(0.04, 0.05]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-17.9",
+       "p10": "-19.61",
+       "p90": "-16.39"
+      }
+     ],
+     "by_load": [
+      {
+       "lb": "(0, 30]",
+       "reg": "CL",
+       "n": "87",
+       "median": "-1.96",
+       "p10": "-9.58",
+       "p90": "2.21"
+      },
+      {
+       "lb": "(30, 50]",
+       "reg": "CL",
+       "n": "263",
+       "median": "0.07",
+       "p10": "-1.37",
+       "p90": "1.36"
+      },
+      {
+       "lb": "(50, 70]",
+       "reg": "CL",
+       "n": "1032",
+       "median": "0.14",
+       "p10": "-1.11",
+       "p90": "1.44"
+      },
+      {
+       "lb": "(70, 85]",
+       "reg": "CL",
+       "n": "104",
+       "median": "0.23",
+       "p10": "-1.16",
+       "p90": "1.47"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "CL",
+       "n": "203",
+       "median": "0.21",
+       "p10": "-1.0",
+       "p90": "1.77"
+      },
+      {
+       "lb": "(85, 101]",
+       "reg": "rich",
+       "n": "19",
+       "median": "-17.9",
+       "p10": "-19.61",
+       "p90": "-16.39"
+      }
+     ]
+    }
+   }
+  },
+  "closed_loop_anchor": {
+   "b6": {
+    "n": 625,
+    "phi_imp_median": 1.0266883917618868,
+    "phi_imp_p10": 1.016644639085871,
+    "phi_imp_p90": 1.0384287638474468,
+    "phi_meas_median": 0.9997559189650964,
+    "corr_register_per_air_vs_phi_meas": 0.2547352079218298,
+    "fuel_inj_range": [
+     0.010035597845986035,
+     0.037532392728290176
+    ]
+   },
+   "b7": {
+    "n": 447,
+    "phi_imp_median": 1.0254540212542498,
+    "phi_imp_p10": 1.011586280541615,
+    "phi_imp_p90": 1.040760720639454,
+    "phi_meas_median": 0.9990548492332083,
+    "corr_register_per_air_vs_phi_meas": -0.038770054133423236,
+    "fuel_inj_range": [
+     0.00565936894429489,
+     0.03686677749324275
+    ]
+   },
+   "b9": {
+    "n": 1689,
+    "phi_imp_median": 1.025178798806715,
+    "phi_imp_p10": 1.0132275828784318,
+    "phi_imp_p90": 1.0374550038649812,
+    "phi_meas_median": 0.9997559189650964,
+    "corr_register_per_air_vs_phi_meas": 0.005334692578895155,
+    "fuel_inj_range": [
+     0.0037860282006638665,
+     0.03533225567057183
+    ]
+   }
+  }
+ }
+}

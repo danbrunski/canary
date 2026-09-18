@@ -1,0 +1,546 @@
+{
+ "session": "/home/dan/canary-data/sessions-0918/_capture-fuel-pw-research-2026-09-18T140805",
+ "channels": {
+  "RPM": 7959,
+  "FUEL_STATUS": 7959,
+  "ENGINE_LOAD": 7959,
+  "TIMING_ADVANCE": 7959,
+  "MAF": 7959,
+  "O2_WR_LAMBDA_S1": 7959,
+  "COMMANDED_EQUIV_RATIO": 7947,
+  "DID_1207": 4005,
+  "DID_1225": 4005,
+  "DID_1206": 4001,
+  "DID_1219": 4001,
+  "DID_1134": 3998,
+  "DID_1208": 3886,
+  "DID_120F": 2999,
+  "DTC_STORED": 7,
+  "DTC_PENDING": 7
+ },
+ "known_answer_ok": true,
+ "known_answer": {
+  "a": "obd:RPM",
+  "b": "did:ECM_RPM",
+  "n_pairs": 4000,
+  "r_squared": 0.9968025868692978,
+  "slope": 0.9981611232683395,
+  "offset": 7.7108219230012125,
+  "slope_drift_pct": 0.16896048831223634,
+  "scale_verdict": "stable",
+  "policy": {
+   "max_separation_s": 0.35,
+   "reference": "auto",
+   "tie_break": "earlier"
+  },
+  "reference": "b",
+  "timestamp_basis_a": "acquired",
+  "timestamp_basis_b": "acquired",
+  "unmatched_a": 3959,
+  "unmatched_b": 1,
+  "separation_median_s": 0.0983743667602539,
+  "separation_p95_s": 0.11988711357116699,
+  "separation_max_s": 0.17406320571899414,
+  "residual_bias": 1.4275656212703325e-12,
+  "residual_spread": 29.948342070660992,
+  "difference_bias": 4.236,
+  "difference_spread": 29.96418160070453,
+  "stability_windows": [
+   {
+    "n": 1334,
+    "rpm_min": 725.0,
+    "rpm_max": 2837.5,
+    "slope": 0.9991238119656444,
+    "slope_se": 0.0010661523870540122
+   },
+   {
+    "n": 1333,
+    "rpm_min": 725.0,
+    "rpm_max": 2862.5,
+    "slope": 0.9974369737166009,
+    "slope_se": 0.0014963239292497491
+   },
+   {
+    "n": 1333,
+    "rpm_min": 725.0,
+    "rpm_max": 2625.0,
+    "slope": 0.998526881073711,
+    "slope_se": 0.0019648225631891513
+   }
+  ]
+ },
+ "known_answer_overridden": false,
+ "target_vs_commanded": {
+  "census_0x1134_raw": {
+   "64": 3998
+  },
+  "cmd_0x44_distinct": 296,
+  "cmd_0x44_min_step": 0.0001220703125,
+  "cmd_0x44_census_top": {
+   "0.979584": 984,
+   "1.020386": 336,
+   "0.870728": 182,
+   "1.000000": 127,
+   "1.006927": 120,
+   "1.007599": 99,
+   "1.006775": 91,
+   "1.008270": 85,
+   "1.006256": 84,
+   "0.992218": 81,
+   "0.993195": 80,
+   "0.992767": 78
+  },
+  "comparison_gated": {
+   "refused": "did:ECM_TARGET_EQUIV_RATIO_CANDIDATE is effectively constant over these 607 pairs (relative span 0.00e+00). Any scale fits a constant, so a fit here would describe the session, not the signals \u2014 compare over a window where it moves."
+  },
+  "comparison_ungated": {
+   "refused": "did:ECM_TARGET_EQUIV_RATIO_CANDIDATE is effectively constant over these 3997 pairs (relative span 0.00e+00). Any scale fits a constant, so a fit here would describe the session, not the signals \u2014 compare over a window where it moves."
+  },
+  "n_pairs_gated": 607,
+  "n_pairs_enriched": 0,
+  "n_pairs_0x44_gt_1.02": 78,
+  "agree_within_quantisation": 0.051070840197693576,
+  "quantisation_tolerance": 0.00787353515625,
+  "closed_loop_check": {
+   "n_pairs_0x44_in_stoich_band": 493,
+   "n_pairs_0x44_exactly_1": 15,
+   "n_0x1134_eq_64": 493,
+   "other_0x1134_raw": {}
+  },
+  "by_regime": {
+   "other": {
+    "n": 83,
+    "mean": 0.12927,
+    "median": 0.12927,
+    "p10": 0.12927,
+    "p90": 0.12927
+   },
+   "stoich band \u00b10.025": {
+    "n": 493,
+    "mean": 0.01084,
+    "median": 0.02042,
+    "p10": -0.02039,
+    "p90": 0.02042
+   },
+   "zero(DFCO/n.a.)": {
+    "n": 31,
+    "mean": 1.0,
+    "median": 1.0,
+    "p10": 1.0,
+    "p90": 1.0
+   }
+  },
+  "verdict": "unresolved: no enriched pairs"
+ },
+ "target_vs_measured": {
+  "n_pairs_steady": 3817,
+  "n_pairs_target_enriched": 0,
+  "target_eq_1": {
+   "n": 3817,
+   "median_phi_meas/target": 1.0001526111772425,
+   "p10": 0.9827550010496956,
+   "p90": 1.0231878484792765
+  },
+  "verdict": "unresolved: no steady enriched pairs"
+ },
+ "fuel_test": {
+  "0x1206": {
+   "n_register_samples": 3995,
+   "n_dfco": 46,
+   "n_steady": 625,
+   "n_closed_loop": 610,
+   "n_enriched": 0,
+   "dfco_register_median": 51.5,
+   "dfco_register_per_g_air": 910.110353130016,
+   "register_per_g_air_by_regime": {
+    "closed_loop": 2258.94578313253
+   },
+   "fit_closed_loop": {
+    "a_counts_per_g": 27746.94245175828,
+    "b_counts": 41.17691933184488,
+    "r2": 0.9641697600914151,
+    "drift_pct": 8.352577318181506,
+    "scale_verdict": "drifting",
+    "b_ms_if_0.01ms_per_count": 0.4117691933184488,
+    "implied_flow_cc_min_if_0.01ms": 290.2550898777474
+   },
+   "residual_by_regime": [
+    {
+     "regime": "closed_loop",
+     "n": 622,
+     "median": -0.25,
+     "p10": -5.46,
+     "p90": 5.33
+    },
+    {
+     "regime": "open_loop_other",
+     "n": 3,
+     "median": -7.79,
+     "p10": -10.12,
+     "p90": -4.96
+    }
+   ],
+   "residual_by_fuel_bin": [
+    {
+     "fuel_bin": "(0.0, 0.01]",
+     "regime": "closed_loop",
+     "n": 423,
+     "median": -0.71,
+     "p10": -5.12,
+     "p90": 4.7
+    },
+    {
+     "fuel_bin": "(0.0, 0.01]",
+     "regime": "open_loop_other",
+     "n": 3,
+     "median": -7.79,
+     "p10": -10.12,
+     "p90": -4.96
+    },
+    {
+     "fuel_bin": "(0.01, 0.015]",
+     "regime": "closed_loop",
+     "n": 172,
+     "median": 1.29,
+     "p10": -5.53,
+     "p90": 9.67
+    },
+    {
+     "fuel_bin": "(0.015, 0.02]",
+     "regime": "closed_loop",
+     "n": 23,
+     "median": -0.92,
+     "p10": -14.37,
+     "p90": 2.42
+    },
+    {
+     "fuel_bin": "(0.02, 0.025]",
+     "regime": "closed_loop",
+     "n": 4,
+     "median": 0.55,
+     "p10": -4.1,
+     "p90": 2.9
+    }
+   ],
+   "residual_by_rpm_bin": [
+    {
+     "rpm_bin": "(0, 900]",
+     "regime": "closed_loop",
+     "n": 358,
+     "median": -0.77,
+     "p10": -5.07,
+     "p90": 4.22
+    },
+    {
+     "rpm_bin": "(1500, 2000]",
+     "regime": "closed_loop",
+     "n": 90,
+     "median": 0.68,
+     "p10": -8.51,
+     "p90": 11.75
+    },
+    {
+     "rpm_bin": "(1500, 2000]",
+     "regime": "open_loop_other",
+     "n": 3,
+     "median": -7.79,
+     "p10": -10.12,
+     "p90": -4.96
+    },
+    {
+     "rpm_bin": "(2000, 2500]",
+     "regime": "closed_loop",
+     "n": 141,
+     "median": 1.26,
+     "p10": -4.45,
+     "p90": 5.7
+    },
+    {
+     "rpm_bin": "(2500, 3000]",
+     "regime": "closed_loop",
+     "n": 28,
+     "median": -0.87,
+     "p10": -5.95,
+     "p90": 3.82
+    },
+    {
+     "rpm_bin": "(900, 1500]",
+     "regime": "closed_loop",
+     "n": 5,
+     "median": 0.28,
+     "p10": -4.98,
+     "p90": 1.39
+    }
+   ],
+   "verdict": "unresolved: no steady enriched rows to validate on"
+  },
+  "0x1207": {
+   "n_register_samples": 3999,
+   "n_dfco": 47,
+   "n_steady": 651,
+   "n_closed_loop": 638,
+   "n_enriched": 0,
+   "dfco_register_median": 52.0,
+   "dfco_register_per_g_air": 899.964093357271,
+   "register_per_g_air_by_regime": {
+    "closed_loop": 2271.5537017726797
+   },
+   "fit_closed_loop": {
+    "a_counts_per_g": 27325.497017821945,
+    "b_counts": 44.83569595394109,
+    "r2": 0.9621032494028238,
+    "drift_pct": 7.8630724441443975,
+    "scale_verdict": "drifting",
+    "b_ms_if_0.01ms_per_count": 0.4483569595394109,
+    "implied_flow_cc_min_if_0.01ms": 294.73173973432546
+   },
+   "residual_by_regime": [
+    {
+     "regime": "closed_loop",
+     "n": 648,
+     "median": -0.45,
+     "p10": -5.62,
+     "p90": 6.28
+    },
+    {
+     "regime": "open_loop_other",
+     "n": 3,
+     "median": -5.8,
+     "p10": -12.46,
+     "p90": -3.21
+    }
+   ],
+   "residual_by_fuel_bin": [
+    {
+     "fuel_bin": "(0.0, 0.01]",
+     "regime": "closed_loop",
+     "n": 436,
+     "median": -0.86,
+     "p10": -5.2,
+     "p90": 4.7
+    },
+    {
+     "fuel_bin": "(0.0, 0.01]",
+     "regime": "open_loop_other",
+     "n": 3,
+     "median": -5.8,
+     "p10": -12.46,
+     "p90": -3.21
+    },
+    {
+     "fuel_bin": "(0.01, 0.015]",
+     "regime": "closed_loop",
+     "n": 189,
+     "median": 1.06,
+     "p10": -6.87,
+     "p90": 9.56
+    },
+    {
+     "fuel_bin": "(0.015, 0.02]",
+     "regime": "closed_loop",
+     "n": 19,
+     "median": -1.82,
+     "p10": -15.29,
+     "p90": 2.25
+    },
+    {
+     "fuel_bin": "(0.02, 0.025]",
+     "regime": "closed_loop",
+     "n": 3,
+     "median": -0.95,
+     "p10": -7.94,
+     "p90": 0.12
+    },
+    {
+     "fuel_bin": "(0.025, 0.03]",
+     "regime": "closed_loop",
+     "n": 1,
+     "median": 9.15,
+     "p10": 9.15,
+     "p90": 9.15
+    }
+   ],
+   "residual_by_rpm_bin": [
+    {
+     "rpm_bin": "(0, 900]",
+     "regime": "closed_loop",
+     "n": 368,
+     "median": -1.16,
+     "p10": -5.2,
+     "p90": 3.92
+    },
+    {
+     "rpm_bin": "(1500, 2000]",
+     "regime": "closed_loop",
+     "n": 98,
+     "median": 1.61,
+     "p10": -8.21,
+     "p90": 10.26
+    },
+    {
+     "rpm_bin": "(1500, 2000]",
+     "regime": "open_loop_other",
+     "n": 3,
+     "median": -5.8,
+     "p10": -12.46,
+     "p90": -3.21
+    },
+    {
+     "rpm_bin": "(2000, 2500]",
+     "regime": "closed_loop",
+     "n": 141,
+     "median": 0.67,
+     "p10": -8.17,
+     "p90": 6.28
+    },
+    {
+     "rpm_bin": "(2500, 3000]",
+     "regime": "closed_loop",
+     "n": 35,
+     "median": 2.43,
+     "p10": -3.56,
+     "p90": 9.87
+    },
+    {
+     "rpm_bin": "(900, 1500]",
+     "regime": "closed_loop",
+     "n": 6,
+     "median": 1.32,
+     "p10": -5.6,
+     "p90": 13.98
+    }
+   ],
+   "verdict": "unresolved: no steady enriched rows to validate on"
+  },
+  "0x1208": {
+   "n_register_samples": 3880,
+   "n_dfco": 42,
+   "n_steady": 630,
+   "n_closed_loop": 614,
+   "n_enriched": 0,
+   "dfco_register_median": 3668.5,
+   "dfco_register_per_g_air": 63984.01190985949,
+   "register_per_g_air_by_regime": {
+    "closed_loop": 63465.72357436622
+   },
+   "fit_closed_loop": {
+    "a_counts_per_g": 933579.420269901,
+    "b_counts": 17.500393983826015,
+    "r2": 0.963480933399482,
+    "drift_pct": 3.253081281176872,
+    "scale_verdict": "unresolved",
+    "b_ms_if_0.01ms_per_count": 0.17500393983826015,
+    "implied_flow_cc_min_if_0.01ms": 8.62668038766261
+   },
+   "residual_by_regime": [
+    {
+     "regime": "closed_loop",
+     "n": 628,
+     "median": -0.52,
+     "p10": -4.06,
+     "p90": 3.3
+    },
+    {
+     "regime": "open_loop_other",
+     "n": 2,
+     "median": -9.28,
+     "p10": -9.3,
+     "p90": -9.26
+    }
+   ],
+   "residual_by_fuel_bin": [
+    {
+     "fuel_bin": "(0.0, 0.01]",
+     "regime": "closed_loop",
+     "n": 438,
+     "median": -0.8,
+     "p10": -3.39,
+     "p90": 1.92
+    },
+    {
+     "fuel_bin": "(0.0, 0.01]",
+     "regime": "open_loop_other",
+     "n": 2,
+     "median": -9.28,
+     "p10": -9.3,
+     "p90": -9.26
+    },
+    {
+     "fuel_bin": "(0.01, 0.015]",
+     "regime": "closed_loop",
+     "n": 171,
+     "median": 0.75,
+     "p10": -5.94,
+     "p90": 8.06
+    },
+    {
+     "fuel_bin": "(0.015, 0.02]",
+     "regime": "closed_loop",
+     "n": 17,
+     "median": 0.27,
+     "p10": -13.04,
+     "p90": 4.79
+    },
+    {
+     "fuel_bin": "(0.02, 0.025]",
+     "regime": "closed_loop",
+     "n": 2,
+     "median": 0.64,
+     "p10": -1.42,
+     "p90": 2.69
+    }
+   ],
+   "residual_by_rpm_bin": [
+    {
+     "rpm_bin": "(0, 900]",
+     "regime": "closed_loop",
+     "n": 367,
+     "median": -0.9,
+     "p10": -3.37,
+     "p90": 1.58
+    },
+    {
+     "rpm_bin": "(1500, 2000]",
+     "regime": "closed_loop",
+     "n": 93,
+     "median": 1.12,
+     "p10": -7.17,
+     "p90": 11.08
+    },
+    {
+     "rpm_bin": "(1500, 2000]",
+     "regime": "open_loop_other",
+     "n": 2,
+     "median": -9.28,
+     "p10": -9.3,
+     "p90": -9.26
+    },
+    {
+     "rpm_bin": "(2000, 2500]",
+     "regime": "closed_loop",
+     "n": 137,
+     "median": 0.48,
+     "p10": -5.19,
+     "p90": 5.64
+    },
+    {
+     "rpm_bin": "(2500, 3000]",
+     "regime": "closed_loop",
+     "n": 27,
+     "median": -0.02,
+     "p10": -3.54,
+     "p90": 5.4
+    },
+    {
+     "rpm_bin": "(900, 1500]",
+     "regime": "closed_loop",
+     "n": 4,
+     "median": 2.71,
+     "p10": -2.71,
+     "p90": 13.06
+    }
+   ],
+   "verdict": "unresolved: no steady enriched rows to validate on"
+  }
+ }
+}

@@ -1,0 +1,233 @@
+{
+ "session": "/home/dan/canary-data/sessions-0918/_capture-fuel-target-research-2026-09-18T140241",
+ "channels": {
+  "FUEL_STATUS": 1253,
+  "O2_WR_LAMBDA_S1": 1251,
+  "RPM": 1251,
+  "ENGINE_LOAD": 1251,
+  "TIMING_ADVANCE": 1251,
+  "MAF": 1251,
+  "COMMANDED_EQUIV_RATIO": 1247,
+  "DID_1208": 632,
+  "DID_1225": 632,
+  "DID_120F": 632,
+  "DID_1209": 632,
+  "DID_1134": 632,
+  "DID_1219": 629,
+  "O2_B1S2": 1,
+  "O2_B2S2": 1,
+  "CONTROL_MODULE_VOLTAGE": 1,
+  "ABSOLUTE_LOAD": 1,
+  "RELATIVE_THROTTLE_POS": 1,
+  "DTC_STORED": 1,
+  "DTC_PENDING": 1
+ },
+ "known_answer_ok": false,
+ "known_answer": {
+  "a": "obd:RPM",
+  "b": "did:ECM_RPM",
+  "n_pairs": 628,
+  "r_squared": 0.9997389652157905,
+  "slope": 0.9997563354427831,
+  "offset": 3.5258869850351093,
+  "slope_drift_pct": 8.520971412473525,
+  "scale_verdict": "drifting",
+  "policy": {
+   "max_separation_s": 0.35,
+   "reference": "auto",
+   "tie_break": "earlier"
+  },
+  "reference": "b",
+  "timestamp_basis_a": "acquired",
+  "timestamp_basis_b": "acquired",
+  "unmatched_a": 623,
+  "unmatched_b": 1,
+  "separation_median_s": 0.07558882236480713,
+  "separation_p95_s": 0.07907586097717285,
+  "separation_max_s": 0.18936753273010254,
+  "residual_bias": 2.6068319477568007e-14,
+  "residual_spread": 14.983712173872181,
+  "difference_bias": 3.1345541401273884,
+  "difference_spread": 14.985416486881018,
+  "stability_windows": [
+   {
+    "n": 210,
+    "rpm_min": 725.0,
+    "rpm_max": 775.0,
+    "slope": 0.9197809278350539,
+    "slope_se": 0.022107228953494044
+   },
+   {
+    "n": 209,
+    "rpm_min": 725.0,
+    "rpm_max": 2937.5,
+    "slope": 0.9984473561613684,
+    "slope_se": 0.0020562888899197016
+   },
+   {
+    "n": 209,
+    "rpm_min": 1975.0,
+    "rpm_max": 3137.5,
+    "slope": 1.0027460573661169,
+    "slope_se": 0.0022554932443071946
+   }
+  ]
+ },
+ "known_answer_overridden": true,
+ "target_vs_commanded": {
+  "census_0x1134_raw": {
+   "64": 632
+  },
+  "cmd_0x44_distinct": 232,
+  "cmd_0x44_min_step": 0.0001220703125,
+  "cmd_0x44_census_top": {
+   "0.979584": 420,
+   "1.020386": 84,
+   "1.016296": 51,
+   "1.016449": 43,
+   "1.016174": 18,
+   "1.016052": 15,
+   "0.983795": 14,
+   "0.983917": 14,
+   "0.984070": 14,
+   "1.016724": 13,
+   "1.016846": 12,
+   "1.012787": 10
+  },
+  "comparison_gated": {
+   "refused": "did:ECM_TARGET_EQUIV_RATIO_CANDIDATE is effectively constant over these 204 pairs (relative span 0.00e+00). Any scale fits a constant, so a fit here would describe the session, not the signals \u2014 compare over a window where it moves."
+  },
+  "comparison_ungated": {
+   "refused": "did:ECM_TARGET_EQUIV_RATIO_CANDIDATE is effectively constant over these 630 pairs (relative span 0.00e+00). Any scale fits a constant, so a fit here would describe the session, not the signals \u2014 compare over a window where it moves."
+  },
+  "n_pairs_gated": 204,
+  "n_pairs_enriched": 0,
+  "n_pairs_0x44_gt_1.02": 23,
+  "agree_within_quantisation": 0.00980392156862745,
+  "quantisation_tolerance": 0.00787353515625,
+  "closed_loop_check": {
+   "n_pairs_0x44_in_stoich_band": 204,
+   "n_pairs_0x44_exactly_1": 0,
+   "n_0x1134_eq_64": 204,
+   "other_0x1134_raw": {}
+  },
+  "by_regime": {
+   "stoich band \u00b10.025": {
+    "n": 204,
+    "mean": 0.01399,
+    "median": 0.02042,
+    "p10": -0.02039,
+    "p90": 0.02042
+   }
+  },
+  "verdict": "unresolved: no enriched pairs"
+ },
+ "target_vs_measured": {
+  "n_pairs_steady": 617,
+  "n_pairs_target_enriched": 0,
+  "target_eq_1": {
+   "n": 617,
+   "median_phi_meas/target": 1.0056160810188737,
+   "p10": 0.982796283711452,
+   "p90": 1.022977022977023
+  },
+  "verdict": "unresolved: no steady enriched pairs"
+ },
+ "fuel_test": {
+  "0x1206": {
+   "absent": "did:ECM_INTAKE_PRESSURE_1206 never captured in this session"
+  },
+  "0x1207": {
+   "absent": "did:ECM_INTAKE_PRESSURE_1207 never captured in this session"
+  },
+  "0x1208": {
+   "n_register_samples": 626,
+   "n_dfco": 0,
+   "n_steady": 299,
+   "n_closed_loop": 299,
+   "n_enriched": 0,
+   "register_per_g_air_by_regime": {
+    "closed_loop": 63662.57142857143
+   },
+   "fit_closed_loop": {
+    "a_counts_per_g": 954324.2896210668,
+    "b_counts": -160.23047105011733,
+    "r2": 0.9906821647316957,
+    "drift_pct": 7.714158408915936,
+    "scale_verdict": "drifting",
+    "b_ms_if_0.01ms_per_count": -1.6023047105011734,
+    "implied_flow_cc_min_if_0.01ms": 8.439155707087432
+   },
+   "residual_by_regime": [
+    {
+     "regime": "closed_loop",
+     "n": 299,
+     "median": -0.16,
+     "p10": -1.88,
+     "p90": 2.36
+    }
+   ],
+   "residual_by_fuel_bin": [
+    {
+     "fuel_bin": "(0.0, 0.01]",
+     "regime": "closed_loop",
+     "n": 286,
+     "median": -0.21,
+     "p10": -1.89,
+     "p90": 2.34
+    },
+    {
+     "fuel_bin": "(0.01, 0.015]",
+     "regime": "closed_loop",
+     "n": 10,
+     "median": 1.43,
+     "p10": -1.35,
+     "p90": 3.94
+    },
+    {
+     "fuel_bin": "(0.015, 0.02]",
+     "regime": "closed_loop",
+     "n": 3,
+     "median": 0.31,
+     "p10": -0.12,
+     "p90": 1.99
+    }
+   ],
+   "residual_by_rpm_bin": [
+    {
+     "rpm_bin": "(0, 900]",
+     "regime": "closed_loop",
+     "n": 279,
+     "median": -0.23,
+     "p10": -1.84,
+     "p90": 2.35
+    },
+    {
+     "rpm_bin": "(2000, 2500]",
+     "regime": "closed_loop",
+     "n": 4,
+     "median": 1.04,
+     "p10": -1.46,
+     "p90": 2.67
+    },
+    {
+     "rpm_bin": "(2500, 3000]",
+     "regime": "closed_loop",
+     "n": 14,
+     "median": 0.62,
+     "p10": -1.41,
+     "p90": 3.34
+    },
+    {
+     "rpm_bin": "(3000, 3500]",
+     "regime": "closed_loop",
+     "n": 2,
+     "median": -1.18,
+     "p10": -2.03,
+     "p90": -0.34
+    }
+   ],
+   "verdict": "unresolved: no steady enriched rows to validate on"
+  }
+ }
+}
