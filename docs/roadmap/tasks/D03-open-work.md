@@ -192,6 +192,16 @@ estimated signal; they cannot establish how UpRev calculates its display.
   feature-spec change.** Nothing linked a `bindings.yaml` edit to the
   artifacts depending on it, and fixing a wrong binding silently blinded the
   detector trained on it.
+  **2026-09-18 evening:** that lesson is now enforced (`32fa211`,
+  `tests/test_manifest_producibility.py`). Every tracked manifest is checked
+  against what the pipeline can produce, against a reviewed allowlist that fails
+  when it goes stale. It also found **the LSTM has the same debt: 8 of 263
+  features unproducible** (the same two retracted bindings, all 4 variants
+  each). Those are masked under its ceiling, so it still scores, but the
+  retrain is owed for both models. `/status` blindness is also fixed
+  (`ad0a0bb`): it now reports exactly the 6 IF columns, where startup sparsity
+  used to show 17. The corpus choice is with the operator (evening drive log,
+  For the operator 2).
   _From D02._
 
 ## Needs the truck

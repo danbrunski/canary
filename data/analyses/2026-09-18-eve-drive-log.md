@@ -166,3 +166,4 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
   - **Map axis:** UpRev's fuel-target load axis is BFS ms from 8.76 ms, so idle and cruise (2–5 ms) sit in column 1. Steady high-load cell placement is good to ±3 %.
   - **Not confirmable from stored data:** the Pi's retention has swept the full 08-08 session, and the laptop copy ends before the UpRev rungs. **Confirmation needs one drive with UpRev along** (logging BFS/MAF/RPM) while CANary polls 0x1208 fast.
   - Implementer dispatched: a candidate `base_fuel_schedule` tuning provider (0x1208/2040, conditions + evidence in schema) and the 0x1208 catalog evidence.
+- 23:40Z `32fa211` manifest-producibility check committed (implementer; 11 tests re-run). **The LSTM also has 8/263 unproducible features** (the same two retracted bindings), masked under its ceiling, so it still scores; the retrain is owed for both. D02.5 updated.
