@@ -497,6 +497,13 @@ promote unverified bindings or to change a tune.
   0x44 > 1.05, not 1.02. Still needs one warm WOT/enrichment window on
   `fuel-pw-research`; the script is `analyze_fuel_blocks.py` (preserved in
   `~/canary-data/scripts-0918/`).
+  **2026-09-18 PM ([September 18 PM drive log](../../../data/analyses/2026-09-18-pm-drive-log.md)): consistent, still short of pairs.** Two enrichment
+  holds (6 s + 10 s, φ up to 1.242) on `fuel-pw-research`. 0x1134 left 64 for
+  the first time: raw 73–79 on 47 samples. In **10** enriched pairs (0x44 > 1.05),
+  0x1134/64 − 0x44 has median −0.0078 (p10–p90 −0.0078..−0.0070), within half a
+  quantum. The stoich band has 70 pairs, all 0x1134 = 64. The falsifier (stays 64
+  while 0x44 > 1.10) didn't fire. The pre-registered bar is ≥ 30 pairs from ≥ 3
+  pulls, so this is **unresolved**: roughly three more ≥ 10 s holds.
 
 - [~] **D03.9 Re-evaluate the injector fuel-mass calibration using today's
   open-loop data; collect only missing coverage tomorrow.** Blocks 6 and 9
@@ -533,6 +540,22 @@ promote unverified bindings or to change a tune.
     (`2026-09-18-fuel-blocks-capture-fuel-pw-research-*.md`).
   - **Remaining:** validate that line on enriched rows (0 today), then operator
     sign-off to re-describe 0x1208 and catalogue 0x1206/0x1207 properly.
+  **2026-09-18 PM ([September 18 PM drive log](../../../data/analyses/2026-09-18-pm-drive-log.md)):** first enriched rows (6 gated, 38 ungated).
+  - **0x1208 = air charge: PASS**, third independent replication. Rich rows
+    sit at −16.6 % against the closed-loop refit (band −14..−18). Counts per g
+    air are 63,972 closed loop vs 64,457 enriched (+0.8 %).
+  - **0x1206: unresolved, and the pre-registered test was ill-posed.** Against
+    the fixed 27,747 + 41 line, enriched rows read +6.2 %, but closed loop is
+    +6.2 % too. The morning line was fit on 57 % idle rows and extrapolated to
+    cruise; the fuel ranges don't overlap. The residual rises with 0x1208 air
+    charge at the same rate in both sessions, and one convex curve,
+    51.6 + 25,284 f + 133,653 f², fits both best (BIC). Altitude, λ and
+    coolant are unchanged; voltage, IAT and fuel temperature weren't logged.
+  - Post hoc, against that curve: enriched −3.4 % (n 6). The curve is still
+    extrapolated beyond the closed-loop fuel range.
+  - **Next:** closed-loop holds that overlap WOT air charge in one session, plus
+    0x42/0x0F/0x33/0x06/0x07 and an idle electrical-load step for dead time.
+    Desk report: `~/canary-data/scripts-0918b/out/shift1206.md`.
 
 - [ ] **D03.10 Capture the missing UpRev instrument reference.** Today's two
   CANary paths already show a rich-side discrepancy: bank-1 voltage converted

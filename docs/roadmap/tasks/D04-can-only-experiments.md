@@ -60,7 +60,7 @@ opportunistic on any sustained climb.
   or lags the PW floor by more than one sample says whether it is an input
   (switch) or an output (fuelling state).
 
-- [ ] **D04.2 Map the decel-fuel-cut boundary.** DFCO only ever appears in
+- [~] **D04.2 Map the decel-fuel-cut boundary.** DFCO only ever appears in
   this repo as an exclusion (`fs == 4` caveats, `censored_ceiling_afr`, the
   lift interval in D03.15). Its *thresholds* — the rpm at which fuel cuts on a
   closed-throttle coast and the rpm at which it resumes, and whether that is
@@ -77,10 +77,23 @@ opportunistic on any sustained climb.
   closure to cut. Report the hysteresis (entry − exit) per gear. If onset rpm
   agrees across gears but onset *speed* does not, it is rpm-gated; the
   converse is speed-gated. Five events is a result; two is a hint.
+  **2026-09-18 PM ([September 18 PM drive log](../../../data/analyses/2026-09-18-pm-drive-log.md)):** there were 32 closed-throttle coasts on
+  `fuel-pw-research` (25 with ≥ 2 floor samples), but none were tagged or
+  protocol coasts.
+  - **Correction to the text above:** the fuel-cut floor is DID **0x1206** at
+    **54–58 counts**, not 0x1208. That register is air charge and doesn't floor.
+    The floor is confirmed by the λ rail and FUEL_STATUS 4 (94–100 % on long
+    coasts).
+  - Cut at 1,840–3,600 rpm. The rpm/km·h ratios cluster at ~36.7, ~49.8 and
+    ~71 (gears not assigned).
+  - Cut/refuel timing is only ±0.5 s at 2 Hz.
+  - Broadcast wheel speed reads 8–16 % below GPS, so settle speed first.
+  - Table: `~/canary-data/scripts-0918b/out/coasts-_capture-fuel-pw-research-2026-09-18T174742.md`.
+  - Still owed: gear assignment, hysteresis per gear, and throttle-to-cut delay.
 
 ## Analyses over the D03.8 capture — needs only throttle steps and plateaus
 
-- [ ] **D04.3 Commanded-φ → measured-λ transport delay.** Six retracted
+- [~] **D04.3 Commanded-φ → measured-λ transport delay.** Six retracted
   findings were transient artefacts, and the acquisition-skew caveats in
   `afr_calibration.yaml` (+17 % raw at 12.4 AFR collapsing to +1.4 % when
   stable) are the same thing: nobody has measured how long the ECM's own λ
@@ -102,6 +115,14 @@ opportunistic on any sustained climb.
   **Accept:** a delay in ms with a stated uncertainty, plus the stability gate
   it implies (how many samples after a step before "steady" is honest). Put
   the number in `afr_calibration.yaml` next to the skew caveats it explains.
+  **2026-09-18 PM ([September 18 PM drive log](../../../data/analyses/2026-09-18-pm-drive-log.md)):** 5 untagged tip-ins and 5 lifts.
+  - **Tip-in:** one clear minimum at **500 ms**, bracket 250–750 ms, n_pairs 64.
+  - **Lift:** no clear minimum (250 and 500 ms within 10 %).
+  - **Resolution limit:** on `fuel-pw-research`, 0x44 and 0x24 sit in the same
+    Mode 01 batch (~6 ms apart, 250 ms cycle), so only lags near multiples of
+    250 ms get pairs.
+  - A 50 ms answer needs the two PIDs in separate batches, or a faster cycle.
+  - Script: `~/canary-data/scripts-0918b/lag_scan.py`.
 
 - [x] **D04.4 Where is `ECM_MAF_GPS` linear against Mode 01 MAF?** Block 6
   gave the whole-session answer — slope 0.934, r² 0.909, `drifting`, with the
@@ -197,6 +218,11 @@ opportunistic on any sustained climb.
   2 kPa, so the slope reads 0.91 `drifting` (a range problem), and nothing goes
   into `expectations.yaml`. One continuous ≥10 kPa climb in a single session
   closes it.
+  **2026-09-18 PM:** `default` session `2026-09-18T180630` descends
+  3,079 → 2,104 m with baro 70 → 79 kPa: **9 kPa in one session**, 1 short of
+  the bar. The session is pulled to `~/canary-data/sessions-0918/`. Run the
+  analysis at the desk: it may resolve the slope, but it doesn't meet the
+  stated ≥ 10 kPa.
 
 ## Not included, and why
 

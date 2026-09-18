@@ -73,10 +73,15 @@ are about to test, write them into the log before the capture starts.
   `/sys/fs/cgroup/system.slice/canary.service/memory.max` must EXIST —
   `systemctl show` echoing the values proves nothing. Log what you find.
 - **Arm keepalive** (`POST /control/power/keepalive {"minutes": N}`) for the
-  expected drive + 60 min.
+  expected drive + 60 min. It holds the Pi up on battery after key-off: on
+  2026-09-18 "the Pi's off" was false for 90 min. Disarm it (`{"minutes": 0}`)
+  at stop, once the trip-end digest has run.
 - **Open the drive window:** `POST /control/captures` with body
   `{"protocol":"drive"}` — nothing else is accepted. It is in-memory: reopen
-  after EVERY restart. Tags: `POST /control/captures/current/tags
+  after EVERY restart. A window from an earlier drive survives engine
+  restarts on the same daemon, bound to the OLD session; `GET
+  /control/captures/current` first, and if it is stale `POST
+  /control/captures/current/stop` then reopen. Tags: `POST /control/captures/current/tags
   {"label":"..."}`; tag what the operator physically did.
 - **Poller that survives laptop sleep:** run the 5 s
   `GET /status?view=compact` curl loop ON THE PI, writing JSONL to `/tmp`
@@ -84,7 +89,13 @@ are about to test, write them into the log before the capture starts.
   request); scp it at block boundaries. Gaps in any poller are
   uninstrumented, not zero: bridge them with cumulative counters and never
   quote a rate across one. Take the full `/status` (1.3–2.6 s) once per
-  block boundary for detector provenance.
+  block boundary for detector provenance. The compact `/status` and
+  `/telemetry/latest` answer without a token (Pi `sudo` for the token file
+  is not available non-interactively; `sudo -n systemctl` is). For a live
+  steering view use `/telemetry/latest?n=600` (~60 ms), never
+  `per_channel=true` (1.3 s). **A live view is steering only: judge a block
+  from the pulled capture.** On 2026-09-18 a view started late reported "no
+  enrichment" twice over a capture that held two WOT holds.
 
 ## Every wake-up
 
