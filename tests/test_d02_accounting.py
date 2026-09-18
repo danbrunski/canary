@@ -426,35 +426,197 @@ def test_a_satisfiable_spec_reports_nothing() -> None:
     assert structural_blindness(_reconciliation(expected=88, absent=0)) is None
 
 
-def test_blindness_verdict_reaches_the_status_snapshot() -> None:
-    """`blind_modes` said a detector scored nothing; this says why."""
+def _report_missing(expected: tuple[str, ...], missing: tuple[str, ...]):
+    from src.preprocessing.feature_pipeline import FeatureSpecReconciliation
+
+    return FeatureSpecReconciliation(
+        row_count=1,
+        expected_feature_columns=expected,
+        missing_feature_columns=missing,
+        extra_feature_columns=(),
+        filled_feature_columns=missing,
+        coerced_feature_columns=(),
+        output_columns=expected,
+    )
+
+
+@pytest.fixture
+def _fresh_blindness():
     from src.daemon import inference as inference_mod
+    from src.models.feature_spec_health import reset_blindness_tracking
+
+    reset_blindness_tracking()
+    inference_mod._SCHEMA_RECONCILIATION_WARNED.clear()
+    yield inference_mod
+    reset_blindness_tracking()
+    inference_mod._SCHEMA_RECONCILIATION_WARNED.clear()
+
+
+def _feed(inference_mod, version, report, *, start: float, seconds: float, step: float = 1.0):
+    t = start
+    while t <= start + seconds:
+        inference_mod._log_schema_reconciliation_once("isolation_forest", version, report, now=t)
+        t += step
+    return t
+
+
+def test_blindness_verdict_reaches_the_status_snapshot(_fresh_blindness) -> None:
+    """`blind_modes` said a detector scored nothing; this says why — once the
+    absence has held over a sustained window, not from one report."""
     from src.models.feature_spec_health import (
-        _STRUCTURAL_BLINDNESS,
+        STRUCTURAL_MIN_OBSERVED_SECONDS,
         structural_blindness_snapshot,
     )
 
-    _STRUCTURAL_BLINDNESS.clear()
-    inference_mod._SCHEMA_RECONCILIATION_WARNED.clear()
-    try:
-        inference_mod._log_schema_reconciliation_once(
-            "isolation_forest", "v-2026-07-27", _reconciliation(expected=88, absent=6)
-        )
-        snapshot = structural_blindness_snapshot()
+    inference_mod = _fresh_blindness
+    report = _reconciliation(expected=88, absent=6)
+    _feed(inference_mod, "v-2026-07-27", report, start=0.0, seconds=STRUCTURAL_MIN_OBSERVED_SECONDS)
+    snapshot = structural_blindness_snapshot()
 
-        assert "isolation_forest" in snapshot
-        assert snapshot["isolation_forest"]["model_version"] == "v-2026-07-27"
-        assert snapshot["isolation_forest"]["scores_nothing"] is True
+    assert snapshot["isolation_forest"]["model_version"] == "v-2026-07-27"
+    assert snapshot["isolation_forest"]["status"] == "established"
+    assert snapshot["isolation_forest"]["absent_count"] == 6
+    assert snapshot["isolation_forest"]["scores_nothing"] is True
 
-        # A later, satisfiable version clears the verdict rather than leaving
-        # a stale alarm behind.
+    # A later, satisfiable version clears the verdict rather than leaving a
+    # stale alarm behind.
+    inference_mod._log_schema_reconciliation_once(
+        "isolation_forest", "v-next", _reconciliation(expected=88, absent=0), now=500.0
+    )
+    assert structural_blindness_snapshot() == {}
+
+
+def test_startup_sparsity_is_not_structural(_fresh_blindness, caplog) -> None:
+    """The 2026-09-18 defect: the first window after start had no GPS fix and
+    no slow-tier PIDs yet, and that was frozen as 17-of-88 "structural" for
+    the whole drive. Only columns absent in *every* report are structural."""
+    import logging
+
+    from src.models.feature_spec_health import (
+        STRUCTURAL_MIN_OBSERVED_SECONDS,
+        structural_blindness_snapshot,
+    )
+
+    inference_mod = _fresh_blindness
+    expected = tuple(f"obd:CH_{i}" for i in range(80)) + (
+        "obd:BAROMETRIC_PRESSURE",
+        "obd:COOLANT_TEMP",
+        "gps:speed",
+        "gps:speed__mean",
+        "decoded:ECM_CALC_LOAD_B",
+        "decoded:ECM_CALC_LOAD_B__mean",
+        "decoded:ECM_AIRFLOW_PROXY_23D",
+        "decoded:ECM_AIRFLOW_PROXY_23D__mean",
+    )
+    retracted = expected[-4:]
+    startup_missing = expected[80:84] + retracted
+    startup = _report_missing(expected, startup_missing)
+    steady = _report_missing(expected, retracted)
+
+    caplog.set_level(logging.INFO, logger=inference_mod.log.name)
+    inference_mod._log_schema_reconciliation_once("isolation_forest", "v1", startup, now=0.0)
+    pending = structural_blindness_snapshot()["isolation_forest"]
+    assert pending["status"] == "pending"
+    assert pending["scores_nothing"] is None
+    assert pending["absent_count"] == 8  # candidates so far: every absent column
+    assert pending["reports"] == 1
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+    # Slow-tier PIDs and GPS arrive on the next windows.
+    inference_mod._log_schema_reconciliation_once("isolation_forest", "v1", steady, now=1.0)
+    still_pending = structural_blindness_snapshot()["isolation_forest"]
+    assert still_pending["status"] == "pending"
+    assert still_pending["absent_feature_columns"] == list(retracted)
+
+    # A sparse window later: the columns are transient, never structural.
+    inference_mod._log_schema_reconciliation_once("isolation_forest", "v1", startup, now=2.0)
+    sparse = structural_blindness_snapshot()["isolation_forest"]
+    assert sparse["absent_feature_columns"] == list(retracted)
+    assert sparse["transient_absent_feature_columns"] == list(expected[80:84])
+
+    _feed(inference_mod, "v1", steady, start=3.0, seconds=STRUCTURAL_MIN_OBSERVED_SECONDS)
+    verdict = structural_blindness_snapshot()["isolation_forest"]
+    assert verdict["status"] == "established"
+    assert verdict["absent_feature_columns"] == list(retracted)
+    assert verdict["transient_absent_feature_columns"] == []
+    # scores_nothing from the structural set: 4/88 = 4.5 % is under the 5 %
+    # ceiling, whereas the startup set (8/88) would have claimed blindness.
+    assert verdict["absent_fraction"] == pytest.approx(4 / 88, abs=1e-4)
+    assert verdict["scores_nothing"] is False
+    assert verdict["observed_seconds"] >= STRUCTURAL_MIN_OBSERVED_SECONDS
+
+    # Established once, logged once — no per-tick spam.
+    established = [r for r in caplog.records if "structural absence" in r.getMessage()]
+    assert len(established) == 1
+    _feed(inference_mod, "v1", steady, start=200.0, seconds=30.0)
+    assert len([r for r in caplog.records if "structural absence" in r.getMessage()]) == 1
+
+
+def test_pending_until_both_floors_are_met(_fresh_blindness) -> None:
+    from src.models.feature_spec_health import (
+        STRUCTURAL_MIN_OBSERVED_SECONDS,
+        STRUCTURAL_MIN_REPORTS,
+        structural_blindness_snapshot,
+    )
+
+    inference_mod = _fresh_blindness
+    report = _reconciliation(expected=88, absent=6)
+    # Plenty of time, too few reports.
+    inference_mod._log_schema_reconciliation_once("isolation_forest", "v1", report, now=0.0)
+    inference_mod._log_schema_reconciliation_once(
+        "isolation_forest", "v1", report, now=STRUCTURAL_MIN_OBSERVED_SECONDS + 1.0
+    )
+    assert structural_blindness_snapshot()["isolation_forest"]["status"] == "pending"
+    # Plenty of reports, too little time.
+    inference_mod._log_schema_reconciliation_once("isolation_forest", "v2", report, now=0.0)
+    for i in range(STRUCTURAL_MIN_REPORTS * 2):
         inference_mod._log_schema_reconciliation_once(
-            "isolation_forest", "v-next", _reconciliation(expected=88, absent=0)
+            "isolation_forest", "v2", report, now=0.1 * (i + 1)
         )
-        assert structural_blindness_snapshot() == {}
-    finally:
-        _STRUCTURAL_BLINDNESS.clear()
-        inference_mod._SCHEMA_RECONCILIATION_WARNED.clear()
+    assert structural_blindness_snapshot()["isolation_forest"]["status"] == "pending"
+
+
+def test_a_column_absent_throughout_stays_structural_and_errors_once(
+    _fresh_blindness, caplog
+) -> None:
+    import logging
+
+    from src.models.feature_spec_health import (
+        STRUCTURAL_MIN_OBSERVED_SECONDS,
+        structural_blindness_snapshot,
+    )
+
+    inference_mod = _fresh_blindness
+    caplog.set_level(logging.INFO, logger=inference_mod.log.name)
+    expected = tuple(f"decoded:CH_{i}" for i in range(88))
+    always = expected[:6]
+    flicker = expected[6:10]
+    end = 0.0
+    for i in range(int(STRUCTURAL_MIN_OBSERVED_SECONDS) + 10):
+        missing = always + (flicker if i % 3 == 0 else ())
+        inference_mod._log_schema_reconciliation_once(
+            "isolation_forest", "v1", _report_missing(expected, missing), now=float(i)
+        )
+        end = float(i)
+    verdict = structural_blindness_snapshot()["isolation_forest"]
+    assert verdict["status"] == "established"
+    assert verdict["absent_feature_columns"] == list(always)
+    assert verdict["scores_nothing"] is True
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(errors) == 1
+
+    # If a retracted column turns up after all, the verdict shrinks and says so
+    # (once), and scores_nothing is recomputed from the smaller set.
+    shrunk = always[:2]
+    for i in range(5):
+        inference_mod._log_schema_reconciliation_once(
+            "isolation_forest", "v1", _report_missing(expected, shrunk), now=end + 1 + i
+        )
+    verdict = structural_blindness_snapshot()["isolation_forest"]
+    assert verdict["absent_feature_columns"] == list(shrunk)
+    assert verdict["scores_nothing"] is False
+    changed = [r for r in caplog.records if "structural absence changed" in r.getMessage()]
+    assert len(changed) == 1
 
 
 # ---------------------------------------------------------------------------

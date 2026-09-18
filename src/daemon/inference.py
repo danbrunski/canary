@@ -35,10 +35,7 @@ from src.decode.behavior_models import (
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import load_did_map
-from src.models.feature_spec_health import (
-    _STRUCTURAL_BLINDNESS,
-    structural_blindness,
-)
+from src.models.feature_spec_health import observe_reconciliation
 from src.models.health import HealthMonitor
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,
@@ -1317,39 +1314,32 @@ def _log_schema_reconciliation_once(
     model_type: str,
     model_version: str,
     report: FeatureSpecReconciliation,
+    *,
+    now: float | None = None,
 ) -> None:
+    """Feed the structural-blindness tracker and log only on verdict changes.
+
+    Every report is folded into :func:`observe_reconciliation` (a column is
+    structural only if absent from *every* report over a sustained window —
+    the first window after start lacks GPS and slow-tier PIDs, which is
+    sparsity, not a retrain signal). Logging is bounded: one WARNING per
+    (model_type, version) on first divergence, one line when the structural
+    verdict is established, and one per later change to it.
+    """
+    update = observe_reconciliation(model_type, model_version, report, now=now)
+    if update.transition is not None and update.verdict and update.verdict["absent_count"]:
+        _log_structural_verdict(model_type, model_version, update.verdict, update.transition)
+    elif update.transition is not None:
+        log.info(
+            "model feature spec is fully satisfiable by the live pipeline",
+            extra={"model_type": model_type, "model_version": model_version},
+        )
     if not report.has_divergence:
-        _STRUCTURAL_BLINDNESS.pop(model_type, None)
         return
     key = (model_type, model_version)
     if key in _SCHEMA_RECONCILIATION_WARNED:
         return
     _SCHEMA_RECONCILIATION_WARNED.add(key)
-    blindness = structural_blindness(report)
-    if blindness is not None and blindness["scores_nothing"]:
-        # Not the same event as "schema reconciled": this model cannot score a
-        # single row until it is retrained, and the only prior symptom was a
-        # `missing_feature_rate` of 1.0 with no cause attached (D02.5).
-        log.error(
-            "model feature spec is unsatisfiable: %d of %d features are absent "
-            "from the live pipeline (%.1f%% > %.1f%% ceiling), so this detector "
-            "will withhold every row until retrained; absent: %s",
-            blindness["absent_count"],
-            blindness["expected_count"],
-            blindness["absent_fraction"] * 100.0,
-            blindness["withhold_ceiling"] * 100.0,
-            ", ".join(blindness["absent_feature_columns"][:12]),
-            extra={
-                "model_type": model_type,
-                "model_version": model_version,
-                "structural_blindness": blindness,
-            },
-        )
-        _STRUCTURAL_BLINDNESS[model_type] = {
-            "model_version": model_version,
-            **blindness,
-        }
-        return
     log.warning(
         "live feature schema reconciled to model feature spec",
         extra={
@@ -1357,6 +1347,50 @@ def _log_schema_reconciliation_once(
             "model_version": model_version,
             "schema_reconciliation": report.to_dict(),
         },
+    )
+
+
+def _log_structural_verdict(
+    model_type: str,
+    model_version: str,
+    verdict: dict[str, Any],
+    transition: str,
+) -> None:
+    extra = {
+        "model_type": model_type,
+        "model_version": model_version,
+        "structural_blindness": verdict,
+        "transition": transition,
+    }
+    if verdict["scores_nothing"]:
+        # Not the same event as "schema reconciled": this model cannot score a
+        # single row until it is retrained, and the only prior symptom was a
+        # `missing_feature_rate` of 1.0 with no cause attached (D02.5).
+        log.error(
+            "model feature spec is unsatisfiable (%s): %d of %d features absent "
+            "from every reconciliation over %.0f s / %d reports (%.1f%% > %.1f%% "
+            "ceiling), so this detector will withhold every row until retrained; "
+            "absent: %s",
+            transition,
+            verdict["absent_count"],
+            verdict["expected_count"],
+            verdict["observed_seconds"],
+            verdict["reports"],
+            verdict["absent_fraction"] * 100.0,
+            verdict["withhold_ceiling"] * 100.0,
+            ", ".join(verdict["absent_feature_columns"][:12]),
+            extra=extra,
+        )
+        return
+    log.warning(
+        "model feature spec structural absence %s: %d of %d features absent from "
+        "every reconciliation over %.0f s (under the %.1f%% withhold ceiling)",
+        transition,
+        verdict["absent_count"],
+        verdict["expected_count"],
+        verdict["observed_seconds"],
+        verdict["withhold_ceiling"] * 100.0,
+        extra=extra,
     )
 
 
