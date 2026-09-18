@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Check that deployed model manifests are still producible by the catalog.
+
+D02.5: a binding retraction or DID rename is a feature-spec change. This reads
+each ``model.manifest.json`` under the (profile-scoped) models dir and reports
+every feature column that no current source — bindings.yaml, dids.yaml, the
+DBC files, the Mode 01 registry, GPS, and the derived/deviation channels the
+feature transform computes from them — can produce. Offline and read-only: it
+never talks to the daemon or the bus, so it is safe to run on the Pi while it
+collects (it is a few seconds of CPU).
+
+Exit status: 0 when every manifest is producible, 1 when any column is not,
+2 when a manifest has no feature spec.
+
+Usage:
+  tools/check_manifest_producibility.py --config /etc/canary/canary.yaml
+  tools/check_manifest_producibility.py --config canary.example.yaml \\
+      --profile nissan-xterra-2008 --json
+  tools/check_manifest_producibility.py --config canary.example.yaml \\
+      --manifest models/nissan-xterra-2008/isolation_forest/model.manifest.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="check_manifest_producibility",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--config", type=Path, required=True, help="canary.yaml to scope by.")
+    parser.add_argument("--profile", default=None, help="Vehicle profile slug.")
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        action="append",
+        default=[],
+        help="Manifest to check (repeatable). Default: every "
+        "<models_dir>/**/model.manifest.json of the scoped config.",
+    )
+    parser.add_argument("--json", action="store_true", help="Emit a JSON report.")
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    sys.path.insert(0, str(REPO_ROOT))
+    from src.config import CanaryConfig
+    from src.models.spec_producibility import (
+        build_producible_catalog,
+        load_manifest_feature_columns,
+        summarize,
+        unproducible_feature_columns,
+    )
+    from src.profiles import resolve_profile_for_tooling, scope_config
+
+    config = CanaryConfig.from_yaml(args.config)
+    if config.profiles.enabled:
+        config = scope_config(config, resolve_profile_for_tooling(config, args.profile))
+    manifests = [p.expanduser() for p in args.manifest] or sorted(
+        config.daemon.models_dir.glob("**/model.manifest.json")
+    )
+    if not manifests:
+        print(f"no model.manifest.json under {config.daemon.models_dir}", file=sys.stderr)
+        return 2
+
+    catalog = build_producible_catalog(config)
+    report: dict[str, object] = {}
+    status = 0
+    for path in manifests:
+        try:
+            columns = load_manifest_feature_columns(path)
+        except (OSError, ValueError) as exc:
+            report[str(path)] = {"error": str(exc)}
+            status = max(status, 2)
+            continue
+        unproducible = unproducible_feature_columns(columns, catalog)
+        report[str(path)] = summarize(unproducible, columns)
+        if unproducible:
+            status = max(status, 1)
+
+    if args.json:
+        print(json.dumps(report, indent=2))
+        return status
+    for path, entry in report.items():
+        assert isinstance(entry, dict)
+        if "error" in entry:
+            print(f"ERROR {path}: {entry['error']}")
+            continue
+        count = entry["unproducible_count"]
+        verdict = "OK   " if not count else "FAIL "
+        print(
+            f"{verdict}{path}: {count}/{entry['expected_count']} unproducible "
+            f"({entry['unproducible_fraction']:.1%})"
+        )
+        for base, detail in entry["unproducible_by_base"].items():
+            print(f"  {base}: {len(detail['columns'])} column(s) — {detail['reason']}")
+    return status
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
